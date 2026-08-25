@@ -1,5 +1,7 @@
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 import type { EngineContext } from "../../engine/engine.js";
+import type { Material } from "../material.js";
+import { getMaterialSource } from "../material-view.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
 
 interface PbrLocalEnvironmentBaseOptions {
@@ -120,7 +122,7 @@ let _states: WeakMap<object, PbrLocalEnvironmentState> | null = null;
 
 /** @internal */
 export function _getPbrLocalEnvironment(material: unknown): PbrLocalEnvironmentState | undefined {
-    return material && typeof material === "object" ? _states?.get(material) : undefined;
+    return material && typeof material === "object" ? _states?.get(getMaterialSource(material as Material)) : undefined;
 }
 
 /** @internal */

@@ -128,7 +128,9 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
         const _hasAnyNormal = hasNormal || hasCotangent;
         const _hasReflectanceExt = has(PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP) || (features2 & PBR2_HAS_REFLECTANCE_FACTORS) !== 0;
         // The opt-in local-environment extension reserves bit 31, making the signed mask negative.
-        const _hasIbl = hasScene(PBR_HAS_ENV) || features < 0;
+        // Pass-only and skybox variants do not contain the ordinary IBL rewrite targets.
+        const supportsLocalIbl = !has(PBR_HAS_SKYBOX) && (features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)) === 0;
+        const _hasIbl = hasScene(PBR_HAS_ENV) || (features < 0 && supportsLocalIbl);
         const _hasMorph = hasMesh(MSH_HAS_MORPH_TARGETS);
         const hasShadow = hasMesh(MSH_RECEIVE_SHADOWS);
         const _hasAnisotropy = has(PBR_HAS_ANISOTROPY);

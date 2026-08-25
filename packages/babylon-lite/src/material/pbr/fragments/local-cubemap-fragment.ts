@@ -10,6 +10,7 @@ import type { ComposedShader, ShaderFragment, UboField } from "../../../shader/f
 import { BU } from "../../../engine/gpu-flags.js";
 import { createMappedBuffer, createUniformBuffer } from "../../../resource/gpu-buffers.js";
 import type { PbrExt, _PbrBindCtx } from "../pbr-flags.js";
+import { PBR_HAS_SKYBOX, PBR2_ESM_SHADOW_OUTPUT, PBR2_NO_COLOR_OUTPUT } from "../pbr-flag-bits.js";
 import { _getPbrLocalEnvironment, type PbrLocalEnvironmentState } from "../pbr-local-cubemap-state.js";
 import {
     _PBR_LOCAL_ENVIRONMENT_DEBUG_COLOR_FLAG,
@@ -500,7 +501,8 @@ export const pbrExt: PbrExt = {
         return { f: state ? PBR_HAS_LOCAL_ENVIRONMENT : 0, f2: 0 };
     },
     frag(ctx) {
-        return (ctx._features & PBR_HAS_LOCAL_ENVIRONMENT) !== 0 ? createLocalEnvironmentFragment(ctx._hasSceneIbl ?? false) : null;
+        const unsupportedVariant = (ctx._features & PBR_HAS_SKYBOX) !== 0 || (ctx._features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)) !== 0;
+        return (ctx._features & PBR_HAS_LOCAL_ENVIRONMENT) !== 0 && !unsupportedVariant ? createLocalEnvironmentFragment(ctx._hasSceneIbl ?? false) : null;
     },
     iblFallback(material) {
         const state = _getPbrLocalEnvironment(material);

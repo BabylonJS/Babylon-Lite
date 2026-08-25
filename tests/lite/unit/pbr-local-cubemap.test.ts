@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { TU } from "../../../packages/babylon-lite/src/engine/gpu-flags";
+import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 import type { EnvironmentTextures } from "../../../packages/babylon-lite/src/loader-env/load-env";
 import {
     createPbrLocalEnvironmentProbeSet,
@@ -19,8 +20,11 @@ import { pbrExt as iblExt } from "../../../packages/babylon-lite/src/material/pb
 import { pbrExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/local-cubemap-fragment";
 import { pbrExt as morphExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/morph-fragment";
 import { pbrExt as sheenExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/sheen-fragment";
+import { pbrExt as skyboxExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/skybox-fragment";
 import { createPbrComposer } from "../../../packages/babylon-lite/src/material/pbr/pbr-compose";
-import { _registerPbrExt, PBR_HAS_ENV, type PbrExt } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags";
+import { _registerPbrExt, PBR_HAS_ENV, PBR_HAS_SKYBOX, PBR2_ESM_SHADOW_OUTPUT, PBR2_NO_COLOR_OUTPUT, type PbrExt } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags";
+import { composePbrGeometryShader } from "../../../packages/babylon-lite/src/material/pbr/pbr-geometry-output-shader";
+import { _setActivePbrGeometryAttachments, createPbrGeometryMaterialView } from "../../../packages/babylon-lite/src/material/pbr/pbr-geometry-view";
 import { _computePbrMaterialFeatures, createPbrMaterial, type PbrMaterialProps } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
 import { MSH_HAS_MORPH_TARGETS } from "../../../packages/babylon-lite/src/material/mesh-features";
 import { createPbrMeshBindGroup } from "../../../packages/babylon-lite/src/material/pbr/pbr-pipeline";
@@ -453,6 +457,25 @@ describe("PBR local cubemap projection", () => {
         expect(result._fragmentWGSL).not.toContain("let sceneEnvironmentIrradiance");
     });
 
+    it("skips local IBL rewriting for no-color, ESM-shadow, and skybox variants", async () => {
+        _registerPbrExt(iblExt);
+        _registerPbrExt(skyboxExt);
+        await enablePbrLocalCubemap();
+        const localEnvironmentFeature = 1 << 31;
+        const variants = [
+            { name: "no-color", features: localEnvironmentFeature, features2: PBR2_NO_COLOR_OUTPUT },
+            { name: "ESM-shadow", features: localEnvironmentFeature, features2: PBR2_ESM_SHADOW_OUTPUT },
+            { name: "skybox", features: localEnvironmentFeature | PBR_HAS_SKYBOX, features2: 0 },
+        ];
+
+        for (const variant of variants) {
+            const result = composer()(variant.features, variant.features2, 0, PBR_HAS_ENV);
+            expect(result._fragmentKey, variant.name).not.toContain("local-cubemap");
+            expect(result._fragmentWGSL, variant.name).not.toContain("localEnvironmentMode");
+            expect(result._fragmentWGSL, variant.name).not.toContain("localProbeData");
+        }
+    });
+
     it("applies morph and local-cubemap post-compose patches together", async () => {
         _registerPbrExt(morphExt);
         const material = createPbrMaterial();
@@ -552,6 +575,81 @@ describe("PBR local cubemap projection", () => {
         expect(resources.slice(6, 10)).toEqual([brdfLutView, brdfSampler, specularCubeView, cubeSampler]);
         expect(resources[10]).toBe(intermediateView);
         expect(resources.slice(11, 15)).toEqual([{ buffer: set._uniformBuffer }, { buffer: set._gridBuffer }, set._textureView, set._sampler]);
+    });
+
+    it("composes and binds local probe state through a PBR geometry view source", async () => {
+        _registerPbrExt(iblExt);
+        await enablePbrLocalCubemap();
+        const brdfLutView = { id: "brdf" } as unknown as GPUTextureView;
+        const brdfSampler = { id: "brdf-sampler" } as unknown as GPUSampler;
+        const specularCubeView = { id: "cube" } as unknown as GPUTextureView;
+        const cubeSampler = { id: "cube-sampler" } as unknown as GPUSampler;
+        const environment = makeEnvironment({
+            brdfLutView,
+            brdfSampler,
+            specularCubeView,
+            cubeSampler,
+            sphericalHarmonics: new Float32Array(36),
+        });
+        const set = fakeProbeSet(environment);
+        const source = {
+            baseColorTexture: { view: {} as GPUTextureView, sampler: {} as GPUSampler },
+            ormTexture: { view: {} as GPUTextureView, sampler: {} as GPUSampler },
+        } as PbrMaterialProps;
+        setPbrLocalEnvironmentProbeSet(source, set);
+        source._renderFeatures = _computePbrMaterialFeatures(source);
+        const attachments = [GeometryTextureType.WORLD_NORMAL] as const;
+        const view = createPbrGeometryMaterialView(source, { attachments, emitColor: false });
+        const previousAttachments = _setActivePbrGeometryAttachments(attachments);
+        const composed = (() => {
+            try {
+                return composePbrGeometryShader(composer(), view._renderFeatures.features, view._renderFeatures.features2 ?? 0, 0, 0, 0, "", "", undefined, "", attachments, false);
+            } finally {
+                _setActivePbrGeometryAttachments(previousAttachments);
+            }
+        })();
+        let descriptor: GPUBindGroupDescriptor | undefined;
+        const engine = {
+            _device: {
+                createBindGroup(value: GPUBindGroupDescriptor): GPUBindGroup {
+                    descriptor = value;
+                    return {} as GPUBindGroup;
+                },
+            },
+        };
+
+        expect(pbrExt.detect!(view)).toEqual({ f: 1 << 31, f2: 0 });
+        expect(composed._fragmentKey).toContain("local-cubemap");
+        createPbrMeshBindGroup(
+            engine as never,
+            {
+                _features: view._renderFeatures.features,
+                _features2: view._renderFeatures.features2 ?? 0,
+                _meshFeatures: 0,
+                _meshBGL: {} as GPUBindGroupLayout,
+                _shadowBGL: null,
+            } as never,
+            composed,
+            {} as GPUBuffer,
+            {} as GPUBuffer,
+            view as unknown as PbrMaterialProps,
+            null,
+            null
+        );
+
+        const resources = descriptor!.entries.map((entry) => entry.resource);
+        expect(resources).toEqual(
+            expect.arrayContaining([
+                brdfLutView,
+                brdfSampler,
+                specularCubeView,
+                cubeSampler,
+                { buffer: set._uniformBuffer },
+                { buffer: set._gridBuffer },
+                set._textureView,
+                set._sampler,
+            ])
+        );
     });
 
     it("normalizes mixed-resolution cubemaps through matching source mip copies", () => {

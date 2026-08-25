@@ -349,6 +349,11 @@ All fragments live in `src/material/pbr/fragments/` and export factory functions
     - `clearPbrLocalEnvironment(material)` removes any of these private opt-in assignments.
 - **Binding lifecycle**: configure assignments before `registerScene()`. After renderables exist,
   call `rebuildMaterial(scene, material)` after changing or clearing an assignment.
+- **Material views**: local-environment state is resolved through a view's source material, so
+  geometry and other pass views compose, write, and bind the same assignment without copying it.
+- **Pass variants**: no-color, ESM-shadow, and skybox variants intentionally skip local-IBL
+  rewriting because they do not contain the ordinary shaded-IBL targets. A scene environment, when
+  present, continues to serve those variants through their existing paths.
 - **Layered IBL**: a local environment counts as active IBL even when the scene has no global
   environment. Clearcoat, sheen, subsurface, unlit, and alpha-luminance composition therefore use
   the same local cubemap or blended probe radiance as the base PBR layer.
