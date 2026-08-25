@@ -449,6 +449,33 @@ variable, and validate it before doing expensive work.
 > is `BabylonJS-BrowserStack`. The two repos have drifted; verify against an
 > actual build log rather than the sibling repo's documentation.
 
+### Fail-Fast Ordering in the Bundle-Manifest Pipeline
+
+The validation above is only worth anything if it runs _before_ the expensive
+work. `azure-pipelines-bundle-manifest.yml` measures 245 scenes, which takes
+around half an hour; a deploy variable that does not resolve should cost
+seconds, not a full measurement run that then fails at the publish step with
+nothing to publish. That is not hypothetical either — it is exactly how this
+pipeline first failed.
+
+So `Check deploy configuration` runs at the top, and the only steps permitted
+ahead of it are these:
+
+- `checkout` — the repository has to be present before any step can run, and
+  fetching it tells the build nothing about whether it can publish.
+
+Everything else, including dependency installation and browser downloads, runs
+after the check. Anything named in that list runs before the build knows it can
+publish, so a step earns a place there only by being both cheap and genuinely
+required _by the check itself_.
+
+Widening the list is therefore a decision, not a repair, and it takes an edit
+here as well as in `tests/lite/unit/pipeline-fail-fast-ordering.test.ts` —
+deliberately, so the justification lands in prose where a reviewer sees it
+rather than as one more name in a constant. Note what it costs: a step listed
+here is no longer watched by the ordering check, so choosing this route for
+expensive work buys silence rather than safety.
+
 ### Optional Pipeline Variables
 
 - `PERF_REGRESSION_PCT` — override regression threshold

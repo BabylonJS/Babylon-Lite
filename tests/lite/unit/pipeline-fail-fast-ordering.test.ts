@@ -248,6 +248,46 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         ).toEqual([]);
     });
 
+    it("documents the allowance in a file the constant cannot edit", () => {
+        // The pin above makes widening cost three edits -- but all three are in
+        // this file, so one diff in one artifact carries the whole decision.
+        // The mechanical test for whether a binding binds is "can one edit
+        // reach both sides", and constant-plus-its-own-comment fails it: the
+        // reason travels with the change that needs justifying.
+        //
+        // TESTING.md cannot be edited by editing this constant, which is the
+        // entire point. Widening the allowance now has to land in prose, in the
+        // same review, next to the paragraph explaining why the check exists.
+        //
+        // A deliberately low bar: it asks that the step be named there, not
+        // that the reason be good. It cannot judge cost -- nothing here can --
+        // it just refuses to let the exemption be granted silently in a file
+        // only this test reads.
+        const doc = readFileSync(join(repoRoot, "TESTING.md"), "utf8");
+        const heading = "### Fail-Fast Ordering in the Bundle-Manifest Pipeline";
+        const start = doc.indexOf(heading);
+
+        expect(
+            start,
+            `${heading} is missing from TESTING.md. It is the second half of the prerequisite allowance: without it, widening CHECK_PREREQUISITES becomes a one-file decision again and this clause silently stops asking anything.`
+        ).toBeGreaterThanOrEqual(0);
+
+        const body = doc.slice(start + heading.length).split("\n### ")[0] ?? "";
+
+        // Floors the section itself, not just its presence. A heading left in
+        // place over an emptied body would satisfy every check below by
+        // containing nothing to disagree with.
+        expect(body.trim().length, `${heading} is present but empty, so the checks below would pass on an absent list`).toBeGreaterThan(200);
+        expect(body, `${heading} no longer names the check it is about, so it is documenting something else`).toContain(PREFLIGHT_STEP);
+
+        const undocumented = CHECK_PREREQUISITES.filter(({ name }) => !body.includes(name)).map(({ name }) => name);
+
+        expect(
+            undocumented,
+            `steps allowed to run before "${PREFLIGHT_STEP}" that TESTING.md does not mention under ${heading}. Add them there, with the reason, in this same change — the allowance is meant to be readable by someone who is reviewing the pipeline rather than this test.`
+        ).toEqual([]);
+    });
+
     it("checks every deploy variable the publish step will read", () => {
         // Derived from the publish step rather than listed here, so a variable
         // added to the publish path later cannot arrive unchecked. The original
