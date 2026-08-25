@@ -51,7 +51,7 @@
 //   - Corner rounding (reference's SMAA_CORNER_ROUNDING). This is a real quality gap, not a
 //     nicety: on axis-aligned corner-heavy content, where the ideal output is the input untouched,
 //     canonical SMAA with corner detection scores 0.197 mean abs error against 0.472 here — it is
-//     what stops a corner being blended as if it were a step. Measured with lab/lite/smaa-lab.html.
+//     what stops a corner being blended as if it were a step.
 //   - The temporal modes (SMAA T2x/S2x). For temporal supersampling use createTaaPostProcessTask
 //     alongside this.
 //   - Predication, and the stencil optimisation that skips the weight pass on non-edge pixels.
