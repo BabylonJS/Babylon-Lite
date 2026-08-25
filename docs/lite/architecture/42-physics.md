@@ -194,6 +194,8 @@ steps matches the animation and sprite managers.
   + `onPhysicsCollision` register an after-step drain on `world._afterStep`.
 - **Triggers** (`havok-trigger.ts`): `setPhysicsShapeIsTrigger`, `onPhysicsTrigger`,
   and body-aware `onPhysicsTriggerBodies`; both subscriptions return a disposer.
+  `onPhysicsTrigger` previously returned `void`; callers that ignore its return value
+  need no runtime changes, while callers can now retain the disposer to unsubscribe.
 - **Queries** (`havok-queries.ts`): `physicsRaycast`, `shapeCast`, `shapeProximity`.
   Shape casts accept `ignoreBodies` so callers can sweep a body's own shape without
   immediately hitting that body.
