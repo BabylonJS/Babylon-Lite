@@ -98,6 +98,61 @@ const COSTLY_COMMANDS = [
 ];
 
 /**
+ * A line whose first non-space character is `#`.
+ *
+ * Stripped from every derivation here that asks what a step *runs*, because a
+ * comment is the one thing in a pipeline guaranteed not to run. #531's
+ * qualifier applies and is why this is a function rather than a rule about the
+ * file format: "descriptive" is relative to the predicate. `condition:` is
+ * commentary about what a step runs and substance about whether a job is
+ * gated; a comment is commentary for both questions, which is what makes it
+ * safe to strip globally here.
+ *
+ * Both directions were live before this existed, measured:
+ *
+ *   a comment naming `pnpm build:bundle-scenes` inside the checkout step
+ *     -> 2 clauses fire on a completely legal pipeline. That is the direction
+ *        that gets a guard deleted rather than obeyed, and a comment is exactly
+ *        what someone adds when explaining why a step sits where it does --
+ *        this pipeline's own header already names that command in prose.
+ *   the scene build replaced by `./scripts/measure.sh`, the old command left
+ *   behind in a `# was:` comment
+ *     -> 10 passed. The `absent` cross-check was satisfied by the comment while
+ *        the pipeline had stopped running the command entirely.
+ *   the check script's 46 body lines commented out, a live `exit 1` kept
+ *     -> 10 passed, including the clause written last round to require the
+ *        check to check. Same defect one clause over, which is the argument for
+ *        sweeping siblings rather than fixing the instance in front of you.
+ *
+ * Leading `#` only. A trailing comment sits on a line that does run, so the
+ * line stays; the residual is that a name mentioned only after a `#` on a live
+ * command line still counts as mentioned. Stripping those needs a shell parser
+ * -- quoting, `$(...)`, `#` inside a string -- and a wrong one would fail in
+ * the direction that gets the guard deleted.
+ */
+function isCommentLine(line: string): boolean {
+    return /^\s*#/.test(line);
+}
+
+/**
+ * `text` with its comment lines gone and nothing else touched.
+ *
+ * The projection for questions that still need the prose: which named step is
+ * this, does this allowance predicate select it. `commandLines` below is the
+ * projection for what a step runs, and drops the descriptive keys too. Two
+ * projections rather than one because the exclusion belongs to the derivation
+ * -- `displayName` is commentary when the question is "what does this run" and
+ * substance when the question is "which step is this" -- while a comment is
+ * commentary for every question here.
+ */
+function withoutComments(text: string): string {
+    return text
+        .split("\n")
+        .filter((line) => !isCommentLine(line))
+        .join("\n");
+}
+
+/**
  * A step's command lines, with the keys that merely describe it removed.
  *
  * Shared by both derivations below, deliberately. A step's `displayName` is
@@ -111,7 +166,25 @@ const COSTLY_COMMANDS = [
  * floor their own output as non-empty; blinding this fires both floors.
  */
 function commandLines(step: string): string[] {
-    return step.split("\n").filter((line) => !/^\s*(?:-\s*)?(?:displayName|name|condition|continueOnError|timeoutInMinutes|task|target):/.test(line));
+    return withoutComments(step)
+        .split("\n")
+        .filter((line) => !/^\s*(?:-\s*)?(?:displayName|name|condition|continueOnError|timeoutInMinutes|task|target):/.test(line));
+}
+
+/**
+ * What a step runs, as one string, for the pattern tests in COSTLY_COMMANDS.
+ *
+ * Worth its own name because adding the comment strip to `commandLines` was not
+ * the fix. Measured: with `commandLines` stripping comments and the callers
+ * unchanged, a comment naming `pnpm build:bundle-scenes` inside the checkout
+ * step still fired two clauses, because `COSTLY_COMMANDS` patterns were tested
+ * against the raw step in three separate places and `GATED_STEPS` in a fourth.
+ * A projection is not applied until every reader uses it, and the readers here
+ * do not all want the same one -- the `GATED_STEPS` check matches display names
+ * and so takes `withoutComments`, not this.
+ */
+function commandText(step: string): string {
+    return commandLines(step).join("\n");
 }
 
 /**
@@ -567,6 +640,13 @@ function stepIndex(steps: string[], displayName: string): number {
  * branch no input reaches is a branch nobody has checked; the caller floors the
  * empty return instead, which gives an accurate message on the day someone
  * writes one rather than a misleading one about variables going unmentioned.
+ *
+ * Comment lines are stripped, so what this returns is what the shell runs.
+ * Measured before it did: commenting out this check's 46 body lines and leaving
+ * a live `exit 1` behind returned 10 passed, with every variable name still
+ * "mentioned" and the check checking nothing. The block is still terminated on
+ * the raw lines, because a YAML comment sitting at the key's column really does
+ * end the block.
  */
 function shellBodyOf(step: string): string {
     const lines = step.split("\n");
@@ -580,7 +660,9 @@ function shellBodyOf(step: string): string {
         if (line.trim() && indentOf(line) <= keyColumn) {
             break;
         }
-        body.push(line);
+        if (!isCommentLine(line)) {
+            body.push(line);
+        }
     }
     return body.join("\n");
 }
@@ -690,6 +772,14 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         const steps = pipelineSteps();
 
         const problems = CHECK_PREREQUISITES.flatMap(({ name, matches }) => {
+            // `matches` is given the raw step, not a projection. Residual,
+            // stated and measured rather than hardened away: a comment cannot
+            // satisfy the one predicate here, because it anchors at the start of
+            // a line and a comment line starts with `#`. A predicate written
+            // loosely enough to match inside a comment would be reported by this
+            // very clause as selecting a step it should not, which is the
+            // behaviour wanted. No input separates stripping from not stripping,
+            // so nothing is stripped.
             const selected = steps.filter((s) => matches(s));
 
             // A predicate matching nothing exempts nothing, so every clause
@@ -706,10 +796,10 @@ describe("the baseline pipeline validates its deploy configuration before doing 
                         .replace(/^["']|["']$/g, "") ??
                     step.split("\n")[0]?.trim() ??
                     "?";
-                const gated = GATED_STEPS.filter((g) => step.includes(g)).map(
+                const gated = GATED_STEPS.filter((g) => withoutComments(step).includes(g)).map(
                     () => `\`${name}\` exempts "${label}", which is work "${PREFLIGHT_STEP}" exists to stand in front of`
                 );
-                const costly = COSTLY_COMMANDS.filter(({ pattern }) => pattern.test(step)).map(
+                const costly = COSTLY_COMMANDS.filter(({ pattern }) => pattern.test(commandText(step))).map(
                     ({ why }) => `\`${name}\` exempts "${label}", which ${why} — the allowance is for cheap steps`
                 );
                 return [...gated, ...costly];
@@ -728,7 +818,7 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         const preflight = stepIndex(steps, PREFLIGHT_STEP);
 
         const expensive = steps.slice(0, preflight).flatMap((step) => {
-            const named = COSTLY_COMMANDS.filter(({ pattern }) => pattern.test(step)).map(({ why }) => `a step that ${why} runs before "${PREFLIGHT_STEP}"`);
+            const named = COSTLY_COMMANDS.filter(({ pattern }) => pattern.test(commandText(step))).map(({ why }) => `a step that ${why} runs before "${PREFLIGHT_STEP}"`);
 
             // The named list supplies the reason; the derived set supplies the
             // floor. A step that invokes a package manager is doing the kind of
@@ -807,7 +897,7 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         // real step -- while the 245-scene build loses its named guard. The
         // derived set is what keeps that case caught; this keeps the messages
         // honest.
-        const absent = COSTLY_COMMANDS.filter(({ pattern }) => !steps.some((s) => pattern.test(s) && packageManagerWork([s]).length > 0));
+        const absent = COSTLY_COMMANDS.filter(({ pattern }) => !steps.some((s) => pattern.test(commandText(s)) && packageManagerWork([s]).length > 0));
         expect(
             absent.map(({ why }) => `no step ${why}`),
             `${pipelineFile} no longer runs commands this clause was written about, so it now floors nothing. Re-point it at what the pipeline actually does rather than deleting it.`
