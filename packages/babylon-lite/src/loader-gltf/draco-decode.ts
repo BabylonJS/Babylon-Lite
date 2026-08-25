@@ -52,7 +52,7 @@ function loadDracoScript(): Promise<DracoFactory> {
     if (scriptLoadPromise) {
         return scriptLoadPromise;
     }
-    const promise = new Promise<DracoFactory>((resolve, reject) => {
+    scriptLoadPromise = new Promise<DracoFactory>((resolve, reject) => {
         const existing = (globalThis as { DracoDecoderModule?: DracoFactory }).DracoDecoderModule;
         if (existing) {
             resolve(existing);
@@ -81,30 +81,24 @@ function loadDracoScript(): Promise<DracoFactory> {
         script.onerror = () => fail("Failed to load draco_decoder.js from " + script.src);
         document.head.appendChild(script);
     });
-    scriptLoadPromise = promise;
-    void promise.catch(() => {
-        if (scriptLoadPromise === promise) {
-            scriptLoadPromise = null;
-        }
+    void scriptLoadPromise.catch(() => {
+        scriptLoadPromise = null;
     });
-    return promise;
+    return scriptLoadPromise;
 }
 
 async function getDracoModule(): Promise<DracoModule> {
     if (modulePromise) {
         return modulePromise;
     }
-    const promise = (async () => {
+    modulePromise = (async () => {
         const factory = await loadDracoScript();
         return factory({ locateFile: (f: string) => dracoBaseUrl + f });
     })();
-    modulePromise = promise;
-    void promise.catch(() => {
-        if (modulePromise === promise) {
-            modulePromise = null;
-        }
+    void modulePromise.catch(() => {
+        modulePromise = null;
     });
-    return promise;
+    return modulePromise;
 }
 
 /**

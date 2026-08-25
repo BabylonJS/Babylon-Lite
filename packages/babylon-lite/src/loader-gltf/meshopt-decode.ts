@@ -29,7 +29,7 @@ function loadMeshoptScript(): Promise<MeshoptDecoderModule> {
     if (scriptLoadPromise) {
         return scriptLoadPromise;
     }
-    const promise = new Promise<MeshoptDecoderModule>((resolve, reject) => {
+    scriptLoadPromise = new Promise<MeshoptDecoderModule>((resolve, reject) => {
         const existing = (globalThis as { MeshoptDecoder?: MeshoptDecoderModule }).MeshoptDecoder;
         if (existing) {
             resolve(existing);
@@ -58,13 +58,10 @@ function loadMeshoptScript(): Promise<MeshoptDecoderModule> {
         script.onerror = () => fail("Failed to load meshopt_decoder.js from " + script.src);
         document.head.appendChild(script);
     });
-    scriptLoadPromise = promise;
-    void promise.catch(() => {
-        if (scriptLoadPromise === promise) {
-            scriptLoadPromise = null;
-        }
+    void scriptLoadPromise.catch(() => {
+        scriptLoadPromise = null;
     });
-    return promise;
+    return scriptLoadPromise;
 }
 
 /** Resolve the ready meshopt decoder module (WASM instantiated). */
