@@ -211,6 +211,15 @@ export interface HeadroomReport {
  * The build log already computed this, but a ~42-minute job's log is not where anyone looks.
  * Putting it in the comment is what turns it into something an author acts on — so the scenes
  * *this PR moved* are called out uncollapsed, and the repo-wide picture is folded away.
+ *
+ * "Moved" means moved *toward* the ceiling. Direction matters and the first run against a real
+ * baseline is what proved it: a branch that had merged a size-reducing master change showed 94
+ * scenes in the uncollapsed block, every one of them shrinking (many by 46 B), because presence
+ * in the moved set was tested with `has()` rather than by sign. A scene that got smaller gained
+ * headroom — it cannot be pushed over its ceiling by this PR, and it was already tight before it
+ * was touched. Reporting it as actionable inverts the signal: it asks the author to look hardest
+ * at the changes that helped. Only increases can consume headroom, so only increases are called
+ * out here; shrinking scenes still appear in the collapsed repo-wide list if they are tight.
  */
 export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], movedBytes: ReadonlyMap<string, number>): HeadroomReport {
     if (inputs.length === 0) {
@@ -221,8 +230,10 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
     const tight = scenesUnderHeadroom(under, TIGHT_HEADROOM_BYTES);
     const critical = scenesUnderHeadroom(under, CRITICAL_HEADROOM_BYTES);
     const tightLabel = formatHeadroomThreshold(TIGHT_HEADROOM_BYTES);
-    const movedAndTight = tight.filter((s) => movedBytes.has(s.scene));
-    const movedAndOver = over.filter((s) => movedBytes.has(s.scene));
+    // Only growth consumes headroom. See the note on direction in this function's doc comment.
+    const grewBy = (scene: SceneHeadroom): number => movedBytes.get(scene.scene) ?? 0;
+    const movedAndTight = tight.filter((s) => grewBy(s) > 0);
+    const movedAndOver = over.filter((s) => grewBy(s) > 0);
 
     const lines = ["### Ceiling headroom", ""];
 
@@ -238,11 +249,19 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
         lines.push("");
         lines.push("| Scene | Size | Ceiling | Headroom | Δ this PR |");
         lines.push("|-------|------|---------|----------|-----------|");
-        for (const scene of movedAndTight) {
+        for (const scene of movedAndTight.slice(0, HEADROOM_LIST_LIMIT)) {
             const delta = formatSignedBytes(movedBytes.get(scene.scene) ?? 0);
             lines.push(
                 `| ${sceneLabel(scene)} | ${formatSizeKB(scene.measuredBytes)} | ${formatCeilingKB(scene.ceilingKB)} | **${formatBytes(scene.headroomBytes)}** | ${delta} |`
             );
+        }
+        if (movedAndTight.length > HEADROOM_LIST_LIMIT) {
+            // Cap the uncollapsed block so its length is bounded no matter how many scenes qualify.
+            // The tightest are listed first, so the overflow is always the least urgent tail, and a
+            // fixed-height block stays readable in the case that matters — a wall of rows is
+            // skimmed past exactly like the build log this section exists to replace.
+            lines.push("");
+            lines.push(`…and ${movedAndTight.length - HEADROOM_LIST_LIMIT} more, listed tightest first.`);
         }
         lines.push("");
     }

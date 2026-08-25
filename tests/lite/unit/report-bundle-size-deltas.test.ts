@@ -255,6 +255,55 @@ describe("report-bundle-size-deltas", () => {
             expect(result.comment).not.toContain("16.6 KB | 16.56 KB");
         });
 
+        it("does not flag a tight scene this PR made smaller (direction — do not remove)", () => {
+            // Found on the first run against a real published baseline: the uncollapsed block came
+            // back with 94 rows, every one of them a scene that had SHRUNK (most by 46 B), because
+            // membership in the moved set was tested with `has()` and ignored the sign.
+            //
+            // A scene that got smaller gained headroom. It cannot be pushed over its ceiling by this
+            // PR, and it was already tight before this PR touched it — so calling it actionable
+            // points the author at the changes that helped. That is worse than silence: it is the
+            // wallpaper failure this section was specifically designed to avoid.
+            //
+            // scene1 shrinks by 300 B and is still only 400 B from its ceiling. It must not be
+            // called out, and it must not trigger a post on its own.
+            const result = runReporter({
+                current: { scene1: { rawKB: 49.6, rawBytes: 50800 } },
+                master: { scene1: { rawKB: 49.9, rawBytes: 51100 } },
+                scenes: [{ id: 1, slug: "scene1", name: "Scene 1 - Sphere", maxRawKB: 50 }],
+            });
+
+            expect(result.comment ?? "").not.toContain("sits under 1.0 KB of headroom");
+            expect(result.stdout).toContain("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]false");
+        });
+
+        it("caps the uncollapsed block so it cannot become a wall of rows", () => {
+            // Length must be bounded by the limit, not by how many scenes happen to qualify. The
+            // same real-baseline run that exposed the direction bug also printed every qualifying
+            // row, which is unreadable for the same reason the build log is.
+            const scenes = [];
+            const current: Record<string, unknown> = {};
+            const master: Record<string, unknown> = {};
+            for (let id = 1; id <= 14; id++) {
+                // Each scene grows 200 B and lands 100+id B short of a 50 KB ceiling.
+                const headroom = 100 + id;
+                current[`scene${id}`] = { rawKB: 49.9, rawBytes: 51200 - headroom };
+                master[`scene${id}`] = { rawKB: 49.7, rawBytes: 51200 - headroom - 200 };
+                scenes.push({ id, slug: `scene${id}`, name: `Scene ${id}`, maxRawKB: 50 });
+            }
+
+            const comment = runReporter({ current, master, scenes }).comment ?? "";
+            const actionable = comment.slice(comment.indexOf("### Ceiling headroom"), comment.indexOf("<details>"));
+
+            expect(comment).toContain("⚠️ **14 scenes this PR moved sit under 1.0 KB of headroom.**");
+            expect(actionable).toContain("…and 4 more, listed tightest first.");
+            // 10 data rows plus the header and separator.
+            expect(actionable.split("\n").filter((l) => l.startsWith("| ")).length).toBe(11);
+            // Tightest first, so the overflow is the least urgent tail.
+            expect(actionable).toContain("`scene1`");
+            expect(actionable).not.toContain("`scene14`");
+        });
+
         it("stays silent when tight scenes this PR did not move are the only tight scenes (noise bound — do not remove)", () => {
             // This is the guard that keeps the headroom report off every PR, and it is the one
             // case here that looks redundant from the outside: it asserts an absence, so a
