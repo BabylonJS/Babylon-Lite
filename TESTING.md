@@ -385,7 +385,12 @@ The subject is every `azure-pipelines*.yml`, every file under
 so covered 7 of them, while claiming the pipelines; the three it missed were the
 `curl` uploads in the shared templates, which `azure-pipelines.yml` includes at
 four call sites and which therefore run on every PR. If you add a CI file
-somewhere else, add its directory to that list.
+somewhere else, add its directory to that list — and you do not have to
+remember to: the same test walks the repo for `Authorization:` headers and
+fails naming any file its roots do not reach. That enforcement is deliberately
+a test rather than this sentence. Once a second guard ships its own root list,
+"add it to that list" is an instruction a reader can follow correctly and still
+be wrong, and no rewording fixes it.
 
 This list is no longer maintained by hand:
 `tests/lite/unit/pipeline-variable-groups-documented.test.ts` parses every

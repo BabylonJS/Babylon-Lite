@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync } from "fs";
-import { join } from "path";
+import { readFileSync, readdirSync, statSync } from "fs";
+import { join, relative, sep } from "path";
 
 const repoRoot = join(__dirname, "..", "..", "..");
 
@@ -227,5 +227,59 @@ describe("pipeline secret hygiene", () => {
             .map(({ location, number }) => `${location}:${number}`);
 
         expect(tokenless, "Authorization header in an Azure pipeline does not reference DEPLOY_TOKEN.").toEqual([]);
+    });
+});
+
+/**
+ * Walks the repo for YAML that carries an `Authorization:` header, so the
+ * collector above can be compared against reality rather than against itself.
+ */
+function allYamlCarryingAnAuthorizationHeader(): string[] {
+    const skip = new Set(["node_modules", ".git", "dist", "build", "coverage", "out", ".turbo"]);
+    const found: string[] = [];
+
+    const walk = (dir: string): void => {
+        for (const name of readdirSync(dir)) {
+            if (skip.has(name)) {
+                continue;
+            }
+            const full = join(dir, name);
+            if (statSync(full).isDirectory()) {
+                walk(full);
+            } else if (/\.ya?ml$/.test(name) && /^\s*[-\s]*.*Authorization\s*:/im.test(readFileSync(full, "utf8"))) {
+                found.push(relative(repoRoot, full).split(sep).join("/"));
+            }
+        }
+    };
+    walk(repoRoot);
+
+    return found;
+}
+
+describe("the mask guard reads every file that carries an Authorization header", () => {
+    // The sibling variable-groups guard got a closure check and this one did
+    // not, on the reasoning that its three roots were already known correct.
+    // That is coverage by *placement*: true of the tree as it stands, and with
+    // no structural reason behind it -- unlike the step templates, which cannot
+    // declare a variable group under any edit, nothing stops a new directory
+    // from carrying a credential. The per-root floors below cannot see this;
+    // they prove each configured root is non-empty, never that the configured
+    // roots are all of them.
+    //
+    // It also repairs a claim that a *merge* falsifies rather than an edit.
+    // TESTING.md said "add its directory to that list", singular, which stops
+    // being unambiguous the moment a second guard ships its own root list. An
+    // instruction that a reader follows correctly and is still wrong afterwards
+    // cannot be fixed by rewording it -- so the enforcement is a test that
+    // names the offending file, which stays true however many lists exist.
+    it("has no Authorization header outside its configured roots", () => {
+        const scanned = new Set(pipelineFiles().map(({ location }) => location));
+        const carrying = allYamlCarryingAnAuthorizationHeader();
+
+        expect(carrying.length, "walked the repo and found no Authorization header at all — the assertion below would compare two empty sets").toBeGreaterThan(0);
+
+        const unread = carrying.filter((file) => !scanned.has(file)).sort();
+
+        expect(unread, "these files carry an Authorization header but the mask guard never reads them, so a masked credential in them is invisible:").toEqual([]);
     });
 });
