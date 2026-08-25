@@ -87,12 +87,30 @@ function withTemplatesResolved(text: string, depth = 3): string {
 }
 
 /**
- * The gate itself, spelled tolerantly.
+ * The two condition forms that keep a job off a master build, spelled
+ * tolerantly.
  *
- * Matching the exact source line would make this guard fail on a reformat and
- * pass on a rewrite that changed the branch -- backwards on both counts.
+ * Both must be accepted, and the first version of this guard accepted only the
+ * first -- while `azure-pipelines.yml`'s own header comment and `TESTING.md`
+ * both instruct you to use the second for a job that cannot function without a
+ * PR at all. A job written to follow this repository's documentation was
+ * therefore reported as ungated, and the advice attached told the author to
+ * replace `startsWith(..., 'refs/pull/')` with `ne(..., 'refs/heads/master')`.
+ *
+ * Following that is a downgrade, not a lateral move. "Not master" is weaker
+ * than "is a pull request": a manually queued build of a feature branch is
+ * neither, and `System.PullRequest.*` is just as empty there as it is on
+ * master. So the diagnostic argued for a gate that admits a case the author had
+ * correctly excluded -- a guard telling someone to loosen the thing the guard
+ * exists to enforce, citing documentation that says the opposite.
+ *
+ * Matching the exact source line would fail on a reformat and pass on a rewrite
+ * that changed the branch, so both forms are matched structurally.
  */
-const MASTER_GATE = /ne\(\s*variables\[\s*['"]Build\.SourceBranch['"]\s*\]\s*,\s*['"]refs\/heads\/master['"]\s*\)/i;
+const GATE_FORMS = [
+    /ne\(\s*variables\[\s*['"]Build\.SourceBranch['"]\s*\]\s*,\s*['"]refs\/heads\/master['"]\s*\)/i,
+    /startsWith\(\s*variables\[\s*['"]Build\.SourceBranch['"]\s*\]\s*,\s*['"]refs\/pull\/['"]\s*\)/i,
+];
 
 /**
  * Named floors. Both clauses assert an *absence* -- no ungated PR-context job,
@@ -141,7 +159,7 @@ function canBuildPullRequests(text: string): boolean {
     return declared !== null && declared[1] !== "none";
 }
 
-type PipelineJob = { name: string; body: string; gated: boolean };
+type PipelineJob = { name: string; body: string; gated: boolean; hasOwnCondition: boolean };
 
 /**
  * Splits a pipeline into its jobs.
@@ -175,7 +193,8 @@ function jobsIn(text: string): PipelineJob[] {
         return {
             name: start.name,
             body: withTemplatesResolved(raw.join("\n")),
-            gated: ownCondition.some((line) => MASTER_GATE.test(line)),
+            gated: ownCondition.some((line) => GATE_FORMS.some((form) => form.test(line))),
+            hasOwnCondition: ownCondition.length > 0,
         };
     });
 }
@@ -229,12 +248,34 @@ describe("pull-request jobs cannot run on a master build", () => {
             ).toContain(name);
         }
 
-        const ungated = prContextJobs.filter((job) => !job.gated).map((job) => `${job.location} > ${job.name}`);
+        // Split by what the author must actually do, not by what the guard
+        // noticed. A job with no `condition:` needs one added; a job that has
+        // one needs that one changed. Telling the second author to "add" a
+        // condition is not merely unhelpful -- a job takes exactly one
+        // `condition:` key, so a literal second one is invalid YAML, and the
+        // only way to comply is to guess. This axis is separate from the
+        // no-job-to-gate split below, and it was introduced by widening the
+        // accepted forms above: once two spellings pass, "absent" and "present
+        // but wrong" stop being the same state.
+        const missing = prContextJobs.filter((job) => !job.gated && !job.hasOwnCondition).map((job) => `${job.location} > ${job.name}`);
+        const ineffective = prContextJobs.filter((job) => !job.gated && job.hasOwnCondition).map((job) => `${job.location} > ${job.name}`);
+
         expect(
-            ungated,
-            `these jobs read pull-request context but would still run on a master build, where those variables are empty:\n  ${ungated.join("\n  ")}\n` +
-                `Add condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master')) at the job's own indentation. ` +
-                `A condition on one step inside the job does not count -- the job would still start.`
+            missing,
+            `these jobs read pull-request context and carry no job-level condition, so they run on a master build where those variables are empty:\n  ${missing.join("\n  ")}\n` +
+                `Add one of:\n` +
+                `  condition: and(succeeded(), ne(variables['Build.SourceBranch'], 'refs/heads/master'))\n` +
+                `  condition: and(succeeded(), startsWith(variables['Build.SourceBranch'], 'refs/pull/'))\n` +
+                `at the job's own indentation -- the second if the job cannot function without a pull request at all. ` +
+                `A condition on one step inside the job does not count; the job would still start.`
+        ).toEqual([]);
+
+        expect(
+            ineffective,
+            `these jobs read pull-request context and DO carry a job-level condition, but it does not keep them off master:\n  ${ineffective.join("\n  ")}\n` +
+                `Do NOT add a second condition -- a job accepts only one. Widen the existing one, keeping its current clauses, ` +
+                `so that it also excludes master: ne(variables['Build.SourceBranch'], 'refs/heads/master') or ` +
+                `startsWith(variables['Build.SourceBranch'], 'refs/pull/').`
         ).toEqual([]);
     });
 
