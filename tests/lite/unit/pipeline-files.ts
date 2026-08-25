@@ -4,18 +4,26 @@ import { join, relative } from "path";
 export const repoRoot = join(__dirname, "..", "..", "..");
 
 /**
- * The directories every pipeline hygiene guard reads.
+ * The directories the pipeline hygiene guards in this file's directory read --
+ * `pipeline-piped-steps-set-pipefail` and `pipeline-pr-comment-steps-guarded`.
  *
- * This lives in one place on purpose. Two guards -- the `set -euo pipefail`
- * check and the `GitHubComment@0` check -- need the same subject, and when each
- * carried its own copy of this list, widening one and not the other would have
- * left the second silently narrow while still reporting success. That is the
- * same defect both guards exist to prevent, one level up: a scope that reads
- * complete because nothing compares it to reality.
+ * Scoped to those two deliberately. #617 adds two further guards that walk
+ * pipeline files with their own local root list, kept separate on purpose so
+ * the two branches do not collide on this path; converging them onto this
+ * module is a queued follow-up for after both land. Until that happens, "every
+ * guard in the repo" would be a claim this module cannot support, and it would
+ * become false at merge rather than at edit -- with no execution anywhere to
+ * notice.
+ *
+ * This list lives in one place for the two it does cover. When each carried its
+ * own copy, widening one and not the other would have left the second silently
+ * narrow while still reporting success -- the same defect both guards exist to
+ * prevent, one level up: a scope that reads complete because nothing compares
+ * it to reality.
  *
  * `pipelineFilesInRepo()` below is the comparison to reality, and it is
  * asserted against this list so a new pipeline in a new directory fails by name
- * rather than quietly falling outside every guard in the repo.
+ * rather than quietly falling outside both guards.
  */
 export const SCANNED_ROOTS: { dir: string; label: string; rootOnlyPattern: RegExp | null }[] = [
     // At the repository root, restrict to `azure-pipelines*.yml`: the root also

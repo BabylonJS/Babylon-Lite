@@ -8,8 +8,22 @@ interface CommentTask {
 }
 
 /**
- * Every `GitHubComment@0` task across the pipelines and the shared step
- * templates they include, located by `file:line`.
+ * Every `GitHubComment@0` task across the scanned pipelines and step
+ * templates, located by `file:line`.
+ *
+ * The subject is Azure's task specifically. GitHub Actions posts PR comments a
+ * different way -- `actions/github-script`, `gh pr comment` -- and this
+ * predicate would not recognise any of them, even though `.github/workflows/`
+ * is inside the shared scope. That is not a hole today: no workflow in this
+ * repo posts a comment, verified by searching for all three forms. But it is
+ * true *incidentally*, not structurally -- unlike a step template, which cannot
+ * declare a job-level thing -- so the first workflow that comments on a PR will
+ * need this predicate widened, and nothing here will fail to prompt it.
+ *
+ * Recorded rather than guarded because there is no subject to guard yet, and a
+ * check with an empty subject is the failure this file exists to prevent. The
+ * distinction that matters is that "correct for a reason nobody wrote down" is
+ * indistinguishable from "correct by luck" at the next edit.
  *
  * These are collected because the job-level PR gate is deliberately the weaker
  * of two possible conditions. Jobs that read PR context are gated on
