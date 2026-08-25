@@ -5,6 +5,7 @@ import {
     createArcRotateCamera,
     createEngine,
     createSceneContext,
+    enableFlowGraphPointerPicking,
     loadEnvironment,
     loadGltf,
     registerScene,
@@ -31,6 +32,7 @@ async function main(): Promise<void> {
     attachControl(camera, canvas, scene);
 
     const runtimes = (await asset.flowGraphRuntimes) ?? [];
+    await enableFlowGraphPointerPicking(scene);
     await registerScene(scene);
     await startEngine(engine);
 

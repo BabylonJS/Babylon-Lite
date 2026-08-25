@@ -30,6 +30,7 @@ export { getBlockDef } from "./block-registry.js";
 
 // Scene attachment
 export { attachFlowGraph, detachFlowGraph, runFlowGraphs, addFlowGraph, dispatchFlowGraphEvent, flowGraphBus, flowGraphRuntimes } from "./scene-flow-graph.js";
+export { dispatchFlowGraphPointerPick, enableFlowGraphPointerPicking } from "./scene-flow-graph-pointer.js";
 
 export type { FgNodeSpec, FgVariableSpec } from "./graph-builder.js";
 export { buildFgGraph } from "./graph-builder.js";

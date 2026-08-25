@@ -4,13 +4,10 @@
 // through the scene's generic `onBeforeRender` / `onSceneDispose` seams instead
 // of hardcoding a loop in scene-core (GUIDANCE §4c′ — always extensions).
 
-import { onBeforeRender, onSceneDispose, type SceneContext } from "../scene/scene-core.js";
+import type { SceneContext } from "../scene/scene-core.js";
 import type { FgRuntime } from "./runtime.js";
 import { advanceFlowGraphTasks, createFgRuntime, disposeFlowGraph, pumpFlowGraphTick, startFlowGraphs } from "./runtime.js";
 import type { AnimationGroup } from "../animation/animation-group.js";
-import { playAnimation as agPlay, stopAnimation as agStop, goToFrame as agGoToFrame } from "../animation/animation-group.js";
-import type { Mesh } from "../mesh/mesh.js";
-import type { PickingInfo } from "../picking/picking-info.js";
 import type { FgCapabilities, FgWiring, LoadedFlowGraph } from "./context.js";
 import type { FgEventBus } from "./event-bus.js";
 import { clearFgEventBus, createFgEventBus, flushFgEvents, pumpFgEvent } from "./event-bus.js";
@@ -28,7 +25,7 @@ export function attachFlowGraph(scene: SceneContext, rt: FgRuntime): void {
     }
     list.push(rt);
     ensureFlowGraphCoordinator(scene);
-    void ensureFlowGraphPointerPicking(scene);
+    scene._flowGraphPointerRefresh?.();
 }
 
 /** Detach and dispose a flow-graph runtime previously attached to `scene`. */
@@ -41,111 +38,10 @@ export function detachFlowGraph(scene: SceneContext, rt: FgRuntime): void {
         }
     }
     disposeFlowGraph(rt);
-    if (!list?.some(graphUsesPointerEvent)) {
-        scene._flowGraphPointerCleanup?.();
-    }
+    scene._flowGraphPointerRefresh?.();
     if (list?.length === 0) {
         removeFlowGraphCoordinator(scene);
     }
-}
-
-interface PickedInteractivityMesh extends Mesh {
-    _gltfNodeIndex?: number;
-}
-
-function graphUsesPointerEvent(runtime: FgRuntime): boolean {
-    return runtime.graph.blocks.some((block) => block.event === FgEventType.Pointer);
-}
-
-function isFlowGraphMeshSelectable(scene: SceneContext, mesh: Mesh): boolean {
-    const nodeIndex = (mesh as PickedInteractivityMesh)._gltfNodeIndex;
-    if (nodeIndex === undefined) {
-        return false;
-    }
-    const selectablePointer = `/nodes/${nodeIndex}/extensions/KHR_node_selectability/selectable`;
-    return !(scene._flowGraphs?.filter(graphUsesPointerEvent) ?? []).some((runtime) => runtime.env.accessors[selectablePointer]?.get() === false);
-}
-
-/** Dispatch one successful scene pick to every distinct Flow Graph event bus.
- * Exported for focused tests; applications use the automatic canvas bridge. */
-export function dispatchFlowGraphPointerPick(scene: SceneContext, pick: PickingInfo): void {
-    const nodeIndex = (pick.pickedMesh as PickedInteractivityMesh | null)?._gltfNodeIndex;
-    const runtimes = scene._flowGraphs?.filter(graphUsesPointerEvent) ?? [];
-    const selectablePointer = `/nodes/${nodeIndex}/extensions/KHR_node_selectability/selectable`;
-    if (!pick.hit || nodeIndex === undefined || runtimes.some((runtime) => runtime.env.accessors[selectablePointer]?.get() === false)) {
-        return;
-    }
-    const buses = new Set(runtimes.map((runtime) => runtime.env.events));
-    for (const bus of buses) {
-        pumpFgEvent(bus, FgEventType.Pointer, {
-            nodeIndex,
-            controllerIndex: 0,
-            event: "/extensions/KHR_interactivity/events/pointer",
-        });
-    }
-}
-
-function ensureFlowGraphPointerPicking(scene: SceneContext): Promise<void> | undefined {
-    if (scene._flowGraphPointerCleanup || scene._flowGraphPointerInit || !scene._flowGraphs?.some(graphUsesPointerEvent)) {
-        return scene._flowGraphPointerInit;
-    }
-    scene._flowGraphPointerInit = import("../picking/gpu-picker.js")
-        .then(({ createGpuPicker, pickAsync, disposePicker }) => {
-            if (!scene._flowGraphs?.some(graphUsesPointerEvent)) {
-                return;
-            }
-            const canvas = scene.surface.canvas;
-            if (!("addEventListener" in canvas)) {
-                return;
-            }
-            const picker = createGpuPicker(scene);
-            let disposed = false;
-            let press: { pointerId: number; x: number; y: number } | undefined;
-            const onPointerDown = (event: Event): void => {
-                const pointer = event as PointerEvent;
-                if (pointer.button === 0) {
-                    press = { pointerId: pointer.pointerId, x: pointer.offsetX, y: pointer.offsetY };
-                }
-            };
-            const onPointerUp = (event: Event): void => {
-                const pointer = event as PointerEvent;
-                const start = press;
-                press = undefined;
-                if (!start || start.pointerId !== pointer.pointerId || Math.hypot(pointer.offsetX - start.x, pointer.offsetY - start.y) > 5) {
-                    return;
-                }
-                void pickAsync(picker, pointer.offsetX, pointer.offsetY, { filter: (mesh) => isFlowGraphMeshSelectable(scene, mesh) })
-                    .then((pick) => {
-                        if (!disposed) {
-                            dispatchFlowGraphPointerPick(scene, pick);
-                        }
-                    })
-                    .catch((error: unknown) => {
-                        console.error("Flow Graph pointer selection failed:", error);
-                    });
-            };
-            const onPointerCancel = (): void => {
-                press = undefined;
-            };
-            canvas.addEventListener("pointerdown", onPointerDown);
-            canvas.addEventListener("pointerup", onPointerUp);
-            canvas.addEventListener("pointercancel", onPointerCancel);
-            scene._flowGraphPointerCleanup = () => {
-                if (disposed) {
-                    return;
-                }
-                disposed = true;
-                canvas.removeEventListener("pointerdown", onPointerDown);
-                canvas.removeEventListener("pointerup", onPointerUp);
-                canvas.removeEventListener("pointercancel", onPointerCancel);
-                disposePicker(picker);
-                scene._flowGraphPointerCleanup = undefined;
-            };
-        })
-        .finally(() => {
-            scene._flowGraphPointerInit = undefined;
-        });
-    return scene._flowGraphPointerInit;
 }
 
 function ensureFlowGraphCoordinator(scene: SceneContext): void {
@@ -177,8 +73,8 @@ function ensureFlowGraphCoordinator(scene: SceneContext): void {
     };
     scene._flowGraphTick = tick;
     scene._flowGraphDispose = dispose;
-    onBeforeRender(scene, tick);
-    onSceneDispose(scene, dispose);
+    scene._beforeRender.unshift(tick);
+    scene._disposables.push(dispose);
 }
 
 function removeFlowGraphCoordinator(scene: SceneContext): void {
@@ -237,7 +133,6 @@ export async function addFlowGraph(scene: SceneContext, graph: FgGraph, wiring: 
         opts
     );
     attachFlowGraph(scene, rt);
-    await scene._flowGraphPointerInit;
     return rt;
 }
 
@@ -248,19 +143,38 @@ export function dispatchFlowGraphEvent(scene: SceneContext, eventId: string, val
 }
 
 /** Scene-owned animation capabilities backing the Play/Stop animation blocks.
- *  Pure delegation to the animation-group functions so blocks never import the
- *  scene. `from`/`to` frame-range playback is a Phase 3 refinement. */
+ *  These tiny state transitions intentionally stay local: importing the
+ *  animation-group runtime from this optional feature makes Rollup split shared
+ *  animation code into every glTF bundle. */
 function sceneAnimationCaps(): FgCapabilities {
     return {
         playAnimation: (group: AnimationGroup, opts) => {
             group.speedRatio = opts?.speed ?? 1;
             group.loopAnimation = opts?.loop ?? false;
-            agPlay(group);
+            group.isPlaying = true;
+            group._stopped = false;
         },
-        stopAnimation: (group: AnimationGroup) => agStop(group),
-        // Halt at the requested frame (goToFrame sets currentTime + clears
-        // isPlaying), leaving the target posed at that frame rather than reset.
-        stopAnimationAt: (group: AnimationGroup, frame: number) => agGoToFrame(group, frame),
+        stopAnimation: (group: AnimationGroup) => {
+            group.isPlaying = false;
+            group.currentTime = 0;
+            group._stopped = true;
+        },
+        stopAnimationAt: (group: AnimationGroup, frame: number) => {
+            const ctrl = group._ctrl;
+            group.currentTime = frame / (group.frameRate || 60);
+            group.isPlaying = false;
+            if (ctrl) {
+                ctrl.time = group.currentTime;
+                ctrl.playing = false;
+                ctrl.speedRatio = group.speedRatio;
+                ctrl.loop = group.loopAnimation;
+                ctrl._setMask?.(group.mask ?? null);
+                if (!group._stopped || !group._gltfMixer) {
+                    ctrl.tick(0);
+                    group.currentTime = ctrl.time;
+                }
+            }
+        },
     };
 }
 
@@ -278,6 +192,5 @@ export async function runFlowGraphs(scene: SceneContext, loaded: readonly Loaded
         attachFlowGraph(scene, rt);
         runtimes.push(rt);
     }
-    await scene._flowGraphPointerInit;
     return runtimes;
 }

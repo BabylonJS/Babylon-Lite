@@ -258,6 +258,8 @@ export interface SceneContext extends RenderingContext {
     _flowGraphPointerInit?: Promise<void>;
     /** @internal Removes the Flow Graph pointer listener and disposes its picker. */
     _flowGraphPointerCleanup?: () => void;
+    /** @internal Refreshes the explicitly enabled Flow Graph pointer bridge. */
+    _flowGraphPointerRefresh?: () => void;
 }
 
 /** Options passed to the scene-context factory. */

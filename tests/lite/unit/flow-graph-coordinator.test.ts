@@ -15,7 +15,7 @@ import {
     getDataValue,
     startFlowGraph,
 } from "../../../packages/babylon-lite/src/index";
-import { dispatchFlowGraphPointerPick } from "../../../packages/babylon-lite/src/flow-graph/scene-flow-graph";
+import { dispatchFlowGraphPointerPick } from "../../../packages/babylon-lite/src/flow-graph/scene-flow-graph-pointer";
 import { createEmptyPickingInfo } from "../../../packages/babylon-lite/src/picking/picking-info";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 
@@ -215,7 +215,7 @@ describe("flow-graph coordinator — imperative build + run", () => {
         scene._flowGraphs = [first, second];
         const pick = createEmptyPickingInfo();
         pick.hit = true;
-        pick.pickedMesh = { _gltfNodeIndex: 7 } as Mesh;
+        pick.pickedMesh = { _gltfNodeIndex: 7 } as unknown as Mesh;
 
         dispatchFlowGraphPointerPick(scene, pick);
         expect(log).toHaveLength(2);

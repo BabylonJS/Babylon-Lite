@@ -482,9 +482,11 @@ scene._beforeRender(deltaMs)               // existing Lite hook
          compactPending(ctx.context)
 ```
 
-Pointer/key events are fed into `env.events` by the picking/input layer the same
-way (the scene driver forwards them); event blocks for those simply subscribe to
-the corresponding bus channel.
+Pointer/key events are fed into `env.events` by the picking/input layer; event
+blocks simply subscribe to the corresponding bus channel. Pointer selection is
+an explicit capability: call `enableFlowGraphPointerPicking(scene)` when a scene
+uses pointer-event blocks. This keeps the GPU picker out of non-interactive glTF
+bundles.
 
 ### Custom math & types live IN the subsystem (bundle discipline)
 
@@ -751,7 +753,8 @@ dispose
   dispatch, the `_flowGraphs` array (new field).
 - **Loader-gltf** (`src/loader-gltf/`): `GltfFeature` hook + registry tuple; the
   node/material/camera maps the path-converter resolves against.
-- **Picking/input**: pointer & key events forwarded into `FgEventBus`.
+- **Picking/input**: pointer & key events forwarded into `FgEventBus`; the GPU
+  pointer bridge is enabled explicitly with `enableFlowGraphPointerPicking`.
 - **New, subsystem-local:** `flow-graph/fg-math.ts`, `flow-graph/custom-types/`.
 
 ---
