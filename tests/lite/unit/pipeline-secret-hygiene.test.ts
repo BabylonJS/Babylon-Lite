@@ -678,6 +678,25 @@ describe("the mask guard reads every file carrying anything its clauses examine"
 
         expect(carrying.length, "walked the repo and found no credential-shaped line at all — the assertion below would compare two empty sets").toBeGreaterThan(0);
 
+        // A bare non-empty floor is not enough, and the mutation proving it is
+        // one already run here: narrowing the walk to `.yml` left this check
+        // green, because `length > 0` survives *shrinkage* and only catches
+        // collapse. A walk that quietly stops reaching one kind of location
+        // still certifies the guard's coverage -- over a subject that no
+        // longer includes the place a credential would hide.
+        //
+        // One name per root, chosen because each is reachable only by a
+        // distinct traversal step: the repo root, a descent into
+        // config/templates, and a descent into .github/workflows. A floor
+        // rather than an exact set on purpose -- an exact set would have to be
+        // edited whenever any pipeline gains a header, which is drift, and it
+        // would rebuild the hand-maintained inventory this walk exists to
+        // replace. These three only need revisiting when a named file stops
+        // carrying a credential shape at all, which is a deliberate act.
+        for (const required of ["azure-pipelines-bundle-manifest.yml", "config/templates/upload-static-site.yml", ".github/workflows/compat-sync-trigger.yml"]) {
+            expect(carrying, `the walk no longer reaches ${required}, so it is certifying a smaller subject than the guard reads`).toContain(required);
+        }
+
         const unread = carrying.filter((file) => !scanned.has(file)).sort();
 
         expect(
