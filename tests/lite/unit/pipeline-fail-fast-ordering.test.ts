@@ -48,6 +48,11 @@ const PUBLISH_STEP = "Publish bundle-size baseline";
  * Naming the scene build a "prerequisite" and moving it ahead of the check was
  * measured: with only the universal, the guard reported 2 passed while the
  * pipeline spent half an hour before learning it could not publish.
+ *
+ * Being a fixed list, it empties. Measured: `GATED_STEPS = []` returned 10
+ * passed -- every clause reading it iterates it, so an empty list asks nothing,
+ * including the clause written to catch the case the universal cannot. Floored
+ * where it is read.
  */
 const GATED_STEPS = ["Build bundle scenes", PUBLISH_STEP];
 
@@ -74,16 +79,49 @@ const GATED_STEPS = ["Build bundle scenes", PUBLISH_STEP];
  * and building 245 scenes are expensive whatever any constant calls them, so
  * the check has to precede them for a reason no edit to this file can revoke.
  *
- * Deliberately narrow: these are the commands whose cost is the reason the
- * check exists, not a general notion of expense. A new expensive command is
- * not caught until it is named here -- but naming it is a decision made in the
- * open, and the universal clause above still refuses anything unlisted.
+ * Deliberately narrow, and deliberately not the whole floor. These are the
+ * commands whose cost is the reason the check exists, named so the failure can
+ * say *why* a step is expensive. But a list of named commands is an enumeration,
+ * and an enumeration goes vacuous: measured, `COSTLY_COMMANDS = []` returned
+ * 10 passed, and re-pointing one entry from the 245-scene build to `corepack` --
+ * a real step, so the reachability floor below is satisfied -- also returned
+ * 10 passed, with the build no longer guarded by anything. Both are one edit in
+ * this file.
+ *
+ * So the floor is not here. `packageManagerWork` derives the expensive set from
+ * the pipeline instead, and this list only supplies the reason.
  */
 const COSTLY_COMMANDS = [
     { pattern: /\bpnpm\s+install\b/, why: "installs the dependency tree" },
     { pattern: /playwright\s+install\b/, why: "downloads a browser" },
     { pattern: /\bbuild:bundle-scenes\b/, why: "measures every bundle scene" },
 ];
+
+/**
+ * Steps that invoke a package manager, derived from the pipeline text.
+ *
+ * The one description of "expensive" that no edit to this file can narrow,
+ * empty or re-point. A step that runs `pnpm`, `npm` or `npx` is fetching or
+ * building something; the three commands the incident was about are all in
+ * here, and so is the next one, without anybody naming it.
+ *
+ * It is a proxy, not a measurement -- `pnpm --version` would be caught and is
+ * not expensive. That direction is the safe one: it can demand the check move
+ * earlier, never later.
+ */
+function packageManagerWork(steps: string[]): string[] {
+    // Commands only. The first version tested the whole step, and a step's
+    // `displayName` is prose: "Enable pnpm via corepack" made the corepack step
+    // read as package-manager work, which is how a `COSTLY_COMMANDS` entry
+    // re-pointed at `corepack` kept passing the check meant to catch it. A rule
+    // about what a step runs must not read the sentence describing it.
+    return steps.filter((s) =>
+        s
+            .split("\n")
+            .filter((line) => !/^\s*(?:-\s*)?(?:displayName|name|condition|continueOnError|timeoutInMinutes|task|target):/.test(line))
+            .some((line) => /\b(?:pnpm|npm|npx)\s+[a-z@]/i.test(line))
+    );
+}
 
 /** Leading-whitespace width, used to compare YAML nesting levels. */
 function indentOf(line: string): number {
@@ -407,9 +445,18 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         const steps = pipelineSteps();
         const preflight = stepIndex(steps, PREFLIGHT_STEP);
 
-        const expensive = steps
-            .slice(0, preflight)
-            .flatMap((step) => COSTLY_COMMANDS.filter(({ pattern }) => pattern.test(step)).map(({ why }) => `a step that ${why} runs before "${PREFLIGHT_STEP}"`));
+        const expensive = steps.slice(0, preflight).flatMap((step) => {
+            const named = COSTLY_COMMANDS.filter(({ pattern }) => pattern.test(step)).map(({ why }) => `a step that ${why} runs before "${PREFLIGHT_STEP}"`);
+
+            // The named list supplies the reason; the derived set supplies the
+            // floor. A step that invokes a package manager is doing the kind of
+            // work this check exists to precede whether or not anyone has named
+            // its command here -- and emptying or re-pointing COSTLY_COMMANDS,
+            // both of which returned 10 passed before this line existed, cannot
+            // take it out of the set.
+            if (named.length > 0) return named;
+            return packageManagerWork([step]).map(() => `a step invoking a package manager runs before "${PREFLIGHT_STEP}"`);
+        });
 
         expect(
             expensive,
@@ -417,14 +464,37 @@ describe("the baseline pipeline validates its deploy configuration before doing 
                 `This cannot be resolved by widening the allowance, and that is the point — the allowance, the pin, GATED_STEPS and TESTING.md are all written by hand, so a capitulation can satisfy them all by writing agreement everywhere. What a step runs is not an assertion. Move the check back above this work.`
         ).toEqual([]);
 
+        // Floored on the derived set, not on the named list. `absent` below asks
+        // whether the *reasons* still describe the pipeline; this asks whether
+        // the clause has any subject at all, and it is the assertion that
+        // survives COSTLY_COMMANDS being emptied.
+        expect(
+            packageManagerWork(steps).length,
+            `no step in ${pipelineFile} invokes a package manager, so this clause has nothing to order and passes whatever the pipeline does. Either the file stopped building anything, or the derivation stopped matching it.`
+        ).toBeGreaterThan(0);
+
         // A rule that names nothing present in the pipeline floors nothing, so
         // pin that these commands are real: every one of them must appear
         // somewhere in the file, or this clause has quietly stopped applying.
-        const absent = COSTLY_COMMANDS.filter(({ pattern }) => !steps.some((s) => pattern.test(s)));
+        //
+        // Not sufficient on its own, which is what the sweep found: re-pointing
+        // `build:bundle-scenes` to `corepack` satisfies this -- corepack is a
+        // real step -- while the 245-scene build loses its named guard. The
+        // derived set is what keeps that case caught; this keeps the messages
+        // honest.
+        const absent = COSTLY_COMMANDS.filter(({ pattern }) => !steps.some((s) => pattern.test(s) && packageManagerWork([s]).length > 0));
         expect(
             absent.map(({ why }) => `no step ${why}`),
             `${pipelineFile} no longer runs commands this clause was written about, so it now floors nothing. Re-point it at what the pipeline actually does rather than deleting it.`
         ).toEqual([]);
+
+        // The reasons are what the failure above says out loud, so an empty list
+        // leaves the floor standing but the message mute. Cheap to state, and it
+        // makes emptying the list a decision rather than a silent one.
+        expect(
+            COSTLY_COMMANDS.length,
+            `COSTLY_COMMANDS is empty. The derived rule above still orders the pipeline, but no failure here can say why a step is expensive.`
+        ).toBeGreaterThan(0);
     });
 
     it("agrees with a real parser about what is nested and what is merely indented", () => {
@@ -490,6 +560,16 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         // has not learned is covered only by the universal above.
         const steps = pipelineSteps();
         const preflight = stepIndex(steps, PREFLIGHT_STEP);
+
+        // Floor: this clause iterates GATED_STEPS, so an empty list checks
+        // nothing while every other clause stays green -- measured, 10 passed.
+        // The publish step is what the check protects by definition, and
+        // PUBLISH_STEP is resolved against the pipeline by stepIndex, so
+        // requiring it here cannot be satisfied by naming something imaginary.
+        expect(
+            GATED_STEPS,
+            `GATED_STEPS no longer names the step this check exists to protect, so the one clause the allowance cannot silence has nothing left to check.`
+        ).toContain(PUBLISH_STEP);
 
         const ahead = GATED_STEPS.filter((name) => stepIndex(steps, name) < preflight);
         expect(
