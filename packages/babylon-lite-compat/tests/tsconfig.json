@@ -2,7 +2,7 @@
     "extends": "../../../tsconfig.base.json",
     "compilerOptions": {
         "noEmit": true,
-        "types": ["@webgpu/types"]
+        "types": ["@webgpu/types", "webxr"]
     },
     "include": ["**/*.ts", "../src/**/*.ts", "../../babylon-lite/src/vite-env.d.ts"]
 }

@@ -25,10 +25,13 @@ export { Plane } from "./math/plane.js";
 export { Ray } from "./math/ray.js";
 export { Frustum } from "./math/frustum.js";
 export { Size, Viewport } from "./math/size.js";
+export { Polar } from "./math/polar.js";
+export { Spherical } from "./math/spherical.js";
 export { Angle, Curve3, Path3D } from "./math/curve.js";
 
 // ─── Culling ─────────────────────────────────────────────────────────
 export { BoundingBox, BoundingSphere, BoundingInfo } from "./culling/bounding.js";
+export { PickingInfo } from "./culling/picking-info.js";
 
 // ─── Engine ──────────────────────────────────────────────────────────
 export { AbstractEngine, ThinEngine, WebGPUEngine, Engine, NullEngine } from "./engine/engine.js";
@@ -312,8 +315,6 @@ export type {
     IGaussianSplattingStreamingPart,
 } from "./unsupported/unsupported-apis.js";
 export {
-    Skeleton,
-    Bone,
     ReflectionProbe,
     Layer,
     EffectLayer,
@@ -348,6 +349,7 @@ export {
     VirtualJoystick,
     SceneOptimizer,
 } from "./unsupported/unsupported-extended.js";
+export { Skeleton, Bone } from "./bones/skeleton.js";
 
 export {
     HavokPlugin,

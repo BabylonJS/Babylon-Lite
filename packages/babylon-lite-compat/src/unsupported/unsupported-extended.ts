@@ -11,18 +11,7 @@
 
 import { unsupported } from "../error.js";
 
-// ─── Bones / Skeletons / Morph ───────────────────────────────────────
-export class Skeleton {
-    public constructor() {
-        unsupported("Skeleton", "Skeletons are produced by the glTF loader in Babylon Lite and driven by `createAnimationController`; they are not constructed manually.");
-    }
-}
-
-export class Bone {
-    public constructor() {
-        unsupported("Bone", "Bones are produced by the glTF loader in Babylon Lite; manual bone construction is not wrapped.");
-    }
-}
+export { Skeleton, Bone } from "../bones/skeleton.js";
 
 // ─── Probes / Layers / Rendering ─────────────────────────────────────
 export class ReflectionProbe {

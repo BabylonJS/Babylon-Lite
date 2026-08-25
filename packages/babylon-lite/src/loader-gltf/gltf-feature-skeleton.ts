@@ -4,7 +4,7 @@
 import type { GltfFeature } from "./gltf-feature.js";
 import { resolveAccessor } from "./gltf-parser.js";
 import { F32, U16 } from "../engine/typed-arrays.js";
-import { _boneBuilder } from "../skeleton/bone-control-hooks.js";
+import { _boneBuilder, _ensureBoneControlForSkinnedAsset } from "../skeleton/bone-control-hooks.js";
 
 /** Denormalize a resolved WEIGHTS_n attribute to a tight Float32 VEC4 buffer.
  *  glTF allows WEIGHTS to be FLOAT or normalized UNSIGNED_BYTE / UNSIGNED_SHORT;
@@ -75,6 +75,8 @@ const feature: GltfFeature = {
         const skin = extractSkin(json, binChunk, node.skin, meshData._worldMatrix, parentMap, worldMatrixCache);
         const boneData = computeBoneTextureData(skin);
         mesh.skeleton = createSkeleton(ctx._engine, joints, weights, skin.jointNodes.length, boneData, joints1, weights1);
+
+        await _ensureBoneControlForSkinnedAsset();
 
         // When bone control is enabled, lazily create the asset-wide override map
         // here (per-mesh hook runs before any per-asset hook) so the animation feature

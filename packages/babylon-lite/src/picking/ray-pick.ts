@@ -37,9 +37,12 @@ export interface RayPickSnapshot {
 
 /** Options for {@link pickWithRay}. */
 export interface RayPickOptions {
-    /** Return `true` for a mesh that may be picked. Meshes with `pickable === false`
-     *  are always skipped (mirrors {@link Mesh.pickable} / BJS `isPickable`). */
+    /** Return `true` for a mesh that may be picked. By default, `pickable === false`
+     *  meshes are skipped before this runs; visibility does not affect native Lite picking. */
     predicate?: (mesh: Mesh) => boolean;
+    /** Skip Lite's default `pickable === false` exclusion. Intended for adapters
+     *  whose predicate fully defines eligibility. */
+    skipPickableCheck?: boolean;
 }
 
 /**
@@ -47,11 +50,11 @@ export interface RayPickOptions {
  *
  * @internal
  */
-export function createRayPickSnapshot(scene: SceneContext, options?: RayPickOptions): RayPickSnapshot {
+export function createRayPickSnapshotFromMeshes(meshes: Iterable<Mesh>, options?: RayPickOptions): RayPickSnapshot {
     const candidates: RayPickCandidate[] = [];
     const predicate = options?.predicate;
-    for (const mesh of scene.meshes) {
-        if (mesh.pickable === false || (predicate && !predicate(mesh))) {
+    for (const mesh of meshes) {
+        if ((!options?.skipPickableCheck && mesh.pickable === false) || (predicate && !predicate(mesh))) {
             continue;
         }
         const aabb = localAabb(mesh);
@@ -64,6 +67,11 @@ export function createRayPickSnapshot(scene: SceneContext, options?: RayPickOpti
         }
     }
     return { candidates };
+}
+
+/** @internal Prepare the scene's pickable meshes for repeated same-frame ray tests. */
+export function createRayPickSnapshot(scene: SceneContext, options?: RayPickOptions): RayPickSnapshot {
+    return createRayPickSnapshotFromMeshes(scene.meshes, options);
 }
 
 // Local AABBs are cached by the identity of the mesh's CPU position array, so the
@@ -241,6 +249,7 @@ export function pickWithRaySnapshot(snapshot: RayPickSnapshot, ray: Ray, options
         if (bestAxis >= 0 && bestInvWorld) {
             const nl = [0, 0, 0];
             nl[bestAxis] = -bestDirSign;
+            info.pickedNormal = [nl[0]!, nl[1]!, nl[2]!];
             const iw = bestInvWorld;
             let wnx = iw[0]! * nl[0]! + iw[1]! * nl[1]! + iw[2]! * nl[2]!;
             let wny = iw[4]! * nl[0]! + iw[5]! * nl[1]! + iw[6]! * nl[2]!;
@@ -265,4 +274,9 @@ export function pickWithRaySnapshot(snapshot: RayPickSnapshot, ray: Ray, options
  */
 export function pickWithRay(scene: SceneContext, ray: Ray, options?: RayPickOptions): PickingInfo {
     return pickWithRaySnapshot(createRayPickSnapshot(scene, options), ray);
+}
+
+/** Cast a ray against an explicit mesh collection instead of a scene's registered mesh list. */
+export function pickMeshesWithRay(meshes: Iterable<Mesh>, ray: Ray, options?: RayPickOptions): PickingInfo {
+    return pickWithRaySnapshot(createRayPickSnapshotFromMeshes(meshes, options), ray);
 }

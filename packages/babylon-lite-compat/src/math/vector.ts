@@ -7,6 +7,8 @@
  * `asArray()`.
  */
 
+import { normalizeVec2ToRef } from "babylon-lite";
+
 import type { Matrix } from "./matrix.js";
 
 export class Vector2 {
@@ -66,12 +68,11 @@ export class Vector2 {
     }
 
     public normalize(): this {
-        const len = this.length();
-        if (len !== 0) {
-            this.x /= len;
-            this.y /= len;
-        }
-        return this;
+        return this.normalizeToRef(this);
+    }
+
+    public normalizeToRef<T extends { x: number; y: number }>(result: T): T {
+        return normalizeVec2ToRef(this, result);
     }
 
     public clone(): Vector2 {
