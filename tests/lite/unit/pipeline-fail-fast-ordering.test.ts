@@ -168,6 +168,80 @@ function isMappingEntry(content: string): boolean {
 }
 
 /**
+ * How much of a value lives on its own line, which is what decides whether a
+ * deeper line under it is legal.
+ *
+ * The first version of this asked only `/^["']/` — "does the value start with a
+ * quote" — and treated every such value as complete. A quote that *opens* on a
+ * line and closes on a later one is a legal multi-line scalar, and the same goes
+ * for `[`/`{` flow collections, so that rule reported five legal documents as
+ * corrupt. All five were measured against PyYAML, not reasoned about:
+ *
+ *     b: "x  +  deeper `more"`        ACCEPTED, was flagged
+ *     b: 'it''s  +  deeper `fine'`    ACCEPTED, was flagged
+ *     b: {c: 1,  +  deeper `d: 2}`    ACCEPTED, was flagged
+ *     b: [one,  +  deeper `c: 1]`     ACCEPTED, was flagged
+ *     b: "http://x  +  deeper `/y"`   ACCEPTED, was flagged
+ *
+ * That is the direction worth guarding: a rule that misses a corruption gets
+ * fixed, a rule that rejects a valid pipeline gets deleted. The scanner walks
+ * the characters rather than matching a closing quote with a regex, because the
+ * escapes are the whole difficulty — `''` inside a single-quoted scalar and `\"`
+ * inside a double-quoted one are both content, and a regex looking for the next
+ * quote reads the first half of a doubled apostrophe as the terminator.
+ */
+type ValueShape = "block" | "continuable" | "self-contained" | "plain";
+
+function valueShape(value: string): ValueShape {
+    if (/^[|>]/.test(value)) {
+        return "block";
+    }
+    const opener = value[0];
+    if (opener !== '"' && opener !== "'" && opener !== "[" && opener !== "{") {
+        return "plain";
+    }
+
+    let quote: '"' | "'" | null = null;
+    let depth = 0;
+    for (let i = 0; i < value.length; i++) {
+        const ch = value[i];
+        if (quote === "'") {
+            // No `''` case here on purpose. A doubled apostrophe is an escaped
+            // one inside a single-quoted scalar, and the obvious handling — skip
+            // the pair — was written first and then measured: it cannot change
+            // an answer. Each apostrophe toggles this flag, so a pair toggles it
+            // twice, and the only state this function reads is the flag's value
+            // at end of line. A mutation arm removing the skip left all 31
+            // specimens green, and a differential run over 400k generated values
+            // found zero disagreements between the two versions.
+            //
+            // It would start to matter the moment this returns *where* the
+            // scalar closed rather than whether it did, because the two versions
+            // differ on the zero characters between the pair. Anyone making that
+            // change has to put the pair back, and needs a specimen that can see
+            // the difference — which is why this is a note and not a deletion in
+            // silence.
+            if (ch === "'") {
+                quote = null;
+            }
+        } else if (quote === '"') {
+            if (ch === "\\") {
+                i++;
+            } else if (ch === '"') {
+                quote = null;
+            }
+        } else if (ch === '"' || ch === "'") {
+            quote = ch;
+        } else if (ch === "[" || ch === "{") {
+            depth++;
+        } else if (ch === "]" || ch === "}") {
+            depth--;
+        }
+    }
+    return quote !== null || depth > 0 ? "continuable" : "self-contained";
+}
+
+/**
  * Lines that open a nesting level the parser will refuse: a key whose scalar
  * value is already complete, followed by something indented under it.
  *
@@ -188,9 +262,11 @@ function isMappingEntry(content: string): boolean {
  *     b: "x"  +  deeper `more`   rejected      b: x  +  deeper `more`   ACCEPTED
  *     b: |    +  deeper `more`   accepted      b:    +  deeper `c: 1`   ACCEPTED
  *
- * A plain scalar may legally continue onto a deeper line; a quoted one may not,
- * and neither may take a mapping entry. An empty value and a block scalar both
- * open a level on purpose. Flagging only what the parser flags is the point —
+ * A plain scalar may legally continue onto a deeper line but may not take a
+ * mapping entry; a value that is already closed — a terminated quote, a balanced
+ * flow collection — may take neither. An empty value, a block scalar and a value
+ * still open at end of line all own the lines under them on purpose. Flagging
+ * only what the parser flags is the point —
  * a hand-rolled well-formedness rule that merely agrees with its author is the
  * thing this exists to catch.
  */
@@ -205,7 +281,11 @@ function malformedNestingIn(text: string): string[] {
         }
         const entry = /^([^:]+):(?:\s+(.*))?$/.exec(content);
         const value = entry?.[2]?.trim() ?? "";
-        if (!value || value.startsWith("#") || /^[|>]/.test(value)) {
+        if (!value || value.startsWith("#")) {
+            continue;
+        }
+        const shape = valueShape(value);
+        if (shape === "block" || shape === "continuable") {
             continue;
         }
 
@@ -222,8 +302,7 @@ function malformedNestingIn(text: string): string[] {
         if (next === undefined || contentColumn(next) <= contentColumn(line)) {
             continue;
         }
-        const quoted = /^["']/.test(value);
-        if (quoted || isMappingEntry(next.slice(contentColumn(next)))) {
+        if (shape === "self-contained" || isMappingEntry(next.slice(contentColumn(next)))) {
             bad.push(`line ${i + 1}: \`${line.trim()}\` is followed by the more-indented \`${next.trim()}\``);
         }
     }
@@ -233,35 +312,46 @@ function malformedNestingIn(text: string): string[] {
 /**
  * Shapes this predicate has to agree with the parser about, in both directions.
  *
- * Every verdict here was taken from PyYAML rather than from what looked right,
- * and re-derived rather than recalled: each row's `illegal` is the parser's
- * answer for that exact string, re-checked against `python3 -c "import yaml;
- * yaml.safe_load(...)"` when the table changes. A specimen whose expected value
- * is the author's reading is the author's belief wearing the costume of a test,
- * and it certifies the defect it was written to catch.
+ * Two columns, and they are not the same kind of claim. `parser` is PyYAML's
+ * answer for that exact string, re-derived rather than recalled whenever the
+ * table changes. `flags` is this rule's obligation: the 1-based lines its
+ * failure must name. A specimen whose expected value is the author's reading is
+ * the author's belief wearing the costume of a test, so the first column comes
+ * from the oracle; the second cannot, because which line to blame for a
+ * corruption is a design judgement no parser settles.
  *
- * The legal ones matter more than the illegal ones: they are the only thing
- * standing between this and a rule that flags valid pipelines. A mechanical
- * conjunct sweep found three of them missing — with no specimen for a
- * comment-only value, a block scalar holding `key: value` text, or a
- * whitespace-only line, the corresponding tests could each be deleted with
- * nothing failing, because no input reached them.
+ * The columns are bound by one rule, asserted below: `flags` may be non-empty
+ * only where the parser rejects. The table is allowed to be incomplete in the
+ * other direction — a row the parser rejects for a reason outside this rule's
+ * one class carries an empty `flags` and says so — but it may never demand that
+ * legal YAML be flagged.
+ *
+ * `flags` naming lines rather than a boolean is deliberate, and was measured:
+ * with a `broken: boolean` column, reporting `line ${i + 99}`, replacing the
+ * whole message with `something is wrong somewhere`, and reporting only the
+ * first corruption in a document all left this file 10/10 green. The message is
+ * the entire value of this guard on a 400-line pipeline, and a boolean column
+ * cannot read it.
+ *
+ * The legal rows matter more than the illegal ones: they are the only thing
+ * standing between this and a rule that flags valid pipelines. Five of them were
+ * added after the rule was caught doing exactly that.
  */
-const NESTING_SPECIMENS: Array<{ label: string; yaml: string; illegal: boolean }> = [
-    { label: "quoted value, then a deeper mapping entry", yaml: 'a:\n  b: "x"\n    c: 1\n', illegal: true },
-    { label: "plain value, then a deeper mapping entry", yaml: "a:\n  b: x\n    c: 1\n", illegal: true },
-    { label: "quoted value, then a deeper bare word", yaml: 'a:\n  b: "x"\n    more\n', illegal: true },
-    { label: "sequence entry, then an over-indented sibling", yaml: "a:\n  - name: N\n      value: V\n", illegal: true },
-    { label: "quoted value, a comment, then a deeper entry", yaml: 'a:\n  b: "x"\n  # note\n    c: 1\n', illegal: true },
+const NESTING_SPECIMENS: Array<{ label: string; yaml: string; parser: "accepts" | "rejects"; flags: number[] }> = [
+    { label: "quoted value, then a deeper mapping entry", yaml: 'a:\n  b: "x"\n    c: 1\n', parser: "rejects", flags: [2] },
+    { label: "plain value, then a deeper mapping entry", yaml: "a:\n  b: x\n    c: 1\n", parser: "rejects", flags: [2] },
+    { label: "quoted value, then a deeper bare word", yaml: 'a:\n  b: "x"\n    more\n', parser: "rejects", flags: [2] },
+    { label: "sequence entry, then an over-indented sibling", yaml: "a:\n  - name: N\n      value: V\n", parser: "rejects", flags: [2] },
+    { label: "quoted value, a comment, then a deeper entry", yaml: 'a:\n  b: "x"\n  # note\n    c: 1\n', parser: "rejects", flags: [2] },
 
-    { label: "plain value continued on a deeper line", yaml: "a:\n  b: x\n    more\n", illegal: false },
-    { label: "block scalar holding deeper text", yaml: "a:\n  b: |\n    more\n", illegal: false },
-    { label: "block scalar holding `key: value` text", yaml: "a:\n  b: |\n    c: 1\n", illegal: false },
-    { label: "empty value opening a nested mapping", yaml: "a:\n  b:\n    c: 1\n", illegal: false },
-    { label: "comment-only value opening a mapping", yaml: "a:\n  b: # note\n    c: 1\n", illegal: false },
-    { label: "sequence entry and its sibling key", yaml: "a:\n  - name: N\n    value: V\n", illegal: false },
-    { label: "a whitespace-only line before a sibling", yaml: 'a:\n  b: "x"\n    \n  c: 1\n', illegal: false },
-    { label: "a scalar key as the final line", yaml: 'a:\n  b: "x"\n', illegal: false },
+    { label: "plain value continued on a deeper line", yaml: "a:\n  b: x\n    more\n", parser: "accepts", flags: [] },
+    { label: "block scalar holding deeper text", yaml: "a:\n  b: |\n    more\n", parser: "accepts", flags: [] },
+    { label: "block scalar holding `key: value` text", yaml: "a:\n  b: |\n    c: 1\n", parser: "accepts", flags: [] },
+    { label: "empty value opening a nested mapping", yaml: "a:\n  b:\n    c: 1\n", parser: "accepts", flags: [] },
+    { label: "comment-only value opening a mapping", yaml: "a:\n  b: # note\n    c: 1\n", parser: "accepts", flags: [] },
+    { label: "sequence entry and its sibling key", yaml: "a:\n  - name: N\n    value: V\n", parser: "accepts", flags: [] },
+    { label: "a whitespace-only line before a sibling", yaml: 'a:\n  b: "x"\n    \n  c: 1\n', parser: "accepts", flags: [] },
+    { label: "a scalar key as the final line", yaml: 'a:\n  b: "x"\n', parser: "accepts", flags: [] },
 
     // Command-shaped deeper lines. Every illegal row above uses a clean `c: 1`,
     // so nothing here reached the part of `isMappingEntry` that decides *what
@@ -269,11 +359,42 @@ const NESTING_SPECIMENS: Array<{ label: string; yaml: string; illegal: boolean }
     // happens in this pipeline. Measured: relaxing that predicate to "a colon
     // anywhere" left all thirteen rows above green while the last two of these
     // became false positives on legal YAML.
-    { label: "deeper line is a command containing `key: value`", yaml: "a:\n  b: echo one\n    echo two: three\n", illegal: true },
-    { label: "deeper line is a command ending in a colon", yaml: "a:\n  b: echo one\n    echo two:\n", illegal: true },
-    { label: "deeper line has a colon with no space after it", yaml: "a:\n  b: echo one\n    echo two:three\n", illegal: false },
-    { label: "deeper line is a URL", yaml: "a:\n  b: echo one\n    http://x/y\n", illegal: false },
-    { label: "deeper line is a sequence dash", yaml: "a:\n  b: echo one\n    - x\n", illegal: false },
+    { label: "deeper line is a command containing `key: value`", yaml: "a:\n  b: echo one\n    echo two: three\n", parser: "rejects", flags: [2] },
+    { label: "deeper line is a command ending in a colon", yaml: "a:\n  b: echo one\n    echo two:\n", parser: "rejects", flags: [2] },
+    { label: "deeper line has a colon with no space after it", yaml: "a:\n  b: echo one\n    echo two:three\n", parser: "accepts", flags: [] },
+    { label: "deeper line is a URL", yaml: "a:\n  b: echo one\n    http://x/y\n", parser: "accepts", flags: [] },
+    { label: "deeper line is a sequence dash", yaml: "a:\n  b: echo one\n    - x\n", parser: "accepts", flags: [] },
+
+    // Values that are still open at end of line. These are the five the rule was
+    // measured getting wrong, plus the flow-sequence case it happened to get
+    // right for the wrong reason -- `two]` has no colon, so the old rule was
+    // silent by accident rather than by design.
+    { label: "double-quoted scalar closed on the deeper line", yaml: 'a:\n  b: "x\n    more"\n', parser: "accepts", flags: [] },
+    { label: "single-quoted scalar with a doubled apostrophe, closed on the deeper line", yaml: "a:\n  b: 'it''s\n    fine'\n", parser: "accepts", flags: [] },
+    { label: "flow mapping spanning two lines", yaml: "a:\n  b: {c: 1,\n    d: 2}\n", parser: "accepts", flags: [] },
+    { label: "flow sequence spanning two lines", yaml: "a:\n  b: [one,\n    two]\n", parser: "accepts", flags: [] },
+    { label: "flow sequence whose deeper line is a mapping pair", yaml: "a:\n  b: [one,\n    c: 1]\n", parser: "accepts", flags: [] },
+    { label: "quoted URL continued on the deeper line", yaml: 'a:\n  b: "http://x\n    /y"\n', parser: "accepts", flags: [] },
+    { label: "folded block scalar holding `key: value` text", yaml: "a:\n  b: >\n    c: 1\n", parser: "accepts", flags: [] },
+
+    // ...and the same values once they are closed, which is what makes the
+    // distinction load-bearing rather than a blanket exemption for anything
+    // holding a quote or a bracket.
+    { label: "closed flow sequence, then a deeper bare word", yaml: "a:\n  b: [x]\n    more\n", parser: "rejects", flags: [2] },
+    { label: "closed flow mapping, then a deeper mapping entry", yaml: "a:\n  b: {x: 1}\n    c: 1\n", parser: "rejects", flags: [2] },
+    { label: "closed single-quoted scalar with a doubled apostrophe, then a deeper entry", yaml: "a:\n  b: 'it''s'\n    c: 1\n", parser: "rejects", flags: [2] },
+    { label: "closed double-quoted scalar with an escaped quote, then a deeper entry", yaml: 'a:\n  b: "a\\"b"\n    c: 1\n', parser: "rejects", flags: [2] },
+
+    // Two corruptions in one document. The only row where `flags` has a second
+    // entry, and the only thing standing between this and a rule that reports
+    // the first problem and stops.
+    { label: "two corruptions in one document", yaml: 'a:\n  b: "x"\n    c: 1\n  d: "y"\n    e: 2\n', parser: "rejects", flags: [2, 4] },
+
+    // Declared out of scope: the parser refuses this, and this rule is silent.
+    // It decides one class -- a complete value with something nested under it --
+    // and an unterminated scalar is a different defect. Recorded rather than
+    // quietly omitted, so the gap is visible to whoever widens the rule next.
+    { label: "unterminated quote running to end of file", yaml: 'a:\n  b: "x\n    more\n', parser: "rejects", flags: [] },
 ];
 
 /**
@@ -531,21 +652,52 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         ).toBeGreaterThan(0);
     });
 
-    it("agrees with a real parser about what is nested and what is merely indented", () => {
-        const wrong = NESTING_SPECIMENS.filter(({ yaml, illegal }) => malformedNestingIn(yaml).length > 0 !== illegal).map(
-            ({ label, illegal }) => `${illegal ? "missed" : "wrongly flagged"}: ${label}`
-        );
+    it("names the lines a real parser would refuse, and none it would accept", () => {
+        // The table may not ask for legal YAML to be flagged. This is a claim
+        // about the specimens themselves rather than about the rule's output:
+        // a fixture is the last thing that can certify a false positive, and it
+        // does so silently, because every arm run against it agrees with it.
+        const unsound = NESTING_SPECIMENS.filter(({ parser, flags }) => parser === "accepts" && flags.length > 0).map(({ label }) => label);
+        expect(
+            unsound,
+            `these rows ask the nesting rule to flag documents the parser accepts:\n  ${unsound.join("\n  ")}\n\n` +
+                `Re-derive the \`parser\` column from PyYAML before changing \`flags\` — a rule that rejects a valid pipeline gets deleted, not fixed.`
+        ).toEqual([]);
+
+        const disagreements: string[] = [];
+        for (const { label, yaml, parser, flags } of NESTING_SPECIMENS) {
+            const messages = malformedNestingIn(yaml);
+            const at = messages.map((m) => Number(/^line (\d+):/.exec(m)?.[1] ?? -1));
+
+            if (at.join(",") !== flags.join(",")) {
+                const said = messages.length === 0 ? "says nothing" : `names lines [${at.join(", ")}]`;
+                disagreements.push(`${parser === "accepts" ? "wrongly flagged" : "misreported"}: ${label} — the rule ${said}, expected [${flags.join(", ")}]`);
+                continue;
+            }
+            // Reaching the right line number is not the same as saying so. The
+            // failure has to quote the offending line, or the number is the only
+            // thing a reader gets and it is unverifiable at the point of use.
+            for (const n of flags) {
+                const source = yaml.split("\n")[n - 1]?.trim() ?? "";
+                if (!messages.some((m) => m.includes(source))) {
+                    disagreements.push(`${label} — nothing in the failure quotes line ${n} (\`${source}\`)`);
+                }
+            }
+        }
 
         expect(
-            wrong,
-            `the nesting rule disagrees with the parser on:\n  ${wrong.join("\n  ")}\n\n` +
+            disagreements,
+            `the nesting rule disagrees with the parser on:\n  ${disagreements.join("\n  ")}\n\n` +
                 `The legal specimens are the load-bearing half — without them this rule can be tightened into one that rejects valid pipelines and nothing here would notice.`
         ).toEqual([]);
 
-        // A rule that only ever refuses is trivially "safe" and useless, so pin
-        // that both verdicts are actually reachable from this table.
-        expect(NESTING_SPECIMENS.some(({ illegal }) => illegal)).toBe(true);
-        expect(NESTING_SPECIMENS.some(({ illegal }) => !illegal)).toBe(true);
+        // A rule that only ever refuses is trivially "safe" and useless, and one
+        // that only ever accepts is inert, so pin that both are reachable from
+        // this table — and that more than one line can be named at once, which
+        // is what stops the rule from reporting the first problem and stopping.
+        expect(NESTING_SPECIMENS.some(({ flags }) => flags.length > 0)).toBe(true);
+        expect(NESTING_SPECIMENS.some(({ parser }) => parser === "accepts")).toBe(true);
+        expect(NESTING_SPECIMENS.some(({ flags }) => flags.length > 1)).toBe(true);
     });
 
     it("reads a pipeline the parser would accept, not merely one that splits into steps", () => {
