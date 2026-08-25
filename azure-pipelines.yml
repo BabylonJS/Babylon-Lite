@@ -689,23 +689,50 @@ stages:
                 - script: npx eslint . --format ./scripts/eslint-vso-formatter.cjs
                   displayName: "ESLint"
 
+                # ── Why every type-check step below starts with `set -euo pipefail` ──────
+                #
+                # Each step pipes tsc through sed to rewrite TypeScript's
+                # "file(line,col): error TSxxxx" into a ##vso[task.logissue] annotation, so
+                # errors show up on the ADO build summary and inline in the PR.
+                #
+                # A shell pipeline exits with the status of its LAST command. sed always
+                # succeeds, so without pipefail the step swallowed tsc's non-zero exit and
+                # reported green. task.logissue alone does not fail a task either — it only
+                # annotates. The net effect was that these steps could not fail: they printed
+                # the errors and passed anyway.
+                #
+                # That was not theoretical. master carried a real type error for weeks
+                # (`_toneMappingHelpers` removed from PbrComposerDeps in #597, still passed by
+                # test call sites added in #601) while this job stayed green on every PR.
+                # Turning on post-merge validation would have been pointless without this
+                # fix — the master run would have inherited the same blind spot.
+                #
+                # `set -euo pipefail` is the convention already used across the other
+                # pipelines in this repo (bundle-manifest, compat-sync, npm-publish).
+                # Do not remove it, and keep it on any new step that pipes a real command
+                # into a formatter.
                 - script: |
+                      set -euo pipefail
                       npx tsc -p packages/babylon-lite/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
                   displayName: "TypeScript type-check (package)"
 
                 - script: |
+                      set -euo pipefail
                       npx tsc -p lab/tsconfig.typecheck.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
                   displayName: "TypeScript type-check (lab)"
 
                 - script: |
+                      set -euo pipefail
                       npx tsc -p tests/lite/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
                   displayName: "TypeScript type-check (tests)"
 
                 - script: |
+                      set -euo pipefail
                       npx tsc -p packages/babylon-lite-gl/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
                   displayName: "TypeScript type-check (gl package)"
 
                 - script: |
+                      set -euo pipefail
                       npx tsc -p tests/gl/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
                   displayName: "TypeScript type-check (gl tests)"
 
@@ -754,11 +781,17 @@ stages:
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
+                # `set -euo pipefail` is required here for the same reason as in the Lint
+                # job above: sed is the last command in the pipeline, so without it a
+                # failing tsc is masked by sed's zero exit and the step reports green.
+                # See the long comment on the Lint job's first type-check step.
                 - script: |
+                      set -euo pipefail
                       npx tsc -p packages/babylon-lite-compat/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
                   displayName: "TypeScript type-check (compat src)"
 
                 - script: |
+                      set -euo pipefail
                       npx tsc -p packages/babylon-lite-compat/tests/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
                   displayName: "TypeScript type-check (compat tests)"
 
