@@ -11,17 +11,17 @@ import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import { animateParticleSystem, startParticleSystem, stopParticleSystem, type ParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
 import { createParticleBillboard } from "../../../packages/babylon-lite/src/particle/particle-billboard";
 import { buildNodeParticleGraph, snapshotParticles } from "./particle-test-utils";
-import { buildNodeParticleSet, type BuildNodeParticleOptions, type NodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/npe-build";
+import { buildNodeParticleSet, type BuildNodeParticleOptions, type NodeParticleSet, type NpeBuildState } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import { buildNodeParticleSetWithBlendModes } from "../../../packages/babylon-lite/src/particle/node/npe-blend-modes";
 import {
     buildNodeParticleSetWithEmitterProvider,
-    enableNodeParticleEmitterProvider,
     type NodeParticleEmitterProvider,
+    withNodeParticleEmitterProvider,
 } from "../../../packages/babylon-lite/src/particle/node/npe-emitter-provider";
 import { buildNodeParticleSetWithFlowMaps } from "../../../packages/babylon-lite/src/particle/node/npe-flow-map";
 import { buildNodeParticleSetWithNoiseTextures } from "../../../packages/babylon-lite/src/particle/node/npe-noise";
 import { buildNodeParticleSetWithTextureUpdates } from "../../../packages/babylon-lite/src/particle/node/npe-texture-updates";
-import { parseNodeParticleSetFromSnippet } from "../../../packages/babylon-lite/src/particle/node/node-particle";
+import { parseNodeParticleSetFromSnippet, type ParseNodeParticleOptions } from "../../../packages/babylon-lite/src/particle/node/node-particle";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
 import type { ParticleGraph } from "../../../packages/babylon-lite/src/particle/node/npe-types";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
@@ -72,8 +72,7 @@ interface RawGraph {
 type NodeParticleBuilder = (engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions) => Promise<NodeParticleSet>;
 
 async function buildNodeParticleGraphWithEmitterProvider(source: unknown, provider: NodeParticleEmitterProvider, options: BuildNodeParticleOptions = {}): Promise<ParticleSystem> {
-    const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(source), options);
-    await enableNodeParticleEmitterProvider(set, provider);
+    const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(source), withNodeParticleEmitterProvider(provider, options));
     return set.systems[0]!;
 }
 
@@ -115,8 +114,8 @@ function worldCylinderGraph(): RawGraph {
     return source;
 }
 
-function multiSystemGraph(): RawGraph {
-    const first = worldPointGraph();
+function multiSystemGraph(source: RawGraph = worldPointGraph()): RawGraph {
+    const first = source;
     const second = structuredClone(first);
     const offset = Math.max(...first.blocks.map((block) => block.id)) + 1;
     for (const block of second.blocks) {
@@ -226,7 +225,7 @@ describe("NPE moving emitter transforms", () => {
         }
     });
 
-    it("refreshes a replacement provider matrix before each manual simulation step", async () => {
+    it("refreshes a newly returned provider matrix before each manual simulation step", async () => {
         let currentMatrix = emitterMatrix(1, 2, 3);
         let providerCalls = 0;
         const system = await buildNodeParticleGraphWithEmitterProvider(pointGraph, () => {
@@ -313,6 +312,42 @@ describe("NPE moving emitter transforms", () => {
         expect(live.buffer.dirZ[1]).toBeCloseTo(staticallyTransformed.buffer.dirZ[0]!, 6);
     });
 
+    it("keeps static implicit-cylinder behavior while collecting inverses only after internal opt-in", async () => {
+        const transformed = emitterMatrix(3, -2, 5, Math.PI / 3, 2, 0.5, 1.5);
+        const untracked = await buildNodeParticleGraph(worldCylinderGraph(), { emitterWorldMatrix: transformed });
+        const collectedInverses: { inverse: Mat4 }[] = [];
+        let collectionWasAbsent = false;
+        const tracked = await buildNodeParticleGraph(worldCylinderGraph(), {
+            emitterWorldMatrix: transformed,
+            _setupEmitter(state) {
+                collectionWasAbsent = state.emitterInverseWorldMatrices === undefined;
+                state.emitterInverseWorldMatrices = collectedInverses;
+            },
+        });
+        const draws = [0.1, 0.2, 0.3, 0.4];
+
+        let restoreRandom = seedRandom(draws);
+        try {
+            startParticleSystem(untracked);
+            animateParticleSystem(untracked, 1);
+        } finally {
+            restoreRandom();
+        }
+        restoreRandom = seedRandom(draws);
+        try {
+            startParticleSystem(tracked);
+            animateParticleSystem(tracked, 1);
+        } finally {
+            restoreRandom();
+        }
+
+        expect(collectionWasAbsent).toBe(true);
+        expect(collectedInverses).toHaveLength(1);
+        expect(untracked._prepareFrame).toBeUndefined();
+        expect(tracked._prepareFrame).toBeUndefined();
+        expect(snapshotParticles(tracked)).toEqual(snapshotParticles(untracked));
+    });
+
     it.each(
         [
             ["box", SCENE262_NPE_JSON],
@@ -357,18 +392,21 @@ describe("NPE moving emitter transforms", () => {
         ["noise", buildNodeParticleSetWithNoiseTextures],
         ["combined texture-update", buildNodeParticleSetWithTextureUpdates],
         ["blend-mode", buildNodeParticleSetWithBlendModes],
-    ] as Array<[string, NodeParticleBuilder]>)("enables the provider on a set from the %s builder", async (_name, builder) => {
+    ] as Array<[string, NodeParticleBuilder]>)("builds a provider-backed set with the %s builder", async (_name, builder) => {
         let providerCalls = 0;
-        const set = await builder({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()));
-        const enabled = await enableNodeParticleEmitterProvider(set, () => {
-            providerCalls++;
-            return emitterMatrix(2, 3, 4);
-        });
+        const set = await builder(
+            {} as EngineContext,
+            {} as SceneContext,
+            parseNodeParticleSource(worldPointGraph()),
+            withNodeParticleEmitterProvider(() => {
+                providerCalls++;
+                return emitterMatrix(2, 3, 4);
+            })
+        );
         const system = set.systems[0]!;
         startParticleSystem(system);
         animateParticleSystem(system, 1);
 
-        expect(enabled).toBe(set);
         expect(providerCalls).toBe(2);
         expect(system.buffer.posX[0]).toBeCloseTo(2);
         expect(system.buffer.posY[0]).toBeCloseTo(3);
@@ -378,15 +416,19 @@ describe("NPE moving emitter transforms", () => {
     it.each([
         ["default", buildNodeParticleSet],
         ["flow-map", buildNodeParticleSetWithFlowMaps],
+        ["noise", buildNodeParticleSetWithNoiseTextures],
         ["combined texture-update", buildNodeParticleSetWithTextureUpdates],
-    ] as Array<[string, NodeParticleBuilder]>)("retains only emitter state from the %s builder", async (_name, builder) => {
+        ["blend-mode", buildNodeParticleSetWithBlendModes],
+    ] as Array<[string, NodeParticleBuilder]>)("retains no provider state on a static set from the %s builder", async (_name, builder) => {
         const set = await builder({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()));
-        const emitterState = set.systems[0]!._emitter!;
+        const system = set.systems[0]!;
 
-        expect(Object.keys(emitterState).sort()).toEqual(["emitter", "emitterInverseWorldMatrices", "emitterWorldMatrix"]);
+        expect(system).not.toHaveProperty("_emitter");
+        expect(system).not.toHaveProperty("_emitterProvider");
+        expect(system._prepareFrame).toBeUndefined();
     });
 
-    it("builds and enables through the convenience builder", async () => {
+    it("builds through the convenience builder", async () => {
         const set = await buildNodeParticleSetWithEmitterProvider({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()), () =>
             emitterMatrix(2, 3, 4)
         );
@@ -399,9 +441,14 @@ describe("NPE moving emitter transforms", () => {
         expect(system.buffer.posZ[0]).toBeCloseTo(4);
     });
 
-    it("enables the provider on an inline snippet set", async () => {
-        const set = await parseNodeParticleSetFromSnippet({} as EngineContext, {} as SceneContext, "ignored", { json: worldPointGraph() });
-        await enableNodeParticleEmitterProvider(set, () => emitterMatrix(5, 6, 7));
+    it("preserves extended options on a provider-backed inline snippet build", async () => {
+        const graph = worldPointGraph();
+        const snippetOptions: ParseNodeParticleOptions = { json: graph, snippetServer: "https://unused.invalid" };
+        const options = withNodeParticleEmitterProvider(() => emitterMatrix(5, 6, 7), snippetOptions);
+
+        expect(options.json).toBe(graph);
+        expect(options.snippetServer).toBe(snippetOptions.snippetServer);
+        const set = await parseNodeParticleSetFromSnippet({} as EngineContext, {} as SceneContext, "ignored", options);
         const system = set.systems[0]!;
         startParticleSystem(system);
         animateParticleSystem(system, 1);
@@ -412,10 +459,14 @@ describe("NPE moving emitter transforms", () => {
     });
 
     it("composes with exact blend-mode registration", async () => {
-        const set = await buildNodeParticleSetWithBlendModes({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()));
+        const set = await buildNodeParticleSetWithBlendModes(
+            {} as EngineContext,
+            {} as SceneContext,
+            parseNodeParticleSource(worldPointGraph()),
+            withNodeParticleEmitterProvider(() => emitterMatrix(2, 3, 4))
+        );
         const system = set.systems[0]!;
         const registerBillboard = system._registerBillboard;
-        await enableNodeParticleEmitterProvider(set, () => emitterMatrix(2, 3, 4));
 
         system.blendMode = 4;
         system.texture = {
@@ -463,8 +514,12 @@ describe("NPE moving emitter transforms", () => {
 
     it("uses one coherent provider snapshot per started call across a multi-system set", async () => {
         let providerCalls = 0;
-        const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(multiSystemGraph()));
-        await enableNodeParticleEmitterProvider(set, () => emitterMatrix(++providerCalls, 0, 0));
+        const set = await buildNodeParticleSet(
+            {} as EngineContext,
+            {} as SceneContext,
+            parseNodeParticleSource(multiSystemGraph()),
+            withNodeParticleEmitterProvider(() => emitterMatrix(++providerCalls, 0, 0))
+        );
         const first = set.systems[0]!;
         const second = set.systems[1]!;
 
@@ -476,204 +531,203 @@ describe("NPE moving emitter transforms", () => {
         expect(providerCalls).toBe(3);
         expect(first.buffer.posX[0]).toBeCloseTo(2);
         expect(second.buffer.posX[0]).toBeCloseTo(3);
-        expect(first._emitter!.emitter.x).toBe(3);
-        expect(second._emitter!.emitter.x).toBe(3);
+    });
+
+    it("keeps implicit-cylinder inverse lists and refresh state independent across systems", async () => {
+        const firstMatrix = emitterMatrix(3, -2, 5, Math.PI / 3, 2, 0.5, 1.5);
+        const secondMatrix = emitterMatrix(-4, 6, -1, -Math.PI / 4, 0.75, 2, 1.25);
+        const providerMatrices = [emitterMatrix(0, 0, 0), firstMatrix, secondMatrix];
+        let providerCalls = 0;
+        const options = withNodeParticleEmitterProvider(() => providerMatrices[providerCalls++]!);
+        const setupEmitter = options._setupEmitter!;
+        const buildStates: NpeBuildState[] = [];
+        options._setupEmitter = (state) => {
+            setupEmitter(state);
+            buildStates.push(state);
+        };
+
+        const liveSet = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(multiSystemGraph(worldCylinderGraph())), options);
+        const staticSystems = await Promise.all([
+            buildNodeParticleGraph(worldCylinderGraph(), { emitterWorldMatrix: firstMatrix }),
+            buildNodeParticleGraph(worldCylinderGraph(), { emitterWorldMatrix: secondMatrix }),
+        ]);
+        const firstInverses = buildStates[0]!.emitterInverseWorldMatrices!;
+        const secondInverses = buildStates[1]!.emitterInverseWorldMatrices!;
+
+        expect(buildStates).toHaveLength(2);
+        expect(buildStates[0]!.emitterWorldMatrix).not.toBe(buildStates[1]!.emitterWorldMatrix);
+        expect(firstInverses).toHaveLength(1);
+        expect(secondInverses).toHaveLength(1);
+        expect(firstInverses).not.toBe(secondInverses);
+        expect(firstInverses[0]!.inverse).not.toBe(secondInverses[0]!.inverse);
+
+        for (const [live, staticallyTransformed] of [
+            [liveSet.systems[0]!, staticSystems[0]!],
+            [liveSet.systems[1]!, staticSystems[1]!],
+        ] as const) {
+            let restoreRandom = seedRandom();
+            try {
+                startParticleSystem(live);
+                animateParticleSystem(live, 1);
+            } finally {
+                restoreRandom();
+            }
+            restoreRandom = seedRandom();
+            try {
+                startParticleSystem(staticallyTransformed);
+                animateParticleSystem(staticallyTransformed, 1);
+            } finally {
+                restoreRandom();
+            }
+
+            expect(snapshotParticles(live)).toEqual(snapshotParticles(staticallyTransformed));
+        }
+
+        expect(providerCalls).toBe(3);
+        expect(Array.from(buildStates[0]!.emitterWorldMatrix)).toEqual(Array.from(firstMatrix));
+        expect(Array.from(buildStates[1]!.emitterWorldMatrix)).toEqual(Array.from(secondMatrix));
+    });
+
+    it("isolates builds that reuse one wrapped options object", async () => {
+        let emitterX = 1;
+        const staticMatrix = emitterMatrix(-3, -2, -1);
+        const staticMatrixSnapshot = Array.from(staticMatrix);
+        const options = withNodeParticleEmitterProvider(() => emitterMatrix(emitterX, 0, 0), { emitterWorldMatrix: staticMatrix });
+        const firstSet = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()), options);
+        const secondSet = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()), options);
+        const first = firstSet.systems[0]!;
+        const second = secondSet.systems[0]!;
+
+        first._prepareFrame = undefined;
+        emitterX = 7;
+        startParticleSystem(second);
+        animateParticleSystem(second, 1);
+        startParticleSystem(first);
+        animateParticleSystem(first, 1);
+
+        expect(second.buffer.posX[0]).toBeCloseTo(7);
+        expect(first.buffer.posX[0]).toBeCloseTo(1);
+        expect(Array.from(staticMatrix)).toEqual(staticMatrixSnapshot);
     });
 
     it.each([
         ["default", buildNodeParticleSet],
         ["flow-map", buildNodeParticleSetWithFlowMaps],
         ["combined texture-update", buildNodeParticleSetWithTextureUpdates],
-    ] as Array<[string, NodeParticleBuilder]>)("refreshes every implicit-cylinder inverse retained by the %s builder", async (_name, builder) => {
+    ] as Array<[string, NodeParticleBuilder]>)("refreshes implicit-cylinder transforms in the %s builder", async (_name, builder) => {
         const transformed = emitterMatrix(3, -2, 5, Math.PI / 3, 2, 0.5, 1.5);
-        const set = await builder({} as EngineContext, {} as SceneContext, parseNodeParticleSource(multiCylinderGraph()));
-        const system = set.systems[0]!;
-        const inverseStates = system._emitter!.emitterInverseWorldMatrices!;
-        const inverseReferences = inverseStates.map((state) => state.inverse);
-        const initialInverseValues = inverseReferences.map((inverse) => Array.from(inverse));
+        const liveSet = await builder(
+            {} as EngineContext,
+            {} as SceneContext,
+            parseNodeParticleSource(multiCylinderGraph()),
+            withNodeParticleEmitterProvider(() => transformed)
+        );
+        const staticSet = await builder({} as EngineContext, {} as SceneContext, parseNodeParticleSource(multiCylinderGraph()), { emitterWorldMatrix: transformed });
+        const live = liveSet.systems[0]!;
+        const staticallyTransformed = staticSet.systems[0]!;
+        const draws = [0.1, 0.2, 0.3, 0.4];
 
-        expect(inverseStates).toHaveLength(2);
-        await enableNodeParticleEmitterProvider(set, () => transformed);
+        let restoreRandom = seedRandom(draws);
+        try {
+            startParticleSystem(live);
+            animateParticleSystem(live, 1);
+        } finally {
+            restoreRandom();
+        }
+        restoreRandom = seedRandom(draws);
+        try {
+            startParticleSystem(staticallyTransformed);
+            animateParticleSystem(staticallyTransformed, 1);
+        } finally {
+            restoreRandom();
+        }
 
-        expect(inverseStates[0]!.inverse).toBe(inverseReferences[0]);
-        expect(inverseStates[1]!.inverse).toBe(inverseReferences[1]);
-        expect(Array.from(inverseStates[0]!.inverse)).not.toEqual(initialInverseValues[0]);
-        expect(Array.from(inverseStates[1]!.inverse)).not.toEqual(initialInverseValues[1]);
-        expect(Array.from(inverseStates[1]!.inverse)).toEqual(Array.from(inverseStates[0]!.inverse));
+        expect(snapshotParticles(live)).toEqual(snapshotParticles(staticallyTransformed));
     });
 
-    it("lets an enabled provider replace the static matrix while preserving stable references", async () => {
+    it("uses the provider instead of a static emitter matrix from the wrapped options", async () => {
         const staticMatrix = emitterMatrix(1, 2, 3);
         let providedMatrix = emitterMatrix(4, 5, 6);
-        const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()), {
-            emitterWorldMatrix: staticMatrix,
-        });
+        const set = await buildNodeParticleSet(
+            {} as EngineContext,
+            {} as SceneContext,
+            parseNodeParticleSource(worldPointGraph()),
+            withNodeParticleEmitterProvider(() => providedMatrix, { emitterWorldMatrix: staticMatrix })
+        );
         const system = set.systems[0]!;
-        const emitterState = system._emitter!;
-        const stableMatrix = emitterState.emitterWorldMatrix;
-        const stableTranslation = emitterState.emitter;
 
-        expect(stableTranslation).toEqual({ x: 1, y: 2, z: 3 });
-        await enableNodeParticleEmitterProvider(set, () => providedMatrix);
-        expect(emitterState.emitterWorldMatrix).toBe(stableMatrix);
-        expect(emitterState.emitter).toBe(stableTranslation);
-        expect(stableTranslation).toEqual({ x: 4, y: 5, z: 6 });
+        startParticleSystem(system);
+        animateParticleSystem(system, 1);
+        expect(system.buffer.posX[0]).toBeCloseTo(4);
+        expect(system.buffer.posY[0]).toBeCloseTo(5);
+        expect(system.buffer.posZ[0]).toBeCloseTo(6);
 
         providedMatrix = emitterMatrix(7, 8, 9);
-        startParticleSystem(system);
         animateParticleSystem(system, 1);
-        expect(stableTranslation).toEqual({ x: 7, y: 8, z: 9 });
+        expect(system.buffer.posX[1]).toBeCloseTo(7);
+        expect(system.buffer.posY[1]).toBeCloseTo(8);
+        expect(system.buffer.posZ[1]).toBeCloseTo(9);
     });
 
-    it("atomically replaces the provider when the same set is enabled again", async () => {
-        let firstCalls = 0;
-        let secondCalls = 0;
-        const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()));
-        await enableNodeParticleEmitterProvider(set, () => {
-            firstCalls++;
-            return emitterMatrix(1, 0, 0);
-        });
-
-        const replacement = await enableNodeParticleEmitterProvider(set, () => {
-            secondCalls++;
-            return emitterMatrix(2, 0, 0);
-        });
-        const system = set.systems[0]!;
-        startParticleSystem(system);
-        animateParticleSystem(system, 1);
-
-        expect(replacement).toBe(set);
-        expect(firstCalls).toBe(1);
-        expect(secondCalls).toBe(2);
-        expect(system.buffer.posX[0]).toBeCloseTo(2);
-
-        await expect(enableNodeParticleEmitterProvider(set, () => emitterMatrix(Number.NaN, 0, 0))).rejects.toThrow(
-            "NodeParticle: emitter provider must return a finite 16-element matrix"
-        );
-        animateParticleSystem(system, 1);
-        expect(secondCalls).toBe(3);
-        expect(system.buffer.posX[1]).toBeCloseTo(2);
-    });
-
-    it("rejects an empty set before sampling the provider", async () => {
-        let providerCalls = 0;
-        await expect(
-            enableNodeParticleEmitterProvider({ systems: [] } as unknown as NodeParticleSet, () => {
-                providerCalls++;
-                return emitterMatrix(1, 2, 3);
-            })
-        ).rejects.toThrow("NodeParticle: emitter provider requires a non-empty built set");
-
-        expect(providerCalls).toBe(0);
-    });
-
-    it("rejects a partially enabled set without changing its provider handles or emitter states", async () => {
-        let firstCalls = 0;
-        let rejectedCalls = 0;
-        const enabledSet = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()));
-        const freshSet = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()));
-        await enableNodeParticleEmitterProvider(enabledSet, () => {
-            firstCalls++;
-            return emitterMatrix(1, 0, 0);
-        });
-        const enabledSystem = enabledSet.systems[0]!;
-        const freshSystem = freshSet.systems[0]!;
-        const enabledHandle = enabledSystem._emitterProvider;
-        const enabledMatrix = Array.from(enabledSystem._emitter!.emitterWorldMatrix);
-        const freshMatrix = Array.from(freshSystem._emitter!.emitterWorldMatrix);
-        const mixedSet = { systems: [enabledSystem, freshSystem] } as unknown as NodeParticleSet;
-
-        await expect(
-            enableNodeParticleEmitterProvider(mixedSet, () => {
-                rejectedCalls++;
-                return emitterMatrix(2, 0, 0);
-            })
-        ).rejects.toThrow("NodeParticle: emitter provider requires consistently enabled systems");
-
-        expect(rejectedCalls).toBe(0);
-        expect(enabledSystem._emitterProvider).toBe(enabledHandle);
-        expect(freshSystem._emitterProvider).toBeUndefined();
-        expect(Array.from(enabledSystem._emitter!.emitterWorldMatrix)).toEqual(enabledMatrix);
-        expect(Array.from(freshSystem._emitter!.emitterWorldMatrix)).toEqual(freshMatrix);
-
-        await enableNodeParticleEmitterProvider(enabledSet, () => emitterMatrix(3, 0, 0));
-        startParticleSystem(enabledSystem);
-        animateParticleSystem(enabledSystem, 1);
-        expect(firstCalls).toBe(1);
-        expect(enabledSystem.buffer.posX[0]).toBeCloseTo(3);
-    });
-
-    it("rejects systems with different provider handles without changing either provider", async () => {
-        let firstCalls = 0;
-        let secondCalls = 0;
-        let rejectedCalls = 0;
-        const firstSet = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()));
-        const secondSet = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()));
-        await enableNodeParticleEmitterProvider(firstSet, () => emitterMatrix(++firstCalls, 0, 0));
-        await enableNodeParticleEmitterProvider(secondSet, () => emitterMatrix(10 + ++secondCalls, 0, 0));
-        const firstSystem = firstSet.systems[0]!;
-        const secondSystem = secondSet.systems[0]!;
-        const firstHandle = firstSystem._emitterProvider;
-        const secondHandle = secondSystem._emitterProvider;
-        const firstPrepareFrame = firstSystem._prepareFrame;
-        const secondPrepareFrame = secondSystem._prepareFrame;
-        const firstMatrix = Array.from(firstSystem._emitter!.emitterWorldMatrix);
-        const secondMatrix = Array.from(secondSystem._emitter!.emitterWorldMatrix);
-
-        await expect(
-            enableNodeParticleEmitterProvider({ systems: [firstSystem, secondSystem] } as unknown as NodeParticleSet, () => {
-                rejectedCalls++;
-                return emitterMatrix(100, 0, 0);
-            })
-        ).rejects.toThrow("NodeParticle: emitter provider requires consistently enabled systems");
-
-        expect(rejectedCalls).toBe(0);
-        expect(firstSystem._emitterProvider).toBe(firstHandle);
-        expect(secondSystem._emitterProvider).toBe(secondHandle);
-        expect(firstSystem._prepareFrame).toBe(firstPrepareFrame);
-        expect(secondSystem._prepareFrame).toBe(secondPrepareFrame);
-        expect(Array.from(firstSystem._emitter!.emitterWorldMatrix)).toEqual(firstMatrix);
-        expect(Array.from(secondSystem._emitter!.emitterWorldMatrix)).toEqual(secondMatrix);
-        startParticleSystem(firstSystem);
-        startParticleSystem(secondSystem);
-        animateParticleSystem(firstSystem, 1);
-        animateParticleSystem(secondSystem, 1);
-        expect(firstCalls).toBe(2);
-        expect(secondCalls).toBe(2);
-        expect(firstSystem.buffer.posX[0]).toBeCloseTo(2);
-        expect(secondSystem.buffer.posX[0]).toBeCloseTo(12);
-    });
-
-    it("propagates provider errors without mutating matrix, translation, inverse, or simulation", async () => {
+    it("validates the initial provider sample before building", async () => {
         const providerError = new Error("provider failed");
-        const throwingSet = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()));
         await expect(
-            enableNodeParticleEmitterProvider(throwingSet, () => {
+            buildNodeParticleSetWithEmitterProvider({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()), () => {
                 throw providerError;
             })
         ).rejects.toBe(providerError);
+        await expect(
+            buildNodeParticleSetWithEmitterProvider(
+                {} as EngineContext,
+                {} as SceneContext,
+                parseNodeParticleSource(worldPointGraph()),
+                () => new Float32Array(15) as unknown as Mat4
+            )
+        ).rejects.toThrow("NodeParticle: emitter provider must return a finite 16-element matrix");
+    });
 
-        const shortSet = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldPointGraph()));
-        await expect(enableNodeParticleEmitterProvider(shortSet, () => new Float32Array(15) as unknown as Mat4)).rejects.toThrow(
-            "NodeParticle: emitter provider must return a finite 16-element matrix"
-        );
-
+    it("propagates per-frame provider errors before simulation and recovers on the next valid sample", async () => {
         let valid = true;
-        const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldCylinderGraph()));
-        await enableNodeParticleEmitterProvider(set, () => (valid ? emitterMatrix(2, 3, 4, Math.PI / 4, 2, 0.5, 1.5) : emitterMatrix(Number.NaN, 0, 0)));
+        let matrix = emitterMatrix(2, 3, 4, Math.PI / 4, 2, 0.5, 1.5);
+        const set = await buildNodeParticleSetWithEmitterProvider({} as EngineContext, {} as SceneContext, parseNodeParticleSource(worldCylinderGraph()), () =>
+            valid ? matrix : emitterMatrix(Number.NaN, 0, 0)
+        );
         const system = set.systems[0]!;
-        const emitterState = system._emitter!;
-        const inverse = emitterState.emitterInverseWorldMatrices![0]!.inverse;
-        const matrixBefore = Array.from(emitterState.emitterWorldMatrix);
-        const translationBefore = { ...emitterState.emitter };
-        const inverseBefore = Array.from(inverse);
         valid = false;
         startParticleSystem(system);
 
         expect(() => animateParticleSystem(system, 1)).toThrow("NodeParticle: emitter provider must return a finite 16-element matrix");
         expect(system.buffer.alive).toBe(0);
-        expect(Array.from(emitterState.emitterWorldMatrix)).toEqual(matrixBefore);
-        expect(emitterState.emitter).toEqual(translationBefore);
-        expect(Array.from(inverse)).toEqual(inverseBefore);
+
+        valid = true;
+        matrix = emitterMatrix(5, 6, 7, Math.PI / 4, 2, 0.5, 1.5);
+        animateParticleSystem(system, 1);
+        expect(system.buffer.alive).toBe(1);
+        expect(system.buffer.posX[0]).toBeGreaterThan(3);
+        expect(Number.isFinite(system.buffer.dirX[0])).toBe(true);
+    });
+
+    it("uses the identity inverse fallback for a singular provider matrix", async () => {
+        const singular = emitterMatrix(3, -2, 5, Math.PI / 3, 0, 0.5, 1.5);
+        const live = await buildNodeParticleGraphWithEmitterProvider(worldCylinderGraph(), () => singular);
+        const staticallyTransformed = await buildNodeParticleGraph(worldCylinderGraph(), { emitterWorldMatrix: singular });
+        const draws = [0.1, 0.2, 0.3, 0.4];
+
+        let restoreRandom = seedRandom(draws);
+        try {
+            startParticleSystem(live);
+            animateParticleSystem(live, 1);
+        } finally {
+            restoreRandom();
+        }
+        restoreRandom = seedRandom(draws);
+        try {
+            startParticleSystem(staticallyTransformed);
+            animateParticleSystem(staticallyTransformed, 1);
+        } finally {
+            restoreRandom();
+        }
+
+        expect(snapshotParticles(live)).toEqual(snapshotParticles(staticallyTransformed));
     });
 });

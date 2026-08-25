@@ -14,7 +14,7 @@ interface BundleInfo {
 const MANIFEST_DIR = resolve(__dirname, "../../../lab/public/bundle/manifest");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-info");
 const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 276, 277, 280, 281, 283, 284];
-const TRACKED_PARTICLE_SCENES = [...CANONICAL_PARTICLE_SCENES, 300, 301, 302];
+const PROVIDER_ISOLATION_SCENES = [12, ...CANONICAL_PARTICLE_SCENES, 300, 301, 302];
 const UNUSED_FEATURE_CHUNK =
     /particle-(blend|billboard-renderable|billboard-scene)|registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes)|update-(attractor|flow-map|noise|direction|angle)-block|npe-(blend-modes|emitter-provider|flow-map-runtime|live-emitter|noise-runtime|texture-update-runtime|texture-content)|cpu-texture-source|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
 const OPTIONAL_BLEND_MODULE = /particle\/(particle-(blend|billboard-renderable|billboard-scene)|node\/npe-blend-modes)/;
@@ -143,17 +143,12 @@ describe("Particle bundle feature isolation", () => {
     });
 
     it("keeps the moving-emitter provider isolated to scene302", () => {
-        for (const sceneId of TRACKED_PARTICLE_SCENES) {
+        for (const sceneId of PROVIDER_ISOLATION_SCENES) {
             const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`), "utf8")) as SceneManifest;
             const runtimeChunks = new Set(manifest.runtimeChunks ?? []);
             expect(runtimeChunks.size, `scene${sceneId} has no runtime chunks recorded`).toBeGreaterThan(0);
             const providerChunks = [...runtimeChunks].filter((chunk) => /npe-(emitter-provider|live-emitter)/.test(chunk));
-            if (sceneId === 302) {
-                expect(
-                    providerChunks.some((chunk) => chunk.includes("npe-live-emitter")),
-                    "scene302 must fetch the live emitter runtime"
-                ).toBe(true);
-            } else {
+            if (sceneId !== 302) {
                 expect(providerChunks, `scene${sceneId} must not fetch moving-emitter provider chunks`).toEqual([]);
             }
 
@@ -168,7 +163,8 @@ describe("Particle bundle feature isolation", () => {
                 .map((module) => module.id ?? "")
                 .filter((id) => /\/particle\/node\/npe-(emitter-provider|live-emitter)\.[jt]s$/.test(id));
             if (sceneId === 302) {
-                expect(providerModules).toEqual(expect.arrayContaining([expect.stringContaining("npe-emitter-provider"), expect.stringContaining("npe-live-emitter")]));
+                expect(providerModules).toEqual(expect.arrayContaining([expect.stringContaining("npe-emitter-provider")]));
+                expect(providerModules.some((id) => id.includes("npe-live-emitter"))).toBe(false);
             } else {
                 expect(providerModules, `scene${sceneId} must not fetch moving-emitter provider modules`).toEqual([]);
             }

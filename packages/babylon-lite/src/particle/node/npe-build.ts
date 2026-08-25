@@ -86,6 +86,8 @@ export interface BuildNodeParticleOptions {
     emitter?: Vec3;
     emitterWorldMatrix?: Mat4;
     textureBaseUrl?: string;
+    /** @internal */
+    _setupEmitter?: (state: NpeBuildState) => void;
 }
 
 /** Build data-oriented particle systems from a parsed graph. */
@@ -124,6 +126,7 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
             scene,
             textureBaseUrl: options.textureBaseUrl,
         };
+        options._setupEmitter?.(state);
 
         const outputs = new Map<string, NpeGetter>();
         const built = new Set<number>();
@@ -204,12 +207,6 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
         };
 
         await buildBlock(systemId);
-
-        system._emitter = {
-            emitter: state.emitter,
-            emitterWorldMatrix: state.emitterWorldMatrix,
-            emitterInverseWorldMatrices: state.emitterInverseWorldMatrices,
-        };
         systems.push(system);
     }
 

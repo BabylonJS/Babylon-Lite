@@ -10,25 +10,13 @@
 import { createParticleBuffer, killParticle, spawnParticle, type ParticleBuffer } from "./particle-buffer.js";
 import type { ParticleStep } from "./node/npe-value.js";
 import type { Texture2D } from "../texture/texture-2d.js";
-import type { Color4, Mat4, Vec3 } from "../math/types.js";
+import type { Color4, Mat4 } from "../math/types.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { FacingBillboardSpriteSystem } from "../sprite/billboard-sprite.js";
 
 /** @internal Matrix retained by an emitter shape whose runtime data includes an inverse transform. */
 export interface ParticleEmitterInverse {
     readonly inverse: Mat4;
-}
-
-/** @internal Stable emitter references captured by an NPE system build. */
-export interface ParticleEmitterState {
-    readonly emitter: Vec3;
-    readonly emitterWorldMatrix: Mat4;
-    readonly emitterInverseWorldMatrices?: ParticleEmitterInverse[];
-}
-
-interface ParticleEmitterProviderState {
-    provider: () => Mat4;
-    readonly refresh: () => void;
 }
 
 /**
@@ -95,10 +83,6 @@ export interface ParticleSystem {
     _suppressInitialDirectionCapture?: boolean;
     /** @internal Local-position source hook installed only for emitter-local graphs that read source 0x18. */
     _seedLocalPosition?: ParticleStep;
-    /** @internal Emitter-only transform state used by opt-in live providers. */
-    _emitter?: ParticleEmitterState;
-    /** @internal Live emitter provider handle installed only by the opt-in enabler. */
-    _emitterProvider?: ParticleEmitterProviderState;
     /** @internal Optional scene registrar installed for particle blend modes requiring specialized rendering. */
     _registerBillboard?: (scene: SceneContext, billboard: FacingBillboardSpriteSystem) => void;
 }

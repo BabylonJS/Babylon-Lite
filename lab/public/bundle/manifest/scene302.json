@@ -1,20 +1,19 @@
 {
-  "rawKB": 56.4,
-  "rawBytes": 57791,
-  "gzipKB": 22.7,
+  "rawKB": 55.5,
+  "rawBytes": 56796,
+  "gzipKB": 22.3,
   "ignoredRawKB": 0,
   "runtimeChunks": [
-    "scene302-billboard-renderable-DvDWpR6z.js",
+    "scene302-billboard-renderable-Dl4PhO-w.js",
     "scene302-create-particle-block-CiseX6ot.js",
-    "scene302-npe-live-emitter-C_n-eIcQ.js",
     "scene302-npe-local-position-BvL-t_BJ.js",
-    "scene302-npe-registry-local-shapes-BMR_E6fJ.js",
+    "scene302-npe-registry-local-shapes-BU7EhCSQ.js",
     "scene302-npe-registry-variants-6AXUWOm4.js",
     "scene302-particle-input-local-block-CRCtVk5C.js",
     "scene302-point-shape-local-block-Bna7ocNG.js",
     "scene302-random-range-CfhNtuAB.js",
     "scene302-system-block-DtFNKeDy.js",
-    "scene302-texture-source-block-HHepIggn.js",
+    "scene302-texture-source-block-CVuQrpDC.js",
     "scene302-update-position-block-DQ-fau8B.js",
     "scene302.js"
   ]
