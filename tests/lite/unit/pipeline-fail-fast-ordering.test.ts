@@ -1,0 +1,165 @@
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
+
+const repoRoot = join(__dirname, "..", "..", "..");
+const pipelineFile = "azure-pipelines-bundle-manifest.yml";
+
+/**
+ * The master bundle-size baseline pipeline measures 245 scenes before it
+ * publishes anything, which is roughly half an hour of work. Its first master
+ * run spent all of it and then failed at the publish step, because the deploy
+ * configuration it needed was never going to resolve.
+ *
+ * The repair was a cheap configuration check placed ahead of the expensive
+ * work. That ordering is the entire value of the repair, and it is an *absence*
+ * claim -- "no expensive step runs before the configuration is known good" --
+ * so every signal stays green when it is violated. Deleting the check outright
+ * was measured against the full unit suite and reported 1998 passed.
+ *
+ * Reordering YAML steps also never reads as a regression in review, and the
+ * failure it reintroduces is not a broken build but a slow one, which is the
+ * failure mode least likely to be attributed to the change that caused it.
+ */
+
+/**
+ * Anchors, deliberately by display name.
+ *
+ * These couple this guard to two strings in the pipeline. That is the intended
+ * trade: the alternative is inferring which step is "expensive", which needs a
+ * cost model rather than a predicate, and a guard that guesses at cost is one
+ * that argues with its reader. The cardinality assertions below turn a rename
+ * into a failure that names the constant to re-point, rather than a silent
+ * match against nothing.
+ */
+const PREFLIGHT_STEP = "Check deploy configuration";
+const PUBLISH_STEP = "Publish bundle-size baseline";
+
+/** Leading-whitespace width, used to compare YAML nesting levels. */
+function indentOf(line: string): number {
+    return line.length - line.trimStart().length;
+}
+
+/**
+ * The `steps:` list of the pipeline, in order, each entry as its raw block.
+ *
+ * The repo has no YAML parser among its dependencies and its sibling pipeline
+ * guards all read lines, so this does too. It was validated against a real
+ * parse rather than assumed: both report 9 steps in the same order for this
+ * file, checkout first.
+ */
+function pipelineSteps(): string[] {
+    const lines = readFileSync(join(repoRoot, pipelineFile), "utf8").split("\n");
+    const stepsAt = lines.findIndex((l) => /^\s*steps:\s*$/.test(l));
+    expect(stepsAt, `${pipelineFile} declares no \`steps:\` block — re-point this guard rather than deleting it`).toBeGreaterThanOrEqual(0);
+
+    const parentIndent = indentOf(lines[stepsAt] ?? "");
+    const steps: string[] = [];
+    let itemIndent: number | null = null;
+    let current: string[] | null = null;
+
+    for (const line of lines.slice(stepsAt + 1)) {
+        const indent = indentOf(line);
+        if (line.trim() && indent <= parentIndent) {
+            break;
+        }
+        if (line.trim() && line.trimStart().startsWith("- ")) {
+            itemIndent ??= indent;
+            if (indent === itemIndent) {
+                if (current) {
+                    steps.push(current.join("\n"));
+                }
+                current = [line];
+                continue;
+            }
+        }
+        current?.push(line);
+    }
+    if (current) {
+        steps.push(current.join("\n"));
+    }
+
+    // Without this the clauses below are satisfied by a file the parser failed
+    // to read: "no expensive step precedes the check" is trivially true of an
+    // empty list, and that is the same silence this guard exists to break.
+    expect(steps.length, `parsed no steps out of ${pipelineFile} — the assertions below would be vacuous`).toBeGreaterThan(0);
+    return steps;
+}
+
+/** The index of the single step carrying `displayName`, asserted to be unique. */
+function stepIndex(steps: string[], displayName: string): number {
+    const matches = steps.map((s, i) => (s.includes(displayName) ? i : -1)).filter((i) => i !== -1);
+    expect(
+        matches,
+        `expected exactly one step named "${displayName}" in ${pipelineFile}. If it was renamed, re-point this guard's anchor rather than deleting the guard; if it was removed, the fail-fast ordering it protects is gone.`
+    ).toHaveLength(1);
+
+    const [index] = matches;
+    if (index === undefined) {
+        throw new Error(`no step named "${displayName}" in ${pipelineFile}`);
+    }
+    return index;
+}
+
+/** The `env:` keys a step block declares. */
+function envKeys(step: string): string[] {
+    const lines = step.split("\n");
+    const envAt = lines.findIndex((l) => /^\s*env:\s*$/.test(l));
+    if (envAt === -1) {
+        return [];
+    }
+    const indent = indentOf(lines[envAt] ?? "");
+    const keys: string[] = [];
+    for (const line of lines.slice(envAt + 1)) {
+        if (!line.trim()) {
+            continue;
+        }
+        if (indentOf(line) <= indent) {
+            break;
+        }
+        const key = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:/.exec(line)?.[1];
+        if (key) {
+            keys.push(key);
+        }
+    }
+    return keys;
+}
+
+describe("the baseline pipeline validates its deploy configuration before doing expensive work", () => {
+    it("runs nothing but checkout before the deploy configuration check", () => {
+        // Stated as a universal over the preceding steps rather than as a list
+        // of the steps known to be expensive today. A named list would have to
+        // grow every time the pipeline does, and would be silent in exactly the
+        // case worth catching: a new expensive step inserted ahead of the check.
+        const steps = pipelineSteps();
+        const preflight = stepIndex(steps, PREFLIGHT_STEP);
+
+        const before = steps.slice(0, preflight).filter((s) => !/^\s*-\s*checkout:/m.test(s));
+        expect(
+            before,
+            `steps run before "${PREFLIGHT_STEP}" in ${pipelineFile}. This pipeline measures 245 scenes, so anything ahead of the configuration check is time spent before the build knows it can publish — which is the failure this ordering was introduced to remove. Move the check above them, or move them below it.`
+        ).toEqual([]);
+    });
+
+    it("checks every deploy variable the publish step will read", () => {
+        // Derived from the publish step rather than listed here, so a variable
+        // added to the publish path later cannot arrive unchecked. The original
+        // failure was exactly this shape: the publish step read a variable name
+        // that nothing had established would resolve, and the build found out
+        // after the expensive part.
+        const steps = pipelineSteps();
+        const checked = envKeys(steps[stepIndex(steps, PREFLIGHT_STEP)] ?? "");
+        const needed = envKeys(steps[stepIndex(steps, PUBLISH_STEP)] ?? "");
+
+        // Floor both sides. A step whose `env:` block stops parsing yields an
+        // empty list, and "every needed variable is checked" is satisfied by
+        // needing nothing -- the vacuous pass this file is here to prevent.
+        expect(needed.length, `parsed no \`env:\` keys from "${PUBLISH_STEP}" — the subset assertion below would be vacuous`).toBeGreaterThan(0);
+        expect(checked.length, `parsed no \`env:\` keys from "${PREFLIGHT_STEP}" — it would be checking nothing`).toBeGreaterThan(0);
+
+        expect(
+            needed.filter((k) => !checked.includes(k)),
+            `variables read by "${PUBLISH_STEP}" that "${PREFLIGHT_STEP}" does not check in ${pipelineFile}. Add them to the check's \`env:\` block and to the names it validates, so a missing one fails in seconds rather than after the scenes are measured.`
+        ).toEqual([]);
+    });
+});
