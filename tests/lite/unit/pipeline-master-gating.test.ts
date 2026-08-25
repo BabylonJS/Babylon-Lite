@@ -1558,6 +1558,15 @@ describe("pull-request jobs cannot run on a master build", () => {
             { what: "a double quote ended by an escaped quote, so it continues", text: 'steps:\n  - script: "a\\"\n      b"\n', rejected: false, folded: false },
             { what: "a single quote holding a doubled apostrophe", text: "steps:\n  - script: 'it''s'\n      more\n", rejected: true, folded: false },
             { what: "a single quote with a doubled apostrophe, continuing", text: "steps:\n  - script: 'it''s\n      b'\n", rejected: false, folded: false },
+            // A comment and a blank line between the key and the line nested
+            // under it. PyYAML rejects both, and they are here because the
+            // skip loops -- the predicate's, and the re-derivation of the
+            // cited parent above -- had no input that ran their bodies. Every
+            // other row puts the deeper line immediately after the key, so
+            // both loops fell straight through and mutating them changed no
+            // verdict any row could see.
+            { what: "a comment line between the key and the line nested under it", text: 'steps:\n  - script: "a"\n  # note\n      b: 1\n', rejected: true, folded: false },
+            { what: "a blank line between the key and the line nested under it", text: 'steps:\n  - script: "a"\n\n      b: 1\n', rejected: true, folded: false },
             { what: "a closed flow mapping holding an escaped quote", text: 'steps:\n  - script: {a: "x\\""}\n      more\n', rejected: true, folded: false },
             { what: "an unclosed flow mapping holding an escaped quote", text: 'steps:\n  - script: {a: "x\\"",\n      b: 2}\n', rejected: false, folded: false },
         ];
@@ -1608,6 +1617,86 @@ describe("pull-request jobs cannot run on a master build", () => {
         // whole verdict is going unmeasured, rather than discovering it the
         // next time somebody mutates the branch it protects.
         expect(scalars.filter((scalar) => scalar.folded).length, "no specimen exercises the silent-fold verdict, so nothing here can tell it from silence").toBeGreaterThan(0);
+
+        // Both columns above are one bit per row, and the bit is not what this
+        // guard is for. It runs against an ~880-line pipeline and its entire
+        // value is naming the line -- and nothing above reads a word of the
+        // message it names it in. Measured, four arms, all four green before
+        // this block existed: report `line ${next + 99}` instead of `next + 1`;
+        // replace the message with a constant; report only the first corruption
+        // and drop the rest; drop the quoted excerpt. A guard that says "something
+        // is wrong somewhere" in an 880-line file is a guard nobody can act on,
+        // and every column here would still have agreed with it.
+        //
+        // The expectations are derived from each subject rather than written per
+        // row: a cited line has to exist in that subject, the deeper line has to
+        // come after the line it is deeper than, and the excerpt has to be text
+        // that subject actually contains. Thirty-one hand-written line numbers
+        // would be thirty-one more authored constants, and the subject is right
+        // there.
+        const misreported = scalars.flatMap((scalar) => {
+            const lines = scalar.text.split("\n");
+            const problems = structureProblems(scalar.text);
+
+            return [...problems.illegal, ...problems.folded].flatMap((problem) => {
+                const cited = [...problem.matchAll(/line (\d+)/g)].map((match) => Number(match[1]));
+                const notes: string[] = [];
+
+                if (cited.length !== 2) {
+                    notes.push(`${scalar.what} -- the report names ${cited.length} line numbers; it has to name the deeper line and the line it is deeper than`);
+                    return notes;
+                }
+
+                const [deeper, parent] = [cited[0] ?? 0, cited[1] ?? 0];
+
+                // There was an in-range check here and it is deliberately gone.
+                // Measured at this end state: removing it while citing a line
+                // outside the subject still fails, because a citation that
+                // names a line the subject does not have cannot also quote that
+                // line's text, and the two checks below catch it on that route.
+                // No input separated it, so it was a conjunct that could only
+                // ever agree. It becomes load-bearing again the moment the
+                // message stops quoting the parent line -- then nothing else
+                // reads the subject's length, and it has to come back.
+
+                // Existence and ordering are not enough, and this is the arm
+                // that proved it: dropping the `+ 1` from the second number
+                // alone -- an off-by-one reporting a 0-based line, the single
+                // likeliest way this message goes wrong -- left every check
+                // above green. Both numbers were in range and still ordered.
+                // So each number is bound to the line it claims: the parent is
+                // re-derived here as the nearest preceding line that is neither
+                // blank nor a comment, which is the line the predicate compared
+                // the deeper one against, and the excerpt has to be that same
+                // line's text. A citation that names a real line, in the right
+                // order, quoting some other line, is a citation that sends the
+                // reader to the wrong place in an ~880-line file.
+                let expected = deeper - 2;
+                while (expected >= 0 && (!(lines[expected] ?? "").trim() || (lines[expected] ?? "").trim().startsWith("#"))) expected--;
+
+                if (parent !== expected + 1) {
+                    notes.push(`${scalar.what} -- the report blames line ${parent} for line ${deeper}, but the line above it is ${expected + 1}`);
+                }
+
+                const excerpt = /\("(.*)"\), which already has a value/.exec(problem);
+                if (!excerpt) {
+                    notes.push(`${scalar.what} -- the report quotes no line at all, so it can only be acted on by re-reading the whole file`);
+                } else if (excerpt[1] !== (lines[parent - 1] ?? "").trim().slice(0, 44)) {
+                    notes.push(`${scalar.what} -- the report cites line ${parent} but quotes ${JSON.stringify(excerpt[1])}, which is not that line`);
+                }
+
+                return notes;
+            });
+        });
+        expect(misreported, `structureProblems reports a problem nobody could act on:\n${misreported.join("\n")}`).toEqual([]);
+
+        // Reporting stops at the first corruption unless something counts, and
+        // the pipeline is the size where the second one matters most.
+        const twice = structureProblems('steps:\n  - script: "a"\n      b: 1\n  - script: "c"\n      d: 2\n');
+        expect(
+            twice.illegal.length,
+            `a subject carrying two independent corruptions reports ${twice.illegal.length} of them.\nFixing the one it names and re-running would then report a file that is still broken as clean.`
+        ).toBe(2);
     });
 
     it("pins the post-merge job set to the sentence documenting it", () => {
