@@ -68,6 +68,7 @@ export class Bone {
             name: { value: lite.name, enumerable: true },
             _lite: { value: lite },
             _skeleton: { value: skeleton },
+            _enabled: { value: true, writable: true },
         });
         return bone;
     }

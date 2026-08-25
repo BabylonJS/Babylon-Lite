@@ -45,6 +45,7 @@ describe("loader-produced Skeleton and Bone wrappers", () => {
         const { skeleton, bake, overrides } = createSkeleton();
         const hand = skeleton.bones[1]!;
 
+        expect(hand.isEnabled()).toBe(true);
         hand.setEnabled(false);
         expect(hand.isEnabled()).toBe(false);
         expect(overrides.has(1)).toBe(false);
