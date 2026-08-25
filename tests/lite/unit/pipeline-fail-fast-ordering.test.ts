@@ -1244,13 +1244,15 @@ describe("the baseline pipeline validates its deploy configuration before doing 
             }
 
             return selected.flatMap((step) => {
-                const label =
-                    /displayName:\s*(.+)/
-                        .exec(step)?.[1]
-                        ?.trim()
-                        .replace(/^["']|["']$/g, "") ??
-                    step.split("\n")[0]?.trim() ??
-                    "?";
+                // `stepLabel`, not a second spelling of it. This was a private
+                // copy of that extraction -- already drifted, with different
+                // quote handling and a different fallback -- and #531's Q3 is
+                // exactly this shape: a predicate spelled twice is pinned at
+                // most once. Measured, both directions: blinding `stepLabel`
+                // fires the STEP_READINGS table, blinding this copy fired
+                // nothing at all, so the exemption failure could name the wrong
+                // step and no row would disagree. One projection, one pin.
+                const label = stepLabel(step);
                 const gated = GATED_STEPS.filter((g) => withoutComments(step).includes(g)).map(
                     () => `\`${name}\` exempts "${label}", which is work "${PREFLIGHT_STEP}" exists to stand in front of`
                 );
@@ -1336,10 +1338,33 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         // blind -- file moved, `scripts` renamed, the invocation pattern no
         // longer matching how the pipeline spells a command -- the cross-check
         // above compares an empty set against anything and always passes.
+        expect(packageScriptWork(steps).length).toBeGreaterThan(0);
+
+        // ...and a count is not enough, which is #531's Q11 arriving in this
+        // file. A floor over cardinality cannot see a substitution: it asks how
+        // much the derivation found, never which. Measured -- narrowing
+        // `packageScriptWork` to drop *only* the 245-scene build fires the
+        // floor above, but with "expected 0 to be greater than 0", because
+        // `build:bundle-scenes` is the only declared script this pipeline runs.
+        // "Lost the one that matters" and "lost everything" are the same edit
+        // here, so that floor is sound by the corpus's shape and not by
+        // construction: the day the pipeline runs a second declared script --
+        // `pnpm lint`, `pnpm test:unit`, one line -- the count stays positive
+        // while the expensive step goes unseen, and the cross-check above
+        // silently stops covering the only step whose cost is the reason any of
+        // this exists.
+        //
+        // So name what has to have been found. `COSTLY_COMMANDS` supplies the
+        // identity and is itself reachability-floored below, so this cannot go
+        // vacuous by the list going dead. Ordering is deliberate: the count
+        // floor fires first and diagnoses "the derivation went blind", this one
+        // diagnoses "it found scripts, but not the expensive one" -- subsumed
+        // on detection, distinct on attribution.
+        const foundScripts = packageScriptWork(steps).flatMap((step) => invokedScripts(step));
         expect(
-            packageScriptWork(steps).length,
-            `no step in ${pipelineFile} was found to run a script declared in package.json, so the cross-check above has nothing to compare. The pipeline runs \`pnpm build:bundle-scenes\`, so this is far more likely to be the derivation going blind than the pipeline having stopped building.`
-        ).toBeGreaterThan(0);
+            foundScripts.filter((name) => COSTLY_COMMANDS.some(({ pattern }) => pattern.test(name))),
+            `${pipelineFile} runs declared scripts (${foundScripts.join(", ") || "none"}), but \`packageScriptWork\` no longer sees one this file calls expensive. The cross-check above still has something to compare, so nothing else here would say so — the expensive step is simply outside it now.`
+        ).not.toEqual([]);
 
         // A rule that names nothing present in the pipeline floors nothing, so
         // pin that these commands are real: every one of them must appear
