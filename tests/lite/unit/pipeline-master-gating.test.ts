@@ -668,6 +668,22 @@ function valueShape(value: string): ValueShape {
     return "plain";
 }
 
+/**
+ * The subjects whose label does not match the file it names.
+ *
+ * Extracted from its one call site so the rule can be asked about a list longer
+ * than the tree currently supplies. Inline, it could only ever be exercised
+ * against one dual-context pipeline plus two templates, and the pipeline branch
+ * of it was satisfied by any constant at all.
+ *
+ * Returns locations rather than subjects because the location is the part a
+ * reader acts on, and because a failure printing whole pipeline files is a
+ * failure nobody reads.
+ */
+function mispairedIn(subjects: { location: string; text: string }[]): string[] {
+    return subjects.filter((subject) => readFileSync(join(repoRoot, subject.location), "utf8") !== subject.text).map((subject) => subject.location);
+}
+
 function structureProblems(text: string): { illegal: string[]; folded: string[] } {
     const lines = text.split("\n");
     const illegal: string[] = [];
@@ -692,6 +708,14 @@ function structureProblems(text: string): { illegal: string[]; folded: string[] 
         const where = `line ${next + 1} is indented deeper than line ${index + 1} ("${line.trim().slice(0, 44)}"), which already has a value`;
 
         if (shape === "self-contained" || MAPPING_COLON.test((lines[next] ?? "").trim())) illegal.push(where);
+        // The `, and is legal YAML that folds into it` suffix is not pinned, and
+        // that is a decision rather than an oversight. Measured: removing it
+        // leaves every clause green, because which verdict a problem carries is
+        // read from *which array it is in*, and the two arrays are asserted
+        // separately with their own framing at the call site. The suffix repeats
+        // at the item level a distinction the reader already has from the
+        // message above it. Pinning it would be a spelling test on prose whose
+        // meaning is carried elsewhere.
         else folded.push(`${where}, and is legal YAML that folds into it`);
     }
 
@@ -1673,6 +1697,59 @@ describe("pull-request jobs cannot run on a master build", () => {
         // removing it takes this clause from failing to passing while the file
         // stays red for unrelated reasons. A file-level red/green reading calls
         // that decoration; it is not.
+
+        // Every problem below is reported as `${location}: ${problem}`, and
+        // until this assertion existed the location half was consumed by
+        // nothing. Both expectations in this clause are `toEqual([])`, so on a
+        // healthy tree the message never renders -- which means a location that
+        // is a constant, or one paired with a different file's text, is
+        // invisible to every clause in this file. The set of pipeline locations
+        // is pinned elsewhere; the *pairing* of a location to the text it
+        // claims to describe was not, and the pairing is the whole content of
+        // the claim. It matters concretely: `subjects` spans every dual-context
+        // pipeline plus every template, so a report naming the wrong one sends
+        // the reader to the wrong file out of ten, with a real line number and a
+        // real excerpt to make it convincing.
+        //
+        // Stated over the subject list rather than over a rendered message,
+        // deliberately. A check that only looks at locations appearing in
+        // failure text can only run when something has already failed, so it
+        // would be exactly as unreachable as the thing it is trying to pin.
+        expect(
+            mispairedIn(subjects),
+            "these subjects are labelled with a path whose contents are not the text being checked, so any problem found in them would be reported against the wrong file"
+        ).toEqual([]);
+
+        // The pipeline half of that list holds exactly one file today, and a
+        // one-element list cannot separate an identity check from a constant:
+        // replacing every pipeline location with the literal string
+        // "azure-pipelines.yml" is *correct*, because that is the only
+        // dual-context pipeline there is. Measured, not assumed -- the arm came
+        // back green and the templates are what caught the same mutation
+        // applied to them.
+        //
+        // So the rule is exercised here against a list long enough to be wrong
+        // in, using real files rather than fixtures so the specimen cannot drift
+        // from what the clause above actually reads. This is the corpus-shaped
+        // dead branch, and its remedy is a specimen; strengthening the assertion
+        // would not help, because there is nothing in today's tree for a
+        // stronger one to see.
+        const realPipeline = readFileSync(join(repoRoot, "azure-pipelines.yml"), "utf8");
+        const realTemplate = readFileSync(join(repoRoot, "config", "templates", "upload-static-site.yml"), "utf8");
+        expect(
+            mispairedIn([
+                { location: "azure-pipelines.yml", text: realPipeline },
+                { location: "config/templates/upload-static-site.yml", text: realTemplate },
+            ]),
+            "correctly paired subjects are being reported as mislabelled, which would fail this clause on a tree nobody touched"
+        ).toEqual([]);
+        expect(
+            mispairedIn([
+                { location: "azure-pipelines.yml", text: realPipeline },
+                { location: "config/templates/upload-static-site.yml", text: realPipeline },
+            ]),
+            "a subject labelled with one file's path and carrying another file's text is not being caught, so the location in every message below is decoration"
+        ).toEqual(["config/templates/upload-static-site.yml"]);
 
         const broken = subjects.flatMap((subject) => structureProblems(subject.text).illegal.map((problem) => `${subject.location}: ${problem}`));
 
