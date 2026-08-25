@@ -35,6 +35,22 @@ const pipelineFile = "azure-pipelines-bundle-manifest.yml";
 const PREFLIGHT_STEP = "Check deploy configuration";
 const PUBLISH_STEP = "Publish bundle-size baseline";
 
+/**
+ * The steps the check exists to stand in front of, named.
+ *
+ * This is deliberately a fixed list where the clause above is a universal, and
+ * the pair is non-subsuming in both directions -- measured, not assumed. The
+ * universal catches an expensive step this file has never heard of; it cannot
+ * catch one smuggled past by widening CHECK_PREREQUISITES, because that edit
+ * makes the universal true. This list catches exactly that, because it is not
+ * expressed in terms of the allowance and no edit to the allowance reaches it.
+ *
+ * Naming the scene build a "prerequisite" and moving it ahead of the check was
+ * measured: with only the universal, the guard reported 2 passed while the
+ * pipeline spent half an hour before learning it could not publish.
+ */
+const GATED_STEPS = ["Build bundle scenes", PUBLISH_STEP];
+
 /** Leading-whitespace width, used to compare YAML nesting levels. */
 function indentOf(line: string): number {
     return line.length - line.trimStart().length;
@@ -162,6 +178,28 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         expect(
             before,
             `steps run before "${PREFLIGHT_STEP}" in ${pipelineFile} that are not among its prerequisites (${CHECK_PREREQUISITES.map(({ name }) => name).join(", ")}). This pipeline measures 245 scenes, so anything ahead of the configuration check is time spent before the build knows it can publish. Two repairs, and which one applies depends on the step: if it is work the check exists to gate, move it below the check. If the check now depends on it, add it to CHECK_PREREQUISITES in this file — but only if it is cheap, because everything listed there runs before the build knows it can publish.`
+        ).toEqual([]);
+    });
+
+    it("keeps the check ahead of the work it gates, by name", () => {
+        // Independent of CHECK_PREREQUISITES on purpose. The clause above is
+        // stated in terms of the allowance, so widening the allowance satisfies
+        // it -- that is what an escape hatch does. This clause never consults
+        // the allowance, so no edit to it can buy silence here.
+        //
+        // The cost bound the allowance's comment describes ("only if it is
+        // cheap") is not derivable from this file: nothing in the YAML says how
+        // long a step takes. So rather than infer cost, this names the steps
+        // whose cost is the reason the check exists, and requires the check to
+        // precede them. Residual, stated: a step expensive in a way this list
+        // has not learned is covered only by the universal above.
+        const steps = pipelineSteps();
+        const preflight = stepIndex(steps, PREFLIGHT_STEP);
+
+        const ahead = GATED_STEPS.filter((name) => stepIndex(steps, name) < preflight);
+        expect(
+            ahead,
+            `these steps run before "${PREFLIGHT_STEP}" in ${pipelineFile}. They are the work the check exists to stand in front of, so running them first restores the failure this ordering removed: half an hour of measurement before the build learns it cannot publish. Move the check back above them. Adding them to CHECK_PREREQUISITES does not resolve this — it is what this clause is here to refuse.`
         ).toEqual([]);
     });
 
