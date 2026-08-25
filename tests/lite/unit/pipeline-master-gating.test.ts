@@ -307,9 +307,55 @@ function postMergeJobsInDoc(): DocSection {
     return docSection("Every push to `master` therefore re-runs", "They run in parallel");
 }
 
-/** A job's `displayName`, which is the string `TESTING.md` refers to it by. */
+/** A job's `displayName` in the pipeline. See `DOC_NAME_ALIASES` before assuming `TESTING.md` uses the same string. */
 function displayNameOf(job: PipelineJob | undefined): string | undefined {
     return /^\s+displayName:\s*"([^"]+)"\s*$/m.exec(job?.body ?? "")?.[1];
+}
+
+/**
+ * The two jobs `TESTING.md` calls something other than their `displayName`.
+ *
+ * This existed from this PR's first commit and was invisible because the grant
+ * it feeds is evaluated zero times while `COST_GATED_JOBS` is empty. Measured by
+ * putting a job into that constant, the binding was wrong in *both* directions
+ * at once:
+ *
+ *   PerfRegression cost-gated  ->  "nothing in TESTING.md says master stopped
+ *                                  validating them", while the section plainly
+ *                                  says "**Perf Regression** (~53 min)"
+ *
+ * -- a grant the document really makes, unreadable, for exactly the two jobs
+ * most likely to ever be cost-gated. And the other way, because the old test was
+ * `block.includes(label)` over the whole section rather than over its list:
+ *
+ *   a sentence reading "Unlike **Bundle Size**, which master still runs on
+ *   every push, the jobs below are skipped" GRANTED Bundle Size its exclusion
+ *
+ * -- prose denying the exclusion satisfying the check for it. Containment over a
+ * region cannot tell a list entry from a sentence about one, so the fix is an
+ * identity over parsed bullets, and the two name spaces have to be reconciled
+ * explicitly rather than by hoping they coincide.
+ *
+ * Kept as an alias rather than renamed in either artifact: the display names are
+ * what Azure DevOps shows in its UI, the doc names are what a person writing
+ * about CI reaches for, and neither is wrong for its own audience.
+ */
+const DOC_NAME_ALIASES: Record<string, string> = {
+    "Perf Regression": "Performance: Lite vs Stable",
+    "Parity Cloud": "Parity Tests (Cloud Browser)",
+};
+
+/**
+ * The display names `TESTING.md` lists as deliberately excluded from `master`.
+ *
+ * Bullets only. A name mentioned in the section's surrounding prose is not a
+ * grant, which is the whole distinction the old containment test could not draw.
+ */
+function excludedJobLabels(): string[] {
+    const bullets = deliberatelyExcludedFromMaster()
+        .block.split("\n")
+        .filter((line) => /^\s*[-*]\s/.test(line));
+    return boldNamesIn(bullets.join("\n")).map((name) => DOC_NAME_ALIASES[name] ?? name);
 }
 
 /**
@@ -1061,6 +1107,52 @@ describe("pull-request jobs cannot run on a master build", () => {
         // terms of it, so the one clause that binds has to be phrased outside.
         const { block } = deliberatelyExcludedFromMaster();
         const jobsByName = new Map(dualContextPipelines.flatMap((file) => file.jobs).map((job) => [job.name, job]));
+        const excluded = excludedJobLabels();
+
+        // The identity that makes the grant readable in both directions. The old
+        // binding only ever asked the document about names COST_GATED_JOBS
+        // already held -- so while that constant is empty it asked nothing at
+        // all, and the document could say anything. These two assertions are the
+        // reverse direction: what the list claims must correspond to what the
+        // pipeline does, whether or not any constant is interested.
+        const gatedLabels = dualContextPipelines
+            .flatMap((file) => file.jobs)
+            .filter((job) => job.gated)
+            .map((job) => displayNameOf(job))
+            .filter((label): label is string => label !== undefined);
+
+        expect(
+            excluded.filter((label) => !gatedLabels.includes(label)).sort(),
+            `TESTING.md lists these as deliberately excluded from master, but the pipeline does not gate them: ${excluded.filter((l) => !gatedLabels.includes(l)).join(", ")}.\n` +
+                `Either the gate was removed and the list is now telling a reader that master skips something it actually runs, or the name is spelled differently from the ` +
+                `job's displayName -- in which case add it to DOC_NAME_ALIASES with the reason, rather than leaving a grant this check cannot read.`
+        ).toEqual([]);
+
+        expect(
+            gatedLabels.filter((label) => !excluded.includes(label)).sort(),
+            `these jobs are gated off master but TESTING.md's excluded list does not name them: ${gatedLabels.filter((l) => !excluded.includes(l)).join(", ")}.\n` +
+                `A reader deciding whether post-merge validation still covers something reads that list. A job missing from it is invisible there while being invisible on master too.`
+        ).toEqual([]);
+
+        // DOC_NAME_ALIASES is hand-maintained, and an alias is a grant: it lets a
+        // string in the document stand for a job. Left unpinned, the cheapest way
+        // to silence either identity above is to add an entry mapping whatever
+        // the document happens to say onto whatever the pipeline happens to run.
+        // So each entry has to earn its place -- the key must really appear in
+        // the list, the value must really be a job, and the two must really
+        // differ, or the alias is dead weight that only widens what is accepted.
+        // These two sit above the hatch check below and will short-circuit it
+        // for any job that is gated: delete a bullet for a gated job and this
+        // fires first, leaving the hatch's own assertion unreached by the
+        // obvious arm. The arm that isolates the hatch is a job recorded in
+        // COST_GATED_JOBS that is *not* gated -- both identities are then
+        // satisfied and only the hatch can see it.
+        const allLabels = dualContextPipelines.flatMap((file) => file.jobs).map((job) => displayNameOf(job));
+        for (const [docName, label] of Object.entries(DOC_NAME_ALIASES)) {
+            expect(boldNamesIn(block), `DOC_NAME_ALIASES maps "${docName}", which TESTING.md's excluded section never mentions -- an alias for nothing`).toContain(docName);
+            expect(allLabels, `DOC_NAME_ALIASES maps "${docName}" onto "${label}", which is not the displayName of any job in the pipeline`).toContain(label);
+            expect(docName, `DOC_NAME_ALIASES maps "${docName}" onto itself, so it grants nothing and hides that the names already agree`).not.toBe(label);
+        }
 
         // One definition, used by the real check and by the specimens below.
         // Written twice, the specimens would exercise a copy and the live
@@ -1079,7 +1171,7 @@ describe("pull-request jobs cannot run on a master build", () => {
                 // does not currently run one, and a clause whose only possible
                 // control is `tsc` is exactly the kind of thing that rots
                 // unnoticed on a branch nothing validates.
-                return label === undefined || !block.includes(label);
+                return label === undefined || !excluded.includes(label);
             });
 
         const undocumented = undocumentedFor(COST_GATED_JOBS);
