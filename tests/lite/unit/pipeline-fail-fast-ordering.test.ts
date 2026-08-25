@@ -311,7 +311,19 @@ describe("the baseline pipeline validates its deploy configuration before doing 
             `the allowance section contains a further markdown heading, so the slice has grown past the section it names and the checks below are reading someone else's text.`
         ).toEqual([]);
 
-        expect(body.trim().length, `"${ALLOWANCE_HEADING}" is present but empty, so the binding below would pass on an absent list`).toBeGreaterThan(200);
+        // Was `length > 200`. Two things wrong with it, and the second is why
+        // it is gone rather than tuned. Nothing entailed 200 -- the section is
+        // 1417 characters, so the bar was whatever looked generous when it was
+        // written. And it caught nothing its neighbour missed: emptying the body
+        // fires the binding below as well, because the prerequisite stops being
+        // named. A number that is neither derived nor load-bearing.
+        //
+        // What it was standing in for is that the section has substance, and
+        // that is checkable per entry instead of in aggregate. See the reason
+        // assertion in the binding below, which fires on the case a length floor
+        // is blind to: an entry added to an already-long section with no reason
+        // attached to it.
+        expect(body.trim(), `"${ALLOWANCE_HEADING}" is present but empty, so the binding below would pass on an absent list`).not.toBe("");
         expect(body, `"${ALLOWANCE_HEADING}" no longer names the check it is about, so it is documenting something else`).toContain(PREFLIGHT_STEP);
     });
 
@@ -337,6 +349,26 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         expect(
             undocumented,
             `steps allowed to run before "${PREFLIGHT_STEP}" that TESTING.md does not mention under ${ALLOWANCE_HEADING}. Add them there, with the reason, in this same change -- the allowance is meant to be readable by someone reviewing the pipeline rather than this test.`
+        ).toEqual([]);
+
+        // Naming an entry is not documenting it. A section long enough to look
+        // substantial can gain one more bullet that is just a name, and both
+        // the assertion above and any floor on the section's total length pass
+        // -- the section did not get shorter.
+        //
+        // The bar is the name's own length, so it is derived from the entry
+        // rather than chosen, and a longer name cannot buy a lower one. Stated
+        // as a residual: this measures that a reason was written, never that it
+        // is a good one. That judgement is the reviewer's, which is the whole
+        // reason the allowance was pushed into prose in the first place.
+        const unreasoned = CHECK_PREREQUISITES.filter(({ name }) => {
+            const bullet = body.split("\n").find((l) => l.includes(name)) ?? "";
+            return bullet.replace(name, "").replace(/[^A-Za-z]+/g, "").length < name.replace(/[^A-Za-z]+/g, "").length;
+        }).map(({ name }) => name);
+
+        expect(
+            unreasoned,
+            `TESTING.md names these steps under ${ALLOWANCE_HEADING} but gives no reason beside them. The list is the part a reviewer reads to decide whether the exemption is justified; a bare name moves the decision back into the constant this section exists to take it out of.`
         ).toEqual([]);
 
         // A step cannot be both the work the check stands in front of and a
