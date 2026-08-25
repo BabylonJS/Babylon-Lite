@@ -154,10 +154,33 @@ function envKeys(step: string): string[] {
  * guard whose advice cannot be followed gets deleted rather than obeyed.
  *
  * Widening this list is a real decision with a cost: anything named here runs
- * before the build knows it can publish, so it must be cheap. Naming it forces
- * that decision to be written down instead of resolved by moving the check.
+ * before the build knows it can publish, so it must be cheap. That sentence
+ * used to be the whole bound, and prose is not a bound. Measured: a new
+ * expensive step ahead of the check fires the universal clause below, whose
+ * remedy offers this list -- and following that remedy exactly as written gave
+ * 3 passed, with the step permanently ahead of the check and the named clause
+ * unable to see it, because it has never heard of it. One edit from a repair to
+ * a blind spot. The pin below is what makes widening cost two edits and a
+ * stated reason instead.
  */
-const CHECK_PREREQUISITES: { name: string; matches: (step: string) => boolean }[] = [{ name: "checkout", matches: (s) => /^\s*-\s*checkout:/m.test(s) }];
+const CHECK_PREREQUISITES: { name: string; why: string; matches: (step: string) => boolean }[] = [
+    {
+        name: "checkout",
+        why: "the repository has to be present before any step can run, and fetching it tells the build nothing about whether it can publish",
+        matches: (s) => /^\s*-\s*checkout:/m.test(s),
+    },
+];
+
+/**
+ * The allowance, pinned.
+ *
+ * This is not a cost check -- nothing in the pipeline says how long a step takes
+ * -- and it does not pretend to be one. It exists so that opening the escape
+ * hatch cannot be done by following a failure message. A reader who widens
+ * CHECK_PREREQUISITES to silence the universal clause lands here instead, with
+ * the consequence spelled out, and has to decide rather than comply.
+ */
+const PINNED_PREREQUISITES = ["checkout"];
 
 describe("the baseline pipeline validates its deploy configuration before doing expensive work", () => {
     it("runs nothing but the check's own prerequisites before the deploy configuration check", () => {
@@ -177,7 +200,7 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         const before = steps.slice(0, preflight).filter((s) => !CHECK_PREREQUISITES.some(({ matches }) => matches(s)));
         expect(
             before,
-            `steps run before "${PREFLIGHT_STEP}" in ${pipelineFile} that are not among its prerequisites (${CHECK_PREREQUISITES.map(({ name }) => name).join(", ")}). This pipeline measures 245 scenes, so anything ahead of the configuration check is time spent before the build knows it can publish. Two repairs, and which one applies depends on the step: if it is work the check exists to gate, move it below the check. If the check now depends on it, add it to CHECK_PREREQUISITES in this file — but only if it is cheap, because everything listed there runs before the build knows it can publish.`
+            `steps run before "${PREFLIGHT_STEP}" in ${pipelineFile} that are not among its prerequisites (${CHECK_PREREQUISITES.map(({ name }) => name).join(", ")}). This pipeline measures 245 scenes, so anything ahead of the configuration check is time spent before the build knows it can publish. Two repairs, and which one applies depends on the step: if it is work the check exists to gate, move it below the check — this is the right answer for anything that builds, installs, or measures. If the check genuinely depends on it, add it to CHECK_PREREQUISITES and to PINNED_PREREQUISITES, with a stated reason. Note what the second repair costs: a step listed there is no longer watched by this clause, so choosing it for expensive work buys silence rather than safety.`
         ).toEqual([]);
     });
 
@@ -200,6 +223,28 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         expect(
             ahead,
             `these steps run before "${PREFLIGHT_STEP}" in ${pipelineFile}. They are the work the check exists to stand in front of, so running them first restores the failure this ordering removed: half an hour of measurement before the build learns it cannot publish. Move the check back above them. Adding them to CHECK_PREREQUISITES does not resolve this — it is what this clause is here to refuse.`
+        ).toEqual([]);
+    });
+
+    it("keeps the prerequisite allowance pinned, so widening it is a decision rather than a repair", () => {
+        // Deliberately a fixed list, which every other clause in this file
+        // avoids being. The reasoning that rejects fixed lists elsewhere is
+        // that the subject grows legitimately; this list is not the subject,
+        // it is the exemption from it, and an exemption that grows quietly is
+        // the whole defect. Here the fixed shape is the point.
+        //
+        // Residual, stated: this does not detect cost and cannot. A reader who
+        // updates both lists and writes a reason has widened the hatch, and
+        // that is allowed -- the aim is that they did it on purpose, having
+        // read what it costs, rather than by doing what a failure told them to.
+        expect(
+            CHECK_PREREQUISITES.map(({ name }) => name),
+            `the set of steps allowed to run before "${PREFLIGHT_STEP}" changed. If you are widening it to resolve a failure from the clause above, read that clause's second repair first: a step listed here stops being watched, so this is the right edit only for something genuinely cheap that the check depends on. If it is, update PINNED_PREREQUISITES to match and say why in the entry.`
+        ).toEqual(PINNED_PREREQUISITES);
+
+        expect(
+            CHECK_PREREQUISITES.filter(({ why }) => why.trim().length === 0).map(({ name }) => name),
+            `prerequisites with no stated reason. The reason is the only record of why a step is allowed to run before the build knows it can publish, and it is what the next reader needs to judge whether it still holds.`
         ).toEqual([]);
     });
 
