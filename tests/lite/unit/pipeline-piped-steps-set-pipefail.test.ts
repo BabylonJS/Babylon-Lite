@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
 import { join } from "path";
 import {
     isShellKey,
@@ -734,6 +735,62 @@ describe("containsPipe distinguishes a pipe from the character", () => {
     // should flip with it -- deliberately, not silently.
     it("still over-flags a case alternation, which needs grammar rather than lexing", () => {
         expect(containsPipe('case "$1" in a|b) echo hi ;; esac')).toBe(true);
+    });
+});
+
+describe("the call sites actually ask the predicates", () => {
+    // Both unifications in this file -- SHELL_STEP_KEYS and isYamlFile -- are
+    // pinned by property tests above, and those properties are *insufficient*
+    // on their own. They assert what each predicate answers. They say nothing
+    // about whether the code that needs the answer bothers to ask.
+    //
+    // Verified, not supposed: inlining a narrower literal at either call site
+    // leaves every property assertion above green.
+    //
+    //   walk uses /\.yml$/ instead of isYamlFile   -> 122 passed
+    //   strip drops `run` from the shell keys      -> 122 passed
+    //
+    // The second is the one that matters. If the strip stops counting `run:`
+    // as shell, it blanks every GitHub Actions body as prose, every pipe in
+    // .github/workflows disappears, and the guard reports success over a file
+    // it effectively never read. Silent, and in the direction that loses
+    // coverage rather than the one that shouts.
+    //
+    // Neither is reachable by a fixture on the predicate, so both are pinned
+    // behaviourally here -- driving the real functions and asserting on what
+    // they *did*.
+
+    it("the walk asks isYamlFile, so it finds .yaml as well as .yml", () => {
+        // All ten in-scope files are .yml today, which is exactly why the real
+        // repo cannot detect this: narrowing to /\.yml$/ is inert against every
+        // file that actually exists. A fixture tree is the only subject that
+        // can tell the difference.
+        const dir = mkdtempSync(join(tmpdir(), "pipeline-walk-"));
+        try {
+            const step = "steps:\n    - script: |\n          echo hi\n";
+            writeFileSync(join(dir, "a.yaml"), step);
+            writeFileSync(join(dir, "b.yml"), step);
+            writeFileSync(join(dir, "c.txt"), step);
+
+            expect(pipelineFilesInRepo(dir)).toEqual(["a.yaml", "b.yml"]);
+        } finally {
+            // A destructive step gets its subject asserted more strictly than
+            // the check does: this must be a temp dir we just made, or we do
+            // not delete it.
+            expect(dir.startsWith(tmpdir()) && dir.includes("pipeline-walk-")).toBe(true);
+            rmSync(dir, { recursive: true, force: true });
+        }
+    });
+
+    it("the strip asks isShellKey, so a run: body survives as shell", () => {
+        const doc = ["jobs:", "  build:", "    steps:", "      - run: |", "          npx tsc --noEmit | sed 's/x/y/'", ""].join("\n");
+
+        // The body must come through intact. If the strip blanked it, the line
+        // would be empty and containsPipe would have nothing to find -- which
+        // is precisely the silent failure this test exists to make loud.
+        const stripped = stripNonShellMultilineScalars(doc);
+        expect(stripped.split("\n")[4]).toContain("npx tsc --noEmit | sed");
+        expect(containsPipe(stripped.split("\n")[4] ?? "")).toBe(true);
     });
 });
 

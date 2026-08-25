@@ -377,8 +377,15 @@ function matchesAnyLine(pattern: RegExp, text: string): boolean {
  * adding a guard that reads something new means adding its pattern here -- the
  * check and the thing it certifies are then the same code and cannot drift by
  * category.
+ *
+ * `root` exists for one reason: every in-scope file in this repo is `.yml`, so
+ * narrowing the walk's extension test is inert against real files and no
+ * assertion over the real tree can detect it. A caller-supplied fixture tree is
+ * the only subject that can tell whether this function still asks
+ * {@link isYamlFile} or has quietly inlined something narrower. Production
+ * callers pass nothing and get the repo.
  */
-export function pipelineFilesInRepo(): string[] {
+export function pipelineFilesInRepo(root: string = repoRoot): string[] {
     const found: string[] = [];
 
     const walk = (dir: string): void => {
@@ -395,11 +402,11 @@ export function pipelineFilesInRepo(): string[] {
             }
             const text = stripNonShellMultilineScalars(readFileSync(full, "utf8"));
             if (SUBJECT_PATTERNS.some((pattern) => matchesAnyLine(pattern, text))) {
-                found.push(relative(repoRoot, full));
+                found.push(relative(root, full));
             }
         }
     };
 
-    walk(repoRoot);
+    walk(root);
     return found.sort();
 }
