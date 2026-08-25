@@ -9,8 +9,6 @@ import { buildNodeParticleSet } from "./npe-build.js";
 import type { BuildNodeParticleOptions, NodeParticleSet, NpeBuildState } from "./npe-build.js";
 import type { ParticleGraph } from "./npe-types.js";
 
-const INVALID_PROVIDER_RESULT = "NodeParticle: emitter provider must return a finite 16-element matrix";
-
 /** Pure-state source sampled for the emitter world transform. */
 export type NodeParticleEmitterProvider = () => Mat4;
 
@@ -24,12 +22,12 @@ function copyMatrix(source: ArrayLike<number>, target: Mat4): void {
 function sampleProvider(provider: NodeParticleEmitterProvider): Mat4 {
     const provided = provider() as Mat4 | null | undefined;
     if (!provided || provided.length !== 16) {
-        throw new Error(INVALID_PROVIDER_RESULT);
+        throw new Error("NodeParticle: emitter provider must return a finite 16-element matrix");
     }
     for (let index = 0; index < 16; index++) {
         const value = provided[index];
         if (!Number.isFinite(value)) {
-            throw new Error(INVALID_PROVIDER_RESULT);
+            throw new Error("NodeParticle: emitter provider must return a finite 16-element matrix");
         }
     }
     return provided;
