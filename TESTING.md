@@ -366,6 +366,15 @@ assuming "not master" implies "is a PR". See the header comment in
 required (declaring any `condition:` replaces the implicit default) and why the
 master trigger deliberately has no `paths:` filter.
 
+That rule is enforced by `tests/lite/unit/pipeline-master-gating.test.ts`, which
+fails in both directions: a job that reads PR context — directly or through a
+`- template:` it includes — and lacks the gate, and a job in the post-merge set
+that gains one. The second half matters more than it looks. Gating one extra job
+never reads as a regression in a diff, and a master build that skips every job is
+_green_ having validated nothing, which is the state this section exists to
+prevent. Deleting all eight gates was measured against the full unit suite before
+that guard existed: everything passed.
+
 > **Manual follow-up:** failure notifications for master runs are configured in
 > the Azure DevOps UI (Project settings → Notifications), not in YAML. A
 > subscription on "A build fails" scoped to this pipeline is required for the
