@@ -21,12 +21,7 @@ export const whileLoopDef: FgBlockDef = {
     }),
     execute(block, ctx, env) {
         const doWhile = !!(block.config?.doWhile as boolean | undefined);
-        let condition = !!getDataValue(ctx, env, block, "condition");
-
-        // do-while: run body once unconditionally before the first check.
-        if (doWhile && !condition) {
-            activateSignal(ctx, env, block, "executionFlow");
-        }
+        let condition = doWhile || !!getDataValue(ctx, env, block, "condition");
 
         let i = 0;
         while (condition) {

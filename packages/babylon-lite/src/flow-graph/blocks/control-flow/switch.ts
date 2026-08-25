@@ -26,8 +26,8 @@ export const switchDef: FgBlockDef = {
     execute(block, ctx, env) {
         const cases = (block.config?.cases as number[] | undefined) ?? [];
         const raw = getDataValue(ctx, env, block, "case");
-        const key: number = isFgInt(raw) ? raw.value : (raw as number) | 0;
-        const matched = cases.some((c) => (c | 0) === key);
+        const key = isFgInt(raw) ? raw.value : typeof raw === "number" && Number.isInteger(raw) ? raw : undefined;
+        const matched = key !== undefined && cases.some((c) => (c | 0) === key);
         activateSignal(ctx, env, block, matched ? `out_${key}` : "default");
     },
 };

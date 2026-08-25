@@ -12,10 +12,15 @@ import { activateSignal, getExecVar, setDataValue, setExecVar } from "../../runt
 import { sigIn, sigOut, sockOut } from "../../sockets.js";
 import { fgInt } from "../../custom-types/fg-integer.js";
 
+function inputSignalCount(config: Readonly<Record<string, unknown>> | undefined): number {
+    const configured = config?.inputSignalCount;
+    return typeof configured === "number" && Number.isFinite(configured) ? Math.max(1, Math.trunc(configured)) : 1;
+}
+
 export const waitAllDef: FgBlockDef = {
     type: FgBlockType.WaitAll,
     build: (config) => {
-        const n = Math.max(1, (config?.inputSignalCount as number) ?? 1);
+        const n = inputSignalCount(config);
         const signalIn = [sigIn("reset")];
         for (let i = 0; i < n; i++) {
             signalIn.push(sigIn(`in_${i}`));
@@ -27,12 +32,13 @@ export const waitAllDef: FgBlockDef = {
         };
     },
     updateOutputs(block, ctx) {
+        const n = inputSignalCount(block.config);
         const state = getExecVar<boolean[]>(ctx, block, "activationState", []);
-        const remaining = state.length ? state.filter((v) => !v).length : ((block.config?.inputSignalCount as number) ?? 1);
+        const remaining = state.length ? state.filter((v) => !v).length : n;
         setDataValue(ctx, block, "remainingInputs", fgInt(remaining));
     },
     execute(block, ctx, env, incomingSignal) {
-        const n = (block.config?.inputSignalCount as number) ?? 1;
+        const n = inputSignalCount(block.config);
         let state = getExecVar<boolean[]>(ctx, block, "activationState", []);
         if (!state.length) {
             state = new Array(n).fill(false) as boolean[];

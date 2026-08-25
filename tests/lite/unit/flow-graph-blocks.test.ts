@@ -1286,6 +1286,31 @@ describe("flow-graph blocks — control flow Phase 3h", () => {
         expect(log.map((e) => e.label)).toEqual(["hit"]);
     });
 
+    it("Switch routes invalid selectors to default instead of coercing them to case 0", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const rt = await makeRuntime(
+            [
+                { id: "start", type: "SceneReadyEvent", signalTargets: { out: [{ blockId: "sw", socket: "in" }] } },
+                {
+                    id: "sw",
+                    type: "Switch",
+                    config: { cases: [0] },
+                    dataDefaults: { case: "invalid" },
+                    signalTargets: {
+                        out_0: [{ blockId: "zero", socket: "in" }],
+                        default: [{ blockId: "fallback", socket: "in" }],
+                    },
+                },
+                { id: "zero", type: RECORD, config: { label: "zero" } },
+                { id: "fallback", type: RECORD, config: { label: "default" } },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+
+        startFlowGraph(rt);
+        expect(log.map((e) => e.label)).toEqual(["default"]);
+    });
+
     // ── ForLoop ───────────────────────────────────────────────────────────────
 
     it("ForLoop fires executionFlow for indices [start, end) exclusively", async () => {
@@ -1336,6 +1361,26 @@ describe("flow-graph blocks — control flow Phase 3h", () => {
         expect(log.map((e) => e.label)).toEqual(["done"]);
     });
 
+    it("ForLoop caps by iteration count rather than the absolute loop index", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const rt = await makeRuntime(
+            [
+                { id: "start", type: "SceneReadyEvent", signalTargets: { out: [{ blockId: "fl", socket: "in" }] } },
+                {
+                    id: "fl",
+                    type: "ForLoop",
+                    dataDefaults: { startIndex: 5000, endIndex: 5003, step: 1 },
+                    signalTargets: { executionFlow: [{ blockId: "rec", socket: "in" }] },
+                },
+                { id: "rec", type: RECORD, dataSources: { value: { blockId: "fl", socket: "index" } } },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+
+        startFlowGraph(rt);
+        expect(log.map((entry) => entry.value)).toEqual([fgInt(5000), fgInt(5001), fgInt(5002)]);
+    });
+
     // ── WhileLoop ─────────────────────────────────────────────────────────────
 
     it("WhileLoop fires body N times then completed when condition goes false", async () => {
@@ -1382,6 +1427,44 @@ describe("flow-graph blocks — control flow Phase 3h", () => {
         startFlowGraph(rt);
         expect(log.filter((e) => e.label === "body")).toHaveLength(3);
         expect(log[log.length - 1]!.label).toBe("done");
+    });
+
+    it("WhileLoop re-checks its condition after the first do-while iteration", async () => {
+        let condition = false;
+        let bodyCount = 0;
+        const conditionDef: FgBlockDef = {
+            type: "test/do-while-condition",
+            build: () => ({ dataOut: [{ name: "value", type: FgType.Boolean }] }),
+            updateOutputs: (_block, ctx) => {
+                ctx.connectionValues["condition:value"] = condition;
+            },
+        };
+        const bodyDef: FgBlockDef = {
+            type: "test/do-while-body",
+            build: () => ({ signalIn: [{ name: "in", targets: [] }] }),
+            execute: () => {
+                bodyCount++;
+                condition = bodyCount === 1;
+            },
+        };
+        const rt = await makeRuntime(
+            [
+                { id: "start", type: "SceneReadyEvent", signalTargets: { out: [{ blockId: "loop", socket: "in" }] } },
+                {
+                    id: "loop",
+                    type: "WhileLoop",
+                    config: { doWhile: true },
+                    dataSources: { condition: { blockId: "condition", socket: "value" } },
+                    signalTargets: { executionFlow: [{ blockId: "body", socket: "in" }] },
+                },
+                { id: "condition", type: "test/do-while-condition" },
+                { id: "body", type: "test/do-while-body" },
+            ],
+            { defs: { "test/do-while-condition": conditionDef, "test/do-while-body": bodyDef } }
+        );
+
+        startFlowGraph(rt);
+        expect(bodyCount).toBe(2);
     });
 
     // ── DoN ───────────────────────────────────────────────────────────────────
@@ -1625,6 +1708,30 @@ describe("flow-graph blocks — control flow Phase 3h", () => {
         expect(log.map((e) => e.label)).toEqual(["partial", "partial", "done"]);
     });
 
+    it("WaitAll normalizes a non-positive input count consistently", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const rt = await makeRuntime(
+            [
+                {
+                    id: "wa",
+                    type: "WaitAll",
+                    config: { inputSignalCount: 0 },
+                    signalTargets: { completed: [{ blockId: "done", socket: "in" }] },
+                },
+                { id: "done", type: RECORD, config: { label: "done" } },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+        const block = rt.graph.blocks.find((candidate) => candidate.id === "wa")!;
+        const def = rt.env.defs[block.type]!;
+
+        expect(block.signalIn.map((signal) => signal.name)).toEqual(["reset", "in_0"]);
+        def.updateOutputs!(block, rt.context, rt.env);
+        expect(rt.context.connectionValues["wa:remainingInputs"]).toEqual(fgInt(1));
+        def.execute!(block, rt.context, rt.env, "in_0");
+        expect(log.map((entry) => entry.label)).toEqual(["done"]);
+    });
+
     // ── Throttle ──────────────────────────────────────────────────────────────
 
     it("Throttle passes first activation then suppresses until duration elapses", async () => {
@@ -1757,6 +1864,43 @@ describe("flow-graph blocks — control flow Phase 3h", () => {
         // done must NOT fire; cancelled must fire once.
         expect(log.filter((e) => e.label === "done")).toHaveLength(0);
         expect(log.filter((e) => e.label === "cancelled")).toHaveLength(1);
+    });
+
+    it("CancelDelay ignores an invalid index instead of canceling delay 0", async () => {
+        const log: { label: string; value: FgValue }[] = [];
+        const rt = await makeRuntime(
+            [
+                {
+                    id: "start",
+                    type: "SceneReadyEvent",
+                    signalTargets: {
+                        out: [
+                            { blockId: "sd", socket: "in" },
+                            { blockId: "cd", socket: "in" },
+                        ],
+                    },
+                },
+                {
+                    id: "sd",
+                    type: "SetDelay",
+                    dataDefaults: { duration: 0.001 },
+                    signalTargets: { done: [{ blockId: "done", socket: "in" }] },
+                },
+                {
+                    id: "cd",
+                    type: "CancelDelay",
+                    dataDefaults: { delayIndex: "invalid" },
+                    signalTargets: { out: [{ blockId: "cancelOut", socket: "in" }] },
+                },
+                { id: "done", type: RECORD, config: { label: "done" } },
+                { id: "cancelOut", type: RECORD, config: { label: "cancel-out" } },
+            ],
+            { defs: { [RECORD]: recorderDef(log) } }
+        );
+
+        startFlowGraph(rt);
+        tickFlowGraph(rt, 2);
+        expect(log.map((entry) => entry.label)).toEqual(["cancel-out", "done"]);
     });
 
     // ── Constant ──────────────────────────────────────────────────────────────

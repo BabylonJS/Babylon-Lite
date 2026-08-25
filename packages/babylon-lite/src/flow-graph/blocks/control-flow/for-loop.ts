@@ -40,6 +40,7 @@ export const forLoopDef: FgBlockDef = {
         const start = toNum(getDataValue(ctx, env, block, "startIndex"));
         const step = toNum(getDataValue(ctx, env, block, "step")) || 1;
         let end = toNum(getDataValue(ctx, env, block, "endIndex"));
+        let iterations = 0;
 
         for (let i = start; i < end; i += step) {
             setExecVar(ctx, block, "index", i);
@@ -47,7 +48,7 @@ export const forLoopDef: FgBlockDef = {
             activateSignal(ctx, env, block, "executionFlow");
             // Re-read endIndex each iteration (body may modify it).
             end = toNum(getDataValue(ctx, env, block, "endIndex"));
-            if (i > MAX_ITERATIONS * step) {
+            if (++iterations >= MAX_ITERATIONS) {
                 break;
             }
         }

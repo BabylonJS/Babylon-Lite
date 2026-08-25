@@ -1,13 +1,11 @@
 import type { FgValue } from "../../types.js";
 
-const UNSAFE_PROPERTIES = new Set(["__proto__", "constructor", "prototype"]);
-
 function propertyPath(propertyName: unknown): string[] | null {
     if (typeof propertyName !== "string" || propertyName.length === 0) {
         return null;
     }
     const path = propertyName.split(".");
-    return path.every((part) => part.length > 0 && !UNSAFE_PROPERTIES.has(part)) ? path : null;
+    return path.every((part) => part.length > 0 && part !== "__proto__" && part !== "constructor" && part !== "prototype") ? path : null;
 }
 
 function propertyObject(value: unknown): Record<string, unknown> | null {

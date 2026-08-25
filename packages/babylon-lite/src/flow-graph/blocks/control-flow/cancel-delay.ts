@@ -21,8 +21,8 @@ export const cancelDelayDef: FgBlockDef = {
     }),
     execute(block, ctx, env) {
         const raw = getDataValue(ctx, env, block, "delayIndex");
-        const idx: number = isFgInt(raw) ? raw.value : (raw as number) | 0;
-        if (isNaN(idx) || !isFinite(idx) || idx < 0) {
+        const idx = isFgInt(raw) ? raw.value : raw;
+        if (typeof idx !== "number" || !Number.isInteger(idx) || idx < 0) {
             activateSignal(ctx, env, block, "out");
             return;
         }
