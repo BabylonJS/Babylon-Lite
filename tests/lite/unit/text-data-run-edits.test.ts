@@ -215,7 +215,7 @@ describe("updateTextData replaceRun", () => {
 
     it("compacts styles before a new allocation exceeds packed indices", () => {
         const first = styledRun(0, false);
-        const last = run("f", 10, [3]);
+        const last: GlyphRun = { ...run("f", 10, [3]), defaultColor: [0.125, 0.25, 0.5, 1] };
         const data = createTextData(makeStorage(), [first, last]);
         data._styleCount = 0xffff;
 
@@ -223,6 +223,10 @@ describe("updateTextData replaceRun", () => {
         updateTextData(data, { update: "replaceRun", previous: first, run: replacement });
 
         expect(data._styleCount).toBe(3);
+        const survivingRecord = data._runRecords.get(last)!;
+        const survivingStyleIndex = data._instancesU32[survivingRecord._slots[0]! * TEXT_INSTANCE_FLOATS + 2]! >>> 16;
+        expect(survivingStyleIndex).toBe(0);
+        expect(Array.from(data._styles.subarray(0, 4))).toEqual([0.125, 0.25, 0.5, 1]);
         const record = data._runRecords.get(replacement)!;
         for (const slot of record._slots) {
             expect(data._instancesU32[slot * TEXT_INSTANCE_FLOATS + 2]! >>> 16).toBeLessThan(0xffff);
