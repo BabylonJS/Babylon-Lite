@@ -32,6 +32,7 @@ export const PBR_HAS_SUBSURFACE = 1 << 27;
 export const PBR_HAS_THICKNESS_MAP = 1 << 28;
 export const PBR_HAS_SKYBOX = 1 << 29;
 export const PBR_HAS_SHEEN_ALBEDO_SCALING = 1 << 30;
+// 1<<31 is PBR_HAS_LOCAL_ENVIRONMENT (local-cubemap-fragment.ts).
 
 // ─── features2 (extended feature bits) ──────────────────────────────
 // Used when `features` runs out of bits. Threaded separately through
