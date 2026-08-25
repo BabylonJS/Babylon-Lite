@@ -263,15 +263,24 @@ function boldNamesIn(section: string): string[] {
  *
  * Every clause that could have seen it is phrased in terms of the hatch, and a
  * hatch reaches all of those by construction. So the binding has to sit
- * somewhere the hatch cannot edit, and `TESTING.md` is that place: it already
- * carries the excluded list with a reason per entry, and no edit to this
- * constant changes a word of it.
+ * somewhere the hatch cannot edit, and `TESTING.md` is that place: it carries
+ * the excluded list with a reason per entry, and no edit to this constant
+ * changes a word of it.
  *
- * Deliberately a low bar -- the job's display name has to appear in that one
- * section. It is not a proof that the reason is good. It forces the exclusion
- * into a second file in the same diff, written in prose, where the person
- * reviewing decides. That is all the original comment claimed and more than it
- * delivered.
+ * On how much that is worth, measured rather than assumed. The four anchors this
+ * binding reads appear **zero** times in `origin/master:TESTING.md` -- the whole
+ * post-merge section is this PR's deliverable. They arrived in commit 1
+ * (`f57a9b22`); this binding arrived in commit 41 (`3e830a06`). So it is not
+ * independent testimony: same author, same pull request. What it does buy is
+ * that the section was written to describe the change, not to satisfy a test
+ * that did not exist yet for another forty commits, and that the exclusion has
+ * to be argued in prose in the same diff where a reviewer will read it.
+ *
+ * Deliberately a low bar -- the job has to be named in that section's list, by
+ * its `displayName` or a declared alias. It is not a proof that the reason is
+ * good. It forces the exclusion into a second file in the same diff, written in
+ * prose, where the person reviewing decides. That is all the original comment
+ * claimed and more than it delivered.
  */
 function deliberatelyExcludedFromMaster(): DocSection {
     return docSection("Deliberately excluded from", "Those jobs are gated");
@@ -634,6 +643,36 @@ describe("pull-request jobs cannot run on a master build", () => {
                 `${name} reads pull-request context; if it is no longer detected as such, this clause has stopped watching it rather than been satisfied by it`
             ).toContain(name);
         }
+
+        // The loop above iterates the constant, so emptying the constant runs it
+        // zero times: `KNOWN_PR_CONTEXT_JOBS = []` was thirteen passed. Same
+        // defect as its twin `KNOWN_MASTER_JOBS`, which was floored on the
+        // pipeline several commits ago -- one was fixed and the other was never
+        // asked the question, because the two look nothing alike at the call
+        // site and identical in kind.
+        //
+        // The identity takes the other direction from the pipeline, which is the
+        // side nobody is asserting: a job that starts reading pull-request
+        // context and is not in the constant is now a failure too, where before
+        // only the gating clause would have noticed and only if it were ungated.
+        //
+        // Residual, measured, because an identity between two sets is satisfied
+        // by both being empty: emptying the constant *and* blinding
+        // `PR_CONTEXT_MARKERS` leaves this assertion green (four other clauses
+        // fire, this one is not among them). What floors that case is not here
+        // -- it is the manufactured specimens for `readsPullRequestContext`
+        // (`isUngatable`, the template-hop fixture, the comment-task-only body).
+        // They are the only inputs in this file that do not come from the repo
+        // tree, so they are the side no edit to the pipeline or to this constant
+        // can reach. Deleting them as redundant re-opens this clause.
+        expect(
+            [...prContextJobs.map((job) => job.name)].sort(),
+            `the jobs that actually read pull-request context and KNOWN_PR_CONTEXT_JOBS have diverged.\n` +
+                `  detected in the pipeline: ${prContextJobs.map((job) => job.name).join(", ") || "(nobody)"}\n` +
+                `  KNOWN_PR_CONTEXT_JOBS:    ${KNOWN_PR_CONTEXT_JOBS.join(", ") || "(nobody)"}\n` +
+                `If a job genuinely stopped needing a pull request, remove it here in the same diff. If detection broke, fix detection -- do not edit this ` +
+                `constant to agree with a detector that has gone blind, which is the cheapest repair and the one that removes the subject.`
+        ).toEqual([...KNOWN_PR_CONTEXT_JOBS].sort());
 
         // Split by what the author must actually do, not by what the guard
         // noticed. A job with no `condition:` needs one added; a job that has
