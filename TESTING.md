@@ -324,13 +324,29 @@ uploading failed Playwright HTML reports:
 
 - `DEPLOYMENT_SERVER`
 - `DEPLOY_TOKEN`
+- `DEPLOY_ENDPOINT_UPLOAD`
+
+It uses `BabylonJS-CI-Infrastructure` for the storage accounts and CDN profiles
+that uploads target:
+
+- `SNAPSHOTS_STORAGE_ACCOUNT` — snapshots account, used by
+  `azure-pipelines-bundle-manifest.yml` for the bundle-size baseline
+- `TOOLS_STORAGE_ACCOUNT` — tools account backing `liteplayground.babylonjs.com`
+- `CDN_PROFILE_TOOLS`
+
+This third group is easy to miss. It was **omitted from this list until the
+bundle-manifest pipeline failed on it**, even though `azure-pipelines.yml` and
+`azure-pipelines-playground.yml` had both been importing it all along. A
+pipeline that needs a storage account and declares only the first two groups
+will not fail at parse time — see the trap described below.
 
 ### Required Report Upload Variables
 
 The failed-test report upload template also expects these pipeline variables:
 
-- `DEPLOY_ENDPOINT_UPLOAD` — `BabylonJS-Deployment`
-- `SERVE_DOMAIN`
+- `DEPLOY_ENDPOINT_UPLOAD` — from `BabylonJS-Deployment`, listed above
+- `SERVE_DOMAIN` — group not verified; confirm against a build log before
+  relying on it in a new pipeline
 - `STORAGE_ACCOUNT` — **not exported by any variable group.** This is the upload
   template's own parameter name, and each pipeline maps its own account into it:
   `azure-pipelines-playground.yml` uses `$(TOOLS_STORAGE_ACCOUNT)`,
