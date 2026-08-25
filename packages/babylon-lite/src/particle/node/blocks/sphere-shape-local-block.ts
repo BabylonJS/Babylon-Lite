@@ -6,12 +6,11 @@ import type { NpeBlockEvaluator } from "../npe-build.js";
 /** Local-space `SphereShapeBlock`; selected only for `SystemBlock.isLocal`. */
 export const sphereShapeLocalBlock: NpeBlockEvaluator = {
     build(block, ctx) {
-        const buffer = ctx.state.buffer!;
-        const system = ctx.state.system!;
-        const emitterWorldMatrix = ctx.state.emitterWorldMatrix;
-        const emitterX = ctx.state.emitter.x;
-        const emitterY = ctx.state.emitter.y;
-        const emitterZ = ctx.state.emitter.z;
+        const state = ctx.state;
+        const buffer = state.buffer!;
+        const system = state.system!;
+        const emitterWorldMatrix = state.emitterWorldMatrix;
+        const emitter = state.emitter;
         const radiusGetter = ctx.input(block, "radius", () => 1);
         const radiusRangeGetter = ctx.input(block, "radiusRange", () => 1);
         const randomizerGetter = ctx.input(block, "directionRandomizer", () => 0);
@@ -56,9 +55,9 @@ export const sphereShapeLocalBlock: NpeBlockEvaluator = {
                 y = randomRange(minY, direction2.y);
                 z = randomRange(minZ, direction2.z);
             } else {
-                x = birthX - emitterX;
-                y = birthY - emitterY;
-                z = birthZ - emitterZ;
+                x = birthX - emitter.x;
+                y = birthY - emitter.y;
+                z = birthZ - emitter.z;
                 let length = Math.sqrt(x * x + y * y + z * z);
                 if (length !== 0 && length !== 1) {
                     x /= length;

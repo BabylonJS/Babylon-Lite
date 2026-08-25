@@ -77,6 +77,9 @@ export function createMorphTargets(
  *  @param weights - New morph weights; missing slots are reset to 0.
  */
 export function setMorphTargetWeights(engine: EngineContext, morphTargets: MorphTargetData, weights: ArrayLike<number>): void {
+    if (morphTargets._disposed) {
+        throw new Error("Cannot update disposed morph targets");
+    }
     const count = Math.min(morphTargets.count, weights.length);
     morphTargets.weights.fill(0);
     for (let i = 0; i < count; i++) {

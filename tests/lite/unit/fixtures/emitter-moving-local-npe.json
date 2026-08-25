@@ -1,0 +1,65 @@
+{
+    "name": "moving-emitter-oracle",
+    "customType": "BABYLON.NodeParticleSystemSet",
+    "blocks": [
+        {
+            "customType": "BABYLON.SystemBlock",
+            "id": 1,
+            "name": "System",
+            "capacity": 16,
+            "updateSpeed": 0.1,
+            "isLocal": true,
+            "inputs": [
+                { "name": "particle", "targetBlockId": 4, "targetConnectionName": "output" },
+                { "name": "emitRate", "valueType": "number", "value": 10 },
+                { "name": "targetStopDuration", "valueType": "number", "value": 0 }
+            ]
+        },
+        {
+            "customType": "BABYLON.CreateParticleBlock",
+            "id": 2,
+            "name": "Create",
+            "inputs": [
+                { "name": "emitPower", "valueType": "number", "value": 1 },
+                { "name": "lifeTime", "valueType": "number", "value": 1 },
+                { "name": "color", "valueType": "BABYLON.Color4", "value": [1, 1, 1, 1] },
+                { "name": "colorDead", "valueType": "BABYLON.Color4", "value": [0, 0, 0, 0] },
+                { "name": "scale", "valueType": "BABYLON.Vector2", "value": [1, 1] },
+                { "name": "angle", "valueType": "number", "value": 0 },
+                { "name": "size", "valueType": "number", "value": 1 }
+            ]
+        },
+        {
+            "customType": "BABYLON.SphereShapeBlock",
+            "id": 3,
+            "name": "Sphere",
+            "inputs": [
+                { "name": "particle", "targetBlockId": 2, "targetConnectionName": "particle" },
+                { "name": "radius", "valueType": "number", "value": 1 },
+                { "name": "radiusRange", "valueType": "number", "value": 1 },
+                { "name": "directionRandomizer", "valueType": "number", "value": 0 },
+                { "name": "direction1", "valueType": "BABYLON.Vector3", "value": [0, 1, 0] },
+                { "name": "direction2", "valueType": "BABYLON.Vector3", "value": [0, 1, 0] }
+            ]
+        },
+        {
+            "customType": "BABYLON.UpdatePositionBlock",
+            "id": 4,
+            "name": "Update Position",
+            "inputs": [
+                { "name": "particle", "targetBlockId": 3, "targetConnectionName": "output" },
+                { "name": "position", "targetBlockId": 5, "targetConnectionName": "output" }
+            ]
+        },
+        {
+            "customType": "BABYLON.ParticleInputBlock",
+            "id": 5,
+            "name": "Local Position Updated",
+            "type": 8,
+            "contextualValue": 24,
+            "systemSource": 0,
+            "valueType": "BABYLON.Vector3",
+            "inputs": []
+        }
+    ]
+}

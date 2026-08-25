@@ -1,0 +1,153 @@
+# Azure Pipelines — Bundle-Size Baseline
+#
+# Measures every scene on each push to master and publishes the aggregate
+# bundle-size manifest to public storage, where PR builds (and developers) read
+# it as the baseline for the "how did this change move bundle sizes" report.
+#
+# ── Why this exists ───────────────────────────────────────────────────────────
+#
+# The baseline used to be ~227 JSON files tracked in git and refreshed by PR
+# authors. Because nearly every shared-module change moves bytes in most of the
+# ~230 scenes, that broke in two ways at once:
+#
+#   * Red CI — as soon as any shared-code PR merged, every other open PR's
+#     committed manifest was stale and its Bundle Size job went red for reasons
+#     that had nothing to do with that PR.
+#   * Merge conflicts — two branches that both regenerated the manifest rewrote
+#     the same ~200 tracked files and collided. In one representative PR, 168 of
+#     the 169 conflicting paths were manifest files and none were source.
+#
+# Both failures come from the same root cause: a generated file living in git on
+# branches that have no reason to carry it. Publishing the baseline instead of
+# committing it removes the cause rather than managing the symptoms — there is no
+# tracked file to go stale and nothing for two branches to collide on.
+#
+# Publishing (rather than pushing to master) also keeps CI out of the repo's
+# write path entirely: master is a protected branch, and the CI identity is
+# deliberately not allowed to bypass that protection.
+#
+# It is safe because the baseline gates nothing. Size regressions are caught by
+# the absolute per-scene ceilings in `scene-config.json` (`maxRawKB`), which
+# `pnpm build:bundle-scenes` enforces byte-exactly. The baseline only powers the
+# advisory delta report, so if it is ever missing or stale the report is skipped
+# and no build fails.
+
+trigger:
+    branches:
+        include:
+            - master
+
+pr: none
+
+variables:
+    # DEPLOYMENT_SERVER / DEPLOY_TOKEN / DEPLOY_ENDPOINT_UPLOAD and STORAGE_ACCOUNT
+    # come from this group — the same upload path the failed-Playwright-report and
+    # static-lab-site templates use. It needs to be authorized for this pipeline
+    # once, in the ADO UI.
+    - group: BabylonJS-Deployment
+    - name: NODE_VERSION
+      value: "22.x"
+    - name: PNPM_VERSION
+      value: "11.9.0"
+    - name: CI
+      value: "true"
+    - name: HEADLESS
+      value: "true"
+    # Public path the baseline is served from. Must stay in sync with
+    # DEFAULT_MASTER_MANIFEST_URL in scripts/bundle-scenes-core.ts.
+    # $(STORAGE_ACCOUNT) is served at $(SERVE_DOMAIN), so this lands at
+    # https://snapshots-cvgtc2eugrd3cgfd.z01.azurefd.net/lite/bundle-baseline/manifest.json
+    #
+    # This is the CI-artifact host that already serves the per-build test reports
+    # and lab sites under lite/<BuildNumber>/, rather than the playground's
+    # product domain. Those are all build-scoped and therefore never overwritten;
+    # the baseline is deliberately the one stable path, so a reader needs no
+    # build number to find it. That host is not cached, so unlike the playground
+    # origin there is no purge to issue after an overwrite.
+    - name: baselineDeployPath
+      value: lite/bundle-baseline
+
+stages:
+    - stage: BundleBaseline
+      displayName: "Bundle-Size Baseline"
+      jobs:
+          - job: PublishBaseline
+            displayName: "Measure scenes and publish the baseline"
+            timeoutInMinutes: 120
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: pnpm exec playwright install chromium
+                  displayName: "Install Playwright browsers"
+
+                # Same rolling URL->bytes asset cache as the PR job: the exact key
+                # never hits (so newly fetched assets are always saved at job end)
+                # while restoreKeys restores the most recent prefix match.
+                # Measurement re-fetches on a miss, so a cold cache is only slower.
+                - task: Cache@2
+                  displayName: "Cache remote scene assets"
+                  inputs:
+                      key: 'bundle-assets | v1 | "$(Build.BuildId)"'
+                      restoreKeys: |
+                          bundle-assets | v1
+                      path: $(System.DefaultWorkingDirectory)/.bundle-asset-cache
+
+                # Enforces the per-scene maxRawKB ceilings byte-exactly and fails
+                # the job when one is exceeded, so a breach can never be published
+                # as the new baseline by the step below.
+                #
+                # BUNDLE_MASTER_MANIFEST_URL is blanked so this build does not
+                # fetch the previous baseline just to overwrite it.
+                - script: pnpm build:bundle-scenes
+                  displayName: "Build bundle scenes"
+                  env:
+                      SKIP_BJS: "true"
+                      BUNDLE_MASTER_MANIFEST_URL: ""
+
+                # Publish the aggregate manifest to the same public storage that
+                # serves the per-build test reports and lab sites, at a stable
+                # path. PR builds and local developers read it over plain HTTPS —
+                # no auth, no ADO artifact retention window, and it works for fork
+                # PRs.
+                #
+                # --fail-with-body so an upload rejection fails the step instead of
+                # silently leaving the baseline stale.
+                - script: |
+                      set -euo pipefail
+
+                      MANIFEST="$(System.DefaultWorkingDirectory)/lab/public/bundle/manifest.json"
+                      WORK="$(Build.ArtifactStagingDirectory)/bundle-baseline"
+
+                      if ! test -s "$MANIFEST"; then
+                        echo "No aggregate manifest at $MANIFEST — refusing to publish an empty baseline."
+                        exit 1
+                      fi
+
+                      SCENES="$(node -e 'process.stdout.write(String(Object.keys(require(process.argv[1])).length))' "$MANIFEST")"
+                      echo "Publishing bundle-size baseline for $SCENES scene(s)."
+
+                      mkdir -p "$WORK"
+                      cp "$MANIFEST" "$WORK/manifest.json"
+                      (cd "$WORK" && zip -j baseline.zip manifest.json)
+
+                      curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD)" --fail-with-body -i -X POST \
+                        -H "Content-Type: multipart/form-data" \
+                        -H "Authorization: ******" \
+                        -F "path=$(baselineDeployPath)" \
+                        -F "storageAccount=$(STORAGE_ACCOUNT)" \
+                        -F "zip=@$WORK/baseline.zip"
+                  displayName: "Publish bundle-size baseline"

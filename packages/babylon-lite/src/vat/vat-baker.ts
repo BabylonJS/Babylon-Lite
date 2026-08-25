@@ -538,6 +538,7 @@ export function attachVat(engine: EngineContext, mesh: Mesh, baked: VatBakeResul
     // `vat` above (never destroyed here); only `boneTexture` is VAT-unused, so it's safe to destroy the
     // moment this was the LAST owner (a still-live clone sibling means it's not, so nothing is destroyed).
     if (release(skel)) {
+        skel._disposed = true;
         skel.boneTexture.destroy();
         if (release(skel._skinBuffers)) {
             skel.jointsBuffer.destroy();

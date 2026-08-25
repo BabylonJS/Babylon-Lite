@@ -100,7 +100,9 @@ describe("GPU task timing installer", () => {
 
         const fg = createFrameGraph(engine);
         const originalExecute = fg.execute;
-        fg._tasks.push(makeTask(engine, "task-execute", 2, log, true), makeTask(engine, "pass-execute", 3, log, false));
+        const disabledTask = makeTask(engine, "disabled-pass", 7, log, false);
+        disabledTask.executionEnabled = false;
+        fg._tasks.push(makeTask(engine, "task-execute", 2, log, true), disabledTask, makeTask(engine, "pass-execute", 3, log, false));
         const surface = { _renderingContexts: [{ frameGraph: fg }] };
         Object.assign(engine, { surfaces: [surface], _surfaces: [surface] });
 

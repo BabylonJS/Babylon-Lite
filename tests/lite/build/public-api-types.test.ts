@@ -50,6 +50,14 @@ describe("build/index.d.ts", () => {
         // bundles them). The `@webgpu/types` package is intentionally NOT loaded
         // here: doing so duplicates those declarations and, without skipLibCheck,
         // trips TS6200/TS2717 conflicts between the package and the native lib.
+        //
+        // WebXR types are NOT in the `dom` lib, so `@types/webxr` (a declared
+        // optional peer) is loaded via `--types webxr` to stand in for the
+        // consumer's own compile path. The public WebXR API references ambient
+        // WebXR globals (`XRSession`, `XRFrame`, `XRView`, `XRReferenceSpace`,
+        // `XRProjectionLayer`, `XRSubImage`, ...) that the rollup treats as
+        // consumer-provided, exactly like `@webgpu/types` — see the design note in
+        // src/xr/xr-webgpu-binding.ts.
         const result = spawnSync(
             NODE,
             [
@@ -65,6 +73,8 @@ describe("build/index.d.ts", () => {
                 "bundler",
                 "--lib",
                 "es2022,dom,dom.iterable",
+                "--types",
+                "webxr",
                 DTS_PATH,
             ],
             {
@@ -166,9 +176,11 @@ describe("build/package.json", () => {
         //     Lite never imports it. The peer entry only advertises the supported range.
         //   - @webgpu/types: ambient/global types referenced by the public .d.ts;
         //     TypeScript consumers need them at compile time.
+        //   - @types/webxr: ambient/global WebXR types referenced by the public
+        //     .d.ts (the WebXR API); TypeScript consumers need them at compile time.
         // Every allowlisted peer MUST be marked optional. Keep this allowlist in sync
         // with `emitPackageJson()` in packages/babylon-lite/vite.config.ts.
-        const ALLOWED_OPTIONAL_PEERS = ["@babylonjs/havok", "@webgpu/types"];
+        const ALLOWED_OPTIONAL_PEERS = ["@babylonjs/havok", "@webgpu/types", "@types/webxr"];
         const peers = (pkg.peerDependencies ?? {}) as Record<string, string>;
         const peerMeta = (pkg.peerDependenciesMeta ?? {}) as Record<string, { optional?: boolean }>;
 
