@@ -271,19 +271,21 @@ export function stripDocumentationText(content: string): string {
 
         const match = DOCUMENTATION_KEY.exec(line);
         if (match) {
-            const value = match[3].trim();
+            const [, indent = "", key = "", rest = ""] = match;
+            const value = rest.trim();
+            const quote = value[0];
             if (/^[|>]/.test(value)) {
-                blockIndent = match[1].length;
-            } else if (/^["']/.test(value) && !closesQuotedScalar(value.slice(1), value[0])) {
+                blockIndent = indent.length;
+            } else if ((quote === '"' || quote === "'") && !closesQuotedScalar(value.slice(1), quote)) {
                 // A quoted scalar that does not close on its own line continues
                 // onto the next. YAML folds those lines into a single string, so
                 // a `run:` or an `Authorization:` header inside one is prose by
                 // the grammar -- settled by the key plus the quote, with no
                 // block scalar marker anywhere to signal it.
-                openQuote = value[0];
-                quoteIndent = match[1].length;
+                openQuote = quote;
+                quoteIndent = indent.length;
             }
-            out.push(`${match[1]}${match[2]}:`);
+            out.push(`${indent}${key}:`);
             continue;
         }
 
