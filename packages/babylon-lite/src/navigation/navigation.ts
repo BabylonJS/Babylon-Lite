@@ -150,6 +150,9 @@ async function _ensureRecast(locateFile?: (url: string) => string): Promise<{ co
                 _coreModule = core;
                 _generatorsModule = gens;
             })();
+            void _initPromise.catch(() => {
+                _initPromise = null;
+            });
         }
         await _initPromise;
     }

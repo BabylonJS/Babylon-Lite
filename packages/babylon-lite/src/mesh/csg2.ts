@@ -79,6 +79,9 @@ async function getRuntimeAsync(): Promise<Csg2Runtime> {
         csg2Runtime = runtime;
         return runtime;
     })();
+    void csg2RuntimePromise.catch(() => {
+        csg2RuntimePromise = null;
+    });
 
     return csg2RuntimePromise;
 }
