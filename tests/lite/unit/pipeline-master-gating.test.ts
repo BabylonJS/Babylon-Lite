@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -78,9 +78,21 @@ function withTemplatesResolved(text: string, depth = 3): string {
         try {
             return line + "\n" + withTemplatesResolved(readFileSync(join(repoRoot, path), "utf8"), depth - 1);
         } catch {
-            // A template this guard cannot read is left as its own text. Being
-            // unable to resolve an include is not evidence that the include is
-            // safe, so the line stays and the markers still see it.
+            // A template this guard cannot read is left as its own text.
+            //
+            // An earlier version of this comment claimed "the markers still see
+            // it", which is false comfort dressed as a safety argument: the
+            // surviving line is `- template: config/templates/x.yml`, which
+            // contains no `System.PullRequest.` and no `GitHubComment@0`, so the
+            // markers see *nothing* and the job silently leaves the PR-context
+            // set. Measured -- moving `upload-test-report.yml` aside drops
+            // `PerfRegression` and `ParityCloud` out of that set entirely.
+            //
+            // The fallback is therefore not safe on its own, and this is why
+            // `resolves every template a dual-context job includes` exists: an
+            // unreadable include is caught there, by name, as its own failure
+            // rather than as a downstream job that looks like it changed
+            // category.
             return line;
         }
     });
@@ -145,6 +157,23 @@ const KNOWN_MASTER_JOBS = ["UnitTests", "Lint", "Compat"];
  * nobody can distinguish from the mechanically required ones.
  */
 const COST_GATED_JOBS: string[] = [];
+
+/**
+ * The template references this guard's marker detection currently rests on.
+ *
+ * Named rather than counted, for the reason the other floors are: a count drifts
+ * and `> 0` is satisfied by one survivor. `PerfRegression` and `ParityCloud`
+ * carry no PR-context marker of their own -- their entire claim to being gated
+ * for correctness arrives through `upload-test-report.yml` -- so if the
+ * reference collector stops finding these paths, the clause below is asserting
+ * something about an empty set while passing.
+ */
+const KNOWN_TEMPLATE_REFERENCES = ["config/templates/upload-test-report.yml", "config/templates/upload-static-site.yml"];
+
+/** Every `- template:` path a resolved body still names, at any depth. */
+function templateReferencesIn(text: string): string[] {
+    return [...text.matchAll(/^\s*-\s*template:\s*(\S+)\s*$/gm)].map((match) => match[1] ?? "");
+}
 
 /**
  * True when this pipeline can produce a build of `master`.
@@ -334,6 +363,49 @@ describe("pull-request jobs cannot run on a master build", () => {
         }
     });
 
+    it("resolves every template a dual-context job includes", () => {
+        // A floor on the transform rather than on its output.
+        //
+        // Every other clause reads markers out of a *resolved* job body, which
+        // makes template resolution a silent dependency of all of them. When it
+        // stops contributing -- a template renamed, moved, or its path
+        // retyped -- the include does not vanish loudly; the job simply stops
+        // carrying the evidence, and the loss surfaces downstream as a job that
+        // appears to have changed category.
+        //
+        // Measured, and this is why the clause is here rather than in a comment:
+        // moving `upload-test-report.yml` aside while adding a gated job whose
+        // only pull-request context comes through it produces exactly one
+        // actionable failure, "this job is gated but needs no PR", whose remedy
+        // is to record it in COST_GATED_JOBS. Following that advice is not a
+        // near miss -- it permanently certifies a job the guard has gone blind
+        // to, and every clause is green afterwards.
+        //
+        // An unreadable include is unambiguous in a way that "this template
+        // still posts a comment" would not be: ADO fails the pipeline on it too,
+        // so this floor cannot fire on a tree that is otherwise correct. A floor
+        // asserting the template still *carries markers* would fire the day
+        // someone legitimately stops posting a comment, and a guard that is red
+        // on a correct tree gets deleted rather than fixed.
+        const referenced = dualContextPipelines.flatMap((file) => file.jobs.flatMap((job) => templateReferencesIn(job.body)));
+
+        for (const path of KNOWN_TEMPLATE_REFERENCES) {
+            expect(referenced, `no dual-context job references ${path} any more; this clause is checking an empty set unless that reference was deliberately removed`).toContain(
+                path
+            );
+        }
+
+        const missing = [...new Set(referenced)].filter((path) => !existsSync(join(repoRoot, path)));
+
+        expect(
+            missing,
+            `a dual-context job includes a template that cannot be read: ${missing.join(", ")}.\n` +
+                `Pull-request context reaches jobs through templates, so an include this guard cannot resolve is context it cannot see -- ` +
+                `the job then looks like it needs no pull request, and the advice attached to that failure is to record it as cost-gated, which would make the blindness permanent. ` +
+                `Fix the path, or if the template is genuinely gone, remove the include from the job.`
+        ).toEqual([]);
+    });
+
     it("keeps the gated set and the pull-request set identical", () => {
         // The named list above catches a post-merge job being removed. It is
         // structurally blind to the opposite motion: a *new* job that arrives
@@ -356,11 +428,30 @@ describe("pull-request jobs cannot run on a master build", () => {
             .sort();
         const expected = [...new Set([...jobs.filter((job) => PR_CONTEXT_MARKERS.some((marker) => marker.test(job.body))).map((job) => job.name), ...COST_GATED_JOBS])].sort();
 
+        // Two different failures reach this assertion, and they need opposite
+        // repairs. A job may be gated because someone decided it was too slow --
+        // real, and COST_GATED_JOBS is where that decision gets written down. Or
+        // the job may need a pull request exactly as before, and this guard has
+        // merely stopped seeing it, in which case recording it as cost-gated
+        // certifies the blindness instead of fixing it.
+        //
+        // The axis that separates them is whether the job's evidence could have
+        // arrived through an include, so the remedy is split on that rather than
+        // on which one seems more likely. Splitting on the input's structure is
+        // what makes it exhaustive: a job either has a `- template:` or it does
+        // not.
+        const unexplained = gated.filter((name) => !expected.includes(name));
+        const viaTemplate = unexplained.filter((name) => templateReferencesIn(jobs.find((job) => job.name === name)?.body ?? "").length > 0);
+
         expect(
             gated,
             `the set of jobs held off master and the set that needs a pull request have diverged.\n` +
                 `  gated:      ${gated.join(", ")}\n` +
                 `  expected:   ${expected.join(", ")}\n` +
+                (viaTemplate.length > 0
+                    ? `${viaTemplate.join(", ")} include a template, so the missing evidence may be the include rather than the job -- check that clause first; ` +
+                      `recording a job as cost-gated while its template silently stops resolving is how this guard goes blind to it permanently.\n`
+                    : "") +
                 `A job gated without needing a pull request shrinks post-merge validation, which is a decision rather than a detail. ` +
                 `If it is deliberate -- gating something purely because it is slow or flaky -- add it to COST_GATED_JOBS with the reason, ` +
                 `so the next reader meets an argument instead of a bare condition. A job that needs a pull request and has no gate is the other clause's failure, not this one's.`
