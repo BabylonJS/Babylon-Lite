@@ -335,10 +335,9 @@ Deliberately excluded from `master`:
   BrowserStack. Externally flaky and expensive per run, which would make a
   post-merge signal noise rather than information.
 - **Bundle Size** (~42 min) — covered on master by
-  `azure-pipelines-bundle-manifest.yml`, which measures every scene on each push
-  and enforces the per-scene `maxRawKB` ceilings byte-exactly. (That pipeline
-  arrives with PR #526; until it merges, master has no bundle-ceiling
-  enforcement. Duplicating a 42-minute job here is not the fix.)
+  `azure-pipelines-bundle-manifest.yml` (added in PR #526), which measures every
+  scene on each push and enforces the per-scene `maxRawKB` ceilings
+  byte-exactly.
 - **Release Markers**, **API Report**, and **PR Playground Snapshot** — all
   inherently PR-scoped. They read `System.PullRequest.PullRequestNumber`, post
   `GitHubComment@0` comments, or diff against the PR's merge base (which on a

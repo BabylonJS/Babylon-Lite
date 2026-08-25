@@ -39,11 +39,9 @@
 # The expensive, externally-dependent suites (Bundle Size, Perf, Parity) stay
 # PR-only. They cost 40-55 minutes each and are flaky in ways that would make a
 # post-merge signal noise rather than information. Bundle-size ceilings are
-# separately enforced on every master push by azure-pipelines-bundle-manifest.yml,
-# which runs `pnpm build:bundle-scenes` and checks `maxRawKB` byte-exactly —
-# that pipeline lands with PR #526, and until it does, master carries no
-# bundle-ceiling enforcement. Adding a 42-minute job here is not the fix for
-# that; landing #526 is.
+# separately enforced on every master push by azure-pipelines-bundle-manifest.yml
+# (added in PR #526), which runs `pnpm build:bundle-scenes` and checks
+# `maxRawKB` byte-exactly.
 #
 # ── Rule for anyone adding a job here ─────────────────────────────────────────
 #
@@ -329,9 +327,9 @@ stages:
           #   * It is already covered on master. azure-pipelines-bundle-manifest.yml
           #     runs on every master push and measures every scene with
           #     `pnpm build:bundle-scenes`, which enforces the per-scene
-          #     `maxRawKB` ceilings from scene-config.json byte-exactly (that
-          #     pipeline lands with PR #526). Duplicating it here would add
-          #     ~42 minutes for a second opinion on the same numbers.
+          #     `maxRawKB` ceilings from scene-config.json byte-exactly.
+          #     Duplicating it here would add ~42 minutes for a second opinion
+          #     on the same numbers.
           #   * The delta half is inherently PR-scoped — it diffs against the
           #     published master baseline and reports the result as a PR comment,
           #     which needs a PR number. On master the "delta" would be the
