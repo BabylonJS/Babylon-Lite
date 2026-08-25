@@ -335,10 +335,20 @@ that uploads target:
 - `CDN_PROFILE_TOOLS`
 
 This third group is easy to miss. It was **omitted from this list until the
-bundle-manifest pipeline failed on it**, even though `azure-pipelines.yml` and
-`azure-pipelines-playground.yml` had both been importing it all along. A
-pipeline that needs a storage account and declares only the first two groups
-will not fail at parse time — see the trap described below.
+bundle-manifest pipeline failed on it**, even though `azure-pipelines.yml`,
+`azure-pipelines-playground.yml` and `azure-pipelines-npm-publish.yml` had all
+three been importing it all along. A pipeline that needs a storage account and
+declares only the first two groups will not fail at parse time — see the trap
+described below.
+
+This list is no longer maintained by hand:
+`tests/lite/unit/pipeline-variable-groups-documented.test.ts` parses every
+`- group:` declaration out of the `azure-pipelines*.yml` files and asserts this
+section covers them, and that it names no group any pipeline stopped using. The
+prose above is still hand-written and can drift — the count of importing files
+in the previous paragraph was itself wrong until the guard's failure output
+listed them — so treat the pipeline files as the source of truth and this text
+as commentary.
 
 ### Required Report Upload Variables
 
