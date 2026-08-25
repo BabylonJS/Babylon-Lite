@@ -281,7 +281,35 @@ describe("pull-request jobs cannot run on a master build", () => {
         // way it breaks -- and the excluded name is the one whose inclusion
         // would turn this file red on a tree nobody touched.
         expect(selected, "azure-pipelines.yml is the pipeline this guard exists for; losing it empties every clause below").toContain("azure-pipelines.yml");
+
+        // The negative half is stated as a *derivation*, not as a name that must
+        // stay out.
+        //
+        // `not.toContain("azure-pipelines-npm-publish.yml")` was the earlier
+        // form, and it has the failure shape this file has now hit twice: it
+        // enforces the conclusion after the reason stops holding. That pipeline
+        // is out of subject because it never builds a pull request -- if it ever
+        // gains a `pr:` trigger it becomes exactly what this guard is for, and
+        // the by-name assertion would greet that correct change by demanding the
+        // file be kept out, which means deleting the trigger or special-casing
+        // the guard.
+        //
+        // So the assertion is on the mechanism instead, and the counterfactual
+        // below is the half that makes it one: give the real file a pull-request
+        // trigger and it enters the subject on its own. An exclusion that cannot
+        // be reversed by changing the thing it depends on is a name, whatever
+        // the comment beside it says.
+        const publish = readFileSync(join(repoRoot, "azure-pipelines-npm-publish.yml"), "utf8");
+
+        expect(
+            canBuildPullRequests(publish),
+            "azure-pipelines-npm-publish.yml is out of subject because it never builds a pull request; if that changed, the exclusion below is no longer the reason"
+        ).toBe(false);
         expect(selected, "azure-pipelines-npm-publish.yml builds master only and never a pull request").not.toContain("azure-pipelines-npm-publish.yml");
+        expect(
+            canRunOnMaster(publish) && canBuildPullRequests(publish.replace(/^pr:\s*none\s*$/m, "pr:\n  branches:\n    include:\n      - master")),
+            "the same file with a pull-request trigger must enter the subject; if it does not, this exclusion is by name rather than by mechanism and a future dual-context publish pipeline goes unguarded"
+        ).toBe(true);
     });
 
     it("gates every job that reads pull-request context", () => {
