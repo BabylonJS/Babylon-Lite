@@ -9,9 +9,10 @@ import { _computeStandardMaterialFeatures, type StandardMaterialProps } from "..
 import { MATERIAL_ALPHA_BLEND } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { StdExt } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
-import type { Renderable } from "../../../packages/babylon-lite/src/render/renderable";
+import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import { createSceneContext, disposeScene, onBeforeRender, type RuntimeSceneBuildHooks, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap";
+import { rebuildSceneRenderables } from "../../../packages/babylon-lite/src/scene/scene-rebuild";
 
 interface MockBuffer {
     readonly id: number;
@@ -368,5 +369,74 @@ describe("dynamic Standard material plugins", () => {
         engine._retirements = null;
         uboRetirements?.splice(0).forEach((retire) => retire());
         expect(oldBuffer.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("keeps the old UBO alive during a blocked full-group rebuild with no scene disposer packet", async () => {
+        const { engine, buffers } = makeEngine();
+        const material = createStandardMaterial();
+        material.plugins = [valuePlugin({ current: 1 })];
+        const scene = pluginScene(engine, [material]);
+        const targetMesh = scene.meshes[0]!;
+
+        registerStdPlugins(scene, (ext) => {
+            registered = ext;
+        });
+        const oldBuffer = buffers[0]!;
+        const standardBuilder = material._buildGroup;
+        let enterBuilder!: () => void;
+        const enteredBuilder = new Promise<void>((resolve) => {
+            enterBuilder = resolve;
+        });
+        let unblockBuilder!: () => void;
+        const blockedBuilder = new Promise<void>((resolve) => {
+            unblockBuilder = resolve;
+        });
+        let reboundBuffer: GPUBuffer | undefined;
+        const builder = (async (targetScene: SceneContext) => {
+            enterBuilder();
+            await blockedBuilder;
+            const entries: GPUBindGroupEntry[] = [];
+            registered._bind!(material, entries, 0, targetMesh, targetScene);
+            reboundBuffer = (entries[0]!.resource as GPUBufferBinding).buffer;
+            targetScene._meshDisposables.set(targetMesh, []);
+            return {
+                renderables: [{ mesh: targetMesh, order: 0, isTransparent: false } as Renderable],
+                rebuildSingle: () => ({ mesh: targetMesh, order: 0, isTransparent: false }) as Renderable,
+            };
+        }) as unknown as MeshGroupBuilder;
+        Object.assign(material, { _buildGroup: builder });
+        scene._groups.set(builder, [targetMesh]);
+        scene._meshDisposables.set(targetMesh, []);
+        scene._built = true;
+
+        const rebuilding = rebuildSceneRenderables(scene);
+        await enteredBuilder;
+        expect(scene._meshDisposables.has(targetMesh)).toBe(false);
+        expect(scene._runtimeBuilds?.pendingDisposers(targetMesh)).toBeDefined();
+
+        Object.assign(material, { _buildGroup: standardBuilder });
+        bakeStdPluginMaterial(material, scene);
+        Object.assign(material, { _buildGroup: builder });
+        expect(buffers).toHaveLength(2);
+        expect(oldBuffer.destroy).not.toHaveBeenCalled();
+        expect(engine._retirements).toBeUndefined();
+
+        unblockBuilder();
+        await rebuilding;
+        expect(reboundBuffer).toBe(buffers[1]);
+        expect(oldBuffer.destroy).not.toHaveBeenCalled();
+        expect(engine._retirements).toHaveLength(1);
+
+        const bindingRetirements = engine._retirements!;
+        engine._retirements = null;
+        bindingRetirements.splice(0).forEach((retire) => retire());
+        expect(oldBuffer.destroy).not.toHaveBeenCalled();
+        expect(engine._retirements).toHaveLength(1);
+
+        const uboRetirements = engine._retirements!;
+        engine._retirements = null;
+        uboRetirements.splice(0).forEach((retire) => retire());
+        expect(oldBuffer.destroy).toHaveBeenCalledOnce();
+        expect(buffers[1]!.destroy).not.toHaveBeenCalled();
     });
 });
