@@ -726,6 +726,7 @@ export { createGridSpriteAtlas, loadSpriteAtlas, disposeSpriteAtlas } from "./sp
 export type { SpriteAtlasFrameSource, SpriteAtlasPackOptions } from "./sprite/shared/sprite-atlas-packer.js";
 export { appendSpriteAtlasFrames, createSpriteAtlasFromFrames } from "./sprite/shared/sprite-atlas-packer.js";
 export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";
+export type { Sprite2DVisibleBounds } from "./sprite/sprite-2d-view.js";
 export type { SpriteBlendDescriptor } from "./sprite/sprite-blend.js";
 export { spriteBlendOpaque, spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive, spriteBlendOneOne, spriteBlendMultiply } from "./sprite/sprite-blend.js";
 export {
@@ -737,6 +738,7 @@ export {
     setSprite2DFrameIndex,
     setSprite2DShaderParams,
 } from "./sprite/sprite-2d.js";
+export { sprite2DWorldToScreenToRef, sprite2DScreenToWorldToRef, getSprite2DVisibleBoundsToRef, centerSprite2DView } from "./sprite/sprite-2d-view.js";
 export type { CustomShaderTexture } from "./sprite/custom-shader-core.js";
 export { setSprite2DCoverageGamma } from "./sprite/sprite-2d-coverage-gamma.js";
 export { setSprite2DUvOffset } from "./sprite/sprite-2d-uvscroll.js";

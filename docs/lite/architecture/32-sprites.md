@@ -775,6 +775,38 @@ export function setSprite2DShaderParams(layer: Sprite2DLayer, params: readonly [
 export function setSprite2DUvOffset(layer: Sprite2DLayer, index: number, uvOffset: readonly [number, number]): void;
 ```
 
+### Sprite2D view utilities
+
+`sprite-2d-view.ts` owns the CPU form of the same transform used by the
+Sprite2D vertex shader. A view maps its `positionPx` to screen `(0, 0)`, then
+applies `rotation` and `zoom`. Screen dimensions and coordinates are backing-
+store pixels with a top-left origin, matching the renderer; pointer callers
+must convert CSS pixels by the canvas backing-store scale first.
+
+```typescript
+export interface Sprite2DVisibleBounds {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+}
+
+export function sprite2DWorldToScreenToRef<T extends Vec2>(view: Sprite2DView, worldX: number, worldY: number, result: T): T;
+export function sprite2DScreenToWorldToRef<T extends Vec2>(view: Sprite2DView, screenX: number, screenY: number, result: T): T;
+export function getSprite2DVisibleBoundsToRef<T extends Sprite2DVisibleBounds>(view: Sprite2DView, viewportWidthPx: number, viewportHeightPx: number, result: T): T;
+export function centerSprite2DView<T extends Sprite2DView>(view: T, worldX: number, worldY: number, viewportWidthPx: number, viewportHeightPx: number): T;
+```
+
+The `ToRef` functions write into caller-owned objects, and centering mutates the
+supplied view, so steady-state camera and culling updates allocate nothing.
+Negative zoom remains valid and mirrors the renderer. Inverse projection,
+visible bounds, and centering throw for `zoom === 0`, where no inverse exists;
+world-to-screen projection still matches the renderer and collapses to `(0, 0)`.
+
+The module has only type imports and pure functions. Nothing in `sprite-2d.ts`,
+`sprite-pipeline.ts`, or the render loop imports it, so applications that do not
+reference these helpers retain no runtime bytes or branches from them.
+
 The Handle API (`addSprite2D` / `removeSprite2D`, returning a
 `Sprite2DHandle` with a stable id) lives in the separately importable
 `sprite-2d-handle.ts` module so Index-only scenes do not pull handle code,
