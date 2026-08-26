@@ -322,7 +322,7 @@ Gallery thumbnails are presentation assets for the lab/pages cards — **not** p
 
 ## Babylon.js Reference Repository
 
-- Location: `C:\Repos\Babylon.js`
+- Location: `D:\Repos\Babylon.js`
 - Use for understanding internal math and algorithms — never for copying code.
 - Key paths:
     - WebGPU engine: `packages/dev/core/src/Engines/webgpuEngine.ts`
