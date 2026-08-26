@@ -13,6 +13,7 @@
 
 import type { Scene } from "../scene/scene.js";
 import type { WebGPUEngine } from "../engine/engine.js";
+import { Observable } from "../misc/observable.js";
 
 let _uniqueIdCounter = 0;
 
@@ -24,6 +25,7 @@ export abstract class Node {
     public readonly uniqueId: number;
     /** Free-form user data slot (Babylon.js `Node.metadata`). */
     public metadata: unknown = null;
+    public readonly onDisposeObservable = new Observable<Node>();
 
     /** @internal Owning compat scene, when constructed against one. */
     protected _scene: Scene | undefined;
@@ -167,12 +169,17 @@ export abstract class Node {
 
     /** @internal Dispose compat wrapper state without touching Lite resources. */
     public _disposeWrapperTree(doNotRecurse = false): void {
+        if (this._disposed) {
+            return;
+        }
         if (!doNotRecurse) {
             for (const child of [...this._children]) {
                 child._disposeWrapperTree();
             }
         }
         this._disposed = true;
+        this.onDisposeObservable.notifyObservers(this);
+        this.onDisposeObservable.clear();
         // Detach from the parent's child registry, then drop this node from its
         // scene's camera / light / mesh registries.
         this._linkParent(null);
