@@ -178,7 +178,7 @@ describe("report-bundle-size-deltas", () => {
                     ],
                 }).comment ?? "";
 
-            expect(comment).toContain("🚨 **1 scene this PR grew now exceeds its ceiling:** `scene2` (+312 B over its 50.00 KB ceiling)");
+            expect(comment).toContain("🚨 **1 scene put over its ceiling by this PR:** `scene2` (+312 B over its 50.00 KB ceiling)");
         });
 
         // The scenario this whole section exists for. Once master is over a ceiling, the Bundle
@@ -199,10 +199,10 @@ describe("report-bundle-size-deltas", () => {
         it("reports a scene already over its ceiling that this PR did not grow", () => {
             const comment = runReporter(inheritedBreachFixture).comment ?? "";
 
-            expect(comment).toContain("🛑 **1 scene is over ceiling on master, not from this PR:** `scene2` (+312 B over its 50.00 KB ceiling)");
+            expect(comment).toContain("🛑 **1 scene was already over ceiling on master:** `scene2` (+312 B over its 50.00 KB ceiling)");
             expect(comment).toContain("This fails the Bundle Size job on every open PR");
             // It is not the author's doing, so it must not be reported as something they caused.
-            expect(comment).not.toContain("this PR grew now exceeds its ceiling");
+            expect(comment).not.toContain("put over its ceiling by this PR");
         });
 
         it("ranks an over-ceiling scene above every scene still under its ceiling", () => {
@@ -233,7 +233,7 @@ describe("report-bundle-size-deltas", () => {
             });
             const comment = result.comment ?? "";
 
-            expect(comment).toContain("🛑 **12 scenes are over ceiling on master, not from this PR:**");
+            expect(comment).toContain("🛑 **12 scenes were already over ceiling on master:**");
             expect(comment).toContain(", and 2 more");
             // The callout names at most HEADROOM_LIST_LIMIT scenes, and the table is capped too.
             const callout = comment.slice(comment.indexOf("🛑"), comment.indexOf("This fails the Bundle Size job"));
@@ -241,6 +241,62 @@ describe("report-bundle-size-deltas", () => {
             const details = comment.slice(comment.indexOf("<details>"), comment.indexOf("</details>"));
             expect(details.match(/⚠️ \d+ B over/g) ?? []).toHaveLength(10);
             expect(details).toContain("12 scenes over ceiling");
+        });
+
+        // Attribution is a question about the baseline, not about movement. These two fixtures
+        // cover the regions where the two answers diverge — both were rendering false statements.
+        it("attributes a scene this PR adds over its ceiling to this PR, not to master", () => {
+            // A new scene is absent from the baseline, so it has no delta at all. Classifying by
+            // movement called that "inherited" and asserted the scene was already over on master
+            // and that rebasing would not clear it — of a scene that does not exist on master.
+            const comment =
+                runReporter({
+                    current: { scene1: { rawKB: 50.3, rawBytes: 51512 }, scene2: { rawKB: 40, rawBytes: 40960 } },
+                    master: { scene2: { rawKB: 40, rawBytes: 40960 } },
+                    scenes: [
+                        { id: 1, slug: "scene1", name: "Scene 1 - New", maxRawKB: 50 },
+                        { id: 2, slug: "scene2", name: "Scene 2", maxRawKB: 50 },
+                    ],
+                }).comment ?? "";
+
+            expect(comment).toContain("🚨 **1 scene put over its ceiling by this PR:** `scene1` (+312 B over its 50.00 KB ceiling)");
+            expect(comment).not.toContain("already over ceiling on master");
+            expect(comment).not.toContain("rebasing will not clear it");
+        });
+
+        it("keeps a breach inherited when this PR only adds bytes on top of it", () => {
+            // Master is already 300 B over; this branch adds 12 B, which is what a shared-path
+            // change does across many scenes at once. Classifying by movement blamed the author
+            // for the whole 312 B and dropped the note saying rebasing will not help — in the
+            // middle of the repo-wide stall that note exists for.
+            const comment =
+                runReporter({
+                    current: { scene1: { rawKB: 50.3, rawBytes: 51512 } },
+                    master: { scene1: { rawKB: 50.3, rawBytes: 51500 } },
+                    scenes: [{ id: 1, slug: "scene1", name: "Scene 1", maxRawKB: 50 }],
+                }).comment ?? "";
+
+            // The branch's contribution is reported separately from the total: the author can act
+            // on the 12 B they added and cannot act on the 300 B that were already there.
+            expect(comment).toContain("🛑 **1 scene was already over ceiling on master:** `scene1` (+312 B over its 50.00 KB ceiling, 12 B of it added here)");
+            expect(comment).toContain("rebasing will not clear it");
+            expect(comment).not.toContain("put over its ceiling by this PR");
+        });
+
+        it("does not claim movement in the header when the only finding is an inherited breach", () => {
+            // The headroom-only header predates the inherited-breach trigger, which reaches it
+            // with nothing moved — so it asserted movement and pointed the author at their own
+            // diff directly above a block saying the breach came from master.
+            const identical = { scene1: { rawKB: 50.3, rawBytes: 51512 } };
+            const comment =
+                runReporter({
+                    current: identical,
+                    master: identical,
+                    scenes: [{ id: 1, slug: "scene1", name: "Scene 1", maxRawKB: 50 }],
+                }).comment ?? "";
+
+            expect(comment).toContain("No bundle-size changes on this branch — but a scene is over its ceiling on master");
+            expect(comment).not.toContain("this PR moved a scene close to its ceiling");
         });
 
         it("posts a comment for an inherited breach even when this PR moves no bundle bytes", () => {
@@ -254,7 +310,7 @@ describe("report-bundle-size-deltas", () => {
 
             expect(result.stdout).toContain("POST_BUNDLE_COMMENT]true");
             expect(result.comment ?? "").not.toBe("**Bundle Size**: No changes detected.");
-            expect(result.comment ?? "").toContain("🛑 **1 scene is over ceiling on master, not from this PR:**");
+            expect(result.comment ?? "").toContain("🛑 **1 scene was already over ceiling on master:**");
         });
 
         it("omits the headroom section for scenes that opt out of the ceiling check", () => {
@@ -307,7 +363,7 @@ describe("report-bundle-size-deltas", () => {
             });
 
             expect(result.stdout).toContain("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]true");
-            expect(result.comment).toContain("🚨 **1 scene this PR grew now exceeds its ceiling:** `scene1` (+312 B over its 50.00 KB ceiling)");
+            expect(result.comment).toContain("🚨 **1 scene put over its ceiling by this PR:** `scene1` (+312 B over its 50.00 KB ceiling)");
         });
 
         it("never renders a compliant scene as if it were over its ceiling (precision monotonicity)", () => {

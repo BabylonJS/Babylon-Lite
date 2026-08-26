@@ -127,7 +127,7 @@ export function computeMovedBytes(current: Manifest, master: Manifest): Map<stri
 }
 
 /** Headroom inputs for every scene that has both a measured size and a ceiling. */
-export function collectHeadroomInputs(current: Manifest, sceneConfigs: SceneConfig[]): SceneHeadroomInput[] {
+export function collectHeadroomInputs(current: Manifest, sceneConfigs: SceneConfig[], master: Manifest = {}): SceneHeadroomInput[] {
     const inputs: SceneHeadroomInput[] = [];
     for (const config of sceneConfigs) {
         const key = `scene${config.id}`;
@@ -136,7 +136,13 @@ export function collectHeadroomInputs(current: Manifest, sceneConfigs: SceneConf
         if (measuredBytes == null || config.maxRawKB == null || config.skipBundleSize) {
             continue;
         }
-        inputs.push({ scene: key, name: config.name, measuredBytes, ceilingKB: config.maxRawKB });
+        inputs.push({
+            scene: key,
+            name: config.name,
+            measuredBytes,
+            ceilingKB: config.maxRawKB,
+            masterBytes: measuredBytesOf(master[key]) ?? undefined,
+        });
     }
     return inputs;
 }
@@ -200,13 +206,17 @@ export interface HeadroomReport {
      */
     movedIntoDangerZone: boolean;
     /**
-     * Whether any scene is over its ceiling that this PR did *not* grow — an inherited breach.
+     * Whether any scene was *already* over its ceiling on the baseline — an inherited breach.
+     *
+     * Determined from the baseline measurement, not from movement. Movement gets this wrong in
+     * both directions: a scene this branch adds has no baseline entry and so no delta, and a
+     * scene already breached has a delta as soon as the branch touches it at all. The question
+     * is whether the baseline was over the ceiling, so that is what this asks.
      *
      * This is a separate trigger from {@link movedIntoDangerZone} because it is not the author's
-     * doing and cannot be filtered by direction: the scene was already over before they branched.
-     * It still has to be posted, and posted on PRs that moved nothing, because it is the exact
-     * state this whole section exists for. Master over a ceiling fails the Bundle Size job on
-     * *every* open PR, so the author whose build just went red needs the comment to say why —
+     * doing. It still has to be posted, and posted on PRs that moved nothing, because it is the
+     * exact state this whole section exists for. Master over a ceiling fails the Bundle Size job
+     * on *every* open PR, so the author whose build just went red needs the comment to say why —
      * otherwise the only explanation lives in a ~42-minute log, which is the problem we started
      * from. Unlike repo-wide tightness this does not fire on almost every PR; it fires only while
      * master is actually breached, which is a loud, short-lived emergency by construction, since
@@ -245,6 +255,15 @@ export interface HeadroomReport {
  * runs `condition: always()`, so it is still generated on exactly those failing builds — it just
  * had nothing to say about the failure. An inherited breach is therefore called out separately
  * from one this PR caused, so the author can tell "you did this" from "this was already broken".
+ *
+ * That attribution is made from the *baseline measurement*, not from a movement delta, because
+ * movement answers a different question and gets both edges wrong. A scene this branch adds is
+ * absent from the baseline, so it has no delta at all and reads as inherited — asserting it was
+ * already over on master, of a scene that does not exist there. A scene that is genuinely
+ * inherited acquires a delta the moment the branch grows it by a single byte, which a shared-path
+ * change does across many scenes at once — and then the whole overage is attributed to the author
+ * and the "rebasing will not clear this" note disappears, in the middle of the repo-wide stall
+ * that note exists for. Only the baseline can distinguish the two, so only the baseline is asked.
  */
 export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], movedBytes: ReadonlyMap<string, number>): HeadroomReport {
     if (inputs.length === 0) {
@@ -258,15 +277,26 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
     // Only growth consumes headroom. See the note on direction in this function's doc comment.
     const grewBy = (scene: SceneHeadroom): number => movedBytes.get(scene.scene) ?? 0;
     const movedAndTight = tight.filter((s) => grewBy(s) > 0);
-    const movedAndOver = over.filter((s) => grewBy(s) > 0);
-    const inheritedOver = over.filter((s) => grewBy(s) <= 0);
+    // Attribution is a question about the *baseline*, not about movement, and the two answer
+    // differently in both directions. A scene this branch adds has no baseline entry, so it has no
+    // delta and movement calls it inherited — while claiming it was "already over on master" and
+    // that rebasing will not clear it, of a scene that does not exist on master. A scene already
+    // over its ceiling that this branch grows by one byte — what a shared-path change does across
+    // many scenes at once — has a positive delta, so movement blames the author for the whole
+    // overage and drops the note explaining that rebasing will not help. Ask the baseline instead:
+    // a breach is inherited only if the baseline was already over the same ceiling.
+    const wasOverOnMaster = (scene: SceneHeadroom): boolean => scene.masterBytes != null && scene.masterBytes > scene.ceilingKB * 1024;
+    const inheritedOver = over.filter((s) => wasOverOnMaster(s));
+    const movedAndOver = over.filter((s) => !wasOverOnMaster(s));
 
     const lines = ["### Ceiling headroom", ""];
 
     if (movedAndOver.length > 0) {
         const named = movedAndOver.map((s) => `\`${s.scene}\` (+${formatBytes(s.headroomBytes)} over its ${formatCeilingKB(s.ceilingKB)} ceiling)`);
-        const verb = movedAndOver.length === 1 ? "now exceeds its ceiling" : "now exceed their ceiling";
-        lines.push(`🚨 **${pluralizeScenes(movedAndOver.length)} this PR grew ${verb}:** ${named.join(", ")}`);
+        // "puts over" rather than "grew": this set now also holds scenes the branch *added*, which
+        // have no baseline size to have grown from, and saying they grew would be false of them.
+        const verb = movedAndOver.length === 1 ? "its ceiling" : "their ceiling";
+        lines.push(`🚨 **${pluralizeScenes(movedAndOver.length)} put over ${verb} by this PR:** ${named.join(", ")}`);
         lines.push("");
     }
 
@@ -293,14 +323,21 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
     }
 
     if (inheritedOver.length > 0) {
-        const named = inheritedOver.slice(0, HEADROOM_LIST_LIMIT).map((s) => `\`${s.scene}\` (+${formatBytes(s.headroomBytes)} over its ${formatCeilingKB(s.ceilingKB)} ceiling)`);
+        const named = inheritedOver.slice(0, HEADROOM_LIST_LIMIT).map((s) => {
+            // A scene can be over on master *and* grown here. Report the branch's contribution
+            // separately from the total rather than folding them together: the author can act on
+            // the bytes they added, and cannot act on the ones that were already there.
+            const added = movedBytes.get(s.scene) ?? 0;
+            const addedNote = added > 0 ? `, ${formatBytes(added)} of it added here` : "";
+            return `\`${s.scene}\` (+${formatBytes(s.headroomBytes)} over its ${formatCeilingKB(s.ceilingKB)} ceiling${addedNote})`;
+        });
         const overflow = inheritedOver.length > HEADROOM_LIST_LIMIT ? `, and ${inheritedOver.length - HEADROOM_LIST_LIMIT} more` : "";
-        const verb = inheritedOver.length === 1 ? "is" : "are";
-        lines.push(`🛑 **${pluralizeScenes(inheritedOver.length)} ${verb} over ceiling on master, not from this PR:** ${named.join(", ")}${overflow}`);
+        const verb = inheritedOver.length === 1 ? "was" : "were";
+        lines.push(`🛑 **${pluralizeScenes(inheritedOver.length)} ${verb} already over ceiling on master:** ${named.join(", ")}${overflow}`);
         lines.push("");
         lines.push(
             "This fails the Bundle Size job on every open PR, including ones that changed no bundle bytes, " +
-                "until the bytes are recovered on master. It is not caused by this branch and rebasing will not clear it."
+                "until the bytes are recovered on master. The breach did not originate on this branch and rebasing will not clear it."
         );
         lines.push("");
     }
@@ -365,7 +402,15 @@ export function formatComment(deltas: BundleDelta[], headroom: HeadroomReport = 
     const lines = ["## Bundle Size Changes", ""];
 
     if (deltas.length === 0) {
-        lines.push("No changes at whole-KB resolution — but this PR moved a scene close to its ceiling.");
+        // Pick the sentence from the flag that actually fired. The movement wording predates the
+        // inherited-breach trigger, which reaches this branch with nothing moved at all — so on a
+        // PR that touched no bundle bytes it asserted movement, and pointed the author at their
+        // own diff immediately above a block saying the breach came from master.
+        lines.push(
+            headroom.movedIntoDangerZone
+                ? "No changes at whole-KB resolution — but this PR moved a scene close to its ceiling."
+                : "No bundle-size changes on this branch — but a scene is over its ceiling on master, which fails this job on every open PR."
+        );
         lines.push("");
         lines.push(...headroom.lines);
         return lines.join("\n");
@@ -436,7 +481,7 @@ function main(): void {
 
     const sceneConfigs = loadSceneConfig(sceneConfigPath);
     const deltas = computeDeltas(current, master, sceneConfigs);
-    const headroom = buildHeadroomReport(collectHeadroomInputs(current, sceneConfigs), computeMovedBytes(current, master));
+    const headroom = buildHeadroomReport(collectHeadroomInputs(current, sceneConfigs, master), computeMovedBytes(current, master));
     const comment = formatComment(deltas, headroom);
 
     mkdirSync(dirname(outputPath), { recursive: true });

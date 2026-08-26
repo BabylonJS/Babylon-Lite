@@ -89,6 +89,17 @@ export interface SceneHeadroomInput {
     name?: string;
     measuredBytes: number;
     ceilingKB: number;
+    /**
+     * The same measurement taken from the baseline, when the scene exists there at all.
+     *
+     * `undefined` means the scene is new on this branch, which is a distinct state from "the same
+     * size as the baseline" and must not be conflated with it: a new scene has no baseline
+     * behaviour to have inherited. Consumers that need to attribute a ceiling breach — was it
+     * already broken, or did this change break it — read this rather than a movement delta,
+     * because movement cannot answer the question. A scene absent from the baseline has no delta,
+     * and a scene already over its ceiling still has a delta if the branch touched it at all.
+     */
+    masterBytes?: number;
 }
 
 export interface SceneHeadroom extends SceneHeadroomInput {
