@@ -5,6 +5,7 @@ import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/e
 import { createShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
 import { clearShaderPipelineCache, enableShaderPipelineCache } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline-cache";
 import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline";
+import { _enableShaderVb, setShaderAttributeFormats } from "../../../packages/babylon-lite/src/material/shader/shader-vb";
 import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/scene-helpers";
 
 function makeEngine() {
@@ -154,5 +155,47 @@ describe("ShaderMaterial pipeline cache", () => {
         expect(createRenderPipeline).toHaveBeenCalledTimes(2);
         expect(createRenderPipeline.mock.calls[0]![0]!.primitive!.topology).toBe("triangle-list");
         expect(createRenderPipeline.mock.calls[1]![0]!.primitive!.topology).toBe("line-list");
+    });
+
+    it("keeps materials with different declared attribute formats in separate cached bindings", () => {
+        clearShaderPipelineCache();
+        clearSceneBGLCache();
+        _enableShaderVb();
+        const { engine, createBindGroupLayout } = makeEngine();
+        const first = makeMaterial();
+        const second = makeMaterial();
+        // Identical names/attributes, but "position" is declared with a different
+        // GPUVertexFormat — the two materials must not share a bind group layout, or a
+        // shader compiled for one format's WGSL type would be bound with the other's
+        // buffer layout.
+        setShaderAttributeFormats(first, { position: "float32x3" });
+        setShaderAttributeFormats(second, { position: "sint32x3" });
+        enableShaderPipelineCache(engine, [{ material: first }, { material: second }]);
+
+        const firstBindings = getOrCreateShaderPipelineBindings(engine, first);
+        const callsAfterFirst = createBindGroupLayout.mock.calls.length;
+        const secondBindings = getOrCreateShaderPipelineBindings(engine, second);
+
+        expect(secondBindings).not.toBe(firstBindings);
+        expect(createBindGroupLayout.mock.calls.length).toBeGreaterThan(callsAfterFirst);
+    });
+
+    it("shares cached bindings across materials with identical declared attribute formats", () => {
+        clearShaderPipelineCache();
+        clearSceneBGLCache();
+        _enableShaderVb();
+        const { engine, createBindGroupLayout } = makeEngine();
+        const first = makeMaterial();
+        const second = makeMaterial();
+        setShaderAttributeFormats(first, { position: "sint32x3" });
+        setShaderAttributeFormats(second, { position: "sint32x3" });
+        enableShaderPipelineCache(engine, [{ material: first }, { material: second }]);
+
+        const firstBindings = getOrCreateShaderPipelineBindings(engine, first);
+        const callsAfterFirst = createBindGroupLayout.mock.calls.length;
+        const secondBindings = getOrCreateShaderPipelineBindings(engine, second);
+
+        expect(secondBindings).toBe(firstBindings);
+        expect(createBindGroupLayout.mock.calls.length).toBe(callsAfterFirst);
     });
 });

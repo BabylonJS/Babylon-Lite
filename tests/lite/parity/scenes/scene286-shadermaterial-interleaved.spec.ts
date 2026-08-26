@@ -21,8 +21,12 @@ test("Scene 286 - ShaderMaterial on interleaved glTF matches Babylon.js referenc
     await attachCompareArtifacts(testInfo, screenshotPath, GOLDEN_REF, REFERENCE_DIR);
     console.log(`Full image MAD=${full.mad.toFixed(3)}`);
 
-    // The four-corner gradient is the assertion that matters: position alone would only
-    // prove the byteStride is honoured, while the colour comes from a non-zero
-    // per-attribute offset inside the same bufferView.
+    // The four-corner gradient is the assertion that matters: it verifies the ShaderMaterial
+    // path honours POSITION's non-canonical byteStride (28, not the tight 12) inside the
+    // shared interleaved bufferView. COLOR_0 is included in the draw for visual coverage, but
+    // the loader always materializes it into its own tight buffer, so this scene does not
+    // exercise a non-zero per-attribute *offset* — that is covered by a synthetic-layout unit
+    // test (see shader-vb-color-offset.test.ts) since no real loader path currently produces
+    // one for the ShaderMaterial pipeline.
     expect(full.mad, `Full image MAD should be <= ${sceneConfig.maxMad}`).toBeLessThanOrEqual(sceneConfig.maxMad);
 });

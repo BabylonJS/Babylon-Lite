@@ -35,11 +35,12 @@ export interface ShaderVbSupport {
     _wgslType(material: ShaderMaterial, name: ShaderAttributeName): string;
 }
 
-let _vbSupport: ShaderVbSupport | null = null;
+/** @internal Opt-in ShaderMaterial vertex-format support. */
+export let _shaderVbSupport: ShaderVbSupport | null = null;
 
 /** @internal Install vertex-packing support (called by `mesh-from-storage`). */
 export function _installShaderVbSupport(support: ShaderVbSupport): void {
-    _vbSupport = support;
+    _shaderVbSupport = support;
 }
 
 export interface ShaderPipelineBindings {
@@ -104,7 +105,7 @@ export function getOrCreateShaderPipelineBindings(engine: EngineContext, materia
             group1BGL,
             systemSpec,
             customSpec,
-            vertexBuffers: _vbSupport ? _vbSupport._layouts(material) : material.attributes.map(_attributeLayout),
+            vertexBuffers: _shaderVbSupport ? _shaderVbSupport._layouts(material) : material.attributes.map(_attributeLayout),
             pipelines: new Map(),
             _pipelineLayout: engine._device.createPipelineLayout({ bindGroupLayouts: [getSceneBindGroupLayout(engine), group1BGL] }),
         };
@@ -330,7 +331,7 @@ ${customSpec._structBody}
 `;
     for (let i = 0; i < material.attributes.length; i++) {
         const attr = material.attributes[i]!;
-        wgsl += `@location(${i}) ${attr}: ${_vbSupport ? _vbSupport._wgslType(material, attr) : _attributeWgslType(attr)},
+        wgsl += `@location(${i}) ${attr}: ${_shaderVbSupport ? _shaderVbSupport._wgslType(material, attr) : _attributeWgslType(attr)},
 `;
     }
     wgsl += instanceAttrs;

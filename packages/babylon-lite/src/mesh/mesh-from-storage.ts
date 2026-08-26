@@ -85,7 +85,7 @@ export interface MeshFromStorageOptions {
 export function createMeshFromStorageBuffer(engine: EngineContext, name: string, options: MeshFromStorageOptions): Mesh {
     const { storage, indices, vertexCount, arrayStride, baseVertex = 0 } = options;
 
-    if (!storage._vertex) {
+    if ((storage._usage & BU.VERTEX) === 0) {
         throw new Error("createMeshFromStorageBuffer: storage must be created with { vertex: true } so it carries GPUBufferUsage.VERTEX.");
     }
     if (!Number.isInteger(arrayStride) || arrayStride <= 0 || arrayStride % 4 !== 0) {
@@ -98,7 +98,7 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
 
     const vertexBuffer = _getStorageBufferHandle(engine, storage);
     const sharedIndices = !ArrayBuffer.isView(indices);
-    if (sharedIndices && !(indices as StorageBuffer)._index) {
+    if (sharedIndices && ((indices as StorageBuffer)._usage & BU.INDEX) === 0) {
         throw new Error("createMeshFromStorageBuffer: a StorageBuffer passed as `indices` must be created with { index: true } so it carries GPUBufferUsage.INDEX.");
     }
     const indexCount = options.indexCount ?? (sharedIndices ? 0 : (indices as Uint16Array | Uint32Array).length);

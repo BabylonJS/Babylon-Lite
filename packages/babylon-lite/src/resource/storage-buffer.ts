@@ -22,10 +22,8 @@ export interface StorageBuffer {
     readonly _label?: string;
     /** @internal Bound as `var<storage, read_write>` and usable as a compute target. */
     readonly _writable?: boolean;
-    /** @internal Carries `GPUBufferUsage.VERTEX`, so a mesh can source geometry from it. */
-    readonly _vertex?: boolean;
-    /** @internal Carries `GPUBufferUsage.INDEX`, so many meshes can share one topology. */
-    readonly _index?: boolean;
+    /** @internal Exact usage mask supplied to the buffer creation helpers. */
+    readonly _usage: GPUBufferUsageFlags;
 }
 
 /** Options for {@link createStorageBuffer}. */
@@ -89,8 +87,7 @@ export function createStorageBuffer(engine: EngineContext, source: ArrayBufferVi
         _engine: { value: engine },
         _label: { value: label },
         _writable: { value: writable },
-        _vertex: { value: vertex },
-        _index: { value: index },
+        _usage: { value: usage },
     });
     (engine._storageBuffers ??= new Set()).add(storage);
     if (!engine._storageRequiredLimits) {
@@ -182,7 +179,7 @@ export function _rebuildStorageBuffers(engine: EngineContext): void {
         if (buffer._destroyed) {
             continue;
         }
-        const usage = BU.STORAGE | (buffer._vertex ? BU.VERTEX : 0);
+        const usage = buffer._usage;
         if (buffer._data) {
             buffer._buffer = createMappedBuffer(engine, buffer._data, usage, buffer._label);
         } else {

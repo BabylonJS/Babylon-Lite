@@ -1,15 +1,15 @@
 {
-  "rawKB": 63.1,
-  "rawBytes": 64608,
-  "gzipKB": 26.3,
+  "rawKB": 63.5,
+  "rawBytes": 65053,
+  "gzipKB": 26.5,
   "ignoredRawKB": 0,
   "runtimeChunks": [
     "scene286-generate-mipmaps-keOkD2_8.js",
-    "scene286-gltf-interleave-Bi3dI4_-.js",
+    "scene286-gltf-interleave-BNtVEXHq.js",
     "scene286-gltf-json-asset-CDS0sodr.js",
     "scene286-gltf-normals-DYhLwXNX.js",
     "scene286-gltf-uv-denorm-C5m1dwJ5.js",
-    "scene286-shader-renderable-D95ISEYn.js",
+    "scene286-shader-renderable-BQ78dIer.js",
     "scene286-ubo-layout-Cs5YvLYZ.js",
     "scene286.js"
   ]
