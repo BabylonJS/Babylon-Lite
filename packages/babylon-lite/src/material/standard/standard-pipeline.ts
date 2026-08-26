@@ -12,6 +12,7 @@
 
 import { F32 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";
+import type { SceneContext } from "../../scene/scene-core.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { StandardMaterialProps, StandardSceneShaderContext } from "./standard-material.js";
 import type { Mesh } from "../../mesh/mesh.js";
@@ -318,7 +319,7 @@ export function getOrCreateStandardPipeline(
  *
  *  Mirrors `createPbrMeshBindGroup` in pbr-pipeline.ts. */
 export function createStandardMeshBindGroup(
-    engine: EngineContext,
+    scene: SceneContext,
     bindings: StandardShaderBindings,
     meshUBO: GPUBuffer,
     materialUBO: GPUBuffer,
@@ -326,6 +327,7 @@ export function createStandardMeshBindGroup(
     morphTargets: { deltasBuffer: GPUBuffer; weightsBuffer: GPUBuffer } | null = null,
     mesh?: Mesh
 ): GPUBindGroup {
+    const engine = scene.surface.engine;
     const device = engine._device;
     const features = bindings._features;
     const hasDiffuseTex = features & HAS_DIFFUSE_TEXTURE;
@@ -367,7 +369,7 @@ export function createStandardMeshBindGroup(
     // to match composer's fragment sort order.
     for (const ext of _getStdExtsSorted()) {
         if (features & ext._feature && ext._bind) {
-            nextBinding = ext._bind(material, entries, nextBinding, mesh, engine);
+            nextBinding = ext._bind(material, entries, nextBinding, mesh, scene);
         }
     }
 

@@ -10,15 +10,12 @@ existing **PBR** or **Standard** material while keeping the full built-in
 lighting / IBL / shadow pipeline. Plugins are plain-data objects (GUIDANCE §4b′),
 attached per-instance via `material.plugins = [plugin]`.
 
-**Hard guarantee: plugin-free scenes are BYTE-IDENTICAL to a build without the
-plugin system.** No shared/core file (renderables, group builders, flags,
-pipelines) carries any plugin-specific code. Plugin support is an **explicit
-opt-in**: the application imports and calls `enableMaterialPlugins(scene)` (after
-creating materials/meshes, before `registerScene`). That single call is the _only_
-thing that pulls the plugin bridges into a scene's module graph. A scene that
-never calls it produces the exact same bytes as master — verified by content-hash
-equality of every runtime chunk. The plugin's WGSL ships in the user's scene
-module, not the engine.
+Plugin support is an **explicit opt-in**: the application imports and calls
+`enableMaterialPlugins(scene)` (after creating materials/meshes, before
+`registerScene`). That call is the only thing that pulls the plugin bridges and
+their WGSL into a scene's module graph. Shared Standard binding infrastructure
+only propagates its existing owning `SceneContext` through the generic extension
+hook, allowing opt-in state to remain truly scene-local.
 
 ## Public API Surface
 
@@ -103,10 +100,11 @@ standardGroupBuilder`, so PBR materials are never touched), walks `scene.meshes`
    ext-extensible, so the index must be baked in before the build reads it. PBR
    needs no walk — its `detect` hook encodes the index during feature computation.
    Standard materials created after this walk can be registered explicitly with
-   `bakeStdPluginMaterial(material, scene)`.
+   `bakeStdPluginMaterial(material, scene)`. Materials without plugins are left
+   untouched, so their normal lazy feature detection remains live until build.
 
-Because none of this lives in a shared module, removing the call (or never adding
-it) leaves every byte of the PBR/Standard core untouched.
+The plugin implementation remains outside the always-loaded PBR/Standard graph;
+only the generic Standard binding hook carries scene ownership context.
 
 ## Injection-point → Lite slot mapping
 
@@ -192,18 +190,21 @@ material UBO, so the bridge:
 Standard plugins marked `dynamic: true` have their per-material UBO values
 rewritten before every frame. Dynamic tracking and UBO ownership are scoped to
 the enabling scene, so enabling a second scene does not replace the first
-scene's refresh state. Static plugins retain the registration-time upload.
-Re-baking a material retires its previous UBO after in-flight GPU work drains;
-disposing the scene destroys all of its remaining plugin UBOs and releases the
-material references held by the bridge.
+scene's refresh state. The Standard bind builders pass the owning scene into the
+plugin extension, so one material shared by multiple scenes resolves each
+scene's distinct UBO; disposing either scene cannot invalidate the other's
+binding. Static plugins retain the registration-time upload. Re-baking a
+material queues every affected mesh for a same-frame material-swap rebuild, so
+new bind groups reference the replacement UBO before the old buffer is retired
+after in-flight GPU work drains. Disposing the scene destroys all of its
+remaining plugin UBOs and releases the material references held by the bridge.
 
-The decisive benefit: this route touches **zero shared standard code**. The
-pre-existing `StdExt._bind` / `_textures` loops in `standard-pipeline.ts` /
-`collect-std-bound-textures.ts` and the `_frag` loop in `standard-renderable.ts`
-carry the plugin for free. `standard-renderable.ts`, `standard-group-builder.ts`,
-and `standard-flags.ts` are byte-identical to master (no `_writeUbo` hook, no UBO
-write loop, no gated import). WGSL access to a Standard plugin uniform is
-`pluginUbo.<field>` (PBR access is `material.<field>`).
+The decisive benefit: this route adds no `_writeUbo` hook or plugin UBO loop to
+the Standard renderable. The pre-existing `StdExt._bind` / `_textures` loops in
+`standard-pipeline.ts` / `collect-std-bound-textures.ts` and the `_frag` loop in
+`standard-renderable.ts` carry the plugin; the bind hook receives the owning
+scene so scene-local UBO state can be selected. WGSL access to a Standard plugin
+uniform is `pluginUbo.<field>` (PBR access is `material.<field>`).
 
 ## Pipeline Configuration / Cache Keying
 
@@ -238,9 +239,13 @@ and grayscale is a linear reduction, the result stays pixel-identical.
 3. Per mesh: detect (PBR) / pre-baked features (Standard) assign the signature index
    → compose builds WGSL with the plugin fragment → pipeline/bind groups created →
    UBO + textures bound.
-4. **Toggle:** set `plugin.isEnabled`, call `bakeStdPluginMaterial(material,
-scene)`, then `rebuildMaterial(scene, material)`. The new signature index
-   yields a fresh pipeline and the replaced plugin UBO is retired safely.
+4. **Toggle/re-bake:** set `plugin.isEnabled`, then call
+   `bakeStdPluginMaterial(material, scene)`. The new signature index yields a
+   fresh pipeline; affected bindings are rebuilt through the scene's material
+   swap queue, and the replaced plugin UBO is retired safely. Removing the last
+   plugin clears the cached Standard features only when that scene actually had
+   an existing plugin state; plugin-free materials are never eagerly cached by
+   `enableMaterialPlugins`.
 5. **Dispose:** `disposeScene(scene)` destroys every remaining Standard plugin
    UBO owned by that scene and drops its per-material refresh state.
 
@@ -266,13 +271,12 @@ scene)`, then `rebuildMaterial(scene, material)`. The new signature index
   with the BlackAndWhite plugin enabled, validated against a BJS golden using an
   equivalent `MaterialPluginBase` BlackAndWhite plugin. MAD ≤ `scene-config.maxMad`.
 - Unit coverage verifies independent dynamic refresh state across two scenes,
-  scene-disposal cleanup, and old-UBO retirement when a Standard material is
-  baked again.
-- Bundle-size: every pre-existing (plugin-free) scene stays **byte-identical** to
-  master — `bundle-size.spec.ts` reports no "increased vs master" for any scene
-  except (newly added) scene217. Because plugin code is only reachable through
-  `enableMaterialPlugins`, the shared PBR/Standard chunks keep identical content
-  hashes.
+  scene-disposal cleanup, shared-material scene isolation, lazy plugin-free
+  feature detection, and replacement-UBO rebinding/retirement when a Standard
+  material is baked again.
+- Bundle-size: `bundle-size.spec.ts` guards the generic scene-context propagation
+  and verifies the plugin implementation remains absent from plugin-free scene
+  graphs.
 
 ## File Manifest
 
@@ -283,8 +287,8 @@ scene)`, then `rebuildMaterial(scene, material)`. The new signature index
 - `material/plugin/pbr-plugin-bridge.ts` — PBR `PbrExt`.
 - `material/plugin/std-plugin-bridge.ts` — Standard `StdExt` + self-managed UBO.
 - `material/plugin/enable-material-plugins.ts` — the opt-in entry point.
-- Edits (all plugin-graph-only or type-only): `material/material.ts` (`plugins?`
-  type-only field, erased from JS), `index.ts` (exports). **No shared/core
-  PBR/Standard runtime file is modified** — `standard-renderable.ts`,
-  `standard-group-builder.ts`, `standard-flags.ts`, and `pbr-renderable.ts` are
-  diff-free vs master.
+- Shared Standard binding edits: `standard-flags.ts`, `standard-pipeline.ts`,
+  `standard-renderable.ts`, `standard-geometry-renderable.ts`, and
+  `fragments/std-uv-transform-fragment.ts` propagate `SceneContext` through the
+  generic bind hook. No shared plugin state or plugin-specific binding loop is
+  added.

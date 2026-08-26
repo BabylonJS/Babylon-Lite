@@ -1,7 +1,7 @@
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { Mesh } from "../../mesh/mesh.js";
-import type { EngineContext } from "../../engine/engine.js";
+import type { SceneContext } from "../../scene/scene-core.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 
 // ─── Feature Flags ──────────────────────────────────────────────────
@@ -75,7 +75,7 @@ export interface StdExt {
     /** @internal */
     _frag(features: number, meshFeatures?: number, shadowLights?: ShadowLightSlotLite[]): ShaderFragment;
     /** @internal Push group-1 bind entries starting at binding `b`; return new b. */
-    _bind?(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number, mesh?: Mesh, engine?: EngineContext): number;
+    _bind?(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number, mesh?: Mesh, scene?: SceneContext): number;
     /** @internal Bind feature-owned vertex buffers and return the next slot. */
     _bindVertexBuffers?(mesh: Mesh, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number): number;
     /** @internal Enumerate textures for acquire/release. */

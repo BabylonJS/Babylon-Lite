@@ -211,7 +211,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const matData = new F32(24);
         writeStdMaterialData(matData, mat, textureLevel);
         const materialUBO = createUniformBuffer(engine, matData);
-        const meshBindGroup = createStandardMeshBindGroup(engine, bindings, meshUBO, materialUBO, mat, mesh.morphTargets ?? null, mesh);
+        const meshBindGroup = createStandardMeshBindGroup(s, bindings, meshUBO, materialUBO, mat, mesh.morphTargets ?? null, mesh);
 
         // Shadow bind group (group 2) — shared across receiving meshes via shadowBGCache.
         let shadowBindGroup: GPUBindGroup | null = null;
