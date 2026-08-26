@@ -1,0 +1,5 @@
+# Local validation artifacts — not part of the published package or source history.
+dist/
+shot-*.png
+# Local Lottie test fixtures are copied in by build.mjs and remain untracked.
+*.json

@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>lottie perf bench</title>
+        <style>
+            html,
+            body {
+                margin: 0;
+                background: #000;
+            }
+            canvas {
+                display: block;
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="c"></canvas>
+        <script type="module">
+            // Player-agnostic loader: ?player=sprite|stencil & ?anim=<name>. Fetches the anim JSON, imports
+            // the matching perf adapter bundle, and hands the canvas + JSON to its window.__bench.start.
+            const qs = new URLSearchParams(location.search);
+            const player = qs.get("player") || "stencil";
+            const anim = qs.get("anim") || "";
+            const canvas = document.getElementById("c");
+            const json = await (await fetch(`./anims/${anim}.json`)).json();
+            await import(`./${player}-perf.js`);
+            await window.__bench.start(canvas, json);
+        </script>
+    </body>
+</html>

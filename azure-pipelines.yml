@@ -1,14 +1,16 @@
 # Azure Pipelines — Babylon Lite CI
 #
-# Runs on every PR targeting master. Eight parallel jobs:
-#   1. Release Markers  — breaking-change marker validation
-#   2. API Report       — public API diff comment + breaking-change validation
-#   3. Unit Tests       — vitest + plumbing (Playwright)
-#   4. Bundle Size      — ceiling checks
-#   5. Perf Regression  — Lite vs Stable on BrowserStack
-#   6. Parity (Cloud)   — pixel-diff via cloud browser with real WebGPU
-#   7. Lint             — ESLint + TypeScript type-check
-#   8. Playground Snapshot — per-PR playground deploy + PR comment
+# Runs on every PR targeting master. Dedicated validation jobs include:
+#   - Release Markers     — breaking-change marker validation
+#   - API Report          — public API diff comment + breaking-change validation
+#   - Unit Tests          — vitest + plumbing (Playwright)
+#   - Lottie Player       — unit/build/size/docs/visual/package checks
+#   - Bundle Size         — ceiling checks
+#   - Perf Regression     — Lite vs Stable on BrowserStack
+#   - Parity (Cloud)      — pixel-diff via cloud browser with real WebGPU
+#   - Lint                — ESLint + TypeScript type-check
+#   - Compat Layer        — compatibility package type-check/build/unit tests
+#   - Playground Snapshot — per-PR playground deploy + PR comment
 #
 
 trigger: none
@@ -28,7 +30,7 @@ variables:
     - name: NODE_VERSION
       value: "22.x"
     - name: PNPM_VERSION
-      value: "11.9.0"
+      value: "11.23.0"
     - name: CI
       value: "true"
     - name: HEADLESS
@@ -39,7 +41,7 @@ stages:
       displayName: "PR Validation"
       jobs:
           # ──────────────────────────────────────────────────────────────
-          # Job 0: Release Marker Validation
+          # Release Marker Validation
           # ──────────────────────────────────────────────────────────────
           - job: ReleaseMarkers
             displayName: "Release Markers"
@@ -69,7 +71,7 @@ stages:
                       GITHUB_TOKEN: "$(GITHUB_TOKEN)"
 
           # ──────────────────────────────────────────────────────────────
-          # Job 1: API Report
+          # API Report
           # ──────────────────────────────────────────────────────────────
           - job: ApiReport
             displayName: "API Report"
@@ -110,7 +112,7 @@ stages:
                       comment: "$(API_COMMENT_BODY)"
 
           # ──────────────────────────────────────────────────────────────
-          # Job 2: Unit Tests
+          # Unit Tests
           # ──────────────────────────────────────────────────────────────
           - job: UnitTests
             displayName: "Unit Tests"
@@ -197,8 +199,56 @@ stages:
                   continueOnError: true
                   displayName: "Report test results"
 
+          # Dedicated Lottie package validation. Kept separate so the required
+          # BabylonJS.Babylon-Lite pipeline exposes a focused release gate.
+          - job: LottiePlayer
+            displayName: "Lottie Player"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: pnpm build:lottie-player
+                  displayName: "Build Lottie player for type-check and visual tests"
+
+                - script: pnpm lint:lottie-player:built
+                  displayName: "Lint and type-check"
+
+                - script: pnpm format:check:lottie-player
+                  displayName: "Check formatting"
+
+                - script: pnpm test:unit:lottie-player
+                  displayName: "Run unit tests"
+
+                - script: pnpm test:release:lottie-player
+                  displayName: "Run release-policy tests"
+
+                - script: pnpm test:build:lottie-player:built
+                  displayName: "Run build, size, and package-content tests"
+
+                - script: pnpm docs:check:lottie-player
+                  displayName: "Validate API documentation"
+
+                - script: pnpm exec playwright install --with-deps chromium
+                  displayName: "Install Chromium for visual tests"
+
+                - script: pnpm test:visual:lottie-player:built
+                  displayName: "Run visual regression tests"
+
           # ──────────────────────────────────────────────────────────────
-          # Job 3: Bundle Size
+          # Bundle Size
           # ──────────────────────────────────────────────────────────────
           - job: BundleSize
             displayName: "Bundle Size"
@@ -309,7 +359,7 @@ stages:
                       linkUrl: $(SERVE_DOMAIN)/lite/$(Build.BuildNumber)/lab/index.html
 
           # ──────────────────────────────────────────────────────────────
-          # Job 4: Performance Regression
+          # Performance Regression
           # ──────────────────────────────────────────────────────────────
           - job: PerfRegression
             displayName: "Performance: Lite vs Stable"
@@ -442,7 +492,7 @@ stages:
                       reportType: perf
 
           # ──────────────────────────────────────────────────────────────
-          # Job 5: Parity (Cloud Browser)
+          # Parity (Cloud Browser)
           # ──────────────────────────────────────────────────────────────
           - job: ParityCloud
             displayName: "Parity Tests (Cloud Browser)"
@@ -522,7 +572,7 @@ stages:
                       reportType: parity
 
           # ──────────────────────────────────────────────────────────────
-          # Job 6: Lint
+          # Lint
           # ──────────────────────────────────────────────────────────────
           - job: Lint
             displayName: "Lint & Type Check"
@@ -590,7 +640,7 @@ stages:
                   displayName: "Feature-comparison doc in sync"
 
           # ──────────────────────────────────────────────────────────────
-          # Job 7: Compat Layer (@babylonjs/lite-compat)
+          # Compat Layer (@babylonjs/lite-compat)
           # ──────────────────────────────────────────────────────────────
           # Type-checks, builds, and unit-tests the opt-in compatibility layer so
           # regressions are caught in PR CI. NOTE: this job intentionally does NOT
@@ -646,7 +696,7 @@ stages:
                   continueOnError: true
 
           # ──────────────────────────────────────────────────────────────
-          # Job 8: PR Playground Snapshot
+          # PR Playground Snapshot
           # ──────────────────────────────────────────────────────────────
           # Builds the Lite Playground from THIS PR's source — the self-hosted
           # engine is bundled from the same commit, so the runner executes the PR's

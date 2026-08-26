@@ -1,0 +1,55 @@
+{
+    "v": "5.7.0",
+    "fr": 30,
+    "ip": 0,
+    "op": 60,
+    "w": 400,
+    "h": 400,
+    "nm": "Babylon Lottie Player embedded image visual fixture",
+    "assets": [
+        {
+            "id": "image_0",
+            "w": 16,
+            "h": 16,
+            "u": "",
+            "p": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAAxSURBVDhPY9DY8uw/Pvx1ny5ezICuAR2ja0DHowYMCgNeu9X+x4fdzhbjxaMGDAsDAIEWtJ/VYyxTAAAAAElFTkSuQmCC",
+            "e": 1
+        }
+    ],
+    "layers": [
+        {
+            "ind": 1,
+            "ty": 2,
+            "refId": "image_0",
+            "nm": "Four-color embedded image",
+            "ks": {
+                "o": { "a": 0, "k": 100 },
+                "p": { "a": 0, "k": [200, 200] },
+                "a": { "a": 0, "k": [8, 8] },
+                "s": { "a": 0, "k": [1200, 1200] },
+                "r": { "a": 0, "k": 12 }
+            },
+            "ip": 0,
+            "op": 60,
+            "st": 0
+        },
+        {
+            "ind": 2,
+            "ty": 1,
+            "nm": "Background",
+            "sc": "#202830",
+            "sw": 400,
+            "sh": 400,
+            "ks": {
+                "o": { "a": 0, "k": 100 },
+                "p": { "a": 0, "k": [0, 0] },
+                "a": { "a": 0, "k": [0, 0] },
+                "s": { "a": 0, "k": [100, 100] },
+                "r": { "a": 0, "k": 0 }
+            },
+            "ip": 0,
+            "op": 60,
+            "st": 0
+        }
+    ]
+}

@@ -1,0 +1,148 @@
+# Azure Pipelines - @babylonjs/lottie-player npm publish
+#
+# Release preparation is intentionally manual-first. Editing the dedicated release config runs
+# the full validation and dry-run path; live publication is possible only from a manually queued
+# run with dryRun=false. There is no schedule.
+
+trigger:
+    branches:
+        include:
+            - master
+    paths:
+        include:
+            - config/release-lottie-player.json
+
+pr: none
+
+parameters:
+    - name: releaseType
+      displayName: "Release type"
+      type: string
+      default: auto
+      values:
+          - auto
+          - patch
+          - minor
+          - major
+    - name: dryRun
+      displayName: "Dry run (validate and resolve without publishing or tagging)"
+      type: boolean
+      default: true
+
+variables:
+    - name: NODE_VERSION
+      value: "22.x"
+    - name: PNPM_VERSION
+      value: "11.23.0"
+    - name: CI
+      value: "true"
+
+stages:
+    - stage: PublishNpm
+      displayName: "Publish @babylonjs/lottie-player to npm"
+      jobs:
+          - job: BuildTestAndPublish
+            displayName: "Build, test, and publish"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+                  fetchDepth: 0
+                  fetchTags: true
+                  persistCredentials: true
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: pnpm build:lottie-player
+                  displayName: "Build Lottie player for type-check"
+
+                - script: pnpm lint:lottie-player:built
+                  displayName: "Lint and type-check Lottie player"
+
+                - script: pnpm format:check:lottie-player
+                  displayName: "Check Lottie player formatting"
+
+                - script: pnpm test:unit:lottie-player
+                  displayName: "Run Lottie player unit tests"
+
+                - script: pnpm test:release:lottie-player
+                  displayName: "Run Lottie release-policy tests"
+
+                - script: pnpm test:build:lottie-player:built
+                  displayName: "Run Lottie build, size, and package-content tests"
+
+                - script: pnpm docs:check:lottie-player
+                  displayName: "Validate Lottie API documentation"
+
+                - script: pnpm exec tsx scripts/prepare-lottie-player-release.ts
+                  displayName: "Resolve npm package version"
+                  env:
+                      RELEASE_TYPE: ${{ parameters.releaseType }}
+
+                - script: pnpm build:lottie-player
+                  displayName: "Build release package"
+                  env:
+                      PACKAGE_VERSION: $(PACKAGE_VERSION)
+
+                - script: pnpm exec playwright install --with-deps chromium
+                  displayName: "Install Chromium for visual tests"
+
+                - script: pnpm test:visual:lottie-player:built
+                  displayName: "Run Lottie visual regression tests"
+
+                - script: npm pack --dry-run ./packages/babylon-lottie-player/dist
+                  displayName: "Validate npm package contents"
+
+                - script: |
+                      set -euo pipefail
+                      TAG="npm-lottie-player-v$(PACKAGE_VERSION)"
+                      if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+                          echo "Release tag $TAG already exists locally."
+                          exit 1
+                      fi
+                      if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+                          echo "Release tag $TAG already exists on origin."
+                          exit 1
+                      fi
+                  displayName: "Validate release tag availability"
+
+                - ${{ if eq(parameters.dryRun, true) }}:
+                      - script: npm publish ./packages/babylon-lottie-player/dist --dry-run --access public --registry https://registry.npmjs.org/
+                        displayName: "Dry-run npm publication"
+
+                - ${{ if eq(parameters.dryRun, false) }}:
+                      - script: |
+                            set -euo pipefail
+                            if [ "$(Build.SourceBranch)" != "refs/heads/master" ]; then echo "Live npm publication is allowed only from refs/heads/master."; exit 1; fi
+                            if [ "$(Build.Reason)" != "Manual" ]; then
+                                echo "Live npm publication is allowed only from an explicitly queued manual run."
+                                exit 1
+                            fi
+                            if [ -z "${NPM_TOKEN:-}" ]; then
+                                echo "NPM_TOKEN must be configured as a secret pipeline variable."
+                                exit 1
+                            fi
+                            printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > ~/.npmrc
+                            npm publish ./packages/babylon-lottie-player/dist --access public --registry https://registry.npmjs.org/
+                        displayName: "Publish package to npm"
+                        env:
+                            NPM_TOKEN: $(NPM_TOKEN)
+
+                      - script: |
+                            set -euo pipefail
+                            TAG="npm-lottie-player-v$(PACKAGE_VERSION)"
+                            git config user.email "bjsplat@gmail.com"
+                            git config user.name "Babylon.js CI"
+                            git tag "$TAG" -m "Publish @babylonjs/lottie-player $(PACKAGE_VERSION)"
+                            git push origin "refs/tags/$TAG"
+                        displayName: "Tag published npm version"

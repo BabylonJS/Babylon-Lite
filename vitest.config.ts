@@ -1,4 +1,20 @@
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { defineConfig } from "vitest/config";
+
+const lottieJsToTs = {
+    name: "lottie-js-to-ts",
+    enforce: "pre" as const,
+    resolveId(source: string, importer: string | undefined): string | null {
+        if (importer && source.startsWith(".") && source.endsWith(".js")) {
+            const typescriptPath = resolve(dirname(importer), `${source.slice(0, -3)}.ts`);
+            if (existsSync(typescriptPath)) {
+                return typescriptPath;
+            }
+        }
+        return null;
+    },
+};
 
 export default defineConfig({
     test: {
@@ -55,6 +71,40 @@ export default defineConfig({
                     name: "gl-build",
                     include: ["tests/gl/build/**/*.test.ts"],
                     testTimeout: 300_000,
+                },
+            },
+            {
+                extends: true,
+                plugins: [lottieJsToTs],
+                test: {
+                    name: "lottie-unit",
+                    include: ["packages/babylon-lottie-player/tests/**/*.test.ts"],
+                    exclude: [
+                        "packages/babylon-lottie-player/tests/worker-client-size.test.ts",
+                        "packages/babylon-lottie-player/tests/package-content.test.ts",
+                        "packages/babylon-lottie-player/tests/release-version.test.ts",
+                    ],
+                    setupFiles: [],
+                },
+            },
+            {
+                extends: true,
+                plugins: [lottieJsToTs],
+                test: {
+                    name: "lottie-build",
+                    include: ["packages/babylon-lottie-player/tests/worker-client-size.test.ts", "packages/babylon-lottie-player/tests/package-content.test.ts"],
+                    setupFiles: [],
+                    testTimeout: 300_000,
+                    fileParallelism: false,
+                },
+            },
+            {
+                extends: true,
+                plugins: [lottieJsToTs],
+                test: {
+                    name: "lottie-release",
+                    include: ["packages/babylon-lottie-player/tests/release-version.test.ts"],
+                    setupFiles: [],
                 },
             },
             {

@@ -1,0 +1,19 @@
+{
+    "$schema": "https://typedoc.org/schema.json",
+    "entryPoints": ["src/index.ts", "src/shapes.ts", "src/standalone.ts"],
+    "tsconfig": "tsconfig.json",
+    "out": "docs/api",
+    "name": "Babylon Lottie Player API",
+    "readme": "README.md",
+    "githubPages": false,
+    "hideGenerator": true,
+    "excludeInternal": true,
+    "excludePrivate": true,
+    "skipErrorChecking": true,
+    "validation": {
+        "notExported": false,
+        "invalidLink": true,
+        "notDocumented": true
+    },
+    "requiredToBeDocumented": ["Enum", "Variable", "Function", "Class", "Interface", "TypeAlias"]
+}
