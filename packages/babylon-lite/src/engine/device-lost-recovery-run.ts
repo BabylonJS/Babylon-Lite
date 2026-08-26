@@ -82,11 +82,11 @@ export async function runDeviceLostRecovery(engine: EngineContext, state: Device
     } finally {
         // After the handlers, never before: each one re-establishes the texture references it owns
         // as it rebuilds its bind groups, and only what is still missing now is ownership recovery
-        // will not restore by itself. Runs even when a handler throws, because the queue is module
-        // state that outlives this recovery: it is the one place here holding textures strongly, so
-        // stranding it pins every rebuilt wrapper and the pixels its source kept, and the next
-        // recovery would drain it onto a different device's textures. A throw is not necessarily
-        // total either — the new device is live and whichever handlers did run own real references.
+        // will not restore by itself. Runs even when a handler throws, because the queue outlives
+        // this recovery: it is the one place here holding textures strongly, so stranding it pins
+        // every rebuilt wrapper and the pixels its source kept, and a later recovery on this engine
+        // would drain it onto a different device's textures. A throw is not necessarily total
+        // either — the new device is live and whichever handlers did run own real references.
         settleTextureOwnership?.();
     }
 
@@ -145,12 +145,13 @@ async function rebuildRecoverableTextures(engine: EngineContext, state: DeviceLo
         });
     } catch (error) {
         // Recovery is over, so the handlers that would have re-established ownership never run.
-        // Settle what was rebuilt before giving up rather than stranding it for the next recovery,
-        // which would apply it to a different device's textures.
-        settleRebuiltTextureOwnership();
+        // Settle what was rebuilt before giving up rather than stranding it for a later recovery,
+        // which would apply it to a different device's textures. Only this engine's queue, so a
+        // failure here cannot settle a concurrently recovering engine's textures early.
+        settleRebuiltTextureOwnership(state);
         throw error;
     }
-    return settleRebuiltTextureOwnership;
+    return () => settleRebuiltTextureOwnership(state);
 }
 
 /**

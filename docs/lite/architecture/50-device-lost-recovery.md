@@ -298,6 +298,18 @@ the only reference is that renderable's, so draining takes the count to zero,
 `releaseTexture` destroys the texture and leaves the zero entry below, and the
 rebuild is then skipped for a texture the re-recorded bind group is about to use.
 
+The queue of deferred ownership hangs off the engine's recovery state rather than
+the module, because a lost GPU process loses every device on the page at once and
+each engine then recovers on its own timeline. A shared queue would let whichever
+engine reached its handlers first drain every engine's entries, restoring the
+others to their full pre-loss count while their handlers had yet to re-acquire —
+reintroducing the double-count above across engines instead of within one. Per
+engine is also per run: `arm` only re-arms once a recovery resolves, so one
+engine cannot overlap itself. The queue is reached through the engine rather than
+threaded as a parameter because the handlers' own walks call `rebuildTexture2D`
+too, and a parameter those call sites did not pass would silently drop the
+ownership of anything they rebuilt first.
+
 Whether a texture has been *released* is asked of every kind, because every kind
 can reach that state — `releaseTexture` is public API, and its first call
 destroys a texture whose creator took no reference of its own. Rebuilding a
@@ -386,9 +398,10 @@ module-level side effects; mutable caches remain null until an explicit call.
   release — still rebuilding an ownerless texture nothing has released, each
   creator-owned kind surviving one consumer acquire/release cycle, a derived
   family's second reference surviving the rebuild, the dynamic rebuild's own
-  reference being counted rather than doubled, and a handler that re-acquires as
+  reference being counted rather than doubled, a handler that re-acquires as
   it rebuilds its bind groups leaving a count final disposal can still bring to
-  zero.
+  zero, and two engines recovering concurrently — one parked inside its handlers
+  while the other completes — settling only their own textures.
 - Scene recovery unit tests replace the device under an ESM shadow generator
   and assert that its textures, sampler, UBOs, hidden blur resources, and nested
   render task are recreated while the generator identity remains stable and the

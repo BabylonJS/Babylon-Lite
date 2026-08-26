@@ -689,6 +689,62 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
         recovery.disable();
     });
 
+    it("settles only its own engine's textures when two recoveries interleave", async () => {
+        // A lost GPU process loses every device on the page at once, so engines recover
+        // concurrently and their async rebuilds overlap. Engine A parks inside its handlers while
+        // engine B runs its whole recovery: B must not settle A's textures, whose handlers have not
+        // re-acquired yet, or A is restored to its full pre-loss count and then acquired on top of
+        // that — one reference nothing can ever release.
+        const engineA = trackingEngine();
+        const engineB = trackingEngine();
+        const recoveryA = enableDeviceLostSpriteRecovery(engineA);
+        const recoveryB = enableDeviceLostSpriteRecovery(engineB);
+        const textureA = sourceTexture(true); // the creator's reference
+        acquireTexture(textureA); // a renderable's bind group
+        engineA._dlr!.p(textureA, new Uint8Array([1, 2, 3, 4]), {});
+        const textureB = sourceTexture(true);
+        acquireTexture(textureB);
+        engineB._dlr!.p(textureB, new Uint8Array([1, 2, 3, 4]), {});
+
+        let enteredHandlersA!: () => void;
+        const inHandlersA = new Promise<void>((resolve) => (enteredHandlersA = resolve));
+        let resumeA!: () => void;
+        const parkedA = new Promise<void>((resolve) => (resumeA = resolve));
+
+        vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => device()) })) } });
+        const recoverA = runDeviceLostRecovery(engineA, engineA._deviceLostRecovery!, [
+            {
+                _kind: "sprite-renderer",
+                _recover: async () => {
+                    enteredHandlersA();
+                    await parkedA;
+                    acquireTexture(textureA);
+                },
+            },
+        ]);
+        // A is now past its rebuild and inside its handlers, ownership queued but not yet settled.
+        await inHandlersA;
+        await runDeviceLostRecovery(engineB, engineB._deviceLostRecovery!, [{ _kind: "sprite-renderer", _recover: () => void acquireTexture(textureB) }]);
+        expect(engineA._deviceLostRecovery!._pendingOwnership).toHaveLength(1);
+        expect(engineB._deviceLostRecovery!._pendingOwnership).toBeUndefined();
+        resumeA();
+        await recoverA;
+        vi.unstubAllGlobals();
+
+        // Final disposal for each: the scene releases the renderable's reference, the application
+        // the creator's. A texture settled by the other engine's run would still hold one.
+        const rebuiltA = textureA.texture as unknown as { destroy: ReturnType<typeof vi.fn> };
+        expect(releaseTexture(textureA)).toBe(false);
+        expect(releaseTexture(textureA)).toBe(true);
+        expect(rebuiltA.destroy).toHaveBeenCalledTimes(1);
+        const rebuiltB = textureB.texture as unknown as { destroy: ReturnType<typeof vi.fn> };
+        expect(releaseTexture(textureB)).toBe(false);
+        expect(releaseTexture(textureB)).toBe(true);
+        expect(rebuiltB.destroy).toHaveBeenCalledTimes(1);
+        recoveryA.disable();
+        recoveryB.disable();
+    });
+
     for (const [kind, owned, capture] of recoverableKinds) {
         it(`does not rebuild a ${kind} texture the application has already released`, async () => {
             const engine = trackingEngine();

@@ -2,17 +2,13 @@ import { U8 } from "../engine/typed-arrays.js";
 import { TU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D, Texture2DOptions, Texture2DRecoverySource } from "./texture-2d.js";
+import type { DeviceLostRecoveryState } from "../engine/device-lost-recovery.js";
 import { getOrCreateSampler, acquireTexture, _isTextureReleased, _textureOwners } from "../resource/gpu-pool.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 
 /** The wrapper that rebuilt each recovery source and the device it rebuilt for, so any other
  *  wrapper sharing that source adopts its result instead of building a second copy. */
 let _rebuiltOn: WeakMap<Texture2DRecoverySource, { device: GPUDevice; tex: Texture2D; done: Promise<void> }> | null = null;
-
-/** Each texture rebuilt during the current recovery and the ownership its outgoing GPUTexture
- *  held, carried onto the replacement by `settleRebuiltTextureOwnership` once the per-context
- *  handlers have run. Null between recoveries. */
-let _pendingOwnership: [Texture2D, number][] | null = null;
 
 /**
  * Rebuilds a single Texture2D after a WebGPU device loss from the pure recovery
@@ -75,13 +71,16 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
     // ownership to carry. Wrappers that adopt queue none either, exactly as `cloneTexture2D` takes
     // none at creation: they share the references held for the texture they now point at.
     if (owners > 0) {
-        (_pendingOwnership ??= []).push([tex, owners]);
+        const state = engine._deviceLostRecovery;
+        if (state) {
+            (state._pendingOwnership ??= []).push([tex, owners]);
+        }
     }
 }
 
 /**
- * Carries onto each rebuilt texture the ownership its outgoing GPUTexture held, after every
- * per-context recovery handler has re-established the references it owns.
+ * Carries onto each texture `state`'s engine rebuilt the ownership its outgoing GPUTexture held,
+ * after every per-context recovery handler has re-established the references it owns.
  *
  * Deferring to here is what makes the count correct: whatever is still missing once the handlers
  * have run is by definition a reference recovery did NOT re-establish — the creator's, and any
@@ -89,11 +88,16 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
  * restoring only one would let the next release destroy a texture a sibling still points at. It is
  * a top-up rather than an outright `acquireTexture` so a handler that already re-took its own
  * reference is counted rather than doubled.
+ *
+ * Draining only this engine's queue is what keeps that true when a lost GPU process starts several
+ * recoveries at once: another engine still inside its handlers has not re-established anything yet,
+ * so topping its textures up here would restore the full pre-loss count and let its handlers add to
+ * it — the very inflation this deferral prevents.
  * @internal
  */
-export function settleRebuiltTextureOwnership(): void {
-    const pending = _pendingOwnership;
-    _pendingOwnership = null;
+export function settleRebuiltTextureOwnership(state: DeviceLostRecoveryState): void {
+    const pending = state._pendingOwnership;
+    state._pendingOwnership = undefined;
     if (!pending) {
         return;
     }
