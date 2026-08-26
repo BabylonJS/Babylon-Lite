@@ -23,14 +23,12 @@
 //   not a divergent 16-case branch. Measured: switching from a midpoint sample to the exact integral
 //   was worth +0.4 percentage points, so the exactness matters a little.
 //
-//   This is NOT the same function AreaTex stores, and the difference is in the pattern index rather
-//   than the integral. Reference SMAA indexes the table on both crossing ends separately, so all 16
-//   combinations are distinct. Here each end is reduced to a single signed step (see cl/cr below):
-//   a crossing in this row is +1, one in the row above is -1, and "no crossing" and "crossings on
-//   both sides" both collapse to 0. The two collapsed cases are genuine information loss — a line
-//   that simply ends, and a T-junction, are reconstructed as if flat. Measured against the
-//   glsl-smaa oracle on the synthetic suite, what remains is 55.8 dB on staircases and 37.8 dB on
-//   crossing thin lines, the latter being exactly where the collapse bites.
+//   This is NOT the same function AreaTex stores, but it retains the same four crossing bits: two at
+//   each end of the run. A lone crossing selects the side that the line steps toward. A crossing on
+//   both sides is a T-junction; when the other end has a lone crossing, it resolves to the opposite
+//   side so the line continues through the junction instead of being mistaken for an open line end.
+//   The resulting two signed endpoints still feed the compact piecewise-linear integral below,
+//   avoiding the divergent 16-case AreaTex reconstruction without merging distinct patterns.
 //
 //   SearchTex exists to jump several pixels per fetch when walking a long edge run. Measured on
 //   hard-surface content, sweeping maxSearchSteps from 4 to 64 moved the error by less than 0.2
@@ -350,14 +348,30 @@ fn smaaAccum(p:f32, q:f32, hp:f32, hq:f32)->vec2f{
     return vec2f(max(a1, 0.0) + max(a2, 0.0), max(-a1, 0.0) + max(-a2, 0.0));
 }
 
+// Preserve both crossing bits at each end. A lone crossing maps directly to a signed step. If an
+// end has both crossings (a T-junction), the lone crossing at the other end determines which branch
+// continues through it. No crossing stays distinct and leaves that endpoint flat.
+fn smaaResolveCrossings(cNear:vec2f, cFar:vec2f)->vec2f{
+    let near = step(vec2f(0.5), cNear);
+    let far = step(vec2f(0.5), cFar);
+    let raw = vec2f(near.x - near.y, far.x - far.y);
+    let nearBoth = near.x + near.y > 1.5;
+    let farBoth = far.x + far.y > 1.5;
+    return vec2f(
+        select(raw.x, -raw.y, nearBoth && abs(raw.y) > 0.5),
+        select(raw.y, -raw.x, farBoth && abs(raw.x) > 0.5)
+    );
+}
+
 // Coverage of the pixel spanning [x0, x0+1]: the exact area under the reconstructed edge, split at
 // the kink in the middle of the run so each piece is linear.
-fn smaaCoveragePair(x0:f32, len:f32, cNear:f32, cFar:f32)->vec2f{
+fn smaaCoveragePair(x0:f32, len:f32, cNear:vec2f, cFar:vec2f)->vec2f{
+    let crossing = smaaResolveCrossings(cNear, cFar);
     let x1 = x0 + 1.0;
     let m = clamp(len * 0.5, x0, x1);
-    let h0 = smaaHeight(x0, len, cNear, cFar);
-    let hm = smaaHeight(m,  len, cNear, cFar);
-    let h1 = smaaHeight(x1, len, cNear, cFar);
+    let h0 = smaaHeight(x0, len, crossing.x, crossing.y);
+    let hm = smaaHeight(m,  len, crossing.x, crossing.y);
+    let h1 = smaaHeight(x1, len, crossing.x, crossing.y);
     return smaaAccum(x0, m, h0, hm) + smaaAccum(m, x1, hm, h1);
 }
 
@@ -436,9 +450,9 @@ fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{
         // against its mirror — getting this backwards makes the filter sharpen instead of smooth.)
         let lEnd = uv + vec2f(-ts.x * d1, 0.0);
         let rEnd = uv + vec2f( ts.x * (d2 + 1.0), 0.0);
-        let cl = step(0.5, smaaEdgeAt(lEnd).x) - step(0.5, smaaEdgeAt(lEnd + vec2f(0.0, -ts.y)).x);
-        let cr = step(0.5, smaaEdgeAt(rEnd).x) - step(0.5, smaaEdgeAt(rEnd + vec2f(0.0, -ts.y)).x);
-        var c = smaaCoveragePair(d1, len, cl, cr);
+        let lCross = vec2f(smaaEdgeAt(lEnd).x, smaaEdgeAt(lEnd + vec2f(0.0, -ts.y)).x);
+        let rCross = vec2f(smaaEdgeAt(rEnd).x, smaaEdgeAt(rEnd + vec2f(0.0, -ts.y)).x);
+        var c = smaaCoveragePair(d1, len, lCross, rCross);
         if (smaaWeight.corner > 0.5) {
             c *= smaaHorizontalCornerFactors(lEnd, rEnd, ts, d1, d2);
         }
@@ -451,9 +465,9 @@ fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{
         let len = d1 + d2 + 1.0;
         let tEnd = uv + vec2f(0.0, -ts.y * d1);
         let bEnd = uv + vec2f(0.0,  ts.y * (d2 + 1.0));
-        let ct = step(0.5, smaaEdgeAt(tEnd).y) - step(0.5, smaaEdgeAt(tEnd + vec2f(-ts.x, 0.0)).y);
-        let cb = step(0.5, smaaEdgeAt(bEnd).y) - step(0.5, smaaEdgeAt(bEnd + vec2f(-ts.x, 0.0)).y);
-        var c = smaaCoveragePair(d1, len, ct, cb);
+        let tCross = vec2f(smaaEdgeAt(tEnd).y, smaaEdgeAt(tEnd + vec2f(-ts.x, 0.0)).y);
+        let bCross = vec2f(smaaEdgeAt(bEnd).y, smaaEdgeAt(bEnd + vec2f(-ts.x, 0.0)).y);
+        var c = smaaCoveragePair(d1, len, tCross, bCross);
         if (smaaWeight.corner > 0.5) {
             c *= smaaVerticalCornerFactors(tEnd, bEnd, ts, d1, d2);
         }
@@ -575,6 +589,17 @@ function clampThreshold(value: number | undefined, fallback: number): number {
         return fallback;
     }
     return Math.min(0.5, value);
+}
+
+type SmaaCrossingState = readonly [sameSide: number, oppositeSide: number];
+
+/** @internal Exported for focused regression tests of open line ends and T-junctions. */
+export function _smaaResolveCrossingsForTests(near: SmaaCrossingState, far: SmaaCrossingState): readonly [near: number, far: number] {
+    const nearBits = [near[0] >= 0.5 ? 1 : 0, near[1] >= 0.5 ? 1 : 0] as const;
+    const farBits = [far[0] >= 0.5 ? 1 : 0, far[1] >= 0.5 ? 1 : 0] as const;
+    const rawNear = nearBits[0] - nearBits[1];
+    const rawFar = farBits[0] - farBits[1];
+    return [nearBits[0] + nearBits[1] === 2 && rawFar !== 0 ? -rawFar : rawNear, farBits[0] + farBits[1] === 2 && rawNear !== 0 ? -rawNear : rawFar];
 }
 
 /**

@@ -5,6 +5,60 @@ import { getSceneConfig } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(187);
 
+interface PanelQuality {
+    meanLuma: readonly [left: number, right: number];
+    foregroundRatio: readonly [left: number, right: number];
+    correlation: number;
+    highFrequencyEnergy: readonly [left: number, right: number];
+}
+
+function lumaAt(png: PNG, x: number, y: number): number {
+    const offset = (y * png.width + x) * 4;
+    return 0.2126 * png.data[offset]! + 0.7152 * png.data[offset + 1]! + 0.0722 * png.data[offset + 2]!;
+}
+
+function measurePanelQuality(png: PNG, region: { xMin: number; xMax: number; yMin: number; yMax: number }): PanelQuality {
+    const panelWidth = png.width / 2;
+    const sums = [0, 0];
+    const squares = [0, 0];
+    let product = 0;
+    const foreground = [0, 0];
+    const highFrequency = [0, 0];
+    const pixelCount = (region.xMax - region.xMin) * (region.yMax - region.yMin);
+    const interiorCount = (region.xMax - region.xMin - 2) * (region.yMax - region.yMin - 2);
+
+    for (let y = region.yMin; y < region.yMax; y++) {
+        for (let x = region.xMin; x < region.xMax; x++) {
+            const values = [lumaAt(png, x, y), lumaAt(png, x + panelWidth, y)];
+            for (let panel = 0; panel < 2; panel++) {
+                const value = values[panel]!;
+                sums[panel]! += value;
+                squares[panel]! += value * value;
+                foreground[panel]! += value >= 16 ? 1 : 0;
+                if (x > region.xMin && x < region.xMax - 1 && y > region.yMin && y < region.yMax - 1) {
+                    const panelX = x + panel * panelWidth;
+                    highFrequency[panel]! += Math.abs(
+                        4 * value - lumaAt(png, panelX - 1, y) - lumaAt(png, panelX + 1, y) - lumaAt(png, panelX, y - 1) - lumaAt(png, panelX, y + 1)
+                    );
+                }
+            }
+            product += values[0]! * values[1]!;
+        }
+    }
+
+    const meanLeft = sums[0]! / pixelCount;
+    const meanRight = sums[1]! / pixelCount;
+    const covariance = product / pixelCount - meanLeft * meanRight;
+    const varianceLeft = squares[0]! / pixelCount - meanLeft * meanLeft;
+    const varianceRight = squares[1]! / pixelCount - meanRight * meanRight;
+    return {
+        meanLuma: [meanLeft, meanRight],
+        foregroundRatio: [foreground[0]! / pixelCount, foreground[1]! / pixelCount],
+        correlation: covariance / Math.sqrt(varianceLeft * varianceRight),
+        highFrequencyEnergy: [highFrequency[0]! / interiorCount, highFrequency[1]! / interiorCount],
+    };
+}
+
 function comparePanels(png: PNG, region: { xMin: number; xMax: number; yMin: number; yMax: number }): { mad: number; changedRatio: number } {
     const panelWidth = png.width / 2;
     let difference = 0;
@@ -84,11 +138,18 @@ test("Scene 187 presents the same stress image without AA and through SMAA", asy
     const screenshot = PNG.sync.read(await canvas.screenshot());
     const shallowEdges = comparePanels(screenshot, { xMin: 35, xMax: 605, yMin: 75, yMax: 270 });
     const fullChart = comparePanels(screenshot, { xMin: 20, xMax: 620, yMin: 70, yMax: 700 });
+    const shallowQuality = measurePanelQuality(screenshot, { xMin: 35, xMax: 605, yMin: 75, yMax: 270 });
+    const fullQuality = measurePanelQuality(screenshot, { xMin: 20, xMax: 620, yMin: 70, yMax: 700 });
 
     expect(shallowEdges.mad).toBeGreaterThan(0.05);
     expect(shallowEdges.changedRatio).toBeGreaterThan(0.001);
     expect(fullChart.mad).toBeGreaterThan(0.03);
     expect(fullChart.changedRatio).toBeGreaterThan(0.001);
+    expect(fullChart.mad).toBeLessThan(4);
+    expect(fullQuality.correlation).toBeGreaterThan(0.97);
+    expect(Math.abs(fullQuality.meanLuma[1] - fullQuality.meanLuma[0])).toBeLessThan(0.5);
+    expect(Math.abs(fullQuality.foregroundRatio[1] - fullQuality.foregroundRatio[0])).toBeLessThan(0.03);
+    expect(shallowQuality.highFrequencyEnergy[1]).toBeLessThan(shallowQuality.highFrequencyEnergy[0] * 0.9);
 });
 
 test("Scene 187 exposes live SMAA controls with debug=1", async ({ page }) => {

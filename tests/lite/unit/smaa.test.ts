@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target.js";
-import { createSmaaPostProcessTask } from "../../../packages/babylon-lite/src/post-process/smaa.js";
+import { _smaaResolveCrossingsForTests, createSmaaPostProcessTask } from "../../../packages/babylon-lite/src/post-process/smaa.js";
 
 function createSource() {
     return createRenderTarget({
@@ -124,6 +124,27 @@ describe("createSmaaPostProcessTask", () => {
         expect(task.threshold).toBe(0.03);
         expect(task.maxSearchSteps).toBe(64);
         expect(task.minDiagonalRun).toBe(2);
+
+        task.dispose();
+    });
+
+    it("keeps an open line end distinct from a T-junction", () => {
+        expect(_smaaResolveCrossingsForTests([0, 0], [1, 0])).toEqual([0, 1]);
+        expect(_smaaResolveCrossingsForTests([1, 1], [1, 0])).toEqual([-1, 1]);
+    });
+
+    it("handles the mirrored far-end T-junction", () => {
+        expect(_smaaResolveCrossingsForTests([1, 0], [0, 0])).toEqual([1, 0]);
+        expect(_smaaResolveCrossingsForTests([1, 0], [1, 1])).toEqual([1, -1]);
+    });
+
+    it("retains both crossing bits in the production weight shader", () => {
+        const task = createSmaaPostProcessTask({ sourceTexture: createSource() }, {} as EngineContext);
+        const shader = (task as unknown as { _blendWeights: { _shader: { fragmentWGSL: string } } })._blendWeights._shader.fragmentWGSL;
+
+        expect(shader).toContain("fn smaaResolveCrossings(cNear:vec2f, cFar:vec2f)->vec2f");
+        expect(shader).toContain("smaaCoveragePair(d1, len, lCross, rCross)");
+        expect(shader).toContain("smaaCoveragePair(d1, len, tCross, bCross)");
 
         task.dispose();
     });
