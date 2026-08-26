@@ -191,46 +191,50 @@ describe("updateTextData replaceRun", () => {
     it("reuses styles across alternating non-tail replacements", () => {
         let first = styledRun(0, false);
         let second = styledRun(10, false);
-        const last = run("f", 20, [3]);
-        const data = createTextData(makeStorage(), [first, second, last]);
+        const data = createTextData(makeStorage(), [first, second, run("f", 20, [3])]);
 
         for (let i = 0; i < 101; i++) {
             const replaceFirst = i % 2 === 0;
-            const replacement = styledRun(replaceFirst ? 0 : 10, Math.floor(i / 2) % 2 === 0);
-            const previous = replaceFirst ? first : second;
-            updateTextData(data, { update: "replaceRun", previous, run: replacement });
+            const withOverride = Math.floor(i / 2) % 2 === 0;
+            const replacement = styledRun(replaceFirst ? 0 : 10, withOverride);
+            updateTextData(data, { update: "replaceRun", previous: replaceFirst ? first : second, run: replacement });
             if (replaceFirst) {
                 first = replacement;
             } else {
                 second = replacement;
             }
-            expect(data._styleCount).toBeLessThanOrEqual(7);
+            expect(data._styleCount).toBeLessThanOrEqual(5);
+            // Bounding the high-water mark only proves slots are recycled; it says nothing about
+            // whether a recycled slot was rewritten. Follow the second glyph's packed index into
+            // the palette so a stale entry surfaces as a wrong colour rather than passing silently.
+            const record = data._runRecords.get(replacement)!;
+            const styleIndex = data._instancesU32[record._slots[1]! * TEXT_INSTANCE_FLOATS + 2]! >>> 16;
+            expect(Array.from(data._styles.subarray(styleIndex * TEXT_STYLE_FLOATS, styleIndex * TEXT_STYLE_FLOATS + 4))).toEqual(
+                withOverride ? [0.25, 0.5, 0.75, 1] : [1, 1, 1, 1]
+            );
         }
-
-        const record = data._runRecords.get(first)!;
-        const packed = data._instancesU32[record._slots[1]! * TEXT_INSTANCE_FLOATS + 2]!;
-        const styleIndex = packed >>> 16;
-        expect(Array.from(data._styles.subarray(styleIndex * TEXT_STYLE_FLOATS, styleIndex * TEXT_STYLE_FLOATS + 4))).toEqual([0.25, 0.5, 0.75, 1]);
     });
 
-    it("compacts styles before a new allocation exceeds packed indices", () => {
+    it("reuses individual style entries at the packed-index limit", () => {
         const first = styledRun(0, false);
         const last: GlyphRun = { ...run("f", 10, [3]), defaultColor: [0.125, 0.25, 0.5, 1] };
         const data = createTextData(makeStorage(), [first, last]);
         data._styleCount = 0xffff;
+        data._freeStyleSlots.push(10);
 
         const replacement = styledRun(0, true);
         updateTextData(data, { update: "replaceRun", previous: first, run: replacement });
 
-        expect(data._styleCount).toBe(3);
+        expect(data._styleCount).toBe(0xffff);
         const survivingRecord = data._runRecords.get(last)!;
-        const survivingStyleIndex = data._instancesU32[survivingRecord._slots[0]! * TEXT_INSTANCE_FLOATS + 2]! >>> 16;
-        expect(survivingStyleIndex).toBe(0);
-        expect(Array.from(data._styles.subarray(0, 4))).toEqual([0.125, 0.25, 0.5, 1]);
-        const record = data._runRecords.get(replacement)!;
-        for (const slot of record._slots) {
-            expect(data._instancesU32[slot * TEXT_INSTANCE_FLOATS + 2]! >>> 16).toBeLessThan(0xffff);
-        }
+        const survivingStyle = data._instancesU32[survivingRecord._slots[0]! * TEXT_INSTANCE_FLOATS + 2]! >>> 16;
+        expect(survivingStyle).toBe(1);
+        expect(Array.from(data._styles.subarray(survivingStyle * TEXT_STYLE_FLOATS, survivingStyle * TEXT_STYLE_FLOATS + 4))).toEqual([0.125, 0.25, 0.5, 1]);
+        const replacementRecord = data._runRecords.get(replacement)!;
+        expect(replacementRecord._styleSlots).toEqual([0, 10]);
+        const overrideStyle = data._instancesU32[replacementRecord._slots[1]! * TEXT_INSTANCE_FLOATS + 2]! >>> 16;
+        expect(overrideStyle).toBe(10);
+        expect(Array.from(data._styles.subarray(overrideStyle * TEXT_STYLE_FLOATS, overrideStyle * TEXT_STYLE_FLOATS + 4))).toEqual([0.25, 0.5, 0.75, 1]);
     });
 
     // The free list is shared by every path that allocates, so an added run reuses a removed
@@ -323,7 +327,7 @@ describe("updateTextData removeRun", () => {
         expect(data._runRecords.has(target)).toBe(false);
     });
 
-    it("reclaims style blocks across repeated add/remove cycles", () => {
+    it("reuses style entries across repeated add/remove cycles", () => {
         const base = run("f", 10, [3]);
         const data = createTextData(makeStorage(), [base]);
 
@@ -331,8 +335,62 @@ describe("updateTextData removeRun", () => {
             const added = styledRun(0, true);
             updateTextData(data, { update: "addRun", run: added, insertBefore: 0 });
             updateTextData(data, { update: "removeRun", run: added });
-            expect(data._styleCount).toBe(1);
+            expect(data._styleCount).toBeLessThanOrEqual(3);
         }
+    });
+});
+
+/** A run whose palette entry is entirely zero — `[0, 0, 0, 0]` with `invScale` 0, since a
+ *  `pixelsPerFontUnit` of 0 maps to 0. Writing it into a never-used slot changes nothing, so
+ *  `writeStyle` stays silent and any `_styleVersion` movement must come from the allocator. */
+function zeroStyleRun(x: number): GlyphRun {
+    return { curveSet: "f", glyphs: [{ glyphId: 1, x, y: 0 }], pixelsPerFontUnit: 0, defaultColor: [0, 0, 0, 0] };
+}
+
+// `ensureStyleGpu` skips the palette upload entirely while `_styleVersion` is unchanged, and
+// uploads exactly `_styleCount` entries when it moves. Both halves of that contract need pinning:
+// a version that moves too eagerly costs a redundant upload every edit, and one that moves too
+// rarely leaves the GPU holding a short or stale palette. Neither shows up in a content
+// assertion, so only these tests stand between the two failure modes.
+describe("TextData _styleVersion", () => {
+    it("does not move when an edit is satisfied entirely from recycled slots", () => {
+        const data = createTextData(makeStorage(), [run("f", 0), run("f", 10)]);
+        updateTextData(data, { update: "removeRun", run: 1 });
+        const before = data._styleVersion;
+        const highWater = data._styleCount;
+
+        // Same curve set, same default colour and `pixelsPerFontUnit` as the run just removed, so
+        // the recycled entry is rewritten with the bytes it already holds.
+        updateTextData(data, { update: "addRun", run: run("f", 20) });
+
+        expect(data._styleCount).toBe(highWater);
+        expect(data._styleVersion).toBe(before);
+    });
+
+    it("moves when an allocation grows the palette past its high-water mark", () => {
+        const data = createTextData(makeStorage(), [run("f", 0)]);
+        const before = data._styleVersion;
+        const highWater = data._styleCount;
+
+        updateTextData(data, { update: "addRun", run: zeroStyleRun(10) });
+
+        // `writeStyle` is a no-op here, so a version that has not moved means the lengthened
+        // palette would never reach the GPU.
+        expect(data._styleCount).toBeGreaterThan(highWater);
+        expect(data._styleVersion).toBeGreaterThan(before);
+    });
+
+    it("moves when a reset shrinks the palette", () => {
+        const data = createTextData(makeStorage(), [run("f", 0), styledRun(10, true), styledRun(20, true)]);
+        const highWater = data._styleCount;
+        const before = data._styleVersion;
+
+        // The surviving run reproduces entry 0 exactly, so `writeStyle` stays silent and the
+        // shorter upload length is the only thing left to report.
+        updateTextData(data, { update: "reset", runs: [run("f", 5)] });
+
+        expect(data._styleCount).toBeLessThan(highWater);
+        expect(data._styleVersion).toBeGreaterThan(before);
     });
 });
 

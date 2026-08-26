@@ -107,12 +107,12 @@ export interface TextData {
     /** @internal Total *capacity* used (live + dead slots across all groups). */
     _instanceCount: number;
     /** @internal Style palette: `TEXT_STYLE_FLOATS` per entry, indexed by the high 16 bits of
-     *  an instance's packed word. Entries are owned by runs — see `RunRecord._styleStart`. */
+     *  an instance's packed word. */
     _styles: Float32Array;
-    /** @internal Entries spanned by `_styles`, including reusable holes below the tail. */
+    /** @internal High-water mark for allocated style entries. */
     _styleCount: number;
-    /** @internal Sorted, coalesced pairs of `[start, count]` describing reusable style blocks. */
-    _freeStyleBlocks: number[];
+    /** @internal Reusable individual style indices. */
+    _freeStyleSlots: number[];
     /** @internal Monotonic version bumped whenever `_styles` content changes, so renderers can
      *  skip the palette upload entirely when nothing moved. */
     _styleVersion: number;
@@ -169,12 +169,8 @@ export type RunRecord = {
     /** @internal Absolute slot indices (within `TextData._instances`) currently occupied by this run.
      *  Length === number of glyphs actually written (skipped glyphs do not occupy slots). */
     _slots: number[];
-    /** @internal First style-palette entry owned by this run. That entry holds the run default
-     *  (`defaultColor` + `invScale`); one entry per glyph carrying its own `color` follows it,
-     *  in glyph order. */
-    _styleStart: number;
-    /** @internal Palette entries reserved at `_styleStart`. */
-    _styleCount: number;
+    /** @internal Style indices owned by this run: default first, then color overrides in glyph order. */
+    _styleSlots: number[];
 };
 
 /** Floats per instance: the anchor (x, y) plus one packed u32 holding the glyph index in its
@@ -270,144 +266,35 @@ function countRunStyles(run: GlyphRun): number {
     return n;
 }
 
-function countLiveStyles(data: TextData, omit?: RunRecord): number {
-    let count = 0;
-    for (const record of data._runRecords.values()) {
-        if (record !== omit) {
-            count += record._styleCount;
-        }
-    }
-    return count;
-}
-
-function assertStyleAllocationFits(data: TextData, previous: RunRecord | undefined, count: number): void {
-    if (count > MAX_STYLE_ENTRIES || (data._styleCount + count > MAX_STYLE_ENTRIES && countLiveStyles(data, previous) + count > MAX_STYLE_ENTRIES)) {
-        throw new Error(`TextData style palette cannot exceed ${MAX_STYLE_ENTRIES} entries.`);
+function releaseStyles(data: TextData, slots: number[]): void {
+    for (let i = 0; i < slots.length; i++) {
+        data._freeStyleSlots.push(slots[i]!);
     }
 }
 
-function takeFreeStyles(data: TextData, count: number): number {
-    const blocks = data._freeStyleBlocks;
-    for (let i = 0; i < blocks.length; i += 2) {
-        const blockCount = blocks[i + 1]!;
-        if (blockCount < count) {
-            continue;
-        }
-        const start = blocks[i]!;
-        if (blockCount === count) {
-            blocks.splice(i, 2);
-        } else {
-            blocks[i] = start + count;
-            blocks[i + 1] = blockCount - count;
-        }
-        return start;
+function allocateStyles(data: TextData, count: number, previous?: number[]): number[] {
+    if (previous?.length === count) {
+        return previous;
     }
-    return -1;
-}
-
-function releaseStyles(data: TextData, start: number, count: number): void {
-    const blocks = data._freeStyleBlocks;
-    let i = 0;
-    while (i < blocks.length && blocks[i]! < start) {
-        i += 2;
+    const free = data._freeStyleSlots;
+    const needed = Math.max(0, count - free.length - (previous?.length ?? 0));
+    ensureStyleCapacity(data, data._styleCount + needed);
+    if (previous) {
+        releaseStyles(data, previous);
     }
-    blocks.splice(i, 0, start, count);
-    if (i > 0 && blocks[i - 2]! + blocks[i - 1]! === start) {
-        blocks[i - 1]! += count;
-        blocks.splice(i, 2);
-        i -= 2;
+    const highWater = data._styleCount;
+    const slots = new Array<number>(count);
+    for (let i = 0; i < count; i++) {
+        slots[i] = free.pop() ?? data._styleCount++;
     }
-    if (i + 2 < blocks.length && blocks[i]! + blocks[i + 1]! === blocks[i + 2]!) {
-        blocks[i + 1]! += blocks[i + 3]!;
-        blocks.splice(i + 2, 2);
-    }
-    while (blocks.length > 0) {
-        const tail = blocks.length - 2;
-        if (blocks[tail]! + blocks[tail + 1]! !== data._styleCount) {
-            break;
-        }
-        data._styleCount = blocks[tail]!;
-        blocks.length = tail;
-    }
-}
-
-/** Densely rebuild the live palette, optionally dropping the block being replaced. This is rare:
- *  the free-block allocator handles normal edits, and compaction runs only when fragmentation
- *  would otherwise push a packed style index beyond 16 bits. */
-function compactStyles(data: TextData, omit?: RunRecord): void {
-    const maxFloats = MAX_STYLE_ENTRIES * TEXT_STYLE_FLOATS;
-    const compacted = new Float32Array(Math.min(data._styles.length, maxFloats));
-    let writeEntry = 0;
-    let movedInstances = false;
-    for (const run of data._runs) {
-        const record = data._runRecords.get(run)!;
-        if (record === omit) {
-            continue;
-        }
-        const previousStart = record._styleStart;
-        const count = record._styleCount;
-        const sourceStart = previousStart * TEXT_STYLE_FLOATS;
-        compacted.set(data._styles.subarray(sourceStart, sourceStart + count * TEXT_STYLE_FLOATS), writeEntry * TEXT_STYLE_FLOATS);
-        if (writeEntry !== previousStart) {
-            for (const slot of record._slots) {
-                const packedOffset = slot * TEXT_INSTANCE_FLOATS + 2;
-                const packed = data._instancesU32[packedOffset]!;
-                const relativeStyle = (packed >>> 16) - previousStart;
-                data._instancesU32[packedOffset] = (packed & 0xffff) | ((writeEntry + relativeStyle) << 16);
-            }
-            movedInstances = true;
-        }
-        record._styleStart = writeEntry;
-        writeEntry += count;
-    }
-    data._styles = compacted;
-    data._styleCount = writeEntry;
-    data._freeStyleBlocks.length = 0;
-    data._styleVersion++;
-    if (movedInstances) {
-        markDirty(data, 0, data._instanceCount);
-    }
-}
-
-/** Reserve `count` contiguous palette entries. Same-count edits retain their block, tail blocks
- *  resize in place, and other edits first reuse released blocks. */
-function reserveStyles(data: TextData, previous: RunRecord | undefined, count: number): number {
-    const prevStart = previous?._styleStart ?? 0;
-    const prevCount = previous?._styleCount ?? 0;
-    if (previous && prevCount === count) {
-        return prevStart;
-    }
-    if (previous && prevStart + prevCount === data._styleCount && prevStart + count <= MAX_STYLE_ENTRIES) {
-        ensureStyleCapacity(data, prevStart + count);
-        data._styleCount = prevStart + count;
+    // Growing past the high-water mark lengthens the upload, and `ensureStyleGpu` only uploads
+    // when the version moved — so the bump cannot be left to `writeStyle`, which stays silent for
+    // an entry whose contents already match (an all-zero style writes nothing). Slots taken from
+    // the free list keep the upload length unchanged, so there `writeStyle` alone is enough.
+    if (data._styleCount !== highWater) {
         data._styleVersion++;
-        return prevStart;
     }
-    let start = takeFreeStyles(data, count);
-    if (start >= 0) {
-        if (previous) {
-            releaseStyles(data, prevStart, prevCount);
-        }
-        data._styleVersion++;
-        return start;
-    }
-    if (data._styleCount + count <= MAX_STYLE_ENTRIES) {
-        start = data._styleCount;
-        ensureStyleCapacity(data, start + count);
-        data._styleCount += count;
-        if (previous) {
-            releaseStyles(data, prevStart, prevCount);
-        }
-        data._styleVersion++;
-        return start;
-    }
-    compactStyles(data, previous);
-    start = data._styleCount;
-    ensureStyleCapacity(data, start + count);
-    data._styleCount += count;
-    // The block moved or resized, so it now covers entries the GPU may never have been sent.
-    data._styleVersion++;
-    return start;
+    return slots;
 }
 
 /** Write one palette entry, bumping `_styleVersion` only when the entry's contents actually
@@ -634,20 +521,17 @@ function ensureGroup(data: TextData, curveSetId: CurveSetId): TextDataDrawGroup 
     return group;
 }
 
-/** Write a run's glyphs into the given (already-allocated) slots, and its styles into the
- *  palette block reserved at `styleStart`. Returns the subset of slots that actually received
+/** Write a run's glyphs into the given (already-allocated) instance and style slots.
+ *  Returns the subset of instance slots that actually received
  *  live glyphs (skipped glyphs leave their slot dead). When every glyph lands — the
  *  overwhelmingly common case — that subset *is* `slots`, and the caller gets the same array
  *  back rather than a freshly built copy. */
-function writeRunToSlots(data: TextData, group: TextDataDrawGroup, run: GlyphRun, slots: number[], styleStart: number): number[] {
+function writeRunToSlots(data: TextData, group: TextDataDrawGroup, run: GlyphRun, slots: number[], styleSlots: number[]): number[] {
     const ratio = run.pixelsPerFontUnit;
     const invScale = ratio !== 0 ? 1 / ratio : 0;
-    // The block's first entry is the run default, which is what every glyph without its own
-    // `color` points at — so the common path costs one already-loaded local, no lookup.
-    writeStyle(data, styleStart, run.defaultColor ?? WHITE_COLOR, invScale);
-    // Overrides take the entries after the default, handed out in glyph order. `countRunStyles`
-    // sized the block by the same rule, so this can never run past it.
-    let overrideEntry = styleStart;
+    const defaultStyle = styleSlots[0]!;
+    writeStyle(data, defaultStyle, run.defaultColor ?? WHITE_COLOR, invScale);
+    let overrideEntry = 0;
     // Materialized only once a glyph actually misses the atlas, seeded with the prefix that
     // did land; while it stays null, `slots` is by definition the live set.
     let liveSlots: number[] | null = null;
@@ -656,10 +540,10 @@ function writeRunToSlots(data: TextData, group: TextDataDrawGroup, run: GlyphRun
     for (let i = 0; i < run.glyphs.length; i++) {
         const pg = run.glyphs[i]!;
         const slot = slots[i]!;
-        let styleIdx = styleStart;
+        let styleIdx = defaultStyle;
         const color = pg.color;
         if (color !== undefined) {
-            styleIdx = ++overrideEntry;
+            styleIdx = styleSlots[++overrideEntry]!;
             writeStyle(data, styleIdx, color, invScale);
         }
         const ok = packGlyphAtSlot(data._instances, data._instancesU32, slot, group._curveSet, pg.glyphId, pg.x, pg.y, styleIdx);
@@ -728,10 +612,10 @@ function applyReset(data: TextData, runs: readonly GlyphRun[], storage: GlyphSto
     const newGroups: TextDataDrawGroup[] = [];
     const newRunRecords = new Map<GlyphRun, RunRecord>();
     let writeSlot = 0;
-    // Reset is also the compaction path: dropping the palette reclaims every block orphaned by
-    // a run whose style count changed since the last reset.
+    // A reset rebuilds the palette densely and drops all free-slot state.
     data._styleCount = 0;
-    data._freeStyleBlocks.length = 0;
+    data._freeStyleSlots.length = 0;
+    data._styleVersion++;
 
     for (const [curveSetId, groupRuns] of runsByCurveSet) {
         const curveSet = lookupCurveSet(storage, curveSetId, "reset");
@@ -758,11 +642,13 @@ function applyReset(data: TextData, runs: readonly GlyphRun[], storage: GlyphSto
                 slots[i] = writeSlot++;
             }
             const styleCount = countRunStyles(run);
-            const styleStart = data._styleCount;
-            data._styleCount += styleCount;
-            const live = writeRunToSlots(data, group, run, slots, styleStart);
+            const styleSlots = new Array<number>(styleCount);
+            for (let i = 0; i < styleCount; i++) {
+                styleSlots[i] = data._styleCount++;
+            }
+            const live = writeRunToSlots(data, group, run, slots, styleSlots);
             liveInGroup += live.length;
-            newRunRecords.set(run, { _run: run, _groupIdx: groupIdx, _slots: live, _styleStart: styleStart, _styleCount: styleCount });
+            newRunRecords.set(run, { _run: run, _groupIdx: groupIdx, _slots: live, _styleSlots: styleSlots });
         }
         group._slotCount = writeSlot - group._slotStart;
         group._liveCount = liveInGroup;
@@ -807,16 +693,15 @@ function applyAddRun(data: TextData, run: GlyphRun, insertBefore?: number): void
     if (data._runRecords.has(run)) {
         throw new Error("updateTextData addRun: GlyphRun reference is already in this TextData.");
     }
-    const styleCount = countRunStyles(run);
-    assertStyleAllocationFits(data, undefined, styleCount);
+    const at = insertBefore ?? data._runs.length;
+    lookupCurveSet(data._storage, run.curveSet, "addRun");
+    const styleSlots = allocateStyles(data, countRunStyles(run));
     const group = ensureGroup(data, run.curveSet);
     const groupIdx = data._groups.indexOf(group);
     const slots = allocateSlots(data, group, run.glyphs.length);
-    const styleStart = reserveStyles(data, undefined, styleCount);
-    const live = writeRunToSlots(data, group, run, slots, styleStart);
+    const live = writeRunToSlots(data, group, run, slots, styleSlots);
     group._liveCount += live.length;
-    data._runRecords.set(run, { _run: run, _groupIdx: groupIdx, _slots: live, _styleStart: styleStart, _styleCount: styleCount });
-    const at = insertBefore ?? data._runs.length;
+    data._runRecords.set(run, { _run: run, _groupIdx: groupIdx, _slots: live, _styleSlots: styleSlots });
     data._runs.splice(at, 0, run);
 }
 
@@ -829,7 +714,7 @@ function applyRemoveRun(data: TextData, ref: GlyphRun | number): void {
     const group = data._groups[rec._groupIdx]!;
     freeSlots(data, group, rec._slots);
     group._liveCount -= rec._slots.length;
-    releaseStyles(data, rec._styleStart, rec._styleCount);
+    releaseStyles(data, rec._styleSlots);
     data._runRecords.delete(run);
     const runIdx = resolveRunIndex(data, ref);
     if (runIdx >= 0) {
@@ -880,14 +765,13 @@ function applyReplaceRun(data: TextData, prevRef: GlyphRun | number, newRun: Gly
     if (prev !== newRun && data._runRecords.has(newRun)) {
         throw new Error("updateTextData replaceRun: new GlyphRun reference is already in this TextData.");
     }
-    const styleCount = countRunStyles(newRun);
-    assertStyleAllocationFits(data, rec, styleCount);
     const group = data._groups[rec._groupIdx]!;
     // Staying in the same draw group means the run keeps its position in `_runs`, so the whole
     // edit reduces to slot bookkeeping — no list splices, and no index scan to drive them. An
     // empty new run is the one exception: it can leave the group with nothing live, and only
     // the remove path knows how to retire a group.
     if (newRun.curveSet === group._curveSetId && newRun.glyphs.length > 0) {
+        const styleSlots = allocateStyles(data, countRunStyles(newRun), rec._styleSlots);
         const prevSlotCount = rec._slots.length;
         let slots = rec._slots;
         if (newRun.glyphs.length !== prevSlotCount) {
@@ -897,19 +781,17 @@ function applyReplaceRun(data: TextData, prevRef: GlyphRun | number, newRun: Gly
             freeSlots(data, group, slots);
             slots = allocateSlots(data, group, newRun.glyphs.length);
         }
-        const styleStart = reserveStyles(data, rec, styleCount);
-        const live = writeRunToSlots(data, group, newRun, slots, styleStart);
+        const live = writeRunToSlots(data, group, newRun, slots, styleSlots);
         // Absorbs both a changed glyph count and any glyph that missed the atlas.
         group._liveCount += live.length - prevSlotCount;
         if (prev === newRun) {
             // In-place glyph edits: the record and `_runs` already point at this run, so its
-            // live slot list and style block are the only things that can have moved.
+            // live instance and style slot lists are the only things that can have moved.
             rec._slots = live;
-            rec._styleStart = styleStart;
-            rec._styleCount = styleCount;
+            rec._styleSlots = styleSlots;
         } else {
             data._runRecords.delete(prev);
-            data._runRecords.set(newRun, { _run: newRun, _groupIdx: rec._groupIdx, _slots: live, _styleStart: styleStart, _styleCount: styleCount });
+            data._runRecords.set(newRun, { _run: newRun, _groupIdx: rec._groupIdx, _slots: live, _styleSlots: styleSlots });
             const runIdx = resolveRunIndex(data, prevRef);
             if (runIdx >= 0) {
                 data._runs[runIdx] = newRun;
@@ -919,6 +801,10 @@ function applyReplaceRun(data: TextData, prevRef: GlyphRun | number, newRun: Gly
     }
     // Different curve set, or an empty replacement → remove + add at the same position.
     const insertPos = resolveRunIndex(data, prevRef);
+    lookupCurveSet(data._storage, newRun.curveSet, "replaceRun");
+    if (countRunStyles(newRun) > data._freeStyleSlots.length + rec._styleSlots.length + MAX_STYLE_ENTRIES - data._styleCount) {
+        throw new Error(`TextData style palette cannot exceed ${MAX_STYLE_ENTRIES} entries.`);
+    }
     applyRemoveRun(data, insertPos >= 0 ? insertPos : prev);
     applyAddRun(data, newRun, insertPos >= 0 ? insertPos : undefined);
 }
@@ -940,7 +826,7 @@ export function createTextData(storage: GlyphStorage, runs?: readonly GlyphRun[]
         _instanceCount: 0,
         _styles: new Float32Array(TEXT_STYLE_FLOATS),
         _styleCount: 0,
-        _freeStyleBlocks: [],
+        _freeStyleSlots: [],
         _styleVersion: 1,
         _storage: storage,
         _version: 1,
@@ -990,7 +876,7 @@ export function disposeTextData(data: TextData): void {
     data._groups = [];
     data._instanceCount = 0;
     data._styleCount = 0;
-    data._freeStyleBlocks.length = 0;
+    data._freeStyleSlots.length = 0;
     data._runs.length = 0;
     data._runRecords.clear();
 }
