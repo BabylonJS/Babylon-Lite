@@ -276,7 +276,15 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
     const tightLabel = formatHeadroomThreshold(TIGHT_HEADROOM_BYTES);
     // Only growth consumes headroom. See the note on direction in this function's doc comment.
     const grewBy = (scene: SceneHeadroom): number => movedBytes.get(scene.scene) ?? 0;
-    const movedAndTight = tight.filter((s) => grewBy(s) > 0);
+    // A scene missing from the baseline is one this branch adds. It has no delta at all, so every
+    // movement-based test answers "no" for it — which is the wrong answer to "is this PR
+    // responsible for this scene?", the question the callouts below are actually asking. Without
+    // this, a PR that lands a brand-new scene a few hundred bytes under its ceiling produces no
+    // comment whatsoever: no delta rows, no danger-zone flag, nothing to post. That is silence in
+    // exactly the case this report exists for, aimed at the author best placed to act on it, and
+    // it is the same mistake as attributing a breach by movement — corrected there, missed here.
+    const isAddedHere = (scene: SceneHeadroom): boolean => scene.masterBytes == null;
+    const movedAndTight = tight.filter((s) => grewBy(s) > 0 || isAddedHere(s));
     // Attribution is a question about the *baseline*, not about movement, and the two answer
     // differently in both directions. A scene this branch adds has no baseline entry, so it has no
     // delta and movement calls it inherited — while claiming it was "already over on master" and
@@ -301,12 +309,16 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
     }
 
     if (movedAndTight.length > 0) {
-        lines.push(`⚠️ **${pluralizeScenes(movedAndTight.length)} this PR grew now ${movedAndTight.length === 1 ? "sits" : "sit"} under ${tightLabel} of headroom.**`);
+        // "added or grew" rather than "grew": this set now also holds scenes the branch created,
+        // which have no baseline size to have grown from.
+        lines.push(`⚠️ **${pluralizeScenes(movedAndTight.length)} this PR added or grew now ${movedAndTight.length === 1 ? "sits" : "sit"} under ${tightLabel} of headroom.**`);
         lines.push("");
         lines.push("| Scene | Size | Ceiling | Headroom | Δ this PR |");
         lines.push("|-------|------|---------|----------|-----------|");
         for (const scene of movedAndTight.slice(0, HEADROOM_LIST_LIMIT)) {
-            const delta = formatSignedBytes(movedBytes.get(scene.scene) ?? 0);
+            // A new scene has no baseline to subtract, so a signed delta would render as "0 B" and
+            // read as "this PR did not touch it" — the opposite of why it is in this table.
+            const delta = isAddedHere(scene) ? "new scene" : formatSignedBytes(movedBytes.get(scene.scene) ?? 0);
             lines.push(
                 `| ${sceneLabel(scene)} | ${formatSizeKB(scene.measuredBytes)} | ${formatCeilingKB(scene.ceilingKB)} | **${formatBytes(scene.headroomBytes)}** | ${delta} |`
             );
@@ -362,8 +374,11 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
         ...under.map((scene) => ({ scene, headroom: formatBytes(scene.headroomBytes) })),
     ];
     for (const { scene, headroom } of rankedRows.slice(0, HEADROOM_LIST_LIMIT)) {
-        const moved = movedBytes.has(scene.scene) ? " ⬅ moved by this PR" : "";
-        lines.push(`| ${sceneLabel(scene)}${moved} | ${formatSizeKB(scene.measuredBytes)} | ${formatCeilingKB(scene.ceilingKB)} | ${headroom} |`);
+        // Mark the branch's own scenes in the repo-wide list so an author can find theirs among
+        // rows that are mostly other people's. A scene this branch adds belongs to it just as much
+        // as one it grew, but has no delta entry, so `movedBytes` alone would leave it unmarked.
+        const attribution = isAddedHere(scene) ? " ⬅ added by this PR" : movedBytes.has(scene.scene) ? " ⬅ moved by this PR" : "";
+        lines.push(`| ${sceneLabel(scene)}${attribution} | ${formatSizeKB(scene.measuredBytes)} | ${formatCeilingKB(scene.ceilingKB)} | ${headroom} |`);
     }
     lines.push("");
     lines.push("</details>");
@@ -408,7 +423,7 @@ export function formatComment(deltas: BundleDelta[], headroom: HeadroomReport = 
         // own diff immediately above a block saying the breach came from master.
         lines.push(
             headroom.movedIntoDangerZone
-                ? "No changes at whole-KB resolution — but this PR moved a scene close to its ceiling."
+                ? "No changes at whole-KB resolution — but this PR put a scene close to its ceiling."
                 : "No bundle-size changes on this branch — but a scene is over its ceiling on master, which fails this job on every open PR."
         );
         lines.push("");

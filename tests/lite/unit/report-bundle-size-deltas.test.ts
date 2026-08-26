@@ -140,7 +140,7 @@ describe("report-bundle-size-deltas", () => {
             const comment = runReporter(headroomFixture).comment ?? "";
 
             expect(comment).toContain("### Ceiling headroom");
-            expect(comment).toContain("⚠️ **1 scene this PR grew now sits under 1.0 KB of headroom.**");
+            expect(comment).toContain("⚠️ **1 scene this PR added or grew now sits under 1.0 KB of headroom.**");
             expect(comment).toContain("| Scene | Size | Ceiling | Headroom | Δ this PR |");
             expect(comment).toContain("Scene 2 - Sphere<br/>`scene2` | 49.90 KB | 50.00 KB | **100 B** | +400 B");
             // scene3 is tight too, but this PR did not touch it — it belongs in the collapsed
@@ -296,7 +296,7 @@ describe("report-bundle-size-deltas", () => {
                 }).comment ?? "";
 
             expect(comment).toContain("No bundle-size changes on this branch — but a scene is over its ceiling on master");
-            expect(comment).not.toContain("this PR moved a scene close to its ceiling");
+            expect(comment).not.toContain("this PR put a scene close to its ceiling");
         });
 
         it("posts a comment for an inherited breach even when this PR moves no bundle bytes", () => {
@@ -349,7 +349,7 @@ describe("report-bundle-size-deltas", () => {
             expect(comment).not.toContain("### Increases");
             expect(comment).not.toContain("### Decreases");
             expect(comment).toContain("### Ceiling headroom");
-            expect(comment).toContain("⚠️ **1 scene this PR grew now sits under 1.0 KB of headroom.**");
+            expect(comment).toContain("⚠️ **1 scene this PR added or grew now sits under 1.0 KB of headroom.**");
             expect(comment).toContain("Scene 2 - Sphere<br/>`scene2` | 49.90 KB | 50.00 KB | **100 B** | +400 B");
             // scene1 moved by 100 B too, but it has 2400 B of room — not a reason to warn.
             expect(comment).not.toContain("Scene 1 - BoomBox PBR<br/>`scene1` | 97.7 KB");
@@ -409,16 +409,25 @@ describe("report-bundle-size-deltas", () => {
             expect(result.stdout).toContain("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]false");
         });
 
-        it("does not treat a scene absent from master as having grown by its whole size", () => {
-            // A scene added by this PR has no baseline to move from. If the null guard in
-            // computeMovedBytes were dropped, its delta would come out as its entire size, which
-            // would then read as the largest growth in the PR and, if the scene were tight, flag it
-            // as freshly pushed into the danger zone. Both claims would be false: a new scene did
-            // not "move", and its size is whatever it was authored at.
+        it("flags a scene absent from master without inventing a delta the size of the whole scene", () => {
+            // Two separate claims used to live in this test, and conflating them hid a bug.
             //
-            // This is live rather than hypothetical — scene186 was added to scene-config.json by
-            // #610 while this PR was open, and appeared in the current manifest before any baseline
-            // contained it. The behaviour is already correct; this pins it.
+            // The invariant, unchanged: a scene added by this PR has no baseline to move from, so
+            // if the null guard in computeMovedBytes were dropped its delta would come out as its
+            // entire size — reading as by far the largest growth in the PR. That must never happen,
+            // and the Δ column says "new scene" rather than a number for exactly that reason.
+            //
+            // What changed: this test also asserted the scene was not flagged *at all*, reasoning
+            // that "a new scene did not move". That is the same movement-as-proxy-for-attribution
+            // mistake corrected for over-ceiling scenes, and here it produced the worst outcome in
+            // the whole feature — a PR landing a brand-new scene 352 B under its ceiling got no
+            // comment whatsoever. The author chose both the contents and the ceiling in that same
+            // PR, which makes it the most actionable case the report has rather than the least.
+            // Attribution asks who is responsible; a scene that exists only on this branch is
+            // unambiguously this branch's.
+            //
+            // Live rather than hypothetical — scene186 arrived in scene-config.json via #610 while
+            // this PR was open, and appeared in the current manifest before any baseline held it.
             const result = runReporter({
                 current: {
                     scene1: { rawKB: 49.9, rawBytes: 51100 },
@@ -430,10 +439,41 @@ describe("report-bundle-size-deltas", () => {
                     { id: 2, slug: "scene2", name: "Scene 2 - Brand New", maxRawKB: 98 },
                 ],
             });
+            const comment = result.comment ?? "";
 
-            // scene2 is 355 B from its ceiling, but this PR did not move it there.
-            expect(result.comment ?? "").not.toContain("sits under 1.0 KB of headroom");
+            // scene2 lands 352 B from its ceiling, and this PR is the reason it exists.
+            expect(comment).toContain("⚠️ **1 scene this PR added or grew now sits under 1.0 KB of headroom.**");
+            expect(comment).toContain("**352 B**");
+            // The delta is named, never computed against a baseline of zero.
+            expect(comment).toContain("| new scene |");
+            expect(comment).not.toContain("+97.7 KB");
+            expect(comment).not.toContain("+100000");
+            expect(result.stdout).toContain("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]true");
+        });
+
+        it("stays silent about a scene this PR added that is nowhere near its ceiling", () => {
+            // The bound on the fix above. Treating "exists only on this branch" as attribution is
+            // correct, but attribution alone must not summon a comment — otherwise every PR that
+            // adds a scene gets a headroom callout, and a callout that fires on healthy scenes is
+            // worse than none, because it trains authors to scroll past the one that matters.
+            //
+            // The tight threshold remains the sole trigger. isAddedHere only decides *whose* a
+            // tight scene is; it never decides *whether* a scene is tight. This test fails if the
+            // two are ever collapsed into one predicate.
+            const result = runReporter({
+                current: {
+                    scene1: { rawKB: 40.0, rawBytes: 40960 },
+                    scene2: { rawKB: 40.0, rawBytes: 40960 },
+                },
+                master: { scene1: { rawKB: 40.0, rawBytes: 40960 } },
+                scenes: [
+                    { id: 1, slug: "scene1", name: "Scene 1 - Sphere", maxRawKB: 80 },
+                    { id: 2, slug: "scene2", name: "Scene 2 - Brand New", maxRawKB: 80 },
+                ],
+            });
+
             expect(result.stdout).toContain("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]false");
+            expect(result.comment ?? "").not.toContain("headroom");
         });
 
         it("caps the uncollapsed block so it cannot become a wall of rows", () => {
@@ -454,7 +494,7 @@ describe("report-bundle-size-deltas", () => {
             const comment = runReporter({ current, master, scenes }).comment ?? "";
             const actionable = comment.slice(comment.indexOf("### Ceiling headroom"), comment.indexOf("<details>"));
 
-            expect(comment).toContain("⚠️ **14 scenes this PR grew now sit under 1.0 KB of headroom.**");
+            expect(comment).toContain("⚠️ **14 scenes this PR added or grew now sit under 1.0 KB of headroom.**");
             expect(actionable).toContain("…and 4 more, listed tightest first.");
             // 10 data rows plus the header and separator.
             expect(actionable.split("\n").filter((l) => l.startsWith("| ")).length).toBe(11);
