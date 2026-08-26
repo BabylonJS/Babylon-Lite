@@ -323,6 +323,20 @@ Transmission uses this task as its final swapchain pass. `enableSceneTransmissio
 
 Transmission refraction textures allocate only the mip levels reachable by the refraction shader's fixed `-4.0` LOD bias. For the current 1024x1024 refraction textures, this means 7 levels (`0..6`) instead of the full 11-level chain, and mip generation records only those allocated levels. Tasks that set `transmission.generateMipmaps = false` allocate only mip 0 and skip this generation step.
 
+### SMAA Task
+
+`createSmaaPostProcessTask()` implements spatial SMAA as three ordered fullscreen passes:
+
+1. Luma edge detection reads the final color source with linear sampling and writes an `rgba8unorm` edge target.
+2. Blending-weight reconstruction reads exact edge texels with nearest sampling, searches each edge run, and writes an `rgba8unorm` weight target.
+3. Neighbourhood blending reads the original color and the weights, then writes the anti-aliased output.
+
+The source must be a single-sample `RenderTarget`; resolve MSAA before recording the task. SMAA is a perceptual filter, so place it at the end of the frame-graph chain after tone mapping. Set `sourceIsSrgb` when the source uses an sRGB view so edge detection re-encodes samples before applying the luma threshold. The task exposes `outputTexture`, `edgesTexture`, and `weightsTexture`; the intermediate targets are useful for diagnostics and are owned and disposed by the task.
+
+The public controls are `threshold`, `maxSearchSteps`, `diagonalDetection`, `minDiagonalRun`, `cornerDetection`, `dominantAxisBlend`, and `sourceIsSrgb`. After changing one, call `updateUniforms()` once the graph has been recorded. Search steps and the minimum diagonal run trade additional texture fetches for longer pattern reconstruction. The simplified diagonal path is disabled by default because it can double-process adjacent diagonal edge channels; enable it only for content dominated by genuine 45-degree structure and measure the result. Corner-pattern attenuation is also opt-in: it uses reference SMAA's 25% corner-rounding preset and adds four edge-texture reads per processed axis only while enabled.
+
+This implementation does not ship the reference Area/Search lookup textures. It reconstructs coverage analytically and searches directly in the weight pass, keeping the runtime self-contained. Predication, stencil optimization, and temporal SMAA modes are not implemented; use TAA when temporal supersampling is required. Scene 187 provides a deterministic side-by-side stress scene and loads its parameter UI only with `?debug=1`.
+
 ### Scene-Texture Transmission
 
 `enableSceneTransmission(scene, engine)` wraps each `RenderTask` instead of adding material-specific behavior to the renderer:
