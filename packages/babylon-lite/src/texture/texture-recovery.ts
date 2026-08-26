@@ -9,6 +9,11 @@ import { getBilinearSampler } from "../resource/samplers.js";
  *  wrapper sharing that source adopts its result instead of building a second copy. */
 let _rebuiltOn: WeakMap<Texture2DRecoverySource, { device: GPUDevice; tex: Texture2D; done: Promise<void> }> | null = null;
 
+/** Each texture rebuilt during the current recovery and the ownership its outgoing GPUTexture
+ *  held, carried onto the replacement by `settleRebuiltTextureOwnership` once the per-context
+ *  handlers have run. Null between recoveries. */
+let _pendingOwnership: [Texture2D, number][] | null = null;
+
 /**
  * Rebuilds a single Texture2D after a WebGPU device loss from the pure recovery
  * data stamped on `tex._recoverySource`.
@@ -58,17 +63,44 @@ export async function rebuildTexture2D(engine: EngineContext, tex: Texture2D): P
     const done = rebuildFromSource(engine, tex, source);
     _rebuiltOn.set(source, { device: engine._device, tex, done });
     await done;
-    // Carry that ownership onto the replacement, which starts unowned. Without it the first
-    // consumer to bind and then unbind a rebuilt texture destroys it while the application still
-    // holds the wrapper. It is a top-up rather than a single `acquireTexture` for two reasons: a
-    // derived family can hold several references to one texture — `cloneTexture2D` leaves that
-    // pairing to the caller — and restoring only one would let the next release destroy a texture a
-    // sibling still points at. And the dynamic-texture rebuild takes its own reference, which this
-    // counts rather than doubles. Kinds whose creator never acquired have no ownership to carry, so
-    // this does nothing for them. Wrappers that adopt take none either, exactly as `cloneTexture2D`
-    // takes none at creation: they share the references held for the texture they now point at.
-    for (let held = _textureOwners(tex); held < owners; held++) {
-        acquireTexture(tex);
+    // Queue that ownership to be carried onto the replacement, which starts unowned. Without it the
+    // first consumer to bind and then unbind a rebuilt texture destroys it while the application
+    // still holds the wrapper. Carrying it HERE would be wrong: recovery re-establishes part of the
+    // pre-loss ownership itself — `rebuildSceneGpu` discards a mesh's queued texture releases and
+    // re-acquires as it rebuilds the bind groups, and the dynamic-texture rebuild re-takes its own
+    // reference — so adding the full pre-loss count on top double-counts exactly those. The texture
+    // would then be permanently over-owned: final disposal never reaches zero, so it is never
+    // destroyed and `_isTextureReleased` never reports it released, silently disabling
+    // released-texture detection on a later loss. Kinds whose creator never acquired have no
+    // ownership to carry. Wrappers that adopt queue none either, exactly as `cloneTexture2D` takes
+    // none at creation: they share the references held for the texture they now point at.
+    if (owners > 0) {
+        (_pendingOwnership ??= []).push([tex, owners]);
+    }
+}
+
+/**
+ * Carries onto each rebuilt texture the ownership its outgoing GPUTexture held, after every
+ * per-context recovery handler has re-established the references it owns.
+ *
+ * Deferring to here is what makes the count correct: whatever is still missing once the handlers
+ * have run is by definition a reference recovery did NOT re-establish — the creator's, and any
+ * extra one a derived family holds, since `cloneTexture2D` leaves that pairing to the caller and
+ * restoring only one would let the next release destroy a texture a sibling still points at. It is
+ * a top-up rather than an outright `acquireTexture` so a handler that already re-took its own
+ * reference is counted rather than doubled.
+ * @internal
+ */
+export function settleRebuiltTextureOwnership(): void {
+    const pending = _pendingOwnership;
+    _pendingOwnership = null;
+    if (!pending) {
+        return;
+    }
+    for (const [tex, owners] of pending) {
+        for (let held = _textureOwners(tex); held < owners; held++) {
+            acquireTexture(tex);
+        }
     }
 }
 

@@ -271,16 +271,32 @@ Ownership is carried onto the replacement rather than re-established from the
 kind. A rebuilt `GPUTexture` starts unowned, so recovery reads how many owners
 the outgoing texture had and tops the replacement up to that number. Without it
 the first consumer to bind and then unbind a rebuilt texture destroys it while
-the application still holds the wrapper. It is a count rather than a single
-re-acquire for two reasons. A derived family can hold several references to one
-texture — `cloneTexture2D` leaves that pairing to the caller — and restoring
-only the creator's would bring the replacement back short, so the next release
-would destroy a texture a sibling still points at. And the dynamic-texture
-rebuild takes its own reference, which a top-up counts rather than doubles.
+the application still holds the wrapper.
+
+The top-up is deferred until every per-context handler has run, and that is what
+makes the count correct rather than inflated. Recovery re-establishes part of the
+pre-loss ownership itself: `rebuildSceneGpu` discards a mesh's queued texture
+releases and re-acquires as it rebuilds the bind groups, and the dynamic-texture
+rebuild re-takes its own reference. Adding the full pre-loss count on top of
+those would double-count exactly them, leaving the texture permanently
+over-owned — final disposal never reaches zero, so it is never destroyed, and the
+released check below never fires for it on a later loss. Deferring needs no
+tracking of which reference came from where: whatever is still missing once the
+handlers have run is by definition ownership recovery did not restore by itself.
+It is also a count rather than a single re-acquire, because a derived family can
+hold several references to one texture — `cloneTexture2D` leaves that pairing to
+the caller — and restoring only the creator's would bring the replacement back
+short, so the next release would destroy a texture a sibling still points at.
 Kinds whose creator never acquired, `createSolidTexture2D` and the glTF
 `uploadTex` path, have no ownership to carry and get none. Wrappers that adopt
 take none either, exactly as `cloneTexture2D` takes none at creation: they share
 the references held for the texture they now point at.
+
+Draining the meshes' queued releases before snapshotting would look like the same
+fix and is not: for a solid or glTF-uploaded texture bound by a single renderable
+the only reference is that renderable's, so draining takes the count to zero,
+`releaseTexture` destroys the texture and leaves the zero entry below, and the
+rebuild is then skipped for a texture the re-recorded bind group is about to use.
 
 Whether a texture has been *released* is asked of every kind, because every kind
 can reach that state — `releaseTexture` is public API, and its first call
@@ -369,8 +385,10 @@ module-level side effects; mutable caches remain null until an explicit call.
   kind — both a single wrapper and a family whose clone performed the final
   release — still rebuilding an ownerless texture nothing has released, each
   creator-owned kind surviving one consumer acquire/release cycle, a derived
-  family's second reference surviving the rebuild, and the dynamic rebuild's own
-  reference being counted rather than doubled.
+  family's second reference surviving the rebuild, the dynamic rebuild's own
+  reference being counted rather than doubled, and a handler that re-acquires as
+  it rebuilds its bind groups leaving a count final disposal can still bring to
+  zero.
 - Scene recovery unit tests replace the device under an ESM shadow generator
   and assert that its textures, sampler, UBOs, hidden blur resources, and nested
   render task are recreated while the generator identity remains stable and the

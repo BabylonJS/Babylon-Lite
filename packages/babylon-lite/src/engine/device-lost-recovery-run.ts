@@ -73,10 +73,21 @@ export async function runDeviceLostRecovery(engine: EngineContext, state: Device
     });
 
     await runRecoveryStep("resizing rendering surfaces", () => resizeEngine(engine));
-    await rebuildRecoverableTextures(engine, state);
+    const settleTextureOwnership = await rebuildRecoverableTextures(engine, state);
     const orderedHandlers = Array.from(handlers.values()).sort((a, b) => (a._recoverOrder ?? 0) - (b._recoverOrder ?? 0));
-    for (const handler of orderedHandlers) {
-        await runRecoveryStep(`running "${handler._kind}" recovery`, () => handler._recover(engine));
+    try {
+        for (const handler of orderedHandlers) {
+            await runRecoveryStep(`running "${handler._kind}" recovery`, () => handler._recover(engine));
+        }
+    } finally {
+        // After the handlers, never before: each one re-establishes the texture references it owns
+        // as it rebuilds its bind groups, and only what is still missing now is ownership recovery
+        // will not restore by itself. Runs even when a handler throws, because the queue is module
+        // state that outlives this recovery: it is the one place here holding textures strongly, so
+        // stranding it pins every rebuilt wrapper and the pixels its source kept, and the next
+        // recovery would drain it onto a different device's textures. A throw is not necessarily
+        // total either — the new device is live and whichever handlers did run own real references.
+        settleTextureOwnership?.();
     }
 
     if (wasRunning) {
@@ -98,8 +109,13 @@ export async function runDeviceLostRecovery(engine: EngineContext, state: Device
  * Textures are tracked weakly, so this walks whatever is still alive and drops the rest. The
  * handlers' own walks still run; `rebuildTexture2D` is idempotent per device, so they no-op here
  * instead of rebuilding a second time.
+ *
+ * Returns the callback that carries each rebuilt texture's ownership onto its replacement, which
+ * the caller runs after the handlers, or undefined when nothing was rebuilt. Nothing outside the
+ * tracked set can be rebuilt later either: a texture with no `_recoverySource` is not tracked and
+ * `rebuildTexture2D` returns for it, so an empty set means no handler can queue ownership either.
  */
-async function rebuildRecoverableTextures(engine: EngineContext, state: DeviceLostRecoveryState): Promise<void> {
+async function rebuildRecoverableTextures(engine: EngineContext, state: DeviceLostRecoveryState): Promise<(() => void) | undefined> {
     const tracked = state._textures;
     const textures: Texture2D[] = [];
     for (const ref of tracked) {
@@ -111,21 +127,30 @@ async function rebuildRecoverableTextures(engine: EngineContext, state: DeviceLo
         }
     }
     if (textures.length === 0) {
-        return;
+        return undefined;
     }
-    const { rebuildTexture2D } = await import("../texture/texture-recovery.js");
-    await runRecoveryStep("rebuilding recoverable textures", async () => {
-        // allSettled (not all): `Promise.all` would reject the moment one rebuild fails, so
-        // recovery would report failure — handing the engine back to the app to tear down —
-        // while the remaining rebuilds were still in flight mutating that app's textures. Settle
-        // everything first so failing here means lite is genuinely done touching them, and so the
-        // error surfaced is not just whichever fetch happened to lose the race.
-        const results = await Promise.allSettled(textures.map((texture) => rebuildTexture2D(engine, texture)));
-        const failed = results.find((result) => result.status === "rejected");
-        if (failed) {
-            throw failed.reason;
-        }
-    });
+    const { rebuildTexture2D, settleRebuiltTextureOwnership } = await import("../texture/texture-recovery.js");
+    try {
+        await runRecoveryStep("rebuilding recoverable textures", async () => {
+            // allSettled (not all): `Promise.all` would reject the moment one rebuild fails, so
+            // recovery would report failure — handing the engine back to the app to tear down —
+            // while the remaining rebuilds were still in flight mutating that app's textures. Settle
+            // everything first so failing here means lite is genuinely done touching them, and so the
+            // error surfaced is not just whichever fetch happened to lose the race.
+            const results = await Promise.allSettled(textures.map((texture) => rebuildTexture2D(engine, texture)));
+            const failed = results.find((result) => result.status === "rejected");
+            if (failed) {
+                throw failed.reason;
+            }
+        });
+    } catch (error) {
+        // Recovery is over, so the handlers that would have re-established ownership never run.
+        // Settle what was rebuilt before giving up rather than stranding it for the next recovery,
+        // which would apply it to a different device's textures.
+        settleRebuiltTextureOwnership();
+        throw error;
+    }
+    return settleRebuiltTextureOwnership;
 }
 
 /**

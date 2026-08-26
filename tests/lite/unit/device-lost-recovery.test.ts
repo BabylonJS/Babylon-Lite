@@ -658,6 +658,37 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
         return replacement;
     }
 
+    it("carries only the ownership recovery does not re-establish itself", async () => {
+        const engine = trackingEngine();
+        const recovery = enableDeviceLostSpriteRecovery(engine);
+        const texture = sourceTexture(true); // the creator's reference
+        acquireTexture(texture); // a renderable's bind group
+        engine._dlr!.p(texture, new Uint8Array([1, 2, 3, 4]), {});
+
+        const replacement = device();
+        vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });
+        await runDeviceLostRecovery(engine, engine._deviceLostRecovery!, [
+            {
+                _kind: "sprite-renderer",
+                // Models `rebuildSceneGpu`: the mesh's queued texture release is discarded and the
+                // bind group rebuild re-acquires, so recovery restores this reference by itself.
+                _recover: () => void acquireTexture(texture),
+            },
+        ]);
+        vi.unstubAllGlobals();
+
+        const rebuilt = texture.texture as unknown as { destroy: ReturnType<typeof vi.fn> };
+        // Final disposal: the scene releases the renderable's reference, the application the
+        // creator's. Carrying the pre-loss count on top of the handler's re-acquire would leave one
+        // reference nothing can ever release, so neither call would destroy the texture.
+        expect(releaseTexture(texture)).toBe(false);
+        expect(releaseTexture(texture)).toBe(true);
+        expect(rebuilt.destroy).toHaveBeenCalledTimes(1);
+        // And detection still works afterwards, so a later loss skips the rebuild.
+        expect(_isTextureReleased(texture)).toBe(true);
+        recovery.disable();
+    });
+
     for (const [kind, owned, capture] of recoverableKinds) {
         it(`does not rebuild a ${kind} texture the application has already released`, async () => {
             const engine = trackingEngine();
