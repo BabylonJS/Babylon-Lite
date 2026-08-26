@@ -1,0 +1,139 @@
+name: Agent Issue Approval
+
+on:
+    issues:
+        types: [labeled, edited]
+
+permissions:
+    issues: write
+
+jobs:
+    record-or-invalidate:
+        if: >-
+            (github.event.action == 'labeled' && github.event.label.name == 'agent-approved') ||
+            (github.event.action == 'edited' && contains(github.event.issue.labels.*.name, 'agent-approved'))
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        steps:
+            - name: Process the approval state
+              shell: bash
+              env:
+                  GITHUB_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  node --input-type=module <<'NODE'
+                  import { createHash } from "node:crypto";
+                  import { readFile } from "node:fs/promises";
+
+                  const APPROVAL_LABEL = "agent-approved";
+                  const INVALIDATION_MARKER_PREFIX = "agent-approval-invalidation:";
+                  // The collaborators API may return legacy "push" for the write role.
+                  const ALLOWED_PERMISSIONS = new Set(["triage", "write", "push", "maintain", "admin"]);
+                  const event = JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, "utf8"));
+                  const { owner, name: repo } = event.repository;
+                  const issue = event.issue;
+                  const repoPath = `/repos/${encodeURIComponent(owner.login)}/${encodeURIComponent(repo)}`;
+
+                  async function githubRequest(method, path, body) {
+                      const response = await fetch(`${process.env.GITHUB_API_URL}${path}`, {
+                          method,
+                          headers: {
+                              Accept: "application/vnd.github+json",
+                              Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+                              "X-GitHub-Api-Version": "2022-11-28",
+                          },
+                          body: body === undefined ? undefined : JSON.stringify(body),
+                      });
+                      const responseText = await response.text();
+                      const responseBody = responseText === "" ? undefined : JSON.parse(responseText);
+                      if (!response.ok) {
+                          const error = new Error(`GitHub API ${method} ${path} failed with ${response.status}: ${responseText.slice(0, 500)}`);
+                          error.status = response.status;
+                          throw error;
+                      }
+                      return responseBody;
+                  }
+
+                  async function postComment(body) {
+                      await githubRequest("POST", `${repoPath}/issues/${issue.number}/comments`, { body });
+                  }
+
+                  async function recordApproval() {
+                      const approver = event.sender.login;
+                      const permissionResult = await githubRequest(
+                          "GET",
+                          `${repoPath}/collaborators/${encodeURIComponent(approver)}/permission`
+                      );
+                      if (!ALLOWED_PERMISSIONS.has(permissionResult.permission)) {
+                          throw new Error(`@${approver} does not have triage-or-higher repository permission; approval was not recorded.`);
+                      }
+
+                      const snapshot = {
+                          version: 1,
+                          issue_number: issue.number,
+                          title: issue.title,
+                          body: issue.body ?? "",
+                      };
+                      const sha256 = createHash("sha256").update(JSON.stringify(snapshot), "utf8").digest("hex");
+                      const marker = `<!-- agent-approval:v1 issue=${issue.number} sha256=${sha256} approver=${approver} approved-at=${new Date().toISOString()} -->`;
+                      await postComment(
+                          [
+                              "This exact issue title/body snapshot is approved for agent automation.",
+                              "",
+                              "Edits invalidate this approval and require reapproval.",
+                              "",
+                              marker,
+                          ].join("\n")
+                      );
+                  }
+
+                  async function hasBotInvalidationComment(marker) {
+                      for (let page = 1; ; page += 1) {
+                          const comments = await githubRequest(
+                              "GET",
+                              `${repoPath}/issues/${issue.number}/comments?per_page=100&page=${page}`
+                          );
+                          if (
+                              comments.some(
+                                  (comment) =>
+                                      comment.user?.login === "github-actions[bot]" &&
+                                      comment.user?.type === "Bot" &&
+                                      typeof comment.body === "string" &&
+                                      comment.body.includes(marker)
+                              )
+                          ) {
+                              return true;
+                          }
+                          if (comments.length < 100) {
+                              return false;
+                          }
+                      }
+                  }
+
+                  async function invalidateApproval() {
+                      try {
+                          await githubRequest(
+                              "DELETE",
+                              `${repoPath}/issues/${issue.number}/labels/${encodeURIComponent(APPROVAL_LABEL)}`
+                          );
+                      } catch (error) {
+                          if (error.status !== 404) {
+                              throw error;
+                          }
+                      }
+
+                      const marker = `<!-- ${INVALIDATION_MARKER_PREFIX}v1 issue=${issue.number} -->`;
+                      if (!(await hasBotInvalidationComment(marker))) {
+                          await postComment(["Approval was invalidated by an issue edit. Reapproval is required.", "", marker].join("\n"));
+                      }
+                  }
+
+                  if (event.action === "labeled" && event.label?.name === APPROVAL_LABEL) {
+                      await recordApproval();
+                  } else if (
+                      event.action === "edited" &&
+                      issue.labels.some((label) => (typeof label === "string" ? label : label.name) === APPROVAL_LABEL)
+                  ) {
+                      await invalidateApproval();
+                  }
+                  NODE

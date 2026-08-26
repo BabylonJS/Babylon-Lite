@@ -534,28 +534,3 @@ and ships to npm, so add no per-symbol rows and no internal-doc links.
   **(Task 2)** which scene(s) landed at MAD ≈ 0 + new count (or "none unblocked");
   **(Task 3)** which floor outcome you hit, the (now-empty) ledger size, any
   tree-shakeable Lite additions with bundle-diff proof, and the test/lint results.
-
----
-
-## Hand-off to the pipeline — PR title (required when you changed anything)
-
-The pipeline (`scripts/open-compat-sync-pr.ts`) opens the draft PR; you do **not**.
-It cannot infer a meaningful title from your diff, so the title is generic unless
-you provide one. As your **final step on any run that changed files**, write a
-single concise, descriptive line summarising the specific work this run to:
-
-```
-.compat-sync-pr-title.txt   (repo root)
-```
-
-- Keep it **≤ ~70 characters** and specific to what changed — e.g.
-  `Wrap AnimationGroup blending + add 3 loader stubs` or
-  `Implement MorphTargetManager API; sync to BJS abc1234`. Never reuse a generic
-  catch-all like "compat-layer sync".
-- Write the **bare summary only** — do **not** add a `[compat-sync]` prefix or any
-  other prefix. The pipeline prepends `[compat-sync]` deterministically; anything you
-  add would be stripped or duplicated.
-- The pipeline reads this file, then **deletes it before committing**, so it is a
-  scratch artifact and never lands in the PR. (It is git-ignored as a safeguard.)
-- If the run changed nothing, do **not** create the file — the pipeline falls back
-  to the generic title and (with no diff) opens no PR anyway.
