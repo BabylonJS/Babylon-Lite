@@ -57,9 +57,7 @@ export function hasMaskedSecret(line: string): boolean {
  * and `${X}`, but not `${{ secrets.X }}`, which is the *canonical* GitHub
  * Actions reference. So the guard would have rejected a correct Actions header
  * -- a misfire, on the one file class that was just added to its subject.
- *
- * It passed only because `compat-sync-trigger.yml` happens to use the shell
- * form. Widening a collector does not widen the predicate that reads it, and an
+ * Widening a collector does not widen the predicate that reads it, and an
  * all-pass result on newly covered files is exactly what a dialect-blind
  * predicate produces.
  */
@@ -177,7 +175,7 @@ export const PIPELINE_ROOTS = [
  * cardinality is what makes it work, and the growth direction it leaves open
  * is covered by the correspondence test rather than by coupling the lists.
  */
-export const ONE_FILE_PER_ROOT = ["azure-pipelines-bundle-manifest.yml", "config/templates/upload-static-site.yml", ".github/workflows/compat-sync-trigger.yml"];
+export const ONE_FILE_PER_ROOT = ["azure-pipelines-bundle-manifest.yml", "config/templates/upload-static-site.yml", ".github/workflows/agent-approval.yml"];
 
 function pipelineFiles(): PipelineFile[] {
     const files: PipelineFile[] = [];
@@ -542,14 +540,18 @@ describe("pipeline secret hygiene", () => {
  * from the file. A workflow that authenticates some third way still passes, as
  * long as its secret is a secret.
  *
- * The trace is needed because the binding is rarely direct. The live case is
- * two hops -- `AUTH` is built from `ADO_PAT`, which is `${{ secrets.ADO_PAT }}`
- * -- so a one-level check would report the real exempt file as unbound and the
- * guard would arrive red on a correct tree.
+ * The trace is needed because the binding is rarely direct. A two-hop fixture
+ * below builds `AUTH` from `ADO_PAT`, which is `${{ secrets.ADO_PAT }}`; a
+ * one-level check would report that correct chain as unbound.
  */
 export function credentialTracesToASecretStore(fileText: string, headerLine: string): boolean {
-    const identifiers = (text: string): string[] => [...text.matchAll(/\$\{?\{?\s*(?:secrets\.)?([A-Za-z_]\w*)/g)].map(([, name]) => name ?? "");
-    const mentionsSecretStore = (text: string): boolean => /\bsecrets\s*\./.test(text);
+    const identifiers = (text: string): string[] => [
+        ...[...text.matchAll(/\$\{?\{?\s*(?:secrets\.)?([A-Za-z_]\w*)/g)].map(([, name]) => name ?? ""),
+        ...[...text.matchAll(/\bprocess\.env\.([A-Za-z_]\w*)/g)].map(([, name]) => name ?? ""),
+    ];
+    const secretExpression = String.raw`\$\{\{\s*(?:secrets\.[A-Za-z_]\w*|github\.token)\s*\}\}`;
+    const mentionsSecretStore = (text: string): boolean => new RegExp(secretExpression).test(text);
+    const isSecretStoreValue = (text: string): boolean => new RegExp(`^\\s*["']?${secretExpression}["']?\\s*(?:#.*)?$`).test(text);
 
     if (mentionsSecretStore(headerLine)) {
         return true;
@@ -572,7 +574,7 @@ export function credentialTracesToASecretStore(fileText: string, headerLine: str
         // YAML `env:` key. The exempt file uses one of each in the same chain.
         const assignments = lines.filter((line) => new RegExp(`(^|\\s)${name}\\s*[:=]`).test(line)).map((line) => line.slice(line.search(/[:=]/) + 1));
 
-        if (assignments.some(mentionsSecretStore)) {
+        if (assignments.some(isSecretStoreValue)) {
             return true;
         }
         pending.push(...assignments.flatMap(identifiers));
@@ -701,7 +703,7 @@ describe("the deploy-token exemption is granted for its reason", () => {
 
         // Same file, same header, secret provenance removed.
         expect(
-            credentialTracesToASecretStore(text.replace(/\$\{\{\s*secrets\.[^}]*\}\}/g, "'a-literal-value'"), header),
+            credentialTracesToASecretStore(text.replace(/\$\{\{\s*(?:secrets\.[^}]*|github\.token\s*)\}\}/g, "'a-literal-value'"), header),
             "the exemption survived its own justification being removed"
         ).toBe(false);
     });
@@ -716,6 +718,15 @@ describe("credential tracing accepts and rejects the right chains", () => {
 
     it("accepts a header that names the secret store directly", () => {
         expect(credentialTracesToASecretStore("", '  -H "Authorization: Bearer ${{ secrets.API_TOKEN }}"')).toBe(true);
+    });
+
+    it("accepts the ephemeral GitHub Actions token and no other GitHub context value", () => {
+        const expression = (property: string): string => "$" + `{{ github.${property} }}`;
+
+        expect(credentialTracesToASecretStore(`GITHUB_TOKEN: ${expression("token")}`, 'Authorization: "Bearer ${GITHUB_TOKEN}"')).toBe(true);
+        expect(credentialTracesToASecretStore(`GITHUB_TOKEN: ${expression("token")}`, "Authorization: `Bearer ${process.env.GITHUB_TOKEN}`")).toBe(true);
+        expect(credentialTracesToASecretStore(`GITHUB_TOKEN: ${expression("actor")}`, 'Authorization: "Bearer ${GITHUB_TOKEN}"')).toBe(false);
+        expect(credentialTracesToASecretStore(`GITHUB_TOKEN: "documentation mentions ${expression("token")}"`, 'Authorization: "Bearer ${GITHUB_TOKEN}"')).toBe(false);
     });
 
     it("rejects a chain that terminates in a literal", () => {
@@ -1002,7 +1013,7 @@ describe("the walk recognises every file kind the enumeration collects", () => {
         "azure-pipelines.yml",
         "azure-pipelines-demos.yaml",
         "upload-static-site.yml",
-        "compat-sync-trigger.yaml",
+        "agent-approval.yaml",
         "azure-pipelines.txt",
         "notes.md",
         "azure-pipelines",

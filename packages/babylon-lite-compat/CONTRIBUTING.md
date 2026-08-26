@@ -5,15 +5,15 @@ to _consume_ the package, see [README.md](./README.md).
 
 The compat layer is largely **maintained by an AI agent**: a Copilot-driven skill
 reconciles it against upstream Babylon.js / Babylon Lite changes and lands new lab
-scenes at parity, and an Azure DevOps pipeline runs that skill on a schedule (and
-on demand) and opens a draft PR. Humans are needed for the parts that require a
-real GPU or judgment — running parity/perf tests and reviewing/merging PRs.
+scenes at parity. Private automation in `microsoft/babylonjs-eng` polls approved
+requests and opens draft PRs for human review. Humans are needed for the parts that
+require a real GPU or judgment — running parity/perf tests and reviewing/merging PRs.
 
 ```
 update-compat-layer skill  ──drives──▶  edits + tests + COMPAT-STATUS.md
         ▲                                         │
         │ runs                                    ▼
-azure-pipelines-compat-sync.yml  ──opens──▶  draft PR (human reviews)
+microsoft/babylonjs-eng poller  ────────▶  draft PR + issue feedback
 ```
 
 ---
@@ -22,7 +22,7 @@ azure-pipelines-compat-sync.yml  ──opens──▶  draft PR (human reviews)
 
 [COMPAT-STATUS.md](./COMPAT-STATUS.md) is the live record of what the layer
 supports and how far it has been reconciled against upstream. Everything else —
-the skill, the pipeline, the README table — reads from or updates it.
+the skill, private automation, and the README table — reads from or updates it.
 
 It tracks three things:
 
@@ -105,26 +105,39 @@ Scenes with no Babylon.js oracle source (Lite-only scenes) are excluded.
 
 ---
 
-## The automated maintenance pipeline
+## Automated maintenance
 
-[azure-pipelines-compat-sync.yml](../../azure-pipelines-compat-sync.yml) runs the
-skill end-to-end via the GitHub Copilot CLI and opens a **draft PR** with whatever
-it changed, so the compat layer can track upstream with no human authoring.
+The private `microsoft/babylonjs-eng` automation polls this repository for approved
+compat requests, runs the `update-compat-layer` skill, and opens a **draft PR** for
+human review. It reports workflow status and actionable failure feedback on the
+originating issue; it does not require a cross-organization dispatch or Microsoft
+credential in this public repository.
 
-- **Triggers:** a daily schedule, manual runs, and a GitHub issue labeled
-  `compat` (bridged GitHub → ADO by
-  [.github/workflows/compat-sync-trigger.yml](../../.github/workflows/compat-sync-trigger.yml),
-  which fetches the issue body and injects it into the agent prompt).
-- **Two halves:** the agent step (read + edit only), then a deterministic PR driver
-  ([scripts/open-compat-sync-pr.ts](../../scripts/open-compat-sync-pr.ts)) that
-  **independently re-validates** — compat unit tests + typecheck, never trusting
-  the agent's self-report — then branches, commits, pushes, and opens the draft PR
-  with the validation results in the body.
-- **Humans stay in the loop** for review and for the GPU-bound checks (parity /
-  perf) that can't run on the pipeline's headless agent.
-
-The prompt is assembled by
-[scripts/build-compat-sync-prompt.mjs](../../scripts/build-compat-sync-prompt.mjs).
+- **Routing and authorization are separate.** `compat` routes an issue to the compat
+  workflow. A Babylon contributor applies `agent-approved` to authorize the exact
+  title/body snapshot. The generic
+  [.github/workflows/agent-approval.yml](../../.github/workflows/agent-approval.yml)
+  verifies that approver has `triage`, `write`, `maintain`, or `admin` permission and
+  posts the attestation with the repository `GITHUB_TOKEN`.
+- **Approval is immutable.** The digest is the lowercase UTF-8 SHA-256 of
+  `JSON.stringify({version:1,issue_number:<number>,title:<title>,body:<body-or-empty-string>})`
+  with that exact JavaScript insertion order. The marker is
+  `<!-- agent-approval:v1 issue=<decimal> sha256=<64 lowercase hex> approver=<login> approved-at=<ISO timestamp> -->`.
+  The poller accepts only comments authored by `github-actions[bot]` with actor type
+  `Bot`, and requires the current issue to carry both `compat` and `agent-approved`
+  with a digest matching its current content.
+- **Edits require reapproval.** Editing an approved issue removes only
+  `agent-approved` and posts one invalidation notice; `compat` remains as the routing
+  label. The poller's own hash comparison remains authoritative against races.
+- **Dispatch uses the approved snapshot.** After rechecking labels, bot identity, and
+  digest, the private poller passes that immutable title/body snapshot to the
+  compat-maintenance workflow. The resulting changes arrive as a draft PR, and
+  status or failure feedback returns to the originating issue.
+- **Machine-read sync state remains in `COMPAT-STATUS.md`.** Every successful sync
+  rewrites `Last synced BJS commit`, `Last synced Lite commit`, and `Last sync date`;
+  do not rename those markers or turn the file into a run log.
+- **Humans stay in the loop** for draft-PR review and GPU-bound parity/performance
+  checks.
 
 ---
 

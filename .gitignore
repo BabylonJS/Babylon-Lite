@@ -91,10 +91,6 @@ _bjs67_defines.txt
 pages-dist/
 
 build-timeline.json
-# Compat-sync scratch file: the agent writes a one-line PR title here; the PR
-# driver (scripts/open-compat-sync-pr.ts) reads it then deletes it before
-# committing. Ignored as a safeguard so it can never land in a PR.
-.compat-sync-pr-title.txt
 # Generated TypeDoc API documentation (regenerated on demand)
 lab/public/api-docs/
 lab/public/lite/api-docs/
