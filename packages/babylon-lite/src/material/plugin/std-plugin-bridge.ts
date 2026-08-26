@@ -79,6 +79,39 @@ function _releaseMaterialState(scene: SceneContext, state: MaterialPluginState):
     }
 }
 
+function _releaseMaterialStateAfterBindings(scene: SceneContext, mat: StandardMaterialProps, state: MaterialPluginState): void {
+    if (!state._uboBuffer || !scene._built) {
+        _releaseMaterialState(scene, state);
+        return;
+    }
+    const activeDisposers: (() => void)[][] = [];
+    for (const mesh of scene.meshes) {
+        if (mesh.material && getMaterialSource(mesh.material) === mat) {
+            const disposers = scene._meshDisposables.get(mesh);
+            if (disposers) {
+                activeDisposers.push(disposers);
+            }
+        }
+    }
+    if (activeDisposers.length === 0) {
+        _releaseMaterialState(scene, state);
+        return;
+    }
+    let remaining = activeDisposers.length;
+    for (const disposers of activeDisposers) {
+        let completed = false;
+        disposers.push(() => {
+            if (completed) {
+                return;
+            }
+            completed = true;
+            if (--remaining === 0) {
+                _releaseMaterialState(scene, state);
+            }
+        });
+    }
+}
+
 function _clearSceneMaterials(scene: SceneContext, state: ScenePluginState): void {
     for (const materialState of state._materials.values()) {
         _releaseMaterialState(scene, materialState);
@@ -194,7 +227,7 @@ export function bakeStdPluginMaterial(mat: StandardMaterialProps | null | undefi
     if (!mat.plugins?.length) {
         if (old) {
             existingSceneState!._materials.delete(mat);
-            _releaseMaterialState(scene, old);
+            _releaseMaterialStateAfterBindings(scene, mat, old);
             mat._renderFeatures = undefined;
             _queueBindingRebuild(scene, mat);
         }
@@ -219,7 +252,7 @@ export function bakeStdPluginMaterial(mat: StandardMaterialProps | null | undefi
     };
     if (old) {
         mat._renderFeatures = undefined;
-        _releaseMaterialState(scene, old);
+        _releaseMaterialStateAfterBindings(scene, mat, old);
     }
     sceneState._materials.set(mat, state);
     mat._renderFeatures = { features: _computeStandardMaterialFeatures(mat) | (idx << PLUGIN_INDEX_SHIFT) };

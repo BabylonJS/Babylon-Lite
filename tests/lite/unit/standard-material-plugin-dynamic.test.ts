@@ -10,7 +10,7 @@ import { MATERIAL_ALPHA_BLEND } from "../../../packages/babylon-lite/src/materia
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { StdExt } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import type { Renderable } from "../../../packages/babylon-lite/src/render/renderable";
-import { createSceneContext, disposeScene, onBeforeRender, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { createSceneContext, disposeScene, onBeforeRender, type RuntimeSceneBuildHooks, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap";
 
 interface MockBuffer {
@@ -252,7 +252,7 @@ describe("dynamic Standard material plugins", () => {
         expect(buffer.destroy).toHaveBeenCalledOnce();
     });
 
-    it("rebuilds bindings with the replacement UBO and retires the previous one", () => {
+    it("keeps the old UBO alive while the swap queue is blocked, then retires it after rebinding", () => {
         const { engine, buffers } = makeEngine();
         const material = createStandardMaterial();
         material.plugins = [valuePlugin({ current: 1 })];
@@ -275,15 +275,39 @@ describe("dynamic Standard material plugins", () => {
         scene._renderables.push(oldRenderable);
         scene._meshDisposables.set(targetMesh, []);
         scene._built = true;
+        let blocked = true;
+        scene._runtimeBuilds = {
+            get w() {
+                return blocked;
+            },
+        } as RuntimeSceneBuildHooks;
         bakeStdPluginMaterial(material, scene);
 
         expect(buffers).toHaveLength(2);
         expect(scene._materialSwapQueue).toEqual([targetMesh]);
         expect(oldBuffer.destroy).not.toHaveBeenCalled();
+        expect(engine._retirements).toBeUndefined();
+
+        processMaterialSwaps(scene);
+        expect(rebuild).not.toHaveBeenCalled();
+        expect(oldBuffer.destroy).not.toHaveBeenCalled();
+        expect(engine._retirements).toBeUndefined();
+
+        blocked = false;
         processMaterialSwaps(scene);
         expect(rebuild).toHaveBeenCalledOnce();
         expect(reboundBuffer).toBe(buffers[1]);
-        engine._retirements!.splice(0).forEach((retire) => retire());
+        expect(engine._retirements).toHaveLength(1);
+
+        const bindingRetirements = engine._retirements!;
+        engine._retirements = null;
+        bindingRetirements.splice(0).forEach((retire) => retire());
+        expect(oldBuffer.destroy).not.toHaveBeenCalled();
+        expect(engine._retirements).toHaveLength(1);
+
+        const uboRetirements = engine._retirements!;
+        engine._retirements = null;
+        uboRetirements.splice(0).forEach((retire) => retire());
         expect(oldBuffer.destroy).toHaveBeenCalledOnce();
         expect(buffers[1]!.destroy).not.toHaveBeenCalled();
     });
