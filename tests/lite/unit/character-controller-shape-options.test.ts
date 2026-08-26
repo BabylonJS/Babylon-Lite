@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { PhysicsCharacterController, type PhysicsCharacterControllerOptions } from "../../../packages/babylon-lite/src/physics/character-controller";
+import {
+    getPhysicsCharacterControllerBody,
+    PhysicsCharacterController,
+    type PhysicsCharacterControllerOptions,
+} from "../../../packages/babylon-lite/src/physics/character-controller";
 import type { Vec3 } from "../../../packages/babylon-lite/src/math/types";
 import type { PhysicsBody, PhysicsShape, PhysicsWorld } from "../../../packages/babylon-lite/src/physics/havok";
 
@@ -58,6 +62,13 @@ function makeController(): {
 }
 
 describe("PhysicsCharacterController.setShapeOptions", () => {
+    it("exposes its backing body for physics queries", () => {
+        const { cc, body } = makeController();
+
+        expect(cc.getBody()).toBe(body);
+        expect(getPhysicsCharacterControllerBody(cc)).toBe(body);
+    });
+
     it("rebuilds the capsule and preserves the world-space foot position by default", () => {
         const { cc, createCapsule, setBodyShape, releaseShape, setNodePosition, oldShape, body } = makeController();
         const options = { capsuleHeight: 1.2, capsuleRadius: 0.4 };

@@ -24,12 +24,25 @@
  */
 
 import { onPhysicsAfterStep } from "./havok.js";
-import type { PhysicsShape, PhysicsWorld } from "./havok.js";
+import type { PhysicsBody, PhysicsShape, PhysicsWorld } from "./havok.js";
+
+type PhysicsTriggerType = PhysicsTriggerInfo["type"];
+
+const TRIGGER_ENTERED = 8;
+const TRIGGER_EXITED = 16;
 
 /** A single trigger-volume event reported by Havok after a physics step. */
 export interface PhysicsTriggerInfo {
     /** `ENTERED` when a body enters the trigger volume, `EXITED` when it leaves. */
     type: "ENTERED" | "EXITED";
+}
+
+/** Trigger event including the two participating bodies. */
+export interface PhysicsTriggerBodyInfo extends PhysicsTriggerInfo {
+    /** First body reported by Havok, or `null` if it is no longer tracked. */
+    bodyA: PhysicsBody | null;
+    /** Second body reported by Havok, or `null` if it is no longer tracked. */
+    bodyB: PhysicsBody | null;
 }
 
 /**
@@ -54,26 +67,59 @@ export function setPhysicsShapeIsTrigger(world: PhysicsWorld, shape: PhysicsShap
  * {@link setPhysicsShapeIsTrigger} first, otherwise the stream is empty.
  * @param world - The physics world to listen on.
  * @param cb - Callback invoked with each {@link PhysicsTriggerInfo} as it is read.
+ * @returns A disposer that removes the callback.
  */
-export function onPhysicsTrigger(world: PhysicsWorld, cb: (info: PhysicsTriggerInfo) => void): void {
-    const hknp = world._hknp;
-    // Native Havok trigger event types: 8 = ENTERED, 16 = EXITED. The Havok `EventType` enum
-    // only enumerates the collision types, so the trigger values are matched literally (mirroring
-    // Babylon.js' `_nativeTriggerCollisionValueToCollisionType`). Unknown values are skipped.
-    const TRIGGER_ENTERED = 8;
-    const TRIGGER_EXITED = 16;
+export function onPhysicsTrigger(world: PhysicsWorld, cb: (info: PhysicsTriggerInfo) => void): () => void {
+    return registerTriggerDrain(world, () => drainTriggerEvents(world, (type) => cb({ type })));
+}
 
-    onPhysicsAfterStep(world, () => {
-        let addr = hknp.HP_World_GetTriggerEvents(world._hkWorld)[1];
-        while (addr) {
-            const intBuf = new Int32Array(hknp.HEAPU8.buffer, addr);
-            const type = intBuf[0];
-            if (type === TRIGGER_ENTERED) {
-                cb({ type: "ENTERED" });
-            } else if (type === TRIGGER_EXITED) {
-                cb({ type: "EXITED" });
-            }
-            addr = hknp.HP_World_GetNextTriggerEvent(world._hkWorld, addr);
+/**
+ * Register a trigger callback that also resolves both participating Havok bodies.
+ *
+ * A body is `null` when the native event references a body that has already been removed from
+ * the world's tracked body list.
+ * @param world - The physics world to listen on.
+ * @param cb - Callback invoked with each body-aware trigger event.
+ * @returns A disposer that removes the callback.
+ */
+export function onPhysicsTriggerBodies(world: PhysicsWorld, cb: (info: PhysicsTriggerBodyInfo) => void): () => void {
+    return registerTriggerDrain(world, () =>
+        drainTriggerEvents(world, (type, bodyAId, bodyBId) => {
+            cb({ type, bodyA: findBodyById(world, bodyAId), bodyB: findBodyById(world, bodyBId) });
+        })
+    );
+}
+
+function drainTriggerEvents(world: PhysicsWorld, cb: (type: PhysicsTriggerType, bodyAId: number, bodyBId: number) => void): void {
+    const hknp = world._hknp;
+    let address = hknp.HP_World_GetTriggerEvents(world._hkWorld)[1];
+    while (address) {
+        const event = new Int32Array(hknp.HEAPU8.buffer, address);
+        const type = event[0] === TRIGGER_ENTERED ? "ENTERED" : event[0] === TRIGGER_EXITED ? "EXITED" : null;
+        if (type) {
+            cb(type, event[2]!, event[6]!);
         }
-    });
+        address = hknp.HP_World_GetNextTriggerEvent(world._hkWorld, address);
+    }
+}
+
+function registerTriggerDrain(world: PhysicsWorld, drain: () => void): () => void {
+    onPhysicsAfterStep(world, drain);
+    return () => {
+        const callbacks = world._afterStep;
+        const index = callbacks?.indexOf(drain) ?? -1;
+        if (index >= 0) {
+            callbacks!.splice(index, 1);
+        }
+    };
+}
+
+function findBodyById(world: PhysicsWorld, bodyId: number): PhysicsBody | null {
+    for (const body of world._bodies) {
+        const nativeId = body._hkBody[0];
+        if (nativeId === bodyId || (typeof nativeId === "bigint" && nativeId === BigInt(bodyId))) {
+            return body;
+        }
+    }
+    return null;
 }

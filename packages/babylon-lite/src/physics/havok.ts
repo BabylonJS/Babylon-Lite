@@ -343,7 +343,7 @@ function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
     // Babylon.js, where physics is advanced inside `scene.animate()` (before render) and
     // post-step scene logic runs in `onAfterRenderObservable`.
     if (world._afterStep) {
-        const cbs = world._afterStep;
+        const cbs = world._afterStep.slice();
         for (let i = 0; i < cbs.length; i++) {
             cbs[i]!(dt);
         }

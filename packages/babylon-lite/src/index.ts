@@ -936,11 +936,17 @@ export { shapeProximity, shapeCast, physicsRaycast } from "./physics/havok-queri
 export type { ShapeProximityQuery, ShapeCastQuery, ShapeProximityResult, ShapeCastResult, RaycastQuery, RaycastResult } from "./physics/havok-queries.js";
 export { setPhysicsBodyCollisionEventsEnabled, onPhysicsCollision } from "./physics/havok-collision.js";
 export type { PhysicsCollisionInfo } from "./physics/havok-collision.js";
-export { setPhysicsShapeIsTrigger, onPhysicsTrigger } from "./physics/havok-trigger.js";
-export type { PhysicsTriggerInfo } from "./physics/havok-trigger.js";
+export { setPhysicsShapeIsTrigger, onPhysicsTrigger, onPhysicsTriggerBodies } from "./physics/havok-trigger.js";
+export type { PhysicsTriggerBodyInfo, PhysicsTriggerInfo } from "./physics/havok-trigger.js";
 export { createPhysicsViewer, showPhysicsBody, showPhysicsConstraint, hidePhysicsBody, disposePhysicsViewer } from "./physics/physics-viewer.js";
 export type { PhysicsViewer, PhysicsViewerOptions, PhysicsConstraintDebug } from "./physics/physics-viewer.js";
-export { createPhysicsCharacterController, PhysicsCharacterController, CharacterSupportedState, CharacterCollisionObservable } from "./physics/character-controller.js";
+export {
+    createPhysicsCharacterController,
+    getPhysicsCharacterControllerBody,
+    PhysicsCharacterController,
+    CharacterSupportedState,
+    CharacterCollisionObservable,
+} from "./physics/character-controller.js";
 export type { PhysicsCharacterControllerOptions, CharacterSurfaceInfo, CharacterCollisionEvent } from "./physics/character-controller.js";
 
 // ─── Navigation (Recast V2) ──────────────────────────────────────────
