@@ -42,7 +42,18 @@ interface RuntimeBuildState {
     generations: WeakMap<Mesh, number>;
     installed: WeakMap<Mesh, Set<MeshGroupBuilder>>;
     installedMeshes: Set<Mesh>;
+    pendingDisposers: WeakMap<Mesh, (() => void)[]>;
     tail: Promise<void> | null;
+}
+
+function holdPendingDisposers(state: RuntimeBuildState, mesh: Mesh, disposers: (() => void)[]): void {
+    state.pendingDisposers.set(mesh, disposers);
+}
+
+function releasePendingDisposers(state: RuntimeBuildState, mesh: Mesh, disposers: (() => void)[] | undefined): void {
+    if (disposers && state.pendingDisposers.get(mesh) === disposers) {
+        state.pendingDisposers.delete(mesh);
+    }
 }
 
 interface PbrGeometrySceneState {
@@ -129,6 +140,7 @@ function installRuntimeBuilds(scene: SceneContext): RuntimeSceneBuildHooks {
         generations: new WeakMap(),
         installed: new WeakMap(),
         installedMeshes: new Set(),
+        pendingDisposers: new WeakMap(),
         tail: null,
     };
     const pbrState = scene as SceneContext & PbrGeometrySceneState;
@@ -187,6 +199,9 @@ function installRuntimeBuilds(scene: SceneContext): RuntimeSceneBuildHooks {
         get w() {
             return !!state.tail;
         },
+        pendingDisposers: (mesh) => state.pendingDisposers.get(mesh),
+        holdPendingDisposers: (mesh, disposers) => holdPendingDisposers(state, mesh, disposers),
+        releasePendingDisposers: (mesh, disposers) => releasePendingDisposers(state, mesh, disposers),
         reset: (mesh) => {
             resetRuntimeRebuild(scene, state, mesh);
             pbrState._pbrMeshGeomContexts?.delete(mesh);
@@ -302,6 +317,7 @@ async function materializeRuntimeMesh(scene: SceneContext, state: RuntimeBuildSt
     const previousDisposers = scene._meshDisposables.get(mesh);
     if (previousDisposers) {
         scene._meshDisposables.delete(mesh);
+        holdPendingDisposers(state, mesh, previousDisposers);
     }
     const previousRebuild = builder._rebuildSingle;
     const runtimeRebuilder = _runtimeRebuilders?.get(builder);
@@ -362,6 +378,7 @@ async function materializeRuntimeMesh(scene: SceneContext, state: RuntimeBuildSt
             }
         });
     }
+    releasePendingDisposers(state, mesh, previousDisposers);
     scene._renderables.push(...result.renderables);
     // Keep the group's tracked output in sync: a later topology rebuild drops the previous output by
     // identity, and a runtime-built renderable that is missing from it would survive and double-draw.
@@ -480,6 +497,7 @@ function discardMeshBuild(scene: SceneContext, state: RuntimeBuildState, mesh: M
             });
         }
     }
+    releasePendingDisposers(state, mesh, previousDisposers);
 }
 
 function discardDisposedSceneCallbacks(scene: SceneContext, state: RuntimeBuildState): void {

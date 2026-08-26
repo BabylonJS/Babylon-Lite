@@ -153,10 +153,11 @@ export const stdUvTransformExt: StdExt = {
     _feature: STD_HAS_UV_TRANSFORM,
     _meshFeatures: (_meshFeatures, material) => (material?._hasUvTx ? STD_HAS_UV_TRANSFORM : 0),
     _frag: createStdUvTransformFragment,
-    _bind(material, entries, binding, _mesh, engine) {
-        if (!engine) {
-            throw new Error("Standard UV transform _bind requires the engine argument from the Standard bind-group builder");
+    _bind(material, entries, binding, _mesh, scene) {
+        if (!scene) {
+            throw new Error("Standard UV transform _bind requires the scene argument from the Standard bind-group builder");
         }
+        const engine = scene.surface.engine;
         const data = new Float32Array(FLOATS_PER_CHANNEL * CHANNEL_COUNT);
         writeUvTransformData(data, material);
         const buffer = createUniformBuffer(engine, data);

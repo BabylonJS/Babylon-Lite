@@ -87,4 +87,14 @@ describe("loadHdrEnvironment", () => {
             scene.surface.engine
         );
     });
+
+    it("can load IBL without creating a background", async () => {
+        vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(4) })) as unknown as typeof fetch);
+        const scene = makeScene();
+
+        await loadHdrEnvironment(scene, "/studio.hdr", { skipSkybox: true, skipGround: true });
+        await scene._deferredBuilders[0]!();
+
+        expect(scene._renderables).toHaveLength(0);
+    });
 });

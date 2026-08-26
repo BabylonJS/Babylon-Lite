@@ -70,6 +70,10 @@ export interface RuntimeSceneBuildHooks {
     track(promise: Promise<void>): Promise<void>;
     base(builder: MeshGroupBuilder, rebuild: NonNullable<MeshGroupBuilder["_rebuildSingle"]>): NonNullable<MeshGroupBuilder["_rebuildSingle"]>;
     readonly w: boolean;
+    /** Disposer packet temporarily owned by an active async mesh or group build after it leaves `_meshDisposables`. */
+    pendingDisposers(mesh: Mesh): (() => void)[] | undefined;
+    holdPendingDisposers(mesh: Mesh, disposers: (() => void)[]): void;
+    releasePendingDisposers(mesh: Mesh, disposers: (() => void)[]): void;
     reset(mesh: Mesh): void;
     remove(mesh: Mesh): void;
     /** Forget every rebuild closure cached for this builder in this scene. Called when a group's output is

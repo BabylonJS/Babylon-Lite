@@ -145,6 +145,48 @@ describe("rebuildSceneRenderables", () => {
         expect(auxDisposed).toBe(false); // aux disposers belong to other tasks
     });
 
+    it("keeps group-rebuild disposer packets reachable while the async builder is blocked", async () => {
+        const scene = fakeScene();
+        let enterBuilder!: () => void;
+        const enteredBuilder = new Promise<void>((resolve) => {
+            enterBuilder = resolve;
+        });
+        let unblockBuilder!: () => void;
+        const blockedBuilder = new Promise<void>((resolve) => {
+            unblockBuilder = resolve;
+        });
+        const builder = (async () => {
+            enterBuilder();
+            await blockedBuilder;
+            return { renderables: [renderable(1)], rebuildSingle: () => renderable(1) };
+        }) as unknown as MeshGroupBuilder;
+        const mesh = { material: { _buildGroup: builder } } as never;
+        const oldDisposers: (() => void)[] = [];
+        scene.meshes.push(mesh);
+        scene._groups.set(builder, [mesh]);
+        scene._meshDisposables.set(mesh, oldDisposers);
+
+        const rebuilding = rebuildSceneRenderables(scene);
+        await enteredBuilder;
+
+        expect(scene._meshDisposables.has(mesh)).toBe(false);
+        const pending = scene._runtimeBuilds?.pendingDisposers(mesh);
+        expect(pending).toBe(oldDisposers);
+        let deferredTeardownRan = false;
+        pending?.push(() => {
+            deferredTeardownRan = true;
+        });
+        expect(deferredTeardownRan).toBe(false);
+
+        unblockBuilder();
+        await rebuilding;
+
+        expect(scene._runtimeBuilds?.pendingDisposers(mesh)).toBeUndefined();
+        expect(deferredTeardownRan).toBe(false);
+        drainRetirements(scene);
+        expect(deferredTeardownRan).toBe(true);
+    });
+
     it("keeps a deferred topology teardown queued when a later group's build rejects", async () => {
         const scene = fakeScene();
         const okBuilder = fakeBuilder(1);

@@ -32,6 +32,7 @@ import {
 import { composeStandardGeometryShader } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-output-shader";
 import type { StandardMaterialProps } from "../../../packages/babylon-lite/src/material/standard/standard-material";
 import { composeStandardShader } from "../../../packages/babylon-lite/src/material/standard/standard-pipeline";
+import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 
 describe("PBR UV transform detection", () => {
     beforeEach(() => {
@@ -141,7 +142,7 @@ describe("StandardMaterial UV transform detection", () => {
             _lightmapTexture: { uAng: Math.PI },
         } as StandardMaterialProps;
 
-        stdUvTransformExt._bind!(material, [], 0, undefined, engine);
+        stdUvTransformExt._bind!(material, [], 0, undefined, { surface: { engine } } as SceneContext);
         const c = Math.cos(0.42);
         const s = Math.sin(0.42);
         expect(written![2]).toBeCloseTo(s * 1.65);
