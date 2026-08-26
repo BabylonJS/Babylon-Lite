@@ -220,6 +220,29 @@ describe("report-bundle-size-deltas", () => {
             expect(details.indexOf("`scene2`")).toBeLessThan(details.indexOf("`scene1`"));
         });
 
+        it("caps the inherited-breach callout so it cannot become a wall of scene names", () => {
+            // Same failure mode as the uncollapsed-block cap: a repo-wide stall can breach many
+            // scenes at once, and an uncapped inline list is skimmed past exactly like the build
+            // log this section replaces. 12 breached scenes, none of them touched by this PR.
+            const breached = Array.from({ length: 12 }, (_, i) => i + 1);
+            const manifest = Object.fromEntries(breached.map((id) => [`scene${id}`, { rawKB: 50.3, rawBytes: 51512 }]));
+            const result = runReporter({
+                current: manifest,
+                master: manifest,
+                scenes: breached.map((id) => ({ id, slug: `scene${id}`, name: `Scene ${id}`, maxRawKB: 50 })),
+            });
+            const comment = result.comment ?? "";
+
+            expect(comment).toContain("🛑 **12 scenes are over ceiling on master, not from this PR:**");
+            expect(comment).toContain(", and 2 more");
+            // The callout names at most HEADROOM_LIST_LIMIT scenes, and the table is capped too.
+            const callout = comment.slice(comment.indexOf("🛑"), comment.indexOf("This fails the Bundle Size job"));
+            expect(callout.match(/over its 50\.00 KB ceiling/g) ?? []).toHaveLength(10);
+            const details = comment.slice(comment.indexOf("<details>"), comment.indexOf("</details>"));
+            expect(details.match(/⚠️ \d+ B over/g) ?? []).toHaveLength(10);
+            expect(details).toContain("12 scenes over ceiling");
+        });
+
         it("posts a comment for an inherited breach even when this PR moves no bundle bytes", () => {
             // Identical manifests on both sides: zero deltas, nothing moved, tables empty. The
             // author still has a red Bundle Size job and this comment is the only explanation.
