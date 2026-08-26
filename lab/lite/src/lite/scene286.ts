@@ -5,9 +5,14 @@
 // packing from `MeshGPU._vbLayout`; the ShaderMaterial path did not, so it fetched both
 // attributes at their canonical tight strides and the quad collapsed to nothing.
 //
-// Reading COLOR_0 as well as POSITION is deliberate: position alone would only prove the
-// stride is honoured, while the colour comes from a non-zero per-attribute offset, so the
-// gradient below is wrong the moment offsets are ignored.
+// Reading COLOR_0 as well as POSITION is deliberate, but note what each attribute actually
+// proves here: the loader always materializes COLOR_0 into its own tight float32x4 buffer
+// (see `gltf-interleave.ts`'s `resolveColorVec4`), so by the time this scene's ShaderMaterial
+// runs, color is read at offset 0 regardless of its non-zero offset in the source glTF. Only
+// POSITION keeps the source's non-canonical byteStride (28 instead of the tight 12), so this
+// scene proves that a non-canonical *stride* is honoured, not a non-zero per-attribute
+// *offset* — the latter is covered separately by a synthetic-layout unit test, since no real
+// loader path currently produces a non-zero-offset attribute for the ShaderMaterial pipeline.
 import { addToScene, createArcRotateCamera, createEngine, createSceneContext, createShaderMaterial, loadGltf, registerScene, startEngine } from "babylon-lite";
 import type { Mesh } from "babylon-lite";
 

@@ -339,7 +339,7 @@ function buildInterleavedGpu(engine: EngineContext, m: GltfMeshData): MeshGPU {
     // Cache key encodes both stride AND byte offset per attribute: the offsets are
     // now baked into the pipeline vertex layout (attributes[].offset), so two meshes
     // with identical strides but different offsets need distinct pipelines.
-    const k = (a: AccessorInterleave | undefined) => `${a?._stride ?? 0},${a?._offset ?? 0}`;
+    const k = (a: AccessorInterleave | undefined) => a && `${a._stride},${a._offset}`;
     return {
         positionBuffer: vbuf(vbsrc._p, m._positions)!,
         normalBuffer: vbuf(vbsrc._n, m._normals)!,
@@ -351,7 +351,7 @@ function buildInterleavedGpu(engine: EngineContext, m: GltfMeshData): MeshGPU {
         indexCount: m._indexCount,
         indexFormat: (m._indices instanceof U32 ? "uint32" : "uint16") as GPUIndexFormat,
         _vbLayout: vbsrc,
-        _vbKey: `vb${k(vbsrc._p)}.${k(vbsrc._n)}.${k(vbsrc._t)}.${k(vbsrc._u)}`,
+        _vbKey: `${k(vbsrc._p)}.${k(vbsrc._n)}.${k(vbsrc._t)}.${k(vbsrc._u)}.${k(vbsrc._u2)}`,
     };
 }
 
