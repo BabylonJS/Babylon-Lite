@@ -21,8 +21,26 @@
  *   under 1024 B      105 scenes (44%)
  *   under 2048 B      131 scenes (54%)
  *
- * The tightest scene on master sits 9 bytes below its ceiling.
- * * That distribution is what makes concurrent PRs dangerous. Two PRs can each measure under
+ * Re-measured later against the published baseline artifact at master `c5f8f660` (243 scenes,
+ * 0 over ceiling), which is a different instrument from the one above — a CDN-hosted manifest
+ * rather than a build's own output:
+ *
+ *   median headroom   1825 B      p25   471 B      p10   360 B
+ *   under  256 B        4 scenes ( 2%)
+ *   under 1024 B       97 scenes (40%)
+ *   under 2048 B      127 scenes (52%)
+ *
+ * Both vintages are kept deliberately. The body of the distribution barely moved — 44% → 40%
+ * under 1 KB, 54% → 52% under 2 KB — while the extreme tail collapsed, from 71 scenes under
+ * 256 B to 4. A core-engine deletion recovering a few hundred bytes across many scenes at
+ * once does exactly that: it lifts the scenes nearest their ceilings without changing the
+ * shape of the rest. That is the same shared-path leverage this report exists to warn about,
+ * observed in the safe direction. Keeping both readings is the point — a threshold justified
+ * by a single snapshot cannot be told apart from one fitted to it.
+ *
+ * The tightest scene on master sits 9 bytes below its ceiling, in both measurements.
+ *
+ * That distribution is what makes concurrent PRs dangerous. Two PRs can each measure under
  * a ceiling — each was built against a master that did not contain the other — and breach
  * it together once both land. Azure DevOps builds the *merge commit* for a PR, so once
  * master is over a ceiling, every subsequent PR's Bundle Size job fails until the bytes are
@@ -41,12 +59,19 @@
  * `0 KB` or `+1 KB`. Below this line an author cannot see the risk from the numbers they are
  * shown, which is precisely where a warning earns its place.
  *
- * It is also where the population splits: median headroom is 1536 B, so 1 KB flags the tight
- * ~44% and stays quiet about the roomy half. The previous value of 256 B was not a "quiet"
- * threshold — it already flagged 71 scenes — it was just an arbitrary point well inside the
- * risk band, and it said nothing about the ~1 KB range where most near-ceiling scenes
- * actually sit. Raising further was rejected: 2 KB flags 54% of scenes and 4 KB flags 72%,
- * at which point the warning is wallpaper nobody reads.
+ * It is also where the population splits, and it stays there across both measurements above:
+ * 1 KB flags the tight 44% / 40% and stays quiet about the roomy half, against a median of
+ * 1536 B / 1825 B. That stability is the argument for it — the threshold's coverage barely
+ * moved while the sub-256 B band collapsed from 71 scenes to 4, so 1 KB is tracking where
+ * near-ceiling scenes actually sit rather than tracking one snapshot's tail.
+ *
+ * The previous value of 256 B is what that collapse disqualifies. It was already arbitrary —
+ * a point well inside the risk band that said nothing about the ~1 KB range where most
+ * near-ceiling scenes live — but it has since become nearly silent as well, flagging 4 scenes
+ * where it once flagged 71. A threshold whose coverage can fall by a factor of seventeen
+ * without anyone changing it is not reporting a risk level; it is reporting the tail's
+ * position. Raising further was rejected in the other direction: 2 KB flags 52-54% of scenes
+ * and 4 KB flags 67-72%, at which point the warning is wallpaper nobody reads.
  *
  * This is a WARNING threshold. It is not a ceiling and it never fails a build.
  */
