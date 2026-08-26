@@ -199,6 +199,20 @@ export interface HeadroomReport {
      * a comment on everything and train people to ignore it.
      */
     movedIntoDangerZone: boolean;
+    /**
+     * Whether any scene is over its ceiling that this PR did *not* grow — an inherited breach.
+     *
+     * This is a separate trigger from {@link movedIntoDangerZone} because it is not the author's
+     * doing and cannot be filtered by direction: the scene was already over before they branched.
+     * It still has to be posted, and posted on PRs that moved nothing, because it is the exact
+     * state this whole section exists for. Master over a ceiling fails the Bundle Size job on
+     * *every* open PR, so the author whose build just went red needs the comment to say why —
+     * otherwise the only explanation lives in a ~42-minute log, which is the problem we started
+     * from. Unlike repo-wide tightness this does not fire on almost every PR; it fires only while
+     * master is actually breached, which is a loud, short-lived emergency by construction, since
+     * it blocks everyone until it is fixed.
+     */
+    inheritedCeilingBreach: boolean;
 }
 
 /**
@@ -223,10 +237,18 @@ export interface HeadroomReport {
  * was touched. Reporting it as actionable inverts the signal: it asks the author to look hardest
  * at the changes that helped. Only increases can consume headroom, so only increases are called
  * out here; shrinking scenes still appear in the collapsed repo-wide list if they are tight.
+ *
+ * Scenes *already* over their ceiling are reported whether or not this PR touched them. Filtering
+ * the over-ceiling set by direction the way the tight set is filtered would have made this section
+ * silent in the one situation it was built for: once master is breached, the Bundle Size job fails
+ * on every open PR, and none of those authors grew the offending scene. The delta-comment step
+ * runs `condition: always()`, so it is still generated on exactly those failing builds — it just
+ * had nothing to say about the failure. An inherited breach is therefore called out separately
+ * from one this PR caused, so the author can tell "you did this" from "this was already broken".
  */
 export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], movedBytes: ReadonlyMap<string, number>): HeadroomReport {
     if (inputs.length === 0) {
-        return { lines: [], movedIntoDangerZone: false };
+        return { lines: [], movedIntoDangerZone: false, inheritedCeilingBreach: false };
     }
 
     const { over, under } = computeSceneHeadroom(inputs);
@@ -237,6 +259,7 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
     const grewBy = (scene: SceneHeadroom): number => movedBytes.get(scene.scene) ?? 0;
     const movedAndTight = tight.filter((s) => grewBy(s) > 0);
     const movedAndOver = over.filter((s) => grewBy(s) > 0);
+    const inheritedOver = over.filter((s) => grewBy(s) <= 0);
 
     const lines = ["### Ceiling headroom", ""];
 
@@ -269,15 +292,41 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
         lines.push("");
     }
 
+    if (inheritedOver.length > 0) {
+        const named = inheritedOver.slice(0, HEADROOM_LIST_LIMIT).map((s) => `\`${s.scene}\` (+${formatBytes(s.headroomBytes)} over its ${formatCeilingKB(s.ceilingKB)} ceiling)`);
+        const overflow = inheritedOver.length > HEADROOM_LIST_LIMIT ? `, and ${inheritedOver.length - HEADROOM_LIST_LIMIT} more` : "";
+        const verb = inheritedOver.length === 1 ? "is" : "are";
+        lines.push(`🛑 **${pluralizeScenes(inheritedOver.length)} ${verb} over ceiling on master, not from this PR:** ${named.join(", ")}${overflow}`);
+        lines.push("");
+        lines.push(
+            "This fails the Bundle Size job on every open PR, including ones that changed no bundle bytes, " +
+                "until the bytes are recovered on master. It is not caused by this branch and rebasing will not clear it."
+        );
+        lines.push("");
+    }
+
     const criticalNote = critical.length > 0 ? `, ${critical.length} under ${formatHeadroomThreshold(CRITICAL_HEADROOM_BYTES)}` : "";
+    // Name the breach count in the summary too. Without it a reader sees "0 of 2 under 1.0 KB"
+    // heading a table whose first row is over its ceiling: the tight band counts only scenes still
+    // *under* theirs, so a breached scene is excluded from the count while still being listed.
+    const overNote = over.length > 0 ? `${pluralizeScenes(over.length)} over ceiling, ` : "";
     lines.push("<details>");
-    lines.push(`<summary>Tightest scenes repo-wide — ${tight.length} of ${inputs.length} under ${tightLabel}${criticalNote}</summary>`);
+    lines.push(`<summary>Tightest scenes repo-wide — ${overNote}${tight.length} of ${inputs.length} under ${tightLabel}${criticalNote}</summary>`);
     lines.push("");
     lines.push("| Scene | Size | Ceiling | Headroom |");
     lines.push("|-------|------|---------|----------|");
-    for (const scene of under.slice(0, HEADROOM_LIST_LIMIT)) {
+    // Over-ceiling scenes lead the list: negative headroom is tighter than any positive amount, so
+    // omitting them would head a "tightest scenes" table with something that is not the tightest.
+    // They are labelled rather than printed bare, because `computeSceneHeadroom` stores an overage
+    // as a *positive* number — an unlabelled `909 B` would read as a comfortable margin in a column
+    // where every other row means the opposite.
+    const rankedRows = [
+        ...over.map((scene) => ({ scene, headroom: `⚠️ ${formatBytes(scene.headroomBytes)} over` })),
+        ...under.map((scene) => ({ scene, headroom: formatBytes(scene.headroomBytes) })),
+    ];
+    for (const { scene, headroom } of rankedRows.slice(0, HEADROOM_LIST_LIMIT)) {
         const moved = movedBytes.has(scene.scene) ? " ⬅ moved by this PR" : "";
-        lines.push(`| ${sceneLabel(scene)}${moved} | ${formatSizeKB(scene.measuredBytes)} | ${formatCeilingKB(scene.ceilingKB)} | ${formatBytes(scene.headroomBytes)} |`);
+        lines.push(`| ${sceneLabel(scene)}${moved} | ${formatSizeKB(scene.measuredBytes)} | ${formatCeilingKB(scene.ceilingKB)} | ${headroom} |`);
     }
     lines.push("");
     lines.push("</details>");
@@ -288,7 +337,11 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
             "every later PR's Bundle Size job then fails until the bytes are recovered. If a scene you touched is near zero, consider landing separately.*"
     );
 
-    return { lines, movedIntoDangerZone: movedAndTight.length > 0 || movedAndOver.length > 0 };
+    return {
+        lines,
+        movedIntoDangerZone: movedAndTight.length > 0 || movedAndOver.length > 0,
+        inheritedCeilingBreach: inheritedOver.length > 0,
+    };
 }
 
 /**
@@ -299,9 +352,13 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
  * exactly the change this feature exists to catch, because a few hundred bytes is enough to
  * consume the headroom of the ~44% of scenes that have under 1 KB of it. Suppressing the comment
  * whenever the tables are empty would make the report inert in its most important case.
+ *
+ * An inherited ceiling breach counts too, and it is the case with no delta rows at all by
+ * construction: the scene went over on master, so a PR that touched nothing still gets a red
+ * Bundle Size job and needs to be told why.
  */
-export function formatComment(deltas: BundleDelta[], headroom: HeadroomReport = { lines: [], movedIntoDangerZone: false }): string {
-    if (deltas.length === 0 && !headroom.movedIntoDangerZone) {
+export function formatComment(deltas: BundleDelta[], headroom: HeadroomReport = { lines: [], movedIntoDangerZone: false, inheritedCeilingBreach: false }): string {
+    if (deltas.length === 0 && !headroom.movedIntoDangerZone && !headroom.inheritedCeilingBreach) {
         return "**Bundle Size**: No changes detected.";
     }
 
@@ -388,12 +445,14 @@ function main(): void {
     console.log("");
     console.log(comment);
 
-    // Post on a whole-KB delta OR on a move into the danger zone. The second disjunct is not a
-    // nicety: a sub-KB change produces no delta rows at all, so gating on the tables alone would
-    // silence the report in precisely the case it was built for — a few hundred bytes landing on
-    // a scene that had a few hundred bytes of room. Repo-wide tightness is deliberately not a
-    // trigger; without the "this PR moved it" requirement every PR would get a comment.
-    if (deltas.length > 0 || headroom.movedIntoDangerZone) {
+    // Post on a whole-KB delta OR on a move into the danger zone OR on an inherited breach. The
+    // second disjunct is not a nicety: a sub-KB change produces no delta rows at all, so gating on
+    // the tables alone would silence the report in precisely the case it was built for — a few
+    // hundred bytes landing on a scene that had a few hundred bytes of room. The third covers the
+    // author who changed nothing and still has a red Bundle Size job because master is breached.
+    // Repo-wide *tightness* remains deliberately not a trigger; without the "this PR moved it"
+    // requirement every PR would get a comment.
+    if (deltas.length > 0 || headroom.movedIntoDangerZone || headroom.inheritedCeilingBreach) {
         console.log("");
         console.log("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]true");
         const escapedComment = escapeAzureVariableValue(comment);

@@ -181,6 +181,59 @@ describe("report-bundle-size-deltas", () => {
             expect(comment).toContain("🚨 **1 scene this PR grew now exceeds its ceiling:** `scene2` (+312 B over its 50.00 KB ceiling)");
         });
 
+        // The scenario this whole section exists for. Once master is over a ceiling, the Bundle
+        // Size job fails on every open PR — and none of those authors grew the offending scene.
+        // Filtering the over-ceiling set by direction the way the tight set is filtered made the
+        // report silent on exactly those builds, which still generate a comment because the step
+        // runs `condition: always()`. These fixtures pin the un-filtered path.
+        const inheritedBreachFixture = {
+            // scene2 is 312 B over its ceiling and identical on both sides: this PR did not touch it.
+            current: { scene1: { rawKB: 97.7, rawBytes: 100000 }, scene2: { rawKB: 50.3, rawBytes: 51512 } },
+            master: { scene1: { rawKB: 95.0, rawBytes: 97280 }, scene2: { rawKB: 50.3, rawBytes: 51512 } },
+            scenes: [
+                { id: 1, slug: "scene1", name: "Scene 1 - BoomBox PBR", maxRawKB: 100 },
+                { id: 2, slug: "scene2", name: "Scene 2 - Sphere", maxRawKB: 50 },
+            ],
+        };
+
+        it("reports a scene already over its ceiling that this PR did not grow", () => {
+            const comment = runReporter(inheritedBreachFixture).comment ?? "";
+
+            expect(comment).toContain("🛑 **1 scene is over ceiling on master, not from this PR:** `scene2` (+312 B over its 50.00 KB ceiling)");
+            expect(comment).toContain("This fails the Bundle Size job on every open PR");
+            // It is not the author's doing, so it must not be reported as something they caused.
+            expect(comment).not.toContain("this PR grew now exceeds its ceiling");
+        });
+
+        it("ranks an over-ceiling scene above every scene still under its ceiling", () => {
+            const comment = runReporter(inheritedBreachFixture).comment ?? "";
+
+            // A breached scene is tighter than any positive margin, so it heads the list. And its
+            // overage is stored positive, so it is labelled — a bare "312 B" in a headroom column
+            // would read as a comfortable margin, the exact inverse of what it means.
+            expect(comment).toContain("`scene2` | 50.30 KB | 50.00 KB | ⚠️ 312 B over |");
+            // Scope the ordering check to the repo-wide table — scene1 also appears earlier in the
+            // Increases delta table, so searching the whole comment answers a different question.
+            const details = comment.slice(comment.indexOf("<details>"), comment.indexOf("</details>"));
+            expect(details).toContain("1 scene over ceiling, 0 of 2 under 1.0 KB");
+            // Match without a trailing pipe: scene1 carries the "⬅ moved by this PR" marker here.
+            expect(details.indexOf("`scene2`")).toBeLessThan(details.indexOf("`scene1`"));
+        });
+
+        it("posts a comment for an inherited breach even when this PR moves no bundle bytes", () => {
+            // Identical manifests on both sides: zero deltas, nothing moved, tables empty. The
+            // author still has a red Bundle Size job and this comment is the only explanation.
+            const result = runReporter({
+                current: { scene1: { rawKB: 50.3, rawBytes: 51512 } },
+                master: { scene1: { rawKB: 50.3, rawBytes: 51512 } },
+                scenes: [{ id: 1, slug: "scene1", name: "Scene 1 - Sphere", maxRawKB: 50 }],
+            });
+
+            expect(result.stdout).toContain("POST_BUNDLE_COMMENT]true");
+            expect(result.comment ?? "").not.toBe("**Bundle Size**: No changes detected.");
+            expect(result.comment ?? "").toContain("🛑 **1 scene is over ceiling on master, not from this PR:**");
+        });
+
         it("omits the headroom section for scenes that opt out of the ceiling check", () => {
             const comment =
                 runReporter({
