@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <title>Babylon Lottie Player viewer</title>
+        <style>
+            :root {
+                color-scheme: dark;
+            }
+            body {
+                margin: 0;
+                background: #2a2a2e;
+                color: #eee;
+                font-family: "Segoe UI", system-ui, sans-serif;
+                display: flex;
+                flex-direction: column;
+                height: 100vh;
+            }
+            #bar {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                padding: 8px 12px;
+                background: #1d1d20;
+                border-bottom: 1px solid #000;
+                flex: 0 0 auto;
+                flex-wrap: wrap;
+            }
+            #bar label {
+                font-size: 12px;
+                opacity: 0.7;
+            }
+            select,
+            button {
+                background: #333;
+                color: #eee;
+                border: 1px solid #555;
+                border-radius: 4px;
+                padding: 4px 10px;
+                font-size: 13px;
+                cursor: pointer;
+            }
+            button:hover,
+            select:hover {
+                background: #3d3d42;
+            }
+            #scrub {
+                flex: 1 1 220px;
+                min-width: 140px;
+            }
+            #info {
+                font-size: 12px;
+                opacity: 0.65;
+                font-variant-numeric: tabular-nums;
+                white-space: nowrap;
+            }
+            #checker {
+                flex: 1 1 auto;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                overflow: auto;
+                /* checkerboard so transparency is obvious */
+                background-image:
+                    linear-gradient(45deg, #3a3a3e 25%, transparent 25%), linear-gradient(-45deg, #3a3a3e 25%, transparent 25%),
+                    linear-gradient(45deg, transparent 75%, #3a3a3e 75%), linear-gradient(-45deg, transparent 75%, #3a3a3e 75%);
+                background-size: 24px 24px;
+                background-position:
+                    0 0,
+                    0 12px,
+                    12px -12px,
+                    -12px 0;
+            }
+            #checker canvas {
+                max-width: 100%;
+                max-height: 100%;
+                box-shadow: 0 4px 24px #000a;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="bar">
+            <label for="anim">Animation</label>
+            <select id="anim"></select>
+            <label for="renderer">Renderer</label>
+            <select id="renderer">
+                <option value="full">Full player (~15.2 KB gz)</option>
+                <option value="shapes">Shapes only (~12.4 KB gz)</option>
+            </select>
+            <label for="thread">Thread</label>
+            <select id="thread">
+                <option value="main">Main (testing)</option>
+                <option value="worker">Worker</option>
+            </select>
+            <button id="play">⏸ Pause</button>
+            <input id="scrub" type="range" min="0" max="1000" value="0" step="1" />
+            <span id="info">loading…</span>
+        </div>
+        <div id="checker"><!-- canvas injected here --></div>
+        <script type="module" src="./main.js"></script>
+    </body>
+</html>

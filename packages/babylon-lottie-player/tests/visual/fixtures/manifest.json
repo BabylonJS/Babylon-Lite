@@ -1,0 +1,92 @@
+{
+    "fixtures": [
+        {
+            "id": "strokes-and-fills",
+            "name": "Solid fills and strokes",
+            "file": "strokes-and-fills.json",
+            "variant": "shapes",
+            "features": ["solid layer", "ellipse", "solid fill", "open stroke", "closed stroke"]
+        },
+        {
+            "id": "gradients",
+            "name": "Linear and radial gradients",
+            "file": "gradients.json",
+            "variant": "shapes",
+            "features": ["linear gradient", "radial gradient", "rounded rectangle", "ellipse"]
+        },
+        {
+            "id": "parenting-z-order",
+            "name": "Parent transforms and layer z-order",
+            "file": "parenting-z-order.json",
+            "variant": "full",
+            "features": ["null parent", "position", "rotation", "scale", "layer z-order"]
+        },
+        {
+            "id": "masks-matte",
+            "name": "Add mask and alpha matte",
+            "file": "masks-matte.json",
+            "variant": "shapes",
+            "reference": "lottie-web",
+            "features": ["add mask", "opaque vector alpha matte", "mask and matte source suppression"]
+        },
+        {
+            "id": "path-morph",
+            "name": "Path morph midpoint",
+            "file": "path-morph.json",
+            "variant": "shapes",
+            "reference": "lottie-web",
+            "loop": false,
+            "features": ["animated shape path", "keyframe interpolation", "non-looping final frame"]
+        },
+        {
+            "id": "embedded-image",
+            "name": "Embedded image layer",
+            "file": "embedded-image.json",
+            "variant": "full",
+            "reference": "lottie-web",
+            "features": ["embedded PNG asset", "image layer", "image transform", "full worker"]
+        },
+        {
+            "id": "relative-image-url",
+            "name": "Image URL relative to animation",
+            "file": "relative-image.json",
+            "variant": "full",
+            "reference": "lottie-web",
+            "urlSource": true,
+            "features": ["URL-loaded animation", "relative image directory", "external PNG asset", "full worker"]
+        },
+        {
+            "id": "nested-group-transform",
+            "name": "Nested group transforms",
+            "file": "nested-group-transform.json",
+            "variant": "shapes",
+            "reference": "lottie-web",
+            "features": ["nested shape groups", "outer group translation", "outer group rotation", "inner group scale", "inherited group opacity"]
+        },
+        {
+            "id": "gradient-animation",
+            "name": "Animated gradient colors",
+            "file": "gradient-animation.json",
+            "variant": "shapes",
+            "reference": "lottie-web",
+            "loop": false,
+            "features": ["animated gradient colors", "non-looping midpoint"]
+        },
+        {
+            "id": "hidden-layer",
+            "name": "Hidden layer suppression",
+            "file": "hidden-layer.json",
+            "variant": "shapes",
+            "reference": "lottie-web",
+            "features": ["hidden shape layer", "hidden transform parent", "visible child layer", "hidden matte source", "layer suppression"]
+        },
+        {
+            "id": "butt-caps",
+            "name": "Butt line caps",
+            "file": "butt-caps.json",
+            "variant": "shapes",
+            "reference": "lottie-web",
+            "features": ["butt line caps", "open path strokes", "thick strokes"]
+        }
+    ]
+}

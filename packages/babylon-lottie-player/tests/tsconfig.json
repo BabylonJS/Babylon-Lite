@@ -1,0 +1,10 @@
+{
+    "extends": "../../../tsconfig.base.json",
+    "compilerOptions": {
+        "noEmit": true,
+        "noUncheckedIndexedAccess": false,
+        "exactOptionalPropertyTypes": false,
+        "types": ["node", "vitest/globals"]
+    },
+    "include": ["**/*.ts", "../src/**/*.ts", "../../../scripts/lottie-player-release-version.ts"]
+}

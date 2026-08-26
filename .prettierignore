@@ -5,3 +5,10 @@ createEngine.*
 *.vertex.ts
 *.fragment.ts
 *.compute.ts
+packages/babylon-lottie-player/dist/
+packages/babylon-lottie-player/demo/dist/
+packages/babylon-lottie-player/docs/api/
+packages/babylon-lottie-player/measure/.out/
+packages/babylon-lottie-player/measure/bench/dist/
+packages/babylon-lottie-player/tests/visual/.out/
+packages/babylon-lottie-player/test-results/

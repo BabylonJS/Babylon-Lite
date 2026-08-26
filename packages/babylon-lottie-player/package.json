@@ -1,0 +1,63 @@
+{
+    "name": "babylon-lottie-player",
+    "version": "10.0.0",
+    "private": true,
+    "description": "Lite-backed WebGL2 Lottie player with stencil-then-cover vector rendering and off-thread Web Worker delivery.",
+    "keywords": [
+        "babylon",
+        "babylonjs",
+        "lottie",
+        "animation",
+        "webgl",
+        "webgl2",
+        "vector",
+        "stencil",
+        "worker",
+        "lite"
+    ],
+    "license": "Apache-2.0",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/BabylonJS/Babylon-Lite.git",
+        "directory": "packages/babylon-lottie-player"
+    },
+    "homepage": "https://github.com/BabylonJS/Babylon-Lite/tree/master/packages/babylon-lottie-player",
+    "type": "module",
+    "main": "./src/index.ts",
+    "types": "./src/index.ts",
+    "sideEffects": false,
+    "exports": {
+        ".": {
+            "import": "./src/index.ts",
+            "types": "./src/index.ts"
+        },
+        "./shapes": {
+            "import": "./src/shapes.ts",
+            "types": "./src/shapes.ts"
+        },
+        "./standalone": {
+            "import": "./src/standalone.ts",
+            "types": "./src/standalone.ts"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "node build.mjs",
+        "dev": "tsc -p tsconfig.json --watch",
+        "demo": "node demo/serve.mjs",
+        "measure": "node measure/bench/run.mjs"
+    },
+    "dependencies": {
+        "@babylonjs/lite-gl": "workspace:babylon-lite-gl@*"
+    },
+    "devDependencies": {
+        "@babylonjs/core": "9.8.0",
+        "@babylonjs/lottie-player": "9.8.0",
+        "lottie-react": "2.3.1",
+        "lottie-web": "^5.13.0",
+        "react": "18",
+        "react-dom": "18"
+    }
+}

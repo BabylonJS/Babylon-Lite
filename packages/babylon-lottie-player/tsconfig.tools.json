@@ -1,0 +1,8 @@
+{
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "noEmit": true,
+        "types": ["node"]
+    },
+    "include": ["playwright.visual.config.ts", "../../scripts/lottie-player-release-version.ts", "../../scripts/prepare-lottie-player-release.ts"]
+}

@@ -15,6 +15,7 @@ export default tseslint.config(
         ignores: [
             "dist/**",
             "**/dist/**",
+            "**/.out/**",
             "packages/babylon-lite/build/**",
             "pages-dist/**",
             "node_modules/**",
@@ -146,6 +147,15 @@ export default tseslint.config(
             // TypeScript rules
             "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", destructuredArrayIgnorePattern: "^_" }],
             "@typescript-eslint/consistent-type-imports": ["error", { disallowTypeAnnotations: false, fixStyle: "separate-type-imports" }],
+        },
+    },
+
+    // Lottie worker-handle fields predate the engine's underscore convention and are explicitly
+    // property-mangled in shipped clients. Renaming them would move the approved byte baselines.
+    {
+        files: ["packages/babylon-lottie-player/src/**/*.ts"],
+        rules: {
+            "babylon-lite/underscore-requires-internal": "off",
         },
     },
 

@@ -1,0 +1,34 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Dev tooling output (demo viewer + measurement bench)
+demo/dist/
+measure/.out/
+measure/bench/dist/
+tests/visual/.out/
+
+# Generated API docs (typedoc)
+docs/api/
+
+# Local Lottie fixtures — the demo and measurement tools read these from disk, but fixture files are
+# not committed. Drop your own licensed *.json files here (see anims/README.md).
+/anims/*
+!/anims/README.md
+
+# Local environment, reports, and editor files
+.env
+.env.*
+!.env.example
+.npmrc
+*.log
+coverage/
+playwright-report/
+test-results/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

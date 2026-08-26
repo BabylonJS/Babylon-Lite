@@ -58,7 +58,9 @@ overrides:
   picomatch: '>=4.0.4'
   '@protobufjs/utf8': '>=1.1.1'
   dompurify: '>=3.4.13'
-  linkify-it: '>=5.0.2'
+  # markdown-it 14 expects linkify-it v5's default export. Keep the security floor;
+  # lift the <6 cap when the consumer supports v6's export shape.
+  linkify-it: '>=5.0.2 <6'
   postcss: '>=8.5.23'
   sharp: '>=0.35.0'
   '@typescript-eslint/utils': '>=8.65.0'
