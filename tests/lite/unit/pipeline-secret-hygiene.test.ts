@@ -549,7 +549,9 @@ export function credentialTracesToASecretStore(fileText: string, headerLine: str
         ...[...text.matchAll(/\$\{?\{?\s*(?:secrets\.)?([A-Za-z_]\w*)/g)].map(([, name]) => name ?? ""),
         ...[...text.matchAll(/\bprocess\.env\.([A-Za-z_]\w*)/g)].map(([, name]) => name ?? ""),
     ];
-    const mentionsSecretStore = (text: string): boolean => /\bsecrets\s*\.|\bgithub\s*\.\s*token\b/.test(text);
+    const secretExpression = String.raw`\$\{\{\s*(?:secrets\.[A-Za-z_]\w*|github\.token)\s*\}\}`;
+    const mentionsSecretStore = (text: string): boolean => new RegExp(secretExpression).test(text);
+    const isSecretStoreValue = (text: string): boolean => new RegExp(`^\\s*["']?${secretExpression}["']?\\s*(?:#.*)?$`).test(text);
 
     if (mentionsSecretStore(headerLine)) {
         return true;
@@ -572,7 +574,7 @@ export function credentialTracesToASecretStore(fileText: string, headerLine: str
         // YAML `env:` key. The exempt file uses one of each in the same chain.
         const assignments = lines.filter((line) => new RegExp(`(^|\\s)${name}\\s*[:=]`).test(line)).map((line) => line.slice(line.search(/[:=]/) + 1));
 
-        if (assignments.some(mentionsSecretStore)) {
+        if (assignments.some(isSecretStoreValue)) {
             return true;
         }
         pending.push(...assignments.flatMap(identifiers));
@@ -724,6 +726,7 @@ describe("credential tracing accepts and rejects the right chains", () => {
         expect(credentialTracesToASecretStore(`GITHUB_TOKEN: ${expression("token")}`, 'Authorization: "Bearer ${GITHUB_TOKEN}"')).toBe(true);
         expect(credentialTracesToASecretStore(`GITHUB_TOKEN: ${expression("token")}`, "Authorization: `Bearer ${process.env.GITHUB_TOKEN}`")).toBe(true);
         expect(credentialTracesToASecretStore(`GITHUB_TOKEN: ${expression("actor")}`, 'Authorization: "Bearer ${GITHUB_TOKEN}"')).toBe(false);
+        expect(credentialTracesToASecretStore(`GITHUB_TOKEN: "documentation mentions ${expression("token")}"`, 'Authorization: "Bearer ${GITHUB_TOKEN}"')).toBe(false);
     });
 
     it("rejects a chain that terminates in a literal", () => {
