@@ -411,7 +411,7 @@ describe("PhysicsEngine", () => {
             expect(hknp.HP_Shape_CreateCylinder).toHaveBeenLastCalledWith([0, 6, 0], [0, 24, 0], 4);
         });
 
-        it("uses the widest horizontal extent for capsule and cylinder radii", () => {
+        it("uses the X extent for capsule and cylinder radii", () => {
             const hknp = makeAggregateMockHknp();
             const plugin = new HavokPlugin(true, hknp);
             plugin._attachToLiteScene(makeScene());
@@ -423,10 +423,10 @@ describe("PhysicsEngine", () => {
             };
 
             new PhysicsAggregate(makePhysicsNode(scene, bounds), PhysicsShapeType.CAPSULE, { mass: 0 });
-            expect(hknp.HP_Shape_CreateCapsule).toHaveBeenLastCalledWith([0, -4, 0], [0, 4, 0], 6);
+            expect(hknp.HP_Shape_CreateCapsule).toHaveBeenLastCalledWith([0, -9, 0], [0, 9, 0], 1);
 
             new PhysicsAggregate(makePhysicsNode(scene, bounds), PhysicsShapeType.CYLINDER, { mass: 0 });
-            expect(hknp.HP_Shape_CreateCylinder).toHaveBeenLastCalledWith([0, -10, 0], [0, 10, 0], 6);
+            expect(hknp.HP_Shape_CreateCylinder).toHaveBeenLastCalledWith([0, -10, 0], [0, 10, 0], 1);
         });
 
         it("rejects an invalid shape enum value before calling Lite", () => {
