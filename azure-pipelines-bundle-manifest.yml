@@ -230,16 +230,26 @@ stages:
                       SCENES="$(node -e 'process.stdout.write(String(Object.keys(require(process.argv[1])).length))' "$MANIFEST")"
                       echo "Publishing bundle-size baseline for $SCENES scene(s)."
 
-                      mkdir -p "$WORK"
-                      cp "$MANIFEST" "$WORK/manifest.json"
-                      (cd "$WORK" && zip -j baseline.zip manifest.json)
+                      # Stamps each scene with the ceiling it was measured against and writes
+                      # the meta.json provenance sidecar into $WORK. Exits non-zero on an empty
+                      # or unreadable manifest, so the guard above is belt-and-braces.
+                      BUNDLE_BASELINE_MANIFEST="$MANIFEST" BUNDLE_BASELINE_STAGING="$WORK" \
+                        pnpm exec tsx scripts/publish-bundle-baseline.ts
 
-                      curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --fail-with-body -i -X POST \
-                        -H "Content-Type: multipart/form-data" \
-                        -H "Authorization: Bearer ${DEPLOY_TOKEN}" \
-                        -F "path=$(baselineDeployPath)" \
-                        -F "storageAccount=${STORAGE_ACCOUNT}" \
-                        -F "zip=@$WORK/baseline.zip"
+                      (cd "$WORK" && zip -j baseline.zip manifest.json meta.json)
+
+                      # Immutable per-commit copy first. If that upload fails the step stops
+                      # here and the mutable copy is left untouched, so "latest" and its
+                      # per-commit twin never disagree about what a commit measured.
+                      for deployPath in "$(baselineDeployPath)/$(Build.SourceVersion)" "$(baselineDeployPath)"; do
+                        echo "Uploading baseline to $deployPath"
+                        curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --fail-with-body -i -X POST \
+                          -H "Content-Type: multipart/form-data" \
+                          -H "Authorization: Bearer ${DEPLOY_TOKEN}" \
+                          -F "path=$deployPath" \
+                          -F "storageAccount=${STORAGE_ACCOUNT}" \
+                          -F "zip=@$WORK/baseline.zip"
+                      done
                   displayName: "Publish bundle-size baseline"
                   env:
                       DEPLOYMENT_SERVER: $(DEPLOYMENT_SERVER)
