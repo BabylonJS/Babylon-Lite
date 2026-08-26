@@ -73,7 +73,7 @@ interface Material {
 Public exports (`index.ts`): `MaterialPlugin`, `MaterialPluginPoint`,
 `PluginUboField`, `PluginSamplerDecl`, `PluginTextureBinding` (all `export type`),
 plus the runtime functions `enableMaterialPlugins(scene)` and
-`bakeStdPluginMaterial(material, engine)`.
+`bakeStdPluginMaterial(material, scene)`.
 
 ## Opt-in entry point — `enableMaterialPlugins(scene)`
 
@@ -103,7 +103,7 @@ standardGroupBuilder`, so PBR materials are never touched), walks `scene.meshes`
    ext-extensible, so the index must be baked in before the build reads it. PBR
    needs no walk — its `detect` hook encodes the index during feature computation.
    Standard materials created after this walk can be registered explicitly with
-   `bakeStdPluginMaterial(material, engine)`.
+   `bakeStdPluginMaterial(material, scene)`.
 
 Because none of this lives in a shared module, removing the call (or never adding
 it) leaves every byte of the PBR/Standard core untouched.
@@ -190,7 +190,12 @@ material UBO, so the bridge:
   declaration order — followed by `bindPluginTextures`.
 
 Standard plugins marked `dynamic: true` have their per-material UBO values
-rewritten before every frame. Static plugins retain the registration-time upload.
+rewritten before every frame. Dynamic tracking and UBO ownership are scoped to
+the enabling scene, so enabling a second scene does not replace the first
+scene's refresh state. Static plugins retain the registration-time upload.
+Re-baking a material retires its previous UBO after in-flight GPU work drains;
+disposing the scene destroys all of its remaining plugin UBOs and releases the
+material references held by the bridge.
 
 The decisive benefit: this route touches **zero shared standard code**. The
 pre-existing `StdExt._bind` / `_textures` loops in `standard-pipeline.ts` /
@@ -233,10 +238,11 @@ and grayscale is a linear reduction, the result stays pixel-identical.
 3. Per mesh: detect (PBR) / pre-baked features (Standard) assign the signature index
    → compose builds WGSL with the plugin fragment → pipeline/bind groups created →
    UBO + textures bound.
-4. **Toggle:** set `plugin.isEnabled`, then (because `_renderFeatures` is cached)
-   set `material._renderFeatures = undefined`, call `enableMaterialPlugins(scene)`
-   again to re-bake, and `rebuildMaterial(scene, material)`. The new signature
-   index yields a fresh pipeline.
+4. **Toggle:** set `plugin.isEnabled`, call `bakeStdPluginMaterial(material,
+scene)`, then `rebuildMaterial(scene, material)`. The new signature index
+   yields a fresh pipeline and the replaced plugin UBO is retired safely.
+5. **Dispose:** `disposeScene(scene)` destroys every remaining Standard plugin
+   UBO owned by that scene and drops its per-material refresh state.
 
 ## Babylon.js Equivalence Map
 
@@ -259,6 +265,9 @@ and grayscale is a linear reduction, the result stays pixel-identical.
 - Scene 217 (`scene217-material-plugin`): a PBR sphere **and** a Standard box, each
   with the BlackAndWhite plugin enabled, validated against a BJS golden using an
   equivalent `MaterialPluginBase` BlackAndWhite plugin. MAD ≤ `scene-config.maxMad`.
+- Unit coverage verifies independent dynamic refresh state across two scenes,
+  scene-disposal cleanup, and old-UBO retirement when a Standard material is
+  baked again.
 - Bundle-size: every pre-existing (plugin-free) scene stays **byte-identical** to
   master — `bundle-size.spec.ts` reports no "increased vs master" for any scene
   except (newly added) scene217. Because plugin code is only reachable through

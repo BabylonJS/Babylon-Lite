@@ -31,7 +31,7 @@ import type { SceneContext } from "../../scene/scene.js";
 import { _registerPbrExt } from "../pbr/pbr-flags.js";
 import { _registerStdExt } from "../standard/standard-flags.js";
 import { registerPbrPlugins } from "./pbr-plugin-bridge.js";
-import { refreshStdPluginUbos, registerStdPlugins } from "./std-plugin-bridge.js";
+import { registerStdPlugins } from "./std-plugin-bridge.js";
 
 /**
  * Enable material-plugin support for `scene`.
@@ -48,9 +48,12 @@ import { refreshStdPluginUbos, registerStdPlugins } from "./std-plugin-bridge.js
  */
 export function enableMaterialPlugins(scene: SceneContext): void {
     registerPbrPlugins(_registerPbrExt);
-    const engine = scene.surface.engine;
-    registerStdPlugins(scene.meshes, engine, _registerStdExt);
+    const refresh = registerStdPlugins(scene, _registerStdExt);
     // Public onBeforeRender() callbacks use unshift(), so appending keeps the upload
     // after plugin-value mutations regardless of whether they register before or after us.
-    scene._beforeRender.push(() => refreshStdPluginUbos(engine));
+    const previous = scene._beforeRender.indexOf(refresh);
+    if (previous >= 0) {
+        scene._beforeRender.splice(previous, 1);
+    }
+    scene._beforeRender.push(refresh);
 }
