@@ -280,7 +280,8 @@ describe("dynamic Standard material plugins", () => {
             get w() {
                 return blocked;
             },
-        } as RuntimeSceneBuildHooks;
+            pendingDisposers: () => undefined,
+        } as unknown as RuntimeSceneBuildHooks;
         bakeStdPluginMaterial(material, scene);
 
         expect(buffers).toHaveLength(2);
@@ -310,5 +311,62 @@ describe("dynamic Standard material plugins", () => {
         uboRetirements.splice(0).forEach((retire) => retire());
         expect(oldBuffer.destroy).toHaveBeenCalledOnce();
         expect(buffers[1]!.destroy).not.toHaveBeenCalled();
+    });
+
+    it("uses an active runtime rebuild's pending disposer packet when the scene map is empty", () => {
+        const { engine, buffers } = makeEngine();
+        const material = createStandardMaterial();
+        material.plugins = [valuePlugin({ current: 1 })];
+        const scene = pluginScene(engine, [material]);
+        const targetMesh = scene.meshes[0]!;
+
+        registerStdPlugins(scene, (ext) => {
+            registered = ext;
+        });
+        const oldBuffer = buffers[0]!;
+        const pendingDisposers: (() => void)[] = [];
+        let reboundBuffer: GPUBuffer | undefined;
+        const rebuild = vi.fn((targetScene: SceneContext) => {
+            const entries: GPUBindGroupEntry[] = [];
+            registered._bind!(material, entries, 0, targetMesh, targetScene);
+            reboundBuffer = (entries[0]!.resource as GPUBufferBinding).buffer;
+            return { mesh: targetMesh, order: 0, isTransparent: false } as Renderable;
+        });
+        scene._groups.set(material._buildGroup, Object.assign([targetMesh], { r: rebuild }));
+        scene._renderables.push({ mesh: targetMesh, order: 0, isTransparent: false } as Renderable);
+        scene._built = true;
+        let blocked = true;
+        scene._runtimeBuilds = {
+            get w() {
+                return blocked;
+            },
+            pendingDisposers: (mesh: Mesh) => (mesh === targetMesh ? pendingDisposers : undefined),
+        } as unknown as RuntimeSceneBuildHooks;
+
+        expect(scene._meshDisposables.get(targetMesh)).toBeUndefined();
+        bakeStdPluginMaterial(material, scene);
+
+        expect(pendingDisposers).toHaveLength(1);
+        expect(engine._retirements).toBeUndefined();
+        processMaterialSwaps(scene);
+        expect(rebuild).not.toHaveBeenCalled();
+        expect(oldBuffer.destroy).not.toHaveBeenCalled();
+
+        blocked = false;
+        scene._meshDisposables.set(targetMesh, []);
+        engine._retirements = [() => pendingDisposers.splice(0).forEach((dispose) => dispose())];
+        processMaterialSwaps(scene);
+
+        expect(rebuild).toHaveBeenCalledOnce();
+        expect(reboundBuffer).toBe(buffers[1]);
+        const bindingRetirements = engine._retirements;
+        engine._retirements = null;
+        bindingRetirements?.splice(0).forEach((retire) => retire());
+        expect(oldBuffer.destroy).not.toHaveBeenCalled();
+
+        const uboRetirements = engine._retirements as (() => void)[] | null;
+        engine._retirements = null;
+        uboRetirements?.splice(0).forEach((retire) => retire());
+        expect(oldBuffer.destroy).toHaveBeenCalledOnce();
     });
 });

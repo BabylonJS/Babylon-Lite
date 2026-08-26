@@ -87,7 +87,7 @@ function _releaseMaterialStateAfterBindings(scene: SceneContext, mat: StandardMa
     const activeDisposers: (() => void)[][] = [];
     for (const mesh of scene.meshes) {
         if (mesh.material && getMaterialSource(mesh.material) === mat) {
-            const disposers = scene._meshDisposables.get(mesh);
+            const disposers = scene._runtimeBuilds?.pendingDisposers(mesh) ?? scene._meshDisposables.get(mesh);
             if (disposers) {
                 activeDisposers.push(disposers);
             }

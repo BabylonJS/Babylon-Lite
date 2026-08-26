@@ -42,6 +42,7 @@ interface RuntimeBuildState {
     generations: WeakMap<Mesh, number>;
     installed: WeakMap<Mesh, Set<MeshGroupBuilder>>;
     installedMeshes: Set<Mesh>;
+    pendingDisposers: WeakMap<Mesh, (() => void)[]>;
     tail: Promise<void> | null;
 }
 
@@ -129,6 +130,7 @@ function installRuntimeBuilds(scene: SceneContext): RuntimeSceneBuildHooks {
         generations: new WeakMap(),
         installed: new WeakMap(),
         installedMeshes: new Set(),
+        pendingDisposers: new WeakMap(),
         tail: null,
     };
     const pbrState = scene as SceneContext & PbrGeometrySceneState;
@@ -187,6 +189,7 @@ function installRuntimeBuilds(scene: SceneContext): RuntimeSceneBuildHooks {
         get w() {
             return !!state.tail;
         },
+        pendingDisposers: (mesh) => state.pendingDisposers.get(mesh),
         reset: (mesh) => {
             resetRuntimeRebuild(scene, state, mesh);
             pbrState._pbrMeshGeomContexts?.delete(mesh);
@@ -302,6 +305,7 @@ async function materializeRuntimeMesh(scene: SceneContext, state: RuntimeBuildSt
     const previousDisposers = scene._meshDisposables.get(mesh);
     if (previousDisposers) {
         scene._meshDisposables.delete(mesh);
+        state.pendingDisposers.set(mesh, previousDisposers);
     }
     const previousRebuild = builder._rebuildSingle;
     const runtimeRebuilder = _runtimeRebuilders?.get(builder);
@@ -362,6 +366,7 @@ async function materializeRuntimeMesh(scene: SceneContext, state: RuntimeBuildSt
             }
         });
     }
+    state.pendingDisposers.delete(mesh);
     scene._renderables.push(...result.renderables);
     // Keep the group's tracked output in sync: a later topology rebuild drops the previous output by
     // identity, and a runtime-built renderable that is missing from it would survive and double-draw.
@@ -480,6 +485,7 @@ function discardMeshBuild(scene: SceneContext, state: RuntimeBuildState, mesh: M
             });
         }
     }
+    state.pendingDisposers.delete(mesh);
 }
 
 function discardDisposedSceneCallbacks(scene: SceneContext, state: RuntimeBuildState): void {

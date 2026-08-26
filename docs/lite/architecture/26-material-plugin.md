@@ -195,12 +195,14 @@ plugin extension, so one material shared by multiple scenes resolves each
 scene's distinct UBO; disposing either scene cannot invalidate the other's
 binding. Static plugins retain the registration-time upload. Re-baking a
 material queues every affected mesh for a material-swap rebuild. The old UBO's
-release is attached to those renderables' existing disposer packets, so it
-remains valid while the swap queue is blocked by an asynchronous runtime build.
-Only after every affected replacement bind group has been committed is the old
-buffer retired behind a subsequent GPU fence. Disposing the scene destroys all
-of its remaining plugin UBOs and releases the material references held by the
-bridge.
+release is attached to those renderables' existing disposer packets. Async
+runtime builds expose the packet they temporarily remove from
+`scene._meshDisposables`, so a re-bake during that window can attach to the same
+pending teardown. The old buffer therefore remains valid while the swap queue is
+blocked. Only after every affected replacement bind group has been committed is
+the old buffer retired behind a subsequent GPU fence. Disposing the scene
+destroys all of its remaining plugin UBOs and releases the material references
+held by the bridge.
 
 The decisive benefit: this route adds no `_writeUbo` hook or plugin UBO loop to
 the Standard renderable. The pre-existing `StdExt._bind` / `_textures` loops in
@@ -276,7 +278,8 @@ and grayscale is a linear reduction, the result stays pixel-identical.
 - Unit coverage verifies independent dynamic refresh state across two scenes,
   scene-disposal cleanup, shared-material scene isolation, lazy plugin-free
   feature detection, and replacement-UBO rebinding/retirement when a Standard
-  material is baked again while the material-swap queue is blocked.
+  material is baked again while the material-swap queue is blocked, including
+  the async-build window where `_meshDisposables` temporarily has no packet.
 - Bundle-size: `bundle-size.spec.ts` guards the generic scene-context propagation
   and verifies the plugin implementation remains absent from plugin-free scene
   graphs.
