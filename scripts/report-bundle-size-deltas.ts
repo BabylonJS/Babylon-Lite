@@ -293,6 +293,14 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
     // many scenes at once — has a positive delta, so movement blames the author for the whole
     // overage and drops the note explaining that rebasing will not help. Ask the baseline instead:
     // a breach is inherited only if the baseline was already over the same ceiling.
+    //
+    // Known gap, tracked in #628: "the same ceiling" is an assumption, not a guarantee. The bytes
+    // come from the baseline but `ceilingKB` comes from *this branch's* scene-config, so the
+    // predicate really asks "is master's size over MY ceiling". Those diverge only when a branch
+    // edits that scene's ceiling — a PR that lowers one below master's measured size gets its own
+    // breach reported as inherited, and is told rebasing will not clear it when reverting the
+    // ceiling edit would. Closing it properly needs the baseline to carry the ceiling it was
+    // measured against, which is new plumbing rather than a change to this predicate.
     const wasOverOnMaster = (scene: SceneHeadroom): boolean => scene.masterBytes != null && scene.masterBytes > scene.ceilingKB * 1024;
     const inheritedOver = over.filter((s) => wasOverOnMaster(s));
     const movedAndOver = over.filter((s) => !wasOverOnMaster(s));
