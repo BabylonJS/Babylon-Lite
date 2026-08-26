@@ -491,11 +491,31 @@ function gitOutput(args: string[]): string | null {
  * A candidate with no published baseline is a plain 404 — one round trip, then the
  * mutable baseline. Nothing waits and nothing fails.
  */
-function readBaselineCommitCandidates(): string[] {
+/**
+ * The outcome of working out which commit's baseline to ask for.
+ *
+ * `disabled` is kept separate from an empty `commits` list because the two lead a
+ * reader to different places: an explicit opt-out is this build's own
+ * configuration doing what it was told, while an empty list is a checkout that
+ * could not say what it was merged with. Collapsing them would report a
+ * deliberate setting as a fault.
+ */
+interface BaselineCommitLookup {
+    /** True when the caller explicitly switched per-commit lookup off. */
+    disabled: boolean;
+    /** Full SHAs to try, in order. Empty when none could be determined. */
+    commits: string[];
+}
+
+function readBaselineCommitCandidates(): BaselineCommitLookup {
     const explicit = process.env.BUNDLE_BASELINE_COMMIT;
     if (explicit !== undefined) {
         const trimmed = explicit.trim();
-        return FULL_SHA_PATTERN.test(trimmed) ? [trimmed] : [];
+        // Set-but-empty is the documented off switch. A non-empty value that is not
+        // a full SHA is a failed attempt at naming a commit, not an opt-out, so it
+        // reports as undetermined rather than as disabled.
+        if (trimmed === "") return { disabled: true, commits: [] };
+        return { disabled: false, commits: FULL_SHA_PATTERN.test(trimmed) ? [trimmed] : [] };
     }
 
     const candidates: string[] = [];
@@ -520,7 +540,7 @@ function readBaselineCommitCandidates(): string[] {
         }
     }
 
-    return [...new Set(candidates.filter((sha) => FULL_SHA_PATTERN.test(sha)))];
+    return { disabled: false, commits: [...new Set(candidates.filter((sha) => FULL_SHA_PATTERN.test(sha)))] };
 }
 
 /**
@@ -529,14 +549,21 @@ function readBaselineCommitCandidates(): string[] {
  *
  * Derived from the URL actually in effect rather than from the hardcoded default,
  * so `BUNDLE_MASTER_MANIFEST_URL` overrides (tests, mirrors) keep working.
+ *
+ * Exported for tests/lite/unit/pipeline-fail-fast-ordering.test.ts, which binds
+ * this derivation to the path the publish step actually uploads to. Nothing else
+ * keeps the two in agreement, and a drift between them is a silent 404 on every
+ * per-commit lookup — which degrades to the mutable baseline and so looks exactly
+ * like the pre-existing behaviour this change was made to replace.
  */
-function perCommitBaselineUrl(manifestUrl: string, commit: string): string {
+export function perCommitBaselineUrl(manifestUrl: string, commit: string): string {
     const slash = manifestUrl.lastIndexOf("/");
     if (slash < 0) return manifestUrl;
     return `${manifestUrl.slice(0, slash)}/${commit}${manifestUrl.slice(slash)}`;
 }
 
-/** Guard against a CDN or proxy serving something that parses as JSON but isn't a manifest. */function isBundleManifest(value: unknown): value is BundleManifest {
+/** Guard against a CDN or proxy serving something that parses as JSON but isn't a manifest. */
+function isBundleManifest(value: unknown): value is BundleManifest {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
     const entries = Object.values(value);
     return entries.length > 0 && entries.every((entry) => typeof entry === "object" && entry !== null && typeof (entry as BundleManifestEntry).rawKB === "number");
@@ -609,8 +636,8 @@ export async function resolveMasterBundleManifest(refs?: string[]): Promise<{ so
         // baseline anyway. Trimmed because a YAML-supplied blank can arrive as " ".
         const url = (process.env.BUNDLE_MASTER_MANIFEST_URL ?? DEFAULT_MASTER_MANIFEST_URL).trim();
         if (url) {
-            const candidates = readBaselineCommitCandidates();
-            for (const commit of candidates) {
+            const lookup = readBaselineCommitCandidates();
+            for (const commit of lookup.commits) {
                 const commitUrl = perCommitBaselineUrl(url, commit);
                 const manifest = await fetchMasterBundleManifest(commitUrl, { quiet404: true });
                 if (manifest) {
@@ -627,14 +654,20 @@ export async function resolveMasterBundleManifest(refs?: string[]): Promise<{ so
                 // that is the failure this per-commit lookup exists to avoid, so when the
                 // fallback fires the reader needs to know it did.
                 //
-                // The two ways of getting here need different words: having asked for a
-                // base commit and been told there is none is a producer-side gap that
-                // will close on its own, whereas never having identified a base commit is
-                // a property of this checkout that will not.
-                const why =
-                    candidates.length > 0
-                        ? "no baseline was published for this build's base commit"
-                        : "this build's base commit could not be determined, so no per-commit baseline was requested";
+                // The three ways of getting here need different words, because they send
+                // the reader to three different places: a base commit with no baseline is
+                // a producer-side gap that closes on its own; an undetermined base commit
+                // is a property of this checkout that will not; and an explicit opt-out is
+                // this build doing what it was configured to do, which is not a fault at
+                // all and should not be reported as one.
+                let why: string;
+                if (lookup.disabled) {
+                    why = "per-commit baseline lookup is switched off for this run";
+                } else if (lookup.commits.length > 0) {
+                    why = "no baseline was published for this build's base commit";
+                } else {
+                    why = "this build's base commit could not be determined, so no per-commit baseline was requested";
+                }
                 console.warn(`Using the latest published bundle-size baseline (${url}); ${why}.`);
                 return { source: url, manifest };
             }

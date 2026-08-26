@@ -260,6 +260,27 @@ describe("resolveMasterBundleManifest — per-commit baseline", () => {
         expect(warnings.some((line) => line.includes("base commit could not be determined"))).toBe(true);
     });
 
+    it("reports an explicit opt-out as a setting rather than as a fault", async () => {
+        // beforeEach blanks BUNDLE_BASELINE_COMMIT, which is the documented off
+        // switch. Describing that as "could not be determined" would send a reader
+        // looking for a broken checkout to explain a value someone set on purpose.
+        routes["/manifest.json"] = { status: 200, contentType: "application/json", body: JSON.stringify(LATEST_MANIFEST) };
+        process.env.BUNDLE_MASTER_MANIFEST_URL = `${baseUrl}/manifest.json`;
+
+        const warnings: string[] = [];
+        const originalWarn = console.warn;
+        console.warn = (...args: unknown[]) => void warnings.push(args.join(" "));
+        try {
+            await resolveMasterBundleManifest();
+        } finally {
+            console.warn = originalWarn;
+        }
+
+        expect(requestCount).toBe(1);
+        expect(warnings.some((line) => line.includes("switched off for this run"))).toBe(true);
+        expect(warnings.some((line) => line.includes("could not be determined"))).toBe(false);
+    });
+
     it("does not adopt a malformed per-commit response", async () => {
         routes[`/${COMMIT}/manifest.json`] = { status: 200, contentType: "application/json", body: "<html>nope</html>" };
         routes["/manifest.json"] = { status: 200, contentType: "application/json", body: JSON.stringify(LATEST_MANIFEST) };
