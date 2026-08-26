@@ -20,12 +20,13 @@ The design requirements are:
 
 ## 2. Package-root API
 
-`packages/babylon-lite/src/index.ts` exports exactly twenty-four node-particle functions and twelve node-particle types.
+`packages/babylon-lite/src/index.ts` exports exactly twenty-five node-particle functions and twelve node-particle types.
 
 ### 2.1 Functions
 
 ```ts
 function parseNodeParticleSource(source: unknown): ParticleGraph;
+function normalizeNodeParticleGraph(graph: ParticleGraph): Promise<ParticleGraph>;
 
 function buildNodeParticleSet(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions): Promise<NodeParticleSet>;
 function buildNodeParticleSetWithBlendModes(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options?: BuildNodeParticleOptions): Promise<NodeParticleSet>;
@@ -67,7 +68,7 @@ function registerNodeParticleSet2DWithBlendModes(renderer: SpriteRenderer, set: 
 function disposeNodeParticleSet2DBlendModesBinding(binding: NodeParticleSet2DBlendModesBinding): void;
 ```
 
-All twenty-four functions listed above, including the build-options helper and blend-mode enabler, are public package-root exports. `ParticleGraph` is returned by `parseNodeParticleSource` and accepted by the graph-build functions above, but it is not a named node-particle type export from the package root.
+All twenty-five functions listed above, including the graph normalizer, build-options helper, and blend-mode enabler, are public package-root exports. `ParticleGraph` is returned by `parseNodeParticleSource` and accepted and returned by `normalizeNodeParticleGraph`, but it is not a named node-particle type export from the package root. TypeScript infers the graph type through the parser/normalizer chain, and the rolled-up declaration represents it the same way as the existing parser API without adding a casual named export.
 
 ### 2.2 Types
 
@@ -162,7 +163,20 @@ await builder(engine, scene, graph, withNodeParticleEmitterProvider(provider, op
 
 The default-builder convenience remains `buildNodeParticleSetWithEmitterProvider(engine, scene, graph, provider, options)`. The options helper returns a shallow copy, preserves extension-specific fields such as `ParseNodeParticleOptions.json` and `snippetServer`, and gives the provider precedence over static `emitterWorldMatrix` and `emitter` values.
 
-### 2.4 Internal APIs
+### 2.4 Teleport graph migration
+
+Direct `parseNodeParticleSource` users opt in to Teleport support explicitly before invoking any builder. One normalized graph composes with the default, flow-map, noise, combined texture-update, blend-mode, and provider-backed builder families:
+
+```ts
+const graph = await normalizeNodeParticleGraph(parseNodeParticleSource(source));
+const set = await buildNodeParticleSet(engine, scene, graph);
+```
+
+Calling a builder directly with an unnormalized graph whose reachable edge targets `ParticleTeleportOutBlock` preserves the existing unsupported-value-block error. This omission behavior is intentional: the parser can represent Teleport records, but direct builders support their routing semantics only after the caller normalizes the graph.
+
+`parseNodeParticleSetFromSnippet` is already an asynchronous arbitrary-content boundary, so it always calls `normalizeNodeParticleGraph` after parsing and before its default build. Inline JSON and fetched snippets therefore gain Teleport support automatically. A non-Teleport snippet pays only the thin graph scan, receives the exact parsed graph reference from the helper, and does not fetch the heavy runtime.
+
+### 2.5 Internal APIs
 
 The following symbols are implementation APIs and are not node-particle package-root exports:
 
@@ -173,16 +187,18 @@ The following symbols are implementation APIs and are not node-particle package-
 - Runtime construction: `ParticleSpriteHandle` and `createParticleSystem`.
 - Sprite features: `SpriteSheetConfig`, `SpriteSheet`, `useSpriteSheet`, and `useRandomSpriteSheet`.
 - Snippet transport: `fetchNodeParticleSnippet`.
+- Graph-plumbing runtime: `normalizeNodeParticleGraphRuntime` and the internal `_isGraphPlumbingNormalized` marker.
 - Contextual factories, local-position helpers, evaluator values, and registry loaders.
 
 ## 3. Modules, ownership, and data flow
 
-The data flow is:
+The direct data flow is:
 
 ```text
-serialized value or snippet response
+serialized value
     -> parseNodeParticleSource
     -> ParticleGraph
+    -> for a Teleport graph: explicit normalizeNodeParticleGraph
      -> buildNodeParticleSet
          or buildNodeParticleSetWithBlendModes for exact billboard Multiply/MultiplyAdd rendering
          or buildNodeParticleSetWithFlowMaps for UpdateFlowMapBlock graphs
@@ -202,6 +218,17 @@ serialized value or snippet response
              or exact-blend pure-2D target:
                  createParticleSprite2DBridgeWithBlendModes + syncParticleSprite2DBridgeWithBlendModes
                  -> registerNodeParticleSet2DWithBlendModes
+```
+
+The snippet convenience flow is:
+
+```text
+inline JSON or fetched snippet response
+    -> parseNodeParticleSource
+    -> normalizeNodeParticleGraph automatically
+        no TeleportOut -> exact graph, heavy runtime not fetched
+        TeleportOut    -> lazy runtime normalization
+    -> buildNodeParticleSet
 ```
 
 The runtime layers are:
@@ -430,7 +457,7 @@ The base particle system has no camera or target-size preparation API. Camera-de
 
 `withNodeParticleEmitterProvider(provider, options)` is the build-time opt-in. It samples and validates the provider immediately, returns a shallow copy of the supplied options with one internal `_setupEmitter` callback, and preserves extension-specific option fields through its generic intersection return type. The result can be passed to every node-particle builder or to `parseNodeParticleSetFromSnippet`. Each builder calls the callback with its temporary `NpeBuildState` immediately after constructing that state and before evaluator traversal. The callback replaces any caller-owned static matrix reference with a fresh provider-owned stable matrix, copies the initial matrix and translation into stable evaluator references, assigns a fresh provider-owned inverse list, and installs frame preparation on that system. Provider setup does not mutate the original options or their `emitterWorldMatrix`.
 
-Provider setup is the sole owner of `_prepareFrame` on a provider-backed NPE system: it installs the hook before evaluator traversal, and block evaluators must neither assign nor replace that field.
+Provider setup is the sole current owner of `_prepareFrame` on a provider-backed NPE system: it installs the hook before evaluator traversal, and current block evaluators must neither assign nor replace that field. Planned Phase 3C graph plumbing composes provider preparation through the internal helper specified in section 9.31.7; provider preparation remains first and no second root helper file is added.
 
 Setup copies the stable emitter vector, emitter matrix, and inverse-list references into local variables immediately. The installed `_prepareFrame` closure retains only those references, the provider, one private next-matrix scratch, one lazily allocated inverse scratch, and any prior frame hook. It does not retain `NpeBuildState`, `SceneContext`, `ParticleSystem`, its buffer, the options object, or graph-build data, and it does not point back to the owning system. The wrapped options object retains only the provider, validated initial matrix, and setup callback; it never accumulates references to systems or builds. Static systems allocate no provider array, inverse-list collection, object, closure, scratch matrix, or provider field.
 
@@ -771,7 +798,7 @@ Contextual source has precedence over system source, and system source has prece
 
 ## 9. Supported blocks
 
-Exactly 29 block class names are supported:
+Builders support exactly 31 block class names after graph normalization. The 29 ordinary classes work on a directly parsed graph; `ParticleTeleportInBlock` and `ParticleTeleportOutBlock` work only when the supplied graph has passed through `normalizeNodeParticleGraph`. The parser itself can represent arbitrary serialized class names.
 
 ```text
 SystemBlock                         CreateParticleBlock
@@ -788,7 +815,8 @@ BasicSpriteUpdateBlock              UpdatePositionBlock
 UpdateColorBlock                    UpdateDirectionBlock
 UpdateAngleBlock                    UpdateSizeBlock
 UpdateAttractorBlock                UpdateFlowMapBlock
-UpdateNoiseBlock
+UpdateNoiseBlock                     ParticleTeleportInBlock
+ParticleTeleportOutBlock
 ```
 
 Local shape modules and serialized variants retain their class name from this list.
@@ -1190,6 +1218,337 @@ When `angle` is connected, request the standard angle column and append an updat
 
 When `size` is connected, request the standard size column and append an update step that writes the scalar result. With an unconnected input, append nothing. No output getter is installed.
 
+### 9.31 Phase 3 graph-plumbing architecture (Phase 3B implemented; Phase 3C planned)
+
+This section began as the Phase 3A contract for five serialized class names: `ParticleTeleportInBlock`, `ParticleTeleportOutBlock`, `ParticleLocalVariableBlock`, `ParticleElbowBlock`, and `ParticleDebugBlock`. The parser can represent all serialized class names because it stores class names opaquely. Phase 3B raises the builder-supported count from 29 to 31 only after a Teleport graph passes through `normalizeNodeParticleGraph`; an unnormalized direct build still reaches the existing unsupported-value registry error. Phase 3C remains planned: normalization adds LocalVariable, Elbow, and Debug and raises the supported count from 31 to 34. Sections 9, 11, and 12 describe the current Phase 3B implementation.
+
+#### 9.31.1 Executive summary
+
+| Concern                 | Hybrid behavior                                                                                                                                                                    |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Direct parser users     | Ordinary graphs go straight to any builder at zero feature bytes. Teleport graphs explicitly call `normalizeNodeParticleGraph` once before any builder.                            |
+| Snippet users           | `parseNodeParticleSetFromSnippet` automatically invokes the helper for inline and fetched content because it is already asynchronous and arbitrary-content-aware.                  |
+| Teleports               | Reachable TeleportOut outputs are rewritten to their TeleportIn source before evaluator traversal. An omitted direct opt-in preserves the existing unsupported-value-block error.  |
+| Elbow                   | Phase 3C copy-on-write source rewrite; no evaluator and no runtime call.                                                                                                           |
+| Debug                   | Phase 3C copy-on-write pass-through; `stackSize`, logs, and observables remain editor-only and add no simulation state.                                                            |
+| Particle local          | Phase 3C Float64 component snapshot per particle id, stored in swap-remove-aware optional columns.                                                                                 |
+| Loop local              | Phase 3C snapshot per started `animateParticleSystem` call and system, shared by updates and births in that call.                                                                  |
+| Detached Teleport       | An explicit/snippet helper call sees TeleportOut and fetches the runtime, whose root-only walk returns a marked graph sharing parsed storage with no diagnostic or system storage. |
+| Repeated normalization  | A Teleport-normalized graph carries an internal marker, so a second helper call returns the exact graph without rescanning or refetching.                                          |
+| Non-Teleport helper use | The thin helper scans once, returns the exact graph reference, and never executes the dynamic import.                                                                              |
+
+The requirements are:
+
+- **GP-REQ-01 — one public opt-in:** `normalizeNodeParticleGraph(graph: ParticleGraph): Promise<ParticleGraph>` is the only new package-root function. No graph type is newly named-exported; the heavy runtime and marker remain internal and are trimmed from declarations.
+- **GP-REQ-02 — hybrid pay-for-use:** the parser and all builders contain no graph-plumbing detection, metadata, branch, or import. Direct ordinary graph users therefore pay 0 B. Explicit helper users and snippet users pay the thin scan; only a `ParticleTeleportOutBlock` hit dynamically imports the heavy runtime.
+- **GP-REQ-03 — teleport equivalence:** any number of distinct TeleportOut blocks may read one TeleportIn. Teleport and Elbow rewrite opaque connection pairs for value, particle flow, system flow, texture, and gradient connections without materializing the carried value. Every consumer observes the terminal source's original output name, value, and volatility.
+- **GP-REQ-04 — deterministic graph failures:** malformed reachable proxy routes fail before any particle system is returned. Diagnostics distinguish missing endpoints, wrong endpoint class, disconnected proxy inputs, unsupported output names, and proxy cycles.
+- **GP-REQ-05 — source immutability and idempotence:** normalization never mutates caller JSON, `ParsedParticleBlock`, `ParsedParticleInput`, or the original `ParticleGraph`. A Teleport graph uses copy-on-write blocks only when a route changes and returns an internally marked graph; a repeated helper call returns that exact graph. A graph with no TeleportOut is returned exactly and receives no marker.
+- **GP-REQ-06 — zero proxy runtime:** TeleportIn, TeleportOut, Elbow, and Debug install no getter, step, column, frame callback, or evaluator module. Normalized consumer edges point directly to the terminal non-proxy source. Debug nevertheless validates its Babylon-compatible `NpeValue`-only connection restriction before it compiles away.
+- **GP-REQ-07 — particle snapshot:** Particle scope evaluates the input at most once for each particle id, copies every component immediately, survives swap-remove, and invalidates a reused slot by id rather than a reset callback.
+- **GP-REQ-08 — loop snapshot:** Loop scope evaluates the input at most once per started animation call for one system. Existing-particle updates, system getters, and births in that call observe the same snapshot.
+- **GP-REQ-09 — scratch safety and precision:** scalar and component snapshots use Float64 storage. Vector and color outputs use block-owned reused scratch values and therefore retain the existing copy-on-read consumer rule.
+- **GP-REQ-10 — deterministic merge remapping:** a future graph-merge operation must remap ordinary connection ids and TeleportOut `entryPoint` ids through the same source-local id map before normalization. Raw id collisions never create cross-source teleport pairs.
+- **GP-REQ-11 — builder parity:** one explicitly normalized graph composes with default, flow-map, noise, combined texture-update, blend-mode, and provider-backed builders. Inline and fetched snippet builds normalize automatically before their default root walk.
+- **GP-REQ-12 — oracle and isolation coverage:** implementation requires state fixtures, malformed-graph fixtures, inline/fetched snippet coverage, an official Teleport parity graph, and fetched-module assertions proving that direct non-users load neither helper nor runtime.
+
+#### 9.31.2 Current and target data flow
+
+Pre-Phase-3B flow:
+
+```text
+serialized blocks
+    -> parseNodeParticleSource
+    -> readonly block map
+    -> root DFS
+    -> registry lookup for reachable class
+    -> unsupported block error
+```
+
+Current direct Phase 3B flow, with the Phase 3C-only branches marked:
+
+```text
+serialized blocks
+    -> parseNodeParticleSource
+    -> readonly block map with no feature metadata
+    -> caller chooses boundary
+        ordinary graph -> any builder directly
+        Teleport graph -> await normalizeNodeParticleGraph(graph)
+            already marked -> exact graph; no scan or import
+            no TeleportOut  -> exact graph; no runtime import
+            TeleportOut     -> dynamic npe-graph-plumbing-runtime.ts
+                detached TeleportOut -> marked graph sharing parsed storage; no diagnostic or system storage
+                reachable Teleport   -> copy-on-write proxy source resolution
+                                     -> cycle / endpoint validation
+                                     -> marked normalized graph
+    -> existing root DFS and lazy evaluator registry
+         Teleport / Elbow / Debug are no longer reachable
+         LocalVariable alone loads its evaluator and storage (Phase 3C)
+```
+
+The snippet path is the automatic half of the hybrid:
+
+```text
+inline JSON or fetched snippet
+    -> parseNodeParticleSource
+    -> await normalizeNodeParticleGraph
+    -> buildNodeParticleSet
+```
+
+The public helper is side-effect-free and contains no module-level allocation. Its complete loading decision is:
+
+```ts
+if (graph._isGraphPlumbingNormalized) return graph;
+for (const block of graph.blocks.values()) {
+    if (block.className === "ParticleTeleportOutBlock") {
+        return (await import("./npe-graph-plumbing-runtime.js")).normalizeNodeParticleGraphRuntime(graph);
+    }
+}
+return graph;
+```
+
+`NodeParticleSet._graph` remains exactly the graph supplied to the selected builder. Builders do not normalize, replace, or annotate it. A direct caller therefore observes the normalized graph only when it supplied one; snippet callers observe the graph normalized by the snippet boundary.
+
+#### 9.31.3 Serialized block contracts
+
+| Class                        | Input             | Output   | Serialized field | Contract                                                                                                                                                            |
+| ---------------------------- | ----------------- | -------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ParticleTeleportInBlock`    | mandatory `input` | none     | none             | Defines the source side of one or more TeleportOut endpoints and accepts every serialized connection kind.                                                          |
+| `ParticleTeleportOutBlock`   | none              | `output` | `entryPoint`     | `entryPoint` is the numeric block id of a TeleportIn. Multiple distinct TeleportOut ids may name the same TeleportIn id.                                            |
+| `ParticleElbowBlock`         | mandatory `input` | `output` | none             | Visual routing only; every serialized connection kind is normalized to the input source.                                                                            |
+| `ParticleDebugBlock`         | mandatory `input` | `output` | `stackSize`      | `NpeValue` pass-through only. Lite does not reconstruct logs, observables, or editor instrumentation. `stackSize` remains serialized but is not read by simulation. |
+| `ParticleLocalVariableBlock` | mandatory `input` | `output` | `scope`          | `NpeValue` snapshot only. `scope === 0` selects Particle; every other value, including a missing field, selects Loop.                                               |
+
+Babylon leaves TeleportIn and Elbow `AutoDetect` without excluding Particle, System, Texture, or gradient connection types. Lite therefore treats their routes as opaque `(targetBlockId, targetConnectionName)` rewrites: they may carry particle or system flow, textures, gradients, or ordinary values because they never materialize the payload. This does not add gradient metadata to `NpeValue`; support after rewrite is determined by the terminal evaluator and consumer.
+
+Babylon excludes Particle, System, Texture, and all four gradient connection types from Debug and LocalVariable. Lite keeps that boundary: those two classes accept only scalar, Vector2, Vector3, and Color4 `NpeValue` paths. The normalizer reports a class-specific unsupported-connection diagnostic when the consumer-role table identifies a flow, texture, or gradient route; LocalVariable also performs the runtime shape validation in section 9.31.6 because serialized output points contain no usable type or `valueType` metadata.
+
+#### 9.31.4 Reachability, feature loading, and copy-on-write normalization
+
+The helper and runtime use this exact path:
+
+1. `parseNodeParticleSource` constructs only the existing block map and root-id list. It neither recognizes Teleports nor adds feature metadata.
+2. A direct caller explicitly invokes `normalizeNodeParticleGraph`; `parseNodeParticleSetFromSnippet` invokes it automatically after either inline or network parsing.
+3. The thin helper first returns an already marked normalized graph. Otherwise it scans `graph.blocks.values()` for `ParticleTeleportOutBlock`. No hit returns the exact graph and never executes the dynamic import. A hit dynamically imports side-effect-free `npe-graph-plumbing-runtime.ts`, even when every TeleportOut is detached.
+4. The heavy runtime seeds its visited set and traversal from `systemBlockIds` only. Detached malformed Teleports are never visited, so normalization returns a marked graph that shares the original block map and root ids and emits no diagnostic or feature storage. Reachable Teleport routes are validated and rewritten before evaluator traversal.
+
+TeleportIn is not a thin-helper trigger because it has no usable output and is semantically traversed only through a TeleportOut `entryPoint`. A source containing TeleportIn without TeleportOut therefore returns exactly from the helper; if malformed hand-authored input directly connects to it, the existing unsupported-value registry error is intentional. Phase 3C extends the thin helper's candidate scan and the heavy runtime to LocalVariable, Elbow, and Debug after their behavior exists; it does not add parser or builder detection.
+
+Current Phase 3B performs root-seeded reachability with a plain visited `Set<number>`. It starts only from `systemBlockIds`, visits each reachable terminal source at most once, and stores no domain or role metadata. Phase 3B has no domain masks, OR accumulation, or domain-triggered revisits.
+
+Traversal is consumer-edge driven. For every visited block, connected inputs named `particle` are selected first in serialized order, followed by all remaining connected inputs in serialized order. Particle-first traversal therefore determines deterministic diagnostic priority for every visited block, not only `SystemBlock`; once validation succeeds, the normalized rewrite result is otherwise independent of traversal order. For each connected consumer input, the Phase 3B normalizer performs these operations in order:
+
+1. Resolve the source pair `(targetBlockId, targetConnectionName)` through the complete Teleport proxy chain before descending into the terminal source.
+2. Replace only the source pair. Preserve the consumer input's `name`, position, literal `value`, and `valueType`; preserve the resolved terminal source's `targetConnectionName` rather than the proxy's `output` name.
+3. Descend into the resolved terminal source. The later owning builder therefore still resolves a `particle` edge before assigning/building value dependencies, even when that edge originally targeted TeleportOut.
+
+Phase 3C plans to replace that plain visited traversal with complete domain-mask analysis from every System root. It will use particle and system bits, record on each block the OR of every incoming domain, and revisit a shared block's inputs whenever the block gains a new bit. The outgoing domain will be derived from the consumer input, never from a proxy or terminal output: a System consumer input named `particle` starts the particle bit, every other System input starts the system bit, and non-System consumers propagate their incoming mask.
+
+Phase 3C will also derive connection roles from consumers, using this planned fixed internal table rather than missing source-output type metadata:
+
+| Role              | Consumer rule                                                                                                                       |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| particle flow     | any input named `particle`                                                                                                          |
+| system flow       | an input named `system`, `onStart`, or `onEnd`                                                                                      |
+| texture           | `SystemBlock.texture`, `UpdateFlowMapBlock.flowMap`, or `UpdateNoiseBlock.noiseTexture`                                             |
+| gradient metadata | a `ParticleGradientBlock` input whose name starts with `value`; its separate `gradient` input remains an ordinary scalar `NpeValue` |
+| `NpeValue`        | every other input accepted by the current evaluator contracts                                                                       |
+
+In Phase 3C, the role will be carried unchanged through every proxy. Teleport and Elbow will accept every role. Debug and LocalVariable will reject every role except `NpeValue` before evaluator traversal. A future supported block that adds a non-value connection must extend this table in the same PR; unknown unsupported classes will still fail their ordinary registry diagnostic after normalization.
+
+Preserving the consumer input is required for specialized dependencies. The flow-map and texture-update walks continue to choose their CPU/embedded texture evaluator override from the unchanged consumer input name after normalization, then apply that override to the resolved terminal source block. The terminal `targetConnectionName` is likewise retained for output lookup. A texture routed through Teleport therefore remains a texture dependency rather than becoming a generic `output` value; Phase 3C applies the same guarantee to Elbow.
+
+The current Phase 3B proxy resolver recognizes:
+
+- **TeleportOut:** require output name `output`; require `entryPoint` to be a number that is finite, integral, and at least zero; resolve that id through the parser's final block map and require a TeleportIn; require the TeleportIn's `input` connection; then recursively resolve that input's complete source pair. Id `0` is valid when block `0` exists. An empty string is invalid rather than disconnected.
+- **Terminal source:** return the pair unchanged when the target class is not a current compile-away proxy.
+
+Phase 3C extends this same resolver with the already-specified Elbow and Debug rules, and treats LocalVariable as a terminal evaluator whose mandatory input and connection role are validated as `NpeValue`. Those three classes are intentionally not normalized or accepted in Phase 3B.
+
+The resolver records the ordered proxy-id stack. Revisiting a proxy already on that stack is a plumbing cycle and reports the complete repeated path. TeleportOut reachability explicitly crosses its `entryPoint` to the TeleportIn input even though TeleportOut itself has no serialized inputs. Memoization occurs only after successful terminal resolution, so a failed or cyclic path cannot poison another diagnostic.
+
+Copy-on-write occurs after successful edge resolution. Only an input whose source pair changes is copied; only a block containing a changed input is copied. Its id, class, name, raw serialized object, unmodified input objects, literal values, and value-type tags remain by reference. A new block map is constructed only when at least one reachable edge changes; `systemBlockIds` and every untouched block reference are preserved. Every graph returned from the heavy runtime carries internal `_isGraphPlumbingNormalized: true`, including a detached-Teleport graph that shares both original collections. The thin helper checks that marker before scanning, so repeat normalization returns the exact graph and cannot refetch the runtime. The marker exists only for Teleport users, is trimmed from the public declaration, and is never written onto the parsed graph. The original graph and raw JSON remain reusable after normalization.
+
+The parser preserves its existing last-record-wins behavior uniformly for every repeated block id, including TeleportOut and TeleportIn route ids. Normalization reads the final parsed map entry, so a final valid endpoint route succeeds and a final block of the wrong class receives the ordinary wrong-endpoint-class diagnostic. Distinct TeleportOut ids may reference the same final TeleportIn entry for fan-out.
+
+#### 9.31.5 Graph merge contract
+
+Lite has no public graph-merge API in Phase 3. The following contract reserves safe behavior for a future merge without adding current API or code:
+
+1. Allocate a unique destination id for every incoming raw block before restoring any edge.
+2. Apply that same source-local id map to every input `targetBlockId` and every TeleportOut `entryPoint`.
+3. Combine the remapped blocks only after all ids and endpoint ids are rewritten.
+4. Run graph-plumbing normalization against the combined unique-id graph.
+5. Never resolve a TeleportOut from one source to a TeleportIn from another source merely because their pre-merge raw ids matched.
+
+Merging already parsed graphs without their source-local remap is unsupported. This avoids exposing mutable graph-authoring APIs as part of Phase 3.
+
+This is intentional hardening beyond Babylon's current reconnect behavior. Babylon uses a truthy `entryPoint` guard, so serialized `0` and `""` are silently ignored, and raw-id merge collisions can reconnect to the wrong source. Lite accepts finite integer id `0` when present, rejects empty strings and all other invalid endpoint values, and requires source-local remapping so collisions cannot cross-link graphs.
+
+#### 9.31.6 Particle-scope local-variable storage
+
+Each reachable Particle-scope LocalVariable requests six optional columns named with its block id:
+
+| Column suffix             | Storage | Purpose                                                                        |
+| ------------------------- | ------- | ------------------------------------------------------------------------------ |
+| `id`                      | Uint32  | Particle id whose snapshot occupies this dense slot.                           |
+| `valid`                   | Uint8   | Distinguishes a real id-zero snapshot from zero-initialized storage.           |
+| `value0` through `value3` | Float64 | Scalar or Vector2/Vector3/Color4 components. Unused components remain ignored. |
+
+Serialized output connection points do not preserve a usable `type` or `valueType`, so build time cannot specialize this layout by output shape. Every reachable Particle-scope block allocates all six columns unconditionally. The capacity cost is `4 + 1 + 4 * 8 = 37` bytes per particle slot per block, excluding the six typed-array object headers and allocator/alignment overhead.
+
+Both scopes use this exact runtime discriminator after evaluating the input once:
+
+1. `typeof value === "number"` selects scalar. No additional finiteness check is added.
+2. Otherwise, a non-null object for which `"r" in value` selects Color4 and must have numeric `r`, `g`, `b`, and `a` properties.
+3. Otherwise, an object for which `"z" in value` selects Vector3 and must have numeric `x`, `y`, and `z` properties.
+4. Otherwise, an object with numeric `x` and `y` properties selects Vector2.
+5. `null`, nonobjects, and objects malformed for their selected branch are unsupported values. A malformed Color4 or Vector3 does not fall through to a smaller vector shape.
+
+The first read for a Particle slot compares both `valid` and cached id with `buffer.id[i]`. A miss evaluates the input exactly once, classifies and validates it, copies all components before any other getter can overwrite scratch, and only then commits the id, components, and valid flag. The first accepted value fixes that evaluator's runtime shape. A later valid value with another shape throws the shape-change diagnostic; a malformed value throws the unsupported-value diagnostic. Either failure leaves the prior snapshot and validity unchanged.
+
+All six columns join `buffer._all`, so swap-remove carries the snapshot, id, and validity with a moved live particle. A newly spawned particle receives a fresh id; stale tail data cannot match unless the global Uint32 id source wraps, which is the existing id-wrap limitation described in section 11. No spawn or death callback is added.
+
+Scalar output reads `value0`. Vector2, Vector3, and Color4 output copy the required components into one reused block-owned scratch value. Callers retain the normal `NpeGetter` rule: consume or copy one scratch-backed result before invoking another getter that may overwrite it.
+
+This id-plus-valid design intentionally avoids Babylon's reset callback coupling. Babylon assigns one particle object's single `_properties.onReset` callback from each LocalVariable block, so a later local block can overwrite an earlier block's cleanup. Lite has no per-particle callback or hidden block ordering: each local's columns move with swap-remove and id mismatch invalidates stale data. The separate valid column also distinguishes particle id `0` from empty storage.
+
+#### 9.31.7 Loop-scope epoch and frame preparation
+
+Loop intentionally means one started `animateParticleSystem` call for one built system. This is a Lite-defined simulation boundary, not a claim that manual calls reproduce Babylon's scene-frame-id cache. It gives deterministic semantics to manual simulation, fixed-step replay, and renderer-managed simulation without making a particle system depend on a Scene frame counter.
+
+The first Loop-scope LocalVariable in one system creates one build-local epoch object and appends one epoch increment to the system's optional frame-preparation chain. Additional Loop blocks in that system share the epoch and add no frame callback. Each block stores its last observed epoch, valid flag, runtime shape, and four Float64 JavaScript number fields plus one reused output scratch value. Loop scope allocates no capacity-sized columns.
+
+Phase 3C changes `_prepareFrame` from provider sole ownership to an ordered internal composition seam:
+
+```ts
+export function appendParticleFramePreparation(system: ParticleSystem, prepare: () => void): void;
+```
+
+The function is internal implementation exported from the existing `particle-system.ts`; it is not re-exported from the package root and adds no root/node file. Provider setup calls it before evaluator traversal, and the first Loop local calls it during traversal.
+
+```text
+started animate call
+    -> provider preparation, when present (installed before evaluator traversal)
+    -> one local-variable epoch increment, when any Loop block is reachable
+    -> dynamic emit-rate evaluation
+    -> existing-particle updates
+    -> particle births
+```
+
+The composition helper captures only the previous callback and the appended callback; it does not capture the system and creates no self-cycle. A callback exception prevents later preparation and simulation, preserving provider error atomicity. Systems with neither feature still have no `_prepareFrame` field or closure, while the existing optional call in `animateParticleSystem` remains the only common simulation cost.
+
+The first Loop read in an epoch evaluates and snapshots its input with the discriminator in section 9.31.6. Every subsequent read in that same call returns the snapshot, including reads from a system getter, multiple existing particles, and newly created particles. An unstarted call returns before the epoch advances. A stopped-but-started drain call advances it. Zero scaled ratio still advances it because one explicit animation call is one Loop.
+
+Each System root receives fresh evaluators, epoch state, and snapshots. Separate systems and separate builds are therefore independent even when they came from one parsed graph and are animated in the same call sequence. This intentionally differs from Babylon, where one LocalVariable block instance shares its Loop map across systems that observe the same scene frame id. Lite keeps state owned by the pure-state system, avoids a cross-system hidden registry, and makes manual simulation deterministic. Tests must expect independent systems.
+
+Particle-scope LocalVariable is rejected on any path whose accumulated mask contains the system bit, including a shared block whose mask is particle plus system. Loop scope is valid on either or both domains and snapshots whichever path reads it first in that started call. This is an intentional safety deviation from Babylon: Babylon permits Particle scope on system-domain paths, buckets a missing particle context under `-1`, and also maps particle id `0` to `-1` through `id || -1`. Lite refuses the ambiguous system path, while its independent `valid` and Uint32 `id` columns preserve id `0` correctly.
+
+There is no direct Babylon oracle for Lite's Loop boundary. Babylon requires a non-null scene to read a Loop local, while the null-scene manual procedure in section 13.2 throws; retaining a scene and repeatedly calling particle animation without rendering does not advance its frame id. Phase 3C therefore uses deterministic Lite tests for started-call semantics. A separate small Babylon oracle fixture may call `scene.render()` once per observed step with a real advancing frame id and exactly one relevant first read per render. That fixture covers only the compatible first-read-per-render case and is explicitly not the manual section 13.2 oracle procedure.
+
+#### 9.31.8 Elbow and Debug behavior
+
+Elbow and Debug use the same recursive source resolver as TeleportOut. After normalization no reachable consumer targets either block, so neither class needs a registry entry or evaluator file.
+
+Elbow preserves every serialized connection role, including particle/system flow, texture, and gradient routes, by rewriting only the opaque source pair. Debug preserves only `NpeValue` flow and deliberately omits Babylon's diagnostic side effects: there is no log array, string formatting, observable, or `stackSize`-limited collection. Those are editor instrumentation over runtime values, not serialized simulation output. Ignoring them prevents per-particle strings and observer notifications from entering the Lite hot path.
+
+Elbow, Debug, and LocalVariable inputs are mandatory in Lite. A disconnected reachable block throws during normalization. This is a deliberate deterministic deviation from Babylon's disconnected Debug/Local null behavior and Elbow pass-through behavior: a graph that cannot produce the promised output never reaches a partially built system.
+
+Chained Elbow, Debug, and Teleport routes resolve to one terminal source pair. A cycle among any combination of those proxies uses the same deterministic cycle diagnostic.
+
+#### 9.31.9 Diagnostics
+
+The invalid/missing/wrong endpoint, disconnected TeleportIn, Teleport output-name, and plumbing-cycle rows are current Phase 3B runtime errors. Rows owned by Elbow, Debug, or LocalVariable remain Phase 3C implementation requirements.
+
+| Condition                                                                 | Error                                                                                                |
+| ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `entryPoint` is not a finite integer number at least zero, including `""` | `NodeParticle: ParticleTeleportOutBlock <outId> has invalid entryPoint`                              |
+| Endpoint id is absent                                                     | `NodeParticle: ParticleTeleportOutBlock <outId> references missing entryPoint <entryId>`             |
+| Endpoint block has another class                                          | `NodeParticle: ParticleTeleportOutBlock <outId> entryPoint <entryId> is not ParticleTeleportInBlock` |
+| TeleportIn input is unconnected                                           | `NodeParticle: ParticleTeleportInBlock <id> input is not connected`                                  |
+| Elbow, Debug, or LocalVariable input is unconnected                       | `NodeParticle: <ClassName> <id> input is not connected`                                              |
+| Consumer names another proxy output                                       | `NodeParticle: <ClassName> <id> does not expose output "<name>"`                                     |
+| Debug or LocalVariable carries particle/system flow, texture, or gradient | `NodeParticle: <ClassName> <id> does not support <role> connections`                                 |
+| Proxy route cycles                                                        | `NodeParticle: graph plumbing cycle <id> -> ... -> <id>`                                             |
+| Particle local's domain mask contains the system bit                      | `NodeParticle: ParticleLocalVariableBlock <id> Particle scope requires particle-only evaluation`     |
+| Local runtime value is outside `NpeValue`                                 | `NodeParticle: ParticleLocalVariableBlock <id> received an unsupported value`                        |
+| Local runtime value changes shape                                         | `NodeParticle: ParticleLocalVariableBlock <id> changed value type`                                   |
+
+Error implementations use inline literal or template arguments so the Lite error extraction plugin can replace prose in production bundles.
+
+#### 9.31.10 Pay-for-use and bundle contract
+
+- Direct parser/build users have no detector, helper import, dynamic-import reference, or branch in the parser or any owning builder. Scenes 262, 280, 281, and 302 must remain raw-byte identical to rebuilt master and fetch neither `npe-graph-plumbing.ts` nor `npe-graph-plumbing-runtime.ts`.
+- Explicit helper users pay the thin module and one block-map scan. Non-Teleport graphs return exactly before the dynamic import, so the heavy runtime is not fetched. Repeated calls on a Teleport-normalized graph return at the internal marker before the scan.
+- `parseNodeParticleSetFromSnippet` statically imports the thin helper because snippet parsing is the automatic feature boundary. Inline and network snippets share the same path. Non-Teleport snippets retain the helper but do not fetch the heavy runtime; Teleport snippets fetch it.
+- Any TeleportOut in an explicit/snippet helper call fetches the heavy runtime. A detached malformed Teleport remains semantically inert because root-only normalization returns a marked graph sharing parsed storage without a diagnostic or feature storage. TeleportIn alone does not trigger the runtime and remains unsupported if malformed input targets it directly.
+- Phase 3C extends the thin candidate scan and heavy runtime in place for LocalVariable, Elbow, and Debug. It adds no parser or builder seam.
+- Teleport, Elbow, and Debug add no evaluator file, output getter, update step, creation slot, particle column, or per-animation callback. Their validation and rewrite live only in the normalizer.
+- Particle local storage is allocated only for a reachable Particle-scope block. Loop local state and its one preparation closure are allocated only for a reachable Loop-scope block.
+- In Phase 3C, the local-variable evaluator is reached through the existing optional value registry. Graphs without LocalVariable do not fetch its module.
+- Production bundle assertions inspect generated bundle-info under the current CI-published baseline workflow; no generated manifest belongs in the PR.
+- Existing canonical direct particle scenes reject both graph-plumbing modules and the local-variable evaluator. Current Scene 304 explicitly calls the helper and must fetch both the thin helper and heavy runtime while rejecting the local evaluator. Phase 3C will additionally fetch the local evaluator there. Teleport, Elbow, and Debug evaluator modules must not exist.
+
+#### 9.31.11 Alternatives and risks
+
+| Alternative                                                    | Decision                                                                                                                                                          |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reproduce Babylon object maps and particle reset callbacks     | Rejected. Lite particles are dense slots, not objects; id-validated columns preserve lifetime through swap-remove without callbacks or per-particle allocation.   |
+| Use `scene` frame id for Loop                                  | Rejected. Manual simulation and pure Sprite2D use must remain scene-frame independent. One started animation call is the deterministic Lite loop boundary.        |
+| Share one Loop map across systems as Babylon does              | Rejected. Per-root evaluators preserve system ownership, avoid a hidden cross-system registry, and make manual simulation deterministic.                          |
+| Runtime pass-through evaluators for Teleport, Elbow, and Debug | Rejected. They add getter calls and module bytes for topology that can be removed before traversal.                                                               |
+| Automatic parser flag plus three builder seams                 | Rejected after measurement. Even though ordinary scenes did not fetch the normalizer, scenes 262/280/281/302 grew by 175–193 raw bytes. Direct users require 0 B. |
+| Statically import the full normalizer from each owning walk    | Rejected. It charges every direct graph user for optional topology rewriting.                                                                                     |
+| Public helper for every caller with snippet auto-normalization | Chosen. Direct Teleport users opt in explicitly; the existing async snippet boundary preserves automatic imported-content behavior.                               |
+| Add a statically imported candidate/reachability probe         | Rejected after measurement. It raised unrelated scenes by roughly 1.1 KB despite the normalizer itself remaining lazy.                                            |
+| On-demand builder resolver                                     | Rejected after measurement. Existing direct scenes still grew by 185–191 raw bytes.                                                                               |
+| Direct owner scan in each builder                              | Rejected after measurement. Existing direct scenes grew by 207–221 raw bytes.                                                                                     |
+| Shared helper or parser thunk behind automatic builders        | Rejected after measurement. Both were larger than the approved hybrid boundary and still charged direct users.                                                    |
+| Mutate parsed inputs in place                                  | Rejected. It would make graph reuse and comparative builds order-dependent.                                                                                       |
+| Store local snapshots as JS objects or arrays                  | Rejected. It allocates per particle and aliases volatile getter scratch unless every value is cloned.                                                             |
+| Infer LocalVariable shape from serialized output metadata      | Rejected. Output points omit a reliable type/valueType, so every Particle local reserves the complete 37-byte slot layout.                                        |
+| Add an unconditional epoch field to every system               | Rejected. A shared feature-owned epoch object and existing optional frame seam keep non-users allocation-free.                                                    |
+| Silently follow malformed teleport routes                      | Rejected. Explicit endpoint, connection, output-name, and cycle diagnostics keep malformed reachable graphs deterministic.                                        |
+
+The main implementation risks are proxy-cycle handling, accidentally diagnosing detached blocks, scratch aliasing, and slot reuse. The ordered-stack resolver, root-only traversal, component copies, and id/valid columns are the required mitigations.
+
+#### 9.31.12 Implementation and test slices
+
+Phase 3A changed this architecture document only.
+
+Phase 3B implements two side-effect-free node infrastructure files:
+
+```text
+packages/babylon-lite/src/particle/node/npe-graph-plumbing.ts
+packages/babylon-lite/src/particle/node/npe-graph-plumbing-runtime.ts
+```
+
+The thin file owns the public scan and lazy import; the runtime owns copy-on-write route resolution and diagnostics. `npe-types.ts` carries only the internal normalized-return marker. `node-particle.ts` invokes the helper at the snippet boundary, `index.ts` root-exports the helper, and Scene 304 invokes it explicitly between parse and build. The parser and all three owning walks remain byte-for-byte at their ordinary baseline in the affected regions. This raises node infrastructure from 27 to 29 files and the normalized-builder class count from 29 to 31; neither Teleport class receives an evaluator.
+
+The corrected 46-file evaluator/helper manifest includes `embedded-texture-source-block.ts`, which existed before Phase 3B but was omitted from the prior 45-file manifest. It is not a Phase 3B evaluator addition.
+
+Focused Phase 3B fixtures cover direct unnormalized omission failure; explicit normalized success; Teleport fan-out and chains across scalar, Vector2, Vector3, Color4, gradient, particle/system flow, and texture edges; terminal output-name preservation; System `particle` ordering; one normalized graph across every specialized builder; endpoint id `0`; invalid/empty/missing/wrong endpoints; repeated Teleport route ids with final-record-wins behavior; disconnected TeleportIn; cycles; graph immutability; parser metadata absence for all graphs; TeleportIn-only exact helper return plus the existing unsupported error; non-Teleport exact-reference return; detached malformed Teleport shared-storage normalization without diagnostics or storage; repeat-normalization identity; automatic inline and fetched snippet support; non-Teleport snippet behavior; declaration trimming; no Teleport evaluator/registry body; and generated runtime-chunk/module isolation. Particle-flow Teleport coverage is mandatory in focused tests.
+
+Phase 3B also includes official Scene 304 (`scene304-npe-teleport`) and all of its anchors: the Lite, Babylon reference, and bundle pages (`lab/lite/scene304.html`, `lab/lite/babylon-ref-scene304.html`, and `lab/lite/bundle-scene304.html`); the shared graph source `lab/lite/src/shared/scene304-npe-teleport.ts`; the Babylon and Lite source entries `lab/lite/src/bjs/scene304.ts` and `lab/lite/src/lite/scene304.ts`; `reference/lite/scene304-npe-teleport/babylon-ref-golden.png`; `lab/public/thumbnails/scene304.jpg`; `tests/lite/parity/scenes/scene304-npe-teleport.spec.ts`; and scene configuration. Lab HTML/Vite inputs and gallery cards are config/file-discovered, so no hardcoded Vite or gallery list changes are required. The graph derives from Scene 262 and is Teleport-only: it contains no Elbow, Debug, LocalVariable, or Loop semantics. It routes deterministic scalar, Vector2, and Vector3 values through fan-out endpoints and routes the final particle-flow edge through Teleport without changing the expected image. Its Lite entry explicitly calls `normalizeNodeParticleGraph(parseNodeParticleSource(...))` before the default builder; the Babylon entry is unchanged.
+
+Scene 304 follows Scene 262's standard runtime reference convention. Its parity specification invokes the shared `captureGolden` helper for the Babylon WebGPU page before opening Lite, refreshes `reference/lite/scene304-npe-teleport/babylon-ref-golden.png`, then compares Lite to that image at `MAD <= 0.01`. The corrected hybrid run produces `MAD = 0.000`, measures `43,936` raw bytes (`42.9 KB`) and `25,906` gzip bytes (`25.3 KB`), and keeps the `44.5 KB` raw ceiling with `1,632` raw bytes of headroom. Generated bundle output remains ignored and no generated manifest belongs in the change.
+
+The Phase 3C implementation explicitly replaces Phase 3B's root-seeded plain visited `Set` with the domain-mask traversal specified in section 9.31.4. It extends the thin helper candidate scan and heavy runtime for Elbow and Debug, adds `blocks/particle-local-variable-block.ts`, routes it from `npe-registry-extra-values.ts`, and adds the internal frame-preparation composition helper in `particle-system.ts`. It updates `npe-emitter-provider.ts` to use that helper, extends `NpeBuildState` with feature-owned Loop epoch sharing, and adds deterministic tests covering:
+
+- Particle ids zero and nonzero, A-B-A reads, two particles, swap-remove, tail-slot reuse, id mismatch, scalar/Vector2/Vector3/Color4 snapshots, volatile source scratch, and runtime shape mismatch.
+- Exact runtime discriminator precedence, malformed properties, unconditional 37-byte Particle slot layout, and no Loop capacity columns.
+- Loop first-read behavior across dynamic emit rate, existing updates, and births; multiple reads and blocks; zero-ratio, unstarted, stopped drain, restart, independent systems, provider composition order, and callback errors.
+- Particle-scope rejection for system-only and shared particle-plus-system masks; Loop acceptance in either domain; id-zero robustness; and the documented Babylon deviations.
+- Elbow routes for every connection role; Debug `NpeValue` routing; class-specific unsupported flow/texture/gradient diagnostics; teleport-plus-pass-through chains; disconnected inputs; mixed proxy cycles; ignored `stackSize`; graph immutability; and detached malformed blocks.
+- Default, flow-map, noise, combined texture-update, blend, provider, and snippet builder parity.
+- Deterministic Lite Loop semantics plus the separate Babylon `scene.render()`-per-step, one-read-per-render oracle case described in section 9.31.7.
+
+Phase 3C changes only the shared Scene 304 graph to thread Elbow, Debug, and a Particle-scope LocalVariable around a deterministic per-particle value whose snapshot equals its source. It adds no Loop block. Babylon and Lite are expected to render the same output as Phase 3B, but changing the shared Babylon graph requires the parity test to recapture/regenerate the golden through the same helper; the Phase 3B image is not presumed valid. Bundle checks then require the local-variable evaluator only for Scene 304 while canonical scenes continue to reject the normalizer and local evaluator.
+
+Phase 3C raises the normalized-builder class count from 31 to 34 and block evaluator/helper files from 46 to 47. Node infrastructure stays at 29 and particle root files stay at 11 because the thin helper/runtime and frame-preparation composition extend existing files.
+
+Phase 3B keeps these descriptive sections synchronized at 31 normalized-builder classes and 29 node infrastructure files. Phase 3C must update the count to 34, extend helper candidate detection/runtime handling to LocalVariable/Elbow/Debug, move its remaining diagnostics into section 11, remove the remaining Phase 3 limitation, update the Scene 304 graph/golden and bundle guards, change section 14.3 to 47 files, add its focused unit test files to section 14.5, and keep or update the Scene 304 anchors there as applicable.
+
 ## 10. Rendering and live registration
 
 ### 10.1 Billboard creation
@@ -1396,6 +1755,13 @@ The implementation preserves these explicit failures:
 - Parser: `NodeParticle: invalid source — expected a \`blocks\` array`.
 - Parser: `NodeParticle: block missing numeric id (name=<stringified name>)`.
 - Parser: `NodeParticle: graph has no SystemBlock`.
+- Direct builder with an unnormalized reachable TeleportOut: `NodeParticle: unsupported value block "ParticleTeleportOutBlock"`.
+- Teleport endpoint value: `NodeParticle: ParticleTeleportOutBlock <outId> has invalid entryPoint`.
+- Missing Teleport endpoint: `NodeParticle: ParticleTeleportOutBlock <outId> references missing entryPoint <entryId>`.
+- Wrong Teleport endpoint class: `NodeParticle: ParticleTeleportOutBlock <outId> entryPoint <entryId> is not ParticleTeleportInBlock`.
+- Disconnected Teleport input: `NodeParticle: ParticleTeleportInBlock <id> input is not connected`.
+- Teleport output mismatch: `NodeParticle: <TeleportClassName> <id> does not expose output "<name>"`.
+- Teleport route cycle: `NodeParticle: graph plumbing cycle <id> -> ... -> <id>`.
 - Snippet HTTP response: `NodeParticle: snippet fetch failed (<status>)`.
 - Connected value with no installed getter: `NodeParticle: unresolved connection <ClassName>.<inputName>`.
 - Unsupported world shape: `NodeParticle: unsupported emitter block "<ClassName>"`.
@@ -1422,8 +1788,11 @@ The implementation preserves these explicit failures:
 - Handle API installed on any exact bridge pass layer: `syncParticleSprite2DBridgeWithBlendModes: bridge-owned layers cannot use the Sprite2D Handle API`.
 - Invalid sprite frame during sync: `resolveSpriteFrame: index <frame> out of range [0, <frameCount>)`.
 
+Phase 3C must move the Elbow/Debug/LocalVariable disconnected-input, unsupported connection role, Particle-scope domain, unsupported runtime value, and shape-change diagnostics here when their owning implementation lands. Those planned strings remain in section 9.31.9.
+
 Additional behavior is observable:
 
+- `normalizeNodeParticleGraph` reports malformed reachable Teleport routes before a builder runs. The snippet API invokes it automatically; direct callers see those diagnostics only after opting in. Omitting direct normalization preserves the existing unsupported registry error instead.
 - A dangling target block id is marked built and skipped. It fails only if a consumer requests its absent getter; a flow-only edge can remain silent.
 - Detached unsupported blocks are ignored because they are unreachable.
 - Dynamic-import failures for reachable evaluator or registry modules propagate from the asynchronous build.
@@ -1443,7 +1812,8 @@ Additional behavior is observable:
 
 ## 12. Current limitations
 
-- Only the 29 classes in section 9 are accepted. Other NPE classes follow the registry errors in section 11.
+- The parser represents arbitrary serialized class names. Builders support the 29 ordinary classes directly and the two Teleport classes only when the supplied graph has passed through `normalizeNodeParticleGraph`, for 31 supported classes after normalization. Other reachable NPE classes follow the registry errors in section 11.
+- The three Phase 3C classes `ParticleLocalVariableBlock`, `ParticleElbowBlock`, and `ParticleDebugBlock` remain unsupported. Phase 3C raises the limit to 34 and removes this bullet.
 - Simulation is CPU-only.
 - Rendering is selected explicitly by the caller: camera-facing billboards or pure-2D Sprite2D. Serialized `billBoardMode` and `isBillboardBased` do not select either runtime path.
 - The Sprite2D bridge maps only NPE world XY. It ignores `posZ` and does not support XZ/YZ projection.
@@ -1487,11 +1857,17 @@ The current unit categories are:
 - Attractors: softened inverse-square attraction, negative-strength repulsion, defaults, coincident-point handling, lifetime-clamped step scaling, and lazy evaluator isolation.
 - Flow maps: projected nearest-neighbor sampling including non-zero row stride, vertical screen mapping, RGBA force decoding, alpha and bounds handling, per-particle strength evaluation, lifetime-clamped step scaling, allocator-selected F32/F64 matrix snapshots, and lazy texture/evaluator isolation.
 - Noise textures: exact three-sample red-channel addressing, six deterministic Float64 random coordinates, coordinate reuse and slot recycling, Vector3 defaults/strength, lifetime-clamped step scaling, extraction failure, parsed graph wiring including ordinary/CPU embedded-texture fan-out, Babylon multi-step state fixtures, and lazy runtime isolation.
+- Graph plumbing: direct unnormalized failure and explicit success; parser metadata absence for ordinary and Teleport graphs; TeleportIn-only exact helper return plus unsupported direct behavior; candidate-free exact-reference and detached-malformed shared-storage paths; Teleport fan-out/chains for scalar, Vector2, Vector3, Color4, gradient, particle/system flow, and texture roles; terminal output and consumer input preservation; particle-first traversal and diagnostic priority; specialized texture evaluator overrides; endpoint id `0`; malformed endpoints; repeated route ids with final-record-wins behavior; cycles; copy-on-write identity, repeated-normalization identity, and raw-source immutability; multiple roots; one normalized graph across every builder family; automatic inline and fetched snippets; non-Teleport snippet behavior; no Teleport evaluator/registry body; and thin/runtime chunk/module isolation.
 - Feature isolation: runtime chunk manifests and, when bundle-info exists, fetched module contents.
 - Baseline Sprite2D bridge: texture and mapping validation, exact XY/+Y conversion, blend mapping including the additive fallback for modes 3, 4, and unknown values, sprite-sheet mapping and its out-of-range cell error, Handle-API ownership rejection, full-range packed synchronization, stale saved-size clearing, single dirty updates, transactional multi-system registration, auto-start control, idempotent disposal, and renderer-disposal cleanup.
 - Exact Sprite2D blend bridge: descriptors for modes 0 through 4 and default, mode-3 custom shader structure and opacity formula, mode-4 `[Multiply, Add]` layers and stable order, one animation per system/update, byte-equivalent pass synchronization under mutable mapping/presentation, all-pass Handle ownership rejection, transactional creation/attachment rollback, manual and renderer disposal, and baseline isolation.
-- Public declarations: the removed post-build API is absent, both build-time provider helpers are present, the generic options intersection preserves extended builder options, and `_setupEmitter` plus provider internals are trimmed from the emitted package declaration.
+- Public declarations: `normalizeNodeParticleGraph` is present with a representable `ParticleGraph` promise signature; its runtime function and marker are absent; the removed post-build provider API is absent; both build-time provider helpers are present; the generic options intersection preserves extended builder options; and `_setupEmitter` plus provider internals are trimmed from the emitted package declaration.
 - Path ownership: the `particle/soa` source directory and `particle-soa*.test.ts` unit-test names must not exist. TypeScript compilation validates all source and test imports.
+
+Phase 3C extends these categories with:
+
+- Phase 3C local state and pass-through: exact shape discrimination; scalar/Vector2/Vector3/Color4 snapshots; 37-byte Particle slot allocation; id `0`; swap-remove/reuse; Particle system/shared-domain rejection; Loop started-call epochs; independent systems; provider composition; Elbow all-role routing; Debug value-only routing; disconnected inputs; ignored `stackSize`; and class-specific unsupported-role diagnostics.
+- Phase 3C oracle separation: deterministic Lite tests own manual Loop semantics, while one small Babylon render-per-step fixture covers only the compatible first-read-per-render case.
 
 ### 13.2 Oracle fixture procedure
 
@@ -1509,9 +1885,11 @@ Use conversion for graph extraction. The oracle's direct parse path does not pre
 
 Moving-emitter fixtures additionally assign the oracle emitter's translation/rotation schedule immediately before each explicit animation call, force its world matrix current, and record that matrix with the resulting particle state. Lite builds with provider-wrapped options and replays the same schedule by returning the recorded matrix before each matching call. Fixtures include translation and rotation changes that distinguish current translation, upper-3x3 direction transforms, local-position reprojection, and inverse-dependent Cylinder direction.
 
+The planned Loop LocalVariable oracle is an explicit exception to this manual procedure. It must not null Babylon's scene and must not call particle animation repeatedly within one unchanged scene frame: null scene access throws for Loop scope, while unchanged frame ids suppress new snapshots. Its dedicated fixture calls `scene.render()` once per step, observes one compatible first read per render, and compares that sequence with Lite. It does not serve as an oracle for Lite's one-started-`animateParticleSystem`-call boundary.
+
 ### 13.3 Visual scenes
 
-The first nine billboard oracle Lite scenes seed after build, synchronize one billboard, and register a frozen scene. Scenes 262 through 281 use a black clear color; scenes 283 and 284 use the warm destination color specified in section 13.5. Scenes 262, 263, 264, 276, and 277 run 200 ratio-1 steps. Scene 280 runs 300, scene 281 runs 240, scene 283 runs 40, and scene 284 runs 20. Scene 280's Babylon reference calls `scene.updateTransformMatrix(true)` before manual steps because Babylon's UpdateFlowMap reads the scene transform matrix before the first render. Scene 302 is the tenth billboard oracle and adds a default-live mode plus a deterministic frozen query mode.
+The ten frozen billboard oracle Lite scenes seed after build, synchronize one billboard, and register a frozen scene. Scenes 262 through 281 and Scene 304 use a black clear color; scenes 283 and 284 use the warm destination color specified in section 13.5. Scenes 262, 263, 264, 276, 277, and 304 run 200 ratio-1 steps. Scene 280 runs 300, scene 281 runs 240, scene 283 runs 40, and scene 284 runs 20. Scene 280's Babylon reference calls `scene.updateTransformMatrix(true)` before manual steps because Babylon's UpdateFlowMap reads the scene transform matrix before the first render. Scene 302 is the eleventh billboard oracle and adds a default-live mode plus a deterministic frozen query mode.
 
 | Scene                                 | Coverage                                                                      | Camera                                                       | MAD ceiling | Raw ceiling |
 | ------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------ | ----------- | ----------- |
@@ -1525,10 +1903,13 @@ The first nine billboard oracle Lite scenes seed after build, synchronize one bi
 | 283 `scene283-npe-multiply-blend`     | Multiply blend with procedural radial alpha over a warm destination           | alpha `-pi/2`, beta `pi/2`, radius `12`, target origin       | `0.01`      | `45.0 KB`   |
 | 284 `scene284-npe-multiply-add-blend` | MultiplyAdd blend with a sparse procedural radial-alpha field                 | alpha `-pi/2`, beta `pi/2`, radius `12`, target origin       | `0.01`      | `45.0 KB`   |
 | 302 `scene302-npe-moving-emitter`     | local Point, moving provider, `LocalPositionUpdated`, live/frozen modes       | alpha `-pi/2`, beta `1.2`, radius `8.5`, target `(0,0.35,0)` | `0.01`      | `61.5 KB`   |
+| 304 `scene304-npe-teleport`           | Scene-262-derived scalar/vector Teleport fan-out and particle-flow routing    | alpha `-pi/2`, beta `1.2`, radius `4`, target `(0,0.3,0)`    | `0.01`      | `44.5 KB`   |
 
-Each camera uses near plane `0.1` and far plane `100`. The nine always-frozen scenes set both `canvas.dataset.animationFrozen` and `canvas.dataset.ready` to `"true"` after engine start. Scene 302 sets `ready` in both modes and sets `animationFrozen` only for a finite nonnegative `seekTime`.
+Each camera uses near plane `0.1` and far plane `100`. The ten always-frozen scenes set both `canvas.dataset.animationFrozen` and `canvas.dataset.ready` to `"true"` after engine start. Scene 302 sets `ready` in both modes and sets `animationFrozen` only for a finite nonnegative `seekTime`.
 
-Each parity specification waits for its deterministic ready/frozen flag, allows a short GPU settle, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, 264, 277, 280, 281, 283, and 284 invoke the shared golden-capture helper before opening the Lite page; specifications 276 and 302 read committed goldens directly. Scene 302's parity test must never navigate to its Babylon.js page at runtime. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all ten scenes.
+Each parity specification waits for its deterministic ready/frozen flag, allows a short GPU settle, screenshots the canvas, and compares full-image MAD against `reference/lite/<scene-slug>/babylon-ref-golden.png`. Specifications 262, 263, 264, 277, 280, 281, 283, 284, and 304 invoke the shared golden-capture helper before opening the Lite page; specifications 276 and 302 read committed goldens directly. Scene 302's parity test must never navigate to its Babylon.js page at runtime. The pass criterion comes from `scene-config.json` and is `MAD <= 0.01` for all eleven scenes.
+
+Scene 304 follows the runtime-capture group, not Scene 302's manual committed-only convention. Its current teleport-only shared graph invokes the same `captureGolden` helper as Scene 262 before Lite and produces `MAD = 0.000` in the focused Phase 3B run. Phase 3C changes that shared Babylon graph by adding Elbow, Debug, and Particle LocalVariable, so it invokes the helper again and regenerates the golden even though the wrapped value and expected pixels are unchanged. No Loop block is used in either Scene 304 phase.
 
 Scene 300 (`scene300-npe-sprite2d`) is a separate deterministic Lite-native integration fixture. It advances an authored NPE graph for 200 seeded ratio-1 steps, freezes simulation, registers the set through `registerNodeParticleSet2D`, and keeps the renderer hook sampling the stable packed layer. `scene-config.json` marks it `skipParity: true` because Babylon.js has no equivalent pure-2D SpriteRenderer path. Its Playwright specification verifies active binding state, live sampling, equal particle/layer counts, frozen particle age, one renderer layer, draw calls, and visible flare pixels; it does not use a Babylon golden or MAD comparison. The fixture uses a two-cell 128 by 64 atlas. Deterministic slot 0 is isolated as an unrotated 64 px marker sprite centered at canvas coordinates `(96,96)` on cell 1; an upper-versus-lower marker-band assertion detects vertical texture or UV inversion. `demo-npe-sprite2d` is the interactive counterpart and mutates the bridge origin from pointer/touch input while the renderer-managed simulation remains live.
 
@@ -1548,40 +1929,50 @@ The default Lite URL is continuously live. A stable matrix is mutated in place b
 
 Any finite nonnegative `?seekTime=T` selects deterministic frozen mode. Both engines install the same seeded generator, apply the initial pose, and replay poses for steps `1...round(T * 60)` immediately before matching explicit simulation calls. For the committed capture `T=2`, this is exactly 120 calls. Lite manually calls `animateParticleSystem(system, 1)`, sets `updateSpeed = 0`, leaves the provider returning the final stable matrix, and registers with `autoStart: false`. Babylon.js assigns a hidden concrete `AbstractMesh` emitter to `set.systemBlocks[0].emitter` before `buildAsync`, updates its position and `rotation.z`, forces `computeWorldMatrix(true)`, and calls the real `ParticleSystem.animate(true)` path. Its native update therefore refreshes `_emitterWorldMatrix`; no particle position is emulated manually. Both pages stamp `data-animation-frozen="true"` only in seek mode.
 
-The Babylon.js page is a manual golden oracle only. The committed `reference/lite/scene302-npe-moving-emitter/babylon-ref-golden.png` is captured once from `babylon-ref-scene302.html?seekTime=2`; the automated frozen test loads only `scene302.html?seekTime=2`, verifies telemetry, and compares the resulting canvas to that golden. The initial ceiling is `MAD <= 0.01`; changing it requires measured parity evidence and approval. Scene 302 adds no package API: the public count remains twenty-four functions and twelve types, and the particle implementation counts are 11 root files, 27 node infrastructure/registry files, and 45 evaluator/helper files.
+The Babylon.js page is a manual golden oracle only. The committed `reference/lite/scene302-npe-moving-emitter/babylon-ref-golden.png` is captured once from `babylon-ref-scene302.html?seekTime=2`; the automated frozen test loads only `scene302.html?seekTime=2`, verifies telemetry, and compares the resulting canvas to that golden. The initial ceiling is `MAD <= 0.01`; changing it requires measured parity evidence and approval. Scene 302 itself adds no package API. After Phase 3B, the public count is twenty-five functions and twelve types, and the current particle implementation counts are 11 root files, 29 node infrastructure/registry files, and 46 evaluator/helper files.
 
 ### 13.4 Bundle manifests and conditional content
 
-Current tracked measurements are:
+Bundle output and per-scene manifests are generated and ignored. The final hybrid build measured exactly the requested representative scenes:
 
-| Scene | Runtime raw | Runtime gzip | Ignored graph payload raw |   Ceiling |
-| ----- | ----------: | -----------: | ------------------------: | --------: |
-| 262   |   `39.9 KB` |    `24.2 KB` |                 `28.5 KB` | `44.1 KB` |
-| 263   |   `42.0 KB` |    `24.8 KB` |                 `27.5 KB` | `44.1 KB` |
-| 264   |   `40.1 KB` |    `26.0 KB` |                 `34.4 KB` | `44.1 KB` |
-| 276   |   `44.2 KB` |    `25.3 KB` |                 `27.1 KB` | `45.0 KB` |
-| 277   |   `41.7 KB` |    `25.3 KB` |                 `29.8 KB` | `45.0 KB` |
-| 280   |   `41.5 KB` |    `25.9 KB` |                 `31.0 KB` | `45.0 KB` |
-| 281   |   `41.4 KB` |    `26.1 KB` |                 `32.1 KB` | `45.0 KB` |
-| 283   |   `41.6 KB` |    `24.1 KB` |                 `28.6 KB` | `45.0 KB` |
-| 284   |   `41.4 KB` |    `24.1 KB` |                 `28.6 KB` | `45.0 KB` |
-| 300   |   `33.8 KB` |    `21.6 KB` |                 `28.6 KB` | `35.5 KB` |
-| 301   |   `37.5 KB` |    `22.2 KB` |                 `28.6 KB` | `40.0 KB` |
-| 302   |   `55.5 KB` |    `22.3 KB` |                  `0.0 KB` | `61.5 KB` |
+| Scene | Current raw | Current gzip | Master raw | Master gzip | Raw delta | Gzip delta | Ignored graph payload raw |   Ceiling |
+| ----- | ----------: | -----------: | ---------: | ----------: | --------: | ---------: | ------------------------: | --------: |
+| 262   |   `39.9 KB` |    `24.2 KB` |  `39.9 KB` |   `24.2 KB` |     `0 B` |     `+1 B` |                 `28.5 KB` | `44.1 KB` |
+| 280   |   `41.5 KB` |    `25.9 KB` |  `41.5 KB` |   `25.9 KB` |     `0 B` |     `-1 B` |                 `31.0 KB` | `45.0 KB` |
+| 281   |   `41.4 KB` |    `26.1 KB` |  `41.4 KB` |   `26.1 KB` |     `0 B` |    `-17 B` |                 `32.1 KB` | `45.0 KB` |
+| 302   |   `55.4 KB` |    `22.2 KB` |  `55.4 KB` |   `22.2 KB` |     `0 B` |     `+2 B` |                  `0.0 KB` | `61.5 KB` |
+| 304   |   `42.9 KB` |    `25.3 KB` |        n/a |         n/a |       n/a |        n/a |                 `28.6 KB` | `44.5 KB` |
 
-Exact reporting anchors are Scene 12 at `105,866` raw / `43,509` gzip bytes, Scene 281 at `42,405` / `26,757`, Scene 284 at `42,426` / `24,671`, and Scene 302 at `56,796` / `22,799`.
+Exact current reporting anchors are Scene 262 at `40,849` raw / `24,745` gzip bytes, Scene 280 at `42,466` / `26,556`, Scene 281 at `42,405` / `26,745`, Scene 302 at `56,683` / `22,761`, and Scene 304 at `43,936` / `25,906`. The disposable baseline build from commit `262250eed097a9294182b5841574402d3e74dc1f` supplied exact master totals of Scene 262 `40,849` / `24,744`, Scene 280 `42,466` / `26,557`, Scene 281 `42,405` / `26,762`, and Scene 302 `56,683` / `22,759`. All four direct scenes therefore meet the hard `0 B` raw-delta gate. Their generated runtime module lists contain neither graph-plumbing file; the small gzip movements are reported separately and are not used to weaken the raw/module isolation criterion.
 
-Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301, and 302 as sprite users. Scenes 262 through 284 and 302 in that list render through billboard sprite modules. Scene 300 requires `particle-sprite-2d.ts` and `sprite-renderer.ts` while rejecting the exact Sprite2D module, custom-shader path, particle billboard, particle scene-registration, depth-hosted Sprite2D, and billboard rendering paths. Scene 301 requires `particle-sprite-2d-blend-modes.ts`, `particle-blend.ts`, `sprite-custom-shader.ts`, and `sprite-renderer.ts` while rejecting `particle-billboard-renderable.ts`, `particle-billboard-scene.ts`, and the scene-rendered sprite path. Representative unrelated Sprite2D scene 50 also rejects every particle exact-blend and custom-shader module. Scene 50 and Scene 300 must remain byte-identical to their pre-feature logical modules; their tracked manifests are not regenerated unless a measured runtime change proves otherwise.
+A same-environment detached baseline rebuild also confirmed identical logical runtime chunk sets for all four direct scenes. Literal chunk filenames and SHA-256 bodies are not identical: adding the runtime's inline diagnostic strings shifts the build-wide extracted numeric error ids by six, and Rollup renames a few size-equivalent local symbols. Diffing representative chunks found only those generated-code substitutions; no graph-plumbing module or branch is present, every logical chunk length is unchanged in aggregate, and feature-caused runtime raw growth is exactly `0 B`.
 
-Scene 302 is the positive moving-emitter bundle fixture. Its fetched module list must contain `npe-emitter-provider.ts`, `mat4-invert-to-ref.ts`, `particle-scene.ts`, `particle-billboard.ts`, `billboard-scene.ts`, and `billboard-renderable.ts`. It must not contain the deleted `npe-live-emitter.ts`, ordinary allocating `mat4-invert.ts`, the flow-map/noise/texture-update runtimes, CPU texture updates, advanced particle blend modules, or either Sprite2D bridge/render path. The filtered build measures `56,783` raw bytes (`55.5 KB`) and `22,800` gzip bytes (`22.3 KB`), `1,008` raw bytes below latest upstream/master `bab23c43`. Scene 302 has no pre-feature `476317dd` counterpart. The shared fixture and scene entry do not match the `*-npe.ts` payload exclusion and are intentionally counted, so this measurement is conservative and not directly comparable to sibling payload-excluded scenes.
+The following rows restore the prior documented architecture baseline. They were not re-measured in the Phase 3B focused run, so they are retained as historical values rather than presented as current output:
+
+| Scene | Prior documented raw | Prior documented gzip | Prior ignored graph payload raw |   Ceiling | Measurement basis                       |
+| ----- | -------------------: | --------------------: | ------------------------------: | --------: | --------------------------------------- |
+| 263   |            `42.0 KB` |             `24.8 KB` |                       `27.5 KB` | `44.1 KB` | not re-measured in Phase 3B focused run |
+| 264   |            `40.1 KB` |             `26.0 KB` |                       `34.4 KB` | `44.1 KB` | not re-measured in Phase 3B focused run |
+| 276   |            `44.2 KB` |             `25.3 KB` |                       `27.1 KB` | `45.0 KB` | not re-measured in Phase 3B focused run |
+| 277   |            `41.7 KB` |             `25.3 KB` |                       `29.8 KB` | `45.0 KB` | not re-measured in Phase 3B focused run |
+| 283   |            `41.6 KB` |             `24.1 KB` |                       `28.6 KB` | `45.0 KB` | not re-measured in Phase 3B focused run |
+| 284   |            `41.4 KB` |             `24.1 KB` |                       `28.6 KB` | `45.0 KB` | not re-measured in Phase 3B focused run |
+| 300   |            `33.8 KB` |             `21.6 KB` |                       `28.6 KB` | `35.5 KB` | not re-measured in Phase 3B focused run |
+| 301   |            `37.5 KB` |             `22.2 KB` |                       `28.6 KB` | `40.0 KB` | not re-measured in Phase 3B focused run |
+
+Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301, 302, and 304 as sprite users. Scenes 262 through 284, 302, and 304 in that list render through billboard sprite modules. Scene 300 requires `particle-sprite-2d.ts` and `sprite-renderer.ts` while rejecting the exact Sprite2D module, custom-shader path, particle billboard, particle scene-registration, depth-hosted Sprite2D, and billboard rendering paths. Scene 301 requires `particle-sprite-2d-blend-modes.ts`, `particle-blend.ts`, `sprite-custom-shader.ts`, and `sprite-renderer.ts` while rejecting `particle-billboard-renderable.ts`, `particle-billboard-scene.ts`, and the scene-rendered sprite path. Representative unrelated Sprite2D scene 50 also rejects every particle exact-blend and custom-shader module. CI-published baselines and generated bundle-info are comparison inputs, and no per-scene manifest is committed.
+
+Scene 302 is the positive moving-emitter bundle fixture. Its fetched module list must contain `npe-emitter-provider.ts`, `mat4-invert-to-ref.ts`, `particle-scene.ts`, `particle-billboard.ts`, `billboard-scene.ts`, and `billboard-renderable.ts`. It must not contain the deleted `npe-live-emitter.ts`, ordinary allocating `mat4-invert.ts`, the flow-map/noise/texture-update runtimes, CPU texture updates, advanced particle blend modules, either graph-plumbing module, or either Sprite2D bridge/render path. The final hybrid filtered build measures `56,683` raw bytes (`55.4 KB`) and `22,761` gzip bytes (`22.2 KB`). The shared fixture and scene entry do not match the `*-npe.ts` payload exclusion and are intentionally counted, so this measurement is conservative and not directly comparable to sibling payload-excluded scenes.
 
 The particle bundle-content test applies the general unused-feature rejection list to the nine canonical billboard parity scenes. Each canonical scene must have a nonempty runtime chunk list, and its fetched chunks are rejected when they match unused variant, extra-basic, extra-emitter, extra-value, local-shape, attractor/flow-map/noise/direction/angle update, CPU or embedded texture source, typed once-random, random sprite, dynamic emit-rate, optional value block, local input/position, or optional emitter patterns. Scene 263 may fetch `npe-registry-extra-emitters` because it uses Sphere, scene 277 must fetch `update-attractor-block`, only scene 280 may fetch `npe-flow-map-runtime`, and only scene 281 may fetch `npe-noise-runtime` and `embedded-texture-source-block`. Each specialized texture runtime contains its evaluator, CPU texture decoder, and the shared texture-update builder after bundling.
 
 When `lab/public/bundle/bundle-info/sceneN.json` exists, the same test also inspects only modules in fetched runtime chunks. It rejects extra-value and local-shape registries, local-position support, dynamic emit rate, Condition, FloatToInt, VectorLength, every local shape body, `embedded-texture-source-block` outside scene 281, and `math/mat4-invert.ts`. It requires scenes 283 and 284 to fetch `particle-blend`, `npe-blend-modes`, `particle-billboard-scene`, and `particle-billboard-renderable`, whether Rollup emits named chunks or folds them into the scene entry, while rejecting all four modules in every ordinary particle scene. When bundle-info is absent, this module-level branch is skipped while the runtime-chunk assertions still run.
 
-`npe-emitter-provider.ts` is optional content. A separate provider-isolation check requires a nonempty runtime chunk list for scene 12 and every tracked particle scene. When bundle-info exists, scene 302 must fetch the provider module. Scene 12 and every other tracked particle scene (262, 263, 264, 276, 277, 280, 281, 283, 284, 300, and 301) reject both provider and live-emitter module/chunk names. Filtered bundle builds and the authoritative Bundle Size job measure actual output; the committed per-scene manifests and provider module isolation are the regression guards, without a unit assertion that compares a manifest byte value to a duplicated constant.
+`npe-emitter-provider.ts` is optional content. A separate provider-isolation check requires a nonempty runtime chunk list for scene 12 and every configured particle scene. When bundle-info exists, scene 302 must fetch the provider module. Scene 12 and every other configured particle scene (262, 263, 264, 276, 277, 280, 281, 283, 284, 300, and 301) reject both provider and live-emitter module/chunk names. Filtered bundle builds and the authoritative Bundle Size job measure actual output; generated runtime chunk manifests, fetched-module checks, and provider isolation are the regression guards, without a unit assertion that compares a manifest byte value to a duplicated constant.
 
-Against latest upstream/master `bab23c43`, the filtered build removes `107` to `116` raw bytes from every static NPE scene. Against pre-feature `476317dd`, those scenes remain only `16` to `22` bytes larger. Scene 12 remains byte-identical to upstream at `105,866` raw bytes and is `5` bytes smaller than the pre-feature reference. Refreshed module data confirms that no provider or live-emitter module is present in any static scene: the measured residual is local to the required `_prepareFrame?.()` call in `particle-system.ts` and one `_setupEmitter?.(state)` call in the owning `npe-build.ts`, `npe-flow-map-runtime.ts`, or `npe-texture-update-runtime.ts` walk. Implicit-cylinder evaluator modules retain one optional `emitterInverseWorldMatrices?.push(...)` collection call, but static builds leave the field absent and allocate no inverse-list array; none of the measured static fixture chunks contains those cylinder modules.
+Phase 3 bundle guards filter generated bundle-info through each scene's `runtimeChunks`, because Vite may build a lazy runtime chunk without fetching it. Existing canonical direct scenes and Scene 302 reject both `npe-graph-plumbing.ts` and `npe-graph-plumbing-runtime.ts`, plus `particle-local-variable-block.ts`; Scene 304 requires both graph-plumbing modules and rejects the local evaluator, provider, specialized texture-update, exact-blend, and Sprite2D modules. The detached malformed unit fixture proves marked shared block/root storage and build success but deliberately makes no false no-import assertion after an explicit helper hit. No existing lab scene uses `parseNodeParticleSetFromSnippet`, so no representative snippet scene is added to the filtered bundle list; inline/network unit coverage and the helper's dynamic-import source guard cover that boundary. Phase 3C will additionally fetch the local evaluator in Scene 304. No bundle may contain a Teleport, Elbow, or Debug evaluator module because those files do not exist.
+
+The parser, default builder, flow-map runtime, and texture-update runtime contain no graph-plumbing source and are restored to baseline in the affected regions. The thin helper is retained only by an explicit helper/snippet import; the heavy runtime is reached only by its dynamic import after a candidate hit. Against the exact master raw totals, all four measured direct scenes move by `0 B` and fetch neither module. Scene 304 fetches the thin helper in its entry plus the separately named heavy runtime chunk. It remains `1,632` raw bytes below `44.5 KB`, and all filtered ceiling/module tests pass.
 
 The provider implementation is synchronous because its public options helper must install the callback before a builder starts. Tree shaking removes the entire module, including its matrix validation and inverse-refresh dependencies, from non-provider scenes.
 
@@ -1632,7 +2023,7 @@ packages/babylon-lite/src/particle/sprite-columns-random.ts
 packages/babylon-lite/src/particle/sprite-columns.ts
 ```
 
-### 14.2 Node infrastructure and registries: 27 files
+### 14.2 Node infrastructure and registries: 29 files
 
 ```text
 packages/babylon-lite/src/particle/node/node-particle.ts
@@ -1641,6 +2032,8 @@ packages/babylon-lite/src/particle/node/npe-build.ts
 packages/babylon-lite/src/particle/node/npe-emitter-provider.ts
 packages/babylon-lite/src/particle/node/npe-flow-map-runtime.ts
 packages/babylon-lite/src/particle/node/npe-flow-map.ts
+packages/babylon-lite/src/particle/node/npe-graph-plumbing.ts
+packages/babylon-lite/src/particle/node/npe-graph-plumbing-runtime.ts
 packages/babylon-lite/src/particle/node/npe-noise-runtime.ts
 packages/babylon-lite/src/particle/node/npe-noise.ts
 packages/babylon-lite/src/particle/node/npe-contextual-extra.ts
@@ -1664,7 +2057,11 @@ packages/babylon-lite/src/particle/node/npe-types.ts
 packages/babylon-lite/src/particle/node/npe-value.ts
 ```
 
-### 14.3 Block evaluators and helpers: 45 files
+Phase 3C extends `npe-graph-plumbing.ts` and `npe-graph-plumbing-runtime.ts` in place and adds a local evaluator under `blocks/`; it adds no node infrastructure file, so this count remains 29.
+
+### 14.3 Block evaluators and helpers: 46 files
+
+This 46-file baseline corrects a pre-existing manifest omission: `embedded-texture-source-block.ts` already existed before Phase 3B and is not an evaluator added by this phase.
 
 ```text
 packages/babylon-lite/src/particle/node/blocks/basic-sprite-update-block.ts
@@ -1676,6 +2073,7 @@ packages/babylon-lite/src/particle/node/blocks/create-particle-block.ts
 packages/babylon-lite/src/particle/node/blocks/cylinder-shape-block.ts
 packages/babylon-lite/src/particle/node/blocks/cylinder-shape-local-block.ts
 packages/babylon-lite/src/particle/node/blocks/cpu-texture-source-block.ts
+packages/babylon-lite/src/particle/node/blocks/embedded-texture-source-block.ts
 packages/babylon-lite/src/particle/node/blocks/mesh-shape-block.ts
 packages/babylon-lite/src/particle/node/blocks/mesh-shape-local-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-condition-block.ts
@@ -1713,6 +2111,14 @@ packages/babylon-lite/src/particle/node/blocks/update-noise-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-position-block.ts
 packages/babylon-lite/src/particle/node/blocks/update-size-block.ts
 ```
+
+Phase 3C plans one addition, taking this section from 46 to 47 files:
+
+```text
+packages/babylon-lite/src/particle/node/blocks/particle-local-variable-block.ts
+```
+
+The Phase 3C implementation must change the heading count to 47 and merge this path into the manifest. TeleportIn, TeleportOut, Elbow, and Debug add no evaluator files. Frame-preparation composition remains a function in existing `particle-system.ts`, so section 14.1 stays at 11 root files.
 
 ### 14.4 Direct integration dependencies
 
@@ -1763,7 +2169,9 @@ lab/lite/src/lite/scene284.ts
 lab/lite/src/lite/scene300.ts
 lab/lite/src/lite/scene301.ts
 lab/lite/src/lite/scene302.ts
+lab/lite/src/lite/scene304.ts
 lab/lite/src/bjs/scene302.ts
+lab/lite/src/bjs/scene304.ts
 lab/lite/src/shared/scene262-npe.ts
 lab/lite/src/shared/scene263-npe.ts
 lab/lite/src/shared/scene264-npe.ts
@@ -1774,15 +2182,21 @@ lab/lite/src/shared/scene281-npe.ts
 lab/lite/src/shared/scene283-npe-multiply-blend.ts
 lab/lite/src/shared/scene284-npe-multiply-add-blend.ts
 lab/lite/src/shared/scene302-npe-moving-emitter.ts
+lab/lite/src/shared/scene304-npe-teleport.ts
 lab/lite/src/shared/npe-sprite2d-fixture.ts
 lab/public/thumbnails/scene301.jpg
 lab/public/thumbnails/scene302.jpg
+lab/public/thumbnails/scene304.jpg
 lab/lite/bundle-scene301.html
 lab/lite/scene301.html
 lab/lite/babylon-ref-scene302.html
 lab/lite/bundle-scene302.html
 lab/lite/scene302.html
+lab/lite/babylon-ref-scene304.html
+lab/lite/bundle-scene304.html
+lab/lite/scene304.html
 reference/lite/scene302-npe-moving-emitter/babylon-ref-golden.png
+reference/lite/scene304-npe-teleport/babylon-ref-golden.png
 tests/lite/parity/scenes/scene262-npe-size.spec.ts
 tests/lite/parity/scenes/scene263-npe-sphere.spec.ts
 tests/lite/parity/scenes/scene264-npe-change-size.spec.ts
@@ -1795,10 +2209,12 @@ tests/lite/parity/scenes/scene284-npe-multiply-add-blend.spec.ts
 tests/lite/parity/scenes/scene300-npe-sprite2d.spec.ts
 tests/lite/parity/scenes/scene301-npe-sprite2d-blend-modes.spec.ts
 tests/lite/parity/scenes/scene302-npe-moving-emitter.spec.ts
+tests/lite/parity/scenes/scene304-npe-teleport.spec.ts
 tests/lite/parity/bundle-size.spec.ts
 tests/lite/unit/npe-particle-flow-map.test.ts
 tests/lite/unit/npe-particle-noise-texture.test.ts
 tests/lite/unit/npe-particle-bundle-content.test.ts
+tests/lite/unit/npe-particle-graph-plumbing.test.ts
 tests/lite/unit/npe-particle-moving-emitter.test.ts
 tests/lite/unit/particle-sprite-2d.test.ts
 tests/lite/unit/particle-sprite-2d-blend-modes.test.ts

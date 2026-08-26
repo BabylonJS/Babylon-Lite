@@ -2621,5 +2621,15 @@
         "skipParity": true,
         "skipParityReason": "Lite-native renderer Y-sort extension; Babylon.js has no equivalent pure-2D GPU-order staging API to use as a pixel oracle.",
         "skipPerf": true
+    },
+    {
+        "id": 304,
+        "slug": "scene304-npe-teleport",
+        "name": "Scene 304 — NPE Teleport Graph Plumbing",
+        "maxMad": 0.01,
+        "maxRawKB": 44.5,
+        "description": "Scene 262's deterministic NPE particle field with scalar, Vector2, Vector3, and particle-flow connections routed through TeleportIn/Out fan-out. Lite normalizes the graph before evaluator traversal and must preserve Babylon.js pixels.",
+        "tags": ["npe", "particles", "billboards", "teleport", "graph-plumbing"],
+        "skipPerf": true
     }
 ]
