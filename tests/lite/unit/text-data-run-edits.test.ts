@@ -195,7 +195,8 @@ describe("updateTextData replaceRun", () => {
 
         for (let i = 0; i < 101; i++) {
             const replaceFirst = i % 2 === 0;
-            const replacement = styledRun(replaceFirst ? 0 : 10, Math.floor(i / 2) % 2 === 0);
+            const withOverride = Math.floor(i / 2) % 2 === 0;
+            const replacement = styledRun(replaceFirst ? 0 : 10, withOverride);
             updateTextData(data, { update: "replaceRun", previous: replaceFirst ? first : second, run: replacement });
             if (replaceFirst) {
                 first = replacement;
@@ -203,6 +204,14 @@ describe("updateTextData replaceRun", () => {
                 second = replacement;
             }
             expect(data._styleCount).toBeLessThanOrEqual(5);
+            // Bounding the high-water mark only proves slots are recycled; it says nothing about
+            // whether a recycled slot was rewritten. Follow the second glyph's packed index into
+            // the palette so a stale entry surfaces as a wrong colour rather than passing silently.
+            const record = data._runRecords.get(replacement)!;
+            const styleIndex = data._instancesU32[record._slots[1]! * TEXT_INSTANCE_FLOATS + 2]! >>> 16;
+            expect(Array.from(data._styles.subarray(styleIndex * TEXT_STYLE_FLOATS, styleIndex * TEXT_STYLE_FLOATS + 4))).toEqual(
+                withOverride ? [0.25, 0.5, 0.75, 1] : [1, 1, 1, 1]
+            );
         }
     });
 
@@ -328,6 +337,60 @@ describe("updateTextData removeRun", () => {
             updateTextData(data, { update: "removeRun", run: added });
             expect(data._styleCount).toBeLessThanOrEqual(3);
         }
+    });
+});
+
+/** A run whose palette entry is entirely zero — `[0, 0, 0, 0]` with `invScale` 0, since a
+ *  `pixelsPerFontUnit` of 0 maps to 0. Writing it into a never-used slot changes nothing, so
+ *  `writeStyle` stays silent and any `_styleVersion` movement must come from the allocator. */
+function zeroStyleRun(x: number): GlyphRun {
+    return { curveSet: "f", glyphs: [{ glyphId: 1, x, y: 0 }], pixelsPerFontUnit: 0, defaultColor: [0, 0, 0, 0] };
+}
+
+// `ensureStyleGpu` skips the palette upload entirely while `_styleVersion` is unchanged, and
+// uploads exactly `_styleCount` entries when it moves. Both halves of that contract need pinning:
+// a version that moves too eagerly costs a redundant upload every edit, and one that moves too
+// rarely leaves the GPU holding a short or stale palette. Neither shows up in a content
+// assertion, so only these tests stand between the two failure modes.
+describe("TextData _styleVersion", () => {
+    it("does not move when an edit is satisfied entirely from recycled slots", () => {
+        const data = createTextData(makeStorage(), [run("f", 0), run("f", 10)]);
+        updateTextData(data, { update: "removeRun", run: 1 });
+        const before = data._styleVersion;
+        const highWater = data._styleCount;
+
+        // Same curve set, same default colour and `pixelsPerFontUnit` as the run just removed, so
+        // the recycled entry is rewritten with the bytes it already holds.
+        updateTextData(data, { update: "addRun", run: run("f", 20) });
+
+        expect(data._styleCount).toBe(highWater);
+        expect(data._styleVersion).toBe(before);
+    });
+
+    it("moves when an allocation grows the palette past its high-water mark", () => {
+        const data = createTextData(makeStorage(), [run("f", 0)]);
+        const before = data._styleVersion;
+        const highWater = data._styleCount;
+
+        updateTextData(data, { update: "addRun", run: zeroStyleRun(10) });
+
+        // `writeStyle` is a no-op here, so a version that has not moved means the lengthened
+        // palette would never reach the GPU.
+        expect(data._styleCount).toBeGreaterThan(highWater);
+        expect(data._styleVersion).toBeGreaterThan(before);
+    });
+
+    it("moves when a reset shrinks the palette", () => {
+        const data = createTextData(makeStorage(), [run("f", 0), styledRun(10, true), styledRun(20, true)]);
+        const highWater = data._styleCount;
+        const before = data._styleVersion;
+
+        // The surviving run reproduces entry 0 exactly, so `writeStyle` stays silent and the
+        // shorter upload length is the only thing left to report.
+        updateTextData(data, { update: "reset", runs: [run("f", 5)] });
+
+        expect(data._styleCount).toBeLessThan(highWater);
+        expect(data._styleVersion).toBeGreaterThan(before);
     });
 });
 

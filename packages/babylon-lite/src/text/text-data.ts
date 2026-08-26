@@ -282,11 +282,18 @@ function allocateStyles(data: TextData, count: number, previous?: number[]): num
     if (previous) {
         releaseStyles(data, previous);
     }
+    const highWater = data._styleCount;
     const slots = new Array<number>(count);
     for (let i = 0; i < count; i++) {
         slots[i] = free.pop() ?? data._styleCount++;
     }
-    data._styleVersion++;
+    // Growing past the high-water mark lengthens the upload, and `ensureStyleGpu` only uploads
+    // when the version moved — so the bump cannot be left to `writeStyle`, which stays silent for
+    // an entry whose contents already match (an all-zero style writes nothing). Slots taken from
+    // the free list keep the upload length unchanged, so there `writeStyle` alone is enough.
+    if (data._styleCount !== highWater) {
+        data._styleVersion++;
+    }
     return slots;
 }
 
