@@ -48,7 +48,7 @@ export function getStandardGroupBuilder(): MeshGroupBuilder {
         const hasMorph = meshes.some((m) => !!m.morphTargets);
 
         let tiSync: ((engine: EngineContext, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number) | undefined;
-        let tiUpdate: ((engine: EngineContext, ti: any, hasColor: boolean, indexCount: number) => GPUBuffer | null) | undefined;
+        let tiUpdate: ((engine: EngineContext, ti: any, hasColor: boolean, indexCount: number, baseVertex: number) => GPUBuffer | null) | undefined;
         let tiFragment: any;
         let shadowFragment: any;
         let morphFragment: any;

@@ -223,7 +223,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
             }
             pass.setIndexBuffer(g.indexBuffer, g.indexFormat);
             pass.setBindGroup(1, pkt._meshBG);
-            pass.drawIndexed(g.indexCount);
+            pass.drawIndexed(g.indexCount, 1, 0, g._baseVertex ?? 0);
         };
 
         const isTransparent = !noColorOutput && !esmShadowOutput && material._needsAlphaBlending;

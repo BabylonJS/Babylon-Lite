@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 interface SceneManifest {
+    rawBytes?: number;
     runtimeChunks?: string[];
 }
 
@@ -13,8 +14,20 @@ interface BundleInfo {
 const MANIFEST_DIR = resolve(__dirname, "../../../lab/public/bundle/manifest");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-info");
 const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 276, 277, 280, 281, 283, 284];
+const PROVIDER_ISOLATION_SCENES = [12, ...CANONICAL_PARTICLE_SCENES, 300, 301, 302];
+const SPRITE_2D_BLEND_SCENES = [50, 300, 301];
+/** The per-scene manifests are build output, not tracked source, so the specs that
+ *  read them self-skip in CI's Unit Tests job (which runs before any build). The
+ *  Bundle Size job re-runs them after `pnpm build:bundle-scenes`, and local
+ *  `pnpm test` builds first. Specs that assert on pure helpers always run. */
+function hasManifests(sceneIds: readonly number[]): boolean {
+    return sceneIds.every((sceneId) => existsSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`)));
+}
+const HAS_MANIFEST = hasManifests(CANONICAL_PARTICLE_SCENES);
+const HAS_MOVING_EMITTER_MANIFEST = hasManifests(PROVIDER_ISOLATION_SCENES);
+const HAS_SPRITE_2D_MANIFEST = hasManifests(SPRITE_2D_BLEND_SCENES);
 const UNUSED_FEATURE_CHUNK =
-    /particle-(blend|billboard-renderable|billboard-scene)|registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes)|update-(attractor|flow-map|noise|direction|angle)-block|npe-(blend-modes|flow-map-runtime|noise-runtime|texture-update-runtime|texture-content)|cpu-texture-source|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
+    /particle-(blend|billboard-renderable|billboard-scene)|registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes)|update-(attractor|flow-map|noise|direction|angle)-block|npe-(blend-modes|emitter-provider|flow-map-runtime|live-emitter|noise-runtime|texture-update-runtime|texture-content)|cpu-texture-source|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
 const OPTIONAL_BLEND_MODULE = /particle\/(particle-(blend|billboard-renderable|billboard-scene)|node\/npe-blend-modes)/;
 const EMBEDDED_TEXTURE_SOURCE = "embedded-texture-source";
 const EMBEDDED_TEXTURE_SOURCE_MODULE = /\/blocks\/embedded-texture-source-block\.[jt]s$/;
@@ -55,7 +68,7 @@ describe("Particle bundle feature isolation", () => {
         expect(findUnexpectedEmbeddedTextureChunks(281, [chunk])).toEqual([]);
     });
 
-    it("canonical particle scenes do not fetch unused optional features", () => {
+    it.skipIf(!HAS_MANIFEST)("canonical particle scenes do not fetch unused optional features", () => {
         for (const sceneId of CANONICAL_PARTICLE_SCENES) {
             const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`), "utf8")) as SceneManifest;
             const chunks = manifest.runtimeChunks ?? [];
@@ -114,7 +127,7 @@ describe("Particle bundle feature isolation", () => {
             }
             const moduleOffenders = runtimeModuleIds.filter(
                 (id) =>
-                    /particle\/(particle-billboard-renderable|node\/(npe-(flow-map-runtime|noise-runtime|texture-update-runtime|local-position|texture-content)|npe-registry-(extra-remaining|extra-values|local-shapes)|blocks\/(cpu-texture-source-block|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|update-(attractor|flow-map|noise)-block|(box|point|sphere|cone|cylinder|mesh)-shape-local)))|math\/mat4-invert/.test(
+                    /particle\/(particle-billboard-renderable|node\/(npe-(emitter-provider|flow-map-runtime|live-emitter|noise-runtime|texture-update-runtime|local-position|texture-content)|npe-registry-(extra-remaining|extra-values|local-shapes)|blocks\/(cpu-texture-source-block|system-dynamic-emit-rate|particle-(condition|float-to-int|vector-length)|update-(attractor|flow-map|noise)-block|(box|point|sphere|cone|cylinder|mesh)-shape-local)))|math\/mat4-invert/.test(
                         id
                     ) &&
                     !(sceneId === 277 && (id.includes("npe-registry-extra-remaining") || id.includes("update-attractor-block"))) &&
@@ -140,8 +153,37 @@ describe("Particle bundle feature isolation", () => {
         }
     });
 
-    it("keeps exact Sprite2D particle blending isolated to scene301", () => {
-        for (const sceneId of [50, 300, 301]) {
+    it.skipIf(!HAS_MOVING_EMITTER_MANIFEST)("keeps the moving-emitter provider isolated to scene302", () => {
+        for (const sceneId of PROVIDER_ISOLATION_SCENES) {
+            const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`), "utf8")) as SceneManifest;
+            const runtimeChunks = new Set(manifest.runtimeChunks ?? []);
+            expect(runtimeChunks.size, `scene${sceneId} has no runtime chunks recorded`).toBeGreaterThan(0);
+            const providerChunks = [...runtimeChunks].filter((chunk) => /npe-(emitter-provider|live-emitter)/.test(chunk));
+            if (sceneId !== 302) {
+                expect(providerChunks, `scene${sceneId} must not fetch moving-emitter provider chunks`).toEqual([]);
+            }
+
+            const bundleInfoPath = resolve(BUNDLE_INFO_DIR, `scene${sceneId}.json`);
+            if (!existsSync(bundleInfoPath)) {
+                continue;
+            }
+            const bundleInfo = JSON.parse(readFileSync(bundleInfoPath, "utf8")) as BundleInfo;
+            const providerModules = (bundleInfo.chunks ?? [])
+                .filter((chunk) => chunk.file && runtimeChunks.has(chunk.file))
+                .flatMap((chunk) => chunk.modules ?? [])
+                .map((module) => module.id ?? "")
+                .filter((id) => /\/particle\/node\/npe-(emitter-provider|live-emitter)\.[jt]s$/.test(id));
+            if (sceneId === 302) {
+                expect(providerModules).toEqual(expect.arrayContaining([expect.stringContaining("npe-emitter-provider")]));
+                expect(providerModules.some((id) => id.includes("npe-live-emitter"))).toBe(false);
+            } else {
+                expect(providerModules, `scene${sceneId} must not fetch moving-emitter provider modules`).toEqual([]);
+            }
+        }
+    });
+
+    it.skipIf(!HAS_SPRITE_2D_MANIFEST)("keeps exact Sprite2D particle blending isolated to scene301", () => {
+        for (const sceneId of SPRITE_2D_BLEND_SCENES) {
             const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`), "utf8")) as SceneManifest;
             const runtimeChunks = new Set(manifest.runtimeChunks ?? []);
             expect(runtimeChunks.size, `scene${sceneId} has no runtime chunks recorded`).toBeGreaterThan(0);

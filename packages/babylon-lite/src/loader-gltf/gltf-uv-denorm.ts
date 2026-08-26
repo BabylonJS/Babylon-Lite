@@ -17,6 +17,9 @@ const COMP_BYTES: Record<number, number> = { [UNSIGNED_BYTE]: 1, [UNSIGNED_SHORT
 
 export function resolveUvVec2(json: any, binChunk: DataView, idx: number): Float32Array {
     const accessor = json.accessors[idx];
+    if (accessor.bufferView === undefined) {
+        return new F32(accessor.count * 2);
+    }
     const ct = accessor.componentType;
     const cb = COMP_BYTES[ct] ?? 4;
     const bv = json.bufferViews[accessor.bufferView];

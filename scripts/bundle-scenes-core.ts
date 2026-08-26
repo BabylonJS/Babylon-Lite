@@ -187,16 +187,36 @@ function resolveLiteAliasDir(): string {
 
     throw new Error(`Missing ${libIndex}.\n` + "Build the package first: `pnpm --filter babylon-lite build:lib` (or `pnpm build`).");
 }
-// Distributed per-scene manifest: the tracked source of truth is one JSON file
-// per scene under `lab/public/bundle/manifest/`. A single aggregate
-// `manifest.json` is still generated (gitignored) for runtime consumers (lab UI,
-// bundle-size test, report script, static lab site). `MANIFEST_GIT_PATH` is the
-// legacy single-file path, kept only for reading pre-migration master refs.
+// Per-scene manifest files under `lab/public/bundle/manifest/` are build output,
+// not tracked source: a single aggregate `manifest.json` is generated from them
+// for runtime consumers (lab UI, bundle-size test, report script, static lab
+// site). Nothing here is committed — see `DEFAULT_MASTER_MANIFEST_URL` for where
+// the master baseline actually comes from. `MANIFEST_GIT_PATH` /
+// `MANIFEST_DIR_GIT_PATH` are the legacy tracked paths, read only as a fallback
+// for refs that predate the move to a published baseline.
 const MANIFEST_GIT_PATH = "lab/public/bundle/manifest.json";
 const MANIFEST_DIR_GIT_PATH = "lab/public/bundle/manifest";
 const MANIFEST_DIR = "manifest";
 const MANIFEST_FILE = "manifest.json";
 const MASTER_MANIFEST_FILE = "master-manifest.json";
+
+/**
+ * Where the master bundle-size baseline is published.
+ *
+ * The baseline used to be ~227 JSON files tracked in git and refreshed by PR
+ * authors. That made it the repo's dominant source of both merge conflicts (two
+ * branches rewriting the same generated files) and red CI (any merge left every
+ * other branch's copy stale). It is now measured once per master build and
+ * published as a single file to the same public storage that serves the
+ * per-build Playwright reports and lab sites, so no branch — and no bot — ever
+ * writes it.
+ *
+ * Hardcoded rather than configured because the primary readers are fork PR
+ * builds and local `pnpm build:bundle-scenes` runs, neither of which has
+ * pipeline variables. Must stay in sync with `baselineDeployPath` in
+ * `azure-pipelines-bundle-manifest.yml`.
+ */
+const DEFAULT_MASTER_MANIFEST_URL = "https://snapshots-cvgtc2eugrd3cgfd.z01.azurefd.net/lite/bundle-baseline/manifest.json";
 export const NAME_POLYFILL = 'var __name=(fn,name)=>(Object.defineProperty(fn,"name",{value:name,configurable:true}),fn);';
 export const LITE_BUNDLE_TARGET = "esnext";
 
@@ -208,9 +228,8 @@ interface SceneConfigEntry {
     /** Scene opts out of bundle-size ceiling enforcement (mirrors bundle-size.spec.ts). */
     skipBundleSize?: boolean;
     /** This scene's runtime dynamic-imports branch on device capability, so its measured
-     *  chunk set differs between a developer's GPU and CI's software renderer. A local
-     *  build measures it but does not overwrite its committed manifest entry; only CI's
-     *  measurement is authoritative. See `DEVICE_DEPENDENT_NOTE`. */
+     *  chunk set differs between a developer's GPU and CI's software renderer. Only CI's
+     *  measurement is comparable to the published baseline. See `DEVICE_DEPENDENT_NOTE`. */
     deviceDependentChunks?: boolean;
 }
 
@@ -219,7 +238,7 @@ interface BundleManifestEntry {
     gzipKB: number;
     /** Exact runtime-fetched byte count. `rawKB` is this rounded to 0.1 KB for display, which
      *  hides sub-50-byte drift — including a ceiling overflow on a zero-headroom scene. Tools
-     *  comparing sizes (`validate:bundle-manifest`, the build's ceiling check) use this. */
+     *  comparing sizes (the build's ceiling check, the delta report) use this. */
     rawBytes?: number;
     ignoredRawKB?: number;
     bjsRawKB?: number;
@@ -262,13 +281,13 @@ function orderBundleManifest(manifest: BundleManifest): BundleManifest {
     return ordered;
 }
 
-/** Absolute path to a scene's tracked per-scene manifest file. */
+/** Absolute path to a scene's per-scene manifest file. */
 function perSceneManifestPath(scene: string): string {
     return resolve(outDir, MANIFEST_DIR, `${scene}.json`);
 }
 
 /**
- * Read the tracked per-scene manifest files (`manifest/<scene>.json`) into a
+ * Read the per-scene manifest files (`manifest/<scene>.json`) into a
  * single aggregate map. This is the source of truth seed for incremental builds.
  */
 export function readCurrentBundleManifest(): BundleManifest {
@@ -310,7 +329,7 @@ function atomicWriteJson(path: string, json: string): void {
     }
 }
 
-/** Write a single scene's tracked per-scene manifest file. */
+/** Write a single scene's per-scene manifest file. */
 function writePerSceneManifest(scene: string, entry: BundleManifestEntry): void {
     atomicWriteJson(perSceneManifestPath(scene), `${JSON.stringify(entry, null, 2)}\n`);
 }
@@ -318,6 +337,54 @@ function writePerSceneManifest(scene: string, entry: BundleManifestEntry): void 
 /** Write the generated (gitignored) aggregate `manifest.json` for runtime consumers. */
 function writeAggregateBundleManifest(manifest: BundleManifest): void {
     atomicWriteJson(resolve(outDir, MANIFEST_FILE), JSON.stringify(orderBundleManifest(manifest), null, 2));
+}
+
+/**
+ * Read many git blobs in one `git cat-file --batch` call, keyed by the revision
+ * spec that produced them.
+ *
+ * The legacy tracked layout is ~230 files per ref, and spawning `git show` once
+ * per file costs ~15s per resolve — long enough to time out callers and to make
+ * every `build:bundle-scenes` run that misses the published baseline feel hung.
+ * One batched process makes the same read effectively free.
+ *
+ * `--batch` emits `<oid> SP <type> SP <size> LF <contents> LF` per request, or
+ * `<spec> SP missing LF` for one it cannot resolve, so the output is parsed as a
+ * buffer and sliced by the declared byte length rather than split on newlines.
+ */
+function readGitBlobs(specs: string[]): Map<string, string> {
+    const out = new Map<string, string>();
+    if (specs.length === 0) {
+        return out;
+    }
+
+    const stdout = execFileSync("git", ["cat-file", "--batch"], {
+        cwd: ROOT,
+        input: specs.join("\n") + "\n",
+        maxBuffer: 512 * 1024 * 1024,
+        stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let offset = 0;
+    for (const spec of specs) {
+        const newline = stdout.indexOf("\n", offset);
+        if (newline === -1) {
+            break;
+        }
+        const header = stdout.toString("utf-8", offset, newline);
+        offset = newline + 1;
+        const [, type, rawSize] = header.split(" ");
+        const size = Number(rawSize);
+        if (type === undefined || !Number.isFinite(size)) {
+            // "missing" / "ambiguous" responses carry no body to skip past.
+            continue;
+        }
+        if (type === "blob") {
+            out.set(spec, stdout.toString("utf-8", offset, offset + size));
+        }
+        offset += size + 1; // trailing LF after the contents
+    }
+    return out;
 }
 
 function readMasterBundleManifestFromRef(ref: string): BundleManifest | null {
@@ -333,13 +400,19 @@ function readMasterBundleManifestFromRef(ref: string): BundleManifest | null {
             .map((l) => l.trim())
             .filter((l) => l.endsWith(".json"));
         if (files.length > 0) {
+            const blobs = readGitBlobs(files.map((file) => `${ref}:${file}`));
             const manifest: BundleManifest = {};
             for (const file of files) {
+                const json = blobs.get(`${ref}:${file}`);
+                if (json === undefined) {
+                    continue;
+                }
                 const scene = file.slice(file.lastIndexOf("/") + 1, -".json".length);
-                const json = execFileSync("git", ["show", `${ref}:${file}`], { cwd: ROOT, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
                 manifest[scene] = JSON.parse(json) as BundleManifestEntry;
             }
-            return manifest;
+            if (Object.keys(manifest).length > 0) {
+                return manifest;
+            }
         }
     } catch {
         /* fall through to the legacy single-file layout */
@@ -353,26 +426,104 @@ function readMasterBundleManifestFromRef(ref: string): BundleManifest | null {
     }
 }
 
-function readMasterBundleManifest(refs = ["upstream/master", "origin/master", "master"]): { ref: string; manifest: BundleManifest } | null {
+function readMasterBundleManifestFromGit(refs = ["upstream/master", "origin/master", "master"]): { source: string; manifest: BundleManifest } | null {
     for (const ref of refs) {
         const manifest = readMasterBundleManifestFromRef(ref);
-        if (manifest) return { ref, manifest };
+        if (manifest) return { source: ref, manifest };
     }
-
-    console.warn(`Could not read ${MANIFEST_DIR_GIT_PATH} from master refs (${refs.join(", ")}); bundle delta UI will not have a master baseline.`);
     return null;
 }
 
-export function writeMasterBundleManifest(refs?: string[]): void {
+/** Guard against a CDN or proxy serving something that parses as JSON but isn't a manifest. */
+function isBundleManifest(value: unknown): value is BundleManifest {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    const entries = Object.values(value);
+    return entries.length > 0 && entries.every((entry) => typeof entry === "object" && entry !== null && typeof (entry as BundleManifestEntry).rawKB === "number");
+}
+
+/** Read a baseline that CI (or a developer) already placed on disk. */
+function readMasterBundleManifestFromFile(path: string): BundleManifest | null {
+    try {
+        const parsed: unknown = JSON.parse(readFileSync(path, "utf-8"));
+        return isBundleManifest(parsed) ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Fetch the published baseline. A 404 means master has not published one yet
+ * (first run after this change, or a fork with no deployment) and is not an
+ * error — the caller degrades to "no baseline", which only costs the advisory
+ * delta report.
+ */
+async function fetchMasterBundleManifest(url: string): Promise<BundleManifest | null> {
+    try {
+        const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+        if (response.status === 404) {
+            console.warn(`No published bundle-size baseline at ${url} yet; skipping the master delta.`);
+            return null;
+        }
+        if (!response.ok) {
+            console.warn(`Could not fetch the bundle-size baseline from ${url}: HTTP ${response.status}.`);
+            return null;
+        }
+        const parsed: unknown = await response.json();
+        if (!isBundleManifest(parsed)) {
+            console.warn(`The response from ${url} is not a bundle-size manifest; skipping the master delta.`);
+            return null;
+        }
+        return parsed;
+    } catch (error) {
+        console.warn(`Could not fetch the bundle-size baseline from ${url}: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+    }
+}
+
+/**
+ * Resolve the master baseline, in order of preference:
+ *   1. `BUNDLE_MASTER_MANIFEST_FILE` — a baseline CI already downloaded.
+ *   2. The published baseline over HTTP (skipped when `refs` is given, i.e. when
+ *      the caller explicitly asked to compare against a specific git ref, or
+ *      when `BUNDLE_MASTER_MANIFEST_URL` is set to an empty value).
+ *   3. Git refs — the legacy tracked layout, still readable on old refs.
+ */
+export async function resolveMasterBundleManifest(refs?: string[]): Promise<{ source: string; manifest: BundleManifest } | null> {
+    const filePath = process.env.BUNDLE_MASTER_MANIFEST_FILE;
+    if (filePath) {
+        const manifest = readMasterBundleManifestFromFile(filePath);
+        if (manifest) return { source: filePath, manifest };
+        console.warn(`BUNDLE_MASTER_MANIFEST_FILE=${filePath} could not be read as a manifest; falling back to the published baseline.`);
+    }
+
+    if (!refs) {
+        // An explicitly empty BUNDLE_MASTER_MANIFEST_URL means "do not fetch" — for
+        // offline runs, and for the master build that is about to overwrite the
+        // baseline anyway. Trimmed because a YAML-supplied blank can arrive as " ".
+        const url = (process.env.BUNDLE_MASTER_MANIFEST_URL ?? DEFAULT_MASTER_MANIFEST_URL).trim();
+        if (url) {
+            const manifest = await fetchMasterBundleManifest(url);
+            if (manifest) return { source: url, manifest };
+        }
+    }
+
+    const fromGit = readMasterBundleManifestFromGit(refs);
+    if (fromGit) return fromGit;
+
+    console.warn("Could not resolve a master bundle-size baseline; the bundle delta UI and PR comment will be skipped.");
+    return null;
+}
+
+export async function writeMasterBundleManifest(refs?: string[]): Promise<void> {
     const masterManifestPath = resolve(outDir, MASTER_MANIFEST_FILE);
-    const baseline = readMasterBundleManifest(refs);
+    const baseline = await resolveMasterBundleManifest(refs);
     if (!baseline) {
         rmSync(masterManifestPath, { force: true });
         return;
     }
 
     writeFileSync(masterManifestPath, JSON.stringify(orderBundleManifest(baseline.manifest), null, 2));
-    console.log(`✓ Bundle master baseline manifest (${baseline.ref}) written to ${masterManifestPath}`);
+    console.log(`✓ Bundle master baseline manifest (${baseline.source}) written to ${masterManifestPath}`);
 }
 
 /**
@@ -737,7 +888,8 @@ function elapsed(startMs: number): string {
 }
 
 /** Strip the no-op `__vitePreload(() => import("chunk"), [])` wrappers that Vite
- *  injects around every dynamic import down to a bare `import("chunk")`.
+ *  injects around dynamic imports. Bare and one-export projection callbacks
+ *  collapse to `import("chunk")`.
  *
  *  These Lite bundles disable module preload, and the preload helper itself is a
  *  pure passthrough (`baseModule => baseModule()`), so the wrapper and its empty
@@ -747,8 +899,13 @@ function elapsed(startMs: number): string {
  *  code-split scene (feature-rich glTF assets carry dozens of these). Applied to
  *  the finalized on-disk output in {@link buildScene} because Vite resolves the
  *  preload form too late for a renderChunk/generateBundle hook to see it. */
-function stripNoopPreloadWrappers(code: string): string {
-    return code.replace(/[\w$]+\(\s*\(\s*\)\s*=>\s*(import\([^()]*\))\s*,\s*\[\s*\]\s*\)/g, "$1");
+export function stripNoopPreloadWrappers(code: string): string {
+    return code
+        .replace(
+            /[\w$]+\(async\(\)=>\{const\{([\w$]+):([\w$]+)\}=await (import\([^()]*\));return\{\1:\2\}\},\[\]\)/g,
+            "$3"
+        )
+        .replace(/[\w$]+\(\s*\(\s*\)\s*=>\s*(import\([^()]*\)(?:\.then\(\s*[\w$]+\s*=>\s*[\w$]+\.[\w$]+\s*\))?)\s*,\s*\[\s*\]\s*\)/g, "$1");
 }
 
 function minimalVitePreloadPlugin(): Plugin {
@@ -997,30 +1154,26 @@ function softwareRenderRequested(): boolean {
     return process.argv.includes("--software") || env === "1" || env === "true";
 }
 
-/** Why some scenes' committed manifest is authored under the software renderer only.
+/** Why a few scenes' local numbers are not comparable to the published master baseline.
  *
  *  CI measures under SwiftShader; a developer machine measures on its real GPU. A few
  *  runtime paths branch on device capability and dynamic-import different chunks as a
  *  result — scenes 113/114/115 resolve detailed picking to `picking-detailed-pipeline` on
  *  a real GPU and to `picking-pipeline` under SwiftShader. Their measured chunk set (and
- *  size) therefore depends on the machine, so a locally regenerated manifest could never
- *  match what CI rebuilds, and `validate:bundle-manifest` failed on PRs that had not
- *  touched those scenes at all — three times before this was diagnosed.
+ *  size) therefore depends on the machine, so a local build shows a delta against the
+ *  CI-measured baseline for scenes it never touched. That delta is noise, not a
+ *  regression; the run logs this note so it is not mistaken for one.
  *
  *  Forcing SwiftShader for the whole build was tried and rejected: on Windows the heavy
  *  IBL scenes never reach `dataset.ready` under it. Restricting the run to the flagged
- *  scenes is the canonical way to regenerate them:
+ *  scenes is the canonical way to reproduce CI's numbers for them:
  *
  *      pnpm build:bundle-manifest:device
  *
  *  That command needs a working SwiftShader WebGPU stack — reliable on the Linux CI image,
- *  flaky-to-unusable on Windows, where these scenes also time out. So on Windows those
- *  three entries are effectively CI-authored: leave them as committed.
- *
- *  Outside such a run, a local build measures these scenes (so the ceiling check and the
- *  generated aggregate manifest see real local numbers) but leaves their TRACKED per-scene
- *  file untouched, because only a software-renderer measurement is comparable to CI's. */
-const DEVICE_DEPENDENT_NOTE = "device-dependent chunk set — tracked manifest left untouched (regenerate with: pnpm build:bundle-manifest:device)";
+ *  flaky-to-unusable on Windows, where these scenes also time out. On Windows, treat CI's
+ *  measurement as the authoritative one for these three. */
+const DEVICE_DEPENDENT_NOTE = "device-dependent chunk set — differs from the CI-measured baseline (reproduce CI with: pnpm build:bundle-manifest:device)";
 
 /** A scene with less than this much room under its ceiling is reported after a build: at
  *  that margin the next shared-path change lands on it, and finding that out from CI costs
@@ -1047,7 +1200,7 @@ export async function buildBundleScenes(): Promise<void> {
     // Do NOT wipe outDir — keep existing data live in the lab tab during the build.
     // Each scene is updated atomically (new files written, stale old chunks removed).
     mkdirSync(outDir, { recursive: true });
-    writeMasterBundleManifest();
+    await writeMasterBundleManifest();
     for (const scene of scenesToBuild) {
         ensureBundleHtmlImportMap(scene);
     }
@@ -1255,8 +1408,8 @@ export async function buildBundleScenes(): Promise<void> {
  * Report each measured scene against its `scene-config.json` ceiling, in BYTES.
  *
  * `rawKB` is rounded to 0.1 KB, so a scene sitting exactly at its ceiling can overflow by
- * a few bytes while both the printed size and the committed manifest still read the same
- * value — the overflow then only surfaces in CI's bundle-size job, ~35 minutes later.
+ * a few bytes while the printed size still reads the same value — the overflow then only
+ * surfaces in CI's bundle-size job, ~35 minutes later.
  * Comparing exact bytes here surfaces it immediately, and listing the tightest scenes makes
  * a zero-margin scene visible *before* it is the thing that breaks someone else's PR.
  */
@@ -1381,11 +1534,11 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
     const { chromium } = await import("@playwright/test");
     const { server, port } = await startStaticServer(labDir);
 
-    // Seed from the tracked per-scene manifest files so subset builds preserve
+    // Seed from any existing per-scene manifest files so subset builds preserve
     // other scenes' entries and the live UI can refresh mid-build.
     const manifest: BundleManifest = readCurrentBundleManifest();
 
-    // Persist a single scene's tracked per-scene file, then refresh the generated
+    // Persist a single scene's per-scene file, then refresh the generated
     // aggregate `manifest.json` that runtime consumers (lab UI, tests) read.
     function flushScene(scene: string): void {
         const entry = manifest[scene];
@@ -1393,32 +1546,22 @@ async function measureLiveSizes(liteScenes: readonly string[], bjsScenes: readon
         writeAggregateBundleManifest(manifest);
     }
 
+    const deviceDependent = (scene: string): boolean => !!sceneConfigByName.get(scene)?.deviceDependentChunks && !process.env.CI && !softwareRenderRequested();
+
     try {
         const tBrowser = performance.now();
         console.log("Launching measurement browser...");
         const browser = await chromium.launch({ channel: "chrome", headless: true, args: measurementBrowserArgs() });
         console.log(`Browser launched in ${elapsed(tBrowser)}`);
 
-        // A scene whose chunk set depends on the GPU keeps its TRACKED file when measured on a
-        // real GPU: only a software-renderer measurement is comparable to CI's. The measurement
-        // is still recorded in memory, so the ceiling check and the generated aggregate manifest
-        // reflect what this machine actually loads.
-        const trackedWriteSuppressed = (scene: string): boolean =>
-            !!sceneConfigByName.get(scene)?.deviceDependentChunks && !process.env.CI && !softwareRenderRequested();
-
         // Measure Lite scenes (write after each), retrying transient failures.
         for (const scene of liteScenes) {
             const tPage = performance.now();
             const { rawKB, rawBytes, gzipKB, ignoredRawKB, chunks } = await measureLiteSceneWithRetry(browser, port, scene);
             manifest[scene] = { ...manifest[scene], rawKB, rawBytes, gzipKB, ignoredRawKB, runtimeChunks: chunks };
-            const suppressed = trackedWriteSuppressed(scene);
-            if (suppressed) {
-                writeAggregateBundleManifest(manifest);
-            } else {
-                flushScene(scene);
-            }
+            flushScene(scene);
             const ignored = ignoredRawKB > 0 ? `, ignored ${ignoredRawKB} KB raw ${IGNORED_BUNDLE_MODULE_PATTERN}` : "";
-            const note = suppressed ? ` — ${DEVICE_DEPENDENT_NOTE}` : "";
+            const note = deviceDependent(scene) ? ` — ${DEVICE_DEPENDENT_NOTE}` : "";
             console.log(`  measured ${scene}: ${rawKB} KB raw, ${gzipKB} KB gzip${ignored} (${elapsed(tPage)})${note}`);
         }
 

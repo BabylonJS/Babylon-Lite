@@ -429,7 +429,8 @@
         "maxGzipKB": 22,
         "description": "Havok Physics V2 sphere drop. Sphere falls onto ground under gravity with restitution bounce.",
         "tags": ["std", "procedural", "physics"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 41,
@@ -1567,7 +1568,7 @@
         "slug": "scene162-shader-material-defines",
         "name": "Scene 162 - ShaderMaterial Defines",
         "maxMad": 0.02,
-        "maxRawKB": 39.40,
+        "maxRawKB": 39.4,
         "description": "WGSL ShaderMaterial emits defines as const pipeline variants.",
         "tags": ["shader", "procedural"],
         "skipPerf": true
@@ -1577,7 +1578,7 @@
         "slug": "scene163-shader-material-alpha",
         "name": "Scene 163 - ShaderMaterial Alpha",
         "maxMad": 0.02,
-        "maxRawKB": 39.10,
+        "maxRawKB": 39.1,
         "description": "WGSL ShaderMaterial uses alpha blending and explicit shader-side discard for alpha testing.",
         "tags": ["shader", "alpha", "procedural"],
         "skipPerf": true
@@ -1597,9 +1598,30 @@
         "slug": "scene165-shader-material-thin-instances",
         "name": "Scene 165 - ShaderMaterial Thin Instances",
         "maxMad": 0.01,
-        "maxRawKB": 44.80,
+        "maxRawKB": 44.8,
         "description": "Custom WGSL ShaderMaterial rendered with thin instances + per-instance color: an 8×8×8 grid of unit cubes with a deterministic color ramp, fixed arc-rotate camera. Validates the auto-injected world0..3/instanceColor vertex attributes and the GPU-culling indirect-draw path.",
         "tags": ["shader", "instances", "procedural"],
+        "skipPerf": true
+    },
+    {
+        "id": 166,
+        "slug": "scene166-clustered-spot-lights",
+        "name": "Scene 166 — Clustered Sponza Spot Lights",
+        "maxMad": 0.5,
+        "maxRawKB": 76.5,
+        "description": "Khronos Sponza glTF lit by 1000 deterministic clustered SPOT lights. Companion to scene 179 (same model, camera and light field generator) that exercises the clustered cone falloff instead of the point-light-only path.",
+        "tags": ["pbr", "gltf", "clustered", "lights"],
+        "skipPerf": true,
+        "bundleTimeoutMs": 180000
+    },
+    {
+        "id": 167,
+        "slug": "scene167-pbr-lightmap",
+        "name": "Scene 167 — PBR Lightmap",
+        "maxMad": 0.7,
+        "maxRawKB": 76.65,
+        "description": "PBR material lightmap channel. The levelTest.glb level keeps its glTF PBR materials and receives a baked lightmap on TEXCOORD_1 as a shadowmap (multiply, level 3.2, sRGB-decoded, uAng = π V-flip); two procedural PBR boxes receive the same texture additively on TEXCOORD_0. Covers every branch of the PBR lightmap fragment. Local Chrome reaches MAD 0.044; BrowserStack cloud Chrome is deterministically 0.642 with 97.9% of pixels within 5, so the 0.7 ceiling allows that renderer quantization while remaining strict.",
+        "tags": ["pbr", "gltf", "lightmap", "texture"],
         "skipPerf": true
     },
     {
@@ -1747,6 +1769,28 @@
         "description": "Edit a textarea to drive a streaming text renderable in real time. Demonstrates in-place atlas growth and instance buffer reuse.",
         "tags": ["text", "font", "demo", "interactive"],
         "skipParity": true,
+        "skipPerf": true
+    },
+    {
+        "id": 186,
+        "slug": "scene186-local-cubemap-blending",
+        "name": "Scene 186 — Local Cubemap Blending",
+        "maxRawKB": 100,
+        "description": "Reflective wood floors backed by different fur textures compare unprojected, hard local, and blended local cubemaps. The default view places a hard-assigned pair to the left of the blended pair for an immediate side-by-side comparison.",
+        "tags": ["pbr", "environment", "cubemap", "blending"],
+        "skipParity": true,
+        "skipParityReason": "Babylon.js supports one box-projected reflection texture per material but has no equivalent fragment-weighted local cubemap probe-array blending feature.",
+        "skipPerf": true
+    },
+    {
+        "id": 187,
+        "slug": "scene187-smaa",
+        "name": "Scene 187 — SMAA",
+        "maxRawKB": 75,
+        "description": "A deterministic orthographic stress scene compares an untreated single-sample render with SMAA across thin geometry, diagonal silhouettes, alpha-cutout stripes, and high-contrast edges.",
+        "tags": ["post-process", "anti-aliasing", "smaa", "orthographic"],
+        "skipParity": true,
+        "skipParityReason": "Babylon.js has no equivalent SMAA frame-graph post-process task.",
         "skipPerf": true
     },
     {
@@ -2587,6 +2631,38 @@
         "tags": ["npe", "particles", "sprite2d", "2d", "multiply", "multiply-add", "blend"],
         "skipParity": true,
         "skipParityReason": "Lite-native exact ParticleSystem-to-Sprite2D blend bridge; Babylon.js has no equivalent pure-2D SpriteRenderer path. Blend equations are established by Babylon oracle scenes 283 and 284.",
+        "skipPerf": true
+    },
+    {
+        "id": 302,
+        "slug": "scene302-npe-moving-emitter",
+        "name": "Scene 302 — NPE Moving Emitter",
+        "maxMad": 0.01,
+        "maxRawKB": 61.5,
+        "description": "A local-space NPE point emitter follows a looping XYZ translation and Z rotation while LocalPositionUpdated keeps existing particles attached to the current emitter transform. The live view supports inspection; seekTime deterministically freezes the same authored graph for Babylon.js parity.",
+        "tags": ["npe", "particles", "billboards", "moving-emitter", "local-space", "animation"],
+        "skipPerf": true
+    },
+    {
+        "id": 303,
+        "slug": "scene303-sprite2d-y-sort",
+        "name": "Scene 303 — Sprite2D Y-Sort",
+        "maxRawKB": 25,
+        "description": "Three sampled overlap pairs prove Sprite2D Y-sort through visible pixels and picking: a first-inserted sprite moved live to larger Y covers a later canonical sprite, equal-Y later insertion wins the stable serial tie, and +60 bias lifts an earlier sprite above a later canonical neighbor.",
+        "tags": ["sprites", "sprite2d", "2d", "y-sort", "top-down", "isometric"],
+        "skipParity": true,
+        "skipParityReason": "Lite-native renderer Y-sort extension; Babylon.js has no equivalent pure-2D GPU-order staging API to use as a pixel oracle.",
+        "skipPerf": true
+    },
+    {
+        "id": 304,
+        "slug": "scene304-khr-interactivity-calculator",
+        "name": "Scene 304 — KHR Interactivity Calculator",
+        "maxRawKB": 207.1,
+        "description": "Loads Khronos' Calculator GLB, executes its embedded KHR_interactivity behavior graph, and verifies onStart initialization, event/onSelect dispatch, variable updates, and pointer/set writes to the display materials.",
+        "tags": ["gltf", "khr-interactivity", "flow-graph", "interaction"],
+        "skipParity": true,
+        "skipParityReason": "Behavioral browser test validates the embedded Khronos graph directly; no immutable visual golden is needed for interaction-state assertions.",
         "skipPerf": true
     }
 ]

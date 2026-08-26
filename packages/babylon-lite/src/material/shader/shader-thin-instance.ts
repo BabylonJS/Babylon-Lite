@@ -118,7 +118,7 @@ function createShaderInstancedRenderable(
         }
         h.updateCustomUbo(scene.surface.engine, material, uniformBatch);
         h.updatePacket(scene, material, packet, context, uniformBatch);
-        drawArgs = syncThinInstanceForDraw(scene.surface.engine, ti, hasColor, mesh._gpu.indexCount);
+        drawArgs = syncThinInstanceForDraw(scene.surface.engine, ti, hasColor, mesh._gpu.indexCount, mesh._gpu._baseVertex ?? 0);
         if (isTransparent) {
             const m = mesh.worldMatrix as unknown as ArrayLike<number>;
             sortCenter[0] = m[12]!;
@@ -146,7 +146,7 @@ function createShaderInstancedRenderable(
         } else if (drawArgs) {
             pass.drawIndexedIndirect(drawArgs, 0);
         } else {
-            pass.drawIndexed(gpu.indexCount, ti.count);
+            pass.drawIndexed(gpu.indexCount, ti.count, 0, gpu._baseVertex ?? 0);
         }
         return 1;
     };

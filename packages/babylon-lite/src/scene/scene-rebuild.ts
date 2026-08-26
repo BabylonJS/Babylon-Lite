@@ -174,6 +174,7 @@ async function rebuildSceneGroups(scene: SceneContext, family: "standard" | "pbr
             await runtime?.wait(meshes);
             let unstable = false;
             const rebuild = async (): Promise<void> => {
+                const buildHooks = ctx._runtimeBuilds;
                 // Build only the meshes that currently belong to this group with this builder's material
                 // family: a mesh whose material was swapped away is still listed in `_groups` (the swap path
                 // does not move group membership) and its output would be discarded anyway. Pre-filtering
@@ -202,6 +203,7 @@ async function rebuildSceneGroups(scene: SceneContext, family: "standard" | "pbr
                     if (disposers) {
                         oldByMesh.set(mesh, disposers);
                         ctx._meshDisposables.delete(mesh);
+                        buildHooks?.holdPendingDisposers(mesh, disposers);
                     }
                 }
 
@@ -234,6 +236,9 @@ async function rebuildSceneGroups(scene: SceneContext, family: "standard" | "pbr
                                 retireOld(previous);
                             }
                         }
+                        if (previous) {
+                            buildHooks?.releasePendingDisposers(mesh, previous);
+                        }
                     }
                     throw error;
                 } finally {
@@ -256,6 +261,9 @@ async function rebuildSceneGroups(scene: SceneContext, family: "standard" | "pbr
                     }
                     const oldDisposers = [...oldByMesh.values()].flat();
                     retireOld(oldDisposers);
+                    for (const [mesh, disposers] of oldByMesh) {
+                        buildHooks?.releasePendingDisposers(mesh, disposers);
+                    }
                     return;
                 }
                 transmission?.[0]();
@@ -297,6 +305,9 @@ async function rebuildSceneGroups(scene: SceneContext, family: "standard" | "pbr
                                 retireOld(previous);
                             }
                         }
+                        if (previous) {
+                            buildHooks?.releasePendingDisposers(mesh, previous);
+                        }
                     }
                     unstable = true;
                     return;
@@ -314,6 +325,7 @@ async function rebuildSceneGroups(scene: SceneContext, family: "standard" | "pbr
                         if (previous && ctx.meshes.includes(mesh)) {
                             ctx._meshDisposables.set(mesh, previous);
                             oldByMesh.delete(mesh);
+                            buildHooks?.releasePendingDisposers(mesh, previous);
                         } else {
                             ctx._meshDisposables.delete(mesh);
                         }
@@ -354,6 +366,9 @@ async function rebuildSceneGroups(scene: SceneContext, family: "standard" | "pbr
                 // (refcount bumped), so they stay alive until the deferred release nets the refcount back down.
                 const oldDisposers = [...oldByMesh.values()].flat();
                 retireOld(oldDisposers);
+                for (const [mesh, disposers] of oldByMesh) {
+                    buildHooks?.releasePendingDisposers(mesh, disposers);
+                }
             };
 
             const { X } = await import("./scene-runtime-mesh-build.js");

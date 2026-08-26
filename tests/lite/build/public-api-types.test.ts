@@ -1,5 +1,5 @@
 import { spawnSync } from "child_process";
-import { existsSync, readdirSync, readFileSync, rmSync } from "fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -50,6 +50,14 @@ describe("build/index.d.ts", () => {
         // bundles them). The `@webgpu/types` package is intentionally NOT loaded
         // here: doing so duplicates those declarations and, without skipLibCheck,
         // trips TS6200/TS2717 conflicts between the package and the native lib.
+        //
+        // WebXR types are NOT in the `dom` lib, so `@types/webxr` (a declared
+        // optional peer) is loaded via `--types webxr` to stand in for the
+        // consumer's own compile path. The public WebXR API references ambient
+        // WebXR globals (`XRSession`, `XRFrame`, `XRView`, `XRReferenceSpace`,
+        // `XRProjectionLayer`, `XRSubImage`, ...) that the rollup treats as
+        // consumer-provided, exactly like `@webgpu/types` — see the design note in
+        // src/xr/xr-webgpu-binding.ts.
         const result = spawnSync(
             NODE,
             [
@@ -65,6 +73,8 @@ describe("build/index.d.ts", () => {
                 "bundler",
                 "--lib",
                 "es2022,dom,dom.iterable",
+                "--types",
+                "webxr",
                 DTS_PATH,
             ],
             {
@@ -113,6 +123,64 @@ describe("build/index.d.ts", () => {
         // consumers never need to install any of our build-time dependencies.
         const external = [...specifiers].filter((s) => !s.startsWith("./") && !s.startsWith("../"));
         expect(external, `build/index.d.ts leaks types from external modules: ${external.join(", ")}`).toEqual([]);
+    });
+
+    it("exposes only the build-time moving-emitter provider API", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).toContain("withNodeParticleEmitterProvider");
+        expect(dts).toContain("withNodeParticleEmitterProvider<T extends object = BuildNodeParticleOptions>");
+        expect(dts).toContain("options?: T & BuildNodeParticleOptions): T & BuildNodeParticleOptions;");
+        expect(dts).toContain("buildNodeParticleSetWithEmitterProvider");
+        expect(dts).not.toContain("enableNodeParticleEmitterProvider");
+        expect(dts).not.toMatch(/\b_(?:capture|setup)Emitter\b|\b_emitterProvider\b|\bParticleEmitterState\b/);
+    });
+
+    it("rejects invalid emitter fields while preserving extended provider options", () => {
+        const probePath = resolve(BUILD_DIR, "public-api-types.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { withNodeParticleEmitterProvider, type NodeParticleEmitterProvider } from "./index.js";
+declare const provider: NodeParticleEmitterProvider;
+// @ts-expect-error emitter remains Vec3-only when generic extension fields are accepted
+withNodeParticleEmitterProvider(provider, { emitter: "not-a-vec3" });
+const extended = withNodeParticleEmitterProvider(provider, { snippetServer: "https://example.invalid" });
+const snippetServer: string = extended.snippetServer;
+void snippetServer;
+`
+            );
+
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                {
+                    cwd: PACKAGE_DIR,
+                    encoding: "utf-8",
+                }
+            );
+
+            const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+            expect(result.status, output).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
     });
 
     it("is the only declaration file in the published package", () => {
@@ -166,9 +234,11 @@ describe("build/package.json", () => {
         //     Lite never imports it. The peer entry only advertises the supported range.
         //   - @webgpu/types: ambient/global types referenced by the public .d.ts;
         //     TypeScript consumers need them at compile time.
+        //   - @types/webxr: ambient/global WebXR types referenced by the public
+        //     .d.ts (the WebXR API); TypeScript consumers need them at compile time.
         // Every allowlisted peer MUST be marked optional. Keep this allowlist in sync
         // with `emitPackageJson()` in packages/babylon-lite/vite.config.ts.
-        const ALLOWED_OPTIONAL_PEERS = ["@babylonjs/havok", "@webgpu/types"];
+        const ALLOWED_OPTIONAL_PEERS = ["@babylonjs/havok", "@webgpu/types", "@types/webxr"];
         const peers = (pkg.peerDependencies ?? {}) as Record<string, string>;
         const peerMeta = (pkg.peerDependenciesMeta ?? {}) as Record<string, { optional?: boolean }>;
 

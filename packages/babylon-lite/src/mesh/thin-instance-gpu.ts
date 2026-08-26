@@ -113,7 +113,7 @@ export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceD
 }
 
 /** Sync the stable indirect draw arguments captured by cached thin-instance render bundles. */
-export function syncThinInstanceDrawArgs(engine: EngineContext, ti: ThinInstanceData, indexCount: number): GPUBuffer {
+export function syncThinInstanceDrawArgs(engine: EngineContext, ti: ThinInstanceData, indexCount: number, baseVertex: number): GPUBuffer {
     if (!ti._drawArgsBuffer) {
         ti._drawArgsBuffer = engine._device.createBuffer({
             size: 20,
@@ -122,29 +122,31 @@ export function syncThinInstanceDrawArgs(engine: EngineContext, ti: ThinInstance
         ti._drawArgsData = new U32(5);
         ti._drawArgsIndexCount = -1;
         ti._drawArgsInstanceCount = -1;
+        ti._drawArgsBaseVertex = -1;
         bumpVisibilityEpoch();
     }
-    if (ti._drawArgsIndexCount !== indexCount || ti._drawArgsInstanceCount !== ti.count) {
+    if (ti._drawArgsIndexCount !== indexCount || ti._drawArgsInstanceCount !== ti.count || ti._drawArgsBaseVertex !== baseVertex) {
         const args = ti._drawArgsData!;
         args[0] = indexCount;
         args[1] = ti.count;
         args[2] = 0;
-        args[3] = 0;
+        args[3] = baseVertex;
         args[4] = 0;
         engine._device.queue.writeBuffer(ti._drawArgsBuffer, 0, args.buffer, args.byteOffset, args.byteLength);
         ti._drawArgsIndexCount = indexCount;
         ti._drawArgsInstanceCount = ti.count;
+        ti._drawArgsBaseVertex = baseVertex;
     }
     return ti._drawArgsBuffer;
 }
 
 /** Sync thin-instance vertex data and return stable indirect args only after a direct draw's count changes. */
-export function syncThinInstanceForDraw(engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number): GPUBuffer | null {
+export function syncThinInstanceForDraw(engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number, baseVertex: number): GPUBuffer | null {
     syncThinInstanceGpuData(engine, ti, hasColor);
     if (!ti._drawArgsBuffer && (ti._drawArgsInstanceCount ??= ti.count) === ti.count) {
         return null;
     }
-    return syncThinInstanceDrawArgs(engine, ti, indexCount);
+    return syncThinInstanceDrawArgs(engine, ti, indexCount, baseVertex);
 }
 
 /** Sync thin instance matrix + optional color GPU buffers and bind to vertex slots. */

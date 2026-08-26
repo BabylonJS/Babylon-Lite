@@ -516,4 +516,42 @@ describe("runtime material rebuild ownership", () => {
         expect(oldDispose).not.toHaveBeenCalled();
         expect(engine._retirements).toHaveLength(1);
     });
+
+    it("keeps a removed disposer packet reachable while an async runtime build is active", async () => {
+        const engine = { _retirements: [] } as unknown as EngineContext;
+        const scene = createScene(engine);
+        scene._built = true;
+        let startBuild!: () => void;
+        let finishBuild!: () => void;
+        const started = new Promise<void>((resolve) => (startBuild = resolve));
+        const finish = new Promise<void>((resolve) => (finishBuild = resolve));
+        const builder = (async (ctx: SceneContext, meshes: Mesh[]) => {
+            startBuild();
+            await finish;
+            const rebuild = (_target: SceneContext, mesh: Mesh): Renderable => renderable(mesh);
+            for (const mesh of meshes) {
+                ctx._meshDisposables.set(mesh, [vi.fn()]);
+            }
+            return { renderables: meshes.map(renderable), rebuildSingle: rebuild };
+        }) as MeshGroupBuilder;
+        builder._materialFamily = "standard";
+        const material = { _buildGroup: builder } as Material;
+        const mesh = { _gpu: {}, material, children: [] } as unknown as Mesh;
+        const previousDisposers = [vi.fn()];
+        scene.meshes.push(mesh);
+        scene._groups.set(builder, Object.assign([mesh], { r: (_ctx: SceneContext, target: Mesh) => renderable(target) }));
+        scene._meshDisposables.set(mesh, previousDisposers);
+
+        const pending = startRuntimeMeshBuild(scene, builder, mesh);
+        await started;
+
+        expect(scene._meshDisposables.get(mesh)).toBeUndefined();
+        expect(scene._runtimeBuilds?.pendingDisposers(mesh)).toBe(previousDisposers);
+
+        finishBuild();
+        await pending;
+
+        expect(scene._runtimeBuilds?.pendingDisposers(mesh)).toBeUndefined();
+        expect(engine._retirements).toHaveLength(1);
+    });
 });

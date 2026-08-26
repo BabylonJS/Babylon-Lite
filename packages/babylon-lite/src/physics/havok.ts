@@ -343,7 +343,7 @@ function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
     // Babylon.js, where physics is advanced inside `scene.animate()` (before render) and
     // post-step scene logic runs in `onAfterRenderObservable`.
     if (world._afterStep) {
-        const cbs = world._afterStep;
+        const cbs = world._afterStep.slice();
         for (let i = 0; i < cbs.length; i++) {
             cbs[i]!(dt);
         }
@@ -1036,14 +1036,15 @@ export function addPhysicsShapeChildFromParent(world: PhysicsWorld, container: P
  * Sets a shape's surface material properties.
  * @param world - The physics world.
  * @param shape - The collision shape.
- * @param friction - Friction coefficient (used for both static and dynamic friction).
+ * @param friction - Dynamic friction coefficient.
  * @param restitution - Bounciness in `[0, 1]`.
+ * @param staticFriction - Static friction coefficient. Defaults to `friction`.
  */
-export function setPhysicsShapeMaterial(world: PhysicsWorld, shape: PhysicsShape, friction: number, restitution: number): void {
+export function setPhysicsShapeMaterial(world: PhysicsWorld, shape: PhysicsShape, friction: number, restitution: number, staticFriction = friction): void {
     // Material array: [staticFriction, dynamicFriction, restitution, frictionCombine, restitutionCombine].
     // Havok's combine modes are embind enum objects, not raw numbers.
     const combines = world._hknp.MaterialCombine;
-    const material = [friction, friction, restitution, combines.MINIMUM, combines.MAXIMUM];
+    const material = [staticFriction, friction, restitution, combines.MINIMUM, combines.MAXIMUM];
     world._hknp.HP_Shape_SetMaterial(shape._hkShape, material);
 }
 
@@ -1146,6 +1147,14 @@ export function setPhysicsBodyLinearVelocity(world: PhysicsWorld, body: PhysicsB
  */
 export function getPhysicsBodyLinearVelocity(world: PhysicsWorld, body: PhysicsBody): Vec3 {
     const v = world._hknp.HP_Body_GetLinearVelocity(body._hkBody)[1];
+    return { x: v[0], y: v[1], z: v[2] };
+}
+
+/**
+ * Get a body's current angular velocity (rad/s).
+ */
+export function getPhysicsBodyAngularVelocity(world: PhysicsWorld, body: PhysicsBody): Vec3 {
+    const v = world._hknp.HP_Body_GetAngularVelocity(body._hkBody)[1];
     return { x: v[0], y: v[1], z: v[2] };
 }
 
@@ -1259,6 +1268,17 @@ export function createPhysicsAggregate(world: PhysicsWorld, node: Mesh, type: Ph
 
 function _buildShapeParams(node: Mesh, type: PhysicsShapeType, options: PhysicsAggregateOptions): PhysicsShapeParameters {
     const params: PhysicsShapeParameters = {};
+    const scaleX = Math.abs(node.scaling.x);
+    const scaleYMagnitude = Math.abs(node.scaling.y);
+    const scaleZ = Math.abs(node.scaling.z);
+    const scaleY = node.scaling.x * node.scaling.y * node.scaling.z < 0 ? -scaleYMagnitude : scaleYMagnitude;
+    const min = node.boundMin ?? [-0.5, -0.5, -0.5];
+    const max = node.boundMax ?? [0.5, 0.5, 0.5];
+    const extents = {
+        x: (max[0] - min[0]) * scaleX,
+        y: (max[1] - min[1]) * scaleYMagnitude,
+        z: (max[2] - min[2]) * scaleZ,
+    };
 
     if (options.center) {
         params.center = options.center;
@@ -1269,56 +1289,38 @@ function _buildShapeParams(node: Mesh, type: PhysicsShapeType, options: PhysicsA
 
     switch (type) {
         case PhysicsShapeType.SPHERE: {
-            params.radius = options.radius ?? _boundingRadius(node);
-            params.center = params.center ?? _boundingCenter(node);
+            params.radius = options.radius ?? Math.max(extents.x, extents.y, extents.z) * 0.5;
+            params.center = params.center ?? {
+                x: (min[0] + max[0]) * 0.5 * scaleX,
+                y: (min[1] + max[1]) * 0.5 * scaleY,
+                z: (min[2] + max[2]) * 0.5 * scaleZ,
+            };
             break;
         }
         case PhysicsShapeType.BOX: {
-            params.extents = options.extents ?? _boundingExtents(node);
-            params.center = params.center ?? _boundingCenter(node);
+            params.extents = options.extents ?? extents;
+            params.center = params.center ?? {
+                x: (min[0] + max[0]) * 0.5 * scaleX,
+                y: (min[1] + max[1]) * 0.5 * scaleY,
+                z: (min[2] + max[2]) * 0.5 * scaleZ,
+            };
             break;
         }
-        case PhysicsShapeType.CAPSULE:
+        case PhysicsShapeType.CAPSULE: {
+            const radius = extents.x * 0.5;
+            params.radius = options.radius ?? radius;
+            params.pointA = options.pointA ?? { x: 0, y: min[1] * scaleY + radius, z: 0 };
+            params.pointB = options.pointB ?? { x: 0, y: min[1] * scaleY + extents.y - radius, z: 0 };
+            break;
+        }
         case PhysicsShapeType.CYLINDER: {
-            params.radius = options.radius ?? _boundingRadius(node);
-            params.pointA = options.pointA ?? { x: 0, y: 0, z: 0 };
-            params.pointB = options.pointB ?? { x: 0, y: 1, z: 0 };
+            params.radius = options.radius ?? extents.x * 0.5;
+            params.pointA = options.pointA ?? { x: 0, y: min[1] * scaleY, z: 0 };
+            params.pointB = options.pointB ?? { x: 0, y: min[1] * scaleY + extents.y, z: 0 };
             break;
         }
     }
     return params;
-}
-
-function _boundingCenter(mesh: Mesh): Vec3 {
-    if (mesh.boundMin && mesh.boundMax) {
-        return {
-            x: (mesh.boundMin[0] + mesh.boundMax[0]) * 0.5,
-            y: (mesh.boundMin[1] + mesh.boundMax[1]) * 0.5,
-            z: (mesh.boundMin[2] + mesh.boundMax[2]) * 0.5,
-        };
-    }
-    return { x: 0, y: 0, z: 0 };
-}
-
-function _boundingExtents(mesh: Mesh): Vec3 {
-    if (mesh.boundMin && mesh.boundMax) {
-        return {
-            x: mesh.boundMax[0] - mesh.boundMin[0],
-            y: mesh.boundMax[1] - mesh.boundMin[1],
-            z: mesh.boundMax[2] - mesh.boundMin[2],
-        };
-    }
-    return { x: 1, y: 1, z: 1 };
-}
-
-function _boundingRadius(mesh: Mesh): number {
-    if (mesh.boundMin && mesh.boundMax) {
-        const dx = mesh.boundMax[0]! - mesh.boundMin[0]!;
-        const dy = mesh.boundMax[1]! - mesh.boundMin[1]!;
-        const dz = mesh.boundMax[2]! - mesh.boundMin[2]!;
-        return Math.max(dx, dy, dz) * 0.5;
-    }
-    return 0.5;
 }
 
 interface PhysicsDebugGeometry {

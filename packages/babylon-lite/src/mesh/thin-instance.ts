@@ -73,6 +73,11 @@ export interface ThinInstanceData {
     _drawArgsIndexCount?: number;
     /** @internal Last instance count observed by a cached direct draw or written to `_drawArgsBuffer`. */
     _drawArgsInstanceCount?: number;
+    /** @internal Last baseVertex written to `_drawArgsBuffer` (args[3]) — mirrors
+     *  `_drawArgsIndexCount`/`_drawArgsInstanceCount` so a mesh whose `_gpu._baseVertex`
+     *  changes (e.g. a storage-buffer mesh reslotted within its shared allocation)
+     *  re-writes the indirect args instead of drawing a stale slot. Undefined reads as 0. */
+    _drawArgsBaseVertex?: number;
     /** @internal Lazy per-mesh F32 upload scratch. Allocated by thin-instance-gpu.ts only
      *  when `matrices` is F64-backed (HPM-on); F32-backed input takes a direct
      *  writeBuffer fast-path. Sized in floats = `_capacity * 16`. */

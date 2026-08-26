@@ -90,7 +90,7 @@ export function tryBind(
         (renderable as { _direct?: boolean })._direct = true;
         // This mesh is the LOD partner of a GPU-culled mesh: it consumes the far bucket that mesh's
         // culling compacts for this pass and never draws its own instance count (see bindLodPartner).
-        return bindLodPartner(ti, signature, hasColor, baseUpdate);
+        return bindLodPartner(mesh, ti, signature, hasColor, baseUpdate);
     }
     if (excluded || !ti._gpuCullingEnabled) {
         return undefined;
@@ -131,7 +131,7 @@ export function tryBind(
             } else if (ti._drawArgsBuffer) {
                 pass.drawIndexedIndirect(ti._drawArgsBuffer, 0);
             } else {
-                pass.drawIndexed(indexCount, instanceCount);
+                pass.drawIndexed(indexCount, instanceCount, 0, mesh._gpu._baseVertex ?? 0);
             }
         },
     };
@@ -142,7 +142,13 @@ export function tryBind(
  *  looks up the far bucket the source mesh's culling published for this pass's signature; its draw issues
  *  ONLY that bucket's indirect draw — with no bucket (source not culling this pass, or culling fell back)
  *  it draws nothing, so the partner can never fall back to its own instance count and double-draw. */
-function bindLodPartner(ti: ThinInstanceData, signature: RenderTargetSignature, hasColor: boolean, baseUpdate: ((context: DrawUpdateContext) => void) | undefined): TiCullBinding {
+function bindLodPartner(
+    mesh: Mesh,
+    ti: ThinInstanceData,
+    signature: RenderTargetSignature,
+    hasColor: boolean,
+    baseUpdate: ((context: DrawUpdateContext) => void) | undefined
+): TiCullBinding {
     const currentBucket = () => {
         const bucket = ti._lodBuckets?.get(signature);
         if (!bucket?.active) {
@@ -172,7 +178,7 @@ function bindLodPartner(ti: ThinInstanceData, signature: RenderTargetSignature, 
                 if (ti._drawArgsBuffer) {
                     pass.drawIndexedIndirect(ti._drawArgsBuffer, 0);
                 } else {
-                    pass.drawIndexed(indexCount, instanceCount);
+                    pass.drawIndexed(indexCount, instanceCount, 0, mesh._gpu._baseVertex ?? 0);
                 }
             }
         },

@@ -59,7 +59,7 @@ type ThinInstanceSync = (
 export interface StdFragmentFactories {
     tiSync?: ThinInstanceSync;
     /** Uploads dirty thin-instance data and promotes cached draws to stable indirect args when their count changes. */
-    tiUpdate?: (engine: EngineContext, ti: any, hasColor: boolean, indexCount: number) => GPUBuffer | null;
+    tiUpdate?: (engine: EngineContext, ti: any, hasColor: boolean, indexCount: number, baseVertex: number) => GPUBuffer | null;
     tiFragment?: (hasColor: boolean) => ShaderFragment;
     shadowFragment?: (shadowLights: import("./fragments/std-shadow-fragment.js").ShadowLightSlot[]) => ShaderFragment;
     /** Present only when at least one mesh in the build has morph targets. */
@@ -211,7 +211,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const matData = new F32(24);
         writeStdMaterialData(matData, mat, textureLevel);
         const materialUBO = createUniformBuffer(engine, matData);
-        const meshBindGroup = createStandardMeshBindGroup(engine, bindings, meshUBO, materialUBO, mat, mesh.morphTargets ?? null, mesh);
+        const meshBindGroup = createStandardMeshBindGroup(s, bindings, meshUBO, materialUBO, mat, mesh.morphTargets ?? null, mesh);
 
         // Shadow bind group (group 2) — shared across receiving meshes via shadowBGCache.
         let shadowBindGroup: GPUBindGroup | null = null;
@@ -273,7 +273,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             }
             const ti = hasThinInstances ? mesh.thinInstances : null;
             if (ti && tiUpdate) {
-                thinDrawArgs = tiUpdate(engine, ti, hasInstanceColor, mesh._gpu.indexCount);
+                thinDrawArgs = tiUpdate(engine, ti, hasInstanceColor, mesh._gpu.indexCount, mesh._gpu._baseVertex ?? 0);
             }
         };
         // FO-version wrapper applied only when the engine has floating-origin
@@ -325,7 +325,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             } else if (ti && thinDrawArgs) {
                 pass.drawIndexedIndirect(thinDrawArgs, 0);
             } else {
-                pass.drawIndexed(g.indexCount, ti?.count);
+                pass.drawIndexed(g.indexCount, ti?.count, 0, g._baseVertex ?? 0);
             }
             return 1;
         };

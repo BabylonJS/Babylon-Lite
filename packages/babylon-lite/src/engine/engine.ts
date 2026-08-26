@@ -157,19 +157,10 @@ export interface EngineContext extends SurfaceContext {
      *  teardown and device-lost recovery can still claim and run them synchronously. */
     _retiring?: Array<Array<() => void>> | null;
 
-    /** @internal Per-frame floating-origin offset updater. Set when the engine
-     *  was created with `useFloatingOrigin: true` (which requires
-     *  `useHighPrecisionMatrix: true`). Undefined when FO is off — scene
-     *  `_update` does `eng._updateFOOffset?.(scene)` so FO-off engines never
-     *  pull the LWR module (`large-world/floating-origin.js`) into their
-     *  bundle. The function reads `scene.camera.worldMatrix` and writes the
-     *  resulting world position into `scene._floatingOriginOffset`, bumping
-     *  `scene._floatingOriginVersion` whenever the value changes. */
-    _updateFOOffset?: (scene: import("../scene/scene-core.js").SceneContext) => void;
-
     /** @internal Per-renderable update closure wrapper. Set when the engine
      *  was created with `useFloatingOrigin: true`. Wraps a renderable's bare
-     *  `update` closure so that when `scene._floatingOriginVersion` changes,
+     *  `update` closure so that when the active camera's `worldMatrixVersion`
+     *  changes — the floating-origin offset being that camera's world position —
      *  the wrapper calls `invalidate()` (which resets the renderable's
      *  `_lastWorldVersion` to -1) before invoking the inner update — forcing
      *  the next mesh-UBO re-pack to pick up the new FO offset. Undefined when
@@ -311,6 +302,22 @@ export interface EngineOptions extends SurfaceOptions {
     useFloatingOrigin?: boolean;
 }
 
+/** Extra `requestAdapter` options contributor, installed only by the WebXR helper
+ *  `enableXrCompatibleAdapter()`. Lets an XR app request an `xrCompatible` GPU adapter without
+ *  every non-XR engine paying for the option: non-XR bundles never call the setter, the bundler
+ *  proves this is always null, and the `_adapterOptionsHook ? … : {}` spread below folds to `{}`,
+ *  so `createEngine`'s adapter request stays byte-identical. */
+let _adapterOptionsHook: (() => GPURequestAdapterOptions) | null = null;
+/** @internal Install extra `requestAdapter` options (called by `enableXrCompatibleAdapter`). */
+export function _installAdapterOptions(hook: () => GPURequestAdapterOptions): void {
+    _adapterOptionsHook = hook;
+}
+/** @internal Resolve the extra adapter options (empty when no hook is installed). Used by
+ *  device-lost recovery so a recovered adapter keeps any XR-compatibility that was requested. */
+export function _getAdapterOptions(): GPURequestAdapterOptions {
+    return _adapterOptionsHook ? _adapterOptionsHook() : {};
+}
+
 /** Create the Babylon Lite engine bound to `canvas`. Acquires the GPU adapter + device,
  *  configures the canvas's WebGPU context, and returns an `EngineContext` that *is also*
  *  the primary `SurfaceContext` — i.e. the returned engine is itself the surface for the
@@ -321,7 +328,7 @@ export interface EngineOptions extends SurfaceOptions {
  *  Accepts either a DOM canvas (main thread) or an `OffscreenCanvas` (e.g. transferred
  *  to a Web Worker) — see {@link RenderCanvas}. */
 export async function createEngine(canvas: RenderCanvas, options?: EngineOptions): Promise<EngineContext> {
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance", ...(_adapterOptionsHook ? _adapterOptionsHook() : {}) });
     if (!adapter) {
         throw new Error("WebGPU adapter not available");
     }
@@ -368,11 +375,12 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
         _setHpmAllocator(allocateF64Mat4);
     }
 
-    // Same dynamic-import trick for the LWR runtime. When `useFloatingOrigin` is
-    // false (the default) the `floating-origin.js` module is never referenced
-    // statically anywhere in the package — scene `_update` does
-    // `eng._updateFOOffset?.(scene)` which is a no-op when the field is
-    // undefined. Tree-shakers drop the module from non-LWR bundles.
+    // Same dynamic-import trick for the LWR runtime. Every consumer of the FO
+    // runtime reaches it through an engine field left undefined when FO is off,
+    // so nothing here imports `floating-origin.js` statically. The module's only
+    // static edge is the package root re-exporting `getFloatingOriginOffset`,
+    // which tree-shakes away when a scene never imports it — so non-LWR bundles
+    // drop the module either way.
     let _wrapRenderableForFO: EngineContext["_wrapRenderableForFO"];
     let _makePackMeshWorld: EngineContext["_makePackMeshWorld"];
     let _lightFoVersion: EngineContext["_lightFoVersion"];

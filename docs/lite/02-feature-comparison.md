@@ -58,7 +58,7 @@ This page maps the feature gap between **Babylon Lite** and **Babylon.js (BJS)**
 | Double-Sided Rendering                     |  ✅  | ✅  |                                                                                                                                                                                        |
 | Opacity Textures                           |  ✅  | ✅  | With depth-write disabled for transparent                                                                                                                                              |
 | Bump / Height Mapping                      |  ✅  | ✅  |                                                                                                                                                                                        |
-| Lightmap Textures                          |  ✅  | ✅  | Standard material UV2                                                                                                                                                                  |
+| Lightmap Textures                          |  ✅  | ✅  | Standard material UV2; PBR via opt-in enablePbrLightmap() + setPbrLightmap()                                                                                                           |
 | Ambient Textures                           |  ✅  | ✅  |                                                                                                                                                                                        |
 | Reflection Textures                        |  ✅  | ✅  | Spherical + planar coord modes                                                                                                                                                         |
 | UV Scaling / Offset                        |  ✅  | ✅  |                                                                                                                                                                                        |
@@ -300,37 +300,37 @@ This page maps the feature gap between **Babylon Lite** and **Babylon.js (BJS)**
 
 ## Advanced Features
 
-| Feature                                 | Lite | BJS | Notes                                                                                                                                       |
-| --------------------------------------- | :--: | :-: | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Physics Engine                          |  ⚡  | ✅  | Havok Physics V2 subset (Scene 40); no Ammo.js/Cannon.js/Oimo compatibility layer                                                           |
-| Particle System                         |  —   | ✅  | CPU + GPU particles                                                                                                                         |
-| Post-Processing Pipeline                |  ⚡  | ✅  | Frame-graph post-process viewports, pipelined blur/chromatic passes, and Bloom are covered (Scenes 142-144); no built-in DOF/SSAO stack yet |
-| GUI (2D / 3D UI)                        |  —   | ✅  |                                                                                                                                             |
-| Sprites / SpriteManager                 |  ⚡  | ✅  | 2D layers, depth-hosted sprites, facing/axis-locked/cutout billboards (Scenes 50-57); not the full BJS SpriteManager API                    |
-| Gaussian Splatting                      |  ✅  | ✅  | .ply / .splat / .sog / .spz loaders, transform baking, material plugin fragments, depth rendering, and GPU picking (Scenes 120-129)         |
-| Octree / Frustum Culling                |  —   | ✅  |                                                                                                                                             |
-| Level of Detail (LOD)                   |  —   | ✅  |                                                                                                                                             |
-| Ray Casting / Picking                   |  ✅  | ✅  | GPU ID pass + CPU ray/triangle details, normal/UV helpers, thin-instance and deformed mesh coverage (Scenes 113-115)                        |
-| WebXR / VR / AR                         |  —   | ✅  |                                                                                                                                             |
-| Glow / Highlight Layer                  |  —   | ✅  |                                                                                                                                             |
-| Screen-Space Reflections                |  —   | ✅  |                                                                                                                                             |
-| SSAO                                    |  —   | ✅  |                                                                                                                                             |
-| Lens Flare                              |  —   | ✅  |                                                                                                                                             |
-| Volumetric Light Scattering             |  —   | ✅  |                                                                                                                                             |
-| Decals                                  |  —   | ✅  |                                                                                                                                             |
-| Solid Particle System                   |  —   | ✅  |                                                                                                                                             |
-| Fluid Rendering                         |  —   | ✅  |                                                                                                                                             |
-| Bones IK                                |  —   | ✅  |                                                                                                                                             |
-| Navigation Mesh                         |  ⚡  | ✅  | Recast V2 navmesh, crowd pathing, tile-cache obstacles, off-mesh links, and raycast (Scenes 170-175)                                        |
-| Device Lost Recovery                    |  ✅  | ✅  | Opt-in per-kind WebGPU device-loss recovery via enableDeviceLost*Recovery APIs (Scene 164: Scene)                                           |
-| OffscreenCanvas / Worker Rendering      |  ✅  | ✅  | Engine runs unchanged on a DOM canvas or an OffscreenCanvas transferred to a Web Worker (Offscreen demo)                                    |
-| Text Rendering                          |  ✅  | ✅  | GPU text renderer with layered layout + editor (Scenes 180-181)                                                                             |
-| Gizmos                                  |  ✅  | ✅  | Position / rotation / scale, bounding-box, camera + light gizmos on a utility layer (Scenes 221-224)                                        |
-| Geometry Buffer Renderer                |  ✅  | ✅  | Frame-graph geometry renderer producing normal / depth / position textures; feeds DoF + CoC (Scenes 145-149)                                |
-| Large World Rendering (Floating Origin) |  ✅  | ✅  | Camera-relative rendering + multi-region physics for huge world coordinates (Scenes 200-209)                                                |
-| Scene Optimizer                         |  —   | ✅  |                                                                                                                                             |
-| Asset Manager                           |  —   | ✅  |                                                                                                                                             |
-| Scene Serialization                     |  —   | ✅  |                                                                                                                                             |
+| Feature                                 | Lite | BJS | Notes                                                                                                                                                  |
+| --------------------------------------- | :--: | :-: | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Physics Engine                          |  ⚡  | ✅  | Havok Physics V2 subset (Scene 40); no Ammo.js/Cannon.js/Oimo compatibility layer                                                                      |
+| Particle System                         |  —   | ✅  | CPU + GPU particles                                                                                                                                    |
+| Post-Processing Pipeline                |  ✅  | ✅  | Frame-graph tasks include generic fullscreen passes, Bloom, depth of field, TAA, SMAA, and final image processing/tone mapping. Scene 187 covers SMAA. |
+| GUI (2D / 3D UI)                        |  —   | ✅  |                                                                                                                                                        |
+| Sprites / SpriteManager                 |  ⚡  | ✅  | 2D layers, depth-hosted sprites, facing/axis-locked/cutout billboards (Scenes 50-57); not the full BJS SpriteManager API                               |
+| Gaussian Splatting                      |  ✅  | ✅  | .ply / .splat / .sog / .spz loaders, transform baking, material plugin fragments, depth rendering, and GPU picking (Scenes 120-129)                    |
+| Octree / Frustum Culling                |  —   | ✅  |                                                                                                                                                        |
+| Level of Detail (LOD)                   |  —   | ✅  |                                                                                                                                                        |
+| Ray Casting / Picking                   |  ✅  | ✅  | GPU ID pass + CPU ray/triangle details, normal/UV helpers, thin-instance and deformed mesh coverage (Scenes 113-115)                                   |
+| WebXR / VR / AR                         |  —   | ✅  |                                                                                                                                                        |
+| Glow / Highlight Layer                  |  —   | ✅  |                                                                                                                                                        |
+| Screen-Space Reflections                |  —   | ✅  |                                                                                                                                                        |
+| SSAO                                    |  —   | ✅  |                                                                                                                                                        |
+| Lens Flare                              |  —   | ✅  |                                                                                                                                                        |
+| Volumetric Light Scattering             |  —   | ✅  |                                                                                                                                                        |
+| Decals                                  |  —   | ✅  |                                                                                                                                                        |
+| Solid Particle System                   |  —   | ✅  |                                                                                                                                                        |
+| Fluid Rendering                         |  —   | ✅  |                                                                                                                                                        |
+| Bones IK                                |  —   | ✅  |                                                                                                                                                        |
+| Navigation Mesh                         |  ⚡  | ✅  | Recast V2 navmesh, crowd pathing, tile-cache obstacles, off-mesh links, and raycast (Scenes 170-175)                                                   |
+| Device Lost Recovery                    |  ✅  | ✅  | Opt-in per-kind WebGPU device-loss recovery via enableDeviceLost*Recovery APIs (Scene 164: Scene)                                                      |
+| OffscreenCanvas / Worker Rendering      |  ✅  | ✅  | Engine runs unchanged on a DOM canvas or an OffscreenCanvas transferred to a Web Worker (Offscreen demo)                                               |
+| Text Rendering                          |  ✅  | ✅  | GPU text renderer with layered layout + editor (Scenes 180-181)                                                                                        |
+| Gizmos                                  |  ✅  | ✅  | Position / rotation / scale, bounding-box, camera + light gizmos on a utility layer (Scenes 221-224)                                                   |
+| Geometry Buffer Renderer                |  ✅  | ✅  | Frame-graph geometry renderer producing normal / depth / position textures; feeds DoF + CoC (Scenes 145-149)                                           |
+| Large World Rendering (Floating Origin) |  ✅  | ✅  | Camera-relative rendering + multi-region physics for huge world coordinates (Scenes 200-209)                                                           |
+| Scene Optimizer                         |  —   | ✅  |                                                                                                                                                        |
+| Asset Manager                           |  —   | ✅  |                                                                                                                                                        |
+| Scene Serialization                     |  —   | ✅  |                                                                                                                                                        |
 
 <!-- AUTOGEN:feature-comparison END -->
 

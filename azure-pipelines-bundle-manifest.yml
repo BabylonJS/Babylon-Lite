@@ -1,0 +1,248 @@
+# Azure Pipelines — Bundle-Size Baseline
+#
+# Measures every scene on each push to master and publishes the aggregate
+# bundle-size manifest to public storage, where PR builds (and developers) read
+# it as the baseline for the "how did this change move bundle sizes" report.
+#
+# ── Why this exists ───────────────────────────────────────────────────────────
+#
+# The baseline used to be ~227 JSON files tracked in git and refreshed by PR
+# authors. Because nearly every shared-module change moves bytes in most of the
+# ~230 scenes, that broke in two ways at once:
+#
+#   * Red CI — as soon as any shared-code PR merged, every other open PR's
+#     committed manifest was stale and its Bundle Size job went red for reasons
+#     that had nothing to do with that PR.
+#   * Merge conflicts — two branches that both regenerated the manifest rewrote
+#     the same ~200 tracked files and collided. In one representative PR, 168 of
+#     the 169 conflicting paths were manifest files and none were source.
+#
+# Both failures come from the same root cause: a generated file living in git on
+# branches that have no reason to carry it. Publishing the baseline instead of
+# committing it removes the cause rather than managing the symptoms — there is no
+# tracked file to go stale and nothing for two branches to collide on.
+#
+# Publishing (rather than pushing to master) also keeps CI out of the repo's
+# write path entirely: master is a protected branch, and the CI identity is
+# deliberately not allowed to bypass that protection.
+#
+# It is safe because the baseline gates nothing. Size regressions are caught by
+# the absolute per-scene ceilings in `scene-config.json` (`maxRawKB`), which
+# `pnpm build:bundle-scenes` enforces byte-exactly. The baseline only powers the
+# advisory delta report, so if it is ever missing or stale the report is skipped
+# and no build fails.
+
+trigger:
+    branches:
+        include:
+            - master
+
+pr: none
+
+variables:
+    # DEPLOYMENT_SERVER / DEPLOY_TOKEN / DEPLOY_ENDPOINT_UPLOAD come from this
+    # group — the same upload path the failed-Playwright-report and
+    # static-lab-site templates use.
+    - group: BabylonJS-Deployment
+    # The snapshots storage account lives here as SNAPSHOTS_STORAGE_ACCOUNT.
+    # Note the rename: the upload templates take a variable called STORAGE_ACCOUNT,
+    # but no group exports that name — each pipeline maps its own account into the
+    # template's parameter (see azure-pipelines-playground.yml, which does the same
+    # with TOOLS_STORAGE_ACCOUNT).
+    #
+    # Assuming a bare STORAGE_ACCOUNT existed is what broke the first master run
+    # (build 20260825.1): ADO leaves an unknown $(VAR) as literal text, bash then
+    # evaluated it as a command substitution ("STORAGE_ACCOUNT: command not found"),
+    # the upload was posted with an empty storageAccount, and the deployment server
+    # answered 401 — after 28 minutes of scene measurement had already succeeded.
+    - group: BabylonJS-CI-Infrastructure
+    - name: NODE_VERSION
+      value: "22.x"
+    - name: PNPM_VERSION
+      value: "11.9.0"
+    - name: CI
+      value: "true"
+    - name: HEADLESS
+      value: "true"
+    # Resolved from the group rather than hardcoded to "babylonsnapshots" (which
+    # azure-pipelines-demos.yml does) so the account name has one source of truth.
+    - name: storageAccount
+      value: $(SNAPSHOTS_STORAGE_ACCOUNT)
+    # Public path the baseline is served from. Must stay in sync with
+    # DEFAULT_MASTER_MANIFEST_URL in scripts/bundle-scenes-core.ts.
+    # The snapshots account is served at $(SERVE_DOMAIN), so this lands at
+    # https://snapshots-cvgtc2eugrd3cgfd.z01.azurefd.net/lite/bundle-baseline/manifest.json
+    #
+    # This is the CI-artifact host that already serves the per-build test reports
+    # and lab sites under lite/<BuildNumber>/, rather than the playground's
+    # product domain. Those are all build-scoped and therefore never overwritten;
+    # the baseline is deliberately the one stable path, so a reader needs no
+    # build number to find it. That host is not cached, so unlike the playground
+    # origin there is no purge to issue after an overwrite.
+    - name: baselineDeployPath
+      value: lite/bundle-baseline
+
+stages:
+    - stage: BundleBaseline
+      displayName: "Bundle-Size Baseline"
+      jobs:
+          - job: PublishBaseline
+            displayName: "Measure scenes and publish the baseline"
+            timeoutInMinutes: 120
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+
+                # Fail fast on a deploy misconfiguration BEFORE spending ~28
+                # minutes measuring scenes. The first master run did all that work
+                # and then lost it in a 2-second publish step. This sits ahead of the
+                # toolchain install too, so a bad variable costs seconds, not minutes.
+                #
+                # Variables are read through env: rather than inline $(VAR) so an
+                # unresolved one arrives as the harmless literal string "$(VAR)"
+                # instead of being evaluated by bash as a command substitution.
+                # That is what turned a missing variable into an opaque HTTP 401
+                # rather than a named error.
+                - script: |
+                      set -euo pipefail
+
+                      missing=0
+
+                      # Build the literal ADO leaves behind for an unresolved macro
+                      # without writing a dollar-paren sequence anywhere in this
+                      # file: ADO would expand that itself before bash ever saw it,
+                      # and the comparison would then always be true.
+                      dollar='$'
+
+                      # DEPLOY_TOKEN is a secret, so it is checked differently from
+                      # the rest: its value is never echoed, and it is not matched
+                      # on a bare '$' because a token may legitimately contain one.
+                      # Comparing against its own unresolved macro is exact, so it
+                      # cannot false-positive on a valid token while still catching
+                      # a missing or misnamed variable -- which ADO would otherwise
+                      # hand us as a non-empty string that sails past a -z test.
+                      if test -z "${DEPLOY_TOKEN-}" ||
+                         test "${DEPLOY_TOKEN-}" = "${dollar}(DEPLOY_TOKEN)"; then
+                        echo "Required deploy variable DEPLOY_TOKEN is missing or did not resolve."
+                        missing=1
+                      fi
+
+                      for name in DEPLOYMENT_SERVER DEPLOY_ENDPOINT_UPLOAD STORAGE_ACCOUNT; do
+                        value="${!name-}"
+                        case "$value" in
+                          "")
+                            echo "Required deploy variable $name is empty."
+                            missing=1
+                            ;;
+                          *'$'*)
+                            # ADO leaves an unknown variable as literal text, so a
+                            # surviving '$' means the variable was never defined.
+                            echo "Required deploy variable $name did not resolve (got: '$value')."
+                            missing=1
+                            ;;
+                        esac
+                      done
+
+                      if test "$missing" -ne 0; then
+                        echo ""
+                        echo "DEPLOYMENT_SERVER/DEPLOY_ENDPOINT_UPLOAD/DEPLOY_TOKEN come from the"
+                        echo "BabylonJS-Deployment variable group; the storage account comes from"
+                        echo "SNAPSHOTS_STORAGE_ACCOUNT in BabylonJS-CI-Infrastructure. Both groups"
+                        echo "must be listed under variables: in this file AND authorized for this"
+                        echo "pipeline in the ADO UI. Note that no group exports a bare"
+                        echo "STORAGE_ACCOUNT — that name is the upload template's parameter, which"
+                        echo "each pipeline maps from its own account variable."
+                        exit 1
+                      fi
+
+                      echo "Deploy configuration present; publishing to storage account '$STORAGE_ACCOUNT'."
+                  displayName: "Check deploy configuration"
+                  env:
+                      DEPLOYMENT_SERVER: $(DEPLOYMENT_SERVER)
+                      DEPLOY_ENDPOINT_UPLOAD: $(DEPLOY_ENDPOINT_UPLOAD)
+                      DEPLOY_TOKEN: $(DEPLOY_TOKEN)
+                      STORAGE_ACCOUNT: $(storageAccount)
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: pnpm exec playwright install chromium
+                  displayName: "Install Playwright browsers"
+
+                # Same rolling URL->bytes asset cache as the PR job: the exact key
+                # never hits (so newly fetched assets are always saved at job end)
+                # while restoreKeys restores the most recent prefix match.
+                # Measurement re-fetches on a miss, so a cold cache is only slower.
+                - task: Cache@2
+                  displayName: "Cache remote scene assets"
+                  inputs:
+                      key: 'bundle-assets | v1 | "$(Build.BuildId)"'
+                      restoreKeys: |
+                          bundle-assets | v1
+                      path: $(System.DefaultWorkingDirectory)/.bundle-asset-cache
+
+                # Enforces the per-scene maxRawKB ceilings byte-exactly and fails
+                # the job when one is exceeded, so a breach can never be published
+                # as the new baseline by the step below.
+                #
+                # BUNDLE_MASTER_MANIFEST_URL is blanked so this build does not
+                # fetch the previous baseline just to overwrite it.
+                - script: pnpm build:bundle-scenes
+                  displayName: "Build bundle scenes"
+                  env:
+                      SKIP_BJS: "true"
+                      BUNDLE_MASTER_MANIFEST_URL: ""
+
+                # Publish the aggregate manifest to the same public storage that
+                # serves the per-build test reports and lab sites, at a stable
+                # path. PR builds and local developers read it over plain HTTPS —
+                # no auth, no ADO artifact retention window, and it works for fork
+                # PRs.
+                #
+                # --fail-with-body so an upload rejection fails the step instead of
+                # silently leaving the baseline stale.
+                #
+                # DEPLOYMENT_SERVER/DEPLOY_ENDPOINT_UPLOAD/STORAGE_ACCOUNT are read
+                # from env: (see the preflight step above for why). DEPLOY_TOKEN
+                # stays inline: ADO does not auto-map secret variables into env, so
+                # macro substitution is the supported way to reference it.
+                - script: |
+                      set -euo pipefail
+
+                      MANIFEST="$(System.DefaultWorkingDirectory)/lab/public/bundle/manifest.json"
+                      WORK="$(Build.ArtifactStagingDirectory)/bundle-baseline"
+
+                      if ! test -s "$MANIFEST"; then
+                        echo "No aggregate manifest at $MANIFEST — refusing to publish an empty baseline."
+                        exit 1
+                      fi
+
+                      SCENES="$(node -e 'process.stdout.write(String(Object.keys(require(process.argv[1])).length))' "$MANIFEST")"
+                      echo "Publishing bundle-size baseline for $SCENES scene(s)."
+
+                      mkdir -p "$WORK"
+                      cp "$MANIFEST" "$WORK/manifest.json"
+                      (cd "$WORK" && zip -j baseline.zip manifest.json)
+
+                      curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --fail-with-body -i -X POST \
+                        -H "Content-Type: multipart/form-data" \
+                        -H "Authorization: Bearer ${DEPLOY_TOKEN}" \
+                        -F "path=$(baselineDeployPath)" \
+                        -F "storageAccount=${STORAGE_ACCOUNT}" \
+                        -F "zip=@$WORK/baseline.zip"
+                  displayName: "Publish bundle-size baseline"
+                  env:
+                      DEPLOYMENT_SERVER: $(DEPLOYMENT_SERVER)
+                      DEPLOY_ENDPOINT_UPLOAD: $(DEPLOY_ENDPOINT_UPLOAD)
+                      STORAGE_ACCOUNT: $(storageAccount)
+                      DEPLOY_TOKEN: $(DEPLOY_TOKEN)

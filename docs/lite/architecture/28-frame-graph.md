@@ -73,6 +73,7 @@ export interface FrameGraph {
 ```typescript
 export interface Task {
     readonly name: string;
+    executionEnabled?: boolean;
     readonly engine: EngineContextInternal;
     readonly scene: SceneContextInternal;
     _passes: Pass[];
@@ -95,6 +96,8 @@ Task lifecycle:
 The `_passes` list is the per-task view of recorded passes. `FrameGraph.build()` clears it at the start of each task's record and the task is responsible for re-pushing its passes during `record()`. Today every `RenderTask` records exactly one `RenderPass`; the surface is shaped to support multi-pass tasks (e.g. shadow cascades) later without changing the `Task` interface again.
 
 `Task.execute()` is a migration escape hatch, not the final shape for new rendering work. `FrameGraph.execute()` sums the draw count returned by `task.execute()` when present; otherwise it drains the recorded passes. Per-task GPU timing is opt-in: the public timing API dynamic-imports a profiler that wraps registered `FrameGraph.execute()` functions at runtime, so non-profiling bundles do not fetch profiler code or carry a static task-timing branch here. The built-in `ShadowTask` uses this path for shadow scheduling: ESM generators expose depth/blur resources that `ShadowTask` encodes, while PCF generators are rendered through ShadowTask-owned depth-only `RenderTask`s that use Standard/PBR/Node no-color shadow material views. These PCF variants keep a void fragment stage when needed so material `discard` logic still affects the depth attachment without binding a color target.
+
+`Task.executionEnabled` is a runtime-only gate that defaults to enabled. When set to `false`, `FrameGraph.execute()` skips both the task-level `execute()` hook and every recorded pass while preserving the task's recorded state and allocated resources. Task-specific fields such as `enabled` retain their own semantics and are not interpreted as this scheduling gate.
 
 ## `Pass` and `RenderPass`
 
@@ -319,6 +322,20 @@ The task owns only its pipeline, bind group, and uniform buffer. It does not own
 Transmission uses this task as its final swapchain pass. `enableSceneTransmission(scene, engine)` retargets render tasks to linear `rgba16float` offscreen output, then appends one `"transmission-image-processing"` task after the last render task if one is not already present. MSAA scenes feed the image-processing task directly from the MSAA color texture, so there is no extra final resolve texture or `*-transmission-scene` target.
 
 Transmission refraction textures allocate only the mip levels reachable by the refraction shader's fixed `-4.0` LOD bias. For the current 1024x1024 refraction textures, this means 7 levels (`0..6`) instead of the full 11-level chain, and mip generation records only those allocated levels. Tasks that set `transmission.generateMipmaps = false` allocate only mip 0 and skip this generation step.
+
+### SMAA Task
+
+`createSmaaPostProcessTask()` implements spatial SMAA as three ordered fullscreen passes:
+
+1. Luma edge detection reads the final color source with linear sampling and writes an `rgba8unorm` edge target.
+2. Blending-weight reconstruction reads exact edge texels with nearest sampling, searches each edge run, and writes an `rgba8unorm` weight target.
+3. Neighbourhood blending reads the original color and the weights, then writes the anti-aliased output.
+
+The source must be a single-sample `RenderTarget`; resolve MSAA before recording the task. SMAA is a perceptual filter, so place it at the end of the frame-graph chain after tone mapping. Set `sourceIsSrgb` when the source uses an sRGB view so edge detection re-encodes samples before applying the luma threshold. The task exposes `outputTexture`, `edgesTexture`, and `weightsTexture`; the intermediate targets are useful for diagnostics and are owned and disposed by the task.
+
+The public controls are `threshold`, `maxSearchSteps`, `diagonalDetection`, `minDiagonalRun`, `cornerDetection`, `dominantAxisBlend`, and `sourceIsSrgb`. After changing one, call `updateUniforms()` once the graph has been recorded. Search steps and the minimum diagonal run trade additional texture fetches for longer pattern reconstruction. The simplified diagonal path is disabled by default because it can double-process adjacent diagonal edge channels; enable it only for content dominated by genuine 45-degree structure and measure the result. Corner-pattern attenuation is also opt-in: it uses reference SMAA's 25% corner-rounding preset and adds four edge-texture reads per processed axis only while enabled.
+
+This implementation does not ship the reference Area/Search lookup textures. It reconstructs coverage analytically and searches directly in the weight pass, keeping the runtime self-contained. Predication, stencil optimization, and temporal SMAA modes are not implemented; use TAA when temporal supersampling is required. Scene 187 provides a deterministic side-by-side stress scene and loads its parameter UI only with `?debug=1`.
 
 ### Scene-Texture Transmission
 

@@ -219,9 +219,9 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     }
     const skeletonVelocity =
         skeletonVelocityFactory && mesh.skeleton
-            ? skeletonVelocityFactory(engine, mesh.skeleton, (texture) => _createGeometryMeshBindGroup(engine, view, res, mesh, meshUBO, texture))
+            ? skeletonVelocityFactory(engine, mesh.skeleton, (texture) => _createGeometryMeshBindGroup(scene, view, res, mesh, meshUBO, texture))
             : null;
-    let meshBindGroup = skeletonVelocity?._bindGroup ?? _createGeometryMeshBindGroup(engine, view, res, mesh, meshUBO, null);
+    let meshBindGroup = skeletonVelocity?._bindGroup ?? _createGeometryMeshBindGroup(scene, view, res, mesh, meshUBO, null);
     let velocityReady = false;
 
     // Acquire all textures the standard shader references so the GPU-pool
@@ -316,7 +316,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         }
         const ti = hasThinInstances ? mesh.thinInstances : null;
         if (ti) {
-            thinDrawArgs = tiHelpers!._syncForDraw(engine, ti, hasInstanceColor, mesh._gpu.indexCount);
+            thinDrawArgs = tiHelpers!._syncForDraw(engine, ti, hasInstanceColor, mesh._gpu.indexCount, mesh._gpu._baseVertex ?? 0);
         }
     };
     // Floating-origin: the mesh UBO bakes the active-camera offset into the
@@ -359,7 +359,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         if (ti && thinDrawArgs) {
             pass.drawIndexedIndirect(thinDrawArgs, 0);
         } else {
-            pass.drawIndexed(g.indexCount, ti?.count);
+            pass.drawIndexed(g.indexCount, ti?.count, 0, g._baseVertex ?? 0);
         }
         return 1;
     };
@@ -525,13 +525,14 @@ function _ensureViewResources(
 }
 
 function _createGeometryMeshBindGroup(
-    engine: EngineContext,
+    scene: SceneContext,
     view: StandardGeometryMaterialView,
     res: StandardGeometryViewResources,
     mesh: Mesh,
     meshUBO: GPUBuffer,
     previousBoneTexture: GPUTexture | null
 ): GPUBindGroup {
+    const engine = scene.surface.engine;
     const source = view.source as StandardMaterialProps;
     const features = res._features;
     let nextBinding = 0;
@@ -552,7 +553,7 @@ function _createGeometryMeshBindGroup(
     }
     for (const used of res._extFragments) {
         if (used._ext._bind) {
-            nextBinding = used._ext._bind(source, entries, nextBinding, mesh, engine);
+            nextBinding = used._ext._bind(source, entries, nextBinding, mesh, scene);
         }
     }
     // Geometry-params `gp` UBO is contributed by the geometry composer as the

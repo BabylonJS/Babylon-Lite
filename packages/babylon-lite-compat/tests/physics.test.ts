@@ -1,10 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { getPhysicsTimestepMs } from "babylon-lite";
 import type { SceneContext } from "babylon-lite";
 
-import { HavokPlugin, PhysicsEngine, PhysicsShapeType, PhysicsMotionType, PhysicsPrestepType, PhysicsConstraintType } from "../src/physics/physics";
+import {
+    HavokPlugin,
+    PhysicsAggregate,
+    PhysicsBody,
+    PhysicsEngine,
+    PhysicsShape,
+    PhysicsShapeType,
+    PhysicsMotionType,
+    PhysicsPrestepType,
+    PhysicsConstraintType,
+} from "../src/physics/physics";
+import type { TransformNode } from "../src/meshes/meshes";
+import { Vector3 } from "../src/math/vector";
+import type { Scene } from "../src/scene/scene";
 import { LiteCompatError } from "../src/error";
+import { Observable } from "../src/misc/observable";
 
 // A minimal non-function, non-undefined stand-in for the awaited Havok module.
 const fakeHknp = {};
@@ -20,6 +34,51 @@ function makeMockHknp() {
         /** Seconds handed to the most recent `HP_World_Step` (undefined if never stepped). */
         lastStepSeconds: () => calls[calls.length - 1],
     };
+}
+
+function makeAggregateMockHknp() {
+    return {
+        ...makeMockHknp(),
+        MotionType: { STATIC: 0, KINEMATIC: 1, DYNAMIC: 2 },
+        MaterialCombine: { MINIMUM: 0, MAXIMUM: 1 },
+        HP_Shape_CreateSphere: vi.fn(() => [0, { __shape: true }]),
+        HP_Shape_CreateBox: vi.fn(() => [0, { __shape: true }]),
+        HP_Shape_CreateCapsule: vi.fn(() => [0, { __shape: true }]),
+        HP_Shape_CreateCylinder: vi.fn(() => [0, { __shape: true }]),
+        HP_Shape_SetMaterial: vi.fn(),
+        HP_Shape_SetTrigger: vi.fn(),
+        HP_Shape_Release: vi.fn(),
+        HP_Body_Create: vi.fn(() => [0, { __body: true }]),
+        HP_Body_SetMotionType: () => undefined,
+        HP_Body_SetQTransform: () => undefined,
+        HP_Body_SetShape: () => undefined,
+        HP_Body_GetLinearVelocity: () => [0, [4, 5, 6]],
+        HP_Body_GetAngularVelocity: () => [0, [1, 2, 3]],
+        HP_Body_Release: vi.fn(),
+        HP_World_AddBody: () => undefined,
+        HP_World_RemoveBody: () => undefined,
+    };
+}
+
+function makePhysicsNode(scene: Scene, overrides: Record<string, unknown> = {}): TransformNode {
+    const onDisposeObservable = new Observable<TransformNode>();
+    const node = {
+        parent: null,
+        physicsBody: null,
+        onDisposeObservable,
+        _node: {
+            position: { x: 0, y: 0, z: 0 },
+            rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 },
+            scaling: { x: 1, y: 1, z: 1 },
+            ...overrides,
+        },
+        getScene: () => scene,
+        dispose: () => {
+            onDisposeObservable.notifyObservers(node as unknown as TransformNode);
+            onDisposeObservable.clear();
+        },
+    };
+    return node as unknown as TransformNode;
 }
 
 /** Minimal scene exposing what the physics step reads: `_beforeRender`, `fixedDeltaMs`, real-delta fallback. */
@@ -136,6 +195,252 @@ describe("PhysicsEngine", () => {
         engine.setTimeStep(1 / 120);
         expect(engine.getTimeStep()).toBeCloseTo(1 / 120);
         expect(() => engine.dispose()).not.toThrow();
+    });
+
+    describe("PhysicsBody", () => {
+        it("translates motion and prestep enums at the Lite boundary", () => {
+            const plugin = new HavokPlugin(true, makeAggregateMockHknp());
+            plugin._attachToLiteScene(makeScene());
+            const physicsEngine = new PhysicsEngine(plugin, { x: 0, y: -9.81, z: 0 });
+            const scene = { getPhysicsEngine: () => physicsEngine } as unknown as Scene;
+            const node = makePhysicsNode(scene);
+            const body = new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene);
+
+            expect(body.getMotionType()).toBe(PhysicsMotionType.STATIC);
+            expect(body.disablePreStep).toBe(true);
+            body.setMotionType(PhysicsMotionType.ANIMATED);
+            expect(body.getMotionType()).toBe(PhysicsMotionType.ANIMATED);
+            body.setMotionType(PhysicsMotionType.DYNAMIC);
+            expect(body.getMotionType()).toBe(PhysicsMotionType.DYNAMIC);
+
+            body.setPrestepType(PhysicsPrestepType.DISABLED);
+            expect(body.getPrestepType()).toBe(PhysicsPrestepType.DISABLED);
+            body.setPrestepType(PhysicsPrestepType.TELEPORT);
+            expect(body.getPrestepType()).toBe(PhysicsPrestepType.TELEPORT);
+            body.setPrestepType(PhysicsPrestepType.ACTION);
+            expect(body.getPrestepType()).toBe(PhysicsPrestepType.ACTION);
+
+            body.disablePreStep = true;
+            expect(body.getPrestepType()).toBe(PhysicsPrestepType.DISABLED);
+            body.disablePreStep = false;
+            expect(body.getPrestepType()).toBe(PhysicsPrestepType.TELEPORT);
+            expect(() => {
+                body.disableSync = true;
+            }).toThrow(/always synchronizes dynamic bodies/);
+            expect(() => {
+                body.disableSync = false;
+            }).not.toThrow();
+        });
+
+        it("rejects invalid motion and prestep enum values at the Lite boundary", () => {
+            const plugin = new HavokPlugin(true, makeAggregateMockHknp());
+            plugin._attachToLiteScene(makeScene());
+            const physicsEngine = new PhysicsEngine(plugin, { x: 0, y: -9.81, z: 0 });
+            const scene = { getPhysicsEngine: () => physicsEngine } as unknown as Scene;
+            const node = makePhysicsNode(scene);
+            const body = new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene);
+
+            expect(() => body.setMotionType(99 as PhysicsMotionType)).toThrow("Invalid PhysicsMotionType value: 99");
+            expect(() => body.setPrestepType(98 as PhysicsPrestepType)).toThrow("Invalid PhysicsPrestepType value: 98");
+
+            (body._lite as unknown as { motionType: number }).motionType = 97;
+            expect(() => body.getMotionType()).toThrow("Invalid Lite PhysicsMotionType value: 97");
+            (body._lite as unknown as { _prestepType: number })._prestepType = 96;
+            expect(() => body.getPrestepType()).toThrow("Invalid Lite PhysicsPrestepType value: 96");
+        });
+
+        it("reads velocities through Lite without allocating in to-ref methods", () => {
+            const plugin = new HavokPlugin(true, makeAggregateMockHknp());
+            plugin._attachToLiteScene(makeScene());
+            const physicsEngine = new PhysicsEngine(plugin, { x: 0, y: -9.81, z: 0 });
+            const scene = { getPhysicsEngine: () => physicsEngine } as unknown as Scene;
+            const node = makePhysicsNode(scene);
+            const body = new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene);
+
+            expect(body.getLinearVelocity()).toEqual({ x: 4, y: 5, z: 6 });
+            const allocatingLinearGetter = vi.spyOn(body, "getLinearVelocity");
+            const linearResult = new Vector3();
+            body.getLinearVelocityToRef(linearResult);
+            expect(linearResult).toEqual({ x: 4, y: 5, z: 6 });
+            expect(allocatingLinearGetter).not.toHaveBeenCalled();
+
+            expect(body.getAngularVelocity()).toEqual({ x: 1, y: 2, z: 3 });
+            const allocatingAngularGetter = vi.spyOn(body, "getAngularVelocity");
+            const angularResult = new Vector3();
+            body.getAngularVelocityToRef(angularResult);
+            expect(angularResult).toEqual({ x: 1, y: 2, z: 3 });
+            expect(allocatingAngularGetter).not.toHaveBeenCalled();
+        });
+
+        it("attaches to the TransformNode and is disposed with it", () => {
+            const hknp = makeAggregateMockHknp();
+            const plugin = new HavokPlugin(true, hknp);
+            plugin._attachToLiteScene(makeScene());
+            const scene = { getPhysicsEngine: () => new PhysicsEngine(plugin, Vector3.Zero()) } as unknown as Scene;
+            const node = makePhysicsNode(scene);
+            const body = new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene);
+
+            expect(node.physicsBody).toBe(body);
+            node.dispose();
+            expect(node.physicsBody).toBeNull();
+            expect(hknp.HP_Body_Release).toHaveBeenCalledOnce();
+            expect(() => body.dispose()).not.toThrow();
+        });
+
+        it("rejects a second body before allocation", () => {
+            const hknp = makeAggregateMockHknp();
+            const plugin = new HavokPlugin(true, hknp);
+            plugin._attachToLiteScene(makeScene());
+            const scene = { getPhysicsEngine: () => new PhysicsEngine(plugin, Vector3.Zero()) } as unknown as Scene;
+            const node = makePhysicsNode(scene);
+            const firstBody = new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene);
+            hknp.HP_Body_Create.mockClear();
+
+            expect(() => new PhysicsBody(node, PhysicsMotionType.STATIC, false, scene)).toThrow(/one physics body per scene node/);
+            expect(() => new PhysicsAggregate(node, PhysicsShapeType.BOX, { mass: 0 }, scene)).toThrow(/one physics body per scene node/);
+            expect(hknp.HP_Body_Create).not.toHaveBeenCalled();
+            expect(hknp.HP_Shape_CreateBox).not.toHaveBeenCalled();
+            expect(node.physicsBody).toBe(firstBody);
+        });
+
+        it("fails before allocation for parented nodes and thin instances", () => {
+            const hknp = makeAggregateMockHknp();
+            const plugin = new HavokPlugin(true, hknp);
+            plugin._attachToLiteScene(makeScene());
+            const scene = { getPhysicsEngine: () => new PhysicsEngine(plugin, Vector3.Zero()) } as unknown as Scene;
+            const parented = makePhysicsNode(scene);
+            parented.parent = {} as TransformNode;
+            const thin = makePhysicsNode(scene, { thinInstances: { count: 2 } });
+
+            expect(() => new PhysicsBody(parented, PhysicsMotionType.STATIC, false, scene)).toThrow(/parented TransformNodes/);
+            expect(() => new PhysicsBody(thin, PhysicsMotionType.STATIC, false, scene)).toThrow(/per-thin-instance/);
+            expect(hknp.HP_Body_Create).not.toHaveBeenCalled();
+        });
+    });
+
+    describe("PhysicsAggregate", () => {
+        it("forwards aggregate construction and disposal to Babylon Lite", () => {
+            const hknp = makeAggregateMockHknp();
+            const plugin = new HavokPlugin(true, hknp);
+            plugin._attachToLiteScene(makeScene());
+            const physicsEngine = new PhysicsEngine(plugin, { x: 0, y: -9.81, z: 0 });
+            const scene = { getPhysicsEngine: () => physicsEngine } as unknown as Scene;
+            const node = makePhysicsNode(scene, {
+                position: { x: 1, y: 2, z: 3 },
+                boundMin: [-1, -1, -1],
+                boundMax: [1, 1, 1],
+            });
+
+            const aggregate = new PhysicsAggregate(node, PhysicsShapeType.BOX, { mass: 0 }, scene);
+
+            expect(aggregate.body.getClassName()).toBe("PhysicsBody");
+            expect(aggregate.body.disablePreStep).toBe(true);
+            expect(aggregate.shape.getClassName()).toBe("PhysicsShape");
+            expect(aggregate.body.shape).toBe(aggregate.shape);
+            expect(aggregate.shape.type).toBe(PhysicsShapeType.BOX);
+            expect(node.physicsBody).toBe(aggregate.body);
+            node.dispose();
+            expect(node.physicsBody).toBeNull();
+            expect(hknp.HP_Body_Release).toHaveBeenCalledOnce();
+            expect(hknp.HP_Shape_Release).toHaveBeenCalledOnce();
+            expect(() => aggregate.dispose()).not.toThrow();
+        });
+
+        it("does not dispose a caller-owned shape", () => {
+            const hknp = makeAggregateMockHknp();
+            const plugin = new HavokPlugin(true, hknp);
+            plugin._attachToLiteScene(makeScene());
+            const physicsEngine = new PhysicsEngine(plugin, { x: 0, y: -9.81, z: 0 });
+            const scene = { getPhysicsEngine: () => physicsEngine } as unknown as Scene;
+            const node = makePhysicsNode(scene);
+            const shape = new PhysicsShape({ type: PhysicsShapeType.BOX, parameters: { extents: { x: 1, y: 1, z: 1 } } }, scene);
+
+            const aggregate = new PhysicsAggregate(node, shape, { mass: 0 }, scene);
+            aggregate.dispose();
+
+            expect(hknp.HP_Shape_Release).not.toHaveBeenCalled();
+            shape.dispose();
+            expect(hknp.HP_Shape_Release).toHaveBeenCalledOnce();
+        });
+
+        it("uses Babylon.js material defaults, preserves trigger state, and forwards static friction", () => {
+            const hknp = makeAggregateMockHknp();
+            const plugin = new HavokPlugin(true, hknp);
+            plugin._attachToLiteScene(makeScene());
+            const scene = { getPhysicsEngine: () => new PhysicsEngine(plugin, Vector3.Zero()) } as unknown as Scene;
+            const shape = new PhysicsShape({ type: PhysicsShapeType.BOX, parameters: { extents: { x: 1, y: 1, z: 1 } } }, scene);
+
+            shape.material = {};
+            expect(hknp.HP_Shape_SetMaterial.mock.calls.at(-1)?.[1]).toEqual([0.5, 0.5, 0, 0, 1]);
+            shape.isTrigger = true;
+            hknp.HP_Shape_SetTrigger.mockClear();
+
+            const aggregate = new PhysicsAggregate(makePhysicsNode(scene), shape, {
+                mass: 0,
+                friction: 0.4,
+                staticFriction: 0.8,
+                restitution: 0.1,
+            });
+            expect(hknp.HP_Shape_SetMaterial.mock.calls.at(-1)?.[1]).toEqual([0.8, 0.4, 0.1, 0, 1]);
+            expect(hknp.HP_Shape_SetTrigger).not.toHaveBeenCalled();
+            aggregate.dispose();
+            shape.dispose();
+        });
+
+        it("matches Babylon.js scaled primitive aggregate sizing", () => {
+            const hknp = makeAggregateMockHknp();
+            const plugin = new HavokPlugin(true, hknp);
+            plugin._attachToLiteScene(makeScene());
+            const scene = { getPhysicsEngine: () => new PhysicsEngine(plugin, Vector3.Zero()) } as unknown as Scene;
+            const bounds = {
+                boundMin: [-1, -2, -3],
+                boundMax: [3, 4, 5],
+                scaling: { x: -2, y: 3, z: 0.5 },
+            };
+
+            new PhysicsAggregate(makePhysicsNode(scene, bounds), PhysicsShapeType.BOX, { mass: 0 });
+            expect(hknp.HP_Shape_CreateBox).toHaveBeenLastCalledWith([2, -3, 0.5], [0, 0, 0, 1], [8, 18, 4]);
+
+            new PhysicsAggregate(makePhysicsNode(scene, bounds), PhysicsShapeType.SPHERE, { mass: 0 });
+            expect(hknp.HP_Shape_CreateSphere).toHaveBeenLastCalledWith([2, -3, 0.5], 9);
+
+            new PhysicsAggregate(makePhysicsNode(scene, bounds), PhysicsShapeType.CAPSULE, { mass: 0 });
+            expect(hknp.HP_Shape_CreateCapsule).toHaveBeenLastCalledWith([0, 10, 0], [0, 20, 0], 4);
+
+            new PhysicsAggregate(makePhysicsNode(scene, bounds), PhysicsShapeType.CYLINDER, { mass: 0 });
+            expect(hknp.HP_Shape_CreateCylinder).toHaveBeenLastCalledWith([0, 6, 0], [0, 24, 0], 4);
+        });
+
+        it("uses the X extent for capsule and cylinder radii", () => {
+            const hknp = makeAggregateMockHknp();
+            const plugin = new HavokPlugin(true, hknp);
+            plugin._attachToLiteScene(makeScene());
+            const scene = { getPhysicsEngine: () => new PhysicsEngine(plugin, Vector3.Zero()) } as unknown as Scene;
+            const bounds = {
+                boundMin: [-1, -10, -3],
+                boundMax: [1, 10, 3],
+                scaling: { x: 1, y: 1, z: 2 },
+            };
+
+            new PhysicsAggregate(makePhysicsNode(scene, bounds), PhysicsShapeType.CAPSULE, { mass: 0 });
+            expect(hknp.HP_Shape_CreateCapsule).toHaveBeenLastCalledWith([0, -9, 0], [0, 9, 0], 1);
+
+            new PhysicsAggregate(makePhysicsNode(scene, bounds), PhysicsShapeType.CYLINDER, { mass: 0 });
+            expect(hknp.HP_Shape_CreateCylinder).toHaveBeenLastCalledWith([0, -10, 0], [0, 10, 0], 1);
+        });
+
+        it("rejects an invalid shape enum value before calling Lite", () => {
+            const plugin = new HavokPlugin(true, makeAggregateMockHknp());
+            plugin._attachToLiteScene(makeScene());
+            const physicsEngine = new PhysicsEngine(plugin, { x: 0, y: -9.81, z: 0 });
+            const scene = { getPhysicsEngine: () => physicsEngine } as unknown as Scene;
+
+            expect(() => new PhysicsShape({ type: 99 as PhysicsShapeType }, scene)).toThrow("Invalid PhysicsShapeType value: 99");
+
+            const shape = new PhysicsShape({ type: PhysicsShapeType.BOX }, scene);
+            (shape._lite as unknown as { _type: number })._type = 98;
+            expect(() => shape.type).toThrow("Invalid Lite PhysicsShapeType value: 98");
+        });
     });
 });
 

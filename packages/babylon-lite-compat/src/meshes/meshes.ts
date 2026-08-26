@@ -56,6 +56,7 @@ import type { Scene } from "../scene/scene.js";
 import { Material as CompatMaterialBase } from "../materials/materials.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
 import type { NodeMaterial } from "../materials/node-material.js";
+import type { PhysicsBody } from "../physics/physics.js";
 import { mergeMeshGeometry } from "./merge-mesh-geometry.js";
 import type { GridMaterial } from "../materials/grid-material.js";
 import type { MorphTargetManager } from "../morph/morph.js";
@@ -175,6 +176,7 @@ function matchingVertexAttribute(data: Float32Array | null | undefined, vertexCo
 export class TransformNode extends Node {
     /** @internal The Lite scene node that carries this transform. */
     public readonly _node: SceneNode;
+    public physicsBody: PhysicsBody | null = null;
 
     /**
      * @internal The Lite asset container this node was loaded from, when produced
@@ -352,6 +354,13 @@ export class AbstractMesh extends TransformNode {
     public set isVisible(value: boolean) {
         this._visible = value;
         this._syncVisibility(this.isEnabled());
+    }
+
+    public get isPickable(): boolean {
+        return this._lite.pickable !== false;
+    }
+    public set isPickable(value: boolean) {
+        this._lite.pickable = value;
     }
 
     public get receiveShadows(): boolean {

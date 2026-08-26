@@ -249,8 +249,8 @@ describe("WebGPU alpha-to-coverage", () => {
         const text = {} as TextRenderable;
         setAlphaToCoverage(text, true);
 
-        const enabled = getOrCreateTextPipeline(engine, "rgba8unorm", 4, "depth24plus", true, text).pipeline;
-        const singleSample = getOrCreateTextPipeline(engine, "rgba8unorm", 1, "depth24plus", true, text).pipeline;
+        const enabled = getOrCreateTextPipeline(engine, "rgba8unorm", 4, "depth24plus", true, text)._pipeline;
+        const singleSample = getOrCreateTextPipeline(engine, "rgba8unorm", 1, "depth24plus", true, text)._pipeline;
 
         expect(alphaToCoverageEnabled(enabled)).toBe(true);
         expect(colorTarget(enabled).blend).toBeUndefined();
@@ -268,8 +268,8 @@ describe("WebGPU alpha-to-coverage", () => {
         const text = {} as TextRenderable;
         setAlphaToCoverage(text, true);
 
-        const enabled = getOrCreateTextPipeline(engine, "rgba8unorm", 4, "depth24plus", true, text).pipeline;
-        const blended = getOrCreateTextPipeline(engine, "rgba8unorm", 1, "depth24plus", true, text).pipeline;
+        const enabled = getOrCreateTextPipeline(engine, "rgba8unorm", 4, "depth24plus", true, text)._pipeline;
+        const blended = getOrCreateTextPipeline(engine, "rgba8unorm", 1, "depth24plus", true, text)._pipeline;
 
         expect(fragmentStage(enabled).module).toBe(fragmentStage(blended).module);
         expect(fragmentStage(enabled).constants).toEqual({ 0: 1 });

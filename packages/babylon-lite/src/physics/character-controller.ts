@@ -364,6 +364,11 @@ export class PhysicsCharacterController {
         return this._position;
     }
 
+    /** Get the Havok body backing this character controller. */
+    public getBody(): PhysicsBody {
+        return this._body;
+    }
+
     /** Teleport the character to a new position, clearing any swept motion. */
     public setPosition(position: Vec3): void {
         vcopy(this._position, position);
@@ -1400,4 +1405,9 @@ function matToArray(m: Mat4): number[] {
  */
 export function createPhysicsCharacterController(world: PhysicsWorld, position: Vec3, options: PhysicsCharacterControllerOptions): PhysicsCharacterController {
     return new PhysicsCharacterController(world, position, options);
+}
+
+/** Return the Havok body backing a character controller. */
+export function getPhysicsCharacterControllerBody(controller: PhysicsCharacterController): PhysicsBody {
+    return controller.getBody();
 }

@@ -615,7 +615,7 @@ function writeCullParams(
         args[0] = indexCount;
         args[1] = 0;
         args[2] = 0;
-        args[3] = 0;
+        args[3] = mesh._gpu._baseVertex ?? 0;
         args[4] = 0;
         engine._device.queue.writeBuffer(state._argsBuffer!, 0, args.buffer, args.byteOffset, args.byteLength);
         state._indexCount = indexCount;
@@ -623,7 +623,9 @@ function writeCullParams(
         engine._currentEncoder.clearBuffer(state._argsBuffer!, 4, 4);
     }
     if (lodMesh) {
-        // Far-bucket args carry the PARTNER mesh's index count; the compute pass fills its instance count.
+        // Far-bucket args carry the PARTNER mesh's index count AND its own baseVertex — the
+        // far bucket draws the LOD partner's geometry, which may be a different storage-buffer
+        // slot (or no slab at all) from the source mesh's, so the two must never be conflated.
         const lodGpu = lodMesh._gpu as MeshGPU | undefined;
         const lodIndexCount = lodGpu ? lodGpu.indexCount : 0;
         if (state._lodIndexCount !== lodIndexCount) {
@@ -631,7 +633,7 @@ function writeCullParams(
             args[0] = lodIndexCount;
             args[1] = 0;
             args[2] = 0;
-            args[3] = 0;
+            args[3] = lodGpu?._baseVertex ?? 0;
             args[4] = 0;
             engine._device.queue.writeBuffer(state._lodArgsBuffer!, 0, args.buffer, args.byteOffset, args.byteLength);
             state._lodIndexCount = lodIndexCount;

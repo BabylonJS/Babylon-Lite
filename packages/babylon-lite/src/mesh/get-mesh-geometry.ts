@@ -1,5 +1,20 @@
 import type { Mesh } from "./mesh.js";
 
+/**
+ * Return caller-owned copies of a mesh's indexed triangle positions.
+ *
+ * Unlike {@link getMeshGeometry}, this does not require normals or other shading attributes.
+ * Returns `null` when positions or indices are not retained on the CPU.
+ */
+export function getMeshTriangles(mesh: Mesh): { positions: Float32Array; indices: Uint32Array } | null {
+    const positions = mesh._cpuPositions;
+    const indices = mesh._cpuIndices;
+    if (!positions || !indices) {
+        return null;
+    }
+    return { positions: positions.slice(), indices: indices.slice() };
+}
+
 /** Return caller-owned copies of the CPU geometry retained by a mesh.
  *  Returns `null` when positions, normals, or indices are unavailable. */
 export function getMeshGeometry(mesh: Mesh): {

@@ -96,7 +96,7 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
         throw new Error(`createMeshFromStorageBuffer: slot needs ${required} bytes but the allocation is ${storage.byteLength} bytes.`);
     }
 
-    const vertexBuffer = _getStorageBufferHandle(engine, storage);
+    _getStorageBufferHandle(engine, storage);
     const sharedIndices = !ArrayBuffer.isView(indices);
     if (sharedIndices && ((indices as StorageBuffer)._usage & BU.INDEX) === 0) {
         throw new Error("createMeshFromStorageBuffer: a StorageBuffer passed as `indices` must be created with { index: true } so it carries GPUBufferUsage.INDEX.");
@@ -124,6 +124,12 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
         _u2: { _stride: arrayStride, _offset: offsets?.uv2 ?? 0 },
         _c: { _stride: arrayStride, _offset: offsets?.color ?? 0 },
     };
+    // Tangent/uv2/color only borrow the slab when the caller declared an offset for them —
+    // otherwise `_offset` defaults to 0, the same byte as position, and reading it as a
+    // fourth attribute would alias position data rather than report "no such attribute".
+    const hasTangent = offsets?.tangent !== undefined;
+    const hasUv2 = offsets?.uv2 !== undefined;
+    const hasColor = offsets?.color !== undefined;
 
     installHooks();
 
@@ -134,12 +140,32 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
         boundMin: options.boundMin ? [...options.boundMin] : undefined,
         boundMax: options.boundMax ? [...options.boundMax] : undefined,
         _gpu: {
-            // Every attribute reads the one shared allocation; `_vbLayout` splits it into
-            // fields via stride + offset, exactly as an interleaved glTF mesh does.
-            positionBuffer: vertexBuffer,
-            normalBuffer: vertexBuffer,
-            uvBuffer: vertexBuffer,
-            indexBuffer,
+            // Resolve borrowed handles lazily so device-loss rebuilds are picked up
+            // without a borrower registry or explicit rebinding.
+            get positionBuffer() {
+                return storage._buffer!;
+            },
+            get normalBuffer() {
+                return storage._buffer!;
+            },
+            get uvBuffer() {
+                return storage._buffer!;
+            },
+            get tangentBuffer() {
+                return hasTangent ? storage._buffer! : null;
+            },
+            get uv2Buffer() {
+                return hasUv2 ? storage._buffer! : null;
+            },
+            get colorBuffer() {
+                return hasColor ? storage._buffer! : null;
+            },
+            hasTangent,
+            hasUv2,
+            hasColor,
+            get indexBuffer() {
+                return sharedIndices ? (indices as StorageBuffer)._buffer! : indexBuffer;
+            },
             indexCount,
             indexFormat,
             _baseVertex: baseVertex,

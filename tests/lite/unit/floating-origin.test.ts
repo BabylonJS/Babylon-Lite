@@ -35,9 +35,9 @@ function makeMockEngine(hpm = false, useFO = false): EngineContext {
     } as unknown as GPUDevice;
 
     // Mirror createEngine's dynamic-import pattern statically for the fake:
-    // when useFO is true, hook the real updateFloatingOriginOffset into
-    // `_updateFOOffset` so scene._update will call it. When false, leave the
-    // field undefined — the FO module is never referenced.
+    // `useFloatingOrigin` is recorded on the engine, and the offset itself is
+    // read from the active camera by `getFloatingOriginOffset`, so the fake
+    // needs no FO wiring beyond the flag.
     const eng = {
         canvas: {} as HTMLCanvasElement,
         msaaSamples: 4,

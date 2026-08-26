@@ -10,9 +10,14 @@
 import { createParticleBuffer, killParticle, spawnParticle, type ParticleBuffer } from "./particle-buffer.js";
 import type { ParticleStep } from "./node/npe-value.js";
 import type { Texture2D } from "../texture/texture-2d.js";
-import type { Color4 } from "../math/types.js";
+import type { Color4, Mat4 } from "../math/types.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { FacingBillboardSpriteSystem } from "../sprite/billboard-sprite.js";
+
+/** @internal Matrix retained by an emitter shape whose runtime data includes an inverse transform. */
+export interface ParticleEmitterInverse {
+    readonly inverse: Mat4;
+}
 
 /**
  * Minimal sprite-sheet handle carried on a system whose graph uses the sprite feature (null otherwise).
@@ -68,6 +73,8 @@ export interface ParticleSystem {
     _actualFrame: number;
     /** @internal Optional system-level emit-rate getter, installed only for a connected emit-rate graph. */
     _emitRateGetter?: () => number;
+    /** @internal Optional feature preparation, run before every started simulation call. */
+    _prepareFrame?: () => void;
     /** @internal Sprite-sheet feature handle, present only for sprite systems. */
     _spriteSheet?: ParticleSpriteHandle;
     /** @internal Optional feature writer installed only when a graph reads ColorDead. */
@@ -129,12 +136,14 @@ export function animateParticleSystem(system: ParticleSystem, scaledRatio: numbe
         return;
     }
 
+    system._prepareFrame?.();
+
     const scaledUpdateSpeed = system.updateSpeed * scaledRatio;
     system._scaledUpdateSpeed = scaledUpdateSpeed;
-
     const emitRate = system._emitRateGetter ? system._emitRateGetter() : system.emitRate;
-    let newParticles = (emitRate * scaledUpdateSpeed) >> 0;
-    system._newPartsExcess += emitRate * scaledUpdateSpeed - newParticles;
+    const emission = emitRate * scaledUpdateSpeed;
+    let newParticles = emission >> 0;
+    system._newPartsExcess += emission - newParticles;
     if (system._newPartsExcess > 1.0) {
         const extra = system._newPartsExcess >> 0;
         newParticles += extra;

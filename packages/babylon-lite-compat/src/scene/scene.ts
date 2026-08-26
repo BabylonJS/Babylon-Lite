@@ -27,8 +27,17 @@ import {
     addAnimationGroup,
     enableAnimationBlending,
     updateAnimationManager,
+    pickMeshesWithRay as litePickWithRay,
 } from "babylon-lite";
-import type { SceneContext, Camera as LiteCamera, ArcRotateCamera as LiteArcRotateCamera, FreeCamera as LiteFreeCamera, AnimationManager } from "babylon-lite";
+import type {
+    SceneContext,
+    Camera as LiteCamera,
+    ArcRotateCamera as LiteArcRotateCamera,
+    FreeCamera as LiteFreeCamera,
+    AnimationManager,
+    Mesh as LiteMesh,
+    PickingInfo as LitePickingInfo,
+} from "babylon-lite";
 
 import { Color3, Color4 } from "../math/color.js";
 import type { Plane } from "../math/plane.js";
@@ -45,6 +54,11 @@ import type { BaseTexture, CubeTexture, HDRCubeTexture } from "../textures/textu
 import type { WebGPUEngine } from "../engine/engine.js";
 import { AbstractScene } from "./abstract-scene.js";
 import { Logger } from "../misc/misc-utils.js";
+import type { Ray } from "../math/ray.js";
+import type { Vector3 } from "../math/vector.js";
+import { PickingInfo } from "../culling/picking-info.js";
+import { AbstractMesh, Mesh } from "../meshes/meshes.js";
+import type { TransformNode } from "../meshes/meshes.js";
 
 /** Babylon.js EnvironmentHelper default skybox/ground assets (match the Lite ports). */
 const DEFAULT_SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
@@ -813,9 +827,55 @@ export class Scene extends AbstractScene {
         );
     }
 
-    /** Synchronous ray picking — unsupported. */
-    public pickWithRay(): never {
-        return unsupported("Scene.pickWithRay", "Synchronous CPU ray-mesh intersection is not implemented in Babylon Lite.");
+    /** Synchronous CPU ray picking over Babylon Lite's scene-mesh picker. */
+    public pickWithRay(
+        ray: Ray,
+        predicate?: (mesh: TransformNode) => boolean,
+        fastCheck = false,
+        trianglePredicate?: (p0: Vector3, p1: Vector3, p2: Vector3, ray: Ray) => boolean
+    ): PickingInfo {
+        if (fastCheck || trianglePredicate) {
+            return unsupported(
+                "Scene.pickWithRay",
+                "Babylon Lite's synchronous picker returns the nearest bounding-box hit and does not expose fast-first-hit or per-triangle predicate modes."
+            );
+        }
+        const candidates = new Set<LiteMesh>(this._lite.meshes);
+        for (const wrapper of this.meshes) {
+            if (wrapper instanceof AbstractMesh) {
+                candidates.add(wrapper._lite);
+            }
+        }
+
+        const wrappers = new Map<NonNullable<LitePickingInfo["pickedMesh"]>, AbstractMesh>();
+        for (const candidate of candidates) {
+            if (candidate.thinInstances && candidate.thinInstances.count > 0) {
+                return unsupported(
+                    "Scene.pickWithRay",
+                    "Thin-instance transforms are not represented by Lite's AABB ray picker; pick the source mesh before adding thin instances or use Lite's GPU picker."
+                );
+            }
+            const registered = this._meshWrappers.get(candidate);
+            const wrapper = registered instanceof AbstractMesh ? registered : Mesh._fromLite(candidate, undefined, this);
+            wrappers.set(candidate, wrapper);
+        }
+
+        const info = litePickWithRay(
+            candidates,
+            {
+                origin: ray.origin.asArray(),
+                direction: ray.direction.asArray(),
+                length: ray.length,
+            },
+            {
+                predicate: (mesh) => {
+                    const wrapper = wrappers.get(mesh);
+                    return !!wrapper && (predicate ? predicate(wrapper) : wrapper.isEnabled() && wrapper.isVisible && wrapper.isPickable);
+                },
+                skipPickableCheck: !!predicate,
+            }
+        );
+        return PickingInfo._fromLite(info, info.pickedMesh ? (wrappers.get(info.pickedMesh) ?? null) : null, ray);
     }
 
     /** @internal The active Physics V2 engine, once `enablePhysics` has wired one. */

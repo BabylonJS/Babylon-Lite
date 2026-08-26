@@ -158,3 +158,69 @@ describe("shared index topology", () => {
         expect(narrow._gpu.indexFormat).toBe("uint16");
     });
 });
+
+describe("optional attribute buffers borrowed from the slab", () => {
+    // position (vec3, 12B, padded to 16) + color (vec4, 16B) = 32B/vertex.
+    const ATTR_STRIDE = 32;
+
+    it("points colorBuffer at the slab handle when attributeOffsets declares a color offset", () => {
+        const { engine } = makeEngine();
+        const slab = createStorageBuffer(engine, VERTS * ATTR_STRIDE, { writable: true, vertex: true });
+        const mesh = createMeshFromStorageBuffer(engine, "chunk", {
+            storage: slab,
+            indices: INDICES,
+            vertexCount: VERTS,
+            arrayStride: ATTR_STRIDE,
+            attributeOffsets: { position: 0, color: 16 },
+        });
+
+        // The slab handle, not a null/zero-filled fallback: this is the bug the ShaderMaterial
+        // render path silently masked by falling back to a freshly-allocated zero buffer.
+        expect(mesh._gpu.colorBuffer).toBe(mesh._gpu.positionBuffer);
+        expect(mesh._gpu.hasColor).toBe(true);
+        expect(mesh._gpu._vbLayout!._c).toEqual({ _stride: ATTR_STRIDE, _offset: 16 });
+
+        // Tangent/uv2 were never declared, so they stay absent rather than silently aliasing
+        // offset 0 (which would otherwise read position data back as tangent/uv2 data).
+        expect(mesh._gpu.tangentBuffer).toBeNull();
+        expect(mesh._gpu.uv2Buffer).toBeNull();
+        expect(mesh._gpu.hasTangent).toBe(false);
+        expect(mesh._gpu.hasUv2).toBe(false);
+    });
+
+    it("points tangentBuffer and uv2Buffer at the slab handle when their offsets are declared", () => {
+        const { engine } = makeEngine();
+        const slab = createStorageBuffer(engine, VERTS * ATTR_STRIDE, { writable: true, vertex: true });
+        const mesh = createMeshFromStorageBuffer(engine, "chunk", {
+            storage: slab,
+            indices: INDICES,
+            vertexCount: VERTS,
+            arrayStride: ATTR_STRIDE,
+            attributeOffsets: { position: 0, tangent: 12, uv2: 28 },
+        });
+
+        expect(mesh._gpu.tangentBuffer).toBe(mesh._gpu.positionBuffer);
+        expect(mesh._gpu.uv2Buffer).toBe(mesh._gpu.positionBuffer);
+        expect(mesh._gpu.hasTangent).toBe(true);
+        expect(mesh._gpu.hasUv2).toBe(true);
+        expect(mesh._gpu.colorBuffer).toBeNull();
+        expect(mesh._gpu.hasColor).toBe(false);
+    });
+
+    it("does not destroy the borrowed tangent/uv2/color buffers on dispose (still `_ownsVertexBuffers: false`)", () => {
+        const { engine } = makeEngine();
+        const slab = createStorageBuffer(engine, VERTS * ATTR_STRIDE, { writable: true, vertex: true });
+        const slabHandle = slab._buffer as unknown as { destroy: ReturnType<typeof vi.fn> };
+        const mesh = createMeshFromStorageBuffer(engine, "chunk", {
+            storage: slab,
+            indices: INDICES,
+            vertexCount: VERTS,
+            arrayStride: ATTR_STRIDE,
+            attributeOffsets: { position: 0, color: 16 },
+        });
+
+        expect(mesh._gpu._ownsVertexBuffers).toBe(false);
+        disposeMeshGpu(mesh);
+        expect(slabHandle.destroy).not.toHaveBeenCalled();
+    });
+});

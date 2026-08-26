@@ -18,7 +18,7 @@ import type { SceneContext } from "../scene/scene.js";
 import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
 import { assembleEnvironmentTextures } from "../loader-env/env-helpers.js";
 import { parseRGBE, computeSHFromEquirect } from "./hdr-parser.js";
-import { equirectToCubemapGPU, prefilterCubemapGPU, generateBrdfLut } from "./hdr-ibl-pipeline.js";
+import { equirectToCubemapGPU, prefilterCubemapGPU, generateBrdfLut, HDR_LOD_GENERATION_SCALE } from "./hdr-ibl-pipeline.js";
 import { mipLevelCount } from "../texture/mip-count.js";
 import { registerEnvSceneUniforms } from "../scene/scene-ubo-extras.js";
 
@@ -29,6 +29,8 @@ export interface HdrLoadOptions {
     faceSize?: number;
     /** When true, render the HDR cubemap as the skybox background. */
     useCubemapSkybox?: boolean;
+    /** When true, skip the background skybox renderable entirely. */
+    skipSkybox?: boolean;
     /** When true, skip the ground plane. */
     skipGround?: boolean;
     /** Skybox size matching BJS createDefaultEnvironment skyboxSize option. */
@@ -51,7 +53,11 @@ export async function loadHdrEnvironment(scene: SceneContext, url: string, optio
     const faceSize = options?.faceSize ?? 256;
 
     // 1. Fetch and parse RGBE
-    const buffer = await fetch(url).then((r) => r.arrayBuffer());
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error(`HDR ${response.status}: ${url}`);
+    }
+    const buffer = await response.arrayBuffer();
     const hdr = parseRGBE(buffer);
 
     // 2. Compute spherical harmonics from equirect (CPU)
@@ -68,7 +74,7 @@ export async function loadHdrEnvironment(scene: SceneContext, url: string, optio
     const brdfLut = generateBrdfLut(engine);
 
     // 6. Assemble
-    const textures = assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, 1.0, engine);
+    const textures = assembleEnvironmentTextures(specularCube, brdfLut, irradianceSH, HDR_LOD_GENERATION_SCALE, engine);
 
     scene._envTextures = textures;
     registerEnvSceneUniforms(scene);
@@ -89,10 +95,11 @@ export async function loadHdrEnvironment(scene: SceneContext, url: string, optio
     // exposure/contrast at build time into their per-mesh UBO). Backgrounds cost nothing here:
     // each builder stamps its own rebuild descriptor onto the renderable it returns.
     const useHdr = !!options?.useCubemapSkybox;
+    const skipSkybox = !!options?.skipSkybox;
     const skipGround = !!options?.skipGround;
     engine._dlr?.h(scene, url, faceSize);
     scene._deferredBuilders.push(async () => {
-        if (useHdr && textures.specularCubeView) {
+        if (useHdr && !skipSkybox && textures.specularCubeView) {
             let autoSkyboxSize = options?.skyboxSize;
             let rootPosition = options?.skyboxPosition;
             if (autoSkyboxSize === undefined || rootPosition === undefined) {
@@ -105,11 +112,11 @@ export async function loadHdrEnvironment(scene: SceneContext, url: string, optio
             const { buildHdrSkyboxRenderable } = await import("../material/pbr/background-hdr-skybox.js");
             scene._renderables.push(await buildHdrSkyboxRenderable(scene, textures, autoSkyboxSize / 2, rootPosition, primaryColor));
         }
-        if (!useHdr || !skipGround) {
+        if ((!useHdr && !skipSkybox) || !skipGround) {
             const primaryColor = scene.environmentPrimaryColor ?? [0.08697355964132344, 0.08697355964132344, 0.2122208331110881];
             const { computeSceneSize } = await import("../material/pbr/scene-size.js");
             const { groundSize, skyboxSize: autoSkyboxSize, rootPosition } = computeSceneSize(scene, options?.skyboxSize);
-            if (!useHdr) {
+            if (!useHdr && !skipSkybox) {
                 const { buildSolidSkyboxRenderable } = await import("../material/pbr/background-solid-skybox.js");
                 scene._renderables.push(buildSolidSkyboxRenderable(scene, textures, autoSkyboxSize / 2, rootPosition, primaryColor));
             }

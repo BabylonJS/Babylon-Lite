@@ -90,8 +90,8 @@ export interface GltfVb {
  *  larger than the attribute's tightly-packed element size). */
 export function accessorIsStrided(json: any, idx: number): boolean {
     const a = json.accessors[idx];
-    const bv = json.bufferViews[a.bufferView];
-    const stride: number | undefined = bv.byteStride;
+    const bv = a.bufferView === undefined ? undefined : json.bufferViews[a.bufferView];
+    const stride: number | undefined = bv?.byteStride;
     if (stride === undefined) {
         return false;
     }
@@ -147,11 +147,19 @@ function resolveColorVec4(json: any, binChunk: DataView, idx: number): Float32Ar
     const ct = accessor.componentType;
     const cb = COMP_BYTES[ct] ?? 4;
     const comps = TYPE_SIZES[accessor.type] ?? 4;
+    const out = new F32(accessor.count * 4);
+    if (accessor.bufferView === undefined) {
+        if (comps < 4) {
+            for (let v = 0; v < accessor.count; v++) {
+                out[v * 4 + 3] = 1;
+            }
+        }
+        return out;
+    }
     const bv = json.bufferViews[accessor.bufferView];
     const stride = bv.byteStride ?? comps * cb;
     const inv = ct === UNSIGNED_BYTE ? 1 / 255 : ct === UNSIGNED_SHORT ? 1 / 65535 : 1;
     const base = (bv.byteOffset ?? 0) + (accessor.byteOffset ?? 0);
-    const out = new F32(accessor.count * 4);
     for (let v = 0; v < accessor.count; v++) {
         const row = base + v * stride;
         for (let c = 0; c < 4; c++) {

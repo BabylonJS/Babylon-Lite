@@ -10,6 +10,16 @@ import {
 import type { GltfMeshData } from "../../../packages/babylon-lite/src/loader-gltf/load-gltf.js";
 
 const FLOAT = 5126;
+const UNSIGNED_BYTE = 5121;
+
+interface TestAccessor {
+    bufferView?: number;
+    byteOffset?: number;
+    componentType: number;
+    count: number;
+    type: string;
+    normalized?: boolean;
+}
 
 /** Build a minimal glTF JSON + binary chunk with POSITION+NORMAL interleaved in
  *  one stride-24 bufferView (offset 0 and 12), plus a tight TEXCOORD_0 bufferView. */
@@ -24,12 +34,13 @@ function makeInterleavedAsset() {
     new Float32Array(buf, interleaved.byteLength, uvs.length).set(uvs);
     const binChunk = new DataView(buf);
 
+    const accessors: TestAccessor[] = [
+        { bufferView: 0, byteOffset: 0, componentType: FLOAT, count: verts, type: "VEC3" }, // POSITION
+        { bufferView: 0, byteOffset: 12, componentType: FLOAT, count: verts, type: "VEC3" }, // NORMAL
+        { bufferView: 1, byteOffset: 0, componentType: FLOAT, count: verts, type: "VEC2" }, // TEXCOORD_0
+    ];
     const json = {
-        accessors: [
-            { bufferView: 0, byteOffset: 0, componentType: FLOAT, count: verts, type: "VEC3" }, // POSITION
-            { bufferView: 0, byteOffset: 12, componentType: FLOAT, count: verts, type: "VEC3" }, // NORMAL
-            { bufferView: 1, byteOffset: 0, componentType: FLOAT, count: verts, type: "VEC2" }, // TEXCOORD_0
-        ],
+        accessors,
         bufferViews: [
             { buffer: 0, byteOffset: 0, byteLength: interleaved.byteLength, byteStride: 24 },
             { buffer: 0, byteOffset: interleaved.byteLength, byteLength: uvs.byteLength }, // tight, no stride
@@ -45,6 +56,18 @@ describe("gltf-interleave", () => {
         expect(accessorIsStrided(json, 0)).toBe(true); // POSITION (stride 24 ≠ 12)
         expect(accessorIsStrided(json, 1)).toBe(true); // NORMAL (stride 24 ≠ 12)
         expect(accessorIsStrided(json, 2)).toBe(false); // TEXCOORD_0 (no byteStride)
+    });
+
+    it("treats a zero-initialized accessor without a bufferView as tight", () => {
+        expect(
+            accessorIsStrided(
+                {
+                    accessors: [{ componentType: FLOAT, count: 2, type: "VEC3" }],
+                    bufferViews: [],
+                },
+                0
+            )
+        ).toBe(false);
     });
 
     it("leaves strided POSITION/NORMAL CPU fields null (lazy) but records the GPU layout", async () => {
@@ -166,5 +189,27 @@ describe("gltf-interleave", () => {
         const second = buildInterleavedMesh(engine, meshData(48, 28), 1, {} as never);
 
         expect(first._gpu._vbKey).not.toBe(second._gpu._vbKey);
+    });
+
+    it("materializes zero-initialized colors when another attribute is interleaved", async () => {
+        const { json, binChunk, primitive } = makeInterleavedAsset();
+        const colorIndex = json.accessors.length;
+        json.accessors.push({ componentType: FLOAT, count: 2, type: "VEC3" });
+        (primitive.attributes as Record<string, number>).COLOR_0 = colorIndex;
+
+        const partial = (await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!;
+
+        expect(Array.from(partial._colors!)).toEqual([0, 0, 0, 1, 0, 0, 0, 1]);
+    });
+
+    it("materializes zero-initialized normalized UVs when another attribute is interleaved", async () => {
+        const { json, binChunk, primitive } = makeInterleavedAsset();
+        const uvIndex = json.accessors.length;
+        json.accessors.push({ componentType: UNSIGNED_BYTE, count: 2, type: "VEC2", normalized: true });
+        (primitive.attributes as Record<string, number>).TEXCOORD_0 = uvIndex;
+
+        const partial = (await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!;
+
+        expect(Array.from(partial._uvs!)).toEqual([0, 0, 0, 0]);
     });
 });

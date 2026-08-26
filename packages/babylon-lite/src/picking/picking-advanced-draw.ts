@@ -136,7 +136,9 @@ export async function prepareAdvancedDraw(
                         deform.bindDeformPickingProjection(engine, pass, pipeline, mesh, 1, !!discardBG);
                     }
                     pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
-                    pass.drawIndexed(gpu.indexCount, ti.count);
+                    // `_baseVertex` addresses this mesh's slot inside a shared vertex allocation
+                    // (a slab of thin-instanced geometry, e.g.); undefined/0 draws exactly as before.
+                    pass.drawIndexed(gpu.indexCount, ti.count, 0, gpu._baseVertex ?? 0);
                     ranges.push({
                         base: nextId,
                         count: ti.count,
@@ -183,7 +185,10 @@ export async function prepareAdvancedDraw(
                     deform.bindDeformPickingProjection(engine, pass, pipeline, mesh, vertexData ? 2 : 1, !!discardBG);
                 }
                 pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
-                pass.drawIndexed(gpu.indexCount);
+                // `_baseVertex` addresses this mesh's slot inside a shared vertex allocation
+                // (a slab slot), so shared-slot meshes pick their own geometry rather than
+                // whichever slot happens to sit at vertex 0; undefined/0 draws as before.
+                pass.drawIndexed(gpu.indexCount, 1, 0, gpu._baseVertex ?? 0);
                 ranges.push({
                     base: nextId,
                     count: 1,
