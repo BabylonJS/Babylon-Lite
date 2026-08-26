@@ -197,8 +197,8 @@ steps matches the animation and sprite managers.
   `onPhysicsTrigger` previously returned `void`; callers that ignore its return value
   need no runtime changes, while callers can now retain the disposer to unsubscribe.
 - **Queries** (`havok-queries.ts`): `physicsRaycast`, `shapeCast`, `shapeProximity`.
-  Shape casts accept `ignoreBodies` so callers can sweep a body's own shape without
-  immediately hitting that body.
+  Shape casts accept one `ignoreBody`, matching Havok's single optional ignored body
+  ID, so callers can sweep a body's own shape without immediately hitting that body.
 - **Heightfield** (`havok-heightfield.ts`): `createHeightFieldShape`.
 - **Character controller** (`character-controller.ts`): kinematic cast-and-slide
   movement; `moveWithCollisions` uses `worldStepSeconds(world)` (the world's step, or

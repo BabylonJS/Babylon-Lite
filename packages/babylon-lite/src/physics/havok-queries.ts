@@ -24,6 +24,7 @@
  * ```
  */
 
+import type { ShapeCastInput as HavokShapeCastInput } from "@babylonjs/havok";
 import type { Quat, Vec3 } from "../math/types.js";
 import type { PhysicsBody, PhysicsShape, PhysicsWorld } from "./havok.js";
 
@@ -53,8 +54,8 @@ export interface ShapeCastQuery {
     endPosition: Vec3;
     /** Whether trigger volumes count as hits. Default `false`. */
     shouldHitTriggers?: boolean;
-    /** Bodies to exclude, such as the body whose own shape is being swept. */
-    ignoreBodies?: readonly PhysicsBody[];
+    /** Body to exclude, such as the body whose own shape is being swept. */
+    ignoreBody?: PhysicsBody;
 }
 
 /** Result of a {@link shapeProximity} query. */
@@ -118,8 +119,8 @@ export interface RaycastResult {
 /** Ignore-none body filter handle: a single zero body id. Lazily built — a
  *  module-level `BigInt(0)` call is a module-init side effect that would defeat
  *  the package's `sideEffects: false` contract. */
-let _ignoreNone: bigint[] | null = null;
-function ignoreNone(): bigint[] {
+let _ignoreNone: [bigint] | null = null;
+function ignoreNone(): [bigint] {
     return (_ignoreNone ??= [BigInt(0)]);
 }
 
@@ -182,8 +183,8 @@ export function shapeCast(world: PhysicsWorld, query: ShapeCastQuery): ShapeCast
     const hknp = world._hknp;
     const collector = getCollector(world);
     const { rotation: r, startPosition: s, endPosition: e } = query;
-    const ignoredBodies = query.ignoreBodies?.length ? query.ignoreBodies.map((body) => body._hkBody[0]) : ignoreNone();
-    const hkQuery = [query.shape._hkShape, [r.x, r.y, r.z, r.w], [s.x, s.y, s.z], [e.x, e.y, e.z], query.shouldHitTriggers ?? false, ignoredBodies];
+    const ignoredBody: [bigint] = query.ignoreBody ? [BigInt(query.ignoreBody._hkBody[0])] : ignoreNone();
+    const hkQuery: HavokShapeCastInput = [query.shape._hkShape, [r.x, r.y, r.z, r.w], [s.x, s.y, s.z], [e.x, e.y, e.z], query.shouldHitTriggers ?? false, ignoredBody];
     hknp.HP_World_ShapeCastWithCollector(world._hkWorld, collector, hkQuery);
 
     if (hknp.HP_QueryCollector_GetNumHits(collector)[1] > 0) {
