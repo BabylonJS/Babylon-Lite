@@ -136,6 +136,16 @@ describe("build/index.d.ts", () => {
         expect(dts).not.toMatch(/\b_(?:capture|setup)Emitter\b|\b_emitterProvider\b|\bParticleEmitterState\b/);
     });
 
+    it("exposes the graph normalizer without its internal runtime or marker", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).toContain("normalizeNodeParticleGraph");
+        expect(dts).toMatch(/normalizeNodeParticleGraph\(graph: ParticleGraph\): Promise<ParticleGraph>/);
+        expect(dts).not.toContain("normalizeNodeParticleGraphRuntime");
+        expect(dts).not.toContain("_isGraphPlumbingNormalized");
+        expect(dts).not.toContain("_localVariableLoopEpoch");
+    });
+
     it("rejects invalid emitter fields while preserving extended provider options", () => {
         const probePath = resolve(BUILD_DIR, "public-api-types.probe.ts");
         try {

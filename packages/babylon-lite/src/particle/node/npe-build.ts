@@ -54,6 +54,8 @@ export interface NpeBuildState {
     emitter: Vec3;
     emitterWorldMatrix: Mat4;
     emitterInverseWorldMatrices?: ParticleEmitterInverse[];
+    /** @internal Shared only by Loop-scope local-variable evaluators in this system build. */
+    _localVariableLoopEpoch?: { value: number };
     isLocal: boolean;
     scene: SceneContext;
     textureBaseUrl?: string;

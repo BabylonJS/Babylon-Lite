@@ -827,6 +827,7 @@ export {
 
 // ─── Node Particles (NPE) ────────────────────────────────────────────
 export { parseNodeParticleSource } from "./particle/node/npe-parser.js";
+export { normalizeNodeParticleGraph } from "./particle/node/npe-graph-plumbing.js";
 export type { NodeParticleSet, BuildNodeParticleOptions, ParseNodeParticleOptions } from "./particle/node/node-particle.js";
 export { buildNodeParticleSet, parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
 export { buildNodeParticleSetWithFlowMaps } from "./particle/node/npe-flow-map.js";
