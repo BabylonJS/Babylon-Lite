@@ -7,8 +7,9 @@ import { _releaseDeviceLostRecoveryCapture, _retainDeviceLostRecoveryCapture } f
  * Enable best-effort WebGPU device-lost recovery for every registered SceneContext.
  *
  * Device reacquisition is coordinated per engine so additional renderer-specific
- * recovery strategies can share the same replacement device. Active context kinds
- * without an enabled strategy are intentionally left untouched.
+ * recovery strategies can share the same replacement device. Every rendering
+ * context kind that is registered when the device is lost needs its own strategy
+ * enabled — recovery fails rather than leave one bound to the lost device.
  */
 export function enableDeviceLostSceneRecovery(engine: EngineContext, options: DeviceLostRecoveryCallbacks = {}): DeviceLostRecoveryHandle {
     return _enableDeviceLostRecovery(engine, {

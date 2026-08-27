@@ -37,11 +37,35 @@ export function releaseTexture(tex: Texture2D): boolean {
     const c = (m.get(tex.texture) ?? 1) - 1;
     if (c <= 0) {
         tex.texture.destroy();
-        m.delete(tex.texture);
+        // Zero is kept rather than deleted so a destroyed texture stays distinguishable from one
+        // nothing ever took ownership of, which has no entry at all. `_isTextureReleased` reads
+        // that difference; the key is weak either way, so the entry retains nothing.
+        m.set(tex.texture, 0);
         return true;
     }
     m.set(tex.texture, c);
     return false;
+}
+
+/** True once every owner has released a Texture2D's current GPUTexture and `releaseTexture`
+ *  destroyed it. False both while the texture is owned and when nothing ever took ownership of it —
+ *  `createSolidTexture2D` and the glTF upload path take no reference, so their textures have no
+ *  entry until a consumer acquires one.
+ *
+ *  Read by device-lost recovery to tell a texture the application still uses from one it has
+ *  finished with. It lives here as a read rather than a flag written onto the wrapper by
+ *  `releaseTexture` so scenes that never enable recovery carry none of the bookkeeping.
+ *  @internal */
+export function _isTextureReleased(tex: Texture2D): boolean {
+    return texRefs().get(tex.texture) === 0;
+}
+
+/** How many owners hold a Texture2D's current GPUTexture; 0 when nothing does. Read by device-lost
+ *  recovery to carry the outgoing texture's ownership onto its replacement — the count, not just
+ *  the fact of it, because a derived family can hold several references to one texture.
+ *  @internal */
+export function _textureOwners(tex: Texture2D): number {
+    return texRefs().get(tex.texture) ?? 0;
 }
 
 /** Increment ref count on a raw GPUTexture (for env textures). */
@@ -56,7 +80,7 @@ export function releaseGPUTexture(tex: GPUTexture): boolean {
     const c = (m.get(tex) ?? 1) - 1;
     if (c <= 0) {
         tex.destroy();
-        m.delete(tex);
+        m.set(tex, 0);
         return true;
     }
     m.set(tex, c);

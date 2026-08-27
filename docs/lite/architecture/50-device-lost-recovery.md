@@ -11,9 +11,10 @@
 Device-lost recovery is an opt-in, engine-wide replacement-device workflow.
 Each public enabler registers exactly one rendering-context kind with the shared
 internal coordinator. The coordinator reacquires the `GPUDevice`, reconfigures
-all surfaces, and then dispatches only to enabled kind handlers. Context kinds
-without an enabled handler are intentionally skipped; no context is cast to
-another kind.
+all surfaces, rebuilds every captured texture, and then dispatches to the
+enabled kind handlers. A registered context whose kind has no enabled handler
+cannot be recovered, so the coordinator fails the recovery rather than resuming
+with it; no context is cast to another kind.
 
 ## Public API Surface
 
@@ -48,13 +49,18 @@ exported from the package root.
 | Text    | `text-renderer`   | `TextRenderer`      |
 
 On loss, the coordinator snapshots active registrations and collapses them to
-one handler per kind. It stops the engine, requests one replacement device with
-the original features and storage limits, rebuilds engine storage buffers,
-reconfigures every surface, refreshes swapchain render targets, resizes
-contexts, invokes each registered kind handler, and restarts the engine only if
-it had been running. Context kinds without a registered recovery handler are
-left untouched; this permits applications to intentionally recover only a
-subset of independent rendering contexts. Callback order is `onLost` before
+one handler per kind. It stops the engine, verifies that every registered
+context's kind has a handler, requests one replacement device with the original
+features and storage limits, rebuilds engine storage buffers, reconfigures every
+surface, refreshes swapchain render targets, resizes contexts, rebuilds every
+captured texture, invokes each registered kind handler, and restarts the engine
+only if it had been running. A registered context of a kind with no handler
+fails the recovery: leaving it on the lost device would let the application
+resume and encode draws against freed native objects, which kills the browser's
+renderer process rather than producing a catchable error. The check runs after
+the engine stops but before anything is disposed or a replacement device is
+requested, so `onRecoveryFailed` fires with the engine intact and the
+application can discard it deliberately. Callback order is `onLost` before
 replacement, `onRecovered` after rebuild and the first resumed frame, or
 `onRecoveryFailed` if any registered recovery step rejects.
 Standalone renderer handlers run before Scene rebuilding so a texture or glyph
@@ -219,6 +225,124 @@ Applications must enable recovery before creating/loading recoverable sprite
 textures. Disabling the last capture-using handle stops retaining sources for
 new resources; existing source records remain on their owning textures.
 
+### Captured textures
+
+Reachability is not sufficient to find them. A capture-stamped texture that no
+registered context references at loss time — a sprite atlas page populated in
+one render mode and idle in another — is invisible to the per-kind walks, and
+would survive recovery still holding the lost device's `GPUTexture`. The capture
+stamp therefore also tracks every texture it stamps, weakly, on the owning
+recovery state, and the coordinator rebuilds that set once per loss after
+surfaces are reconfigured and before any kind handler runs, so handlers bind
+textures that are already current. The per-kind walks remain, for textures that
+were never captured. Rebuilding is deduplicated on the recovery source and keyed
+by device, so a source is uploaded once per loss however many wrappers or walks
+reach it, a `url` source is fetched once, and a later loss rebuilds again. The
+weak set is compacted when it doubles, never below a floor.
+
+Wrappers derived from another wrapper are tracked in that same set. Both
+`cloneTexture2D` and the glTF sampler path spread a base wrapper, so the result
+inherits `_recoverySource` without passing through the stamp while owning its
+own `texture` field. Deriving a wrapper notifies the capture module, which finds
+the recovery state that captured the base's source — held weakly, so an
+application texture outliving its engine cannot pin that engine's registrations
+— and tracks the derived wrapper too. Tracking each one in its own right, rather
+than reaching them by way of their base, is what recovers a clone whose base has
+already been collected. The first wrapper reached rebuilds and the rest adopt
+its texture, view, and size; a wrapper carrying its own captured sampler
+descriptor gets that sampler rebuilt instead of the base's, so the glTF sampler
+wrapper keeps its own wrap and filter settings.
+
+Call sites reach that tracking two ways, for bundle-size reasons rather than
+behavioural ones. Sites holding an engine use the `engine._dlr` capture seam
+directly, which costs a property access and adds no module dependency. The glTF
+sampler path is one of these: giving `gltf-sampler-desc` a runtime import of
+`texture-2d` pulls that module into bundles that otherwise load it lazily or not
+at all, which measured far larger than the feature itself. `cloneTexture2D` has
+no engine — it is public API and glTF reaches it through
+`GltfFeature.wrapTexture` — so it calls a module-level hook that the capture
+installs and that stays null, and tree-shaken, in scenes that never enable
+recovery. Both paths call the same tracking function.
+
+Ownership and release are two separate questions, and recovery asks them
+separately because the answers differ per kind.
+
+Ownership is carried onto the replacement rather than re-established from the
+kind. A rebuilt `GPUTexture` starts unowned, so recovery reads how many owners
+the outgoing texture had and tops the replacement up to that number. Without it
+the first consumer to bind and then unbind a rebuilt texture destroys it while
+the application still holds the wrapper.
+
+The top-up is deferred until every per-context handler has run, and that is what
+makes the count correct rather than inflated. Recovery re-establishes part of the
+pre-loss ownership itself: `rebuildSceneGpu` discards a mesh's queued texture
+releases and re-acquires as it rebuilds the bind groups, and the dynamic-texture
+rebuild re-takes its own reference. Adding the full pre-loss count on top of
+those would double-count exactly them, leaving the texture permanently
+over-owned — final disposal never reaches zero, so it is never destroyed, and the
+released check below never fires for it on a later loss. Deferring needs no
+tracking of which reference came from where: whatever is still missing once the
+handlers have run is by definition ownership recovery did not restore by itself.
+It is also a count rather than a single re-acquire, because a derived family can
+hold several references to one texture — `cloneTexture2D` leaves that pairing to
+the caller — and restoring only the creator's would bring the replacement back
+short, so the next release would destroy a texture a sibling still points at.
+Kinds whose creator never acquired, `createSolidTexture2D` and the glTF
+`uploadTex` path, have no ownership to carry and get none. Wrappers that adopt
+take none either, exactly as `cloneTexture2D` takes none at creation: they share
+the references held for the texture they now point at.
+
+Draining the meshes' queued releases before snapshotting would look like the same
+fix and is not: for a solid or glTF-uploaded texture bound by a single renderable
+the only reference is that renderable's, so draining takes the count to zero,
+`releaseTexture` destroys the texture and leaves the zero entry below, and the
+rebuild is then skipped for a texture the re-recorded bind group is about to use.
+
+The queue of deferred ownership hangs off the engine's recovery state rather than
+the module, because a lost GPU process loses every device on the page at once and
+each engine then recovers on its own timeline. A shared queue would let whichever
+engine reached its handlers first drain every engine's entries, restoring the
+others to their full pre-loss count while their handlers had yet to re-acquire —
+reintroducing the double-count above across engines instead of within one. Per
+engine is also per run, but only because the coordinator makes it so: recovery
+installs the replacement device on the engine long before its handlers finish
+while `_armedDevice` still names the lost one, so a registration enabled in that
+window used to arm the replacement, and losing it started a second run on the
+same engine that shared this queue, the engine's device and its surface list.
+`_recovering` now holds `arm` off for the duration of a run. Nothing is dropped
+by waiting: the run re-arms once it resolves, and `GPUDevice.lost` is a promise,
+so a device lost during the window resolves for that later subscriber too and is
+recovered immediately afterwards. A failed run clears the flag without re-arming,
+because the engine may still be on the lost device and arming it would spin
+recovery forever. The queue is reached through the engine rather than
+threaded as a parameter because the handlers' own walks call `rebuildTexture2D`
+too, and a parameter those call sites did not pass would silently drop the
+ownership of anything they rebuilt first.
+
+Whether a texture has been *released* is asked of every kind, because every kind
+can reach that state — `releaseTexture` is public API, and its first call
+destroys a texture whose creator took no reference of its own. Rebuilding a
+destroyed texture hands a live one back to a wrapper the application has
+finished with, and for a texture that had owners, takes references nothing will
+ever release. Recovery therefore skips it.
+
+That question is answered by the ref-count map, which distinguishes three
+states: no entry means nothing ever took ownership, a positive count means the
+texture is owned, and a zero entry means every owner released it and
+`releaseTexture` destroyed it. `releaseTexture` leaves the zero behind rather
+than deleting it, which is what makes "destroyed" distinguishable from "never
+owned" — the key is weak either way, so the entry retains nothing. Reading three
+states rather than two is what lets the check cover solid and glTF-uploaded
+textures: treating their ownerless steady state as released would skip every one
+of them and leave a whole glTF scene on the lost device.
+
+The map is keyed on the `GPUTexture`, not the wrapper, so a derived family
+shares one entry and reads as released from whichever wrapper recovery visits
+first — whichever one performed the final release, no sibling rebuilds a
+destroyed texture. The state is read on the recovery path rather than recorded
+onto the wrapper by `releaseTexture`, which would put the bookkeeping in every
+scene whether or not it ever recovers.
+
 ### TextRenderer
 
 Text recovery enumerates only registered `text-renderer` contexts. It recreates
@@ -267,9 +391,30 @@ module-level side effects; mutable caches remain null until an explicit call.
 
 ## Test Specification
 
-- Coordinator unit tests cover mixed Scene/Sprite/Text registration, skipped
-  unregistered kinds, repeated registrations, safe idempotent disable, and
-  shared capture lifetime.
+- Coordinator unit tests cover mixed Scene/Sprite/Text registration, repeated
+  registrations, safe idempotent disable, and shared capture lifetime.
+- Fail-fast unit tests cover a registered context whose kind has no enabled
+  handler: the error names the offending kinds, deduplicated and stably ordered,
+  and is thrown before any resource is disposed or a replacement device is
+  requested.
+- Captured-texture unit tests cover weak tracking, rebuilding a texture no
+  registered context references, restoring bytes appended after creation into
+  the wrapper the application still holds, one rebuild per source per device,
+  derived wrappers (including one whose base was collected, and one carrying its
+  own sampler), a single shared rebuild leaving every wrapper on the same
+  texture/view/sampler, skipping a released texture across every recoverable
+  kind — both a single wrapper and a family whose clone performed the final
+  release — still rebuilding an ownerless texture nothing has released, each
+  creator-owned kind surviving one consumer acquire/release cycle, a derived
+  family's second reference surviving the rebuild, the dynamic rebuild's own
+  reference being counted rather than doubled, a handler that re-acquires as
+  it rebuilds its bind groups leaving a count final disposal can still bring to
+  zero, and two engines recovering concurrently — one parked inside its handlers
+  while the other completes — settling only their own textures.
+- A coordinator-driven test loses a device, parks the run inside its handlers,
+  then enables a further recovery kind and loses the replacement. It asserts no
+  second run starts on that engine while the first is in flight, and that the
+  deferred loss is nonetheless recovered once the first run settles.
 - Scene recovery unit tests replace the device under an ESM shadow generator
   and assert that its textures, sampler, UBOs, hidden blur resources, and nested
   render task are recreated while the generator identity remains stable and the

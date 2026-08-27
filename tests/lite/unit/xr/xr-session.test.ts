@@ -587,6 +587,8 @@ describe("xr-session lifecycle", () => {
             _samplerDescriptors: new WeakMap(),
             _captureRefs: 0,
             _meshCaptureRefs: 0,
+            _textures: new Set(),
+            _texturesPruneAt: 64,
         };
         const scene = createSceneContext(engine);
         const ctx = await enterXr(scene, { input: false });
