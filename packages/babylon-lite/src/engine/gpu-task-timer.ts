@@ -44,6 +44,7 @@ export interface GpuTaskTimer {
     readonly querySet: GPUQuerySet;
     readonly resolveBuffer: GPUBuffer;
     readonly readbackPool: GPUBuffer[];
+    readonly pendingReadbacks: Set<GPUBuffer>;
     readonly records: TaskTimingRecord[];
     readonly wrappedGraphs: WrappedFrameGraph[];
     readonly patchedContextLists: PatchedContextList[];
@@ -54,6 +55,7 @@ export interface GpuTaskTimer {
     droppedTaskCount: number;
     inFlight: number;
     skipFrame: boolean;
+    disposed: boolean;
 }
 
 /** Create the per-task GPU timer, or null when timestamp queries are unsupported. */
@@ -70,6 +72,7 @@ export function createGpuTaskTimer(device: GPUDevice): GpuTaskTimer | null {
             usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
         }),
         readbackPool: [],
+        pendingReadbacks: new Set(),
         records: [],
         wrappedGraphs: [],
         patchedContextLists: [],
@@ -80,6 +83,7 @@ export function createGpuTaskTimer(device: GPUDevice): GpuTaskTimer | null {
         droppedTaskCount: 0,
         inFlight: 0,
         skipFrame: false,
+        disposed: false,
     };
 }
 
@@ -97,7 +101,10 @@ export function installGpuTaskTimer(timer: GpuTaskTimer, engine: EngineContext, 
     };
     engine._gpuTaskTimerResolve = resolveTaskTiming;
     engine._gpuTimerResolve = resolveBoth;
-    return () => restoreWrappedFrameGraphs(timer, engine, previousResolve, resolveTaskTiming, resolveBoth);
+    return () => {
+        restoreWrappedFrameGraphs(timer, engine, previousResolve, resolveTaskTiming, resolveBoth);
+        disposeGpuTaskTimer(timer);
+    };
 }
 
 function patchSurfaceList(timer: GpuTaskTimer, list: SurfaceContext[]): void {
@@ -256,6 +263,9 @@ function beginTaskTimingFrame(timer: GpuTaskTimer, encoder: GPUCommandEncoder): 
 
 /** Resolve this frame's task timestamps after renderFrame has submitted the command buffer. */
 function finishTaskTimingFrame(timer: GpuTaskTimer, publish: (snapshot: RenderTaskGpuTimings) => void): void {
+    if (timer.disposed) {
+        return;
+    }
     timer.frameIndex++;
     const taskCount = timer.records.length;
     if (timer.skipFrame || taskCount === 0 || timer.inFlight > MAX_IN_FLIGHT_READBACKS) {
@@ -270,6 +280,7 @@ function finishTaskTimingFrame(timer: GpuTaskTimer, publish: (snapshot: RenderTa
     encoder.copyBufferToBuffer(timer.resolveBuffer, 0, readback, 0, byteLength);
     timer.device.queue.submit([encoder.finish()]);
     timer.inFlight++;
+    timer.pendingReadbacks.add(readback);
     void finishTaskTimingReadback(timer, {
         buffer: readback,
         byteLength,
@@ -293,6 +304,9 @@ async function finishTaskTimingReadback(timer: GpuTaskTimer, pending: PendingTas
         // Let the resolve/copy submit leave the JavaScript stack before mapping.
         await Promise.resolve();
         await buffer.mapAsync(GPUMapMode.READ, 0, pending.byteLength);
+        if (timer.disposed) {
+            return;
+        }
         const raw = new BigUint64Array(buffer.getMappedRange(0, pending.byteLength));
         const tasks: RenderTaskGpuTiming[] = [];
         for (const record of pending.records) {
@@ -303,14 +317,36 @@ async function finishTaskTimingReadback(timer: GpuTaskTimer, pending: PendingTas
             }
         }
         buffer.unmap();
+        timer.pendingReadbacks.delete(buffer);
         timer.readbackPool.push(buffer);
         timer.inFlight--;
         pending.publish(makeTimingSnapshot("available", true, true, pending.frameIndex, tasks, pending.droppedTaskCount));
     } catch (error) {
-        timer.inFlight--;
+        timer.pendingReadbacks.delete(buffer);
+        timer.inFlight = Math.max(0, timer.inFlight - 1);
         buffer.destroy();
-        pending.publish(makeTimingSnapshot("error", true, true, pending.frameIndex, [], pending.droppedTaskCount, readbackErrorMessage(error)));
+        if (!timer.disposed) {
+            pending.publish(makeTimingSnapshot("error", true, true, pending.frameIndex, [], pending.droppedTaskCount, readbackErrorMessage(error)));
+        }
     }
+}
+
+function disposeGpuTaskTimer(timer: GpuTaskTimer): void {
+    if (timer.disposed) {
+        return;
+    }
+    timer.disposed = true;
+    timer.querySet.destroy();
+    timer.resolveBuffer.destroy();
+    for (const buffer of timer.readbackPool) {
+        buffer.destroy();
+    }
+    for (const buffer of timer.pendingReadbacks) {
+        buffer.destroy();
+    }
+    timer.readbackPool.length = 0;
+    timer.pendingReadbacks.clear();
+    timer.inFlight = 0;
 }
 
 function readbackErrorMessage(error: unknown): string {

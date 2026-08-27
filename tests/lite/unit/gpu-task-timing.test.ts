@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext, RenderingContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { getRenderTaskGpuTimings, isRenderTaskGpuTimingSupported, setRenderTaskGpuTimingEnabled } from "../../../packages/babylon-lite/src/engine/gpu-task-timing";
@@ -7,7 +7,11 @@ import { createFrameGraph } from "../../../packages/babylon-lite/src/frame-graph
 import type { Pass } from "../../../packages/babylon-lite/src/frame-graph/pass";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
 
-const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUMapMode"> & { GPUMapMode?: { READ: number; WRITE: number } };
+const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUMapMode"> & {
+    GPUBufferUsage?: { COPY_DST: number; COPY_SRC: number; MAP_READ: number; QUERY_RESOLVE: number };
+    GPUMapMode?: { READ: number; WRITE: number };
+};
+gpuGlobals.GPUBufferUsage ??= { COPY_DST: 0x0008, COPY_SRC: 0x0004, MAP_READ: 0x0001, QUERY_RESOLVE: 0x0200 } as unknown as GPUBufferUsage;
 gpuGlobals.GPUMapMode ??= { READ: 0x1, WRITE: 0x2 } as unknown as GPUMapMode;
 
 function makeEngineWithFeatures(features: Iterable<GPUFeatureName>): EngineContext {
@@ -84,6 +88,51 @@ describe("render-task GPU timing public state", () => {
         expect(snapshot).toMatchObject({ status: "pending", supported: true, enabled: true, tasks: [] });
         expect(engine._gpuTaskTimerEpoch).toBe(7);
     });
+
+    it("creates a fresh timer after profiling is disabled and re-enabled", async () => {
+        const querySetDestroyers: ReturnType<typeof vi.fn>[] = [];
+        const bufferDestroyers: ReturnType<typeof vi.fn>[] = [];
+        const device = {
+            features: new Set<GPUFeatureName>(["timestamp-query"]),
+            createQuerySet: () => {
+                const destroy = vi.fn();
+                querySetDestroyers.push(destroy);
+                return { destroy } as unknown as GPUQuerySet;
+            },
+            createBuffer: () => {
+                const destroy = vi.fn();
+                bufferDestroyers.push(destroy);
+                return { destroy } as unknown as GPUBuffer;
+            },
+        } as unknown as GPUDevice;
+        const engine = {
+            _device: device,
+            surfaces: [],
+            _surfaces: [],
+        } as unknown as EngineContext;
+
+        await setRenderTaskGpuTimingEnabled(engine, true);
+        const firstTimer = engine._gpuTaskTimer;
+
+        expect(firstTimer).toBeDefined();
+        expect(querySetDestroyers).toHaveLength(1);
+        expect(bufferDestroyers).toHaveLength(1);
+
+        await setRenderTaskGpuTimingEnabled(engine, false);
+
+        expect(querySetDestroyers[0]).toHaveBeenCalledOnce();
+        expect(bufferDestroyers[0]).toHaveBeenCalledOnce();
+        expect(engine._gpuTaskTimer).toBeUndefined();
+
+        await setRenderTaskGpuTimingEnabled(engine, true);
+
+        expect(engine._gpuTaskTimer).toBeDefined();
+        expect(engine._gpuTaskTimer).not.toBe(firstTimer);
+        expect(querySetDestroyers).toHaveLength(2);
+        expect(bufferDestroyers).toHaveLength(2);
+
+        await setRenderTaskGpuTimingEnabled(engine, false);
+    });
 });
 
 describe("GPU task timing installer", () => {
@@ -123,9 +172,10 @@ describe("GPU task timing installer", () => {
                     }) as unknown as GPUCommandEncoder,
                 queue: { submit: () => undefined },
             } as unknown as GPUDevice,
-            querySet: {} as GPUQuerySet,
-            resolveBuffer: {} as GPUBuffer,
+            querySet: { destroy: () => undefined } as unknown as GPUQuerySet,
+            resolveBuffer: { destroy: () => undefined } as unknown as GPUBuffer,
             readbackPool: [readback],
+            pendingReadbacks: new Set(),
             records: [],
             wrappedGraphs: [],
             patchedContextLists: [],
@@ -136,6 +186,7 @@ describe("GPU task timing installer", () => {
             droppedTaskCount: 0,
             inFlight: 0,
             skipFrame: false,
+            disposed: false,
         };
         const snapshots: unknown[] = [];
         let previousResolveCalls = 0;
@@ -182,9 +233,10 @@ describe("GPU task timing installer", () => {
         Object.assign(engine, { surfaces, _surfaces: surfaces });
         const timer: GpuTaskTimer = {
             device: {} as GPUDevice,
-            querySet: {} as GPUQuerySet,
-            resolveBuffer: {} as GPUBuffer,
+            querySet: { destroy: () => undefined } as unknown as GPUQuerySet,
+            resolveBuffer: { destroy: () => undefined } as unknown as GPUBuffer,
             readbackPool: [],
+            pendingReadbacks: new Set(),
             records: [],
             wrappedGraphs: [],
             patchedContextLists: [],
@@ -195,6 +247,7 @@ describe("GPU task timing installer", () => {
             droppedTaskCount: 0,
             inFlight: 0,
             skipFrame: false,
+            disposed: false,
         };
         const restore = installGpuTaskTimer(timer, engine, () => undefined);
 
@@ -208,5 +261,118 @@ describe("GPU task timing installer", () => {
         restore();
         expect(laterFg.execute).toBe(originalExecute);
         expect(engine._gpuTimerResolve).toBeUndefined();
+    });
+
+    it("destroys query, resolve, pooled, and pending readback resources on restore", () => {
+        const engine = makeEngineWithFeatures(["timestamp-query"]);
+        const surfaces = [] as unknown as EngineContext["_surfaces"];
+        Object.assign(engine, { surfaces, _surfaces: surfaces });
+        const querySetDestroy = vi.fn();
+        const resolveBufferDestroy = vi.fn();
+        const pooledReadbackDestroy = vi.fn();
+        const pendingReadbackDestroy = vi.fn();
+        const pendingReadback = { destroy: pendingReadbackDestroy } as unknown as GPUBuffer;
+        const timer: GpuTaskTimer = {
+            device: {} as GPUDevice,
+            querySet: { destroy: querySetDestroy } as unknown as GPUQuerySet,
+            resolveBuffer: { destroy: resolveBufferDestroy } as unknown as GPUBuffer,
+            readbackPool: [{ destroy: pooledReadbackDestroy } as unknown as GPUBuffer],
+            pendingReadbacks: new Set([pendingReadback]),
+            records: [],
+            wrappedGraphs: [],
+            patchedContextLists: [],
+            patchedSurfaceLists: [],
+            taskCapacity: 64,
+            currentEncoder: null,
+            frameIndex: 0,
+            droppedTaskCount: 0,
+            inFlight: 1,
+            skipFrame: false,
+            disposed: false,
+        };
+        const restore = installGpuTaskTimer(timer, engine, () => undefined);
+
+        restore();
+        restore();
+
+        expect(querySetDestroy).toHaveBeenCalledOnce();
+        expect(resolveBufferDestroy).toHaveBeenCalledOnce();
+        expect(pooledReadbackDestroy).toHaveBeenCalledOnce();
+        expect(pendingReadbackDestroy).toHaveBeenCalledOnce();
+        expect(timer.readbackPool).toEqual([]);
+        expect(timer.pendingReadbacks.size).toBe(0);
+        expect(timer.inFlight).toBe(0);
+        expect(timer.disposed).toBe(true);
+    });
+
+    it("does not publish a readback that completes after restore", async () => {
+        const engine = makeEngineWithFeatures(["timestamp-query"]);
+        engine._currentEncoder = {
+            beginComputePass: () => ({ end: () => undefined }) as unknown as GPUComputePassEncoder,
+        } as unknown as GPUCommandEncoder;
+        const fg = createFrameGraph(engine);
+        fg._tasks.push(makeTask(engine, "late-task", 1, [], true));
+        const surface = { _renderingContexts: [{ frameGraph: fg }] };
+        Object.assign(engine, { surfaces: [surface], _surfaces: [surface] });
+
+        let finishMap!: () => void;
+        const mapAsync = vi.fn(
+            () =>
+                new Promise<void>((resolve) => {
+                    finishMap = resolve;
+                })
+        );
+        const readbackDestroy = vi.fn();
+        const readbackUnmap = vi.fn();
+        const readback = {
+            mapAsync,
+            getMappedRange: () => new BigUint64Array([0n, 1_000_000n]).buffer,
+            unmap: readbackUnmap,
+            destroy: readbackDestroy,
+        } as unknown as GPUBuffer;
+        const timer: GpuTaskTimer = {
+            device: {
+                createCommandEncoder: () =>
+                    ({
+                        resolveQuerySet: () => undefined,
+                        copyBufferToBuffer: () => undefined,
+                        finish: () => ({}) as GPUCommandBuffer,
+                    }) as unknown as GPUCommandEncoder,
+                queue: { submit: () => undefined },
+            } as unknown as GPUDevice,
+            querySet: { destroy: () => undefined } as unknown as GPUQuerySet,
+            resolveBuffer: { destroy: () => undefined } as unknown as GPUBuffer,
+            readbackPool: [readback],
+            pendingReadbacks: new Set(),
+            records: [],
+            wrappedGraphs: [],
+            patchedContextLists: [],
+            patchedSurfaceLists: [],
+            taskCapacity: 64,
+            currentEncoder: null,
+            frameIndex: 0,
+            droppedTaskCount: 0,
+            inFlight: 0,
+            skipFrame: false,
+            disposed: false,
+        };
+        const snapshots: unknown[] = [];
+        const restore = installGpuTaskTimer(timer, engine, (snapshot) => snapshots.push(snapshot));
+
+        fg.execute();
+        engine._gpuTimerResolve?.();
+        await Promise.resolve();
+
+        expect(mapAsync).toHaveBeenCalledOnce();
+        expect(timer.pendingReadbacks.has(readback)).toBe(true);
+
+        restore();
+        finishMap();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(readbackDestroy).toHaveBeenCalledOnce();
+        expect(readbackUnmap).not.toHaveBeenCalled();
+        expect(snapshots).toEqual([]);
     });
 });

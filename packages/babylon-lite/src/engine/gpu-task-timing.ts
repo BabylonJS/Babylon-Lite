@@ -68,6 +68,7 @@ export async function setRenderTaskGpuTimingEnabled(engine: EngineContext, enabl
         engine._gpuTaskTimerWanted = false;
         engine._gpuTaskTimerDisable?.();
         engine._gpuTaskTimerDisable = undefined;
+        engine._gpuTaskTimer = undefined;
         const supported = isRenderTaskGpuTimingSupported(engine);
         engine._gpuTaskTimingResult = makeTimingSnapshot(supported ? "disabled" : "unsupported", supported, false, 0, [], 0);
         return engine._gpuTaskTimingResult;
