@@ -13,11 +13,11 @@ interface BundleInfo {
 
 const MANIFEST_DIR = resolve(__dirname, "../../../lab/public/bundle/manifest");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-info");
-const SCENE_304_SOURCE = resolve(__dirname, "../../../lab/lite/src/lite/scene304.ts");
+const SCENE_305_SOURCE = resolve(__dirname, "../../../lab/lite/src/lite/scene305.ts");
 const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 276, 277, 280, 281, 283, 284];
 const PROVIDER_ISOLATION_SCENES = [12, ...CANONICAL_PARTICLE_SCENES, 300, 301, 302];
 const SPRITE_2D_BLEND_SCENES = [50, 300, 301];
-const GRAPH_PLUMBING_SCENES = [...CANONICAL_PARTICLE_SCENES, 302, 304];
+const GRAPH_PLUMBING_SCENES = [...CANONICAL_PARTICLE_SCENES, 302, 305];
 /** The per-scene manifests are build output, not tracked source, so the specs that
  *  read them self-skip in CI's Unit Tests job (which runs before any build). The
  *  Bundle Size job re-runs them after `pnpm build:bundle-scenes`, and local
@@ -64,8 +64,8 @@ function expectEmbeddedTextureModuleIsolation(sceneId: number, moduleIds: string
 }
 
 describe("Particle bundle feature isolation", () => {
-    it("keeps the frozen scene304 fixture free of camera controls", () => {
-        expect(readFileSync(SCENE_304_SOURCE, "utf8")).not.toMatch(/\battachControl\b|arc-rotate-controls/);
+    it("keeps the frozen scene305 fixture free of camera controls", () => {
+        expect(readFileSync(SCENE_305_SOURCE, "utf8")).not.toMatch(/\battachControl\b|arc-rotate-controls/);
     });
 
     it("rejects named embedded-texture chunks without bundle-info except for scene281", () => {
@@ -233,11 +233,11 @@ describe("Particle bundle feature isolation", () => {
             const runtimeChunks = new Set(manifest.runtimeChunks ?? []);
             expect(runtimeChunks.size, `scene${sceneId} has no runtime chunks recorded`).toBeGreaterThan(0);
             const normalizerChunks = [...runtimeChunks].filter((chunk) => chunk.includes("npe-graph-plumbing-runtime"));
-            if (sceneId === 304) {
-                expect(normalizerChunks.length, "scene304 must fetch the heavy graph-plumbing runtime chunk").toBeGreaterThan(0);
+            if (sceneId === 305) {
+                expect(normalizerChunks.length, "scene305 must fetch the heavy graph-plumbing runtime chunk").toBeGreaterThan(0);
                 expect(
                     [...runtimeChunks].filter((chunk) => chunk.includes("arc-rotate-controls")),
-                    "scene304 must not fetch an arc-rotate-controls runtime chunk"
+                    "scene305 must not fetch an arc-rotate-controls runtime chunk"
                 ).toEqual([]);
             } else {
                 expect(normalizerChunks, `scene${sceneId} must not fetch the heavy graph-plumbing runtime`).toEqual([]);
@@ -255,24 +255,24 @@ describe("Particle bundle feature isolation", () => {
             const helperModules = runtimeModuleIds.filter((id) => /\/particle\/node\/npe-graph-plumbing\.[jt]s$/.test(id));
             const runtimeModules = runtimeModuleIds.filter((id) => /\/particle\/node\/npe-graph-plumbing-runtime\.[jt]s$/.test(id));
             const localModules = runtimeModuleIds.filter((id) => /\/particle\/node\/blocks\/particle-local-variable-block\.[jt]s$/.test(id));
-            if (sceneId === 304) {
+            if (sceneId === 305) {
                 expect(
-                    runtimeModuleIds.filter((id) => /\/scene304-teleport-npe\.ts$/.test(id)),
-                    "scene304 must keep its checked-in graph in the ignored *-npe.ts payload convention"
+                    runtimeModuleIds.filter((id) => /\/scene305-teleport-npe\.ts$/.test(id)),
+                    "scene305 must keep its checked-in graph in the ignored *-npe.ts payload convention"
                 ).toHaveLength(1);
-                expect(helperModules.length, "scene304 must fetch the thin graph-plumbing helper module").toBeGreaterThan(0);
-                expect(runtimeModules.length, "scene304 must fetch the heavy graph-plumbing runtime module").toBeGreaterThan(0);
-                expect(localModules.length, "scene304 must fetch the Particle LocalVariable evaluator").toBeGreaterThan(0);
+                expect(helperModules.length, "scene305 must fetch the thin graph-plumbing helper module").toBeGreaterThan(0);
+                expect(runtimeModules.length, "scene305 must fetch the heavy graph-plumbing runtime module").toBeGreaterThan(0);
+                expect(localModules.length, "scene305 must fetch the Particle LocalVariable evaluator").toBeGreaterThan(0);
                 expect(
                     runtimeModuleIds.filter((id) => /\/camera\/arc-rotate-controls\.[jt]s$/.test(id)),
-                    "scene304 must not fetch the arc-rotate-controls runtime module"
+                    "scene305 must not fetch the arc-rotate-controls runtime module"
                 ).toEqual([]);
                 const offenders = runtimeModuleIds.filter((id) =>
                     /\/particle\/(?:particle-(?:blend|sprite-2d|sprite-2d-blend-modes)|node\/npe-(?:blend-modes|emitter-provider|flow-map-runtime|noise-runtime|texture-update-runtime|texture-content))\.[jt]s$/.test(
                         id
                     )
                 );
-                expect(offenders, "scene304 must contain only default-builder Phase 3 plumbing").toEqual([]);
+                expect(offenders, "scene305 must contain only default-builder Phase 3 plumbing").toEqual([]);
             } else {
                 expect(helperModules, `scene${sceneId} must not fetch the thin graph-plumbing helper module`).toEqual([]);
                 expect(runtimeModules, `scene${sceneId} must not fetch the heavy graph-plumbing runtime module`).toEqual([]);

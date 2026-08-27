@@ -2,17 +2,17 @@ import { test, expect } from "../parity-fixtures";
 import * as path from "path";
 import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
 
-const sceneConfig = getSceneConfig(304);
-const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene304-npe-teleport");
+const sceneConfig = getSceneConfig(305);
+const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene305-npe-teleport");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
-test.skip(!!sceneConfig.skipParity, "Scene 304 skipped via skipParity in scene-config.json");
+test.skip(!!sceneConfig.skipParity, "Scene 305 skipped via skipParity in scene-config.json");
 
-test("Scene 304 — NPE Teleport graph plumbing matches Babylon.js reference", async ({ page }, testInfo) => {
+test("Scene 305 — NPE Teleport graph plumbing matches Babylon.js reference", async ({ page }, testInfo) => {
     const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 304 });
+    await captureGolden(browser, { sceneId: 305 });
 
-    await page.goto("/scene304.html");
+    await page.goto("/scene305.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
 

@@ -1,31 +1,31 @@
 import { SCENE262_NPE_JSON } from "./scene262-npe.js";
 
-interface Scene304Input {
+interface Scene305Input {
     name?: string;
     targetBlockId?: number;
     targetConnectionName?: string;
     [key: string]: unknown;
 }
 
-interface Scene304Block {
+interface Scene305Block {
     customType?: string;
     id: number;
     name?: string;
-    inputs: Scene304Input[];
+    inputs: Scene305Input[];
     [key: string]: unknown;
 }
 
-interface Scene304Graph {
-    blocks: Scene304Block[];
+interface Scene305Graph {
+    blocks: Scene305Block[];
     [key: string]: unknown;
 }
 
-interface Scene304Consumer {
+interface Scene305Consumer {
     readonly blockId: number;
     readonly inputName: string;
 }
 
-function addPhase3CValueRoute(graph: Scene304Graph, nextId: { value: number }): void {
+function addPhase3CValueRoute(graph: Scene305Graph, nextId: { value: number }): void {
     const elbowId = nextId.value++;
     const debugId = nextId.value++;
     const localId = nextId.value++;
@@ -60,7 +60,7 @@ function addPhase3CValueRoute(graph: Scene304Graph, nextId: { value: number }): 
     sizeInput.targetConnectionName = "output";
 }
 
-function addTeleportFanOut(graph: Scene304Graph, sourceBlockId: number, sourceConnectionName: string, consumers: readonly Scene304Consumer[], nextId: { value: number }): void {
+function addTeleportFanOut(graph: Scene305Graph, sourceBlockId: number, sourceConnectionName: string, consumers: readonly Scene305Consumer[], nextId: { value: number }): void {
     const entryPointId = nextId.value++;
     graph.blocks.push({
         customType: "BABYLON.ParticleTeleportInBlock",
@@ -88,8 +88,8 @@ function addTeleportFanOut(graph: Scene304Graph, sourceBlockId: number, sourceCo
 }
 
 /** Scene 262 with deterministic value/local-variable plumbing and particle flow routed through Teleport blocks. */
-export function createScene304NpeGraph(): object {
-    const graph = structuredClone(SCENE262_NPE_JSON) as unknown as Scene304Graph;
+export function createScene305NpeGraph(): object {
+    const graph = structuredClone(SCENE262_NPE_JSON) as unknown as Scene305Graph;
     const nextId = { value: 1000 };
 
     addPhase3CValueRoute(graph, nextId);
