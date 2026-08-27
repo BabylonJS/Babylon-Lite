@@ -207,6 +207,7 @@ stages:
             steps:
                 - checkout: self
                   persistCredentials: true
+                  fetchDepth: 0
 
                 - task: UseNode@1
                   inputs:
@@ -220,8 +221,11 @@ stages:
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
+                - template: config/templates/select-affected-scenes.yml
+
                 - script: pnpm exec playwright install chromium
                   displayName: "Install Playwright browsers"
+                  condition: eq(variables['RUN_BUNDLE_TESTS'], 'true')
 
                 # Cache remote scene assets (models/textures/env fetched during
                 # measurement) across runs/PRs. The cache is a pure URL->bytes store
@@ -234,6 +238,7 @@ stages:
                 # never incorrect.
                 - task: Cache@2
                   displayName: "Cache remote scene assets"
+                  condition: eq(variables['RUN_BUNDLE_TESTS'], 'true')
                   inputs:
                       key: 'bundle-assets | v1 | "$(Build.BuildId)"'
                       restoreKeys: |
@@ -252,8 +257,10 @@ stages:
                 # are what actually gate size, are unaffected.
                 - script: pnpm build:bundle-scenes
                   displayName: "Build bundle scenes"
+                  condition: eq(variables['RUN_BUNDLE_TESTS'], 'true')
                   env:
                       SKIP_BJS: "true"
+                      BUNDLE_SCENES: "$(AFFECTED_BUNDLE_SCENES)"
 
                 # Bundle-content unit specs read the per-scene manifests under
                 # lab/public/bundle/manifest/. Those are build output rather than
@@ -261,20 +268,24 @@ stages:
                 # build) self-skips them — run them here, where the build exists.
                 - script: npx vitest run --project unit tests/lite/unit/bundle-content-no-f64.test.ts tests/lite/unit/npe-particle-bundle-content.test.ts
                   displayName: "Bundle content unit tests"
+                  condition: eq(variables['RUN_BUNDLE_TESTS'], 'true')
 
                 # Absolute ceiling checks (scene-config.json maxRawKB)
                 - script: npx playwright test tests/lite/parity/bundle-size.spec.ts --reporter=junit
                   displayName: "Bundle size ceiling checks"
+                  condition: eq(variables['RUN_BUNDLE_TESTS'], 'true')
                   env:
                       HEADLESS: "true"
+                      REUSE_BROWSER: "1"
+                      BUNDLE_SCENES: "$(AFFECTED_BUNDLE_SCENES)"
                       PLAYWRIGHT_JUNIT_OUTPUT_NAME: test-results/bundle-ceiling-junit.xml
 
                 - script: npx tsx scripts/report-test-results.ts test-results/bundle-ceiling-junit.xml
-                  condition: always()
+                  condition: and(always(), eq(variables['RUN_BUNDLE_TESTS'], 'true'))
                   displayName: "Report bundle-size results to Azure"
 
                 - task: PublishTestResults@2
-                  condition: always()
+                  condition: and(always(), eq(variables['RUN_BUNDLE_TESTS'], 'true'))
                   displayName: "Publish bundle-size test results"
                   inputs:
                       testResultsFormat: JUnit
@@ -283,7 +294,7 @@ stages:
 
                 # Generate bundle-size delta comment for PR
                 - script: npx tsx scripts/report-bundle-size-deltas.ts
-                  condition: always()
+                  condition: and(always(), eq(variables['RUN_BUNDLE_TESTS'], 'true'))
                   displayName: "Generate bundle-size delta comment"
 
                 - task: GitHubComment@0
@@ -336,12 +347,16 @@ stages:
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
+                - template: config/templates/select-affected-scenes.yml
+
                 # Build current bundle scenes (skip size measurement — not needed for perf)
                 - script: pnpm build:bundle-scenes
                   displayName: "Build current bundle scenes"
+                  condition: eq(variables['RUN_PERF_TESTS'], 'true')
                   env:
                       SKIP_BJS: "true"
                       SKIP_MEASURE: "true"
+                      BUNDLE_SCENES: "$(AFFECTED_PERF_SCENES)"
 
                 # Resolve baseline ref SHA for cache key.
                 # Must mirror getBaselineRef() in scripts/build-perf-baseline.ts so the cache key
@@ -369,18 +384,22 @@ stages:
                       echo "Baseline SHA: $BASELINE_SHA"
                       mkdir -p lab/public/bundle-baseline
                   displayName: "Resolve baseline ref"
+                  condition: eq(variables['RUN_PERF_TESTS'], 'true')
 
                 - task: Cache@2
                   inputs:
-                      key: '"perf-baseline" | "$(BASELINE_SHA)"'
+                      key: '"perf-baseline" | "$(BASELINE_SHA)" | "$(AFFECTED_PERF_SCENES_HASH)"'
                       path: $(System.DefaultWorkingDirectory)/lab/public/bundle-baseline
                       cacheHitVar: BASELINE_CACHE_HIT
                   displayName: "Cache baseline bundles"
+                  condition: eq(variables['RUN_PERF_TESTS'], 'true')
 
                 # Build baseline bundle scenes from last release tag (or master)
                 - script: pnpm build:perf-baseline
                   displayName: "Build baseline bundle scenes"
-                  condition: ne(variables.BASELINE_CACHE_HIT, 'true')
+                  condition: and(eq(variables['RUN_PERF_TESTS'], 'true'), ne(variables.BASELINE_CACHE_HIT, 'true'))
+                  env:
+                      BUNDLE_SCENES: "$(AFFECTED_PERF_SCENES)"
 
                 # Generate baseline HTML loader pages (needed even on cache hit)
                 - script: |
@@ -397,13 +416,16 @@ stages:
                       console.log('Generated ' + scenes.length + ' baseline HTML pages');
                       "
                   displayName: "Generate baseline HTML pages"
-                  condition: eq(variables.BASELINE_CACHE_HIT, 'true')
+                  condition: and(eq(variables['RUN_PERF_TESTS'], 'true'), eq(variables.BASELINE_CACHE_HIT, 'true'))
 
                 # Runs current vs baseline on same BrowserStack macOS Chrome instance
                 - script: pnpm test:perf-cloud
                   displayName: "Run perf regression tests (current vs stable)"
+                  condition: eq(variables['RUN_PERF_TESTS'], 'true')
                   env:
                       HEADLESS: "true"
+                      REUSE_BROWSER: "1"
+                      PERF_SCENES: "$(AFFECTED_PERF_SCENE_IDS)"
                       PERF_REGRESSION_PCT: "$(PERF_REGRESSION_PCT)"
                       PERF_FRAMES: "$(PERF_FRAMES)"
                       PERF_RUNS: "$(PERF_RUNS)"
@@ -418,7 +440,7 @@ stages:
                       npx tsx scripts/redact-secrets.ts sanitize test-results/perf-junit.xml test-results/perf-report
                       npx tsx scripts/redact-secrets.ts verify test-results/perf-junit.xml test-results/perf-report
                       echo "##vso[task.setvariable variable=ArtifactsSafe]true"
-                  condition: always()
+                  condition: and(always(), eq(variables['RUN_PERF_TESTS'], 'true'))
                   displayName: "Sanitize and verify publishable perf artifacts"
                   env:
                       BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
@@ -454,6 +476,7 @@ stages:
                 ReportUploaded: "false"
             steps:
                 - checkout: self
+                  fetchDepth: 0
 
                 - task: UseNode@1
                   inputs:
@@ -467,11 +490,15 @@ stages:
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
+                - template: config/templates/select-affected-scenes.yml
+
                 - script: pnpm build:bundle-scenes
                   displayName: "Build bundle scenes"
+                  condition: eq(variables['RUN_PARITY_TESTS'], 'true')
                   env:
                       SKIP_BJS: "true"
                       SKIP_MEASURE: "true"
+                      BUNDLE_SCENES: "$(AFFECTED_PARITY_SCENES)"
 
                 # Run parity tests on BrowserStack (macOS Chrome with real WebGPU)
                 # via a direct CDP connection — NO browserstack-node-sdk. The wait
@@ -484,8 +511,11 @@ stages:
                 # from the BabylonJS-BrowserStack variable group.
                 - script: bash scripts/browserstack-wait.sh pnpm test:parity-cloud
                   displayName: "Run parity tests (BrowserStack, sharded)"
+                  condition: eq(variables['RUN_PARITY_TESTS'], 'true')
                   env:
                       HEADLESS: "true"
+                      REUSE_BROWSER: "1"
+                      AFFECTED_PARITY_SCENE_IDS: "$(AFFECTED_PARITY_SCENE_IDS)"
                       BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
                       BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
                       BSTACK_SESSIONS_REQUIRED: "2"
@@ -498,7 +528,7 @@ stages:
                       npx tsx scripts/redact-secrets.ts sanitize test-results/parity-junit.xml test-results/parity-report
                       npx tsx scripts/redact-secrets.ts verify test-results/parity-junit.xml test-results/parity-report
                       echo "##vso[task.setvariable variable=ArtifactsSafe]true"
-                  condition: always()
+                  condition: and(always(), eq(variables['RUN_PARITY_TESTS'], 'true'))
                   displayName: "Sanitize and verify publishable parity artifacts"
                   env:
                       BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"

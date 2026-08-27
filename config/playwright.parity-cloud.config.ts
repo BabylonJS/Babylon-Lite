@@ -36,6 +36,7 @@ const useBrowserStack = !!(process.env.BROWSERSTACK_USERNAME && process.env.BROW
 // Number of parallel BrowserStack sessions / Playwright workers. Set by the wait
 // script in CI; defaults conservatively so a bare cloud run grabs one session.
 const ciWorkers = process.env.CIWORKERS && Number(process.env.CIWORKERS) > 0 ? Number(process.env.CIWORKERS) : undefined;
+const selectedSceneIds = process.env.AFFECTED_PARITY_SCENE_IDS?.split(",").filter(Boolean);
 
 // SwiftShader flags for local CI fallback (no BrowserStack)
 const swiftShaderArgs =
@@ -45,6 +46,7 @@ const swiftShaderArgs =
 
 export default defineConfig({
     testDir: "../tests/lite/parity/scenes",
+    ...(selectedSceneIds?.length ? { testMatch: selectedSceneIds.map((id) => `scene${id}-*.spec.ts`) } : {}),
     timeout: 120_000,
     retries: 1,
     workers: ciWorkers ?? (useBrowserStack ? 1 : 2),
