@@ -128,7 +128,7 @@ export interface PhysicsMassProperties {
     inertiaOrientation?: Quat;
 }
 
-/** Principal body axis whose angular motion may be locked. */
+/** Body-local axis whose angular motion may be locked. */
 export type PhysicsRotationAxis = "x" | "y" | "z";
 
 /** Pivot/axis options used to create a physics constraint. */
@@ -159,6 +159,8 @@ export interface PhysicsBody {
     /** @internal */ readonly _hkBody: any;
     /** @internal */ readonly _world: PhysicsWorld;
     /** @internal */ _shape?: PhysicsShape | null;
+    /** @internal */ _rotationLockMask?: number;
+    /** @internal */ _massPropertiesTransform?: (massProperties: any[]) => void;
     /** @internal */ _preStep: boolean;
     /** @internal How a moved node is propagated to the body pre-step (TELEPORT by default). */
     _prestepType: PhysicsPrestepType;
@@ -1054,10 +1056,10 @@ export function setPhysicsShapeMaterial(world: PhysicsWorld, shape: PhysicsShape
 // ─── Mass ────────────────────────────────────────────────────────────
 
 /**
- * Sets a body's mass, preserving the shape-derived inertia tensor, centre of mass, and inertia
- * orientation (matching Babylon.js `HavokPlugin` — only the mass scalar is overridden). A body with
- * no shape attached yet has no inertia tensor to derive, so it falls back to an isotropic inertia
- * proportional to the mass until a shape is set.
+ * Sets a body's mass, preserving the shape-derived inertia tensor, centre of mass, inertia
+ * orientation, and active rotation-axis locks (matching Babylon.js `HavokPlugin` — only the mass
+ * scalar is overridden). A body with no shape attached yet has no inertia tensor to derive, so it
+ * falls back to an isotropic inertia proportional to the mass until a shape is set.
  * @param world - The physics world.
  * @param body - The body to update.
  * @param mass - Mass in kilograms.
@@ -1077,11 +1079,13 @@ export function setPhysicsBodyMass(world: PhysicsWorld, body: PhysicsBody, mass:
     if (centerOfMass) {
         massProps[0] = [centerOfMass.x, centerOfMass.y, centerOfMass.z];
     }
+    body._massPropertiesTransform?.(massProps);
     world._hknp.HP_Body_SetMassProperties(body._hkBody, massProps);
 }
 
 /**
- * Sets a body's mass properties, preserving Havok's shape-derived values for omitted fields.
+ * Sets a body's mass properties, preserving Havok's shape-derived values for omitted fields and
+ * reapplying active rotation-axis locks.
  * @param world - The physics world.
  * @param body - The body to update.
  * @param properties - Mass-property overrides.
@@ -1100,6 +1104,7 @@ export function setPhysicsBodyMassProperties(world: PhysicsWorld, body: PhysicsB
     if (properties.inertiaOrientation) {
         massProps[3] = [properties.inertiaOrientation.x, properties.inertiaOrientation.y, properties.inertiaOrientation.z, properties.inertiaOrientation.w];
     }
+    body._massPropertiesTransform?.(massProps);
     world._hknp.HP_Body_SetMassProperties(body._hkBody, massProps);
 }
 
@@ -1171,10 +1176,23 @@ export function setPhysicsBodyAngularVelocity(world: PhysicsWorld, body: Physics
 /**
  * Lock angular motion around selected body-local axes.
  * Havok represents a locked angular degree of freedom with zero inertia.
+ * Locks are cumulative and remain active when the body's mass properties are rebuilt.
  */
 export function lockPhysicsBodyRotationAxes(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis[]): void {
     if (axes.length === 0) {
         return;
+    }
+    let mask = body._rotationLockMask ?? 0;
+    for (const axis of axes) {
+        if (axis === "x") {
+            mask |= 1;
+        } else if (axis === "y") {
+            mask |= 2;
+        } else if (axis === "z") {
+            mask |= 4;
+        } else {
+            throw new Error(`Unknown physics rotation axis "${String(axis)}".`);
+        }
     }
     const hknp = world._hknp;
     const result = hknp.HP_Body_GetMassProperties(body._hkBody);
@@ -1183,21 +1201,46 @@ export function lockPhysicsBodyRotationAxes(world: PhysicsWorld, body: PhysicsBo
         throw new Error("Failed to read physics body mass properties.");
     }
     const massProperties = result[1];
-    const inertia = [...massProperties[2]];
-    for (const axis of axes) {
-        if (axis === "x") {
-            inertia[0] = 0;
-        } else if (axis === "y") {
-            inertia[1] = 0;
-        } else if (axis === "z") {
-            inertia[2] = 0;
-        } else {
-            throw new Error(`Unknown physics rotation axis "${String(axis)}".`);
-        }
-    }
-    massProperties[2] = inertia;
-    massProperties[3] = [0, 0, 0, 1];
+    applyBodyRotationLocks(massProperties, mask);
     hknp.HP_Body_SetMassProperties(body._hkBody, massProperties);
+    body._rotationLockMask = mask;
+    body._massPropertiesTransform = (properties) => applyBodyRotationLocks(properties, mask);
+}
+
+function applyBodyRotationLocks(massProperties: any[], mask: number): void {
+    if (mask === 0) {
+        return;
+    }
+    const inertia = massProperties[2];
+    const q = massProperties[3];
+    const x = q[0],
+        y = q[1],
+        z = q[2],
+        w = q[3];
+    const xx = x * x,
+        yy = y * y,
+        zz = z * z,
+        xy = x * y,
+        xz = x * z,
+        yz = y * z,
+        xw = x * w,
+        yw = y * w,
+        zw = z * w;
+    const r00 = 1 - 2 * (yy + zz),
+        r01 = 2 * (xy - zw),
+        r02 = 2 * (xz + yw),
+        r10 = 2 * (xy + zw),
+        r11 = 1 - 2 * (xx + zz),
+        r12 = 2 * (yz - xw),
+        r20 = 2 * (xz - yw),
+        r21 = 2 * (yz + xw),
+        r22 = 1 - 2 * (xx + yy);
+    massProperties[2] = [
+        mask & 1 ? 0 : r00 * r00 * inertia[0] + r01 * r01 * inertia[1] + r02 * r02 * inertia[2],
+        mask & 2 ? 0 : r10 * r10 * inertia[0] + r11 * r11 * inertia[1] + r12 * r12 * inertia[2],
+        mask & 4 ? 0 : r20 * r20 * inertia[0] + r21 * r21 * inertia[1] + r22 * r22 * inertia[2],
+    ];
+    massProperties[3] = [0, 0, 0, 1];
 }
 
 /**

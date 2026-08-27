@@ -192,10 +192,13 @@ steps matches the animation and sprite managers.
 
 `lockPhysicsBodyRotationAxes(world, body, axes)` locks selected body-local
 axes after the collision shape and mass properties have been configured. Havok
-represents a locked angular degree of freedom with a zero inertia component, so
-the helper reads the body's current mass properties, zeros only the requested
-`"x"`, `"y"`, or `"z"` components, aligns the inertia frame with the body, and
-preserves its mass, centre of mass, and unlocked inertia magnitudes.
+represents a locked angular degree of freedom with a zero inertia component. Its
+shape-derived inertia is expressed in a rotated principal-axis frame, so the
+helper first evaluates the diagonal of `R · diag(inertia) · Rᵀ` in body space,
+then zeros the requested `"x"`, `"y"`, or `"z"` components and sets the inertia
+orientation to identity. Mass and centre of mass are preserved. The active lock
+mask is retained on the body and reapplied by `setPhysicsBodyMass` and
+`setPhysicsBodyMassProperties` when they rebuild shape-derived mass properties.
 
 ---
 
@@ -233,7 +236,8 @@ preserves its mass, centre of mass, and unlocked inertia magnitudes.
   unset (respecting runtime changes), is converted to seconds for `HP_World_Step`,
   and is settable via `setPhysicsTimestep` / `setPhysicsTimestepMs`.
 - `tests/lite/unit/physics-rotation-axis-locks.test.ts` — selected body-local inertia
-  components are zeroed while mass, centre of mass, and unlocked components are
-  preserved; empty input and native read failures do not write mass properties.
+  components are zeroed after transforming a non-identity principal inertia frame
+  into body space; mass updates preserve active locks, and empty input/native read
+  failures do not write mass properties.
 - Parity scenes (physics drop/stack/constraint scenes) set
   `scene.fixedDeltaMs = 1000 / 60` so Lite and Babylon.js step identically.
