@@ -51,9 +51,17 @@ export interface DeviceLostRecoveryState {
      *  loses every device on the page at once, so two engines recover concurrently and their async
      *  rebuilds would otherwise share one queue — whichever finished its handlers first would top
      *  up the other engine's textures before its handlers had re-acquired them, which is exactly
-     *  the inflation deferring the settle exists to prevent. One engine cannot overlap itself: it
-     *  re-arms only after its run resolves. Absent between recoveries. */
+     *  the inflation deferring the settle exists to prevent. One engine cannot overlap itself
+     *  because `_recovering` holds arming off until its run settles. Absent between recoveries. */
     _pendingOwnership?: [Texture2D, number][];
+    /** @internal Set while a recovery run on this engine is in flight, so `arm` defers. Recovery
+     *  installs the replacement device on the engine long before its handlers finish, leaving
+     *  `_armedDevice` naming the lost one, so a registration enabled in that window would otherwise
+     *  arm the replacement. Losing it would then start a second run on this same engine, and the
+     *  two would share one `_pendingOwnership` queue, one `_device` and one surface list. Nothing
+     *  is dropped by waiting: the run re-arms once it resolves, and `GPUDevice.lost` is a promise,
+     *  so a device lost during the window resolves for that later subscriber too. */
+    _recovering?: boolean;
 }
 
 function getState(engine: EngineContext): DeviceLostRecoveryState {
@@ -109,7 +117,7 @@ export function markNextDeviceLossForRecovery(engine: EngineContext): boolean {
 
 function arm(engine: EngineContext, state: DeviceLostRecoveryState): void {
     const device = engine._device;
-    if (state._armedDevice === device) {
+    if (state._armedDevice === device || state._recovering) {
         return;
     }
     state._armedDevice = device;
@@ -121,6 +129,7 @@ function arm(engine: EngineContext, state: DeviceLostRecoveryState): void {
             return;
         }
         state._forceNextLoss = false;
+        state._recovering = true;
 
         const registrations = [...state._registrations];
         for (const registration of registrations) {
@@ -131,12 +140,19 @@ function arm(engine: EngineContext, state: DeviceLostRecoveryState): void {
             .then(({ runDeviceLostRecovery }) => runDeviceLostRecovery(engine, state, registrations))
             .then(
                 () => {
+                    state._recovering = false;
+                    // Arms whatever device the engine settled on. If that device was itself lost
+                    // while this run held arming off, its already-resolved `lost` fires here and
+                    // the deferred recovery runs now, after this one, rather than alongside it.
                     arm(engine, state);
                     for (const registration of registrations) {
                         registration._onRecovered?.();
                     }
                 },
                 (error) => {
+                    // Cleared but deliberately not re-armed: a failed run leaves the engine on a
+                    // device that may already be lost, and arming it would spin recovery forever.
+                    state._recovering = false;
                     for (const registration of registrations) {
                         registration._onRecoveryFailed?.(error);
                     }

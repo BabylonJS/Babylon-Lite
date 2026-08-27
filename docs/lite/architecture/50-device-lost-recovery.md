@@ -304,8 +304,17 @@ each engine then recovers on its own timeline. A shared queue would let whicheve
 engine reached its handlers first drain every engine's entries, restoring the
 others to their full pre-loss count while their handlers had yet to re-acquire —
 reintroducing the double-count above across engines instead of within one. Per
-engine is also per run: `arm` only re-arms once a recovery resolves, so one
-engine cannot overlap itself. The queue is reached through the engine rather than
+engine is also per run, but only because the coordinator makes it so: recovery
+installs the replacement device on the engine long before its handlers finish
+while `_armedDevice` still names the lost one, so a registration enabled in that
+window used to arm the replacement, and losing it started a second run on the
+same engine that shared this queue, the engine's device and its surface list.
+`_recovering` now holds `arm` off for the duration of a run. Nothing is dropped
+by waiting: the run re-arms once it resolves, and `GPUDevice.lost` is a promise,
+so a device lost during the window resolves for that later subscriber too and is
+recovered immediately afterwards. A failed run clears the flag without re-arming,
+because the engine may still be on the lost device and arming it would spin
+recovery forever. The queue is reached through the engine rather than
 threaded as a parameter because the handlers' own walks call `rebuildTexture2D`
 too, and a parameter those call sites did not pass would silently drop the
 ownership of anything they rebuilt first.
@@ -402,6 +411,10 @@ module-level side effects; mutable caches remain null until an explicit call.
   it rebuilds its bind groups leaving a count final disposal can still bring to
   zero, and two engines recovering concurrently — one parked inside its handlers
   while the other completes — settling only their own textures.
+- A coordinator-driven test loses a device, parks the run inside its handlers,
+  then enables a further recovery kind and loses the replacement. It asserts no
+  second run starts on that engine while the first is in flight, and that the
+  deferred loss is nonetheless recovered once the first run settles.
 - Scene recovery unit tests replace the device under an ESM shadow generator
   and assert that its textures, sampler, UBOs, hidden blur resources, and nested
   render task are recreated while the generator identity remains stable and the

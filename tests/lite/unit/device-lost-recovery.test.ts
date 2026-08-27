@@ -650,6 +650,14 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
         return tex;
     }
 
+    /** A device whose loss the test triggers, so recovery is driven through the real `arm`
+     *  coordinator instead of by calling `runDeviceLostRecovery` directly. */
+    function losableDevice(): { gpu: GPUDevice; lose: () => void } {
+        let lose!: () => void;
+        const lost = new Promise<GPUDeviceLostInfo>((resolve) => (lose = () => resolve({ reason: "unknown", message: "" } as GPUDeviceLostInfo)));
+        return { gpu: { ...(device() as unknown as object), lost } as unknown as GPUDevice, lose };
+    }
+
     async function recoverWithoutRebuilding(engine: EngineContext): Promise<GPUDevice> {
         const replacement = device();
         vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });
@@ -743,6 +751,80 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
         expect(rebuiltB.destroy).toHaveBeenCalledTimes(1);
         recoveryA.disable();
         recoveryB.disable();
+    });
+
+    it("holds off arming a replacement device until the run in flight has settled", async () => {
+        // Recovery installs the replacement on the engine long before its handlers finish, while
+        // `_armedDevice` still names the lost device. Enabling another recovery kind in that window
+        // arms the replacement, so losing it would start a second run on this same engine — two
+        // runs sharing one pending-ownership queue, one device and one surface list, each able to
+        // top up the other's textures before its handlers had re-acquired them. Arming waits for
+        // the run in flight, and because `GPUDevice.lost` is a promise the deferred loss is
+        // recovered afterwards rather than dropped.
+        const engine = trackingEngine();
+        const first = losableDevice();
+        engine._device = first.gpu;
+        const recovery = enableDeviceLostSpriteRecovery(engine);
+        const texture = sourceTexture(true); // the creator's reference
+        acquireTexture(texture); // a renderable's bind group
+        engine._dlr!.p(texture, new Uint8Array([1, 2, 3, 4]), {});
+
+        let enteredHandlers!: () => void;
+        const inHandlers = new Promise<void>((resolve) => (enteredHandlers = resolve));
+        let resume!: () => void;
+        const parked = new Promise<void>((resolve) => (resume = resolve));
+        let firstSettled!: () => void;
+        const firstRun = new Promise<void>((resolve) => (firstSettled = resolve));
+        let secondSettled!: () => void;
+        const secondRun = new Promise<void>((resolve) => (secondSettled = resolve));
+        let runs = 0;
+        const parking = _enableDeviceLostRecovery(engine, {
+            _kind: "scene",
+            // Models a handler rebuilding bind groups: it re-acquires the reference recovery hands
+            // back to it, which is why settling waits for every handler to have run.
+            _recover: async () => {
+                enteredHandlers();
+                await parked;
+                acquireTexture(texture);
+            },
+            _onRecovered: () => (runs++ === 0 ? firstSettled() : secondSettled()),
+        });
+
+        const second = losableDevice();
+        const replacements = [second.gpu, device()];
+        const requestDevice = vi.fn(async () => replacements.shift()!);
+        vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice })) } });
+
+        first.lose();
+        await inHandlers;
+
+        // The replacement is installed on the engine and its run is parked mid-handler. A
+        // registration enabled now must not arm it, so losing it must not start a second run.
+        const late = _enableDeviceLostRecovery(engine, { _kind: "text-renderer", _recover: vi.fn() });
+        second.lose();
+        await new Promise((resolve) => setTimeout(resolve, 0)); // drains every pending microtask
+        expect(requestDevice).toHaveBeenCalledTimes(1);
+        expect(engine._device).toBe(second.gpu);
+
+        resume();
+        await firstRun;
+        // Held off, not dropped: the loss suffered during the window is recovered once the first
+        // run has settled, so the engine does not stay on a dead device.
+        await secondRun;
+        expect(requestDevice).toHaveBeenCalledTimes(2);
+        vi.unstubAllGlobals();
+
+        // Two serialized runs leave the texture exactly as owned as it was before the loss. This
+        // is an end-state sanity check rather than the overlap detector: the assertions above are
+        // what fail if arming is not held off, because a second concurrent run reaches
+        // `requestDevice` and swaps `engine._device` while the first is still parked.
+        const rebuilt = texture.texture as unknown as { destroy: ReturnType<typeof vi.fn> };
+        expect(releaseTexture(texture)).toBe(false);
+        expect(releaseTexture(texture)).toBe(true);
+        expect(rebuilt.destroy).toHaveBeenCalledTimes(1);
+        late.disable();
+        parking.disable();
+        recovery.disable();
     });
 
     for (const [kind, owned, capture] of recoverableKinds) {
