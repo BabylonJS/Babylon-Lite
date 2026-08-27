@@ -143,6 +143,7 @@ describe("build/index.d.ts", () => {
         expect(dts).toMatch(/normalizeNodeParticleGraph\(graph: ParticleGraph\): Promise<ParticleGraph>/);
         expect(dts).not.toContain("normalizeNodeParticleGraphRuntime");
         expect(dts).not.toContain("_isGraphPlumbingNormalized");
+        expect(dts).not.toContain("_localVariableLoopEpoch");
     });
 
     it("rejects invalid emitter fields while preserving extended provider options", () => {

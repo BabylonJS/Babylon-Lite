@@ -5,22 +5,45 @@ interface SourcePair {
     readonly connectionName: string;
 }
 
+type ConnectionRole = "" | "particle flow" | "system flow" | "texture" | "gradient metadata";
+
+const PARTICLE_DOMAIN = 1;
+const SYSTEM_DOMAIN = 2;
 function isConnected(input: ParsedParticleInput | undefined): input is ParsedParticleInput & { targetBlockId: number; targetConnectionName: string } {
     return input?.targetBlockId != null && input.targetConnectionName != null;
 }
 
-function cycleError(stack: readonly number[], repeatedId: number): Error {
+function cyclePath(stack: readonly number[], repeatedId: number): string {
     const start = stack.indexOf(repeatedId);
-    const cycle = [...stack.slice(start), repeatedId].join(" -> ");
-    return new Error(`NodeParticle: graph plumbing cycle ${cycle}`);
+    return [...stack.slice(start), repeatedId].join(" -> ");
 }
 
-/** @internal Normalize reachable Teleport routes without mutating the parsed graph. */
+function connectionRole(block: ParsedParticleBlock, input: ParsedParticleInput): ConnectionRole {
+    if (input.name === "particle") {
+        return "particle flow";
+    }
+    if (input.name === "system" || input.name === "onStart" || input.name === "onEnd") {
+        return "system flow";
+    }
+    if (
+        (block.className === "SystemBlock" && input.name === "texture") ||
+        (block.className === "UpdateFlowMapBlock" && input.name === "flowMap") ||
+        (block.className === "UpdateNoiseBlock" && input.name === "noiseTexture")
+    ) {
+        return "texture";
+    }
+    if (block.className === "ParticleGradientBlock" && input.name.startsWith("value")) {
+        return "gradient metadata";
+    }
+    return "";
+}
+
+/** @internal Normalize reachable graph-plumbing routes without mutating the parsed graph. */
 export function normalizeNodeParticleGraphRuntime(graph: ParticleGraph): ParticleGraph {
     const resolvedSources = new Map<string, SourcePair>();
 
-    const resolveSource = (blockId: number, connectionName: string, stack: readonly number[]): SourcePair => {
-        const cacheKey = `${blockId}:${connectionName}`;
+    const resolveSource = (blockId: number, connectionName: string, role: ConnectionRole, stack: readonly number[]): SourcePair => {
+        const cacheKey = `${blockId}:${connectionName}:${role}`;
         const cached = resolvedSources.get(cacheKey);
         if (cached) {
             return cached;
@@ -33,52 +56,83 @@ export function normalizeNodeParticleGraphRuntime(graph: ParticleGraph): Particl
         if (block.className === "ParticleTeleportInBlock") {
             throw new Error(`NodeParticle: ParticleTeleportInBlock ${block.id} does not expose output "${connectionName}"`);
         }
-        if (block.className !== "ParticleTeleportOutBlock") {
-            const terminal = { blockId, connectionName };
+
+        switch (block.className) {
+            case "ParticleTeleportOutBlock":
+            case "ParticleElbowBlock":
+            case "ParticleDebugBlock":
+            case "ParticleLocalVariableBlock":
+                break;
+            default: {
+                const terminal: SourcePair = { blockId, connectionName };
+                resolvedSources.set(cacheKey, terminal);
+                return terminal;
+            }
+        }
+        if (connectionName !== "output") {
+            throw new Error(`NodeParticle: ${block.className} ${block.id} does not expose output "${connectionName}"`);
+        }
+        if (stack.includes(block.id)) {
+            throw new Error(`NodeParticle: graph plumbing cycle ${cyclePath(stack, block.id)}`);
+        }
+        if ((block.className === "ParticleDebugBlock" || block.className === "ParticleLocalVariableBlock") && role) {
+            throw new Error(`NodeParticle: ${block.className} ${block.id} does not support ${role} connections`);
+        }
+
+        if (block.className === "ParticleTeleportOutBlock") {
+            const entryPoint = block.serialized.entryPoint;
+            if (typeof entryPoint !== "number" || !Number.isFinite(entryPoint) || !Number.isInteger(entryPoint) || entryPoint < 0) {
+                throw new Error(`NodeParticle: ParticleTeleportOutBlock ${block.id} has invalid entryPoint`);
+            }
+            const endpoint = graph.blocks.get(entryPoint);
+            if (!endpoint) {
+                throw new Error(`NodeParticle: ParticleTeleportOutBlock ${block.id} references missing entryPoint ${entryPoint}`);
+            }
+            if (endpoint.className !== "ParticleTeleportInBlock") {
+                throw new Error(`NodeParticle: ParticleTeleportOutBlock ${block.id} entryPoint ${entryPoint} is not ParticleTeleportInBlock`);
+            }
+            if (stack.includes(endpoint.id)) {
+                throw new Error(`NodeParticle: graph plumbing cycle ${cyclePath(stack, endpoint.id)}`);
+            }
+            const input = endpoint.inputs.find((candidate) => candidate.name === "input");
+            if (!isConnected(input)) {
+                throw new Error(`NodeParticle: ParticleTeleportInBlock ${endpoint.id} input is not connected`);
+            }
+
+            const resolved = resolveSource(input.targetBlockId, input.targetConnectionName, role, [...stack, block.id, endpoint.id]);
+            resolvedSources.set(cacheKey, resolved);
+            return resolved;
+        }
+
+        const input = block.inputs.find((candidate) => candidate.name === "input");
+        if (!isConnected(input)) {
+            throw new Error(`NodeParticle: ${block.className} ${block.id} input is not connected`);
+        }
+        if (block.className === "ParticleLocalVariableBlock") {
+            const terminal: SourcePair = { blockId, connectionName };
             resolvedSources.set(cacheKey, terminal);
             return terminal;
         }
-        if (connectionName !== "output") {
-            throw new Error(`NodeParticle: ParticleTeleportOutBlock ${block.id} does not expose output "${connectionName}"`);
-        }
-        if (stack.includes(block.id)) {
-            throw cycleError(stack, block.id);
-        }
-
-        const entryPoint = block.serialized.entryPoint;
-        if (typeof entryPoint !== "number" || !Number.isFinite(entryPoint) || !Number.isInteger(entryPoint) || entryPoint < 0) {
-            throw new Error(`NodeParticle: ParticleTeleportOutBlock ${block.id} has invalid entryPoint`);
-        }
-        const endpoint = graph.blocks.get(entryPoint);
-        if (!endpoint) {
-            throw new Error(`NodeParticle: ParticleTeleportOutBlock ${block.id} references missing entryPoint ${entryPoint}`);
-        }
-        if (endpoint.className !== "ParticleTeleportInBlock") {
-            throw new Error(`NodeParticle: ParticleTeleportOutBlock ${block.id} entryPoint ${entryPoint} is not ParticleTeleportInBlock`);
-        }
-        if (stack.includes(endpoint.id)) {
-            throw cycleError(stack, endpoint.id);
-        }
-        const input = endpoint.inputs.find((candidate) => candidate.name === "input");
-        if (!isConnected(input)) {
-            throw new Error(`NodeParticle: ParticleTeleportInBlock ${endpoint.id} input is not connected`);
-        }
-
-        const resolved = resolveSource(input.targetBlockId, input.targetConnectionName, [...stack, block.id, endpoint.id]);
+        const resolved = resolveSource(input.targetBlockId, input.targetConnectionName, role, [...stack, block.id]);
         resolvedSources.set(cacheKey, resolved);
         return resolved;
     };
 
-    const visited = new Set<number>();
-    let changedBlocks: Map<number, ParsedParticleBlock> | undefined;
-    const visitBlock = (blockId: number): void => {
-        if (visited.has(blockId)) {
+    const visitedDomains = new Map<number, number>();
+    let blocks: Map<number, ParsedParticleBlock> | undefined;
+    const visitBlock = (blockId: number, incomingDomain: number): void => {
+        const visited = visitedDomains.get(blockId) ?? 0;
+        const domain = visited | incomingDomain;
+        if (domain === visited) {
             return;
         }
-        visited.add(blockId);
+        visitedDomains.set(blockId, domain);
         const block = graph.blocks.get(blockId);
         if (!block) {
             return;
+        }
+        if (block.className === "ParticleLocalVariableBlock" && block.serialized.scope === 0 && (domain & SYSTEM_DOMAIN) !== 0) {
+            throw new Error(`NodeParticle: ParticleLocalVariableBlock ${block.id} Particle scope requires particle-only evaluation`);
         }
 
         let inputs: ParsedParticleInput[] | undefined;
@@ -86,12 +140,14 @@ export function normalizeNodeParticleGraphRuntime(graph: ParticleGraph): Particl
             if (!isConnected(input)) {
                 return;
             }
-            const resolved = resolveSource(input.targetBlockId, input.targetConnectionName, []);
+            const role = connectionRole(block, input);
+            const resolved = resolveSource(input.targetBlockId, input.targetConnectionName, role, []);
             if (resolved.blockId !== input.targetBlockId || resolved.connectionName !== input.targetConnectionName) {
                 inputs ??= block.inputs.slice();
                 inputs[index] = { ...input, targetBlockId: resolved.blockId, targetConnectionName: resolved.connectionName };
             }
-            visitBlock(resolved.blockId);
+            const childDomain = block.className === "SystemBlock" ? (input.name === "particle" ? PARTICLE_DOMAIN : SYSTEM_DOMAIN) : domain;
+            visitBlock(resolved.blockId, childDomain);
         };
 
         for (let index = 0; index < block.inputs.length; index++) {
@@ -105,20 +161,15 @@ export function normalizeNodeParticleGraphRuntime(graph: ParticleGraph): Particl
             }
         }
         if (inputs) {
-            (changedBlocks ??= new Map()).set(block.id, { ...block, inputs });
+            (blocks ??= new Map(graph.blocks)).set(block.id, { ...block, inputs });
         }
     };
 
     for (const systemId of graph.systemBlockIds) {
-        visitBlock(systemId);
+        visitBlock(systemId, SYSTEM_DOMAIN);
     }
-    if (!changedBlocks) {
+    if (!blocks) {
         return graph._isGraphPlumbingNormalized ? graph : { blocks: graph.blocks, systemBlockIds: graph.systemBlockIds, _isGraphPlumbingNormalized: true };
-    }
-
-    const blocks = new Map(graph.blocks);
-    for (const [blockId, block] of changedBlocks) {
-        blocks.set(blockId, block);
     }
     return { blocks, systemBlockIds: graph.systemBlockIds, _isGraphPlumbingNormalized: true };
 }

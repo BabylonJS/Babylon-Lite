@@ -1,12 +1,11 @@
 // Scene 304: Node Particle Editor Teleport graph plumbing.
 //
-// Uses Scene 262's deterministic particle oracle with scalar/vector fan-out and particle flow routed
-// through TeleportIn/Out blocks. Graph normalization must preserve the exact frozen rendered state.
+// Uses Scene 262's deterministic particle oracle with Teleports plus Elbow, Debug, and a Particle
+// LocalVariable. Graph normalization must preserve the exact frozen rendered state.
 
 import {
     addFacingBillboardSystem,
     animateParticleSystem,
-    attachControl,
     buildNodeParticleSet,
     createArcRotateCamera,
     createEngine,
@@ -19,7 +18,7 @@ import {
     startParticleSystem,
     syncParticleBillboard,
 } from "babylon-lite";
-import { createScene304NpeGraph } from "../shared/scene304-npe-teleport.js";
+import { createScene304NpeGraph } from "../shared/scene304-teleport-npe.js";
 
 /** Number of deterministic simulation steps before the frame is frozen. */
 const STEPS = 200;
@@ -35,7 +34,7 @@ async function main(): Promise<void> {
     camera.nearPlane = 0.1;
     camera.farPlane = 100;
     scene.camera = camera;
-    attachControl(camera, canvas, scene);
+    // This frozen parity fixture mirrors the non-interactive Babylon.js oracle, so controls are intentionally omitted.
 
     const graph = await normalizeNodeParticleGraph(parseNodeParticleSource(createScene304NpeGraph()));
     const set = await buildNodeParticleSet(engine, scene, graph, {

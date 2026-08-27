@@ -267,12 +267,16 @@ for (const scene of SCENES) {
                 runtimeModules.some((id) => /\/particle\/node\/npe-graph-plumbing-runtime\.[jt]s$/.test(id)),
                 `scene304 is missing the heavy graph-plumbing runtime; loaded modules: ${runtimeModules.join(", ")}`
             ).toBe(true);
+            expect(
+                runtimeModules.some((id) => /\/particle\/node\/blocks\/particle-local-variable-block\.[jt]s$/.test(id)),
+                `scene304 is missing the Particle LocalVariable evaluator; loaded modules: ${runtimeModules.join(", ")}`
+            ).toBe(true);
             const offenders = runtimeModules.filter((id) =>
-                /\/(?:particle\/(?:particle-(?:blend|sprite-2d|sprite-2d-blend-modes)|node\/(?:npe-(?:blend-modes|emitter-provider|flow-map-runtime|noise-runtime|texture-update-runtime|texture-content)|blocks\/particle-local-variable-block))|sprite\/(?:sprite-renderer|sprite-custom-shader))\.[jt]s$/.test(
+                /\/(?:camera\/arc-rotate-controls|particle\/(?:particle-(?:blend|sprite-2d|sprite-2d-blend-modes)|node\/npe-(?:blend-modes|emitter-provider|flow-map-runtime|noise-runtime|texture-update-runtime|texture-content))|sprite\/(?:sprite-renderer|sprite-custom-shader))\.[jt]s$/.test(
                     id
                 )
             );
-            expect(offenders, `scene304 must not load provider, specialized texture, Phase 3C, blend, or Sprite2D modules; found: ${offenders.join(", ")}`).toEqual([]);
+            expect(offenders, `scene304 must not load camera controls, provider, specialized texture, blend, or Sprite2D modules; found: ${offenders.join(", ")}`).toEqual([]);
         }
 
         if (scene.slug === "scene303-sprite2d-y-sort") {

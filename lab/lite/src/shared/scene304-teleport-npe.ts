@@ -25,6 +25,41 @@ interface Scene304Consumer {
     readonly inputName: string;
 }
 
+function addPhase3CValueRoute(graph: Scene304Graph, nextId: { value: number }): void {
+    const elbowId = nextId.value++;
+    const debugId = nextId.value++;
+    const localId = nextId.value++;
+    graph.blocks.push(
+        {
+            customType: "BABYLON.ParticleElbowBlock",
+            id: elbowId,
+            name: "Size elbow",
+            inputs: [{ name: "input", targetBlockId: 11, targetConnectionName: "output" }],
+            outputs: [{ name: "output" }],
+        },
+        {
+            customType: "BABYLON.ParticleDebugBlock",
+            id: debugId,
+            name: "Size debug",
+            stackSize: 37,
+            inputs: [{ name: "input", targetBlockId: elbowId, targetConnectionName: "output" }],
+            outputs: [{ name: "output" }],
+        },
+        {
+            customType: "BABYLON.ParticleLocalVariableBlock",
+            id: localId,
+            name: "Particle size snapshot",
+            scope: 0,
+            inputs: [{ name: "input", targetBlockId: debugId, targetConnectionName: "output" }],
+            outputs: [{ name: "output" }],
+        }
+    );
+    const createBlock = graph.blocks.find((block) => block.id === 4)!;
+    const sizeInput = createBlock.inputs.find((input) => input.name === "size")!;
+    sizeInput.targetBlockId = localId;
+    sizeInput.targetConnectionName = "output";
+}
+
 function addTeleportFanOut(graph: Scene304Graph, sourceBlockId: number, sourceConnectionName: string, consumers: readonly Scene304Consumer[], nextId: { value: number }): void {
     const entryPointId = nextId.value++;
     graph.blocks.push({
@@ -52,10 +87,12 @@ function addTeleportFanOut(graph: Scene304Graph, sourceBlockId: number, sourceCo
     }
 }
 
-/** Scene 262 with deterministic value fan-out and particle flow routed through Teleport blocks. */
+/** Scene 262 with deterministic value/local-variable plumbing and particle flow routed through Teleport blocks. */
 export function createScene304NpeGraph(): object {
     const graph = structuredClone(SCENE262_NPE_JSON) as unknown as Scene304Graph;
     const nextId = { value: 1000 };
+
+    addPhase3CValueRoute(graph, nextId);
 
     addTeleportFanOut(
         graph,

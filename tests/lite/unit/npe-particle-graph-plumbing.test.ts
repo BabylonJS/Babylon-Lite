@@ -359,10 +359,10 @@ describe("NPE graph plumbing", () => {
         expect(rebuilt._graph).toBe(first._graph);
     });
 
-    it("does not mark or activate Phase 3C classes", async () => {
+    it("marks and activates a normalized Phase 3C LocalVariable", async () => {
         const source: GraphSource = {
             blocks: [
-                { customType: "BABYLON.ParticleInputBlock", id: 1, inputs: [] },
+                { customType: "BABYLON.ParticleInputBlock", id: 1, type: 0x0002, value: 7, inputs: [] },
                 {
                     customType: "BABYLON.ParticleLocalVariableBlock",
                     id: 2,
@@ -372,9 +372,12 @@ describe("NPE graph plumbing", () => {
             ],
         };
         const graph = parseNodeParticleSource(source);
+        const normalized = await normalizeNodeParticleGraph(graph);
+        const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, normalized);
 
-        expect(await normalizeNodeParticleGraph(graph)).toBe(graph);
-        await expect(buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph)).rejects.toThrow('NodeParticle: unsupported value block "ParticleLocalVariableBlock"');
+        expect(normalized).not.toBe(graph);
+        expect(normalized._isGraphPlumbingNormalized).toBe(true);
+        expect(set.systems[0]!.targetStopDuration).toBe(7);
     });
 
     it("leaves a TeleportIn-only malformed graph unmarked and unsupported", async () => {
@@ -626,7 +629,7 @@ describe("NPE graph plumbing", () => {
         expect(snippetSource).toContain("await normalizeNodeParticleGraph(parseNodeParticleSource(source))");
     });
 
-    it("adds no Teleport evaluator or registry implementation", () => {
+    it("adds no Teleport, Elbow, or Debug evaluator or registry implementation", () => {
         const nodeDirectory = resolve(__dirname, "../../../packages/babylon-lite/src/particle/node");
         const blockNames = readdirSync(resolve(nodeDirectory, "blocks"));
         const registrySource = readdirSync(nodeDirectory)
@@ -635,6 +638,8 @@ describe("NPE graph plumbing", () => {
             .join("\n");
 
         expect(blockNames.filter((name) => name.toLowerCase().includes("teleport"))).toEqual([]);
-        expect(registrySource).not.toContain("ParticleTeleport");
+        expect(blockNames.filter((name) => /(?:elbow|debug)/i.test(name))).toEqual([]);
+        expect(blockNames.filter((name) => name === "particle-local-variable-block.ts")).toEqual(["particle-local-variable-block.ts"]);
+        expect(registrySource).not.toMatch(/Particle(?:Teleport|Elbow|Debug)/);
     });
 });

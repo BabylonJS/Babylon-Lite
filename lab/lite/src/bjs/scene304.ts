@@ -1,5 +1,5 @@
 // Babylon.js reference for Scene 304. It parses the same Scene-262-derived graph as Lite, including
-// scalar/vector Teleport fan-out and the final particle-flow Teleport route.
+// Teleport fan-out plus Elbow, Debug, and a Particle-scope LocalVariable on the size path.
 
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
@@ -12,7 +12,7 @@ import { NodeParticleSystemSet } from "@babylonjs/core/Particles/Node/nodePartic
 import "@babylonjs/core/Particles/Node/Blocks";
 import "@babylonjs/core/Shaders/particles.vertex";
 import "@babylonjs/core/Shaders/particles.fragment";
-import { createScene304NpeGraph } from "../shared/scene304-npe-teleport.js";
+import { createScene304NpeGraph } from "../shared/scene304-teleport-npe.js";
 
 /** Deterministic steps before freezing - must match the Lite scene. */
 const STEPS = 200;
