@@ -20,6 +20,7 @@ export function isSceneImpactManifest(value: unknown): value is SceneImpactManif
         manifest.scenes.every((scene) => typeof scene === "string") &&
         typeof manifest.files === "object" &&
         manifest.files !== null &&
+        !Array.isArray(manifest.files) &&
         Object.values(manifest.files).every((scenes) => Array.isArray(scenes) && scenes.every((scene) => typeof scene === "string"))
     );
 }

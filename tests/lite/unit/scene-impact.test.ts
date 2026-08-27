@@ -31,6 +31,7 @@ describe("scene impact manifest", () => {
     it("rejects malformed published manifests", () => {
         expect(isSceneImpactManifest(impact({ "packages/babylon-lite/src/engine/engine.ts": ["scene1"] }))).toBe(true);
         expect(isSceneImpactManifest({ version: 1, commit: "base", scenes: ["scene1"], files: { bad: "scene1" } })).toBe(false);
+        expect(isSceneImpactManifest({ version: 1, commit: "base", scenes: ["scene1"], files: [] })).toBe(false);
     });
 
     it("maps built library modules back to source files", () => {
