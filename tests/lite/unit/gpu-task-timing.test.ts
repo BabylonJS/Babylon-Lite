@@ -135,9 +135,13 @@ describe("render-task GPU timing public state", () => {
         await setRenderTaskGpuTimingEnabled(engine, false);
     });
 
-    it("dispatches frame and task timing resolves exactly once per rendered frame", () => {
+    it("dispatches the shared GPU timing resolver exactly once per rendered frame", () => {
         const frameResolve = vi.fn();
         const taskResolve = vi.fn();
+        const resolveGpuTimers = vi.fn(() => {
+            frameResolve();
+            taskResolve();
+        });
         const texture = {
             width: 1,
             height: 1,
@@ -163,18 +167,19 @@ describe("render-task GPU timing public state", () => {
             ],
             _cbs: [{} as GPUCommandBuffer],
             drawCallCount: 0,
-            _gpuTimerResolve: frameResolve,
+            _gpuTimerResolve: resolveGpuTimers,
             _gpuTaskTimerResolve: taskResolve,
         } as unknown as EngineContext;
         Object.assign(engine, { surfaces: [engine], _surfaces: [engine] });
 
         renderFrame(engine, 16);
 
+        expect(resolveGpuTimers).toHaveBeenCalledOnce();
         expect(frameResolve).toHaveBeenCalledOnce();
         expect(taskResolve).toHaveBeenCalledOnce();
     });
 
-    it("keeps the task resolver independent when frame timing is disabled", () => {
+    it("keeps task timing on the shared resolver when frame timing is disabled", () => {
         const taskResolve = vi.fn();
         const engine = {
             gpuFrameTimeMs: 12,
@@ -189,7 +194,7 @@ describe("render-task GPU timing public state", () => {
         expect(engine.gpuFrameTimeMs).toBe(0);
         expect(engine._gpuTimerBegin).toBeUndefined();
         expect(engine._gpuTimerEnd).toBeUndefined();
-        expect(engine._gpuTimerResolve).toBeUndefined();
+        expect(engine._gpuTimerResolve).toBe(taskResolve);
         expect(engine._gpuTaskTimerResolve).toBe(taskResolve);
     });
 });
@@ -251,13 +256,13 @@ describe("GPU task timing installer", () => {
         let previousResolveCalls = 0;
         const previousResolve = () => {
             previousResolveCalls++;
+            engine._gpuTaskTimerResolve?.();
         };
         engine._gpuTimerResolve = previousResolve;
         const restore = installGpuTaskTimer(timer, engine, (snapshot) => snapshots.push(snapshot));
 
         expect(fg.execute()).toBe(5);
         engine._gpuTimerResolve?.();
-        engine._gpuTaskTimerResolve?.();
         await Promise.resolve();
         await Promise.resolve();
 
@@ -310,6 +315,7 @@ describe("GPU task timing installer", () => {
             disposed: false,
         };
         const restore = installGpuTaskTimer(timer, engine, () => undefined);
+        expect(engine._gpuTimerResolve).toBe(engine._gpuTaskTimerResolve);
 
         const laterFg = createFrameGraph(engine);
         const originalExecute = laterFg.execute;
@@ -320,6 +326,7 @@ describe("GPU task timing installer", () => {
         expect(laterFg.execute).not.toBe(originalExecute);
         restore();
         expect(laterFg.execute).toBe(originalExecute);
+        expect(engine._gpuTimerResolve).toBeUndefined();
         expect(engine._gpuTaskTimerResolve).toBeUndefined();
     });
 
@@ -420,7 +427,7 @@ describe("GPU task timing installer", () => {
         const restore = installGpuTaskTimer(timer, engine, (snapshot) => snapshots.push(snapshot));
 
         fg.execute();
-        engine._gpuTaskTimerResolve?.();
+        engine._gpuTimerResolve?.();
         await Promise.resolve();
 
         expect(mapAsync).toHaveBeenCalledOnce();

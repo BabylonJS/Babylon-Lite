@@ -95,6 +95,7 @@ export function installGpuTaskTimer(timer: GpuTaskTimer, engine: EngineContext, 
     }
     const resolveTaskTiming = () => finishTaskTimingFrame(timer, publish);
     engine._gpuTaskTimerResolve = resolveTaskTiming;
+    engine._gpuTimerResolve ??= resolveTaskTiming;
     return () => {
         restoreWrappedFrameGraphs(timer, engine, resolveTaskTiming);
         disposeGpuTaskTimer(timer);
@@ -177,6 +178,9 @@ function restoreWrappedFrameGraphs(timer: GpuTaskTimer, engine: EngineContext, r
     timer.currentEncoder = null;
     if (engine._gpuTaskTimerResolve === resolveTaskTiming) {
         engine._gpuTaskTimerResolve = undefined;
+    }
+    if (engine._gpuTimerResolve === resolveTaskTiming) {
+        engine._gpuTimerResolve = undefined;
     }
 }
 
