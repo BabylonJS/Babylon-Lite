@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { build } from "vite";
 
-import { demoSlugForBundleFile } from "../../../scripts/demo-bundle-name";
+import { demoOwnsBundleFile } from "../../../scripts/demo-bundle-name";
 import { terserPropertyManglePlugin } from "../../../scripts/bundle-scenes-core";
 
 const tempDirs: string[] = [];
@@ -53,9 +53,16 @@ describe("bundle tooling correctness", () => {
     it("assigns prefix-related bundle files to the longest matching demo slug", () => {
         const slugs = ["fluid", "fluid-worker", "racer"];
 
-        expect(demoSlugForBundleFile("fluid-worker-shared-abc123.js", slugs)).toBe("fluid-worker");
-        expect(demoSlugForBundleFile("fluid-old-abc123.js", slugs)).toBe("fluid");
-        expect(demoSlugForBundleFile("racer.js", slugs)).toBe("racer");
-        expect(demoSlugForBundleFile("unrelated.js", slugs)).toBeUndefined();
+        expect(demoOwnsBundleFile("fluid-worker-shared-abc123.js", "fluid-worker", slugs)).toBe(true);
+        expect(demoOwnsBundleFile("fluid-worker-shared-abc123.js", "fluid", slugs)).toBe(false);
+        expect(demoOwnsBundleFile("fluid-old-abc123.js", "fluid", slugs)).toBe(true);
+        expect(demoOwnsBundleFile("racer.js", "racer", slugs)).toBe(true);
+        expect(demoOwnsBundleFile("unrelated.js", "racer", slugs)).toBe(false);
+    });
+
+    it("recognizes support bundle files whose slug is not in the demo config", () => {
+        const configuredSlugs = ["fluid", "racer"];
+
+        expect(demoOwnsBundleFile("landing-bg-oldhash.js", "landing-bg", configuredSlugs)).toBe(true);
     });
 });

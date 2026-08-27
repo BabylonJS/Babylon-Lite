@@ -38,7 +38,7 @@ import {
 } from "./bundle-scenes-core";
 import { wgslMinifyPlugin } from "./wgsl-minify-plugin";
 import { fetchDemoAssets } from "./demo-fetchers";
-import { demoSlugForBundleFile } from "./demo-bundle-name";
+import { demoOwnsBundleFile } from "./demo-bundle-name";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PAGES_SRC = resolve(ROOT, "pages");
@@ -383,7 +383,7 @@ export async function buildDemo(slug: string): Promise<void> {
     }
     const demoSlugs = loadDemosConfig().map((demo) => demo.slug);
     for (const existing of readdirSync(demosDir)) {
-        if (demoSlugForBundleFile(existing, demoSlugs) === slug && !newNames.has(existing)) {
+        if (demoOwnsBundleFile(existing, slug, demoSlugs) && !newNames.has(existing)) {
             rmSync(resolve(demosDir, existing));
         }
     }

@@ -1071,7 +1071,10 @@ function elapsed(startMs: number): string {
  *  preload form too late for a renderChunk/generateBundle hook to see it. */
 export function stripNoopPreloadWrappers(code: string): string {
     return code
-        .replace(/[\w$]+\(async\(\)=>\{const\{([\w$]+):([\w$]+)\}=await (import\([^()]*\));return\{\1:\2\}\},\[\]\)/g, "$3")
+        .replace(
+            /[\w$]+\(async\(\)=>\{const\{([\w$]+):([\w$]+)\}=await (import\([^()]*\));return\{\1:\2\}\},\[\]\)/g,
+            "$3"
+        )
         .replace(/[\w$]+\(\s*\(\s*\)\s*=>\s*(import\([^()]*\)(?:\.then\(\s*[\w$]+\s*=>\s*[\w$]+\.[\w$]+\s*\))?)\s*,\s*\[\s*\]\s*\)/g, "$1");
 }
 
