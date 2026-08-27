@@ -123,5 +123,12 @@
         "tags": ["game", "showcase"],
         "fetch": "racer",
         "mobile": true
+    },
+    {
+        "slug": "antigravity-racer",
+        "name": "Antigravity Racer",
+        "description": "A clean-room native port of Cédric Guillemet's antigravity racing Babylon.js playground (WVPVWL): fly a hover-ship around a closed, banked loop spline threaded through 7 editable control points, racing AI opponents and boosting off energy strips. Procedural track, ships, and rocks — no external assets. Single-player, 2-player split-screen, attract/demo, and a live track editor (drag control points with a gizmo). Keyboard (WASD/ZQSD + arrows, layout-independent) and gamepad supported throughout, including menu navigation.",
+        "tags": ["game", "racing", "showcase"],
+        "mobile": false
     }
 ]
