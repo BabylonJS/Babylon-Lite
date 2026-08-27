@@ -381,7 +381,7 @@ export async function buildDemo(slug: string): Promise<void> {
         newNames.add(f);
         writeFileSync(resolve(demosDir, f), readFileSync(resolve(demoOutDir, f)));
     }
-    const demoSlugs = loadDemosConfig().map((demo) => demo.slug);
+    const demoSlugs = [...loadDemosConfig().map((demo) => demo.slug), ...DEMO_SUPPORT_BUNDLES];
     for (const existing of readdirSync(demosDir)) {
         if (demoOwnsBundleFile(existing, slug, demoSlugs) && !newNames.has(existing)) {
             rmSync(resolve(demosDir, existing));

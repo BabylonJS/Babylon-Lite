@@ -61,8 +61,17 @@ describe("bundle tooling correctness", () => {
     });
 
     it("recognizes support bundle files whose slug is not in the demo config", () => {
-        const configuredSlugs = ["fluid", "racer"];
+        const knownSlugs = ["fluid", "racer", "landing-bg"];
 
-        expect(demoOwnsBundleFile("landing-bg-oldhash.js", "landing-bg", configuredSlugs)).toBe(true);
+        expect(demoOwnsBundleFile("landing-bg-oldhash.js", "landing-bg", knownSlugs)).toBe(true);
+    });
+
+    it("keeps ownership exclusive regardless of which prefix-related demo is being built", () => {
+        const knownSlugs = ["landing", "racer", "landing-bg"];
+
+        expect(demoOwnsBundleFile("landing-bg-oldhash.js", "landing-bg", knownSlugs)).toBe(true);
+        expect(demoOwnsBundleFile("landing-bg-oldhash.js", "landing", knownSlugs)).toBe(false);
+        expect(demoOwnsBundleFile("landing-oldhash.js", "landing", knownSlugs)).toBe(true);
+        expect(demoOwnsBundleFile("landing-oldhash.js", "landing-bg", knownSlugs)).toBe(false);
     });
 });
