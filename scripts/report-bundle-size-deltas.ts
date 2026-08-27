@@ -32,6 +32,11 @@ interface ManifestEntry {
     rawKB?: number;
     rawBytes?: number;
     gzipKB?: number;
+    /**
+     * Ceiling that applied when this manifest entry was measured. Published baseline entries carry
+     * it; older baselines may not, in which case historical ceiling state is unknown.
+     */
+    ceilingKB?: number;
 }
 
 type Manifest = Record<string, ManifestEntry>;
@@ -142,6 +147,7 @@ export function collectHeadroomInputs(current: Manifest, sceneConfigs: SceneConf
             measuredBytes,
             ceilingKB: config.maxRawKB,
             masterBytes: measuredBytesOf(master[key]) ?? undefined,
+            masterCeilingKB: master[key]?.ceilingKB,
         });
     }
     return inputs;
@@ -291,19 +297,18 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
     // that rebasing will not clear it, of a scene that does not exist on master. A scene already
     // over its ceiling that this branch grows by one byte — what a shared-path change does across
     // many scenes at once — has a positive delta, so movement blames the author for the whole
-    // overage and drops the note explaining that rebasing will not help. Ask the baseline instead:
-    // a breach is inherited only if the baseline was already over the same ceiling.
+    // overage and drops the note explaining that rebasing will not help. Ask the baseline instead,
+    // using the ceiling published with those bytes rather than this branch's current ceiling.
     //
-    // Known gap, tracked in #628: "the same ceiling" is an assumption, not a guarantee. The bytes
-    // come from the baseline but `ceilingKB` comes from *this branch's* scene-config, so the
-    // predicate really asks "is master's size over MY ceiling". Those diverge only when a branch
-    // edits that scene's ceiling — a PR that lowers one below master's measured size gets its own
-    // breach reported as inherited, and is told rebasing will not clear it when reverting the
-    // ceiling edit would. Closing it properly needs the baseline to carry the ceiling it was
-    // measured against, which is new plumbing rather than a change to this predicate.
-    const wasOverOnMaster = (scene: SceneHeadroom): boolean => scene.masterBytes != null && scene.masterBytes > scene.ceilingKB * 1024;
+    // Older baselines carry bytes but no ceiling. That is "unknown", not "not over": substituting
+    // the branch ceiling recreates #628, while treating it as unlimited silently asserts master
+    // was healthy. Such scenes remain visible in the repo-wide current-state table, but neither
+    // attribution callout makes a historical claim that the available data cannot support.
+    type SceneWithKnownMasterCeiling = SceneHeadroom & { masterBytes: number; masterCeilingKB: number };
+    const hasKnownMasterCeiling = (scene: SceneHeadroom): scene is SceneWithKnownMasterCeiling => scene.masterBytes != null && scene.masterCeilingKB != null;
+    const wasOverOnMaster = (scene: SceneHeadroom): scene is SceneWithKnownMasterCeiling => hasKnownMasterCeiling(scene) && scene.masterBytes > scene.masterCeilingKB * 1024;
     const inheritedOver = over.filter((s) => wasOverOnMaster(s));
-    const movedAndOver = over.filter((s) => !wasOverOnMaster(s));
+    const movedAndOver = over.filter((s) => isAddedHere(s) || (hasKnownMasterCeiling(s) && !wasOverOnMaster(s)));
 
     const lines = ["### Ceiling headroom", ""];
 
@@ -349,7 +354,8 @@ export function buildHeadroomReport(inputs: readonly SceneHeadroomInput[], moved
             // the bytes they added, and cannot act on the ones that were already there.
             const added = movedBytes.get(s.scene) ?? 0;
             const addedNote = added > 0 ? `, ${formatBytes(added)} of it added here` : "";
-            return `\`${s.scene}\` (+${formatBytes(s.headroomBytes)} over its ${formatCeilingKB(s.ceilingKB)} ceiling${addedNote})`;
+            const masterOverage = Math.ceil(s.masterBytes - s.masterCeilingKB * 1024);
+            return `\`${s.scene}\` (+${formatBytes(masterOverage)} over its ${formatCeilingKB(s.masterCeilingKB)} baseline ceiling${addedNote})`;
         });
         const overflow = inheritedOver.length > HEADROOM_LIST_LIMIT ? `, and ${inheritedOver.length - HEADROOM_LIST_LIMIT} more` : "";
         const verb = inheritedOver.length === 1 ? "was" : "were";

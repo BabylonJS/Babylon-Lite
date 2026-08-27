@@ -125,6 +125,15 @@ export interface SceneHeadroomInput {
      * and a scene already over its ceiling still has a delta if the branch touched it at all.
      */
     masterBytes?: number;
+    /**
+     * The ceiling that applied when `masterBytes` was measured.
+     *
+     * Baselines published before ceiling stamping do not have this field. That absence means the
+     * historical ceiling state is unknown; consumers must not substitute the branch's current
+     * ceiling, because doing so makes a newly tightened ceiling look like a breach inherited from
+     * master.
+     */
+    masterCeilingKB?: number;
 }
 
 export interface SceneHeadroom extends SceneHeadroomInput {

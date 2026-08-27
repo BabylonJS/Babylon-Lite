@@ -171,7 +171,7 @@ describe("report-bundle-size-deltas", () => {
             const comment =
                 runReporter({
                     current: { scene1: { rawKB: 97.7, rawBytes: 100000 }, scene2: { rawKB: 50.3, rawBytes: 51512 } },
-                    master: { scene1: { rawKB: 95.0, rawBytes: 97280 }, scene2: { rawKB: 49.5, rawBytes: 50700 } },
+                    master: { scene1: { rawKB: 95.0, rawBytes: 97280, ceilingKB: 100 }, scene2: { rawKB: 49.5, rawBytes: 50700, ceilingKB: 50 } },
                     scenes: [
                         { id: 1, slug: "scene1", name: "Scene 1 - BoomBox PBR", maxRawKB: 100 },
                         { id: 2, slug: "scene2", name: "Scene 2 - Sphere", maxRawKB: 50 },
@@ -189,7 +189,7 @@ describe("report-bundle-size-deltas", () => {
         const inheritedBreachFixture = {
             // scene2 is 312 B over its ceiling and identical on both sides: this PR did not touch it.
             current: { scene1: { rawKB: 97.7, rawBytes: 100000 }, scene2: { rawKB: 50.3, rawBytes: 51512 } },
-            master: { scene1: { rawKB: 95.0, rawBytes: 97280 }, scene2: { rawKB: 50.3, rawBytes: 51512 } },
+            master: { scene1: { rawKB: 95.0, rawBytes: 97280, ceilingKB: 100 }, scene2: { rawKB: 50.3, rawBytes: 51512, ceilingKB: 50 } },
             scenes: [
                 { id: 1, slug: "scene1", name: "Scene 1 - BoomBox PBR", maxRawKB: 100 },
                 { id: 2, slug: "scene2", name: "Scene 2 - Sphere", maxRawKB: 50 },
@@ -199,7 +199,7 @@ describe("report-bundle-size-deltas", () => {
         it("reports a scene already over its ceiling that this PR did not grow", () => {
             const comment = runReporter(inheritedBreachFixture).comment ?? "";
 
-            expect(comment).toContain("🛑 **1 scene was already over ceiling on master:** `scene2` (+312 B over its 50.00 KB ceiling)");
+            expect(comment).toContain("🛑 **1 scene was already over ceiling on master:** `scene2` (+312 B over its 50.00 KB baseline ceiling)");
             expect(comment).toContain("This fails the Bundle Size job on every open PR");
             // It is not the author's doing, so it must not be reported as something they caused.
             expect(comment).not.toContain("put over its ceiling by this PR");
@@ -225,10 +225,11 @@ describe("report-bundle-size-deltas", () => {
             // scenes at once, and an uncapped inline list is skimmed past exactly like the build
             // log this section replaces. 12 breached scenes, none of them touched by this PR.
             const breached = Array.from({ length: 12 }, (_, i) => i + 1);
-            const manifest = Object.fromEntries(breached.map((id) => [`scene${id}`, { rawKB: 50.3, rawBytes: 51512 }]));
+            const current = Object.fromEntries(breached.map((id) => [`scene${id}`, { rawKB: 50.3, rawBytes: 51512 }]));
+            const master = Object.fromEntries(breached.map((id) => [`scene${id}`, { rawKB: 50.3, rawBytes: 51512, ceilingKB: 50 }]));
             const result = runReporter({
-                current: manifest,
-                master: manifest,
+                current,
+                master,
                 scenes: breached.map((id) => ({ id, slug: `scene${id}`, name: `Scene ${id}`, maxRawKB: 50 })),
             });
             const comment = result.comment ?? "";
@@ -237,7 +238,7 @@ describe("report-bundle-size-deltas", () => {
             expect(comment).toContain(", and 2 more");
             // The callout names at most HEADROOM_LIST_LIMIT scenes, and the table is capped too.
             const callout = comment.slice(comment.indexOf("🛑"), comment.indexOf("This fails the Bundle Size job"));
-            expect(callout.match(/over its 50\.00 KB ceiling/g) ?? []).toHaveLength(10);
+            expect(callout.match(/over its 50\.00 KB baseline ceiling/g) ?? []).toHaveLength(10);
             const details = comment.slice(comment.indexOf("<details>"), comment.indexOf("</details>"));
             expect(details.match(/⚠️ \d+ B over/g) ?? []).toHaveLength(10);
             expect(details).toContain("12 scenes over ceiling");
@@ -272,13 +273,13 @@ describe("report-bundle-size-deltas", () => {
             const comment =
                 runReporter({
                     current: { scene1: { rawKB: 50.3, rawBytes: 51512 } },
-                    master: { scene1: { rawKB: 50.3, rawBytes: 51500 } },
+                    master: { scene1: { rawKB: 50.3, rawBytes: 51500, ceilingKB: 50 } },
                     scenes: [{ id: 1, slug: "scene1", name: "Scene 1", maxRawKB: 50 }],
                 }).comment ?? "";
 
             // The branch's contribution is reported separately from the total: the author can act
             // on the 12 B they added and cannot act on the 300 B that were already there.
-            expect(comment).toContain("🛑 **1 scene was already over ceiling on master:** `scene1` (+312 B over its 50.00 KB ceiling, 12 B of it added here)");
+            expect(comment).toContain("🛑 **1 scene was already over ceiling on master:** `scene1` (+300 B over its 50.00 KB baseline ceiling, 12 B of it added here)");
             expect(comment).toContain("rebasing will not clear it");
             expect(comment).not.toContain("put over its ceiling by this PR");
         });
@@ -287,11 +288,12 @@ describe("report-bundle-size-deltas", () => {
             // The headroom-only header predates the inherited-breach trigger, which reaches it
             // with nothing moved — so it asserted movement and pointed the author at their own
             // diff directly above a block saying the breach came from master.
-            const identical = { scene1: { rawKB: 50.3, rawBytes: 51512 } };
+            const current = { scene1: { rawKB: 50.3, rawBytes: 51512 } };
+            const master = { scene1: { rawKB: 50.3, rawBytes: 51512, ceilingKB: 50 } };
             const comment =
                 runReporter({
-                    current: identical,
-                    master: identical,
+                    current,
+                    master,
                     scenes: [{ id: 1, slug: "scene1", name: "Scene 1", maxRawKB: 50 }],
                 }).comment ?? "";
 
@@ -304,13 +306,46 @@ describe("report-bundle-size-deltas", () => {
             // author still has a red Bundle Size job and this comment is the only explanation.
             const result = runReporter({
                 current: { scene1: { rawKB: 50.3, rawBytes: 51512 } },
-                master: { scene1: { rawKB: 50.3, rawBytes: 51512 } },
+                master: { scene1: { rawKB: 50.3, rawBytes: 51512, ceilingKB: 50 } },
                 scenes: [{ id: 1, slug: "scene1", name: "Scene 1 - Sphere", maxRawKB: 50 }],
             });
 
             expect(result.stdout).toContain("POST_BUNDLE_COMMENT]true");
             expect(result.comment ?? "").not.toBe("**Bundle Size**: No changes detected.");
             expect(result.comment ?? "").toContain("🛑 **1 scene was already over ceiling on master:**");
+        });
+
+        it("uses the baseline ceiling when a PR tightens the current ceiling (#628)", () => {
+            // Master measured 95 KB under the 100 KB ceiling that applied to it. This PR reclaims
+            // 3 KB but tightens the current ceiling to 90 KB. Comparing master's bytes with the
+            // branch ceiling falsely called this inherited and claimed rebasing could not clear it.
+            const result = runReporter({
+                current: { scene1: { rawKB: 92, rawBytes: 92 * 1024 } },
+                master: { scene1: { rawKB: 95, rawBytes: 95 * 1024, ceilingKB: 100 } },
+                scenes: [{ id: 1, slug: "scene1", name: "Scene 1", maxRawKB: 90 }],
+            });
+            const comment = result.comment ?? "";
+
+            expect(comment).toContain("🚨 **1 scene put over its ceiling by this PR:** `scene1` (+2.0 KB over its 90.00 KB ceiling)");
+            expect(comment).not.toContain("already over ceiling on master");
+            expect(comment).not.toContain("rebasing will not clear it");
+        });
+
+        it("does not infer historical ceiling state when an old baseline has no ceiling", () => {
+            const result = runReporter({
+                current: { scene1: { rawKB: 92, rawBytes: 92 * 1024 } },
+                master: { scene1: { rawKB: 95, rawBytes: 95 * 1024 } },
+                scenes: [{ id: 1, slug: "scene1", name: "Scene 1", maxRawKB: 90 }],
+            });
+            const comment = result.comment ?? "";
+
+            expect(comment).not.toContain("put over its ceiling by this PR");
+            expect(comment).not.toContain("already over ceiling on master");
+            expect(comment).not.toContain("rebasing will not clear it");
+            // A whole-KB delta still posts the ordinary comparison, and the collapsed table can
+            // report the current branch's absolute state without inventing anything about master.
+            expect(comment).toContain("### Decreases");
+            expect(comment).toContain("⚠️ 2.0 KB over");
         });
 
         it("omits the headroom section for scenes that opt out of the ceiling check", () => {
@@ -358,7 +393,7 @@ describe("report-bundle-size-deltas", () => {
         it("posts a headroom-only comment when sub-KB movement pushes a scene over its ceiling", () => {
             const result = runReporter({
                 current: { scene1: { rawKB: 50.3, rawBytes: 51512 } },
-                master: { scene1: { rawKB: 50.0, rawBytes: 51200 } },
+                master: { scene1: { rawKB: 50.0, rawBytes: 51200, ceilingKB: 50 } },
                 scenes: [{ id: 1, slug: "scene1", name: "Scene 1 - Sphere", maxRawKB: 50 }],
             });
 
