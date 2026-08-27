@@ -128,6 +128,9 @@ export interface PhysicsMassProperties {
     inertiaOrientation?: Quat;
 }
 
+/** Principal body axis whose angular motion may be locked. */
+export type PhysicsRotationAxis = "x" | "y" | "z";
+
 /** Pivot/axis options used to create a physics constraint. */
 export interface PhysicsConstraintOptions {
     pivotA?: Vec3;
@@ -1163,6 +1166,38 @@ export function getPhysicsBodyAngularVelocity(world: PhysicsWorld, body: Physics
  */
 export function setPhysicsBodyAngularVelocity(world: PhysicsWorld, body: PhysicsBody, velocity: Vec3): void {
     world._hknp.HP_Body_SetAngularVelocity(body._hkBody, [velocity.x, velocity.y, velocity.z]);
+}
+
+/**
+ * Lock angular motion around selected body-local axes.
+ * Havok represents a locked angular degree of freedom with zero inertia.
+ */
+export function lockPhysicsBodyRotationAxes(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis[]): void {
+    if (axes.length === 0) {
+        return;
+    }
+    const hknp = world._hknp;
+    const result = hknp.HP_Body_GetMassProperties(body._hkBody);
+    const ok = hknp.Result?.RESULT_OK ?? 0;
+    if (result[0] !== ok) {
+        throw new Error("Failed to read physics body mass properties.");
+    }
+    const massProperties = result[1];
+    const inertia = [...massProperties[2]];
+    for (const axis of axes) {
+        if (axis === "x") {
+            inertia[0] = 0;
+        } else if (axis === "y") {
+            inertia[1] = 0;
+        } else if (axis === "z") {
+            inertia[2] = 0;
+        } else {
+            throw new Error(`Unknown physics rotation axis "${String(axis)}".`);
+        }
+    }
+    massProperties[2] = inertia;
+    massProperties[3] = [0, 0, 0, 1];
+    hknp.HP_Body_SetMassProperties(body._hkBody, massProperties);
 }
 
 /**

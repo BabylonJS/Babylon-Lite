@@ -188,6 +188,17 @@ steps matches the animation and sprite managers.
 
 ---
 
+## Rigid-body angular locks
+
+`lockPhysicsBodyRotationAxes(world, body, axes)` locks selected body-local
+axes after the collision shape and mass properties have been configured. Havok
+represents a locked angular degree of freedom with a zero inertia component, so
+the helper reads the body's current mass properties, zeros only the requested
+`"x"`, `"y"`, or `"z"` components, aligns the inertia frame with the body, and
+preserves its mass, centre of mass, and unlocked inertia magnitudes.
+
+---
+
 ## Feature modules (opt-in)
 
 - **Collision events** (`havok-collision.ts`): `setPhysicsBodyCollisionEventsEnabled`
@@ -221,5 +232,8 @@ steps matches the animation and sprite managers.
   (independent of `scene.fixedDeltaMs`), follows the scene's per-frame delta when
   unset (respecting runtime changes), is converted to seconds for `HP_World_Step`,
   and is settable via `setPhysicsTimestep` / `setPhysicsTimestepMs`.
+- `tests/lite/unit/physics-rotation-axis-locks.test.ts` — selected body-local inertia
+  components are zeroed while mass, centre of mass, and unlocked components are
+  preserved; empty input and native read failures do not write mass properties.
 - Parity scenes (physics drop/stack/constraint scenes) set
   `scene.fixedDeltaMs = 1000 / 60` so Lite and Babylon.js step identically.
