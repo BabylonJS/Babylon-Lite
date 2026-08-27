@@ -775,6 +775,59 @@ export function setSprite2DShaderParams(layer: Sprite2DLayer, params: readonly [
 export function setSprite2DUvOffset(layer: Sprite2DLayer, index: number, uvOffset: readonly [number, number]): void;
 ```
 
+### Sprite2D view utilities
+
+`sprite-2d-view.ts` owns the CPU form of the same transform used by the
+Sprite2D vertex shader. A view maps its `positionPx` to logical screen `(0, 0)`,
+then applies `rotation` and `zoom`. Screen dimensions and coordinates are
+backing-store pixels with a top-left origin. `Bounds2D` is a reusable math type;
+the visible-bounds helper writes world-space values into it.
+
+```typescript
+export interface Bounds2D {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+}
+
+export function sprite2DWorldToScreenToRef<T extends Vec2>(view: Sprite2DView, worldX: number, worldY: number, result: T): T;
+export function sprite2DScreenToWorldToRef<T extends Vec2>(view: Sprite2DView, screenX: number, screenY: number, result: T): T;
+export function getSprite2DVisibleBoundsToRef<T extends Bounds2D>(view: Sprite2DView, screenWidthPx: number, screenHeightPx: number, result: T): T;
+export function centerSprite2DView<T extends Sprite2DView>(view: T, worldX: number, worldY: number, screenWidthPx: number, screenHeightPx: number): T;
+```
+
+For a `SpriteRenderer`, and for a depth-hosted layer rendered through a full
+camera viewport, logical screen coordinates are absolute framebuffer
+coordinates. Pointer callers first convert CSS pixels by the canvas backing-
+store scale. A depth-hosted layer under a non-full camera viewport keeps the
+full render target as its logical screen size because the render pass applies
+the camera viewport after the Sprite2D vertex transform. Use
+`resolveCameraViewport`, then remap an absolute framebuffer point before
+unprojecting it:
+
+```typescript
+const screenX = ((framebufferX - viewport.x) * targetWidth) / viewport.width;
+const screenY = ((framebufferY - viewport.y) * targetHeight) / viewport.height;
+sprite2DScreenToWorldToRef(layer.view, screenX, screenY, worldPosition);
+```
+
+The inverse mapping places a projected Sprite2D point in the absolute
+framebuffer: `framebufferX = viewport.x + screenX * viewport.width /
+targetWidth`, with the equivalent expression for Y. Pass the full render-target
+width and height to `getSprite2DVisibleBoundsToRef` and `centerSprite2DView`, not
+the camera viewport's reduced pixel size.
+
+The `ToRef` functions write into caller-owned objects, and centering mutates the
+supplied view, so steady-state camera and culling updates allocate nothing.
+Negative zoom remains valid and mirrors the renderer. Inverse projection,
+visible bounds, and centering throw for `zoom === 0`, where no inverse exists;
+world-to-screen projection still matches the renderer and collapses to `(0, 0)`.
+
+The module has only type imports and pure functions. Nothing in `sprite-2d.ts`,
+`sprite-pipeline.ts`, or the render loop imports it, so applications that do not
+reference these helpers retain no runtime bytes or branches from them.
+
 The Handle API (`addSprite2D` / `removeSprite2D`, returning a
 `Sprite2DHandle` with a stable id) lives in the separately importable
 `sprite-2d-handle.ts` module so Index-only scenes do not pull handle code,

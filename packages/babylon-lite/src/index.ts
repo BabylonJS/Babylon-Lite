@@ -558,7 +558,7 @@ export {
 } from "./math/spherical.js";
 export type { SphericalCoordinates } from "./math/spherical.js";
 export { scaleBoundsFromCenterToRef } from "./math/scale-bounds-from-center-to-ref.js";
-export type { Vec2, Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
+export type { Vec2, Bounds2D, Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
 export type { Aabb } from "./math/aabb.js";
 export { computeAabb } from "./math/aabb.js";
 export { eulerToQuat, quatToEulerXYZ } from "./math/quat-euler.js";
@@ -737,6 +737,7 @@ export {
     setSprite2DFrameIndex,
     setSprite2DShaderParams,
 } from "./sprite/sprite-2d.js";
+export { sprite2DWorldToScreenToRef, sprite2DScreenToWorldToRef, getSprite2DVisibleBoundsToRef, centerSprite2DView } from "./sprite/sprite-2d-view.js";
 export type { CustomShaderTexture } from "./sprite/custom-shader-core.js";
 export { setSprite2DCoverageGamma } from "./sprite/sprite-2d-coverage-gamma.js";
 export { setSprite2DUvOffset } from "./sprite/sprite-2d-uvscroll.js";

@@ -1,4 +1,4 @@
-export type { Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat, Mat4Storage } from "./types.js";
+export type { Bounds2D, Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat, Mat4Storage } from "./types.js";
 export { randomRange } from "./random-range.js";
 export { linearToSrgbByte, srgbByteToLinear, packedSrgbToLinearRgba } from "./color.js";
 export { copyColor4, scaleColor4ToRef } from "./color4-ref.js";
