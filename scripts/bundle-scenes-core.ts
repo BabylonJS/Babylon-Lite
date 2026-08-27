@@ -888,7 +888,8 @@ function elapsed(startMs: number): string {
 }
 
 /** Strip the no-op `__vitePreload(() => import("chunk"), [])` wrappers that Vite
- *  injects around every dynamic import down to a bare `import("chunk")`.
+ *  injects around dynamic imports. Bare and one-export projection callbacks
+ *  collapse to `import("chunk")`.
  *
  *  These Lite bundles disable module preload, and the preload helper itself is a
  *  pure passthrough (`baseModule => baseModule()`), so the wrapper and its empty
@@ -898,8 +899,13 @@ function elapsed(startMs: number): string {
  *  code-split scene (feature-rich glTF assets carry dozens of these). Applied to
  *  the finalized on-disk output in {@link buildScene} because Vite resolves the
  *  preload form too late for a renderChunk/generateBundle hook to see it. */
-function stripNoopPreloadWrappers(code: string): string {
-    return code.replace(/[\w$]+\(\s*\(\s*\)\s*=>\s*(import\([^()]*\))\s*,\s*\[\s*\]\s*\)/g, "$1");
+export function stripNoopPreloadWrappers(code: string): string {
+    return code
+        .replace(
+            /[\w$]+\(async\(\)=>\{const\{([\w$]+):([\w$]+)\}=await (import\([^()]*\));return\{\1:\2\}\},\[\]\)/g,
+            "$3"
+        )
+        .replace(/[\w$]+\(\s*\(\s*\)\s*=>\s*(import\([^()]*\)(?:\.then\(\s*[\w$]+\s*=>\s*[\w$]+\.[\w$]+\s*\))?)\s*,\s*\[\s*\]\s*\)/g, "$1");
 }
 
 function minimalVitePreloadPlugin(): Plugin {

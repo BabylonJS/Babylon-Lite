@@ -6,12 +6,9 @@
  * always-fetched engine graph references the plugin bridges. A scene only pulls
  * in plugin code when the application imports and calls `enableMaterialPlugins`.
  *
- * This is what keeps plugin-free scenes BYTE-IDENTICAL to a build without the
- * plugin system at all: the shared PBR/Standard renderable and group-builder
- * modules carry zero plugin-specific code; they merely walk their generic
- * extension registries. `enableMaterialPlugins` registers the plugin bridges
- * into those global registries, and the pre-existing hook loops invoke them with
- * no shared-code changes.
+ * Shared PBR/Standard renderables carry no plugin implementation; they merely
+ * walk generic extension registries and pass their owning scene to binding hooks.
+ * `enableMaterialPlugins` registers the plugin bridges into those registries.
  *
  * Contract: call AFTER creating materials/meshes and adding them to the scene,
  * and BEFORE `registerScene(scene)`. Attach plugins via
@@ -48,5 +45,12 @@ import { registerStdPlugins } from "./std-plugin-bridge.js";
  */
 export function enableMaterialPlugins(scene: SceneContext): void {
     registerPbrPlugins(_registerPbrExt);
-    registerStdPlugins(scene.meshes, scene.surface.engine, _registerStdExt);
+    const refresh = registerStdPlugins(scene, _registerStdExt);
+    // Public onBeforeRender() callbacks use unshift(), so appending keeps the upload
+    // after plugin-value mutations regardless of whether they register before or after us.
+    const previous = scene._beforeRender.indexOf(refresh);
+    if (previous >= 0) {
+        scene._beforeRender.splice(previous, 1);
+    }
+    scene._beforeRender.push(refresh);
 }

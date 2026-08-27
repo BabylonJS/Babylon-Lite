@@ -64,6 +64,7 @@ Pages are ordered by how commonly Babylon Lite users reach for them — start wi
 | [42-physics.md](42-physics.md)                                     | Physics                  | Havok V2 world, bodies/shapes/aggregates, timestep & delta propagation, collision/trigger/query/character |
 | [49-error-handling.md](49-error-handling.md)                       | Error Handling           | Coded errors by default; `enableErrorDecoding` (always-on) vs `decodeError` (on-the-fly, e.g. telemetry)   |
 | [50-device-lost-recovery.md](50-device-lost-recovery.md)           | Device Lost Recovery     | Opt-in Scene, SpriteRenderer, and TextRenderer recovery after WebGPU device loss                           |
+| [51-flow-graph.md](51-flow-graph.md)                               | Flow Graph               | Pure-state visual scripting, stable glTF `KHR_interactivity`, and editor JSON compatibility               |
 
 ---
 

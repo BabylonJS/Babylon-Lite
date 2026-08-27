@@ -18,6 +18,7 @@ import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } fr
 import type { TextData } from "./text-data.js";
 import { TEXT_INSTANCE_BYTES } from "./text-data.js";
 import { ensureSharedAtlasGpu } from "./_gpu/text-textures.js";
+import { createStyleBuffer, ensureStyleGpu } from "./_gpu/text-style-gpu.js";
 import { getOrCreateTextPipeline } from "./_gpu/text-pipeline.js";
 
 /** Initial transform and draw options for a scene-attached text renderable. */
@@ -52,18 +53,20 @@ export interface TextRenderable extends Renderable {
 }
 
 interface TextRenderableGpu {
-    device: GPUDevice;
-    textU: GPUBuffer;
-    instanceBuf: GPUBuffer;
-    instanceCap: number;
-    pipeline: GPURenderPipeline;
-    uploadedDataVersion: number;
-    uploadedCameraVersion: number;
-    uploadedAspect: number;
-    uploadedViewportW: number;
-    uploadedViewportH: number;
-    uploadedOpacity: number;
-    targetKey: string;
+    _device: GPUDevice;
+    _textU: GPUBuffer;
+    _instanceBuf: GPUBuffer;
+    _instanceCap: number;
+    _styleBuf: GPUBuffer;
+    _uploadedStyleVersion: number;
+    _pipeline: GPURenderPipeline;
+    _uploadedDataVersion: number;
+    _uploadedCameraVersion: number;
+    _uploadedAspect: number;
+    _uploadedViewportW: number;
+    _uploadedViewportH: number;
+    _uploadedOpacity: number;
+    _targetKey: string;
 }
 
 const TEXT_UBO_BYTES = 64 /* mvp */ + 16 /* viewport */ + 16; /* color */
@@ -122,43 +125,46 @@ function ensureGpu(r: TextRenderable, engine: EngineContext, target: RenderTarge
     }
     const depthFormat = target._depthStencilFormat ?? null;
     const depthWrite = !r.ignoreDepth;
-    const { pipeline } = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite, r);
+    const { _pipeline: pipeline } = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite, r);
     const key = targetSig(target);
     let gpu = r._gpu;
-    if (gpu && gpu.device !== device) {
-        gpu.textU.destroy();
-        gpu.instanceBuf.destroy();
+    if (gpu && gpu._device !== device) {
+        gpu._textU.destroy();
+        gpu._instanceBuf.destroy();
+        gpu._styleBuf.destroy();
         gpu = null;
     }
-    if (!gpu || gpu.targetKey !== key || gpu.pipeline !== pipeline) {
+    if (!gpu || gpu._targetKey !== key || gpu._pipeline !== pipeline) {
         if (!gpu) {
             const cap = Math.max(r._data._instanceCount, 8);
             gpu = {
-                device,
-                textU: createEmptyUniformBuffer(engine, TEXT_UBO_BYTES, "text-renderable-ubo"),
-                instanceBuf: device.createBuffer({
+                _device: device,
+                _textU: createEmptyUniformBuffer(engine, TEXT_UBO_BYTES, "text-renderable-ubo"),
+                _instanceBuf: device.createBuffer({
                     label: "text-instance",
                     size: cap * TEXT_INSTANCE_BYTES,
                     usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
                 }),
-                instanceCap: cap,
-                pipeline,
-                uploadedDataVersion: -1,
-                uploadedCameraVersion: -1,
-                uploadedAspect: -1,
-                uploadedViewportW: 0,
-                uploadedViewportH: 0,
-                uploadedOpacity: NaN,
-                targetKey: key,
+                _instanceCap: cap,
+                _styleBuf: createStyleBuffer(device, 1),
+                _uploadedStyleVersion: -1,
+                _pipeline: pipeline,
+                _uploadedDataVersion: -1,
+                _uploadedCameraVersion: -1,
+                _uploadedAspect: -1,
+                _uploadedViewportW: 0,
+                _uploadedViewportH: 0,
+                _uploadedOpacity: NaN,
+                _targetKey: key,
             };
             r._gpu = gpu;
         } else {
-            gpu.pipeline = pipeline;
-            gpu.targetKey = key;
+            gpu._pipeline = pipeline;
+            gpu._targetKey = key;
             // Pipeline change — per-group bind groups must be rebuilt against the new bindGroupLayout.
             for (const g of r._data._groups) {
-                g.bindGroup = null;
-                g.bindGroupVersion = -1;
+                g._bindGroup = null;
+                g._bindGroupVersion = -1;
             }
         }
     }
@@ -166,32 +172,32 @@ function ensureGpu(r: TextRenderable, engine: EngineContext, target: RenderTarge
 }
 
 function ensureInstanceCapacity(device: GPUDevice, gpu: TextRenderableGpu, needed: number): void {
-    if (needed <= gpu.instanceCap) {
+    if (needed <= gpu._instanceCap) {
         return;
     }
-    let cap = gpu.instanceCap;
+    let cap = gpu._instanceCap;
     while (cap < needed) {
         cap *= 2;
     }
-    gpu.instanceBuf.destroy();
-    gpu.instanceBuf = device.createBuffer({
+    gpu._instanceBuf.destroy();
+    gpu._instanceBuf = device.createBuffer({
         label: "text-instance",
         size: cap * TEXT_INSTANCE_BYTES,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
-    gpu.instanceCap = cap;
-    gpu.uploadedDataVersion = -1;
+    gpu._instanceCap = cap;
+    gpu._uploadedDataVersion = -1;
 }
 
 function bindTextRenderable(r: TextRenderable, engine: EngineContext, target: RenderTargetSignature): DrawBinding {
     const gpu = ensureGpu(r, engine, target);
-    const { cache } = getOrCreateTextPipeline(engine, target._colorFormat!, target._sampleCount === 1 ? 1 : 4, target._depthStencilFormat ?? null, !r.ignoreDepth, r);
-    const quadVertex = cache.quadVertexBuffer;
-    const bindGroupLayout = cache.bindGroupLayout;
+    const { _cache: cache } = getOrCreateTextPipeline(engine, target._colorFormat!, target._sampleCount === 1 ? 1 : 4, target._depthStencilFormat ?? null, !r.ignoreDepth, r);
+    const quadVertex = cache._quadVertexBuffer;
+    const bindGroupLayout = cache._bindGroupLayout;
 
     return {
         renderable: r,
-        pipeline: gpu.pipeline,
+        pipeline: gpu._pipeline,
         update(context: DrawUpdateContext): void {
             updateTextRenderable(r, engine, gpu, bindGroupLayout, context);
         },
@@ -205,41 +211,46 @@ function updateTextRenderable(r: TextRenderable, engine: EngineContext, gpu: Tex
     const device = engine._device;
     const data = r._data;
 
+    // Sync the style palette first: a grown buffer invalidates every group's bind group.
+    const styleRecreated = ensureStyleGpu(device, data, gpu);
+
     // Sync every group's atlas to the GPU; track which need bind-group rebuild.
     for (const g of data._groups) {
-        const { rebuilt, gpu: atlasGpu } = ensureSharedAtlasGpu(device, g.curveSet.atlas);
-        if (rebuilt || !g.bindGroup || g.bindGroupVersion !== atlasGpu.uploadedVersion) {
-            g.bindGroup = device.createBindGroup({
-                label: "text-bg0-" + g.curveSetId,
+        const { _rebuilt: rebuilt, _gpu: atlasGpu } = ensureSharedAtlasGpu(device, g._curveSet._atlas);
+        if (rebuilt || styleRecreated || !g._bindGroup || g._bindGroupVersion !== atlasGpu._uploadedVersion) {
+            g._bindGroup = device.createBindGroup({
+                label: "text-bg0-" + g._curveSetId,
                 layout: bindGroupLayout,
                 entries: [
-                    { binding: 0, resource: { buffer: gpu.textU } },
-                    { binding: 1, resource: atlasGpu.curveTex.createView() },
-                    { binding: 2, resource: atlasGpu.bandTex.createView() },
+                    { binding: 0, resource: { buffer: gpu._textU } },
+                    { binding: 1, resource: atlasGpu._curveTex.createView() },
+                    { binding: 2, resource: atlasGpu._bandTex.createView() },
+                    { binding: 3, resource: { buffer: atlasGpu._metaBuf } },
+                    { binding: 4, resource: { buffer: gpu._styleBuf } },
                 ],
             });
-            g.bindGroupVersion = atlasGpu.uploadedVersion;
+            g._bindGroupVersion = atlasGpu._uploadedVersion;
         }
     }
 
     // Sync instance buffer if data changed.
     ensureInstanceCapacity(device, gpu, data._instanceCount);
-    if (gpu.uploadedDataVersion !== data._version) {
+    if (gpu._uploadedDataVersion !== data._version) {
         if (data._instanceCount > 0) {
             // Partial upload when only a sub-range is dirty; full upload after grow/reset (when
-            // uploadedDataVersion is -1 we don't trust the dirty range).
-            const dirtyValid = gpu.uploadedDataVersion !== -1 && data._dirtyEnd > data._dirtyStart;
+            // _uploadedDataVersion is -1 we don't trust the dirty range).
+            const dirtyValid = gpu._uploadedDataVersion !== -1 && data._dirtyEnd > data._dirtyStart;
             if (dirtyValid) {
                 const startFloats = data._dirtyStart * (TEXT_INSTANCE_BYTES / 4);
                 const endFloats = data._dirtyEnd * (TEXT_INSTANCE_BYTES / 4);
                 const view = data._instances.subarray(startFloats, endFloats);
-                device.queue.writeBuffer(gpu.instanceBuf, data._dirtyStart * TEXT_INSTANCE_BYTES, view.buffer as ArrayBuffer, view.byteOffset, view.byteLength);
+                device.queue.writeBuffer(gpu._instanceBuf, data._dirtyStart * TEXT_INSTANCE_BYTES, view.buffer as ArrayBuffer, view.byteOffset, view.byteLength);
             } else {
                 const view = data._instances.subarray(0, data._instanceCount * (TEXT_INSTANCE_BYTES / 4));
-                device.queue.writeBuffer(gpu.instanceBuf, 0, view.buffer as ArrayBuffer, view.byteOffset, view.byteLength);
+                device.queue.writeBuffer(gpu._instanceBuf, 0, view.buffer as ArrayBuffer, view.byteOffset, view.byteLength);
             }
         }
-        gpu.uploadedDataVersion = data._version;
+        gpu._uploadedDataVersion = data._version;
         data._dirtyStart = 0;
         data._dirtyEnd = 0;
     }
@@ -251,28 +262,28 @@ function updateTextRenderable(r: TextRenderable, engine: EngineContext, gpu: Tex
     if (camera) {
         const aspect = getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight);
         const camVer = _cameraChangeKey(camera);
-        if (r._wmDirty || gpu.uploadedCameraVersion !== camVer || gpu.uploadedAspect !== aspect) {
+        if (r._wmDirty || gpu._uploadedCameraVersion !== camVer || gpu._uploadedAspect !== aspect) {
             const vp = getViewProjectionMatrix(camera, aspect) as unknown as Float32Array;
             const wm = r._worldMatrix();
             mat4MultiplyInto(_mvpScratch, 0, vp, 0, wm as unknown as Mat4Storage, 0);
-            device.queue.writeBuffer(gpu.textU, 0, _mvpScratch.buffer as ArrayBuffer, _mvpScratch.byteOffset, 64);
+            device.queue.writeBuffer(gpu._textU, 0, _mvpScratch.buffer as ArrayBuffer, _mvpScratch.byteOffset, 64);
             r._wmDirty = false;
-            gpu.uploadedCameraVersion = camVer;
-            gpu.uploadedAspect = aspect;
+            gpu._uploadedCameraVersion = camVer;
+            gpu._uploadedAspect = aspect;
         }
     }
-    if (gpu.uploadedViewportW !== context.targetWidth || gpu.uploadedViewportH !== context.targetHeight) {
+    if (gpu._uploadedViewportW !== context.targetWidth || gpu._uploadedViewportH !== context.targetHeight) {
         const vp = new Float32Array([context.targetWidth, context.targetHeight, 0, 0]);
-        device.queue.writeBuffer(gpu.textU, 64, vp.buffer as ArrayBuffer, vp.byteOffset, 16);
-        gpu.uploadedViewportW = context.targetWidth;
-        gpu.uploadedViewportH = context.targetHeight;
+        device.queue.writeBuffer(gpu._textU, 64, vp.buffer as ArrayBuffer, vp.byteOffset, 16);
+        gpu._uploadedViewportW = context.targetWidth;
+        gpu._uploadedViewportH = context.targetHeight;
     }
     // Color uniform carries whole-block opacity as alpha (rgb fixed to white). Per-glyph color
     // comes from the instance `slugColor` attribute.
-    if (gpu.uploadedOpacity !== r.opacity) {
+    if (gpu._uploadedOpacity !== r.opacity) {
         const col = new Float32Array([1, 1, 1, r.opacity]);
-        device.queue.writeBuffer(gpu.textU, 80, col.buffer as ArrayBuffer, col.byteOffset, 16);
-        gpu.uploadedOpacity = r.opacity;
+        device.queue.writeBuffer(gpu._textU, 80, col.buffer as ArrayBuffer, col.byteOffset, 16);
+        gpu._uploadedOpacity = r.opacity;
     }
 }
 
@@ -281,14 +292,14 @@ function drawTextRenderable(gpu: TextRenderableGpu, data: TextData, quadVertex: 
         return 0;
     }
     pass.setVertexBuffer(0, quadVertex);
-    pass.setVertexBuffer(1, gpu.instanceBuf);
+    pass.setVertexBuffer(1, gpu._instanceBuf);
     let draws = 0;
     for (const g of data._groups) {
-        if (g.slotCount === 0 || !g.bindGroup) {
+        if (g._slotCount === 0 || !g._bindGroup) {
             continue;
         }
-        pass.setBindGroup(0, g.bindGroup);
-        pass.draw(6, g.slotCount, 0, g.slotStart);
+        pass.setBindGroup(0, g._bindGroup);
+        pass.draw(6, g._slotCount, 0, g._slotStart);
         draws++;
     }
     return draws;
@@ -297,8 +308,9 @@ function drawTextRenderable(gpu: TextRenderableGpu, data: TextData, quadVertex: 
 /** Release GPU buffers owned by a text renderable. The underlying `TextData` and `GlyphStorage` remain caller-owned. */
 export function disposeTextRenderable(renderable: TextRenderable): void {
     if (renderable._gpu) {
-        renderable._gpu.textU.destroy();
-        renderable._gpu.instanceBuf.destroy();
+        renderable._gpu._textU.destroy();
+        renderable._gpu._instanceBuf.destroy();
+        renderable._gpu._styleBuf.destroy();
         renderable._gpu = null;
     }
 }

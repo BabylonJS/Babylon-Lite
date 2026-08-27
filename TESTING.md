@@ -96,6 +96,8 @@ The cloud parity config connects to remote Chrome **directly over CDP**
 so specs shard across `CIWORKERS` parallel cloud browsers. The local Vite dev
 server is exposed to the remote browser through a BrowserStack Local tunnel
 started by the config's `globalSetup` (`config/browserstack-local-tunnel.ts`).
+Both BrowserStack Playwright configs explicitly disable tracing, including
+retry tracing, because BrowserStack connection metadata can embed credentials.
 
 ```sh
 pnpm build:bundle-scenes
@@ -324,14 +326,157 @@ uploading failed Playwright HTML reports:
 
 - `DEPLOYMENT_SERVER`
 - `DEPLOY_TOKEN`
+- `DEPLOY_ENDPOINT_UPLOAD`
+
+It uses `BabylonJS-CI-Infrastructure` for the storage accounts and CDN profiles
+that uploads target:
+
+- `SNAPSHOTS_STORAGE_ACCOUNT` — snapshots account, used by
+  `azure-pipelines-bundle-manifest.yml` for the bundle-size baseline
+- `TOOLS_STORAGE_ACCOUNT` — tools account backing `liteplayground.babylonjs.com`
+- `CDN_PROFILE_TOOLS`
+
+This third group is easy to miss. It was **omitted from this list until the
+bundle-manifest pipeline failed on it**, even though `azure-pipelines.yml`,
+`azure-pipelines-playground.yml` and `azure-pipelines-npm-publish.yml` had all
+three been importing it all along. A pipeline that needs a storage account and
+declares only the first two groups will not fail at parse time — see the trap
+described below.
+
+### Never copy a command out of a build log
+
+Azure masks secret values in build logs as a run of asterisks. If you copy a
+`curl` line out of a log to reproduce it, you copy the mask, and pasting it back
+into a pipeline produces a header that still _looks_ like a header while
+carrying no credential at all.
+
+This is not hypothetical. The bundle-manifest publish step shipped with a
+literal asterisk run where the bearer token belonged, and it survived review for
+weeks, because it is close to invisible: a code-review diff redacts the value of
+an `Authorization` header to asterisks whether the file holds a real token
+reference or a mask, so both render identically. It reads as correct in every
+view except the raw bytes.
+
+It was also a _second_, independent cause of the same 401 that the storage
+account produced — so fixing one of the two would have left the symptom
+unchanged and the remaining cause looking disproven.
+
+`tests/lite/unit/pipeline-secret-hygiene.test.ts` guards this. Read what it
+actually asserts before relying on it, because each clause is narrower than the
+obvious phrasing, deliberately:
+
+- It rejects a **mask in value position for a credential** — an all-asterisk
+  token following an auth header, `token=`, `password:` or similar. Not any
+  asterisk run, and not any asterisk token either: `echo "a***b"`,
+  `dist/**/*` and log banners such as `displayName: "*** Publish ***"` are
+  legitimate and must keep passing. A guard that fails on correct code gets
+  deleted rather than debugged, and this invariant is one whose violation is
+  invisible. Forms carrying a credential with no separator (`curl -u`) are a
+  known gap.
+- Every `Authorization:` header must **interpolate some variable**. This is the
+  universal clause and it holds in any CI dialect. Header names are matched
+  case-insensitively, because HTTP header names are: a hardcoded credential in
+  a lowercase `authorization:` once passed every clause, differing from a
+  caught one by a single letter. Commented examples are excluded so documented
+  prose is not read as a live header. The mask passed every earlier
+  check precisely because it still resembled a header.
+- Azure pipelines and their step templates must additionally reference
+  `DEPLOY_TOKEN`. This one is **not** applied repo-wide: the GitHub Actions
+  workflow authenticates with `Basic ${AUTH}`, which is correct, and demanding
+  `DEPLOY_TOKEN` of it would be a misfire.
+
+The subject is every `azure-pipelines*.yml`, every file under
+`config/templates/`, and every file under `.github/workflows/` — 10
+`Authorization:` headers today. The first version read the repo root alone and
+so covered 7 of them, while claiming the pipelines; the three it missed were the
+`curl` uploads in the shared templates, which `azure-pipelines.yml` includes at
+four call sites and which therefore run on every PR. If you add a CI file
+somewhere else, add its directory to that list — and you do not have to
+remember to: the same test walks the repo for anything its clauses examine, an
+`Authorization:` header **or** a masked value, and fails naming any file its
+roots do not reach. Documentation text is blanked before either clause reads a
+line — a `description:` explaining that a token "appears as `Authorization:
+Bearer ******`" is correct content in a file the guard must read, and the line
+was in scope, collected, and matched correctly; it simply was not a header.
+Issue templates are excluded by category rather than by key, because `value:`
+holds prose in a GitHub form and a real secret in an Azure `variables:` block —
+the same key carries opposite meaning depending on the file it sits in. Test
+data is excluded for the same categorical reason: a fixture holding a mask is
+correct code, and flagging it would advise adding a test directory to the
+roots, which would make the guard scan fixtures and fail on the very mask it
+was sent to read. Discovering by a narrower category than the clauses read
+would certify part of the subject while reporting on all of it. That
+enforcement is deliberately
+a test rather than this sentence. Once a second guard ships its own root list,
+"add it to that list" is an instruction a reader can follow correctly and still
+be wrong, and no rewording fixes it.
+
+This list is no longer maintained by hand:
+`tests/lite/unit/pipeline-variable-groups-documented.test.ts` parses every
+`- group:` declaration out of the `azure-pipelines*.yml` files and asserts this
+section covers them, and that it names no group any pipeline stopped using. The
+prose above is still hand-written and can drift — the count of importing files
+in the previous paragraph was itself wrong until the guard's failure output
+listed them — so treat the pipeline files as the source of truth and this text
+as commentary.
 
 ### Required Report Upload Variables
 
 The failed-test report upload template also expects these pipeline variables:
 
-- `DEPLOY_ENDPOINT_UPLOAD`
-- `STORAGE_ACCOUNT`
-- `SERVE_DOMAIN`
+- `DEPLOY_ENDPOINT_UPLOAD` — from `BabylonJS-Deployment`, listed above
+- `SERVE_DOMAIN` — group not verified; confirm against a build log before
+  relying on it in a new pipeline
+- `STORAGE_ACCOUNT` — **not exported by any variable group.** This is the upload
+  template's own parameter name, and each pipeline maps its own account into it:
+  `azure-pipelines-playground.yml` uses `$(TOOLS_STORAGE_ACCOUNT)`,
+  `azure-pipelines-bundle-manifest.yml` uses `$(SNAPSHOTS_STORAGE_ACCOUNT)` (both
+  from `BabylonJS-CI-Infrastructure`), and `azure-pipelines-demos.yml` hardcodes
+  `babylonsnapshots`.
+
+The `STORAGE_ACCOUNT` naming is a genuine trap: it reads like a group variable
+because it sits beside `DEPLOYMENT_SERVER`/`DEPLOY_TOKEN` in every upload call.
+Writing `$(STORAGE_ACCOUNT)` in a new pipeline does not fail loudly — ADO leaves
+the unresolved macro as literal text, bash evaluates it as a command
+substitution, and the upload is posted with an empty account, which the
+deployment server rejects as an HTTP 401. Always map an explicit account
+variable, and validate it before doing expensive work.
+
+> **Do not trust `BabylonJS/Babylon.js/.azure-pipelines/VARIABLE-GROUPS.md` for
+> this repo.** It documents the same ADO organisation but a different group
+> layout — it places `DEPLOY_ENDPOINT_UPLOAD` in `BabylonJS-CI-Infrastructure`
+> and names the BrowserStack group `Browserstack-Opensource`, whereas here
+> `DEPLOY_ENDPOINT_UPLOAD` resolves from `BabylonJS-Deployment` (observed in
+> build `20260825.1`, which imported only that group) and the BrowserStack group
+> is `BabylonJS-BrowserStack`. The two repos have drifted; verify against an
+> actual build log rather than the sibling repo's documentation.
+
+### Fail-Fast Ordering in the Bundle-Manifest Pipeline
+
+The validation above is only worth anything if it runs _before_ the expensive
+work. `azure-pipelines-bundle-manifest.yml` measures 245 scenes, which takes
+around half an hour; a deploy variable that does not resolve should cost
+seconds, not a full measurement run that then fails at the publish step with
+nothing to publish. That is not hypothetical either — it is exactly how this
+pipeline first failed.
+
+So `Check deploy configuration` runs at the top, and the only steps permitted
+ahead of it are these:
+
+- `checkout` — the repository has to be present before any step can run, and
+  fetching it tells the build nothing about whether it can publish.
+
+Everything else, including dependency installation and browser downloads, runs
+after the check. Anything named in that list runs before the build knows it can
+publish, so a step earns a place there only by being both cheap and genuinely
+required _by the check itself_.
+
+Widening the list is therefore a decision, not a repair, and it takes an edit
+here as well as in `tests/lite/unit/pipeline-fail-fast-ordering.test.ts` —
+deliberately, so the justification lands in prose where a reviewer sees it
+rather than as one more name in a constant. Note what it costs: a step listed
+here is no longer watched by the ordering check, so choosing this route for
+expensive work buys silence rather than safety.
 
 ### Optional Pipeline Variables
 
@@ -348,8 +493,8 @@ Both cloud test suites (perf and parity) produce:
 - **JUnit XML** — consumed by Azure DevOps `PublishTestResults@2` and
   displayed in the pipeline's **Tests** tab with pass/fail counts, durations,
   and error messages
-- **HTML report** — interactive Playwright report with error details,
-  screenshots, and traces
+- **HTML report** — interactive Playwright report with error details and
+  screenshots; tracing is disabled for BrowserStack runs
 
 Report locations after a run:
 
@@ -365,8 +510,14 @@ pnpm exec playwright show-report test-results/parity-report
 pnpm exec playwright show-report test-results/perf-report
 ```
 
-In CI, test artifacts (including the HTML report) are uploaded as pipeline
-artifacts on every run and can be downloaded from the build summary.
+In CI, BrowserStack reports and JUnit files are sanitized and independently
+verified before publication. The fail-closed scan requires both BrowserStack
+credentials, checks raw and URL-encoded forms in every file and nested ZIP, and
+sets `ArtifactsSafe=true` only after verification succeeds. Azure test-result
+publication and failed-test CDN report uploads are gated on that variable. The
+CDN allowlist contains only `test-results/parity-report` and
+`test-results/perf-report`; raw Playwright artifact/trace directories are never
+uploaded.
 
 ---
 

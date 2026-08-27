@@ -17,7 +17,7 @@ between Babylon Lite and Babylon.js:
    background is just the clear color.
 
 4. **Read the BJS source** — use the explore agent to check the actual Babylon.js
-   code paths (at `C:\Repos\Babylon.js`) before assuming how BJS works.
+   code paths (at `D:\Repos\Babylon.js`) before assuming how BJS works.
 
 **The rule: 1 capture + 1 pixel dump before any code change.** Don't try to
 reverse-engineer colors mathematically when you can just read them from a
@@ -27,10 +27,10 @@ capture. Don't guess texture content when Spector shows you exactly what's bound
 
 ```bash
 # Quick summary of any WebGPU page
-node C:\Repos\Spector.gpu\skills\spector-gpu-capture\capture-cli.js <URL> --summary --headed --wait 10000
+node D:\Repos\Spector.gpu\skills\spector-gpu-capture\capture-cli.js <URL> --summary --headed --wait 10000
 
 # Full capture with screenshot
-node C:\Repos\Spector.gpu\skills\spector-gpu-capture\capture-cli.js <URL> --headed --wait 10000 --output capture.json --screenshot shot.png
+node D:\Repos\Spector.gpu\skills\spector-gpu-capture\capture-cli.js <URL> --headed --wait 10000 --output capture.json --screenshot shot.png
 ```
 
 Use `--wait 15000` for Lite pages (compute shaders need time).

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { getMeshGeometry } from "../../../packages/babylon-lite/src/mesh/get-mesh-geometry";
+import { getMeshGeometry, getMeshTriangles } from "../../../packages/babylon-lite/src/mesh/get-mesh-geometry";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 
 function completeMesh(): Mesh {
@@ -29,6 +29,7 @@ describe("getMeshGeometry", () => {
             tangents: mesh._cpuTangents,
             colors: mesh._cpuColors,
         });
+
         expect(geometry).not.toBeNull();
         expect(geometry!.positions).not.toBe(mesh._cpuPositions);
         expect(geometry!.normals).not.toBe(mesh._cpuNormals);
@@ -89,5 +90,28 @@ describe("getMeshGeometry", () => {
         expect(geometry?.positions).not.toBe(positions);
         expect(geometry?.normals).not.toBe(normals);
         expect(geometry?.indices).not.toBe(indices);
+    });
+});
+
+describe("getMeshTriangles", () => {
+    it("returns caller-owned positions and indices without requiring normals", () => {
+        const mesh = completeMesh();
+        mesh._cpuNormals = undefined;
+
+        const triangles = getMeshTriangles(mesh);
+
+        expect(triangles).toEqual({
+            positions: mesh._cpuPositions,
+            indices: mesh._cpuIndices,
+        });
+        expect(triangles!.positions).not.toBe(mesh._cpuPositions);
+        expect(triangles!.indices).not.toBe(mesh._cpuIndices);
+    });
+
+    it.each(["_cpuPositions", "_cpuIndices"] as const)("returns null when %s is unavailable", (field) => {
+        const mesh = completeMesh();
+        mesh[field] = undefined;
+
+        expect(getMeshTriangles(mesh)).toBeNull();
     });
 });

@@ -4,17 +4,27 @@ This file tracks the support status of each Babylon.js (BJS) feature area in the
 `@babylonjs/lite-compat` package. It is the single source of truth consulted and
 updated by the `update-compat-layer` skill.
 
-<!-- The two markers below are machine-read by the update-compat-layer skill.
-     Do not rename them. Update the SHA after re-syncing against BJS master. -->
+<!-- `Last synced BJS commit`, `Last synced Lite commit` and `Last sync date` are the
+     sync markers: machine-read by the update-compat-layer skill, and all three are
+     rewritten at the end of every sync. Do not rename them.
+     `Lite compat package version` is NOT a sync marker -- it tracks the published
+     package and changes only when that version changes. -->
 
 - **Last synced BJS commit:** `82d305cbb2603e16e9795fd311690ac96a358501`
+- **Last synced Lite commit:** `6b71be8339a0cacaf9c82271a77c62b387b5c1e8`
 - **Last sync date:** 2026-08-24
 - **Lite compat package version:** 0.0.1
 
 > The "Last synced BJS commit" is the `BabylonJS/Babylon.js` `master` HEAD that the
-> compat surface was last reconciled against. The skill diffs BJS history since
-> this SHA (and Lite history since the last commit that touched this file) to find
-> new work, then updates the SHA.
+> compat surface was last reconciled against; the "Last synced Lite commit" is the
+> `BabylonJS/Babylon-Lite` `master` HEAD at that same moment. The skill diffs both
+> histories forward from these SHAs to find new work, then updates them.
+
+> **Why the Lite watermark is a field.** It used to be inferred from _the commit that
+> last modified this file_, which made every edit here load-bearing: correcting a
+> single status row also advanced the watermark, silently skipping any Lite change in
+> between, with nothing to report the gap. Recording it explicitly makes this an
+> ordinary document again — edit it freely; only the marker moves the watermark.
 
 **Scope:** the compat layer (and the `update-compat-layer` skill that maintains it)
 covers **only the public API of `@babylonjs/core` and `@babylonjs/loaders`**. The
@@ -29,8 +39,9 @@ for reader context but are not part of the audited surface.
 The `update-compat-layer` skill advances the compat layer on three fronts; this
 file is the live status record for each:
 
-1. **Upstream sync (Task 1 — diffs).** The `Last synced BJS commit` / `Last sync
-date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
+1. **Upstream sync (Task 1 — diffs).** The `Last synced BJS commit`,
+   `Last synced Lite commit` and `Last sync date` markers above record the
+   `BabylonJS/Babylon.js` and `BabylonJS/Babylon-Lite` `master` HEADs the surface
    was last reconciled against.
 2. **Lab-scene coverage (Task 2).** The [Lab scene coverage](#lab-scene-coverage)
    section records which Babylon.js oracle scenes render at parity through the
@@ -348,7 +359,7 @@ date` markers above record the `BabylonJS/Babylon.js` `master` HEAD the surface
 | `HavokPlugin`                                                                             | ⚡ Partial       | Real wrapper ([physics/physics.ts](src/physics/physics.ts)) over Lite `createHavokWorld`. Constructor `(useDeltaForWorldStep = true, hpInjection)`, `setGravity`/`setTimeStep`/`getTimeStep`/`getPluginVersion`/`isSupported`/`dispose`. `useDeltaForWorldStep` drives **refresh-rate-independent** delta stepping (issue #332). `executeStep` throws (Lite steps internally). Wire via `scene.enablePhysics`. |
 | `PhysicsEngine` (V2) / `IPhysicsEngine`                                                   | ⚡ Partial       | Returned by `scene.getPhysicsEngine()`; exposes `getPhysicsPlugin`/`gravity`/`setGravity`/`getTimeStep`/`setTimeStep`/`getPluginVersion`/`dispose`.                                                                                                                                                                                                                                                            |
 | `PhysicsShapeType` / `PhysicsMotionType` / `PhysicsPrestepType` / `PhysicsConstraintType` | ✅ Full          | Real enums, values match Babylon.js. Used with the native `createPhysicsAggregate` API.                                                                                                                                                                                                                                                                                                                        |
-| `PhysicsAggregate` / `PhysicsBody` / `PhysicsShape`                                       | ⚡ Partial       | [physics/physics.ts](src/physics/physics.ts) over Lite `createPhysicsAggregate` / `createPhysicsBody` / `createPhysicsShape`; common construction, shape/material/filter/trigger state, motion/prestep, velocity, force/impulse, mass-property setters, and deterministic disposal are forwarded. Instances, constraints, damping, collision observables, and shape-container helpers remain unwrapped         |
+| `PhysicsAggregate` / `PhysicsBody` / `PhysicsShape`                                       | ⚡ Partial       | [physics/physics.ts](src/physics/physics.ts) over Lite `createPhysicsAggregate` / `createPhysicsBody` / `createPhysicsShape`; common construction, shape/material/filter/trigger state, motion/prestep, velocity, force/impulse, mass-property setters, and deterministic disposal are forwarded. Parented transform nodes and thin-instanced meshes throw because Lite physics synchronizes one unparented node transform per body; `disableSync = true` throws because Lite's shared physics-step hot path always synchronizes dynamic bodies; constructing a second body or aggregate on a node throws before allocation to avoid two bodies synchronizing one Lite node. Instances, constraints, damping, collision observables, and shape-container helpers remain unwrapped |
 | `CannonJSPlugin` / `AmmoJSPlugin`                                                         | ❌ Not supported | throwing stub; Lite is Havok-V2 only                                                                                                                                                                                                                                                                                                                                                                           |
 
 ## Navigation
@@ -426,10 +437,10 @@ behavioural cross-check of the API surface above, not a separate contract.
 > nothing to run through the compat layer; `/compat/sceneN.html` reports them as
 > skipped. The counts below are out of the **164** scenes that have a BJS oracle.
 
-### ✅ Working (109 scenes, MAD ≈ 0)
+### ✅ Working (110 scenes, MAD ≈ 0)
 
 `1`, `2`, `4`, `5`, `6`, `9`, `10`, `11`, `13`, `14`, `15`, `16`, `18`, `19`, `22`, `24`, `25`, `27`, `28`,
-`29`, `30`, `31`, `32`, `33`, `34`, `35`, `36`, `37`, `38`, `50`, `51`, `52`, `53`,
+`29`, `30`, `31`, `32`, `33`, `34`, `35`, `36`, `37`, `38`, `40`, `50`, `51`, `52`, `53`,
 `54`, `55`, `56`, `57`, `58`, `59`, `60`, `61`, `62`, `63`, `64`, `65`, `67`, `68`, `69`, `70`,
 `71`, `77`, `78`, `79`, `80`,
 `82`, `83`, `85`, `86`, `87`, `88`, `89`, `90`, `91`, `92`, `93`, `94`, `95`, `96`, `112`, `120`, `121`,
@@ -446,7 +457,7 @@ camera-facing billboard sprites (`SpriteManager`/`Sprite`), pixel-space
 uvOffset parallax) plus depth-hosted 2D sprites, gizmos (single-axis +
 composite position/rotation/scale, bounding-box, camera + light) over a utility
 layer, procedural builders (ribbon/tube/extrude), `VertexData.applyToMesh`
-(CPU-authored geometry),
+(CPU-authored geometry), Havok physics aggregates,
 floating-origin / large-world rendering (point/spot light, thin instances,
 directional shadows), CPU keyframe animation, manual weighted / cross-fade
 `AnimationGroup` blending (structural groups sharing a property), loaded
@@ -474,7 +485,6 @@ wrapper over Lite's `loadSplat` / `loadSOG` / `loadSPZ` (incl. `updateData` with
 | Navigation meshes (Recast) | — | Recast nav is fully wrapped: scenes **170, 171, 172, 173, 174, 175** work (MAD ≈ 0) via a compat `@babylonjs/addons/navigation` wrapper (`navigation/navigation.ts`) over Babylon Lite's native Recast API — navmesh build, debug-mesh visualization, crowd + `addAgent`/`agentGoto`/`timeFactor`, `computePath`, `raycast`, off-mesh connections (174), and tile-cache obstacles (172, 173). The `@recast-navigation/*` packages the oracle imports are shimmed to no-ops since Lite loads its own Recast wasm. Also: glTF `result.meshes` now includes the BJS `__root__` at index 0 (so `result.meshes[1]` resolves), and `mesh.bakeCurrentTransformIntoVertices()` folds a node's transform into its CPU geometry. | | |
 | Basis Universal textures | — | Wrapped & working (**36** = `.basis` diffuse+emissive box, MAD ≈ 0). The compat `Texture` routes `.basis` URLs through Lite's `loadBasisTexture2D` (GPU-format transcode) instead of the raster `loadTexture2D`, and `StandardMaterial.emissiveTexture` is now wired to the Lite material (with deferred-load rebinding, like `diffuseTexture`). |
 | CSG / CSG2 | — | Wrapped & working (90 = legacy `CSG`, 91 = Manifold `CSG2`, both MAD ≈ 0). Compat `CSG`/`CSG2`/`InitializeCSG2Async` ([meshes/csg.ts](src/meshes/csg.ts)) adapt Babylon.js's method-chaining (`FromMesh` / `subtract` / `intersect` / `union` or `add` / `toMesh`) onto Lite's `createCsgFromMesh`/`createMeshFromCsg` and `createCsg2FromMesh`/`createMeshesFromCsg2`. CSG2 preserves per-source materials (each `FromMesh` records its mesh's material against a unique slot; `toMesh` triangulates one Lite mesh per slot and parents them under one returned mesh). Also wired `StandardMaterial.alphaCutOff` (the texture-label alpha test). |
-| Physics (Havok) | 40 | `HavokPlugin` is now wrapped (issue #332: `useDeltaForWorldStep` delta stepping) and `scene.enablePhysics`/`getPhysicsEngine` + the `PhysicsShapeType`/`PhysicsMotionType` enums are real; scene 40 still needs the `PhysicsAggregate` class wrapper (bodies use the native `createPhysicsAggregate` API) before it can render through compat. |
 | `CascadedShadowGenerator` (true CSM) | 214, 215 | Falls back to single-cascade directional; cascades diverge |
 | Misc single-API gaps | 8, 12, 20, 26, 113, 140, 147, 148, 149, 165, 179, 217 | e.g. `HDRCubeTexture`, `MaterialPluginBase`, gizmo internals |
 | Loaded-camera surfacing / KTX2 textures | — | Both resolved. **24** surfaces a `.babylon` camera as the compat `scene.activeCamera` (`FreeCamera._adopt`). **112** (FlightHelmet, KTX2 / `KHR_texture_basisu`) renders at MAD ≈ 0: Babylon Lite decodes KTX2/basisu inside its glTF loader, and `scene.materials` is iterable (the BJS oracle's `enableNoise` loop is a no-op over the compat material list). |

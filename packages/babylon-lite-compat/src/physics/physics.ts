@@ -38,7 +38,6 @@ import {
     setPhysicsBodyLinearVelocity,
     setPhysicsBodyMassProperties,
     setPhysicsBodyMotionType,
-    setPhysicsBodyPreStep,
     setPhysicsBodyPrestepType,
     setPhysicsBodyShape,
     setPhysicsGravity,
@@ -61,6 +60,8 @@ import type {
 import { unsupported } from "../error.js";
 import { Vector3 } from "../math/vector.js";
 import type { Mesh, TransformNode } from "../meshes/meshes.js";
+import type { ObserverCallback } from "../misc/observable.js";
+import type { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
 
 /** Minimal `{x, y, z}` view shared by the compat `Vector3` and Lite's `Vec3`. */
@@ -124,6 +125,7 @@ export interface PhysicShapeOptions {
 export interface PhysicsAggregateParameters {
     mass: number;
     friction?: number;
+    staticFriction?: number;
     restitution?: number;
     radius?: number;
     pointA?: Vec3Like;
@@ -281,7 +283,8 @@ export class PhysicsShape {
 
     public set material(value: PhysicsMaterial) {
         this._material = value;
-        setPhysicsShapeMaterial(this._world, this._lite, value.friction ?? 0.2, value.restitution ?? 0.2);
+        const friction = value.friction ?? 0.5;
+        setPhysicsShapeMaterial(this._world, this._lite, friction, value.restitution ?? 0, value.staticFriction ?? friction);
     }
     public get material(): PhysicsMaterial {
         return this._material;
@@ -313,15 +316,20 @@ export class PhysicsBody {
     private _shape: PhysicsShape | null = null;
     /** @internal */
     private _disposed = false;
+    /** @internal */
+    private _nodeDisposeObserver: ObserverCallback<Node> | null = null;
     public readonly transformNode: TransformNode;
-    public disableSync = false;
+    private _disableSync = false;
     public readonly startAsleep: boolean;
 
     public constructor(transformNode: TransformNode, motionType: PhysicsMotionType, startsAsleep: boolean, scene: Scene) {
+        assertPhysicsNodeSupported(transformNode);
         this.transformNode = transformNode;
         this.startAsleep = startsAsleep;
         this._world = requirePhysicsWorld(scene);
         this._lite = createPhysicsBody(this._world, transformNode._node, liteMotionType(motionType), startsAsleep);
+        setPhysicsBodyPrestepType(this._lite, LitePhysicsPrestepType.DISABLED);
+        this._attachToNode();
     }
 
     /** @internal */
@@ -332,10 +340,13 @@ export class PhysicsBody {
             _world: { value: world },
             _shape: { value: null, writable: true },
             _disposed: { value: false, writable: true },
+            _nodeDisposeObserver: { value: null, writable: true },
             transformNode: { value: transformNode, enumerable: true },
-            disableSync: { value: false, writable: true, enumerable: true },
+            _disableSync: { value: false, writable: true },
             startAsleep: { value: startsAsleep, enumerable: true },
         });
+        setPhysicsBodyPrestepType(wrapper._lite, LitePhysicsPrestepType.DISABLED);
+        wrapper._attachToNode();
         return wrapper;
     }
 
@@ -344,10 +355,23 @@ export class PhysicsBody {
     }
 
     public get disablePreStep(): boolean {
-        return !this._lite._preStep;
+        return this._lite._prestepType === LitePhysicsPrestepType.DISABLED;
     }
     public set disablePreStep(value: boolean) {
-        setPhysicsBodyPreStep(this._lite, !value);
+        setPhysicsBodyPrestepType(this._lite, value ? LitePhysicsPrestepType.DISABLED : LitePhysicsPrestepType.TELEPORT);
+    }
+
+    public get disableSync(): boolean {
+        return this._disableSync;
+    }
+    public set disableSync(value: boolean) {
+        if (value) {
+            unsupported(
+                "PhysicsBody.disableSync",
+                "Babylon Lite's shared physics step always synchronizes dynamic bodies; opting out would require changing that existing hot-path module and every physics scene bundle."
+            );
+        }
+        this._disableSync = false;
     }
 
     public get motionType(): PhysicsMotionType {
@@ -429,7 +453,12 @@ export class PhysicsBody {
 
     public dispose(): void {
         if (!this._disposed) {
+            this.transformNode.onDisposeObservable.remove(this._nodeDisposeObserver);
+            this._nodeDisposeObserver = null;
             removePhysicsBody(this._world, this._lite);
+            if (this.transformNode.physicsBody === this) {
+                this.transformNode.physicsBody = null;
+            }
             this._disposed = true;
         }
     }
@@ -437,6 +466,12 @@ export class PhysicsBody {
     /** @internal */
     public _adoptShape(shape: PhysicsShape): void {
         this._shape = shape;
+    }
+
+    /** @internal */
+    private _attachToNode(): void {
+        this.transformNode.physicsBody = this;
+        this._nodeDisposeObserver = this.transformNode.onDisposeObservable.add(() => this.dispose());
     }
 }
 
@@ -451,8 +486,11 @@ export class PhysicsAggregate {
     private _disposed = false;
     /** @internal */
     private readonly _disposeShapeWhenDisposed: boolean;
+    /** @internal */
+    private _nodeDisposeObserver: ObserverCallback<Node> | null = null;
 
     public constructor(transformNode: TransformNode, type: PhysicsShapeType | PhysicsShape, options: PhysicsAggregateParameters = { mass: 0 }, scene?: Scene) {
+        assertPhysicsNodeSupported(transformNode);
         this.transformNode = transformNode;
         this.type = type;
         const resolvedScene = scene ?? transformNode.getScene();
@@ -467,22 +505,45 @@ export class PhysicsAggregate {
             ...options,
             shape: suppliedShape?._lite,
         });
-        this.material = { friction: options.friction ?? 0.2, restitution: options.restitution ?? 0.2 };
+        this.material = {
+            friction: options.friction ?? 0.2,
+            staticFriction: options.staticFriction,
+            restitution: options.restitution ?? 0.2,
+        };
         this.shape = suppliedShape ?? PhysicsShape._fromLite(aggregate.shape, world);
         this.shape.material = this.material;
-        this.shape.isTrigger = options.isTriggerShape ?? false;
+        if (options.isTriggerShape !== undefined) {
+            this.shape.isTrigger = options.isTriggerShape;
+        }
         this.body = PhysicsBody._fromLite(aggregate.body, transformNode, world, options.startAsleep);
         this.body._adoptShape(this.shape);
+        this._nodeDisposeObserver = transformNode.onDisposeObservable.add(() => this.dispose());
     }
 
     public dispose(): void {
         if (!this._disposed) {
+            this.transformNode.onDisposeObservable.remove(this._nodeDisposeObserver);
+            this._nodeDisposeObserver = null;
             this.body.dispose();
             if (this._disposeShapeWhenDisposed) {
                 this.shape.dispose();
             }
+
             this._disposed = true;
         }
+    }
+}
+
+function assertPhysicsNodeSupported(transformNode: TransformNode): void {
+    if (transformNode.physicsBody) {
+        unsupported("PhysicsBody", "Babylon Lite synchronizes one physics body per scene node; dispose the existing TransformNode.physicsBody before attaching another.");
+    }
+    if (transformNode.parent || transformNode._node.parent) {
+        unsupported("PhysicsBody", "Babylon Lite physics bodies currently consume local transforms, so parented TransformNodes cannot be synchronized in Babylon.js world space.");
+    }
+    const mesh = transformNode._node as Partial<LiteMesh>;
+    if (mesh.thinInstances?.count) {
+        unsupported("PhysicsBody", "Babylon Lite exposes one physics body per scene node and has no per-thin-instance body representation.");
     }
 }
 

@@ -92,7 +92,7 @@ The single source of truth for all three is
 
 | Task | Goal                             | Tracked in `COMPAT-STATUS.md` by                                  |
 | ---- | -------------------------------- | ----------------------------------------------------------------- |
-| 1    | Upstream diffs                   | the `Last synced BJS commit` + `Last sync date` markers           |
+| 1    | Upstream diffs                   | the two `Last synced ...` SHAs + the `Last sync date` marker      |
 | 2    | Lab-scene coverage (conditional) | the **Lab scene coverage** section (working list + blocker table) |
 | 3    | API parity                       | the per-area **status matrix** (a row per core/loaders symbol)    |
 
@@ -138,18 +138,40 @@ Task 3 gap implementable.
 
 ## Task 1 — React to upstream BJS/Lite diffs
 
-1. **Find Lite changes since the previous sync.** Get `LAST_STATUS_COMMIT`, then
-   review Lite source changes since it:
+1. **Find Lite changes since the previous sync.** Read `LAST_LITE_SHA` from the
+   `Last synced Lite commit` marker, and capture the commit you are syncing from as
+   `NEW_LITE_SHA`. Take it from `HEAD` **before you make any commits**, or it will
+   point at your own work instead of the Lite history you reviewed:
+
     ```
-    git log -1 --format=%H -- packages/babylon-lite-compat/COMPAT-STATUS.md
-    git log --oneline LAST_STATUS_COMMIT..HEAD -- packages/babylon-lite/src
-    git diff --stat LAST_STATUS_COMMIT..HEAD -- packages/babylon-lite/src/index.ts
+    LAST_LITE_SHA=$(grep -m1 '^- \*\*Last synced Lite commit:' \
+      packages/babylon-lite-compat/COMPAT-STATUS.md | grep -oE '[0-9a-f]{40}')
+    NEW_LITE_SHA=$(git rev-parse HEAD)
+
+    # The marker must be present and resolvable before it is used as a range end.
+    test -n "$LAST_LITE_SHA" && git cat-file -e "$LAST_LITE_SHA^{commit}" 2>/dev/null \
+      || { echo "Last synced Lite commit marker missing or unresolvable"; exit 1; }
+
+    git log --oneline $LAST_LITE_SHA..$NEW_LITE_SHA -- packages/babylon-lite/src
+    git diff --stat $LAST_LITE_SHA..$NEW_LITE_SHA -- packages/babylon-lite/src/index.ts
     ```
+
     New public exports in `index.ts` are new Lite capabilities — cross-reference them
     against `🔧`/`⚡`/`❌` rows (they may now be upgradable). **This is the Task 2
     trigger:** if a new Lite capability clears a blocker on a previously-skipped lab
     scene, drive that scene to parity. If no new Lite capability lands, Task 2 stays
     dormant.
+
+    **If that check fails, stop the sync and report it.** Do not guess a starting
+    point and do not carry on without one. An empty `LAST_LITE_SHA` leaves the range
+    as `..$NEW_LITE_SHA`, which git reads as `HEAD..HEAD` and answers with silence and
+    exit code 0 — so every Lite change since the last sync would be skipped with
+    nothing at all to show it happened.
+
+    Do **not** derive this watermark from the history of `COMPAT-STATUS.md` itself.
+    It is recorded as a marker _inside_ that file precisely so that editing the file
+    is harmless — a status-row correction must never move the watermark.
+
 2. **Find BJS core/loaders changes since `LAST_BJS_SHA`** (the `Last synced BJS
 commit` in `COMPAT-STATUS.md`): - Latest master HEAD → `https://api.github.com/repos/BabylonJS/Babylon.js/commits/master`
    (record as `NEW_BJS_SHA`). - Compare → `https://api.github.com/repos/BabylonJS/Babylon.js/compare/LAST_BJS_SHA...master`
@@ -435,8 +457,8 @@ Lite change unblocked a scene. Do not finish until:
 - [ ] **(Task 3)** The **Supported APIs at a glance** table in
       `packages/babylon-lite-compat/README.md` still reflects the matrix (any changed
       area's roll-up + note updated).
-- [ ] **(Task 1)** `Last synced BJS commit` / `Last sync date` updated to
-      `NEW_BJS_SHA` / today.
+- [ ] **(Task 1)** `Last synced BJS commit`, `Last synced Lite commit` and
+      `Last sync date` updated to `NEW_BJS_SHA` / `NEW_LITE_SHA` / today.
 - [ ] Tests, both typechecks, ESLint, and Prettier all pass.
 
 If any box is unchecked, the run is not done.
@@ -460,8 +482,9 @@ Update the part each task touched:
    section — move newly-working scenes into the working list (bump the count) and
    revise/remove blocker rows. When nothing was unblocked, the existing "Task 2 status"
    line already says so — leave it alone rather than adding a note saying it again.
-3. **(Task 1)** Set `Last synced BJS commit` to `NEW_BJS_SHA` and `Last sync date` to
-   today; update `Lite compat package version` if it changed.
+3. **(Task 1)** Set `Last synced BJS commit` to `NEW_BJS_SHA`, `Last synced Lite commit`
+   to `NEW_LITE_SHA`, and `Last sync date` to today; update `Lite compat package version`
+   if it changed.
 
 Then **sync the README summary** (`packages/babylon-lite-compat/README.md`,
 **Supported APIs at a glance**): a per-_feature-area_ roll-up (one `✅`/`⚡`/`❌` per
@@ -506,32 +529,8 @@ and ships to npm, so add no per-symbol rows and no internal-doc links.
 - **When Task 2 fires, land the scene — don't just unblock it:** drive it to MAD ≈ 0
   and into the working list (expect a chain of several gaps). If nothing was
   unblocked, zero scene work is correct.
-- Summarise at the end, per task: **(Task 1)** changes acted on + `NEW_BJS_SHA`;
+- Summarise at the end, per task: **(Task 1)** changes acted on, plus `NEW_BJS_SHA`
+  and `NEW_LITE_SHA`;
   **(Task 2)** which scene(s) landed at MAD ≈ 0 + new count (or "none unblocked");
   **(Task 3)** which floor outcome you hit, the (now-empty) ledger size, any
   tree-shakeable Lite additions with bundle-diff proof, and the test/lint results.
-
----
-
-## Hand-off to the pipeline — PR title (required when you changed anything)
-
-The pipeline (`scripts/open-compat-sync-pr.ts`) opens the draft PR; you do **not**.
-It cannot infer a meaningful title from your diff, so the title is generic unless
-you provide one. As your **final step on any run that changed files**, write a
-single concise, descriptive line summarising the specific work this run to:
-
-```
-.compat-sync-pr-title.txt   (repo root)
-```
-
-- Keep it **≤ ~70 characters** and specific to what changed — e.g.
-  `Wrap AnimationGroup blending + add 3 loader stubs` or
-  `Implement MorphTargetManager API; sync to BJS abc1234`. Never reuse a generic
-  catch-all like "compat-layer sync".
-- Write the **bare summary only** — do **not** add a `[compat-sync]` prefix or any
-  other prefix. The pipeline prepends `[compat-sync]` deterministically; anything you
-  add would be stripped or duplicated.
-- The pipeline reads this file, then **deletes it before committing**, so it is a
-  scratch artifact and never lands in the PR. (It is git-ignored as a safeguard.)
-- If the run changed nothing, do **not** create the file — the pipeline falls back
-  to the generic title and (with no diff) opens no PR anyway.

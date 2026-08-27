@@ -260,6 +260,13 @@ function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
         }
     }
 
+    if (demos.some((demo) => demo.slug === "calculator")) {
+        const glb = resolve(labDir, "public", "models", "Calculator.glb");
+        if (existsSync(glb)) {
+            cpSync(glb, resolve(demosDir, "Calculator.glb"));
+        }
+    }
+
     if (demos.some((demo) => demo.slug === "tetris")) {
         // Tetris geometry/texture assets (consolidated under lab/public/tetris/)
         // plus its local studio HDR environment, copied flat so the demo resolves

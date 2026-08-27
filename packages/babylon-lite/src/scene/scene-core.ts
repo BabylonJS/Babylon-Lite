@@ -23,8 +23,10 @@ import { createRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
 import type { SceneLightGpuState } from "../render/lights-ubo.js";
 import type { ClusteredLightContainer } from "../light/clustered.js";
+import type { FgRuntime } from "../flow-graph/runtime.js";
 import type { PickSource } from "../picking/pick-contributor.js";
 import type { ToneMapping } from "../material/pbr/tone-mapping.js";
+import type { FgEventBus } from "../flow-graph/event-bus.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
@@ -68,6 +70,10 @@ export interface RuntimeSceneBuildHooks {
     track(promise: Promise<void>): Promise<void>;
     base(builder: MeshGroupBuilder, rebuild: NonNullable<MeshGroupBuilder["_rebuildSingle"]>): NonNullable<MeshGroupBuilder["_rebuildSingle"]>;
     readonly w: boolean;
+    /** Disposer packet temporarily owned by an active async mesh or group build after it leaves `_meshDisposables`. */
+    pendingDisposers(mesh: Mesh): (() => void)[] | undefined;
+    holdPendingDisposers(mesh: Mesh, disposers: (() => void)[]): void;
+    releasePendingDisposers(mesh: Mesh, disposers: (() => void)[]): void;
     reset(mesh: Mesh): void;
     remove(mesh: Mesh): void;
     /** Forget every rebuild closure cached for this builder in this scene. Called when a group's output is
@@ -237,6 +243,27 @@ export interface SceneContext extends RenderingContext {
     _clusteredLightContainer?: ClusteredLightContainer;
     /** @internal Updates clustered light cells for the camera used by the current render pass. */
     _clusteredLightUpdater?: (camera: Camera | null | undefined, targetWidth: number, targetHeight: number) => void;
+
+    /** @internal Flow-graph runtimes attached to this scene (visual scripting /
+     *  glTF KHR_interactivity). Lazily created by `attachFlowGraph`; left
+     *  undefined for non-interactivity scenes so core stays byte-identical.
+     *  Driven via the generic `onBeforeRender` seam, not a hardcoded core loop. */
+    _flowGraphs?: FgRuntime[];
+
+    /** @internal Scene-scoped flow-graph event bus shared by all graphs attached
+     *  to this scene, so multiple graphs exchange custom events. Lazily created
+     *  by `flowGraphBus`; undefined for non-interactivity scenes. */
+    _flowGraphBus?: FgEventBus;
+    /** @internal Scene-wide Flow Graph frame callback, registered lazily. */
+    _flowGraphTick?: (deltaMs: number) => void;
+    /** @internal Scene-wide Flow Graph disposal callback, registered lazily. */
+    _flowGraphDispose?: () => void;
+    /** @internal In-flight lazy setup for the Flow Graph pointer-selection bridge. */
+    _flowGraphPointerInit?: Promise<void>;
+    /** @internal Removes the Flow Graph pointer listener and disposes its picker. */
+    _flowGraphPointerCleanup?: () => void;
+    /** @internal Refreshes the explicitly enabled Flow Graph pointer bridge. */
+    _flowGraphPointerRefresh?: () => void;
 }
 
 /** Options passed to the scene-context factory. */

@@ -59,8 +59,8 @@ export default defineConfig({
     use: {
         headless: true,
         viewport: { width: 1280, height: 720 },
-        // Keep traces off: the BrowserStack wsEndpoint embeds the access key and
-        // could otherwise be captured in published trace artifacts.
+        // Keep all tracing, including retry tracing, off: the BrowserStack
+        // wsEndpoint embeds credentials that traces can capture.
         trace: "off",
         ...(useBrowserStack
             ? { connectOptions: { wsEndpoint: buildBrowserStackEndpoint() } }

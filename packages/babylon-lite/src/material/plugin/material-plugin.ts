@@ -74,6 +74,9 @@ export interface MaterialPlugin {
     /** Default true when attached. A disabled plugin contributes no shader code
      *  but still changes the pipeline cache key (so toggling forces a rebuild). */
     isEnabled?: boolean;
+    /** Re-upload this plugin's Standard-material UBO values before every rendered frame.
+     *  PBR plugin values already follow the material UBO's versioned update path. */
+    dynamic?: boolean;
     /** Static defines folded into the pipeline cache key (and available to the
      *  plugin when it builds its custom code). */
     defines?: Record<string, boolean | number>;

@@ -127,6 +127,8 @@ export { createDepthOfFieldPostProcessTask, DepthOfFieldBlurLevel } from "./post
 export type { DepthOfFieldPostProcessTask, DepthOfFieldPostProcessTaskConfig } from "./post-process/depth-of-field.js";
 export { createTaaPostProcessTask } from "./post-process/taa.js";
 export type { TaaPostProcessTask, TaaPostProcessTaskConfig } from "./post-process/taa.js";
+export { createSmaaPostProcessTask } from "./post-process/smaa.js";
+export type { SmaaPostProcessTask, SmaaPostProcessTaskConfig } from "./post-process/smaa.js";
 export { createScreenSpaceContactShadowsPostProcessTask } from "./post-process/screen-space-contact-shadows.js";
 export type { ScreenSpaceContactShadowsPostProcessTask, ScreenSpaceContactShadowsPostProcessTaskConfig } from "./post-process/screen-space-contact-shadows.js";
 export { createScreenSpaceGlobalIlluminationPostProcessTask } from "./post-process/screen-space-global-illumination.js";
@@ -246,7 +248,7 @@ export { createLineSystemData, createLineSystem, createLines, updateLineSystem }
 export type { LineSystemData, LineSystemDataOptions, LineSystemOptions, LinesOptions, LineSystemUpdateOptions } from "./mesh/create-line-system.js";
 export { createDashedLines, updateDashedLines } from "./mesh/create-dashed-lines.js";
 export type { DashedLinesOptions, DashedLinesUpdateOptions } from "./mesh/create-dashed-lines.js";
-export { getMeshGeometry } from "./mesh/get-mesh-geometry.js";
+export { getMeshGeometry, getMeshTriangles } from "./mesh/get-mesh-geometry.js";
 export { createBoxData } from "./mesh/create-box.js";
 export type { BoxData } from "./mesh/create-box.js";
 export { createSphereData } from "./mesh/create-sphere.js";
@@ -391,6 +393,7 @@ export { AcesToneMapping } from "./material/pbr/pbr-aces-wgsl.js";
 export { NeutralToneMapping } from "./material/pbr/pbr-neutral-wgsl.js";
 export type { MaterialPlugin, MaterialPluginPoint, PluginUboField, PluginSamplerDecl, PluginTextureBinding } from "./material/plugin/material-plugin.js";
 export { enableMaterialPlugins } from "./material/plugin/enable-material-plugins.js";
+export { bakeStdPluginMaterial } from "./material/plugin/std-plugin-bridge.js";
 export { enableMaterialStencil } from "./material/enable-material-stencil.js";
 export { getAlphaToCoverage, setAlphaToCoverage } from "./render/alpha-to-coverage.js";
 export type { AlphaToCoverageTarget } from "./render/alpha-to-coverage.js";
@@ -936,11 +939,17 @@ export { shapeProximity, shapeCast, physicsRaycast } from "./physics/havok-queri
 export type { ShapeProximityQuery, ShapeCastQuery, ShapeProximityResult, ShapeCastResult, RaycastQuery, RaycastResult } from "./physics/havok-queries.js";
 export { setPhysicsBodyCollisionEventsEnabled, onPhysicsCollision } from "./physics/havok-collision.js";
 export type { PhysicsCollisionInfo } from "./physics/havok-collision.js";
-export { setPhysicsShapeIsTrigger, onPhysicsTrigger } from "./physics/havok-trigger.js";
-export type { PhysicsTriggerInfo } from "./physics/havok-trigger.js";
+export { setPhysicsShapeIsTrigger, onPhysicsTrigger, onPhysicsTriggerBodies } from "./physics/havok-trigger.js";
+export type { PhysicsTriggerBodyInfo, PhysicsTriggerInfo } from "./physics/havok-trigger.js";
 export { createPhysicsViewer, showPhysicsBody, showPhysicsConstraint, hidePhysicsBody, disposePhysicsViewer } from "./physics/physics-viewer.js";
 export type { PhysicsViewer, PhysicsViewerOptions, PhysicsConstraintDebug } from "./physics/physics-viewer.js";
-export { createPhysicsCharacterController, PhysicsCharacterController, CharacterSupportedState, CharacterCollisionObservable } from "./physics/character-controller.js";
+export {
+    createPhysicsCharacterController,
+    getPhysicsCharacterControllerBody,
+    PhysicsCharacterController,
+    CharacterSupportedState,
+    CharacterCollisionObservable,
+} from "./physics/character-controller.js";
 export type { PhysicsCharacterControllerOptions, CharacterSurfaceInfo, CharacterCollisionEvent } from "./physics/character-controller.js";
 
 // ─── Navigation (Recast V2) ──────────────────────────────────────────
@@ -1023,3 +1032,45 @@ export { createSoundBufferAsync } from "./audio/sound-buffer.js";
 export type { SoundBuffer, SoundSource, SoundBufferOptions } from "./audio/sound-buffer.js";
 export type { AudioSignal } from "./audio/audio-signal.js";
 export type { AudioRampShape, RampOptions } from "./audio/audio-param.js";
+
+// ─── Flow graph (visual scripting / glTF KHR_interactivity runtime) ───
+export type { FgBlock, FgDataSocket, FgGraph, FgSignalSocket, FgValue } from "./flow-graph/index.js";
+export { FgEventType, FgType } from "./flow-graph/index.js";
+export type { FgBlockDef, FgBlockShape } from "./flow-graph/index.js";
+export { FgBlockType } from "./flow-graph/index.js";
+export type { FgAccessor, FgCapabilities, FgContext, FgEnv, FgPendingTask, FgWiring } from "./flow-graph/index.js";
+export type { FgEventBus, FgEventHandler, FgEventPayload } from "./flow-graph/index.js";
+export { clearFgEventBus, createFgEventBus, flushFgEvents, pumpFgEvent, queueFgEvent, stopFgEventPropagation, subscribeFgEvent } from "./flow-graph/index.js";
+export { animationTypeForFgType, coerceValue, defaultForType, FgAnimationValueType } from "./flow-graph/index.js";
+export type { FgInteger, FgMatrix2D, FgMatrix3D } from "./flow-graph/index.js";
+export { fgInt, fgMatrix2D, fgMatrix3D, isFgInt, isFgMatrix2D, isFgMatrix3D } from "./flow-graph/index.js";
+export { getBlockDef } from "./flow-graph/index.js";
+export { attachFlowGraph, detachFlowGraph, runFlowGraphs, addFlowGraph, dispatchFlowGraphEvent, flowGraphBus, flowGraphRuntimes } from "./flow-graph/index.js";
+export { dispatchFlowGraphPointerPick, enableFlowGraphPointerPicking } from "./flow-graph/index.js";
+export type { FgNodeSpec, FgVariableSpec } from "./flow-graph/index.js";
+export { buildFgGraph } from "./flow-graph/index.js";
+export type {
+    EditorValueParseOptions,
+    ParsedEditorFlowGraphs,
+    SerializedEditorBlock,
+    SerializedEditorConnection,
+    SerializedEditorContext,
+    SerializedEditorGraph,
+} from "./flow-graph/index.js";
+export { addFlowGraphEditorJson, parseFlowGraphEditorJson } from "./flow-graph/index.js";
+export type { FgRuntime } from "./flow-graph/index.js";
+export {
+    activateSignal,
+    addPending,
+    cancelPendingForBlock,
+    compactPending,
+    createFgContext,
+    createFgEnv,
+    createFgRuntime,
+    disposeFlowGraph,
+    getDataValue,
+    setDataValue,
+    startFlowGraph,
+    stillPending,
+    tickFlowGraph,
+} from "./flow-graph/index.js";

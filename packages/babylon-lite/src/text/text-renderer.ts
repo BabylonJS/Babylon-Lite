@@ -13,6 +13,7 @@ import type { TextData } from "./text-data.js";
 import { TEXT_INSTANCE_BYTES } from "./text-data.js";
 import type { CurveSetId } from "./glyph-storage.js";
 import { ensureSharedAtlasGpu } from "./_gpu/text-textures.js";
+import { createStyleBuffer, ensureStyleGpu } from "./_gpu/text-style-gpu.js";
 import { getOrCreateTextPipeline } from "./_gpu/text-pipeline.js";
 
 // ─── TextLayer ────────────────────────────────────────────────────────────
@@ -123,30 +124,32 @@ export interface TextRenderer extends RenderingContext {
  *  together makes the cache self-describing: an entry can never disagree with its own
  *  invalidation keys, and there is a single array to write, truncate, and clear. */
 interface BindGroupCacheEntry {
-    bindGroup: GPUBindGroup;
-    atlasVersion: number;
-    curveSetId: CurveSetId;
+    _bindGroup: GPUBindGroup;
+    _atlasVersion: number;
+    _curveSetId: CurveSetId;
 }
 
 /** @internal Per-layer GPU resources owned by the renderer. */
 interface LayerGpu {
-    layer: TextLayer;
-    textU: GPUBuffer;
-    instanceBuf: GPUBuffer;
-    instanceCap: number;
-    pipeline: GPURenderPipeline | null;
+    _layer: TextLayer;
+    _textU: GPUBuffer;
+    _instanceBuf: GPUBuffer;
+    _instanceCap: number;
+    _styleBuf: GPUBuffer;
+    _uploadedStyleVersion: number;
+    _pipeline: GPURenderPipeline | null;
     /** Per-draw-group bind groups; rebuilt when the atlas grows or the curve set at an index
      *  changes. Indexed by draw-group index, which is NOT stable: `data._groups` is spliced
      *  when a group empties and rebuilt in map-insertion order by `applyReset`. Each entry
      *  therefore carries the curve set it was built for, so a reordered group cannot inherit
      *  another curve set's atlas textures. */
-    bindGroupCache: BindGroupCacheEntry[];
-    uploadedDataVersion: number;
-    uploadedViewportW: number;
-    uploadedViewportH: number;
+    _bindGroupCache: BindGroupCacheEntry[];
+    _uploadedDataVersion: number;
+    _uploadedViewportW: number;
+    _uploadedViewportH: number;
     /** Snapshot of (posX, posY, rot, scale, W, H) to skip mvp upload when unchanged. */
-    lastMvpInputs: Float32Array;
-    mvpUploaded: boolean;
+    _lastMvpInputs: Float32Array;
+    _mvpUploaded: boolean;
     /** Pre-recorded GPU command bundle for this layer: `setPipeline` + quad/instance vertex
      *  buffers + per-draw-group `setBindGroup` + `draw`. Replayed via `pass.executeBundles`
      *  for near-zero per-frame command-recording cost (mirrors the sprite renderer). The
@@ -154,11 +157,11 @@ interface LayerGpu {
      *  (glyph instance bytes, mvp/opacity/gamma UBO) do NOT require a rebuild. Invalidated
      *  when the draw structure changes (`data._layoutVersion`) or a baked object reference
      *  changes: pipeline swap, instance-buffer reallocation, or atlas-driven bind-group rebuild. */
-    renderBundle: GPURenderBundle | null;
-    /** `data._layoutVersion` the cached `renderBundle` was recorded against. */
-    bundleLayoutVersion: number;
+    _renderBundle: GPURenderBundle | null;
+    /** `data._layoutVersion` the cached `_renderBundle` was recorded against. */
+    _bundleLayoutVersion: number;
     /** Draw-group count baked into the cached bundle (for the metrics return value). */
-    bundleDrawCalls: number;
+    _bundleDrawCalls: number;
 }
 
 const _mvpScratch = new Float32Array(16);
@@ -194,96 +197,103 @@ function ensureLayerGpu(rr: TextRenderer, layer: TextLayer): LayerGpu {
     const device = engine._device;
     const cap = Math.max(layer.data._instanceCount, 8);
     lg = {
-        layer,
-        textU: createEmptyUniformBuffer(engine, TEXT_UBO_BYTES, "text-layer-ubo"),
-        instanceBuf: device.createBuffer({
+        _layer: layer,
+        _textU: createEmptyUniformBuffer(engine, TEXT_UBO_BYTES, "text-layer-ubo"),
+        _instanceBuf: device.createBuffer({
             label: "text-layer-instances",
             size: cap * TEXT_INSTANCE_BYTES,
             usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
         }),
-        instanceCap: cap,
-        pipeline: null,
-        bindGroupCache: [],
-        uploadedDataVersion: -1,
-        uploadedViewportW: 0,
-        uploadedViewportH: 0,
-        lastMvpInputs: new Float32Array(6),
-        mvpUploaded: false,
-        renderBundle: null,
-        bundleLayoutVersion: -1,
-        bundleDrawCalls: 0,
+        _instanceCap: cap,
+        _styleBuf: createStyleBuffer(device, 1),
+        _uploadedStyleVersion: -1,
+        _pipeline: null,
+        _bindGroupCache: [],
+        _uploadedDataVersion: -1,
+        _uploadedViewportW: 0,
+        _uploadedViewportH: 0,
+        _lastMvpInputs: new Float32Array(6),
+        _mvpUploaded: false,
+        _renderBundle: null,
+        _bundleLayoutVersion: -1,
+        _bundleDrawCalls: 0,
     };
     rr._layerGpu.set(layer, lg);
     return lg;
 }
 
 function ensureInstanceCapacity(device: GPUDevice, lg: LayerGpu, needed: number): void {
-    if (needed <= lg.instanceCap) {
+    if (needed <= lg._instanceCap) {
         return;
     }
-    let cap = lg.instanceCap;
+    let cap = lg._instanceCap;
     while (cap < needed) {
         cap *= 2;
     }
-    lg.instanceBuf.destroy();
-    lg.instanceBuf = device.createBuffer({
+    lg._instanceBuf.destroy();
+    lg._instanceBuf = device.createBuffer({
         label: "text-layer-instances",
         size: cap * TEXT_INSTANCE_BYTES,
         usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
-    lg.instanceCap = cap;
-    lg.uploadedDataVersion = -1;
+    lg._instanceCap = cap;
+    lg._uploadedDataVersion = -1;
     // Bundle baked a reference to the old GPUBuffer; force a re-record.
-    lg.renderBundle = null;
+    lg._renderBundle = null;
 }
 
 function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGroupLayout): void {
     const device = rr._surface.engine._device;
-    const layer = lg.layer;
+    const layer = lg._layer;
     const data = layer.data;
+
+    // Style palette first: a grown buffer invalidates every cached bind group.
+    const styleRecreated = ensureStyleGpu(device, data, lg);
 
     // Atlas + bind groups per draw group.
     for (let i = 0; i < data._groups.length; i++) {
         const g = data._groups[i]!;
-        const { rebuilt, gpu: atlasGpu } = ensureSharedAtlasGpu(device, g.curveSet.atlas);
-        const cached = lg.bindGroupCache[i];
-        if (!cached || rebuilt || cached.atlasVersion !== atlasGpu.uploadedVersion || cached.curveSetId !== g.curveSetId) {
-            lg.bindGroupCache[i] = {
-                bindGroup: device.createBindGroup({
-                    label: "text-renderer-bg0-" + g.curveSetId,
+        const { _rebuilt: rebuilt, _gpu: atlasGpu } = ensureSharedAtlasGpu(device, g._curveSet._atlas);
+        const cached = lg._bindGroupCache[i];
+        if (!cached || rebuilt || styleRecreated || cached._atlasVersion !== atlasGpu._uploadedVersion || cached._curveSetId !== g._curveSetId) {
+            lg._bindGroupCache[i] = {
+                _bindGroup: device.createBindGroup({
+                    label: "text-renderer-bg0-" + g._curveSetId,
                     layout: bindGroupLayout,
                     entries: [
-                        { binding: 0, resource: { buffer: lg.textU } },
-                        { binding: 1, resource: atlasGpu.curveTex.createView() },
-                        { binding: 2, resource: atlasGpu.bandTex.createView() },
+                        { binding: 0, resource: { buffer: lg._textU } },
+                        { binding: 1, resource: atlasGpu._curveTex.createView() },
+                        { binding: 2, resource: atlasGpu._bandTex.createView() },
+                        { binding: 3, resource: { buffer: atlasGpu._metaBuf } },
+                        { binding: 4, resource: { buffer: lg._styleBuf } },
                     ],
                 }),
-                atlasVersion: atlasGpu.uploadedVersion,
-                curveSetId: g.curveSetId,
+                _atlasVersion: atlasGpu._uploadedVersion,
+                _curveSetId: g._curveSetId,
             };
             // Bundle baked the old bind group; force a re-record.
-            lg.renderBundle = null;
+            lg._renderBundle = null;
         }
     }
-    if (lg.bindGroupCache.length > data._groups.length) {
-        lg.bindGroupCache.length = data._groups.length;
-        lg.renderBundle = null;
+    if (lg._bindGroupCache.length > data._groups.length) {
+        lg._bindGroupCache.length = data._groups.length;
+        lg._renderBundle = null;
     }
 
     // Instance buffer.
     ensureInstanceCapacity(device, lg, data._instanceCount);
-    if (lg.uploadedDataVersion !== data._version && data._instanceCount > 0) {
-        const dirtyValid = lg.uploadedDataVersion !== -1 && data._dirtyEnd > data._dirtyStart;
+    if (lg._uploadedDataVersion !== data._version && data._instanceCount > 0) {
+        const dirtyValid = lg._uploadedDataVersion !== -1 && data._dirtyEnd > data._dirtyStart;
         if (dirtyValid) {
             const startFloats = data._dirtyStart * (TEXT_INSTANCE_BYTES / 4);
             const endFloats = data._dirtyEnd * (TEXT_INSTANCE_BYTES / 4);
             const view = data._instances.subarray(startFloats, endFloats);
-            device.queue.writeBuffer(lg.instanceBuf, data._dirtyStart * TEXT_INSTANCE_BYTES, view.buffer as ArrayBuffer, view.byteOffset, view.byteLength);
+            device.queue.writeBuffer(lg._instanceBuf, data._dirtyStart * TEXT_INSTANCE_BYTES, view.buffer as ArrayBuffer, view.byteOffset, view.byteLength);
         } else {
             const view = data._instances.subarray(0, data._instanceCount * (TEXT_INSTANCE_BYTES / 4));
-            device.queue.writeBuffer(lg.instanceBuf, 0, view.buffer as ArrayBuffer, view.byteOffset, view.byteLength);
+            device.queue.writeBuffer(lg._instanceBuf, 0, view.buffer as ArrayBuffer, view.byteOffset, view.byteLength);
         }
-        lg.uploadedDataVersion = data._version;
+        lg._uploadedDataVersion = data._version;
         data._dirtyStart = 0;
         data._dirtyEnd = 0;
     }
@@ -291,25 +301,25 @@ function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGro
     // MVP — skip upload when nothing relevant changed.
     const W = rr._targetWidth;
     const H = rr._targetHeight;
-    const mi = lg.lastMvpInputs;
-    if (!lg.mvpUploaded || mi[0] !== layer.positionPx.x || mi[1] !== layer.positionPx.y || mi[2] !== layer.rotationRad || mi[3] !== layer.scale || mi[4] !== W || mi[5] !== H) {
+    const mi = lg._lastMvpInputs;
+    if (!lg._mvpUploaded || mi[0] !== layer.positionPx.x || mi[1] !== layer.positionPx.y || mi[2] !== layer.rotationRad || mi[3] !== layer.scale || mi[4] !== W || mi[5] !== H) {
         buildLayerMvp(layer, W, H, _mvpScratch);
-        device.queue.writeBuffer(lg.textU, 0, _mvpScratch.buffer as ArrayBuffer, _mvpScratch.byteOffset, 64);
+        device.queue.writeBuffer(lg._textU, 0, _mvpScratch.buffer as ArrayBuffer, _mvpScratch.byteOffset, 64);
         mi[0] = layer.positionPx.x;
         mi[1] = layer.positionPx.y;
         mi[2] = layer.rotationRad;
         mi[3] = layer.scale;
         mi[4] = W;
         mi[5] = H;
-        lg.mvpUploaded = true;
+        lg._mvpUploaded = true;
     }
 
     // Viewport (only used by Slug dilation; pixel reciprocal is fine to refresh on resize).
-    if (lg.uploadedViewportW !== W || lg.uploadedViewportH !== H) {
+    if (lg._uploadedViewportW !== W || lg._uploadedViewportH !== H) {
         const vp = new Float32Array([W, H, 0, 0]);
-        device.queue.writeBuffer(lg.textU, 64, vp.buffer as ArrayBuffer, vp.byteOffset, 16);
-        lg.uploadedViewportW = W;
-        lg.uploadedViewportH = H;
+        device.queue.writeBuffer(lg._textU, 64, vp.buffer as ArrayBuffer, vp.byteOffset, 16);
+        lg._uploadedViewportW = W;
+        lg._uploadedViewportH = H;
     }
 
     // Color uniform carries the whole-layer opacity as alpha. The R slot (otherwise unused;
@@ -317,12 +327,13 @@ function uploadLayer(rr: TextRenderer, lg: LayerGpu, bindGroupLayout: GPUBindGro
     // anti-aliased edge coverage in the fragment shader. G/B stay 1.
     const gammaInv = layer.coverageGamma > 0 ? 1 / layer.coverageGamma : 1;
     const col = new Float32Array([gammaInv, 1, 1, layer.opacity]);
-    device.queue.writeBuffer(lg.textU, 80, col.buffer as ArrayBuffer, col.byteOffset, 16);
+    device.queue.writeBuffer(lg._textU, 80, col.buffer as ArrayBuffer, col.byteOffset, 16);
 }
 
 function disposeLayerGpu(lg: LayerGpu): void {
-    lg.textU.destroy();
-    lg.instanceBuf.destroy();
+    lg._textU.destroy();
+    lg._instanceBuf.destroy();
+    lg._styleBuf.destroy();
 }
 
 function compareLayers(a: TextLayer, b: TextLayer): number {
@@ -375,21 +386,21 @@ function textRendererUpdate(rr: TextRenderer): void {
 
     // Pipeline: depth-less, sampleCount=1, swapchain format. The key is identical for every
     // layer, so resolve it once per frame and reuse the pipeline + bind-group layout below.
-    const { pipeline, cache } = getOrCreateTextPipeline(rr._surface.engine, rr._surface.format, 1, null, false);
+    const { _pipeline: pipeline, _cache: cache } = getOrCreateTextPipeline(rr._surface.engine, rr._surface.format, 1, null, false);
 
     for (const layer of rr._layers) {
         if (!layer.visible) {
             continue;
         }
         const lg = ensureLayerGpu(rr, layer);
-        if (lg.pipeline !== pipeline) {
-            lg.pipeline = pipeline;
+        if (lg._pipeline !== pipeline) {
+            lg._pipeline = pipeline;
             // Pipeline change → bind groups must be rebuilt against new bindGroupLayout.
-            lg.bindGroupCache.length = 0;
+            lg._bindGroupCache.length = 0;
             // Bundle baked the old pipeline; force a re-record.
-            lg.renderBundle = null;
+            lg._renderBundle = null;
         }
-        uploadLayer(rr, lg, cache.bindGroupLayout);
+        uploadLayer(rr, lg, cache._bindGroupLayout);
     }
 }
 
@@ -415,8 +426,8 @@ function textRendererRecord(rr: TextRenderer): number {
     });
 
     let drawCalls = 0;
-    const { cache } = getOrCreateTextPipeline(rr._surface.engine, format, 1, null, false);
-    const quadVertex = cache.quadVertexBuffer;
+    const { _cache: cache } = getOrCreateTextPipeline(rr._surface.engine, format, 1, null, false);
+    const quadVertex = cache._quadVertexBuffer;
 
     const visibleBundles = rr._visibleBundles;
     visibleBundles.length = 0;
@@ -426,7 +437,7 @@ function textRendererRecord(rr: TextRenderer): number {
             continue;
         }
         const lg = rr._layerGpu.get(layer);
-        if (!lg || !lg.pipeline) {
+        if (!lg || !lg._pipeline) {
             continue;
         }
         const data = layer.data;
@@ -441,32 +452,32 @@ function textRendererRecord(rr: TextRenderer): number {
         // instance-buffer realloc, atlas-driven bind-group rebuild) null the bundle at their
         // source. The steady-state win is frames with no structural edits: `data._layoutVersion`
         // is stable and the pre-baked bundle is replayed with zero per-call command recording.
-        if (lg.renderBundle == null || lg.bundleLayoutVersion !== data._layoutVersion) {
+        if (lg._renderBundle == null || lg._bundleLayoutVersion !== data._layoutVersion) {
             const be = device.createRenderBundleEncoder({
                 colorFormats: [format],
                 sampleCount: 1,
             });
-            be.setPipeline(lg.pipeline);
+            be.setPipeline(lg._pipeline);
             be.setVertexBuffer(0, quadVertex);
-            be.setVertexBuffer(1, lg.instanceBuf);
+            be.setVertexBuffer(1, lg._instanceBuf);
             let groupDraws = 0;
             for (let i = 0; i < data._groups.length; i++) {
                 const g = data._groups[i]!;
-                const bg = lg.bindGroupCache[i]?.bindGroup;
-                if (g.slotCount === 0 || !bg) {
+                const bg = lg._bindGroupCache[i]?._bindGroup;
+                if (g._slotCount === 0 || !bg) {
                     continue;
                 }
                 be.setBindGroup(0, bg);
-                be.draw(6, g.slotCount, 0, g.slotStart);
+                be.draw(6, g._slotCount, 0, g._slotStart);
                 groupDraws++;
             }
-            lg.renderBundle = be.finish();
-            lg.bundleLayoutVersion = data._layoutVersion;
-            lg.bundleDrawCalls = groupDraws;
+            lg._renderBundle = be.finish();
+            lg._bundleLayoutVersion = data._layoutVersion;
+            lg._bundleDrawCalls = groupDraws;
         }
 
-        visibleBundles.push(lg.renderBundle);
-        drawCalls += lg.bundleDrawCalls;
+        visibleBundles.push(lg._renderBundle);
+        drawCalls += lg._bundleDrawCalls;
     }
 
     if (visibleBundles.length > 0) {
