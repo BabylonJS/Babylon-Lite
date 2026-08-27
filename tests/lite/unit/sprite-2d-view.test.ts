@@ -1,17 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import type { Vec2 } from "../../../packages/babylon-lite/src/math/types";
+import type { Bounds2D, Vec2 } from "../../../packages/babylon-lite/src/math/types";
 import type { Sprite2DView } from "../../../packages/babylon-lite/src/sprite/sprite-2d";
 import {
     centerSprite2DView,
     getSprite2DVisibleBoundsToRef,
     sprite2DScreenToWorldToRef,
     sprite2DWorldToScreenToRef,
-    type Sprite2DVisibleBounds,
 } from "../../../packages/babylon-lite/src/sprite/sprite-2d-view";
 
 const point = (): Vec2 => ({ x: 0, y: 0 });
-const bounds = (): Sprite2DVisibleBounds => ({ minX: 0, minY: 0, maxX: 0, maxY: 0 });
+const bounds = (): Bounds2D => ({ minX: 0, minY: 0, maxX: 0, maxY: 0 });
 
 describe("Sprite2D view utilities", () => {
     it("preserves coordinates through an identity view", () => {
@@ -39,6 +38,22 @@ describe("Sprite2D view utilities", () => {
         expect(sprite2DScreenToWorldToRef(view, screen.x, screen.y, world)).toBe(world);
         expect(world.x).toBeCloseTo(151.25, 10);
         expect(world.y).toBeCloseTo(-92.5, 10);
+    });
+
+    it("unprojects framebuffer coordinates remapped from a camera sub-viewport", () => {
+        const view: Sprite2DView = { positionPx: [0, 0], zoom: 1, rotation: 0 };
+        const targetWidth = 800;
+        const targetHeight = 600;
+        const viewport = { x: 200, y: 150, width: 400, height: 300 };
+        const framebufferX = 300;
+        const framebufferY = 225;
+        const screenX = ((framebufferX - viewport.x) * targetWidth) / viewport.width;
+        const screenY = ((framebufferY - viewport.y) * targetHeight) / viewport.height;
+
+        expect(sprite2DScreenToWorldToRef(view, screenX, screenY, point())).toEqual({ x: 200, y: 150 });
+        const projected = sprite2DWorldToScreenToRef(view, 200, 150, point());
+        expect(viewport.x + (projected.x * viewport.width) / targetWidth).toBe(framebufferX);
+        expect(viewport.y + (projected.y * viewport.height) / targetHeight).toBe(framebufferY);
     });
 
     it("supports negative zoom", () => {

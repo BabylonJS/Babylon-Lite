@@ -558,7 +558,7 @@ export {
 } from "./math/spherical.js";
 export type { SphericalCoordinates } from "./math/spherical.js";
 export { scaleBoundsFromCenterToRef } from "./math/scale-bounds-from-center-to-ref.js";
-export type { Vec2, Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
+export type { Vec2, Bounds2D, Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
 export type { Aabb } from "./math/aabb.js";
 export { computeAabb } from "./math/aabb.js";
 export { eulerToQuat, quatToEulerXYZ } from "./math/quat-euler.js";
@@ -726,7 +726,6 @@ export { createGridSpriteAtlas, loadSpriteAtlas, disposeSpriteAtlas } from "./sp
 export type { SpriteAtlasFrameSource, SpriteAtlasPackOptions } from "./sprite/shared/sprite-atlas-packer.js";
 export { appendSpriteAtlasFrames, createSpriteAtlasFromFrames } from "./sprite/shared/sprite-atlas-packer.js";
 export type { Sprite2DLayer, Sprite2DLayerOptions, Sprite2DProps, Sprite2DView, Sprite2DDepthMode, SpriteBlendMode } from "./sprite/sprite-2d.js";
-export type { Sprite2DVisibleBounds } from "./sprite/sprite-2d-view.js";
 export type { SpriteBlendDescriptor } from "./sprite/sprite-blend.js";
 export { spriteBlendOpaque, spriteBlendAlpha, spriteBlendPremultiplied, spriteBlendAdditive, spriteBlendOneOne, spriteBlendMultiply } from "./sprite/sprite-blend.js";
 export {
