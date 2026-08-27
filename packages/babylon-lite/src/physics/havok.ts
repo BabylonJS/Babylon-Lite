@@ -160,6 +160,7 @@ export interface PhysicsBody {
     /** @internal */ readonly _world: PhysicsWorld;
     /** @internal */ _shape?: PhysicsShape | null;
     /** @internal */ _rotationLockMask?: number;
+    /** @internal */ _rotationLockSource?: any[];
     /** @internal */ _massPropertiesTransform?: (massProperties: any[]) => void;
     /** @internal */ _preStep: boolean;
     /** @internal How a moved node is propagated to the body pre-step (TELEPORT by default). */
@@ -1179,10 +1180,56 @@ export function setPhysicsBodyAngularVelocity(world: PhysicsWorld, body: Physics
  * Locks are cumulative and remain active when the body's mass properties are rebuilt.
  */
 export function lockPhysicsBodyRotationAxes(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis[]): void {
-    if (axes.length === 0) {
+    const requestedMask = physicsRotationAxesMask(axes);
+    if (requestedMask === 0) {
         return;
     }
-    let mask = body._rotationLockMask ?? 0;
+    const previousMask = body._rotationLockMask ?? 0;
+    const mask = previousMask | requestedMask;
+    let source = body._rotationLockSource;
+    if (previousMask === 0) {
+        const hknp = world._hknp;
+        const result = hknp.HP_Body_GetMassProperties(body._hkBody);
+        const ok = hknp.Result?.RESULT_OK ?? 0;
+        if (result[0] !== ok) {
+            throw new Error("Failed to read physics body mass properties.");
+        }
+        source = cloneMassProperties(result[1]);
+    }
+    const massProperties = cloneMassProperties(source!);
+    applyBodyRotationLocks(massProperties, mask);
+    world._hknp.HP_Body_SetMassProperties(body._hkBody, massProperties);
+    body._rotationLockMask = mask;
+    body._rotationLockSource = source;
+    body._massPropertiesTransform ??= (properties) => {
+        body._rotationLockSource = cloneMassProperties(properties);
+        applyBodyRotationLocks(properties, body._rotationLockMask ?? 0);
+    };
+}
+
+/**
+ * Unlock angular motion around selected body-local axes.
+ * Axes that remain locked continue to be reapplied when mass properties are rebuilt.
+ */
+export function unlockPhysicsBodyRotationAxes(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis[]): void {
+    const requestedMask = physicsRotationAxesMask(axes);
+    const previousMask = body._rotationLockMask ?? 0;
+    const mask = previousMask & ~requestedMask;
+    if (mask === previousMask) {
+        return;
+    }
+    const massProperties = cloneMassProperties(body._rotationLockSource!);
+    applyBodyRotationLocks(massProperties, mask);
+    world._hknp.HP_Body_SetMassProperties(body._hkBody, massProperties);
+    body._rotationLockMask = mask || undefined;
+    if (mask === 0) {
+        body._rotationLockSource = undefined;
+        body._massPropertiesTransform = undefined;
+    }
+}
+
+function physicsRotationAxesMask(axes: readonly PhysicsRotationAxis[]): number {
+    let mask = 0;
     for (const axis of axes) {
         if (axis === "x") {
             mask |= 1;
@@ -1194,17 +1241,11 @@ export function lockPhysicsBodyRotationAxes(world: PhysicsWorld, body: PhysicsBo
             throw new Error(`Unknown physics rotation axis "${String(axis)}".`);
         }
     }
-    const hknp = world._hknp;
-    const result = hknp.HP_Body_GetMassProperties(body._hkBody);
-    const ok = hknp.Result?.RESULT_OK ?? 0;
-    if (result[0] !== ok) {
-        throw new Error("Failed to read physics body mass properties.");
-    }
-    const massProperties = result[1];
-    applyBodyRotationLocks(massProperties, mask);
-    hknp.HP_Body_SetMassProperties(body._hkBody, massProperties);
-    body._rotationLockMask = mask;
-    body._massPropertiesTransform = (properties) => applyBodyRotationLocks(properties, mask);
+    return mask;
+}
+
+function cloneMassProperties(massProperties: any[]): any[] {
+    return [[...massProperties[0]], massProperties[1], [...massProperties[2]], [...massProperties[3]]];
 }
 
 function applyBodyRotationLocks(massProperties: any[], mask: number): void {
@@ -1235,12 +1276,39 @@ function applyBodyRotationLocks(massProperties: any[], mask: number): void {
         r20 = 2 * (xz - yw),
         r21 = 2 * (yz + xw),
         r22 = 1 - 2 * (xx + yy);
-    massProperties[2] = [
-        mask & 1 ? 0 : r00 * r00 * inertia[0] + r01 * r01 * inertia[1] + r02 * r02 * inertia[2],
-        mask & 2 ? 0 : r10 * r10 * inertia[0] + r11 * r11 * inertia[1] + r12 * r12 * inertia[2],
-        mask & 4 ? 0 : r20 * r20 * inertia[0] + r21 * r21 * inertia[1] + r22 * r22 * inertia[2],
-    ];
+    const ixx = r00 * r00 * inertia[0] + r01 * r01 * inertia[1] + r02 * r02 * inertia[2];
+    const iyy = r10 * r10 * inertia[0] + r11 * r11 * inertia[1] + r12 * r12 * inertia[2];
+    const izz = r20 * r20 * inertia[0] + r21 * r21 * inertia[1] + r22 * r22 * inertia[2];
+    if (mask === 1) {
+        setSingleAxisLockedInertia(massProperties, 0, iyy, izz, r10 * r20 * inertia[0] + r11 * r21 * inertia[1] + r12 * r22 * inertia[2]);
+        return;
+    }
+    if (mask === 2) {
+        setSingleAxisLockedInertia(massProperties, 1, ixx, izz, -(r00 * r20 * inertia[0] + r01 * r21 * inertia[1] + r02 * r22 * inertia[2]));
+        return;
+    }
+    if (mask === 4) {
+        setSingleAxisLockedInertia(massProperties, 2, ixx, iyy, r00 * r10 * inertia[0] + r01 * r11 * inertia[1] + r02 * r12 * inertia[2]);
+        return;
+    }
+    massProperties[2] = [mask & 1 ? 0 : ixx, mask & 2 ? 0 : iyy, mask & 4 ? 0 : izz];
     massProperties[3] = [0, 0, 0, 1];
+}
+
+function setSingleAxisLockedInertia(massProperties: any[], axis: number, a: number, b: number, coupling: number): void {
+    if (coupling === 0) {
+        massProperties[2] = axis === 0 ? [0, a, b] : axis === 1 ? [a, 0, b] : [a, b, 0];
+        massProperties[3] = [0, 0, 0, 1];
+        return;
+    }
+    const mean = (a + b) * 0.5;
+    const radius = Math.hypot((a - b) * 0.5, coupling);
+    const halfAngle = Math.atan2(2 * coupling, a - b) * 0.25;
+    const s = Math.sin(halfAngle);
+    const q = [0, 0, 0, Math.cos(halfAngle)];
+    q[axis] = s;
+    massProperties[2] = axis === 0 ? [0, mean + radius, mean - radius] : axis === 1 ? [mean + radius, 0, mean - radius] : [mean + radius, mean - radius, 0];
+    massProperties[3] = q;
 }
 
 /**

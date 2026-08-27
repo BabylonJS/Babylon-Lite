@@ -194,11 +194,16 @@ steps matches the animation and sprite managers.
 axes after the collision shape and mass properties have been configured. Havok
 represents a locked angular degree of freedom with a zero inertia component. Its
 shape-derived inertia is expressed in a rotated principal-axis frame, so the
-helper first evaluates the diagonal of `R · diag(inertia) · Rᵀ` in body space,
-then zeros the requested `"x"`, `"y"`, or `"z"` components and sets the inertia
-orientation to identity. Mass and centre of mass are preserved. The active lock
-mask is retained on the body and reapplied by `setPhysicsBodyMass` and
+helper evaluates `R · diag(inertia) · Rᵀ` in body space and zeros the requested
+`"x"`, `"y"`, or `"z"` components. A single-axis lock retains the exact coupled
+inertia in the remaining free plane through a rotation around the locked axis;
+multi-axis locks use an identity inertia orientation. Mass and centre of mass are
+preserved. The active lock mask and latest unlocked mass properties are retained
+on the body and reapplied by `setPhysicsBodyMass` and
 `setPhysicsBodyMassProperties` when they rebuild shape-derived mass properties.
+`unlockPhysicsBodyRotationAxes(world, body, axes)` selectively restores axes from
+those unlocked properties and removes the internal persistence seam after the
+last axis is unlocked.
 
 ---
 
@@ -237,7 +242,8 @@ mask is retained on the body and reapplied by `setPhysicsBodyMass` and
   and is settable via `setPhysicsTimestep` / `setPhysicsTimestepMs`.
 - `tests/lite/unit/physics-rotation-axis-locks.test.ts` — selected body-local inertia
   components are zeroed after transforming a non-identity principal inertia frame
-  into body space; mass updates preserve active locks, and empty input/native read
-  failures do not write mass properties.
+  into body space; single-axis locks preserve free-plane coupling, mass updates
+  preserve active locks, selective unlocking restores the latest unlocked
+  properties, and empty input/native read failures do not write mass properties.
 - Parity scenes (physics drop/stack/constraint scenes) set
   `scene.fixedDeltaMs = 1000 / 60` so Lite and Babylon.js step identically.

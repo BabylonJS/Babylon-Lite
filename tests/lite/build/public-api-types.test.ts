@@ -151,6 +151,7 @@ describe("build/index.d.ts", () => {
 
         expect(dts).toContain('type PhysicsRotationAxis = "x" | "y" | "z"');
         expect(dts).toMatch(/lockPhysicsBodyRotationAxes\(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis\[\]\): void/);
+        expect(dts).toMatch(/unlockPhysicsBodyRotationAxes\(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis\[\]\): void/);
     });
 
     it("rejects invalid emitter fields while preserving extended provider options", () => {

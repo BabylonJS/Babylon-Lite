@@ -911,6 +911,7 @@ export {
     getPhysicsBodyAngularVelocity,
     setPhysicsBodyAngularVelocity,
     lockPhysicsBodyRotationAxes,
+    unlockPhysicsBodyRotationAxes,
     setPhysicsBodyMotionType,
     setPhysicsBodyTransform,
     removePhysicsBody,
