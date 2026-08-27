@@ -88,7 +88,7 @@ export interface EngineContext extends SurfaceContext {
     _gpuTaskTimingResult?: RenderTaskGpuTimings;
     /** @internal Restores frame graphs wrapped by the optional task GPU profiler. */
     _gpuTaskTimerDisable?: () => void;
-    /** @internal Optional task-profiler resolver chained through `_gpuTimerResolve` after the frame command buffer is submitted. */
+    /** @internal Optional task-profiler resolver called by {@link renderFrame} after the frame command buffer is submitted. */
     _gpuTaskTimerResolve?: () => void;
 
     /**
@@ -606,6 +606,9 @@ export function renderFrame(engine: EngineContext, delta: number): void {
     // Resolve + read back the timestamp pair asynchronously (its own submit, after the frame's) and
     // publish the latest completed sample to `gpuFrameTimeMs`. Non-blocking — never stalls this frame.
     engine._gpuTimerResolve?.();
+    // Task timing owns a separate query set and resolve submit. Keep dispatch centralized here rather
+    // than chaining either optional profiler through the other, so enabling order cannot double-resolve.
+    engine._gpuTaskTimerResolve?.();
 }
 
 /** Whether GPU frame-time measurement is available on this engine's device — i.e. the adapter offered
@@ -630,13 +633,12 @@ export function isGpuTimingSupported(engine: EngineContext): boolean {
 export function setGpuTimingEnabled(engine: EngineContext, enabled: boolean): void {
     if (!enabled) {
         // Clear the hooks (renderFrame's optional-chains go back to no-ops) but keep `_gpuTimer` so its
-        // GPU resources are reused if timing is re-enabled later. Preserve the task-profiler resolve hook
-        // when per-task timing is enabled independently.
+        // GPU resources are reused if timing is re-enabled later.
         engine._gpuTimerWanted = false;
         engine.gpuFrameTimeMs = 0;
         engine._gpuTimerBegin = undefined;
         engine._gpuTimerEnd = undefined;
-        engine._gpuTimerResolve = engine._gpuTaskTimerResolve;
+        engine._gpuTimerResolve = undefined;
         return;
     }
     if (!isGpuTimingSupported(engine)) {
@@ -657,7 +659,6 @@ export function setGpuTimingEnabled(engine: EngineContext, enabled: boolean): vo
             engine._gpuTimerResolve = () => {
                 gpuFrameTimerResolve(timer);
                 engine.gpuFrameTimeMs = timer.lastMs;
-                engine._gpuTaskTimerResolve?.();
             };
         }
     });

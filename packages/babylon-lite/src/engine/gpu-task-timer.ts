@@ -93,16 +93,10 @@ export function installGpuTaskTimer(timer: GpuTaskTimer, engine: EngineContext, 
     for (const surface of engine.surfaces) {
         patchSurface(timer, surface);
     }
-    const previousResolve = engine._gpuTimerResolve;
     const resolveTaskTiming = () => finishTaskTimingFrame(timer, publish);
-    const resolveBoth = () => {
-        previousResolve?.();
-        resolveTaskTiming();
-    };
     engine._gpuTaskTimerResolve = resolveTaskTiming;
-    engine._gpuTimerResolve = resolveBoth;
     return () => {
-        restoreWrappedFrameGraphs(timer, engine, previousResolve, resolveTaskTiming, resolveBoth);
+        restoreWrappedFrameGraphs(timer, engine, resolveTaskTiming);
         disposeGpuTaskTimer(timer);
     };
 }
@@ -167,13 +161,7 @@ function wrapFrameGraph(timer: GpuTaskTimer, graph: FrameGraph): void {
     timer.wrappedGraphs.push({ graph, execute: original });
 }
 
-function restoreWrappedFrameGraphs(
-    timer: GpuTaskTimer,
-    engine: EngineContext,
-    previousResolve: (() => void) | undefined,
-    resolveTaskTiming: () => void,
-    resolveBoth: () => void
-): void {
+function restoreWrappedFrameGraphs(timer: GpuTaskTimer, engine: EngineContext, resolveTaskTiming: () => void): void {
     for (const patched of timer.patchedSurfaceLists) {
         patched.list.push = patched.push;
     }
@@ -189,11 +177,6 @@ function restoreWrappedFrameGraphs(
     timer.currentEncoder = null;
     if (engine._gpuTaskTimerResolve === resolveTaskTiming) {
         engine._gpuTaskTimerResolve = undefined;
-    }
-    if (engine._gpuTimerResolve === resolveBoth) {
-        engine._gpuTimerResolve = previousResolve;
-    } else if (engine._gpuTimerResolve === resolveTaskTiming) {
-        engine._gpuTimerResolve = undefined;
     }
 }
 
@@ -322,12 +305,13 @@ async function finishTaskTimingReadback(timer: GpuTaskTimer, pending: PendingTas
         timer.inFlight--;
         pending.publish(makeTimingSnapshot("available", true, true, pending.frameIndex, tasks, pending.droppedTaskCount));
     } catch (error) {
-        timer.pendingReadbacks.delete(buffer);
-        timer.inFlight = Math.max(0, timer.inFlight - 1);
-        buffer.destroy();
-        if (!timer.disposed) {
-            pending.publish(makeTimingSnapshot("error", true, true, pending.frameIndex, [], pending.droppedTaskCount, readbackErrorMessage(error)));
+        if (timer.disposed) {
+            return;
         }
+        timer.pendingReadbacks.delete(buffer);
+        timer.inFlight--;
+        buffer.destroy();
+        pending.publish(makeTimingSnapshot("error", true, true, pending.frameIndex, [], pending.droppedTaskCount, readbackErrorMessage(error)));
     }
 }
 

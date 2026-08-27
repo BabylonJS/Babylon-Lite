@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { renderFrame, setGpuTimingEnabled } from "../../../packages/babylon-lite/src/engine/engine";
 import type { EngineContext, RenderingContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { getRenderTaskGpuTimings, isRenderTaskGpuTimingSupported, setRenderTaskGpuTimingEnabled } from "../../../packages/babylon-lite/src/engine/gpu-task-timing";
 import { installGpuTaskTimer, type GpuTaskTimer } from "../../../packages/babylon-lite/src/engine/gpu-task-timer";
@@ -133,6 +134,64 @@ describe("render-task GPU timing public state", () => {
 
         await setRenderTaskGpuTimingEnabled(engine, false);
     });
+
+    it("dispatches frame and task timing resolves exactly once per rendered frame", () => {
+        const frameResolve = vi.fn();
+        const taskResolve = vi.fn();
+        const texture = {
+            width: 1,
+            height: 1,
+            createView: () => ({}) as GPUTextureView,
+        } as unknown as GPUTexture;
+        const encoder = {
+            finish: () => ({}) as GPUCommandBuffer,
+        } as unknown as GPUCommandEncoder;
+        const engine = {
+            _device: {
+                createCommandEncoder: () => encoder,
+                queue: { submit: () => undefined },
+            },
+            _context: { getCurrentTexture: () => texture },
+            scRT: {},
+            format: "rgba8unorm",
+            _renderingContexts: [
+                {
+                    _update: () => undefined,
+                    _drawCallsPre: 0,
+                    _record: () => 0,
+                },
+            ],
+            _cbs: [{} as GPUCommandBuffer],
+            drawCallCount: 0,
+            _gpuTimerResolve: frameResolve,
+            _gpuTaskTimerResolve: taskResolve,
+        } as unknown as EngineContext;
+        Object.assign(engine, { surfaces: [engine], _surfaces: [engine] });
+
+        renderFrame(engine, 16);
+
+        expect(frameResolve).toHaveBeenCalledOnce();
+        expect(taskResolve).toHaveBeenCalledOnce();
+    });
+
+    it("keeps the task resolver independent when frame timing is disabled", () => {
+        const taskResolve = vi.fn();
+        const engine = {
+            gpuFrameTimeMs: 12,
+            _gpuTimerBegin: vi.fn(),
+            _gpuTimerEnd: vi.fn(),
+            _gpuTimerResolve: vi.fn(),
+            _gpuTaskTimerResolve: taskResolve,
+        } as unknown as EngineContext;
+
+        setGpuTimingEnabled(engine, false);
+
+        expect(engine.gpuFrameTimeMs).toBe(0);
+        expect(engine._gpuTimerBegin).toBeUndefined();
+        expect(engine._gpuTimerEnd).toBeUndefined();
+        expect(engine._gpuTimerResolve).toBeUndefined();
+        expect(engine._gpuTaskTimerResolve).toBe(taskResolve);
+    });
 });
 
 describe("GPU task timing installer", () => {
@@ -198,6 +257,7 @@ describe("GPU task timing installer", () => {
 
         expect(fg.execute()).toBe(5);
         engine._gpuTimerResolve?.();
+        engine._gpuTaskTimerResolve?.();
         await Promise.resolve();
         await Promise.resolve();
 
@@ -260,7 +320,7 @@ describe("GPU task timing installer", () => {
         expect(laterFg.execute).not.toBe(originalExecute);
         restore();
         expect(laterFg.execute).toBe(originalExecute);
-        expect(engine._gpuTimerResolve).toBeUndefined();
+        expect(engine._gpuTaskTimerResolve).toBeUndefined();
     });
 
     it("destroys query, resolve, pooled, and pending readback resources on restore", () => {
@@ -305,7 +365,7 @@ describe("GPU task timing installer", () => {
         expect(timer.disposed).toBe(true);
     });
 
-    it("does not publish a readback that completes after restore", async () => {
+    it.each(["resolve", "reject"] as const)("does not publish a readback whose mapAsync %s after restore", async (outcome) => {
         const engine = makeEngineWithFeatures(["timestamp-query"]);
         engine._currentEncoder = {
             beginComputePass: () => ({ end: () => undefined }) as unknown as GPUComputePassEncoder,
@@ -315,11 +375,11 @@ describe("GPU task timing installer", () => {
         const surface = { _renderingContexts: [{ frameGraph: fg }] };
         Object.assign(engine, { surfaces: [surface], _surfaces: [surface] });
 
-        let finishMap!: () => void;
+        let settleMap!: () => void;
         const mapAsync = vi.fn(
             () =>
-                new Promise<void>((resolve) => {
-                    finishMap = resolve;
+                new Promise<void>((resolve, reject) => {
+                    settleMap = outcome === "resolve" ? resolve : () => reject(new Error("buffer destroyed"));
                 })
         );
         const readbackDestroy = vi.fn();
@@ -360,14 +420,14 @@ describe("GPU task timing installer", () => {
         const restore = installGpuTaskTimer(timer, engine, (snapshot) => snapshots.push(snapshot));
 
         fg.execute();
-        engine._gpuTimerResolve?.();
+        engine._gpuTaskTimerResolve?.();
         await Promise.resolve();
 
         expect(mapAsync).toHaveBeenCalledOnce();
         expect(timer.pendingReadbacks.has(readback)).toBe(true);
 
         restore();
-        finishMap();
+        settleMap();
         await Promise.resolve();
         await Promise.resolve();
 
