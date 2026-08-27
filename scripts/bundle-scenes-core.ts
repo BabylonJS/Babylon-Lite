@@ -1019,6 +1019,8 @@ const MIME: Record<string, string> = {
     ".jpeg": "image/jpeg",
     ".css": "text/css",
     ".wasm": "application/wasm",
+    ".glb": "model/gltf-binary",
+    ".gltf": "model/gltf+json",
 };
 
 export function startStaticServer(root: string): Promise<{ server: Server; port: number }> {

@@ -51,6 +51,7 @@ const TETRIS_SRC = resolve(labDir, "public/tetris");
 const PLATFORMER_SRC = resolve(labDir, "public/platformer");
 const SANDBLOX_SRC = resolve(labDir, "public/sandblox");
 const RACER_SRC = resolve(labDir, "public/racer");
+const ANTIGRAVITY_RACER_SRC = resolve(labDir, "public/antigravity-racer");
 const SCREEN_SPACE_EFFECTS_SRC = resolve(labDir, "public/screen-space-effects");
 const DRACO_FILES = ["draco_decoder.js", "draco_decoder.wasm"];
 
@@ -251,6 +252,22 @@ function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
 
     if (demos.some((demo) => demo.slug === "screen-space-effects")) {
         copyRequiredDir(SCREEN_SPACE_EFFECTS_SRC, resolve(demosDir, "screen-space-effects"), "Screen-space effects");
+    }
+
+    if (demos.some((demo) => demo.slug === "antigravity-racer")) {
+        // Committed road artwork (track/*.png — its author granted redistribution
+        // rights) plus the CC BY 4.0 Sketchfab ship + rock glTFs fetched by
+        // fetch-antigravity-racer.ts (author/license carried in each file's
+        // asset.extras). Both are resolved at runtime via
+        // demoAssetUrl("./antigravity-racer/..."). The directory now exists even
+        // with no models fetched (track/ is committed), so check the files.
+        const required = ["track/road-straight.png", "track/road-curve.png", "track/road-emissive.png", "track/boost-arrow.png", "rhs-x/scene.gltf", "obj_nat_rock_01/scene.gltf"];
+        for (const file of required) {
+            if (!existsSync(resolve(ANTIGRAVITY_RACER_SRC, file))) {
+                throw new Error(`Missing Antigravity Racer asset ${file} at ${ANTIGRAVITY_RACER_SRC} (run: pnpm fetch:antigravity-racer)`);
+            }
+        }
+        copyRequiredDir(ANTIGRAVITY_RACER_SRC, resolve(demosDir, "antigravity-racer"), "Antigravity Racer");
     }
 
     if (demos.some((demo) => demo.slug === "bath-day")) {

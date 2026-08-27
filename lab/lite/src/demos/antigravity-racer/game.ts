@@ -24,6 +24,7 @@ import {
 import { createInputSystem, type InputSystem } from "./input.js";
 import { createMainMenu, type MainMenu } from "./menu.js";
 import { createRaceHud, createEditorHud, type RaceHud, type EditorHud } from "./hud.js";
+import { loadRacerAssets, type RacerAssets } from "./assets.js";
 import { buildArena, addArenaToScene, type Arena } from "./world.js";
 import { spawnGrid, type Grid } from "./spawn.js";
 import { ChaseCamera, SpectatorCamera } from "./camera-rig.js";
@@ -45,6 +46,9 @@ export async function runAntigravityRacer(canvas: HTMLCanvasElement): Promise<vo
     canvas.tabIndex = 0;
     const engine = await createEngine(canvas);
     const input = createInputSystem();
+    // Ship + boulder models are loaded once for the whole page and cloned per mode
+    // (see assets.ts), so switching modes never re-decodes their textures.
+    const assets = await loadRacerAssets(engine);
 
     let mode: RunningMode | null = null;
 
@@ -59,33 +63,33 @@ export async function runAntigravityRacer(canvas: HTMLCanvasElement): Promise<vo
         await teardown();
         // Shared background behind the visible menu: no standalone exit control,
         // since the menu itself is already the "home" surface on top of it.
-        mode = await buildDemoBackground(engine, input, menu);
+        mode = await buildDemoBackground(engine, assets, input, menu);
         menu.show(input);
     }
 
     async function startRace1P(controlPoints?: readonly Vec3[]): Promise<void> {
         menu.hide(input);
         await teardown();
-        mode = await buildRace1P(engine, input, goToMainMenu, controlPoints);
+        mode = await buildRace1P(engine, assets, input, goToMainMenu, controlPoints);
     }
 
     async function startRace2P(): Promise<void> {
         menu.hide(input);
         await teardown();
-        mode = await buildRace2P(engine, input, canvas, goToMainMenu);
+        mode = await buildRace2P(engine, assets, input, canvas, goToMainMenu);
     }
 
     async function startDemo(): Promise<void> {
         menu.hide(input);
         await teardown();
         // Standalone attract mode: menu is hidden, so give it its own exit control.
-        mode = await buildDemoBackground(engine, input, menu, goToMainMenu);
+        mode = await buildDemoBackground(engine, assets, input, menu, goToMainMenu);
     }
 
     async function startEditor(): Promise<void> {
         menu.hide(input);
         await teardown();
-        mode = await buildEditor(engine, input, canvas, startRace1P, goToMainMenu);
+        mode = await buildEditor(engine, assets, input, canvas, startRace1P, goToMainMenu);
     }
 
     const menu: MainMenu = createMainMenu({
@@ -97,7 +101,7 @@ export async function runAntigravityRacer(canvas: HTMLCanvasElement): Promise<vo
     menu.hide(input);
 
     // Initial state: a living demo/attract background behind the main menu.
-    mode = await buildDemoBackground(engine, input, menu);
+    mode = await buildDemoBackground(engine, assets, input, menu);
     menu.show(input);
 
     await startEngine(engine);
@@ -122,12 +126,12 @@ export async function runAntigravityRacer(canvas: HTMLCanvasElement): Promise<vo
  *   keyboard Escape, gamepad Start/B, and a small visible DOM button back to
  *   the main menu.
  */
-async function buildDemoBackground(engine: EngineContext, input: InputSystem, menu: MainMenu, onExitToMenu?: () => Promise<void>): Promise<RunningMode> {
+async function buildDemoBackground(engine: EngineContext, assets: RacerAssets, input: InputSystem, menu: MainMenu, onExitToMenu?: () => Promise<void>): Promise<RunningMode> {
     const scene = createSceneContext(engine);
     scene.clearColor = SPACE_CLEAR_COLOR;
-    const arena = buildArena(engine);
+    const arena = buildArena(engine, assets);
     addArenaToScene(scene, arena);
-    const grid = spawnGrid(engine, [scene], arena.track, 0, TOTAL_SHIP_COUNT);
+    const grid = spawnGrid(engine, assets, [scene], arena.track, 0, TOTAL_SHIP_COUNT);
     const spectator = new SpectatorCamera(scene, grid.rigs[0]!.state);
 
     const exitHint = onExitToMenu ? createAttractExitHint(() => void onExitToMenu()) : null;
@@ -171,6 +175,7 @@ async function buildDemoBackground(engine: EngineContext, input: InputSystem, me
         dispose(): void {
             disposed = true;
             disposeScene(scene);
+            arena.dispose();
             exitHint?.dispose();
         },
     };
@@ -193,12 +198,18 @@ function createAttractExitHint(onExit: () => void): { dispose(): void } {
 
 // ─── 1-player race ──────────────────────────────────────────────────────────
 
-async function buildRace1P(engine: EngineContext, input: InputSystem, onExitToMenu: () => Promise<void>, controlPoints?: readonly Vec3[]): Promise<RunningMode> {
+async function buildRace1P(
+    engine: EngineContext,
+    assets: RacerAssets,
+    input: InputSystem,
+    onExitToMenu: () => Promise<void>,
+    controlPoints?: readonly Vec3[]
+): Promise<RunningMode> {
     const scene = createSceneContext(engine);
     scene.clearColor = SPACE_CLEAR_COLOR;
-    const arena: Arena = buildArena(engine, controlPoints);
+    const arena: Arena = buildArena(engine, assets, controlPoints);
     addArenaToScene(scene, arena);
-    const grid: Grid = spawnGrid(engine, [scene], arena.track, 1, TOTAL_SHIP_COUNT - 1);
+    const grid: Grid = spawnGrid(engine, assets, [scene], arena.track, 1, TOTAL_SHIP_COUNT - 1);
     const player = grid.rigs[0]!.state;
     const chase = new ChaseCamera(scene, player);
 
@@ -217,13 +228,14 @@ async function buildRace1P(engine: EngineContext, input: InputSystem, onExitToMe
         dispose(): void {
             disposed = true;
             disposeScene(scene);
+            arena.dispose();
             hud.dispose();
         },
     };
     hud.onRestart(() => {
         void (async () => {
             currentMode.dispose();
-            currentMode = await buildRace1P(engine, input, onExitToMenu, controlPoints);
+            currentMode = await buildRace1P(engine, assets, input, onExitToMenu, controlPoints);
         })();
     });
 
@@ -270,7 +282,13 @@ async function buildRace1P(engine: EngineContext, input: InputSystem, onExitToMe
 
 // ─── 2-player split-screen race ─────────────────────────────────────────────
 
-async function buildRace2P(engine: EngineContext, input: InputSystem, primaryCanvas: HTMLCanvasElement, onExitToMenu: () => Promise<void>): Promise<RunningMode> {
+async function buildRace2P(
+    engine: EngineContext,
+    assets: RacerAssets,
+    input: InputSystem,
+    primaryCanvas: HTMLCanvasElement,
+    onExitToMenu: () => Promise<void>
+): Promise<RunningMode> {
     const wrap = primaryCanvas.parentElement!;
     const canvas2 = document.createElement("canvas");
     canvas2.id = "ag-canvas-p2";
@@ -286,10 +304,10 @@ async function buildRace2P(engine: EngineContext, input: InputSystem, primaryCan
     const sceneB = createSceneContext(surface2);
     sceneB.clearColor = SPACE_CLEAR_COLOR;
 
-    const arena: Arena = buildArena(engine);
+    const arena: Arena = buildArena(engine, assets);
     addArenaToScene(sceneA, arena);
     addArenaToScene(sceneB, arena);
-    const grid: Grid = spawnGrid(engine, [sceneA, sceneB], arena.track, 2, TOTAL_SHIP_COUNT - 2);
+    const grid: Grid = spawnGrid(engine, assets, [sceneA, sceneB], arena.track, 2, TOTAL_SHIP_COUNT - 2);
     const p1 = grid.rigs[0]!.state;
     const p2 = grid.rigs[1]!.state;
     const chaseA = new ChaseCamera(sceneA, p1);
@@ -353,6 +371,7 @@ async function buildRace2P(engine: EngineContext, input: InputSystem, primaryCan
             disposed = true;
             disposeScene(sceneA);
             disposeScene(sceneB);
+            arena.dispose();
             disposeResize();
             disposeSurface(surface2);
             canvas2.remove();
@@ -366,6 +385,7 @@ async function buildRace2P(engine: EngineContext, input: InputSystem, primaryCan
 
 async function buildEditor(
     engine: EngineContext,
+    assets: RacerAssets,
     input: InputSystem,
     canvas: HTMLCanvasElement,
     onTest: (controlPoints: readonly Vec3[]) => Promise<void>,
@@ -373,7 +393,7 @@ async function buildEditor(
 ): Promise<RunningMode> {
     const scene = createSceneContext(engine);
     scene.clearColor = SPACE_CLEAR_COLOR;
-    const arena: Arena = buildArena(engine);
+    const arena: Arena = buildArena(engine, assets);
     addArenaToScene(scene, arena);
 
     const hud: EditorHud = createEditorHud();
@@ -389,7 +409,8 @@ async function buildEditor(
             return;
         }
         input.poll();
-        editor.tick(Math.min(deltaMs / 1000, 0.1), input);
+        const dt = Math.min(deltaMs / 1000, 0.1);
+        editor.tick(dt, input);
     });
 
     await registerScene(scene);
@@ -398,6 +419,7 @@ async function buildEditor(
             disposed = true;
             editor.dispose();
             disposeScene(scene);
+            arena.dispose();
             hud.dispose();
         },
     };

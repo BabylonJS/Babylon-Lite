@@ -334,6 +334,11 @@ function serveReferenceImages(): Plugin {
                         ".wasm": "application/wasm",
                         ".bin": "application/octet-stream",
                         ".glb": "model/gltf-binary",
+                        // Vendored .gltf models (Antigravity Racer's ship + rock) reference their
+                        // own .bin/textures by relative URI; without an entry here the manifest
+                        // falls through to the SPA HTML fallback and the loader chokes on
+                        // `<!doctype html>`.
+                        ".gltf": "model/gltf+json",
                         ".env": "application/octet-stream",
                         ".wad": "application/octet-stream",
                         ".txt": "text/plain; charset=utf-8",

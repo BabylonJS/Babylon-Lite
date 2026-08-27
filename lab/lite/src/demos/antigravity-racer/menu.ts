@@ -28,6 +28,10 @@ export interface MainMenu {
     dispose(): void;
 }
 
+/** Attribution for the third-party art the demo ships (see also the demo's CREDITS.txt files). */
+const CREDIT_HTML =
+    'Native Babylon Lite port of Cédric Guillemet&rsquo;s antigravity racing playground (WVPVWL). Track textures by <a href="https://github.com/PatrickRyanMS" target="_blank" rel="noopener">Patrick Ryan</a>, used with his permission &mdash; he owns the rights to the road artwork and granted this demo the right to redistribute it. Ship &ldquo;RHS-X&rdquo; by <a href="https://sketchfab.com/alone5" target="_blank" rel="noopener">Hassan Bassassi</a>, rock &ldquo;Obj_Nat_Rock_01&rdquo; by <a href="https://sketchfab.com/SaschaHenrichs" target="_blank" rel="noopener">SaschaHenrichs</a> — both <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Trails and terrain are procedural.';
+
 export function createMainMenu(handlers: MainMenuHandlers): MainMenu {
     const root = document.createElement("div");
     root.className = "ag-menu";
@@ -43,9 +47,13 @@ export function createMainMenu(handlers: MainMenuHandlers): MainMenu {
                 <button type="button" class="ag-btn" data-action="editor">✏️ Track Editor</button>
             </div>
             <div class="ag-menu-hint" id="ag-menu-hint">Keyboard: <b>WASD</b>/<b>ZQSD</b> + arrows · Gamepad supported</div>
-            <div class="ag-menu-credit">Inspired by Cédric Guillemet's antigravity racing playground for Babylon.js — reimplemented natively for Babylon Lite.</div>
+            <div class="ag-menu-credit"></div>
         </div>
     `;
+    // Set separately from a plain quoted string: the demo bundler's WGSL template-literal
+    // minifier treats `//` inside a BACKTICK template as a comment start and would eat the
+    // rest of the line (including every href). Quoted strings are skipped untouched.
+    root.querySelector(".ag-menu-credit")!.innerHTML = CREDIT_HTML;
     document.body.appendChild(root);
 
     const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>(".ag-btn"));

@@ -11,6 +11,8 @@
 import type { EngineContext, Mesh, Vec3 } from "babylon-lite";
 import { createMeshFromData, createStandardMaterial, crossVec3, lengthVec3, normalizeVec3Object, scaleVec3, subVec3, updateMeshPositions } from "babylon-lite";
 
+import { HUGE_BOUND_MAX, HUGE_BOUND_MIN } from "./constants.js";
+
 const TRAIL_POINTS = 36;
 
 export interface ShipTrail {
@@ -49,6 +51,10 @@ export function createShipTrail(engine: EngineContext, color: [number, number, n
     }
 
     const mesh = createMeshFromData(engine, "ship-trail", positions, normals, indices, uvs);
+    // Every vertex is rewritten each tick, so the geometry's own box goes stale immediately —
+    // publish the huge box instead so frustum culling never drops a live ribbon.
+    mesh.boundMin = HUGE_BOUND_MIN;
+    mesh.boundMax = HUGE_BOUND_MAX;
     const material = createStandardMaterial();
     material.diffuseColor = [0, 0, 0];
     material.emissiveColor = color;

@@ -1,33 +1,40 @@
 /**
- * Antigravity Racer — track spline math + procedural ribbon mesh.
+ * Antigravity Racer — track spline math + the procedural track piece.
  *
- * Ports the playground's closed Hermite-spline track (7 editable control
- * points → 256 sampled "rings", arc-length reparametrized so ring spacing is
- * even in world distance) but keeps everything as CPU-side plain vectors
- * instead of the original's float-texture + node-material vertex shader
- * deformation (unsupported in Lite — see GUIDANCE). The final curved geometry
- * is built directly on the CPU and uploaded once; editing a control point just
- * recomputes the rings and re-uploads positions/normals in place.
+ * A faithful port of the source playground's track pipeline:
+ *
+ *  1. Seven control points define a closed Hermite/Catmull-Rom loop.
+ *  2. `computeTrackLength` walks the loop twice to build 256 arc-length-even
+ *     sample ratios (`trackRatios`).
+ *  3. `createTrackTexture` turns those into 256 orthonormal segment matrices —
+ *     each one's origin is the PREVIOUS sample and its forward axis points at
+ *     the current one — plus the per-row track-info channels.
+ *  4. The mesh itself is the same undeformed extrusion the PG merges: one
+ *     20-point cross-section duplicated at z = i and z = i + 1 for each of the
+ *     256 segments (10,240 vertices / 15,360 indices / 5,120 triangles), with no
+ *     UV buffer — the undeformed X/Z drive the fragment shading.
+ *  5. The GPU bends that straight extrusion onto the spline (see
+ *     `track-material.ts`), so editing a control point only re-uploads 256
+ *     matrices instead of touching a single vertex.
  */
 
 import type { EngineContext, Mesh, SceneContext, Vec3 } from "babylon-lite";
+import { addVec3, addToScene, createMeshFromData, crossVec3, dotVec3, normalizeVec3Object, scaleVec3, subVec3 } from "babylon-lite";
+
 import {
-    addVec3,
-    addToScene,
-    createMeshFromData,
-    createStandardMaterial,
-    crossVec3,
-    dotVec3,
-    normalizeVec3Object,
-    scaleVec3,
-    subVec3,
-    updateMeshNormals,
-    updateMeshPositions,
-} from "babylon-lite";
+    BOOST_LEFT_OFFSET,
+    BOOST_PERIOD,
+    BOOST_RIGHT_OFFSET,
+    DEFAULT_CONTROL_POINTS,
+    HUGE_BOUND_MAX,
+    HUGE_BOUND_MIN,
+    RING_COUNT,
+    TRACK_CROSS_NORMALS,
+    TRACK_CROSS_SECTION,
+} from "./constants.js";
+import { createTrackMaterial, FLOATS_PER_FRAME, type TrackMaterial, type TrackTextures } from "./track-material.js";
 
-import { BOOST_LEFT_OFFSET, BOOST_PERIOD, BOOST_RIGHT_OFFSET, DEFAULT_CONTROL_POINTS, FLOOR_HALF_WIDTH, RING_COUNT, TRACK_PROFILE } from "./constants.js";
-
-/** A single sampled ring: world position + orthonormal (right, up, forward) basis. */
+/** A single sampled segment: world origin + orthonormal (right, up, forward) basis. */
 export interface TrackFrame {
     pos: Vec3;
     dir: Vec3;
@@ -59,7 +66,8 @@ function hermite(p: Vec3, pm1: Vec3, pp1: Vec3, pp2: Vec3, t: number): Vec3 {
     };
 }
 
-/** Sample a closed Hermite loop through `points` at loop ratio `ratio` (any real, folded into [0,1)). */
+/** Sample a closed Hermite loop through `points` at loop ratio `ratio` (any real, folded into [0,1)).
+ *  Mirrors the PG's `GetDescToRef`, including its `i += 1; i %= 1` fold. */
 function sampleLoop(points: readonly Vec3[], ratio: number): Vec3 {
     const l = points.length;
     let i = ratio + 1;
@@ -71,7 +79,7 @@ function sampleLoop(points: readonly Vec3[], ratio: number): Vec3 {
 }
 
 /** Per-control-point "up" vector, derived from the loop's local curvature (banking),
- *  with a continuity fix so it doesn't flip sign at inflection points. */
+ *  with the PG's continuity fix so it doesn't flip sign at inflection points. */
 function computeControlUps(points: readonly Vec3[]): Vec3[] {
     const l = points.length;
     const ups: Vec3[] = [];
@@ -93,9 +101,10 @@ function computeControlUps(points: readonly Vec3[]): Vec3[] {
     return ups;
 }
 
-/** Arc-length reparametrization: returns `ringCount` loop ratios spaced evenly by world distance
- *  (so tight corners don't bunch up rings vs. long straights). Ported from `computeTrackLength`. */
-function computeArcLengthRatios(points: readonly Vec3[], ringCount: number): number[] {
+/** Total loop length plus the `ringCount` arc-length-even sample ratios, reproducing the
+ *  PG's two-pass `computeTrackLength` (including its 256-chord approximation and its
+ *  "emit `floor(localLength / lengthPerRow)` ratios per chord" quirk). */
+export function computeTrackRatios(points: readonly Vec3[], ringCount = RING_COUNT): { length: number; lengthPerRow: number; ratios: number[] } {
     let prev = sampleLoop(points, 0);
     let total = 0;
     for (let i = 1; i <= ringCount; i++) {
@@ -103,7 +112,7 @@ function computeArcLengthRatios(points: readonly Vec3[], ringCount: number): num
         total += dist(prev, next);
         prev = next;
     }
-    const lengthPerRing = total / ringCount;
+    const lengthPerRow = total / ringCount;
 
     const ratios: number[] = [0];
     prev = sampleLoop(points, 0);
@@ -113,28 +122,33 @@ function computeArcLengthRatios(points: readonly Vec3[], ringCount: number): num
         const nextRatio = i / ringCount;
         const next = sampleLoop(points, nextRatio);
         localLength += dist(prev, next);
-        const sliceCountF = localLength / lengthPerRing;
+        const sliceCountF = localLength / lengthPerRow;
         const sliceCount = Math.floor(sliceCountF);
         for (let s = 1; s <= sliceCount; s++) {
             ratios.push(currentRatio + ((nextRatio - currentRatio) / sliceCountF) * s);
         }
-        localLength -= lengthPerRing * sliceCount;
+        localLength -= lengthPerRow * sliceCount;
         prev = next;
         currentRatio = nextRatio;
     }
-    // Guard against a short array from floating-point edge cases.
+    // Guard against a short array from floating-point edge cases (the PG would read `undefined`).
     for (let i = ratios.length; i < ringCount; i++) {
         ratios.push(i / ringCount);
     }
-    return ratios;
+    return { length: total, lengthPerRow, ratios };
 }
 
-/** Build the `ringCount` track frames (position + orthonormal basis) for the given control points. */
-export function buildTrackFrames(points: readonly Vec3[], ringCount = RING_COUNT): TrackFrame[] {
+/** Build the `ringCount` segment frames for the given control points, plus the per-row
+ *  dot(prevDir, dir) curvature ratios the track-info channel is derived from.
+ *  Mirrors the PG's `createTrackTexture`: frame `i`'s ORIGIN is the sample at
+ *  `ratios[i - 1]` and its forward axis points at the sample at `ratios[i]`. */
+export function buildTrackFrames(points: readonly Vec3[], ringCount = RING_COUNT): { frames: TrackFrame[]; curveRatios: number[] } {
     const ups = computeControlUps(points);
-    const ratios = computeArcLengthRatios(points, ringCount);
+    const { ratios } = computeTrackRatios(points, ringCount);
     const frames: TrackFrame[] = [];
+    const curveRatios: number[] = [];
     let currentPos = sampleLoop(points, ratios[ringCount - 1] ?? 0);
+    let currentDir: Vec3 = { x: 0, y: 0, z: 1 };
     for (let i = 0; i < ringCount; i++) {
         const ratio = ratios[i] ?? i / ringCount;
         const nextPos = sampleLoop(points, ratio);
@@ -142,24 +156,27 @@ export function buildTrackFrames(points: readonly Vec3[], ringCount = RING_COUNT
         const dir = normalizeVec3Object(subVec3(nextPos, currentPos));
         const right = normalizeVec3Object(crossVec3(dir, rawUp));
         const up = normalizeVec3Object(crossVec3(right, dir));
-        frames.push({ pos: nextPos, dir, up, right });
+        curveRatios.push(dotVec3(currentDir, dir));
+        frames.push({ pos: currentPos, dir, up, right });
         currentPos = nextPos;
+        currentDir = dir;
     }
-    return frames;
+    return { frames, curveRatios };
 }
 
-/** Local (right, up, forward) coordinates of `worldPos` relative to a ring frame. */
+/** Local (right, up, forward) coordinates of `worldPos` relative to a segment frame. */
 export function frameLocalCoords(frame: TrackFrame, worldPos: Vec3): Vec3 {
     const rel = subVec3(worldPos, frame.pos);
     return { x: dotVec3(rel, frame.right), y: dotVec3(rel, frame.up), z: dotVec3(rel, frame.dir) };
 }
 
-/** Reconstruct a world position from local (right, up, forward) coordinates at a ring frame. */
+/** Reconstruct a world position from local (right, up, forward) coordinates at a segment frame. */
 export function frameToWorld(frame: TrackFrame, local: Vec3): Vec3 {
     return addVec3(frame.pos, addVec3(scaleVec3(frame.right, local.x), addVec3(scaleVec3(frame.up, local.y), scaleVec3(frame.dir, local.z))));
 }
 
-/** Advance a ring index forward while `worldPos` has crossed the next ring's plane. Capped so a bad state can't spin forever. */
+/** Advance a segment index forward while `worldPos` has crossed the next segment's plane.
+ *  Capped so a bad state can't spin forever. */
 export function advanceSegment(frames: readonly TrackFrame[], seg: number, worldPos: Vec3): number {
     const n = frames.length;
     for (let guard = 0; guard < n; guard++) {
@@ -174,162 +191,117 @@ export function advanceSegment(frames: readonly TrackFrame[], seg: number, world
     return seg;
 }
 
-function buildRibbonPositionsNormals(frames: readonly TrackFrame[]): { positions: Float32Array; normals: Float32Array; indices: Uint32Array; uvs: Float32Array } {
-    const profileCount = TRACK_PROFILE.length;
-    const ringCount = frames.length;
-    const vertsPerRing = profileCount;
-    const positions = new Float32Array(ringCount * vertsPerRing * 3);
-    const uvs = new Float32Array(ringCount * vertsPerRing * 2);
-    for (let i = 0; i < ringCount; i++) {
-        const f = frames[i]!;
-        for (let k = 0; k < profileCount; k++) {
-            const prof = TRACK_PROFILE[k]!;
-            const wx = f.pos.x + f.right.x * prof.x + f.up.x * prof.y;
-            const wy = f.pos.y + f.right.y * prof.x + f.up.y * prof.y;
-            const wz = f.pos.z + f.right.z * prof.x + f.up.z * prof.y;
-            const vi = i * vertsPerRing + k;
-            positions[vi * 3] = wx;
-            positions[vi * 3 + 1] = wy;
-            positions[vi * 3 + 2] = wz;
-            uvs[vi * 2] = k / (profileCount - 1);
-            uvs[vi * 2 + 1] = i / ringCount;
+/**
+ * The undeformed track piece: the 20-point cross-section duplicated at z = i and
+ * z = i + 1 for each of the `RING_COUNT` segments. Exactly the geometry the PG
+ * merges from 256 clones of one 40-vertex piece — 10,240 vertices, 15,360
+ * indices, 5,120 triangles, and no UV buffer.
+ */
+export function buildTrackPiece(): { positions: Float32Array; normals: Float32Array; indices: Uint32Array } {
+    const cross = TRACK_CROSS_SECTION.length; // 20
+    const perSegment = cross * 2; // 40
+    const positions = new Float32Array(RING_COUNT * perSegment * 3);
+    const normals = new Float32Array(RING_COUNT * perSegment * 3);
+    for (let seg = 0; seg < RING_COUNT; seg++) {
+        const base = seg * perSegment;
+        for (let row = 0; row < 2; row++) {
+            for (let k = 0; k < cross; k++) {
+                const v = (base + row * cross + k) * 3;
+                const xy = TRACK_CROSS_SECTION[k]!;
+                const n = TRACK_CROSS_NORMALS[k]!;
+                positions[v] = xy[0];
+                positions[v + 1] = xy[1];
+                positions[v + 2] = seg + row;
+                normals[v] = n[0];
+                normals[v + 1] = n[1];
+                normals[v + 2] = n[2];
+            }
         }
     }
-    // Quad strip across the profile, wrapped around the ring loop.
-    const indices = new Uint32Array(ringCount * (profileCount - 1) * 6);
+
+    // Per segment: the PG's `for (index = 0; index < cnt - 1; index += 2)` strip,
+    // i.e. 10 quads (60 indices) linking row 0 to row 1.
+    const indices = new Uint32Array(RING_COUNT * 60);
     let ii = 0;
-    for (let i = 0; i < ringCount; i++) {
-        const next = (i + 1) % ringCount;
-        for (let k = 0; k < profileCount - 1; k++) {
-            const a = i * vertsPerRing + k;
-            const b = i * vertsPerRing + k + 1;
-            const c = next * vertsPerRing + k;
-            const d = next * vertsPerRing + k + 1;
-            indices[ii++] = a;
-            indices[ii++] = c;
-            indices[ii++] = b;
-            indices[ii++] = b;
-            indices[ii++] = c;
-            indices[ii++] = d;
+    for (let seg = 0; seg < RING_COUNT; seg++) {
+        const base = seg * perSegment;
+        for (let index = 0; index < cross - 1; index += 2) {
+            indices[ii++] = base + index;
+            indices[ii++] = base + index + 1;
+            indices[ii++] = base + index + cross;
+            indices[ii++] = base + index + 1;
+            indices[ii++] = base + index + 1 + cross;
+            indices[ii++] = base + index + cross;
         }
     }
-    const normals = computeSmoothNormalsLocal(positions, indices);
-    return { positions, normals, indices, uvs };
+    return { positions, normals, indices };
 }
 
-/** Simple area-weighted smooth-normal computation (avoids depending on an internal engine helper). */
-function computeSmoothNormalsLocal(positions: Float32Array, indices: Uint32Array): Float32Array {
-    const normals = new Float32Array(positions.length);
-    for (let t = 0; t < indices.length; t += 3) {
-        const ia = indices[t]! * 3;
-        const ib = indices[t + 1]! * 3;
-        const ic = indices[t + 2]! * 3;
-        const ax = positions[ia]!,
-            ay = positions[ia + 1]!,
-            az = positions[ia + 2]!;
-        const bx = positions[ib]!,
-            by = positions[ib + 1]!,
-            bz = positions[ib + 2]!;
-        const cx = positions[ic]!,
-            cy = positions[ic + 1]!,
-            cz = positions[ic + 2]!;
-        const e1x = bx - ax,
-            e1y = by - ay,
-            e1z = bz - az;
-        const e2x = cx - ax,
-            e2y = cy - ay,
-            e2z = cz - az;
-        const nx = e1y * e2z - e1z * e2y;
-        const ny = e1z * e2x - e1x * e2z;
-        const nz = e1x * e2y - e1y * e2x;
-        normals[ia] = normals[ia]! + nx;
-        normals[ia + 1] = normals[ia + 1]! + ny;
-        normals[ia + 2] = normals[ia + 2]! + nz;
-        normals[ib] = normals[ib]! + nx;
-        normals[ib + 1] = normals[ib + 1]! + ny;
-        normals[ib + 2] = normals[ib + 2]! + nz;
-        normals[ic] = normals[ic]! + nx;
-        normals[ic + 1] = normals[ic + 1]! + ny;
-        normals[ic + 2] = normals[ic + 2]! + nz;
-    }
-    for (let v = 0; v < normals.length; v += 3) {
-        const x = normals[v]!,
-            y = normals[v + 1]!,
-            z = normals[v + 2]!;
-        const len = Math.sqrt(x * x + y * y + z * z) || 1;
-        normals[v] = x / len;
-        normals[v + 1] = y / len;
-        normals[v + 2] = z / len;
-    }
-    return normals;
-}
-
-export interface BoostPad {
-    readonly ring: number;
-    readonly side: "left" | "right";
-    mesh: Mesh;
-}
-
-/** Track data: the live geometry + everything simulation needs. `rebuild()` recomputes the rings from
- *  the current `controlPoints` and re-uploads geometry in place (topology never changes). */
+/** Track data: the live geometry + everything the simulation needs. `rebuild()` recomputes the
+ *  frames from the current `controlPoints` and re-uploads them in place — the mesh never changes. */
 export interface TrackData {
     readonly controlPoints: Vec3[];
     frames: TrackFrame[];
     readonly mesh: Mesh;
-    readonly boostPads: BoostPad[];
     readonly boostRight: boolean[];
     readonly boostLeft: boolean[];
     rebuild(): void;
+    dispose(): void;
 }
 
-function basisToQuat(right: Vec3, up: Vec3, forward: Vec3): { x: number; y: number; z: number; w: number } {
-    // Standard rotation-matrix→quaternion (columns = right, up, forward), trace method.
-    const m00 = right.x,
-        m10 = right.y,
-        m20 = right.z;
-    const m01 = up.x,
-        m11 = up.y,
-        m21 = up.z;
-    const m02 = forward.x,
-        m12 = forward.y,
-        m22 = forward.z;
-    const trace = m00 + m11 + m22;
-    if (trace > 0) {
-        const s = 0.5 / Math.sqrt(trace + 1);
-        return { w: 0.25 / s, x: (m21 - m12) * s, y: (m02 - m20) * s, z: (m10 - m01) * s };
-    } else if (m00 > m11 && m00 > m22) {
-        const s = 2 * Math.sqrt(1 + m00 - m11 - m22);
-        return { w: (m21 - m12) / s, x: 0.25 * s, y: (m01 + m10) / s, z: (m02 + m20) / s };
-    } else if (m11 > m22) {
-        const s = 2 * Math.sqrt(1 + m11 - m00 - m22);
-        return { w: (m02 - m20) / s, x: (m01 + m10) / s, y: 0.25 * s, z: (m12 + m21) / s };
-    } else {
-        const s = 2 * Math.sqrt(1 + m22 - m00 - m11);
-        return { w: (m10 - m01) / s, x: (m02 + m20) / s, y: (m12 + m21) / s, z: 0.25 * s };
+/** Fill the material's frame + info buffers from `frames`, using the original's column layout. */
+function writeFrameBuffers(material: TrackMaterial, frames: readonly TrackFrame[], curveRatios: readonly number[]): void {
+    const f = material.frameData;
+    const info = material.infoData;
+    for (let i = 0; i < frames.length; i++) {
+        const { pos, dir, up, right } = frames[i]!;
+        const o = i * FLOATS_PER_FRAME;
+        // c0 / c1 / c2 are the segment matrix's rows (m0,m4,m8), (m1,m5,m9), (m2,m6,m10).
+        f[o] = right.x;
+        f[o + 1] = up.x;
+        f[o + 2] = dir.x;
+        f[o + 3] = 0;
+        f[o + 4] = right.y;
+        f[o + 5] = up.y;
+        f[o + 6] = dir.y;
+        f[o + 7] = 0;
+        f[o + 8] = right.z;
+        f[o + 9] = up.z;
+        f[o + 10] = dir.z;
+        f[o + 11] = 0;
+        f[o + 12] = pos.x;
+        f[o + 13] = pos.y;
+        f[o + 14] = pos.z;
+        f[o + 15] = 1;
+
+        const io = i * 4;
+        // R = tight-curve flag (blends the road sheet to the hazard-striped one),
+        // G = +x boost lane, B = -x boost lane. The fragment shader stamps the
+        // chevron on exactly those channels/sides, and `touchBoost` in
+        // simulation.ts tests the same rows via `boostRight` / `boostLeft`, so the
+        // arrow is always drawn on the pad that actually boosts.
+        info[io] = (curveRatios[i] ?? 1) > 0.9996 ? 0 : 1;
+        info[io + 1] = i % BOOST_PERIOD === BOOST_RIGHT_OFFSET ? 1 : 0;
+        info[io + 2] = i % BOOST_PERIOD === BOOST_LEFT_OFFSET ? 1 : 0;
+        info[io + 3] = 0;
     }
 }
 
-function positionBoostPad(pad: BoostPad, frames: readonly TrackFrame[]): void {
-    const f = frames[pad.ring % frames.length]!;
-    const side = pad.side === "right" ? 1 : -1;
-    const localX = side * (FLOOR_HALF_WIDTH - 0.7);
-    const world = frameToWorld(f, { x: localX, y: 0.02, z: 0 });
-    pad.mesh.position.set(world.x, world.y, world.z);
-    const q = basisToQuat(f.right, f.up, f.dir);
-    pad.mesh.rotationQuaternion.set(q.x, q.y, q.z, q.w);
-}
-
-export function buildTrack(engine: EngineContext, controlPoints: readonly Vec3[] = DEFAULT_CONTROL_POINTS): TrackData {
+export function buildTrack(engine: EngineContext, textures: TrackTextures, controlPoints: readonly Vec3[] = DEFAULT_CONTROL_POINTS): TrackData {
     const points = controlPoints.map((p) => ({ x: p.x, y: p.y, z: p.z }));
-    let frames = buildTrackFrames(points);
-    const { positions, normals, indices, uvs } = buildRibbonPositionsNormals(frames);
-    const mesh = createMeshFromData(engine, "antigrav-track", positions, normals, indices, uvs);
-    const material = createStandardMaterial();
-    material.diffuseColor = [0.16, 0.19, 0.32];
-    material.emissiveColor = [0.05, 0.09, 0.16];
-    material.specularColor = [0.25, 0.3, 0.4];
-    material.backFaceCulling = false;
-    mesh.material = material;
+    let { frames, curveRatios } = buildTrackFrames(points);
+
+    const { positions, normals, indices } = buildTrackPiece();
+    const mesh = createMeshFromData(engine, "antigrav-track", positions, normals, indices);
+    // The vertices live at the origin and are placed by the vertex shader, so the geometric
+    // bounds are meaningless for culling — publish the PG's explicit huge box instead.
+    mesh.boundMin = HUGE_BOUND_MIN;
+    mesh.boundMax = HUGE_BOUND_MAX;
+
+    const trackMaterial = createTrackMaterial(engine, textures);
+    mesh.material = trackMaterial.material;
+    writeFrameBuffers(trackMaterial, frames, curveRatios);
+    trackMaterial.upload();
 
     const boostRight: boolean[] = new Array(RING_COUNT).fill(false);
     const boostLeft: boolean[] = new Array(RING_COUNT).fill(false);
@@ -342,63 +314,23 @@ export function buildTrack(engine: EngineContext, controlPoints: readonly Vec3[]
         controlPoints: points,
         frames,
         mesh,
-        boostPads: [],
         boostRight,
         boostLeft,
         rebuild(): void {
-            frames = buildTrackFrames(track.controlPoints);
+            ({ frames, curveRatios } = buildTrackFrames(track.controlPoints));
             track.frames = frames;
-            const rebuilt = buildRibbonPositionsNormals(frames);
-            updateMeshPositions(engine, mesh, rebuilt.positions);
-            updateMeshNormals(engine, mesh, rebuilt.normals);
-            for (const pad of track.boostPads) {
-                positionBoostPad(pad, frames);
-            }
+            writeFrameBuffers(trackMaterial, frames, curveRatios);
+            // Same buffers, same bind group — only their contents change.
+            trackMaterial.upload();
+        },
+        dispose(): void {
+            trackMaterial.dispose();
         },
     };
     return track;
 }
 
-function makeBoostPad(engine: EngineContext, ring: number, side: "left" | "right"): BoostPad {
-    const mesh = createMeshFromData(
-        engine,
-        `boost-${side}-${ring}`,
-        new Float32Array([-0.7, 0, -1, 0.7, 0, -1, 0.7, 0, 1, -0.7, 0, 1]),
-        new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0]),
-        new Uint32Array([0, 1, 2, 0, 2, 3]),
-        new Float32Array([0, 0, 1, 0, 1, 1, 0, 1])
-    );
-    const material = createStandardMaterial();
-    material.diffuseColor = side === "right" ? [0.1, 0.6, 0.9] : [0.95, 0.55, 0.1];
-    material.emissiveColor = side === "right" ? [0.1, 0.55, 0.85] : [0.85, 0.45, 0.05];
-    material.disableLighting = true;
-    material.backFaceCulling = false;
-    mesh.material = material;
-    return { ring, side, mesh };
-}
-
-/** Create + place the boost pad decal meshes for a built track. */
-export function createBoostPads(engine: EngineContext, track: TrackData): BoostPad[] {
-    const pads: BoostPad[] = [];
-    for (let i = 0; i < RING_COUNT; i++) {
-        if (track.boostRight[i]) {
-            pads.push(makeBoostPad(engine, i, "right"));
-        }
-        if (track.boostLeft[i]) {
-            pads.push(makeBoostPad(engine, i, "left"));
-        }
-    }
-    for (const pad of pads) {
-        positionBoostPad(pad, track.frames);
-    }
-    track.boostPads.push(...pads);
-    return pads;
-}
-
-/** Add the track mesh and its boost pads to a scene. */
+/** Add the track mesh to a scene. */
 export function addTrackToScene(scene: SceneContext, track: TrackData): void {
     addToScene(scene, track.mesh);
-    for (const pad of track.boostPads) {
-        addToScene(scene, pad.mesh);
-    }
 }

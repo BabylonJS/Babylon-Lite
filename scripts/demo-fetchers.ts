@@ -22,6 +22,7 @@ import { fetchVoxelpack } from "./fetch-voxelpack";
 import { fetchFreeciv } from "./fetch-freeciv";
 import { fetchLittlestTokyo } from "./fetch-littlest-tokyo";
 import { fetchRacer } from "./fetch-racer";
+import { fetchAntigravityRacer } from "./fetch-antigravity-racer";
 
 /** Map of `fetch` id (as used in demos-config.json) → asset downloader. */
 export const DEMO_FETCHERS: Record<string, () => Promise<void>> = {
@@ -31,6 +32,7 @@ export const DEMO_FETCHERS: Record<string, () => Promise<void>> = {
     freeciv: fetchFreeciv,
     "littlest-tokyo": fetchLittlestTokyo,
     racer: fetchRacer,
+    "antigravity-racer": fetchAntigravityRacer,
 };
 
 /** Minimal shape of a demos-config.json entry needed to resolve its fetcher. */

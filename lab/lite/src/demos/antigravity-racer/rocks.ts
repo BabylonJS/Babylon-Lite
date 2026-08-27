@@ -1,62 +1,47 @@
 /**
- * Antigravity Racer — procedural decorative rocks.
+ * Antigravity Racer — the decorative boulders.
  *
- * The source PG loads an external Sketchfab rock glTF; this port scatters
- * simple procedural low-poly "boulders" (irregularly-scaled polyhedra) outside
- * the track walls instead, avoiding any runtime dependency on third-party
- * asset hosting (see GUIDANCE: avoid mutable remote dependencies).
+ * The same CC BY 4.0 "Obj_Nat_Rock_01" model the source playground scatters, at
+ * the seven exact transforms authored there (see `ROCK_TRANSFORMS`), drawn as
+ * one thin-instance pool.
+ *
+ * The playground places each boulder by REPLACING the glTF root's own transform
+ * (`meshes[0].rotationQuaternion = null; meshes[0].scaling = rocksScale[i]`),
+ * which drops Babylon's right-to-left-handed root conversion. Lite's pool
+ * composes on top of that conversion instead, so the instance matrix is just
+ * the playground's `scale · rotation · translation` above the model hierarchy
+ * — no extra mirror. The rock template's static (non-instanced) pipeline was
+ * built expecting exactly one flip (the glTF root's), i.e. a negative-
+ * determinant world matrix with `frontFace` unchanged; an extra per-instance
+ * X mirror used to cancel that flip back to a positive determinant, which
+ * left the double-sided PBR material's front/back normal resolution wrong
+ * (the rock rendered with inverted lighting). Leaving the root flip alone
+ * keeps the determinant negative as the pipeline expects; the resulting
+ * mirror of this roughly-symmetric natural rock is not visually significant.
  */
 
-import type { EngineContext, Mesh, SceneContext } from "babylon-lite";
-import { addToScene, createPolyhedron, createStandardMaterial } from "babylon-lite";
+import type { HierarchyInstancePool, SceneContext, SceneNode } from "babylon-lite";
+import { addHierarchyInstance, addToScene, mat4Compose } from "babylon-lite";
 
-import type { TrackData } from "./track.js";
-import { RING_COUNT } from "./constants.js";
+import { instantiateModel, type RacerAssets } from "./assets.js";
+import { bjsEulerToQuat } from "./bjs-euler.js";
+import { ROCK_TRANSFORMS } from "./constants.js";
 
-/** Small deterministic PRNG (mulberry32) so the rock scatter is stable across rebuilds. */
-function mulberry32(seed: number): () => number {
-    let a = seed;
-    return () => {
-        a |= 0;
-        a = (a + 0x6d2b79f5) | 0;
-        let t = Math.imul(a ^ (a >>> 15), 1 | a);
-        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    };
+export interface RockField {
+    readonly root: SceneNode;
+    readonly pool: HierarchyInstancePool;
 }
 
-const ROCK_COUNT = 9;
-const ROCK_SEED = 20240521;
-
-export function createRocks(engine: EngineContext, track: TrackData): Mesh[] {
-    const rng = mulberry32(ROCK_SEED);
-    const material = createStandardMaterial();
-    material.diffuseColor = [0.32, 0.29, 0.27];
-    material.specularColor = [0.05, 0.05, 0.05];
-
-    const rocks: Mesh[] = [];
-    for (let i = 0; i < ROCK_COUNT; i++) {
-        const ring = Math.floor(rng() * RING_COUNT);
-        const frame = track.frames[ring]!;
-        const side = rng() > 0.5 ? 1 : -1;
-        const outset = 6 + rng() * 6;
-        const drop = -1 - rng() * 4;
-        const x = frame.pos.x + frame.right.x * side * outset + frame.up.x * drop;
-        const y = frame.pos.y + frame.right.y * side * outset + frame.up.y * drop;
-        const z = frame.pos.z + frame.right.z * side * outset + frame.up.z * drop;
-
-        const rock = createPolyhedron(engine, { type: Math.floor(rng() * 4), size: 1.6 + rng() * 2.2 });
-        rock.material = material;
-        rock.position.set(x, y, z);
-        rock.rotation.set(rng() * Math.PI * 2, rng() * Math.PI * 2, rng() * Math.PI * 2);
-        rock.scaling.set(0.7 + rng() * 0.6, 0.55 + rng() * 0.7, 0.7 + rng() * 0.6);
-        rocks.push(rock);
+export function createRocks(assets: RacerAssets): RockField {
+    const { root, pool } = instantiateModel(assets.rockTemplate, ROCK_TRANSFORMS.length);
+    for (const t of ROCK_TRANSFORMS) {
+        const q = bjsEulerToQuat(t.rotation[0], t.rotation[1], t.rotation[2]);
+        const trs = mat4Compose(t.position[0], t.position[1], t.position[2], q.x, q.y, q.z, q.w, t.scaling[0], t.scaling[1], t.scaling[2]);
+        addHierarchyInstance(pool, trs);
     }
-    return rocks;
+    return { root, pool };
 }
 
-export function addRocksToScene(scene: SceneContext, rocks: readonly Mesh[]): void {
-    for (const rock of rocks) {
-        addToScene(scene, rock);
-    }
+export function addRocksToScene(scene: SceneContext, rocks: RockField): void {
+    addToScene(scene, rocks.root);
 }
