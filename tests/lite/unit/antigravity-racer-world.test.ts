@@ -11,6 +11,8 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { createMeshFromData } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
@@ -24,6 +26,7 @@ const constantsPath = "../../../lab/lite/src/demos/antigravity-racer/constants.j
 const terrainPath = "../../../lab/lite/src/demos/antigravity-racer/terrain.js";
 const worldPath = "../../../lab/lite/src/demos/antigravity-racer/world.js";
 const environmentPath = "../../../lab/lite/src/demos/antigravity-racer/environment.js";
+const rocksSource = readFileSync(fileURLToPath(new URL("../../../lab/lite/src/demos/antigravity-racer/rocks.ts", import.meta.url)), "utf8");
 
 /** Counting GPU device stand-in: enough for meshes, storage buffers and the CSM depth array. */
 const gpu = vi.hoisted(() => {
@@ -90,6 +93,7 @@ const constants = (await import(constantsPath)) as Record<string, number> & {
     SUN_DIRECTION: [number, number, number];
     SUN_POSITION: [number, number, number];
     SPACE_CLEAR_COLOR: { r: number; g: number; b: number; a: number };
+    RACER_FOG_COLOR: [number, number, number];
 };
 const { HEIGHTMAP_URL, GROUND_TEXTURE_URL } = (await import(terrainPath)) as { HEIGHTMAP_URL: string; GROUND_TEXTURE_URL: string };
 const { RACER_ENVIRONMENT_URL, RACER_SKYBOX_POSITION } = (await import(environmentPath)) as {
@@ -174,6 +178,13 @@ describe("lighting and sky", () => {
     it("disables world-bounds auto-sizing for the infinite-distance HDR skybox", () => {
         expect(RACER_SKYBOX_POSITION).toEqual([0, 0, 0]);
     });
+
+    it("adds subtle blue distance fog while retaining HDR image-based lighting", () => {
+        expect(constants.RACER_FOG_MODE).toBe(3);
+        expect(constants.RACER_FOG_START).toBe(250);
+        expect(constants.RACER_FOG_END).toBe(900);
+        expect(constants.RACER_FOG_COLOR).toEqual([0.12, 0.18, 0.25]);
+    });
 });
 
 describe("terrain", () => {
@@ -183,12 +194,18 @@ describe("terrain", () => {
     });
 
     it("keeps CreateGroundFromHeightMap's exact parameters", () => {
-        expect(constants.TERRAIN_SIZE).toBe(400);
+        expect(constants.TERRAIN_SIZE).toBe(800);
         expect(constants.TERRAIN_SUBDIVISIONS).toBe(600);
         expect(constants.TERRAIN_MIN_HEIGHT).toBe(0);
         expect(constants.TERRAIN_MAX_HEIGHT).toBe(25);
         expect(constants.TERRAIN_Y).toBe(-2.05);
-        expect(constants.TERRAIN_UV_SCALE).toBe(6);
+        expect(constants.TERRAIN_UV_SCALE).toBe(12);
+    });
+});
+
+describe("rocks", () => {
+    it("drops the glTF handedness root before applying the playground transforms", () => {
+        expect(rocksSource).toContain("instantiateModel(assets.rockTemplate, ROCK_TRANSFORMS.length, true)");
     });
 });
 
