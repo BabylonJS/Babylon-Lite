@@ -38,6 +38,7 @@ function makeMockHknp() {
 }
 
 function makeAggregateMockHknp() {
+    const filterInfo = new WeakMap<object, [number, number]>();
     return {
         ...makeMockHknp(),
         MotionType: { STATIC: 0, KINEMATIC: 1, DYNAMIC: 2 },
@@ -48,6 +49,8 @@ function makeAggregateMockHknp() {
         HP_Shape_CreateCylinder: vi.fn(() => [0, { __shape: true }]),
         HP_Shape_SetMaterial: vi.fn(),
         HP_Shape_SetTrigger: vi.fn(),
+        HP_Shape_GetFilterInfo: vi.fn((shape: object) => [0, filterInfo.get(shape) ?? [0xffffffff, 0xffffffff]]),
+        HP_Shape_SetFilterInfo: vi.fn((shape: object, value: [number, number]) => filterInfo.set(shape, value)),
         HP_Shape_Release: vi.fn(),
         HP_Body_Create: vi.fn(() => [0, { __body: true }]),
         HP_Body_SetMotionType: () => undefined,
@@ -508,9 +511,25 @@ describe("PhysicsEngine", () => {
                 }).toThrow(/ownership\/lifetime contract/);
 
                 const originalShape = controller.shape;
+                const originalLiteShape = originalShape._lite;
+                originalShape.material = { friction: 0.4, restitution: 0.1, staticFriction: 0.8 };
+                originalShape.filterMembershipMask = 7;
+                originalShape.filterCollideMask = 11;
+                originalShape.isTrigger = true;
+                hknp.HP_Shape_SetMaterial.mockClear();
+                hknp.HP_Shape_SetFilterInfo.mockClear();
+                hknp.HP_Shape_SetTrigger.mockClear();
                 expect(controller.shapeOptions).toEqual({ capsuleHeight: 2, capsuleRadius: 0.4 });
                 controller.setShapeOptions({ capsuleHeight: 2.2, capsuleRadius: 0.5 });
-                expect(controller.shape).not.toBe(originalShape);
+                expect(controller.shape).toBe(originalShape);
+                expect(controller.shape._lite).not.toBe(originalLiteShape);
+                expect(controller.shape.material).toEqual({ friction: 0.4, restitution: 0.1, staticFriction: 0.8 });
+                expect(controller.shape.filterMembershipMask).toBe(7);
+                expect(controller.shape.filterCollideMask).toBe(11);
+                expect(controller.shape.isTrigger).toBe(true);
+                expect(hknp.HP_Shape_SetMaterial).toHaveBeenCalledWith(controller.shape._lite._hkShape, [0.8, 0.4, 0.1, 0, 1]);
+                expect(hknp.HP_Shape_SetFilterInfo).toHaveBeenLastCalledWith(controller.shape._lite._hkShape, [7, 11]);
+                expect(hknp.HP_Shape_SetTrigger).toHaveBeenCalledWith(controller.shape._lite._hkShape, true);
                 expect(controller.shapeOptions).toEqual({ capsuleHeight: 2.2, capsuleRadius: 0.5 });
                 expect(hknp.HP_Shape_Release).toHaveBeenCalledOnce();
                 controller.shape.dispose();

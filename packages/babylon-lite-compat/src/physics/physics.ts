@@ -238,7 +238,7 @@ function litePrestepType(type: PhysicsPrestepType): LitePhysicsPrestepType {
 /** Babylon.js-shaped collision shape backed by a Babylon Lite physics shape. */
 export class PhysicsShape {
     /** @internal */
-    public readonly _lite!: LitePhysicsShape;
+    public _lite!: LitePhysicsShape;
     /** @internal */
     private readonly _world: PhysicsWorld;
     /** @internal */
@@ -269,7 +269,7 @@ export class PhysicsShape {
     public static _fromLite(shape: LitePhysicsShape, world: PhysicsWorld, ownsLiteShape = true): PhysicsShape {
         const wrapper = Object.create(PhysicsShape.prototype) as PhysicsShape;
         Object.defineProperties(wrapper, {
-            _lite: { value: shape, enumerable: true },
+            _lite: { value: shape, enumerable: true, writable: true },
             _world: { value: world },
             _material: { value: {}, writable: true },
             _membershipMask: { value: 0xffffffff, writable: true },
@@ -279,6 +279,15 @@ export class PhysicsShape {
             _ownsLiteShape: { value: ownsLiteShape },
         });
         return wrapper;
+    }
+
+    /** @internal */
+    public _replaceLiteShape(shape: LitePhysicsShape): void {
+        this._lite = shape;
+        this.material = this._material;
+        this.filterMembershipMask = this._membershipMask;
+        this.filterCollideMask = this._collideMask;
+        this.isTrigger = this._isTrigger;
     }
 
     public getClassName(): string {
@@ -553,7 +562,6 @@ export class PhysicsCharacterController {
     public readonly _lite: LitePhysicsCharacterController;
     public readonly onTriggerCollisionObservable = new Observable<ICharacterControllerCollisionEvent>();
     private _shape: PhysicsShape;
-    private readonly _world: PhysicsWorld;
     private _up: Vector3;
     private _maxStepHeight = 0;
     private _footOffset: number;
@@ -567,7 +575,6 @@ export class PhysicsCharacterController {
             );
         }
         const world = requirePhysicsWorld(scene);
-        this._world = world;
         this._lite = createPhysicsCharacterController(world, position, {
             capsuleHeight: characterShapeOptions.capsuleHeight ?? 1.8,
             capsuleRadius: characterShapeOptions.capsuleRadius ?? 0.6,
@@ -606,7 +613,7 @@ export class PhysicsCharacterController {
         if (!liteShape) {
             throw new Error("Babylon Lite character controller did not rebuild its collision shape.");
         }
-        this._shape = PhysicsShape._fromLite(liteShape, this._world, false);
+        this._shape._replaceLiteShape(liteShape);
         this._footOffset = (options.capsuleHeight ?? 1.8) * 0.5;
     }
 
