@@ -92,7 +92,10 @@ const constants = (await import(constantsPath)) as Record<string, number> & {
     SPACE_CLEAR_COLOR: { r: number; g: number; b: number; a: number };
 };
 const { HEIGHTMAP_URL, GROUND_TEXTURE_URL } = (await import(terrainPath)) as { HEIGHTMAP_URL: string; GROUND_TEXTURE_URL: string };
-const { RACER_ENVIRONMENT_URL } = (await import(environmentPath)) as { RACER_ENVIRONMENT_URL: string };
+const { RACER_ENVIRONMENT_URL, RACER_SKYBOX_POSITION } = (await import(environmentPath)) as {
+    RACER_ENVIRONMENT_URL: string;
+    RACER_SKYBOX_POSITION?: [number, number, number];
+};
 
 interface ShaderMaterialLike {
     _shadowCasterMaterial?: unknown;
@@ -166,6 +169,10 @@ describe("lighting and sky", () => {
 
     it("uses the HDR environment requested from Playground CGA05F#831", () => {
         expect(RACER_ENVIRONMENT_URL).toBe("https://playground.babylonjs.com/textures/environment.hdr");
+    });
+
+    it("disables world-bounds auto-sizing for the infinite-distance HDR skybox", () => {
+        expect(RACER_SKYBOX_POSITION).toEqual([0, 0, 0]);
     });
 });
 
