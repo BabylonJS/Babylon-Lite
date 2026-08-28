@@ -582,8 +582,8 @@ As a deliberate post-parity presentation change, every mode loads the exact raw
 Babylon-Lite converts it to a 512-pixel cubemap and uses it for both diffuse/specular IBL and a
 1000-unit visible skybox, without tone mapping and at exposure/contrast `1`.
 
-The same presentation layer adds subtle linear blue fog (`start=250`, `end=900`,
-`color=(0.12, 0.18, 0.25)`) and doubles the terrain footprint while preserving texture density:
+The same presentation layer adds linear blue fog (`start=120`, `end=500`,
+`color=(0.08, 0.16, 0.30)`) and doubles the terrain footprint while preserving texture density:
 
 Terrain:
 

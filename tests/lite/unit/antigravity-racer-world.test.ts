@@ -181,9 +181,9 @@ describe("lighting and sky", () => {
 
     it("adds subtle blue distance fog while retaining HDR image-based lighting", () => {
         expect(constants.RACER_FOG_MODE).toBe(3);
-        expect(constants.RACER_FOG_START).toBe(250);
-        expect(constants.RACER_FOG_END).toBe(900);
-        expect(constants.RACER_FOG_COLOR).toEqual([0.12, 0.18, 0.25]);
+        expect(constants.RACER_FOG_START).toBe(120);
+        expect(constants.RACER_FOG_END).toBe(500);
+        expect(constants.RACER_FOG_COLOR).toEqual([0.08, 0.16, 0.3]);
     });
 });
 

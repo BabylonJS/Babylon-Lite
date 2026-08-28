@@ -43,6 +43,9 @@ export function createShipFleet(assets: RacerAssets, count: number): ShipFleet {
     for (let i = 0; i < count; i++) {
         addHierarchyInstance(pool, identity);
     }
+    for (let i = 0; i < pool.meshes.length; i++) {
+        pool.meshes[i]!.receiveShadows = true;
+    }
     // Per-fleet scratch matrices to avoid per-tick allocations.
     const _localMat = new Float32Array(16) as Mat4Storage;
     const _worldMat = new Float32Array(16) as Mat4Storage;

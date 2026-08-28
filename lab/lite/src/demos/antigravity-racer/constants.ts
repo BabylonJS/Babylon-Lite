@@ -234,9 +234,9 @@ export const TERRAIN_UV_SCALE = 12;
 
 /** Subtle linear blue atmospheric perspective over the enlarged terrain. */
 export const RACER_FOG_MODE = 3;
-export const RACER_FOG_START = 250;
-export const RACER_FOG_END = 900;
-export const RACER_FOG_COLOR: [number, number, number] = [0.12, 0.18, 0.25];
+export const RACER_FOG_START = 120;
+export const RACER_FOG_END = 500;
+export const RACER_FOG_COLOR: [number, number, number] = [0.08, 0.16, 0.3];
 
 /** Cascaded shadows, matching `new CascadedShadowGenerator(1024, light)` plus the PG's overrides. */
 export const SHADOW_MAP_SIZE = 1024;
