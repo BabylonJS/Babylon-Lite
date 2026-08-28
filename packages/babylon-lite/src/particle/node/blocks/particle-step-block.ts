@@ -19,32 +19,53 @@ export const particleStepBlock: NpeBlockEvaluator = {
         const color4: Color4 = { r: 0, g: 0, b: 0, a: 0 };
         const getter: NpeGetter = (i) => {
             const source = value(i);
-            const edgeValue = edge(i);
-            if (typeof edgeValue !== "number") {
-                throw new Error(`NodeParticle: ParticleStepBlock ${block.id} received an unsupported value`);
-            }
             if (typeof source === "number") {
+                const edgeValue = edge(i);
+                if (typeof edgeValue !== "number") {
+                    throw new Error(`NodeParticle: ParticleStepBlock ${block.id} received an unsupported value`);
+                }
                 return step(source, edgeValue);
             }
             if (!source || typeof source !== "object") {
                 throw new Error(`NodeParticle: ParticleStepBlock ${block.id} received an unsupported value`);
             }
             if ("r" in source && typeof source.r === "number" && typeof source.g === "number" && typeof source.b === "number" && typeof source.a === "number") {
-                color4.r = step(source.r, edgeValue);
-                color4.g = step(source.g, edgeValue);
-                color4.b = step(source.b, edgeValue);
-                color4.a = step(source.a, edgeValue);
+                const r = source.r;
+                const g = source.g;
+                const b = source.b;
+                const a = source.a;
+                const edgeValue = edge(i);
+                if (typeof edgeValue !== "number") {
+                    throw new Error(`NodeParticle: ParticleStepBlock ${block.id} received an unsupported value`);
+                }
+                color4.r = step(r, edgeValue);
+                color4.g = step(g, edgeValue);
+                color4.b = step(b, edgeValue);
+                color4.a = step(a, edgeValue);
                 return color4;
             }
             if ("z" in source && typeof source.x === "number" && typeof source.y === "number" && typeof source.z === "number") {
-                vector3.x = step(source.x, edgeValue);
-                vector3.y = step(source.y, edgeValue);
-                vector3.z = step(source.z, edgeValue);
+                const x = source.x;
+                const y = source.y;
+                const z = source.z;
+                const edgeValue = edge(i);
+                if (typeof edgeValue !== "number") {
+                    throw new Error(`NodeParticle: ParticleStepBlock ${block.id} received an unsupported value`);
+                }
+                vector3.x = step(x, edgeValue);
+                vector3.y = step(y, edgeValue);
+                vector3.z = step(z, edgeValue);
                 return vector3;
             }
             if ("x" in source && typeof source.x === "number" && typeof source.y === "number") {
-                vector2.x = step(source.x, edgeValue);
-                vector2.y = step(source.y, edgeValue);
+                const x = source.x;
+                const y = source.y;
+                const edgeValue = edge(i);
+                if (typeof edgeValue !== "number") {
+                    throw new Error(`NodeParticle: ParticleStepBlock ${block.id} received an unsupported value`);
+                }
+                vector2.x = step(x, edgeValue);
+                vector2.y = step(y, edgeValue);
                 return vector2;
             }
             throw new Error(`NodeParticle: ParticleStepBlock ${block.id} received an unsupported value`);

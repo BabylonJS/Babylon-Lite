@@ -20,33 +20,57 @@ export const particleClampBlock: NpeBlockEvaluator = {
         const color4: Color4 = { r: 0, g: 0, b: 0, a: 0 };
         const getter: NpeGetter = (i) => {
             const source = value(i);
-            const minValue = min(i);
-            const maxValue = max(i);
-            if (typeof minValue !== "number" || typeof maxValue !== "number") {
-                throw new Error(`NodeParticle: ParticleClampBlock ${block.id} received an unsupported value`);
-            }
             if (typeof source === "number") {
+                const minValue = min(i);
+                const maxValue = max(i);
+                if (typeof minValue !== "number" || typeof maxValue !== "number") {
+                    throw new Error(`NodeParticle: ParticleClampBlock ${block.id} received an unsupported value`);
+                }
                 return clamp(source, minValue, maxValue);
             }
             if (!source || typeof source !== "object") {
                 throw new Error(`NodeParticle: ParticleClampBlock ${block.id} received an unsupported value`);
             }
             if ("r" in source && typeof source.r === "number" && typeof source.g === "number" && typeof source.b === "number" && typeof source.a === "number") {
-                color4.r = clamp(source.r, minValue, maxValue);
-                color4.g = clamp(source.g, minValue, maxValue);
-                color4.b = clamp(source.b, minValue, maxValue);
-                color4.a = clamp(source.a, minValue, maxValue);
+                const r = source.r;
+                const g = source.g;
+                const b = source.b;
+                const a = source.a;
+                const minValue = min(i);
+                const maxValue = max(i);
+                if (typeof minValue !== "number" || typeof maxValue !== "number") {
+                    throw new Error(`NodeParticle: ParticleClampBlock ${block.id} received an unsupported value`);
+                }
+                color4.r = clamp(r, minValue, maxValue);
+                color4.g = clamp(g, minValue, maxValue);
+                color4.b = clamp(b, minValue, maxValue);
+                color4.a = clamp(a, minValue, maxValue);
                 return color4;
             }
             if ("z" in source && typeof source.x === "number" && typeof source.y === "number" && typeof source.z === "number") {
-                vector3.x = clamp(source.x, minValue, maxValue);
-                vector3.y = clamp(source.y, minValue, maxValue);
-                vector3.z = clamp(source.z, minValue, maxValue);
+                const x = source.x;
+                const y = source.y;
+                const z = source.z;
+                const minValue = min(i);
+                const maxValue = max(i);
+                if (typeof minValue !== "number" || typeof maxValue !== "number") {
+                    throw new Error(`NodeParticle: ParticleClampBlock ${block.id} received an unsupported value`);
+                }
+                vector3.x = clamp(x, minValue, maxValue);
+                vector3.y = clamp(y, minValue, maxValue);
+                vector3.z = clamp(z, minValue, maxValue);
                 return vector3;
             }
             if ("x" in source && typeof source.x === "number" && typeof source.y === "number") {
-                vector2.x = clamp(source.x, minValue, maxValue);
-                vector2.y = clamp(source.y, minValue, maxValue);
+                const x = source.x;
+                const y = source.y;
+                const minValue = min(i);
+                const maxValue = max(i);
+                if (typeof minValue !== "number" || typeof maxValue !== "number") {
+                    throw new Error(`NodeParticle: ParticleClampBlock ${block.id} received an unsupported value`);
+                }
+                vector2.x = clamp(x, minValue, maxValue);
+                vector2.y = clamp(y, minValue, maxValue);
                 return vector2;
             }
             throw new Error(`NodeParticle: ParticleClampBlock ${block.id} received an unsupported value`);

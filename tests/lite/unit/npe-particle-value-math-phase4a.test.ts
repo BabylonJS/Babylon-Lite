@@ -64,6 +64,29 @@ async function evaluateParsedGraph(source: object): Promise<number> {
     return set.systems[0]!._emitRateGetter!();
 }
 
+function withNumberMathConsumer(blocks: Array<Record<string, unknown>>, producerId = 10): object {
+    return {
+        blocks: [
+            ...blocks,
+            { customType: "BABYLON.ParticleInputBlock", id: 90, type: 2, value: -1, inputs: [] },
+            {
+                customType: "BABYLON.ParticleNumberMathBlock",
+                id: 91,
+                operation: 1,
+                inputs: [
+                    { name: "left", targetBlockId: producerId, targetConnectionName: "output" },
+                    { name: "right", targetBlockId: 90, targetConnectionName: "output" },
+                ],
+            },
+            {
+                customType: "BABYLON.SystemBlock",
+                id: 92,
+                inputs: [{ name: "emitRate", targetBlockId: 91, targetConnectionName: "output" }],
+            },
+        ],
+    };
+}
+
 describe("Phase 4A NPE value math", () => {
     describe("ParticleNumberMathBlock", () => {
         it.each([
@@ -148,6 +171,105 @@ describe("Phase 4A NPE value math", () => {
             (source.blocks.at(-1)!.inputs as Array<Record<string, unknown>>)[0]!.targetBlockId = 60;
             expect(await evaluateParsedGraph(source)).toBe(expected);
         });
+
+        it.each([
+            [
+                "Condition",
+                [
+                    { customType: "BABYLON.ParticleInputBlock", id: 1, type: 2, value: 0, inputs: [] },
+                    { customType: "BABYLON.ParticleInputBlock", id: 2, type: 1, value: 2, inputs: [] },
+                    {
+                        customType: "BABYLON.ParticleConditionBlock",
+                        id: 10,
+                        test: 0,
+                        inputs: [
+                            { name: "left", targetBlockId: 1, targetConnectionName: "output" },
+                            { name: "right", targetBlockId: 1, targetConnectionName: "output" },
+                            { name: "ifTrue", targetBlockId: 2, targetConnectionName: "output" },
+                            { name: "ifFalse", targetBlockId: 2, targetConnectionName: "output" },
+                        ],
+                    },
+                ],
+            ],
+            [
+                "LocalVariable",
+                [
+                    { customType: "BABYLON.ParticleInputBlock", id: 1, type: 1, value: 2, inputs: [] },
+                    {
+                        customType: "BABYLON.ParticleLocalVariableBlock",
+                        id: 10,
+                        scope: 1,
+                        inputs: [{ name: "input", targetBlockId: 1, targetConnectionName: "output" }],
+                    },
+                ],
+            ],
+            [
+                "Random",
+                [
+                    { customType: "BABYLON.ParticleInputBlock", id: 1, type: 1, value: 2, inputs: [] },
+                    {
+                        customType: "BABYLON.ParticleRandomBlock",
+                        id: 10,
+                        lockMode: 0,
+                        inputs: [
+                            { name: "min", targetBlockId: 1, targetConnectionName: "output" },
+                            { name: "max", targetBlockId: 1, targetConnectionName: "output" },
+                        ],
+                    },
+                ],
+            ],
+            [
+                "Math",
+                [
+                    { customType: "BABYLON.ParticleInputBlock", id: 1, type: 1, value: 1, inputs: [] },
+                    { customType: "BABYLON.ParticleInputBlock", id: 2, type: 1, value: 1, inputs: [] },
+                    {
+                        customType: "BABYLON.ParticleMathBlock",
+                        id: 10,
+                        operation: 0,
+                        inputs: [
+                            { name: "left", targetBlockId: 1, targetConnectionName: "output" },
+                            { name: "right", targetBlockId: 2, targetConnectionName: "output" },
+                        ],
+                    },
+                ],
+            ],
+            [
+                "Lerp",
+                [
+                    { customType: "BABYLON.ParticleInputBlock", id: 1, type: 1, value: 2, inputs: [] },
+                    { customType: "BABYLON.ParticleInputBlock", id: 2, type: 2, value: 0.5, inputs: [] },
+                    {
+                        customType: "BABYLON.ParticleLerpBlock",
+                        id: 10,
+                        inputs: [
+                            { name: "left", targetBlockId: 1, targetConnectionName: "output" },
+                            { name: "right", targetBlockId: 1, targetConnectionName: "output" },
+                            { name: "gradient", targetBlockId: 2, targetConnectionName: "output" },
+                        ],
+                    },
+                ],
+            ],
+        ])("propagates Int through %s into NumberMath coercion", async (_name, blocks) => {
+            expect(await evaluateParsedGraph(withNumberMathConsumer(blocks))).toBe(0);
+        });
+
+        it("preserves Float type through mixed Int and Float Math inputs", async () => {
+            const source = withNumberMathConsumer([
+                { customType: "BABYLON.ParticleInputBlock", id: 1, type: 1, value: 1, inputs: [] },
+                { customType: "BABYLON.ParticleInputBlock", id: 2, type: 2, value: 1, inputs: [] },
+                {
+                    customType: "BABYLON.ParticleMathBlock",
+                    id: 10,
+                    operation: 0,
+                    inputs: [
+                        { name: "left", targetBlockId: 1, targetConnectionName: "output" },
+                        { name: "right", targetBlockId: 2, targetConnectionName: "output" },
+                    ],
+                },
+            ]);
+            expect(await evaluateParsedGraph(source)).toBe(0.5);
+        });
     });
 
     describe("ParticleClampBlock", () => {
@@ -174,6 +296,32 @@ describe("Phase 4A NPE value math", () => {
             const second = output(0);
             expect(second).toBe(first);
             expect(second).toEqual({ x: 0.25, y: 1, z: 0 });
+        });
+
+        it("snapshots shared source scratch before evaluating bounds", async () => {
+            const shared: Vec3 = { x: -1, y: 0.5, z: 2 };
+            const output = await buildGetter(
+                "ParticleClampBlock",
+                {},
+                {
+                    inputs: {
+                        value: () => shared,
+                        min: () => {
+                            shared.x = 8;
+                            shared.y = 8;
+                            shared.z = 8;
+                            return 0;
+                        },
+                        max: () => {
+                            shared.x = 9;
+                            shared.y = 9;
+                            shared.z = 9;
+                            return 1;
+                        },
+                    },
+                }
+            );
+            expect(output(0)).toEqual({ x: 0, y: 0.5, z: 1 });
         });
 
         it("preserves signed zero and reports malformed values", async () => {
@@ -216,6 +364,27 @@ describe("Phase 4A NPE value math", () => {
             const second = output(0);
             expect(second).toBe(first);
             expect(second).toEqual({ r: 1, g: 0, b: 1, a: 1 });
+        });
+
+        it("snapshots shared source scratch before evaluating the edge", async () => {
+            const shared: Color4 = { r: -1, g: 0, b: 1, a: -2 };
+            const output = await buildGetter(
+                "ParticleStepBlock",
+                {},
+                {
+                    inputs: {
+                        value: () => shared,
+                        edge: () => {
+                            shared.r = 9;
+                            shared.g = 9;
+                            shared.b = 9;
+                            shared.a = 9;
+                            return 0;
+                        },
+                    },
+                }
+            );
+            expect(output(0)).toEqual({ r: 0, g: 1, b: 1, a: 0 });
         });
 
         it("reports disconnected and malformed values", async () => {

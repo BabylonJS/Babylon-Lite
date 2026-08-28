@@ -5,12 +5,20 @@ import type { ScalarGetter } from "../npe-value.js";
 const OP_MODULO = 0;
 const OP_POW = 1;
 
-function hasIntOutput(blocks: ReadonlyMap<number, ParsedParticleBlock>, blockId: number, visiting: Set<number>): boolean {
+function hasIntInput(blocks: ReadonlyMap<number, ParsedParticleBlock>, block: ParsedParticleBlock, inputName: string, visiting: Set<number>): boolean {
+    const input = block.inputs.find((candidate) => candidate.name === inputName);
+    return (
+        input?.valueType === "int" ||
+        (input?.targetBlockId != null && input.targetConnectionName != null && hasIntOutput(blocks, input.targetBlockId, input.targetConnectionName, visiting))
+    );
+}
+
+function hasIntOutput(blocks: ReadonlyMap<number, ParsedParticleBlock>, blockId: number, outputName: string, visiting: Set<number>): boolean {
     if (visiting.has(blockId)) {
         return false;
     }
     const block = blocks.get(blockId);
-    if (!block) {
+    if (!block || outputName !== "output") {
         return false;
     }
     if (block.className === "ParticleInputBlock") {
@@ -19,15 +27,32 @@ function hasIntOutput(blocks: ReadonlyMap<number, ParsedParticleBlock>, blockId:
     if (block.className === "ParticleFloatToIntBlock") {
         return true;
     }
-    if (block.className === "ParticleNumberMathBlock" || block.className === "ParticleClampBlock" || block.className === "ParticleStepBlock") {
-        visiting.add(blockId);
-        const inputName = block.className === "ParticleNumberMathBlock" ? "left" : "value";
-        const input = block.inputs.find((candidate) => candidate.name === inputName);
-        const result = input?.targetBlockId != null && hasIntOutput(blocks, input.targetBlockId, visiting);
-        visiting.delete(blockId);
-        return result;
+    visiting.add(blockId);
+    let result = false;
+    switch (block.className) {
+        case "ParticleMathBlock":
+            result = hasIntInput(blocks, block, "left", visiting) && hasIntInput(blocks, block, "right", visiting);
+            break;
+        case "ParticleConditionBlock":
+            result = hasIntInput(blocks, block, "ifTrue", visiting);
+            break;
+        case "ParticleNumberMathBlock":
+        case "ParticleLerpBlock":
+            result = hasIntInput(blocks, block, "left", visiting);
+            break;
+        case "ParticleRandomBlock":
+            result = hasIntInput(blocks, block, "min", visiting);
+            break;
+        case "ParticleLocalVariableBlock":
+            result = hasIntInput(blocks, block, "input", visiting);
+            break;
+        case "ParticleClampBlock":
+        case "ParticleStepBlock":
+            result = hasIntInput(blocks, block, "value", visiting);
+            break;
     }
-    return false;
+    visiting.delete(blockId);
+    return result;
 }
 
 /** `ParticleNumberMathBlock` — scalar remainder or power with Int-left result coercion. */
@@ -47,7 +72,11 @@ export const particleNumberMathBlock: NpeBlockEvaluator = {
         const right = ctx.input(block, "right");
         const leftInput = block.inputs.find((input) => input.name === "left");
         const intResult =
-            leftInput?.valueType === "int" || (leftInput?.targetBlockId != null && ctx._blocks !== undefined && hasIntOutput(ctx._blocks, leftInput.targetBlockId, new Set()));
+            leftInput?.valueType === "int" ||
+            (leftInput?.targetBlockId != null &&
+                leftInput.targetConnectionName != null &&
+                ctx._blocks !== undefined &&
+                hasIntOutput(ctx._blocks, leftInput.targetBlockId, leftInput.targetConnectionName, new Set()));
         const getter: ScalarGetter = (i) => {
             const leftValue = left(i);
             const rightValue = right(i);
