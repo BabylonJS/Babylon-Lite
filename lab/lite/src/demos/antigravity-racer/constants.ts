@@ -217,8 +217,7 @@ export const SPAWN_LATERAL = 1.5;
 /** Trail emitter, in `ShipTransform` local space (the PG's `heater`). */
 export const TRAIL_EMITTER_LOCAL = { x: 0.05, y: 0, z: 0.85 };
 
-/** Generous world bounds shared by every mesh whose vertices are placed by a shader or
- *  rewritten every frame (the deformed track, the ribbon trails). Mirrors the source PG's
+/** Generous world bounds for the shader-placed ribbon trails. Mirrors the source PG's
  *  explicit `setBoundingInfo(-1000 … 1000)` so frustum culling never drops them. */
 export const HUGE_BOUND_MIN: [number, number, number] = [-1000, -1000, -1000];
 export const HUGE_BOUND_MAX: [number, number, number] = [1000, 1000, 1000];

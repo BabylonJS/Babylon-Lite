@@ -3,7 +3,8 @@
  * CSM cascade refactor and shadow-base ToRef helpers.
  */
 import { describe, expect, it, vi } from "vitest";
-import { buildLightViewMatrix, buildLightViewMatrixInto, multiply4x4, multiply4x4Into } from "../../../packages/babylon-lite/src/shadow/shadow-base.js";
+import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
+import { buildLightViewMatrix, buildLightViewMatrixInto, casterVersionSum, multiply4x4, multiply4x4Into } from "../../../packages/babylon-lite/src/shadow/shadow-base.js";
 import {
     _biasViewProjection,
     _biasViewProjectionInto,
@@ -14,12 +15,7 @@ import {
 
 // Minimal mock of getViewProjectionMatrix — returns an invertible perspective-like matrix.
 vi.mock("../../../packages/babylon-lite/src/camera/camera.js", () => {
-    const _vpMat = new Float32Array([
-        1.5, 0, 0, 0,
-        0, 2, 0, 0,
-        0, 0, -1.002, -1,
-        0, 0, -0.2002, 0,
-    ]);
+    const _vpMat = new Float32Array([1.5, 0, 0, 0, 0, 2, 0, 0, 0, 0, -1.002, -1, 0, 0, -0.2002, 0]);
     return {
         getViewProjectionMatrix: () => _vpMat,
         getEffectiveAspectRatio: () => 1.5,
@@ -28,6 +24,15 @@ vi.mock("../../../packages/babylon-lite/src/camera/camera.js", () => {
 });
 
 describe("shadow-base ToRef numerical equivalence", () => {
+    it("invalidates a cached shadow fit when shader-deformed bounds change", () => {
+        const mesh = { worldMatrixVersion: 4, thinInstances: null, _boundsVersion: 1 } as unknown as Mesh;
+
+        const before = casterVersionSum([mesh]);
+        mesh._boundsVersion!++;
+
+        expect(casterVersionSum([mesh])).toBe(before + 1);
+    });
+
     it("buildLightViewMatrixInto produces identical output to buildLightViewMatrix", () => {
         const params: [number, number, number, number, number, number][] = [
             [0, -1, 0, 5, 10, 3],
@@ -166,7 +171,10 @@ describe("_computeCsmCascades zero-allocation", () => {
     // Minimal stubs — only the fields accessed by _computeCsmCascades
     function makeStubs(numCascades: number) {
         const worldMat = new Float32Array(16);
-        worldMat[0] = 1; worldMat[5] = 1; worldMat[10] = 1; worldMat[15] = 1;
+        worldMat[0] = 1;
+        worldMat[5] = 1;
+        worldMat[10] = 1;
+        worldMat[15] = 1;
         const camera = {
             nearPlane: 0.1,
             farPlane: 100,

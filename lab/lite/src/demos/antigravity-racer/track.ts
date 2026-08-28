@@ -28,17 +28,7 @@
 import type { EngineContext, Mesh, SceneContext, ShadowGenerator, Vec3 } from "babylon-lite";
 import { addVec3, addToScene, createMeshFromData, crossVec3, dotVec3, normalizeVec3Object, scaleVec3, subVec3 } from "babylon-lite";
 
-import {
-    BOOST_LEFT_OFFSET,
-    BOOST_PERIOD,
-    BOOST_RIGHT_OFFSET,
-    DEFAULT_CONTROL_POINTS,
-    HUGE_BOUND_MAX,
-    HUGE_BOUND_MIN,
-    RING_COUNT,
-    TRACK_CROSS_NORMALS,
-    TRACK_CROSS_SECTION,
-} from "./constants.js";
+import { BOOST_LEFT_OFFSET, BOOST_PERIOD, BOOST_RIGHT_OFFSET, DEFAULT_CONTROL_POINTS, RING_COUNT, TRACK_CROSS_NORMALS, TRACK_CROSS_SECTION } from "./constants.js";
 import { createTrackMaterial, FLOATS_PER_FRAME, type TrackMaterial, type TrackTextures } from "./track-material.js";
 
 /** A single sampled segment: world origin + orthonormal (right, up, forward) basis. */
@@ -169,6 +159,38 @@ export function buildTrackFrames(points: readonly Vec3[], ringCount = RING_COUNT
         currentDir = dir;
     }
     return { frames, curveRatios };
+}
+
+/** Fit the world-space box occupied by the shader-deformed road into caller-owned storage.
+ * The track mesh has an identity world matrix, so these values are also its object-local bounds. */
+export function computeTrackBoundsInto(frames: readonly TrackFrame[], min: [number, number, number], max: [number, number, number]): void {
+    let minX = Infinity;
+    let minY = Infinity;
+    let minZ = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    let maxZ = -Infinity;
+    for (const frame of frames) {
+        for (const [x, y] of TRACK_CROSS_SECTION) {
+            const wx = frame.pos.x + frame.right.x * x + frame.up.x * y;
+            const wy = frame.pos.y + frame.right.y * x + frame.up.y * y;
+            const wz = frame.pos.z + frame.right.z * x + frame.up.z * y;
+            minX = Math.min(minX, wx);
+            minY = Math.min(minY, wy);
+            minZ = Math.min(minZ, wz);
+            maxX = Math.max(maxX, wx);
+            maxY = Math.max(maxY, wy);
+            maxZ = Math.max(maxZ, wz);
+        }
+    }
+    // Cover float32 frame-buffer rounding without materially widening the CSM depth fit.
+    const pad = 0.05;
+    min[0] = minX - pad;
+    min[1] = minY - pad;
+    min[2] = minZ - pad;
+    max[0] = maxX + pad;
+    max[1] = maxY + pad;
+    max[2] = maxZ + pad;
 }
 
 /** Local (right, up, forward) coordinates of `worldPos` relative to a segment frame. */
@@ -383,10 +405,10 @@ export function createTrackSource(controlPoints: readonly Vec3[] = DEFAULT_CONTR
 export function buildTrackRender(engine: EngineContext, textures: TrackTextures, shadowGenerator: ShadowGenerator, track: TrackData): TrackRender {
     const { positions, normals, indices } = buildTrackPiece();
     const mesh = createMeshFromData(engine, "antigrav-track", positions, normals, indices);
-    // The vertices live at the origin and are placed by the vertex shader, so the geometric
-    // bounds are meaningless for culling — publish the PG's explicit huge box instead.
-    mesh.boundMin = HUGE_BOUND_MIN;
-    mesh.boundMax = HUGE_BOUND_MAX;
+    const trackBoundMin: [number, number, number] = [0, 0, 0];
+    const trackBoundMax: [number, number, number] = [0, 0, 0];
+    mesh.boundMin = trackBoundMin;
+    mesh.boundMax = trackBoundMax;
     mesh.receiveShadows = true;
 
     const trackMaterial = createTrackMaterial(engine, textures, shadowGenerator);
@@ -395,6 +417,8 @@ export function buildTrackRender(engine: EngineContext, textures: TrackTextures,
     // Seeds the buffers now and re-uploads them on every editor edit — same buffers, same bind
     // group, so dragging a control point causes no resource churn in any pane.
     const unsubscribe = track.onRebuild((frames, curveRatios) => {
+        computeTrackBoundsInto(frames, trackBoundMin, trackBoundMax);
+        mesh._boundsVersion = (mesh._boundsVersion ?? 0) + 1;
         writeFrameBuffers(trackMaterial, frames, curveRatios);
         trackMaterial.upload();
     });

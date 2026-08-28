@@ -65,6 +65,7 @@ export function frameLocalCoords(frame, worldPos): Vec3;
 export function frameToWorld(frame, local): Vec3;
 export function advanceSegment(frames, seg, worldPos): number;
 export function createTrackSource(controlPoints?: readonly Vec3[]): TrackData;
+export function computeTrackBoundsInto(frames, min, max): void;
 export function buildTrackRender(engine, textures, shadowGenerator, track: TrackData): TrackRender;
 export function addTrackToScene(scene, render: TrackRender): void;
 
@@ -610,8 +611,8 @@ setShadowTaskCasterMeshes(shadowGenerator, [thisWorldTrackMesh, ...rockPoolMeshe
 await registerSceneWithShadowSupport(scene)
 ```
 
-Receivers: terrain (standard material, built-in CSM receiver), rocks (PBR, built-in receiver), and the
-track (custom receiver, below). Ships are casters only, exactly like the playground. The built-in
+Receivers: terrain (standard material, built-in CSM receiver), rocks and ships (PBR, built-in receiver),
+and the track (custom receiver, below). The built-in
 receivers resolve their generator from `scene.lights` when the scene's renderables are built, which is
 why the shared terrain/rock meshes receive the correct pane's cascades in split-screen.
 
@@ -633,6 +634,14 @@ storage buffer, wired through the public `setShadowCasterMaterial(visible, caste
 see a track rebuild because they share that GPU buffer, so editing a control point moves the visible
 geometry and its shadow in the same frame with no resource churn. There is no CPU-deformed duplicate
 mesh.
+
+The undeformed vertex buffer cannot describe the road's world bounds because the vertex shader places
+each row from `trackFrames`. `computeTrackBoundsInto` therefore fits the deformed cross-section into
+stable caller-owned arrays after every spline rebuild. The same tight box drives render culling and CSM
+caster-depth fitting. This avoids the Playground's conservative `[-1000, 1000]` culling box expanding a
+near cascade to roughly 2,000 world units, which turned the normalized `0.001` bias into visible
+ship-to-road shadow separation. Updating the box increments the mesh bounds revision so a stationary
+editor camera still refits and redraws the cascades.
 
 The spline itself lives in `TrackData` and owns no GPU resource; each pane's `TrackRender` subscribes
 with `TrackData.onRebuild` and re-uploads its own frame buffer in place. So an editor drag recomputes
@@ -729,7 +738,7 @@ own `_shadowCasterMaterial` links (the same chain `getNoColorView` recurses thro
 
 | Test file                              | Covers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `antigravity-racer-track.test.ts`      | spline length/ratios, 256 orthonormal frames, track piece counts/winding, road artwork, track material compositing, CSM receiver declarations + WGSL (cascade select, 5×5 PCF kernel, `CSM_RECEIVER_VEC4S`), caster twin sharing the frame buffer                                                                                                                                                                                                                                                                                                                                                                                                |
+| `antigravity-racer-track.test.ts`      | spline length/ratios, 256 orthonormal frames, tight shader-deformed bounds, track piece counts/winding, road artwork, track material compositing, CSM receiver declarations + WGSL (cascade select, 5×5 PCF kernel, `CSM_RECEIVER_VEC4S`), caster twin sharing the frame buffer                                                                                                                                                                                                                                                                                                                                                                  |
 | `antigravity-racer-simulation.test.ts` | vertical adhesion write-back (0.45/0.9), unclamped up extrapolation, wall clamp + 0.99, boost + debounce, accel/drag traces, un-normalized drift + corner speed loss, binary right-wins steering, spawn grid 0..7/±1.5, AI nearest-ahead + avoidance, emitter folded-vs-matrix equality, **the chase + demo camera rigs** (offsets/target/smoothing/FOV/up-roll, anchoring + dolly + re-anchor cadence)                                                                                                                                                                                                                                          |
 | `antigravity-racer-trail.test.ts`      | history ordering/copyWithin, spawn seeding, strip vertex/index counts + v mapping + winding, WGSL constants/alpha, blend/depth state                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `antigravity-racer-world.test.ts`      | light directions/intensities, terrain parameters + remote URLs, CSM config; and the persistent-world contract exercised against the real engine with a stub device: one 1024²×4 depth array per world and never per mode, terrain + boulders built once per session, the same meshes and lights re-added to every mode scene, per-pane light/generator/track isolation (each pane's material bound to its OWN receiver texture and frame buffer), per-pane caster sets (own track + shared boulders + ships, never the other pane's track, ships cleared on teardown), and an editor edit re-uploading every pane in place with zero allocations |

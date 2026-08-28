@@ -55,6 +55,15 @@ interface TrackModule {
         curveRatios: number[];
     };
     computeTrackRatios: (points: readonly { x: number; y: number; z: number }[]) => { length: number; lengthPerRow: number; ratios: number[] };
+    computeTrackBoundsInto: (
+        frames: readonly {
+            pos: { x: number; y: number; z: number };
+            up: { x: number; y: number; z: number };
+            right: { x: number; y: number; z: number };
+        }[],
+        min: [number, number, number],
+        max: [number, number, number]
+    ) => void;
     buildTrackPiece: () => { positions: Float32Array; normals: Float32Array; indices: Uint32Array };
 }
 
@@ -115,7 +124,7 @@ function stubCsmGenerator(): Record<string, unknown> {
 const trackModulePath = "../../../lab/lite/src/demos/antigravity-racer/track.js";
 const constantsPath = "../../../lab/lite/src/demos/antigravity-racer/constants.js";
 const trackMaterialPath = "../../../lab/lite/src/demos/antigravity-racer/track-material.js";
-const { buildTrackFrames, computeTrackRatios, buildTrackPiece } = (await import(trackModulePath)) as TrackModule;
+const { buildTrackFrames, computeTrackRatios, computeTrackBoundsInto, buildTrackPiece } = (await import(trackModulePath)) as TrackModule;
 const { createTrackMaterial, CSM_RECEIVER_VEC4S } = (await import(trackMaterialPath)) as TrackMaterialModule;
 const { DEFAULT_CONTROL_POINTS, RING_COUNT, TRACK_CROSS_SECTION, TRACK_CROSS_NORMALS } = (await import(constantsPath)) as {
     DEFAULT_CONTROL_POINTS: readonly { x: number; y: number; z: number }[];
@@ -162,6 +171,29 @@ describe("antigravity racer track spline", () => {
 });
 
 describe("antigravity racer track piece", () => {
+    it("fits shader-deformed track bounds tightly enough for precise ship shadows", () => {
+        const { frames } = buildTrackFrames(DEFAULT_CONTROL_POINTS);
+        const min: [number, number, number] = [0, 0, 0];
+        const max: [number, number, number] = [0, 0, 0];
+
+        computeTrackBoundsInto(frames, min, max);
+
+        expect(Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2])).toBeLessThan(150);
+        for (const frame of frames) {
+            for (const [x, y] of TRACK_CROSS_SECTION) {
+                const wx = frame.pos.x + frame.right.x * x + frame.up.x * y;
+                const wy = frame.pos.y + frame.right.y * x + frame.up.y * y;
+                const wz = frame.pos.z + frame.right.z * x + frame.up.z * y;
+                expect(wx).toBeGreaterThanOrEqual(min[0]);
+                expect(wy).toBeGreaterThanOrEqual(min[1]);
+                expect(wz).toBeGreaterThanOrEqual(min[2]);
+                expect(wx).toBeLessThanOrEqual(max[0]);
+                expect(wy).toBeLessThanOrEqual(max[1]);
+                expect(wz).toBeLessThanOrEqual(max[2]);
+            }
+        }
+    });
+
     it("has the playground's exact vertex/index counts", () => {
         const { positions, normals, indices } = buildTrackPiece();
         expect(positions.length / 3).toBe(10240);
