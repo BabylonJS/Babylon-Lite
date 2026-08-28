@@ -114,7 +114,6 @@ export async function buildNodeParticleSetWithTextureUpdateRuntime(
         const ctx: NpeBuildContext = {
             state,
             engine,
-            _blocks: graph.blocks,
             input(block, name, fallback) {
                 const input = block.inputs.find((candidate) => candidate.name === name);
                 if (isInputConnected(input)) {

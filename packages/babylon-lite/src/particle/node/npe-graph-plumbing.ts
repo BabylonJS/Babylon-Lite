@@ -17,9 +17,10 @@ export async function normalizeNodeParticleGraph(graph: ParticleGraph): Promise<
         plumbing ||= /^Particle(TeleportOut|LocalVariable|Elbow|Debug)Block$/.test(className);
         phase4 ||= (className === "ParticleInputBlock" && block.serialized.type === 0x0001) || /^Particle(FloatToInt|NumberMath|Clamp|Step)Block$/.test(className);
     }
-    const normalized = plumbing ? await (await import("./npe-graph-plumbing-runtime.js")).normalizeNodeParticleGraphRuntime(graph) : graph;
+    const normalized = plumbing ? (await import("./npe-graph-plumbing-runtime.js")).normalizeNodeParticleGraphRuntime(graph) : graph;
     if (phase4) {
-        (await import("./npe-phase4-values.js")).enablePhase4ValueGraph(normalized);
+        const { enablePhase4ValueGraph } = await import("./npe-phase4-values.js");
+        enablePhase4ValueGraph(normalized);
     }
     return normalized;
 }
