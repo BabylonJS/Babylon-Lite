@@ -95,7 +95,14 @@ const constants = (await import(constantsPath)) as Record<string, number> & {
     SPACE_CLEAR_COLOR: { r: number; g: number; b: number; a: number };
     RACER_FOG_COLOR: [number, number, number];
 };
-const { HEIGHTMAP_URL, GROUND_TEXTURE_URL } = (await import(terrainPath)) as { HEIGHTMAP_URL: string; GROUND_TEXTURE_URL: string };
+const { HEIGHTMAP_URL, GROUND_TEXTURE_URL, TERRAIN_BASE_ALPHA, createTerrainDistanceFade } = (await import(terrainPath)) as {
+    HEIGHTMAP_URL: string;
+    GROUND_TEXTURE_URL: string;
+    TERRAIN_BASE_ALPHA: number;
+    createTerrainDistanceFade: () => {
+        getCustomCode: (shaderType: "vertex" | "fragment") => Partial<Record<"CUSTOM_FRAGMENT_UPDATE_ALPHA", string>> | null;
+    };
+};
 const { RACER_ENVIRONMENT_URL, RACER_SKYBOX_POSITION } = (await import(environmentPath)) as {
     RACER_ENVIRONMENT_URL: string;
     RACER_SKYBOX_POSITION?: [number, number, number];
@@ -200,6 +207,13 @@ describe("terrain", () => {
         expect(constants.TERRAIN_MAX_HEIGHT).toBe(25);
         expect(constants.TERRAIN_Y).toBe(-2.05);
         expect(constants.TERRAIN_UV_SCALE).toBe(12);
+    });
+
+    it("fades the ground alpha over the fog distance instead of ending in the fog color", () => {
+        expect(TERRAIN_BASE_ALPHA).toBeLessThan(1);
+        const alphaCode = createTerrainDistanceFade().getCustomCode("fragment")?.CUSTOM_FRAGMENT_UPDATE_ALPHA;
+        expect(alphaCode).toContain(`smoothstep(${constants.RACER_FOG_START}.0, ${constants.RACER_FOG_END}.0`);
+        expect(alphaCode).toContain("distance(scene.vEyePosition.xyz, input.vp)");
     });
 });
 

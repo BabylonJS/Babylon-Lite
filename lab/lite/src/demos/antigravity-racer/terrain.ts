@@ -19,15 +19,32 @@
  * different ground silhouette would silently break parity.
  */
 
-import type { EngineContext, Mesh, SceneContext } from "babylon-lite";
+import type { EngineContext, MaterialPlugin, Mesh, SceneContext } from "babylon-lite";
 import { addToScene, createGroundFromHeightMap, createStandardMaterial, loadTexture2D } from "babylon-lite";
 
-import { TERRAIN_MAX_HEIGHT, TERRAIN_MIN_HEIGHT, TERRAIN_SIZE, TERRAIN_SUBDIVISIONS, TERRAIN_UV_SCALE, TERRAIN_Y } from "./constants.js";
+import { RACER_FOG_END, RACER_FOG_START, TERRAIN_MAX_HEIGHT, TERRAIN_MIN_HEIGHT, TERRAIN_SIZE, TERRAIN_SUBDIVISIONS, TERRAIN_UV_SCALE, TERRAIN_Y } from "./constants.js";
 
 /** The playground's own height map — the relief the original track flies over. */
 export const HEIGHTMAP_URL = "https://playground.babylonjs.com/textures/heightMap.png";
 /** The playground's own ground diffuse sheet. */
 export const GROUND_TEXTURE_URL = "https://playground.babylonjs.com/textures/ground.jpg";
+
+/** Keep the ground in the transparent render phase; the shader supplies the visible distance alpha. */
+export const TERRAIN_BASE_ALPHA = 0.999;
+
+export function createTerrainDistanceFade(): MaterialPlugin {
+    return {
+        name: "antigrav-terrain-distance-fade",
+        getCustomCode(shaderType) {
+            if (shaderType !== "fragment") {
+                return null;
+            }
+            return {
+                CUSTOM_FRAGMENT_UPDATE_ALPHA: `alpha *= 1.0 - smoothstep(${RACER_FOG_START}.0, ${RACER_FOG_END}.0, distance(scene.vEyePosition.xyz, input.vp));`,
+            };
+        },
+    };
+}
 
 /** Build the ground mesh from the playground's remote height map + diffuse texture. */
 export async function createTerrain(engine: EngineContext): Promise<Mesh> {
@@ -55,6 +72,8 @@ export async function createTerrain(engine: EngineContext): Promise<Mesh> {
         throw new Error(`Antigravity Racer could not load its ground texture from ${GROUND_TEXTURE_URL}. Cause: ${String(cause)}`, { cause });
     }
     material.specularColor = [0, 0, 0];
+    material.alpha = TERRAIN_BASE_ALPHA;
+    material.plugins = [createTerrainDistanceFade()];
     mesh.material = material;
     return mesh;
 }

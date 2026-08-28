@@ -583,7 +583,9 @@ Babylon-Lite converts it to a 512-pixel cubemap and uses it for both diffuse/spe
 1000-unit visible skybox, without tone mapping and at exposure/contrast `1`.
 
 The same presentation layer adds linear blue fog (`start=120`, `end=500`,
-`color=(0.08, 0.16, 0.30)`) and doubles the terrain footprint while preserving texture density:
+`color=(0.08, 0.16, 0.30)`) for atmospheric depth and doubles the terrain footprint while
+preserving texture density. The terrain uses those distances as an alpha fade, so its horizon
+reveals the HDR environment instead of becoming an opaque fog-colored band:
 
 Terrain:
 
@@ -593,7 +595,8 @@ createGroundFromHeightMap(engine, HEIGHTMAP_URL, {
     minHeight: 0, maxHeight: 25, uvScale: [12, 12],
 })
 terrain.position.y   = -2.05
-terrain.material     = standard material, diffuseTexture = GROUND_TEXTURE_URL, specularColor = (0,0,0)
+terrain.material     = standard material + camera-distance alpha plugin
+                       diffuseTexture = GROUND_TEXTURE_URL, specularColor = (0,0,0)
 terrain.receiveShadows = true
 ```
 

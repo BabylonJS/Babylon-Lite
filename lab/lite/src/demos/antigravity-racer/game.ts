@@ -31,6 +31,7 @@ import {
     createSurface,
     disposeScene,
     disposeSurface,
+    enableMaterialPlugins,
     enableSurfaceResizeObserver,
     onBeforeRender,
     registerSceneWithShadowSupport,
@@ -305,6 +306,7 @@ async function buildRace(
     );
 
     for (const scene of scenes) {
+        enableMaterialPlugins(scene);
         await registerSceneWithShadowSupport(scene);
     }
 
@@ -383,6 +385,7 @@ async function buildEditor(
         editor.tick(Math.min(deltaMs / 1000, 0.1), input);
     });
 
+    enableMaterialPlugins(scene);
     await registerSceneWithShadowSupport(scene);
     await editor.registerOverlay();
     return {
