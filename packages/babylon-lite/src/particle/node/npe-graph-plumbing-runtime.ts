@@ -1,9 +1,6 @@
 import type { ParticleGraph, ParsedParticleBlock, ParsedParticleInput } from "./npe-types.js";
 
-interface SourcePair {
-    readonly blockId: number;
-    readonly connectionName: string;
-}
+type SourcePair = readonly [blockId: number, connectionName: string];
 
 type ConnectionRole = "" | "particle flow" | "system flow" | "texture" | "gradient metadata";
 
@@ -14,15 +11,14 @@ function isConnected(input: ParsedParticleInput | undefined): input is ParsedPar
 }
 
 function cyclePath(stack: readonly number[], repeatedId: number): string {
-    const start = stack.indexOf(repeatedId);
-    return [...stack.slice(start), repeatedId].join(" -> ");
+    return stack.slice(stack.indexOf(repeatedId)).concat(repeatedId).join(" -> ");
 }
 
 function connectionRole(block: ParsedParticleBlock, input: ParsedParticleInput): ConnectionRole {
     if (input.name === "particle") {
         return "particle flow";
     }
-    if (input.name === "system" || input.name === "onStart" || input.name === "onEnd") {
+    if (/^(system|on(Start|End))$/.test(input.name)) {
         return "system flow";
     }
     if (
@@ -51,7 +47,7 @@ export function normalizeNodeParticleGraphRuntime(graph: ParticleGraph): Particl
 
         const block = graph.blocks.get(blockId);
         if (!block) {
-            return { blockId, connectionName };
+            return [blockId, connectionName];
         }
         if (block.className === "ParticleTeleportInBlock") {
             throw new Error(`NodeParticle: ParticleTeleportInBlock ${block.id} does not expose output "${connectionName}"`);
@@ -64,7 +60,7 @@ export function normalizeNodeParticleGraphRuntime(graph: ParticleGraph): Particl
             case "ParticleLocalVariableBlock":
                 break;
             default: {
-                const terminal: SourcePair = { blockId, connectionName };
+                const terminal: SourcePair = [blockId, connectionName];
                 resolvedSources.set(cacheKey, terminal);
                 return terminal;
             }
@@ -81,7 +77,7 @@ export function normalizeNodeParticleGraphRuntime(graph: ParticleGraph): Particl
 
         if (block.className === "ParticleTeleportOutBlock") {
             const entryPoint = block.serialized.entryPoint;
-            if (typeof entryPoint !== "number" || !Number.isFinite(entryPoint) || !Number.isInteger(entryPoint) || entryPoint < 0) {
+            if (typeof entryPoint !== "number" || !Number.isInteger(entryPoint) || entryPoint < 0) {
                 throw new Error(`NodeParticle: ParticleTeleportOutBlock ${block.id} has invalid entryPoint`);
             }
             const endpoint = graph.blocks.get(entryPoint);
@@ -109,7 +105,7 @@ export function normalizeNodeParticleGraphRuntime(graph: ParticleGraph): Particl
             throw new Error(`NodeParticle: ${block.className} ${block.id} input is not connected`);
         }
         if (block.className === "ParticleLocalVariableBlock") {
-            const terminal: SourcePair = { blockId, connectionName };
+            const terminal: SourcePair = [blockId, connectionName];
             resolvedSources.set(cacheKey, terminal);
             return terminal;
         }
@@ -141,13 +137,13 @@ export function normalizeNodeParticleGraphRuntime(graph: ParticleGraph): Particl
                 return;
             }
             const role = connectionRole(block, input);
-            const resolved = resolveSource(input.targetBlockId, input.targetConnectionName, role, []);
-            if (resolved.blockId !== input.targetBlockId || resolved.connectionName !== input.targetConnectionName) {
+            const [resolvedBlockId, resolvedConnectionName] = resolveSource(input.targetBlockId, input.targetConnectionName, role, []);
+            if (resolvedBlockId !== input.targetBlockId || resolvedConnectionName !== input.targetConnectionName) {
                 inputs ??= block.inputs.slice();
-                inputs[index] = { ...input, targetBlockId: resolved.blockId, targetConnectionName: resolved.connectionName };
+                inputs[index] = { ...input, targetBlockId: resolvedBlockId, targetConnectionName: resolvedConnectionName };
             }
             const childDomain = block.className === "SystemBlock" ? (input.name === "particle" ? PARTICLE_DOMAIN : SYSTEM_DOMAIN) : domain;
-            visitBlock(resolved.blockId, childDomain);
+            visitBlock(resolvedBlockId, childDomain);
         };
 
         for (let index = 0; index < block.inputs.length; index++) {
@@ -169,7 +165,7 @@ export function normalizeNodeParticleGraphRuntime(graph: ParticleGraph): Particl
         visitBlock(systemId, SYSTEM_DOMAIN);
     }
     if (!blocks) {
-        return graph._isGraphPlumbingNormalized ? graph : { blocks: graph.blocks, systemBlockIds: graph.systemBlockIds, _isGraphPlumbingNormalized: true };
+        return { blocks: graph.blocks, systemBlockIds: graph.systemBlockIds, _isGraphPlumbingNormalized: true };
     }
     return { blocks, systemBlockIds: graph.systemBlockIds, _isGraphPlumbingNormalized: true };
 }

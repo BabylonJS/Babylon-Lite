@@ -24,11 +24,14 @@ function isInputConnected(input: ParsedParticleInput | undefined): input is Pars
 /** Parse a literal value serialized directly on an unconnected input. */
 function parseInputLiteral(input: ParsedParticleInput): NpeValue | undefined {
     const value = input.value;
-    if (value === undefined || value === null) {
+    if (value == null) {
         return undefined;
     }
-    if (input.valueType === "number" || typeof value === "number") {
-        return typeof value === "number" ? value : undefined;
+    if (typeof value === "number") {
+        return value;
+    }
+    if (input.valueType === "number") {
+        return undefined;
     }
     if (Array.isArray(value)) {
         const array = value as number[];
@@ -65,8 +68,6 @@ export interface NpeBuildState {
 export interface NpeBuildContext {
     state: NpeBuildState;
     engine: EngineContext;
-    /** @internal Parsed metadata used by evaluators whose output type depends on an upstream block. */
-    _blocks?: ReadonlyMap<number, ParsedParticleBlock>;
     input(block: ParsedParticleBlock, name: string, fallback?: NpeGetter): NpeGetter;
     isConnected(block: ParsedParticleBlock, name: string): boolean;
     setOutput(blockId: number, name: string, getter: NpeGetter): void;
@@ -141,7 +142,6 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
         const ctx: NpeBuildContext = {
             state,
             engine,
-            _blocks: graph.blocks,
             input(block, name, fallback) {
                 const input = block.inputs.find((i) => i.name === name);
                 if (isInputConnected(input)) {
@@ -210,7 +210,7 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
                   ? await (await import("./npe-registry-local-shapes.js")).loadLocalShapeEvaluator(block.className)
                   : variant
                     ? await (await import("./npe-registry-variants.js")).loadVariantBlockEvaluator(block)
-                    : await loadNpeBlockEvaluator(block.className);
+                    : ((await graph._loadEvaluator?.(block)) ?? (await loadNpeBlockEvaluator(block.className)));
             evaluator.build(block, ctx);
         };
 

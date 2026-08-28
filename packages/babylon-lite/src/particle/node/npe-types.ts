@@ -1,3 +1,5 @@
+import type { NpeBlockEvaluator } from "./npe-build.js";
+
 /** A parsed connection on a block input. `targetBlockId === null` means the input is unconnected. */
 export interface ParsedParticleInput {
     readonly name: string;
@@ -25,6 +27,8 @@ export interface ParticleGraph {
     readonly blocks: ReadonlyMap<number, ParsedParticleBlock>;
     /** Ids of the `SystemBlock` roots — one runtime system is built per root. */
     readonly systemBlockIds: readonly number[];
+    /** @internal Optional evaluator resolver installed by graph feature normalization. */
+    _loadEvaluator?: (block: ParsedParticleBlock) => Promise<NpeBlockEvaluator | undefined>;
     /** @internal True only on a graph returned by the graph-plumbing normalizer. */
     readonly _isGraphPlumbingNormalized?: true;
 }

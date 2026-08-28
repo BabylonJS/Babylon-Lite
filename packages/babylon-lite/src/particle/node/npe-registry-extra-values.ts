@@ -12,6 +12,6 @@ export async function loadValueBlockEvaluator(className: string): Promise<NpeBlo
         case "ParticleLocalVariableBlock":
             return (await import("./blocks/particle-local-variable-block.js")).particleLocalVariableBlock;
         default:
-            return (await import("./npe-registry-phase4-values.js")).loadPhase4ValueBlockEvaluator(className);
+            throw new Error(`NodeParticle: unsupported value block "${className}"`);
     }
 }

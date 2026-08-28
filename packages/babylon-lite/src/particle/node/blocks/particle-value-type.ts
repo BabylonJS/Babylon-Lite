@@ -54,3 +54,22 @@ function hasIntOutput(blocks: ReadonlyMap<number, ParsedParticleBlock>, blockId:
 export function hasIntBlockInput(blocks: ReadonlyMap<number, ParsedParticleBlock> | undefined, block: ParsedParticleBlock, inputName: string): boolean {
     return blocks !== undefined && hasIntInput(blocks, block, inputName, new Set());
 }
+
+/** Annotate connected inputs with their recursively propagated Int type. */
+export function resolveParticleValueTypes(blocks: ReadonlyMap<number, ParsedParticleBlock>): void {
+    for (const block of blocks.values()) {
+        for (const input of block.inputs) {
+            if (hasIntInput(blocks, block, input.name, new Set())) {
+                (input as { valueType?: string }).valueType = "int";
+            }
+        }
+    }
+    for (const block of blocks.values()) {
+        if (block.className === "ParticleMathBlock" && hasIntInput(blocks, block, "left", new Set()) && hasIntInput(blocks, block, "right", new Set())) {
+            const left = block.inputs.find((input) => input.name === "left");
+            const right = block.inputs.find((input) => input.name === "right");
+            const alias = left?.targetBlockId === right?.targetBlockId && left?.targetConnectionName === right?.targetConnectionName;
+            (block as { className: string }).className = alias ? "ParticleIntMathAliasBlock" : "ParticleIntMathBlock";
+        }
+    }
+}

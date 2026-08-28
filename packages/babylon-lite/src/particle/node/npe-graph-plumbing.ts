@@ -10,15 +10,16 @@ export async function normalizeNodeParticleGraph(graph: ParticleGraph): Promise<
     if (graph._isGraphPlumbingNormalized) {
         return graph;
     }
+    let plumbing = false;
+    let phase4 = false;
     for (const block of graph.blocks.values()) {
-        if (
-            block.className === "ParticleTeleportOutBlock" ||
-            block.className === "ParticleLocalVariableBlock" ||
-            block.className === "ParticleElbowBlock" ||
-            block.className === "ParticleDebugBlock"
-        ) {
-            return (await import("./npe-graph-plumbing-runtime.js")).normalizeNodeParticleGraphRuntime(graph);
-        }
+        const className = block.className;
+        plumbing ||= /^Particle(TeleportOut|LocalVariable|Elbow|Debug)Block$/.test(className);
+        phase4 ||= (className === "ParticleInputBlock" && block.serialized.type === 0x0001) || /^Particle(FloatToInt|NumberMath|Clamp|Step)Block$/.test(className);
     }
-    return graph;
+    const normalized = plumbing ? await (await import("./npe-graph-plumbing-runtime.js")).normalizeNodeParticleGraphRuntime(graph) : graph;
+    if (phase4) {
+        (await import("./npe-phase4-values.js")).enablePhase4ValueGraph(normalized);
+    }
+    return normalized;
 }

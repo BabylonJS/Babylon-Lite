@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Color4, Vec2, Vec3 } from "../../../packages/babylon-lite/src/math/types";
 import { buildNodeParticleSet, type NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
+import { normalizeNodeParticleGraph } from "../../../packages/babylon-lite/src/particle/node/npe-graph-plumbing";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
 import { loadValueBlockEvaluator } from "../../../packages/babylon-lite/src/particle/node/npe-registry-extra-values";
+import { loadPhase4ValueBlockEvaluator } from "../../../packages/babylon-lite/src/particle/node/npe-registry-phase4-values";
 import type { ParsedParticleBlock, ParsedParticleInput } from "../../../packages/babylon-lite/src/particle/node/npe-types";
 import type { NpeGetter, NpeValue } from "../../../packages/babylon-lite/src/particle/node/npe-value";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
@@ -23,7 +25,6 @@ async function buildGetter(className: string, serialized: Record<string, unknown
     const block: ParsedParticleBlock = { id: 7, className, name: className, inputs, serialized };
     let output: NpeGetter | undefined;
     const context = {
-        _blocks: new Map<number, ParsedParticleBlock>(),
         input(_block: ParsedParticleBlock, name: string, fallback?: NpeGetter): NpeGetter {
             return options.inputs[name] ?? fallback ?? (() => null as unknown as NpeValue);
         },
@@ -37,7 +38,8 @@ async function buildGetter(className: string, serialized: Record<string, unknown
         },
     } as unknown as NpeBuildContext;
 
-    (await loadValueBlockEvaluator(className)).build(block, context);
+    const evaluator = (await loadPhase4ValueBlockEvaluator(block)) ?? (await loadValueBlockEvaluator(className));
+    evaluator.build(block, context);
     return output!;
 }
 
@@ -60,7 +62,8 @@ function scalarGraph(className: string, blockFields: Record<string, unknown>, in
 }
 
 async function evaluateParsedGraph(source: object): Promise<number> {
-    const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, parseNodeParticleSource(source));
+    const graph = await normalizeNodeParticleGraph(parseNodeParticleSource(source));
+    const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph);
     return set.systems[0]!._emitRateGetter!();
 }
 

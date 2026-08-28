@@ -30,7 +30,7 @@ const HAS_MANIFEST = hasManifests(CANONICAL_PARTICLE_SCENES);
 const HAS_MOVING_EMITTER_MANIFEST = hasManifests(PROVIDER_ISOLATION_SCENES);
 const HAS_SPRITE_2D_MANIFEST = hasManifests(SPRITE_2D_BLEND_SCENES);
 const UNUSED_FEATURE_CHUNK =
-    /particle-(blend|billboard-renderable|billboard-scene)|registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes|phase4-values)|update-(attractor|flow-map|noise|direction|angle)-block|npe-(blend-modes|emitter-provider|flow-map-runtime|graph-plumbing(?:-runtime)?|live-emitter|noise-runtime|texture-update-runtime|texture-content)|cpu-texture-source|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(clamp|condition|float-to-int|local-variable|number-math|step|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
+    /particle-(blend|billboard-renderable|billboard-scene)|registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes|phase4-values)|update-(attractor|flow-map|noise|direction|angle)-block|npe-(blend-modes|emitter-provider|flow-map-runtime|graph-plumbing(?:-runtime)?|live-emitter|noise-runtime|phase4-values|texture-update-runtime|texture-content)|cpu-texture-source|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(clamp|condition|float-to-int|local-variable|math-int|number-math|step|value-type|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
 const OPTIONAL_BLEND_MODULE = /particle\/(particle-(blend|billboard-renderable|billboard-scene)|node\/npe-blend-modes)/;
 const EMBEDDED_TEXTURE_SOURCE = "embedded-texture-source";
 const EMBEDDED_TEXTURE_SOURCE_MODULE = /\/blocks\/embedded-texture-source-block\.[jt]s$/;
@@ -66,7 +66,12 @@ function expectEmbeddedTextureModuleIsolation(sceneId: number, moduleIds: string
 
 describe("Particle bundle feature isolation", () => {
     it("keeps Phase 4A evaluator imports in the lazy value registry", () => {
+        const enabler = readFileSync(resolve(NPE_SOURCE_DIR, "npe-phase4-values.ts"), "utf8");
         const registry = readFileSync(resolve(NPE_SOURCE_DIR, "npe-registry-phase4-values.ts"), "utf8");
+        expect(enabler).toContain('from "./blocks/particle-value-type.js"');
+        expect(enabler).toContain('import("./npe-registry-phase4-values.js")');
+        expect(readFileSync(resolve(NPE_SOURCE_DIR, "npe-registry-extra-values.ts"), "utf8")).not.toContain("phase4");
+        expect(registry).toContain('import("./blocks/particle-math-int-block.js")');
         for (const moduleName of ["particle-number-math-block", "particle-clamp-block", "particle-step-block"]) {
             expect(registry).toContain(`import("./blocks/${moduleName}.js")`);
             for (const owner of ["npe-parser.ts", "npe-build.ts", "npe-registry.ts"]) {
@@ -144,7 +149,7 @@ describe("Particle bundle feature isolation", () => {
             }
             const moduleOffenders = runtimeModuleIds.filter(
                 (id) =>
-                    /particle\/(particle-billboard-renderable|node\/(npe-(emitter-provider|flow-map-runtime|live-emitter|noise-runtime|texture-update-runtime|local-position|texture-content)|npe-registry-(extra-remaining|extra-values|local-shapes|phase4-values)|blocks\/(cpu-texture-source-block|system-dynamic-emit-rate|particle-(clamp|condition|float-to-int|local-variable|number-math|step|vector-length)|update-(attractor|flow-map|noise)-block|(box|point|sphere|cone|cylinder|mesh)-shape-local)))|math\/mat4-invert/.test(
+                    /particle\/(particle-billboard-renderable|node\/(npe-(emitter-provider|flow-map-runtime|live-emitter|noise-runtime|phase4-values|texture-update-runtime|local-position|texture-content)|npe-registry-(extra-remaining|extra-values|local-shapes|phase4-values)|blocks\/(cpu-texture-source-block|system-dynamic-emit-rate|particle-(clamp|condition|float-to-int|local-variable|math-int|number-math|step|value-type|vector-length)|update-(attractor|flow-map|noise)-block|(box|point|sphere|cone|cylinder|mesh)-shape-local)))|math\/mat4-invert/.test(
                         id
                     ) &&
                     !(sceneId === 277 && (id.includes("npe-registry-extra-remaining") || id.includes("update-attractor-block"))) &&

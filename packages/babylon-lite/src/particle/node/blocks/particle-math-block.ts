@@ -1,7 +1,6 @@
 import type { Vec2, Vec3, Color4 } from "../../../math/types.js";
 import type { NpeBlockEvaluator } from "../npe-build.js";
 import type { NpeGetter } from "../npe-value.js";
-import { hasIntBlockInput } from "./particle-value-type.js";
 
 const OP_ADD = 0;
 const OP_SUBTRACT = 1;
@@ -38,7 +37,6 @@ export const particleMathBlock: NpeBlockEvaluator = {
         const op = typeof block.serialized.operation === "number" ? block.serialized.operation : OP_ADD;
         const left = ctx.input(block, "left");
         const right = ctx.input(block, "right");
-        const intResult = hasIntBlockInput(ctx._blocks, block, "left") && hasIntBlockInput(ctx._blocks, block, "right");
         const v3: Vec3 = { x: 0, y: 0, z: 0 };
         const c4: Color4 = { r: 0, g: 0, b: 0, a: 0 };
         const v2: Vec2 = { x: 0, y: 0 };
@@ -48,8 +46,7 @@ export const particleMathBlock: NpeBlockEvaluator = {
             if (typeof l === "number") {
                 const r = right(i);
                 if (typeof r === "number") {
-                    const result = applyScalar(op, l, r);
-                    return intResult ? result | 0 : result;
+                    return applyScalar(op, l, r);
                 }
                 if ("r" in r) {
                     c4.r = applyScalar(op, l, r.r);

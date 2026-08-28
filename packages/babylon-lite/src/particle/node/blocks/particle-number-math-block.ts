@@ -1,6 +1,5 @@
 import type { NpeBlockEvaluator } from "../npe-build.js";
 import type { ScalarGetter } from "../npe-value.js";
-import { hasIntBlockInput } from "./particle-value-type.js";
 
 const OP_MODULO = 0;
 const OP_POW = 1;
@@ -20,7 +19,7 @@ export const particleNumberMathBlock: NpeBlockEvaluator = {
         }
         const left = ctx.input(block, "left");
         const right = ctx.input(block, "right");
-        const intResult = hasIntBlockInput(ctx._blocks, block, "left");
+        const intResult = block.inputs.find((input) => input.name === "left")?.valueType === "int";
         const getter: ScalarGetter = (i) => {
             const leftValue = left(i);
             const rightValue = right(i);
