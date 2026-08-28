@@ -123,6 +123,31 @@ describe("Phase 4A NPE value math", () => {
             (source.blocks.at(-1)!.inputs as Array<Record<string, unknown>>)[0]!.targetBlockId = 11;
             expect(await evaluateParsedGraph(source)).toBe(1);
         });
+
+        it.each([
+            ["Clamp", "ParticleClampBlock", { value: { type: 1, value: 5.75 }, min: { type: 2, value: 0 }, max: { type: 2, value: 10 } }, 2, 1],
+            ["Step", "ParticleStepBlock", { value: { type: 1, value: 5.75 }, edge: { type: 2, value: 0 } }, 0.6, 0],
+        ])("propagates the left Int type through %s into a downstream NumberMath", async (_name, className, inputs, divisor, expected) => {
+            const source = scalarGraph(className, {}, inputs) as { blocks: Array<Record<string, unknown>> };
+            source.blocks.splice(source.blocks.length - 1, 0, {
+                customType: "BABYLON.ParticleInputBlock",
+                id: 50,
+                type: 2,
+                value: divisor,
+                inputs: [],
+            });
+            source.blocks.splice(source.blocks.length - 1, 0, {
+                customType: "BABYLON.ParticleNumberMathBlock",
+                id: 60,
+                operation: 0,
+                inputs: [
+                    { name: "left", targetBlockId: 10, targetConnectionName: "output" },
+                    { name: "right", targetBlockId: 50, targetConnectionName: "output" },
+                ],
+            });
+            (source.blocks.at(-1)!.inputs as Array<Record<string, unknown>>)[0]!.targetBlockId = 60;
+            expect(await evaluateParsedGraph(source)).toBe(expected);
+        });
     });
 
     describe("ParticleClampBlock", () => {
