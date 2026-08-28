@@ -676,6 +676,9 @@ pane `buildRace` calls (Test Track, 1P, Demo, menu background) use the primary w
 secondary world to its second surface's scene. Teardown disposes the mode's scenes, HUD, cameras and
 ship grid, and clears the ships from each used world's caster set — never the world itself.
 
+The editor registers its ArcRotate-controlled main scene before its utility layer, ensuring the
+position gizmo's swapchain overlay renders on top of the track while both share the same camera.
+
 Removed as non-original: lap counting, ranking, the rank HUD readout, boost flash timers, per-AI speed
 factors, and the FOV kick.
 

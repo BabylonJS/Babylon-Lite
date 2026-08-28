@@ -39,6 +39,8 @@ import type { EditorHud } from "./hud.js";
 const NUDGE_SPEED = 8; // world units/sec
 
 export interface TrackEditor {
+    /** Register the gizmo overlay after the main scene so it renders on top. */
+    registerOverlay(): Promise<void>;
     tick(dt: number, input: InputSystem): void;
     resetToDefault(): void;
     dispose(): void;
@@ -83,7 +85,6 @@ export async function createTrackEditor(
     });
 
     const utilityLayer: UtilityLayer = createUtilityLayer(engine, scene);
-    await registerUtilityLayer(utilityLayer);
     const gizmo: PositionGizmo = createPositionGizmo(engine, utilityLayer);
     const picker: GpuPicker = createGpuPicker(scene);
 
@@ -128,6 +129,14 @@ export async function createTrackEditor(
     window.addEventListener("blur", clearKeys);
 
     const lastMarkerPos = markers.map((m) => ({ x: m.position.x, y: m.position.y, z: m.position.z }));
+    let overlayRegistered = false;
+
+    async function registerOverlay(): Promise<void> {
+        if (!overlayRegistered) {
+            await registerUtilityLayer(utilityLayer);
+            overlayRegistered = true;
+        }
+    }
 
     function tick(dt: number, input: InputSystem): void {
         if (input.consumeCameraToggle(0) || input.consumeCameraToggle(1)) {
@@ -216,5 +225,5 @@ export async function createTrackEditor(
         disposeUtilityLayer(utilityLayer);
     }
 
-    return { tick, resetToDefault, dispose };
+    return { registerOverlay, tick, resetToDefault, dispose };
 }

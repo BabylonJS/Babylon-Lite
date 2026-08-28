@@ -384,6 +384,7 @@ async function buildEditor(
     });
 
     await registerSceneWithShadowSupport(scene);
+    await editor.registerOverlay();
     return {
         dispose(): void {
             disposed = true;
