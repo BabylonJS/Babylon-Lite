@@ -65,6 +65,8 @@ export interface NpeBuildState {
 export interface NpeBuildContext {
     state: NpeBuildState;
     engine: EngineContext;
+    /** @internal Parsed metadata used by evaluators whose output type depends on an upstream block. */
+    _blocks?: ReadonlyMap<number, ParsedParticleBlock>;
     input(block: ParsedParticleBlock, name: string, fallback?: NpeGetter): NpeGetter;
     isConnected(block: ParsedParticleBlock, name: string): boolean;
     setOutput(blockId: number, name: string, getter: NpeGetter): void;
@@ -139,6 +141,7 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
         const ctx: NpeBuildContext = {
             state,
             engine,
+            _blocks: graph.blocks,
             input(block, name, fallback) {
                 const input = block.inputs.find((i) => i.name === name);
                 if (isInputConnected(input)) {

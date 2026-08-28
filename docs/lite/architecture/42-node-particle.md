@@ -679,7 +679,7 @@ Evaluators are not preloaded. Selection and dynamic import occur when DFS reache
 - Shape names that miss the Box arm route to `npe-registry-extra-emitters.ts`, which handles Point, Sphere, Cone, Cylinder, and Mesh.
 - `npe-registry-extra.ts` handles UpdateSize, Gradient, GradientValue, SetupSpriteSheet, and BasicSpriteUpdate. Every other optional miss goes to `npe-registry-extra-remaining.ts`.
 - `npe-registry-extra-remaining.ts` handles UpdateAttractor, forwards Particle-prefixed names to `npe-registry-extra-values.ts`, and sends non-Particle names to `npe-registry-extra-basic.ts` for UpdateDirection and UpdateAngle.
-- `npe-registry-extra-values.ts` handles Condition, FloatToInt, VectorLength, and LocalVariable. Unknown Particle names retain the unsupported-value diagnostic. UpdateFlowMap and UpdateNoise are owned by dynamically loaded feature builders and are absent from shared registries.
+- `npe-registry-extra-values.ts` handles Condition, FloatToInt, VectorLength, and LocalVariable, then delegates misses to `npe-registry-phase4-values.ts` for NumberMath, Clamp, and Step. Unknown Particle names retain the unsupported-value diagnostic in that nested registry. UpdateFlowMap and UpdateNoise are owned by dynamically loaded feature builders and are absent from shared registries.
 - `npe-registry-local-shapes.ts` selects separate local implementations for all six shape classes when `state.isLocal` is true.
 - `npe-registry-variants.ts` selects extra contextual Input, source `0x18` Input, alias-safe Math, typed OncePerParticle Random, dynamic-emit-rate System, and random-start SetupSpriteSheet evaluators.
 - Scalar OncePerParticle Random imports its evaluator directly from the builder.
@@ -801,7 +801,7 @@ Contextual source has precedence over system source, and system source has prece
 
 ## 9. Supported blocks
 
-Builders support exactly 34 block class names after graph normalization. The 29 ordinary classes work on a directly parsed graph; `ParticleTeleportInBlock`, `ParticleTeleportOutBlock`, `ParticleLocalVariableBlock`, `ParticleElbowBlock`, and `ParticleDebugBlock` are supported only at the normalized boundary. The parser itself can represent arbitrary serialized class names.
+Builders support exactly 37 block class names after graph normalization. The 32 ordinary classes work on a directly parsed graph; `ParticleTeleportInBlock`, `ParticleTeleportOutBlock`, `ParticleLocalVariableBlock`, `ParticleElbowBlock`, and `ParticleDebugBlock` are supported only at the normalized boundary. The parser itself can represent arbitrary serialized class names.
 
 ```text
 SystemBlock                         CreateParticleBlock
@@ -813,6 +813,8 @@ ParticleMathBlock                   ParticleLerpBlock
 ParticleConverterBlock              ParticleGradientBlock
 ParticleGradientValueBlock          ParticleConditionBlock
 ParticleFloatToIntBlock             ParticleVectorLengthBlock
+ParticleNumberMathBlock             ParticleClampBlock
+ParticleStepBlock
 ParticleTextureSourceBlock          SetupSpriteSheetBlock
 BasicSpriteUpdateBlock              UpdatePositionBlock
 UpdateColorBlock                    UpdateDirectionBlock
@@ -824,6 +826,14 @@ ParticleElbowBlock                   ParticleDebugBlock
 ```
 
 Local shape modules and serialized variants retain their class name from this list.
+
+### Phase 4A value math contract
+
+`ParticleNumberMathBlock` requires connected scalar `left` and `right` inputs and installs scalar `output`. Operation `0` computes JavaScript remainder and operation `1` computes `Math.pow`; an omitted operation is `0`. At build time, its lazy evaluator resolves the connected left type from the existing parsed upstream metadata, including an Int `ParticleInputBlock`, `ParticleFloatToIntBlock`, or another NumberMath block whose left input is Int. The evaluator applies signed 32-bit `| 0` coercion only to an Int-left result. Float results retain JavaScript `NaN`, infinity, signed-zero, and remainder-sign behavior.
+
+`ParticleClampBlock` requires connected scalar, Vector2, Vector3, or Color4 `value`; scalar `min` and `max` default to `0` and `1`. Each component computes `Math.max(min, Math.min(value, max))`. `ParticleStepBlock` requires the same `value` shapes; scalar `edge` defaults to `0`, and each component computes `value < edge ? 0 : 1`. Both blocks preserve the primary input shape, return semantic Color4 data, and reuse one evaluator-owned scratch object per non-scalar shape. Scalar defaults and serialized input literals are authoritative; no block-level Clamp minimum/maximum compatibility form is interpreted.
+
+All three evaluators validate required connections during build, reject unknown operations during build, and reject unsupported runtime shapes deterministically. They add no particle storage, steps, callbacks, or public API. The established value registry delegates misses to a nested Phase 4 registry, where each class has a separate dynamic import, so existing value-block users fetch neither Phase 4 routing metadata nor evaluator bodies. Unit coverage includes every operation, defaults, numeric edge cases, all supported shapes, scratch identity and volatile-source behavior, diagnostics, parser-derived Int/Float metadata, and complete parsed-graph execution. Bundle coverage rejects the Phase 4 registry and all three evaluator modules in representative non-user scenes, including scene305, and rejects folding evaluator bodies into the parser, builder, or shared registry.
 
 ### 9.1 SystemBlock
 
@@ -1534,7 +1544,7 @@ Phase 3C changes the shared Scene 305 graph to thread Elbow, Debug, and a Partic
 
 Phase 3C raises the normalized-builder class count from 31 to 34 and block evaluator/helper files from 46 to 47. Node infrastructure stays at 29 and particle root files stay at 11 because the thin helper/runtime and frame-preparation composition extend existing files.
 
-The current descriptive sections are synchronized at 34 normalized-builder classes, 11 particle root files, 29 node infrastructure files, and 47 evaluator/helper files.
+Phase 4A raises the normalized-builder class count from 34 to 37, adds three evaluator files, and adds one nested Phase 4 value registry. The current descriptive sections are synchronized at 37 normalized-builder classes, 11 particle root files, 30 node infrastructure files, and 50 evaluator/helper files.
 
 ## 10. Rendering and live registration
 
@@ -1754,6 +1764,9 @@ The implementation preserves these explicit failures:
 - Particle LocalVariable on a domain containing the system bit: `NodeParticle: ParticleLocalVariableBlock <id> Particle scope requires particle-only evaluation`.
 - Unsupported LocalVariable runtime value: `NodeParticle: ParticleLocalVariableBlock <id> received an unsupported value`.
 - LocalVariable runtime shape change: `NodeParticle: ParticleLocalVariableBlock <id> changed value type`.
+- Disconnected Phase 4A required input: `NodeParticle: <ClassName> <id> input "<name>" is not connected`.
+- Unknown NumberMath operation: `NodeParticle: ParticleNumberMathBlock <id> has unsupported operation <decimal id>`.
+- Unsupported Phase 4A runtime value: `NodeParticle: <ClassName> <id> received an unsupported value`.
 - Snippet HTTP response: `NodeParticle: snippet fetch failed (<status>)`.
 - Connected value with no installed getter: `NodeParticle: unresolved connection <ClassName>.<inputName>`.
 - Unsupported world shape: `NodeParticle: unsupported emitter block "<ClassName>"`.
@@ -1802,7 +1815,7 @@ Additional behavior is observable:
 
 ## 12. Current limitations
 
-- The parser represents arbitrary serialized class names. Builders support the 29 ordinary classes directly and five Phase 3 classes at the required normalized boundary, for 34 supported classes after normalization. Other reachable NPE classes follow the registry errors in section 11.
+- The parser represents arbitrary serialized class names. Builders support the 32 ordinary classes directly and five Phase 3 classes at the required normalized boundary, for 37 supported classes after normalization. Other reachable NPE classes follow the registry errors in section 11.
 - Simulation is CPU-only.
 - Rendering is selected explicitly by the caller: camera-facing billboards or pure-2D Sprite2D. Serialized `billBoardMode` and `isBillboardBased` do not select either runtime path.
 - The Sprite2D bridge maps only NPE world XY. It ignores `posZ` and does not support XZ/YZ projection.
@@ -1916,7 +1929,7 @@ The default Lite URL is continuously live. A stable matrix is mutated in place b
 
 Any finite nonnegative `?seekTime=T` selects deterministic frozen mode. Both engines install the same seeded generator, apply the initial pose, and replay poses for steps `1...round(T * 60)` immediately before matching explicit simulation calls. For the committed capture `T=2`, this is exactly 120 calls. Lite manually calls `animateParticleSystem(system, 1)`, sets `updateSpeed = 0`, leaves the provider returning the final stable matrix, and registers with `autoStart: false`. Babylon.js assigns a hidden concrete `AbstractMesh` emitter to `set.systemBlocks[0].emitter` before `buildAsync`, updates its position and `rotation.z`, forces `computeWorldMatrix(true)`, and calls the real `ParticleSystem.animate(true)` path. Its native update therefore refreshes `_emitterWorldMatrix`; no particle position is emulated manually. Both pages stamp `data-animation-frozen="true"` only in seek mode.
 
-The Babylon.js page is a manual golden oracle only. The committed `reference/lite/scene302-npe-moving-emitter/babylon-ref-golden.png` is captured once from `babylon-ref-scene302.html?seekTime=2`; the automated frozen test loads only `scene302.html?seekTime=2`, verifies telemetry, and compares the resulting canvas to that golden. The initial ceiling is `MAD <= 0.01`; changing it requires measured parity evidence and approval. Scene 302 itself adds no package API. Phase 3C adds no package-root API: the public count remains twenty-five functions and twelve types, and the current particle implementation counts are 11 root files, 29 node infrastructure/registry files, and 47 evaluator/helper files.
+The Babylon.js page is a manual golden oracle only. The committed `reference/lite/scene302-npe-moving-emitter/babylon-ref-golden.png` is captured once from `babylon-ref-scene302.html?seekTime=2`; the automated frozen test loads only `scene302.html?seekTime=2`, verifies telemetry, and compares the resulting canvas to that golden. The initial ceiling is `MAD <= 0.01`; changing it requires measured parity evidence and approval. Scene 302 itself adds no package API. Phase 4A adds no package-root API: the public count remains twenty-five functions and twelve types, and the current particle implementation counts are 11 root files, 30 node infrastructure/registry files, and 50 evaluator/helper files.
 
 ### 13.4 Bundle manifests and conditional content
 
@@ -1943,6 +1956,8 @@ Scene 305 fetches the thin helper, heavy runtime, existing optional registry cha
 The Phase 3B run originally measured `43,936` raw bytes while the same 2,924-byte Scene 305 graph payload had a noncanonical filename and was counted. The comparison column subtracts that payload from the Phase 3B raw result as well (`43,936 - 2,924 = 41,012`) so the `+3,815` raw delta remains an honest engine/runtime comparison. Gzip subsets cannot be removed from a mixed chunk, so the measured gzip values remain unadjusted.
 
 Local `*-npe.ts` graph payload modules are excluded from engine runtime-byte accounting and appear in ignored bytes. The general bundle-size specification identifies scene ids 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301, 302, and 305 as sprite users. Scenes 262 through 284, 302, and 305 in that list render through billboard sprite modules. Scene 300 requires `particle-sprite-2d.ts` and `sprite-renderer.ts` while rejecting the exact Sprite2D module, custom-shader path, particle billboard, particle scene-registration, depth-hosted Sprite2D, and billboard rendering paths. Scene 301 requires `particle-sprite-2d-blend-modes.ts`, `particle-blend.ts`, `sprite-custom-shader.ts`, and `sprite-renderer.ts` while rejecting `particle-billboard-renderable.ts`, `particle-billboard-scene.ts`, and the scene-rendered sprite path. Representative unrelated Sprite2D scene 50 also rejects every particle exact-blend and custom-shader module. CI-published baselines and generated bundle-info are comparison inputs, and no per-scene manifest is committed.
+
+Phase 4A measured scenes 262, 264, 302, and 305 before and after implementation. Final raw/gzip totals are `38.5/24.0 KB`, `38.2/25.7 KB`, `52.7/21.9 KB`, and `41.1/26.4 KB`, respectively, exactly matching the fresh pre-change measurements. Direct Phase 4 cases in `npe-registry-extra-values.ts` caused an unrelated Scene 305 routing cost, so the accepted topology delegates value-registry misses to the unfetched nested `npe-registry-phase4-values.ts`. All four non-user scenes fetch neither that registry nor any Phase 4A evaluator body.
 
 Scene 302 is the positive moving-emitter bundle fixture. Its fetched module list must contain `npe-emitter-provider.ts`, `mat4-invert-to-ref.ts`, `particle-scene.ts`, `particle-billboard.ts`, `billboard-scene.ts`, and `billboard-renderable.ts`. It must not contain the deleted `npe-live-emitter.ts`, ordinary allocating `mat4-invert.ts`, the flow-map/noise/texture-update runtimes, CPU texture updates, advanced particle blend modules, either graph-plumbing module, or either Sprite2D bridge/render path. The final filtered build measures `56,705` raw bytes (`55.4 KB`) and `22,761` gzip bytes (`22.2 KB`). The shared fixture and scene entry do not match the `*-npe.ts` payload exclusion and are intentionally counted, so this measurement is conservative and not directly comparable to sibling payload-excluded scenes.
 
@@ -2005,7 +2020,7 @@ packages/babylon-lite/src/particle/sprite-columns-random.ts
 packages/babylon-lite/src/particle/sprite-columns.ts
 ```
 
-### 14.2 Node infrastructure and registries: 29 files
+### 14.2 Node infrastructure and registries: 30 files
 
 ```text
 packages/babylon-lite/src/particle/node/node-particle.ts
@@ -2026,6 +2041,7 @@ packages/babylon-lite/src/particle/node/npe-registry-extra-basic.ts
 packages/babylon-lite/src/particle/node/npe-registry-extra-emitters.ts
 packages/babylon-lite/src/particle/node/npe-registry-extra-remaining.ts
 packages/babylon-lite/src/particle/node/npe-registry-extra-values.ts
+packages/babylon-lite/src/particle/node/npe-registry-phase4-values.ts
 packages/babylon-lite/src/particle/node/npe-registry-extra.ts
 packages/babylon-lite/src/particle/node/npe-registry-local-shapes.ts
 packages/babylon-lite/src/particle/node/npe-registry-variants.ts
@@ -2041,9 +2057,9 @@ packages/babylon-lite/src/particle/node/npe-value.ts
 
 Phase 3C extends `npe-graph-plumbing.ts` and `npe-graph-plumbing-runtime.ts` in place and adds a local evaluator under `blocks/`; it adds no node infrastructure file, so this count remains 29.
 
-### 14.3 Block evaluators and helpers: 47 files
+### 14.3 Block evaluators and helpers: 50 files
 
-The 46-file Phase 3B baseline corrected a pre-existing manifest omission: `embedded-texture-source-block.ts` already existed before Phase 3B. Phase 3C adds only `particle-local-variable-block.ts`.
+The 46-file Phase 3B baseline corrected a pre-existing manifest omission: `embedded-texture-source-block.ts` already existed before Phase 3B. Phase 3C adds `particle-local-variable-block.ts`; Phase 4A adds the NumberMath, Clamp, and Step evaluators.
 
 ```text
 packages/babylon-lite/src/particle/node/blocks/basic-sprite-update-block.ts
@@ -2058,6 +2074,7 @@ packages/babylon-lite/src/particle/node/blocks/cpu-texture-source-block.ts
 packages/babylon-lite/src/particle/node/blocks/embedded-texture-source-block.ts
 packages/babylon-lite/src/particle/node/blocks/mesh-shape-block.ts
 packages/babylon-lite/src/particle/node/blocks/mesh-shape-local-block.ts
+packages/babylon-lite/src/particle/node/blocks/particle-clamp-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-condition-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-converter-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-float-to-int-block.ts
@@ -2070,11 +2087,13 @@ packages/babylon-lite/src/particle/node/blocks/particle-lerp-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-local-variable-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-math-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-math-compact-block.ts
+packages/babylon-lite/src/particle/node/blocks/particle-number-math-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-random-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-random-once-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-random-once-typed-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-random-once-typed.ts
 packages/babylon-lite/src/particle/node/blocks/particle-random-once.ts
+packages/babylon-lite/src/particle/node/blocks/particle-step-block.ts
 packages/babylon-lite/src/particle/node/blocks/particle-vector-length-block.ts
 packages/babylon-lite/src/particle/node/blocks/point-shape-block.ts
 packages/babylon-lite/src/particle/node/blocks/point-shape-local-block.ts

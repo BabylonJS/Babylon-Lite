@@ -14,6 +14,7 @@ interface BundleInfo {
 const MANIFEST_DIR = resolve(__dirname, "../../../lab/public/bundle/manifest");
 const BUNDLE_INFO_DIR = resolve(__dirname, "../../../lab/public/bundle/bundle-info");
 const SCENE_305_SOURCE = resolve(__dirname, "../../../lab/lite/src/lite/scene305.ts");
+const NPE_SOURCE_DIR = resolve(__dirname, "../../../packages/babylon-lite/src/particle/node");
 const CANONICAL_PARTICLE_SCENES = [262, 263, 264, 276, 277, 280, 281, 283, 284];
 const PROVIDER_ISOLATION_SCENES = [12, ...CANONICAL_PARTICLE_SCENES, 300, 301, 302];
 const SPRITE_2D_BLEND_SCENES = [50, 300, 301];
@@ -29,7 +30,7 @@ const HAS_MANIFEST = hasManifests(CANONICAL_PARTICLE_SCENES);
 const HAS_MOVING_EMITTER_MANIFEST = hasManifests(PROVIDER_ISOLATION_SCENES);
 const HAS_SPRITE_2D_MANIFEST = hasManifests(SPRITE_2D_BLEND_SCENES);
 const UNUSED_FEATURE_CHUNK =
-    /particle-(blend|billboard-renderable|billboard-scene)|registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes)|update-(attractor|flow-map|noise|direction|angle)-block|npe-(blend-modes|emitter-provider|flow-map-runtime|graph-plumbing(?:-runtime)?|live-emitter|noise-runtime|texture-update-runtime|texture-content)|cpu-texture-source|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|local-variable|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
+    /particle-(blend|billboard-renderable|billboard-scene)|registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes|phase4-values)|update-(attractor|flow-map|noise|direction|angle)-block|npe-(blend-modes|emitter-provider|flow-map-runtime|graph-plumbing(?:-runtime)?|live-emitter|noise-runtime|texture-update-runtime|texture-content)|cpu-texture-source|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(clamp|condition|float-to-int|local-variable|number-math|step|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
 const OPTIONAL_BLEND_MODULE = /particle\/(particle-(blend|billboard-renderable|billboard-scene)|node\/npe-blend-modes)/;
 const EMBEDDED_TEXTURE_SOURCE = "embedded-texture-source";
 const EMBEDDED_TEXTURE_SOURCE_MODULE = /\/blocks\/embedded-texture-source-block\.[jt]s$/;
@@ -64,6 +65,16 @@ function expectEmbeddedTextureModuleIsolation(sceneId: number, moduleIds: string
 }
 
 describe("Particle bundle feature isolation", () => {
+    it("keeps Phase 4A evaluator imports in the lazy value registry", () => {
+        const registry = readFileSync(resolve(NPE_SOURCE_DIR, "npe-registry-phase4-values.ts"), "utf8");
+        for (const moduleName of ["particle-number-math-block", "particle-clamp-block", "particle-step-block"]) {
+            expect(registry).toContain(`import("./blocks/${moduleName}.js")`);
+            for (const owner of ["npe-parser.ts", "npe-build.ts", "npe-registry.ts"]) {
+                expect(readFileSync(resolve(NPE_SOURCE_DIR, owner), "utf8")).not.toContain(`blocks/${moduleName}`);
+            }
+        }
+    });
+
     it("keeps the frozen scene305 fixture free of camera controls", () => {
         expect(readFileSync(SCENE_305_SOURCE, "utf8")).not.toMatch(/\battachControl\b|arc-rotate-controls/);
     });
@@ -133,7 +144,7 @@ describe("Particle bundle feature isolation", () => {
             }
             const moduleOffenders = runtimeModuleIds.filter(
                 (id) =>
-                    /particle\/(particle-billboard-renderable|node\/(npe-(emitter-provider|flow-map-runtime|live-emitter|noise-runtime|texture-update-runtime|local-position|texture-content)|npe-registry-(extra-remaining|extra-values|local-shapes)|blocks\/(cpu-texture-source-block|system-dynamic-emit-rate|particle-(condition|float-to-int|local-variable|vector-length)|update-(attractor|flow-map|noise)-block|(box|point|sphere|cone|cylinder|mesh)-shape-local)))|math\/mat4-invert/.test(
+                    /particle\/(particle-billboard-renderable|node\/(npe-(emitter-provider|flow-map-runtime|live-emitter|noise-runtime|texture-update-runtime|local-position|texture-content)|npe-registry-(extra-remaining|extra-values|local-shapes|phase4-values)|blocks\/(cpu-texture-source-block|system-dynamic-emit-rate|particle-(clamp|condition|float-to-int|local-variable|number-math|step|vector-length)|update-(attractor|flow-map|noise)-block|(box|point|sphere|cone|cylinder|mesh)-shape-local)))|math\/mat4-invert/.test(
                         id
                     ) &&
                     !(sceneId === 277 && (id.includes("npe-registry-extra-remaining") || id.includes("update-attractor-block"))) &&
