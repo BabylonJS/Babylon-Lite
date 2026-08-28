@@ -37,10 +37,10 @@ export const WEIGHT_SHADER_FRAGMENT: TextShaderFragment = {
     _vertexSlots: {
         VO: `@location(4) @interpolate(flat) wo:f32,`,
         VD: `d.wo=0.0;`,
-        // Inflate the font-space glyph bounds symmetrically so the quad covers the expanded
-        // contour.
+        // Inflate by the miter limit so every accepted apex remains inside the quad.
         VB: `let wo=sy.p.y;
-let sb=vec4<f32>(md.b.xy-vec2<f32>(wo),md.b.zw+vec2<f32>(wo));`,
+let ao=2.5*wo;
+let sb=vec4<f32>(md.b.xy-vec2<f32>(ao),md.b.zw+vec2<f32>(ao));`,
         VA: `out.wo=wo;`,
     },
     _fragmentSlots: {
@@ -87,8 +87,39 @@ res=min(dot2(d+(c+b*t.x)*t.x),dot2(d+(c+b*t.y)*t.y));
 }
 return sqrt(res);
 }
-// Distance from the pixel to the nearest contour within rad font units, or a large value
-// when there is none. Complete within that radius, unlike the base coverage loops.
+fn cr(a:vec2<f32>,b:vec2<f32>)->f32{return a.x*b.y-a.y*b.x;}
+fn ds(p:vec2<f32>,a:vec2<f32>,b:vec2<f32>)->f32{
+let e=b-a;
+let v=p-a;
+let q=v-e*clamp(dot(v,e)/max(dot(e,e),1.0e-9),0.0,1.0);
+return dot(q,q);
+}
+// Signed distance to a triangle, negative inside. Degenerate joins contribute nothing.
+fn td(p:vec2<f32>,a:vec2<f32>,b:vec2<f32>,c:vec2<f32>)->f32{
+let ar=cr(b-a,c-a);
+if(abs(ar)<1.0e-7){return 1.0e9;}
+let inside=cr(b-a,p-a)*ar>=0.0&&cr(c-b,p-b)*ar>=0.0&&cr(a-c,p-c)*ar>=0.0;
+let d=sqrt(min(ds(p,a,b),min(ds(p,b,c),ds(p,c,a))));
+return select(d,-d,inside);
+}
+// Reconstruct the one convex, exterior-facing wedge from its stored unit apex vector.
+fn mdst(p:vec2<f32>,A:vec2<f32>,B:vec2<f32>,C:vec2<f32>,m:vec2<f32>,wo:f32)->f32{
+let ml=dot(m,m);
+var tv=C-B;
+if(dot(tv,tv)<1.0e-12){tv=C-A;}
+if(ml<1.0e-7||dot(tv,tv)<1.0e-12){return 1.0e9;}
+let t=normalize(tv);
+var n=vec2<f32>(-t.y,t.x);
+n=n*select(-1.0,1.0,dot(n,m)>=0.0);
+let u=m*inverseSqrt(ml);
+let nn=2.0*dot(n,u)*u-n;
+let a=C+n*wo;
+let b=C+nn*wo;
+let ap=C+m*wo;
+return td(p,a,ap,b);
+}
+struct WD{d:f32,m:f32};
+// Distance from the pixel to the nearest contour and miter wedge within rad font units.
 //
 // Every h-band spans the full glyph width and partitions y, and a band lists every curve
 // whose y-extent meets it (glyph-storage.ts -> buildBandsInternal). Any curve with a point
@@ -97,11 +128,12 @@ return sqrt(res);
 // (bn.y, bn.w) is monotone non-decreasing and never negative by construction there, so the
 // two ends of the range stay ordered; a zero scale (zero-height glyph) collapses them to
 // band 0, its only band.
-fn wdst(rc:vec2<f32>,gp:vec2<i32>,bm:vec2<i32>,bn:vec4<f32>,rad:f32)->f32{
+fn wdst(rc:vec2<f32>,gp:vec2<i32>,bm:vec2<i32>,bn:vec4<f32>,rad:f32,wo:f32)->WD{
 let y0=clamp(i32((rc.y-rad)*bn.y+bn.w),0,bm.y);
 let y1=clamp(i32((rc.y+rad)*bn.y+bn.w),0,bm.y);
 let xl=rc.x-rad;
 var md=1.0e9;
+var mm=1.0e9;
 for(var b:i32=y0;b<=y1;b=b+1){
 let hr=textureLoad(bt,vec2<i32>(gp.x+b,gp.y),0);
 let hn=i32(hr.x+0.5);
@@ -110,15 +142,16 @@ for(var i:i32=0;i<hn;i=i+1){
 let lr=textureLoad(bt,vec2<i32>(hl.x+i,hl.y),0);
 let cv=vec2<i32>(i32(lr.x+0.5),i32(lr.y+0.5));
 let q12=textureLoad(ct,cv,0);
-let q3=textureLoad(ct,vec2<i32>(cv.x+1,cv.y),0).xy;
+let q3=textureLoad(ct,vec2<i32>(cv.x+1,cv.y),0);
 // Curves are sorted by descending max-x: once one's right extent is farther left than
 // the search radius, so is every later curve in this band. A curve with a point within
 // rad has max-x >= rc.x - rad, so it is never behind this bound.
 if(max(max(q12.x,q12.z),q3.x)<xl){break;}
-md=min(md,dq(rc,q12.xy,q12.zw,q3));
+md=min(md,dq(rc,q12.xy,q12.zw,q3.xy));
+mm=min(mm,mdst(rc,q12.xy,q12.zw,q3.xy,q3.zw,wo));
 }
 }
-return md;
+return WD(md,mm);
 }`,
         // Expand coverage outward from the nearest contour, then union it with the analytic
         // base coverage. `max` keeps the base authoritative inside the original fill, so an
@@ -127,9 +160,10 @@ return md;
         // shader and skips the scan.
         CO: `if(in.wo!=0.0){
 let aas=max(max(pe.x,pe.y),1.0e-8);
-let d=wdst(rc,gp,bm,in.bn,in.wo+1.0/aas);
-let wc=clamp((in.wo-d)*aas+0.5,0.0,1.0);
-cov=max(cov,wc);
+let wd=wdst(rc,gp,bm,in.bn,2.5*in.wo+1.0/aas,in.wo);
+let wc=clamp((in.wo-wd.d)*aas+0.5,0.0,1.0);
+let mc=clamp(0.5-wd.m*aas,0.0,1.0);
+cov=max(cov,max(wc,mc));
 }`,
     },
 };

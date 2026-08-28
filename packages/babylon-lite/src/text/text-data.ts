@@ -220,6 +220,8 @@ export type TextGroupKey = CurveSetId | object;
 
 /** @internal Per-run styling hooks supplied by an opt-in feature. */
 export interface TextStyleSeam {
+    /** @internal Prepare feature-owned data for this run and its current owning TextData. */
+    _prepare(data: TextData, run: GlyphRun): void;
     /** @internal Draw-group key for a run — must be `run.curveSet` unless the run needs a
      *  different pipeline variant, and must never equal another curve set's key. */
     _key(run: GlyphRun): TextGroupKey;
@@ -235,8 +237,9 @@ export function _installTextStyleSeam(seam: TextStyleSeam): void {
     _textStyleSeam = seam;
 }
 
-/** Draw-group key for a run: its curve set unless a styling feature interned another. */
-function runGroupKey(run: GlyphRun): TextGroupKey {
+/** Prepare and resolve a run's group key: its curve set unless a feature interned another. */
+function runGroupKey(data: TextData, run: GlyphRun): TextGroupKey {
+    _textStyleSeam?._prepare(data, run);
     return _textStyleSeam?._key(run) ?? run.curveSet;
 }
 
@@ -651,7 +654,7 @@ function applyReset(data: TextData, runs: readonly GlyphRun[], storage: GlyphSto
     // Group runs by draw-group key so each group's slots are contiguous initially.
     const runsByKey = new Map<TextGroupKey, GlyphRun[]>();
     for (const run of runs) {
-        const key = runGroupKey(run);
+        const key = runGroupKey(data, run);
         let list = runsByKey.get(key);
         if (!list) {
             list = [];
@@ -765,7 +768,7 @@ function applyAddRun(data: TextData, run: GlyphRun, insertBefore?: number): void
     const at = insertBefore ?? data._runs.length;
     lookupCurveSet(data._storage, run.curveSet, "addRun");
     const styleSlots = allocateStyles(data, countRunStyles(run));
-    const group = ensureGroup(data, run.curveSet, runGroupKey(run));
+    const group = ensureGroup(data, run.curveSet, runGroupKey(data, run));
     const groupIdx = data._groups.indexOf(group);
     const slots = allocateSlots(data, group, run.glyphs.length);
     const live = writeRunToSlots(data, group, run, slots, styleSlots);
@@ -839,7 +842,7 @@ function applyReplaceRun(data: TextData, prevRef: GlyphRun | number, newRun: Gly
     // edit reduces to slot bookkeeping — no list splices, and no index scan to drive them. An
     // empty new run is the one exception: it can leave the group with nothing live, and only
     // the remove path knows how to retire a group.
-    if (runGroupKey(newRun) === group._groupKey && newRun.glyphs.length > 0) {
+    if (runGroupKey(data, newRun) === group._groupKey && newRun.glyphs.length > 0) {
         const styleSlots = allocateStyles(data, countRunStyles(newRun), rec._styleSlots);
         const prevSlotCount = rec._slots.length;
         let slots = rec._slots;

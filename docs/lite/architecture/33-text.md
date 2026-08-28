@@ -807,7 +807,8 @@ A synthetic contour offset (emboldening) per `GlyphRun`, evaluated
 analytically in the Slug fragment shader. This is **not** CSS font-weight face selection
 (100–900); it is a non-negative contour offset in font design units that thickens the
 rendered outlines by expanding them outward. Round
-contour joins fall out of the distance field automatically — no miter/bevel logic.
+contour joins fall out of the distance field automatically; an opt-in miter wedge restores
+sharp joins whose reach is at most 2.5 times the contour offset.
 
 The feature owns all of its cost at its enabler: importing `setFontWeightOffset` pulls in
 the weight shader fragment; calling it with an offset that actually changes a run installs
@@ -856,30 +857,42 @@ including after it is already bound and rendering.
    TextData.`). `updateTextData`'s own index path shares this helper, so the two can never
    drift.
 3. **Clamp** to `[0, 100]` with a `console.warn` when out of range.
-4. **No-op detection.** If the resolved run's current effective offset already equals the
-   clamped value, return before touching anything: no seam install, no shader composition,
-   no `_version` / `_layoutVersion` churn. A zero call on a run that never had an offset is
-   therefore a *true* no-op — it does not install the feature or compile its shader — while
-   the first nonzero call always installs.
-5. **Capture** the `WeakMap`'s exact prior entry for this run — whether it had one at all,
+4. **Prepare miter metadata** for every glyph referenced by the run when the clamped offset
+   is nonzero. The feature replays the curve atlas's deterministic append layout and writes
+   one unit miter vector into the otherwise-unused `.zw` components of each curve's second
+   texel. Preparation is cached by atlas + glyph id, so later slider changes do no join work.
+   If at least one accepted vector changes staging data, incrementing the atlas's existing
+   `_version` causes it to upload during the next renderer update; glyphs with no accepted
+   joins do not trigger an upload. No synchronous GPU work occurs in the setter. Zero calls
+   perform no preparation. The same hook runs whenever
+   TextData evaluates a run's group key, so swapping a weighted `TextData` to a replacement
+   `GlyphStorage` prepares that atlas during the reset rather than briefly rendering round
+   joins.
+5. **No-op detection.** If the resolved run's current effective offset already equals the
+   clamped value, return after the cached preparation check: no seam install, no shader
+   composition, and no TextData `_version` / `_layoutVersion` churn. A zero call on a run
+   that never had an offset is therefore a *true* no-op — it does not install the feature or
+   compile its shader — while the first nonzero call always installs.
+6. **Capture** the `WeakMap`'s exact prior entry for this run — whether it had one at all,
    and its value — then **store** the clamped offset (zero deletes the entry), then
    **install the seams** (`_installTextStyleSeam` + `_installTextVariantResolver`),
    idempotently.
-6. **Repack** via `updateTextData(data, { update: "reset" })` — the narrowest existing
+7. **Repack** via `updateTextData(data, { update: "reset" })` — the narrowest existing
    TextData operation that both re-reads every run's draw-group key and rewrites every
    style entry's `params.y`. `reset` with no `runs` keeps the current run objects (it
    defensively copies `data._runs`), compacts the slot allocator, and reuses the previous
    draw-group objects per key, so a run moving between the base and weighted groups is a
    regrouping — not a rebuild of the caller's descriptors. The feature deliberately
    re-implements none of the allocator, grouping or style-packing logic.
-7. **Roll back on failure.** If step 6 throws (e.g. the run's curve set is no longer in
-   `data`'s storage), the `WeakMap` entry written in step 5 is restored to its exact prior
+8. **Roll back on failure.** If step 7 throws (e.g. the run's curve set is no longer in
+   `data`'s storage), the `WeakMap` entry written in step 6 is restored to its exact prior
    state — deleted if the run had no entry before this call, set back to the previous value
    if it did — before the error is rethrown unchanged. Without this, a failed repack would
    leave the map at the *new* offset while the data itself was never actually repacked; a
    caller that fixes the failure and retries with the same offset would then hit the no-op
-   guard in step 4 and get silent non-repair instead of a retry. The seams installed in step
-   5 are **not** rolled back — they are idempotent, side-effect-free until a run actually
+   guard in step 5 and get silent non-repair instead of a retry. Prepared miter texels and
+   the seams installed in step 6 are **not** rolled back — both are monotonic, idempotent,
+   and side-effect-free until a run actually
    uses them, and re-running `ensureInstalled` on a retry is a no-op, so leaving them
    installed after a failed call is harmless.
 
@@ -913,6 +926,8 @@ export type TextGroupKey = CurveSetId | object;
 
 /** @internal */
 export interface TextStyleSeam {
+    /** @internal Prepare feature-owned data for this run and its current TextData. */
+    _prepare(data: TextData, run: GlyphRun): void;
     /** @internal Draw-group key for a run — `run.curveSet` unless the run needs a different
      *  pipeline variant. Must never return a value that equals another curve set's key. */
     _key(run: GlyphRun): TextGroupKey;
@@ -924,11 +939,11 @@ export interface TextStyleSeam {
 /** @internal */ export function _installTextStyleSeam(seam: TextStyleSeam): void;
 ```
 
-`text-data.ts` attaches **no** meaning to either result: `_param` is a float it copies into
-`params.y`, `_key` is a token it compares with `===`. Both call sites are single
-optional-chained calls with a neutral default (`_textStyleSeam?._key(run) ?? run.curveSet`,
-`_textStyleSeam?._param(run) ?? 0`), and only scalars / opaque values cross the boundary.
-All font-weight semantics live in `set-font-weight-offset.ts`.
+`text-data.ts` attaches **no** feature meaning to these hooks: `_prepare` is called before
+group-key evaluation with the current data/run pair, `_param` is a float copied into
+`params.y`, and `_key` is a token compared with `===`. With the seam null, preparation is a
+single skipped optional call and the key/parameter retain their neutral defaults. All
+font-weight semantics live in `set-font-weight-offset.ts`.
 
 `text-data.ts` additionally exports one feature-agnostic helper so per-run feature setters
 resolve and validate their run argument exactly as `updateTextData` does:
@@ -982,11 +997,44 @@ atlas lookup, bind-group labelling and error messages.
 | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `VO` | `@location(4) @interpolate(flat) wo:f32,` — the per-instance weight offset varying.                                                                            |
 | `VD` | `d.wo=0.0;` — dead-slot default.                                                                                                                                |
-| `VB` | `let wo=sy.p.y; let sb=vec4<f32>(md.b.xy-vec2<f32>(wo),md.b.zw+vec2<f32>(wo));` — inflates the font-space bounds symmetrically so the quad covers the expanded contour. |
+| `VB` | Inflates the font-space bounds by `2.5 * wo`, the miter limit, so the quad covers both the round expansion and every accepted miter apex. |
 | `VA` | `out.wo=wo;`                                                                                                                                                    |
 | `FI` | `@location(4) @interpolate(flat) wo:f32,`                                                                                                                      |
-| `FH` | `dot2` + `dq` (exact distance to a quadratic Bézier) + `wdst` (the bounded nearest-contour band scan).                                                           |
-| `CO` | Zero-offset guard, unsigned distance, weighted coverage, and monotone `max` finalization.                                                                         |
+| `FH` | `dot2` + `dq` (exact distance to a quadratic Bézier), signed distance to a triangle, and `wdst` (the bounded nearest-contour + miter-wedge band scan). |
+| `CO` | Zero-offset guard, unsigned contour distance, signed miter distance, weighted coverage, and monotone `max` finalization.                                |
+
+### Miter metadata and preparation
+
+The second curve texel already stores `p2` in `.xy`; base Slug leaves `.zw` unused. The
+weight feature uses those two floats for a dimensionless vector from `p2` to the single
+**exterior-facing** miter apex at unit offset. A zero vector means the join is concave,
+smooth, open, degenerate, or exceeds the miter limit and therefore keeps the round-distance
+fallback.
+
+Preparation replays the atlas's deterministic curve layout until every requested glyph has
+been reached. It is therefore linear in the atlas prefix ending at the last referenced
+glyph on that atlas's first preparation, then O(1) for repeated slider changes:
+
+1. Walk the ordered curves, joining consecutive segments whose endpoints coincide and
+   wrapping a closed contour's final segment back to its first.
+2. Compute the glyph's winding sign from the exact signed-area integral of all quadratic
+   segments. Oppositely wound holes subtract from the outer contours, leaving the filled
+   side consistent for the glyph.
+3. Normalize the incoming and outgoing endpoint tangents. Keep only turns whose sign
+   matches the glyph winding: these are convex on the exterior; re-entrant joins retain the
+   round fallback.
+4. Build the bisector of their left normals, divide by its projection onto either normal,
+   then multiply by the negative winding sign so the stored vector points into the empty
+   exterior for either outline orientation.
+5. Reject smooth/reversing joins and vectors longer than the `2.5` miter limit.
+6. Replay the atlas's existing two-texels-per-curve row packing, write the accepted vector
+   into the second texel's `.zw`, and stop as soon as all requested glyphs are prepared.
+
+All preprocessing code lives in the tree-shakable setter module. Consumers that do not
+import the setter retain zero preprocessing code and never write these channels. The
+feature caches prepared glyph ids in a `WeakMap` keyed by `SharedAtlas`; repeated offset
+changes are therefore O(1) with respect to contour topology. New glyphs are prepared the
+first time a run that references them receives a nonzero offset.
 
 ### Why the weight fragment owns its own scan
 
@@ -1008,13 +1056,14 @@ top edges of a glyph and on all four corners. The weight fragment consequently d
 own complete, bounded scan in `FH` and reads nothing from the base loops:
 
 ```wgsl
-fn wdst(rc:vec2<f32>,gp:vec2<i32>,bm:vec2<i32>,bn:vec4<f32>,rad:f32)->f32
+fn wdst(rc:vec2<f32>,gp:vec2<i32>,bm:vec2<i32>,bn:vec4<f32>,rad:f32,wo:f32)->WD
 ```
 
-- **Search radius.** `rad = wo + 1/aaScale` font units, where `aaScale = max(pe.x, pe.y)` is
-  pixels-per-font-unit. Beyond that radius the weighted coverage saturates to 0 (outside) or is
-  dominated by the base coverage (inside), so a curve farther than `rad` cannot change the
-  result.
+- **Search radius.** `rad = 2.5 * wo + 1/aaScale` font units, where
+  `aaScale = max(pe.x, pe.y)` is pixels-per-font-unit. The factor is the miter limit: every
+  accepted apex lies within `2.5 * wo` of its endpoint. Beyond that radius both round and
+  miter coverage saturate to 0 (outside) or are dominated by base coverage (inside), so a
+  curve farther than `rad` cannot change the result.
 - **Complete band range.** Every h-band spans the full glyph width in `x` and partitions
   `y` (`glyph-storage.ts` → `buildBandsInternal`), and a band holds every curve whose
   `y`-extent intersects it. `wdst` therefore iterates **all** h-bands intersecting
@@ -1041,9 +1090,10 @@ fn wdst(rc:vec2<f32>,gp:vec2<i32>,bm:vec2<i32>,bn:vec4<f32>,rad:f32)->f32
 ```wgsl
 if(in.wo!=0.0){
   let aas=max(max(pe.x,pe.y),1.0e-8);
-  let d=wdst(rc,gp,bm,in.bn,in.wo+1.0/aas);
-  let wc=clamp((in.wo-d)*aas+0.5,0.0,1.0);
-  cov=max(cov,wc);
+  let wd=wdst(rc,gp,bm,in.bn,2.5*in.wo+1.0/aas,in.wo);
+  let wc=clamp((in.wo-wd.d)*aas+0.5,0.0,1.0);
+  let mc=clamp(0.5-wd.m*aas,0.0,1.0);
+  cov=max(cov,max(wc,mc));
 }
 ```
 
@@ -1051,15 +1101,20 @@ if(in.wo!=0.0){
    a variant group — takes no distance scan at all and keeps the base coverage bit-exactly.
 2. **Base Slug coverage runs unchanged** and remains authoritative inside the original fill.
 3. **Unsigned contour distance.** Positive-only emboldening needs no inside/outside
-   classification: `wdst` is the distance to the nearest outline in either direction.
+   classification: `wdst.d` is the distance to the nearest outline in either direction.
 4. **Offset threshold.** Coverage decreases with distance, and the offset pushes
-   the boundary outward: `wc = saturate((wo - d) * aaScale + 0.5)`, a ~1px screen-space
+   the boundary outward: `wc = saturate((wo - wd.d) * aaScale + 0.5)`, a ~1px screen-space
    transition.
-5. **Monotone finalization.** Emboldening may only add coverage:
-   `cov = max(cov, wc)`. This keeps the analytic base coverage authoritative inside the
+5. **Miter wedge.** For each nonzero `.zw` vector, the scan orients the current endpoint
+   normal toward that stored exterior apex and reflects it across the bisector to recover
+   the adjoining normal. Signed distance to the single resulting triangle produces `wd.m`;
+   `mc = saturate(0.5 - wd.m * aaScale)` supplies anti-aliased sharp convex corners while
+   concave and CPU-rejected joins retain round expansion.
+6. **Monotone finalization.** Emboldening may only add coverage:
+   `cov = max(cov, max(wc, mc))`. This keeps the analytic base coverage authoritative inside the
    original fill, while the distance field contributes only its outward expansion. An
    overestimated `wdst` can never punch holes into the original glyph.
-6. The template then applies the coverage gamma and the `a2c` premultiply select exactly as
+7. The template then applies the coverage gamma and the `a2c` premultiply select exactly as
    for the base variant.
 
 `aaScale` is floored at `1e-8` so a degenerate derivative (`fwidth == inf`) cannot produce a
@@ -1072,7 +1127,9 @@ Offsets are clamped to `[0, 100]` font design units; out-of-range values are cla
 effect depends on the font's `unitsPerEm`: for a 2048-unit font, `100` is about `0.049 em`.
 The bound exists because large offsets expand the glyph quad into its neighbours and
 lengthen the per-pixel band scan (its cost is proportional to the number of bands the
-radius spans).
+radius spans). Miter joins use a fixed `2.5` limit: common right-angle corners and Inter's Q
+tail (about `2.25 * offset`) remain sharp, while more acute joins fall back to the existing
+round expansion instead of producing long spikes or forcing larger quads.
 
 ### Test specification
 
@@ -1082,6 +1139,13 @@ radius spans).
   and `Infinity` rejected with `console.error` and no repack; values clamped to `[0, 100]` with
   `console.warn`; setting the value a run already has is a no-op (`_version` and
   `_layoutVersion` unchanged), and a zero call on a never-weighted run installs nothing.
+- **Miter preparation** — the curve texel `.zw` channels start at zero; the first effective
+  positive call writes the expected unit miter vectors only for referenced glyphs and bumps
+  the atlas version once; repeated calls and additional weighted runs referencing an
+  already-prepared glyph do not rewrite or re-version the atlas. An L-shaped fixture proves
+  the convex joins point toward the exterior while its re-entrant join stays zero. An open
+  glyph with no accepted joins proves no atlas version/upload churn, and swapping storage
+  under an already-weighted run prepares the replacement atlas during reset.
 - **Run resolution** — the index form (`setFontWeightOffset(data, 0, …)`) is equivalent to
   the reference form; an out-of-range index and a `GlyphRun` that belongs to another
   `TextData` both throw with the `updateTextData`-shaped message.
@@ -1113,7 +1177,8 @@ radius spans).
   significant line, proving composition rather than duplication. `_key` is `""` for the base
   and the fragment id for the variant.
 - **Coverage direction** — a JS replica of the `CO` transfer function proves positive offsets
-  expand and that `max` finalization can never remove analytic base coverage.
+  expand, miter triangles add their sharp wedge, and `max` finalization can never remove
+  analytic base coverage.
 - **Pipeline cache key** — the exported key builder is fixed arity and a base A2C pipeline
   cannot collide with a variant whose id is `"a"`.
 

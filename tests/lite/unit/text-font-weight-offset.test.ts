@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import type { GlyphCurves, QuadCurve } from "../../../packages/babylon-lite/src/text/glyph-storage";
 import { createTextData, updateTextData, TEXT_INSTANCE_FLOATS, TEXT_STYLE_FLOATS, _textStyleSeam } from "../../../packages/babylon-lite/src/text/text-data";
 import type { GlyphRun } from "../../../packages/babylon-lite/src/text/text-data";
-import { buildGlyphBands, createGlyphStorage } from "../../../packages/babylon-lite/src/text/glyph-storage";
+import { buildGlyphBands, createGlyphStorage, TEX_WIDTH } from "../../../packages/babylon-lite/src/text/glyph-storage";
 import { setFontWeightOffset } from "../../../packages/babylon-lite/src/text/set-font-weight-offset";
 import { createFontFromBuffer } from "../../../packages/babylon-lite/src/text/font";
 import { createDefaultTextData, disposeDefaultTextData, updateDefaultTextData } from "../../../packages/babylon-lite/src/text/default-text-data";
@@ -24,6 +24,30 @@ function makeGlyph(glyphId: number): GlyphCurves {
     };
 }
 
+/** Counter-clockwise L shape with one re-entrant join at curve 3's endpoint. */
+function concaveGlyph(): GlyphCurves {
+    const points: [number, number][] = [
+        [0, 0],
+        [100, 0],
+        [100, 100],
+        [50, 100],
+        [50, 50],
+        [0, 50],
+    ];
+    const curves = points.map((point, i): QuadCurve => {
+        const next = points[(i + 1) % points.length]!;
+        return {
+            p0x: point[0],
+            p0y: point[1],
+            p1x: (point[0] + next[0]) / 2,
+            p1y: (point[1] + next[1]) / 2,
+            p2x: next[0],
+            p2y: next[1],
+        };
+    });
+    return { glyphId: 1, curves, bounds: { xMin: 0, yMin: 0, xMax: 100, yMax: 100 } };
+}
+
 const PACKED_OFFSET = 2;
 const STYLE_PARAMS_Y_OFFSET = 5; // params.y in the 8-float TextStyle struct
 
@@ -36,6 +60,27 @@ function instanceWeightOffset(data: ReturnType<typeof createTextData>, i: number
 /** The style parameter `text-data` would pack for a run (0 when no feature is installed). */
 function styleParam(run: GlyphRun): number {
     return _textStyleSeam?._param(run) ?? 0;
+}
+
+/** Read the feature-owned miter vector from one curve's second atlas texel. */
+function curveMiter(data: ReturnType<typeof createTextData>, curveSetId: string, glyphId: number, curveIndex: number): [number, number] {
+    const curveSet = data._storage._curveSets.get(curveSetId)!;
+    let curveTexel = 0;
+    for (const [id, glyph] of curveSet._curves) {
+        for (let i = 0; i < glyph.curves.length; i++) {
+            const row0 = (curveTexel / TEX_WIDTH) | 0;
+            const row1 = ((curveTexel + 1) / TEX_WIDTH) | 0;
+            if (row0 !== row1) {
+                curveTexel = row1 * TEX_WIDTH;
+            }
+            if (id === glyphId && i === curveIndex) {
+                const offset = (curveTexel + 1) * 4;
+                return [curveSet._atlas._curveTexData[offset + 2]!, curveSet._atlas._curveTexData[offset + 3]!];
+            }
+            curveTexel += 2;
+        }
+    }
+    throw new Error(`curve ${curveIndex} of glyph ${glyphId} not found`);
 }
 
 const SETTER_STORAGE = createGlyphStorage(
@@ -206,6 +251,116 @@ describe("setFontWeightOffset", () => {
         expect(data._groups[0]!._groupKey).not.toBe("f");
         expect(instanceWeightOffset(data, 0)).toBe(Math.fround(10));
     });
+
+    it("prepares sharp miter joins once for referenced glyphs on the first positive offset", () => {
+        const storage = createGlyphStorage(
+            new Map([
+                [
+                    "square",
+                    new Map<number, GlyphCurves>([
+                        [1, squareGlyph()],
+                        [2, makeGlyph(2)],
+                    ]),
+                ],
+            ])
+        );
+        const run: GlyphRun = { curveSet: "square", glyphs: [{ glyphId: 1, x: 0, y: 0 }], pixelsPerFontUnit: 1 };
+        const data = createTextData(storage, [run]);
+        const atlas = data._storage._curveSets.get("square")!._atlas;
+        const initialAtlasVersion = atlas._version;
+
+        expect(curveMiter(data, "square", 1, 0)).toEqual([0, 0]);
+        expect(curveMiter(data, "square", 1, 3)).toEqual([0, 0]);
+        expect(curveMiter(data, "square", 2, 0)).toEqual([0, 0]);
+
+        setFontWeightOffset(data, run, 10);
+
+        expect(atlas._version).toBe(initialAtlasVersion + 1);
+        expect(curveMiter(data, "square", 1, 0)).toEqual([0, 0]);
+        expect(curveMiter(data, "square", 1, 3)[0]).toBeCloseTo(1);
+        expect(curveMiter(data, "square", 1, 3)[1]).toBeCloseTo(-1);
+        expect(curveMiter(data, "square", 1, 7)[0]).toBeCloseTo(1);
+        expect(curveMiter(data, "square", 1, 7)[1]).toBeCloseTo(1);
+        expect(curveMiter(data, "square", 2, 0)).toEqual([0, 0]);
+
+        setFontWeightOffset(data, run, 20);
+        expect(atlas._version).toBe(initialAtlasVersion + 1);
+    });
+
+    it("does not prepare or re-version an atlas when clearing an unweighted run", () => {
+        const storage = createGlyphStorage(new Map([["square", new Map([[1, squareGlyph()]])]]));
+        const run: GlyphRun = { curveSet: "square", glyphs: [{ glyphId: 1, x: 0, y: 0 }], pixelsPerFontUnit: 1 };
+        const data = createTextData(storage, [run]);
+        const atlas = data._storage._curveSets.get("square")!._atlas;
+        const version = atlas._version;
+
+        setFontWeightOffset(data, run, 0);
+
+        expect(atlas._version).toBe(version);
+        expect(curveMiter(data, "square", 1, 3)).toEqual([0, 0]);
+    });
+
+    it("does not prepare unrelated unweighted data after the global styling seam is installed", () => {
+        const weighted = makeLiveData();
+        setFontWeightOffset(weighted.data, weighted.run, 10);
+
+        const storage = createGlyphStorage(new Map([["square", new Map([[1, squareGlyph()]])]]));
+        const run: GlyphRun = { curveSet: "square", glyphs: [{ glyphId: 1, x: 0, y: 0 }], pixelsPerFontUnit: 1 };
+        const data = createTextData(storage, [run]);
+        const atlas = storage._curveSets.get("square")!._atlas;
+        const version = atlas._version;
+
+        updateTextData(data, { update: "reset" });
+
+        expect(atlas._version).toBe(version);
+        expect(curveMiter(data, "square", 1, 3)).toEqual([0, 0]);
+    });
+
+    it("does not re-version an atlas when a weighted glyph has no accepted miter joins", () => {
+        const openGlyph: GlyphCurves = {
+            glyphId: 1,
+            curves: [{ p0x: 0, p0y: 0, p1x: 50, p1y: 50, p2x: 100, p2y: 0 }],
+            bounds: { xMin: 0, yMin: 0, xMax: 100, yMax: 50 },
+        };
+        const storage = createGlyphStorage(new Map([["open", new Map([[1, openGlyph]])]]));
+        const run: GlyphRun = { curveSet: "open", glyphs: [{ glyphId: 1, x: 0, y: 0 }], pixelsPerFontUnit: 1 };
+        const data = createTextData(storage, [run]);
+        const atlas = storage._curveSets.get("open")!._atlas;
+        const version = atlas._version;
+
+        setFontWeightOffset(data, run, 10);
+
+        expect(atlas._version).toBe(version);
+        expect(curveMiter(data, "open", 1, 0)).toEqual([0, 0]);
+    });
+
+    it("prepares a replacement atlas automatically when weighted data swaps storage", () => {
+        const makeStorage = () => createGlyphStorage(new Map([["square", new Map([[1, squareGlyph()]])]]));
+        const run: GlyphRun = { curveSet: "square", glyphs: [{ glyphId: 1, x: 0, y: 0 }], pixelsPerFontUnit: 1 };
+        const data = createTextData(makeStorage(), [run]);
+        setFontWeightOffset(data, run, 10);
+
+        const replacement = makeStorage();
+        const atlas = replacement._curveSets.get("square")!._atlas;
+        const initialAtlasVersion = atlas._version;
+        updateTextData(data, { update: "reset", storage: replacement });
+
+        expect(curveMiter(data, "square", 1, 3)[0]).toBeCloseTo(1);
+        expect(curveMiter(data, "square", 1, 3)[1]).toBeCloseTo(-1);
+        expect(atlas._version).toBe(initialAtlasVersion + 1);
+    });
+
+    it("stores only exterior-facing convex miters and rejects a re-entrant join", () => {
+        const storage = createGlyphStorage(new Map([["concave", new Map([[1, concaveGlyph()]])]]));
+        const run: GlyphRun = { curveSet: "concave", glyphs: [{ glyphId: 1, x: 0, y: 0 }], pixelsPerFontUnit: 1 };
+        const data = createTextData(storage, [run]);
+
+        setFontWeightOffset(data, run, 10);
+
+        expect(curveMiter(data, "concave", 1, 0)[0]).toBeCloseTo(1);
+        expect(curveMiter(data, "concave", 1, 0)[1]).toBeCloseTo(-1);
+        expect(curveMiter(data, "concave", 1, 3)).toEqual([0, 0]);
+    });
 });
 
 describe("font-weight-offset style packing", () => {
@@ -349,11 +504,12 @@ function weightedCoverage(distance: number, weightOffset: number, aaScale: numbe
 }
 
 /** Pure-JS replica of the `CO` slot as a whole, including the monotone finalization. */
-function finalCoverage(baseCoverage: number, distance: number, weightOffset: number, aaScale: number): number {
+function finalCoverage(baseCoverage: number, distance: number, miterDistance: number, weightOffset: number, aaScale: number): number {
     if (weightOffset === 0) {
         return baseCoverage;
     }
-    return Math.max(baseCoverage, weightedCoverage(distance, weightOffset, aaScale));
+    const miterCoverage = Math.min(Math.max(0.5 - miterDistance * aaScale, 0), 1);
+    return Math.max(baseCoverage, weightedCoverage(distance, weightOffset, aaScale), miterCoverage);
 }
 
 describe("font-weight-offset shader-math direction", () => {
@@ -373,27 +529,32 @@ describe("font-weight-offset shader-math direction", () => {
 
     it("a zero offset leaves the analytic base coverage untouched", () => {
         for (const base of [0, 0.25, 0.5, 0.75, 1]) {
-            expect(finalCoverage(base, 0.37, 0, AA)).toBe(base);
+            expect(finalCoverage(base, 0.37, -0.1, 0, AA)).toBe(base);
         }
     });
 
     it("a positive offset can only add coverage, never remove it", () => {
         // Overestimated distance (nearest contour missed / beyond the search radius) must not
         // punch a hole in a filled interior.
-        expect(finalCoverage(1, 5, 0.05, AA)).toBe(1);
+        expect(finalCoverage(1, 5, 5, 0.05, AA)).toBe(1);
         for (const distance of [0, 0.02, 0.5, 5]) {
-            expect(finalCoverage(0.6, distance, 0.05, AA)).toBeGreaterThanOrEqual(0.6);
+            expect(finalCoverage(0.6, distance, 5, 0.05, AA)).toBeGreaterThanOrEqual(0.6);
         }
     });
 
+    it("a point inside a miter wedge gains coverage beyond the round expansion", () => {
+        expect(finalCoverage(0, 5, -0.02, 0.05, AA)).toBeGreaterThan(0.9);
+    });
+
     it("matches the WGSL emitted by the weight fragment's coverage slot", () => {
-        // Keeps the JS replica honest: the shader must use unsigned distance, guard on a zero
-        // offset, and combine only with max.
+        // Keeps the JS replica honest: the shader must use unsigned contour distance, signed
+        // miter distance, guard on a zero offset, and combine only with max.
         const co = WEIGHT_SHADER_FRAGMENT._fragmentSlots!.CO!.replace(/\s+/g, "");
         expect(co).toContain("if(in.wo!=0.0){");
-        expect(co).toContain("letd=wdst(rc,gp,bm,in.bn,in.wo+1.0/aas)");
-        expect(co).toContain("letwc=clamp((in.wo-d)*aas+0.5,0.0,1.0)");
-        expect(co).toContain("cov=max(cov,wc)");
+        expect(co).toContain("letwd=wdst(rc,gp,bm,in.bn,2.5*in.wo+1.0/aas,in.wo)");
+        expect(co).toContain("letwc=clamp((in.wo-wd.d)*aas+0.5,0.0,1.0)");
+        expect(co).toContain("letmc=clamp(0.5-wd.m*aas,0.0,1.0)");
+        expect(co).toContain("cov=max(cov,max(wc,mc))");
         expect(co).not.toContain("select(");
         expect(co).not.toContain("min(cov,wc)");
     });
@@ -788,7 +949,12 @@ describe("Slug shader composition", () => {
 
         expect(variant._frag).toContain("@location(4) @interpolate(flat) wo:f32,");
         expect(variant._frag).toContain("fn dq(");
+        expect(variant._frag).toContain("fn td(");
+        expect(variant._frag).toContain("if(dot(tv,tv)<1.0e-12){tv=C-A;}");
+        expect(variant._frag).toContain("n=n*select(-1.0,1.0,dot(n,m)>=0.0);");
+        expect(variant._frag).not.toContain("nap");
         expect(variant._frag).toContain("fn wdst(");
+        expect(variant._frag).toContain("struct WD{d:f32,m:f32}");
         expect(variant._frag).toContain("if(in.wo!=0.0){");
         // The distance scan is declared once, as a helper, and called once from the override.
         expect(count(variant._frag, "fn wdst(")).toBe(1);
