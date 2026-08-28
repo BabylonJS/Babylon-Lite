@@ -31,7 +31,11 @@ export interface RaceHud {
 export function createRaceHud(paneCount: 1 | 2): RaceHud {
     const root = document.createElement("div");
     root.className = "ag-hud";
-    const panes: { speed: HTMLElement }[] = [];
+    const speedLabels: string[] = [];
+    for (let i = 0; i <= 255; i++) {
+        speedLabels.push(String(i));
+    }
+    const panes: { speed: HTMLElement; value: number }[] = [];
     for (let i = 0; i < paneCount; i++) {
         const pane = document.createElement("div");
         pane.className = "ag-hud-pane";
@@ -43,7 +47,7 @@ export function createRaceHud(paneCount: 1 | 2): RaceHud {
             </div>
         `;
         root.appendChild(pane);
-        panes.push({ speed: pane.querySelector(".ag-hud-speed-val")! });
+        panes.push({ speed: pane.querySelector(".ag-hud-speed-val")!, value: 0 });
     }
 
     const hint = document.createElement("div");
@@ -87,7 +91,11 @@ export function createRaceHud(paneCount: 1 | 2): RaceHud {
                 return;
             }
             // `velocity` is per 60 Hz tick, so ×60 reads as world units per second.
-            pane.speed.textContent = String(Math.round(Math.abs(ship.velocity) * 60));
+            const speed = Math.min(255, Math.round(Math.abs(ship.velocity) * 60));
+            if (speed !== pane.value) {
+                pane.speed.textContent = speedLabels[speed]!;
+                pane.value = speed;
+            }
         },
         setControlsHint(text: string): void {
             hint.textContent = text;

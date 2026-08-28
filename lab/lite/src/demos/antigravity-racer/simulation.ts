@@ -327,7 +327,8 @@ const AI_CONTROLS: ShipControls = { left: false, right: false, accelerate: false
 
 /** Tick every ship once, in spawn order — the playground's `TickShips` loop. */
 export function tickAllShips(ships: readonly ShipState[], track: TrackData, controlsForPlayer: (playerSlot: 0 | 1) => ShipControls, simTime: number): void {
-    for (const ship of ships) {
+    for (let i = 0; i < ships.length; i++) {
+        const ship = ships[i]!;
         tickShip(ship, ships, track, ship.isAI ? AI_CONTROLS : controlsForPlayer(ship.playerSlot as 0 | 1), simTime);
     }
 }

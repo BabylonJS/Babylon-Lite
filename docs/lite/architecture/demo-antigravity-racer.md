@@ -577,9 +577,9 @@ directionalLight      = createDirectionalLight([-1, -2, -1], 1)
 directionalLight.position = (120, 50, 100)
 ```
 
-As a deliberate post-parity presentation change, every mode loads
-`https://playground.babylonjs.com/textures/environment.env`, the prefiltered sibling of the
-`environment.hdr` used by Playground `CGA05F#831`. It is used for both IBL and a 1000-unit visible
+As a deliberate post-parity presentation change, every mode loads the exact raw
+`https://playground.babylonjs.com/textures/environment.hdr` used by Playground `CGA05F#831`.
+Babylon-Lite converts it to a 512-pixel cubemap and uses it for both IBL and a 1000-unit visible
 skybox, without tone mapping and at exposure/contrast `1`, while the racer's own terrain remains.
 
 Terrain:

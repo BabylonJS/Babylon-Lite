@@ -58,10 +58,6 @@ function applyDeadzone(raw: number, deadzone: number): number {
     return Math.sign(raw) * ((Math.abs(raw) - deadzone) / (1 - deadzone));
 }
 
-interface GamepadEdgeState {
-    prevButtons: boolean[];
-}
-
 export interface InputSystem {
     /** Re-sample connected gamepads. Call once per rendered frame before reading axes/edges. */
     poll(): void;
@@ -120,7 +116,9 @@ export function createInputSystem(): InputSystem {
     let dpadDownEdge = false;
     const cameraEdge: [boolean, boolean] = [false, false];
     let gamepadConnected = false;
-    const gamepadStates = new Map<number, GamepadEdgeState>();
+    const sampledPads: (Gamepad | null)[] = [null, null];
+    const previousButtons = [new Uint8Array(32), new Uint8Array(32)];
+    const noPads: readonly (Gamepad | null)[] = [];
 
     const onKeyDown = (e: KeyboardEvent): void => {
         const wasDown = keysDown.has(e.code);
@@ -164,7 +162,10 @@ export function createInputSystem(): InputSystem {
         gamepadConnected = true;
     };
     const onGamepadDisconnected = (e: GamepadEvent): void => {
-        gamepadStates.delete(e.gamepad.index);
+        if (e.gamepad.index < sampledPads.length) {
+            sampledPads[e.gamepad.index] = null;
+            previousButtons[e.gamepad.index]!.fill(0);
+        }
     };
     const onVisibilityChange = (): void => {
         if (document.hidden) {
@@ -180,22 +181,22 @@ export function createInputSystem(): InputSystem {
     window.addEventListener("gamepaddisconnected", onGamepadDisconnected);
 
     function poll(): void {
-        const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+        const pads = navigator.getGamepads?.() ?? noPads;
         let anyConnected = false;
-        for (const pad of pads) {
+        sampledPads[0] = pads[0] ?? null;
+        sampledPads[1] = pads[1] ?? null;
+        for (let padIndex = 0; padIndex < sampledPads.length; padIndex++) {
+            const pad = sampledPads[padIndex];
             if (!pad) {
                 continue;
             }
             anyConnected = true;
-            let state = gamepadStates.get(pad.index);
-            if (!state) {
-                state = { prevButtons: pad.buttons.map(() => false) };
-                gamepadStates.set(pad.index, state);
-            }
             const playerSlot: 0 | 1 = pad.index === 0 ? 0 : 1;
-            for (let b = 0; b < pad.buttons.length; b++) {
+            const prev = previousButtons[playerSlot]!;
+            const buttonCount = Math.min(pad.buttons.length, prev.length);
+            for (let b = 0; b < buttonCount; b++) {
                 const pressed = pad.buttons[b]!.pressed;
-                const was = state.prevButtons[b] ?? false;
+                const was = prev[b] !== 0;
                 if (pressed && !was) {
                     if (b === BTN_START) {
                         pauseEdge = true;
@@ -218,7 +219,7 @@ export function createInputSystem(): InputSystem {
                         dpadDownEdge = true;
                     }
                 }
-                state.prevButtons[b] = pressed;
+                prev[b] = pressed ? 1 : 0;
             }
         }
         gamepadConnected = anyConnected;
@@ -232,6 +233,10 @@ export function createInputSystem(): InputSystem {
     const _gpControls: [ShipControls, ShipControls] = [
         { left: false, right: false, accelerate: false },
         { left: false, right: false, accelerate: false },
+    ];
+    const _rightSticks: [{ x: number; y: number }, { x: number; y: number }] = [
+        { x: 0, y: 0 },
+        { x: 0, y: 0 },
     ];
 
     function readKeyboardControls(
@@ -266,8 +271,7 @@ export function createInputSystem(): InputSystem {
     }
 
     function gamepadControlsFor(playerSlot: 0 | 1): ShipControls | null {
-        const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-        const pad = pads[playerSlot];
+        const pad = sampledPads[playerSlot];
         if (!pad) {
             return null;
         }
@@ -280,14 +284,18 @@ export function createInputSystem(): InputSystem {
     }
 
     function getRightStick(playerSlot: 0 | 1): { x: number; y: number } {
-        const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-        const pad = pads[playerSlot];
+        const out = _rightSticks[playerSlot];
+        const pad = sampledPads[playerSlot];
         if (!pad || pad.axes.length <= AXIS_RSTICK_Y) {
-            return { x: 0, y: 0 };
+            out.x = 0;
+            out.y = 0;
+            return out;
         }
         const x = applyDeadzone(pad.axes[AXIS_RSTICK_X] ?? 0, GAMEPAD_DEADZONE);
         const y = applyDeadzone(pad.axes[AXIS_RSTICK_Y] ?? 0, GAMEPAD_DEADZONE);
-        return { x: Math.max(-1, Math.min(1, x)), y: Math.max(-1, Math.min(1, y)) };
+        out.x = Math.max(-1, Math.min(1, x));
+        out.y = Math.max(-1, Math.min(1, y));
+        return out;
     }
 
     function getControls(playerSlot: 0 | 1): ShipControls {

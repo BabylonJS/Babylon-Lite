@@ -100,7 +100,7 @@ export class DemoCamera {
     private readonly _track: TrackData;
     private readonly _ships: readonly ShipState[];
     private _time = 0;
-    private _translate: Vec3 = { x: 0, y: 0, z: 0 };
+    private readonly _translate: Vec3 = { x: 0, y: 0, z: 0 };
 
     constructor(scene: SceneContext, track: TrackData, ships: readonly ShipState[]) {
         this._track = track;
@@ -136,7 +136,9 @@ export class DemoCamera {
         this._time = Math.random() * DEMO_CAMERA_TIME_RANGE + DEMO_CAMERA_MIN_TIME;
 
         const dirFactor = 3 * (Math.random() > 0.5 ? 1 : -1);
-        const aim = { x: frame.dir.x * dirFactor, y: frame.dir.y * dirFactor, z: frame.dir.z * dirFactor };
+        const aimX = frame.dir.x * dirFactor;
+        const aimY = frame.dir.y * dirFactor;
+        const aimZ = frame.dir.z * dirFactor;
 
         // TransformCoordinates INCLUDES the frame's translation, so this is a world point — then
         // scaled to a small drift velocity. Faithfully odd, exactly like the original.
@@ -144,11 +146,9 @@ export class DemoCamera {
         const ry = Math.random() * 2 - 1;
         const rz = Math.random() * 2 - 1;
         const scale = Math.random() * 0.014;
-        this._translate = {
-            x: (frame.pos.x + frame.right.x * rx + frame.up.x * ry + frame.dir.x * rz) * scale,
-            y: (frame.pos.y + frame.right.y * rx + frame.up.y * ry + frame.dir.y * rz) * scale,
-            z: (frame.pos.z + frame.right.z * rx + frame.up.z * ry + frame.dir.z * rz) * scale,
-        };
+        this._translate.x = (frame.pos.x + frame.right.x * rx + frame.up.x * ry + frame.dir.x * rz) * scale;
+        this._translate.y = (frame.pos.y + frame.right.y * rx + frame.up.y * ry + frame.dir.y * rz) * scale;
+        this._translate.z = (frame.pos.z + frame.right.z * rx + frame.up.z * ry + frame.dir.z * rz) * scale;
 
         const cam = this.camera;
         cam.position.set(
@@ -156,7 +156,7 @@ export class DemoCamera {
             frame.pos.y + frame.up.y * DEMO_CAMERA_UP - this._translate.y * this._time,
             frame.pos.z + frame.up.z * DEMO_CAMERA_UP - this._translate.z * this._time
         );
-        cam.target.set(frame.pos.x + aim.x * 3, frame.pos.y + aim.y * 3, frame.pos.z + aim.z * 3);
+        cam.target.set(frame.pos.x + aimX * 3, frame.pos.y + aimY * 3, frame.pos.z + aimZ * 3);
         cam.upVector.set(frame.up.x, frame.up.y, frame.up.z);
     }
 }

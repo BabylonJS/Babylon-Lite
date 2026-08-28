@@ -242,6 +242,7 @@ async function buildRace(
     const exitHint = !cfg.isMenuBackground && cfg.humanCount === 0 ? createAttractExitHint(() => void nav.goToMainMenu()) : null;
 
     let disposed = false;
+    const controlsForSlot = (slot: 0 | 1): ShipControls => (slot < cfg.humanCount ? input.getControls(slot) : NO_CONTROLS);
 
     if (hud) {
         hud.setControlsHint(controlsHint(input, cfg.humanCount));
@@ -290,9 +291,9 @@ async function buildRace(
             return true;
         },
         (simTime: number): void => {
-            grid.tick((slot) => (slot < cfg.humanCount ? input.getControls(slot) : NO_CONTROLS), simTime);
-            for (const chase of chases) {
-                chase.tick();
+            grid.tick(controlsForSlot, simTime);
+            for (let i = 0; i < chases.length; i++) {
+                chases[i]!.tick();
             }
             demoCamera?.tick();
             if (hud) {

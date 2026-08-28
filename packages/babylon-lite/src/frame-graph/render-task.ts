@@ -378,6 +378,10 @@ function resolvePendingMeshes(task: RenderTask, sc: SceneContext): void {
     task._pendingMeshes.length = 0;
 }
 
+function compareTransparentBindings(a: DrawBinding, b: DrawBinding): number {
+    return b._sortDistance! - a._sortDistance! || a.renderable.order - b.renderable.order;
+}
+
 /** Per-frame back-to-front sort for transparent bindings using the active camera. */
 function sortTransparentBindings(task: RenderTask, camera: Camera | null | undefined): void {
     const arr = task._transparentBindings;
@@ -385,11 +389,12 @@ function sortTransparentBindings(task: RenderTask, camera: Camera | null | undef
         return;
     }
     const v = getViewMatrix(camera);
-    for (const b of arr) {
+    for (let i = 0; i < arr.length; i++) {
+        const b = arr[i]!;
         const wc = b.renderable._worldCenter;
         b._sortDistance = wc ? wc[0]! * v[2]! + wc[1]! * v[6]! + wc[2]! * v[10]! + v[14]! : 0;
     }
-    arr.sort((a, b) => b._sortDistance! - a._sortDistance! || a.renderable.order - b.renderable.order);
+    arr.sort(compareTransparentBindings);
 }
 
 /** (Re)bucket task._renderables into bound lists. */
@@ -482,14 +487,15 @@ function prepareRenderTaskPass(task: RenderTask, eng: EngineContext, targetSigna
     // (e.g. transparent billboard systems) need it to compute view-space sort
     // depths during their update.
     (context as MutableDrawUpdateContext)._camera = camera;
-    for (const batch of task._updateBatches) {
-        batch.reset();
+    const batches = task._updateBatches;
+    for (let i = 0; i < batches.length; i++) {
+        batches[i]!.reset();
     }
     updateBindings(task._opaqueBindings, context);
     updateBindings(task._directBindings, context);
     updateBindings(task._transparentBindings, context);
-    for (const batch of task._updateBatches) {
-        batch.flush(eng);
+    for (let i = 0; i < batches.length; i++) {
+        batches[i]!.flush(eng);
     }
     // Per-frame back-to-front sort for transparent bindings — must run AFTER
     // updateBindings so renderables that compute `_worldCenter` inside their
@@ -639,16 +645,16 @@ export function _writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: 
     _packSceneUniforms(data, eng, scene, camera, aspect);
     const contribs = scene._sceneUboContributors;
     if (contribs) {
-        for (const c of contribs) {
-            c(data, scene);
+        for (let i = 0; i < contribs.length; i++) {
+            contribs[i]!(data, scene);
         }
     }
     eng._device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
 }
 
 function updateBindings(list: readonly DrawBinding[], context: DrawUpdateContext): void {
-    for (const b of list) {
-        b.update?.(context);
+    for (let i = 0; i < list.length; i++) {
+        list[i]!.update?.(context);
     }
 }
 
@@ -656,7 +662,8 @@ function updateBindings(list: readonly DrawBinding[], context: DrawUpdateContext
 export function drawList(enc: GPURenderPassEncoder | GPURenderBundleEncoder, list: readonly DrawBinding[], engine: EngineContext): number {
     let lp: GPURenderPipeline | null = null;
     let draws = 0;
-    for (const b of list) {
+    for (let i = 0; i < list.length; i++) {
+        const b = list[i]!;
         const mesh = b.renderable.mesh;
         if (mesh && mesh.visible === false) {
             continue;
