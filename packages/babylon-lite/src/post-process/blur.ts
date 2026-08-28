@@ -145,7 +145,8 @@ export function createBlurPostProcessTask(config: BlurPostProcessTaskConfig, eng
         if (shaderKernel !== params.kernel) {
             shaderKernel = params.kernel;
             updateBlurShader(task._shader, params.kernel);
-            task.record();
+            task._rebuildGpuState();
+            return;
         }
         baseUpdateUniforms();
     };
