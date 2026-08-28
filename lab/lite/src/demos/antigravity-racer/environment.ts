@@ -1,5 +1,7 @@
 import type { SceneContext } from "babylon-lite";
-import { loadHdrEnvironment } from "babylon-lite";
+import { loadHdrEnvironment, setFog } from "babylon-lite";
+
+import { RACER_FOG_COLOR, RACER_FOG_END, RACER_FOG_MODE, RACER_FOG_START } from "./constants.js";
 
 /** Exact raw environment used by Playground CGA05F#831. */
 export const RACER_ENVIRONMENT_URL = "https://playground.babylonjs.com/textures/environment.hdr";
@@ -20,4 +22,11 @@ export async function loadRacerEnvironment(scene: SceneContext): Promise<void> {
     scene.imageProcessing.toneMappingEnabled = false;
     scene.imageProcessing.exposure = 1;
     scene.imageProcessing.contrast = 1;
+    setFog(scene, {
+        mode: RACER_FOG_MODE,
+        density: 0,
+        start: RACER_FOG_START,
+        end: RACER_FOG_END,
+        color: RACER_FOG_COLOR,
+    });
 }

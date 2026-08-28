@@ -6,7 +6,8 @@
  * (`initPlay`, `initEditing`) reuses them. This module reproduces that lifetime:
  * {@link createRacerWorlds} runs exactly once per page and its resources — the
  * 600-subdivision height-mapped ground, the boulder pool, the track pieces and
- * the CSM depth arrays — live until the page goes away. Mode switching only
+ * the CSM depth arrays — live until the page goes away. The presentation layer
+ * doubles the ground footprint and adds subtle blue distance fog. Mode switching only
  * builds and disposes scenes, cameras, HUD and the ship grid.
  *
  * **Why more than one "render world".** A CSM generator fits its cascades to ONE

@@ -8,6 +8,10 @@
  *   groundMaterial.diffuseTexture = new Texture("textures/ground.jpg"); uScale = vScale = 6
  *   groundMaterial.specularColor = black; ground.position.y = -2.05; ground.receiveShadows = true
  *
+ * This demo deliberately doubles the ground dimensions and UV tiling after the
+ * fidelity port so the terrain reaches farther toward the HDR horizon without
+ * stretching the ground artwork.
+ *
  * Those two files are NOT redistributed with this demo — they are fetched from
  * `playground.babylonjs.com` at runtime, so the terrain is the original's relief
  * and artwork exactly. A network/decode failure is surfaced as a hard error (the

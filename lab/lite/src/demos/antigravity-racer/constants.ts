@@ -223,14 +223,20 @@ export const TRAIL_EMITTER_LOCAL = { x: 0.05, y: 0, z: 0.85 };
 export const HUGE_BOUND_MIN: [number, number, number] = [-1000, -1000, -1000];
 export const HUGE_BOUND_MAX: [number, number, number] = [1000, 1000, 1000];
 
-/** Terrain: the source PG's height-mapped ground, verbatim
- *  (`CreateGroundFromHeightMap("ground", "textures/heightMap.png", 400, 400, 600, 0, 25, …)`). */
-export const TERRAIN_SIZE = 400;
+/** Terrain: twice the source PG's width/depth so the authored landscape extends to the HDR horizon. */
+export const TERRAIN_SIZE = 800;
 export const TERRAIN_SUBDIVISIONS = 600;
 export const TERRAIN_MIN_HEIGHT = 0;
 export const TERRAIN_MAX_HEIGHT = 25;
 export const TERRAIN_Y = -2.05;
-export const TERRAIN_UV_SCALE = 6;
+/** Preserve the playground ground texture's world-space texel density on the larger mesh. */
+export const TERRAIN_UV_SCALE = 12;
+
+/** Subtle linear blue atmospheric perspective over the enlarged terrain. */
+export const RACER_FOG_MODE = 3;
+export const RACER_FOG_START = 250;
+export const RACER_FOG_END = 900;
+export const RACER_FOG_COLOR: [number, number, number] = [0.12, 0.18, 0.25];
 
 /** Cascaded shadows, matching `new CascadedShadowGenerator(1024, light)` plus the PG's overrides. */
 export const SHADOW_MAP_SIZE = 1024;

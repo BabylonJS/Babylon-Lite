@@ -127,53 +127,53 @@ export function setWorldCasters(world: RenderWorld, extra: readonly Mesh[]): voi
 
 ## Constants (all in ORIGINAL per-tick units)
 
-| Name                       | Value                    | Playground origin                                |
-| -------------------------- | ------------------------ | ------------------------------------------------ |
-| `RING_COUNT`               | `256`                    | `texHeight`                                      |
-| `MAX_SPEED`                | `0.7`                    | `maxSpeed` (units per tick)                      |
-| `MAX_ACCEL`                | `0.004`                  | `maxAccel` (units per tick²)                     |
-| `VELOCITY_DRAG`            | `0.99`                   | `Ship.velocity *= 0.99`, applied every tick      |
-| `WALL_HIT_DRAG`            | `0.99`                   | extra `*= 0.99` on each wall clamp               |
-| `BOOST_SPEED_KICK`         | `0.3`                    | `Ship.velocity += 0.3`                           |
-| `BOOST_DEBOUNCE_SEGMENTS`  | `10`                     | `Math.abs(seg - LastBonusSegment) > 10`          |
-| `LAST_BONUS_SEGMENT_INIT`  | `99999`                  | `LastBonusSegment: 99999`                        |
-| `MAX_STEER_TILT`           | `0.8`                    | `desiredRotx = ±0.8`                             |
-| `MAX_YAW_RATE`             | `0.05`                   | `desiredRotySpeed = ±0.05` (radians per tick)    |
-| `UP_BLEND`                 | `0.1`                    | `Vector3.Lerp(Ship.up, n, 0.1)`                  |
-| `YAW_BLEND`                | `0.1`                    | `RotYSpeed += (desired - RotYSpeed) * 0.1`       |
-| `TILT_BLEND`               | `0.1`                    | `rotation.z += (desiredRotx - rotation.z) * 0.1` |
-| `INERTIA_SPEED_TERM`       | `0.98`                   | `fakeInertiaFactor = 1 - speedRatio * 0.98`      |
-| `GRAVITY_NOISE_STRENGTH`   | `0.1`                    | `gravityNoiseStrength`                           |
-| `NOISE_TILT_GAIN`          | `3`                      | `desiredRotx += noise.x * strength * 3`          |
-| `WOBBLE_Y_OFFSET`          | `0.5`                    | `ShipTransform.position.y = ... + 0.5`           |
-| `TICK_TIME`                | `0.0166`                 | `time += 0.0166` (noise clock, NOT `FIXED_DT`)   |
-| `FIXED_DT`                 | `1/60`                   | port-only fixed-step accumulator                 |
-| `MAX_STEPS_PER_FRAME`      | `6`                      | port-only stall guard                            |
-| `WALL_BASE_SLOPE`          | `2.5`                    | `wallSlope = 2.5 + localY`                       |
-| `FLOOR_DAMP` / `CEIL_DAMP` | `0.45` / `0.9`           | `localToSegment.y *= (y < 0) ? 0.45 : 0.9`       |
-| `AI_AIM_LOOKAHEAD`         | `6`                      | `segmentMatrices[(seg + 6) % 256]`               |
-| `AI_AVOID_LIMIT`           | `6`                      | `GetFirstNextShip(shipIndex, 6)`                 |
-| `AI_AVOID_TOLERANCE`       | `0.1`                    | `avoidTolerance`                                 |
-| `TOTAL_SHIP_COUNT`         | `8`                      | `initPlay(scene, 8, humanCount)`                 |
-| `SPAWN_LATERAL`            | `±1.5` alternating       | `(i & 1) ? 1.5 : -1.5`                           |
-| spawn segment              | `i` (0…7)                | `segStart = i`                                   |
-| `SHIP_MODEL_YAW`           | `Math.PI`                | `_ShipTransform.rotation.y = Math.PI`            |
-| `TRAIL_EMITTER_LOCAL`      | `(0.05, 0, 0.85)`        | `heater` local offset                            |
-| `CHASE_CAMERA_OFFSETS`     | `(0,3,-5)`, `(0,2,-2.8)` | `CameraRels`                                     |
-| `CHASE_TARGET_LOCAL`       | `(0, 0, 5)`              | `TransformCoordinatesFromFloatsToRef(0,0,5, …)`  |
-| `CAMERA_FOV`               | `0.8`                    | `fov += (0.8 - fov) * 0.01` → constant 0.8       |
-| `DEMO_CAMERA_SHIP`         | `5`                      | `Ships[5]`                                       |
-| `DEMO_CAMERA_LOOKAHEAD`    | `20`                     | `(currentSegment + 20) % 256`                    |
-| `DEMO_CAMERA_UP`           | `2`                      | `moveUp`                                         |
-| `DEMO_CAMERA_MIN/RANGE`    | `2` / `2`                | `Math.random() * 2 + 2`                          |
-| `EDITOR_CAMERA_FAR`        | `1500`                   | `editorCamera.maxZ = 1500`                       |
-| `TERRAIN_*`                | 400 / 600 / 0…25 / -2.05 | `CreateGroundFromHeightMap("ground", …)`         |
-| `TERRAIN_UV_SCALE`         | `6`                      | `diffuseTexture.uScale = vScale = 6`             |
-| `SHADOW_MAP_SIZE`          | `1024`                   | `new CascadedShadowGenerator(1024, light)`       |
-| `SHADOW_CASCADES`          | `4`                      | BJS `CascadedShadowGenerator` default            |
-| `SHADOW_LAMBDA`            | `1`                      | `shadowGenerator.lambda = 1`                     |
-| `SHADOW_BIAS`              | `0.001`                  | `shadowGenerator.bias = 0.001`                   |
-| `SHADOW_MAX_Z`             | `1500`                   | `shadowGenerator.shadowMaxZ = 1500`              |
+| Name                       | Value                    | Playground origin                                   |
+| -------------------------- | ------------------------ | --------------------------------------------------- |
+| `RING_COUNT`               | `256`                    | `texHeight`                                         |
+| `MAX_SPEED`                | `0.7`                    | `maxSpeed` (units per tick)                         |
+| `MAX_ACCEL`                | `0.004`                  | `maxAccel` (units per tick²)                        |
+| `VELOCITY_DRAG`            | `0.99`                   | `Ship.velocity *= 0.99`, applied every tick         |
+| `WALL_HIT_DRAG`            | `0.99`                   | extra `*= 0.99` on each wall clamp                  |
+| `BOOST_SPEED_KICK`         | `0.3`                    | `Ship.velocity += 0.3`                              |
+| `BOOST_DEBOUNCE_SEGMENTS`  | `10`                     | `Math.abs(seg - LastBonusSegment) > 10`             |
+| `LAST_BONUS_SEGMENT_INIT`  | `99999`                  | `LastBonusSegment: 99999`                           |
+| `MAX_STEER_TILT`           | `0.8`                    | `desiredRotx = ±0.8`                                |
+| `MAX_YAW_RATE`             | `0.05`                   | `desiredRotySpeed = ±0.05` (radians per tick)       |
+| `UP_BLEND`                 | `0.1`                    | `Vector3.Lerp(Ship.up, n, 0.1)`                     |
+| `YAW_BLEND`                | `0.1`                    | `RotYSpeed += (desired - RotYSpeed) * 0.1`          |
+| `TILT_BLEND`               | `0.1`                    | `rotation.z += (desiredRotx - rotation.z) * 0.1`    |
+| `INERTIA_SPEED_TERM`       | `0.98`                   | `fakeInertiaFactor = 1 - speedRatio * 0.98`         |
+| `GRAVITY_NOISE_STRENGTH`   | `0.1`                    | `gravityNoiseStrength`                              |
+| `NOISE_TILT_GAIN`          | `3`                      | `desiredRotx += noise.x * strength * 3`             |
+| `WOBBLE_Y_OFFSET`          | `0.5`                    | `ShipTransform.position.y = ... + 0.5`              |
+| `TICK_TIME`                | `0.0166`                 | `time += 0.0166` (noise clock, NOT `FIXED_DT`)      |
+| `FIXED_DT`                 | `1/60`                   | port-only fixed-step accumulator                    |
+| `MAX_STEPS_PER_FRAME`      | `6`                      | port-only stall guard                               |
+| `WALL_BASE_SLOPE`          | `2.5`                    | `wallSlope = 2.5 + localY`                          |
+| `FLOOR_DAMP` / `CEIL_DAMP` | `0.45` / `0.9`           | `localToSegment.y *= (y < 0) ? 0.45 : 0.9`          |
+| `AI_AIM_LOOKAHEAD`         | `6`                      | `segmentMatrices[(seg + 6) % 256]`                  |
+| `AI_AVOID_LIMIT`           | `6`                      | `GetFirstNextShip(shipIndex, 6)`                    |
+| `AI_AVOID_TOLERANCE`       | `0.1`                    | `avoidTolerance`                                    |
+| `TOTAL_SHIP_COUNT`         | `8`                      | `initPlay(scene, 8, humanCount)`                    |
+| `SPAWN_LATERAL`            | `±1.5` alternating       | `(i & 1) ? 1.5 : -1.5`                              |
+| spawn segment              | `i` (0…7)                | `segStart = i`                                      |
+| `SHIP_MODEL_YAW`           | `Math.PI`                | `_ShipTransform.rotation.y = Math.PI`               |
+| `TRAIL_EMITTER_LOCAL`      | `(0.05, 0, 0.85)`        | `heater` local offset                               |
+| `CHASE_CAMERA_OFFSETS`     | `(0,3,-5)`, `(0,2,-2.8)` | `CameraRels`                                        |
+| `CHASE_TARGET_LOCAL`       | `(0, 0, 5)`              | `TransformCoordinatesFromFloatsToRef(0,0,5, …)`     |
+| `CAMERA_FOV`               | `0.8`                    | `fov += (0.8 - fov) * 0.01` → constant 0.8          |
+| `DEMO_CAMERA_SHIP`         | `5`                      | `Ships[5]`                                          |
+| `DEMO_CAMERA_LOOKAHEAD`    | `20`                     | `(currentSegment + 20) % 256`                       |
+| `DEMO_CAMERA_UP`           | `2`                      | `moveUp`                                            |
+| `DEMO_CAMERA_MIN/RANGE`    | `2` / `2`                | `Math.random() * 2 + 2`                             |
+| `EDITOR_CAMERA_FAR`        | `1500`                   | `editorCamera.maxZ = 1500`                          |
+| `TERRAIN_*`                | 800 / 600 / 0…25 / -2.05 | Original footprint doubled as a presentation change |
+| `TERRAIN_UV_SCALE`         | `12`                     | Doubled with size to preserve texture density       |
+| `SHADOW_MAP_SIZE`          | `1024`                   | `new CascadedShadowGenerator(1024, light)`          |
+| `SHADOW_CASCADES`          | `4`                      | BJS `CascadedShadowGenerator` default               |
+| `SHADOW_LAMBDA`            | `1`                      | `shadowGenerator.lambda = 1`                        |
+| `SHADOW_BIAS`              | `0.001`                  | `shadowGenerator.bias = 0.001`                      |
+| `SHADOW_MAX_Z`             | `1500`                   | `shadowGenerator.shadowMaxZ = 1500`                 |
 
 Remote assets (loaded at runtime, never redistributed):
 
@@ -579,15 +579,18 @@ directionalLight.position = (120, 50, 100)
 
 As a deliberate post-parity presentation change, every mode loads the exact raw
 `https://playground.babylonjs.com/textures/environment.hdr` used by Playground `CGA05F#831`.
-Babylon-Lite converts it to a 512-pixel cubemap and uses it for both IBL and a 1000-unit visible
-skybox, without tone mapping and at exposure/contrast `1`, while the racer's own terrain remains.
+Babylon-Lite converts it to a 512-pixel cubemap and uses it for both diffuse/specular IBL and a
+1000-unit visible skybox, without tone mapping and at exposure/contrast `1`.
+
+The same presentation layer adds subtle linear blue fog (`start=250`, `end=900`,
+`color=(0.12, 0.18, 0.25)`) and doubles the terrain footprint while preserving texture density:
 
 Terrain:
 
 ```
 createGroundFromHeightMap(engine, HEIGHTMAP_URL, {
-    width: 400, height: 400, subdivisions: 600,
-    minHeight: 0, maxHeight: 25, uvScale: [6, 6],
+    width: 800, height: 800, subdivisions: 600,
+    minHeight: 0, maxHeight: 25, uvScale: [12, 12],
 })
 terrain.position.y   = -2.05
 terrain.material     = standard material, diffuseTexture = GROUND_TEXTURE_URL, specularColor = (0,0,0)
@@ -613,6 +616,10 @@ Caster meshes for the glTF models are the `HierarchyInstancePool.meshes` arrays 
 carrier meshes — so all eight ships / seven boulders cast from a single caster entry per source
 primitive. The CSM caster path computes a thin-instance world AABB for those meshes, so the cascade
 fit sees every instance.
+
+The Playground replaces the rock glTF root transform before assigning each authored TRS. The port
+does the same: it clears the cloned handedness-conversion root before applying the seven literal
+position, Euler rotation, and non-uniform scale triples, rather than mirroring the rock geometry.
 
 ### Track: casting and receiving
 

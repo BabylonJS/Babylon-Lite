@@ -157,11 +157,17 @@ export async function loadRacerAssets(engine: EngineContext): Promise<RacerAsset
  * copies. The returned pool's meshes carry the model's own materials, so all
  * copies render in one draw per source primitive.
  *
- * An instance matrix composes ON TOP of the template's world matrices (including
- * the glTF `__root__` right-to-left-handed flip), exactly like adding a parent
- * transform node above the model root.
+ * An instance matrix normally composes on top of the template's world matrices.
+ * `resetRootTransform` reproduces callers that replace Babylon's glTF conversion
+ * root before assigning their authored transform.
  */
-export function instantiateModel(template: SceneNode, capacity: number): { root: SceneNode; pool: HierarchyInstancePool } {
+export function instantiateModel(template: SceneNode, capacity: number, resetRootTransform = false): { root: SceneNode; pool: HierarchyInstancePool } {
     const root = cloneTransformNode(template);
+    if (resetRootTransform) {
+        root._localMatrix = undefined;
+        root.position.set(0, 0, 0);
+        root.rotationQuaternion.set(0, 0, 0, 1);
+        root.scaling.set(1, 1, 1);
+    }
     return { root, pool: createHierarchyInstancePool(root, capacity) };
 }
