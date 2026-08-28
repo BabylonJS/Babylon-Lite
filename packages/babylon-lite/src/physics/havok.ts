@@ -1186,6 +1186,9 @@ export function lockPhysicsBodyRotationAxes(world: PhysicsWorld, body: PhysicsBo
     }
     const previousMask = body._rotationLockMask ?? 0;
     const mask = previousMask | requestedMask;
+    if (mask === previousMask) {
+        return;
+    }
     let source = body._rotationLockSource;
     if (previousMask === 0) {
         const hknp = world._hknp;

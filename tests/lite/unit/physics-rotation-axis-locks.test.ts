@@ -104,6 +104,20 @@ describe("physics body rotation axis locks", () => {
         expect(setMassProperties).not.toHaveBeenCalled();
     });
 
+    it("does not query or update Havok when requested axes are already locked", () => {
+        const getMassProperties = vi.fn(() => [7, [[0, 0, 0], 1, [1, 2, 3], [0, 0, 0, 1]]]);
+        const { world, body, setMassProperties } = makeWorld(getMassProperties);
+
+        lockPhysicsBodyRotationAxes(world, body, ["x", "z"]);
+        getMassProperties.mockClear();
+        setMassProperties.mockClear();
+
+        lockPhysicsBodyRotationAxes(world, body, ["x"]);
+
+        expect(getMassProperties).not.toHaveBeenCalled();
+        expect(setMassProperties).not.toHaveBeenCalled();
+    });
+
     it("does not update Havok when unlocking an axis that is not locked", () => {
         const getMassProperties = vi.fn();
         const { world, body, setMassProperties } = makeWorld(getMassProperties);
