@@ -35,9 +35,12 @@ vi.mock("babylon-lite", () => ({
     createShaderMaterial: vi.fn(),
     createStorageBuffer: vi.fn(),
     disposeStorageBuffer: vi.fn(),
+    getCsmReceiverTexture: vi.fn(),
+    onCsmReceiverUpdate: vi.fn(),
     setShaderStorageBuffer: vi.fn(),
     setShaderTexture: vi.fn(),
     setShaderVector3: vi.fn(),
+    setShadowCasterMaterial: vi.fn(),
     updateStorageBuffer: vi.fn(),
 }));
 
@@ -58,7 +61,8 @@ interface TrackModule {
 interface TrackMaterialModule {
     createTrackMaterial: (
         engine: unknown,
-        textures: Record<string, unknown>
+        textures: Record<string, unknown>,
+        shadowGenerator: unknown
     ) => {
         material: {
             vertexSource: string;
@@ -66,9 +70,21 @@ interface TrackMaterialModule {
             samplerDecls: { name: string }[];
             storageBufferDecls: { name: string }[];
             _textureSlots: Map<string, { current: unknown }>;
+            _storageBufferSlots: Map<string, { current: unknown }>;
+            _shadowCasterMaterial?: unknown;
         };
+        casterMaterial: {
+            vertexSource: string;
+            samplerDecls: { name: string }[];
+            storageBufferDecls: { name: string }[];
+            _storageBufferSlots: Map<string, { current: unknown }>;
+        };
+        frameData: Float32Array;
+        infoData: Float32Array;
+        upload(): void;
         dispose(): void;
     };
+    CSM_RECEIVER_VEC4S: number;
 }
 
 /** Minimal engine stand-in: `createStorageBuffer` is the only device call `createTrackMaterial` makes. */
@@ -80,7 +96,17 @@ function stubEngine(): unknown {
                 unmap: () => {},
                 destroy: () => {},
             }),
+            queue: { writeBuffer: () => {} },
         },
+    };
+}
+
+/** A cascaded-shadow generator stand-in — enough for the receiver seam, no device required. */
+function stubCsmGenerator(): Record<string, unknown> {
+    return {
+        _shadowType: "csm",
+        _depthTexture: { width: 1024, height: 1024, createView: () => ({}), destroy: () => {} },
+        _depthSampler: {},
     };
 }
 
@@ -90,7 +116,7 @@ const trackModulePath = "../../../lab/lite/src/demos/antigravity-racer/track.js"
 const constantsPath = "../../../lab/lite/src/demos/antigravity-racer/constants.js";
 const trackMaterialPath = "../../../lab/lite/src/demos/antigravity-racer/track-material.js";
 const { buildTrackFrames, computeTrackRatios, buildTrackPiece } = (await import(trackModulePath)) as TrackModule;
-const { createTrackMaterial } = (await import(trackMaterialPath)) as TrackMaterialModule;
+const { createTrackMaterial, CSM_RECEIVER_VEC4S } = (await import(trackMaterialPath)) as TrackMaterialModule;
 const { DEFAULT_CONTROL_POINTS, RING_COUNT, TRACK_CROSS_SECTION, TRACK_CROSS_NORMALS } = (await import(constantsPath)) as {
     DEFAULT_CONTROL_POINTS: readonly { x: number; y: number; z: number }[];
     RING_COUNT: number;
@@ -212,12 +238,13 @@ describe("antigravity racer road artwork", () => {
 
 // ── Track material ──────────────────────────────────────────────────────────
 describe("antigravity racer track material", () => {
+    const textures = { straight: { id: "S" }, curve: { id: "C" }, emissive: { id: "E" }, boost: { id: "B" } };
+
     it("binds the four road sheets and composites them exactly like the node material", () => {
-        const textures = { straight: { id: "S" }, curve: { id: "C" }, emissive: { id: "E" }, boost: { id: "B" } };
-        const built = createTrackMaterial(stubEngine(), textures);
+        const built = createTrackMaterial(stubEngine(), textures, stubCsmGenerator());
         const material = built.material;
 
-        expect(material.samplerDecls.map((s) => s.name)).toEqual(["roadStraight", "roadCurve", "roadEmissive", "boostArrow"]);
+        expect(material.samplerDecls.map((s) => s.name)).toEqual(["roadStraight", "roadCurve", "roadEmissive", "boostArrow", "csmShadow"]);
         expect(material._textureSlots.get("roadStraight")!.current).toBe(textures.straight);
         expect(material._textureSlots.get("roadCurve")!.current).toBe(textures.curve);
         expect(material._textureSlots.get("roadEmissive")!.current).toBe(textures.emissive);
@@ -241,9 +268,41 @@ describe("antigravity racer track material", () => {
         expect(frag).toContain("let diffuseColor = mix(road, vec3<f32>(0.0), boostMask);");
         expect(frag).toContain("return vec4<f32>(2.0 * emissive + diffuseColor * irradiance + arrow.rgb * boostMask, 1.0);");
         // The storage-buffer vertex deformation is untouched by the artwork port.
-        expect(material.storageBufferDecls.map((b) => b.name)).toEqual(["trackFrames", "trackInfo"]);
+        expect(material.storageBufferDecls.map((b) => b.name)).toEqual(["trackFrames", "trackInfo", "csmReceiver"]);
         expect(material.vertexSource).toContain("out.undeformed = vec2<f32>(input.position.x, input.position.z);");
 
+        built.dispose();
+    });
+
+    it("receives cascaded shadows through the public CSM seam", () => {
+        const built = createTrackMaterial(stubEngine(), textures, stubCsmGenerator());
+        const frag = built.material.fragmentSource;
+        expect(built.material.samplerDecls.find((s) => s.name === "csmShadow")).toMatchObject({
+            sampleType: "depth",
+            viewDimension: "2d-array",
+            comparison: true,
+        });
+        // Cascade select + 5x5 PCF + cascade blend, mirroring csm-shadow-fragment-core.
+        expect(frag).toContain("let viewZ = (shaderSystem.view * vec4<f32>(input.worldPos, 1.0)).z;");
+        expect(frag).toContain("let shadow = computeShadowCSM(vec4<f32>(input.worldPos, 1.0), viewZ);");
+        expect(frag).toContain("let irradiance = shaderUniforms.ambientColor + shaderUniforms.sunColor * ndl * shadow;");
+        expect(frag).toContain("textureSampleCompareLevel(csmShadow, csmShadowSampler,");
+        expect(frag).toContain("sh /= 144.0;");
+        expect(frag).toContain("let depthRef = clamp(clipSpace.z, 0.0, 0.99999994);");
+        expect(CSM_RECEIVER_VEC4S).toBe(20);
+        built.dispose();
+    });
+
+    it("casts through a sampler-free twin that shares the SAME frame buffer", () => {
+        const built = createTrackMaterial(stubEngine(), textures, stubCsmGenerator());
+        // The caster is wired through the public setShadowCasterMaterial seam.
+        expect(built.material._shadowCasterMaterial).toBe(built.casterMaterial);
+        // Sampler-free: nothing in the caster's bind group can alias the cascade array it renders into.
+        expect(built.casterMaterial.samplerDecls).toEqual([]);
+        expect(built.casterMaterial.storageBufferDecls.map((b) => b.name)).toEqual(["trackFrames"]);
+        // Same vertex deformation, same GPU buffer → an editor rebuild moves road and shadow together.
+        expect(built.casterMaterial.vertexSource).toBe(built.material.vertexSource);
+        expect(built.casterMaterial._storageBufferSlots.get("trackFrames")!.current).toBe(built.material._storageBufferSlots.get("trackFrames")!.current);
         built.dispose();
     });
 });

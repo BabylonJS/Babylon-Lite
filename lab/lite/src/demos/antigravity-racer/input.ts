@@ -14,7 +14,7 @@
  * window blur or tab hide so nothing "sticks" when focus is lost mid-press.
  */
 
-import type { ShipAxes } from "./simulation.js";
+import type { ShipControls } from "./simulation.js";
 
 const P1_LEFT_CODES = new Set(["KeyA"]);
 const P1_RIGHT_CODES = new Set(["KeyD"]);
@@ -32,6 +32,10 @@ const PAUSE_CODES = new Set(["Escape"]);
 const CONFIRM_CODES = new Set(["Enter", "Space"]);
 
 const GAMEPAD_DEADZONE = 0.18;
+/** Analog steering past this (post-deadzone) magnitude counts as the matching digital direction.
+ *  The simulation's steering is binary (the playground's key map), so an analog stick expresses
+ *  INTENT here rather than changing the physics. */
+const GAMEPAD_STEER_THRESHOLD = 0.35;
 // Standard gamepad mapping button/axis indices.
 const BTN_A = 0;
 const BTN_B = 1;
@@ -61,7 +65,8 @@ interface GamepadEdgeState {
 export interface InputSystem {
     /** Re-sample connected gamepads. Call once per rendered frame before reading axes/edges. */
     poll(): void;
-    getAxes(playerSlot: 0 | 1): ShipAxes;
+    /** Binary steering/accelerate intent for a player slot, merging keyboard and gamepad. */
+    getControls(playerSlot: 0 | 1): ShipControls;
     /** True once on the frame pause was newly pressed (Escape, or gamepad Start on either pad). */
     consumePauseToggle(): boolean;
     /** True once when the given player's camera-cycle control was newly pressed. */
@@ -219,15 +224,12 @@ export function createInputSystem(): InputSystem {
         gamepadConnected = anyConnected;
     }
 
-    function readKeyboardSteer(leftCodes: Set<string>, rightCodes: Set<string>, leftKeys?: Set<string>): number {
-        let v = 0;
-        if (isAnyDown(leftCodes) || (leftKeys && isAnyLogicalDown(leftKeys))) {
-            v -= 1;
-        }
-        if (isAnyDown(rightCodes)) {
-            v += 1;
-        }
-        return v;
+    function readKeyboardControls(leftCodes: Set<string>, rightCodes: Set<string>, accelCodes: Set<string>, leftKeys?: Set<string>, accelKeys?: Set<string>): ShipControls {
+        return {
+            left: isAnyDown(leftCodes) || (!!leftKeys && isAnyLogicalDown(leftKeys)),
+            right: isAnyDown(rightCodes),
+            accelerate: isAnyDown(accelCodes) || (!!accelKeys && isAnyLogicalDown(accelKeys)),
+        };
     }
     function isAnyDown(codes: Set<string>): boolean {
         for (const c of codes) {
@@ -246,20 +248,18 @@ export function createInputSystem(): InputSystem {
         return false;
     }
 
-    function gamepadAxesFor(playerSlot: 0 | 1): { steer: number; accelerate: boolean } | null {
+    function gamepadControlsFor(playerSlot: 0 | 1): ShipControls | null {
         const pads = navigator.getGamepads ? navigator.getGamepads() : [];
         const pad = pads[playerSlot];
         if (!pad) {
             return null;
         }
-        let steer = applyDeadzone(pad.axes[0] ?? 0, GAMEPAD_DEADZONE);
-        if (pad.buttons[DPAD_LEFT]?.pressed) {
-            steer = -1;
-        } else if (pad.buttons[DPAD_RIGHT]?.pressed) {
-            steer = 1;
-        }
-        const accelerate = !!(pad.buttons[BTN_RT]?.pressed || pad.buttons[BTN_A]?.pressed);
-        return { steer: Math.max(-1, Math.min(1, steer)), accelerate };
+        const analog = applyDeadzone(pad.axes[0] ?? 0, GAMEPAD_DEADZONE);
+        return {
+            left: !!pad.buttons[DPAD_LEFT]?.pressed || analog <= -GAMEPAD_STEER_THRESHOLD,
+            right: !!pad.buttons[DPAD_RIGHT]?.pressed || analog >= GAMEPAD_STEER_THRESHOLD,
+            accelerate: !!(pad.buttons[BTN_RT]?.pressed || pad.buttons[BTN_A]?.pressed),
+        };
     }
 
     function getRightStick(playerSlot: 0 | 1): { x: number; y: number } {
@@ -273,20 +273,20 @@ export function createInputSystem(): InputSystem {
         return { x: Math.max(-1, Math.min(1, x)), y: Math.max(-1, Math.min(1, y)) };
     }
 
-    function getAxes(playerSlot: 0 | 1): ShipAxes {
-        const gp = gamepadAxesFor(playerSlot);
-        if (gp && (gp.steer !== 0 || gp.accelerate)) {
+    function getControls(playerSlot: 0 | 1): ShipControls {
+        const gp = gamepadControlsFor(playerSlot);
+        if (gp && (gp.left || gp.right || gp.accelerate)) {
             return gp;
         }
         if (playerSlot === 0) {
-            return { steer: readKeyboardSteer(P1_LEFT_CODES, P1_RIGHT_CODES, P1_LEFT_KEYS), accelerate: isAnyDown(P1_ACCEL_CODES) || isAnyLogicalDown(P1_ACCEL_KEYS) };
+            return readKeyboardControls(P1_LEFT_CODES, P1_RIGHT_CODES, P1_ACCEL_CODES, P1_LEFT_KEYS, P1_ACCEL_KEYS);
         }
-        return { steer: readKeyboardSteer(P2_LEFT_CODES, P2_RIGHT_CODES), accelerate: isAnyDown(P2_ACCEL_CODES) };
+        return readKeyboardControls(P2_LEFT_CODES, P2_RIGHT_CODES, P2_ACCEL_CODES);
     }
 
     return {
         poll,
-        getAxes,
+        getControls,
         consumePauseToggle(): boolean {
             const v = pauseEdge;
             pauseEdge = false;

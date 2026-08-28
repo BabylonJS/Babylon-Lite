@@ -16,9 +16,16 @@
  *  5. The GPU bends that straight extrusion onto the spline (see
  *     `track-material.ts`), so editing a control point only re-uploads 256
  *     matrices instead of touching a single vertex.
+ *
+ * The spline itself (control points + frames) is the demo's ONE source of truth
+ * ({@link TrackData}), and it is deliberately separate from the GPU-side piece
+ * ({@link TrackRender}). Split-screen needs one renderer per pane — each pane's
+ * material samples ITS OWN cascade array — but both must bend to the same road,
+ * so every renderer subscribes to the source and re-uploads the shared frames
+ * whenever the editor moves a control point.
  */
 
-import type { EngineContext, Mesh, SceneContext, Vec3 } from "babylon-lite";
+import type { EngineContext, Mesh, SceneContext, ShadowGenerator, Vec3 } from "babylon-lite";
 import { addVec3, addToScene, createMeshFromData, crossVec3, dotVec3, normalizeVec3Object, scaleVec3, subVec3 } from "babylon-lite";
 
 import {
@@ -237,15 +244,32 @@ export function buildTrackPiece(): { positions: Float32Array; normals: Float32Ar
     return { positions, normals, indices };
 }
 
-/** Track data: the live geometry + everything the simulation needs. `rebuild()` recomputes the
- *  frames from the current `controlPoints` and re-uploads them in place — the mesh never changes. */
+/** The demo's single spline source of truth: the editable control points, the frames derived from
+ *  them, and the boost rows the simulation tests. Holds NO GPU resource — the per-scene renderers
+ *  ({@link TrackRender}) subscribe to it and re-upload their own buffers when it changes. */
 export interface TrackData {
     readonly controlPoints: Vec3[];
     frames: TrackFrame[];
-    readonly mesh: Mesh;
+    /** Per-row `dot(prevDir, dir)`, the curvature the track-info channel is derived from. */
+    curveRatios: number[];
     readonly boostRight: boolean[];
     readonly boostLeft: boolean[];
+    /** Recompute the frames from the current `controlPoints` and refresh every subscribed renderer. */
     rebuild(): void;
+    /** Subscribe a renderer to the frames. Invoked immediately with the current ones, then on every
+     *  {@link TrackData.rebuild}. Returns an unsubscribe function. */
+    onRebuild(cb: (frames: readonly TrackFrame[], curveRatios: readonly number[]) => void): () => void;
+}
+
+/** The GPU-side track for ONE scene: the undeformed piece plus the material pair that bends it.
+ *  Split-screen builds one per pane, because a pane's receiver material is bound to that pane's
+ *  cascade array. */
+export interface TrackRender {
+    readonly mesh: Mesh;
+    readonly material: TrackMaterial;
+    /** Release this pane's frame/info/receiver buffers and unsubscribe from the spline source.
+     *  The demo never calls it — a world lives as long as the page (see `world.ts`) — but the
+     *  renderer owns those resources, so it owns their release. */
     dispose(): void;
 }
 
@@ -287,21 +311,12 @@ function writeFrameBuffers(material: TrackMaterial, frames: readonly TrackFrame[
     }
 }
 
-export function buildTrack(engine: EngineContext, textures: TrackTextures, controlPoints: readonly Vec3[] = DEFAULT_CONTROL_POINTS): TrackData {
+/** Create the spline source. Built once per session: the editor mutates its control points in
+ *  place and every renderer follows, so an edited track survives mode switches exactly like the
+ *  playground's single global track does. */
+export function createTrackSource(controlPoints: readonly Vec3[] = DEFAULT_CONTROL_POINTS): TrackData {
     const points = controlPoints.map((p) => ({ x: p.x, y: p.y, z: p.z }));
-    let { frames, curveRatios } = buildTrackFrames(points);
-
-    const { positions, normals, indices } = buildTrackPiece();
-    const mesh = createMeshFromData(engine, "antigrav-track", positions, normals, indices);
-    // The vertices live at the origin and are placed by the vertex shader, so the geometric
-    // bounds are meaningless for culling — publish the PG's explicit huge box instead.
-    mesh.boundMin = HUGE_BOUND_MIN;
-    mesh.boundMax = HUGE_BOUND_MAX;
-
-    const trackMaterial = createTrackMaterial(engine, textures);
-    mesh.material = trackMaterial.material;
-    writeFrameBuffers(trackMaterial, frames, curveRatios);
-    trackMaterial.upload();
+    const { frames, curveRatios } = buildTrackFrames(points);
 
     const boostRight: boolean[] = new Array(RING_COUNT).fill(false);
     const boostLeft: boolean[] = new Array(RING_COUNT).fill(false);
@@ -310,27 +325,68 @@ export function buildTrack(engine: EngineContext, textures: TrackTextures, contr
         boostLeft[i] = i % BOOST_PERIOD === BOOST_LEFT_OFFSET;
     }
 
+    const subscribers: ((frames: readonly TrackFrame[], curveRatios: readonly number[]) => void)[] = [];
     const track: TrackData = {
         controlPoints: points,
         frames,
-        mesh,
+        curveRatios,
         boostRight,
         boostLeft,
         rebuild(): void {
-            ({ frames, curveRatios } = buildTrackFrames(track.controlPoints));
-            track.frames = frames;
-            writeFrameBuffers(trackMaterial, frames, curveRatios);
-            // Same buffers, same bind group — only their contents change.
-            trackMaterial.upload();
+            const next = buildTrackFrames(track.controlPoints);
+            track.frames = next.frames;
+            track.curveRatios = next.curveRatios;
+            for (const cb of subscribers) {
+                cb(next.frames, next.curveRatios);
+            }
         },
-        dispose(): void {
-            trackMaterial.dispose();
+        onRebuild(cb): () => void {
+            subscribers.push(cb);
+            cb(track.frames, track.curveRatios);
+            return () => {
+                const i = subscribers.indexOf(cb);
+                if (i >= 0) {
+                    subscribers.splice(i, 1);
+                }
+            };
         },
     };
     return track;
 }
 
-/** Add the track mesh to a scene. */
-export function addTrackToScene(scene: SceneContext, track: TrackData): void {
-    addToScene(scene, track.mesh);
+/** Build one scene's track piece: the undeformed mesh plus the deformation material pair wired to
+ *  `shadowGenerator`'s cascades. The mesh geometry never changes — a control-point edit only
+ *  re-uploads this renderer's 256 frames (visible + caster share one buffer). */
+export function buildTrackRender(engine: EngineContext, textures: TrackTextures, shadowGenerator: ShadowGenerator, track: TrackData): TrackRender {
+    const { positions, normals, indices } = buildTrackPiece();
+    const mesh = createMeshFromData(engine, "antigrav-track", positions, normals, indices);
+    // The vertices live at the origin and are placed by the vertex shader, so the geometric
+    // bounds are meaningless for culling — publish the PG's explicit huge box instead.
+    mesh.boundMin = HUGE_BOUND_MIN;
+    mesh.boundMax = HUGE_BOUND_MAX;
+    mesh.receiveShadows = true;
+
+    const trackMaterial = createTrackMaterial(engine, textures, shadowGenerator);
+    mesh.material = trackMaterial.material;
+
+    // Seeds the buffers now and re-uploads them on every editor edit — same buffers, same bind
+    // group, so dragging a control point causes no resource churn in any pane.
+    const unsubscribe = track.onRebuild((frames, curveRatios) => {
+        writeFrameBuffers(trackMaterial, frames, curveRatios);
+        trackMaterial.upload();
+    });
+
+    return {
+        mesh,
+        material: trackMaterial,
+        dispose(): void {
+            unsubscribe();
+            trackMaterial.dispose();
+        },
+    };
+}
+
+/** Add a scene's track piece to that scene. */
+export function addTrackToScene(scene: SceneContext, render: TrackRender): void {
+    addToScene(scene, render.mesh);
 }

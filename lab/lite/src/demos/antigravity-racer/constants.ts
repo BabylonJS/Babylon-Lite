@@ -4,8 +4,9 @@
  * Everything in the first half of this file is copied verbatim from Cédric
  * Guillemet's playground (snippet WVPVWL#0) so the ported track has the same
  * shape, the same 256-segment procedural piece and the same rock placement.
- * The second half holds the port's own handling/camera tuning, expressed in
- * per-second units so the simulation is frame-rate independent.
+ * The second half holds the playground's handling/camera/world tuning, kept in
+ * its ORIGINAL per-tick units — the simulation runs them on a fixed 60 Hz clock
+ * instead of rescaling them (see `docs/lite/architecture/demo-antigravity-racer.md`).
  */
 
 /** Number of sampled track segments around the closed loop (`texHeight` in the source PG). */
@@ -127,45 +128,94 @@ export const ROCK_TRANSFORMS: readonly {
 /** Yaw applied to the ship model so its nose points along the track (`ShipTransform.rotation.y` in the PG). */
 export const SHIP_MODEL_YAW = Math.PI;
 
-/** Ships travel at up to this many world units per second. */
-export const MAX_SPEED = 42; // == original 0.7/frame * 60fps
-/** Acceleration, world units per second^2, scaled down as speed approaches MAX_SPEED. */
-export const MAX_ACCEL = 14.4; // == original 0.004/frame * 60fps
+// ─── Original per-tick tuning ───────────────────────────────────────────────
+// Every constant below is the SOURCE PLAYGROUND's per-frame value, kept in its
+// original units. The simulation runs them on a fixed 60 Hz clock (FIXED_DT), so
+// at 60 Hz it is tick-for-tick identical to the original and at any other refresh
+// rate it plays out identically in wall-clock time. Nothing here is rescaled.
 
-/** Per-second multiplicative velocity drag (== original 0.99 per frame at 60fps). */
-export const VELOCITY_DRAG_PER_SEC = Math.pow(0.99, 60);
+/** Top speed, world units per tick (`maxSpeed`). */
+export const MAX_SPEED = 0.7;
+/** Acceleration per tick, scaled down as speed approaches `MAX_SPEED` (`maxAccel`). */
+export const MAX_ACCEL = 0.004;
+/** Unconditional per-tick velocity drag (`Ship.velocity *= 0.99`). */
+export const VELOCITY_DRAG = 0.99;
+/** Extra per-tick drag applied on each wall clamp. */
+export const WALL_HIT_DRAG = 0.99;
+/** Half-width of the drivable deck at deck level; grows with the local Y (`wallSlope = 2.5 + y`). */
+export const WALL_BASE_SLOPE = 2.5;
+/** Vertical adhesion factors below / above the road surface. */
+export const FLOOR_DAMP = 0.45;
+export const CEIL_DAMP = 0.9;
 
 /** Boost strip segment spacing/offsets — the source PG's `(i & 31) == 2` / `== 6` track-info rows. */
 export const BOOST_PERIOD = 32;
 export const BOOST_RIGHT_OFFSET = 2;
 export const BOOST_LEFT_OFFSET = 6;
-/** Speed instantly added when a boost strip is touched (units/second, matches MAX_SPEED scale). */
-export const BOOST_SPEED_KICK = 18;
+/** Speed instantly added when a boost strip is touched (`Ship.velocity += 0.3`). */
+export const BOOST_SPEED_KICK = 0.3;
 /** Minimum segment separation before another boost from the same ship can trigger again. */
-export const BOOST_DEBOUNCE_RINGS = 10;
+export const BOOST_DEBOUNCE_SEGMENTS = 10;
+/** `LastBonusSegment` seed — far enough away that the first pad always triggers. */
+export const LAST_BONUS_SEGMENT_INIT = 99999;
 
+/** Steering: full-lock visual bank and yaw rate (radians per tick). */
+export const MAX_STEER_TILT = 0.8;
+export const MAX_YAW_RATE = 0.05;
+/** Per-tick blend weights (all `0.1` in the original): track-up adhesion, yaw rate, visual bank. */
+export const UP_BLEND = 0.1;
+export const YAW_BLEND = 0.1;
+export const TILT_BLEND = 0.1;
+/** Drift inertia: `fakeInertiaFactor = 1 - speedRatio * 0.98`. */
+export const INERTIA_SPEED_TERM = 0.98;
+
+/** Anti-gravity wobble: noise amplitude, its extra contribution to the visual bank, and the hover offset. */
+export const GRAVITY_NOISE_STRENGTH = 0.1;
+export const NOISE_TILT_GAIN = 3;
+export const WOBBLE_Y_OFFSET = 0.5;
+
+/** AI: aim this many segments ahead, avoid the nearest ship within this many segments, at this dot tolerance. */
+export const AI_AIM_LOOKAHEAD = 6;
+export const AI_AVOID_LIMIT = 6;
+export const AI_AVOID_TOLERANCE = 0.1;
+
+/** Noise clock increment per tick (`time += 0.0166`). Deliberately the original's rounded
+ *  value, NOT `FIXED_DT` — it is a phase, not a duration. */
+export const TICK_TIME = 0.0166;
 /** Fixed simulation step, seconds — the whole sim ticks in these increments regardless of display refresh rate. */
 export const FIXED_DT = 1 / 60;
 /** Safety cap on fixed steps run per rendered frame (avoids a spiral of death after a stall/tab-switch). */
 export const MAX_STEPS_PER_FRAME = 6;
 
-/** Ship steering / handling tuning. */
-export const MAX_STEER_TILT = 0.8;
-export const MAX_YAW_RATE = 0.05 * 60; // radians/sec at full steer (== original 0.05/frame at 60fps)
-
-/** Chase-camera ship-relative offsets (right, up, forward) for the two cyclable camera positions. */
+/** Chase-camera ship-local offsets (right, up, forward) for the two cyclable positions (`CameraRels`). */
 export const CHASE_CAMERA_OFFSETS: readonly { x: number; y: number; z: number }[] = [
-    { x: 0, y: 3.2, z: -8 },
-    { x: 0, y: 2, z: -4.2 },
+    { x: 0, y: 3, z: -5 },
+    { x: 0, y: 2, z: -2.8 },
 ];
-export const CHASE_CAMERA_LOOK_AHEAD = 3;
-export const CAMERA_LERP_TAU = 0.045;
+/** Ship-local point the chase camera looks at (`TransformCoordinatesFromFloats(0, 0, 5, …)`). */
+export const CHASE_TARGET_LOCAL = { x: 0, y: 0, z: 5 };
+/** Chase smoothing weight per tick: `0.1 + speedRatio * 0.7`. */
+export const CAMERA_LERP_BASE = 0.1;
+export const CAMERA_LERP_SPEED_TERM = 0.7;
+/** Every camera in the original settles on Babylon's default FOV (`fov += (0.8 - fov) * 0.01`). */
+export const CAMERA_FOV = 0.8;
+/** `editorCamera.maxZ = 1500` — also the demo camera's far plane. */
+export const EDITOR_CAMERA_FAR = 1500;
+
+/** Demo/attract camera: the ship it anchors ahead of, how far ahead, how high, and its re-anchor delay range. */
+export const DEMO_CAMERA_SHIP = 5;
+export const DEMO_CAMERA_LOOKAHEAD = 20;
+export const DEMO_CAMERA_UP = 2;
+export const DEMO_CAMERA_MIN_TIME = 2;
+export const DEMO_CAMERA_TIME_RANGE = 2;
 
 /** Total ships in a race (human + AI combined). */
 export const TOTAL_SHIP_COUNT = 8;
-/** Segment-index gap between each spawn slot around the loop, so ships start well clear of
- *  each other and of a following chase camera (which pulls back ~9-14 world units). */
-export const SPAWN_RING_SPACING = 18;
+/** Ships spawn on consecutive segments `0..7`, alternating sides of the deck (`(i & 1) ? 1.5 : -1.5`). */
+export const SPAWN_LATERAL = 1.5;
+
+/** Trail emitter, in `ShipTransform` local space (the PG's `heater`). */
+export const TRAIL_EMITTER_LOCAL = { x: 0.05, y: 0, z: 0.85 };
 
 /** Generous world bounds shared by every mesh whose vertices are placed by a shader or
  *  rewritten every frame (the deformed track, the ribbon trails). Mirrors the source PG's
@@ -173,8 +223,28 @@ export const SPAWN_RING_SPACING = 18;
 export const HUGE_BOUND_MIN: [number, number, number] = [-1000, -1000, -1000];
 export const HUGE_BOUND_MAX: [number, number, number] = [1000, 1000, 1000];
 
-/** Terrain: same footprint / height range / drop as the source PG's height-mapped ground. */
+/** Terrain: the source PG's height-mapped ground, verbatim
+ *  (`CreateGroundFromHeightMap("ground", "textures/heightMap.png", 400, 400, 600, 0, 25, …)`). */
 export const TERRAIN_SIZE = 400;
-export const TERRAIN_SUBDIVISIONS = 300;
+export const TERRAIN_SUBDIVISIONS = 600;
+export const TERRAIN_MIN_HEIGHT = 0;
 export const TERRAIN_MAX_HEIGHT = 25;
 export const TERRAIN_Y = -2.05;
+export const TERRAIN_UV_SCALE = 6;
+
+/** Cascaded shadows, matching `new CascadedShadowGenerator(1024, light)` plus the PG's overrides. */
+export const SHADOW_MAP_SIZE = 1024;
+export const SHADOW_CASCADES = 4;
+export const SHADOW_LAMBDA = 1;
+export const SHADOW_BIAS = 0.001;
+export const SHADOW_MAX_Z = 1500;
+
+/** Lights, exactly as authored in the source PG. */
+export const HEMI_LIGHT_DIRECTION: [number, number, number] = [1, 1, 0];
+export const HEMI_LIGHT_INTENSITY = 0.5;
+export const SUN_DIRECTION: [number, number, number] = [-1, -2, -1];
+export const SUN_POSITION: [number, number, number] = [120, 50, 100];
+export const SUN_INTENSITY = 1;
+
+/** The playground's black skybox, expressed as a clear colour. */
+export const SPACE_CLEAR_COLOR = { r: 0, g: 0, b: 0, a: 1 };

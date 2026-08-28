@@ -1,128 +1,161 @@
 /**
  * Antigravity Racer — camera rigs.
  *
- * `ChaseCamera` follows one ship from a ship-relative offset (matches the
- * source PG's `CameraRels`-driven follow cam): each tick it computes the
- * desired world position/target directly from the ship's own (right, up,
- * forward) basis — exactly like the original — and eases a `FreeCamera`
- * toward them. Lite's `FreeCamera` always keeps world +Y as its look-at up
- * (see GUIDANCE), so unlike the original the camera doesn't visually roll
- * through banked/inverted sections, but its POSITION still correctly follows
- * the ship's actual orientation, so it never clips through the track.
- * `SpectatorCamera` (demo/attract mode) uses a plain world-up orbit instead,
- * which is a good fit since it isn't locked to one ship's banking.
+ * Both rigs are per-tick ports of the playground's camera code in `TickShips`,
+ * and both use a {@link createBankedFreeCamera} so the view rolls with the track
+ * exactly like the original's `camera.upVector` writes.
+ *
+ * `ChaseCamera` follows one human ship from a ship-local offset; `DemoCamera` is
+ * the attract-mode camera that re-anchors ahead of ship 5 every 2–4 seconds and
+ * dollies with a fixed orientation in between.
  */
 
-import type { ArcRotateCamera, FreeCamera, SceneContext } from "babylon-lite";
-import { createArcRotateCamera, createFreeCamera, dampScalar, expDampFactor } from "babylon-lite";
+import type { BankedFreeCamera, SceneContext, Vec3 } from "babylon-lite";
+import { createBankedFreeCamera } from "babylon-lite";
 
-import type { ShipState } from "./simulation.js";
-import { CAMERA_LERP_TAU, CHASE_CAMERA_LOOK_AHEAD, CHASE_CAMERA_OFFSETS, MAX_SPEED } from "./constants.js";
+import { shipSpeedRatio, type ShipState } from "./simulation.js";
+import type { TrackData } from "./track.js";
+import {
+    CAMERA_FOV,
+    CAMERA_LERP_BASE,
+    CAMERA_LERP_SPEED_TERM,
+    CHASE_CAMERA_OFFSETS,
+    CHASE_TARGET_LOCAL,
+    DEMO_CAMERA_LOOKAHEAD,
+    DEMO_CAMERA_MIN_TIME,
+    DEMO_CAMERA_SHIP,
+    DEMO_CAMERA_TIME_RANGE,
+    DEMO_CAMERA_UP,
+    EDITOR_CAMERA_FAR,
+    TICK_TIME,
+} from "./constants.js";
 
-/** Ship-relative unit "right" vector (right = up × forward, matching the ship's own convention). */
-function shipRight(ship: ShipState): { x: number; y: number; z: number } {
+/** `TransformCoordinates(local, ShipMesh.worldMatrix)` — the ship basis is (right, up, forward). */
+function shipLocalToWorld(ship: ShipState, local: Vec3): Vec3 {
+    const p = ship.worldPos;
+    const r = ship.meshRight;
     const u = ship.up;
-    const f = ship.velocityDirection;
-    const x = u.y * f.z - u.z * f.y;
-    const y = u.z * f.x - u.x * f.z;
-    const z = u.x * f.y - u.y * f.x;
-    const len = Math.sqrt(x * x + y * y + z * z) || 1;
-    return { x: x / len, y: y / len, z: z / len };
+    const d = ship.meshForward;
+    return {
+        x: p.x + r.x * local.x + u.x * local.y + d.x * local.z,
+        y: p.y + r.y * local.x + u.y * local.y + d.y * local.z,
+        z: p.z + r.z * local.x + u.z * local.y + d.z * local.z,
+    };
 }
 
+function lerpTo(current: number, goal: number, t: number): number {
+    return current + (goal - current) * t;
+}
+
+/**
+ * Chase camera for a human ship.
+ *
+ * Per tick the desired position/target are read straight out of the ship's own world matrix, then the
+ * camera eases toward them with the original's speed-dependent weight `0.1 + speedRatio * 0.7`. Storing
+ * and lerping the target point matches Babylon's `TargetCamera.target` semantics: after `setTarget(t)`
+ * with the already-updated position, `_currentTarget` is exactly `t` again.
+ */
 export class ChaseCamera {
-    readonly camera: FreeCamera;
-    private _offsetIndex = 0;
-    private _px: number;
-    private _py: number;
-    private _pz: number;
-    private _tx: number;
-    private _ty: number;
-    private _tz: number;
+    readonly camera: BankedFreeCamera;
+    private readonly _ship: ShipState;
 
     constructor(scene: SceneContext, ship: ShipState) {
-        const off = CHASE_CAMERA_OFFSETS[0]!;
-        const right = shipRight(ship);
-        const p = ship.worldPos;
-        this._px = p.x + right.x * off.x + ship.up.x * off.y + ship.velocityDirection.x * off.z;
-        this._py = p.y + right.y * off.x + ship.up.y * off.y + ship.velocityDirection.y * off.z;
-        this._pz = p.z + right.z * off.x + ship.up.z * off.y + ship.velocityDirection.z * off.z;
-        this._tx = p.x + ship.velocityDirection.x * CHASE_CAMERA_LOOK_AHEAD;
-        this._ty = p.y + ship.velocityDirection.y * CHASE_CAMERA_LOOK_AHEAD;
-        this._tz = p.z + ship.velocityDirection.z * CHASE_CAMERA_LOOK_AHEAD;
-        this.camera = createFreeCamera({ x: this._px, y: this._py, z: this._pz }, { x: this._tx, y: this._ty, z: this._tz });
-        this.camera.fov = 0.75;
-        this.camera.nearPlane = 0.3;
-        this.camera.farPlane = 800;
+        this._ship = ship;
+        const position = shipLocalToWorld(ship, CHASE_CAMERA_OFFSETS[ship.cameraOffsetIndex]!);
+        const target = shipLocalToWorld(ship, CHASE_TARGET_LOCAL);
+        this.camera = createBankedFreeCamera(position, target, ship.up);
+        this.camera.fov = CAMERA_FOV;
         scene.camera = this.camera;
     }
 
+    /** Cycle to the next `CameraRels` offset (C key / gamepad shoulder). */
     cycleOffset(): void {
-        this._offsetIndex = (this._offsetIndex + 1) % CHASE_CAMERA_OFFSETS.length;
+        this._ship.cameraOffsetIndex = (this._ship.cameraOffsetIndex + 1) % CHASE_CAMERA_OFFSETS.length;
     }
 
-    tick(dt: number, ship: ShipState): void {
+    tick(): void {
+        const ship = this._ship;
         const cam = this.camera;
-        const speedRatio = Math.min(1, Math.abs(ship.velocity) / MAX_SPEED);
-        const off = CHASE_CAMERA_OFFSETS[this._offsetIndex]!;
-        const p = ship.worldPos;
-        const right = shipRight(ship);
+        const desiredPosition = shipLocalToWorld(ship, CHASE_CAMERA_OFFSETS[ship.cameraOffsetIndex]!);
+        const desiredTarget = shipLocalToWorld(ship, CHASE_TARGET_LOCAL);
+        const k = CAMERA_LERP_BASE + shipSpeedRatio(ship) * CAMERA_LERP_SPEED_TERM;
 
-        const desiredPX = p.x + right.x * off.x + ship.up.x * off.y + ship.velocityDirection.x * off.z;
-        const desiredPY = p.y + right.y * off.x + ship.up.y * off.y + ship.velocityDirection.y * off.z;
-        const desiredPZ = p.z + right.z * off.x + ship.up.z * off.y + ship.velocityDirection.z * off.z;
-        const desiredTX = p.x + ship.velocityDirection.x * CHASE_CAMERA_LOOK_AHEAD;
-        const desiredTY = p.y + ship.velocityDirection.y * CHASE_CAMERA_LOOK_AHEAD;
-        const desiredTZ = p.z + ship.velocityDirection.z * CHASE_CAMERA_LOOK_AHEAD;
-
-        const t = expDampFactor(dt, CAMERA_LERP_TAU * (1.2 - speedRatio * 0.5));
-        this._px = dampScalar(this._px, desiredPX, t);
-        this._py = dampScalar(this._py, desiredPY, t);
-        this._pz = dampScalar(this._pz, desiredPZ, t);
-        this._tx = dampScalar(this._tx, desiredTX, t);
-        this._ty = dampScalar(this._ty, desiredTY, t);
-        this._tz = dampScalar(this._tz, desiredTZ, t);
-        cam.position.set(this._px, this._py, this._pz);
-        cam.target.set(this._tx, this._ty, this._tz);
-
-        const desiredFov = 0.72 + speedRatio * 0.1 + (ship.boostFlashTimer > 0 ? 0.15 : 0);
-        cam.fov = dampScalar(cam.fov, desiredFov, expDampFactor(dt, 0.08));
+        cam.position.set(lerpTo(cam.position.x, desiredPosition.x, k), lerpTo(cam.position.y, desiredPosition.y, k), lerpTo(cam.position.z, desiredPosition.z, k));
+        cam.target.set(lerpTo(cam.target.x, desiredTarget.x, k), lerpTo(cam.target.y, desiredTarget.y, k), lerpTo(cam.target.z, desiredTarget.z, k));
+        cam.upVector.set(lerpTo(cam.upVector.x, ship.up.x, k), lerpTo(cam.upVector.y, ship.up.y, k), lerpTo(cam.upVector.z, ship.up.z, k));
     }
 }
 
-/** Spectator camera for demo/attract mode: slowly auto-orbits the current leader, and
- *  periodically swaps to another ship for variety. */
-export class SpectatorCamera {
-    readonly camera: ArcRotateCamera;
-    private _retargetIn = 3;
-    private _target: ShipState;
+/**
+ * Attract-mode camera.
+ *
+ * Every 2–4 seconds it re-anchors on the segment frame 20 ahead of ship 5, two units along that frame's
+ * up axis, looking three units along a randomly-signed ±3× forward vector, with the frame's up as its up.
+ * Between anchors it only dollies: position AND target move by the same delta each tick, which is what
+ * keeps Babylon's orientation fixed when `position` is written without a `setTarget`.
+ */
+export class DemoCamera {
+    readonly camera: BankedFreeCamera;
+    private readonly _track: TrackData;
+    private readonly _ships: readonly ShipState[];
+    private _time = 0;
+    private _translate: Vec3 = { x: 0, y: 0, z: 0 };
 
-    constructor(scene: SceneContext, initial: ShipState) {
-        this._target = initial;
-        this.camera = createArcRotateCamera(0, 1.1, 16, { x: initial.worldPos.x, y: initial.worldPos.y, z: initial.worldPos.z });
-        this.camera.fov = 0.8;
-        this.camera.nearPlane = 0.3;
-        this.camera.farPlane = 800;
+    constructor(scene: SceneContext, track: TrackData, ships: readonly ShipState[]) {
+        this._track = track;
+        this._ships = ships;
+        const frame = track.frames[0]!;
+        this.camera = createBankedFreeCamera(frame.pos, { x: frame.pos.x + frame.dir.x, y: frame.pos.y + frame.dir.y, z: frame.pos.z + frame.dir.z }, frame.up);
+        this.camera.fov = CAMERA_FOV;
+        this.camera.farPlane = EDITOR_CAMERA_FAR;
         scene.camera = this.camera;
+        this._anchor();
     }
 
-    tick(dt: number, ships: readonly ShipState[]): void {
-        this._retargetIn -= dt;
-        if (this._retargetIn <= 0) {
-            this._retargetIn = 4 + Math.random() * 4;
-            const candidates = ships.filter((s) => s !== this._target);
-            if (candidates.length) {
-                this._target = candidates[Math.floor(Math.random() * candidates.length)]!;
-            }
+    tick(): void {
+        this._time -= TICK_TIME;
+        if (this._time < 0) {
+            this._anchor();
+            return;
         }
-        const p = this._target.worldPos;
-        const t = expDampFactor(dt, 0.6);
-        this.camera.target.x = dampScalar(this.camera.target.x, p.x, t);
-        this.camera.target.y = dampScalar(this.camera.target.y, p.y, t);
-        this.camera.target.z = dampScalar(this.camera.target.z, p.z, t);
-        this.camera.alpha += dt * 0.15;
-        this.camera.beta = 1.05 + Math.sin(this.camera.alpha * 0.6) * 0.15;
-        const speedRatio = Math.min(1, Math.abs(this._target.velocity) / MAX_SPEED);
-        this.camera.radius = dampScalar(this.camera.radius, 12 + speedRatio * 6, expDampFactor(dt, 0.5));
+        const cam = this.camera;
+        const dx = this._translate.x * TICK_TIME;
+        const dy = this._translate.y * TICK_TIME;
+        const dz = this._translate.z * TICK_TIME;
+        // Position and target move together: Babylon keeps the rotation fixed while only `position`
+        // is written, so the camera dollies without re-aiming.
+        cam.position.set(cam.position.x + dx, cam.position.y + dy, cam.position.z + dz);
+        cam.target.set(cam.target.x + dx, cam.target.y + dy, cam.target.z + dz);
+    }
+
+    private _anchor(): void {
+        const frames = this._track.frames;
+        const anchorShip = this._ships[DEMO_CAMERA_SHIP] ?? this._ships[0]!;
+        const frame = frames[(anchorShip.currentSegment + DEMO_CAMERA_LOOKAHEAD) % frames.length]!;
+        this._time = Math.random() * DEMO_CAMERA_TIME_RANGE + DEMO_CAMERA_MIN_TIME;
+
+        const dirFactor = 3 * (Math.random() > 0.5 ? 1 : -1);
+        const aim = { x: frame.dir.x * dirFactor, y: frame.dir.y * dirFactor, z: frame.dir.z * dirFactor };
+
+        // TransformCoordinates INCLUDES the frame's translation, so this is a world point — then
+        // scaled to a small drift velocity. Faithfully odd, exactly like the original.
+        const rx = Math.random() - 0.5;
+        const ry = Math.random() * 2 - 1;
+        const rz = Math.random() * 2 - 1;
+        const scale = Math.random() * 0.014;
+        this._translate = {
+            x: (frame.pos.x + frame.right.x * rx + frame.up.x * ry + frame.dir.x * rz) * scale,
+            y: (frame.pos.y + frame.right.y * rx + frame.up.y * ry + frame.dir.y * rz) * scale,
+            z: (frame.pos.z + frame.right.z * rx + frame.up.z * ry + frame.dir.z * rz) * scale,
+        };
+
+        const cam = this.camera;
+        cam.position.set(
+            frame.pos.x + frame.up.x * DEMO_CAMERA_UP - this._translate.x * this._time,
+            frame.pos.y + frame.up.y * DEMO_CAMERA_UP - this._translate.y * this._time,
+            frame.pos.z + frame.up.z * DEMO_CAMERA_UP - this._translate.z * this._time
+        );
+        cam.target.set(frame.pos.x + aim.x * 3, frame.pos.y + aim.y * 3, frame.pos.z + aim.z * 3);
+        cam.upVector.set(frame.up.x, frame.up.y, frame.up.z);
     }
 }

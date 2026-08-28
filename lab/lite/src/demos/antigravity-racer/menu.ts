@@ -11,6 +11,7 @@ import type { InputSystem } from "./input.js";
 import { createButtonListNav, type ButtonListNav } from "./gamepad-list-nav.js";
 
 export interface MainMenuHandlers {
+    onTestTrack(): void;
     onRace1P(): void;
     onRace2P(): void;
     onDemo(): void;
@@ -30,7 +31,7 @@ export interface MainMenu {
 
 /** Attribution for the third-party art the demo ships (see also the demo's CREDITS.txt files). */
 const CREDIT_HTML =
-    'Native Babylon Lite port of Cédric Guillemet&rsquo;s antigravity racing playground (WVPVWL). Track textures by <a href="https://github.com/PatrickRyanMS" target="_blank" rel="noopener">Patrick Ryan</a>, used with his permission &mdash; he owns the rights to the road artwork and granted this demo the right to redistribute it. Ship &ldquo;RHS-X&rdquo; by <a href="https://sketchfab.com/alone5" target="_blank" rel="noopener">Hassan Bassassi</a>, rock &ldquo;Obj_Nat_Rock_01&rdquo; by <a href="https://sketchfab.com/SaschaHenrichs" target="_blank" rel="noopener">SaschaHenrichs</a> — both <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. Trails and terrain are procedural.';
+    'Native Babylon Lite port of Cédric Guillemet&rsquo;s antigravity racing playground (WVPVWL). Track textures by <a href="https://github.com/PatrickRyanMS" target="_blank" rel="noopener">Patrick Ryan</a>, used with his permission &mdash; he owns the rights to the road artwork and granted this demo the right to redistribute it. Ship &ldquo;RHS-X&rdquo; by <a href="https://sketchfab.com/alone5" target="_blank" rel="noopener">Hassan Bassassi</a>, rock &ldquo;Obj_Nat_Rock_01&rdquo; by <a href="https://sketchfab.com/SaschaHenrichs" target="_blank" rel="noopener">SaschaHenrichs</a> — both <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. The terrain height map and ground texture are loaded from playground.babylonjs.com at runtime.';
 
 export function createMainMenu(handlers: MainMenuHandlers): MainMenu {
     const root = document.createElement("div");
@@ -43,6 +44,7 @@ export function createMainMenu(handlers: MainMenuHandlers): MainMenu {
             <div class="ag-menu-buttons" role="menu">
                 <button type="button" class="ag-btn ag-btn-primary" data-action="race1p">🏁 Race (1 Player)</button>
                 <button type="button" class="ag-btn" data-action="race2p">🎮 Split-Screen (2 Players)</button>
+                <button type="button" class="ag-btn" data-action="test">🛠 Test Track (no opponents)</button>
                 <button type="button" class="ag-btn" data-action="demo">📺 Attract Mode</button>
                 <button type="button" class="ag-btn" data-action="editor">✏️ Track Editor</button>
             </div>
@@ -60,6 +62,7 @@ export function createMainMenu(handlers: MainMenuHandlers): MainMenu {
     const actions: Record<string, () => void> = {
         race1p: handlers.onRace1P,
         race2p: handlers.onRace2P,
+        test: handlers.onTestTrack,
         demo: handlers.onDemo,
         editor: handlers.onEditor,
     };

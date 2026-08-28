@@ -10,19 +10,24 @@
  * What is ported verbatim: the 7 control points, the arc-length spline sampling,
  * the 256-segment procedural track piece, the per-segment frame data and the
  * deformation vertex shader that bends that straight piece onto the spline, the
- * exact rock transforms, the road artwork and compositing of the playground's
- * node material (snippet 01HFES#76 — track textures by Patrick Ryan, committed
- * here with his permission), and the two CC BY 4.0 Sketchfab models the
- * playground loads (ship "RHS-X" by Hassan Bassassi, rock "Obj_Nat_Rock_01" by
+ * exact per-tick physics/AI, the ship transforms, cameras, engine trails,
+ * lighting, black sky, height-mapped terrain and cascaded shadows, the exact
+ * rock transforms, the road artwork and compositing of the playground's node
+ * material (snippet 01HFES#76 — track textures by Patrick Ryan, committed here
+ * with his permission), and the two CC BY 4.0 Sketchfab models the playground
+ * loads (ship "RHS-X" by Hassan Bassassi, rock "Obj_Nat_Rock_01" by
  * SaschaHenrichs) — vendored locally by `scripts/fetch-antigravity-racer.ts`.
+ * The playground's own `heightMap.png` / `ground.jpg` are fetched from
+ * playground.babylonjs.com at runtime rather than redistributed.
  *
- * What is original: the engine trails, the procedural terrain, the DOM
- * menus/HUD, and the frame-rate-independent fixed-step simulation.
+ * What is original: the DOM menus/HUD/pause overlay, the QWERTY/AZERTY-independent
+ * keyboard and gamepad support, and the fixed 60 Hz clock the playground's
+ * per-tick formulas run on (see `docs/lite/architecture/demo-antigravity-racer.md`).
  *
  * Split into focused modules (see `antigravity-racer/`): track spline math +
- * deformation material, ship simulation, instanced ship/rock models, CPU ribbon
- * trails, camera rigs, keyboard+gamepad input, DOM menu/HUD, and the track
- * editor — see `game.ts` for how they're wired together.
+ * deformation/shadow material, ship simulation, instanced ship/rock models,
+ * storage-buffer trails, camera rigs, keyboard+gamepad input, DOM menu/HUD, and
+ * the track editor — see `game.ts` for how they're wired together.
  *
  * Controls: W/A/S/D (or ZQSD) + arrows to drive, C / shoulder buttons to
  * cycle camera, Esc / Start to pause. Gamepad supported throughout, including

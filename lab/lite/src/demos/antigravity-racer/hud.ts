@@ -13,8 +13,8 @@ import { createButtonListNav, type ButtonListNav } from "./gamepad-list-nav.js";
 
 export interface RaceHud {
     readonly root: HTMLElement;
-    /** Update the HUD readouts for one player's ship (call once per player pane). */
-    updatePlayer(paneIndex: number, ship: ShipState, rank: number, totalShips: number): void;
+    /** Update one player pane's readout. */
+    updatePlayer(paneIndex: number, ship: ShipState): void;
     setControlsHint(text: string): void;
     showPause(input: InputSystem): void;
     hidePause(input: InputSystem): void;
@@ -31,7 +31,7 @@ export interface RaceHud {
 export function createRaceHud(paneCount: 1 | 2): RaceHud {
     const root = document.createElement("div");
     root.className = "ag-hud";
-    const panes: { speed: HTMLElement; rank: HTMLElement; boost: HTMLElement }[] = [];
+    const panes: { speed: HTMLElement }[] = [];
     for (let i = 0; i < paneCount; i++) {
         const pane = document.createElement("div");
         pane.className = "ag-hud-pane";
@@ -40,16 +40,10 @@ export function createRaceHud(paneCount: 1 | 2): RaceHud {
         pane.innerHTML = `
             <div class="ag-hud-panel">
                 <div class="ag-hud-speed"><span class="ag-hud-speed-val">0</span><span class="ag-hud-speed-unit">u/s</span></div>
-                <div class="ag-hud-rank">1<span>/1</span></div>
-                <div class="ag-hud-boost" aria-hidden="true"></div>
             </div>
         `;
         root.appendChild(pane);
-        panes.push({
-            speed: pane.querySelector(".ag-hud-speed-val")!,
-            rank: pane.querySelector(".ag-hud-rank")!,
-            boost: pane.querySelector(".ag-hud-boost")!,
-        });
+        panes.push({ speed: pane.querySelector(".ag-hud-speed-val")! });
     }
 
     const hint = document.createElement("div");
@@ -87,14 +81,13 @@ export function createRaceHud(paneCount: 1 | 2): RaceHud {
 
     return {
         root,
-        updatePlayer(paneIndex, ship, rank, totalShips): void {
+        updatePlayer(paneIndex, ship): void {
             const pane = panes[paneIndex];
             if (!pane) {
                 return;
             }
-            pane.speed.textContent = String(Math.round(Math.abs(ship.velocity)));
-            pane.rank.innerHTML = `${rank}<span>/${totalShips}</span>`;
-            pane.boost.classList.toggle("is-active", ship.boostFlashTimer > 0);
+            // `velocity` is per 60 Hz tick, so ×60 reads as world units per second.
+            pane.speed.textContent = String(Math.round(Math.abs(ship.velocity) * 60));
         },
         setControlsHint(text: string): void {
             hint.textContent = text;

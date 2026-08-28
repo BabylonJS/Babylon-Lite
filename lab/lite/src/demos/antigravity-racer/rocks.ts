@@ -39,6 +39,10 @@ export function createRocks(assets: RacerAssets): RockField {
         const trs = mat4Compose(t.position[0], t.position[1], t.position[2], q.x, q.y, q.z, q.w, t.scaling[0], t.scaling[1], t.scaling[2]);
         addHierarchyInstance(pool, trs);
     }
+    // `rocks[i].receiveShadows = true` in the playground; they are also shadow casters (wired by world.ts).
+    for (const mesh of pool.meshes) {
+        mesh.receiveShadows = true;
+    }
     return { root, pool };
 }
 

@@ -1,19 +1,25 @@
 /**
- * Antigravity Racer — spawns a full grid of ships (human + AI) with their
- * trails, and syncs simulation state onto the instanced ship model each tick.
- * Kept separate from `simulation.ts` (pure physics) and `ship-fleet.ts` (pure
- * model instancing) so `game.ts` just wires the three together per race.
+ * Antigravity Racer — the starting grid.
+ *
+ * Reproduces the playground's `initPlay` loop: `playerCount` ships spawned on
+ * CONSECUTIVE segments `0 … playerCount-1`, alternating `±1.5` across the deck,
+ * with the first `humanCount` of them player-controlled. Consecutive spawns are
+ * what puts the pack inside each AI's six-segment avoidance window, so the field
+ * jostles from the first tick instead of being strung out around the loop.
+ *
+ * Kept separate from `simulation.ts` (pure physics), `ship-fleet.ts` (model
+ * instancing) and `trail.ts` (ribbon rendering) so `game.ts` just wires them.
  */
 
-import type { EngineContext, SceneContext } from "babylon-lite";
+import type { EngineContext, Mesh, SceneContext } from "babylon-lite";
 import { addToScene } from "babylon-lite";
 
 import type { RacerAssets } from "./assets.js";
 import { createShipFleet, addShipFleetToScene, type ShipFleet } from "./ship-fleet.js";
-import { createShipState, tickAllShips, type ShipAxes, type ShipState } from "./simulation.js";
+import { createShipState, shipEmitterPoint, tickAllShips, type ShipControls, type ShipState } from "./simulation.js";
 import { createShipTrail, type ShipTrail } from "./trail.js";
 import type { TrackData } from "./track.js";
-import { MAX_SPEED, SPAWN_RING_SPACING } from "./constants.js";
+import { SPAWN_LATERAL } from "./constants.js";
 
 export interface ShipRig {
     readonly state: ShipState;
@@ -23,23 +29,24 @@ export interface ShipRig {
 export interface Grid {
     readonly rigs: ShipRig[];
     readonly fleet: ShipFleet;
-    tick(dt: number, axesForPlayer: (playerSlot: 0 | 1) => ShipAxes, simTime: number): void;
+    /** Meshes that should cast shadows for this grid (the fleet's thin-instance carriers). */
+    readonly casterMeshes: readonly Mesh[];
+    /** Advance every ship by one fixed 60 Hz tick and push the results to the GPU. */
+    tick(controlsForPlayer: (playerSlot: 0 | 1) => ShipControls, simTime: number): void;
+    dispose(): void;
 }
 
-/** Spawn `humanCount` human-controlled ships (playerSlot 0, 1, …) plus `aiCount` AI ships, all on
- *  `track`, and add the shared ship model + every trail to each scene in `scenes` (pass 2 scenes for
- *  split-screen — see `mesh-scene-registry.ts`: a mesh may live in several scenes at once). */
+/** Spawn `humanCount` human ships (player slots 0, 1, …) plus `aiCount` AI ships and add the shared ship
+ *  model + every trail to each scene in `scenes` (two scenes for split-screen — a Lite mesh may live in
+ *  several scenes at once, see `mesh-scene-registry.ts`). */
 export function spawnGrid(engine: EngineContext, assets: RacerAssets, scenes: readonly SceneContext[], track: TrackData, humanCount: number, aiCount: number): Grid {
     const total = humanCount + aiCount;
     const fleet = createShipFleet(assets, total);
     const rigs: ShipRig[] = [];
     for (let i = 0; i < total; i++) {
         const isAI = i >= humanCount;
-        const lateral = i & 1 ? 1.5 : -1.5;
-        const aiSpeedFactor = isAI ? 0.82 + ((i * 6971) % 100) / 100 / 4 : 1;
-        const state = createShipState(track, i * SPAWN_RING_SPACING, lateral, i, isAI, isAI ? -1 : i, aiSpeedFactor);
-        const trail = createShipTrail(engine, isAI ? [0.9, 0.55, 0.15] : i === 0 ? [0.25, 0.75, 1] : [1, 0.35, 0.35], state.worldPos);
-        rigs.push({ state, trail });
+        const state = createShipState(track, i, i & 1 ? SPAWN_LATERAL : -SPAWN_LATERAL, i, isAI, isAI ? -1 : i);
+        rigs.push({ state, trail: createShipTrail(engine, shipEmitterPoint(state)) });
     }
     for (const scene of scenes) {
         addShipFleetToScene(scene, fleet);
@@ -52,14 +59,20 @@ export function spawnGrid(engine: EngineContext, assets: RacerAssets, scenes: re
         syncVisual(fleet, i, rigs[i]!);
     }
 
+    const states = rigs.map((r) => r.state);
     return {
         rigs,
         fleet,
-        tick(dt, axesForPlayer, simTime): void {
-            const states = rigs.map((r) => r.state);
-            tickAllShips(states, track, dt, axesForPlayer, simTime);
+        casterMeshes: fleet.pool.meshes,
+        tick(controlsForPlayer, simTime): void {
+            tickAllShips(states, track, controlsForPlayer, simTime);
             for (let i = 0; i < rigs.length; i++) {
                 syncVisual(fleet, i, rigs[i]!);
+            }
+        },
+        dispose(): void {
+            for (const rig of rigs) {
+                rig.trail.dispose();
             }
         },
     };
@@ -68,6 +81,5 @@ export function spawnGrid(engine: EngineContext, assets: RacerAssets, scenes: re
 function syncVisual(fleet: ShipFleet, index: number, rig: ShipRig): void {
     const { state, trail } = rig;
     fleet.setShipTransform(index, state.worldPos, state.orientationQuat, state.wobble, state.tiltZ);
-    const speedRatio = Math.min(1, Math.abs(state.velocity) / MAX_SPEED);
-    trail.push(state.trailEmitPoint, state.up, speedRatio);
+    trail.push(shipEmitterPoint(state), state.trailIntensity);
 }
