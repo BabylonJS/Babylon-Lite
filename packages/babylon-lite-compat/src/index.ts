@@ -361,8 +361,17 @@ export {
     PhysicsMotionType,
     PhysicsPrestepType,
     PhysicsConstraintType,
+    PhysicsCharacterController,
+    CharacterSupportedState,
 } from "./physics/physics.js";
-export type { PhysicsAggregateParameters, PhysicsMaterial, PhysicShapeOptions } from "./physics/physics.js";
+export type {
+    PhysicsAggregateParameters,
+    PhysicsMaterial,
+    PhysicShapeOptions,
+    CharacterShapeOptions,
+    CharacterSurfaceInfo,
+    ICharacterControllerCollisionEvent,
+} from "./physics/physics.js";
 
 // ─── Node Particle Editor (NPE) ──────────────────────────────────────
 export { NodeParticleSystemSet, ParticleSystemSet } from "./particles/node-particle-system-set.js";

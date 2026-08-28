@@ -955,6 +955,7 @@ export {
     CharacterCollisionObservable,
 } from "./physics/character-controller.js";
 export type { PhysicsCharacterControllerOptions, CharacterSurfaceInfo, CharacterCollisionEvent } from "./physics/character-controller.js";
+export { calculatePhysicsCharacterMovementToRef } from "./physics/character-controller-to-ref.js";
 
 // ─── Navigation (Recast V2) ──────────────────────────────────────────
 export {
