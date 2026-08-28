@@ -3,6 +3,8 @@ import { loadHdrEnvironment } from "babylon-lite";
 
 /** Exact raw environment used by Playground CGA05F#831. */
 export const RACER_ENVIRONMENT_URL = "https://playground.babylonjs.com/textures/environment.hdr";
+/** Explicit origin prevents EnvironmentHelper-style world-bounds sizing from pushing the skybox past the camera far plane. */
+export const RACER_SKYBOX_POSITION: [number, number, number] = [0, 0, 0];
 
 /** Add the Playground environment as both IBL and the visible sky. */
 export async function loadRacerEnvironment(scene: SceneContext): Promise<void> {
@@ -10,6 +12,7 @@ export async function loadRacerEnvironment(scene: SceneContext): Promise<void> {
         faceSize: 512,
         useCubemapSkybox: true,
         skyboxSize: 1000,
+        skyboxPosition: RACER_SKYBOX_POSITION,
         skipGround: true,
     });
 
