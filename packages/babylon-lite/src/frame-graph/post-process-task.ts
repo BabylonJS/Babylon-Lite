@@ -54,6 +54,8 @@ export interface PostProcessTask extends Task, PostProcessTaskSettings {
     outputTexture: RenderTarget;
     /** Recompute and upload the pass's uniform buffer from current settings. Call after mutating effect parameters. */
     updateUniforms(): void;
+    /** @internal Rebuild the shader pipeline and bindings without recreating render targets. */
+    _rebuildGpuState(): void;
     /** @internal */
     readonly _shader: PostProcessShaderConfig;
 }
@@ -133,6 +135,9 @@ export function createPostProcessTask(config: PostProcessTaskConfig, engine: Eng
         },
         updateUniforms(): void {
             writePostProcessUniforms(task, engine);
+        },
+        _rebuildGpuState(): void {
+            createPostProcessGpuState(task, engine);
         },
         dispose(): void {
             task._passes.length = 0;

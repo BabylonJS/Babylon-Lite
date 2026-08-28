@@ -187,7 +187,8 @@ export function createDepthOfFieldBlurPostProcessTask(config: DepthOfFieldBlurPo
         if (shaderKernel !== params.kernel) {
             shaderKernel = params.kernel;
             updateDofBlurShader(task._shader, params.kernel);
-            task.record();
+            task._rebuildGpuState();
+            return;
         }
         baseUpdateUniforms();
     };

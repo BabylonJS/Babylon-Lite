@@ -827,6 +827,7 @@ export {
 
 // ─── Node Particles (NPE) ────────────────────────────────────────────
 export { parseNodeParticleSource } from "./particle/node/npe-parser.js";
+export { normalizeNodeParticleGraph } from "./particle/node/npe-graph-plumbing.js";
 export type { NodeParticleSet, BuildNodeParticleOptions, ParseNodeParticleOptions } from "./particle/node/node-particle.js";
 export { buildNodeParticleSet, parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
 export { buildNodeParticleSetWithFlowMaps } from "./particle/node/npe-flow-map.js";
@@ -909,6 +910,8 @@ export {
     getPhysicsBodyLinearVelocity,
     getPhysicsBodyAngularVelocity,
     setPhysicsBodyAngularVelocity,
+    lockPhysicsBodyRotationAxes,
+    unlockPhysicsBodyRotationAxes,
     setPhysicsBodyMotionType,
     setPhysicsBodyTransform,
     removePhysicsBody,
@@ -930,6 +933,7 @@ export type {
     PhysicsShapeParameters,
     PhysicsAggregateOptions,
     PhysicsMassProperties,
+    PhysicsRotationAxis,
     PhysicsConstraintOptions,
     PhysicsConstraintLimit,
 } from "./physics/havok.js";
@@ -951,6 +955,7 @@ export {
     CharacterCollisionObservable,
 } from "./physics/character-controller.js";
 export type { PhysicsCharacterControllerOptions, CharacterSurfaceInfo, CharacterCollisionEvent } from "./physics/character-controller.js";
+export { calculatePhysicsCharacterMovementToRef } from "./physics/character-controller-to-ref.js";
 
 // ─── Navigation (Recast V2) ──────────────────────────────────────────
 export {

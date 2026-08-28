@@ -259,11 +259,32 @@ for (const scene of SCENES) {
                 ).toBe(true);
             }
             const offenders = runtimeModules.filter((id) =>
-                /\/(math\/mat4-invert|particle\/(particle-(blend|billboard-renderable|billboard-scene|sprite-2d|sprite-2d-blend-modes)|node\/(npe-(blend-modes|flow-map-runtime|live-emitter|noise-runtime|texture-update-runtime|texture-content)|blocks\/(cpu-texture-source-block|update-(flow-map|noise)-block)))|sprite\/(sprite-renderer|sprite-custom-shader|sprite-renderable))\.[jt]s$/.test(
+                /\/(math\/mat4-invert|particle\/(particle-(blend|billboard-renderable|billboard-scene|sprite-2d|sprite-2d-blend-modes)|node\/(npe-(blend-modes|flow-map-runtime|graph-plumbing(?:-runtime)?|live-emitter|noise-runtime|texture-update-runtime|texture-content)|blocks\/(cpu-texture-source-block|update-(flow-map|noise)-block)))|sprite\/(sprite-renderer|sprite-custom-shader|sprite-renderable))\.[jt]s$/.test(
                     id
                 )
             );
-            expect(offenders, `scene302 must not load ordinary inversion, flow/noise, exact-blend, or Sprite2D paths; found: ${offenders.join(", ")}`).toEqual([]);
+            expect(offenders, `scene302 must not load graph plumbing, ordinary inversion, flow/noise, exact-blend, or Sprite2D paths; found: ${offenders.join(", ")}`).toEqual([]);
+        }
+
+        if (scene.slug === "scene305-npe-teleport") {
+            expect(
+                runtimeModules.some((id) => /\/particle\/node\/npe-graph-plumbing\.[jt]s$/.test(id)),
+                `scene305 is missing the thin graph-plumbing helper; loaded modules: ${runtimeModules.join(", ")}`
+            ).toBe(true);
+            expect(
+                runtimeModules.some((id) => /\/particle\/node\/npe-graph-plumbing-runtime\.[jt]s$/.test(id)),
+                `scene305 is missing the heavy graph-plumbing runtime; loaded modules: ${runtimeModules.join(", ")}`
+            ).toBe(true);
+            expect(
+                runtimeModules.some((id) => /\/particle\/node\/blocks\/particle-local-variable-block\.[jt]s$/.test(id)),
+                `scene305 is missing the Particle LocalVariable evaluator; loaded modules: ${runtimeModules.join(", ")}`
+            ).toBe(true);
+            const offenders = runtimeModules.filter((id) =>
+                /\/(?:camera\/arc-rotate-controls|particle\/(?:particle-(?:blend|sprite-2d|sprite-2d-blend-modes)|node\/npe-(?:blend-modes|emitter-provider|flow-map-runtime|noise-runtime|texture-update-runtime|texture-content))|sprite\/(?:sprite-renderer|sprite-custom-shader))\.[jt]s$/.test(
+                    id
+                )
+            );
+            expect(offenders, `scene305 must not load camera controls, provider, specialized texture, blend, or Sprite2D modules; found: ${offenders.join(", ")}`).toEqual([]);
         }
 
         if (scene.slug === "scene303-sprite2d-y-sort") {
@@ -317,9 +338,9 @@ for (const scene of SCENES) {
         // Mesh-only / non-sprite 3D scenes must NOT pull in any sprite code.
         // List excludes the sprite-using scenes (50-59, the 92-98 custom-shader scenes, and the
         // 117/118 sprite-picking scenes). 60-series are NME demos with no sprites; 1-40 are core 3D.
-        // 262/263/264/276/277/280/281/283/284/302 are NPE billboard scenes; 300/301/303 use Sprite2D.
+        // 262/263/264/276/277/280/281/283/284/302/305 are NPE billboard scenes; 300/301/303 use Sprite2D.
         const SPRITE_USING_IDS = new Set([
-            50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301, 302, 303,
+            50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 92, 93, 94, 95, 96, 97, 98, 117, 118, 205, 206, 262, 263, 264, 276, 277, 280, 281, 283, 284, 300, 301, 302, 303, 305,
         ]);
         if (!SPRITE_USING_IDS.has(scene.id)) {
             const offenders = runtimeModules.filter((id) => /\/sprite\/.*\.[jt]s$/.test(id));
