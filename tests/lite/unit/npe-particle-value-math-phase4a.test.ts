@@ -270,6 +270,34 @@ describe("Phase 4A NPE value math", () => {
             ]);
             expect(await evaluateParsedGraph(source)).toBe(0.5);
         });
+
+        it("observes ParticleMath Int coercion before downstream NumberMath", async () => {
+            const source = withNumberMathConsumer([
+                { customType: "BABYLON.ParticleInputBlock", id: 1, type: 1, value: 5, inputs: [] },
+                { customType: "BABYLON.ParticleInputBlock", id: 2, type: 1, value: 2, inputs: [] },
+                {
+                    customType: "BABYLON.ParticleMathBlock",
+                    id: 10,
+                    operation: 3,
+                    inputs: [
+                        { name: "left", targetBlockId: 1, targetConnectionName: "output" },
+                        { name: "right", targetBlockId: 2, targetConnectionName: "output" },
+                    ],
+                },
+            ]);
+            const blocks = (source as { blocks: Array<Record<string, unknown>> }).blocks;
+            (blocks.find((block) => block.id === 90) as Record<string, unknown>).value = 2;
+            expect(await evaluateParsedGraph(source)).toBe(4);
+        });
+
+        it("coerces direct and alias-safe ParticleMath Int results", async () => {
+            expect(await evaluateParsedGraph(scalarGraph("ParticleMathBlock", { operation: 3 }, { left: { type: 1, value: 5 }, right: { type: 1, value: 2 } }))).toBe(2);
+
+            const aliasSource = scalarGraph("ParticleMathBlock", { operation: 3 }, { left: { type: 1, value: 0 } }) as { blocks: Array<Record<string, unknown>> };
+            const math = aliasSource.blocks.find((block) => block.id === 10)!;
+            (math.inputs as Array<Record<string, unknown>>).push({ name: "right", targetBlockId: 1, targetConnectionName: "output" });
+            expect(await evaluateParsedGraph(aliasSource)).toBe(0);
+        });
     });
 
     describe("ParticleClampBlock", () => {
@@ -324,7 +352,7 @@ describe("Phase 4A NPE value math", () => {
             expect(output(0)).toEqual({ x: 0, y: 0.5, z: 1 });
         });
 
-        it("preserves signed zero and reports malformed values", async () => {
+        it("clamps negative zero to positive zero and reports malformed values", async () => {
             const output = await buildGetter("ParticleClampBlock", {}, { inputs: { value: () => -0 } });
             expect(Object.is(output(0), 0)).toBe(true);
             await expect(buildGetter("ParticleClampBlock", {}, { inputs: {} })).rejects.toThrow('NodeParticle: ParticleClampBlock 7 input "value" is not connected');
