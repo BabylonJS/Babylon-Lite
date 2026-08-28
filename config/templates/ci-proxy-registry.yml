@@ -1,0 +1,32 @@
+# Reusable step template: point pnpm/npm at the internal Azure Artifacts proxy feed
+# for the duration of a CI job, then authenticate to it.
+#
+# Why this exists:
+#   The committed `.npmrc` intentionally leaves `registry=` unset so it defaults to
+#   https://registry.npmjs.org/. That keeps `pnpm install` working for external
+#   contributors who clone https://github.com/BabylonJS/Babylon-Lite locally (see
+#   README/CONTRIBUTING). The hosted CI agents, however, cannot reach npmjs.org
+#   directly — they must go through the `Apps_PublicPackages` proxy feed. pnpm >= 11
+#   reads the registry ONLY from `.npmrc`, so we append it here (CI only) instead of
+#   committing it, then let `npmAuthenticate@0` inject a read token for the feed.
+#
+#   Reference the template immediately before every `pnpm install` step:
+#       - template: config/templates/ci-proxy-registry.yml
+#
+# Required: the job's checkout must have already run so the repo `.npmrc` exists.
+
+steps:
+    - script: |
+          set -euo pipefail
+          registry="https://pkgs.dev.azure.com/microsoft/Apps/_packaging/Apps_PublicPackages/npm/registry/"
+          # Idempotent: only add the proxy registry if one is not already configured,
+          # so a future committed `registry=` (or a re-run of this step) is respected.
+          if ! grep -qE '^registry=' .npmrc 2>/dev/null; then
+              printf '\nregistry=%s\n' "$registry" >> .npmrc
+          fi
+      displayName: "Point pnpm at Apps_PublicPackages proxy feed (CI only)"
+
+    - task: npmAuthenticate@0
+      displayName: "Authenticate to Apps_PublicPackages proxy feed"
+      inputs:
+          workingFile: .npmrc

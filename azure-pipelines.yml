@@ -58,6 +58,7 @@ stages:
                       corepack prepare pnpm@$(PNPM_VERSION) --activate
                   displayName: "Enable pnpm via corepack"
 
+                - template: config/templates/ci-proxy-registry.yml
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
@@ -89,6 +90,7 @@ stages:
                       corepack prepare pnpm@$(PNPM_VERSION) --activate
                   displayName: "Enable pnpm via corepack"
 
+                - template: config/templates/ci-proxy-registry.yml
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
@@ -128,6 +130,7 @@ stages:
                       corepack prepare pnpm@$(PNPM_VERSION) --activate
                   displayName: "Enable pnpm via corepack"
 
+                - template: config/templates/ci-proxy-registry.yml
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
@@ -217,6 +220,7 @@ stages:
                       corepack prepare pnpm@$(PNPM_VERSION) --activate
                   displayName: "Enable pnpm via corepack"
 
+                - template: config/templates/ci-proxy-registry.yml
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
@@ -333,6 +337,7 @@ stages:
                       corepack prepare pnpm@$(PNPM_VERSION) --activate
                   displayName: "Enable pnpm via corepack"
 
+                - template: config/templates/ci-proxy-registry.yml
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
@@ -464,6 +469,7 @@ stages:
                       corepack prepare pnpm@$(PNPM_VERSION) --activate
                   displayName: "Enable pnpm via corepack"
 
+                - template: config/templates/ci-proxy-registry.yml
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
@@ -540,6 +546,7 @@ stages:
                       corepack prepare pnpm@$(PNPM_VERSION) --activate
                   displayName: "Enable pnpm via corepack"
 
+                - template: config/templates/ci-proxy-registry.yml
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
@@ -612,6 +619,7 @@ stages:
                       corepack prepare pnpm@$(PNPM_VERSION) --activate
                   displayName: "Enable pnpm via corepack"
 
+                - template: config/templates/ci-proxy-registry.yml
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
@@ -696,6 +704,7 @@ stages:
                       corepack prepare pnpm@$(PNPM_VERSION) --activate
                   displayName: "Enable pnpm via corepack"
 
+                - template: config/templates/ci-proxy-registry.yml
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
