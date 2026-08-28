@@ -165,7 +165,7 @@ describe("lighting and sky", () => {
     });
 
     it("uses the HDR environment requested from Playground CGA05F#831", () => {
-        expect(RACER_ENVIRONMENT_URL).toBe("https://playground.babylonjs.com/textures/environment.env");
+        expect(RACER_ENVIRONMENT_URL).toBe("https://playground.babylonjs.com/textures/environment.hdr");
     });
 });
 
