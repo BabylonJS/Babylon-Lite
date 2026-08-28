@@ -25,8 +25,6 @@ import {
     disposePositionGizmo,
     disposeUtilityLayer,
     isGizmoDragging,
-    isGizmoInteracting,
-    isGizmoPickPending,
     pickAsync,
     registerUtilityLayer,
 } from "babylon-lite";
@@ -79,9 +77,7 @@ export async function createTrackEditor(
     });
 
     const detachOrbit = attachControl(camera, canvas, scene, {
-        shouldHandlePointerDown: () => !isGizmoInteracting(canvas),
         isExternalDragActive: () => isGizmoDragging(canvas),
-        isExternalPickPending: () => isGizmoPickPending(canvas),
     });
 
     const utilityLayer: UtilityLayer = createUtilityLayer(engine, scene);
