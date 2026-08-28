@@ -224,12 +224,29 @@ export function createInputSystem(): InputSystem {
         gamepadConnected = anyConnected;
     }
 
-    function readKeyboardControls(leftCodes: Set<string>, rightCodes: Set<string>, accelCodes: Set<string>, leftKeys?: Set<string>, accelKeys?: Set<string>): ShipControls {
-        return {
-            left: isAnyDown(leftCodes) || (!!leftKeys && isAnyLogicalDown(leftKeys)),
-            right: isAnyDown(rightCodes),
-            accelerate: isAnyDown(accelCodes) || (!!accelKeys && isAnyLogicalDown(accelKeys)),
-        };
+    // Reusable per-slot control objects to avoid per-tick allocations.
+    const _kbControls: [ShipControls, ShipControls] = [
+        { left: false, right: false, accelerate: false },
+        { left: false, right: false, accelerate: false },
+    ];
+    const _gpControls: [ShipControls, ShipControls] = [
+        { left: false, right: false, accelerate: false },
+        { left: false, right: false, accelerate: false },
+    ];
+
+    function readKeyboardControls(
+        playerSlot: 0 | 1,
+        leftCodes: Set<string>,
+        rightCodes: Set<string>,
+        accelCodes: Set<string>,
+        leftKeys?: Set<string>,
+        accelKeys?: Set<string>
+    ): ShipControls {
+        const out = _kbControls[playerSlot];
+        out.left = isAnyDown(leftCodes) || (!!leftKeys && isAnyLogicalDown(leftKeys));
+        out.right = isAnyDown(rightCodes);
+        out.accelerate = isAnyDown(accelCodes) || (!!accelKeys && isAnyLogicalDown(accelKeys));
+        return out;
     }
     function isAnyDown(codes: Set<string>): boolean {
         for (const c of codes) {
@@ -255,11 +272,11 @@ export function createInputSystem(): InputSystem {
             return null;
         }
         const analog = applyDeadzone(pad.axes[0] ?? 0, GAMEPAD_DEADZONE);
-        return {
-            left: !!pad.buttons[DPAD_LEFT]?.pressed || analog <= -GAMEPAD_STEER_THRESHOLD,
-            right: !!pad.buttons[DPAD_RIGHT]?.pressed || analog >= GAMEPAD_STEER_THRESHOLD,
-            accelerate: !!(pad.buttons[BTN_RT]?.pressed || pad.buttons[BTN_A]?.pressed),
-        };
+        const out = _gpControls[playerSlot];
+        out.left = !!pad.buttons[DPAD_LEFT]?.pressed || analog <= -GAMEPAD_STEER_THRESHOLD;
+        out.right = !!pad.buttons[DPAD_RIGHT]?.pressed || analog >= GAMEPAD_STEER_THRESHOLD;
+        out.accelerate = !!(pad.buttons[BTN_RT]?.pressed || pad.buttons[BTN_A]?.pressed);
+        return out;
     }
 
     function getRightStick(playerSlot: 0 | 1): { x: number; y: number } {
@@ -279,9 +296,9 @@ export function createInputSystem(): InputSystem {
             return gp;
         }
         if (playerSlot === 0) {
-            return readKeyboardControls(P1_LEFT_CODES, P1_RIGHT_CODES, P1_ACCEL_CODES, P1_LEFT_KEYS, P1_ACCEL_KEYS);
+            return readKeyboardControls(0, P1_LEFT_CODES, P1_RIGHT_CODES, P1_ACCEL_CODES, P1_LEFT_KEYS, P1_ACCEL_KEYS);
         }
-        return readKeyboardControls(P2_LEFT_CODES, P2_RIGHT_CODES, P2_ACCEL_CODES);
+        return readKeyboardControls(1, P2_LEFT_CODES, P2_RIGHT_CODES, P2_ACCEL_CODES);
     }
 
     return {

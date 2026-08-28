@@ -25,11 +25,12 @@
  * teardown below the page itself (the same lifetime `loadRacerAssets` gives the
  * models), so world resources are released when the page goes away.
  *
- * Lighting, sky and shadows are the playground's, verbatim: a 0.5-intensity
+ * Lighting and shadows are the racer's original setup: a 0.5-intensity
  * hemispheric light aimed at (1, 1, 0), a unit directional light travelling
- * (-1, -2, -1) from (120, 50, 100), a pure black sky, and a 1024² four-cascade
+ * (-1, -2, -1) from (120, 50, 100), and a 1024² four-cascade
  * CSM with lambda 1, bias 0.001 and shadowMaxZ 1500 (BJS `usePercentageCloserFiltering`
- * ⇒ Lite's PCF5 receiver). Casters are the ships, the boulders and the deformed
+ * ⇒ Lite's PCF5 receiver). The visible HDR sky is attached to each mode scene by
+ * `environment.ts`. Casters are the ships, the boulders and the deformed
  * track; receivers are the terrain, the boulders and the track.
  */
 

@@ -54,3 +54,4 @@ export { ObservableVec3 } from "./observable-vec3.js";
 export { ObservableQuat } from "./observable-quat.js";
 export { packMat4IntoF32 } from "./pack-mat4-into-f32.js";
 export { shToPolynomial } from "./spherical-harmonics.js";
+export { quatFromLookDirectionRHToRef } from "./quat-from-look-direction-rh-to-ref.js";

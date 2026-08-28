@@ -9,9 +9,9 @@
  */
 
 import type { Quat, Vec3 } from "babylon-lite";
-import { addVec3, crossVec3, dotVec3, lerpVec3, normalizeVec3Object, quatFromLookDirectionRH, scaleVec3, subVec3 } from "babylon-lite";
+import { crossVec3ToRef, dotVec3, lerpVec3ToRef, normalizeVec3ToRef, quatFromLookDirectionRH, quatFromLookDirectionRHToRef, scaleVec3ToRef, subVec3ToRef } from "babylon-lite";
 
-import { advanceSegment, frameLocalCoords, frameToWorld, type TrackData } from "./track.js";
+import { advanceSegment, frameLocalCoordsToRef, frameToWorld, frameToWorldToRef, type TrackData } from "./track.js";
 import {
     AI_AIM_LOOKAHEAD,
     AI_AVOID_LIMIT,
@@ -78,6 +78,21 @@ export interface ShipState {
     trailIntensity: number;
     /** Which of `CHASE_CAMERA_OFFSETS` this ship's chase camera uses. */
     cameraOffsetIndex: number;
+    /** @internal Scratch: emitter world point, reused each tick to avoid allocation. */
+    _emitterPoint: Vec3;
+    /** @internal Scratch vectors for tickShip, allocated once at ship creation. */
+    _scratch: {
+        localCoords: Vec3;
+        interpolatedUp: Vec3;
+        n: Vec3;
+        right: Vec3;
+        direction: Vec3;
+        up: Vec3;
+        aim: Vec3;
+        aheadDelta: Vec3;
+        rotated: Vec3;
+        scaledDir: Vec3;
+    };
 }
 
 /** `speedRatio` as the original computes it — clamped at 1, from the CURRENT velocity. */
@@ -102,23 +117,26 @@ export function shipEmitterPoint(ship: ShipState): Vec3 {
     const lz = ship.wobble.z - TRAIL_EMITTER_LOCAL.z;
     const right = ship.meshRight;
     const forward = ship.meshForward;
-    return {
-        x: ship.worldPos.x + right.x * lx + ship.up.x * ly + forward.x * lz,
-        y: ship.worldPos.y + right.y * lx + ship.up.y * ly + forward.y * lz,
-        z: ship.worldPos.z + right.z * lx + ship.up.z * ly + forward.z * lz,
-    };
+    const out = ship._emitterPoint;
+    out.x = ship.worldPos.x + right.x * lx + ship.up.x * ly + forward.x * lz;
+    out.y = ship.worldPos.y + right.y * lx + ship.up.y * ly + forward.y * lz;
+    out.z = ship.worldPos.z + right.z * lx + ship.up.z * ly + forward.z * lz;
+    return out;
 }
 
-function rotateAroundAxis(v: Vec3, axis: Vec3, angle: number): Vec3 {
+function rotateAroundAxisToRef(v: Vec3, axis: Vec3, angle: number, out: Vec3): Vec3 {
     const cosA = Math.cos(angle);
     const sinA = Math.sin(angle);
     const d = dotVec3(axis, v);
-    const c = crossVec3(axis, v);
-    return {
-        x: v.x * cosA + c.x * sinA + axis.x * d * (1 - cosA),
-        y: v.y * cosA + c.y * sinA + axis.y * d * (1 - cosA),
-        z: v.z * cosA + c.z * sinA + axis.z * d * (1 - cosA),
-    };
+    // Inline cross(axis, v) to avoid allocation
+    const cx = axis.y * v.z - axis.z * v.y;
+    const cy = axis.z * v.x - axis.x * v.z;
+    const cz = axis.x * v.y - axis.y * v.x;
+    const oneMinusCos = 1 - cosA;
+    out.x = v.x * cosA + cx * sinA + axis.x * d * oneMinusCos;
+    out.y = v.y * cosA + cy * sinA + axis.y * d * oneMinusCos;
+    out.z = v.z * cosA + cz * sinA + axis.z * d * oneMinusCos;
+    return out;
 }
 
 /** Spawn a ship on `spawnSegment`, offset laterally (`lateral`, in local track-width units). */
@@ -143,6 +161,19 @@ export function createShipState(track: TrackData, spawnSegment: number, lateral:
         orientationQuat: quatFromLookDirectionRH(frame.dir, frame.up),
         trailIntensity: 0,
         cameraOffsetIndex: 0,
+        _emitterPoint: { x: 0, y: 0, z: 0 },
+        _scratch: {
+            localCoords: { x: 0, y: 0, z: 0 },
+            interpolatedUp: { x: 0, y: 0, z: 0 },
+            n: { x: 0, y: 0, z: 0 },
+            right: { x: 0, y: 0, z: 0 },
+            direction: { x: 0, y: 0, z: 0 },
+            up: { x: 0, y: 0, z: 0 },
+            aim: { x: 0, y: 0, z: 0 },
+            aheadDelta: { x: 0, y: 0, z: 0 },
+            rotated: { x: 0, y: 0, z: 0 },
+            scaledDir: { x: 0, y: 0, z: 0 },
+        },
     };
 }
 
@@ -170,9 +201,10 @@ export function tickShip(ship: ShipState, ships: readonly ShipState[], track: Tr
     const count = frames.length;
 
     // ── Segment advance, wall clamp, vertical adhesion ──────────────────────
+    const sc = ship._scratch;
     const seg = advanceSegment(frames, ship.currentSegment, ship.worldPos);
     const frame = frames[seg]!;
-    const local = frameLocalCoords(frame, ship.worldPos);
+    const local = frameLocalCoordsToRef(frame, ship.worldPos, sc.localCoords);
     // The damped Y is written BACK into the reconstructed world position — this is what
     // glues the ship to the deck, with the original's floor/ceiling asymmetry.
     local.y *= local.y < 0 ? FLOOR_DAMP : CEIL_DAMP;
@@ -188,8 +220,8 @@ export function tickShip(ship: ShipState, ships: readonly ShipState[], track: Tr
     const nextFrame = frames[(seg + 1) % count]!;
     // `Matrix.Lerp(M[seg], M[seg+1], local.z)` is a component-wise, UNCLAMPED blend and only its
     // up column is ever read, so blend the up vectors directly — extrapolation included.
-    const interpolatedUp = lerpVec3(frame.up, nextFrame.up, local.z);
-    ship.worldPos = frameToWorld(frame, local);
+    lerpVec3ToRef(frame.up, nextFrame.up, local.z, sc.interpolatedUp);
+    frameToWorldToRef(frame, local, ship.worldPos);
     ship.currentSegment = seg;
 
     // ── Boost pads ──────────────────────────────────────────────────────────
@@ -199,18 +231,30 @@ export function tickShip(ship: ShipState, ships: readonly ShipState[], track: Tr
     }
 
     // ── Orientation frame ───────────────────────────────────────────────────
-    let direction = ship.velocityDirection;
-    const n = normalizeVec3Object(lerpVec3(ship.up, interpolatedUp, UP_BLEND));
-    const right = normalizeVec3Object(crossVec3(n, direction));
-    direction = normalizeVec3Object(crossVec3(right, n));
-    const up = normalizeVec3Object(crossVec3(direction, right));
-    ship.up = up;
-    ship.velocityDirection = direction;
+    lerpVec3ToRef(ship.up, sc.interpolatedUp, UP_BLEND, sc.n);
+    normalizeVec3ToRef(sc.n, sc.n);
+    crossVec3ToRef(sc.n, ship.velocityDirection, sc.right);
+    normalizeVec3ToRef(sc.right, sc.right);
+    crossVec3ToRef(sc.right, sc.n, sc.direction);
+    normalizeVec3ToRef(sc.direction, sc.direction);
+    crossVec3ToRef(sc.direction, sc.right, sc.up);
+    normalizeVec3ToRef(sc.up, sc.up);
+    // Write results into ship state objects in place.
+    ship.up.x = sc.up.x;
+    ship.up.y = sc.up.y;
+    ship.up.z = sc.up.z;
+    ship.velocityDirection.x = sc.direction.x;
+    ship.velocityDirection.y = sc.direction.y;
+    ship.velocityDirection.z = sc.direction.z;
     // `ShipMesh.rotation` is written HERE in the original, before the yaw update below, so the
     // camera and the trail emitter see this basis for the rest of the tick.
-    ship.meshRight = right;
-    ship.meshForward = direction;
-    ship.orientationQuat = quatFromLookDirectionRH(direction, up);
+    ship.meshRight.x = sc.right.x;
+    ship.meshRight.y = sc.right.y;
+    ship.meshRight.z = sc.right.z;
+    ship.meshForward.x = sc.direction.x;
+    ship.meshForward.y = sc.direction.y;
+    ship.meshForward.z = sc.direction.z;
+    quatFromLookDirectionRHToRef(sc.direction, sc.up, ship.orientationQuat);
 
     // ── Noise + steering intent ─────────────────────────────────────────────
     const localTime = simTime + ship.index;
@@ -225,11 +269,14 @@ export function tickShip(ship: ShipState, ships: readonly ShipState[], track: Tr
     let desiredYaw = 0;
     let go = false;
     if (ship.isAI) {
-        const aim = normalizeVec3Object(subVec3(frames[(seg + AI_AIM_LOOKAHEAD) % count]!.pos, ship.worldPos));
-        let d = dotVec3(right, aim);
+        subVec3ToRef(frames[(seg + AI_AIM_LOOKAHEAD) % count]!.pos, ship.worldPos, sc.aim);
+        normalizeVec3ToRef(sc.aim, sc.aim);
+        let d = dotVec3(sc.right, sc.aim);
         const ahead = firstShipAhead(ships, ships.indexOf(ship), AI_AVOID_LIMIT, count);
         if (ahead) {
-            const ds = dotVec3(right, normalizeVec3Object(subVec3(ahead.worldPos, ship.worldPos)));
+            subVec3ToRef(ahead.worldPos, ship.worldPos, sc.aheadDelta);
+            normalizeVec3ToRef(sc.aheadDelta, sc.aheadDelta);
+            const ds = dotVec3(sc.right, sc.aheadDelta);
             if (Math.abs(d - ds) < AI_AVOID_TOLERANCE) {
                 d = ds > d ? ds + AI_AVOID_TOLERANCE : ds - AI_AVOID_TOLERANCE;
             }
@@ -258,20 +305,22 @@ export function tickShip(ship: ShipState, ships: readonly ShipState[], track: Tr
 
     const fakeInertia = 1 - speedRatio * INERTIA_SPEED_TERM;
     // NOT normalized: through a corner the blended direction shortens, and the ship loses ground speed.
-    ship.velocityDirectionEffective = lerpVec3(ship.velocityDirectionEffective, ship.velocityDirection, fakeInertia);
-    ship.worldPos = addVec3(ship.worldPos, scaleVec3(ship.velocityDirectionEffective, ship.velocity));
+    lerpVec3ToRef(ship.velocityDirectionEffective, ship.velocityDirection, fakeInertia, ship.velocityDirectionEffective);
+    scaleVec3ToRef(ship.velocityDirectionEffective, ship.velocity, sc.scaledDir);
+    ship.worldPos.x += sc.scaledDir.x;
+    ship.worldPos.y += sc.scaledDir.y;
+    ship.worldPos.z += sc.scaledDir.z;
 
     ship.rotYSpeed += (desiredYaw - ship.rotYSpeed) * YAW_BLEND;
-    ship.velocityDirection = normalizeVec3Object(rotateAroundAxis(ship.velocityDirection, ship.up, ship.rotYSpeed));
+    rotateAroundAxisToRef(ship.velocityDirection, ship.up, ship.rotYSpeed, sc.rotated);
+    normalizeVec3ToRef(sc.rotated, ship.velocityDirection);
 
     // ── Visual transform ────────────────────────────────────────────────────
     desiredTilt += noiseX * GRAVITY_NOISE_STRENGTH * NOISE_TILT_GAIN;
     ship.tiltZ += (desiredTilt - ship.tiltZ) * TILT_BLEND;
-    ship.wobble = {
-        x: noiseX * GRAVITY_NOISE_STRENGTH,
-        y: noiseY * GRAVITY_NOISE_STRENGTH + WOBBLE_Y_OFFSET,
-        z: noiseZ * GRAVITY_NOISE_STRENGTH,
-    };
+    ship.wobble.x = noiseX * GRAVITY_NOISE_STRENGTH;
+    ship.wobble.y = noiseY * GRAVITY_NOISE_STRENGTH + WOBBLE_Y_OFFSET;
+    ship.wobble.z = noiseZ * GRAVITY_NOISE_STRENGTH;
 }
 
 const AI_CONTROLS: ShipControls = { left: false, right: false, accelerate: false };

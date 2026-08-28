@@ -23,6 +23,7 @@ import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scen
 const constantsPath = "../../../lab/lite/src/demos/antigravity-racer/constants.js";
 const terrainPath = "../../../lab/lite/src/demos/antigravity-racer/terrain.js";
 const worldPath = "../../../lab/lite/src/demos/antigravity-racer/world.js";
+const environmentPath = "../../../lab/lite/src/demos/antigravity-racer/environment.js";
 
 /** Counting GPU device stand-in: enough for meshes, storage buffers and the CSM depth array. */
 const gpu = vi.hoisted(() => {
@@ -91,6 +92,7 @@ const constants = (await import(constantsPath)) as Record<string, number> & {
     SPACE_CLEAR_COLOR: { r: number; g: number; b: number; a: number };
 };
 const { HEIGHTMAP_URL, GROUND_TEXTURE_URL } = (await import(terrainPath)) as { HEIGHTMAP_URL: string; GROUND_TEXTURE_URL: string };
+const { RACER_ENVIRONMENT_URL } = (await import(environmentPath)) as { RACER_ENVIRONMENT_URL: string };
 
 interface ShaderMaterialLike {
     _shadowCasterMaterial?: unknown;
@@ -158,8 +160,12 @@ describe("lighting and sky", () => {
         expect(constants.SUN_INTENSITY).toBe(1);
     });
 
-    it("uses the playground's pure black sky", () => {
+    it("keeps black as the fallback clear color", () => {
         expect(constants.SPACE_CLEAR_COLOR).toEqual({ r: 0, g: 0, b: 0, a: 1 });
+    });
+
+    it("uses the HDR environment requested from Playground CGA05F#831", () => {
+        expect(RACER_ENVIRONMENT_URL).toBe("https://playground.babylonjs.com/textures/environment.env");
     });
 });
 

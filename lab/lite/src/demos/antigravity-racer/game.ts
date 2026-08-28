@@ -46,6 +46,7 @@ import { spawnGrid, type Grid } from "./spawn.js";
 import { ChaseCamera, DemoCamera } from "./camera-rig.js";
 import { createTrackEditor, type TrackEditor } from "./editor.js";
 import type { ShipControls } from "./simulation.js";
+import { loadRacerEnvironment } from "./environment.js";
 import { FIXED_DT, MAX_STEPS_PER_FRAME, TICK_TIME, TOTAL_SHIP_COUNT } from "./constants.js";
 
 interface RunningMode {
@@ -218,6 +219,7 @@ async function buildRace(
     for (let i = 0; i < scenes.length; i++) {
         addWorldToScene(scenes[i]!, paneWorlds[i]!);
     }
+    await Promise.all(scenes.map(loadRacerEnvironment));
 
     const grid: Grid = spawnGrid(engine, assets, scenes, worlds.track, cfg.humanCount, cfg.aiCount);
     for (const world of paneWorlds) {
@@ -357,6 +359,7 @@ async function buildEditor(
     scene.clearColor = SPACE_CLEAR_COLOR;
     const world = worlds.primary;
     addWorldToScene(scene, world);
+    await loadRacerEnvironment(scene);
     // No ships in the editor: the cascades carry the world's own casters only.
     setWorldCasters(world, []);
 

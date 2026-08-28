@@ -525,8 +525,8 @@ return vec4<f32>(1.0 / 255.0, 213.0 / 255.0, 253.0 / 255.0, alpha);
 
 The colour is the node material's `color` input `(0.00392156862745098, 0.8352941176470589,
 0.9921568627450981)` = `rgb(1, 213, 253)`, identical for every ship (AI and human alike). The `max(0, …)`
-clamp replaces the original's negative-alpha half, which under `SRC_ALPHA/ONE_MINUS_SRC_ALPHA` over a
-black sky resolved to black anyway.
+clamp replaces the original's negative-alpha half, which made no visible contribution under the
+original alpha blend.
 
 `dispose()` releases the per-ship storage buffer; the mesh's GPU geometry is released by `disposeScene`.
 
@@ -571,11 +571,16 @@ memoizes it, so single-pane sessions never allocate a second depth array.
   reference disposed ship meshes. A world's caster list never contains the other pane's track mesh.
 
 ```
-scene.clearColor      = pure black (0, 0, 0, 1)      // the playground's black skybox
+scene.clearColor      = pure black (0, 0, 0, 1)      // fallback while the HDR sky loads
 hemisphericLight      = createHemisphericLight([1, 1, 0], 0.5)    // white diffuse, black ground (defaults)
 directionalLight      = createDirectionalLight([-1, -2, -1], 1)
 directionalLight.position = (120, 50, 100)
 ```
+
+As a deliberate post-parity presentation change, every mode loads
+`https://playground.babylonjs.com/textures/environment.env`, the prefiltered sibling of the
+`environment.hdr` used by Playground `CGA05F#831`. It is used for both IBL and a 1000-unit visible
+skybox, without tone mapping and at exposure/contrast `1`, while the racer's own terrain remains.
 
 Terrain:
 

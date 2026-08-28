@@ -246,5 +246,5 @@ export const SUN_DIRECTION: [number, number, number] = [-1, -2, -1];
 export const SUN_POSITION: [number, number, number] = [120, 50, 100];
 export const SUN_INTENSITY = 1;
 
-/** The playground's black skybox, expressed as a clear colour. */
+/** Fallback clear colour shown before the HDR skybox is ready. */
 export const SPACE_CLEAR_COLOR = { r: 0, g: 0, b: 0, a: 1 };

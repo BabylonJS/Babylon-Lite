@@ -508,3 +508,85 @@ describe("demo camera", () => {
         expect(demo.camera.target.x).not.toBeCloseTo(beforeReanchor.x, 3);
     });
 });
+
+// ─────────────── quatFromLookDirectionRHToRef equivalence ────────────────
+describe("quatFromLookDirectionRHToRef", () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let quatFromLookDirectionRH: (f: Vec3, u: Vec3) => any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let quatFromLookDirectionRHToRef: (f: Vec3, u: Vec3, out: any) => any;
+
+    it("loads helpers", async () => {
+        const mathPath = "../../../packages/babylon-lite/src/math/quat-from-look-direction-rh.js";
+        const mathRefPath = "../../../packages/babylon-lite/src/math/quat-from-look-direction-rh-to-ref.js";
+        quatFromLookDirectionRH = ((await import(mathPath)) as Record<string, unknown>).quatFromLookDirectionRH as typeof quatFromLookDirectionRH;
+        quatFromLookDirectionRHToRef = ((await import(mathRefPath)) as Record<string, unknown>).quatFromLookDirectionRHToRef as typeof quatFromLookDirectionRHToRef;
+    });
+
+    it("produces same values as allocating variant", () => {
+        const cases: [Vec3, Vec3][] = [
+            [
+                { x: 0, y: 0, z: 1 },
+                { x: 0, y: 1, z: 0 },
+            ],
+            [
+                { x: 1, y: 0, z: 0 },
+                { x: 0, y: 1, z: 0 },
+            ],
+            [
+                { x: 0.577, y: 0.577, z: 0.577 },
+                { x: 0, y: 1, z: 0 },
+            ],
+        ];
+        const out = { x: 0, y: 0, z: 0, w: 1 };
+        for (const [f, u] of cases) {
+            const expected = quatFromLookDirectionRH(f, u);
+            const result = quatFromLookDirectionRHToRef(f, u, out);
+            expect(result).toBe(out);
+            expect(out.x).toBeCloseTo(expected.x, 12);
+            expect(out.y).toBeCloseTo(expected.y, 12);
+            expect(out.z).toBeCloseTo(expected.z, 12);
+            expect(out.w).toBeCloseTo(expected.w, 12);
+        }
+    });
+});
+
+// ─────────────── Allocation contract: object identity stability ─────────
+describe("allocation contract — hot-loop object identity", () => {
+    it("tickShip reuses the same state-owned objects across many ticks", () => {
+        const track = makeTrack();
+        const ship = createShipState(track, 5, 1.5, 0, false, 0) as ShipState & {
+            _emitterPoint: Vec3;
+            _scratch: Record<string, Vec3>;
+        };
+        const refWorldPos = ship.worldPos;
+        const refUp = ship.up;
+        const refVelDir = ship.velocityDirection;
+        const refVelDirEff = ship.velocityDirectionEffective;
+        const refMeshRight = ship.meshRight;
+        const refMeshForward = ship.meshForward;
+        const refWobble = ship.wobble;
+        const refOrientQuat = (ship as unknown as { orientationQuat: { x: number; y: number; z: number; w: number } }).orientationQuat;
+        const refEmitter = ship._emitterPoint;
+
+        const go: ShipControls = { left: false, right: true, accelerate: true };
+        for (let t = 0; t < 200; t++) {
+            tickShip(ship, [ship], track, go, t * 0.016);
+        }
+
+        expect(ship.worldPos).toBe(refWorldPos);
+        expect(ship.up).toBe(refUp);
+        expect(ship.velocityDirection).toBe(refVelDir);
+        expect(ship.velocityDirectionEffective).toBe(refVelDirEff);
+        expect(ship.meshRight).toBe(refMeshRight);
+        expect(ship.meshForward).toBe(refMeshForward);
+        expect(ship.wobble).toBe(refWobble);
+        expect((ship as unknown as { orientationQuat: unknown }).orientationQuat).toBe(refOrientQuat);
+        expect(ship._emitterPoint).toBe(refEmitter);
+
+        const e1 = shipEmitterPoint(ship);
+        const e2 = shipEmitterPoint(ship);
+        expect(e1).toBe(e2);
+        expect(e1).toBe(refEmitter);
+    });
+});

@@ -177,9 +177,28 @@ export function frameLocalCoords(frame: TrackFrame, worldPos: Vec3): Vec3 {
     return { x: dotVec3(rel, frame.right), y: dotVec3(rel, frame.up), z: dotVec3(rel, frame.dir) };
 }
 
+/** Local (right, up, forward) coordinates of `worldPos` relative to a segment frame, writing into `out`. */
+export function frameLocalCoordsToRef(frame: TrackFrame, worldPos: Vec3, out: Vec3): Vec3 {
+    const rx = worldPos.x - frame.pos.x;
+    const ry = worldPos.y - frame.pos.y;
+    const rz = worldPos.z - frame.pos.z;
+    out.x = rx * frame.right.x + ry * frame.right.y + rz * frame.right.z;
+    out.y = rx * frame.up.x + ry * frame.up.y + rz * frame.up.z;
+    out.z = rx * frame.dir.x + ry * frame.dir.y + rz * frame.dir.z;
+    return out;
+}
+
 /** Reconstruct a world position from local (right, up, forward) coordinates at a segment frame. */
 export function frameToWorld(frame: TrackFrame, local: Vec3): Vec3 {
     return addVec3(frame.pos, addVec3(scaleVec3(frame.right, local.x), addVec3(scaleVec3(frame.up, local.y), scaleVec3(frame.dir, local.z))));
+}
+
+/** Reconstruct a world position from local coordinates at a segment frame, writing into `out`. */
+export function frameToWorldToRef(frame: TrackFrame, local: Vec3, out: Vec3): Vec3 {
+    out.x = frame.pos.x + frame.right.x * local.x + frame.up.x * local.y + frame.dir.x * local.z;
+    out.y = frame.pos.y + frame.right.y * local.x + frame.up.y * local.y + frame.dir.y * local.z;
+    out.z = frame.pos.z + frame.right.z * local.x + frame.up.z * local.y + frame.dir.z * local.z;
+    return out;
 }
 
 /** Advance a segment index forward while `worldPos` has crossed the next segment's plane.
@@ -188,8 +207,12 @@ export function advanceSegment(frames: readonly TrackFrame[], seg: number, world
     const n = frames.length;
     for (let guard = 0; guard < n; guard++) {
         const nextSeg = (seg + 1) % n;
-        const rel = subVec3(worldPos, frames[nextSeg]!.pos);
-        if (dotVec3(rel, frames[nextSeg]!.dir) > 0) {
+        const nf = frames[nextSeg]!;
+        // Inline sub + dot to avoid allocating a temporary Vec3.
+        const rx = worldPos.x - nf.pos.x;
+        const ry = worldPos.y - nf.pos.y;
+        const rz = worldPos.z - nf.pos.z;
+        if (rx * nf.dir.x + ry * nf.dir.y + rz * nf.dir.z > 0) {
             seg = nextSeg;
         } else {
             break;

@@ -30,17 +30,16 @@ import {
     TICK_TIME,
 } from "./constants.js";
 
-/** `TransformCoordinates(local, ShipMesh.worldMatrix)` — the ship basis is (right, up, forward). */
-function shipLocalToWorld(ship: ShipState, local: Vec3): Vec3 {
+/** `TransformCoordinates(local, ShipMesh.worldMatrix)` — writes into `out`. */
+function shipLocalToWorldToRef(ship: ShipState, local: Vec3, out: Vec3): Vec3 {
     const p = ship.worldPos;
     const r = ship.meshRight;
     const u = ship.up;
     const d = ship.meshForward;
-    return {
-        x: p.x + r.x * local.x + u.x * local.y + d.x * local.z,
-        y: p.y + r.y * local.x + u.y * local.y + d.y * local.z,
-        z: p.z + r.z * local.x + u.z * local.y + d.z * local.z,
-    };
+    out.x = p.x + r.x * local.x + u.x * local.y + d.x * local.z;
+    out.y = p.y + r.y * local.x + u.y * local.y + d.y * local.z;
+    out.z = p.z + r.z * local.x + u.z * local.y + d.z * local.z;
+    return out;
 }
 
 function lerpTo(current: number, goal: number, t: number): number {
@@ -58,12 +57,14 @@ function lerpTo(current: number, goal: number, t: number): number {
 export class ChaseCamera {
     readonly camera: BankedFreeCamera;
     private readonly _ship: ShipState;
+    private readonly _desiredPos: Vec3 = { x: 0, y: 0, z: 0 };
+    private readonly _desiredTarget: Vec3 = { x: 0, y: 0, z: 0 };
 
     constructor(scene: SceneContext, ship: ShipState) {
         this._ship = ship;
-        const position = shipLocalToWorld(ship, CHASE_CAMERA_OFFSETS[ship.cameraOffsetIndex]!);
-        const target = shipLocalToWorld(ship, CHASE_TARGET_LOCAL);
-        this.camera = createBankedFreeCamera(position, target, ship.up);
+        shipLocalToWorldToRef(ship, CHASE_CAMERA_OFFSETS[ship.cameraOffsetIndex]!, this._desiredPos);
+        shipLocalToWorldToRef(ship, CHASE_TARGET_LOCAL, this._desiredTarget);
+        this.camera = createBankedFreeCamera({ ...this._desiredPos }, { ...this._desiredTarget }, ship.up);
         this.camera.fov = CAMERA_FOV;
         scene.camera = this.camera;
     }
@@ -76,12 +77,12 @@ export class ChaseCamera {
     tick(): void {
         const ship = this._ship;
         const cam = this.camera;
-        const desiredPosition = shipLocalToWorld(ship, CHASE_CAMERA_OFFSETS[ship.cameraOffsetIndex]!);
-        const desiredTarget = shipLocalToWorld(ship, CHASE_TARGET_LOCAL);
+        shipLocalToWorldToRef(ship, CHASE_CAMERA_OFFSETS[ship.cameraOffsetIndex]!, this._desiredPos);
+        shipLocalToWorldToRef(ship, CHASE_TARGET_LOCAL, this._desiredTarget);
         const k = CAMERA_LERP_BASE + shipSpeedRatio(ship) * CAMERA_LERP_SPEED_TERM;
 
-        cam.position.set(lerpTo(cam.position.x, desiredPosition.x, k), lerpTo(cam.position.y, desiredPosition.y, k), lerpTo(cam.position.z, desiredPosition.z, k));
-        cam.target.set(lerpTo(cam.target.x, desiredTarget.x, k), lerpTo(cam.target.y, desiredTarget.y, k), lerpTo(cam.target.z, desiredTarget.z, k));
+        cam.position.set(lerpTo(cam.position.x, this._desiredPos.x, k), lerpTo(cam.position.y, this._desiredPos.y, k), lerpTo(cam.position.z, this._desiredPos.z, k));
+        cam.target.set(lerpTo(cam.target.x, this._desiredTarget.x, k), lerpTo(cam.target.y, this._desiredTarget.y, k), lerpTo(cam.target.z, this._desiredTarget.z, k));
         cam.upVector.set(lerpTo(cam.upVector.x, ship.up.x, k), lerpTo(cam.upVector.y, ship.up.y, k), lerpTo(cam.upVector.z, ship.up.z, k));
     }
 }

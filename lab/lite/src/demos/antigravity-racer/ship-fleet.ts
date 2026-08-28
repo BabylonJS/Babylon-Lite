@@ -20,11 +20,11 @@
  * first), composed on top of the model's own glTF hierarchy by the pool.
  */
 
-import type { HierarchyInstancePool, SceneContext, SceneNode, Vec3 } from "babylon-lite";
-import { addHierarchyInstance, addToScene, mat4Compose, mat4Multiply, setHierarchyInstanceCount, setHierarchyInstanceMatrix } from "babylon-lite";
+import type { HierarchyInstancePool, Mat4, Mat4Storage, SceneContext, SceneNode, Vec3 } from "babylon-lite";
+import { addHierarchyInstance, addToScene, mat4Compose, mat4ComposeInto, mat4MultiplyInto, setHierarchyInstanceCount, setHierarchyInstanceMatrix } from "babylon-lite";
 
 import { instantiateModel, type RacerAssets } from "./assets.js";
-import { bjsEulerToQuat } from "./bjs-euler.js";
+import { bjsEulerToQuatInto } from "./bjs-euler.js";
 import { SHIP_MODEL_YAW } from "./constants.js";
 
 export interface ShipFleet {
@@ -43,14 +43,20 @@ export function createShipFleet(assets: RacerAssets, count: number): ShipFleet {
     for (let i = 0; i < count; i++) {
         addHierarchyInstance(pool, identity);
     }
+    // Per-fleet scratch matrices to avoid per-tick allocations.
+    const _localMat = new Float32Array(16) as Mat4Storage;
+    const _worldMat = new Float32Array(16) as Mat4Storage;
+    const _resultMat = new Float32Array(16) as Mat4Storage;
+    const _localQuat = { x: 0, y: 0, z: 0, w: 1 };
     return {
         root,
         pool,
         setShipTransform(index, worldPos, orientation, wobble, tiltZ): void {
-            const local = bjsEulerToQuat(0, SHIP_MODEL_YAW, tiltZ);
-            const shipTransform = mat4Compose(wobble.x, wobble.y, wobble.z, local.x, local.y, local.z, local.w, 1, 1, 1);
-            const shipMesh = mat4Compose(worldPos.x, worldPos.y, worldPos.z, orientation.x, orientation.y, orientation.z, orientation.w, 1, 1, 1);
-            setHierarchyInstanceMatrix(pool, index, mat4Multiply(shipMesh, shipTransform));
+            bjsEulerToQuatInto(0, SHIP_MODEL_YAW, tiltZ, _localQuat);
+            mat4ComposeInto(_localMat, 0, wobble.x, wobble.y, wobble.z, _localQuat.x, _localQuat.y, _localQuat.z, _localQuat.w, 1, 1, 1);
+            mat4ComposeInto(_worldMat, 0, worldPos.x, worldPos.y, worldPos.z, orientation.x, orientation.y, orientation.z, orientation.w, 1, 1, 1);
+            mat4MultiplyInto(_resultMat, 0, _worldMat, 0, _localMat, 0);
+            setHierarchyInstanceMatrix(pool, index, _resultMat as unknown as Mat4);
         },
         setVisibleCount(visible): void {
             setHierarchyInstanceCount(pool, visible);

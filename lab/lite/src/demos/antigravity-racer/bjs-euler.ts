@@ -25,3 +25,18 @@ export function bjsEulerToQuat(rx: number, ry: number, rz: number): Quat {
         w: cy * cx * cz + sy * sx * sz,
     };
 }
+
+/** Same as {@link bjsEulerToQuat} but writes into an existing quaternion object. */
+export function bjsEulerToQuatInto(rx: number, ry: number, rz: number, out: Quat): Quat {
+    const sx = Math.sin(rx * 0.5);
+    const cx = Math.cos(rx * 0.5);
+    const sy = Math.sin(ry * 0.5);
+    const cy = Math.cos(ry * 0.5);
+    const sz = Math.sin(rz * 0.5);
+    const cz = Math.cos(rz * 0.5);
+    out.x = cy * sx * cz + sy * cx * sz;
+    out.y = sy * cx * cz - cy * sx * sz;
+    out.z = cy * cx * sz - sy * sx * cz;
+    out.w = cy * cx * cz + sy * sx * sz;
+    return out;
+}

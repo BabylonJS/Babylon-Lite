@@ -16,7 +16,16 @@ import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
 import { getNoColorView } from "./pcf-shadow-task-hooks.js";
 import { createCsmRefitGate, type CsmRefitGate } from "./csm-refit-gate.js";
-import { _biasViewProjection, _computeCsmCascades, _writeCsmUbo, csmCameraAspect, csmWorldBiasClipOffset, type CsmConfig, type CsmTaskState } from "./csm-shadow-task-hooks.js";
+import {
+    _biasViewProjectionInto,
+    _computeCsmCascades,
+    _createCascadeScratch,
+    _writeCsmUbo,
+    csmCameraAspect,
+    csmWorldBiasClipOffset,
+    type CsmConfig,
+    type CsmTaskState,
+} from "./csm-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 
 interface CsmCachedTaskState extends CsmTaskState {
@@ -288,6 +297,7 @@ export function ensureCsmShadowCacheState(
         _materialViews: materialViews,
         _casterMatGens: casterMatGens,
         _casterMaxCascades: casterMaxCascades,
+        _cascadeScratch: _createCascadeScratch(cascadeCount),
         _staticTasks: staticTasks,
         _cacheTexture: cacheTexture,
         _gate: gate,
@@ -363,7 +373,7 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
 }
 
 function applyCsmRefit(engine: EngineContext, sg: ShadowGenerator, state: CsmTaskState, cfg: CsmConfig, camera: NonNullable<SceneContext["camera"]>): void {
-    const cascades = _computeCsmCascades(state._scene, camera, sg._light as DirectionalLight, cfg, state._casterMeshes);
+    const cascades = _computeCsmCascades(state._scene, camera, sg._light as DirectionalLight, cfg, state._casterMeshes, state._cascadeScratch);
     _writeCsmUbo(state._uboData, cascades, cfg);
     sg._version++;
     engine._device.queue.writeBuffer(sg._shadowUBO, 0, state._uboData as Float32Array<ArrayBuffer>);
@@ -378,14 +388,8 @@ function applyCsmRefit(engine: EngineContext, sg: ShadowGenerator, state: CsmTas
         const cascadeCamera = state._cameras[i]!;
         cascadeCamera.fov = 1;
         const clipBias = cfg._worldSpaceBias === null ? cfg._bias * 0.5 : csmWorldBiasClipOffset(cfg._worldSpaceBias, cascades._near[i]!, cascades._far[i]!);
-        updateShadowCameraBase(
-            cascadeCamera,
-            state._cameraVersion,
-            cascades._near[i]!,
-            cascades._far[i]!,
-            cascades._views[i]!,
-            _biasViewProjection(cascades._biased[i]!, clipBias)
-        );
+        _biasViewProjectionInto(cascades._biased[i]!, cascades._transforms[i]!, clipBias);
+        updateShadowCameraBase(cascadeCamera, state._cameraVersion, cascades._near[i]!, cascades._far[i]!, cascades._views[i]!, cascades._biased[i]!);
     }
 }
 

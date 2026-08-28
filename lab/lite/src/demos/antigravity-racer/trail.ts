@@ -126,6 +126,7 @@ return vec4<f32>(1.0 / 255.0, 213.0 / 255.0, 253.0 / 255.0, alpha);
  */
 export function createShipTrail(engine: EngineContext, startPos: Vec3): ShipTrail {
     const history = new Float32Array(TRAIL_HISTORY * 4);
+    const historyBytes = new Uint8Array(history.buffer);
     for (let i = 0; i < TRAIL_HISTORY; i++) {
         history[i * 4] = startPos.x;
         history[i * 4 + 1] = startPos.y;
@@ -170,7 +171,7 @@ export function createShipTrail(engine: EngineContext, startPos: Vec3): ShipTrai
             history[last + 1] = pos.y;
             history[last + 2] = pos.z;
             history[last + 3] = intensity;
-            updateStorageBuffer(engine, buffer, history);
+            updateStorageBuffer(engine, buffer, historyBytes);
         },
         dispose(): void {
             if (disposed) {

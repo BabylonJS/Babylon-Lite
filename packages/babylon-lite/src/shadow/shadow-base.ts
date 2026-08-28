@@ -32,6 +32,14 @@ export function writeShadowUboFields(out: Float32Array, sg: { _lightMatrix: Floa
 /** Build a light-space view matrix (column-major 4x4) from direction + position.
  *  Shared between directional and spot shadow generators. */
 export function buildLightViewMatrix(dirX: number, dirY: number, dirZ: number, px: number, py: number, pz: number): Float32Array {
+    const out = new F32(16);
+    buildLightViewMatrixInto(out, dirX, dirY, dirZ, px, py, pz);
+    return out;
+}
+
+/** Build a light-space view matrix into a pre-allocated Float32Array(16).
+ *  Zero-allocation variant of {@link buildLightViewMatrix}. */
+export function buildLightViewMatrixInto(out: Float32Array, dirX: number, dirY: number, dirZ: number, px: number, py: number, pz: number): void {
     const len = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ) || 1;
     const fx = dirX / len;
     const fy = dirY / len;
@@ -45,7 +53,6 @@ export function buildLightViewMatrix(dirX: number, dirY: number, dirZ: number, p
         upY = 0;
         upZ = 1;
     }
-    // right = cross(up, forward)
     let rx = upY * fz - upZ * fy;
     let ry = upZ * fx - upX * fz;
     let rz = upX * fy - upY * fx;
@@ -54,18 +61,38 @@ export function buildLightViewMatrix(dirX: number, dirY: number, dirZ: number, p
     ry /= rLen;
     rz /= rLen;
 
-    // up = cross(forward, right)
     const ux = fy * rz - fz * ry;
     const uy = fz * rx - fx * rz;
     const uz = fx * ry - fy * rx;
 
-    // Column-major view matrix (stores basis as rows of rotation, plus translation column)
-    return new F32([rx, ux, fx, 0, ry, uy, fy, 0, rz, uz, fz, 0, -(rx * px + ry * py + rz * pz), -(ux * px + uy * py + uz * pz), -(fx * px + fy * py + fz * pz), 1]);
+    out[0] = rx;
+    out[1] = ux;
+    out[2] = fx;
+    out[3] = 0;
+    out[4] = ry;
+    out[5] = uy;
+    out[6] = fy;
+    out[7] = 0;
+    out[8] = rz;
+    out[9] = uz;
+    out[10] = fz;
+    out[11] = 0;
+    out[12] = -(rx * px + ry * py + rz * pz);
+    out[13] = -(ux * px + uy * py + uz * pz);
+    out[14] = -(fx * px + fy * py + fz * pz);
+    out[15] = 1;
 }
 
 /** Multiply two column-major 4x4 matrices: out = a * b. */
 export function multiply4x4(a: Float32Array, b: Float32Array): Float32Array {
     const out = new F32(16);
+    multiply4x4Into(out, a, b);
+    return out;
+}
+
+/** Multiply two column-major 4x4 matrices into a pre-allocated buffer: out = a * b.
+ *  Zero-allocation variant of {@link multiply4x4}. */
+export function multiply4x4Into(out: Float32Array, a: Float32Array, b: Float32Array): void {
     for (let row = 0; row < 4; row++) {
         for (let col = 0; col < 4; col++) {
             let sum = 0;
@@ -75,7 +102,6 @@ export function multiply4x4(a: Float32Array, b: Float32Array): Float32Array {
             out[row + col * 4] = sum;
         }
     }
-    return out;
 }
 
 /** Fit an orthographic directional-light projection to caster world-space bounds. */
