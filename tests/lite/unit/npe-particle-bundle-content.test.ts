@@ -65,12 +65,17 @@ function expectEmbeddedTextureModuleIsolation(sceneId: number, moduleIds: string
 }
 
 describe("Particle bundle feature isolation", () => {
-    it("keeps Phase 4A evaluator imports in the lazy value registry", () => {
+    it("keeps Phase 4A activation and evaluator imports lazy", () => {
+        const builder = readFileSync(resolve(NPE_SOURCE_DIR, "npe-build.ts"), "utf8");
         const enabler = readFileSync(resolve(NPE_SOURCE_DIR, "npe-phase4-values.ts"), "utf8");
         const registry = readFileSync(resolve(NPE_SOURCE_DIR, "npe-registry-phase4-values.ts"), "utf8");
+        expect(builder).toContain('import("./npe-phase4-values.js")');
         expect(enabler).toContain('from "./blocks/particle-value-type.js"');
         expect(enabler).toContain('import("./npe-registry-phase4-values.js")');
         expect(readFileSync(resolve(NPE_SOURCE_DIR, "npe-registry-extra-values.ts"), "utf8")).not.toContain("phase4");
+        for (const owner of ["npe-parser.ts", "npe-registry.ts", "npe-graph-plumbing.ts"]) {
+            expect(readFileSync(resolve(NPE_SOURCE_DIR, owner), "utf8")).not.toContain("npe-phase4-values");
+        }
         expect(registry).toContain('import("./blocks/particle-math-int-block.js")');
         for (const moduleName of ["particle-number-math-block", "particle-clamp-block", "particle-step-block"]) {
             expect(registry).toContain(`import("./blocks/${moduleName}.js")`);

@@ -180,6 +180,14 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
             if (!block) {
                 return;
             }
+            const className = block.className;
+            if (
+                !graph._loadEvaluator &&
+                ((className === "ParticleInputBlock" && block.serialized.type === 0x0001) || /^Particle(FloatToInt|NumberMath|Clamp|Step)Block$/.test(className))
+            ) {
+                const { enablePhase4ValueGraph } = await import("./npe-phase4-values.js");
+                enablePhase4ValueGraph(graph);
+            }
             const buildKey = evaluatorOverride ? block : blockId;
             if (built.has(buildKey)) {
                 return;
@@ -190,6 +198,11 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
             for (const input of block.inputs) {
                 if (input.name === "particle" && isInputConnected(input)) {
                     await buildBlock(input.targetBlockId);
+                }
+            }
+            for (const input of block.inputs) {
+                if (input.name !== "particle" && isInputConnected(input)) {
+                    await buildBlock(input.targetBlockId, options._getInputEvaluator?.(block, input));
                 }
             }
             const contextualSource = typeof block.serialized.contextualValue === "number" ? block.serialized.contextualValue : 0;
@@ -205,11 +218,6 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
                 (block.className === "ParticleMathBlock" && left?.targetBlockId === right?.targetBlockId && left?.targetConnectionName === right?.targetConnectionName) ||
                 (block.className === "SystemBlock" && isInputConnected(block.inputs.find((input) => input.name === "emitRate"))) ||
                 (block.className === "SetupSpriteSheetBlock" && block.serialized.randomStartCell === true);
-            for (const input of block.inputs) {
-                if (input.name !== "particle" && isInputConnected(input)) {
-                    await buildBlock(input.targetBlockId, options._getInputEvaluator?.(block, input));
-                }
-            }
             const evaluator =
                 evaluatorOverride ??
                 options._getEvaluator?.(block) ??
