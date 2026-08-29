@@ -274,6 +274,10 @@ describe("Phase 4A NPE value math", () => {
             expect(await evaluateParsedGraph(source)).toBe(0.5);
         });
 
+        it("coerces ParticleMath when only the left input is Int", async () => {
+            expect(await evaluateParsedGraph(scalarGraph("ParticleMathBlock", { operation: 3 }, { left: { type: 1, value: 5 }, right: { type: 2, value: 2 } }))).toBe(2);
+        });
+
         it("observes ParticleMath Int coercion before downstream NumberMath", async () => {
             const source = withNumberMathConsumer([
                 { customType: "BABYLON.ParticleInputBlock", id: 1, type: 1, value: 5, inputs: [] },

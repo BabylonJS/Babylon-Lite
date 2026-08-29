@@ -65,7 +65,7 @@ export function resolveParticleValueTypes(blocks: ReadonlyMap<number, ParsedPart
         }
     }
     for (const block of blocks.values()) {
-        if (block.className === "ParticleMathBlock" && hasIntInput(blocks, block, "left", new Set()) && hasIntInput(blocks, block, "right", new Set())) {
+        if (block.className === "ParticleMathBlock" && hasIntInput(blocks, block, "left", new Set())) {
             const left = block.inputs.find((input) => input.name === "left");
             const right = block.inputs.find((input) => input.name === "right");
             const alias = left?.targetBlockId === right?.targetBlockId && left?.targetConnectionName === right?.targetConnectionName;

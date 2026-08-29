@@ -2,17 +2,14 @@ import type { NpeBlockEvaluator, NpeBuildContext } from "../npe-build.js";
 import { particleMathBlock } from "./particle-math-block.js";
 import { particleMathCompactBlock } from "./particle-math-compact-block.js";
 
-/** Add scalar Int coercion to a ParticleMath evaluator selected for an all-Int result. */
+/** Add Babylon's left-Int coercion to a ParticleMath evaluator. */
 function withIntMath(evaluator: NpeBlockEvaluator): NpeBlockEvaluator {
     return {
         build(block, ctx) {
             const intContext: NpeBuildContext = {
                 ...ctx,
                 setOutput(blockId, name, getter) {
-                    ctx.setOutput(blockId, name, (index) => {
-                        const value = getter(index);
-                        return typeof value === "number" ? value | 0 : value;
-                    });
+                    ctx.setOutput(blockId, name, (index) => (getter(index) as number) | 0);
                 },
             };
             evaluator.build(block, intContext);
@@ -20,8 +17,8 @@ function withIntMath(evaluator: NpeBlockEvaluator): NpeBlockEvaluator {
     };
 }
 
-/** All-Int ParticleMath evaluator for distinct input sources. */
+/** Left-Int ParticleMath evaluator for distinct input sources. */
 export const particleIntMathBlock = withIntMath(particleMathCompactBlock);
 
-/** All-Int ParticleMath evaluator that snapshots aliased input sources. */
+/** Left-Int ParticleMath evaluator that snapshots aliased input sources. */
 export const particleIntMathAliasBlock = withIntMath(particleMathBlock);
