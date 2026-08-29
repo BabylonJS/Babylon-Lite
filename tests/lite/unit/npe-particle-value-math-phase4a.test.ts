@@ -71,10 +71,24 @@ async function evaluateParsedGraph(source: object): Promise<number> {
 
 type ParticleBuilder = (engine: EngineContext, scene: SceneContext, graph: ReturnType<typeof parseNodeParticleSource>) => Promise<NodeParticleSet>;
 
+const particleBuilders = [
+    ["default", buildNodeParticleSet],
+    ["flow-map", buildNodeParticleSetWithFlowMaps],
+    ["combined texture-update", buildNodeParticleSetWithTextureUpdates],
+] as const satisfies ReadonlyArray<readonly [string, ParticleBuilder]>;
+
 async function evaluateParsedGraphWith(source: object, builder: ParticleBuilder): Promise<number> {
     const graph = await normalizeNodeParticleGraph(parseNodeParticleSource(source));
     const set = await builder({} as EngineContext, {} as SceneContext, graph);
     return set.systems[0]!._emitRateGetter!();
+}
+
+async function evaluateParsedGraphContract(source: object, builder: ParticleBuilder): Promise<{ value: number; valueType: string | undefined }> {
+    const graph = await normalizeNodeParticleGraph(parseNodeParticleSource(source));
+    const system = graph.blocks.get(graph.systemBlockIds[0]!)!;
+    const valueType = system.inputs.find((input) => input.name === "emitRate")?.valueType;
+    const set = await builder({} as EngineContext, {} as SceneContext, graph);
+    return { value: set.systems[0]!._emitRateGetter!(), valueType };
 }
 
 function withNumberMathConsumer(blocks: Array<Record<string, unknown>>, producerId = 10): object {
@@ -101,6 +115,53 @@ function withNumberMathConsumer(blocks: Array<Record<string, unknown>>, producer
 }
 
 describe("Phase 4A NPE value math", () => {
+    describe("Babylon.js connection-point contracts", () => {
+        const contracts = [
+            {
+                name: "NumberMath uses its Int left input for output type and coercion",
+                source: scalarGraph("ParticleNumberMathBlock", { operation: 0 }, { left: { type: 1, value: 5.75 }, right: { type: 2, value: 2 } }),
+                value: 1,
+                valueType: "int",
+            },
+            {
+                name: "NumberMath keeps a Float left input when the right input is Int",
+                source: scalarGraph("ParticleNumberMathBlock", { operation: 0 }, { left: { type: 2, value: 5.75 }, right: { type: 1, value: 2 } }),
+                value: 1.75,
+                valueType: undefined,
+            },
+            {
+                name: "Clamp bases its output type on the value input",
+                source: scalarGraph("ParticleClampBlock", {}, { value: { type: 1, value: 3 }, min: { type: 2, value: 0 }, max: { type: 2, value: 2 } }),
+                value: 2,
+                valueType: "int",
+            },
+            {
+                name: "Clamp preserves a Float value type",
+                source: scalarGraph("ParticleClampBlock", {}, { value: { type: 2, value: 3 }, min: { type: 1, value: 0 }, max: { type: 1, value: 2 } }),
+                value: 2,
+                valueType: undefined,
+            },
+            {
+                name: "Step bases its output type on the value input",
+                source: scalarGraph("ParticleStepBlock", {}, { value: { type: 1, value: -1 }, edge: { type: 2, value: 0 } }),
+                value: 0,
+                valueType: "int",
+            },
+            {
+                name: "Step preserves a Float value type",
+                source: scalarGraph("ParticleStepBlock", {}, { value: { type: 2, value: 0 }, edge: { type: 1, value: 0 } }),
+                value: 1,
+                valueType: undefined,
+            },
+        ] as const;
+
+        it.each(contracts)("$name through every builder", async ({ source, value, valueType }) => {
+            for (const [, builder] of particleBuilders) {
+                await expect(evaluateParsedGraphContract(source, builder)).resolves.toEqual({ value, valueType });
+            }
+        });
+    });
+
     describe("ParticleNumberMathBlock", () => {
         it.each([
             [0, 5.5, 2, 1.5],
@@ -316,11 +377,7 @@ describe("Phase 4A NPE value math", () => {
             expect(await evaluateParsedGraph(aliasSource)).toBe(0);
         });
 
-        it.each([
-            ["default", buildNodeParticleSet],
-            ["flow-map", buildNodeParticleSetWithFlowMaps],
-            ["combined texture-update", buildNodeParticleSetWithTextureUpdates],
-        ] as const)("keeps Int OncePerParticle Random scalar through the %s builder", async (_name, builder) => {
+        it.each(particleBuilders)("keeps Int OncePerParticle Random scalar through the %s builder", async (_name, builder) => {
             const source = scalarGraph("ParticleRandomBlock", { lockMode: 3 }, { min: { type: 1, value: 2 }, max: { type: 1, value: 4 } });
             const previousRandom = Math.random;
             Math.random = () => 0.5;
