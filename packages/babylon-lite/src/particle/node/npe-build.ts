@@ -196,7 +196,8 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
             const left = block.inputs.find((input) => input.name === "left");
             const right = block.inputs.find((input) => input.name === "right");
             const onceValueType = block.inputs.find((input) => input.name === "min")?.valueType ?? block.inputs.find((input) => input.name === "max")?.valueType ?? "number";
-            const scalarOnce = block.className === "ParticleRandomBlock" && block.serialized.lockMode === 3 && onceValueType === "number";
+            // Valid typed tags are BABYLON.*; indexing lets Rollup fold statically known scene tags.
+            const scalarOnce = block.className === "ParticleRandomBlock" && block.serialized.lockMode === 3 && onceValueType[0] !== "B";
             const localShape = state.isLocal && block.className.endsWith("ShapeBlock");
             const variant =
                 (block.className === "ParticleInputBlock" && contextualSource !== 0 && !((contextualSource <= 6 && contextualSource !== 2) || contextualSource === 0x17)) ||
@@ -210,7 +211,7 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
                   ? await (await import("./npe-registry-local-shapes.js")).loadLocalShapeEvaluator(block.className)
                   : variant
                     ? await (await import("./npe-registry-variants.js")).loadVariantBlockEvaluator(block)
-                    : ((await graph._loadEvaluator?.(block)) ?? (await loadNpeBlockEvaluator(block.className)));
+                    : await (graph._loadEvaluator?.(block) ?? loadNpeBlockEvaluator(block.className));
             evaluator.build(block, ctx);
         };
 

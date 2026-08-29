@@ -28,7 +28,7 @@ export interface ParticleGraph {
     /** Ids of the `SystemBlock` roots — one runtime system is built per root. */
     readonly systemBlockIds: readonly number[];
     /** @internal Optional evaluator resolver installed by graph feature normalization. */
-    _loadEvaluator?: (block: ParsedParticleBlock) => Promise<NpeBlockEvaluator | undefined>;
+    _loadEvaluator?: (block: ParsedParticleBlock) => Promise<NpeBlockEvaluator>;
     /** @internal True only on a graph returned by the graph-plumbing normalizer. */
     readonly _isGraphPlumbingNormalized?: true;
 }

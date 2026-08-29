@@ -17,11 +17,14 @@ function isInputConnected(input: ParsedParticleInput | undefined): input is Pars
 
 function parseInputLiteral(input: ParsedParticleInput): NpeValue | undefined {
     const value = input.value;
-    if (value === undefined || value === null) {
+    if (value == null) {
         return undefined;
     }
-    if (input.valueType === "number" || typeof value === "number") {
-        return typeof value === "number" ? value : undefined;
+    if (typeof value === "number") {
+        return value;
+    }
+    if (input.valueType === "number") {
+        return undefined;
     }
     if (Array.isArray(value)) {
         const array = value as number[];
@@ -132,7 +135,7 @@ export async function buildNodeParticleSetWithFlowMapsRuntime(
             const left = block.inputs.find((input) => input.name === "left");
             const right = block.inputs.find((input) => input.name === "right");
             const onceValueType = block.inputs.find((input) => input.name === "min")?.valueType ?? block.inputs.find((input) => input.name === "max")?.valueType ?? "number";
-            const scalarOnce = block.className === "ParticleRandomBlock" && block.serialized.lockMode === 3 && onceValueType === "number";
+            const scalarOnce = block.className === "ParticleRandomBlock" && block.serialized.lockMode === 3 && onceValueType[0] !== "B";
             const localShape = state.isLocal && block.className.endsWith("ShapeBlock");
             const variant =
                 (block.className === "ParticleInputBlock" && contextualSource !== 0 && !((contextualSource <= 6 && contextualSource !== 2) || contextualSource === 0x17)) ||
@@ -151,7 +154,7 @@ export async function buildNodeParticleSetWithFlowMapsRuntime(
                         ? await (await import("./npe-registry-local-shapes.js")).loadLocalShapeEvaluator(block.className)
                         : variant
                           ? await (await import("./npe-registry-variants.js")).loadVariantBlockEvaluator(block)
-                          : await loadNpeBlockEvaluator(block.className));
+                          : await (graph._loadEvaluator?.(block) ?? loadNpeBlockEvaluator(block.className)));
             for (const input of block.inputs) {
                 if (input.name !== "particle" && isInputConnected(input)) {
                     await buildBlock(input.targetBlockId, isFlowMap && input.name === "flowMap" ? cpuTextureSourceBlock : undefined);

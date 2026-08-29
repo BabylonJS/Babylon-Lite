@@ -14,7 +14,7 @@ export async function loadVariantBlockEvaluator(block: ParsedParticleBlock): Pro
             return (await import("./blocks/particle-math-block.js")).particleMathBlock;
         case "ParticleRandomBlock": {
             const valueType = block.inputs.find((input) => input.name === "min")?.valueType ?? block.inputs.find((input) => input.name === "max")?.valueType ?? "number";
-            if (valueType !== "number") {
+            if (valueType[0] === "B") {
                 return (await import("./blocks/particle-random-once-typed-block.js")).particleRandomOnceTypedBlock;
             }
             return (await import("./blocks/particle-random-once-block.js")).particleRandomOnceBlock;

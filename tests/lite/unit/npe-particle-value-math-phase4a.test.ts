@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Color4, Vec2, Vec3 } from "../../../packages/babylon-lite/src/math/types";
-import { buildNodeParticleSet, type NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
+import { buildNodeParticleSet, type NodeParticleSet, type NpeBuildContext } from "../../../packages/babylon-lite/src/particle/node/npe-build";
+import { buildNodeParticleSetWithFlowMaps } from "../../../packages/babylon-lite/src/particle/node/npe-flow-map";
 import { normalizeNodeParticleGraph } from "../../../packages/babylon-lite/src/particle/node/npe-graph-plumbing";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
 import { loadValueBlockEvaluator } from "../../../packages/babylon-lite/src/particle/node/npe-registry-extra-values";
 import { loadPhase4ValueBlockEvaluator } from "../../../packages/babylon-lite/src/particle/node/npe-registry-phase4-values";
+import { buildNodeParticleSetWithTextureUpdates } from "../../../packages/babylon-lite/src/particle/node/npe-texture-updates";
 import type { ParsedParticleBlock, ParsedParticleInput } from "../../../packages/babylon-lite/src/particle/node/npe-types";
 import type { NpeGetter, NpeValue } from "../../../packages/babylon-lite/src/particle/node/npe-value";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
@@ -64,6 +66,14 @@ function scalarGraph(className: string, blockFields: Record<string, unknown>, in
 async function evaluateParsedGraph(source: object): Promise<number> {
     const graph = await normalizeNodeParticleGraph(parseNodeParticleSource(source));
     const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph);
+    return set.systems[0]!._emitRateGetter!();
+}
+
+type ParticleBuilder = (engine: EngineContext, scene: SceneContext, graph: ReturnType<typeof parseNodeParticleSource>) => Promise<NodeParticleSet>;
+
+async function evaluateParsedGraphWith(source: object, builder: ParticleBuilder): Promise<number> {
+    const graph = await normalizeNodeParticleGraph(parseNodeParticleSource(source));
+    const set = await builder({} as EngineContext, {} as SceneContext, graph);
     return set.systems[0]!._emitRateGetter!();
 }
 
@@ -304,6 +314,32 @@ describe("Phase 4A NPE value math", () => {
             const math = aliasSource.blocks.find((block) => block.id === 10)!;
             (math.inputs as Array<Record<string, unknown>>).push({ name: "right", targetBlockId: 1, targetConnectionName: "output" });
             expect(await evaluateParsedGraph(aliasSource)).toBe(0);
+        });
+
+        it.each([
+            ["default", buildNodeParticleSet],
+            ["flow-map", buildNodeParticleSetWithFlowMaps],
+            ["combined texture-update", buildNodeParticleSetWithTextureUpdates],
+        ] as const)("keeps Int OncePerParticle Random scalar through the %s builder", async (_name, builder) => {
+            const source = scalarGraph("ParticleRandomBlock", { lockMode: 3 }, { min: { type: 1, value: 2 }, max: { type: 1, value: 4 } });
+            const previousRandom = Math.random;
+            Math.random = () => 0.5;
+            try {
+                expect(await evaluateParsedGraphWith(source, builder)).toBe(3);
+            } finally {
+                Math.random = previousRandom;
+            }
+        });
+
+        it.each([
+            ["NumberMath", scalarGraph("ParticleNumberMathBlock", { operation: 1 }, { left: { type: 1, value: 2 }, right: { type: 1, value: 3 } }), 8],
+            ["Clamp", scalarGraph("ParticleClampBlock", {}, { value: { type: 1, value: 3 }, min: { type: 1, value: 0 }, max: { type: 1, value: 2 } }), 2],
+            ["Step", scalarGraph("ParticleStepBlock", {}, { value: { type: 1, value: 3 }, edge: { type: 1, value: 2 } }), 1],
+            ["IntMath", scalarGraph("ParticleMathBlock", { operation: 3 }, { left: { type: 1, value: 5 }, right: { type: 1, value: 2 } }), 2],
+        ] as const)("builds Phase 4 %s through specialized builders", async (_name, source, expected) => {
+            for (const builder of [buildNodeParticleSetWithFlowMaps, buildNodeParticleSetWithTextureUpdates]) {
+                expect(await evaluateParsedGraphWith(source, builder)).toBe(expected);
+            }
         });
     });
 
