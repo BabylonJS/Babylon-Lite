@@ -64,12 +64,6 @@ function scalarGraph(className: string, blockFields: Record<string, unknown>, in
 }
 
 async function evaluateParsedGraph(source: object): Promise<number> {
-    const graph = parseNodeParticleSource(source);
-    const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph);
-    return set.systems[0]!._emitRateGetter!();
-}
-
-async function evaluateNormalizedParsedGraph(source: object): Promise<number> {
     const graph = await normalizeNodeParticleGraph(parseNodeParticleSource(source));
     const set = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph);
     return set.systems[0]!._emitRateGetter!();
@@ -84,16 +78,16 @@ const particleBuilders = [
 ] as const satisfies ReadonlyArray<readonly [string, ParticleBuilder]>;
 
 async function evaluateParsedGraphWith(source: object, builder: ParticleBuilder): Promise<number> {
-    const graph = parseNodeParticleSource(source);
+    const graph = await normalizeNodeParticleGraph(parseNodeParticleSource(source));
     const set = await builder({} as EngineContext, {} as SceneContext, graph);
     return set.systems[0]!._emitRateGetter!();
 }
 
 async function evaluateParsedGraphContract(source: object, builder: ParticleBuilder): Promise<{ value: number; valueType: string | undefined }> {
-    const graph = parseNodeParticleSource(source);
-    const set = await builder({} as EngineContext, {} as SceneContext, graph);
+    const graph = await normalizeNodeParticleGraph(parseNodeParticleSource(source));
     const system = graph.blocks.get(graph.systemBlockIds[0]!)!;
     const valueType = system.inputs.find((input) => input.name === "emitRate")?.valueType;
+    const set = await builder({} as EngineContext, {} as SceneContext, graph);
     return { value: set.systems[0]!._emitRateGetter!(), valueType };
 }
 
@@ -165,6 +159,11 @@ describe("Phase 4A NPE value math", () => {
             for (const [, builder] of particleBuilders) {
                 await expect(evaluateParsedGraphContract(source, builder)).resolves.toEqual({ value, valueType });
             }
+        });
+
+        it.each(particleBuilders)("requires graph normalization through the %s builder", async (_name, builder) => {
+            const graph = parseNodeParticleSource(scalarGraph("ParticleNumberMathBlock", { operation: 1 }, { left: { type: 1, value: 2 }, right: { type: 1, value: 3 } }));
+            await expect(builder({} as EngineContext, {} as SceneContext, graph)).rejects.toThrow('NodeParticle: unsupported value block "ParticleNumberMathBlock"');
         });
     });
 
@@ -322,7 +321,7 @@ describe("Phase 4A NPE value math", () => {
             expect(await evaluateParsedGraph(withNumberMathConsumer(blocks))).toBe(0);
         });
 
-        it("propagates Int through normalized LocalVariable into NumberMath coercion", async () => {
+        it("propagates Int through LocalVariable into NumberMath coercion", async () => {
             const source = withNumberMathConsumer([
                 { customType: "BABYLON.ParticleInputBlock", id: 1, type: 1, value: 2, inputs: [] },
                 {
@@ -332,7 +331,7 @@ describe("Phase 4A NPE value math", () => {
                     inputs: [{ name: "input", targetBlockId: 1, targetConnectionName: "output" }],
                 },
             ]);
-            expect(await evaluateNormalizedParsedGraph(source)).toBe(0);
+            expect(await evaluateParsedGraph(source)).toBe(0);
         });
 
         it("preserves Float type through mixed Int and Float Math inputs", async () => {

@@ -76,7 +76,10 @@ export function withNodeParticleEmitterProvider<T extends object = BuildNodePart
     } as T & BuildNodeParticleOptions;
 }
 
-/** Build an NPE set with a live emitter provider. */
+/**
+ * Build an NPE set with a live emitter provider.
+ * Graphs using optional graph plumbing, Phase 4 value blocks, or Int value propagation must first be passed to `normalizeNodeParticleGraph`.
+ */
 export async function buildNodeParticleSetWithEmitterProvider(
     engine: EngineContext,
     scene: SceneContext,

@@ -102,7 +102,10 @@ export interface BuildNodeParticleOptions {
     _getInputEvaluator?: (block: ParsedParticleBlock, input: ParsedParticleInput) => NpeBlockEvaluator | undefined;
 }
 
-/** Build data-oriented particle systems from a parsed graph. */
+/**
+ * Build data-oriented particle systems from a parsed graph.
+ * Graphs using optional graph plumbing, Phase 4 value blocks, or Int value propagation must first be passed to `normalizeNodeParticleGraph`.
+ */
 export async function buildNodeParticleSet(engine: EngineContext, scene: SceneContext, graph: ParticleGraph, options: BuildNodeParticleOptions = {}): Promise<NodeParticleSet> {
     const systems: ParticleSystem[] = [];
     const buildPromises: Promise<void>[] = [];
@@ -179,14 +182,6 @@ export async function buildNodeParticleSet(engine: EngineContext, scene: SceneCo
             const block = graph.blocks.get(blockId);
             if (!block) {
                 return;
-            }
-            const className = block.className;
-            if (
-                !graph._loadEvaluator &&
-                ((className === "ParticleInputBlock" && block.serialized.type === 0x0001) || /^Particle(FloatToInt|NumberMath|Clamp|Step)Block$/.test(className))
-            ) {
-                const { enablePhase4ValueGraph } = await import("./npe-phase4-values.js");
-                enablePhase4ValueGraph(graph);
             }
             const buildKey = evaluatorOverride ? block : blockId;
             if (built.has(buildKey)) {
