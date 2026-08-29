@@ -13,6 +13,7 @@ import {
     PhysicsMotionType,
     PhysicsPrestepType,
     PhysicsConstraintType,
+    HingeConstraint,
     PhysicsCharacterController,
 } from "../src/physics/physics";
 import type { TransformNode } from "../src/meshes/meshes";
@@ -63,6 +64,16 @@ function makeAggregateMockHknp() {
         HP_Body_Release: vi.fn(),
         HP_World_AddBody: () => undefined,
         HP_World_RemoveBody: () => undefined,
+        ConstraintAxis: { LINEAR_X: 0, LINEAR_Y: 1, LINEAR_Z: 2, ANGULAR_X: 3, ANGULAR_Y: 4, ANGULAR_Z: 5, LINEAR_DISTANCE: 6 },
+        ConstraintAxisLimitMode: { FREE: 0, LIMITED: 1, LOCKED: 2 },
+        HP_Constraint_Create: vi.fn(() => [0, { __constraint: true }]),
+        HP_Constraint_SetParentBody: vi.fn(),
+        HP_Constraint_SetChildBody: vi.fn(),
+        HP_Constraint_SetAnchorInParent: vi.fn(),
+        HP_Constraint_SetAnchorInChild: vi.fn(),
+        HP_Constraint_SetAxisMode: vi.fn(),
+        HP_Constraint_SetCollisionsEnabled: vi.fn(),
+        HP_Constraint_SetEnabled: vi.fn(),
         HP_Shape_BuildMassProperties: () => [0, [[0, 0, 0], 1, [1, 1, 1], [0, 0, 0, 1]]],
         HP_QueryCollector_Create: vi.fn(() => [0, { __collector: true }]),
         HP_QueryCollector_Release: vi.fn(),
@@ -324,6 +335,31 @@ describe("PhysicsEngine", () => {
             expect(() => new PhysicsBody(parented, PhysicsMotionType.STATIC, false, scene)).toThrow(/parented TransformNodes/);
             expect(() => new PhysicsBody(thin, PhysicsMotionType.STATIC, false, scene)).toThrow(/per-thin-instance/);
             expect(hknp.HP_Body_Create).not.toHaveBeenCalled();
+        });
+
+        it("forwards hinge constraints to Babylon Lite", () => {
+            const hknp = makeAggregateMockHknp();
+            const plugin = new HavokPlugin(true, hknp);
+            plugin._attachToLiteScene(makeScene());
+            const physicsEngine = new PhysicsEngine(plugin, Vector3.Zero());
+            const scene = { getPhysicsEngine: () => physicsEngine } as unknown as Scene;
+            const parent = new PhysicsBody(makePhysicsNode(scene), PhysicsMotionType.STATIC, false, scene);
+            const child = new PhysicsBody(makePhysicsNode(scene), PhysicsMotionType.DYNAMIC, false, scene);
+            const pivotA = new Vector3(-0.75, 0, 0);
+            const pivotB = new Vector3(0.25, 0, 0);
+            const axisA = new Vector3(0, 0, -1);
+            const axisB = new Vector3(0, 0, 1);
+            const hinge = new HingeConstraint(pivotA, pivotB, axisA, axisB, scene);
+
+            parent.addConstraint(child, hinge);
+
+            expect(hknp.HP_Constraint_Create).toHaveBeenCalledOnce();
+            expect(hknp.HP_Constraint_SetParentBody).toHaveBeenCalledWith(expect.anything(), parent._lite._hkBody);
+            expect(hknp.HP_Constraint_SetChildBody).toHaveBeenCalledWith(expect.anything(), child._lite._hkBody);
+            expect(hknp.HP_Constraint_SetAnchorInParent).toHaveBeenCalledWith(expect.anything(), [-0.75, 0, 0], [0, 0, -1], expect.anything());
+            expect(hknp.HP_Constraint_SetAnchorInChild).toHaveBeenCalledWith(expect.anything(), [0.25, 0, 0], [0, 0, 1], expect.anything());
+            expect(hknp.HP_Constraint_SetAxisMode).toHaveBeenCalledTimes(5);
+            expect(hknp.HP_Constraint_SetEnabled).toHaveBeenCalledWith(expect.anything(), true);
         });
     });
 

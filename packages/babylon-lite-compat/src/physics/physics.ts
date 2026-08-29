@@ -27,12 +27,15 @@ import {
     createHavokWorld,
     createPhysicsAggregate,
     createPhysicsBody,
+    createPhysicsConstraint,
     createPhysicsShape,
     disposePhysics,
     getPhysicsBodyAngularVelocity,
     getPhysicsBodyLinearVelocity,
     PhysicsMotionType as LitePhysicsMotionType,
     PhysicsPrestepType as LitePhysicsPrestepType,
+    PhysicsConstraintAxis as LitePhysicsConstraintAxis,
+    PhysicsConstraintType as LitePhysicsConstraintType,
     PhysicsShapeType as LitePhysicsShapeType,
     releasePhysicsShape,
     removePhysicsBody,
@@ -122,6 +125,17 @@ export enum PhysicsConstraintType {
     SIX_DOF = 7,
 }
 
+/** Axis addressed by a Physics V2 constraint limit. */
+export enum PhysicsConstraintAxis {
+    LINEAR_X = 0,
+    LINEAR_Y = 1,
+    LINEAR_Z = 2,
+    ANGULAR_X = 3,
+    ANGULAR_Y = 4,
+    ANGULAR_Z = 5,
+    LINEAR_DISTANCE = 6,
+}
+
 /** Contact state of a physics character against its supporting surface. */
 export enum CharacterSupportedState {
     UNSUPPORTED = 0,
@@ -148,6 +162,25 @@ export interface ICharacterControllerCollisionEvent {
     colliderIndex: number;
     impulse: Vector3;
     impulsePosition: Vector3;
+}
+
+export interface PhysicsConstraintParameters {
+    pivotA?: Vec3Like;
+    pivotB?: Vec3Like;
+    axisA?: Vec3Like;
+    axisB?: Vec3Like;
+    perpAxisA?: Vec3Like;
+    perpAxisB?: Vec3Like;
+    maxDistance?: number;
+    collision?: boolean;
+}
+
+export class Physics6DoFLimit {
+    public axis!: PhysicsConstraintAxis;
+    public minLimit?: number;
+    public maxLimit?: number;
+    public stiffness?: number;
+    public damping?: number;
 }
 
 export interface PhysicsMaterial {
@@ -232,6 +265,44 @@ function litePrestepType(type: PhysicsPrestepType): LitePhysicsPrestepType {
             return LitePhysicsPrestepType.ACTION;
         default:
             throw new Error(`Invalid PhysicsPrestepType value: ${type}`);
+    }
+}
+
+function liteConstraintType(type: PhysicsConstraintType): LitePhysicsConstraintType {
+    switch (type) {
+        case PhysicsConstraintType.BALL_AND_SOCKET:
+            return LitePhysicsConstraintType.BALL_AND_SOCKET;
+        case PhysicsConstraintType.DISTANCE:
+            return LitePhysicsConstraintType.DISTANCE;
+        case PhysicsConstraintType.HINGE:
+            return LitePhysicsConstraintType.HINGE;
+        case PhysicsConstraintType.SLIDER:
+            return LitePhysicsConstraintType.SLIDER;
+        case PhysicsConstraintType.LOCK:
+            return LitePhysicsConstraintType.LOCK;
+        case PhysicsConstraintType.PRISMATIC:
+            return LitePhysicsConstraintType.PRISMATIC;
+        case PhysicsConstraintType.SIX_DOF:
+            return LitePhysicsConstraintType.SIX_DOF;
+    }
+}
+
+function liteConstraintAxis(axis: PhysicsConstraintAxis): LitePhysicsConstraintAxis {
+    switch (axis) {
+        case PhysicsConstraintAxis.LINEAR_X:
+            return LitePhysicsConstraintAxis.LINEAR_X;
+        case PhysicsConstraintAxis.LINEAR_Y:
+            return LitePhysicsConstraintAxis.LINEAR_Y;
+        case PhysicsConstraintAxis.LINEAR_Z:
+            return LitePhysicsConstraintAxis.LINEAR_Z;
+        case PhysicsConstraintAxis.ANGULAR_X:
+            return LitePhysicsConstraintAxis.ANGULAR_X;
+        case PhysicsConstraintAxis.ANGULAR_Y:
+            return LitePhysicsConstraintAxis.ANGULAR_Y;
+        case PhysicsConstraintAxis.ANGULAR_Z:
+            return LitePhysicsConstraintAxis.ANGULAR_Z;
+        case PhysicsConstraintAxis.LINEAR_DISTANCE:
+            return LitePhysicsConstraintAxis.LINEAR_DISTANCE;
     }
 }
 
@@ -506,6 +577,12 @@ export class PhysicsBody {
     public applyForce(force: Vec3Like, location: Vec3Like): void {
         applyPhysicsBodyForce(this._world, this._lite, force, location);
     }
+    public addConstraint(childBody: PhysicsBody, constraint: PhysicsConstraint): void {
+        if (childBody._world !== this._world) {
+            throw new Error("PhysicsBody.addConstraint requires both bodies to belong to the same scene");
+        }
+        constraint._bind(this._world, this._lite, childBody._lite);
+    }
 
     public dispose(): void {
         if (!this._disposed) {
@@ -529,6 +606,114 @@ export class PhysicsBody {
     private _attachToNode(): void {
         this.transformNode.physicsBody = this;
         this._nodeDisposeObserver = this.transformNode.onDisposeObservable.add(() => this.dispose());
+    }
+}
+
+/** Babylon.js-shaped Physics V2 constraint backed by Lite's native constraint factory. */
+export class PhysicsConstraint {
+    private _isBound = false;
+
+    public constructor(
+        public readonly type: PhysicsConstraintType,
+        protected readonly _options: PhysicsConstraintParameters,
+        protected readonly _scene: Scene,
+        protected readonly _limits: readonly Physics6DoFLimit[] = []
+    ) {
+        requirePhysicsWorld(_scene);
+    }
+
+    public get options(): PhysicsConstraintParameters {
+        return this._options;
+    }
+
+    public getClassName(): string {
+        return "PhysicsConstraint";
+    }
+
+    /** @internal */
+    public _bind(world: PhysicsWorld, bodyA: LitePhysicsBody, bodyB: LitePhysicsBody): void {
+        if (this._isBound) {
+            throw new Error("PhysicsConstraint instances can only be added to one body pair");
+        }
+        if (requirePhysicsWorld(this._scene) !== world) {
+            throw new Error("PhysicsConstraint and PhysicsBody must belong to the same scene");
+        }
+        createPhysicsConstraint(
+            world,
+            bodyA,
+            bodyB,
+            liteConstraintType(this.type),
+            this._options,
+            this._limits.map((limit) => ({ ...limit, axis: liteConstraintAxis(limit.axis) }))
+        );
+        this._isBound = true;
+    }
+}
+
+/** Babylon.js `HingeConstraint` adapter. */
+export class HingeConstraint extends PhysicsConstraint {
+    public constructor(pivotA: Vector3, pivotB: Vector3, axisA: Vector3, axisB: Vector3, scene: Scene) {
+        super(PhysicsConstraintType.HINGE, { pivotA, pivotB, axisA, axisB }, scene);
+    }
+
+    public override getClassName(): string {
+        return "HingeConstraint";
+    }
+}
+
+export class BallAndSocketConstraint extends PhysicsConstraint {
+    public constructor(pivotA: Vector3, pivotB: Vector3, axisA: Vector3, axisB: Vector3, scene: Scene) {
+        super(PhysicsConstraintType.BALL_AND_SOCKET, { pivotA, pivotB, axisA, axisB }, scene);
+    }
+}
+
+export class DistanceConstraint extends PhysicsConstraint {
+    public constructor(maxDistance: number, scene: Scene) {
+        super(PhysicsConstraintType.DISTANCE, { maxDistance }, scene);
+    }
+}
+
+export class SliderConstraint extends PhysicsConstraint {
+    public constructor(pivotA: Vector3, pivotB: Vector3, axisA: Vector3, axisB: Vector3, scene: Scene) {
+        super(PhysicsConstraintType.SLIDER, { pivotA, pivotB, axisA, axisB }, scene);
+    }
+}
+
+export class LockConstraint extends PhysicsConstraint {
+    public constructor(pivotA: Vector3, pivotB: Vector3, axisA: Vector3, axisB: Vector3, scene: Scene) {
+        super(PhysicsConstraintType.LOCK, { pivotA, pivotB, axisA, axisB }, scene);
+    }
+}
+
+export class PrismaticConstraint extends PhysicsConstraint {
+    public constructor(pivotA: Vector3, pivotB: Vector3, axisA: Vector3, axisB: Vector3, scene: Scene) {
+        super(PhysicsConstraintType.PRISMATIC, { pivotA, pivotB, axisA, axisB }, scene);
+    }
+}
+
+export class Physics6DoFConstraint extends PhysicsConstraint {
+    public constructor(constraintParams: PhysicsConstraintParameters, public readonly limits: Physics6DoFLimit[], scene: Scene) {
+        super(PhysicsConstraintType.SIX_DOF, constraintParams, scene, limits);
+    }
+}
+
+export class SpringConstraint extends Physics6DoFConstraint {
+    public constructor(
+        pivotA: Vector3,
+        pivotB: Vector3,
+        axisA: Vector3,
+        axisB: Vector3,
+        minDistance: number,
+        maxDistance: number,
+        stiffness: number,
+        damping: number,
+        scene: Scene
+    ) {
+        super(
+            { pivotA, pivotB, axisA, axisB },
+            [{ axis: PhysicsConstraintAxis.LINEAR_DISTANCE, minLimit: minDistance, maxLimit: maxDistance, stiffness, damping }],
+            scene
+        );
     }
 }
 
