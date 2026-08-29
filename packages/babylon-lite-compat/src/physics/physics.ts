@@ -692,7 +692,11 @@ export class PrismaticConstraint extends PhysicsConstraint {
 }
 
 export class Physics6DoFConstraint extends PhysicsConstraint {
-    public constructor(constraintParams: PhysicsConstraintParameters, public readonly limits: Physics6DoFLimit[], scene: Scene) {
+    public constructor(
+        constraintParams: PhysicsConstraintParameters,
+        public readonly limits: Physics6DoFLimit[],
+        scene: Scene
+    ) {
         super(PhysicsConstraintType.SIX_DOF, constraintParams, scene, limits);
     }
 }
@@ -709,11 +713,7 @@ export class SpringConstraint extends Physics6DoFConstraint {
         damping: number,
         scene: Scene
     ) {
-        super(
-            { pivotA, pivotB, axisA, axisB },
-            [{ axis: PhysicsConstraintAxis.LINEAR_DISTANCE, minLimit: minDistance, maxLimit: maxDistance, stiffness, damping }],
-            scene
-        );
+        super({ pivotA, pivotB, axisA, axisB }, [{ axis: PhysicsConstraintAxis.LINEAR_DISTANCE, minLimit: minDistance, maxLimit: maxDistance, stiffness, damping }], scene);
     }
 }
 

@@ -36,21 +36,17 @@ describe("CascadedShadowGenerator", () => {
 
         generator._build({} as EngineContext);
 
-        expect(createCsmDirectionalShadowGenerator).toHaveBeenCalledWith(
-            {},
-            light._lite,
-            {
-                mapSize: 2048,
-                numCascades: 3,
-                lambda: 0.7,
-                cascadeBlendPercentage: 0.2,
-                stabilizeCascades: true,
-                shadowMaxZ: 500,
-                bias: 0.001,
-                darkness: 0.25,
-                frustumEdgeFalloff: 0.15,
-            }
-        );
+        expect(createCsmDirectionalShadowGenerator).toHaveBeenCalledWith({}, light._lite, {
+            mapSize: 2048,
+            numCascades: 3,
+            lambda: 0.7,
+            cascadeBlendPercentage: 0.2,
+            stabilizeCascades: true,
+            shadowMaxZ: 500,
+            bias: 0.001,
+            darkness: 0.25,
+            frustumEdgeFalloff: 0.15,
+        });
         expect(light._lite.shadowGenerator).toEqual({ kind: "csm" });
         expect(setShadowTaskCasterMeshes).toHaveBeenCalledWith({ kind: "csm" }, []);
     });

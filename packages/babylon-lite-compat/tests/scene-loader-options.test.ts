@@ -14,8 +14,6 @@ const options = {
 
 describe("function-style scene loader options", () => {
     it.each([ImportMeshAsync, AppendSceneAsync, LoadAssetContainerAsync])("rejects unsupported glTF URL preprocessing", async (load) => {
-        await expect(load("model.glb", scene, options)).rejects.toThrow(
-            "'ISceneLoaderOptions.pluginOptions.gltf.preprocessUrlAsync' is not supported"
-        );
+        await expect(load("model.glb", scene, options)).rejects.toThrow("'ISceneLoaderOptions.pluginOptions.gltf.preprocessUrlAsync' is not supported");
     });
 });
