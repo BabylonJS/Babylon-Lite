@@ -700,6 +700,13 @@ describe("pipeline secret hygiene", () => {
             tokenless,
             "Authorization header in an Azure pipeline does not reference the token approved for its endpoint class, directly or through an assignment in its own file."
         ).toEqual([]);
+
+        const wrongScheme = headers
+            .filter(({ requiresDeployToken }) => requiresDeployToken)
+            .filter(({ line }) => !/Authorization\s*:\s*Bearer\s+/i.test(line))
+            .map(({ location, number }) => `${location}:${number}`);
+
+        expect(wrongScheme, "Authorization headers for deployment and Azure Build API endpoints must use the Bearer scheme.").toEqual([]);
     });
 });
 

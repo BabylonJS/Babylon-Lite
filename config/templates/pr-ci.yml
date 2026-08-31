@@ -165,9 +165,10 @@ stages:
                   displayName: "Install dependencies"
 
                 # No GITHUB_TOKEN: this step runs PR-authored source, and no job
-                # in this pipeline holds a credential. The script falls back to
-                # the Azure PR context and writes the comment body to a file,
-                # which `azure-pipelines-pr-publish.yml` posts.
+                # in this pipeline holds a credential. The script writes the
+                # comment body to a file for `azure-pipelines-pr-publish.yml`;
+                # when trusted PR metadata is unavailable here, marker
+                # enforcement is deferred rather than rejecting a valid marker.
                 - script: pnpm report:api-changes
                   displayName: "Generate API report diff"
 

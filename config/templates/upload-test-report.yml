@@ -209,7 +209,7 @@ steps:
           token_escaped=${DEPLOY_TOKEN//\\/\\\\}
           token_escaped=${token_escaped//\"/\\\"}
 
-          printf 'header = "Authorization: %s"\n' "$token_escaped" |
+          printf 'header = "Authorization: Bearer %s"\n' "$token_escaped" |
           curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --config - --fail-with-body --silent --show-error -X POST \
             --proto '=https' --max-time 600 \
             -H "Content-Type: multipart/form-data" \

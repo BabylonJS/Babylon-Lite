@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { breakingApiLines } from "../../../scripts/report-api-changes";
+import { breakingApiLines, breakingMarkerStatus } from "../../../scripts/report-api-changes";
 
 function apiDiff(removed: string, added: string): string {
     return ["diff --git a/target.api.md b/current.api.md", "--- a/target.api.md", "+++ b/current.api.md", "@@", `-${removed}`, `+${added}`].join("\n");
@@ -192,6 +192,18 @@ describe("API report breaking-change classifier", () => {
         const diff = apiDiff(removed, "export declare function setColor(color?: string | Color3): void;");
 
         expect(breakingApiLines(diff)).toEqual([removed]);
+    });
+});
+
+describe("API report breaking-marker enforcement", () => {
+    it("defers when the credential-free job has no trusted PR metadata", () => {
+        expect(breakingMarkerStatus(undefined)).toBe("unavailable");
+    });
+
+    it("distinguishes a missing marker from a present marker", () => {
+        expect(breakingMarkerStatus({ title: "feat: change API", body: "" })).toBe("absent");
+        expect(breakingMarkerStatus({ title: "feat!: change API", body: "" })).toBe("present");
+        expect(breakingMarkerStatus({ title: "feat: change API", body: "BREAKING CHANGE: migration required" })).toBe("present");
     });
 });
 
