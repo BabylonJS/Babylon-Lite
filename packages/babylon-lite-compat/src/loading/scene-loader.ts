@@ -102,6 +102,42 @@ interface ImportResult {
     container?: AssetContainer;
 }
 
+export interface ISceneLoaderProgressEvent {
+    lengthComputable: boolean;
+    loaded: number;
+    total: number;
+}
+
+export interface ISceneLoaderOptions {
+    rootUrl?: string;
+    onProgress?: (event: ISceneLoaderProgressEvent) => void;
+    pluginExtension?: string;
+    name?: string;
+    pluginOptions?: Record<string, unknown> & {
+        gltf?: {
+            preprocessUrlAsync?: (url: string) => Promise<string>;
+            [option: string]: unknown;
+        };
+    };
+}
+
+export interface ImportMeshOptions extends ISceneLoaderOptions {
+    meshNames?: string | readonly string[] | null;
+}
+
+export interface AppendOptions extends ISceneLoaderOptions {}
+
+export interface LoadAssetContainerOptions extends ISceneLoaderOptions {}
+
+function validateGltfOptions(source: string, options: ISceneLoaderOptions | undefined): void {
+    if (!isBabylonUrl(source) && !isSplatUrl(source) && options?.pluginOptions?.gltf?.preprocessUrlAsync) {
+        unsupported(
+            "ISceneLoaderOptions.pluginOptions.gltf.preprocessUrlAsync",
+            "Supporting per-resource URL preprocessing requires a loader-wide callback/context contract across Lite's core glTF loader and lazy extension modules, which cannot be added as an independent tree-shakeable export."
+        );
+    }
+}
+
 /** @internal Load a splat URL into a `GaussianSplattingMesh` (shared by every loader entry point). */
 async function loadSplatResult(url: string, scene: Scene): Promise<ImportResult> {
     const gs = new GaussianSplattingMesh(baseName(url), null, scene);
@@ -181,11 +217,13 @@ export const SceneLoader = {
 // ── Function-style loaders (Babylon.js 7+ `@babylonjs/core/Loading/sceneLoader`) ──
 
 /** Babylon.js `ImportMeshAsync(source, scene, options?)` — imports an asset into the scene. */
-export async function ImportMeshAsync(source: string, scene: Scene, _options?: unknown): Promise<ImportResult> {
-    if (isSplatUrl(source)) {
-        return loadSplatResult(source, scene);
+export async function ImportMeshAsync(source: string, scene: Scene, options?: ImportMeshOptions): Promise<ImportResult> {
+    const url = joinUrl(options?.rootUrl ?? "", source);
+    if (isSplatUrl(url)) {
+        return loadSplatResult(url, scene);
     }
-    const container = await loadFromSource(source, scene);
+    validateGltfOptions(url, options);
+    const container = await loadFromSource(url, scene);
     container.addAllToScene(scene);
     return {
         meshes: container.meshes,
@@ -199,19 +237,23 @@ export async function ImportMeshAsync(source: string, scene: Scene, _options?: u
 }
 
 /** Babylon.js `AppendSceneAsync(source, scene, options?)` — appends an asset's contents to the scene. */
-export async function AppendSceneAsync(source: string, scene: Scene, _options?: unknown): Promise<Scene> {
-    if (isSplatUrl(source)) {
-        await loadSplatResult(source, scene);
+export async function AppendSceneAsync(source: string, scene: Scene, options?: AppendOptions): Promise<Scene> {
+    const url = joinUrl(options?.rootUrl ?? "", source);
+    if (isSplatUrl(url)) {
+        await loadSplatResult(url, scene);
         return scene;
     }
-    const container = await loadFromSource(source, scene);
+    validateGltfOptions(url, options);
+    const container = await loadFromSource(url, scene);
     container.addAllToScene(scene);
     return scene;
 }
 
 /** Babylon.js `LoadAssetContainerAsync(source, scene, options?)` — loads into a container without adding. */
-export async function LoadAssetContainerAsync(source: string, scene: Scene, _options?: unknown): Promise<AssetContainer> {
-    return loadFromSource(source, scene);
+export async function LoadAssetContainerAsync(source: string, scene: Scene, options?: LoadAssetContainerOptions): Promise<AssetContainer> {
+    const url = joinUrl(options?.rootUrl ?? "", source);
+    validateGltfOptions(url, options);
+    return loadFromSource(url, scene);
 }
 
 /** @internal Load a glTF/.babylon asset from a single source URL (function-loader form). */

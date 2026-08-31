@@ -186,6 +186,7 @@ export interface PhysicsAggregate {
 /** Opaque handle to a Havok constraint between two bodies. */
 export interface PhysicsConstraint {
     /** @internal */ readonly _hkConstraint: any;
+    /** @internal */ _isDisposed: boolean;
     readonly bodyA: PhysicsBody;
     readonly bodyB: PhysicsBody;
     readonly type: PhysicsConstraintType;
@@ -656,7 +657,7 @@ export function createPhysicsConstraint(
     hknp.HP_Constraint_SetCollisionsEnabled(joint, !!options.collision);
     hknp.HP_Constraint_SetEnabled(joint, true);
 
-    return { _hkConstraint: joint, bodyA, bodyB, type, options: { ...options, axisA, axisB, perpAxisA, perpAxisB }, limits };
+    return { _hkConstraint: joint, _isDisposed: false, bodyA, bodyB, type, options: { ...options, axisA, axisB, perpAxisA, perpAxisB }, limits };
 }
 
 /**
@@ -1371,6 +1372,20 @@ export function removePhysicsBody(world: PhysicsWorld, body: PhysicsBody): void 
  */
 export function releasePhysicsShape(world: PhysicsWorld, shape: PhysicsShape): void {
     world._hknp.HP_Shape_Release(shape._hkShape);
+}
+
+/**
+ * Disable and release a constraint's native handle. Repeated calls are ignored.
+ * @param world - The physics world that owns the constraint.
+ * @param constraint - The constraint to release.
+ */
+export function releasePhysicsConstraint(world: PhysicsWorld, constraint: PhysicsConstraint): void {
+    if (constraint._isDisposed) {
+        return;
+    }
+    world._hknp.HP_Constraint_SetEnabled(constraint._hkConstraint, false);
+    world._hknp.HP_Constraint_Release(constraint._hkConstraint);
+    constraint._isDisposed = true;
 }
 
 // ─── Aggregate (convenience) ─────────────────────────────────────────

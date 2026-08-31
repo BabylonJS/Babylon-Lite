@@ -14,10 +14,16 @@
  * scene flips to shadow-aware registration when any generator is present.
  */
 
-import { createEsmDirectionalShadowGenerator, createPcfDirectionalShadowGenerator, createPcfSpotlightShadowGenerator, setShadowTaskCasterMeshes } from "babylon-lite";
+import {
+    createCsmDirectionalShadowGenerator,
+    createEsmDirectionalShadowGenerator,
+    createPcfDirectionalShadowGenerator,
+    createPcfSpotlightShadowGenerator,
+    setShadowTaskCasterMeshes,
+} from "babylon-lite";
 import type { EngineContext, Mesh as LiteMesh } from "babylon-lite";
 
-import type { Light } from "../lights/lights.js";
+import { DirectionalLight, type Light } from "../lights/lights.js";
 import type { AbstractMesh } from "../meshes/meshes.js";
 
 export class ShadowGenerator {
@@ -112,7 +118,19 @@ export class ShadowGenerator {
         const usePcf = this.usePercentageCloserFiltering || this.useContactHardeningShadow || this.usePoissonSampling;
 
         let liteGen;
-        if (className === "SpotLight") {
+        if (this instanceof CascadedShadowGenerator) {
+            liteGen = createCsmDirectionalShadowGenerator(engine, liteLight, {
+                mapSize: this._mapSize,
+                numCascades: this.numCascades,
+                lambda: this.lambda,
+                cascadeBlendPercentage: this.cascadeBlendPercentage,
+                stabilizeCascades: this.stabilizeCascades,
+                shadowMaxZ: this.shadowMaxZ,
+                bias: this.bias,
+                darkness: this.darkness,
+                frustumEdgeFalloff: this.frustumEdgeFalloff,
+            });
+        } else if (className === "SpotLight") {
             // Lite has only a PCF spot generator.
             liteGen = createPcfSpotlightShadowGenerator(engine, liteLight, {
                 mapSize: this._mapSize,
@@ -151,18 +169,30 @@ export class ShadowGenerator {
     }
 }
 
-/**
- * Babylon.js `CascadedShadowGenerator` — cascaded shadow maps for large directional
- * scenes. Mapped onto Babylon Lite's CSM generator is a larger task; for now this
- * extends {@link ShadowGenerator} and falls back to the standard directional path,
- * which renders (a single cascade's worth of) shadows rather than throwing.
- */
+/** Babylon.js `CascadedShadowGenerator` backed by Lite's native CSM generator. */
 export class CascadedShadowGenerator extends ShadowGenerator {
-    public numCascades = 4;
+    private _numCascades = 4;
     public lambda = 0.5;
+    public cascadeBlendPercentage = 0.1;
     public stabilizeCascades = false;
+    public shadowMaxZ: number | undefined;
     public depthClamp = true;
     public autoCalcDepthBounds = false;
+
+    public constructor(mapSize: number, light: DirectionalLight) {
+        if (!(light instanceof DirectionalLight)) {
+            throw new TypeError("CascadedShadowGenerator requires a DirectionalLight");
+        }
+        super(mapSize, light);
+    }
+
+    public get numCascades(): number {
+        return this._numCascades;
+    }
+
+    public set numCascades(value: number) {
+        this._numCascades = Math.min(Math.max(value, 2), 4);
+    }
 
     public override getClassName(): string {
         return "CascadedShadowGenerator";
