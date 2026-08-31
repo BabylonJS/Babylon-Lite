@@ -94,6 +94,8 @@ export interface PollSummary {
     considered: number;
     queued: QueueRequest[];
     exhausted: PublisherTriple[];
+    /** Pull requests whose own state could not be read. Nothing was queued for them. */
+    failed: Array<{ triple: PublisherTriple; reason: string }>;
 }
 
 /**
@@ -198,21 +200,43 @@ export function resolveTriple(runRepresentation: unknown, buildRepresentation: u
     return undefined;
 }
 
-function normalizeResult(result: unknown): JobResult {
-    // `succeededWithIssues` is a *success*. Azure returns it whenever a step with
-    // `continueOnError: true` fails, and `PostApiComment` reaches that state on
-    // every pull request that did not move the public API: PR CI stages the
-    // `api-comment` artifact only when there is a diff, so the download step
-    // warns and the job finishes with issues.
-    //
-    // Reading it as anything else is not a small mistake. `decideAction` would
-    // see the API axis as unpublished, re-queue the credentialed publisher three
-    // times per PR CI build, and then fail the tick — permanently, on almost
-    // every pull request. Where the API comment *was* posted, the re-queue would
-    // also re-run a create-only task and duplicate it, which is the exact failure
-    // this change exists to remove.
-    if (result === "succeeded" || result === "succeededWithIssues" || result === "partiallySucceeded") {
+/**
+ * The publisher's timeline did not have the shape this poller can read.
+ *
+ * Its own class because it must be contained to one pull request rather than failing the tick:
+ * an unreadable timeline on one build says nothing about any other pull request's state.
+ */
+export class TimelineShapeError extends Error {
+    public constructor(message: string) {
+        super(message);
+        this.name = "TimelineShapeError";
+    }
+}
+
+/**
+ * Turn a job result into a publish outcome, per axis.
+ *
+ * The two axes need opposite readings of the same string, which is why this takes the axis.
+ *
+ * `succeededWithIssues` means "a step with `continueOnError: true` failed". For the **API** axis
+ * that is the normal outcome on every pull request that does not move the public API — PR CI
+ * stages the `api-comment` artifact only when there is a diff, so the download warns. Treating it
+ * as a failure there would re-queue a *create-only* task and duplicate the comment.
+ *
+ * For the **bundle** axis the same string must be read as a failure. Its work is idempotent and
+ * retryable, so the cost of retrying a false negative is one wasted run, while the cost of
+ * accepting a false positive is a permanently stale comment on the latest build — issue #627
+ * exactly. The publisher is arranged so this is not a lossy trade: the bundle job's download is
+ * conditioned on a trusted artifact-existence probe and carries no `continueOnError`, so a legacy
+ * build with no artifact *skips* the download rather than warning, and `succeeded` is the normal
+ * outcome. Anything less than `succeeded` there is a real problem worth another attempt.
+ */
+export function normalizeResult(result: unknown, axis: "api" | "bundle"): JobResult {
+    if (result === "succeeded") {
         return "succeeded";
+    }
+    if (result === "succeededWithIssues" || result === "partiallySucceeded") {
+        return axis === "api" ? "succeeded" : "failed";
     }
     if (result === "failed" || result === "canceled" || result === "abandoned") {
         return "failed";
@@ -236,12 +260,22 @@ export function jobResultsFromTimeline(timeline: unknown): { api: JobResult; bun
     const records = (timeline as { records?: unknown } | null)?.records;
     const list = Array.isArray(records) ? (records as Array<Record<string, unknown>>) : [];
 
-    const find = (identifier: string): JobResult => {
-        const record = list.find((entry) => entry.type === "Job" && entry.identifier === identifier);
-        return record ? normalizeResult(record.result) : "unknown";
+    const find = (identifier: string, axis: "api" | "bundle"): JobResult => {
+        const matches = list.filter((entry) => entry.type === "Job" && entry.identifier === identifier);
+        if (matches.length > 1) {
+            // Ambiguous, so no answer is defensible. Guessing between two records could read a
+            // failed publish as a successful one and leave a stale comment forever.
+            throw new TimelineShapeError(`Timeline contains ${matches.length} \`${identifier}\` job records; refusing to guess which one published.`);
+        }
+        if (matches.length === 0) {
+            // Distinguishable from "ran and failed": a job that never appears was never scheduled,
+            // which is the normal shape when the publisher was queued with that axis switched off.
+            return "unknown";
+        }
+        return normalizeResult(matches[0].result, axis);
     };
 
-    return { api: find("PostApiComment"), bundle: find("PostBundleComment") };
+    return { api: find("PostApiComment", "api"), bundle: find("PostBundleComment", "bundle") };
 }
 
 /**
@@ -278,7 +312,7 @@ export function decideAction(history: PublisherRunHistory[]): Decision {
 export async function poll(api: PollerApi): Promise<PollSummary> {
     if (await api.otherPollerRunInProgress()) {
         console.log("Another poller run is already in progress; exiting so the two cannot race.");
-        return { skipped: true, considered: 0, queued: [], exhausted: [] };
+        return { skipped: true, considered: 0, queued: [], exhausted: [], failed: [] };
     }
 
     const open = await api.listOpenPullRequests();
@@ -300,6 +334,7 @@ export async function poll(api: PollerApi): Promise<PollSummary> {
 
     const queued: QueueRequest[] = [];
     const exhausted: PublisherTriple[] = [];
+    const failed: Array<{ triple: PublisherTriple; reason: string }> = [];
 
     for (const candidate of candidates) {
         const triple: PublisherTriple = { prNumber: candidate.prNumber, prCiRunId: candidate.id, prCiDefinitionId: candidate.definitionId };
@@ -309,25 +344,50 @@ export async function poll(api: PollerApi): Promise<PollSummary> {
             break;
         }
 
-        const decision = decideAction(await api.publisherRunsFor(triple));
-        if (decision.kind === "queue") {
-            const request: QueueRequest = { ...triple, postApiComment: decision.postApiComment, postBundleComment: decision.postBundleComment };
-            const runId = await api.queuePublisher(request);
-            queued.push(request);
-            console.log(`Queued publisher run ${runId} for PR ${triple.prNumber} build ${triple.prCiRunId} (api=${request.postApiComment}, bundle=${request.postBundleComment}).`);
-        } else if (decision.kind === "exhausted") {
-            console.error(`PR ${triple.prNumber} build ${triple.prCiRunId} has failed to publish ${decision.attempts} times; not retrying.`);
-            exhausted.push(triple);
+        // Contained per pull request. Reading one pull request's publisher history can fail for
+        // reasons that are entirely local to it — an unreadable timeline, or a candidate run whose
+        // immutable queue-time triple neither API representation will confirm. Those must fail
+        // *closed for that pull request*: queue nothing for it, because without confirmed history
+        // the poller cannot tell an unpublished build from a published one, and queueing on a
+        // guess would duplicate the create-only API comment.
+        //
+        // They must not, however, decide anything for the other pull requests. Letting one
+        // malformed history abort the loop would stop reconciliation for every open pull request,
+        // which is the same single-pull-request blast radius the reconciler avoids on the other
+        // side of the boundary. The tick still ends in failure, after the useful work is done.
+        try {
+            const decision = decideAction(await api.publisherRunsFor(triple));
+            if (decision.kind === "queue") {
+                const request: QueueRequest = { ...triple, postApiComment: decision.postApiComment, postBundleComment: decision.postBundleComment };
+                const runId = await api.queuePublisher(request);
+                queued.push(request);
+                console.log(`Queued publisher run ${runId} for PR ${triple.prNumber} build ${triple.prCiRunId} (api=${request.postApiComment}, bundle=${request.postBundleComment}).`);
+            } else if (decision.kind === "exhausted") {
+                console.error(`PR ${triple.prNumber} build ${triple.prCiRunId} has failed to publish ${decision.attempts} times; not retrying.`);
+                exhausted.push(triple);
+            }
+        } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            console.error(`PR ${triple.prNumber} build ${triple.prCiRunId} could not be reconciled, and nothing was queued for it: ${reason}`);
+            failed.push({ triple, reason });
         }
     }
 
+    const problems: string[] = [];
     if (exhausted.length > 0) {
-        // Reported by failing the tick, not by a log line nobody reads. Everything above has
-        // already been queued, so escalating here costs no progress.
-        throw new Error(`${exhausted.length} pull request(s) exceeded ${MAX_ATTEMPTS} publish attempts: ${exhausted.map((t) => `#${t.prNumber}`).join(", ")}.`);
+        problems.push(`${exhausted.length} pull request(s) exceeded ${MAX_ATTEMPTS} publish attempts: ${exhausted.map((t) => `#${t.prNumber}`).join(", ")}`);
+    }
+    if (failed.length > 0) {
+        problems.push(`${failed.length} pull request(s) could not be evaluated: ${failed.map((f) => `#${f.triple.prNumber}`).join(", ")}`);
     }
 
-    return { skipped: false, considered: candidates.length, queued, exhausted };
+    if (problems.length > 0) {
+        // Reported by failing the tick, not by a log line nobody reads. Everything above has
+        // already been queued, so escalating here costs no progress.
+        throw new Error(`${problems.join("; ")}.`);
+    }
+
+    return { skipped: false, considered: candidates.length, queued, exhausted, failed };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -523,7 +583,11 @@ export class AzurePollerApi implements PollerApi {
     }
 
     async otherPollerRunInProgress(): Promise<boolean> {
-        const query = [`definitions=${this.config.pollerDefinitionId}`, "statusFilter=inProgress"].join("&");
+        // Every status a run can hold *before* it reaches `completed`. Filtering on `inProgress`
+        // alone misses a sibling that is still queued, which is the most likely overlap of all:
+        // on a busy pool a tick can sit in `notStarted` for longer than it spends running, and two
+        // ticks that both believe they are alone will both queue the same publisher.
+        const query = [`definitions=${this.config.pollerDefinitionId}`, "statusFilter=notStarted,inProgress,postponed,cancelling"].join("&");
         const { json } = await this.fetchJson("GET", this.buildsUrl(query), this.config.readAuth);
         const builds = ((json as { value?: unknown })?.value as Array<{ id?: unknown }>) ?? [];
         return builds.some((build) => Number.isInteger(build.id) && (build.id as number) < this.config.selfBuildId);

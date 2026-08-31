@@ -28,6 +28,7 @@ import {
     verifyPrCiBuild,
     resolveTriple,
     jobResultsFromTimeline,
+    AzurePollerApi,
     decideAction,
     poll,
     nextPageUrl,
@@ -170,7 +171,7 @@ describe("publish outcomes are read per comment path, from the job that owns it"
         expect(results).toEqual({ api: "succeeded", bundle: "unknown" });
     });
 
-    it("counts a job that finished with issues as published", () => {
+    it("counts an API job that finished with issues as published, but not a bundle job", () => {
         // `succeededWithIssues` is what Azure reports when a `continueOnError` step fails, and
         // `PostApiComment` lands there on every pull request that does not move the public API:
         // PR CI stages `api-comment` only when there is a diff, so the download warns.
@@ -179,13 +180,62 @@ describe("publish outcomes are read per comment path, from the job that owns it"
         // API comment as unpublished on almost every pull request, re-queue the credentialed
         // publisher until the attempt budget ran out, fail the tick, and — where the comment had
         // in fact been posted — duplicate it through a create-only task.
+        // The two axes read the same string oppositely, and both readings are forced.
+        //
+        // API: `GitHubComment@0` cannot update, so a re-queue duplicates the comment. Its download
+        // legitimately warns on every pull request that did not move the public API, because PR CI
+        // stages `api-comment` only when there is a diff. Terminal.
+        //
+        // Bundle: retrying is idempotent and cheap, while accepting a false success freezes a stale
+        // comment on the latest build — the #627 defect itself. Not terminal.
         const results = jobResultsFromTimeline(
             timeline([
                 { type: "Job", identifier: "PostApiComment", result: "succeededWithIssues", state: "completed" },
-                { type: "Job", identifier: "PostBundleComment", result: "partiallySucceeded", state: "completed" },
+                { type: "Job", identifier: "PostBundleComment", result: "succeededWithIssues", state: "completed" },
             ])
         );
-        expect(results).toEqual({ api: "succeeded", bundle: "succeeded" });
+        expect(results).toEqual({ api: "succeeded", bundle: "failed" });
+
+        expect(jobResultsFromTimeline(timeline([{ type: "Job", identifier: "PostBundleComment", result: "partiallySucceeded", state: "completed" }])).bundle).toBe("failed");
+        expect(jobResultsFromTimeline(timeline([{ type: "Job", identifier: "PostBundleComment", result: "succeeded", state: "completed" }])).bundle).toBe("succeeded");
+    });
+
+    it("retries a bundle job that only warned, so a failed artifact download cannot retire as published", () => {
+        // The concrete regression: a transient `DownloadPipelineArtifact` failure used to leave the
+        // directory absent, the reconciler no-opped, and the warning-level job result marked the
+        // bundle axis done forever against the latest build.
+        const results = jobResultsFromTimeline(
+            timeline([
+                { type: "Job", identifier: "PostApiComment", result: "succeeded", state: "completed" },
+                { type: "Job", identifier: "PostBundleComment", result: "succeededWithIssues", state: "completed" },
+            ])
+        );
+
+        expect(decideAction([{ runId: 1, finished: true, apiJobResult: results.api, bundleJobResult: results.bundle }])).toEqual({
+            kind: "queue",
+            postApiComment: false,
+            postBundleComment: true,
+        });
+    });
+
+    it("requires exactly one job record per axis and refuses to guess between duplicates", () => {
+        expect(() =>
+            jobResultsFromTimeline(
+                timeline([
+                    { type: "Job", identifier: "PostBundleComment", result: "succeeded", state: "completed" },
+                    { type: "Job", identifier: "PostBundleComment", result: "failed", state: "completed" },
+                ])
+            )
+        ).toThrow(/refusing to guess/i);
+    });
+
+    it("tolerates the shapes a timeline response can legitimately take", () => {
+        expect(jobResultsFromTimeline({})).toEqual({ api: "unknown", bundle: "unknown" });
+        expect(jobResultsFromTimeline({ records: null })).toEqual({ api: "unknown", bundle: "unknown" });
+        expect(jobResultsFromTimeline({ records: "nope" })).toEqual({ api: "unknown", bundle: "unknown" });
+        expect(jobResultsFromTimeline(null)).toEqual({ api: "unknown", bundle: "unknown" });
+        // A phase/stage record sharing the identifier must not be mistaken for the job.
+        expect(jobResultsFromTimeline(timeline([{ type: "Phase", identifier: "PostBundleComment", result: "succeeded" }])).bundle).toBe("unknown");
     });
 
     it("does not queue anything for a build whose API job only warned", () => {
@@ -377,7 +427,7 @@ describe("a tick reconciles every open pull request, or fails without acting", (
             queuePublisher: () => Promise.reject(new Error("ADO POST /pipelines/9/runs failed: 403")),
         });
 
-        await expect(poll(api)).rejects.toThrow(/403/);
+        await expect(poll(api)).rejects.toThrow(/could not be evaluated/i);
     });
 });
 
@@ -389,5 +439,97 @@ describe("pagination stops where the server says it stops", () => {
         expect(nextPageUrl('<https://api.github.com/repositories/1/pulls?page=1>; rel="prev"')).toBeUndefined();
         expect(nextPageUrl("")).toBeUndefined();
         expect(nextPageUrl(null)).toBeUndefined();
+    });
+});
+
+describe("the concurrency guard asks the server about every run that has not finished yet", () => {
+    /**
+     * Exercised through the real `AzurePollerApi` against a recording fetcher, because the
+     * behaviour under test *is* the query string. A hand-written boolean fake would assert only
+     * that the poller calls a method it was always going to call.
+     */
+    function recordingApi(response: unknown = { value: [] }): { api: AzurePollerApi; urls: string[] } {
+        const urls: string[] = [];
+        const config = {
+            collectionUri: "https://dev.azure.com/babylonjs/",
+            projectId: "proj",
+            repository: "BabylonJS/Babylon-Lite",
+            prCiDefinitionId: 48,
+            publisherDefinitionId: 60,
+            pollerDefinitionId: 61,
+            selfBuildId: 777,
+            readAuth: { scheme: "Bearer", token: "r" } as const,
+            queueAuth: { scheme: "Basic", token: "q" } as const,
+            metadataAuth: { scheme: "Bearer", token: "m" } as const,
+        };
+        const api = new AzurePollerApi(config, (_method: string, url: string) => {
+            urls.push(url);
+            return Promise.resolve({ json: response, link: null });
+        });
+        return { api, urls };
+    }
+
+    it("filters on every pre-completion status, not just inProgress", async () => {
+        // A tick that is still queued is the likeliest overlap of all: on a busy pool a run can sit
+        // in `notStarted` longer than it spends running. Two ticks that each believe they are alone
+        // queue the same publisher twice.
+        const { api, urls } = recordingApi();
+        await api.otherPollerRunInProgress();
+
+        expect(urls).toHaveLength(1);
+        const query = new URL(urls[0]).searchParams;
+        expect(query.get("statusFilter")?.split(",").sort()).toEqual(["cancelling", "inProgress", "notStarted", "postponed"]);
+        expect(query.get("definitions")).toBe("61");
+    });
+
+    it("ignores itself and yields to an older run only", async () => {
+        const older = recordingApi({ value: [{ id: 100 }] });
+        expect(await older.api.otherPollerRunInProgress()).toBe(true);
+
+        const itself = recordingApi({ value: [{ id: 777 }] });
+        expect(await itself.api.otherPollerRunInProgress()).toBe(false);
+
+        const newer = recordingApi({ value: [{ id: 999 }] });
+        expect(await newer.api.otherPollerRunInProgress(), "a newer run must defer to this one, not the other way round").toBe(false);
+    });
+});
+
+describe("one unreadable pull request does not decide anything for the others", () => {
+    it("queues the healthy pull requests, queues nothing for the broken one, and still fails the tick", async () => {
+        const api = fakeApi({
+            listOpenPullRequests: () => Promise.resolve({ numbers: [1, 2, 3], complete: true }),
+            latestCompletedPrCiBuild: (prNumber: number) => Promise.resolve(verified(prNumber, 100 + prNumber)),
+            publisherRunsFor: (triple) => {
+                if (triple.prNumber === 2) {
+                    // The shape the fail-closed rule exists for: a candidate whose immutable
+                    // queue-time triple neither API representation will confirm.
+                    return Promise.reject(new Error("Publisher run 500 exposes no queue-time parameters."));
+                }
+                return Promise.resolve([]);
+            },
+        });
+
+        await expect(poll(api)).rejects.toThrow(/#2/);
+
+        // Fail-closed for #2 specifically: nothing queued for it, because without confirmed history
+        // the poller cannot tell an unpublished build from a published one, and guessing would
+        // duplicate the create-only API comment.
+        expect(api.queued.map((request) => request.prNumber).sort()).toEqual([1, 3]);
+    });
+
+    it("reports an exhausted pull request and an unreadable one in the same tick", async () => {
+        const api = fakeApi({
+            listOpenPullRequests: () => Promise.resolve({ numbers: [1, 2], complete: true }),
+            latestCompletedPrCiBuild: (prNumber: number) => Promise.resolve(verified(prNumber, 100 + prNumber)),
+            publisherRunsFor: (triple) => {
+                if (triple.prNumber === 1) {
+                    return Promise.reject(new Error("timeline unreadable"));
+                }
+                return Promise.resolve([history({ bundleJobResult: "failed" }), history({ bundleJobResult: "failed" }), history({ bundleJobResult: "failed" })]);
+            },
+        });
+
+        await expect(poll(api)).rejects.toThrow(/exceeded 3 publish attempts.*could not be evaluated/s);
+        expect(api.queued).toEqual([]);
     });
 });

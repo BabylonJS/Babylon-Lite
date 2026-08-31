@@ -21,7 +21,7 @@
  * repository, including a human's, so a selection bug must not be able to destroy review history.
  * Superseded duplicates are rewritten in place instead, losing the canonical marker.
  */
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 
 /** Repository this publisher is allowed to write to. Fixed; never taken from artifact content. */
@@ -281,7 +281,24 @@ export function parseBundleCommentState(json: string): BundleCommentState {
  * say anything, which is `unavailable` — not `none`. The distinction is the difference between
  * leaving a regression report alone and silently withdrawing it.
  */
-export function loadStagedArtifact(directory: string): { state: BundleCommentState; body?: string } {
+export function loadStagedArtifact(directory: string, artifactPresent: boolean): { state: BundleCommentState; body?: string } {
+    if (!artifactPresent) {
+        // The server says this build published no bundle-comment artifact, so there is nothing to
+        // download and nothing to say. That is a legacy run from before the artifact existed, and
+        // the correct outcome is to leave whatever comment is there exactly as it is.
+        console.log("The PR CI run published no bundle-comment artifact; leaving any existing comment untouched.");
+        return { state: "unavailable" };
+    }
+
+    if (!existsSync(directory)) {
+        // The opposite case, and the reason presence is read from the API rather than inferred
+        // from the directory. The artifact provably exists and is not here, so the download
+        // failed. Reporting `unavailable` would mark the bundle axis published against the latest
+        // build and freeze a stale comment on the pull request — issue #627 restated. A plain
+        // Error, not an ArtifactContractError: this one is transient and worth retrying.
+        throw new Error(`PR CI published a bundle-comment artifact but ${directory} is absent; the download failed and this run must be retried.`);
+    }
+
     let stateJson: string;
     try {
         stateJson = readFileSync(resolve(directory, BUNDLE_COMMENT_STATE_FILE), "utf-8");
@@ -319,6 +336,55 @@ function supersededBody(identity: MarkerIdentity): string {
         `${SUPERSEDED_MARKER_PREFIX}${JSON.stringify({ repo: identity.repo, pr: identity.pr })}${MARKER_SUFFIX}`,
         "**Bundle Size**: superseded by the current bundle-size comment on this pull request.",
     ].join("\n");
+}
+
+/**
+ * The first line of every bundle-size comment the create-only task ever posted.
+ *
+ * Not a guess. `formatComment` in `report-bundle-size-deltas.ts` emits exactly two shapes, and the
+ * old pipeline gated posting on `POST_BUNDLE_COMMENT`, which was set only on the notable path — so
+ * the only body that was ever posted begins with this heading followed by a blank line. The other
+ * shape (`**Bundle Size**: No changes detected.`) was computed and never sent.
+ */
+const LEGACY_FIRST_LINE = "## Bundle Size Changes";
+
+/**
+ * Adopt the comments the previous, create-only task left behind.
+ *
+ * Without this, #627 stays visibly unfixed on every pull request that is already open: those
+ * comments carry no marker, so the reconciler would ignore them forever, post a second comment
+ * beside them, and never retract the stale one.
+ *
+ * Matching is by generated structure, not resemblance:
+ *
+ *  * the author's *numeric* id is the token's own identity;
+ *  * the first line is byte-equal to the generated heading and the second line is empty;
+ *  * the comment carries no marker of ours already, so an adopted comment is never re-adopted.
+ *
+ * It is consulted **only when no canonical comment exists**, which makes it inherently one-shot per
+ * pull request: the first successful reconcile leaves a marker behind, and from then on this code
+ * never runs for that pull request again.
+ *
+ * The one residual: the sibling API comment is posted by the same bot and its body is written by
+ * pull-request code, so a pull request that rewrote its own API reporter to emit this exact heading
+ * could have its own API comment adopted. Genuine API reports begin `## API Changes` and cannot
+ * collide. The blast radius is that pull request's own comments — no other pull request, no
+ * credential, and no repository state is reachable — and the edit is preserved in GitHub's comment
+ * history. Ordinary review sees the reporter change that would be required to trigger it.
+ */
+export function selectLegacyComments(comments: IssueComment[], viewerId: number): IssueComment[] {
+    return comments
+        .filter((comment) => {
+            if (comment.user?.id !== viewerId) {
+                return false;
+            }
+            if (countMarkers(comment.body) > 0 || comment.body.includes(SUPERSEDED_MARKER_PREFIX)) {
+                return false;
+            }
+            const lines = comment.body.split("\n");
+            return lines[0]?.trimEnd() === LEGACY_FIRST_LINE && (lines[1] ?? "").trim() === "";
+        })
+        .sort((a, b) => a.id - b.id);
 }
 
 /**
@@ -394,7 +460,17 @@ export async function reconcile(api: GitHubCommentApi, input: ReconcileInput): P
     }
 
     const owned = selectOwnedComments(page.comments, viewerId, identity);
-    const [canonical, ...duplicates] = owned;
+
+    // Only when nothing of ours exists yet. Once a canonical comment is present the migration path
+    // is closed for this pull request for good, so adoption cannot repeat or compete with it.
+    const adopted = owned.length === 0 ? selectLegacyComments(page.comments, viewerId) : [];
+    if (adopted.length > 0) {
+        console.log(`Adopting ${adopted.length} pre-marker bundle-size comment(s) on PR ${identity.pr}: ${adopted.map((c) => c.id).join(", ")}.`);
+    }
+
+    // The oldest legacy comment becomes the canonical one and the rest are demoted alongside any
+    // other duplicate, so the deterministic single-current-comment rule holds through migration.
+    const [canonical, ...duplicates] = [...owned, ...adopted];
 
     if (duplicates.length > MAX_DUPLICATE_REWRITES) {
         throw new Error(`Found ${duplicates.length} duplicate bundle-size comments on PR ${identity.pr}, over the ${MAX_DUPLICATE_REWRITES} rewrite cap.`);
@@ -459,6 +535,21 @@ function requireEnv(name: string): string {
         throw new Error(`${name} is not set; refusing to run without it.`);
     }
     return value;
+}
+
+/**
+ * Read Preflight's server-side answer about the artifact.
+ *
+ * Strict on both sides rather than defaulting. Defaulting to `false` would turn a variable-wiring
+ * mistake into permanent silence, and defaulting to `true` would turn it into a permanently
+ * failing job; an unset or unexpanded value is neither, and says so.
+ */
+function requireArtifactPresence(): boolean {
+    const raw = requireEnv("BUNDLE_ARTIFACT_PRESENT");
+    if (raw !== "true" && raw !== "false") {
+        throw new Error(`BUNDLE_ARTIFACT_PRESENT must be "true" or "false", got ${JSON.stringify(raw)}.`);
+    }
+    return raw === "true";
 }
 
 function requirePositiveInteger(name: string): number {
@@ -595,7 +686,7 @@ async function main(): Promise<void> {
     // which is the same outcome as an unmeasured build.
     let artifact: { state: BundleCommentState; body?: string };
     try {
-        artifact = loadStagedArtifact(requireEnv("BUNDLE_COMMENT_DIR"));
+        artifact = loadStagedArtifact(requireEnv("BUNDLE_COMMENT_DIR"), requireArtifactPresence());
     } catch (error) {
         if (!(error instanceof ArtifactContractError)) {
             throw error;

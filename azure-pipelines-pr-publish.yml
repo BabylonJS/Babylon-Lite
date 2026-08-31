@@ -213,6 +213,47 @@ stages:
                       SYSTEM_COLLECTIONURI: $(System.CollectionUri)
                       SYSTEM_TEAMPROJECTID: $(System.TeamProjectId)
 
+                # Ask the server whether the PR CI run actually produced a bundle-comment artifact,
+                # and publish the answer as an output variable.
+                #
+                # This exists so the bundle job can tell "there was nothing to download" apart from
+                # "the download failed", which are the same observable state on the agent — an empty
+                # directory — and must be handled oppositely. A build with no artifact is a legacy
+                # run from before #627 and is a legitimate no-op; a failed download of an artifact
+                # that provably exists must be retried, or the pull request keeps a stale comment.
+                #
+                # It runs here rather than in the comment job because Preflight already holds
+                # System.AccessToken and holds no GitHub credential, so the two tokens never meet.
+                - script: |
+                      set -euo pipefail
+
+                      RUN_ID="${{ parameters.prCiRunId }}"
+                      ARTIFACTS_JSON="$(Agent.TempDirectory)/pr-ci-artifacts-${RUN_ID}.json"
+                      trap 'rm -f "$ARTIFACTS_JSON"' EXIT
+                      token_escaped=${SYSTEM_ACCESSTOKEN//\\/\\\\}
+                      token_escaped=${token_escaped//\"/\\\"}
+
+                      printf 'header = "Authorization: Bearer %s"\n' "$token_escaped" |
+                          curl --fail --silent --show-error \
+                              --proto '=https' \
+                              --config - \
+                              --output "$ARTIFACTS_JSON" \
+                              "${SYSTEM_COLLECTIONURI}${SYSTEM_TEAMPROJECTID}/_apis/build/builds/${RUN_ID}/artifacts?api-version=7.1"
+
+                      if jq -e '[.value[]? | select(.name == "bundle-comment")] | length >= 1' "$ARTIFACTS_JSON" >/dev/null; then
+                          echo "PR CI run $RUN_ID published a bundle-comment artifact."
+                          echo "##vso[task.setvariable variable=bundleArtifactPresent;isOutput=true]true"
+                      else
+                          echo "PR CI run $RUN_ID published no bundle-comment artifact; the bundle comment will be left untouched."
+                          echo "##vso[task.setvariable variable=bundleArtifactPresent;isOutput=true]false"
+                      fi
+                  name: bundleArtifact
+                  displayName: "Probe the PR CI run for a bundle-comment artifact"
+                  env:
+                      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+                      SYSTEM_COLLECTIONURI: $(System.CollectionUri)
+                      SYSTEM_TEAMPROJECTID: $(System.TeamProjectId)
+
           # ──────────────────────────────────────────────────────────────
           # Job 1: Release marker labels (trusted source checkout)
           # ──────────────────────────────────────────────────────────────
@@ -392,13 +433,21 @@ stages:
                 # metadata, and widening it would hand comment-write to every other
                 # consumer of BabylonJS-Deployment.
                 - group: BabylonLite-PRComments
+                # Server-side answer from Preflight, not an agent-side guess. Trusted: it is
+                # derived from the ADO Build API, never from artifact content.
+                - name: BUNDLE_ARTIFACT_PRESENT
+                  value: $[ dependencies.Preflight.outputs['bundleArtifact.bundleArtifactPresent'] ]
             steps:
                 - checkout: trusted
                   fetchDepth: 1
 
+                # No `continueOnError`. A legacy run with no artifact skips this step outright, so
+                # the only way it can fail is a genuine failure to fetch an artifact the server says
+                # exists — which must fail the job and be retried rather than be mistaken for
+                # "nothing to report" and leave a stale comment in place.
                 - task: DownloadPipelineArtifact@2
                   displayName: "Download bundle comment"
-                  continueOnError: true
+                  condition: and(succeeded(), eq(variables['BUNDLE_ARTIFACT_PRESENT'], 'true'))
                   inputs:
                       buildType: specific
                       project: $(System.TeamProject)
@@ -431,4 +480,5 @@ stages:
                       PR_CI_RUN_ID: "${{ parameters.prCiRunId }}"
                       PR_CI_DEFINITION_ID: "${{ parameters.prCiDefinitionId }}"
                       BUNDLE_COMMENT_DIR: $(Pipeline.Workspace)/bundle-comment
+                      BUNDLE_ARTIFACT_PRESENT: "$(BUNDLE_ARTIFACT_PRESENT)"
                       PR_COMMENT_TOKEN: "$(PR_COMMENT_TOKEN)"

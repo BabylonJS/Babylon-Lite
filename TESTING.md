@@ -520,19 +520,49 @@ no third fallback: build _tags_ would work and are writable by the Build Service
 identities pull-request YAML can reach, so a pull request could forge "already
 published" and suppress its own report.
 
-**Retry.** Per-axis job results come from the publisher run's timeline, keyed on
-the `PostApiComment` and `PostBundleComment` **jobs**. `succeeded`,
-`succeededWithIssues` and `partiallySucceeded` all count as published;
-`skipped` does not, so an axis that was switched off is never mistaken for one
-that ran. Counting `succeededWithIssues` matters more than it looks: Azure
-reports it whenever a `continueOnError` step fails, and `PostApiComment` reaches
-that state on every pull request that does not move the public API, because PR CI
-stages the `api-comment` artifact only when there is a diff. Reading it as a
-failure would re-queue the publisher on nearly every pull request, exhaust the
-attempt budget, fail the tick, and duplicate the create-only API comment. A
-genuinely failed axis is retried up to three times; exhaustion fails the tick
+**Retry, and why the two axes classify results differently.** Per-axis job
+results come from the publisher run's timeline, keyed on the `PostApiComment` and
+`PostBundleComment` **jobs**. Exactly one timeline record must match each axis:
+zero is "did not run", and more than one means the timeline is not the shape this
+code was written against, which fails that pull request visibly rather than
+letting an arbitrary record decide whether a comment is owed. `skipped` never
+counts as published, so an axis that was switched off is not mistaken for one
+that ran.
+
+The two axes then diverge, deliberately:
+
+- **API — lenient.** `succeeded`, `succeededWithIssues` and `partiallySucceeded`
+  all count as published. Azure reports a warning result whenever a
+  `continueOnError` step fails, and `PostApiComment` reaches that state on every
+  pull request that does not move the public API, because PR CI stages the
+  `api-comment` artifact only when there is a diff. Reading it as a failure would
+  re-queue the publisher on nearly every pull request, exhaust the attempt
+  budget, fail the tick, and duplicate the create-only API comment.
+- **Bundle — strict.** Only `succeeded` counts. A warning result is treated as a
+  failure and retried. This is not symmetry for its own sake: the bundle job has
+  no tolerant steps at all, so a warning there means something genuinely went
+  wrong. Classifying it as published would retire the bundle axis for the latest
+  build with a stale comment still on the pull request — issue #627 exactly.
+
+A genuinely failed axis is retried up to three times; exhaustion fails the tick
 loudly, after everything else has been queued, so one broken pull request cannot
-stall the rest.
+stall the rest. The same isolation applies earlier in the tick: if a candidate
+publisher run will not expose its queue-time triple, that one pull request fails
+closed and has nothing queued for it, every other open pull request is still
+reconciled, and the tick reports failure at the end. A single malformed history
+must not freeze the whole repository's comments.
+
+**"No artifact" is established from the server, never from the filesystem.** A
+pull request whose CI predates the `bundle-comment` artifact and one whose
+artifact download simply failed look identical on the agent: an empty directory.
+They must be handled oppositely — the first is a legitimate no-op, the second
+must be retried. So `Preflight` asks the Build API which artifacts the PR CI run
+actually published and passes the answer down as `BUNDLE_ARTIFACT_PRESENT`. The
+download is skipped entirely when the server says there is none, and is **not**
+`continueOnError` when the server says there is one. If the artifact exists and
+the directory is still absent, the reconciler raises an ordinary error and the
+poller retries. The probe lives in `Preflight` because that job holds
+`System.AccessToken` and no GitHub credential, so the two never share a job.
 
 **The API comment stays create-only, and stays automatic.** `GitHubComment@0`
 cannot update, and #627 does not change that. What it does change is that the API
@@ -599,6 +629,52 @@ for _every_ open pull request. Declining costs at most one stale or duplicate
 comment, which the next run resolves. Transient GitHub and Azure DevOps errors
 are the opposite case and still fail hard, because for those a retry is exactly
 the right response.
+
+#### Adopting the comments the old create-only task left behind
+
+Every bundle-size comment posted before #627 was written by `GitHubComment@0` and
+carries no marker, so the reconciler would treat it as somebody else's comment
+and post a second one beside it — leaving the already-open pull requests with
+precisely the stale comments #627 was filed about. Those comments are therefore
+adopted once, in place, by adding the canonical marker to them.
+
+Adoption is deliberately narrow, because the alternative is a token with
+issue-comment write scope pattern-matching its way onto a human's comment:
+
+- the comment must be authored by the token's **own numeric account id** — the
+  same identity check the marker path uses, never a login and never anything the
+  artifact supplies;
+- its first line must equal the literal `## Bundle Size Changes`, and its second
+  line must be blank. That is not a guess: `formatComment` in
+  `scripts/report-bundle-size-deltas.ts` emits exactly two shapes, and the old
+  pipeline posted only when the report was notable, which is the only shape that
+  reaches that branch. The API reporter's heading is `## API Changes`, so the two
+  cannot collide;
+- the comment must not already carry a canonical or superseded marker;
+- and adoption is only attempted **when the pull request has no canonical comment
+  at all**, which makes it inherently one-shot: the moment one is adopted or
+  created, the path is closed for that pull request forever.
+
+If several comments qualify, the oldest becomes canonical and the rest are
+tombstoned like any other duplicate. Both transitions are covered: a pull request
+with a current report has its legacy comment upgraded and rewritten, and one
+whose report has since resolved has its legacy comment upgraded and retracted —
+which is the case that actually clears the #627 backlog.
+
+**This constrains the token.** `PR_COMMENT_TOKEN` must belong to the same bot
+account as the historical `BabylonBotPAT`; otherwise the id check fails and no
+legacy comment is ever adopted. That is a safe failure — nothing is touched — but
+it silently leaves the backlog in place, so it is an admin prerequisite rather
+than an implementation detail. If the account must change, an explicitly
+configured trusted legacy author id is the supported alternative; inferring the
+author from anything a pull request can influence is not.
+
+**Residual risk, accepted knowingly.** A pull request that rewrites its own
+reporter to emit `## Bundle Size Changes` could have that comment adopted instead
+of its real one. The blast radius is that pull request's own comments: no
+credential, no other pull request, no repository state, and GitHub's edit history
+preserves the original body. It is bounded further by the one-shot rule above and
+visible in review, which is why it is documented rather than designed around.
 
 ### Cloud browser tests run post-merge
 
@@ -1135,6 +1211,14 @@ conditions hold:
   comment-write to every other consumer of that group — and rather than an
   extraction of `BabylonBotPAT`, which is a service connection whose credential
   is deliberately opaque to scripts.
+
+  **Issue it from the same bot account as `BabylonBotPAT`.** Bundle-size comments
+  posted before #627 carry no marker and are adopted by author id, so a different
+  account leaves every one of them orphaned — the pull requests #627 was filed
+  about keep their stale comments. See
+  [Adopting the comments the old create-only task left behind](#adopting-the-comments-the-old-create-only-task-left-behind).
+  If a different account is unavoidable, configure the historical author id
+  explicitly instead; do not relax the check.
 - **23. Create the dedicated queue identity and the
   `BabylonLite-PRPublishQueue` group.** Create a service principal or PAT that
   holds **Queue builds** and **View builds** on the PR publisher definition,

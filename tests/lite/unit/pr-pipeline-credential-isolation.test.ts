@@ -1679,17 +1679,59 @@ describe("the publisher splits the two comment paths so a retry cannot duplicate
         const bundle = jobsOf(publisher).find((job) => job.name === "PostBundleComment");
         expect(bundle, `${PUBLISHER} has no PostBundleComment job`).toBeDefined();
 
-        // The download stays tolerant on purpose: a pull request whose CI never
-        // reached the bundle-size job has no artifact, and that is a legitimate
-        // "nothing to say" state the reconciler no-ops on, not a failure.
+        // Nothing in this job may swallow a failure. The job it replaced was
+        // tolerant at both the download *and* the task level, which is exactly
+        // why a failed bundle post was invisible and stale comments survived.
         //
-        // The reconciler itself is the retry signal, and it must not be tolerant.
-        // The job this replaced swallowed failures at both the download *and* the
-        // task level, which is exactly why a failed bundle post was invisible and
-        // why stale comments survived forever.
+        // The download in particular must stay intolerant. A tolerant download
+        // turns a transient fetch failure into an empty directory, the reconciler
+        // reads that as "nothing measured", and the warning-level job result
+        // retires the bundle axis as published against the latest build — issue
+        // #627 restored in full. "Nothing to download" is established from the
+        // server instead, by the condition below.
+        expect(withoutComments(bundle?.body ?? ""), "a tolerant step in the bundle job hides the failure the poller retries on").not.toMatch(/continueOnError:\s*true/);
+
         const step = /-\s*script:\s*pnpm reconcile:bundle-comment[\s\S]*?(?=\n\s{18}-\s|$)/.exec(withoutComments(bundle?.body ?? ""));
         expect(step, `${PUBLISHER} does not run the bundle reconciler`).toBeDefined();
         expect(step?.[0], "the bundle reconciler swallows its own failures, so no retry can ever be triggered").not.toMatch(/continueOnError:\s*true/);
+    });
+
+    it("decides whether an artifact exists on the server, not from the agent's filesystem", () => {
+        // The two states are indistinguishable on disk and must be handled
+        // oppositely, so the answer has to come from somewhere a failed download
+        // cannot forge.
+        const preflight = jobsOf(publisher).find((job) => job.name === "Preflight");
+        const probe = /-\s*script:[\s\S]*?_apis\/build\/builds\/\$\{RUN_ID\}\/artifacts[\s\S]*?(?=\n\s{16}-\s|$)/.exec(withoutComments(preflight?.body ?? ""));
+        expect(probe, `${PUBLISHER} never asks the Build API which artifacts the PR CI run published`).toBeDefined();
+        expect(probe?.[0]).toMatch(/isOutput=true/);
+        expect(probe?.[0], "the probe must name the artifact it is looking for").toContain("bundle-comment");
+
+        // Preflight is the right place for it precisely because it has no GitHub
+        // credential: the ADO token and the comment token never share a job.
+        expect(preflight?.body, "Preflight must not gain a GitHub credential").not.toMatch(/PR_COMMENT_TOKEN|BabylonLite-PRComments/);
+    });
+
+    it("gates the bundle download on the server's answer, sourced from Preflight rather than an artifact", () => {
+        const bundle = jobsOf(publisher).find((job) => job.name === "PostBundleComment");
+        const body = withoutComments(bundle?.body ?? "");
+
+        const download = /-\s*task:\s*DownloadPipelineArtifact@2[\s\S]*?(?=\n\s{16}-\s|$)/.exec(body);
+        expect(download, `${PUBLISHER} does not download the bundle comment`).toBeDefined();
+        expect(download?.[0], "the download must be skipped when the server says there is no artifact").toMatch(/condition:[^\n]*BUNDLE_ARTIFACT_PRESENT/);
+
+        // Sourced from the trusted job's output. Anything artifact-derived here
+        // would let a pull request decide whether its own stale comment is
+        // retracted.
+        expect(body).toMatch(/BUNDLE_ARTIFACT_PRESENT[\s\S]{0,120}dependencies\.Preflight\.outputs\['bundleArtifact\.bundleArtifactPresent'\]/);
+        expect(body, "the reconciler must be told what the server said").toMatch(/BUNDLE_ARTIFACT_PRESENT:\s*"\$\(BUNDLE_ARTIFACT_PRESENT\)"/);
+    });
+
+    it("keeps the API path tolerant, because its task cannot be retried safely", () => {
+        // The asymmetry is deliberate and worth pinning: `GitHubComment@0` is
+        // create-only, so a retry duplicates the comment. Its download warns on
+        // every pull request that did not move the public API.
+        const api = jobsOf(publisher).find((job) => job.name === "PostApiComment");
+        expect(withoutComments(api?.body ?? ""), "the API path lost its tolerance, so ordinary runs will now be retried and duplicated").toMatch(/continueOnError:\s*true/);
     });
 
     it("gives every publisher run a build number derived only from compile-time parameters", () => {

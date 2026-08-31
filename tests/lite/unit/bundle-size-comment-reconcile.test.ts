@@ -34,6 +34,7 @@ import {
     sanitizeArtifactBody,
     parseBundleCommentState,
     loadStagedArtifact,
+    selectLegacyComments,
     ArtifactContractError,
     selectOwnedComments,
     reconcile,
@@ -401,15 +402,29 @@ describe("the staged artifact is a contract, and a broken one is not silently a 
         }
     });
 
-    it("treats a missing artifact directory as unavailable, never as resolved", () => {
+    it("separates a build that published nothing from a download that failed", () => {
+        // These are the same observable state on the agent — an empty directory — and they must be
+        // handled oppositely, which is why the publisher asks the server which one it is.
+        //
+        // The failed-download case is the #627 defect in miniature: reporting `unavailable` would
+        // mark the bundle axis published against the latest build and freeze a stale comment on the
+        // pull request. It throws a plain Error rather than an ArtifactContractError precisely so
+        // the poller retries it.
+        expect(loadStagedArtifact(join(directory, "absent"), false).state, "a legacy build with no artifact is a no-op").toBe("unavailable");
+
+        expect(() => loadStagedArtifact(join(directory, "absent"), true), "an artifact the server says exists is a retryable failure").toThrow(/download failed/i);
+        expect(() => loadStagedArtifact(join(directory, "absent"), true)).not.toThrow(ArtifactContractError);
+    });
+
+    it("treats a staged directory with no state file as unavailable, never as resolved", () => {
         // A pull request whose CI never reached the bundle-size job has nothing to say. Reading
         // that as "no regression" would retract a real, still-accurate report.
-        expect(loadStagedArtifact(join(directory, "absent")).state).toBe("unavailable");
+        expect(loadStagedArtifact(directory, true).state).toBe("unavailable");
     });
 
     it("fails when the state claims a report but no markdown was staged", () => {
         writeFileSync(join(directory, "bundle-comment-state.json"), JSON.stringify({ schemaVersion: 1, state: "report" }));
-        expect(() => loadStagedArtifact(directory)).toThrow(/bundle-size-comment\.md|missing/i);
+        expect(() => loadStagedArtifact(directory, true)).toThrow(/bundle-size-comment\.md|missing/i);
     });
 
     it("classifies every artifact-shaped failure as a contract error rather than an outage", () => {
@@ -418,25 +433,25 @@ describe("the staged artifact is a contract, and a broken one is not silently a 
         // build, and the poller escalates an exhausted budget by failing its tick — which would let
         // one pull request stop bundle-size reconciliation for all of them.
         writeFileSync(join(directory, "bundle-comment-state.json"), '{"schemaVersion":9,"state":"none"}');
-        expect(() => loadStagedArtifact(directory)).toThrow(ArtifactContractError);
+        expect(() => loadStagedArtifact(directory, true)).toThrow(ArtifactContractError);
 
         writeFileSync(join(directory, "bundle-comment-state.json"), "not json");
-        expect(() => loadStagedArtifact(directory)).toThrow(ArtifactContractError);
+        expect(() => loadStagedArtifact(directory, true)).toThrow(ArtifactContractError);
 
         writeFileSync(join(directory, "bundle-comment-state.json"), JSON.stringify({ schemaVersion: 1, state: "report" }));
-        expect(() => loadStagedArtifact(directory), "an absent markdown body").toThrow(ArtifactContractError);
+        expect(() => loadStagedArtifact(directory, true), "an absent markdown body").toThrow(ArtifactContractError);
 
         writeFileSync(join(directory, "bundle-size-comment.md"), "   \n");
-        expect(() => loadStagedArtifact(directory), "an empty markdown body").toThrow(ArtifactContractError);
+        expect(() => loadStagedArtifact(directory, true), "an empty markdown body").toThrow(ArtifactContractError);
 
         writeFileSync(join(directory, "bundle-size-comment.md"), Buffer.from([0x68, 0x00, 0x69]));
-        expect(() => loadStagedArtifact(directory), "a NUL byte").toThrow(ArtifactContractError);
+        expect(() => loadStagedArtifact(directory, true), "a NUL byte").toThrow(ArtifactContractError);
 
         writeFileSync(join(directory, "bundle-size-comment.md"), Buffer.from([0xff, 0xfe, 0xfd]));
-        expect(() => loadStagedArtifact(directory), "invalid UTF-8").toThrow(ArtifactContractError);
+        expect(() => loadStagedArtifact(directory, true), "invalid UTF-8").toThrow(ArtifactContractError);
 
         writeFileSync(join(directory, "bundle-size-comment.md"), "x".repeat(1024 * 1024 + 1));
-        expect(() => loadStagedArtifact(directory), "an oversized body").toThrow(ArtifactContractError);
+        expect(() => loadStagedArtifact(directory, true), "an oversized body").toThrow(ArtifactContractError);
     });
 
     it("carries the sanitized markdown through when the state says report", () => {
@@ -444,7 +459,7 @@ describe("the staged artifact is a contract, and a broken one is not silently a 
         writeFileSync(join(directory, "bundle-comment-state.json"), JSON.stringify({ schemaVersion: 1, state: "report" }));
         writeFileSync(join(directory, "bundle-size-comment.md"), "### Bundle size\n<!-- sneaky -->");
 
-        const loaded = loadStagedArtifact(directory);
+        const loaded = loadStagedArtifact(directory, true);
 
         expect(loaded.state).toBe("report");
         expect(loaded.body).toContain("### Bundle size");
@@ -478,5 +493,124 @@ describe("API failures surface instead of being smoothed over", () => {
             expect(String(call[0])).not.toContain("SECRET-MARKER-TEXT");
         }
         log.mockRestore();
+    });
+});
+
+describe("comments left by the old create-only task are adopted rather than orphaned", () => {
+    /**
+     * Without this, #627 stays visibly unfixed on exactly the pull requests it was filed about.
+     * Every currently open pull request carries an unmarked bundle comment; ignoring them would
+     * leave the stale comment in place forever and post a second one beside it.
+     *
+     * The signature is generated, not guessed. `formatComment` emits `## Bundle Size Changes`
+     * followed by a blank line, and the old pipeline posted only that shape — `POST_BUNDLE_COMMENT`
+     * was false for the `**Bundle Size**: No changes detected.` variant, so it was never sent.
+     */
+    const LEGACY_BODY = ["## Bundle Size Changes", "", "### Increases", "", "| Package | Current | Master | Change |", "| core | 100 KB | 96 KB | **+4 KB** |"].join("\n");
+
+    function legacy(id: number, body = LEGACY_BODY, userId = BOT_ID): IssueComment {
+        return { id, body, user: { id: userId } };
+    }
+
+    it("adopts a legacy comment in place and marks it, rather than posting a second one", async () => {
+        const api = new FakeApi([legacy(1)]);
+
+        const result = await reconcile(api, { identity: IDENTITY, state: "report", body: "current report" });
+
+        expect(result.action, "a second comment beside the stale one is the bug, not the fix").toBe("updated");
+        expect(result.canonicalCommentId).toBe(1);
+        expect(
+            api.writes.filter((w) => w.kind === "create"),
+            "adoption must edit, never create"
+        ).toHaveLength(0);
+        expect(api.comments[0].body).toBe(`${formatMarker(IDENTITY)}\ncurrent report`);
+    });
+
+    it("retracts a legacy comment whose regression is gone", async () => {
+        // The other half of #627: the old task could not withdraw a report that stopped being true.
+        const api = new FakeApi([legacy(1)]);
+
+        const result = await reconcile(api, { identity: IDENTITY, state: "none" });
+
+        expect(result.action).toBe("resolved");
+        expect(api.comments[0].body.startsWith(formatMarker(IDENTITY))).toBe(true);
+        expect(api.comments[0].body).toContain("no longer notable");
+    });
+
+    it("canonicalises the oldest of several legacy comments and tombstones the rest", async () => {
+        // The normal state of a long-lived pull request under the old task: one comment per push.
+        const api = new FakeApi([legacy(7), legacy(3), legacy(11)]);
+
+        const result = await reconcile(api, { identity: IDENTITY, state: "report", body: "current" });
+
+        expect(result.canonicalCommentId).toBe(3);
+        expect(result.demotedCommentIds.sort((a, b) => a - b)).toEqual([7, 11]);
+        expect(api.comments.filter((c) => c.body.startsWith(`${MARKER_PREFIX}`)).map((c) => c.id)).toEqual([3]);
+        expect(api.comments, "history must survive migration").toHaveLength(3);
+    });
+
+    it("is idempotent: the second run sees an ordinary canonical comment", async () => {
+        const api = new FakeApi([legacy(1)]);
+        await reconcile(api, { identity: IDENTITY, state: "report", body: "current" });
+
+        const second = await reconcile(api, { identity: IDENTITY, state: "report", body: "current" });
+
+        expect(second.action).toBe("unchanged");
+        expect(second.canonicalCommentId).toBe(1);
+        expect(api.comments).toHaveLength(1);
+    });
+
+    it("never adopts a comment written by anyone but the bot", () => {
+        // The runbook requires PR_COMMENT_TOKEN to be the same identity that posted the legacy
+        // comments; a mismatch must degrade to "post a fresh comment", never to "rewrite a human's".
+        expect(selectLegacyComments([legacy(1, LEGACY_BODY, HUMAN_ID)], BOT_ID)).toEqual([]);
+    });
+
+    it("requires the generated heading exactly, so a near miss is left alone", () => {
+        const nearMisses = [
+            "## Bundle Size Change\n\nrows",
+            "## bundle size changes\n\nrows",
+            "### Bundle Size Changes\n\nrows",
+            "Preamble\n## Bundle Size Changes\n\nrows",
+            "## Bundle Size Changes\nnot blank\nrows",
+            "## API Changes\n\nAPI Extractor detected public API changes.",
+        ];
+
+        for (const body of nearMisses) {
+            expect(selectLegacyComments([legacy(1, body)], BOT_ID), body.slice(0, 24)).toEqual([]);
+        }
+    });
+
+    it("never re-adopts a comment it already owns", () => {
+        // Adoption is one-shot by construction: the marker it writes disqualifies the comment.
+        const adoptedAlready = { id: 1, body: `${formatMarker(IDENTITY)}\n## Bundle Size Changes\n\nrows`, user: { id: BOT_ID } };
+        expect(selectLegacyComments([adoptedAlready], BOT_ID)).toEqual([]);
+
+        const tombstoned = {
+            id: 2,
+            body: `${SUPERSEDED_MARKER_PREFIX}${JSON.stringify({ repo: IDENTITY.repo, pr: IDENTITY.pr })} -->\n## Bundle Size Changes\n\nrows`,
+            user: { id: BOT_ID },
+        };
+        expect(selectLegacyComments([tombstoned], BOT_ID)).toEqual([]);
+    });
+
+    it("leaves legacy comments alone once a canonical comment exists", async () => {
+        // The migration window closes after the first successful reconcile, which is what keeps the
+        // heading match from being a permanent, re-armable selector.
+        const api = new FakeApi([ownedComment(1, "current"), legacy(2)]);
+
+        const result = await reconcile(api, { identity: IDENTITY, state: "report", body: "current" });
+
+        expect(result.canonicalCommentId).toBe(1);
+        expect(api.comments.find((c) => c.id === 2)?.body, "an unowned legacy comment is not a duplicate to demote").toBe(LEGACY_BODY);
+    });
+
+    it("does not touch a legacy comment when the run could not measure", async () => {
+        const api = new FakeApi([legacy(1)]);
+
+        const result = await reconcile(api, { identity: IDENTITY, state: "unavailable" });
+
+        expect(result.action).toBe("skipped");
+        expect(api.comments[0].body).toBe(LEGACY_BODY);
     });
 });
