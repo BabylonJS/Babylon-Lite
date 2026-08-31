@@ -87,6 +87,23 @@ export interface RacerWorlds {
     readonly worlds: readonly RenderWorld[];
 }
 
+interface ShadowFitState {
+    initialized: boolean;
+}
+
+function observeTrackForShadowFit(track: TrackData, sun: DirectionalLight): void {
+    const state: ShadowFitState = { initialized: false };
+    track.onRebuild(() => {
+        if (state.initialized) {
+            // Track deformation changes its caller-managed bounds without moving its mesh. A bulk
+            // direction write bumps the light version watched by the CSM fit while preserving the sun.
+            sun.direction.set(sun.direction.x, sun.direction.y, sun.direction.z);
+        } else {
+            state.initialized = true;
+        }
+    });
+}
+
 function createWorldLights(): { ambient: LightBase; sun: DirectionalLight } {
     const ambient = createHemisphericLight(HEMI_LIGHT_DIRECTION, HEMI_LIGHT_INTENSITY);
     const sun = createDirectionalLight(SUN_DIRECTION, SUN_INTENSITY);
@@ -129,6 +146,7 @@ export async function createRacerWorlds(engine: EngineContext, assets: RacerAsse
 
         const trackRender = buildTrackRender(engine, assets.trackTextures, shadowGenerator, track);
         addTrackToScene(residency, trackRender);
+        observeTrackForShadowFit(track, sun);
 
         const world: RenderWorld = {
             lights: [ambient, sun],

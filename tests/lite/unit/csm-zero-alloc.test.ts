@@ -24,15 +24,6 @@ vi.mock("../../../packages/babylon-lite/src/camera/camera.js", () => {
 });
 
 describe("shadow-base ToRef numerical equivalence", () => {
-    it("invalidates a cached shadow fit when shader-deformed bounds change", () => {
-        const mesh = { worldMatrixVersion: 4, thinInstances: null, _boundsVersion: 1 } as unknown as Mesh;
-
-        const before = casterVersionSum([mesh]);
-        mesh._boundsVersion!++;
-
-        expect(casterVersionSum([mesh])).toBe(before + 1);
-    });
-
     it("buildLightViewMatrixInto produces identical output to buildLightViewMatrix", () => {
         const params: [number, number, number, number, number, number][] = [
             [0, -1, 0, 5, 10, 3],

@@ -26,7 +26,7 @@
  */
 
 import type { EngineContext, Mesh, SceneContext, ShadowGenerator, Vec3 } from "babylon-lite";
-import { addVec3, addToScene, createMeshFromData, crossVec3, dotVec3, markMeshBoundsDirty, normalizeVec3Object, scaleVec3, subVec3 } from "babylon-lite";
+import { addVec3, addToScene, createMeshFromData, crossVec3, dotVec3, normalizeVec3Object, scaleVec3, subVec3 } from "babylon-lite";
 
 import { BOOST_LEFT_OFFSET, BOOST_PERIOD, BOOST_RIGHT_OFFSET, DEFAULT_CONTROL_POINTS, RING_COUNT, TRACK_CROSS_NORMALS, TRACK_CROSS_SECTION } from "./constants.js";
 import { createTrackMaterial, FLOATS_PER_FRAME, type TrackMaterial, type TrackTextures } from "./track-material.js";
@@ -418,7 +418,6 @@ export function buildTrackRender(engine: EngineContext, textures: TrackTextures,
     // group, so dragging a control point causes no resource churn in any pane.
     const unsubscribe = track.onRebuild((frames, curveRatios) => {
         computeTrackBoundsInto(frames, trackBoundMin, trackBoundMax);
-        markMeshBoundsDirty(mesh);
         writeFrameBuffers(trackMaterial, frames, curveRatios);
         trackMaterial.upload();
     });

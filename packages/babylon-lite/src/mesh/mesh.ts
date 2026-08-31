@@ -184,9 +184,6 @@ export interface Mesh extends SceneNode {
     _dashedLineOptions?: readonly [dashSize: number, gapSize: number];
     /** @internal Highest CSM cascade this mesh casts into; undefined means all cascades. */
     _shadowMaxCascade?: number;
-    /** @internal Revision of caller-managed bounds for shader-deformed geometry. Increment when
-     * `boundMin` / `boundMax` change without a transform or thin-instance update. */
-    _boundsVersion?: number;
     /** @internal */
     _cpuPositions?: Float32Array;
     /** @internal */

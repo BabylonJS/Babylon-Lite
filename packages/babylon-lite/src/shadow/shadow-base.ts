@@ -186,7 +186,7 @@ export function casterVersionSum(casterMeshes: readonly Mesh[]): number {
     let sum = 0;
     for (const mesh of casterMeshes) {
         // Bitwise coercion maps the absent optional version to zero without another branch.
-        sum += mesh.worldMatrixVersion + ~~(mesh.thinInstances?._version as number) + ~~(mesh._boundsVersion as number);
+        sum += mesh.worldMatrixVersion + ~~(mesh.thinInstances?._version as number);
     }
     return sum;
 }
