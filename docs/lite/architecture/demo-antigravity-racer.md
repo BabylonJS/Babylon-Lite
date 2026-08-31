@@ -699,7 +699,8 @@ ship grid, and clears the ships from each used world's caster set — never the 
 
 The editor registers its ArcRotate-controlled main scene before its utility layer, ensuring the
 position gizmo's swapchain overlay renders on top of the track while both share the same camera.
-Idle gizmo hover readbacks are coalesced to one in-flight pick plus the latest pointer position.
+The editor's demo-local pointer router keeps idle gizmo hover readbacks to one in-flight pick plus
+the latest pointer position; the shared engine gizmo dispatcher remains unchanged.
 The editor camera starts orbiting immediately and yields only after a gizmo drag is confirmed, so
 GPU picking and first-use pipeline compilation cannot stall ordinary camera input.
 

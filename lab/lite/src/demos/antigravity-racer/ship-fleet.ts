@@ -21,7 +21,7 @@
  */
 
 import type { HierarchyInstancePool, Mat4, SceneContext, SceneNode, Vec3 } from "babylon-lite";
-import { addHierarchyInstance, addToScene, mat4Compose, setHierarchyInstanceCount, setHierarchyInstanceMatrix } from "babylon-lite";
+import { addHierarchyInstance, addToScene, isPbrMaterial, mat4Compose, setHierarchyInstanceCount, setHierarchyInstanceMatrix } from "babylon-lite";
 
 import { instantiateModel, type RacerAssets } from "./assets.js";
 import { bjsEulerToQuatInto } from "./bjs-euler.js";
@@ -86,7 +86,14 @@ export function createShipFleet(assets: RacerAssets, count: number): ShipFleet {
         addHierarchyInstance(pool, identity);
     }
     for (let i = 0; i < pool.meshes.length; i++) {
-        pool.meshes[i]!.receiveShadows = true;
+        const mesh = pool.meshes[i]!;
+        mesh.receiveShadows = true;
+        if (isPbrMaterial(mesh.material)) {
+            // The HDR reflection otherwise dominates the tiny ship's direct light, making even
+            // full rock shadows look sunlit. Keep enough IBL for the metallic hull while allowing
+            // the CSM-attenuated directional contribution to read clearly.
+            mesh.material.environmentIntensity = 0.35;
+        }
     }
     // Per-fleet scratch matrices to avoid per-tick allocations.
     const _localMat = new Float32Array(16);

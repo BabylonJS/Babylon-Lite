@@ -25,6 +25,7 @@ import {
     disposePositionGizmo,
     disposeUtilityLayer,
     isGizmoDragging,
+    isGizmoPickPending,
     pickAsync,
     registerUtilityLayer,
 } from "babylon-lite";
@@ -33,6 +34,7 @@ import type { TrackData } from "./track.js";
 import { DEFAULT_CONTROL_POINTS } from "./constants.js";
 import type { InputSystem } from "./input.js";
 import type { EditorHud } from "./hud.js";
+import { attachEditorPointerDrag } from "./editor-pointer-drag.js";
 
 const NUDGE_SPEED = 8; // world units/sec
 
@@ -76,13 +78,15 @@ export async function createTrackEditor(
         return marker;
     });
 
-    const detachOrbit = attachControl(camera, canvas, scene, {
-        isExternalDragActive: () => isGizmoDragging(canvas),
-    });
-
     const utilityLayer: UtilityLayer = createUtilityLayer(engine, scene);
     const gizmo: PositionGizmo = createPositionGizmo(engine, utilityLayer);
+    const editorPointer = attachEditorPointerDrag(canvas, utilityLayer, gizmo);
     const picker: GpuPicker = createGpuPicker(scene);
+
+    const detachEditorOrbit = attachControl(camera, canvas, scene, {
+        isExternalDragActive: () => isGizmoDragging(editorPointer.canvas),
+        isExternalPickPending: () => isGizmoPickPending(editorPointer.canvas),
+    });
 
     let selected = 0;
     let disposed = false;
@@ -224,7 +228,8 @@ export async function createTrackEditor(
         window.removeEventListener("keydown", onKeyDown);
         window.removeEventListener("keyup", onKeyUp);
         window.removeEventListener("blur", clearKeys);
-        detachOrbit();
+        detachEditorOrbit();
+        editorPointer.dispose();
         // Gizmo must be torn down before the utility layer it lives on; the
         // picker is scene-owned and independent of the layer/gizmo teardown.
         disposePositionGizmo(gizmo, utilityLayer);

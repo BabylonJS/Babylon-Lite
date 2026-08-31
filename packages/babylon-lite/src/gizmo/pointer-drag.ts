@@ -142,13 +142,6 @@ interface DispatcherState {
     /** Async pick token — if the latest pointer-move arrives before the
      *  previous pick resolves, the older result is discarded. */
     hoverToken: number;
-    /** True while the single allowed hover pick is in flight. */
-    hoverInFlight: boolean;
-    /** Whether another hover position arrived while that pick was in flight. */
-    hoverQueued: boolean;
-    /** Latest coalesced hover coordinates. */
-    hoverX: number;
-    hoverY: number;
     /** True while a pointer-down GPU pick is in flight (between the press and
      *  the async pick resolving).  Camera controls consult this so they defer
      *  starting an orbit until it's known whether the press hit a gizmo. */
@@ -243,10 +236,6 @@ function installDispatcher(layer: UtilityLayer, canvas: HTMLCanvasElement): Disp
         active: null,
         hovered: null,
         hoverToken: 0,
-        hoverInFlight: false,
-        hoverQueued: false,
-        hoverX: 0,
-        hoverY: 0,
         pickPending: false,
         cleanup: () => undefined,
     };
@@ -257,8 +246,6 @@ function installDispatcher(layer: UtilityLayer, canvas: HTMLCanvasElement): Disp
         }
         // Mark a pick as in flight so camera controls defer starting an orbit
         // until we know whether this press hit a gizmo (the pick is async).
-        state.hoverToken++;
-        state.hoverQueued = false;
         state.pickPending = true;
         void handlePointerDown(state, event);
     };
@@ -268,11 +255,12 @@ function installDispatcher(layer: UtilityLayer, canvas: HTMLCanvasElement): Disp
             handlePointerMove(state, event);
             return;
         }
-        // Do not add hover work behind a pointer-down pick. Camera controls are
-        // waiting on that pick and must be able to orbit as soon as it resolves.
-        if (!state.pickPending) {
-            queueHoverMove(state, event.offsetX, event.offsetY);
-        }
+        // Idle pointer-move: GPU-pick to determine hover target so gizmos can
+        // swap to their hover material before the user starts dragging.  Picks
+        // are tagged with a monotonically-increasing token so a stale result
+        // can't overwrite the latest hover decision (and `pickAsync` serializes
+        // per-picker so overlapping picks never race the shared staging buffers).
+        void handleHoverMove(state, event);
     };
 
     const onPointerUp = (event: PointerEvent): void => {
@@ -283,8 +271,6 @@ function installDispatcher(layer: UtilityLayer, canvas: HTMLCanvasElement): Disp
     };
 
     const onPointerLeave = (): void => {
-        state.hoverToken++;
-        state.hoverQueued = false;
         if (state.hovered) {
             state.hovered.hovering = false;
             state.hovered.onHoverEnd.notify();
@@ -306,16 +292,14 @@ function installDispatcher(layer: UtilityLayer, canvas: HTMLCanvasElement): Disp
         canvas.removeEventListener("pointerup", onPointerUp, { capture: true });
         canvas.removeEventListener("pointercancel", onPointerUp, { capture: true });
         canvas.removeEventListener("pointerleave", onPointerLeave, { capture: true });
-        state.hoverToken++;
-        state.hoverQueued = false;
     };
 
     return state;
 }
 
-/** Record the latest hover position and keep at most one GPU hover pick in
- *  flight. `pickAsync` serializes per-picker, so submitting every pointer-move
- *  would otherwise put a pointer-down pick behind an unbounded hover backlog.
+/** Perform a single hover pick and update hover state.  `pickAsync` serializes
+ *  per-picker, so concurrent calls (a fast pointer, or a pointer-down racing an
+ *  in-flight hover) never race the picker's shared 1×1 staging buffers.
  *
  *  Display-only gizmos (every registered drag disabled) do ZERO hover picking —
  *  no GPU work is spent when nothing is interactive.  This is what makes
@@ -323,43 +307,17 @@ function installDispatcher(layer: UtilityLayer, canvas: HTMLCanvasElement): Disp
  *  `AxisDragGizmo.isEnabled = false`) fully non-interactive.  We still fall
  *  through to the hover-transition logic so a gizmo hovered just before it was
  *  disabled clears its hover material instead of staying stuck. */
-function queueHoverMove(state: DispatcherState, x: number, y: number): void {
-    if (!state.drags.some((d) => d.enabled)) {
-        state.hoverToken++;
-        state.hoverQueued = false;
-        updateHoveredDrag(state, null);
-        return;
-    }
-    state.hoverX = x;
-    state.hoverY = y;
-    if (state.hoverInFlight) {
-        state.hoverToken++;
-        state.hoverQueued = true;
-        return;
-    }
-    void runHoverPick(state);
-}
-
-async function runHoverPick(state: DispatcherState): Promise<void> {
-    state.hoverInFlight = true;
-    const token = ++state.hoverToken;
-    try {
-        const info = await pickAsync(state.picker, state.hoverX, state.hoverY);
-        if (token !== state.hoverToken || state.active || state.pickPending) {
+async function handleHoverMove(state: DispatcherState, event: PointerEvent): Promise<void> {
+    let next: PointerDrag | null = null;
+    if (state.drags.some((d) => d.enabled)) {
+        const token = ++state.hoverToken;
+        const info = await pickAsync(state.picker, event.offsetX, event.offsetY);
+        if (token !== state.hoverToken || state.active) {
             return;
         }
         const drag = info.hit && info.pickedMesh ? findDragForMesh(state.drags, info.pickedMesh as Mesh) : null;
-        updateHoveredDrag(state, drag && drag.enabled ? drag : null);
-    } finally {
-        state.hoverInFlight = false;
-        if (state.hoverQueued && !state.active && !state.pickPending) {
-            state.hoverQueued = false;
-            void runHoverPick(state);
-        }
+        next = drag && drag.enabled ? drag : null;
     }
-}
-
-function updateHoveredDrag(state: DispatcherState, next: PointerDrag | null): void {
     if (next === state.hovered) {
         return;
     }
