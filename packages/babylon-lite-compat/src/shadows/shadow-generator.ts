@@ -23,7 +23,7 @@ import {
 } from "babylon-lite";
 import type { EngineContext, Mesh as LiteMesh } from "babylon-lite";
 
-import type { Light } from "../lights/lights.js";
+import { DirectionalLight, type Light } from "../lights/lights.js";
 import type { AbstractMesh } from "../meshes/meshes.js";
 
 export class ShadowGenerator {
@@ -178,6 +178,13 @@ export class CascadedShadowGenerator extends ShadowGenerator {
     public shadowMaxZ: number | undefined;
     public depthClamp = true;
     public autoCalcDepthBounds = false;
+
+    public constructor(mapSize: number, light: DirectionalLight) {
+        if (!(light instanceof DirectionalLight)) {
+            throw new TypeError("CascadedShadowGenerator requires a DirectionalLight");
+        }
+        super(mapSize, light);
+    }
 
     public get numCascades(): number {
         return this._numCascades;

@@ -368,6 +368,23 @@ describe("PhysicsEngine", () => {
             expect(hknp.HP_Constraint_SetEnabled).toHaveBeenCalledWith(expect.anything(), false);
             expect(hknp.HP_Constraint_Release).toHaveBeenCalledOnce();
         });
+
+        it("does not release an invalid constraint handle after plugin teardown", () => {
+            const hknp = makeAggregateMockHknp();
+            const plugin = new HavokPlugin(true, hknp);
+            plugin._attachToLiteScene(makeScene());
+            const physicsEngine = new PhysicsEngine(plugin, Vector3.Zero());
+            const scene = { getPhysicsEngine: () => physicsEngine } as unknown as Scene;
+            const parent = new PhysicsBody(makePhysicsNode(scene), PhysicsMotionType.STATIC, false, scene);
+            const child = new PhysicsBody(makePhysicsNode(scene), PhysicsMotionType.DYNAMIC, false, scene);
+            const hinge = new HingeConstraint(Vector3.Zero(), Vector3.Zero(), Vector3.Up(), Vector3.Up(), scene);
+            parent.addConstraint(child, hinge);
+
+            plugin.dispose();
+
+            expect(() => hinge.dispose()).not.toThrow();
+            expect(hknp.HP_Constraint_Release).not.toHaveBeenCalled();
+        });
     });
 
     describe("PhysicsAggregate", () => {

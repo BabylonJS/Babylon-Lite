@@ -13,7 +13,7 @@ vi.mock("babylon-lite", async (importOriginal) => ({
 
 import type { EngineContext } from "babylon-lite";
 
-import { DirectionalLight } from "../src/lights/lights";
+import { DirectionalLight, SpotLight } from "../src/lights/lights";
 import { Vector3 } from "../src/math/vector";
 import { CascadedShadowGenerator } from "../src/shadows/shadow-generator";
 
@@ -62,5 +62,12 @@ describe("CascadedShadowGenerator", () => {
         expect(generator.numCascades).toBe(4);
         generator.numCascades = 5;
         expect(generator.numCascades).toBe(4);
+    });
+
+    it("rejects non-directional lights before building", () => {
+        const light = new SpotLight("spot", Vector3.Zero(), new Vector3(0, -1, 0), Math.PI / 2, 1);
+
+        expect(() => new CascadedShadowGenerator(2048, light as unknown as DirectionalLight)).toThrow("CascadedShadowGenerator requires a DirectionalLight");
+        expect(createCsmDirectionalShadowGenerator).not.toHaveBeenCalled();
     });
 });

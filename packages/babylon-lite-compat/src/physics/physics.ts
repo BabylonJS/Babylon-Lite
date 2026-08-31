@@ -615,6 +615,7 @@ export class PhysicsBody {
 export class PhysicsConstraint {
     private _isBound = false;
     private _lite: LitePhysicsConstraint | null = null;
+    private readonly _world: PhysicsWorld;
 
     public constructor(
         public readonly type: PhysicsConstraintType,
@@ -622,7 +623,7 @@ export class PhysicsConstraint {
         protected readonly _scene: Scene,
         protected readonly _limits: readonly Physics6DoFLimit[] = []
     ) {
-        requirePhysicsWorld(_scene);
+        this._world = requirePhysicsWorld(_scene);
     }
 
     public get options(): PhysicsConstraintParameters {
@@ -638,7 +639,7 @@ export class PhysicsConstraint {
         if (this._isBound) {
             throw new Error("PhysicsConstraint instances can only be added to one body pair");
         }
-        if (requirePhysicsWorld(this._scene) !== world) {
+        if (this._world !== world) {
             throw new Error("PhysicsConstraint and PhysicsBody must belong to the same scene");
         }
         this._lite = createPhysicsConstraint(
@@ -655,7 +656,10 @@ export class PhysicsConstraint {
     public dispose(): void {
         const constraint = this._lite;
         if (constraint) {
-            releasePhysicsConstraint(requirePhysicsWorld(this._scene), constraint);
+            // Releasing the Havok world invalidates all of its constraint handles.
+            if (this._scene.getPhysicsEngine()?.getPhysicsPlugin().world === this._world) {
+                releasePhysicsConstraint(this._world, constraint);
+            }
             this._lite = null;
         }
     }

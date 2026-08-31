@@ -218,11 +218,12 @@ export const SceneLoader = {
 
 /** Babylon.js `ImportMeshAsync(source, scene, options?)` — imports an asset into the scene. */
 export async function ImportMeshAsync(source: string, scene: Scene, options?: ImportMeshOptions): Promise<ImportResult> {
-    if (isSplatUrl(source)) {
-        return loadSplatResult(source, scene);
+    const url = joinUrl(options?.rootUrl ?? "", source);
+    if (isSplatUrl(url)) {
+        return loadSplatResult(url, scene);
     }
-    validateGltfOptions(source, options);
-    const container = await loadFromSource(source, scene);
+    validateGltfOptions(url, options);
+    const container = await loadFromSource(url, scene);
     container.addAllToScene(scene);
     return {
         meshes: container.meshes,
@@ -237,20 +238,22 @@ export async function ImportMeshAsync(source: string, scene: Scene, options?: Im
 
 /** Babylon.js `AppendSceneAsync(source, scene, options?)` — appends an asset's contents to the scene. */
 export async function AppendSceneAsync(source: string, scene: Scene, options?: AppendOptions): Promise<Scene> {
-    if (isSplatUrl(source)) {
-        await loadSplatResult(source, scene);
+    const url = joinUrl(options?.rootUrl ?? "", source);
+    if (isSplatUrl(url)) {
+        await loadSplatResult(url, scene);
         return scene;
     }
-    validateGltfOptions(source, options);
-    const container = await loadFromSource(source, scene);
+    validateGltfOptions(url, options);
+    const container = await loadFromSource(url, scene);
     container.addAllToScene(scene);
     return scene;
 }
 
 /** Babylon.js `LoadAssetContainerAsync(source, scene, options?)` — loads into a container without adding. */
 export async function LoadAssetContainerAsync(source: string, scene: Scene, options?: LoadAssetContainerOptions): Promise<AssetContainer> {
-    validateGltfOptions(source, options);
-    return loadFromSource(source, scene);
+    const url = joinUrl(options?.rootUrl ?? "", source);
+    validateGltfOptions(url, options);
+    return loadFromSource(url, scene);
 }
 
 /** @internal Load a glTF/.babylon asset from a single source URL (function-loader form). */
