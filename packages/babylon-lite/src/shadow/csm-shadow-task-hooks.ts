@@ -16,7 +16,7 @@ import type { RenderTarget } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { createRenderTask, removeMeshFromTask, type RenderTask } from "../frame-graph/render-task.js";
 import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } from "../camera/camera.js";
-import { mat4InvertToRef } from "../math/mat4-invert-to-ref.js";
+import { mat4InvertToRefOrIdentity } from "../math/mat4-invert-to-ref.js";
 import { casterVersionSum, createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
 import { getNoColorView, preloadPcfShadowTaskState } from "./pcf-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
@@ -539,7 +539,7 @@ export function _computeCsmCascades(
     const aspect = csmCameraAspect(scene, camera);
     const vp = getViewProjectionMatrix(camera, aspect) as unknown as ArrayLike<number>;
     const invViewProj = scratch._invViewProj;
-    mat4InvertToRef(vp as never, invViewProj as never);
+    mat4InvertToRefOrIdentity(vp as never, invViewProj as never);
 
     const hasCasterBounds = _castersWorldAabbInto(casterMeshes, scratch);
 

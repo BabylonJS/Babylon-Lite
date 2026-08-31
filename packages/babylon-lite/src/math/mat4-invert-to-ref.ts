@@ -1,6 +1,7 @@
 import type { Mat4, Mat4Storage } from "./types.js";
 
-function invert(input: Mat4, result: Mat4): boolean {
+/** Write the inverse into an existing matrix, or identity when the input is singular. */
+export function mat4InvertToRefOrIdentity(input: Mat4, result: Mat4): void {
     const m = input as unknown as Mat4Storage;
     const a00 = m[0]!,
         a01 = m[1]!,
@@ -18,6 +19,7 @@ function invert(input: Mat4, result: Mat4): boolean {
         a31 = m[13]!,
         a32 = m[14]!,
         a33 = m[15]!;
+
     const b00 = a00 * a11 - a01 * a10;
     const b01 = a00 * a12 - a02 * a10;
     const b02 = a00 * a13 - a03 * a10;
@@ -30,12 +32,21 @@ function invert(input: Mat4, result: Mat4): boolean {
     const b09 = a21 * a32 - a22 * a31;
     const b10 = a21 * a33 - a23 * a31;
     const b11 = a22 * a33 - a23 * a32;
+
     let det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
     const out = result as unknown as Mat4Storage;
     if (Math.abs(det) < 1e-10) {
-        return false;
+        for (let index = 0; index < 16; index++) {
+            out[index] = 0;
+        }
+        out[0] = 1;
+        out[5] = 1;
+        out[10] = 1;
+        out[15] = 1;
+        return;
     }
     det = 1 / det;
+
     out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det;
     out[1] = (a02 * b10 - a01 * b11 - a03 * b09) * det;
     out[2] = (a31 * b05 - a32 * b04 + a33 * b03) * det;
@@ -52,24 +63,4 @@ function invert(input: Mat4, result: Mat4): boolean {
     out[13] = (a00 * b09 - a01 * b07 + a02 * b06) * det;
     out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det;
     out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
-    return true;
-}
-
-/** Write the inverse into existing storage, copying the input when singular. */
-export function mat4InvertToRef(input: Mat4, result: Mat4): void {
-    if (!invert(input, result)) {
-        (result as unknown as Mat4Storage).set(input as unknown as Mat4Storage);
-    }
-}
-
-/** Write the inverse into an existing matrix, or identity when the input is singular. */
-export function mat4InvertToRefOrIdentity(input: Mat4, result: Mat4): void {
-    if (!invert(input, result)) {
-        const out = result as unknown as Mat4Storage;
-        out.fill(0);
-        out[0] = 1;
-        out[5] = 1;
-        out[10] = 1;
-        out[15] = 1;
-    }
 }
