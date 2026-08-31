@@ -377,7 +377,7 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
 // ─── CSM math (isolated to this module) ─────────────────────────────
 
 export interface CsmCascades {
-    /** @internal Unbiased receiver transform per cascade (col-major). */
+    /** @internal Receiver transform per cascade (col-major), clip-biased in place after the receiver UBO is written. */
     _transforms: Float32Array[];
     /** @internal Cascade light view matrix per cascade (col-major). */
     _views: Float32Array[];

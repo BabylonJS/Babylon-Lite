@@ -12,18 +12,7 @@ import type { Quat } from "babylon-lite";
 
 /** Babylon.js Euler triple (applied yaw-pitch-roll / y-x-z) → quaternion. */
 export function bjsEulerToQuat(rx: number, ry: number, rz: number): Quat {
-    const sx = Math.sin(rx * 0.5);
-    const cx = Math.cos(rx * 0.5);
-    const sy = Math.sin(ry * 0.5);
-    const cy = Math.cos(ry * 0.5);
-    const sz = Math.sin(rz * 0.5);
-    const cz = Math.cos(rz * 0.5);
-    return {
-        x: cy * sx * cz + sy * cx * sz,
-        y: sy * cx * cz - cy * sx * sz,
-        z: cy * cx * sz - sy * sx * cz,
-        w: cy * cx * cz + sy * sx * sz,
-    };
+    return bjsEulerToQuatInto(rx, ry, rz, { x: 0, y: 0, z: 0, w: 1 });
 }
 
 /** Same as {@link bjsEulerToQuat} but writes into an existing quaternion object. */

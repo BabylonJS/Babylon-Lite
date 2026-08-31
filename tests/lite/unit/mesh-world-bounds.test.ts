@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { computeSceneSize } from "../../../packages/babylon-lite/src/material/pbr/scene-size";
 import { enableThinInstanceWorldBounds } from "../../../packages/babylon-lite/src/mesh/enable-thin-instance-world-bounds";
 import { emptyWorldAabb, expandWorldAabbForMesh } from "../../../packages/babylon-lite/src/mesh/mesh-world-bounds";
+import { markMeshBoundsDirty } from "../../../packages/babylon-lite/src/mesh/mark-mesh-bounds-dirty";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { setThinInstances } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
@@ -21,6 +22,15 @@ function mesh(worldMatrix: number[], matrices?: number[]): Mesh {
 }
 
 describe("mesh world bounds", () => {
+    it("marks caller-managed bounds as changed", () => {
+        const target = mesh([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+
+        markMeshBoundsDirty(target);
+        markMeshBoundsDirty(target);
+
+        expect(target._boundsVersion).toBe(2);
+    });
+
     it("applies the complete mesh world matrix", () => {
         const acc = emptyWorldAabb();
         expandWorldAabbForMesh(acc, mesh([0, 2, 0, 0, -3, 0, 0, 0, 0, 0, 4, 0, 10, 20, 30, 1]));

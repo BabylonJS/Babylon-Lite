@@ -107,7 +107,7 @@ export function shipSpeedRatio(ship: ShipState): number {
  * `ShipTransform` is `translate(wobble) · Ry(π) · Rz(tiltZ)` under `ShipMesh`'s (right, up, direction)
  * basis at `worldPos`, so the local point folds to
  * `(wobble.x - 0.05·cos(tilt), wobble.y + 0.05·sin(tilt), wobble.z - 0.85)` before being lifted into the
- * ship basis. `antigravity-racer-simulation.test.ts` proves the folded form equals the matrix composition.
+ * ship basis.
  */
 export function shipEmitterPoint(ship: ShipState): Vec3 {
     const c = Math.cos(ship.tiltZ);

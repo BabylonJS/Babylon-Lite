@@ -609,6 +609,7 @@ export type { FreeCamera } from "./camera/free-camera.js";
 export type { BankedFreeCamera } from "./camera/banked-free-camera.js";
 export type { Mesh, MeshGPU } from "./mesh/mesh.js";
 export { disposeMeshGpu } from "./mesh/mesh-dispose.js";
+export { markMeshBoundsDirty } from "./mesh/mark-mesh-bounds-dirty.js";
 export { computeMaxExtents } from "./mesh/compute-max-extents.js";
 export type { MeshExtent } from "./mesh/compute-max-extents.js";
 export { ObservableVec3 } from "./math/observable-vec3.js";

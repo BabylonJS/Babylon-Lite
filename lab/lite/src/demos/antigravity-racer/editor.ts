@@ -85,6 +85,7 @@ export async function createTrackEditor(
     const picker: GpuPicker = createGpuPicker(scene);
 
     let selected = 0;
+    let disposed = false;
     const select = (i: number): void => {
         selected = (i + markers.length) % markers.length;
         markers.forEach((m, idx) => (m.material = idx === selected ? selectedMat : markerMat));
@@ -97,14 +98,23 @@ export async function createTrackEditor(
     input.resetNavEdges();
 
     const onPointerDown = (e: PointerEvent): void => {
-        void (async () => {
-            const info = await pickAsync(picker, e.offsetX, e.offsetY);
-            const picked = info.hit ? (info.pickedMesh as Mesh | null) : null;
-            const idx = picked ? markers.indexOf(picked) : -1;
-            if (idx >= 0) {
-                select(idx);
+        void pickAsync(picker, e.offsetX, e.offsetY).then(
+            (info) => {
+                if (disposed) {
+                    return;
+                }
+                const picked = info.hit ? (info.pickedMesh as Mesh | null) : null;
+                const idx = picked ? markers.indexOf(picked) : -1;
+                if (idx >= 0) {
+                    select(idx);
+                }
+            },
+            (error: unknown) => {
+                if (!disposed) {
+                    console.error("Antigravity Racer editor pick failed.", error);
+                }
             }
-        })();
+        );
     };
     canvas.addEventListener("pointerdown", onPointerDown);
 
@@ -209,6 +219,7 @@ export async function createTrackEditor(
     }
 
     function dispose(): void {
+        disposed = true;
         canvas.removeEventListener("pointerdown", onPointerDown);
         window.removeEventListener("keydown", onKeyDown);
         window.removeEventListener("keyup", onKeyUp);

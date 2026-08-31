@@ -86,13 +86,6 @@ export function buildLightViewMatrixInto(out: Float32Array, dirX: number, dirY: 
 /** Multiply two column-major 4x4 matrices: out = a * b. */
 export function multiply4x4(a: Float32Array, b: Float32Array): Float32Array {
     const out = new F32(16);
-    multiply4x4Into(out, a, b);
-    return out;
-}
-
-/** Multiply two column-major 4x4 matrices into a pre-allocated buffer: out = a * b.
- *  Zero-allocation variant of {@link multiply4x4}. */
-export function multiply4x4Into(out: Float32Array, a: Float32Array, b: Float32Array): void {
     for (let row = 0; row < 4; row++) {
         for (let col = 0; col < 4; col++) {
             let sum = 0;
@@ -102,6 +95,7 @@ export function multiply4x4Into(out: Float32Array, a: Float32Array, b: Float32Ar
             out[row + col * 4] = sum;
         }
     }
+    return out;
 }
 
 /** Fit an orthographic directional-light projection to caster world-space bounds. */

@@ -25,14 +25,7 @@ vi.mock("../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks.js", ()
     _biasViewProjection: () => {},
     _writeCsmUbo: () => {},
     _computeCsmCascades: () => ({ _transforms: [new Float32Array(16)], _views: [new Float32Array(16)], _near: [0], _far: [1] }),
-    _createCascadeScratch: () => ({
-        _numCascades: 1,
-        _cascades: { _transforms: [], _views: [], _near: [], _far: [], _viewFrustumZ: [], _frustumLengths: [] },
-        _perCascade: new Float32Array(64),
-        _invViewProj: new Float32Array(16),
-        _corners: new Float32Array(24),
-        _breakDist: [0],
-    }),
+    _createCascadeScratch: () => ({}),
 }));
 vi.mock("../../../packages/babylon-lite/src/frame-graph/render-task.js", () => ({
     createRenderTask: () => ({
