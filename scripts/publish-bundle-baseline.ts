@@ -3,7 +3,7 @@
  *
  * Runs on master only, from `azure-pipelines-bundle-manifest.yml`, after every
  * scene has been measured. It takes the aggregate `manifest.json` the build
- * produced and prepares the exact bytes that get uploaded, adding two things the
+ * produced and prepares the exact bytes that get uploaded, adding three things the
  * raw manifest cannot carry:
  *
  *  1. **Ceilings.** Each entry is stamped with the scene's `maxRawKB` as it stood
@@ -13,7 +13,10 @@
  *     ceiling makes master retroactively appear to have been in breach. A
  *     measurement and the limit it was taken against have to travel together.
  *
- *  2. **Provenance**, in a `meta.json` sidecar: which commit produced these bytes,
+ *  2. **Scene impact data**, in an `impact-manifest.json` sidecar: which source
+ *     files are statically reachable from each scene.
+ *
+ *  3. **Provenance**, in a `meta.json` sidecar: which commit produced these bytes,
  *     which build, and when.
  *
  * Provenance is a sidecar rather than an envelope inside `manifest.json` because
@@ -32,6 +35,7 @@ import { execFileSync } from "child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
+import { createSceneImpactManifest } from "./scene-impact";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -46,6 +50,7 @@ interface BundleManifestEntry {
     gzipKB: number;
     rawBytes?: number;
     ceilingKB?: number;
+    runtimeChunks?: string[];
     [key: string]: unknown;
 }
 
@@ -118,6 +123,8 @@ function main(): void {
     const ceilings = Object.values(stamped).filter((entry) => entry.ceilingKB != null).length;
 
     const commit = gitHead();
+    const bundleInfoDir = process.env.BUNDLE_BASELINE_INFO_DIR ?? resolve(dirname(manifestPath), "bundle-info");
+    const impactManifest = createSceneImpactManifest(ROOT, commit, manifest, bundleInfoDir);
     const meta: BaselineMeta = {
         commit,
         buildId: process.env.BUILD_BUILDID?.trim() || undefined,
@@ -129,9 +136,12 @@ function main(): void {
 
     mkdirSync(outDir, { recursive: true });
     writeFileSync(resolve(outDir, "manifest.json"), `${JSON.stringify(stamped, null, 2)}\n`);
+    writeFileSync(resolve(outDir, "impact-manifest.json"), `${JSON.stringify(impactManifest, null, 2)}\n`);
     writeFileSync(resolve(outDir, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`);
 
-    console.log(`✓ Staged bundle-size baseline for ${commit.slice(0, 8)}: ${scenes} scene(s), ${ceilings} with a ceiling.`);
+    console.log(
+        `✓ Staged bundle-size baseline for ${commit.slice(0, 8)}: ${scenes} scene(s), ${ceilings} with a ceiling, ${Object.keys(impactManifest.files).length} impacted source file(s).`
+    );
     console.log(`  ${outDir}`);
 
     // Consumed by the pipeline to address the immutable per-commit copy.

@@ -111,6 +111,7 @@ export type { IUploadImageToTexture2DArrayLayerOptions, ICreateTexture2DArrayFro
 
 // ─── Loading ─────────────────────────────────────────────────────────
 export { SceneLoader, AssetContainer, ImportMeshAsync, AppendSceneAsync, LoadAssetContainerAsync } from "./loading/scene-loader.js";
+export type { ISceneLoaderProgressEvent, ISceneLoaderOptions, ImportMeshOptions, AppendOptions, LoadAssetContainerOptions } from "./loading/scene-loader.js";
 export { AssetsManager, AbstractAssetTask, CustomAssetTask } from "./loading/assets-manager.js";
 export { KHR_materials_variants } from "./loading/material-variants.js";
 
@@ -361,6 +362,17 @@ export {
     PhysicsMotionType,
     PhysicsPrestepType,
     PhysicsConstraintType,
+    PhysicsConstraintAxis,
+    PhysicsConstraint,
+    HingeConstraint,
+    BallAndSocketConstraint,
+    DistanceConstraint,
+    SliderConstraint,
+    LockConstraint,
+    PrismaticConstraint,
+    Physics6DoFConstraint,
+    Physics6DoFLimit,
+    SpringConstraint,
     PhysicsCharacterController,
     CharacterSupportedState,
 } from "./physics/physics.js";
@@ -371,6 +383,7 @@ export type {
     CharacterShapeOptions,
     CharacterSurfaceInfo,
     ICharacterControllerCollisionEvent,
+    PhysicsConstraintParameters,
 } from "./physics/physics.js";
 
 // ─── Node Particle Editor (NPE) ──────────────────────────────────────
