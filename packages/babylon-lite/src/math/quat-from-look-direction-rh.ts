@@ -2,7 +2,7 @@
  *  Standalone function for tree-shaking — only bundled when used. */
 
 import type { Vec3, Quat } from "./types.js";
-import { _quatFromRotationBasisToRef } from "./quat-from-rotation-matrix.js";
+import { _quatFromRotationBasis } from "./quat-from-rotation-matrix.js";
 
 /**
  * Build a unit quaternion that orients local +Z onto `forward` and local +Y onto
@@ -35,5 +35,5 @@ export function quatFromLookDirectionRH(forward: Vec3, up: Vec3): Quat {
     const ux = fy * rz - fz * ry;
     const uy = fz * rx - fx * rz;
     const uz = fx * ry - fy * rx;
-    return _quatFromRotationBasisToRef(rx, ux, fx, ry, uy, fy, rz, uz, fz, { x: 0, y: 0, z: 0, w: 1 });
+    return _quatFromRotationBasis(rx, ux, fx, ry, uy, fy, rz, uz, fz);
 }
