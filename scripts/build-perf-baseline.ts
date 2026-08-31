@@ -120,7 +120,15 @@ try {
 // comparisons focused on runtime source changes, not historical bundler bugs.
 // Keep helper imports in sync too, so baseline refs that predate helper files
 // (or helper exports) still build with the current bundle builder.
-for (const scriptName of ["bundle-scenes-core.ts", "bundle-size-accounting.ts", "wgsl-minify-plugin.ts"]) {
+//
+// This list is the full import closure of bundle-scenes-core.ts within scripts/,
+// and it has to be maintained by hand: the baseline worktree is checked out at an
+// older ref, so any sibling module the *current* core imports is absent there
+// unless it is copied in. Extracting a new helper out of bundle-scenes-core.ts
+// without adding it here fails the perf job with "Cannot find module './<helper>'"
+// — and only the perf job, because every other consumer builds from a full
+// checkout where the file simply exists.
+for (const scriptName of ["bundle-scenes-core.ts", "bundle-ceiling-headroom.ts", "bundle-size-accounting.ts", "wgsl-minify-plugin.ts"]) {
     cpSync(resolve(ROOT, "scripts", scriptName), resolve(WORKTREE_DIR, "scripts", scriptName));
 }
 
