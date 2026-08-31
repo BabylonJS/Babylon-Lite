@@ -1,14 +1,10 @@
 /**
  * Antigravity Racer — every asset the source playground uses.
  *
- * The two models are CC BY 4.0 Sketchfab models (see
- * `lab/public/antigravity-racer/CREDITS.txt`, and the `asset.extras` block inside
- * each `scene.gltf`), vendored at a pinned commit by
- * `scripts/fetch-antigravity-racer.ts`. The four road sheets are Patrick Ryan's
- * track artwork, extracted from the playground's node material and committed
- * under `track/` with his permission (see that folder's CREDITS.txt). Both sets
- * are served from the demo's own asset folder — never fetched from a mutable
- * remote URL at runtime.
+ * The two models are CC BY 4.0 Sketchfab models committed as self-contained GLBs.
+ * The four road sheets are Patrick Ryan's track artwork, extracted from the
+ * playground's node material and committed with his permission. Attribution for
+ * all artwork is shown on the startup screen.
  *
  * The models are loaded exactly ONCE for the whole page and then kept as *templates*:
  *
@@ -32,9 +28,9 @@ import { demoAssetUrl } from "../demo-asset-url.js";
 import type { TrackTextures } from "./track-material.js";
 
 /** Racing ship — "RHS-X" by Hassan Bassassi (alone5), CC BY 4.0. */
-const SHIP_URL = demoAssetUrl("./antigravity-racer/rhs-x/scene.gltf", import.meta.url);
+const SHIP_URL = demoAssetUrl("./antigravity-racer/rhs-x.glb", import.meta.url);
 /** Boulder — "Obj_Nat_Rock_01" by SaschaHenrichs, CC BY 4.0. */
-const ROCK_URL = demoAssetUrl("./antigravity-racer/obj_nat_rock_01/scene.gltf", import.meta.url);
+const ROCK_URL = demoAssetUrl("./antigravity-racer/rock.glb", import.meta.url);
 
 /**
  * The road sheets, with the sampler state the node material gave each one.
@@ -114,11 +110,7 @@ export async function loadRacerAssets(engine: EngineContext): Promise<RacerAsset
     try {
         [ship, rock] = await Promise.all([loadGltf(engine, SHIP_URL), loadGltf(engine, ROCK_URL)]);
     } catch (cause) {
-        throw new Error(
-            `Antigravity Racer could not load its models from ${SHIP_URL} / ${ROCK_URL}. ` +
-                `Run \`pnpm fetch:antigravity-racer\` to restore them (they are gitignored). Cause: ${String(cause)}`,
-            { cause }
-        );
+        throw new Error(`Antigravity Racer could not load its models from ${SHIP_URL} / ${ROCK_URL}. Cause: ${String(cause)}`, { cause });
     }
 
     const pinned: Texture2D[] = [];

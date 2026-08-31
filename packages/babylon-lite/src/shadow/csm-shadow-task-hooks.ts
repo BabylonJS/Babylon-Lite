@@ -4,8 +4,7 @@
  *  `texture_2d_array` and computes per-cascade frustum-split + orthographic-fit
  *  matrices from the active camera. All CSM-only math (frustum-corner fit,
  *  ortho-off-center, texel snap) lives here so plain ESM/PCF scenes never bundle
- *  it. The light view matrix + 4×4 multiply are shared helpers (already used by
- *  ESM/PCF) so reusing them adds zero bytes.
+ *  it.
  */
 
 import type { Camera } from "../camera/camera.js";
@@ -18,7 +17,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import { createRenderTask, removeMeshFromTask, type RenderTask } from "../frame-graph/render-task.js";
 import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } from "../camera/camera.js";
 import { mat4InvertToRef } from "../math/mat4-invert-to-ref.js";
-import { buildLightViewMatrixInto, casterVersionSum, createShadowCamera, multiply4x4Into, updateShadowCameraBase } from "./shadow-base.js";
+import { buildLightViewMatrixInto, casterVersionSum, createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
 import { getNoColorView, preloadPcfShadowTaskState } from "./pcf-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
@@ -103,26 +102,16 @@ export interface CsmTaskState extends ShadowTaskInternalState {
 
 /** @internal Pre-allocated scratch buffers for zero-allocation cascade fitting. */
 interface CsmCascadeScratch {
-    /** Number of cascades this scratch was allocated for. */
-    _numCascades: number;
     /** Shared CsmCascades result object mutated in place each frame. */
     _cascades: CsmCascades;
-    /** Per-cascade scratch: view matrix (16), proj matrix (16), snap matrix (16), temp multiply (16). */
-    _perCascade: Float32Array;
-    /** Pre-allocated subarray views into _perCascade: [cascade][0=view,1=proj,2=snap,3=temp]. */
-    _perCascadeViews: Float32Array[][];
+    /** Reusable temporary light-view matrix. */
+    _view: Float32Array;
     /** Inverse view-projection matrix (16 floats). */
     _invViewProj: Float32Array;
-    /** 8 frustum corners × 3 coords = 24 floats. */
-    _corners: Float32Array;
-    /** Pre-allocated break distance array (n floats). */
-    _breakDist: number[];
-    /** Pre-allocated caster world AABB min (x,y,z). */
-    _aabbMin: Float64Array;
-    /** Pre-allocated caster world AABB max (x,y,z). */
-    _aabbMax: Float64Array;
-    /** Whether the AABB is valid (at least one finite caster). */
-    _aabbValid: boolean;
+    /** Eight reusable frustum corner vectors. */
+    _corners: number[][];
+    /** Caster world AABB as min xyz followed by max xyz. */
+    _aabb: number[];
 }
 
 export const preloadCsmShadowTaskState = preloadPcfShadowTaskState;
@@ -130,44 +119,24 @@ export const preloadCsmShadowTaskState = preloadPcfShadowTaskState;
 /** @internal Allocate fixed-size scratch storage for zero-allocation per-frame cascade fitting. */
 export function _createCascadeScratch(n: number): CsmCascadeScratch {
     const transforms: Float32Array[] = [];
-    const biased: Float32Array[] = [];
     const views: Float32Array[] = [];
     for (let i = 0; i < n; i++) {
         transforms.push(new Float32Array(16));
-        biased.push(new Float32Array(16));
         views.push(new Float32Array(16));
     }
-    // Per-cascade scratch: view(16) + proj(16) + snap(16) + temp(16) = 64 floats per cascade
-    const perCascade = new Float32Array(n * 64);
-    const perCascadeViews: Float32Array[][] = [];
-    for (let i = 0; i < n; i++) {
-        const off = i * 64;
-        perCascadeViews.push([
-            perCascade.subarray(off, off + 16),       // view
-            perCascade.subarray(off + 16, off + 32),  // proj
-            perCascade.subarray(off + 32, off + 48),  // snap
-            perCascade.subarray(off + 48, off + 64),  // temp
-        ]);
-    }
     return {
-        _numCascades: n,
         _cascades: {
             _transforms: transforms,
-            _biased: biased,
             _views: views,
             _near: new Array<number>(n).fill(0),
             _far: new Array<number>(n).fill(0),
             _viewFrustumZ: new Array<number>(n).fill(0),
             _frustumLengths: new Array<number>(n).fill(0),
         },
-        _perCascade: perCascade,
-        _perCascadeViews: perCascadeViews,
+        _view: new Float32Array(16),
         _invViewProj: new Float32Array(16),
-        _corners: new Float32Array(24), // 8 corners × 3 coords
-        _breakDist: new Array<number>(n).fill(0),
-        _aabbMin: new Float64Array(3),
-        _aabbMax: new Float64Array(3),
-        _aabbValid: false,
+        _corners: Array.from({ length: 8 }, () => [0, 0, 0]),
+        _aabb: [0, 0, 0, 0, 0, 0],
     };
 }
 
@@ -394,8 +363,8 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
         const cam = state._cameras[i]!;
         cam.fov = 1;
         const clipBias = cfg._worldSpaceBias === null ? cfg._bias * 0.5 : csmWorldBiasClipOffset(cfg._worldSpaceBias, cascades._near[i]!, cascades._far[i]!);
-        _biasViewProjectionInto(cascades._biased[i]!, cascades._transforms[i]!, clipBias);
-        updateShadowCameraBase(cam, state._cameraVersion, cascades._near[i]!, cascades._far[i]!, cascades._views[i]!, cascades._biased[i]!);
+        _biasViewProjection(cascades._transforms[i]!, clipBias);
+        updateShadowCameraBase(cam, state._cameraVersion, cascades._near[i]!, cascades._far[i]!, cascades._views[i]!, cascades._transforms[i]!);
     }
 
     state._lastCasterVersion = casterVersion;
@@ -410,8 +379,6 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
 export interface CsmCascades {
     /** @internal Unbiased receiver transform per cascade (col-major). */
     _transforms: Float32Array[];
-    /** @internal Same as _transforms, used for the caster camera before bias. */
-    _biased: Float32Array[];
     /** @internal Cascade light view matrix per cascade (col-major). */
     _views: Float32Array[];
     /** @internal Ortho near per cascade. */
@@ -435,36 +402,36 @@ const FRUSTUM_NDC: ReadonlyArray<readonly [number, number, number]> = [
     [1, -1, 0],
     [-1, -1, 0],
 ];
+const DEFAULT_BOUND_MIN = [-0.5, -0.5, -0.5] as const;
+const DEFAULT_BOUND_MAX = [0.5, 0.5, 0.5] as const;
 
-/** Transform a point by a 4×4 column-major matrix with perspective divide, writing xyz into `out` at offset `o`. */
-function transformCoordInto(out: Float32Array, o: number, m: ArrayLike<number>, x: number, y: number, z: number): void {
+/** Transform a point by a 4×4 column-major matrix with perspective divide. */
+function transformCoordInto(out: number[], m: ArrayLike<number>, x: number, y: number, z: number): void {
     const X = m[0]! * x + m[4]! * y + m[8]! * z + m[12]!;
     const Y = m[1]! * x + m[5]! * y + m[9]! * z + m[13]!;
     const Z = m[2]! * x + m[6]! * y + m[10]! * z + m[14]!;
     const W = m[3]! * x + m[7]! * y + m[11]! * z + m[15]!;
-    out[o] = X / W;
-    out[o + 1] = Y / W;
-    out[o + 2] = Z / W;
+    out[0] = X / W;
+    out[1] = Y / W;
+    out[2] = Z / W;
 }
 
-/** Column-major OrthoOffCenterLH with half-z NDC (z: near→0, far→1). Writes into pre-allocated buffer. */
-function orthoOffCenterLHInto(m: Float32Array, l: number, r: number, b: number, t: number, n: number, f: number): void {
-    m[0] = 2 / (r - l);
-    m[1] = 0;
-    m[2] = 0;
-    m[3] = 0;
-    m[4] = 0;
-    m[5] = 2 / (t - b);
-    m[6] = 0;
-    m[7] = 0;
-    m[8] = 0;
-    m[9] = 0;
-    m[10] = 1 / (f - n);
-    m[11] = 0;
-    m[12] = -(r + l) / (r - l);
-    m[13] = -(t + b) / (t - b);
-    m[14] = -n / (f - n);
-    m[15] = 1;
+/** Multiply an orthographic off-center projection directly by an affine light view. */
+function orthoViewInto(out: Float32Array, view: Float32Array, l: number, r: number, b: number, t: number, n: number, f: number): void {
+    const sx = 2 / (r - l);
+    const sy = 2 / (t - b);
+    const sz = 1 / (f - n);
+    const tx = -(r + l) / (r - l);
+    const ty = -(t + b) / (t - b);
+    const tz = -n / (f - n);
+    for (let column = 0; column < 4; column++) {
+        const i = column * 4;
+        const w = view[i + 3]!;
+        out[i] = sx * view[i]! + tx * w;
+        out[i + 1] = sy * view[i + 1]! + ty * w;
+        out[i + 2] = sz * view[i + 2]! + tz * w;
+        out[i + 3] = w;
+    }
 }
 
 /** Effective aspect of the surface the scene actually renders into.
@@ -503,7 +470,6 @@ export function _computeCsmCascades(
     const corners = scratch._corners;
 
     // Reuse stable arrays for split computation
-    const breakDistValues = scratch._breakDist;
     const viewFrustumZ = cascades._viewFrustumZ;
     const frustumLengths = cascades._frustumLengths;
     for (let i = 0; i < n; i++) {
@@ -511,12 +477,8 @@ export function _computeCsmCascades(
         const log = minZ * ratio ** p;
         const uniform = minZ + range * p;
         const d = cfg._lambda * (log - uniform) + uniform;
-        breakDistValues[i] = (d - near) / cameraRange;
+        frustumLengths[i] = d - (i === 0 ? minZ : viewFrustumZ[i - 1]!);
         viewFrustumZ[i] = d;
-    }
-    for (let i = 0; i < n; i++) {
-        const prevBreak = i === 0 ? minDistance : breakDistValues[i - 1]!;
-        frustumLengths[i] = (breakDistValues[i]! - prevBreak) * cameraRange;
     }
 
     // Light direction (normalized), avoiding a perfectly vertical degenerate case.
@@ -537,43 +499,41 @@ export function _computeCsmCascades(
     const invViewProj = scratch._invViewProj;
     mat4InvertToRef(vp as never, invViewProj as never);
 
-    _castersWorldAabbInto(casterMeshes, scratch);
+    const hasCasterBounds = _castersWorldAabbInto(casterMeshes, scratch);
 
+    let prevSplit = 0;
     for (let c = 0; c < n; c++) {
-        const prevSplit = c === 0 ? 0 : breakDistValues[c - 1]!;
-        const split = breakDistValues[c]!;
+        const split = prevSplit + frustumLengths[c]! / cameraRange;
 
-        // World-space frustum corners of this slice, stored flat in scratch._corners (8×3).
+        // World-space frustum corners of this slice.
         for (let k = 0; k < 8; k++) {
             const ndc = FRUSTUM_NDC[k]!;
-            transformCoordInto(corners, k * 3, invViewProj, ndc[0], ndc[1], ndc[2]);
+            transformCoordInto(corners[k]!, invViewProj, ndc[0], ndc[1], ndc[2]);
         }
         // Interpolate near/far corners to cascade slice boundaries
         for (let k = 0; k < 4; k++) {
-            const nOff = k * 3;
-            const fOff = (k + 4) * 3;
-            const rx = corners[fOff]! - corners[nOff]!;
-            const ry = corners[fOff + 1]! - corners[nOff + 1]!;
-            const rz = corners[fOff + 2]! - corners[nOff + 2]!;
-            const nx = corners[nOff]!;
-            const ny = corners[nOff + 1]!;
-            const nz = corners[nOff + 2]!;
-            corners[fOff] = nx + rx * split;
-            corners[fOff + 1] = ny + ry * split;
-            corners[fOff + 2] = nz + rz * split;
-            corners[nOff] = nx + rx * prevSplit;
-            corners[nOff + 1] = ny + ry * prevSplit;
-            corners[nOff + 2] = nz + rz * prevSplit;
+            const nearCorner = corners[k]!;
+            const farCorner = corners[k + 4]!;
+            const rx = farCorner[0]! - nearCorner[0]!;
+            const ry = farCorner[1]! - nearCorner[1]!;
+            const rz = farCorner[2]! - nearCorner[2]!;
+            farCorner[0] = nearCorner[0]! + rx * split;
+            farCorner[1] = nearCorner[1]! + ry * split;
+            farCorner[2] = nearCorner[2]! + rz * split;
+            nearCorner[0] = nearCorner[0]! + rx * prevSplit;
+            nearCorner[1] = nearCorner[1]! + ry * prevSplit;
+            nearCorner[2] = nearCorner[2]! + rz * prevSplit;
         }
+        prevSplit = split;
 
         // Centroid.
         let cx = 0,
             cy = 0,
             cz = 0;
-        for (let k = 0; k < 8; k++) {
-            cx += corners[k * 3]!;
-            cy += corners[k * 3 + 1]!;
-            cz += corners[k * 3 + 2]!;
+        for (const corner of corners) {
+            cx += corner[0]!;
+            cy += corner[1]!;
+            cz += corner[2]!;
         }
         cx /= 8;
         cy /= 8;
@@ -582,17 +542,12 @@ export function _computeCsmCascades(
         let minX: number, maxX: number, minY: number, maxY: number, minEz: number, maxEz: number;
         let stableRadius = 0;
 
-        // Pre-allocated subarray views from scratch
-        const cascadeViews = scratch._perCascadeViews[c]!;
-        const viewBuf = cascadeViews[0]!;
-        const projBuf = cascadeViews[1]!;
-        const snapBuf = cascadeViews[2]!;
-        const tempBuf = cascadeViews[3]!;
+        const viewBuf = scratch._view;
 
         if (cfg._stabilizeCascades) {
             let radius = 0;
-            for (let k = 0; k < 8; k++) {
-                radius = Math.max(radius, Math.hypot(corners[k * 3]! - cx, corners[k * 3 + 1]! - cy, corners[k * 3 + 2]! - cz));
+            for (const corner of corners) {
+                radius = Math.max(radius, Math.hypot(corner[0]! - cx, corner[1]! - cy, corner[2]! - cz));
             }
             radius = Math.ceil(radius * 16) / 16;
             stableRadius = radius;
@@ -603,19 +558,14 @@ export function _computeCsmCascades(
             buildLightViewMatrixInto(viewBuf, dx, dy, dz, cx, cy, cz);
             minX = minY = minEz = Infinity;
             maxX = maxY = maxEz = -Infinity;
-            for (let k = 0; k < 8; k++) {
-                const px = corners[k * 3]!;
-                const py = corners[k * 3 + 1]!;
-                const pz = corners[k * 3 + 2]!;
-                const lx = viewBuf[0]! * px + viewBuf[4]! * py + viewBuf[8]! * pz + viewBuf[12]!;
-                const ly = viewBuf[1]! * px + viewBuf[5]! * py + viewBuf[9]! * pz + viewBuf[13]!;
-                const lz = viewBuf[2]! * px + viewBuf[6]! * py + viewBuf[10]! * pz + viewBuf[14]!;
-                minX = Math.min(minX, lx);
-                maxX = Math.max(maxX, lx);
-                minY = Math.min(minY, ly);
-                maxY = Math.max(maxY, ly);
-                minEz = Math.min(minEz, lz);
-                maxEz = Math.max(maxEz, lz);
+            for (const corner of corners) {
+                transformCoordInto(corner, viewBuf, corner[0]!, corner[1]!, corner[2]!);
+                minX = Math.min(minX, corner[0]!);
+                maxX = Math.max(maxX, corner[0]!);
+                minY = Math.min(minY, corner[1]!);
+                maxY = Math.max(maxY, corner[1]!);
+                minEz = Math.min(minEz, corner[2]!);
+                maxEz = Math.max(maxEz, corner[2]!);
             }
         }
 
@@ -631,15 +581,14 @@ export function _computeCsmCascades(
 
         // Tighten Z to the caster bounding box in cascade view space (depthClamp = false behaviour:
         // keep all casters inside the frustum so no GPU depth-clip feature is required).
-        if (scratch._aabbValid) {
-            const aabbMin = scratch._aabbMin;
-            const aabbMax = scratch._aabbMax;
+        if (hasCasterBounds) {
+            const aabb = scratch._aabb;
             let cMinZ = Infinity;
             let cMaxZ = -Infinity;
             for (let k = 0; k < 8; k++) {
-                const wx = k & 1 ? aabbMax[0]! : aabbMin[0]!;
-                const wy = k & 2 ? aabbMax[1]! : aabbMin[1]!;
-                const wz = k & 4 ? aabbMax[2]! : aabbMin[2]!;
+                const wx = aabb[k & 1 ? 3 : 0]!;
+                const wy = aabb[k & 2 ? 4 : 1]!;
+                const wz = aabb[k & 4 ? 5 : 2]!;
                 const lz = view[2]! * wx + view[6]! * wy + view[10]! * wz + view[14]!;
                 cMinZ = Math.min(cMinZ, lz);
                 cMaxZ = Math.max(cMaxZ, lz);
@@ -656,54 +605,25 @@ export function _computeCsmCascades(
             viewMaxZ += cfg._worldSpaceBias;
         }
 
-        orthoOffCenterLHInto(projBuf, minX, maxX, minY, maxY, viewMinZ, viewMaxZ);
         const transform = cascades._transforms[c]!;
-        multiply4x4Into(transform, projBuf, view);
+        orthoViewInto(transform, view, minX, maxX, minY, maxY, viewMinZ, viewMaxZ);
 
         // Texel-snap
         let aClipX = transform[12]!;
         let aClipY = transform[13]!;
         if (cfg._stabilizeCascades && stableRadius > 0) {
             const texelWorld = (2 * stableRadius) / cfg._mapSize;
-            const rX = view[0]!,
-                rY = view[4]!,
-                rZ = view[8]!;
-            const uX = view[1]!,
-                uY = view[5]!,
-                uZ = view[9]!;
-            const sr = Math.round((rX * cx + rY * cy + rZ * cz) / texelWorld) * texelWorld;
-            const tr = Math.round((uX * cx + uY * cy + uZ * cz) / texelWorld) * texelWorld;
-            const ax = sr * rX + tr * uX;
-            const ay = sr * rY + tr * uY;
-            const az = sr * rZ + tr * uZ;
-            aClipX = transform[0]! * ax + transform[4]! * ay + transform[8]! * az + transform[12]!;
-            aClipY = transform[1]! * ax + transform[5]! * ay + transform[9]! * az + transform[13]!;
+            const anchorX = Math.round((view[0]! * cx + view[4]! * cy + view[8]! * cz) / texelWorld) * texelWorld;
+            const anchorY = Math.round((view[1]! * cx + view[5]! * cy + view[9]! * cz) / texelWorld) * texelWorld;
+            aClipX += anchorX / stableRadius;
+            aClipY += anchorY / stableRadius;
         }
         const ox = aClipX * (cfg._mapSize / 2);
         const oy = aClipY * (cfg._mapSize / 2);
         const offX = (Math.round(ox) - ox) * (2 / cfg._mapSize);
         const offY = (Math.round(oy) - oy) * (2 / cfg._mapSize);
-        // Build snap matrix in place
-        snapBuf[0] = 1;
-        snapBuf[1] = 0;
-        snapBuf[2] = 0;
-        snapBuf[3] = 0;
-        snapBuf[4] = 0;
-        snapBuf[5] = 1;
-        snapBuf[6] = 0;
-        snapBuf[7] = 0;
-        snapBuf[8] = 0;
-        snapBuf[9] = 0;
-        snapBuf[10] = 1;
-        snapBuf[11] = 0;
-        snapBuf[12] = offX;
-        snapBuf[13] = offY;
-        snapBuf[14] = 0;
-        snapBuf[15] = 1;
-        // proj = snap * proj0
-        multiply4x4Into(tempBuf, snapBuf, projBuf);
-        // transform = proj * view
-        multiply4x4Into(transform, tempBuf, view);
+        transform[12] = transform[12]! + offX;
+        transform[13] = transform[13]! + offY;
 
         cascades._near[c] = viewMinZ;
         cascades._far[c] = viewMaxZ;
@@ -712,11 +632,9 @@ export function _computeCsmCascades(
     return cascades;
 }
 
-/** Write the casters' world AABB into scratch-owned storage.  Sets `scratch._aabbValid` to indicate
- *  whether any finite caster contributed. Zero-allocation: no object/array creation. */
-function _castersWorldAabbInto(casterMeshes: readonly Mesh[], scratch: CsmCascadeScratch): void {
-    const aabbMin = scratch._aabbMin;
-    const aabbMax = scratch._aabbMax;
+/** Write the casters' world AABB into scratch-owned storage. */
+function _castersWorldAabbInto(casterMeshes: readonly Mesh[], scratch: CsmCascadeScratch): boolean {
+    const aabb = scratch._aabb;
     let minX = Infinity,
         minY = Infinity,
         minZ = Infinity,
@@ -727,61 +645,52 @@ function _castersWorldAabbInto(casterMeshes: readonly Mesh[], scratch: CsmCascad
         const mesh = casterMeshes[mi]!;
         const ti = mesh.thinInstances;
         if (ti && ti.count > 0 && ti.matrices) {
-            if (_thinInstanceWorldAabbInto(mesh, ti)) {
-                const cache = _getThinCasterAabbCache();
-                const cached = cache.get(mesh)!;
-                minX = Math.min(minX, cached._minX);
-                maxX = Math.max(maxX, cached._maxX);
-                minY = Math.min(minY, cached._minY);
-                maxY = Math.max(maxY, cached._maxY);
-                minZ = Math.min(minZ, cached._minZ);
-                maxZ = Math.max(maxZ, cached._maxZ);
+            const cached = _thinInstanceWorldAabb(mesh, ti);
+            if (cached) {
+                const bounds = cached._bounds;
+                minX = Math.min(minX, bounds[0]!);
+                minY = Math.min(minY, bounds[1]!);
+                minZ = Math.min(minZ, bounds[2]!);
+                maxX = Math.max(maxX, bounds[3]!);
+                maxY = Math.max(maxY, bounds[4]!);
+                maxZ = Math.max(maxZ, bounds[5]!);
             }
             continue;
         }
         const world = mesh.worldMatrix;
-        const bmin = mesh.boundMin;
-        const bmax = mesh.boundMax;
-        const bminX = bmin ? bmin[0]! : -0.5;
-        const bminY = bmin ? bmin[1]! : -0.5;
-        const bminZ = bmin ? bmin[2]! : -0.5;
-        const bmaxX = bmax ? bmax[0]! : 0.5;
-        const bmaxY = bmax ? bmax[1]! : 0.5;
-        const bmaxZ = bmax ? bmax[2]! : 0.5;
+        const bmin = mesh.boundMin ?? DEFAULT_BOUND_MIN;
+        const bmax = mesh.boundMax ?? DEFAULT_BOUND_MAX;
         for (let k = 0; k < 8; k++) {
-            const lx = k & 1 ? bmaxX : bminX;
-            const ly = k & 2 ? bmaxY : bminY;
-            const lz = k & 4 ? bmaxZ : bminZ;
+            const lx = k & 1 ? bmax[0]! : bmin[0]!;
+            const ly = k & 2 ? bmax[1]! : bmin[1]!;
+            const lz = k & 4 ? bmax[2]! : bmin[2]!;
             const wx = world[0]! * lx + world[4]! * ly + world[8]! * lz + world[12]!;
             const wy = world[1]! * lx + world[5]! * ly + world[9]! * lz + world[13]!;
             const wz = world[2]! * lx + world[6]! * ly + world[10]! * lz + world[14]!;
-            if (wx < minX) { minX = wx; }
-            if (wx > maxX) { maxX = wx; }
-            if (wy < minY) { minY = wy; }
-            if (wy > maxY) { maxY = wy; }
-            if (wz < minZ) { minZ = wz; }
-            if (wz > maxZ) { maxZ = wz; }
+            minX = Math.min(minX, wx);
+            minY = Math.min(minY, wy);
+            minZ = Math.min(minZ, wz);
+            maxX = Math.max(maxX, wx);
+            maxY = Math.max(maxY, wy);
+            maxZ = Math.max(maxZ, wz);
         }
     }
     if (!Number.isFinite(minX)) {
-        scratch._aabbValid = false;
-        return;
+        return false;
     }
-    aabbMin[0] = minX;
-    aabbMin[1] = minY;
-    aabbMin[2] = minZ;
-    aabbMax[0] = maxX;
-    aabbMax[1] = maxY;
-    aabbMax[2] = maxZ;
-    scratch._aabbValid = true;
+    aabb[0] = minX;
+    aabb[1] = minY;
+    aabb[2] = minZ;
+    aabb[3] = maxX;
+    aabb[4] = maxY;
+    aabb[5] = maxZ;
+    return true;
 }
 
 interface ThinCasterAabbEntry {
     _version: number;
     _worldVersion: number;
-    _valid: boolean;
-    _minX: number; _minY: number; _minZ: number;
-    _maxX: number; _maxY: number; _maxZ: number;
+    _bounds: number[];
 }
 
 /** Per-mesh cache of a thin-instanced caster's world AABB.
@@ -794,28 +703,22 @@ function _getThinCasterAabbCache(): WeakMap<Mesh, ThinCasterAabbEntry> {
     return _thinCasterAabbCache;
 }
 
-/** Compute the world AABB of a thin-instanced caster into a stable cache entry, returning validity. */
-function _thinInstanceWorldAabbInto(mesh: Mesh, ti: NonNullable<Mesh["thinInstances"]>): boolean {
+/** Compute a thin-instanced caster's world AABB in a stable cache entry. */
+function _thinInstanceWorldAabb(mesh: Mesh, ti: NonNullable<Mesh["thinInstances"]>): ThinCasterAabbEntry | null {
     const cache = _getThinCasterAabbCache();
     const worldVersion = mesh.worldMatrixVersion;
     let entry = cache.get(mesh);
     if (entry && entry._version === ti._version && entry._worldVersion === worldVersion) {
-        return entry._valid;
+        return Number.isFinite(entry._bounds[0]) ? entry : null;
     }
     if (!entry) {
-        entry = { _version: 0, _worldVersion: 0, _valid: false, _minX: 0, _minY: 0, _minZ: 0, _maxX: 0, _maxY: 0, _maxZ: 0 };
+        entry = { _version: 0, _worldVersion: 0, _bounds: [0, 0, 0, 0, 0, 0] };
         cache.set(mesh, entry);
     }
     // Hoist the prototype world matrix once (worldMatrix is a getter) — it is constant across all instances.
     const world = mesh.worldMatrix;
-    const bmin = mesh.boundMin;
-    const bmax = mesh.boundMax;
-    const bminX = bmin ? bmin[0]! : -0.5;
-    const bminY = bmin ? bmin[1]! : -0.5;
-    const bminZ = bmin ? bmin[2]! : -0.5;
-    const bmaxX = bmax ? bmax[0]! : 0.5;
-    const bmaxY = bmax ? bmax[1]! : 0.5;
-    const bmaxZ = bmax ? bmax[2]! : 0.5;
+    const bmin = mesh.boundMin ?? DEFAULT_BOUND_MIN;
+    const bmax = mesh.boundMax ?? DEFAULT_BOUND_MAX;
     const mats = ti.matrices;
     const count = Math.min(ti.count, (mats.length / 16) | 0);
     let minX = Infinity,
@@ -841,9 +744,9 @@ function _thinInstanceWorldAabbInto(mesh: Mesh, ti: NonNullable<Mesh["thinInstan
             continue;
         }
         for (let k = 0; k < 8; k++) {
-            const lx = k & 1 ? bmaxX : bminX;
-            const ly = k & 2 ? bmaxY : bminY;
-            const lz = k & 4 ? bmaxZ : bminZ;
+            const lx = k & 1 ? bmax[0]! : bmin[0]!;
+            const ly = k & 2 ? bmax[1]! : bmin[1]!;
+            const lz = k & 4 ? bmax[2]! : bmin[2]!;
             // 1) instance-local: ip = instanceMatrix * localCorner
             const ix = mats[o]! * lx + mats[o + 4]! * ly + mats[o + 8]! * lz + mats[o + 12]!;
             const iy = mats[o + 1]! * lx + mats[o + 5]! * ly + mats[o + 9]! * lz + mats[o + 13]!;
@@ -852,24 +755,28 @@ function _thinInstanceWorldAabbInto(mesh: Mesh, ti: NonNullable<Mesh["thinInstan
             const wx = world[0]! * ix + world[4]! * iy + world[8]! * iz + world[12]!;
             const wy = world[1]! * ix + world[5]! * iy + world[9]! * iz + world[13]!;
             const wz = world[2]! * ix + world[6]! * iy + world[10]! * iz + world[14]!;
-            if (wx < minX) { minX = wx; }
-            if (wx > maxX) { maxX = wx; }
-            if (wy < minY) { minY = wy; }
-            if (wy > maxY) { maxY = wy; }
-            if (wz < minZ) { minZ = wz; }
-            if (wz > maxZ) { maxZ = wz; }
+            minX = Math.min(minX, wx);
+            minY = Math.min(minY, wy);
+            minZ = Math.min(minZ, wz);
+            maxX = Math.max(maxX, wx);
+            maxY = Math.max(maxY, wy);
+            maxZ = Math.max(maxZ, wz);
         }
     }
     entry._version = ti._version;
     entry._worldVersion = worldVersion;
+    const bounds = entry._bounds;
     if (!Number.isFinite(minX)) {
-        entry._valid = false;
-        return false;
+        bounds[0] = Infinity;
+        return null;
     }
-    entry._minX = minX; entry._minY = minY; entry._minZ = minZ;
-    entry._maxX = maxX; entry._maxY = maxY; entry._maxZ = maxZ;
-    entry._valid = true;
-    return true;
+    bounds[0] = minX;
+    bounds[1] = minY;
+    bounds[2] = minZ;
+    bounds[3] = maxX;
+    bounds[4] = maxY;
+    bounds[5] = maxZ;
+    return entry;
 }
 
 export function _writeCsmUbo(out: Float32Array, cascades: CsmCascades, cfg: CsmConfig): void {
@@ -899,21 +806,7 @@ export function csmWorldBiasClipOffset(worldSpaceBias: number, near: number, far
     return worldSpaceBias / range;
 }
 
-/** @internal Apply clip-space Z bias to a view-projection matrix, writing into `out`.
- *  `src` may alias `out` safely. Zero-allocation variant of _biasViewProjection. */
-export function _biasViewProjectionInto(out: Float32Array, src: Float32Array, clipOffset: number): void {
-    if (out !== src) {
-        out.set(src);
-    }
-    for (let col = 0; col < 4; col++) {
-        const z = 2 + col * 4;
-        const w = 3 + col * 4;
-        out[z] = src[z]! + clipOffset * src[w]!;
-    }
-}
-
-export function _biasViewProjection(viewProj: Float32Array, clipOffset: number): Float32Array {
-    const biased = new Float32Array(viewProj);
-    _biasViewProjectionInto(biased, viewProj, clipOffset);
-    return biased;
+/** @internal Apply clip-space Z bias to a view-projection matrix. */
+export function _biasViewProjection(matrix: Float32Array, clipOffset: number): void {
+    matrix[14] = matrix[14]! + clipOffset;
 }

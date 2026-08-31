@@ -22,13 +22,12 @@ vi.mock("../../../packages/babylon-lite/src/shadow/shadow-base.js", () => ({
 vi.mock("../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks.js", () => ({
     csmCameraAspect: () => 1,
     csmWorldBiasClipOffset: () => 0,
-    _biasViewProjection: (m: Float32Array) => m,
-    _biasViewProjectionInto: () => {},
+    _biasViewProjection: () => {},
     _writeCsmUbo: () => {},
-    _computeCsmCascades: () => ({ _transforms: [new Float32Array(16)], _biased: [new Float32Array(16)], _views: [new Float32Array(16)], _near: [0], _far: [1] }),
+    _computeCsmCascades: () => ({ _transforms: [new Float32Array(16)], _views: [new Float32Array(16)], _near: [0], _far: [1] }),
     _createCascadeScratch: () => ({
         _numCascades: 1,
-        _cascades: { _transforms: [], _biased: [], _views: [], _near: [], _far: [], _viewFrustumZ: [], _frustumLengths: [] },
+        _cascades: { _transforms: [], _views: [], _near: [], _far: [], _viewFrustumZ: [], _frustumLengths: [] },
         _perCascade: new Float32Array(64),
         _invViewProj: new Float32Array(16),
         _corners: new Float32Array(24),

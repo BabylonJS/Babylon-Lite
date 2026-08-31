@@ -129,7 +129,6 @@
         "name": "Antigravity Racer",
         "description": "A native Babylon Lite port of Cédric Guillemet's antigravity racing Babylon.js playground (WVPVWL): fly a hover-ship around a closed, banked loop spline threaded through 7 editable control points, racing AI opponents and boosting off energy strips. The track is the playground's own procedural 256-segment piece, bent onto the spline by a deformation vertex shader that reads one orthonormal frame per segment — so dragging a control point in the editor reshapes it live on the GPU. Its surface is the playground node material's own artwork and compositing (track textures by Patrick Ryan, redistributed with his permission); ships and rocks are the playground's original CC BY 4.0 models (\"RHS-X\" by Hassan Bassassi, \"Obj_Nat_Rock_01\" by SaschaHenrichs); trails and terrain are original procedural work. Single-player, 2-player split-screen, attract/demo, and a live track editor (drag control points with a gizmo). Keyboard (WASD/ZQSD + arrows, layout-independent) and gamepad supported throughout, including menu navigation.",
         "tags": ["game", "racing", "showcase"],
-        "fetch": "antigravity-racer",
         "mobile": false
     }
 ]

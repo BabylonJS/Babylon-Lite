@@ -17,7 +17,7 @@ import { createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
 import { getNoColorView } from "./pcf-shadow-task-hooks.js";
 import { createCsmRefitGate, type CsmRefitGate } from "./csm-refit-gate.js";
 import {
-    _biasViewProjectionInto,
+    _biasViewProjection,
     _computeCsmCascades,
     _createCascadeScratch,
     _writeCsmUbo,
@@ -388,8 +388,8 @@ function applyCsmRefit(engine: EngineContext, sg: ShadowGenerator, state: CsmTas
         const cascadeCamera = state._cameras[i]!;
         cascadeCamera.fov = 1;
         const clipBias = cfg._worldSpaceBias === null ? cfg._bias * 0.5 : csmWorldBiasClipOffset(cfg._worldSpaceBias, cascades._near[i]!, cascades._far[i]!);
-        _biasViewProjectionInto(cascades._biased[i]!, cascades._transforms[i]!, clipBias);
-        updateShadowCameraBase(cascadeCamera, state._cameraVersion, cascades._near[i]!, cascades._far[i]!, cascades._views[i]!, cascades._biased[i]!);
+        _biasViewProjection(cascades._transforms[i]!, clipBias);
+        updateShadowCameraBase(cascadeCamera, state._cameraVersion, cascades._near[i]!, cascades._far[i]!, cascades._views[i]!, cascades._transforms[i]!);
     }
 }
 

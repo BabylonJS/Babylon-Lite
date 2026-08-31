@@ -8,11 +8,10 @@
 
 Reproduce the playground's **look and feel exactly** at its intended 60 Hz tuning, while keeping the
 port's modern additions: DOM menus/HUD, pause overlay, QWERTY/AZERTY-independent keyboard, gamepad
-support, explicit asset error surfacing, and focused tests.
+support, and explicit asset error surfacing.
 
-This document is the formal specification. Every constant, formula and shader listing below is the
-contract the implementation must satisfy; the regression tests in
-`tests/lite/unit/antigravity-racer-*.test.ts` assert the load-bearing parts of it.
+This document is the formal specification. Every constant, formula, and shader listing below is the
+contract the implementation must satisfy.
 
 **Simulation model.** The playground ties one simulation step to one rendered frame
 (`scene.beforeRender`) and hard-codes 60 Hz constants. The port keeps the _exact per-tick formulas_
@@ -185,6 +184,16 @@ GROUND_TEXTURE_URL = "https://playground.babylonjs.com/textures/ground.jpg"
 
 Failure to fetch either must reject `loadRacerAssets`/`createRacerWorlds` with a readable error that
 reaches the demo's error overlay (`canvas.dataset.error`). There is **no** procedural fallback.
+
+Committed assets:
+
+- `lab/public/antigravity-racer/rhs-x.glb` — "RHS-X" by Hassan Bassassi (alone5), CC BY 4.0.
+- `lab/public/antigravity-racer/rock.glb` — "Obj_Nat_Rock_01" by SaschaHenrichs, CC BY 4.0.
+- `lab/public/antigravity-racer/track/*.png` — road artwork by Patrick Ryan, redistributed with his
+  permission.
+
+The model GLBs are self-contained; no asset downloader or external model textures are required.
+All attribution is shown on the startup screen.
 
 ---
 
@@ -734,22 +743,6 @@ own `_shadowCasterMaterial` links (the same chain `getNoColorView` recurses thro
 
 ---
 
-## Test Specification
-
-| Test file                              | Covers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `antigravity-racer-track.test.ts`      | spline length/ratios, 256 orthonormal frames, tight shader-deformed bounds, track piece counts/winding, road artwork, track material compositing, CSM receiver declarations + WGSL (cascade select, 5×5 PCF kernel, `CSM_RECEIVER_VEC4S`), caster twin sharing the frame buffer                                                                                                                                                                                                                                                                                                                                                                  |
-| `antigravity-racer-simulation.test.ts` | vertical adhesion write-back (0.45/0.9), unclamped up extrapolation, wall clamp + 0.99, boost + debounce, accel/drag traces, un-normalized drift + corner speed loss, binary right-wins steering, spawn grid 0..7/±1.5, AI nearest-ahead + avoidance, emitter folded-vs-matrix equality, **the chase + demo camera rigs** (offsets/target/smoothing/FOV/up-roll, anchoring + dolly + re-anchor cadence)                                                                                                                                                                                                                                          |
-| `antigravity-racer-trail.test.ts`      | history ordering/copyWithin, spawn seeding, strip vertex/index counts + v mapping + winding, WGSL constants/alpha, blend/depth state                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `antigravity-racer-world.test.ts`      | light directions/intensities, terrain parameters + remote URLs, CSM config; and the persistent-world contract exercised against the real engine with a stub device: one 1024²×4 depth array per world and never per mode, terrain + boulders built once per session, the same meshes and lights re-added to every mode scene, per-pane light/generator/track isolation (each pane's material bound to its OWN receiver texture and frame buffer), per-pane caster sets (own track + shared boulders + ships, never the other pane's track, ships cleared on teardown), and an editor edit re-uploading every pane in place with zero allocations |
-| `banked-free-camera.test.ts`           | up vector affects the look-at basis, mutation invalidates the world matrix, default matches `createFreeCamera`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `shadow-caster-material.test.ts`       | setter stores/clears the caster material; `getNoColorView` resolves through it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-
-There is no separate camera test file: the chase and demo camera rigs are covered by the "chase
-camera" and "demo camera" suites inside `antigravity-racer-simulation.test.ts`.
-
----
-
 ## File Manifest
 
 | File                                    | Purpose                                                                |
@@ -757,7 +750,7 @@ camera" and "demo camera" suites inside `antigravity-racer-simulation.test.ts`.
 | `antigravity-racer.ts`                  | demo entry: loading progress + error overlay                           |
 | `antigravity-racer/game.ts`             | engine/input/menu ownership, mode switching, `buildRace`/`buildEditor` |
 | `antigravity-racer/constants.ts`        | playground data + per-tick tuning                                      |
-| `antigravity-racer/assets.ts`           | glTF models, road artwork, remote terrain assets                       |
+| `antigravity-racer/assets.ts`           | GLB models, road artwork, remote terrain assets                        |
 | `antigravity-racer/track.ts`            | spline math, frames, procedural piece, `TrackData` + `TrackRender`     |
 | `antigravity-racer/track-material.ts`   | deformation + road compositing + CSM receiver + caster material        |
 | `antigravity-racer/simulation.ts`       | exact per-tick physics + AI                                            |

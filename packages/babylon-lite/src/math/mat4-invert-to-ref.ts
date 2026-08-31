@@ -1,14 +1,24 @@
 import type { Mat4, Mat4Storage } from "./types.js";
 
-/** Write the inverse into an existing matrix, copying `input` on singular.
- *  Returns `true` when the inverse was computed, `false` when `result` received a copy of `input`. */
-export function mat4InvertToRef(input: Mat4, result: Mat4): boolean {
+/** Write the inverse into existing storage, copying the input when singular. */
+export function mat4InvertToRef(input: Mat4, result: Mat4): void {
     const m = input as unknown as Mat4Storage;
-    const a00 = m[0]!,  a01 = m[1]!,  a02 = m[2]!,  a03 = m[3]!;
-    const a10 = m[4]!,  a11 = m[5]!,  a12 = m[6]!,  a13 = m[7]!;
-    const a20 = m[8]!,  a21 = m[9]!,  a22 = m[10]!, a23 = m[11]!;
-    const a30 = m[12]!, a31 = m[13]!, a32 = m[14]!, a33 = m[15]!;
-
+    const a00 = m[0]!,
+        a01 = m[1]!,
+        a02 = m[2]!,
+        a03 = m[3]!;
+    const a10 = m[4]!,
+        a11 = m[5]!,
+        a12 = m[6]!,
+        a13 = m[7]!;
+    const a20 = m[8]!,
+        a21 = m[9]!,
+        a22 = m[10]!,
+        a23 = m[11]!;
+    const a30 = m[12]!,
+        a31 = m[13]!,
+        a32 = m[14]!,
+        a33 = m[15]!;
     const b00 = a00 * a11 - a01 * a10;
     const b01 = a00 * a12 - a02 * a10;
     const b02 = a00 * a13 - a03 * a10;
@@ -21,12 +31,11 @@ export function mat4InvertToRef(input: Mat4, result: Mat4): boolean {
     const b09 = a21 * a32 - a22 * a31;
     const b10 = a21 * a33 - a23 * a31;
     const b11 = a22 * a33 - a23 * a32;
-
     let det = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
     const out = result as unknown as Mat4Storage;
     if (Math.abs(det) < 1e-10) {
-        for (let i = 0; i < 16; i++) { out[i] = m[i]!; }
-        return false;
+        out.set(m);
+        return;
     }
     det = 1 / det;
     out[0] = (a11 * b11 - a12 * b10 + a13 * b09) * det;
@@ -45,7 +54,6 @@ export function mat4InvertToRef(input: Mat4, result: Mat4): boolean {
     out[13] = (a00 * b09 - a01 * b07 + a02 * b06) * det;
     out[14] = (a31 * b01 - a30 * b03 - a32 * b00) * det;
     out[15] = (a20 * b03 - a21 * b01 + a22 * b00) * det;
-    return true;
 }
 
 /** Write the inverse into an existing matrix, or identity when the input is singular. */

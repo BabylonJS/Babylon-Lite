@@ -56,16 +56,6 @@ lab/public/freeciv/
 .platformer-cache/
 lab/public/racer/
 .racer-cache/
-# Antigravity Racer: the fetched CC BY 4.0 ship/rock models (~12 MB) stay out of
-# git, but the road artwork under track/ is committed (its author granted us
-# redistribution rights — see lab/public/antigravity-racer/track/CREDITS.txt).
-# Written as `dir/**` + negations, NOT `dir/`: git never descends into an
-# excluded directory, so a `lab/public/antigravity-racer/` line could not be
-# re-opened from within.
-lab/public/antigravity-racer/**
-!lab/public/antigravity-racer/track/
-!lab/public/antigravity-racer/track/**
-.antigravity-racer-cache/
 lab/public/littlest-tokyo/*.bak
 lab/public/perf-manifest.json
 lab/public/perf-regression-manifest.json

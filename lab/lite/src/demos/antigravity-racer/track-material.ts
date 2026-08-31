@@ -24,8 +24,7 @@
  * The surface look is the original node material's, texture for texture: the
  * straight/curved road sheets, the emissive decal sheet and the boost chevron
  * are Patrick Ryan's artwork, extracted losslessly from the snippet's embedded
- * data URIs and redistributed here with his permission (see
- * `lab/public/antigravity-racer/track/CREDITS.txt`). The fragment stage below
+ * data URIs and redistributed here with his permission. The fragment stage below
  * reproduces the graph's compositing exactly — same UV construction, same
  * brightness banding, same lane masks, same `2·E + D + A` sum — and, like the
  * original graph's `Light` block, it receives the directional light's shadows.

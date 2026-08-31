@@ -16,7 +16,7 @@
  * material (snippet 01HFES#76 — track textures by Patrick Ryan, committed here
  * with his permission), and the two CC BY 4.0 Sketchfab models the playground
  * loads (ship "RHS-X" by Hassan Bassassi, rock "Obj_Nat_Rock_01" by
- * SaschaHenrichs) — vendored locally by `scripts/fetch-antigravity-racer.ts`.
+ * SaschaHenrichs) — committed locally as self-contained GLBs.
  * The playground's own `heightMap.png` / `ground.jpg` are fetched from
  * playground.babylonjs.com at runtime rather than redistributed.
  *

@@ -9,7 +9,7 @@
  */
 
 import type { Quat, Vec3 } from "babylon-lite";
-import { crossVec3ToRef, dotVec3, lerpVec3ToRef, normalizeVec3ToRef, quatFromLookDirectionRH, quatFromLookDirectionRHToRef, scaleVec3ToRef, subVec3ToRef } from "babylon-lite";
+import { crossVec3ToRef, dotVec3, lerpVec3ToRef, normalizeVec3ToRef, quatFromLookDirectionRH, scaleVec3ToRef, subVec3ToRef } from "babylon-lite";
 
 import { advanceSegment, frameLocalCoordsToRef, frameToWorld, frameToWorldToRef, type TrackData } from "./track.js";
 import {
@@ -139,6 +139,57 @@ function rotateAroundAxisToRef(v: Vec3, axis: Vec3, angle: number, out: Vec3): V
     return out;
 }
 
+function quatFromBasisToRef(m11: number, m12: number, m13: number, m21: number, m22: number, m23: number, m31: number, m32: number, m33: number, out: Quat): void {
+    const trace = m11 + m22 + m33;
+    let s: number;
+    if (trace > 0) {
+        s = 0.5 / Math.sqrt(trace + 1);
+        out.x = (m32 - m23) * s;
+        out.y = (m13 - m31) * s;
+        out.z = (m21 - m12) * s;
+        out.w = 0.25 / s;
+    } else if (m11 > m22 && m11 > m33) {
+        s = 2 * Math.sqrt(1 + m11 - m22 - m33);
+        out.x = 0.25 * s;
+        out.y = (m12 + m21) / s;
+        out.z = (m13 + m31) / s;
+        out.w = (m32 - m23) / s;
+    } else if (m22 > m33) {
+        s = 2 * Math.sqrt(1 + m22 - m11 - m33);
+        out.x = (m12 + m21) / s;
+        out.y = 0.25 * s;
+        out.z = (m23 + m32) / s;
+        out.w = (m13 - m31) / s;
+    } else {
+        s = 2 * Math.sqrt(1 + m33 - m11 - m22);
+        out.x = (m13 + m31) / s;
+        out.y = (m23 + m32) / s;
+        out.z = 0.25 * s;
+        out.w = (m21 - m12) / s;
+    }
+}
+
+function quatFromLookDirectionToRef(forward: Vec3, up: Vec3, out: Quat): void {
+    let fx = forward.x;
+    let fy = forward.y;
+    let fz = forward.z;
+    const fl = Math.hypot(fx, fy, fz) || 1;
+    fx /= fl;
+    fy /= fl;
+    fz /= fl;
+    let rx = up.y * fz - up.z * fy;
+    let ry = up.z * fx - up.x * fz;
+    let rz = up.x * fy - up.y * fx;
+    const rl = Math.hypot(rx, ry, rz) || 1;
+    rx /= rl;
+    ry /= rl;
+    rz /= rl;
+    const ux = fy * rz - fz * ry;
+    const uy = fz * rx - fx * rz;
+    const uz = fx * ry - fy * rx;
+    quatFromBasisToRef(rx, ux, fx, ry, uy, fy, rz, uz, fz, out);
+}
+
 /** Spawn a ship on `spawnSegment`, offset laterally (`lateral`, in local track-width units). */
 export function createShipState(track: TrackData, spawnSegment: number, lateral: number, index: number, isAI: boolean, playerSlot: number): ShipState {
     const frame = track.frames[spawnSegment % track.frames.length]!;
@@ -254,7 +305,7 @@ export function tickShip(ship: ShipState, ships: readonly ShipState[], track: Tr
     ship.meshForward.x = sc.direction.x;
     ship.meshForward.y = sc.direction.y;
     ship.meshForward.z = sc.direction.z;
-    quatFromLookDirectionRHToRef(sc.direction, sc.up, ship.orientationQuat);
+    quatFromLookDirectionToRef(sc.direction, sc.up, ship.orientationQuat);
 
     // ── Noise + steering intent ─────────────────────────────────────────────
     const localTime = simTime + ship.index;

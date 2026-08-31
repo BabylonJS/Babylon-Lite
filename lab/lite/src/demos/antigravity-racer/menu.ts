@@ -29,7 +29,7 @@ export interface MainMenu {
     dispose(): void;
 }
 
-/** Attribution for the third-party art the demo ships (see also the demo's CREDITS.txt files). */
+/** Attribution for the third-party art the demo ships. */
 const CREDIT_HTML =
     'Native Babylon Lite port of Cédric Guillemet&rsquo;s antigravity racing playground (WVPVWL). Track textures by <a href="https://github.com/PatrickRyanMS" target="_blank" rel="noopener">Patrick Ryan</a>, used with his permission &mdash; he owns the rights to the road artwork and granted this demo the right to redistribute it. Ship &ldquo;RHS-X&rdquo; by <a href="https://sketchfab.com/alone5" target="_blank" rel="noopener">Hassan Bassassi</a>, rock &ldquo;Obj_Nat_Rock_01&rdquo; by <a href="https://sketchfab.com/SaschaHenrichs" target="_blank" rel="noopener">SaschaHenrichs</a> — both <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>. The terrain height map and ground texture are loaded from playground.babylonjs.com at runtime.';
 
