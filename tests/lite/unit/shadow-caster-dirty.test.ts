@@ -89,8 +89,8 @@ describe("shadow caster dirty tracking", () => {
             _lastFoVersion: -1,
             _shadowUboData: new Float32Array(24),
             _casterMeshes: [mesh],
-            _casterMaterials: new Map(),
-            _casterMatGens: new Map(),
+            _casterMaterials: [mesh.material],
+            _casterMatGens: [0],
             _scene: { camera: null } as unknown as SceneContext,
         } satisfies PcfTaskState;
         const shadowGenerator = {

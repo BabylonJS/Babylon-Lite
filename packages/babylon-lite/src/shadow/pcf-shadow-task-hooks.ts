@@ -40,10 +40,10 @@ export interface PcfTaskState extends ShadowTaskInternalState {
     _shadowUboData: Float32Array;
     /** @internal */
     _casterMeshes: readonly Mesh[];
-    /** @internal Terminal caster material last resolved for each receive material. */
-    _casterMaterials: Map<Material, Material>;
+    /** @internal Terminal caster material last resolved for each caster mesh. */
+    _casterMaterials: (Material | null)[];
     /** @internal Generation of each terminal caster material when the task was built. */
-    _casterMatGens: Map<Material, number>;
+    _casterMatGens: number[];
     /** @internal Owning scene — used to read the live floating-origin offset (camera world position). */
     _scene: SceneContext;
 }
@@ -117,8 +117,10 @@ export function ensurePcfShadowTaskState(
     const existing = existingState as PcfTaskState | null;
     if (existing) {
         let casterMaterialChanged = false;
-        for (const mesh of casterMeshes) {
-            if (mesh.material && shadowCasterMaterialChanged(mesh.material, existing._casterMaterials, existing._casterMatGens)) {
+        for (let i = 0; i < casterMeshes.length; i++) {
+            const material = casterMeshes[i]!.material;
+            const terminal = material ? resolveShadowCasterMaterial(material) : null;
+            if (existing._casterMaterials[i] !== terminal || existing._casterMatGens[i] !== (terminal?._csmGen ?? 0)) {
                 casterMaterialChanged = true;
                 break;
             }
@@ -130,8 +132,8 @@ export function ensurePcfShadowTaskState(
     }
 
     const materialViews = new Map<Material, MaterialView>();
-    const casterMaterials = new Map<Material, Material>();
-    const casterMatGens = new Map<Material, number>();
+    const casterMaterials: (Material | null)[] = [];
+    const casterMatGens: number[] = [];
     const camera = createShadowCamera(sg);
     const rt = createShadowRenderTarget(sg);
     const state: PcfTaskState = {
@@ -160,9 +162,11 @@ export function ensurePcfShadowTaskState(
 
     for (const mesh of casterMeshes) {
         const material = mesh.material;
+        const terminal = material ? resolveShadowCasterMaterial(material) : null;
+        casterMaterials.push(terminal);
+        casterMatGens.push(terminal?._csmGen ?? 0);
         if (material) {
             state._task.addMesh(mesh, { material: getNoColorView(material, materialViews) });
-            snapshotShadowCasterMaterial(material, casterMaterials, casterMatGens);
         }
     }
 
@@ -187,11 +191,8 @@ export function snapshotShadowCasterMaterial(material: Material, terminals: Map<
 
 /** @internal Whether an override changed, was cleared, or its terminal material was rebuilt. */
 export function shadowCasterMaterialChanged(material: Material, terminals: Map<Material, Material>, generations: Map<Material, number>): boolean {
-    if (!terminals.has(material)) {
-        return false;
-    }
     const terminal = resolveShadowCasterMaterial(material);
-    return terminals.get(material) !== terminal || generations.get(material) !== (terminal._csmGen ?? 0);
+    return terminals.has(material) && (terminals.get(material) !== terminal || generations.get(material) !== (terminal._csmGen ?? 0));
 }
 
 export function renderPcfShadowMap(
@@ -257,9 +258,9 @@ export function getNoColorView(material: Material, cache: Map<Material, Material
     // Material._shadowCasterMaterial). Take the override's OWN no-colour view (recurse) so the same mesh casts
     // with a sampler-free / alpha-clip caster instead of this material's shadow-map-aliasing view. Cache under
     // THIS material so the lookup at the call site (keyed by the receive material) hits.
-    const terminal = resolveShadowCasterMaterial(material);
-    if (terminal !== material) {
-        const overrideView = getNoColorView(terminal, cache);
+    const override = material._shadowCasterMaterial;
+    if (override) {
+        const overrideView = getNoColorView(override, cache);
         cache.set(material, overrideView);
         return overrideView;
     }
