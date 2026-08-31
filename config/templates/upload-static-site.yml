@@ -1,8 +1,29 @@
 # Reusable step template: upload a static site directory and post its link to the PR
 #
+# SECURITY CONTRACT (read before adding a call site)
+# --------------------------------------------------
+# This template hands a long-lived deploy token to an authenticated upload. It
+# MUST only be used from a job that has not executed repository-authored code —
+# no checkout of a PR ref, no `pnpm install` (which runs dependency lifecycle
+# scripts), no build and no test steps. PR CI therefore builds the site in an
+# untrusted, secretless job, publishes it as a pipeline artifact, and calls this
+# template from a separate `checkout: none` job. That job boundary is what makes
+# the destination trustworthy: a runtime `##vso[task.setvariable]` can rewrite
+# DEPLOYMENT_SERVER, STORAGE_ACCOUNT and friends, so if attacker-controlled code
+# had run first it could point this authenticated curl at its own host and
+# capture DEPLOY_TOKEN.
+#
+# As defence in depth the script below also:
+#   * refuses any deploy path outside a fixed allowlist (see ALLOWED_PATH_RE),
+#   * requires an https destination whose host carries no embedded userinfo,
+#   * rejects deploy variables containing multipart/form-data metacharacters,
+#   * passes DEPLOY_TOKEN through `env:` instead of macro-expanding it into the
+#     generated script body, so the secret never reaches a command line.
+#
 # Parameters:
 #   siteDir        - path to the static site folder to zip and upload
-#   deployPath     - storage path where the site should be served
+#   deployPath     - storage path where the site should be served; must match
+#                    ALLOWED_PATH_RE below
 #   siteName       - label used in display names and the PR comment
 #   postComment    - post a PR comment with the link (default true)
 #   storageAccount - storage account to upload to (default $(STORAGE_ACCOUNT))
@@ -12,6 +33,7 @@
 #   BabylonJS-Deployment variable group: DEPLOYMENT_SERVER, DEPLOY_TOKEN
 #   Report upload settings: DEPLOY_ENDPOINT_UPLOAD, STORAGE_ACCOUNT, SERVE_DOMAIN
 #   Playground snapshots additionally pass TOOLS_STORAGE_ACCOUNT via storageAccount.
+#   Scope these groups to the calling job — never to the whole pipeline.
 # Required service connection:
 #   BabylonBotPAT - GitHub PAT service connection for PR comments
 
@@ -44,28 +66,110 @@ parameters:
 
 steps:
     - script: |
-          SITE_DIR="${{ parameters.siteDir }}"
+          set -euo pipefail
 
-          if ! test -d "$SITE_DIR"; then
-            echo "No static site directory found at $SITE_DIR"
-            exit 1
+          SITE_DIR="${{ parameters.siteDir }}"
+          DEPLOY_PATH="${{ parameters.deployPath }}"
+          ARCHIVE="$(Build.ArtifactStagingDirectory)/_static_site.zip"
+          trap 'rm -f "$ARCHIVE"' EXIT
+
+          # Allowlist of every destination this template is permitted to write.
+          # Anything else -- including a destination smuggled in through a
+          # runtime variable override -- is refused rather than uploaded.
+          ALLOWED_PATH_RE='^(lite/[A-Za-z0-9._-]+/lab|litePlayground/pr/[0-9]+|litePlayground/v/[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?)$'
+
+          case "$DEPLOY_PATH" in
+              *..*)
+                  echo "Refusing upload: deploy path '$DEPLOY_PATH' contains a parent-directory segment."
+                  exit 1
+                  ;;
+          esac
+
+          if ! printf '%s' "$DEPLOY_PATH" | grep -Eq "$ALLOWED_PATH_RE"; then
+              echo "Refusing upload: deploy path '$DEPLOY_PATH' is not in the allowlist."
+              echo "Permitted destinations: lite/<build>/lab, litePlayground/pr/<number>, litePlayground/v/<version>."
+              exit 1
           fi
 
-          cd "$SITE_DIR"
-          zip -r $(Build.SourcesDirectory)/_static_site.zip *
-          cd $(Build.SourcesDirectory)
+          # An unresolved ADO macro arrives as literal text rather than an empty
+          # string, so an emptiness test alone is not sufficient.
+          for name in DEPLOYMENT_SERVER DEPLOY_ENDPOINT_UPLOAD STORAGE_ACCOUNT; do
+              value="${!name-}"
+              if test -z "$value"; then
+                  echo "Refusing upload: required deploy variable $name is empty."
+                  exit 1
+              fi
+              case "$value" in
+                  *'$'*)
+                      echo "Refusing upload: required deploy variable $name did not resolve."
+                      exit 1
+                      ;;
+              esac
+          done
 
-          curl $(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD) -i -X POST \
+          if test -z "${DEPLOY_TOKEN-}"; then
+              echo "Refusing upload: DEPLOY_TOKEN is missing."
+              exit 1
+          fi
+
+          # The destination must be a bare https origin. Userinfo ('user@host')
+          # and a path prefix are rejected because either can silently relocate
+          # the request -- and with it the Authorization header -- elsewhere.
+          case "$DEPLOYMENT_SERVER" in
+              https://*) ;;
+              *)
+                  echo "Refusing upload: DEPLOYMENT_SERVER must use https."
+                  exit 1
+                  ;;
+          esac
+
+          # Reject anything that could move the request -- and with it the
+          # Authorization header -- to a different host: embedded userinfo
+          # ('https://real-host@attacker/'), or a host containing characters
+          # that are not valid in a hostname or port.
+          DEPLOY_HOST="${DEPLOYMENT_SERVER#https://}"
+          DEPLOY_HOST="${DEPLOY_HOST%%/*}"
+          case "$DEPLOY_HOST" in
+              "" | *[!A-Za-z0-9.:-]*)
+                  echo "Refusing upload: DEPLOYMENT_SERVER host is empty or contains characters that are not permitted in a host."
+                  exit 1
+                  ;;
+          esac
+
+          # These become multipart/form-data field values, so keep them to
+          # characters that cannot forge part boundaries or additional fields.
+          for name in DEPLOY_ENDPOINT_UPLOAD STORAGE_ACCOUNT; do
+              case "${!name}" in
+                  *[!A-Za-z0-9._/-]*)
+                      echo "Refusing upload: $name contains characters that are not permitted in a request field."
+                      exit 1
+                      ;;
+              esac
+          done
+
+          if ! test -d "$SITE_DIR"; then
+              echo "No static site directory found at $SITE_DIR"
+              exit 1
+          fi
+
+          (cd "$SITE_DIR" && zip -q -r "$ARCHIVE" .)
+
+          # DEPLOY_TOKEN is read from the environment rather than macro-expanded,
+          # so the secret is never written into the generated script body.
+          curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --fail-with-body --silent --show-error -X POST \
             -H "Content-Type: multipart/form-data" \
-            -H "Authorization: Bearer $(DEPLOY_TOKEN)" \
-            -F "path=${{ parameters.deployPath }}" \
-            -F "storageAccount=${{ parameters.storageAccount }}" \
-            -F "zip=@_static_site.zip"
-
-          rm -f _static_site.zip
+            -H "Authorization: ${DEPLOY_TOKEN}" \
+            -F "path=${DEPLOY_PATH}" \
+            -F "storageAccount=${STORAGE_ACCOUNT}" \
+            -F "zip=@${ARCHIVE}"
       condition: succeeded()
       continueOnError: true
       displayName: "Upload ${{ parameters.siteName }} static site"
+      env:
+          DEPLOYMENT_SERVER: $(DEPLOYMENT_SERVER)
+          DEPLOY_ENDPOINT_UPLOAD: $(DEPLOY_ENDPOINT_UPLOAD)
+          DEPLOY_TOKEN: $(DEPLOY_TOKEN)
+          STORAGE_ACCOUNT: ${{ parameters.storageAccount }}
 
     - ${{ if eq(parameters.postComment, true) }}:
           - task: GitHubComment@0

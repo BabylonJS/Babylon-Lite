@@ -10,6 +10,36 @@
 #   7. Lint             — ESLint + TypeScript type-check
 #   8. Playground Snapshot — per-PR playground deploy + PR comment
 #
+# ── SECRET HANDLING (do not regress) ─────────────────────────────────────────
+# This is the only pipeline with a `pr:` trigger, so it is the only one that
+# executes code authored by the pull request: `pnpm install` runs dependency
+# lifecycle scripts, and every build/test/report step runs repository source
+# from the PR head. Two rules follow, and every job below obeys them.
+#
+#   1. No credential is ever in scope for a job that runs PR-authored code.
+#      Variable groups are therefore attached per job, never at pipeline level.
+#      Build/test jobs that touch PR source declare no group at all; the jobs
+#      that need BrowserStack declare only BabylonJS-BrowserStack.
+#
+#   2. Every privileged action — uploading to the deployment server — happens in
+#      a dedicated `checkout: none` job that consumes a pipeline artifact. Such
+#      a job runs no repository code at all, which is what makes its destination
+#      variables trustworthy: `##vso[task.setvariable]` from an earlier step can
+#      rewrite DEPLOYMENT_SERVER/STORAGE_ACCOUNT, so an authenticated upload that
+#      shares a job with PR code can be redirected to an attacker's host and made
+#      to hand over DEPLOY_TOKEN. A gate flag set by a repository script (the
+#      former `ArtifactsSafe`) is not a substitute: PR code can set it too.
+#
+# `System.PullRequest.IsFork` gates every credentialed job on top of that
+# structure. It is a read-only system variable, so unlike an ordinary pipeline
+# variable it cannot be forged by `##vso[task.setvariable]` from PR-authored
+# code — which is why the conditions below reference it directly rather than
+# through a convenience variable. Azure also withholds secrets from fork builds
+# by default; both controls are required, because for a PR build Azure reads
+# this YAML from the PR head, so nothing in this file can defend a pipeline
+# whose fork-secret setting has been turned on.
+# See TESTING.md ("CI/CD Secret Handling") for the server-side settings that
+# repository files cannot enforce.
 
 trigger: none
 
@@ -19,12 +49,9 @@ pr:
             - master
 
 variables:
-    - group: BabylonJS-BrowserStack
-    - group: BabylonJS-Deployment
-    # Provides TOOLS_STORAGE_ACCOUNT — the tools storage account backing
-    # liteplayground.babylonjs.com, so PR playground snapshots serve same-origin
-    # as nightly (required by the client-side deploy coordinator).
-    - group: BabylonJS-CI-Infrastructure
+    # Variable groups are intentionally NOT declared here. Anything listed at
+    # pipeline scope is in scope for every job, including the jobs that execute
+    # PR-authored code. Add groups to the individual jobs that need them.
     - name: NODE_VERSION
       value: "22.x"
     - name: PNPM_VERSION
@@ -99,8 +126,12 @@ stages:
                       PR_NUMBER: "$(System.PullRequest.PullRequestNumber)"
                       GITHUB_TOKEN: "$(GITHUB_TOKEN)"
 
+                # The BabylonBotPAT service connection is only used on non-fork
+                # builds. POST_API_COMMENT and API_COMMENT_BODY are set by a
+                # repository-authored script, so they are treated as untrusted
+                # content, not as an authorization decision.
                 - task: GitHubComment@0
-                  condition: and(always(), eq(variables['POST_API_COMMENT'], 'true'))
+                  condition: and(always(), eq(variables['POST_API_COMMENT'], 'true'), eq(variables['System.PullRequest.IsFork'], 'False'))
                   continueOnError: true
                   displayName: "Post API changes to PR"
                   inputs:
@@ -286,8 +317,10 @@ stages:
                   condition: always()
                   displayName: "Generate bundle-size delta comment"
 
+                # See the API comment above: gated to non-fork builds, and the
+                # comment body is untrusted script output.
                 - task: GitHubComment@0
-                  condition: and(always(), eq(variables['POST_BUNDLE_COMMENT'], 'true'))
+                  condition: and(always(), eq(variables['POST_BUNDLE_COMMENT'], 'true'), eq(variables['System.PullRequest.IsFork'], 'False'))
                   continueOnError: true
                   displayName: "Post bundle-size changes to PR"
                   inputs:
@@ -301,9 +334,46 @@ stages:
                   env:
                       LAB_BASE_PATH: "/lite/$(Build.BuildNumber)/lab/"
 
+                # The deploy token is deliberately NOT in scope for this job — it
+                # has just run PR-authored install/build/test code. The built site
+                # is handed to the PublishLabSite job below, which holds the
+                # credential and runs nothing from the repository.
+                - task: PublishPipelineArtifact@1
+                  displayName: "Stage lab site for trusted upload"
+                  condition: succeeded()
+                  continueOnError: true
+                  inputs:
+                      targetPath: $(System.DefaultWorkingDirectory)/lab/dist
+                      artifact: lab-site
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 3b: Publish Lab Site (trusted)
+          # ──────────────────────────────────────────────────────────────
+          # Fresh job: `checkout: none`, no dependency install, no repository
+          # code of any kind. It exists solely so the deploy token and the
+          # destination variables are resolved in an environment that PR code
+          # never touched and therefore could not have rewritten.
+          - job: PublishLabSite
+            displayName: "Publish Lab Site"
+            dependsOn: BundleSize
+            condition: and(succeeded(), eq(variables['System.PullRequest.IsFork'], 'False'))
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                - group: BabylonJS-Deployment
+            steps:
+                - checkout: none
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download lab site"
+                  continueOnError: true
+                  inputs:
+                      artifact: lab-site
+                      path: $(Pipeline.Workspace)/lab-site
+
                 - template: config/templates/upload-static-site.yml
                   parameters:
-                      siteDir: $(System.DefaultWorkingDirectory)/lab/dist
+                      siteDir: $(Pipeline.Workspace)/lab-site
                       deployPath: lite/$(Build.BuildNumber)/lab
                       siteName: "Lab"
                       linkUrl: $(SERVE_DOMAIN)/lite/$(Build.BuildNumber)/lab/index.html
@@ -311,14 +381,25 @@ stages:
           # ──────────────────────────────────────────────────────────────
           # Job 4: Performance Regression
           # ──────────────────────────────────────────────────────────────
+          # Runs PR-authored test code with BrowserStack credentials in scope, so
+          # it is restricted to non-fork builds. There is no way to run a cloud
+          # browser on untrusted code without handing that code the account key,
+          # so fork PRs skip this job instead of receiving the credential.
           - job: PerfRegression
             displayName: "Performance: Lite vs Stable"
+            condition: eq(variables['System.PullRequest.IsFork'], 'False')
             timeoutInMinutes: 120
             pool:
                 vmImage: "ubuntu-latest"
             variables:
-                ArtifactsSafe: "false"
-                ReportUploaded: "false"
+                # Only BrowserStack. The deploy token stays out of this job; the
+                # report upload happens in PublishPerfReport below.
+                - group: BabylonJS-BrowserStack
+                # Redaction gate for artifact publication only. This is set by a
+                # repository-authored script, so it is a correctness check, not a
+                # security boundary, and nothing privileged depends on it.
+                - name: ArtifactsSafe
+                  value: "false"
             steps:
                 - checkout: self
                   fetchDepth: 0
@@ -437,21 +518,68 @@ stages:
                   condition: and(always(), eq(variables['ArtifactsSafe'], 'true'))
                   continueOnError: true
                   displayName: "Report test results"
+
+                # Hand the sanitized report to the trusted upload job. Publishing
+                # it here rather than uploading it here keeps DEPLOY_TOKEN out of
+                # a job that has executed PR-authored code.
+                - task: PublishPipelineArtifact@1
+                  condition: and(failed(), eq(variables['ArtifactsSafe'], 'true'))
+                  continueOnError: true
+                  displayName: "Stage perf report for trusted upload"
+                  inputs:
+                      targetPath: $(System.DefaultWorkingDirectory)/test-results/perf-report
+                      artifact: perf-report
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 4b: Publish Perf Report (trusted)
+          # ──────────────────────────────────────────────────────────────
+          # Only runs when PerfRegression failed and the report was staged. Fresh
+          # job with `checkout: none` — see PublishLabSite for the rationale.
+          - job: PublishPerfReport
+            displayName: "Publish Perf Report"
+            dependsOn: PerfRegression
+            condition: and(failed(), eq(variables['System.PullRequest.IsFork'], 'False'))
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                - group: BabylonJS-Deployment
+                - name: ReportUploaded
+                  value: "false"
+            steps:
+                - checkout: none
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download perf report"
+                  continueOnError: true
+                  inputs:
+                      artifact: perf-report
+                      path: $(Pipeline.Workspace)/perf-report
+
                 - template: config/templates/upload-test-report.yml
                   parameters:
                       reportType: perf
+                      reportDir: $(Pipeline.Workspace)/perf-report
 
           # ──────────────────────────────────────────────────────────────
           # Job 5: Parity (Cloud Browser)
           # ──────────────────────────────────────────────────────────────
+          # As with PerfRegression: PR-authored specs run against a real cloud
+          # browser, so the BrowserStack account key is unavoidably in scope and
+          # the job is restricted to non-fork builds.
           - job: ParityCloud
             displayName: "Parity Tests (Cloud Browser)"
+            condition: eq(variables['System.PullRequest.IsFork'], 'False')
             timeoutInMinutes: 180
             pool:
                 vmImage: "ubuntu-latest"
             variables:
-                ArtifactsSafe: "false"
-                ReportUploaded: "false"
+                # Only BrowserStack. The deploy token stays out of this job; the
+                # report upload happens in PublishParityReport below.
+                - group: BabylonJS-BrowserStack
+                # Redaction gate for artifact publication only — see the note on
+                # the same variable in PerfRegression.
+                - name: ArtifactsSafe
+                  value: "false"
             steps:
                 - checkout: self
 
@@ -517,9 +645,47 @@ stages:
                   condition: and(always(), eq(variables['ArtifactsSafe'], 'true'))
                   continueOnError: true
                   displayName: "Report test results"
+
+                # Hand the sanitized report to the trusted upload job. Publishing
+                # it here rather than uploading it here keeps DEPLOY_TOKEN out of
+                # a job that has executed PR-authored code.
+                - task: PublishPipelineArtifact@1
+                  condition: and(failed(), eq(variables['ArtifactsSafe'], 'true'))
+                  continueOnError: true
+                  displayName: "Stage parity report for trusted upload"
+                  inputs:
+                      targetPath: $(System.DefaultWorkingDirectory)/test-results/parity-report
+                      artifact: parity-report
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 5b: Publish Parity Report (trusted)
+          # ──────────────────────────────────────────────────────────────
+          # Only runs when ParityCloud failed and the report was staged. Fresh
+          # job with `checkout: none` — see PublishLabSite for the rationale.
+          - job: PublishParityReport
+            displayName: "Publish Parity Report"
+            dependsOn: ParityCloud
+            condition: and(failed(), eq(variables['System.PullRequest.IsFork'], 'False'))
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                - group: BabylonJS-Deployment
+                - name: ReportUploaded
+                  value: "false"
+            steps:
+                - checkout: none
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download parity report"
+                  continueOnError: true
+                  inputs:
+                      artifact: parity-report
+                      path: $(Pipeline.Workspace)/parity-report
+
                 - template: config/templates/upload-test-report.yml
                   parameters:
                       reportType: parity
+                      reportDir: $(Pipeline.Workspace)/parity-report
 
           # ──────────────────────────────────────────────────────────────
           # Job 6: Lint
@@ -656,17 +822,20 @@ stages:
           # public sub-path so every asset, the runner iframe, the self-hosted
           # engine, and the SPA snippet routes resolve under it.
           #
-          # Fork PRs: Azure withholds secret variables (including the deploy token)
-          # from fork-triggered PRs by default, so on a fork the upload step simply
-          # no-ops (it is continueOnError) and the PR still passes. To publish
-          # snapshots for fork PRs, enable "Make secrets available to builds of
-          # forks" in the pipeline's trigger settings — note this exposes the
-          # deploy token to fork-authored code, a security trade-off to weigh.
+          # Fork PRs: the build below is secretless and runs everywhere, but the
+          # upload lives in the separate PublishPlaygroundSnapshot job, which is
+          # gated to non-fork builds. Publishing snapshots for fork PRs would
+          # require enabling "Make secrets available to builds of forks", which
+          # hands the deploy token to fork-authored code and must stay off.
           - job: PlaygroundSnapshot
             displayName: "PR Playground Snapshot"
             pool:
                 vmImage: "ubuntu-latest"
             variables:
+                # No variable group: this job builds PR-authored code, so it
+                # holds no credential. The upload job below supplies the storage
+                # account and deploy token.
+                #
                 # Immutable per-PR snapshot, served same-origin as nightly on the
                 # tools account so the deploy coordinator can hand off to it.
                 #   deployPath     — upload path inside the tools storage account
@@ -706,9 +875,50 @@ stages:
                   env:
                       PLAYGROUND_BASE: $(playgroundBase)
 
+                # Secretless hand-off: the built snapshot goes to the trusted
+                # upload job, which holds the tools storage account and the
+                # deploy token and runs no repository code.
+                - task: PublishPipelineArtifact@1
+                  displayName: "Stage playground snapshot for trusted upload"
+                  condition: succeeded()
+                  continueOnError: true
+                  inputs:
+                      targetPath: $(System.DefaultWorkingDirectory)/playground/dist
+                      artifact: playground-site
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 8b: Publish Playground Snapshot (trusted)
+          # ──────────────────────────────────────────────────────────────
+          # Fresh job with `checkout: none` — see PublishLabSite for the
+          # rationale. BabylonJS-CI-Infrastructure provides TOOLS_STORAGE_ACCOUNT
+          # (the account backing liteplayground.babylonjs.com) and is scoped to
+          # this job alone.
+          - job: PublishPlaygroundSnapshot
+            displayName: "Publish Playground Snapshot"
+            dependsOn: PlaygroundSnapshot
+            condition: and(succeeded(), eq(variables['System.PullRequest.IsFork'], 'False'))
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                - group: BabylonJS-Deployment
+                - group: BabylonJS-CI-Infrastructure
+                - name: deployPath
+                  value: litePlayground/pr/$(System.PullRequest.PullRequestNumber)
+                - name: playgroundUrl
+                  value: https://liteplayground.babylonjs.com/pr/$(System.PullRequest.PullRequestNumber)/
+            steps:
+                - checkout: none
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download playground snapshot"
+                  continueOnError: true
+                  inputs:
+                      artifact: playground-site
+                      path: $(Pipeline.Workspace)/playground-site
+
                 - template: config/templates/upload-static-site.yml
                   parameters:
-                      siteDir: $(System.DefaultWorkingDirectory)/playground/dist
+                      siteDir: $(Pipeline.Workspace)/playground-site
                       deployPath: $(deployPath)
                       storageAccount: $(TOOLS_STORAGE_ACCOUNT)
                       siteName: "Lite Playground"

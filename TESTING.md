@@ -303,15 +303,72 @@ For local development, add these to `.env.local` (git-ignored).
 **Config:** `azure-pipelines.yml`  
 **Trigger:** PRs targeting `master`
 
-Five parallel jobs:
+Parallel jobs:
 
-| Job                 | What it does                                           |
-| ------------------- | ------------------------------------------------------ |
-| **Unit Tests**      | Vitest unit tests + Playwright plumbing tests          |
-| **Bundle Size**     | Ceiling checks + delta vs baseline                     |
-| **Perf Regression** | Current vs baseline on BrowserStack (macOS Chrome)     |
-| **Parity (Cloud)**  | Pixel-diff on BrowserStack (macOS Chrome, real WebGPU) |
-| **Lint**            | ESLint + TypeScript `--noEmit` type-check              |
+| Job                     | What it does                                            |
+| ----------------------- | ------------------------------------------------------- |
+| **Unit Tests**          | Vitest unit tests + Playwright plumbing tests           |
+| **Bundle Size**         | Ceiling checks + delta vs baseline                      |
+| **Perf Regression**     | Current vs baseline on BrowserStack (macOS Chrome)      |
+| **Parity (Cloud)**      | Pixel-diff on BrowserStack (macOS Chrome, real WebGPU)  |
+| **Lint**                | ESLint + TypeScript `--noEmit` type-check               |
+| **Publish \* (trusted)** | Credentialed uploads, in `checkout: none` jobs — see below |
+
+### CI/CD Secret Handling
+
+`azure-pipelines.yml` is the only pipeline with a `pr:` trigger, so it is the
+only one that executes code authored by the pull request under review —
+`pnpm install` runs dependency lifecycle scripts, and every build, test and
+report step runs source from the PR head. Anything in scope for such a job is
+readable by that code, and any *destination* it uploads to is rewritable by it,
+because `##vso[task.setvariable]` overwrites an ordinary pipeline variable at
+runtime. Two rules follow, and `tests/lite/unit/pr-pipeline-credential-isolation.test.ts`
+enforces both:
+
+1. **No credential is in scope for a job that runs PR code.** Variable groups
+   are attached per job, never at pipeline scope. Build and test jobs declare no
+   group; only the two cloud-browser jobs declare `BabylonJS-BrowserStack`, and
+   they are gated to non-fork builds because there is no way to drive a cloud
+   browser from untrusted code without giving that code the account key.
+2. **Privileged work runs in its own job.** Each upload happens in a dedicated
+   `checkout: none` job that consumes a pipeline artifact and runs no repository
+   code, so its destination variables cannot have been rewritten. A gate flag
+   set by a repository script — the former `ArtifactsSafe` — is not a substitute,
+   because PR code can set it too; it may gate artifact publication and nothing
+   privileged.
+
+The upload templates additionally allowlist their deploy paths, require an
+https destination whose host carries no embedded userinfo, and pass
+`DEPLOY_TOKEN` via `env:` so it never reaches a command line.
+
+#### Settings that repository files cannot enforce
+
+These live in Azure DevOps and GitHub, cannot be asserted from this repo, and
+must be verified by an administrator. Nothing in the YAML defends against a
+mistake here, because for a PR build Azure reads the pipeline definition from
+the PR head.
+
+- **Fork secrets stay off.** "Make secrets available to builds of forks" and
+  "Make fork builds run with the same permissions" must both be disabled on
+  `azure-pipelines.yml`. Enabling either hands every secret above to
+  fork-authored code and voids all of the above.
+- **Queue-time overrides stay off.** `DEPLOYMENT_SERVER`, `DEPLOY_ENDPOINT_UPLOAD`,
+  `STORAGE_ACCOUNT`, `TOOLS_STORAGE_ACCOUNT` and `SERVE_DOMAIN` must not be
+  settable at queue time, or the destination allowlist is the only thing left.
+- **Variable groups are authorized per pipeline, not organization-wide.**
+  `BabylonJS-Deployment` and `BabylonJS-CI-Infrastructure` should be authorized
+  only for the pipelines that upload; `BabylonJS-BrowserStack` only for those
+  that use a cloud browser.
+- **Credentials are least-privilege and rotated.** `DEPLOY_TOKEN` should be
+  write-only to its storage paths; the `BabylonBotPAT` service connection should
+  be limited to posting issue comments; `GITHUB_TOKEN` (read by
+  `pnpm validate:release-markers` and `pnpm report:api-changes`, both of which
+  run alongside PR code) must be a read-only, fine-grained token scoped to this
+  repository's pull-request metadata. Rotate all of them on a fixed schedule and
+  after any suspected exposure.
+- **Secret variables are marked secret.** A plain variable is written into the
+  build environment and into logs; only variables marked secret are masked and
+  withheld from fork builds.
 
 ### Required Pipeline Variable Groups
 
