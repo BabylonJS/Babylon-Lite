@@ -706,9 +706,17 @@ describe("the trusted publisher exposes a narrow interface for PR CI output", ()
     it("lets untrusted comment content set only the four variables the posting tasks consume", () => {
         const comments = jobsOf(publisher).find((job) => job.name === "PostPrComments");
         expect(comments, `${PUBLISHER} has no PostPrComments job`).toBeDefined();
-        expect(comments?.body).toMatch(
-            /displayName:\s*"Load and neutralise comment bodies"[\s\S]*?target:\s*\n\s*commands:\s*restricted\s*\n\s*settableVariables:\s*\n\s*-\s*API_COMMENT_BODY\s*\n\s*-\s*POST_API_COMMENT\s*\n\s*-\s*BUNDLE_COMMENT_BODY\s*\n\s*-\s*POST_BUNDLE_COMMENT/
-        );
+        const target =
+            /displayName:\s*"Load and neutralise comment bodies"[\s\S]*?target:\s*\n\s*commands:\s*restricted\s*\n\s*settableVariables:\s*\n((?:\s*-\s*[A-Z][A-Z_]*\s*\n?)+)/.exec(
+                comments?.body ?? ""
+            );
+        expect(target, "the comment-body step has no restricted settableVariables target").toBeDefined();
+        expect([...(target?.[1] ?? "").matchAll(/-\s*(\w+)/g)].map((match) => match[1])).toEqual([
+            "API_COMMENT_BODY",
+            "POST_API_COMMENT",
+            "BUNDLE_COMMENT_BODY",
+            "POST_BUNDLE_COMMENT",
+        ]);
     });
 });
 
