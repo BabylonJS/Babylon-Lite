@@ -46,6 +46,41 @@ const UPLOAD_TEMPLATES = ["config/templates/upload-static-site.yml", "config/tem
 const PRIVILEGED_GROUPS = ["BabylonJS-Deployment", "BabylonJS-CI-Infrastructure"];
 
 /**
+ * The protected variable group that carries the npm registry credential, and the
+ * name of the credential inside it.
+ *
+ * Both were introduced together, and the rename is load-bearing rather than
+ * cosmetic. The token used to be `$(NPM_TOKEN)` with no group import at all,
+ * which meant it could only ever have come from a **pipeline-level UI variable**
+ * — and a UI variable is not a protected resource. No branch-control check, no
+ * pipeline-authorization check and no required-template check applies to one;
+ * every job in the definition can read it; and because a manually queued run
+ * executes the YAML of whatever ref it names, a run from an arbitrary branch
+ * could write itself a job that asks for the token and gets it. Importing a
+ * group inside the publishing job puts the credential behind checks that YAML
+ * cannot edit.
+ *
+ * Renaming at the same time is what makes the migration fail-closed. Had the
+ * group exported `NPM_TOKEN`, a leftover UI variable of that name would keep
+ * publishing working whether or not the group was ever created or authorized —
+ * the exact configuration error this change exists to make impossible would be
+ * invisible, and the credential in use would still be the unprotected one.
+ */
+const PUBLISH_GROUP = "BabylonJS-NpmPublish";
+const PUBLISH_TOKEN = "NPM_PUBLISH_TOKEN";
+
+/**
+ * Names the publish path must no longer use.
+ *
+ * `NPM_TOKEN` is the retired one; the others are the spellings a future edit is
+ * most likely to reach for when wiring npm auth from an environment rather than
+ * from the group. Any of them appearing in a pipeline means a credential is
+ * being taken from somewhere other than `BabylonJS-NpmPublish` — which, since
+ * nothing in this repository defines them, means a pipeline UI variable.
+ */
+const RETIRED_PUBLISH_TOKEN_NAMES = ["NPM_TOKEN", "NPM_AUTH_TOKEN", "NODE_AUTH_TOKEN"];
+
+/**
  * Credentials a job running pull-request code may hold: none.
  *
  * This list used to contain `BabylonJS-BrowserStack`, on the reasoning that a
@@ -79,7 +114,8 @@ const CLOUD_GROUP = "BabylonJS-BrowserStack";
 const DEPLOYMENT_CREDENTIAL_MARKERS = [
     /^\s*-\s*group:\s*BabylonJS-Deployment\s*$/m,
     /^\s*-\s*group:\s*BabylonJS-CI-Infrastructure\s*$/m,
-    /NPM_TOKEN:/,
+    /^\s*-\s*group:\s*BabylonJS-NpmPublish\s*$/m,
+    /NPM_PUBLISH_TOKEN:/,
     /gitHubConnection:/,
     /GITHUB_TOKEN:/,
 ];
@@ -568,12 +604,217 @@ describe("npm publishing keeps its registry credential in a job-scoped file", ()
     });
 });
 
+/**
+ * True when a script refuses to continue unless `name` holds a usable value.
+ *
+ * Two separate refusals, and the second is the one that is easy to leave out.
+ * When a variable is not in scope — the group was never created, was not
+ * authorized for this pipeline, was refused by a check, or simply does not
+ * define this name — Azure does not substitute an empty string. It passes the
+ * macro through as the literal text `$(NAME)`, which is a non-empty value that
+ * every `-z` test in the world accepts. The publish step tested only for
+ * emptiness, so the misconfiguration this change is about would have sailed past
+ * it and failed at the registry instead, as an authentication error that reads
+ * like a bad token rather than like missing configuration.
+ *
+ * Exported so both directions can be pinned against fixtures. A guard that
+ * cannot distinguish the shape it accepts from the shape it must reject is a
+ * guard that reports success having checked nothing.
+ */
+export function failsClosedOnUnresolvedMacro(script: string, name: string): boolean {
+    if (!new RegExp(String.raw`\$\{${name}:-\}`).test(script)) {
+        return false;
+    }
+
+    const rejectsEmpty = new RegExp(String.raw`""\s*\||-z\s+"\$\{${name}:-\}"`).test(script);
+
+    // The literal-macro test, written so the script does not contain the macro
+    // it is looking for: `*'$('*` as a case pattern. Writing `$(NAME)` in a
+    // script body would make Azure substitute it, and the check would compare
+    // the value to itself.
+    const rejectsUnresolvedMacro = /'\$\('/.test(script);
+
+    return rejectsEmpty && rejectsUnresolvedMacro && /\bexit 1\b/.test(script);
+}
+
+describe("the npm registry credential comes from a job-scoped protected group", () => {
+    // The finding this closes: both publish pipelines named `$(NPM_TOKEN)` and
+    // imported no variable group at all, so the only place that value could come
+    // from was a pipeline-level UI variable. A UI variable is not a protected
+    // resource — no check is evaluated for it, and every job in the definition
+    // can read it, including a job written by a manually queued run of an
+    // arbitrary branch, because the YAML that runs is that branch's YAML.
+    //
+    // The fix is structural and has three parts, each asserted below: the group
+    // is imported inside the publishing job and nowhere else, the credential is
+    // renamed so a leftover UI variable cannot stand in for the group, and the
+    // job refuses to run when the macro did not resolve.
+    const publishers = allPipelines().filter((file) => /^\s*npm publish\s/m.test(read(file)));
+
+    /** The job in each publishing pipeline that actually runs `npm publish`. */
+    const publishJobs = publishers.flatMap((file) =>
+        jobsOf(read(file))
+            .filter((job) => /^\s*npm publish\s/m.test(withoutComments(job.body)))
+            .map((job) => ({ file, job }))
+    );
+
+    it("has publishing pipelines and publishing jobs to inspect", () => {
+        expect(publishers.length, "no pipeline runs `npm publish` — the selector has drifted").toBeGreaterThan(0);
+        expect(publishJobs.length, "no job runs `npm publish` — the job-block selector has drifted").toBe(publishers.length);
+    });
+
+    it.each(publishJobs.map(({ file, job }) => `${file}:${job.name}`))("%s imports the protected group in its own variables block", (id) => {
+        const entry = publishJobs.find(({ file, job }) => `${file}:${job.name}` === id);
+        expect(entry, `job ${id} disappeared between selection and assertion`).toBeDefined();
+        const body = withoutComments(entry?.job.body ?? "");
+
+        expect(
+            declaredGroups(body),
+            `job ${id} publishes to npm without importing ${PUBLISH_GROUP}, so its credential can only be coming from an unprotected pipeline variable`
+        ).toContain(PUBLISH_GROUP);
+    });
+
+    it.each(publishJobs.map(({ file, job }) => `${file}:${job.name}`))("%s takes the credential from the renamed variable only", (id) => {
+        const entry = publishJobs.find(({ file, job }) => `${file}:${job.name}` === id);
+        const body = withoutComments(entry?.job.body ?? "");
+
+        expect(body, `job ${id} never maps ${PUBLISH_TOKEN} into the environment, so the group it imports is not what it publishes with`).toContain(
+            `${PUBLISH_TOKEN}: $(${PUBLISH_TOKEN})`
+        );
+    });
+
+    it.each(publishJobs.map(({ file, job }) => `${file}:${job.name}`))("%s refuses to publish when the macro did not resolve", (id) => {
+        const entry = publishJobs.find(({ file, job }) => `${file}:${job.name}` === id);
+        const body = withoutComments(entry?.job.body ?? "");
+
+        // Before the first `npm publish`, not merely somewhere in the job: a
+        // check that runs after the packages are on npm is not a check.
+        const publishAt = body.search(/^\s*npm publish\s/m);
+        expect(publishAt, `job ${id} matched the publish selector but has no \`npm publish\` line`).toBeGreaterThan(0);
+
+        expect(
+            failsClosedOnUnresolvedMacro(body.slice(0, publishAt), PUBLISH_TOKEN),
+            `job ${id} does not refuse an unset or unresolved ${PUBLISH_TOKEN} before publishing. An out-of-scope variable arrives as literal macro text, so testing only for emptiness passes it straight through to npm`
+        ).toBe(true);
+    });
+
+    // Every YAML in the repository that could name the group or the token, so
+    // "only the publish jobs have it" is checked against the files rather than
+    // assumed from the two that were edited.
+    const everyPipelineFile = allPipelines().concat(
+        readdirSync(join(repoRoot, "config", "templates"))
+            .filter((f) => /\.ya?ml$/.test(f))
+            .sort()
+            .map((f) => `config/templates/${f}`)
+    );
+
+    it("names the group and the token only inside a job that imports the group", () => {
+        const offenders: string[] = [];
+
+        for (const file of everyPipelineFile) {
+            const source = withoutComments(read(file));
+            const jobs = jobsOf(source);
+
+            // Everything above the first job: a `variables:` block there is
+            // pipeline-scoped, which hands the credential to every job in the
+            // definition and undoes the entire point of the import.
+            const firstBody = jobs[0]?.body;
+            const fileScope = firstBody === undefined ? source : source.slice(0, source.indexOf(firstBody));
+            if (fileScope.includes(PUBLISH_GROUP) || fileScope.includes(PUBLISH_TOKEN)) {
+                offenders.push(`${file}: names ${PUBLISH_GROUP}/${PUBLISH_TOKEN} outside any job, where every job can read it`);
+            }
+
+            for (const job of jobs) {
+                const body = withoutComments(job.body);
+                const namesIt = body.includes(PUBLISH_TOKEN) || body.includes(PUBLISH_GROUP);
+                if (namesIt && !declaredGroups(body).includes(PUBLISH_GROUP)) {
+                    offenders.push(`${file}:${job.name}: names ${PUBLISH_TOKEN} without importing ${PUBLISH_GROUP}`);
+                }
+                if (namesIt && !/^\s*npm publish\s/m.test(body)) {
+                    offenders.push(`${file}:${job.name}: holds the publish credential without publishing anything`);
+                }
+            }
+        }
+
+        expect(offenders, "the npm publish credential is reachable outside the jobs that publish:").toEqual([]);
+    });
+
+    it("uses none of the retired pipeline-variable names anywhere", () => {
+        const offenders: string[] = [];
+
+        for (const file of everyPipelineFile) {
+            withoutComments(read(file))
+                .split("\n")
+                .forEach((line, index) => {
+                    for (const retired of RETIRED_PUBLISH_TOKEN_NAMES) {
+                        // Word-bounded, so `NPM_PUBLISH_TOKEN` is not read as a
+                        // hit for `NPM_TOKEN` and vice versa.
+                        if (new RegExp(String.raw`(?<![A-Z_])${retired}(?![A-Z_])`).test(line)) {
+                            offenders.push(`${file}:${index + 1}: ${retired} — ${line.trim()}`);
+                        }
+                    }
+                });
+        }
+
+        expect(
+            offenders,
+            `these lines name a retired npm credential variable. Nothing in this repository defines those names, so they can only resolve from a pipeline UI variable — which is not a protected resource, and whose continued existence is what would let a missing ${PUBLISH_GROUP} go unnoticed:`
+        ).toEqual([]);
+    });
+
+    it("keeps the publish credential out of everything a pull request reaches", () => {
+        const reachable = [...new Set(prTriggeredPipelines().concat([ENTRY_POINT, PINNED_TEMPLATE], UPLOAD_TEMPLATES))];
+
+        // Guard the guard: the entry point and the templates are named
+        // literally, so this cannot silently empty, but the pr-triggered half
+        // can — and that is the half that would discover a new one.
+        expect(reachable.length, "no pull-request-reachable file to inspect").toBeGreaterThan(0);
+
+        for (const file of reachable) {
+            const source = withoutComments(read(file));
+            expect(source, `${file} is reachable from a pull request and names ${PUBLISH_GROUP}`).not.toContain(PUBLISH_GROUP);
+            expect(source, `${file} is reachable from a pull request and names ${PUBLISH_TOKEN}`).not.toContain(PUBLISH_TOKEN);
+        }
+    });
+});
+
+describe("the fail-closed selector accepts and rejects the right scripts", () => {
+    // The shape both pipelines use, reproduced rather than read out of them, so
+    // the fixture states the contract instead of tracking whatever they say.
+    const real = ['case "${NPM_PUBLISH_TOKEN:-}" in', "    \"\" | *'$('*)", '        echo "not in scope"', "        exit 1", "        ;;", "esac"].join("\n");
+
+    it("accepts the case form both pipelines use", () => {
+        expect(failsClosedOnUnresolvedMacro(real, "NPM_PUBLISH_TOKEN")).toBe(true);
+    });
+
+    it("rejects an emptiness-only check, which an unresolved macro passes", () => {
+        // The previous version of the publish step, in shape. It is the false
+        // negative this guard exists for: an unresolved macro arrives as
+        // non-empty literal text, so this accepts a run holding no credential.
+        const emptinessOnly = ['if [ -z "${NPM_PUBLISH_TOKEN:-}" ]; then', '  echo "missing"', "  exit 1", "fi"].join("\n");
+        expect(failsClosedOnUnresolvedMacro(emptinessOnly, "NPM_PUBLISH_TOKEN")).toBe(false);
+    });
+
+    it("rejects a script that reports the problem without stopping", () => {
+        const warnsOnly = ['case "${NPM_PUBLISH_TOKEN:-}" in', "    \"\" | *'$('*)", '        echo "not in scope"', "        ;;", "esac"].join("\n");
+        expect(failsClosedOnUnresolvedMacro(warnsOnly, "NPM_PUBLISH_TOKEN")).toBe(false);
+    });
+
+    it("rejects a script that never reads the value", () => {
+        expect(failsClosedOnUnresolvedMacro('npm publish "$GL_TGZ" --ignore-scripts', "NPM_PUBLISH_TOKEN")).toBe(false);
+    });
+
+    it("does not accept a check written for a different variable", () => {
+        expect(failsClosedOnUnresolvedMacro(real, "SOME_OTHER_TOKEN")).toBe(false);
+    });
+});
+
 describe("a credentialed job constrains artifact content before it can act as a command", () => {
     // The publishing jobs read a version and a tarball path out of an artifact
     // staged by the job that ran repository code, and echo them into
     // `##vso[task.setvariable]`. The agent obeys any logging command that starts
     // a line of step output, so an unconstrained value there is an instruction
-    // channel into the job holding NPM_TOKEN — `task.prependpath` alone puts an
+    // channel into the job holding the publish token — `task.prependpath` alone puts an
     // attacker-chosen `npm` ahead of the real one.
     //
     // `grep -Eq '^…$'` is specifically not enough: grep matches when ANY line
@@ -633,7 +874,7 @@ describe("npm publishing never executes the package it publishes", () => {
         const source = withoutComments(read(file));
         for (const command of source.match(/^\s*npm publish\s.*$/gm) ?? []) {
             // Publishing a directory runs that package's prepack and
-            // prepublishOnly hooks on the agent holding NPM_TOKEN. Publishing a
+            // prepublishOnly hooks on the agent holding the publish token. Publishing a
             // tarball still does, unless scripts are off.
             expect(command, `${file}: \`${command.trim()}\` publishes without --ignore-scripts`).toMatch(/--ignore-scripts/);
             expect(command, `${file}: \`${command.trim()}\` publishes a working directory rather than a packed tarball`).not.toMatch(/npm publish\s+\.?\//);

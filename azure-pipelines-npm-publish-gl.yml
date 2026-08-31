@@ -1,7 +1,10 @@
 # Azure Pipelines — Babylon Lite GL npm Publish
 #
-# Publishes the built @babylonjs/lite-gl package to npm. Configure NPM_TOKEN as
-# a secret pipeline variable or variable-group value before enabling this run.
+# Publishes the built @babylonjs/lite-gl package to npm. The registry credential
+# is `NPM_PUBLISH_TOKEN`, from the protected variable group
+# `BabylonJS-NpmPublish`, imported by the publishing job and by nothing else — a
+# pipeline-level UI variable is deliberately not a supported way to configure it.
+# See TESTING.md, "Settings that repository files cannot enforce".
 #
 # Manual runs can choose patch, minor, major, or auto. Scheduled runs use auto.
 # Pushes to master that change config/release-gl.json read the release type from
@@ -11,9 +14,9 @@
 #
 # Same reasoning as azure-pipelines-npm-publish.yml: `pnpm install`, the build,
 # the test suites and every npm lifecycle script they trigger are repository
-# code, and repository code sharing an agent with NPM_TOKEN can read it out of
-# the environment — one compromised transitive dependency is enough. So the
-# build job carries no credential at all and ends at `npm pack`; a second job
+# code, and repository code sharing an agent with the publish token can read it
+# out of the environment — one compromised transitive dependency is enough. So
+# the build job carries no credential at all and ends at `npm pack`; a second job
 # starts clean with `checkout: none`, validates the tarball it was handed, and
 # publishes it with `--ignore-scripts`.
 #
@@ -162,7 +165,7 @@ stages:
                       artifact: npm-gl-tarball
 
           # ══════════════════════════════════════════════════════════════
-          # Publish to npm — NPM_TOKEN, no repository code
+          # Publish to npm — NPM_PUBLISH_TOKEN, no repository code
           # ══════════════════════════════════════════════════════════════
           - job: PublishToNpm
             displayName: "Publish tarball to npm"
@@ -175,8 +178,37 @@ stages:
             condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
             pool:
                 vmImage: "ubuntu-latest"
+            variables:
+                # The registry credential, imported by this job and by nothing
+                # else in this file. A variable group is a protected resource, so
+                # the branch-control and pipeline-authorization checks an
+                # administrator sets on it are evaluated before this job starts
+                # and cannot be edited from YAML; a pipeline-level UI variable is
+                # not, and is readable by every job in the definition including
+                # one written by a manually queued run of another ref. The
+                # variable was renamed along with the move so a leftover UI
+                # `NPM_TOKEN` cannot stand in for missing group configuration.
+                # See the identical import in azure-pipelines-npm-publish.yml.
+                - group: BabylonJS-NpmPublish
             steps:
                 - checkout: none
+
+                # Fail closed, before anything is downloaded. An unresolved macro
+                # arrives as the literal text `$(NAME)`, not as an empty string,
+                # which is what this job sees when a check refuses the group, when
+                # the group is not authorized for this definition, or when it does
+                # not define the variable — so emptiness alone is not the test.
+                - script: |
+                      set -uo pipefail
+                      case "${NPM_PUBLISH_TOKEN:-}" in
+                          "" | *'$('*)
+                              echo "BabylonJS-NpmPublish is not in scope for this run, or does not define NPM_PUBLISH_TOKEN; refusing to publish."
+                              exit 1
+                              ;;
+                      esac
+                  displayName: "Require publish credential"
+                  env:
+                      NPM_PUBLISH_TOKEN: $(NPM_PUBLISH_TOKEN)
 
                 - task: UseNode@1
                   inputs:
@@ -197,7 +229,7 @@ stages:
                 # that ran repository code, and the agent obeys any `##vso[...]`
                 # that starts a line of step output, so an unconstrained value
                 # echoed here would be issuing logging commands in the job that
-                # holds NPM_TOKEN.
+                # holds the publish token.
                 - script: |
                       set -euo pipefail
                       DIR="$(Pipeline.Workspace)/npm-gl-tarball"
@@ -243,14 +275,20 @@ stages:
 
                 # --ignore-scripts: publishing a tarball still runs the package's
                 # own prepack/prepublishOnly hooks otherwise, which would put
-                # repository-controlled code back on the agent holding NPM_TOKEN.
+                # repository-controlled code back on the agent holding the
+                # publish token.
                 - script: |
                       set -euo pipefail
 
-                      if [ -z "${NPM_TOKEN:-}" ]; then
-                        echo "NPM_TOKEN must be configured as a secret pipeline variable."
-                        exit 1
-                      fi
+                      # Repeated from the gate step above rather than assumed, so
+                      # deleting or reordering that step cannot quietly restore
+                      # "publish with whatever happens to be in scope".
+                      case "${NPM_PUBLISH_TOKEN:-}" in
+                        "" | *'$('*)
+                          echo "NPM_PUBLISH_TOKEN must come from the BabylonJS-NpmPublish variable group."
+                          exit 1
+                          ;;
+                      esac
 
                       # A job-scoped npmrc rather than ~/.npmrc: created empty
                       # under a 077 umask so it is 0600 *before* the token is
@@ -260,12 +298,12 @@ stages:
                       trap 'rm -f "$NPMRC"' EXIT
                       ( umask 077 && : > "$NPMRC" )
                       chmod 600 "$NPMRC"
-                      printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$NPMRC"
+                      printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_PUBLISH_TOKEN" >> "$NPMRC"
 
                       npm publish "$GL_TGZ" --ignore-scripts --access public --userconfig "$NPMRC" --registry https://registry.npmjs.org/
                   displayName: "Publish package to npm"
                   env:
-                      NPM_TOKEN: $(NPM_TOKEN)
+                      NPM_PUBLISH_TOKEN: $(NPM_PUBLISH_TOKEN)
                       GL_TGZ: $(GL_TGZ)
 
           # ══════════════════════════════════════════════════════════════

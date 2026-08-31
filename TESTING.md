@@ -557,7 +557,12 @@ protections above are conventions rather than controls.
   "the entry point is only a shell" enforceable: an abandoned-`extends` pull
   request still builds, it simply builds with nothing worth stealing. Note that
   the check names the ref, so repointing the repository resource at another
-  branch fails it too.
+  branch fails it too. `BabylonJS-NpmPublish` is deliberately **not** in that
+  list: a required-template check refuses the resource to any run that does not
+  extend the named template, and the two publish pipelines declare their stages
+  inline rather than extending anything, so adding it there would block
+  publishing rather than protect it. Branch control carries that group instead —
+  see its entry below.
 - **`GITHUB_TOKEN` must live in a protected variable group.** A variable defined
   in the pipeline's UI **is not a protected resource**, so no check applies to it
   and every job in the definition can read it. `Release Markers (labels)` reads
@@ -594,7 +599,8 @@ protections above are conventions rather than controls.
 - **Pipeline permissions.** Each protected resource should be authorized only for
   the pipelines that need it: `BabylonJS-Deployment` and
   `BabylonJS-CI-Infrastructure` for the pipelines that upload,
-  `BabylonJS-BrowserStack` only for those that use a cloud browser.
+  `BabylonJS-BrowserStack` only for those that use a cloud browser, and
+  `BabylonJS-NpmPublish` only for the two npm-publish definitions.
 - **Branch control on non-PR definitions.** A branch-control check allowing only
   `refs/heads/master` is the strongest form of this, but it cannot be applied to
   the resources PR CI uses: a PR build runs from `refs/pull/<n>/merge` and would
@@ -610,16 +616,57 @@ protections above are conventions rather than controls.
   server-side fact rather than a repository convention, and is the single check
   that most directly enforces the move described in
   [Cloud browser tests run post-merge](#cloud-browser-tests-run-post-merge).
-- **`NPM_TOKEN` should be a granular publish-only token, in a protected variable
-  group.** It is now used only in a `checkout: none` job that runs `npm publish
-  --ignore-scripts` on a tarball built by an earlier, credential-free job,
-  through a `0600` npmrc in the agent's temp directory that is deleted when the
-  step ends. Scoping the token to the published packages bounds what a failure of
-  that boundary would be worth. Note that a **pipeline-level UI variable is not a
-  protected resource**: like `GITHUB_TOKEN` above, `NPM_TOKEN` should come from a
-  variable group scoped to the publishing job, so the required-template and
-  branch-control checks cover it — while it lives in the pipeline's UI variables,
-  every job in that definition can ask for it and no check applies.
+- **Create `BabylonJS-NpmPublish`, and delete the old `NPM_TOKEN` UI variable.**
+  Both publish pipelines now import the protected variable group
+  `BabylonJS-NpmPublish` inside their `PublishToNpm` job only, and read the
+  credential as **`NPM_PUBLISH_TOKEN`** — a deliberately new name. In order:
+
+  1. **Create the group.** `BabylonJS-NpmPublish`, with a single variable
+     `NPM_PUBLISH_TOKEN`, **marked secret**, holding a granular, publish-only npm
+     token scoped to `@babylonjs/lite`, `@babylonjs/lite-compat` and
+     `@babylonjs/lite-gl`. Scoping the token to those packages bounds what a
+     failure of the publishing boundary would be worth. The credential is used
+     only in a `checkout: none` job that runs `npm publish --ignore-scripts` on a
+     tarball built by an earlier, credential-free job, through a `0600` npmrc in
+     the agent's temp directory that is deleted when the step ends.
+  2. **Delete the old pipeline UI variables, and rotate the token.** Remove
+     `NPM_TOKEN` from the pipeline-level variables of **both** the
+     `azure-pipelines-npm-publish.yml` and `azure-pipelines-npm-publish-gl.yml`
+     definitions, and issue a **new** npm token for the group rather than copying
+     the old value across. The old one was readable by every job in those
+     definitions — including a job written by a manually queued run of an
+     arbitrary branch, whose YAML is that branch's YAML — so treat it as exposed.
+     The rename is what makes this step checkable: nothing reads `NPM_TOKEN` any
+     more, so a forgotten UI variable cannot quietly keep publishing working
+     while the group is missing, misnamed or unauthorized. Both jobs refuse to
+     publish when `NPM_PUBLISH_TOKEN` is empty **or** still the unsubstituted
+     macro text, which is what an out-of-scope variable resolves to.
+  3. **Authorize the group for exactly the two publish definitions.** The
+     pipelines built from `azure-pipelines-npm-publish.yml` and
+     `azure-pipelines-npm-publish-gl.yml`, and nothing else. Do **not** enable
+     "Grant access permission to all pipelines" — that setting turns the group
+     back into the ambient credential the UI variable was.
+  4. **Branch control, `refs/heads/master` only.** Add a **Branch control** check
+     on the group allowing only `refs/heads/master`, with "Verify branch
+     protection" enabled. This is the enforceable half of the job conditions
+     ([above](#credentialed-pipelines-run-only-from-the-protected-ref)): a run
+     queued from another ref executes that ref's YAML and can delete the
+     condition, but it cannot make the server hand it the group. Every
+     legitimate run of both publish pipelines is a master run, so nothing that
+     should work is blocked.
+  5. **No required-template check on this group — yet.** A required-template
+     check refuses the resource to any run that does not `extends` the named
+     template, and neither publish pipeline is written that way; adding one today
+     would break releases rather than protect them. Branch control is strictly
+     stronger for a resource whose every legitimate run is from
+     `refs/heads/master`. If either publish pipeline is later converted to the
+     shell-plus-pinned-template shape `azure-pipelines.yml` uses, add a Required
+     template check naming that template at ref `refs/heads/master` at the same
+     time.
+  6. **No queue-time override.** `NPM_PUBLISH_TOKEN` must not be settable at
+     queue time, and the group must not allow users to override its values when
+     running a pipeline. A queue-time override re-creates exactly the
+     unprotected, caller-supplied variable this replaced.
 - **Fork secrets stay off.** "Make secrets available to builds of forks" and
   "Make fork builds run with the same permissions" must both be disabled.
   Enabling either hands every secret above to fork-authored code.
@@ -633,8 +680,10 @@ protections above are conventions rather than controls.
 - **Credentials are least-privilege and rotated.** `DEPLOY_TOKEN` should be
   write-only to its storage paths; the `BabylonBotPAT` service connection should
   be limited to posting issue comments; `GITHUB_TOKEN` should be a read-only,
-  fine-grained token scoped to this repository's pull-request metadata. Rotate
-  all of them on a fixed schedule and after any suspected exposure.
+  fine-grained token scoped to this repository's pull-request metadata;
+  `NPM_PUBLISH_TOKEN` should be a granular token that can publish the three
+  published packages and nothing else. Rotate all of them on a fixed schedule and
+  after any suspected exposure.
 - **Secret variables are marked secret.** A plain variable is written into the
   build environment and into logs; only variables marked secret are masked and
   withheld from fork builds.
@@ -665,6 +714,23 @@ that uploads target:
   `azure-pipelines-bundle-manifest.yml` for the bundle-size baseline
 - `TOOLS_STORAGE_ACCOUNT` — tools account backing `liteplayground.babylonjs.com`
 - `CDN_PROFILE_TOOLS`
+
+It uses `BabylonJS-NpmPublish` for the npm registry credential, imported by the
+`PublishToNpm` job of `azure-pipelines-npm-publish.yml` and
+`azure-pipelines-npm-publish-gl.yml` and by no other job in either file:
+
+- `NPM_PUBLISH_TOKEN` — granular, publish-only npm token for `@babylonjs/lite`,
+  `@babylonjs/lite-compat` and `@babylonjs/lite-gl`
+
+The name is new on purpose. The publish jobs previously read `$(NPM_TOKEN)` and
+imported no group at all, so that value could only have come from a
+pipeline-level UI variable — not a protected resource, readable by every job in
+the definition, and handed just as freely to a run queued manually from any
+branch, whose YAML is that branch's YAML. Had the group simply exported
+`NPM_TOKEN`, a surviving UI variable of that name would have kept publishing
+working whether or not the group existed, hiding the misconfiguration the move
+exists to surface. Both jobs now fail closed when `NPM_PUBLISH_TOKEN` is empty
+_or_ still the unsubstituted macro text an out-of-scope variable resolves to.
 
 This third group is easy to miss. It was **omitted from this list until the
 bundle-manifest pipeline failed on it**, even though PR CI (now
