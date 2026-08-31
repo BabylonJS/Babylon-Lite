@@ -21,11 +21,19 @@
 #   reportDir  — directory holding the sanitized HTML report to upload
 #
 # Required pipeline variables:
-#   BabylonJS-Deployment variable group: DEPLOYMENT_SERVER, DEPLOY_TOKEN
+#   BabylonJS-Deployment variable group: DEPLOYMENT_SERVER, DEPLOY_TOKEN,
+#     DEPLOY_HOST_ALLOWLIST (space- or comma-separated host[:port] list)
 #   Report upload settings: DEPLOY_ENDPOINT_UPLOAD, STORAGE_ACCOUNT, SERVE_DOMAIN
 #   Scope these groups to the calling job — never to the whole pipeline.
 # Required service connection:
 #   BabylonBotPAT — GitHub PAT service connection for PR comments
+#
+# For a pull-request build Azure reads the pipeline definition from the pull
+# request itself, so a call site is only as trustworthy as the file it lives in.
+# Every PR-context call site must therefore sit in `config/templates/pr-ci.yml`,
+# which `azure-pipelines.yml` reaches through a repository resource pinned to
+# refs/heads/master, and must pass `requireHostAllowlist: true` so that "some
+# https host" cannot stand in for "the deployment host".
 
 parameters:
     - name: reportType
@@ -35,6 +43,12 @@ parameters:
           - perf
     - name: reportDir
       type: string
+    # True for any call site that a pull-request build can reach. The host
+    # allowlist then has to be configured, and an unset one aborts the upload
+    # rather than falling back to "any https host".
+    - name: requireHostAllowlist
+      type: boolean
+      default: false
 
 steps:
     - script: |
@@ -102,6 +116,36 @@ steps:
                   ;;
           esac
 
+          # "It is https" is not a destination check -- an attacker's host serves
+          # https too. The host must be one this deployment is actually allowed
+          # to talk to, named in DEPLOY_HOST_ALLOWLIST alongside the credential
+          # it protects, where only a project administrator can change it.
+          REQUIRE_HOST_ALLOWLIST="${{ parameters.requireHostAllowlist }}"
+          ALLOWLIST="${DEPLOY_HOST_ALLOWLIST-}"
+          case "$ALLOWLIST" in
+              *'$'*) ALLOWLIST="" ;;
+          esac
+
+          if test -z "$ALLOWLIST"; then
+              if test "$REQUIRE_HOST_ALLOWLIST" = "True" || test "$REQUIRE_HOST_ALLOWLIST" = "true"; then
+                  echo "Refusing upload: DEPLOY_HOST_ALLOWLIST is not configured, and this call site requires it."
+                  echo "Add DEPLOY_HOST_ALLOWLIST to the BabylonJS-Deployment variable group as a space- or comma-separated list of permitted host[:port] values."
+                  exit 1
+              fi
+              echo "DEPLOY_HOST_ALLOWLIST is not configured; skipping host allowlist check for this non-PR call site."
+          else
+              HOST_ALLOWED="false"
+              for allowed in $(printf '%s' "$ALLOWLIST" | tr ',' ' '); do
+                  if test "$DEPLOY_HOST" = "$allowed"; then
+                      HOST_ALLOWED="true"
+                  fi
+              done
+              if test "$HOST_ALLOWED" != "true"; then
+                  echo "Refusing upload: DEPLOYMENT_SERVER host is not in DEPLOY_HOST_ALLOWLIST."
+                  exit 1
+              fi
+          fi
+
           for name in DEPLOY_ENDPOINT_UPLOAD STORAGE_ACCOUNT; do
               case "${!name}" in
                   *[!A-Za-z0-9._/-]*)
@@ -123,22 +167,29 @@ steps:
 
           # DEPLOY_TOKEN is read from the environment rather than macro-expanded,
           # so the secret is never written into the generated script body.
+          # --proto '=https' keeps the Authorization header on the host validated
+          # above: curl does not follow redirects unless asked, and cannot be
+          # talked down to plain http by the server's response.
           curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --fail-with-body --silent --show-error -X POST \
+            --proto '=https' --max-time 600 \
             -H "Content-Type: multipart/form-data" \
             -H "Authorization: ${DEPLOY_TOKEN}" \
             -F "path=${DEPLOY_PATH}" \
             -F "storageAccount=${STORAGE_ACCOUNT}" \
             -F "zip=@${ARCHIVE}"
           echo "##vso[task.setvariable variable=ReportUploaded]true"
+      continueOnError: true
       displayName: "Upload ${{ parameters.reportType }} test report"
       env:
           DEPLOYMENT_SERVER: $(DEPLOYMENT_SERVER)
           DEPLOY_ENDPOINT_UPLOAD: $(DEPLOY_ENDPOINT_UPLOAD)
           DEPLOY_TOKEN: $(DEPLOY_TOKEN)
+          DEPLOY_HOST_ALLOWLIST: $(DEPLOY_HOST_ALLOWLIST)
           STORAGE_ACCOUNT: $(STORAGE_ACCOUNT)
 
     - task: GitHubComment@0
       condition: eq(variables['ReportUploaded'], 'true')
+      continueOnError: true
       displayName: "Post ${{ parameters.reportType }} report link to PR"
       inputs:
           gitHubConnection: "BabylonBotPAT"

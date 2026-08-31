@@ -300,72 +300,185 @@ For local development, add these to `.env.local` (git-ignored).
 
 ## Azure Pipelines CI
 
-**Config:** `azure-pipelines.yml`  
+**Entry point:** `azure-pipelines.yml`
+**Job definitions:** `config/templates/pr-ci.yml`, read from `refs/heads/master`
 **Trigger:** PRs targeting `master`
 
-Parallel jobs:
+`azure-pipelines.yml` contains no job, no variable group and no script. It names
+the trigger and `extends` `config/templates/pr-ci.yml` through a repository
+resource pinned to `refs/heads/master`. Everything CI actually does is defined
+there. [Why](#why-the-jobs-are-not-in-azure-pipelinesyml) is the whole of the
+next section — it is not a tidy-up, and moving a job back into the entry point
+reintroduces a vulnerability.
 
-| Job                     | What it does                                            |
-| ----------------------- | ------------------------------------------------------- |
-| **Unit Tests**          | Vitest unit tests + Playwright plumbing tests           |
-| **Bundle Size**         | Ceiling checks + delta vs baseline                      |
-| **Perf Regression**     | Current vs baseline on BrowserStack (macOS Chrome)      |
-| **Parity (Cloud)**      | Pixel-diff on BrowserStack (macOS Chrome, real WebGPU)  |
-| **Lint**                | ESLint + TypeScript `--noEmit` type-check               |
-| **Publish \* (trusted)** | Credentialed uploads, in `checkout: none` jobs — see below |
+The run is three stages, because Azure evaluates approvals and checks per stage:
+
+| Stage       | Runs PR code | Credentials held                                   |
+| ----------- | ------------ | -------------------------------------------------- |
+| **CI**      | yes          | none                                                |
+| **Cloud**   | yes          | `BabylonJS-BrowserStack` only                       |
+| **Publish** | no           | `BabylonJS-Deployment`, `BabylonJS-CI-Infrastructure`, `BabylonBotPAT` |
+
+Jobs:
+
+| Job                          | Stage   | What it does                                            |
+| ---------------------------- | ------- | ------------------------------------------------------- |
+| **Release Markers**          | CI      | Commit-message half of the breaking-change rule         |
+| **API Report**               | CI      | Public API diff vs the merge base                       |
+| **Unit Tests**               | CI      | Vitest unit tests + Playwright plumbing tests           |
+| **Bundle Size**              | CI      | Ceiling checks + delta vs baseline                      |
+| **Lint**                     | CI      | ESLint + TypeScript `--noEmit` type-check               |
+| **Compat**                   | CI      | Cross-version compatibility checks                      |
+| **Playground Snapshot**      | CI      | Builds the playground; publishes it as an artifact      |
+| **Perf Regression**          | Cloud   | Current vs baseline on BrowserStack (macOS Chrome)      |
+| **Parity (Cloud)**           | Cloud   | Pixel-diff on BrowserStack (macOS Chrome, real WebGPU)  |
+| **Release Markers (labels)** | Publish | Label half of the rule, run from the pinned master checkout |
+| **Publish \***                 | Publish | Credentialed uploads, in `checkout: none` jobs          |
+| **Post PR Comments**         | Publish | Posts the API and bundle-size comment bodies            |
+
+### Why the jobs are not in `azure-pipelines.yml`
+
+For a pull-request build, Azure reads the pipeline definition from the pull
+request:
+
+> the YAML file that is used to run the pipeline is also a merge between the
+> source and the target branch. As a result, the changes you make to the YAML
+> file in source branch of the pull request can override the behavior defined by
+> the YAML file in target branch.
+
+There is no setting that makes a PR build use the target branch's YAML. So for
+as long as the jobs live in `azure-pipelines.yml`, the author of the pull request
+writes them — including which job holds which variable group, which job runs
+`checkout: none`, and where an authenticated upload is pointed. A pull request
+could add `- group: BabylonJS-Deployment` to a job that also runs its own code,
+set `DEPLOYMENT_SERVER` to a host it controls, and receive `DEPLOY_TOKEN` in the
+`Authorization` header of the upload. Nothing in the repository would notice,
+because the repository is what was rewritten.
+
+`System.PullRequest.IsFork` does not fix this. It only distinguishes forks — a
+branch pushed to this repository is not a fork, and most of this project's pull
+requests come from such branches. Microsoft documents system variables as
+read-only but does not document the agent refusing a `##vso[task.setvariable]`
+that shadows one for later steps, so it is also not a control you can lean on.
+
+Repository resources, by contrast, are resolved from their pinned ref, once, at
+pipeline start. Pinning the template to `refs/heads/master` means the jobs that
+run are the reviewed, merged ones no matter which branch queued the build.
 
 ### CI/CD Secret Handling
 
-`azure-pipelines.yml` is the only pipeline with a `pr:` trigger, so it is the
-only one that executes code authored by the pull request under review —
-`pnpm install` runs dependency lifecycle scripts, and every build, test and
-report step runs source from the PR head. Anything in scope for such a job is
-readable by that code, and any *destination* it uploads to is rewritable by it,
-because `##vso[task.setvariable]` overwrites an ordinary pipeline variable at
-runtime. Two rules follow, and `tests/lite/unit/pr-pipeline-credential-isolation.test.ts`
-enforces both:
+Three rules, all enforced by
+`tests/lite/unit/pr-pipeline-credential-isolation.test.ts`:
 
-1. **No credential is in scope for a job that runs PR code.** Variable groups
-   are attached per job, never at pipeline scope. Build and test jobs declare no
-   group; only the two cloud-browser jobs declare `BabylonJS-BrowserStack`, and
-   they are gated to non-fork builds because there is no way to drive a cloud
-   browser from untrusted code without giving that code the account key.
-2. **Privileged work runs in its own job.** Each upload happens in a dedicated
-   `checkout: none` job that consumes a pipeline artifact and runs no repository
-   code, so its destination variables cannot have been rewritten. A gate flag
-   set by a repository script — the former `ArtifactsSafe` — is not a substitute,
-   because PR code can set it too; it may gate artifact publication and nothing
-   privileged.
+1. **The entry point defines nothing.** No job, no step, no group, no service
+   connection — only the trigger and the pinned `extends`. The repository
+   resource must carry an explicit `ref: refs/heads/master`; without one it
+   follows the default branch, which is the right branch by accident and
+   silently the wrong one if the default ever changes.
+2. **No credential is in scope for a job that checks out the pull request.** No
+   variable group, no `GITHUB_TOKEN`, no `System.AccessToken`, no
+   `gitHubConnection`, and no `persistCredentials` — that last one leaves the
+   build's OAuth token in `.git/config`, where every later step in the job,
+   including a dependency's install script, can read it. The single exception is
+   `BabylonJS-BrowserStack` in the Cloud stage: a cloud browser cannot be driven
+   without giving the tests the account key. That stage holds nothing else, so a
+   leaked key buys browser minutes rather than a deploy.
+3. **Privileged work runs where no PR code has run.** Every upload happens in a
+   `checkout: none` job that consumes a pipeline artifact, and the two jobs that
+   need repository code with a credential in scope (`Release Markers (labels)`,
+   `Post PR Comments`) check out the pinned master resource instead. A gate flag
+   set by a repository script — `ArtifactsSafe` — is not a substitute, because
+   PR code can set it too; it may gate artifact publication and nothing else.
 
-The upload templates additionally allowlist their deploy paths, require an
-https destination whose host carries no embedded userinfo, and pass
-`DEPLOY_TOKEN` via `env:` so it never reaches a command line.
+Untrusted *content* still crosses the boundary: the API-report and bundle-size
+comment bodies are written by jobs running PR code. `Post PR Comments` runs them
+through `scripts/strip-logging-commands.sh`, which neutralises every `##vso[` and
+`##[` sequence before the body is loaded into a variable — otherwise a comment
+body could issue logging commands inside the job that holds the GitHub
+connection.
+
+The upload templates allowlist their deploy paths, require the destination host
+to appear in `DEPLOY_HOST_ALLOWLIST`, pin `curl` to `https` with no redirect
+following, and pass `DEPLOY_TOKEN` via `env:` so it never reaches a command line.
+An https URL on its own is not a destination check: an attacker's host serves
+https too.
+
+#### Changing CI
+
+Because the template is pinned, edits to `config/templates/pr-ci.yml` take effect
+only once they are on `master`. A pull request that changes it will not see its
+own changes run — that is the point. To try a change first, queue a **manual**
+run of the pipeline from your branch with the `trusted` resource's ref overridden
+to that branch. A manual run is not a pull-request run, is subject to the same
+checks, and grants no additional access.
 
 #### Settings that repository files cannot enforce
 
-These live in Azure DevOps and GitHub, cannot be asserted from this repo, and
-must be verified by an administrator. Nothing in the YAML defends against a
-mistake here, because for a PR build Azure reads the pipeline definition from
-the PR head.
+The design above stops a pull request from *quietly* taking a credential. It does
+not stop one from deleting the `extends` and writing its own jobs — no file in
+this repository can, because that file is the one being rewritten. The server
+side of the design is a set of checks configured in Azure DevOps, which
+[cannot be modified from YAML](https://learn.microsoft.com/azure/devops/pipelines/process/approvals):
 
+> Approvals and other checks aren't defined in the yaml file. Users modifying the
+> pipeline yaml file can't modify the checks performed before start of a stage.
+
+An administrator must configure all of the following. Until they do, the
+protections above are conventions rather than controls.
+
+- **Required template check, on every protected resource.** On the
+  `BabylonJS-Deployment`, `BabylonJS-CI-Infrastructure` and
+  `BabylonJS-BrowserStack` variable groups and on the `BabylonBotPAT` service
+  connection, add a **Required template** check requiring
+  `config/templates/pr-ci.yml` from this repository at ref `refs/heads/master`.
+  A run whose YAML does not extend that exact template at that exact ref is then
+  refused the resource before its stage starts. This is the check that makes
+  "the entry point is only a shell" enforceable: an abandoned-`extends` pull
+  request still builds, it simply builds with nothing worth stealing. Note that
+  the check names the ref, so repointing the repository resource at another
+  branch fails it too.
+- **`GITHUB_TOKEN` must live in a protected variable group.** A variable defined
+  in the pipeline's UI **is not a protected resource**, so no check applies to it
+  and every job in the definition can read it. `Release Markers (labels)` reads
+  it from `BabylonJS-Deployment`; the pipeline-level UI variable of the same name
+  must be **deleted**, or the whole isolation is bypassable by a pull request
+  that simply asks for `$(GITHUB_TOKEN)` in its own job.
+- **`DEPLOY_HOST_ALLOWLIST` must be set** in `BabylonJS-Deployment`, to a space-
+  or comma-separated list of the exact `host[:port]` values uploads may reach. PR
+  CI passes `requireHostAllowlist: true`, so if this variable is missing the
+  upload aborts rather than falling back to "any https host". It must live beside
+  the token it protects, in a group only an administrator can edit — not in the
+  pipeline UI, and not in the repository, where a pull request could add its own
+  host to it.
+- **Pipeline permissions.** Each protected resource should be authorized only for
+  the pipelines that need it: `BabylonJS-Deployment` and
+  `BabylonJS-CI-Infrastructure` for the pipelines that upload,
+  `BabylonJS-BrowserStack` only for those that use a cloud browser.
+- **Branch control on non-PR definitions.** A branch-control check allowing only
+  `refs/heads/master` is the strongest form of this, but it cannot be applied to
+  the resources PR CI uses: a PR build runs from `refs/pull/<n>/merge` and would
+  be blocked outright, taking the lab-site and report previews with it. Apply it
+  to the release and publish pipelines, where every run is a master run, and rely
+  on the required-template check for PR CI.
+- **Approvals on the cloud stage (optional).** Because the Cloud stage is the
+  only place a credential meets pull-request code, an approval check on
+  `BabylonJS-BrowserStack` gates exactly that exposure — and nothing else — at
+  the cost of a manual click per PR.
 - **Fork secrets stay off.** "Make secrets available to builds of forks" and
-  "Make fork builds run with the same permissions" must both be disabled on
-  `azure-pipelines.yml`. Enabling either hands every secret above to
-  fork-authored code and voids all of the above.
+  "Make fork builds run with the same permissions" must both be disabled.
+  Enabling either hands every secret above to fork-authored code.
 - **Queue-time overrides stay off.** `DEPLOYMENT_SERVER`, `DEPLOY_ENDPOINT_UPLOAD`,
-  `STORAGE_ACCOUNT`, `TOOLS_STORAGE_ACCOUNT` and `SERVE_DOMAIN` must not be
-  settable at queue time, or the destination allowlist is the only thing left.
-- **Variable groups are authorized per pipeline, not organization-wide.**
-  `BabylonJS-Deployment` and `BabylonJS-CI-Infrastructure` should be authorized
-  only for the pipelines that upload; `BabylonJS-BrowserStack` only for those
-  that use a cloud browser.
+  `DEPLOY_HOST_ALLOWLIST`, `STORAGE_ACCOUNT`, `TOOLS_STORAGE_ACCOUNT` and
+  `SERVE_DOMAIN` must not be settable at queue time.
+- **The `endpoint:` on the repository resource must exist.** The `trusted`
+  resource names a GitHub service connection with read access to this
+  repository. If that name is wrong the pipeline fails at startup, so confirm it
+  before merging a change to it.
 - **Credentials are least-privilege and rotated.** `DEPLOY_TOKEN` should be
   write-only to its storage paths; the `BabylonBotPAT` service connection should
-  be limited to posting issue comments; `GITHUB_TOKEN` (read by
-  `pnpm validate:release-markers` and `pnpm report:api-changes`, both of which
-  run alongside PR code) must be a read-only, fine-grained token scoped to this
-  repository's pull-request metadata. Rotate all of them on a fixed schedule and
-  after any suspected exposure.
+  be limited to posting issue comments; `GITHUB_TOKEN` should be a read-only,
+  fine-grained token scoped to this repository's pull-request metadata. Rotate
+  all of them on a fixed schedule and after any suspected exposure.
 - **Secret variables are marked secret.** A plain variable is written into the
   build environment and into logs; only variables marked secret are masked and
   withheld from fork builds.
@@ -384,6 +497,8 @@ uploading failed Playwright HTML reports:
 - `DEPLOYMENT_SERVER`
 - `DEPLOY_TOKEN`
 - `DEPLOY_ENDPOINT_UPLOAD`
+- `DEPLOY_HOST_ALLOWLIST` — exact `host[:port]` values uploads may reach
+- `GITHUB_TOKEN` — read-only PR metadata, read by `Release Markers (labels)`
 
 It uses `BabylonJS-CI-Infrastructure` for the storage accounts and CDN profiles
 that uploads target:
@@ -394,9 +509,9 @@ that uploads target:
 - `CDN_PROFILE_TOOLS`
 
 This third group is easy to miss. It was **omitted from this list until the
-bundle-manifest pipeline failed on it**, even though `azure-pipelines.yml`,
-`azure-pipelines-playground.yml` and `azure-pipelines-npm-publish.yml` had all
-three been importing it all along. A pipeline that needs a storage account and
+bundle-manifest pipeline failed on it**, even though PR CI (now
+`config/templates/pr-ci.yml`), `azure-pipelines-playground.yml` and
+`azure-pipelines-npm-publish.yml` had all three been importing it all along. A pipeline that needs a storage account and
 declares only the first two groups will not fail at parse time — see the trap
 described below.
 

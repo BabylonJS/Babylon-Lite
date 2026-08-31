@@ -1,0 +1,1117 @@
+# Babylon Lite — pull-request CI, defined on a protected ref
+#
+# ── WHY THIS FILE IS NOT azure-pipelines.yml ─────────────────────────────────
+#
+# For a pull-request build, Azure Pipelines reads the pipeline definition from
+# the pull request itself:
+#
+#   "the YAML file that is used to run the pipeline is also a merge between the
+#    source and the target branch. As a result, the changes you make to the YAML
+#    file in source branch of the pull request can override the behavior defined
+#    by the YAML file in target branch."
+#   — learn.microsoft.com/azure/devops/pipelines/repos/github#pr-triggers
+#
+# There is no setting that makes a PR build use the target branch's YAML. So for
+# as long as the job definitions live in `azure-pipelines.yml`, the author of a
+# pull request writes them. Everything a reviewer might rely on — which job holds
+# which variable group, which job runs `checkout: none`, which destination an
+# upload is pointed at, whether an OAuth token is left in `.git/config` — is
+# theirs to rewrite, and the rewrite ships with the PR that is being reviewed.
+# `System.PullRequest.IsFork` does not help: it only distinguishes forks, and
+# Microsoft documents system variables as read-only without documenting that the
+# agent stops `##vso[task.setvariable]` from shadowing one for later steps.
+#
+# So `azure-pipelines.yml` no longer contains any job. It is a shell that does
+# nothing but `extends` this file through a repository resource pinned to
+# `refs/heads/master`, and repository resources are resolved from the pinned ref:
+#
+#   "Repositories are resolved only once, when the pipeline starts up. After
+#    that, the same resource is used during the pipeline run."
+#   — learn.microsoft.com/azure/devops/pipelines/process/templates
+#
+# Everything below therefore comes from master — reviewed, merged code — no
+# matter which branch the build was queued from.
+#
+# ── WHAT MAKES THAT ENFORCEABLE ──────────────────────────────────────────────
+#
+# A pull request can still delete the `extends` from the shell and write its own
+# jobs. That is exactly what the **Required template** check is for: it is
+# configured on each protected resource by an administrator, is not expressed in
+# YAML, and is evaluated before a stage starts:
+#
+#   "Approvals and other checks aren't defined in the yaml file. Users modifying
+#    the pipeline yaml file can't modify the checks performed before start of a
+#    stage."
+#   — learn.microsoft.com/azure/devops/pipelines/process/approvals
+#
+# With a Required template check naming this file at `refs/heads/master`, a run
+# whose YAML does not extend it is refused every variable group and every service
+# connection it asks for. The abandoned-`extends` pull request still builds — it
+# simply builds with nothing worth stealing. TESTING.md ("CI/CD Secret Handling")
+# lists the checks an administrator must configure; they are the server half of
+# this design and no file in this repository can assert them.
+#
+# ── STAGE LAYOUT (the reason there are three) ────────────────────────────────
+#
+# Checks are evaluated per stage, so the trust boundaries are stages:
+#
+#   CI       — runs pull-request code. Holds no variable group, no service
+#              connection, no `persistCredentials`, no token of any kind. Nothing
+#              here is protected because there is nothing here to protect.
+#   Cloud    — runs pull-request code against a cloud browser, which cannot be
+#              done without giving that code the account key. Holds
+#              BabylonJS-BrowserStack and nothing else: no deploy token, no
+#              GitHub credential. Isolated in its own stage so an administrator
+#              can put an approval on the BrowserStack group without gating
+#              anything else.
+#   Publish  — holds the deploy token and the GitHub connection. Every job in it
+#              either checks out nothing at all or checks out the pinned master
+#              resource. No job in this stage runs a line of pull-request code,
+#              which is what makes its destination variables trustworthy: a
+#              `##vso[task.setvariable]` can rewrite an ordinary pipeline
+#              variable, so an authenticated upload sharing a job with PR code
+#              can be redirected to another host and made to hand over
+#              DEPLOY_TOKEN.
+#
+# Artifacts are the only thing that crosses from CI/Cloud into Publish, and the
+# upload templates allowlist both the destination path and the destination host.
+
+variables:
+    - name: NODE_VERSION
+      value: "22.x"
+    - name: PNPM_VERSION
+      value: "11.9.0"
+    - name: CI
+      value: "true"
+    - name: HEADLESS
+      value: "true"
+
+stages:
+    # ══════════════════════════════════════════════════════════════════════
+    # Stage 1: CI — pull-request code, zero credentials
+    # ══════════════════════════════════════════════════════════════════════
+    - stage: CI
+      displayName: "PR Validation"
+      jobs:
+          # ──────────────────────────────────────────────────────────────
+          # Job 0: Release Marker Validation
+          # ──────────────────────────────────────────────────────────────
+          # Commit-message half of the check, which needs no credential. The
+          # label half needs the GitHub API and therefore a token, so it runs in
+          # the Publish stage against the pinned master checkout instead.
+          - job: ReleaseMarkers
+            displayName: "Release Markers"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+                  fetchDepth: 0
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: pnpm validate:release-markers
+                  displayName: "Validate breaking-change markers"
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 1: API Report
+          # ──────────────────────────────────────────────────────────────
+          - job: ApiReport
+            displayName: "API Report"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                # No `persistCredentials`. It leaves the OAuth token in the
+                # checkout's git config ("Set to 'true' to leave the OAuth token
+                # in the Git config after the initial fetch"), where every later
+                # step — including dependency lifecycle scripts — can read it.
+                # The report only reads history, which the fetch already has.
+                - checkout: self
+                  fetchDepth: 0
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                # No GITHUB_TOKEN: this step runs PR-authored source. The script
+                # falls back to the Azure PR context and writes the comment body
+                # to a file, which the Publish stage posts.
+                - script: pnpm report:api-changes
+                  displayName: "Generate API report diff"
+
+                # The report script always writes the body, but sets
+                # POST_API_COMMENT only when the diff is non-empty. Staging on
+                # that flag keeps the previous behaviour of commenting only when
+                # the public API actually moved. The flag is set by PR code, so
+                # it decides nothing but whether the PR gets its own comment.
+                - task: PublishPipelineArtifact@1
+                  condition: and(always(), eq(variables['POST_API_COMMENT'], 'true'))
+                  continueOnError: true
+                  displayName: "Stage API comment for trusted posting"
+                  inputs:
+                      targetPath: $(System.DefaultWorkingDirectory)/test-results/api-report/api-report-comment.md
+                      artifact: api-comment
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 2: Unit Tests
+          # ──────────────────────────────────────────────────────────────
+          - job: UnitTests
+            displayName: "Unit Tests"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: pnpm exec playwright install chromium
+                  displayName: "Install Playwright browsers"
+
+                - script: npx vitest run --project unit --project gl-unit --project no-webgpu
+                  displayName: "Run vitest unit tests"
+                  env:
+                      CI: "true"
+
+                - script: npx vitest run --project build
+                  displayName: "Run vitest build-output tests"
+
+                - script: npx vitest run --project gl-build
+                  displayName: "Run vitest lite-gl build-output tests"
+
+                # lite-gl visual parity vs the Babylon ThinEngine reference. WebGL2
+                # runs headless (SwiftShader in CI, enabled by CI=true in
+                # playwright.config.ts), so no cloud browser is needed — unlike the
+                # WebGPU parity job below. Compares the live lite-gl render against the
+                # committed goldens in reference/gl/<slug>/babylon-ref-golden.png; those
+                # goldens MUST be generated with the same SwiftShader path
+                # (CI=true HEADLESS=true RECAPTURE_GOLDEN=true pnpm test:parity:gl) so
+                # the renderer matches. If a golden is missing the harness self-captures
+                # it live (the run still passes, but without a reviewed baseline).
+                - script: pnpm test:parity:gl
+                  displayName: "Run lite-gl parity tests"
+                  env:
+                      HEADLESS: "true"
+                      CI: "true"
+
+                # lite-gl perf vs the Babylon ThinEngine it replaces (same headless
+                # SwiftShader render — no cloud browser needed, and no committed golden
+                # required since both engines render live). Gates that lite-gl is not
+                # materially slower than Babylon; a generous margin absorbs CI software-
+                # rendering noise (where the lite-gl/Babylon ratio compresses) while
+                # still catching a gross regression. Writes the Perf-Regression manifest.
+                - script: pnpm test:perf-regression:gl
+                  displayName: "Run lite-gl perf regression"
+                  env:
+                      HEADLESS: "true"
+                      CI: "true"
+                      PERF_DURATION: "3"
+                      PERF_REGRESSION_PCT: "50"
+
+                - script: |
+                      npx playwright test tests/lite/plumbing/dispose.spec.ts
+                      npx playwright test tests/lite/plumbing/material-swap.spec.ts
+                      npx playwright test tests/lite/plumbing/memory-leak.spec.ts
+                      npx playwright test tests/lite/plumbing/picking.spec.ts
+                  displayName: "Run plumbing tests"
+                  env:
+                      HEADLESS: "true"
+
+                - task: PublishTestResults@2
+                  condition: always()
+                  inputs:
+                      testResultsFormat: "JUnit"
+                      testResultsFiles: "**/test-results/unit-junit.xml"
+                      mergeTestResults: true
+                      testRunTitle: "Unit Tests"
+                  continueOnError: true
+
+                - script: npx tsx scripts/report-test-results.ts test-results/unit-junit.xml
+                  condition: always()
+                  continueOnError: true
+                  displayName: "Report test results"
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 3: Bundle Size
+          # ──────────────────────────────────────────────────────────────
+          - job: BundleSize
+            displayName: "Bundle Size"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                # See ApiReport: no `persistCredentials`.
+                - checkout: self
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: pnpm exec playwright install chromium
+                  displayName: "Install Playwright browsers"
+
+                # Cache remote scene assets (models/textures/env fetched during
+                # measurement) across runs/PRs. The cache is a pure URL->bytes store
+                # independent of source, so a constant prefix is shared broadly. The
+                # per-run key component means the exact key never hits (so newly
+                # fetched assets are always saved at job end), while restoreKeys
+                # restores the most recent prefix match — a rolling cache that
+                # accumulates new assets instead of freezing. Measurement still
+                # fetches-with-retry on a miss, so a cold/expired cache is only slower,
+                # never incorrect.
+                - task: Cache@2
+                  displayName: "Cache remote scene assets"
+                  inputs:
+                      key: 'bundle-assets | v1 | "$(Build.BuildId)"'
+                      restoreKeys: |
+                          bundle-assets | v1
+                      path: $(System.DefaultWorkingDirectory)/.bundle-asset-cache
+
+                # The master baseline for the delta report is published by
+                # azure-pipelines-bundle-manifest.yml to public storage, so it is
+                # fetched over plain HTTPS rather than read out of git. Nothing is
+                # tracked, so there is nothing for branches to conflict on and
+                # nothing that can go stale and turn this job red.
+                #
+                # build:bundle-scenes fetches it itself (see
+                # writeMasterBundleManifest); a missing baseline is not an error —
+                # the delta report is skipped and the ceiling checks below, which
+                # are what actually gate size, are unaffected.
+                - script: pnpm build:bundle-scenes
+                  displayName: "Build bundle scenes"
+                  env:
+                      SKIP_BJS: "true"
+
+                # Bundle-content unit specs read the per-scene manifests under
+                # lab/public/bundle/manifest/. Those are build output rather than
+                # tracked source, so the Unit Tests job (which runs vitest before any
+                # build) self-skips them — run them here, where the build exists.
+                - script: npx vitest run --project unit tests/lite/unit/bundle-content-no-f64.test.ts tests/lite/unit/npe-particle-bundle-content.test.ts
+                  displayName: "Bundle content unit tests"
+
+                # Absolute ceiling checks (scene-config.json maxRawKB)
+                - script: npx playwright test tests/lite/parity/bundle-size.spec.ts --reporter=junit
+                  displayName: "Bundle size ceiling checks"
+                  env:
+                      HEADLESS: "true"
+                      PLAYWRIGHT_JUNIT_OUTPUT_NAME: test-results/bundle-ceiling-junit.xml
+
+                - script: npx tsx scripts/report-test-results.ts test-results/bundle-ceiling-junit.xml
+                  condition: always()
+                  displayName: "Report bundle-size results to Azure"
+
+                - task: PublishTestResults@2
+                  condition: always()
+                  displayName: "Publish bundle-size test results"
+                  inputs:
+                      testResultsFormat: JUnit
+                      testResultsFiles: "test-results/bundle-ceiling-junit.xml"
+                      testRunTitle: "Bundle Size"
+
+                # Generate bundle-size delta comment for PR. Written to a file and
+                # posted from the Publish stage; this job holds no GitHub
+                # credential, so it cannot post it itself.
+                - script: npx tsx scripts/report-bundle-size-deltas.ts
+                  condition: always()
+                  displayName: "Generate bundle-size delta comment"
+
+                # See the API report job: staged only when there is a delta to
+                # report, matching the previous comment-on-change behaviour.
+                - task: PublishPipelineArtifact@1
+                  condition: and(always(), eq(variables['POST_BUNDLE_COMMENT'], 'true'))
+                  continueOnError: true
+                  displayName: "Stage bundle comment for trusted posting"
+                  inputs:
+                      targetPath: $(System.DefaultWorkingDirectory)/test-results/bundle-size-comment.md
+                      artifact: bundle-comment
+
+                - script: pnpm build:lab-site
+                  displayName: "Build static lab site"
+                  env:
+                      LAB_BASE_PATH: "/lite/$(Build.BuildNumber)/lab/"
+
+                # The deploy token is deliberately NOT in scope for this job — it
+                # has just run PR-authored install/build/test code. The built site
+                # is handed to the Publish stage, which holds the credential and
+                # runs nothing from the repository.
+                - task: PublishPipelineArtifact@1
+                  displayName: "Stage lab site for trusted upload"
+                  condition: succeeded()
+                  continueOnError: true
+                  inputs:
+                      targetPath: $(System.DefaultWorkingDirectory)/lab/dist
+                      artifact: lab-site
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 4: Lint
+          # ──────────────────────────────────────────────────────────────
+          - job: Lint
+            displayName: "Lint & Type Check"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: npx eslint . --format ./scripts/eslint-vso-formatter.cjs
+                  displayName: "ESLint"
+
+                # Every type-check below pipes tsc into sed to turn TS diagnostics into
+                # `##vso[task.logissue]` annotations. A shell pipeline exits with the status
+                # of its LAST command, and sed always succeeds — so without `pipefail` a
+                # failing tsc reported green. `task.logissue type=error` annotates the build
+                # but does not fail the task on its own, so nothing else caught it either.
+                - script: |
+                      set -euo pipefail
+                      npx tsc -p packages/babylon-lite/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (package)"
+
+                - script: |
+                      set -euo pipefail
+                      npx tsc -p lab/tsconfig.typecheck.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (lab)"
+
+                - script: |
+                      set -euo pipefail
+                      npx tsc -p tests/lite/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (tests)"
+
+                - script: |
+                      set -euo pipefail
+                      npx tsc -p packages/babylon-lite-gl/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (gl package)"
+
+                - script: |
+                      set -euo pipefail
+                      npx tsc -p tests/gl/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (gl tests)"
+
+                # Verifies docs/lite/02-feature-comparison.md is in sync with its
+                # source of truth (lab/lite/docs/feature-comparison.html). The check
+                # exits non-zero either when the doc is OUT OF SYNC or when generation
+                # itself fails (e.g. malformed HTML). On failure, emit a task.logissue
+                # so the error surfaces in the ADO build's Errors summary (the GitHub
+                # check links here via "Details"); the step log above has the specifics.
+                - script: |
+                      if ! pnpm gen:feature-doc:check; then
+                          echo "##vso[task.logissue type=error;sourcepath=docs/lite/02-feature-comparison.md]Feature-comparison doc check failed (see the step log above for details). If it reports OUT OF SYNC, run 'pnpm gen:feature-doc' and commit the result; otherwise fix the reported generation error."
+                          exit 1
+                      fi
+                  displayName: "Feature-comparison doc in sync"
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 5: Compat Layer (@babylonjs/lite-compat)
+          # ──────────────────────────────────────────────────────────────
+          # Type-checks, builds, and unit-tests the opt-in compatibility layer so
+          # regressions are caught in PR CI. NOTE: this job intentionally does NOT
+          # publish the package — @babylonjs/lite-compat is not released yet. The
+          # npm-publish pipeline only publishes packages/babylon-lite/build.
+          - job: Compat
+            displayName: "Compat Layer"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                # `set -euo pipefail` is required here for the same reason as in the Lint
+                # job above: sed is the last command in the pipeline, so without it a
+                # failing tsc is masked by sed's zero exit and the step reports green.
+                - script: |
+                      set -euo pipefail
+                      npx tsc -p packages/babylon-lite-compat/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (compat src)"
+
+                - script: |
+                      set -euo pipefail
+                      npx tsc -p packages/babylon-lite-compat/tests/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (compat tests)"
+
+                - script: pnpm --filter @babylonjs/lite-compat build
+                  displayName: "Build compat package (dist)"
+
+                - script: npx vitest run --project compat
+                  displayName: "Run compat unit tests"
+                  env:
+                      CI: "true"
+
+                - task: PublishTestResults@2
+                  condition: always()
+                  inputs:
+                      testResultsFormat: "JUnit"
+                      testResultsFiles: "**/test-results/unit-junit.xml"
+                      mergeTestResults: true
+                      testRunTitle: "Compat Layer"
+                  continueOnError: true
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 6: PR Playground Snapshot (build only)
+          # ──────────────────────────────────────────────────────────────
+          # Builds the Lite Playground from THIS PR's source — the self-hosted
+          # engine is bundled from the same commit, so the runner executes the PR's
+          # engine code — and hands the result to the Publish stage, which deploys
+          # it to a per-PR sub-path on the tools account (served at
+          # liteplayground.babylonjs.com/pr/<N>/) and comments the URL on the PR.
+          # PLAYGROUND_BASE is set to match the public sub-path so every asset, the
+          # runner iframe, the self-hosted engine, and the SPA snippet routes
+          # resolve under it.
+          - job: PlaygroundSnapshot
+            displayName: "PR Playground Snapshot"
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                # Public base path baked into the build. The upload path and the
+                # public URL are decided in the Publish stage, which is the only
+                # place they cannot be rewritten by the code being built.
+                - name: playgroundBase
+                  value: /pr/$(System.PullRequest.PullRequestNumber)/
+            steps:
+                # fetchDepth: 0 + tags so the engine build can resolve the latest
+                # npm-lite-v* tag for its version stamp (see vite.engine.config.ts).
+                - checkout: self
+                  fetchDepth: 0
+                  fetchTags: true
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                # PLAYGROUND_BASE must be leading- and trailing-slashed and match
+                # the public sub-path so the built app resolves assets under it.
+                - script: pnpm build:playground
+                  displayName: "Build the playground (engine + app)"
+                  env:
+                      PLAYGROUND_BASE: $(playgroundBase)
+
+                - task: PublishPipelineArtifact@1
+                  displayName: "Stage playground snapshot for trusted upload"
+                  condition: succeeded()
+                  continueOnError: true
+                  inputs:
+                      targetPath: $(System.DefaultWorkingDirectory)/playground/dist
+                      artifact: playground-site
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Stage 2: Cloud — pull-request code + the cloud-browser key, nothing else
+    # ══════════════════════════════════════════════════════════════════════
+    # Driving a cloud browser means the code under test talks to BrowserStack, so
+    # the account key is unavoidably in scope. What is avoidable is everything
+    # else being in scope with it: this stage imports BabylonJS-BrowserStack and
+    # no other group, holds no deploy token and no GitHub credential, and uploads
+    # nothing. It runs in parallel with CI (`dependsOn: []`).
+    #
+    # Because it is its own stage, an administrator can attach an approval or a
+    # branch-control check to BabylonJS-BrowserStack that gates these two jobs
+    # alone — see TESTING.md.
+    #
+    # Fork builds: Azure withholds secrets from them, so the key is absent. The
+    # jobs detect that directly (the value is missing) rather than consulting
+    # `System.PullRequest.IsFork`, and skip instead of failing.
+    - stage: Cloud
+      displayName: "Cloud Browser Tests"
+      dependsOn: []
+      jobs:
+          # ──────────────────────────────────────────────────────────────
+          # Job 7: Performance Regression
+          # ──────────────────────────────────────────────────────────────
+          - job: PerfRegression
+            displayName: "Performance: Lite vs Stable"
+            timeoutInMinutes: 120
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                - group: BabylonJS-BrowserStack
+                # Redaction gate for artifact publication only. This is set by a
+                # repository-authored script, so it is a correctness check, not a
+                # security boundary, and nothing privileged depends on it.
+                - name: ArtifactsSafe
+                  value: "false"
+            steps:
+                - checkout: self
+                  fetchDepth: 0
+                  fetchTags: true
+
+                # Presence of the key, not the fork flag, decides whether a cloud
+                # run is possible. Forging this variable only makes the run fail
+                # for want of a key; it grants nothing.
+                - script: |
+                      set -uo pipefail
+                      # An unresolved macro arrives as literal "$(NAME)" rather
+                      # than as an empty string, which is what a run sees when a
+                      # check refuses the variable group, so emptiness alone is
+                      # not the whole test.
+                      PRESENT="true"
+                      for value in "${BROWSERSTACK_USERNAME:-}" "${BROWSERSTACK_ACCESS_KEY:-}"; do
+                          case "$value" in
+                              "" | *'$('*) PRESENT="false" ;;
+                          esac
+                      done
+                      if test "$PRESENT" != "true"; then
+                          echo "No BrowserStack credential in scope (expected for fork builds, and for any run denied the variable group); skipping the cloud run."
+                      fi
+                      echo "##vso[task.setvariable variable=CloudCredentialPresent]${PRESENT}"
+                  displayName: "Detect cloud credential"
+                  env:
+                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
+                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
+
+                - task: UseNode@1
+                  condition: eq(variables['CloudCredentialPresent'], 'true')
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  condition: eq(variables['CloudCredentialPresent'], 'true')
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  condition: eq(variables['CloudCredentialPresent'], 'true')
+                  displayName: "Install dependencies"
+
+                # Build current bundle scenes (skip size measurement — not needed for perf)
+                - script: pnpm build:bundle-scenes
+                  condition: eq(variables['CloudCredentialPresent'], 'true')
+                  displayName: "Build current bundle scenes"
+                  env:
+                      SKIP_BJS: "true"
+                      SKIP_MEASURE: "true"
+
+                # Resolve baseline ref SHA for cache key.
+                # Must mirror getBaselineRef() in scripts/build-perf-baseline.ts so the cache key
+                # matches the ref that pnpm build:perf-baseline will actually build from.
+                # NOTE: do NOT chain `git describe ... | xargs git rev-parse || fallback` — when
+                # `git describe` finds no tag it exits non-zero but xargs still runs `git rev-parse`
+                # with no args, which exits 0 with empty stdout, so the `||` fallbacks never fire
+                # and BASELINE_SHA silently becomes empty. That corrupts the cache key to a
+                # constant string shared across all builds.
+                - script: |
+                      set -u
+                      TAG=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+                      if [ -n "$TAG" ]; then
+                          BASELINE_SHA=$(git rev-parse "$TAG")
+                          echo "Baseline ref: $TAG"
+                      else
+                          BASELINE_SHA=$(git rev-parse origin/master 2>/dev/null || git rev-parse HEAD~1)
+                          echo "Baseline ref: origin/master (no v* tag found)"
+                      fi
+                      if [ -z "$BASELINE_SHA" ]; then
+                          echo "##vso[task.logissue type=error]Failed to resolve baseline SHA — aborting to avoid poisoning the perf-baseline cache with an empty key."
+                          exit 1
+                      fi
+                      echo "##vso[task.setvariable variable=BASELINE_SHA]$BASELINE_SHA"
+                      echo "Baseline SHA: $BASELINE_SHA"
+                      mkdir -p lab/public/bundle-baseline
+                  condition: eq(variables['CloudCredentialPresent'], 'true')
+                  displayName: "Resolve baseline ref"
+
+                - task: Cache@2
+                  condition: eq(variables['CloudCredentialPresent'], 'true')
+                  inputs:
+                      key: '"perf-baseline" | "$(BASELINE_SHA)"'
+                      path: $(System.DefaultWorkingDirectory)/lab/public/bundle-baseline
+                      cacheHitVar: BASELINE_CACHE_HIT
+                  displayName: "Cache baseline bundles"
+
+                # Build baseline bundle scenes from last release tag (or master)
+                - script: pnpm build:perf-baseline
+                  displayName: "Build baseline bundle scenes"
+                  condition: and(eq(variables['CloudCredentialPresent'], 'true'), ne(variables.BASELINE_CACHE_HIT, 'true'))
+
+                # Generate baseline HTML loader pages (needed even on cache hit)
+                - script: |
+                      node -e "
+                      const fs = require('fs');
+                      const path = require('path');
+                      const scenes = JSON.parse(fs.readFileSync('scene-config.json','utf8'));
+                      const outDir = path.join('lab','lite');
+                      fs.mkdirSync(outDir, { recursive: true });
+                      for (const s of scenes) {
+                        const html = '<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000}canvas{width:100%;height:100%;display:block}</style></head><body><canvas id=\"renderCanvas\"></canvas><script src=\"/loader.js\"></script><script type=\"module\" src=\"/bundle-baseline/scene'+s.id+'.js\"></script></body></html>';
+                        fs.writeFileSync(path.join(outDir,'bundle-baseline-scene'+s.id+'.html'), html);
+                      }
+                      console.log('Generated ' + scenes.length + ' baseline HTML pages');
+                      "
+                  displayName: "Generate baseline HTML pages"
+                  condition: and(eq(variables['CloudCredentialPresent'], 'true'), eq(variables.BASELINE_CACHE_HIT, 'true'))
+
+                # Runs current vs baseline on same BrowserStack macOS Chrome instance
+                - script: pnpm test:perf-cloud
+                  condition: eq(variables['CloudCredentialPresent'], 'true')
+                  displayName: "Run perf regression tests (current vs stable)"
+                  env:
+                      HEADLESS: "true"
+                      PERF_REGRESSION_PCT: "$(PERF_REGRESSION_PCT)"
+                      PERF_FRAMES: "$(PERF_FRAMES)"
+                      PERF_RUNS: "$(PERF_RUNS)"
+                      PERF_WARMUP: "$(PERF_WARMUP)"
+                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
+                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
+
+                # Only the JUnit file and explicit HTML report allowlist may be
+                # published. Raw Playwright output/trace directories stay private.
+                - script: |
+                      set -euo pipefail
+                      npx tsx scripts/redact-secrets.ts sanitize test-results/perf-junit.xml test-results/perf-report
+                      npx tsx scripts/redact-secrets.ts verify test-results/perf-junit.xml test-results/perf-report
+                      echo "##vso[task.setvariable variable=ArtifactsSafe]true"
+                  condition: and(always(), eq(variables['CloudCredentialPresent'], 'true'))
+                  displayName: "Sanitize and verify publishable perf artifacts"
+                  env:
+                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
+                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
+
+                - task: PublishTestResults@2
+                  condition: and(always(), eq(variables['ArtifactsSafe'], 'true'))
+                  inputs:
+                      testResultsFormat: "JUnit"
+                      testResultsFiles: "test-results/perf-junit.xml"
+                      mergeTestResults: true
+                      testRunTitle: "Perf Regression"
+                      publishRunAttachments: false
+                  continueOnError: true
+
+                - script: npx tsx scripts/report-test-results.ts test-results/perf-junit.xml
+                  condition: and(always(), eq(variables['ArtifactsSafe'], 'true'))
+                  continueOnError: true
+                  displayName: "Report test results"
+
+                # Hand the sanitized report to the Publish stage. Publishing it
+                # here rather than uploading it here keeps DEPLOY_TOKEN out of a
+                # job that has executed PR-authored code.
+                - task: PublishPipelineArtifact@1
+                  condition: and(failed(), eq(variables['ArtifactsSafe'], 'true'))
+                  continueOnError: true
+                  displayName: "Stage perf report for trusted upload"
+                  inputs:
+                      targetPath: $(System.DefaultWorkingDirectory)/test-results/perf-report
+                      artifact: perf-report
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 8: Parity (Cloud Browser)
+          # ──────────────────────────────────────────────────────────────
+          - job: ParityCloud
+            displayName: "Parity Tests (Cloud Browser)"
+            timeoutInMinutes: 180
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                - group: BabylonJS-BrowserStack
+                # Redaction gate for artifact publication only — see the note on
+                # the same variable in PerfRegression.
+                - name: ArtifactsSafe
+                  value: "false"
+            steps:
+                - checkout: self
+
+                - script: |
+                      set -uo pipefail
+                      # An unresolved macro arrives as literal "$(NAME)" rather
+                      # than as an empty string, which is what a run sees when a
+                      # check refuses the variable group, so emptiness alone is
+                      # not the whole test.
+                      PRESENT="true"
+                      for value in "${BROWSERSTACK_USERNAME:-}" "${BROWSERSTACK_ACCESS_KEY:-}"; do
+                          case "$value" in
+                              "" | *'$('*) PRESENT="false" ;;
+                          esac
+                      done
+                      if test "$PRESENT" != "true"; then
+                          echo "No BrowserStack credential in scope (expected for fork builds, and for any run denied the variable group); skipping the cloud run."
+                      fi
+                      echo "##vso[task.setvariable variable=CloudCredentialPresent]${PRESENT}"
+                  displayName: "Detect cloud credential"
+                  env:
+                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
+                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
+
+                - task: UseNode@1
+                  condition: eq(variables['CloudCredentialPresent'], 'true')
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  condition: eq(variables['CloudCredentialPresent'], 'true')
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  condition: eq(variables['CloudCredentialPresent'], 'true')
+                  displayName: "Install dependencies"
+
+                - script: pnpm build:bundle-scenes
+                  condition: eq(variables['CloudCredentialPresent'], 'true')
+                  displayName: "Build bundle scenes"
+                  env:
+                      SKIP_BJS: "true"
+                      SKIP_MEASURE: "true"
+
+                # Run parity tests on BrowserStack (macOS Chrome with real WebGPU)
+                # via a direct CDP connection — NO browserstack-node-sdk. The wait
+                # script grabs up to BSTACK_SESSIONS_REQUIRED parallel sessions and
+                # exports CIWORKERS so the specs shard across that many cloud browsers
+                # (falling back to fewer when the plan is busy). A BrowserStack Local
+                # tunnel (started by the Playwright globalSetup) exposes the local dev
+                # server to the remote browser.
+                # Requires BROWSERSTACK_USERNAME and BROWSERSTACK_ACCESS_KEY
+                # from the BabylonJS-BrowserStack variable group.
+                - script: bash scripts/browserstack-wait.sh pnpm test:parity-cloud
+                  condition: eq(variables['CloudCredentialPresent'], 'true')
+                  displayName: "Run parity tests (BrowserStack, sharded)"
+                  env:
+                      HEADLESS: "true"
+                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
+                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
+                      BSTACK_SESSIONS_REQUIRED: "2"
+                      BSTACK_LOCAL_IDENTIFIER: "bstack-lite-parity-$(Build.BuildId)"
+
+                # Only the JUnit file and explicit HTML report allowlist may be
+                # published. Raw Playwright output/trace directories stay private.
+                - script: |
+                      set -euo pipefail
+                      npx tsx scripts/redact-secrets.ts sanitize test-results/parity-junit.xml test-results/parity-report
+                      npx tsx scripts/redact-secrets.ts verify test-results/parity-junit.xml test-results/parity-report
+                      echo "##vso[task.setvariable variable=ArtifactsSafe]true"
+                  condition: and(always(), eq(variables['CloudCredentialPresent'], 'true'))
+                  displayName: "Sanitize and verify publishable parity artifacts"
+                  env:
+                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
+                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
+
+                - task: PublishTestResults@2
+                  condition: and(always(), eq(variables['ArtifactsSafe'], 'true'))
+                  inputs:
+                      testResultsFormat: "JUnit"
+                      testResultsFiles: "test-results/parity-junit.xml"
+                      mergeTestResults: true
+                      testRunTitle: "Parity (Cloud)"
+                      publishRunAttachments: false
+                  continueOnError: true
+
+                - script: npx tsx scripts/report-test-results.ts test-results/parity-junit.xml
+                  condition: and(always(), eq(variables['ArtifactsSafe'], 'true'))
+                  continueOnError: true
+                  displayName: "Report test results"
+
+                # Hand the sanitized report to the Publish stage — see the note on
+                # the same step in PerfRegression.
+                - task: PublishPipelineArtifact@1
+                  condition: and(failed(), eq(variables['ArtifactsSafe'], 'true'))
+                  continueOnError: true
+                  displayName: "Stage parity report for trusted upload"
+                  inputs:
+                      targetPath: $(System.DefaultWorkingDirectory)/test-results/parity-report
+                      artifact: parity-report
+
+    # ══════════════════════════════════════════════════════════════════════
+    # Stage 3: Publish — the only stage that holds a deploy or GitHub credential
+    # ══════════════════════════════════════════════════════════════════════
+    # Every job here either checks out nothing (`checkout: none`) or checks out
+    # the `trusted` repository resource, which is pinned to refs/heads/master.
+    # None of them runs a line of pull-request code. That is what makes the
+    # destination variables trustworthy — with no PR code in the job, there is
+    # nothing to rewrite DEPLOYMENT_SERVER or STORAGE_ACCOUNT before the upload —
+    # and it is why the upload templates additionally allowlist the destination
+    # host and path.
+    #
+    # `succeededOrFailed()` because failed cloud runs are exactly when the report
+    # upload matters, and a red CI stage should still get its bundle-size comment.
+    - stage: Publish
+      displayName: "Trusted Publish"
+      dependsOn:
+          - CI
+          - Cloud
+      condition: succeededOrFailed()
+      jobs:
+          # ──────────────────────────────────────────────────────────────
+          # Job 9: Release marker labels (trusted source checkout)
+          # ──────────────────────────────────────────────────────────────
+          # The label half of the release-marker rule needs the GitHub API, and
+          # therefore a token. Running the PR's own copy of the validator with a
+          # token in scope is precisely what must not happen, so this job checks
+          # out `trusted` — master — and runs master's validator against the PR's
+          # metadata. `--ignore-scripts` keeps even master's dependency lifecycle
+          # scripts out of the job that holds the token.
+          - job: ReleaseMarkerLabels
+            displayName: "Release Markers (labels)"
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                # GITHUB_TOKEN must resolve from a protected variable group so the
+                # Required template / pipeline-permission checks cover it. See
+                # TESTING.md: while it remains a pipeline-level UI variable it is
+                # readable by any job in this definition and no check applies.
+                - group: BabylonJS-Deployment
+            steps:
+                - checkout: trusted
+                  fetchDepth: 1
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile --ignore-scripts
+                  displayName: "Install dependencies (no lifecycle scripts)"
+
+                - script: pnpm validate:release-markers
+                  displayName: "Enforce breaking-change labels"
+                  env:
+                      GITHUB_REPOSITORY: "BabylonJS/Babylon-Lite"
+                      PR_NUMBER: "$(System.PullRequest.PullRequestNumber)"
+                      GITHUB_TOKEN: "$(GITHUB_TOKEN)"
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 10: Publish Lab Site
+          # ──────────────────────────────────────────────────────────────
+          - job: PublishLabSite
+            displayName: "Publish Lab Site"
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                - group: BabylonJS-Deployment
+            steps:
+                - checkout: none
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download lab site"
+                  continueOnError: true
+                  inputs:
+                      artifact: lab-site
+                      path: $(Pipeline.Workspace)/lab-site
+
+                - template: upload-static-site.yml
+                  parameters:
+                      siteDir: $(Pipeline.Workspace)/lab-site
+                      deployPath: lite/$(Build.BuildNumber)/lab
+                      siteName: "Lab"
+                      linkUrl: $(SERVE_DOMAIN)/lite/$(Build.BuildNumber)/lab/index.html
+                      requireHostAllowlist: true
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 11: Publish Playground Snapshot
+          # ──────────────────────────────────────────────────────────────
+          # BabylonJS-CI-Infrastructure provides TOOLS_STORAGE_ACCOUNT (the
+          # account backing liteplayground.babylonjs.com). The upload path and the
+          # public URL are computed here, in a job with no repository code, rather
+          # than in the job that built the snapshot.
+          - job: PublishPlaygroundSnapshot
+            displayName: "Publish Playground Snapshot"
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                - group: BabylonJS-Deployment
+                - group: BabylonJS-CI-Infrastructure
+                # The `litePlayground` container maps to the subdomain root, so
+                # this path becomes /pr/<N>/.
+                - name: deployPath
+                  value: litePlayground/pr/$(System.PullRequest.PullRequestNumber)
+                - name: playgroundUrl
+                  value: https://liteplayground.babylonjs.com/pr/$(System.PullRequest.PullRequestNumber)/
+            steps:
+                - checkout: none
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download playground snapshot"
+                  continueOnError: true
+                  inputs:
+                      artifact: playground-site
+                      path: $(Pipeline.Workspace)/playground-site
+
+                - template: upload-static-site.yml
+                  parameters:
+                      siteDir: $(Pipeline.Workspace)/playground-site
+                      deployPath: $(deployPath)
+                      storageAccount: $(TOOLS_STORAGE_ACCOUNT)
+                      siteName: "Lite Playground"
+                      linkUrl: $(playgroundUrl)
+                      requireHostAllowlist: true
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 12: Publish Perf Report
+          # ──────────────────────────────────────────────────────────────
+          # The upload template exits cleanly when no report was staged, so this
+          # job is a no-op on a green perf run.
+          - job: PublishPerfReport
+            displayName: "Publish Perf Report"
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                - group: BabylonJS-Deployment
+                - name: ReportUploaded
+                  value: "false"
+            steps:
+                - checkout: none
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download perf report"
+                  continueOnError: true
+                  inputs:
+                      artifact: perf-report
+                      path: $(Pipeline.Workspace)/perf-report
+
+                - template: upload-test-report.yml
+                  parameters:
+                      reportType: perf
+                      reportDir: $(Pipeline.Workspace)/perf-report
+                      requireHostAllowlist: true
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 13: Publish Parity Report
+          # ──────────────────────────────────────────────────────────────
+          - job: PublishParityReport
+            displayName: "Publish Parity Report"
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                - group: BabylonJS-Deployment
+                - name: ReportUploaded
+                  value: "false"
+            steps:
+                - checkout: none
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download parity report"
+                  continueOnError: true
+                  inputs:
+                      artifact: parity-report
+                      path: $(Pipeline.Workspace)/parity-report
+
+                - template: upload-test-report.yml
+                  parameters:
+                      reportType: parity
+                      reportDir: $(Pipeline.Workspace)/parity-report
+                      requireHostAllowlist: true
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 14: Post PR comments
+          # ──────────────────────────────────────────────────────────────
+          # The API-report and bundle-size comment bodies are produced by jobs
+          # that run PR code, so they are untrusted *content*. Content is fine —
+          # it ends up as markdown in a comment — but it must not be interpreted.
+          # Echoing it back through `##vso[task.setvariable]` would let it emit
+          # logging commands of its own, so `strip-logging-commands.sh` (from the
+          # pinned master checkout) neutralises every `##vso[` / `##[` sequence
+          # before the body is ever set as a variable.
+          - job: PostPrComments
+            displayName: "Post PR Comments"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: trusted
+                  fetchDepth: 1
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download API comment"
+                  continueOnError: true
+                  inputs:
+                      artifact: api-comment
+                      path: $(Pipeline.Workspace)/api-comment
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download bundle comment"
+                  continueOnError: true
+                  inputs:
+                      artifact: bundle-comment
+                      path: $(Pipeline.Workspace)/bundle-comment
+
+                - script: |
+                      set -euo pipefail
+                      bash scripts/strip-logging-commands.sh \
+                          "$(Pipeline.Workspace)/api-comment/api-report-comment.md" \
+                          API_COMMENT_BODY POST_API_COMMENT
+                      bash scripts/strip-logging-commands.sh \
+                          "$(Pipeline.Workspace)/bundle-comment/bundle-size-comment.md" \
+                          BUNDLE_COMMENT_BODY POST_BUNDLE_COMMENT
+                  condition: always()
+                  continueOnError: true
+                  displayName: "Load and neutralise comment bodies"
+
+                - task: GitHubComment@0
+                  condition: and(always(), eq(variables['POST_API_COMMENT'], 'true'))
+                  continueOnError: true
+                  displayName: "Post API changes to PR"
+                  inputs:
+                      gitHubConnection: "BabylonBotPAT"
+                      repositoryName: "$(Build.Repository.Name)"
+                      id: "$(System.PullRequest.PullRequestNumber)"
+                      comment: "$(API_COMMENT_BODY)"
+
+                - task: GitHubComment@0
+                  condition: and(always(), eq(variables['POST_BUNDLE_COMMENT'], 'true'))
+                  continueOnError: true
+                  displayName: "Post bundle-size changes to PR"
+                  inputs:
+                      gitHubConnection: "BabylonBotPAT"
+                      repositoryName: "$(Build.Repository.Name)"
+                      id: "$(System.PullRequest.PullRequestNumber)"
+                      comment: "$(BUNDLE_COMMENT_BODY)"

@@ -13,12 +13,21 @@
 # had run first it could point this authenticated curl at its own host and
 # capture DEPLOY_TOKEN.
 #
+# For a pull-request build Azure reads the pipeline definition from the pull
+# request, so the call site itself is only as trustworthy as the file it lives
+# in. Every PR-context call site must therefore sit in `config/templates/pr-ci.yml`,
+# which `azure-pipelines.yml` reaches through a repository resource pinned to
+# refs/heads/master, and must pass `requireHostAllowlist: true`.
+#
 # As defence in depth the script below also:
 #   * refuses any deploy path outside a fixed allowlist (see ALLOWED_PATH_RE),
-#   * requires an https destination whose host carries no embedded userinfo,
+#   * requires the destination host to appear in DEPLOY_HOST_ALLOWLIST, which is
+#     mandatory whenever `requireHostAllowlist` is true — an https URL alone is
+#     not a destination check, since any host can serve https,
 #   * rejects deploy variables containing multipart/form-data metacharacters,
-#   * passes DEPLOY_TOKEN through `env:` instead of macro-expanding it into the
-#     generated script body, so the secret never reaches a command line.
+#   * pins curl to https, refuses redirects, and passes DEPLOY_TOKEN through
+#     `env:` instead of macro-expanding it into the generated script body, so the
+#     secret never reaches a command line.
 #
 # Parameters:
 #   siteDir        - path to the static site folder to zip and upload
@@ -28,9 +37,12 @@
 #   postComment    - post a PR comment with the link (default true)
 #   storageAccount - storage account to upload to (default $(STORAGE_ACCOUNT))
 #   linkUrl        - public URL to link in the PR comment (when postComment)
+#   requireHostAllowlist - fail closed when DEPLOY_HOST_ALLOWLIST is unset.
+#                    Mandatory for every call site reachable from a PR build.
 #
 # Required pipeline variables:
-#   BabylonJS-Deployment variable group: DEPLOYMENT_SERVER, DEPLOY_TOKEN
+#   BabylonJS-Deployment variable group: DEPLOYMENT_SERVER, DEPLOY_TOKEN,
+#     DEPLOY_HOST_ALLOWLIST (space- or comma-separated host[:port] list)
 #   Report upload settings: DEPLOY_ENDPOINT_UPLOAD, STORAGE_ACCOUNT, SERVE_DOMAIN
 #   Playground snapshots additionally pass TOOLS_STORAGE_ACCOUNT via storageAccount.
 #   Scope these groups to the calling job — never to the whole pipeline.
@@ -63,6 +75,12 @@ parameters:
     - name: linkUrl
       type: string
       default: ""
+    # True for any call site that a pull-request build can reach. The host
+    # allowlist then has to be configured, and an unset one aborts the upload
+    # rather than falling back to "any https host".
+    - name: requireHostAllowlist
+      type: boolean
+      default: false
 
 steps:
     - script: |
@@ -136,6 +154,36 @@ steps:
                   ;;
           esac
 
+          # "It is https" is not a destination check -- an attacker's host serves
+          # https too. The host must be one this deployment is actually allowed
+          # to talk to, named in DEPLOY_HOST_ALLOWLIST alongside the credential
+          # it protects, where only a project administrator can change it.
+          REQUIRE_HOST_ALLOWLIST="${{ parameters.requireHostAllowlist }}"
+          ALLOWLIST="${DEPLOY_HOST_ALLOWLIST-}"
+          case "$ALLOWLIST" in
+              *'$'*) ALLOWLIST="" ;;
+          esac
+
+          if test -z "$ALLOWLIST"; then
+              if test "$REQUIRE_HOST_ALLOWLIST" = "True" || test "$REQUIRE_HOST_ALLOWLIST" = "true"; then
+                  echo "Refusing upload: DEPLOY_HOST_ALLOWLIST is not configured, and this call site requires it."
+                  echo "Add DEPLOY_HOST_ALLOWLIST to the BabylonJS-Deployment variable group as a space- or comma-separated list of permitted host[:port] values."
+                  exit 1
+              fi
+              echo "DEPLOY_HOST_ALLOWLIST is not configured; skipping host allowlist check for this non-PR call site."
+          else
+              HOST_ALLOWED="false"
+              for allowed in $(printf '%s' "$ALLOWLIST" | tr ',' ' '); do
+                  if test "$DEPLOY_HOST" = "$allowed"; then
+                      HOST_ALLOWED="true"
+                  fi
+              done
+              if test "$HOST_ALLOWED" != "true"; then
+                  echo "Refusing upload: DEPLOYMENT_SERVER host is not in DEPLOY_HOST_ALLOWLIST."
+                  exit 1
+              fi
+          fi
+
           # These become multipart/form-data field values, so keep them to
           # characters that cannot forge part boundaries or additional fields.
           for name in DEPLOY_ENDPOINT_UPLOAD STORAGE_ACCOUNT; do
@@ -156,7 +204,12 @@ steps:
 
           # DEPLOY_TOKEN is read from the environment rather than macro-expanded,
           # so the secret is never written into the generated script body.
+          # --proto '=https' and --location-trusted's absence keep the
+          # Authorization header on the host validated above: curl does not
+          # follow redirects unless asked, and cannot be talked down to plain
+          # http by the server's response.
           curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --fail-with-body --silent --show-error -X POST \
+            --proto '=https' --max-time 600 \
             -H "Content-Type: multipart/form-data" \
             -H "Authorization: ${DEPLOY_TOKEN}" \
             -F "path=${DEPLOY_PATH}" \
@@ -169,6 +222,7 @@ steps:
           DEPLOYMENT_SERVER: $(DEPLOYMENT_SERVER)
           DEPLOY_ENDPOINT_UPLOAD: $(DEPLOY_ENDPOINT_UPLOAD)
           DEPLOY_TOKEN: $(DEPLOY_TOKEN)
+          DEPLOY_HOST_ALLOWLIST: $(DEPLOY_HOST_ALLOWLIST)
           STORAGE_ACCOUNT: ${{ parameters.storageAccount }}
 
     - ${{ if eq(parameters.postComment, true) }}:
