@@ -5,8 +5,8 @@
 #   2. API Report       — public API diff comment + breaking-change validation
 #   3. Unit Tests       — vitest + plumbing (Playwright)
 #   4. Bundle Size      — ceiling checks
-#   5. Perf Regression  — Lite vs Stable on BrowserStack
-#   6. Parity (Cloud)   — pixel-diff via cloud browser with real WebGPU
+#   5. Perf Regression  — Lite vs Stable on native macOS
+#   6. Parity (macOS)   — experimental native headless WebGPU pixel-diff
 #   7. Lint             — ESLint + TypeScript type-check
 #   8. Playground Snapshot — per-PR playground deploy + PR comment
 #
@@ -19,7 +19,6 @@ pr:
             - master
 
 variables:
-    - group: BabylonJS-BrowserStack
     - group: BabylonJS-Deployment
     # Provides TOOLS_STORAGE_ACCOUNT — the tools storage account backing
     # liteplayground.babylonjs.com, so PR playground snapshots serve same-origin
@@ -312,12 +311,12 @@ stages:
           # Job 4: Performance Regression
           # ──────────────────────────────────────────────────────────────
           - job: PerfRegression
-            displayName: "Performance: Lite vs Stable"
+            displayName: "Performance: Lite vs Stable (Native macOS)"
             timeoutInMinutes: 120
             pool:
-                vmImage: "ubuntu-latest"
+                vmImage: "macOS-15"
             variables:
-                ArtifactsSafe: "false"
+                ArtifactsSafe: "true"
                 ReportUploaded: "false"
             steps:
                 - checkout: self
@@ -399,30 +398,16 @@ stages:
                   displayName: "Generate baseline HTML pages"
                   condition: eq(variables.BASELINE_CACHE_HIT, 'true')
 
-                # Runs current vs baseline on same BrowserStack macOS Chrome instance
-                - script: pnpm test:perf-cloud
-                  displayName: "Run perf regression tests (current vs stable)"
+                # Runs current vs baseline in the same local Chrome instance on the
+                # hosted macOS agent. The shared WebGPU probe runs before the test.
+                - script: pnpm test:perf-native-macos
+                  displayName: "Run perf regression tests (native macOS)"
                   env:
-                      HEADLESS: "true"
                       PERF_REGRESSION_PCT: "$(PERF_REGRESSION_PCT)"
                       PERF_FRAMES: "$(PERF_FRAMES)"
                       PERF_RUNS: "$(PERF_RUNS)"
                       PERF_WARMUP: "$(PERF_WARMUP)"
-                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
-                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
-
-                # Only the JUnit file and explicit HTML report allowlist may be
-                # published. Raw Playwright output/trace directories stay private.
-                - script: |
-                      set -euo pipefail
-                      npx tsx scripts/redact-secrets.ts sanitize test-results/perf-junit.xml test-results/perf-report
-                      npx tsx scripts/redact-secrets.ts verify test-results/perf-junit.xml test-results/perf-report
-                      echo "##vso[task.setvariable variable=ArtifactsSafe]true"
-                  condition: always()
-                  displayName: "Sanitize and verify publishable perf artifacts"
-                  env:
-                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
-                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
+                      REUSE_BROWSER: "1"
 
                 - task: PublishTestResults@2
                   condition: and(always(), eq(variables['ArtifactsSafe'], 'true'))
@@ -442,15 +427,17 @@ stages:
                       reportType: perf
 
           # ──────────────────────────────────────────────────────────────
-          # Job 5: Parity (Cloud Browser)
+          # Job 5: Parity (Native macOS WebGPU experiment)
           # ──────────────────────────────────────────────────────────────
-          - job: ParityCloud
-            displayName: "Parity Tests (Cloud Browser)"
+          - job: ParityNativeMacOS
+            displayName: "Parity Tests (Native macOS)"
             timeoutInMinutes: 180
             pool:
-                vmImage: "ubuntu-latest"
+                vmImage: "macOS-15"
             variables:
-                ArtifactsSafe: "false"
+                # This job has no remote-browser credentials in its Playwright
+                # process, so its allowlisted HTML/JUnit reports are safe to publish.
+                ArtifactsSafe: "true"
                 ReportUploaded: "false"
             steps:
                 - checkout: self
@@ -473,36 +460,15 @@ stages:
                       SKIP_BJS: "true"
                       SKIP_MEASURE: "true"
 
-                # Run parity tests on BrowserStack (macOS Chrome with real WebGPU)
-                # via a direct CDP connection — NO browserstack-node-sdk. The wait
-                # script grabs up to BSTACK_SESSIONS_REQUIRED parallel sessions and
-                # exports CIWORKERS so the specs shard across that many cloud browsers
-                # (falling back to fewer when the plan is busy). A BrowserStack Local
-                # tunnel (started by the Playwright globalSetup) exposes the local dev
-                # server to the remote browser.
-                # Requires BROWSERSTACK_USERNAME and BROWSERSTACK_ACCESS_KEY
-                # from the BabylonJS-BrowserStack variable group.
-                - script: bash scripts/browserstack-wait.sh pnpm test:parity-cloud
-                  displayName: "Run parity tests (BrowserStack, sharded)"
+                # Run Chrome directly on the hosted macOS agent. The Playwright
+                # global setup logs Chromium GPU diagnostics and requests a WebGPU device before
+                # scene execution, so the experiment fails clearly when the hosted
+                # VM does not expose a usable adapter.
+                - script: pnpm test:parity-native-macos
+                  displayName: "Run parity tests (native macOS WebGPU)"
                   env:
-                      HEADLESS: "true"
-                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
-                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
-                      BSTACK_SESSIONS_REQUIRED: "2"
-                      BSTACK_LOCAL_IDENTIFIER: "bstack-lite-parity-$(Build.BuildId)"
-
-                # Only the JUnit file and explicit HTML report allowlist may be
-                # published. Raw Playwright output/trace directories stay private.
-                - script: |
-                      set -euo pipefail
-                      npx tsx scripts/redact-secrets.ts sanitize test-results/parity-junit.xml test-results/parity-report
-                      npx tsx scripts/redact-secrets.ts verify test-results/parity-junit.xml test-results/parity-report
-                      echo "##vso[task.setvariable variable=ArtifactsSafe]true"
-                  condition: always()
-                  displayName: "Sanitize and verify publishable parity artifacts"
-                  env:
-                      BROWSERSTACK_USERNAME: "$(BROWSERSTACK_USERNAME)"
-                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"
+                      CIWORKERS: "2"
+                      REUSE_BROWSER: "1"
 
                 - task: PublishTestResults@2
                   condition: and(always(), eq(variables['ArtifactsSafe'], 'true'))
@@ -510,7 +476,7 @@ stages:
                       testResultsFormat: "JUnit"
                       testResultsFiles: "test-results/parity-junit.xml"
                       mergeTestResults: true
-                      testRunTitle: "Parity (Cloud)"
+                      testRunTitle: "Parity (Native macOS)"
                       publishRunAttachments: false
                   continueOnError: true
                 - script: npx tsx scripts/report-test-results.ts test-results/parity-junit.xml

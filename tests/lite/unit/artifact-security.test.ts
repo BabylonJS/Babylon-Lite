@@ -162,7 +162,7 @@ describe("BrowserStack artifact security", () => {
     });
 });
 
-describe("BrowserStack pipeline publication gates", () => {
+describe("remote-browser and native test publication gates", () => {
     const pipeline = readFileSync(resolve(repoRoot, "azure-pipelines.yml"), "utf8");
     const uploadTemplate = readFileSync(resolve(repoRoot, "config/templates/upload-test-report.yml"), "utf8");
     const parityConfig = readFileSync(resolve(repoRoot, "config/playwright.parity-cloud.config.ts"), "utf8");
@@ -173,17 +173,20 @@ describe("BrowserStack pipeline publication gates", () => {
         expect(perfConfig).toContain('trace: "off"');
     });
 
-    it("sets ArtifactsSafe only after sanitize and verify commands", () => {
-        const safetySteps = [...pipeline.matchAll(/npx tsx scripts\/redact-secrets\.ts sanitize[\s\S]*?##vso\[task\.setvariable variable=ArtifactsSafe\]true/g)];
-        expect(safetySteps).toHaveLength(2);
-        expect(pipeline.match(/ArtifactsSafe: "false"/g)).toHaveLength(2);
-        for (const step of safetySteps) {
-            expect(step[0]).toContain("redact-secrets.ts verify");
-            expect(step[0]).not.toContain("continueOnError");
-        }
+    it("does not expose BrowserStack credentials to native test jobs", () => {
+        expect(pipeline).not.toContain("BabylonJS-BrowserStack");
+        expect(pipeline).not.toContain("BROWSERSTACK_USERNAME");
+        expect(pipeline).not.toContain("BROWSERSTACK_ACCESS_KEY");
+        expect(pipeline).not.toContain("scripts/browserstack-wait.sh");
+        expect(pipeline).not.toContain("pnpm test:perf-cloud");
     });
 
-    it("gates BrowserStack result publication and allowlists only report directories", () => {
+    it("runs GPU test jobs locally on hosted macOS agents", () => {
+        expect(pipeline).toMatch(/- job: PerfRegression[\s\S]*?vmImage: "macOS-15"[\s\S]*?pnpm test:perf-native-macos/);
+        expect(pipeline).toMatch(/- job: ParityNativeMacOS[\s\S]*?vmImage: "macOS-15"[\s\S]*?pnpm test:parity-native-macos/);
+    });
+
+    it("gates test result publication and allowlists only report directories", () => {
         for (const suite of ["perf", "parity"]) {
             expect(pipeline).toMatch(
                 new RegExp(
