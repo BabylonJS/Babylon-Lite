@@ -18,17 +18,9 @@ import { createRenderTask, removeMeshFromTask, type RenderTask } from "../frame-
 import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } from "../camera/camera.js";
 import { mat4InvertToRefOrIdentity } from "../math/mat4-invert-to-ref.js";
 import { casterVersionSum, createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
-import { getNoColorView, preloadPcfShadowTaskState } from "./pcf-shadow-task-hooks.js";
+import { getNoColorView, preloadPcfShadowTaskState, shadowCasterMaterialChanged, snapshotShadowCasterMaterial } from "./pcf-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
-
-/** Generation of the material that ACTUALLY casts this caster mesh's shadow — the explicit
- *  `_shadowCasterMaterial` override when set, else the mesh's own material. Lets the caster-set diff detect a
- *  rebuild of the override caster material (which would otherwise be invisible to a check on the receive material). */
-function effectiveCasterGen(material: Material): number {
-    const eff = material._shadowCasterMaterial ?? material;
-    return (eff as { _csmGen?: number })._csmGen ?? 0;
-}
 
 /** CSM configuration captured by the generator and consumed by these hooks. */
 export interface CsmConfig {
@@ -89,6 +81,8 @@ export interface CsmTaskState extends ShadowTaskInternalState {
      *  caster-set change updates the existing cascade tasks instead of rebuilding and re-resolving every caster
      *  (which leaked ~casters×cascades UBO handles each time the caster list was re-supplied). */
     _materialViews: Map<Material, MaterialView>;
+    /** @internal Terminal caster material identity snapshot for each receive material. */
+    _casterMaterials: Map<Material, Material>;
     /** @internal Per-caster-material generation (`_csmGen`) snapshot at build. The incremental path is taken only
      *  while every current caster's material gen is unchanged — i.e. no CASTER material was rebuilt (which would
      *  leave its cached no-color view dangling). This is precise, unlike the global `_materialEpoch` which also
@@ -151,7 +145,15 @@ export function ensureCsmShadowTaskState(
 ): CsmTaskState {
     const existing = existingState as CsmTaskState | null;
     if (existing) {
-        if (existing._casterMeshes === casterMeshes && existing._renderableVersion === scene._renderableVersion) {
+        let casterMatChanged = false;
+        for (const m of casterMeshes) {
+            const mat = m.material;
+            if (mat && shadowCasterMaterialChanged(mat, existing._casterMaterials, existing._casterMatGens)) {
+                casterMatChanged = true;
+                break;
+            }
+        }
+        if (!casterMatChanged && existing._casterMeshes === casterMeshes && existing._renderableVersion === scene._renderableVersion) {
             return existing;
         }
         // The caster set is unchanged and NO material was rebuilt/swapped since these tasks were built (the
@@ -163,7 +165,7 @@ export function ensureCsmShadowTaskState(
         // geometry edit re-compiles pipelines + churns bind-groups/bundles for the whole caster set (multi-MB,
         // never returned by the GPU allocator). Only a real material change (epoch bump) needs a full rebuild,
         // because that destroys the caster UBOs the cached views point at.
-        if (existing._casterMeshes === casterMeshes && existing._materialEpoch === scene._materialEpoch) {
+        if (!casterMatChanged && existing._casterMeshes === casterMeshes && existing._materialEpoch === scene._materialEpoch) {
             existing._renderableVersion = scene._renderableVersion;
             return existing;
         }
@@ -177,21 +179,10 @@ export function ensureCsmShadowTaskState(
         // leaking ~casters×cascades handles every time the caster list was re-supplied, which a consumer may do
         // per frame). Only add the new casters / drop departed ones (a regenerated caster's old packet is freed
         // by removeFromScene when its mesh is disposed; a persistent caster simply keeps its packet).
-        let casterMatChanged = false;
-        for (const m of casterMeshes) {
-            const mat = m.material;
-            if (!mat) {
-                continue;
-            }
-            const stored = existing._casterMatGens.get(mat);
-            if (stored !== undefined && stored !== effectiveCasterGen(mat)) {
-                casterMatChanged = true;
-                break;
-            }
-        }
         if (!casterMatChanged) {
             const nextSet = new Set(casterMeshes);
             const views = existing._materialViews;
+            const materials = existing._casterMaterials;
             const gens = existing._casterMatGens;
             const caps = existing._casterMaxCascades;
             const tasks = existing._tasks;
@@ -212,7 +203,7 @@ export function ensureCsmShadowTaskState(
                             tasks[c]!.addMesh(m, { material: view });
                         }
                     }
-                    gens.set(m.material, effectiveCasterGen(m.material));
+                    snapshotShadowCasterMaterial(m.material, materials, gens);
                 }
                 caps.set(m, maxCascade);
             }
@@ -294,11 +285,12 @@ export function ensureCsmShadowTaskState(
     // Snapshot each caster material's gen so the next caster-set change can tell whether a CASTER material was
     // rebuilt (→ full rebuild) or only the set changed (→ incremental, keeping unchanged casters' packets).
     const casterMatGens = new Map<Material, number>();
+    const casterMaterials = new Map<Material, Material>();
     const casterMaxCascades = new Map<Mesh, number | undefined>();
     for (const m of casterMeshes) {
         casterMaxCascades.set(m, m._shadowMaxCascade);
         if (m.material) {
-            casterMatGens.set(m.material, effectiveCasterGen(m.material));
+            snapshotShadowCasterMaterial(m.material, casterMaterials, casterMatGens);
         }
     }
     return {
@@ -316,6 +308,7 @@ export function ensureCsmShadowTaskState(
         _renderableVersion: scene._renderableVersion,
         _materialEpoch: scene._materialEpoch,
         _materialViews: materialViews,
+        _casterMaterials: casterMaterials,
         _casterMatGens: casterMatGens,
         _casterMaxCascades: casterMaxCascades,
         _cascadeScratch: _createCascadeScratch(n),

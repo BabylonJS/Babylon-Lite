@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from "vitest";
 import { setShadowCasterMaterial } from "../../../packages/babylon-lite/src/material/set-shadow-caster-material";
-import { getNoColorView } from "../../../packages/babylon-lite/src/shadow/pcf-shadow-task-hooks";
+import { getNoColorView, shadowCasterMaterialChanged, snapshotShadowCasterMaterial } from "../../../packages/babylon-lite/src/shadow/pcf-shadow-task-hooks";
 import type { Material, MaterialView } from "../../../packages/babylon-lite/src/material/material";
 
 function fakeMaterial(name: string): Material {
@@ -77,6 +77,49 @@ describe("the caster-view resolver shared by the PCF and CSM paths", () => {
 
         expect(getNoColorView(visible, cache)).toBe(casterView);
         expect(cache.get(visible)).toBe(casterView);
+    });
+
+    describe("shadow caster task invalidation", () => {
+        it("detects changing and clearing an override after a task snapshot", () => {
+            const visible = fakeMaterial("visible");
+            const first = fakeMaterial("first");
+            const second = fakeMaterial("second");
+            const terminals = new Map<Material, Material>();
+            const generations = new Map<Material, number>();
+
+            setShadowCasterMaterial(visible, first);
+            snapshotShadowCasterMaterial(visible, terminals, generations);
+            expect(shadowCasterMaterialChanged(visible, terminals, generations)).toBe(false);
+
+            setShadowCasterMaterial(visible, second);
+            expect(shadowCasterMaterialChanged(visible, terminals, generations)).toBe(true);
+            snapshotShadowCasterMaterial(visible, terminals, generations);
+
+            setShadowCasterMaterial(visible, null);
+            expect(shadowCasterMaterialChanged(visible, terminals, generations)).toBe(true);
+        });
+
+        it("detects a rebuild of the terminal material in an override chain", () => {
+            const visible = fakeMaterial("visible");
+            const intermediate = fakeMaterial("intermediate");
+            const terminal = fakeMaterial("terminal");
+            const terminals = new Map<Material, Material>();
+            const generations = new Map<Material, number>();
+
+            setShadowCasterMaterial(visible, intermediate);
+            setShadowCasterMaterial(intermediate, terminal);
+            terminal._csmGen = 4;
+            snapshotShadowCasterMaterial(visible, terminals, generations);
+            expect(shadowCasterMaterialChanged(visible, terminals, generations)).toBe(false);
+
+            terminal._csmGen++;
+            expect(shadowCasterMaterialChanged(visible, terminals, generations)).toBe(true);
+        });
+
+        it("leaves a previously unseen material to the incremental caster path", () => {
+            const material = fakeMaterial("new-caster");
+            expect(shadowCasterMaterialChanged(material, new Map(), new Map())).toBe(false);
+        });
     });
 
     it("leaves a material without an override to its own view", () => {

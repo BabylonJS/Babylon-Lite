@@ -67,6 +67,7 @@ describe("setShadowCasterMaxCascade", () => {
             _renderableVersion: 1,
             _materialEpoch: 1,
             _materialViews: new Map([[material, view]]),
+            _casterMaterials: new Map([[material, material]]),
             _casterMatGens: new Map([[material, 0]]),
             _casterMaxCascades: new Map([[mesh, undefined]]),
         } as unknown as CsmTaskState;
