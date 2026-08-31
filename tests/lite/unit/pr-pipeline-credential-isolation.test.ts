@@ -642,6 +642,36 @@ describe("the trusted publisher exposes a narrow interface for PR CI output", ()
         );
     });
 
+    it("stages the bundle comment on every run, whatever the scene selection decided", () => {
+        // #627 turns on the artifact being unconditional: the run that should
+        // withdraw a stale comment is exactly the run with nothing to say, so a
+        // condition that suppresses staging suppresses the withdrawal too.
+        //
+        // The affected-scene selection (#638) is the live threat here, because
+        // gating the bundle job's expensive steps on `RUN_BUNDLE_TESTS` reads as
+        // an obvious thing to extend to the staging step as well.
+        const step = /-\s*task:\s*PublishPipelineArtifact@\d(?:(?!PublishPipelineArtifact@)[\s\S])*?artifact:\s*bundle-comment/.exec(withoutComments(template));
+        expect(step, `${PINNED_TEMPLATE} does not stage the bundle comment`).toBeDefined();
+
+        const condition = /condition:\s*([^\n]*)/.exec(step?.[0] ?? "")?.[1]?.trim();
+        expect(condition, `${PINNED_TEMPLATE} stages the bundle comment conditionally, so a quiet run cannot retract a stale comment`).toBe("always()");
+
+        // The generator has to survive the same gating, or the directory it is
+        // supposed to fill is simply absent and the reconciler reads "leave it
+        // alone" — which is the stale comment, restored.
+        const generator = /-\s*script:\s*npx tsx scripts\/report-bundle-size-deltas\.ts[\s\S]*?(?=\n\s{16}-\s)/.exec(withoutComments(template));
+        expect(generator, `${PINNED_TEMPLATE} does not generate the bundle comment`).toBeDefined();
+        expect(/condition:\s*([^\n]*)/.exec(generator?.[0] ?? "")?.[1]?.trim(), `${PINNED_TEMPLATE} skips the bundle-comment generator, so quiet runs stage no state`).toBe(
+            "always()"
+        );
+
+        // Skipping measurement is only safe to report as `none` because the
+        // selector positively said so; the generator must be told which it was.
+        expect(generator?.[0], `${PINNED_TEMPLATE} does not tell the generator whether any bundle scene was affected`).toMatch(
+            /BUNDLE_SCENES_AFFECTED:\s*"\$\(RUN_BUNDLE_TESTS\)"/
+        );
+    });
+
     it("consumes only the inert comment artifacts PR CI stages", () => {
         const staged = new Set(
             jobsOf(template)

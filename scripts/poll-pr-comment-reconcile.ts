@@ -272,7 +272,7 @@ export function jobResultsFromTimeline(timeline: unknown): { api: JobResult; bun
             // which is the normal shape when the publisher was queued with that axis switched off.
             return "unknown";
         }
-        return normalizeResult(matches[0].result, axis);
+        return normalizeResult(matches[0]?.result, axis);
     };
 
     return { api: find("PostApiComment", "api"), bundle: find("PostBundleComment", "bundle") };

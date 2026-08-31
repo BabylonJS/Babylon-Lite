@@ -35,10 +35,18 @@ const MIRRORED_NODE_IDS = new Set([168, 257, 266, 269]);
 /** Scenes whose glTF draws a non-triangle-list topology, keyed to the value they must retain. */
 const EXOTIC_TOPOLOGY_SCENES = new Map([[260, "triangle-strip"]]);
 
+const requestedSceneIds = process.env.BUNDLE_SCENES
+    ? process.env.BUNDLE_SCENES.split(",")
+          .map((scene) => scene.trim().replace(/^scene/, ""))
+          .filter(Boolean)
+          .map(Number)
+          .filter(Number.isFinite)
+    : [];
+const selectedScenes = requestedSceneIds.length ? new Set(requestedSceneIds) : null;
 const SCENES = allScenes.filter((s) => {
     // Scene 114 opts out because WebGPU's optional "primitive-index" feature
     // changes which picking chunks the browser fetches across machines.
-    return !s.skipBundleSize && s.maxRawKB != null;
+    return (!selectedScenes || selectedScenes.has(s.id)) && !s.skipBundleSize && s.maxRawKB != null;
 });
 
 interface BundleInfoModule {

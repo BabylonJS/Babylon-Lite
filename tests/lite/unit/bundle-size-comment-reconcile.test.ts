@@ -523,7 +523,7 @@ describe("comments left by the old create-only task are adopted rather than orph
             api.writes.filter((w) => w.kind === "create"),
             "adoption must edit, never create"
         ).toHaveLength(0);
-        expect(api.comments[0].body).toBe(`${formatMarker(IDENTITY)}\ncurrent report`);
+        expect(api.comments[0]?.body).toBe(`${formatMarker(IDENTITY)}\ncurrent report`);
     });
 
     it("retracts a legacy comment whose regression is gone", async () => {
@@ -533,8 +533,8 @@ describe("comments left by the old create-only task are adopted rather than orph
         const result = await reconcile(api, { identity: IDENTITY, state: "none" });
 
         expect(result.action).toBe("resolved");
-        expect(api.comments[0].body.startsWith(formatMarker(IDENTITY))).toBe(true);
-        expect(api.comments[0].body).toContain("no longer notable");
+        expect(api.comments[0]?.body.startsWith(formatMarker(IDENTITY))).toBe(true);
+        expect(api.comments[0]?.body).toContain("no longer notable");
     });
 
     it("canonicalises the oldest of several legacy comments and tombstones the rest", async () => {
@@ -611,6 +611,6 @@ describe("comments left by the old create-only task are adopted rather than orph
         const result = await reconcile(api, { identity: IDENTITY, state: "unavailable" });
 
         expect(result.action).toBe("skipped");
-        expect(api.comments[0].body).toBe(LEGACY_BODY);
+        expect(api.comments[0]?.body).toBe(LEGACY_BODY);
     });
 });

@@ -477,7 +477,7 @@ describe("the concurrency guard asks the server about every run that has not fin
         await api.otherPollerRunInProgress();
 
         expect(urls).toHaveLength(1);
-        const query = new URL(urls[0]).searchParams;
+        const query = new URL(urls[0] ?? "").searchParams;
         expect(query.get("statusFilter")?.split(",").sort()).toEqual(["cancelling", "inProgress", "notStarted", "postponed"]);
         expect(query.get("definitions")).toBe("61");
     });

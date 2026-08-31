@@ -14,6 +14,7 @@ interface RunReporterOptions {
     current?: unknown;
     master?: unknown;
     scenes?: unknown;
+    env?: Record<string, string>;
 }
 
 function runReporter(options: RunReporterOptions): { stdout: string; comment: string | null; state: string | null } {
@@ -42,6 +43,7 @@ function runReporter(options: RunReporterOptions): { stdout: string; comment: st
             BUNDLE_SIZE_MASTER_MANIFEST: masterPath,
             BUNDLE_SIZE_SCENE_CONFIG: sceneConfigPath,
             BUNDLE_SIZE_COMMENT_PATH: outputPath,
+            ...options.env,
         },
     });
 
@@ -613,6 +615,47 @@ describe("report-bundle-size-deltas", () => {
             });
 
             expect(result.state).toBe("unavailable");
+        });
+
+        it("says `none` when no bundle scene is affected, so nothing was measured on purpose", () => {
+            // PR CI skips the build and the ceiling checks when the diff cannot reach a bundle
+            // scene (#638). Nothing is measured, but sizes provably did not move, so a comment
+            // an earlier push left behind has to be retracted rather than stranded.
+            const result = runReporter({
+                current: { scene1: { rawKB: 95.4 } },
+                master: { scene1: { rawKB: 93.0 } },
+                scenes: [{ id: 1, slug: "scene1", name: "Scene 1" }],
+                env: { BUNDLE_SCENES_AFFECTED: "false" },
+            });
+
+            expect(result.state, "a skipped measurement must retract, not report").toBe("none");
+            expect(result.comment, "no comment body should be produced when nothing was measured").toBeNull();
+        });
+
+        it("still measures when the selector says a bundle scene is affected", () => {
+            const result = runReporter({
+                current: { scene1: { rawKB: 95.4 } },
+                master: { scene1: { rawKB: 93.0 } },
+                scenes: [{ id: 1, slug: "scene1", name: "Scene 1" }],
+                env: { BUNDLE_SCENES_AFFECTED: "true" },
+            });
+
+            expect(result.state).toBe("report");
+        });
+
+        it("measures rather than retracting when the selector's answer is missing or unexpanded", () => {
+            // If the selection step never ran, Azure leaves `$(RUN_BUNDLE_TESTS)` unexpanded. That
+            // is an unknown, and an unknown must never take the retracting branch.
+            for (const value of ["$(RUN_BUNDLE_TESTS)", "", "False", "no"]) {
+                const result = runReporter({
+                    current: { scene1: { rawKB: 95.4 } },
+                    master: { scene1: { rawKB: 93.0 } },
+                    scenes: [{ id: 1, slug: "scene1", name: "Scene 1" }],
+                    env: { BUNDLE_SCENES_AFFECTED: value },
+                });
+
+                expect(result.state, `'${value}' was treated as a definite "no scenes affected"`).toBe("report");
+            }
         });
 
         it("writes the state file next to the markdown the publisher downloads", () => {

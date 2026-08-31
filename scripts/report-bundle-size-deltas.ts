@@ -527,6 +527,24 @@ function main(): void {
     const outputPath = process.env.BUNDLE_SIZE_COMMENT_PATH ?? resolve(rootDir, "test-results/bundle-comment/bundle-size-comment.md");
     const stateDir = dirname(outputPath);
 
+    // PR CI measures bundle sizes only for the scenes a pull request can actually
+    // reach (#638). When it reaches none, nothing is built and nothing is measured
+    // — but this is a *measured* nothing rather than an unknown one: the selector
+    // proved no bundle scene is downstream of the diff, so sizes cannot have moved.
+    //
+    // That distinction is the entire point of the tri-state. `none` retracts the
+    // comment an earlier push left behind when it did touch bundle code;
+    // `unavailable` would strand it there forever, which is the #627 bug. The
+    // variable is only ever the selector's own answer, and anything other than a
+    // definite "false" falls through to the measuring path, so a selector that
+    // failed to run degrades to `unavailable` rather than to a silent retraction.
+    if (process.env.BUNDLE_SCENES_AFFECTED === "false") {
+        console.log("No bundle scene is affected by this pull request; bundle sizes cannot have moved.");
+        writeBundleCommentState(stateDir, "none");
+        console.log("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]false");
+        return;
+    }
+
     const current = loadManifest(currentPath);
     const master = loadManifest(masterPath);
 
