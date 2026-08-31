@@ -364,14 +364,24 @@ stages:
                   condition: always()
                   displayName: "Generate bundle-size delta comment"
 
-                # See the API report job: staged only when there is a delta to
-                # report, matching the previous comment-on-change behaviour.
+                # Staged on every run, unlike the API comment above, and that
+                # asymmetry is the point of issue #627. A comment that is only
+                # staged when there is something to say can only ever be created,
+                # never withdrawn: the run that would withdraw it is precisely the
+                # run that stages nothing, and "no artifact" is indistinguishable
+                # from "the job crashed before staging". So the directory always
+                # ships, carrying `bundle-comment-state.json` — `report`, `none` or
+                # `unavailable` — and the trusted reconciler decides from that.
+                #
+                # The artifact stays inert. It carries markdown and a three-valued
+                # enum; the repository, pull request, comment marker and API action
+                # are all compile-time constants in the publisher.
                 - task: PublishPipelineArtifact@1
-                  condition: and(always(), eq(variables['POST_BUNDLE_COMMENT'], 'true'))
+                  condition: always()
                   continueOnError: true
                   displayName: "Stage bundle comment for trusted posting"
                   inputs:
-                      targetPath: $(System.DefaultWorkingDirectory)/test-results/bundle-size-comment.md
+                      targetPath: $(System.DefaultWorkingDirectory)/test-results/bundle-comment
                       artifact: bundle-comment
 
                 # The public base path is derived from the pull-request number,

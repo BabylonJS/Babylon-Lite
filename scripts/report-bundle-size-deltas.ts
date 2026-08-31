@@ -9,6 +9,8 @@
  * Outputs:
  *  - Markdown comment listing all changes rounded to nearest whole KB, followed by a
  *    ceiling-headroom section (see `buildHeadroomReport`)
+ *  - `bundle-comment-state.json` beside it, declaring which of the three states this run
+ *    measured. See `BundleCommentState`.
  *  - Azure DevOps variables for conditional GitHubComment@0 posting. The comment is posted
  *    when a rounded delta is nonzero OR when this PR moved a scene into the tight/critical
  *    headroom band, since sub-KB movement produces no delta rows yet is exactly what puts a
@@ -55,6 +57,43 @@ interface BundleDelta {
     currentKB: number;
     masterKB: number;
     deltaKB: number;
+}
+
+/**
+ * What this run measured, as three distinguishable outcomes rather than a boolean.
+ *
+ * The trusted reconciler that owns the sticky PR comment (issue #627) has to tell "this PR has
+ * nothing notable to say" apart from "this run could not tell", because the first retracts a
+ * previous comment and the second must leave it alone. A boolean collapses them, and the safe
+ * collapse — treat unknown as nothing-to-report — is the one that silently retracts a real
+ * regression report the moment a baseline fetch fails.
+ *
+ * `report`      the comment body is meaningful and should be posted or refreshed
+ * `none`        measured successfully, nothing notable; a prior comment should be retracted
+ * `unavailable` could not measure; a prior comment must be left exactly as it is
+ *
+ * This mirrors the `present | absent | unavailable` marker status in `report-api-changes.ts`.
+ */
+export type BundleCommentState = "report" | "none" | "unavailable";
+
+/** Schema version of `bundle-comment-state.json`. The reader rejects anything else. */
+export const BUNDLE_COMMENT_STATE_VERSION = 1;
+
+/** File name the trusted publisher looks for inside the `bundle-comment` artifact. */
+export const BUNDLE_COMMENT_STATE_FILE = "bundle-comment-state.json";
+
+/**
+ * Write the state file next to the comment body.
+ *
+ * Written on every successful run, including the runs with nothing to say — that is the whole
+ * point. Before #627 a quiet run staged no artifact at all, which is indistinguishable from a
+ * crashed run, so the publisher could never safely retract anything.
+ */
+export function writeBundleCommentState(directory: string, state: BundleCommentState): string {
+    const path = resolve(directory, BUNDLE_COMMENT_STATE_FILE);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(path, `${JSON.stringify({ schemaVersion: BUNDLE_COMMENT_STATE_VERSION, state }, null, 2)}\n`, "utf-8");
+    return path;
 }
 
 export function loadManifest(path: string): Manifest | null {
@@ -485,7 +524,8 @@ function main(): void {
     const currentPath = process.env.BUNDLE_SIZE_CURRENT_MANIFEST ?? resolve(rootDir, "lab/public/bundle/manifest.json");
     const masterPath = process.env.BUNDLE_SIZE_MASTER_MANIFEST ?? resolve(rootDir, "lab/public/bundle/master-manifest.json");
     const sceneConfigPath = process.env.BUNDLE_SIZE_SCENE_CONFIG ?? resolve(rootDir, "scene-config.json");
-    const outputPath = process.env.BUNDLE_SIZE_COMMENT_PATH ?? resolve(rootDir, "test-results/bundle-size-comment.md");
+    const outputPath = process.env.BUNDLE_SIZE_COMMENT_PATH ?? resolve(rootDir, "test-results/bundle-comment/bundle-size-comment.md");
+    const stateDir = dirname(outputPath);
 
     const current = loadManifest(currentPath);
     const master = loadManifest(masterPath);
@@ -503,7 +543,13 @@ function main(): void {
         // the scenes sit inside the tight band at any moment, so a baseline-free headroom report
         // would hand every PR a warning about scenes it never touched. Silence is the correct
         // degraded behaviour here.
+        //
+        // Silence, though, is not retraction. This is the case the tri-state exists for: the run
+        // could not measure, so the sticky comment must be left exactly as the last run that
+        // *could* measure left it. Reporting `none` here would let a transient baseline-fetch
+        // failure quietly withdraw a live regression report.
         console.log("Master manifest not found; skipping delta report.");
+        writeBundleCommentState(stateDir, "unavailable");
         console.log("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]false");
         return;
     }
@@ -526,7 +572,14 @@ function main(): void {
     // author who changed nothing and still has a red Bundle Size job because master is breached.
     // Repo-wide *tightness* remains deliberately not a trigger; without the "this PR moved it"
     // requirement every PR would get a comment.
-    if (deltas.length > 0 || headroom.movedIntoDangerZone || headroom.inheritedCeilingBreach) {
+    const notable = deltas.length > 0 || headroom.movedIntoDangerZone || headroom.inheritedCeilingBreach;
+
+    // Staged unconditionally, unlike the variable below. The variable still gates the legacy
+    // create-only posting path; the state file is what lets the trusted reconciler retract a
+    // comment that a *later* quiet run has made obsolete, which is issue #627 itself.
+    writeBundleCommentState(stateDir, notable ? "report" : "none");
+
+    if (notable) {
         console.log("");
         console.log("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]true");
         const escapedComment = escapeAzureVariableValue(comment);

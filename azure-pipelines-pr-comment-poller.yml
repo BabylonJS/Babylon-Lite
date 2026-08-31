@@ -1,0 +1,126 @@
+# Azure Pipelines — Babylon Lite PR comment poller (trusted, master-only)
+#
+# The automatic half of issue #627. PR CI stages inert comment artifacts and holds
+# no credential; `azure-pipelines-pr-publish.yml` holds every credential and must
+# stay unreachable from a pull request. This definition is the only thing that
+# connects them, and it does so from the trusted side.
+#
+# ── WHY NOT A PIPELINE COMPLETION TRIGGER ────────────────────────────────────
+#
+# `resources.pipelines` with a completion trigger is the wiring everyone reaches
+# for and the one that undoes the whole design: when the triggering and triggered
+# pipelines share a repository, Azure runs the triggered pipeline on the
+# *triggering* run's branch. For a pull-request build that is `refs/pull/<n>/merge`,
+# so the publisher's YAML — with its GitHub tokens and its deploy token — would be
+# read from the pull request. There is no configuration that makes that safe, so
+# this pipeline declares no `pipelines:` resource at all and a guard test asserts it
+# never grows one.
+#
+# ── WHAT IT IS ALLOWED TO DO ─────────────────────────────────────────────────
+#
+# Read builds, read open pull requests, and queue the publisher. It never downloads
+# a pipeline artifact, never checks out pull-request code, and holds no credential
+# that can write to GitHub. `System.AccessToken` is read-only here; queueing uses a
+# dedicated identity whose only permissions are `Queue builds` and `View builds` on
+# the publisher, because the project Build Service identity is reachable from
+# pull-request YAML and is explicitly denied that permission (TESTING.md, runbook
+# item 6).
+#
+# The one credential worth arguing about is `PR_METADATA_TOKEN`, a read-only GitHub
+# token used to list open pull requests. It exists because the alternative — scanning
+# "the last N days" of builds — silently loses state across an outage and never sees
+# an old-but-open pull request at all. Deriving the desired state from the open pull
+# requests needs no watermark and cannot skip a run. See the header of
+# `scripts/poll-pr-comment-reconcile.ts`.
+
+trigger: none
+
+pr: none
+
+schedules:
+    - cron: "*/30 * * * *"
+      displayName: "Reconcile PR comments"
+      branches:
+          include:
+              - master
+      always: true
+
+resources:
+    repositories:
+        # Pinned to master, and read through its own least-privilege connection.
+        #
+        # Not `BabylonLite-PRCI-RepoRead`: that is the one connection PR CI is
+        # authorized for, and sharing it with a credentialed master definition is the
+        # coupling the security split exists to undo. Not `BabylonBotPAT` either: it
+        # can write comments and tags, and this definition's control flow is driven by
+        # build metadata, so it should not be able to write anything at all.
+        - repository: trusted
+          type: github
+          name: BabylonJS/Babylon-Lite
+          endpoint: BabylonLite-Trusted-RepoRead
+          ref: refs/heads/master
+
+variables:
+    - name: NODE_VERSION
+      value: "22.x"
+    - name: PNPM_VERSION
+      value: "11.9.0"
+
+    # Definition ids are configuration, not something the poller derives: deriving
+    # them from a build it read would let the thing being inspected choose which
+    # pipeline gets queued. Set these once, in the pipeline's variables, from the ids
+    # recorded in TESTING.md.
+    - name: PR_CI_DEFINITION_ID
+      value: "0"
+    - name: PUBLISHER_DEFINITION_ID
+      value: "0"
+    - name: POLLER_DEFINITION_ID
+      value: "0"
+
+stages:
+    - stage: ReconcilePrComments
+      displayName: "Reconcile PR comments"
+      jobs:
+          - job: Poll
+            displayName: "Queue publisher runs for unpublished PR CI builds"
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                # Both resolve from protected variable groups so the branch-control
+                # check covers them. A pipeline-level UI variable is not a protected
+                # resource: no check applies to one.
+                - group: BabylonLite-PRPublishQueue
+                - group: BabylonLite-PRMetadata
+            steps:
+                - checkout: trusted
+                  fetchDepth: 1
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile --ignore-scripts
+                  displayName: "Install dependencies (no lifecycle scripts)"
+
+                - script: pnpm poll:pr-comments
+                  displayName: "Reconcile PR comment publishing"
+                  target:
+                      commands: restricted
+                      settableVariables: none
+                  env:
+                      GITHUB_REPOSITORY: "BabylonJS/Babylon-Lite"
+                      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+                      SYSTEM_COLLECTIONURI: $(System.CollectionUri)
+                      SYSTEM_TEAMPROJECTID: $(System.TeamProjectId)
+                      BUILD_BUILDID: $(Build.BuildId)
+                      PR_CI_DEFINITION_ID: $(PR_CI_DEFINITION_ID)
+                      PUBLISHER_DEFINITION_ID: $(PUBLISHER_DEFINITION_ID)
+                      POLLER_DEFINITION_ID: $(POLLER_DEFINITION_ID)
+                      PR_PUBLISH_QUEUE_TOKEN: "$(PR_PUBLISH_QUEUE_TOKEN)"
+                      PR_METADATA_TOKEN: "$(PR_METADATA_TOKEN)"

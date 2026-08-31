@@ -382,13 +382,17 @@ type-checked before the first step runs. Before any protected job starts,
 
 The publisher downloads only `api-comment` and `bundle-comment`. It never
 executes artifact content, fixes every GitHub task's repository to
-`BabylonJS/Babylon-Lite`, and lets the neutralisation step set only
-`API_COMMENT_BODY`, `POST_API_COMMENT`, `BUNDLE_COMMENT_BODY` and
-`POST_BUNDLE_COMMENT` through the agent's `target.commands: restricted` /
-`settableVariables` enforcement.
+`BabylonJS/Babylon-Lite`, and constrains every step that touches downloaded
+artifact bytes through the agent's `target.commands: restricted` /
+`settableVariables` enforcement. `PostApiComment` permits exactly
+`API_COMMENT_BODY` and `POST_API_COMMENT`; `PostBundleComment` permits
+`settableVariables: none`, because its reconciler reads the artifact from disk
+and needs no pipeline variable at all — so untrusted bytes never pass through a
+variable on that path.
 
-Manual queueing is **not** the normal operation and this change must remain draft
-until #627 restores automation. A `resources.pipelines` completion trigger is
+Manual queueing is **not** the normal operation. Automation is restored by the
+stacked #627 change described below; the manual queue survives only as an
+emergency and debugging path. A `resources.pipelines` completion trigger is
 the obvious wiring and is the one shape that would rebuild the whole vulnerability:
 when the triggering and triggered pipelines share a repository, Azure runs the
 triggered pipeline on the *triggering run's* branch — for a PR build, the pull
@@ -400,12 +404,12 @@ The required stacked design is:
 
 - **PR 1:** this credential-boundary redesign and publisher contract, opened
   draft and blocked from merge.
-- **PR 2 / #627:** a scheduled pipeline that always runs from `master`, polls the
-  Azure Builds API for completed runs of the fixed PR CI definition, and queues
-  this publisher with the validated number triple through a dedicated queue
-  identity. It owns fixed, trusted hidden markers for sticky-comment
+- **PR 2 / #627:** `azure-pipelines-pr-comment-poller.yml`, a scheduled pipeline
+  that always runs from `master`, derives which publisher runs are missing, and
+  queues this publisher with the validated number triple through a dedicated
+  queue identity. It owns fixed, trusted hidden markers for sticky-comment
   reconciliation; no marker, destination, repository or action is read from an
-  artifact.
+  artifact. See “The scheduled comment poller” below.
 
 The publisher contract #627 consumes is exact:
 
@@ -414,14 +418,37 @@ The publisher contract #627 consumes is exact:
 | `prNumber` | `number` | Number parsed from `refs/pull/<N>/merge` |
 | `prCiRunId` | `number` | Completed Azure build id |
 | `prCiDefinitionId` | `number` | Fixed PR CI definition id configured by an administrator |
-| `postComments` | `boolean` | Emergency selector; the poller uses `true` |
+| `postComments` | `boolean` | Master switch; the poller uses `true` |
+| `postApiComment` | `boolean` | Runs `PostApiComment`. Defaults `true` |
+| `postBundleComment` | `boolean` | Runs `PostBundleComment`. Defaults `true` |
+
+The last two exist because the two comment paths have different retry semantics.
+`GitHubComment@0` can only create, so re-running the API path posts a second
+comment; the bundle path is a reconciler that must be retryable. They were one
+job until #627, which meant a bundle retry necessarily duplicated the API
+comment. They are now separate jobs with separate results, and the poller sets
+each flag from the corresponding job's outcome on earlier attempts. Both default
+`true`, so a manual emergency queue behaves exactly as it did before.
 
 | Artifact | Required file | Ownership |
 | -------- | ------------- | --------- |
 | `api-comment` | `api-report-comment.md` | Untrusted markdown body only |
-| `bundle-comment` | `bundle-size-comment.md` | Untrusted markdown body only |
+| `bundle-comment` | `bundle-comment-state.json` | Trusted fixed schema: `{"schemaVersion":1,"state":"report"\|"none"\|"unavailable"}` |
+| `bundle-comment` | `bundle-size-comment.md` | Untrusted markdown body only; required when the state is `report` |
 
-The poller, not either artifact, owns its watermark, retry state, GitHub
+`bundle-comment-state.json` is staged on **every** successful bundle-size run,
+including runs with nothing to report, because a sticky comment has to be
+retractable and “there is no regression” is not the same fact as “I could not
+measure”. The third value, `unavailable`, covers the case where the master
+baseline could not be fetched. Collapsing it into `none` would be silent and
+wrong in the worst direction — a failed download would read as a clean run and
+retract a regression report that is still accurate.
+
+The state file is a fixed enumeration, not a body: it selects between three
+behaviours the publisher already implements. It cannot name a repository, a pull
+request, a comment, a marker or an action.
+
+The poller and the publisher, not either artifact, own the retry state, GitHub
 repository, comment markers and reconciliation action. A missing optional
 artifact means “no comment update for that report,” not permission to invent a
 destination. Previews remain disabled until a separate registrable domain,
@@ -440,9 +467,138 @@ The costs, stated rather than hidden:
 
 - Until the stacked #627 PR is ready, API/bundle-size comments require the
   emergency manual queue. **PR 1 must not merge in that state.**
+- Comments arrive a poll interval later than they used to. That is the price of
+  the trigger this design refuses; the alternative was a credentialed pipeline
+  whose YAML came from the pull request.
 - The **label** half of the breaking-change rule moved here with the token it
   needs, so it no longer blocks a pull request by itself. The **commit-message**
   half still runs on every pull request, with no credential, in PR CI.
+
+### The scheduled comment poller
+
+`azure-pipelines-pr-comment-poller.yml` is the automatic half of #627. It runs
+from `master` on a schedule, decides which publisher runs are missing, and queues
+them. It never checks out pull-request code, never downloads a pipeline artifact,
+and holds no GitHub credential that can write anything.
+
+**It derives the desired state; it does not track it.** An earlier design scanned
+"builds finished in the last seven days" and was rejected, correctly: an outage
+longer than the window permanently hides the runs it spanned, and a freshly
+created poller definition never sees an old-but-still-open pull request at all.
+There is no watermark here and no time filter. Each tick:
+
+1. Enumerate every **open** pull request in `BabylonJS/Babylon-Lite`, following
+   `Link: rel="next"` to exhaustion. A partial listing fails the run rather than
+   producing a partial reconciliation. More than 250 open pull requests fails
+   visibly rather than truncating.
+2. For each, ask the Builds API for the single latest **completed** run of the
+   fixed PR CI definition on exactly `refs/pull/<N>/merge`, and re-verify every
+   field of what comes back — definition id, `reason`, `status`, `sourceBranch`,
+   `repository.type`, `repository.name` — by exact string equality.
+3. Compare against what the publisher has already done, and queue what is
+   missing, oldest-finished first, at most 20 per tick.
+
+The desired state is therefore a pure function of "which pull requests are open
+now" and "what is each one's latest completed run". A restart, a week of
+downtime, and a brand-new definition all converge on the first tick. Obsolete
+builds are ignored by construction, which is also the right semantics for a
+sticky comment: only the newest result is worth showing.
+
+**The documented boundary:** closed and merged pull requests are not enumerated,
+so their comments freeze in whatever state the last processed run left them. That
+is intended — a closed pull request needs no fresh report.
+
+**Matching prior attempts.** Candidate publisher runs are found by build number,
+whose format is compiled from the publisher's own parameters
+(`blp-<pr>-<runId>-<rev>`). That index is treated as **untrusted**, because build
+numbers are writable by anyone holding _Update build information_. It is only
+ever allowed to produce candidates; it can never assert "already published". Each
+candidate is then confirmed by reading the immutable queue-time triple, from the
+Pipelines run representation first and the Builds representation second. If
+neither carries it, **the poller fails and queues nothing**. There is deliberately
+no third fallback: build _tags_ would work and are writable by the Build Service
+identities pull-request YAML can reach, so a pull request could forge "already
+published" and suppress its own report.
+
+**Retry.** Per-axis job results come from the publisher run's timeline, keyed on
+the `PostApiComment` and `PostBundleComment` **jobs**. `succeeded`,
+`succeededWithIssues` and `partiallySucceeded` all count as published;
+`skipped` does not, so an axis that was switched off is never mistaken for one
+that ran. Counting `succeededWithIssues` matters more than it looks: Azure
+reports it whenever a `continueOnError` step fails, and `PostApiComment` reaches
+that state on every pull request that does not move the public API, because PR CI
+stages the `api-comment` artifact only when there is a diff. Reading it as a
+failure would re-queue the publisher on nearly every pull request, exhaust the
+attempt budget, fail the tick, and duplicate the create-only API comment. A
+genuinely failed axis is retried up to three times; exhaustion fails the tick
+loudly, after everything else has been queued, so one broken pull request cannot
+stall the rest.
+
+**The API comment stays create-only, and stays automatic.** `GitHubComment@0`
+cannot update, and #627 does not change that. What it does change is that the API
+path is queued at most once per selected PR CI build, so a bundle retry no longer
+duplicates it — strictly better than the manual re-queue it replaced. One
+residual difference is worth knowing: if two PR CI runs for the same pull request
+complete inside one poll interval, only the latest produces an API comment. Every
+pull request with a completed run still gets one; what is lost is a duplicate
+comment about an already-superseded state.
+
+### The sticky bundle-size comment
+
+`scripts/reconcile-bundle-size-comment.ts` runs in the publisher's
+`PostBundleComment` job. It replaced a create-only task that added a comment on
+every push and retracted none, so a reviewer could not tell which report was
+current.
+
+A comment is **canonical** when its **first line** is the marker
+`<!-- babylon-lite:bundle-size:v1 {...} -->`, its author id equals the token's own
+viewer id, and the marker names this repository and this pull request. First-line
+anchoring is what makes the API-report comment — same bot, same pull request,
+body this repository does not control — structurally unable to be adopted: its
+first line is a trusted heading. The author check compares numeric ids, never
+logins, because a login can be renamed and then claimed.
+
+| measured state | existing canonical | outcome                                           |
+| -------------- | ------------------ | ------------------------------------------------- |
+| `report`       | none               | create exactly one                                |
+| `report`       | one                | update it, or leave it alone if already identical |
+| `none`         | one                | rewrite to a concise resolved state               |
+| `none`         | none               | nothing — silence on never-notable pull requests  |
+| `unavailable`  | anything           | nothing at all                                    |
+
+Additional duplicates are rewritten in place to a concise tombstone whose marker
+is demoted to `:v1-superseded`, which is deliberately not a prefix of the
+canonical marker so it can never be re-adopted. **Nothing in this script deletes
+a comment.** The token can delete any comment in the repository, including a
+reviewer's, so a selection bug must not be able to destroy review history.
+
+Two failure modes are handled explicitly because both are unbounded if they are
+not:
+
+- **A create on an incomplete listing.** If a truncated page listing hides the
+  canonical comment, every tick creates another one. The enumeration must prove
+  it read every page, and the reconciler refuses to create otherwise.
+- **A poisoned marker.** Artifact markdown is escaped — `<!--` and `-->` become
+  entities — _before_ the body is ever posted, so a comment this script owns
+  cannot contain a second marker. Both artifacts are escaped: the bundle body
+  in-process by the reconciler, the API body by
+  `scripts/strip-logging-commands.sh`.
+
+Where a body is nevertheless ambiguous or malformed, the script declines rather
+than fails. A comment carrying two markers is skipped, not treated as fatal; a
+marker whose payload is corrupt is read as "not ours"; and a staged artifact that
+breaks its contract — bad JSON, an unknown schema version or state, a missing,
+empty, oversized, non-UTF-8 or NUL-bearing body — is reported loudly on stderr
+and treated as `unavailable`, leaving every comment untouched and the job green.
+
+The asymmetry is the whole point. These inputs are pull-request-authored and
+deterministic, so a retry cannot fix any of them: failing would burn the poller's
+attempt budget for that build, and the poller escalates an exhausted budget by
+failing its tick. One malformed artifact would stop bundle-size reconciliation
+for _every_ open pull request. Declining costs at most one stale or duplicate
+comment, which the next run resolves. Transient GitHub and Azure DevOps errors
+are the opposite case and still fail hard, because for those a retry is exactly
+the right response.
 
 ### Cloud browser tests run post-merge
 
@@ -531,6 +687,10 @@ matrix replaced.
 | `BabylonJS-BrowserStack` | yes — account key | `azure-pipelines-cloud-tests.yml` **only** | **Branch control**: `refs/heads/master` only |
 | `BabylonJS-NpmPublish` | yes — registry token | `azure-pipelines-npm-publish.yml`, `azure-pipelines-npm-publish-gl.yml` | **Branch control**: `refs/heads/master` only |
 | `BabylonBotPAT` (GitHub service connection) | yes — comment/tag write | `azure-pipelines-pr-publish.yml`, `-npm-publish.yml`, `-npm-publish-gl.yml`, and any master pipeline calling an upload template | **Branch control**: `refs/heads/master` only |
+| `BabylonLite-Trusted-RepoRead` (GitHub service connection) | read-only PAT, no write scope | `azure-pipelines-pr-comment-poller.yml` **only** | **Branch control**: `refs/heads/master` only |
+| `BabylonLite-PRComments` | yes — `PR_COMMENT_TOKEN`, issue-comment write | `azure-pipelines-pr-publish.yml` **only** | **Branch control**: `refs/heads/master` only |
+| `BabylonLite-PRPublishQueue` | yes — `PR_PUBLISH_QUEUE_TOKEN`, queues the publisher | `azure-pipelines-pr-comment-poller.yml` **only** | **Branch control**: `refs/heads/master` only |
+| `BabylonLite-PRMetadata` | yes — `PR_METADATA_TOKEN`, read-only | `azure-pipelines-pr-comment-poller.yml` **only** | **Branch control**: `refs/heads/master` only |
 
 Reading the table:
 
@@ -602,12 +762,23 @@ Four rules, all enforced by
 
 Untrusted *content* still crosses the boundary: the API-report and bundle-size
 comment bodies are written by jobs running PR code, in a different run.
-`Post PR Comments` in `azure-pipelines-pr-publish.yml` runs them through
+`PostApiComment` in `azure-pipelines-pr-publish.yml` runs its body through
 `scripts/strip-logging-commands.sh`, which neutralises every `##vso[` and `##[`
 sequence before the body is loaded into a variable — otherwise a comment body
 could issue logging commands inside the job that holds the GitHub connection.
-The step also uses the agent-enforced `target.commands: restricted` with a
-four-entry `settableVariables` allowlist. The string neutraliser and the agent
+That script also escapes `<!--` and `-->` to entities, because the sibling
+bundle-size comment is identified by a hidden marker on its first line and both
+comments are posted by the same bot: without the escaping a pull request could
+open its API report with a byte-exact copy of that marker and have the trusted
+reconciler adopt and overwrite the wrong comment. Real API reports contain no
+HTML comments, and `ci-log-command-injection.test.ts` proves a representative
+report survives the script byte for byte, so the escaping changes no live body.
+
+`PostBundleComment` carries no such step: it runs under `settableVariables:
+none` and never loads artifact bytes into a variable at all, reading the files
+from disk and sanitising in-process instead. Both jobs use the agent-enforced
+`target.commands: restricted`, with `settableVariables` pinned per job to
+exactly the names that job sets. The string neutraliser and the agent
 restriction are independent controls.
 
 The upload templates allowlist their deploy paths, pin `curl` to `https` with no
@@ -795,14 +966,25 @@ conditions hold:
   if the project Build Service identity can queue a credentialed definition on
   `refs/heads/master`, that new run satisfies branch control and receives the
   definition's protected resources. On every credentialed definition — the PR
-  publisher, cloud tests, npm publishers, playground, demos and bundle manifest
-  — explicitly **Deny Queue builds** to `<Project> Build Service (<Org>)` and
-  `Project Collection Build Service (<Org>)`. Keep build-read permission only
-  where artifact download/provenance validation needs it. Before merge, run a
-  temporary PR CI step that authenticates with its job token and attempts to
-  queue each protected definition on `master`; every request must return 403.
-  The #627 poller uses the dedicated queue identity described above, never the
-  project Build Service identity.
+  publisher, cloud tests, npm publishers, playground, demos, bundle manifest and
+  the #627 comment poller — explicitly **Deny Queue builds**, **Update build
+  information** and **Edit build quality** to `<Project> Build Service (<Org>)`
+  and `Project Collection Build Service (<Org>)`. Keep build-read permission only
+  where artifact download/provenance validation needs it.
+
+  The last two verbs matter as much as the first. The poller finds prior publish
+  attempts by build number and confirms them against queue-time parameters; both
+  build numbers and build tags are _mutable_ by an identity holding those
+  permissions. Leaving them at their Allow-by-default state would let
+  pull-request-authored YAML rewrite publish history — not to publish anything,
+  but to make the poller believe a comment had already been posted, and so
+  suppress its own bundle-size report.
+
+  Before merge, run a temporary PR CI step that authenticates with its job token
+  and attempts, for each protected definition on `master`, to queue a build, to
+  update build information, and to set build quality; **all three** must return
+  403. The #627 poller uses the dedicated queue identity described above, never
+  the project Build Service identity.
 - **7. Gate untrusted fork builds on a team member.** In the PR CI definition's
   *Triggers → Pull request validation → Forks* settings, keep **Make secrets
   available to builds of forks** and **Make fork builds run with the same
@@ -943,6 +1125,52 @@ conditions hold:
 - **21. Secret variables are marked secret.** A plain variable is written into the
   build environment and into logs; only variables marked secret are masked and
   withheld from fork builds.
+- **22. Create the `BabylonLite-PRComments` group.** One secret variable,
+  `PR_COMMENT_TOKEN`: a fine-grained GitHub token scoped to
+  `BabylonJS/Babylon-Lite` with **Issues: read and write** and nothing else.
+  Authorize it to `azure-pipelines-pr-publish.yml` only, mark it secret, add
+  branch control for `refs/heads/master`, and do not allow it to be overridden at
+  queue time. It is a new token rather than a widening of `GITHUB_TOKEN` because
+  that one lives in `BabylonJS-Deployment` — widening it would hand
+  comment-write to every other consumer of that group — and rather than an
+  extraction of `BabylonBotPAT`, which is a service connection whose credential
+  is deliberately opaque to scripts.
+- **23. Create the dedicated queue identity and the
+  `BabylonLite-PRPublishQueue` group.** Create a service principal or PAT that
+  holds **Queue builds** and **View builds** on the PR publisher definition,
+  **View builds** on the PR CI definition, and no permission on any other
+  definition or resource. Store it as the secret variable
+  `PR_PUBLISH_QUEUE_TOKEN`, authorize the group to
+  `azure-pipelines-pr-comment-poller.yml` only, and apply the same secret,
+  branch-control and no-queue-time-override settings. This identity exists so the
+  poller never queues with `System.AccessToken`: that token belongs to a Build
+  Service identity pull-request YAML can also reach, and item 6 denies it queue
+  permission precisely so a pull request cannot start a credentialed run.
+- **24. Create the `BabylonLite-PRMetadata` group.** One secret variable,
+  `PR_METADATA_TOKEN`: a fine-grained GitHub token scoped to
+  `BabylonJS/Babylon-Lite` with **Pull requests: read** and **Metadata: read**,
+  and no write permission of any kind. Same authorization and branch control as
+  above. This is a read-only GitHub credential living in trusted, master-pinned,
+  PR-unreachable code, and it is a deliberate trade: the alternative was a
+  time-windowed build scan that silently loses runs across an outage. Verify it
+  has no write scope before storing it — that property is the whole argument for
+  putting it there.
+- **25. Create the `BabylonLite-Trusted-RepoRead` service connection.** A
+  read-only GitHub connection used by the poller's pinned `checkout: trusted`.
+  Not `BabylonLite-PRCI-RepoRead`, which is the one connection PR CI is
+  authorized for and must not be shared with a credentialed definition; not
+  `BabylonBotPAT`, which can write.
+- **26. Create the poller definition and record the definition ids.** Create a
+  pipeline from `azure-pipelines-pr-comment-poller.yml` on `master`, authorize it
+  for the two groups above and the connection from item 25, and set its
+  `PR_CI_DEFINITION_ID`, `PUBLISHER_DEFINITION_ID` and `POLLER_DEFINITION_ID`
+  variables to the real ids. They are pipeline configuration rather than
+  something the poller derives at runtime: deriving them from a build it had just
+  read would let the thing being inspected choose which pipeline gets queued.
+  After the first scheduled run, confirm in its log that the queue-time triple was
+  resolved from an authoritative representation — if neither the Pipelines run
+  nor the Builds representation exposes `templateParameters`, the poller fails
+  closed and queues nothing, and that must be resolved before this is relied on.
 
 ### Required Pipeline Variable Groups
 
@@ -989,6 +1217,40 @@ branch, whose YAML is that branch's YAML. Had the group simply exported
 working whether or not the group existed, hiding the misconfiguration the move
 exists to surface. Both jobs now fail closed when `NPM_PUBLISH_TOKEN` is empty
 _or_ still the unsubstituted macro text an out-of-scope variable resolves to.
+
+It uses three groups introduced by issue #627, which restored _automatic_
+bundle-size comments after pull-request CI lost every write credential. They are
+deliberately three groups rather than one: the poller decides _when_ to publish
+and the publisher decides _what_ to write, and neither should be able to do the
+other's job.
+
+`BabylonLite-PRComments` is imported by the `PostBundleComment` job of
+`azure-pipelines-pr-publish.yml` and by no other job in any definition:
+
+- `PR_COMMENT_TOKEN` — fine-grained GitHub token, `BabylonJS/Babylon-Lite` only,
+  **Issues: read and write** and nothing else. It exists because the sticky
+  comment must list, update and demote comments, and `GitHubComment@0` is
+  create-only with its credential opaque to scripts. It is not `GITHUB_TOKEN`
+  from `BabylonJS-Deployment`: that one is documented above as read-only PR
+  metadata, and widening it would hand comment-write to every other consumer of
+  that group.
+
+`BabylonLite-PRPublishQueue` and `BabylonLite-PRMetadata` are imported by
+`azure-pipelines-pr-comment-poller.yml` and by nothing else:
+
+- `PR_PUBLISH_QUEUE_TOKEN` — a dedicated Azure DevOps identity holding
+  `Queue builds` and `View builds` on the publisher and `View builds` on PR CI,
+  and no other permission anywhere. The ambient job token is deliberately not
+  used to queue: it belongs to a Build Service identity that pull-request YAML
+  can also reach, and runbook item 6 denies that identity `Queue builds` on the
+  publisher precisely so a pull request cannot start a credentialed run.
+- `PR_METADATA_TOKEN` — fine-grained GitHub token, `BabylonJS/Babylon-Lite` only,
+  **Pull requests: read** and **Metadata: read**, no write of any kind. This is a
+  read-only GitHub credential in trusted, master-pinned, PR-unreachable code, and
+  it is a deliberate trade: the alternative was scanning "builds from the last N
+  days", which silently loses runs across an outage and never sees an
+  old-but-still-open pull request at all. Enumerating the open pull requests
+  needs no watermark and cannot skip a run.
 
 This third group is easy to miss. It was **omitted from this list until the
 bundle-manifest pipeline failed on it**, even though the PR CI template,

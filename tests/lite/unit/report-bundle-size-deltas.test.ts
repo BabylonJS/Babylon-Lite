@@ -16,7 +16,7 @@ interface RunReporterOptions {
     scenes?: unknown;
 }
 
-function runReporter(options: RunReporterOptions): { stdout: string; comment: string | null } {
+function runReporter(options: RunReporterOptions): { stdout: string; comment: string | null; state: string | null } {
     const dir = mkdtempSync(resolve(tmpdir(), "bundle-size-deltas-"));
     tempDirs.push(dir);
 
@@ -45,9 +45,12 @@ function runReporter(options: RunReporterOptions): { stdout: string; comment: st
         },
     });
 
+    const statePath = resolve(dir, "bundle-comment-state.json");
+
     return {
         stdout,
         comment: existsSync(outputPath) ? readFileSync(outputPath, "utf-8") : null,
+        state: existsSync(statePath) ? (JSON.parse(readFileSync(statePath, "utf-8")) as { state: string }).state : null,
     };
 }
 
@@ -567,6 +570,62 @@ describe("report-bundle-size-deltas", () => {
 
             expect(result.stdout).toContain("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]false");
             expect(result.comment).toContain("No changes detected");
+        });
+    });
+
+    /**
+     * Issue #627 made the bundle comment sticky, which means the publisher now has to be able to
+     * *retract* a report as well as post one. That only works if this script says which of three
+     * things happened, every time it runs — and in particular if "I could not measure" is
+     * distinguishable from "I measured, and there is nothing to report".
+     *
+     * Collapsing those two would be silent and wrong in the worst direction: a failed baseline
+     * download would look like a clean run and retract a regression report that is still accurate.
+     */
+    describe("stages an explicit comment state for the trusted publisher", () => {
+        it("says `report` when there is something worth saying", () => {
+            const result = runReporter({
+                current: { scene1: { rawKB: 95.4 } },
+                master: { scene1: { rawKB: 93.0 } },
+                scenes: [{ id: 1, slug: "scene1", name: "Scene 1" }],
+            });
+
+            expect(result.state).toBe("report");
+            expect(result.comment).not.toBeNull();
+        });
+
+        it("says `none` when the run was clean, so a stale comment can be retracted", () => {
+            const result = runReporter({
+                current: { scene1: { rawKB: 93.4 } },
+                master: { scene1: { rawKB: 93.0 } },
+                scenes: [{ id: 1, slug: "scene1", name: "Scene 1" }],
+            });
+
+            expect(result.state).toBe("none");
+        });
+
+        it("says `unavailable`, not `none`, when the master baseline could not be read", () => {
+            // The distinction that keeps a real regression report on the pull request when the
+            // baseline fetch fails.
+            const result = runReporter({
+                current: { scene1: { rawKB: 95.4 } },
+                scenes: [{ id: 1, slug: "scene1", name: "Scene 1" }],
+            });
+
+            expect(result.state).toBe("unavailable");
+        });
+
+        it("writes the state file next to the markdown the publisher downloads", () => {
+            // Both live in the `bundle-comment` artifact directory. If the state file were written
+            // anywhere else the publisher would see a missing state and no-op forever, which is
+            // exactly the silent-nothing-happens failure the sticky comment exists to remove.
+            const result = runReporter({
+                current: { scene1: { rawKB: 95.4 } },
+                master: { scene1: { rawKB: 93.0 } },
+                scenes: [{ id: 1, slug: "scene1", name: "Scene 1" }],
+            });
+
+            expect(result.state).not.toBeNull();
         });
     });
 });

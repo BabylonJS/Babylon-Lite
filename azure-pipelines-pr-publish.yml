@@ -78,6 +78,34 @@ parameters:
       type: boolean
       default: true
 
+    # Per-axis switches, both defaulting on so a manual queue behaves exactly as
+    # it always has. They exist for the scheduled poller (#627), which needs to
+    # retry one comment path without repeating the other: the API comment is
+    # create-only, so re-running it after an unrelated bundle failure would post
+    # a duplicate. The poller sets each flag from the job-level result of the
+    # previous publisher run for the same build.
+    - name: postApiComment
+      displayName: "Post the API-report comment"
+      type: boolean
+      default: true
+
+    - name: postBundleComment
+      displayName: "Reconcile the sticky bundle-size comment"
+      type: boolean
+      default: true
+
+# Build number, composed only from compile-time parameters. This is what makes a
+# publisher run findable by the triple it was queued for, so the scheduled poller
+# in #627 can ask "has this PR CI build already been published?" with one exact
+# query instead of scanning history.
+#
+# It is an *index*, not a source of truth. Build numbers are editable by anyone
+# holding `Update build information`, so the poller re-confirms every hit against
+# the run's immutable queue-time parameters before believing it. A forged number
+# can therefore only cost an extra queue, which the reconciler absorbs, and never
+# suppress a report.
+name: blp-${{ parameters.prNumber }}-${{ parameters.prCiRunId }}-$(Rev:.r)
+
 resources:
     repositories:
         # The scripts this pipeline runs come from master, not from whichever ref
@@ -254,23 +282,34 @@ stages:
                   displayName: "Skip untrusted preview artifacts"
 
           # ──────────────────────────────────────────────────────────────
-          # Job 3: Post PR comments
+          # Job 3: Post the API-report comment
           # ──────────────────────────────────────────────────────────────
-          # The API-report and bundle-size comment bodies are produced by jobs
-          # that run pull-request code, so they are untrusted *content*. Content
-          # is fine — it ends up as markdown in a comment — but it must not be
-          # interpreted. Echoing it back through `##vso[task.setvariable]` would
-          # let it emit logging commands of its own, so
-          # `strip-logging-commands.sh` (from the pinned master checkout)
-          # neutralises every `##vso[` / `##[` sequence before the body is ever
-          # set as a variable, so a body that arrives from a job that ran
-          # pull-request code cannot issue logging commands inside the job that
-          # holds the GitHub connection.
+          # The comment bodies are produced by jobs that run pull-request code, so
+          # they are untrusted *content*. Content is fine — it ends up as markdown
+          # in a comment — but it must not be interpreted. Echoing it back through
+          # `##vso[task.setvariable]` would let it emit logging commands of its
+          # own, so `strip-logging-commands.sh` (from the pinned master checkout)
+          # neutralises every `##vso[` / `##[` sequence before the body is ever set
+          # as a variable, so a body that arrives from a job that ran pull-request
+          # code cannot issue logging commands inside the job that holds the GitHub
+          # connection.
           #
-          - job: PostPrComments
-            displayName: "Post PR Comments"
+          # ── WHY THIS IS ITS OWN JOB ──────────────────────────────────────────
+          #
+          # It used to share a job with the bundle-size comment. The two have
+          # different failure semantics and that turned out to matter once #627
+          # made publishing automatic: `GitHubComment@0` can only *create*, so
+          # re-running this path duplicates the comment, while the bundle path must
+          # be retried until it succeeds. In one job the poller could only retry
+          # both or neither. Split, it retries exactly the half that failed, and
+          # reads each half's result from the run timeline.
+          #
+          # Every input here is carried over unchanged, `continueOnError` included.
+          # This comment's behaviour is deliberately not part of #627.
+          - job: PostApiComment
+            displayName: "Post API Comment"
             dependsOn: Preflight
-            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'), eq('${{ parameters.postComments }}', 'true'))
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'), eq('${{ parameters.postComments }}', 'true'), eq('${{ parameters.postApiComment }}', 'true'))
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -289,6 +328,74 @@ stages:
                       artifact: api-comment
                       path: $(Pipeline.Workspace)/api-comment
 
+                - script: |
+                      set -euo pipefail
+                      bash scripts/strip-logging-commands.sh \
+                          "$(Pipeline.Workspace)/api-comment/api-report-comment.md" \
+                          API_COMMENT_BODY POST_API_COMMENT
+                  condition: always()
+                  continueOnError: true
+                  displayName: "Load and neutralise comment bodies"
+                  target:
+                      commands: restricted
+                      settableVariables:
+                          - API_COMMENT_BODY
+                          - POST_API_COMMENT
+
+                - task: GitHubComment@0
+                  condition: and(always(), eq(variables['POST_API_COMMENT'], 'true'))
+                  continueOnError: true
+                  displayName: "Post API changes to PR"
+                  inputs:
+                      gitHubConnection: "BabylonBotPAT"
+                      repositoryName: "BabylonJS/Babylon-Lite"
+                      id: "${{ parameters.prNumber }}"
+                      comment: "$(API_COMMENT_BODY)"
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 4: Reconcile the sticky bundle-size comment
+          # ──────────────────────────────────────────────────────────────
+          # This is issue #627. `GitHubComment@0` is create-only, so the bundle-size
+          # comment outlived the measurement it described: a pull request that added
+          # 40 KB and then took it back kept a comment asserting the regression, and
+          # every later run stacked another comment beside it. Nothing in the task
+          # could update or withdraw one, and its `BabylonBotPAT` service connection
+          # is opaque to scripts by construction, so the fix cannot be built on top
+          # of it. It is replaced here by master's own reconciler against a token
+          # scoped to issue comments and nothing else.
+          #
+          # Three properties are load-bearing:
+          #
+          #   * The step runs under a restricted target that can set no variables at
+          #     all. It is the step that touches artifact bytes, and it runs in a job
+          #     holding a GitHub write token — a single `##vso[task.setendpoint]` in
+          #     its output would be enough to redirect a connection, so the agent is
+          #     told not to honour any logging command from it.
+          #   * `continueOnError` is deliberately absent, unlike the API job above.
+          #     A failed reconcile must fail the job, because that is the signal the
+          #     poller retries on. Swallowing it would leave a wrong comment standing
+          #     and look like success.
+          #   * Repository, pull request, definition and build are compile-time
+          #     parameters. The artifact contributes markdown and a three-valued
+          #     state enum; it can name no destination and select no credential.
+          - job: PostBundleComment
+            displayName: "Reconcile Bundle Size Comment"
+            dependsOn: Preflight
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'), eq('${{ parameters.postComments }}', 'true'), eq('${{ parameters.postBundleComment }}', 'true'))
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                # PR_COMMENT_TOKEN resolves from a protected variable group, so the
+                # branch-control check covers it. It is a fine-grained GitHub token
+                # with issue-comment read/write on this repository and nothing else:
+                # the publisher's existing GITHUB_TOKEN is documented as read-only PR
+                # metadata, and widening it would hand comment-write to every other
+                # consumer of BabylonJS-Deployment.
+                - group: BabylonLite-PRComments
+            steps:
+                - checkout: trusted
+                  fetchDepth: 1
+
                 - task: DownloadPipelineArtifact@2
                   displayName: "Download bundle comment"
                   continueOnError: true
@@ -301,41 +408,27 @@ stages:
                       artifact: bundle-comment
                       path: $(Pipeline.Workspace)/bundle-comment
 
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
                 - script: |
-                      set -euo pipefail
-                      bash scripts/strip-logging-commands.sh \
-                          "$(Pipeline.Workspace)/api-comment/api-report-comment.md" \
-                          API_COMMENT_BODY POST_API_COMMENT
-                      bash scripts/strip-logging-commands.sh \
-                          "$(Pipeline.Workspace)/bundle-comment/bundle-size-comment.md" \
-                          BUNDLE_COMMENT_BODY POST_BUNDLE_COMMENT
-                  condition: always()
-                  continueOnError: true
-                  displayName: "Load and neutralise comment bodies"
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile --ignore-scripts
+                  displayName: "Install dependencies (no lifecycle scripts)"
+
+                - script: pnpm reconcile:bundle-comment
+                  displayName: "Reconcile sticky bundle-size comment"
                   target:
                       commands: restricted
-                      settableVariables:
-                          - API_COMMENT_BODY
-                          - POST_API_COMMENT
-                          - BUNDLE_COMMENT_BODY
-                          - POST_BUNDLE_COMMENT
-
-                - task: GitHubComment@0
-                  condition: and(always(), eq(variables['POST_API_COMMENT'], 'true'))
-                  continueOnError: true
-                  displayName: "Post API changes to PR"
-                  inputs:
-                      gitHubConnection: "BabylonBotPAT"
-                      repositoryName: "BabylonJS/Babylon-Lite"
-                      id: "${{ parameters.prNumber }}"
-                      comment: "$(API_COMMENT_BODY)"
-
-                - task: GitHubComment@0
-                  condition: and(always(), eq(variables['POST_BUNDLE_COMMENT'], 'true'))
-                  continueOnError: true
-                  displayName: "Post bundle-size changes to PR"
-                  inputs:
-                      gitHubConnection: "BabylonBotPAT"
-                      repositoryName: "BabylonJS/Babylon-Lite"
-                      id: "${{ parameters.prNumber }}"
-                      comment: "$(BUNDLE_COMMENT_BODY)"
+                      settableVariables: none
+                  env:
+                      GITHUB_REPOSITORY: "BabylonJS/Babylon-Lite"
+                      PR_NUMBER: "${{ parameters.prNumber }}"
+                      PR_CI_RUN_ID: "${{ parameters.prCiRunId }}"
+                      PR_CI_DEFINITION_ID: "${{ parameters.prCiDefinitionId }}"
+                      BUNDLE_COMMENT_DIR: $(Pipeline.Workspace)/bundle-comment
+                      PR_COMMENT_TOKEN: "$(PR_COMMENT_TOKEN)"

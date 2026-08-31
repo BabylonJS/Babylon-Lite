@@ -54,7 +54,17 @@ fi
 # body back into something that is not what was checked. `##vso[` and `##[` are
 # defanged with a zero-width-free marker that stays readable in the posted
 # comment.
-BODY=$(sed -e 's/%/%AZP25/g' -e 's/##vso\[/##vso(/g' -e 's/##\[/##(/g' "$FILE")
+#
+# The HTML comment delimiters are escaped for a different reason. Sticky comments
+# are identified by a hidden marker on a comment's first line, and this body is
+# repository-authored markdown posted by the same bot account. Left intact, a
+# pull request could open its API report with a byte-exact copy of the bundle
+# comment's marker and have the trusted reconciler adopt — and overwrite — the
+# wrong comment, or park it in an ambiguous state. Escaping to entities keeps the
+# text readable in the rendered comment while making the sequence impossible to
+# reconstruct. Real API reports contain no HTML comments, so this is a no-op on
+# every body the generator actually produces.
+BODY=$(sed -e 's/%/%AZP25/g' -e 's/##vso\[/##vso(/g' -e 's/##\[/##(/g' -e 's/<!--/\&lt;!--/g' -e 's/-->/--\&gt;/g' "$FILE")
 
 # Re-encode the newlines that command substitution stripped, plus any CR.
 BODY=${BODY//$'\r'/%0D}
