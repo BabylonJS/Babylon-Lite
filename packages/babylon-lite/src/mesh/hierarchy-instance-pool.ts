@@ -121,8 +121,8 @@ export function addHierarchyInstance(pool: HierarchyInstancePool, matrix: Mat4):
         throw new Error("addHierarchyInstance exceeded pool capacity");
     }
 
-    for (let b = 0; b < pool._bindings.length; b++) {
-        writeBindingMatrix(pool, pool._bindings[b]!, index, matrix);
+    for (const binding of pool._bindings) {
+        writeBindingMatrix(pool, binding, index, matrix);
     }
     setHierarchyInstanceCount(pool, index + 1);
     return index;
@@ -137,8 +137,7 @@ export function addHierarchyInstance(pool: HierarchyInstancePool, matrix: Mat4):
  */
 export function setHierarchyInstanceMatrix(pool: HierarchyInstancePool, index: number, matrix: Mat4): void {
     assertActiveIndex(pool, index, "setHierarchyInstanceMatrix");
-    for (let b = 0; b < pool._bindings.length; b++) {
-        const binding = pool._bindings[b]!;
+    for (const binding of pool._bindings) {
         writeBindingMatrix(pool, binding, index, matrix);
         markMatrixDirty(binding, index);
     }
@@ -160,8 +159,8 @@ export function removeHierarchyInstance(pool: HierarchyInstancePool, index: numb
     if (index !== last) {
         const dst = index * 16;
         const src = last * 16;
-        for (let b = 0; b < pool._bindings.length; b++) {
-            pool._bindings[b]!.matrices.copyWithin(dst, src, src + 16);
+        for (const binding of pool._bindings) {
+            binding.matrices.copyWithin(dst, src, src + 16);
         }
     }
     setHierarchyInstanceCount(pool, last);
@@ -182,8 +181,7 @@ export function setHierarchyInstanceCount(pool: HierarchyInstancePool, count: nu
     if (!Number.isInteger(count) || count < 0 || count > pool.capacity) {
         throw new Error("setHierarchyInstanceCount count must be an integer within pool capacity");
     }
-    for (let b = 0; b < pool._bindings.length; b++) {
-        const binding = pool._bindings[b]!;
+    for (const binding of pool._bindings) {
         if (!binding.mesh.thinInstances) {
             throw new Error(`setHierarchyInstanceCount mesh "${binding.mesh.name}" is missing thin instance data`);
         }

@@ -32,14 +32,6 @@ export function writeShadowUboFields(out: Float32Array, sg: { _lightMatrix: Floa
 /** Build a light-space view matrix (column-major 4x4) from direction + position.
  *  Shared between directional and spot shadow generators. */
 export function buildLightViewMatrix(dirX: number, dirY: number, dirZ: number, px: number, py: number, pz: number): Float32Array {
-    const out = new F32(16);
-    buildLightViewMatrixInto(out, dirX, dirY, dirZ, px, py, pz);
-    return out;
-}
-
-/** Build a light-space view matrix into a pre-allocated Float32Array(16).
- *  Zero-allocation variant of {@link buildLightViewMatrix}. */
-export function buildLightViewMatrixInto(out: Float32Array, dirX: number, dirY: number, dirZ: number, px: number, py: number, pz: number): void {
     const len = Math.sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ) || 1;
     const fx = dirX / len;
     const fy = dirY / len;
@@ -65,22 +57,7 @@ export function buildLightViewMatrixInto(out: Float32Array, dirX: number, dirY: 
     const uy = fz * rx - fx * rz;
     const uz = fx * ry - fy * rx;
 
-    out[0] = rx;
-    out[1] = ux;
-    out[2] = fx;
-    out[3] = 0;
-    out[4] = ry;
-    out[5] = uy;
-    out[6] = fy;
-    out[7] = 0;
-    out[8] = rz;
-    out[9] = uz;
-    out[10] = fz;
-    out[11] = 0;
-    out[12] = -(rx * px + ry * py + rz * pz);
-    out[13] = -(ux * px + uy * py + uz * pz);
-    out[14] = -(fx * px + fy * py + fz * pz);
-    out[15] = 1;
+    return new F32([rx, ux, fx, 0, ry, uy, fy, 0, rz, uz, fz, 0, -(rx * px + ry * py + rz * pz), -(ux * px + uy * py + uz * pz), -(fx * px + fy * py + fz * pz), 1]);
 }
 
 /** Multiply two column-major 4x4 matrices: out = a * b. */

@@ -4,8 +4,14 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
-import { buildLightViewMatrix, buildLightViewMatrixInto, casterVersionSum } from "../../../packages/babylon-lite/src/shadow/shadow-base.js";
-import { _biasViewProjection, _createCascadeScratch, _computeCsmCascades, _writeCsmUbo } from "../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks.js";
+import { buildLightViewMatrix, casterVersionSum } from "../../../packages/babylon-lite/src/shadow/shadow-base.js";
+import {
+    _biasViewProjection,
+    _createCascadeScratch,
+    _computeCsmCascades,
+    _writeCsmUbo,
+    buildLightViewMatrixInto,
+} from "../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks.js";
 
 // Minimal mock of getViewProjectionMatrix — returns an invertible perspective-like matrix.
 vi.mock("../../../packages/babylon-lite/src/camera/camera.js", () => {
