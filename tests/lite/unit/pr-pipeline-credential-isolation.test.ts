@@ -59,13 +59,13 @@ const PINNED_TEMPLATE = "config/templates/pr-ci.yml";
 /**
  * The master-only definition that publishes what a pull-request run staged.
  *
- * Every credentialed operation PR CI used to perform in its own `Publish` stage
- * — the lab-site and playground uploads, the API/bundle-size comments, the
- * release-marker label check — lives here instead. It is `trigger: none` /
- * `pr: none` and is queued by hand from master with the PR CI run id, because a
- * `resources.pipelines` completion trigger would run *this* file from the
- * triggering run's branch when the two share a repository — that is, from the
- * pull request, holding every credential below.
+ * The API/bundle-size comments and release-marker label check live here instead.
+ * Preview publishing remains disabled until a dedicated untrusted origin exists.
+ * It is `trigger: none` / `pr: none`; a `resources.pipelines` completion trigger
+ * would run *this* file from the triggering run's branch when the two share a
+ * repository — that is, from the pull request, holding every credential below.
+ * Manual queueing is an emergency/debug interface until #627 supplies the
+ * scheduled master poller.
  */
 const PUBLISHER = "azure-pipelines-pr-publish.yml";
 
@@ -152,6 +152,7 @@ const CLOUD_PIPELINE = "azure-pipelines-cloud-tests.yml";
 
 /** The cloud-browser credential, banned from anything a pull request reaches. */
 const CLOUD_GROUP = "BabylonJS-BrowserStack";
+const TESTING_GUIDE = "TESTING.md";
 
 /**
  * Credentials that can write to npm, GitHub or the deployment server.
@@ -606,7 +607,7 @@ describe("no protected resource is shared by a PR-reachable and a master-only de
     });
 });
 
-describe("the trusted publisher takes over what PR CI gave up", () => {
+describe("the trusted publisher exposes a narrow interface for PR CI output", () => {
     // Removing the credential by removing the capability would satisfy every
     // assertion above. The publisher has to exist, has to be unreachable from a
     // pull request, and has to consume exactly the artifacts PR CI stages.
@@ -615,7 +616,7 @@ describe("the trusted publisher takes over what PR CI gave up", () => {
 
     it("is a definition no pull request can trigger", () => {
         expect(publisher, `${PUBLISHER} must opt out of pull-request triggers with \`pr: none\``).toMatch(/^pr:\s*none\s*$/m);
-        expect(publisher, `${PUBLISHER} must not run automatically on push either; it is queued by hand with a run id`).toMatch(/^trigger:\s*none\s*$/m);
+        expect(publisher, `${PUBLISHER} must not run automatically on push; #627 supplies the trusted scheduled poller`).toMatch(/^trigger:\s*none\s*$/m);
         expect(prTriggeredPipelines(), `${PUBLISHER} is pull-request triggered`).not.toContain(PUBLISHER);
     });
 
@@ -630,7 +631,7 @@ describe("the trusted publisher takes over what PR CI gave up", () => {
         );
     });
 
-    it("publishes the artifacts PR CI actually stages", () => {
+    it("consumes only the inert comment artifacts PR CI stages", () => {
         const staged = new Set(
             jobsOf(template)
                 .flatMap((job) => [...withoutComments(job.body).matchAll(/PublishPipelineArtifact@\d[\s\S]*?artifact:\s*(\S+)/g)])
@@ -639,7 +640,7 @@ describe("the trusted publisher takes over what PR CI gave up", () => {
         const consumed = new Set([...withoutComments(publisher).matchAll(/DownloadPipelineArtifact@\d[\s\S]*?artifact:\s*(\S+)/g)].map((match) => match[1] ?? ""));
 
         expect(staged.size, `${PINNED_TEMPLATE} stages no artifact — the publisher would have nothing to publish`).toBeGreaterThan(0);
-        expect(consumed.size, `${PUBLISHER} downloads no artifact`).toBeGreaterThan(0);
+        expect([...consumed].sort(), `${PUBLISHER} must consume exactly the inert comment artifact contract`).toEqual(["api-comment", "bundle-comment"]);
         expect(
             [...consumed].filter((artifact) => !staged.has(artifact)),
             `${PUBLISHER} downloads artifacts ${PINNED_TEMPLATE} does not stage, so the publish silently produces nothing:`
@@ -662,21 +663,69 @@ describe("the trusted publisher takes over what PR CI gave up", () => {
         }
     });
 
-    it("gates the pull-request number to a number", () => {
+    it("gates every identity input to a number", () => {
         // `type: number` is validated by the server at queue time, so a deploy
         // path built from it cannot carry a traversal or an injection.
-        expect(publisher, `${PUBLISHER} does not declare prNumber as a numeric parameter`).toMatch(/-\s*name:\s*prNumber\b[\s\S]{0,200}?type:\s*number/);
-        expect(publisher, `${PUBLISHER} does not declare prCiRunId as a numeric parameter`).toMatch(/-\s*name:\s*prCiRunId\b[\s\S]{0,200}?type:\s*number/);
+        for (const parameter of ["prNumber", "prCiRunId", "prCiDefinitionId"]) {
+            expect(publisher, `${PUBLISHER} does not declare ${parameter} as a numeric parameter`).toMatch(
+                new RegExp(`-\\s*name:\\s*${parameter}\\b[\\s\\S]{0,200}?type:\\s*number`)
+            );
+        }
     });
 
-    it("agrees with PR CI about where the lab site will be served", () => {
-        // The base path is baked into the build by PR CI and the upload path is
-        // chosen by the publisher. If they disagree the site deploys and every
-        // asset 404s, which is the kind of break that looks like a bad build.
-        expect(template, `${PINNED_TEMPLATE} no longer bakes a per-PR lab base path`).toMatch(/LAB_BASE_PATH:\s*"\/lite\/pr-\$\(System\.PullRequest\.PullRequestNumber\)\/lab\/"/);
-        expect(publisher, `${PUBLISHER} does not upload the lab site to the path PR CI baked into it`).toMatch(
-            /deployPath:\s*lite\/pr-\$\{\{\s*parameters\.prNumber\s*\}\}\/lab\s*$/m
+    it("validates build identity, PR ref and fixed repository before protected jobs run", () => {
+        const preflight = jobsOf(publisher).find((job) => job.name === "Preflight");
+        expect(preflight, `${PUBLISHER} has no Preflight job`).toBeDefined();
+        expect(preflight?.body).toContain(".definition.id == $definitionId");
+        expect(preflight?.body).toContain('.reason == "pullRequest"');
+        expect(preflight?.body).toContain('.status == "completed"');
+        expect(preflight?.body).toContain(".sourceBranch == $sourceBranch");
+        expect(preflight?.body).toContain('.repository.type == "GitHub"');
+        expect(preflight?.body).toContain('.repository.name == "BabylonJS/Babylon-Lite"');
+        expect(preflight?.body).toContain('"refs/pull/${PR_NUMBER}/merge"');
+    });
+
+    it("fixes every GitHub destination to BabylonJS/Babylon-Lite", () => {
+        const uncommented = withoutComments(publisher);
+        expect(uncommented).not.toContain("$(Build.Repository.Name)");
+        const destinations = [...uncommented.matchAll(/repositoryName:\s*"([^"]+)"/g)];
+        expect(destinations, `${PUBLISHER} has no GitHub repository destinations to inspect`).toHaveLength(2);
+        for (const match of destinations) {
+            expect(match[1]).toBe("BabylonJS/Babylon-Lite");
+        }
+    });
+
+    it("keeps PR previews disabled instead of publishing unreviewed code to a production origin", () => {
+        const uncommented = withoutComments(publisher);
+        expect(uncommented).toContain("- job: PreviewPublishingDisabled");
+        expect(uncommented).not.toMatch(/-\s*template:\s*config\/templates\/upload-static-site\.yml/);
+        expect(uncommented).not.toMatch(/liteplayground\.babylonjs\.com\/pr|deployPath:\s*(?:lite\/pr-|litePlayground\/pr)/);
+        expect(uncommented).not.toMatch(/-\s*name:\s*publish(?:LabSite|Playground)/);
+    });
+
+    it("lets untrusted comment content set only the four variables the posting tasks consume", () => {
+        const comments = jobsOf(publisher).find((job) => job.name === "PostPrComments");
+        expect(comments, `${PUBLISHER} has no PostPrComments job`).toBeDefined();
+        expect(comments?.body).toMatch(
+            /displayName:\s*"Load and neutralise comment bodies"[\s\S]*?target:\s*\n\s*commands:\s*restricted\s*\n\s*settableVariables:\s*\n\s*-\s*API_COMMENT_BODY\s*\n\s*-\s*POST_API_COMMENT\s*\n\s*-\s*BUNDLE_COMMENT_BODY\s*\n\s*-\s*POST_BUNDLE_COMMENT/
         );
+    });
+});
+
+describe("the administrator runbook closes the job-token queue path", () => {
+    const guide = read(TESTING_GUIDE);
+
+    it("denies both Build Service identities Queue builds on every credentialed definition", () => {
+        expect(guide).toContain("Deny Queue builds");
+        expect(guide).toContain("<Project> Build Service (<Org>)");
+        expect(guide).toContain("Project Collection Build Service (<Org>)");
+        expect(guide).toContain("every credentialed definition");
+    });
+
+    it("requires an empirical 403 and a separate #627 queue identity", () => {
+        expect(guide).toContain("every request must return 403");
+        expect(guide).toContain("dedicated queue identity");
+        expect(guide).toContain("Do not use `System.AccessToken` to queue the");
     });
 });
 
@@ -1306,21 +1355,8 @@ describe("authenticated uploads run where no pull-request code has run", () => {
         expect(runsPullRequestCode(entry?.job.body ?? ""), `job ${id} uploads with a deploy token and also runs pull-request code`).toBe(false);
     });
 
-    it.each(uploaders.filter(({ file }) => file === PUBLISHER).map(({ file, job }) => `${file}:${job.name}`))("%s requires the destination host allowlist", (id) => {
-        const entry = uploaders.find(({ file, job }) => `${file}:${job.name}` === id);
-        expect(entry, `job ${id} disappeared between selection and assertion`).toBeDefined();
-        // The publisher uploads artifacts built by pull-request code. An https
-        // URL is not a destination check — an attacker's host serves https too —
-        // and neither is a runtime variable, which is what the allowlist
-        // parameter replaces.
-        expect(entry?.job.body, `job ${id} publishes pull-request output without requireHostAllowlist: true`).toMatch(/requireHostAllowlist:\s*true/);
-    });
-
-    it("has publisher upload jobs to inspect", () => {
-        expect(
-            uploaders.filter(({ file }) => file === PUBLISHER).length,
-            `${PUBLISHER} calls no upload template — the clause above would be vacuous and pull-request previews would have no publisher`
-        ).toBeGreaterThan(0);
+    it("keeps all authenticated upload templates out of the PR publisher while previews are disabled", () => {
+        expect(uploaders.filter(({ file }) => file === PUBLISHER)).toEqual([]);
     });
 
     it("never lets a repository-set variable gate a deploy credential", () => {

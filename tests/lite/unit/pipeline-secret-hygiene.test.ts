@@ -628,7 +628,7 @@ describe("pipeline secret hygiene", () => {
     // looked like a header. Assert the stronger property: an Authorization
     // header must actually reference the token, in either the ADO macro form
     // or the shell form used when the secret is passed through `env:`.
-    it("references the deploy token in every Authorization header", () => {
+    it("references an approved token in every Authorization header", () => {
         const headers = pipelineLines().filter(({ line }) => isAuthorizationHeader(line));
 
         // Print N, and where. An assertion of the form "N things, all correct"
@@ -690,10 +690,16 @@ describe("pipeline secret hygiene", () => {
         const bodies = new Map(pipelineFiles().map((file) => [file.location, readFileSync(file.path, "utf8")]));
         const tokenless = headers
             .filter(({ requiresDeployToken }) => requiresDeployToken)
-            .filter(({ location, line }) => !credentialTracesToDeployToken(bodies.get(location) ?? "", line))
+            .filter(({ location, line }) => {
+                const expected = location === "azure-pipelines-pr-publish.yml" ? "SYSTEM_ACCESSTOKEN" : "DEPLOY_TOKEN";
+                return !credentialTracesToAzureToken(bodies.get(location) ?? "", line, expected);
+            })
             .map(({ location, number }) => `${location}:${number}`);
 
-        expect(tokenless, "Authorization header in an Azure pipeline does not reference DEPLOY_TOKEN, directly or through an assignment in its own file.").toEqual([]);
+        expect(
+            tokenless,
+            "Authorization header in an Azure pipeline does not reference the token approved for its endpoint class, directly or through an assignment in its own file."
+        ).toEqual([]);
     });
 });
 
@@ -788,7 +794,7 @@ export function credentialTracesToASecretStore(fileText: string, headerLine: str
 }
 
 /**
- * True when a header's credential is `DEPLOY_TOKEN`, directly or through
+ * True when a header's credential is the expected token, directly or through
  * same-file assignments.
  *
  * The Azure clause used to ask this of a single line, with
@@ -807,7 +813,7 @@ export function credentialTracesToASecretStore(fileText: string, headerLine: str
  * file", which every one of these files does in prose and in its `env:` block,
  * and which would therefore pass on a header wired to nothing at all.
  */
-export function credentialTracesToDeployToken(fileText: string, headerLine: string): boolean {
+export function credentialTracesToAzureToken(fileText: string, headerLine: string, expected: "DEPLOY_TOKEN" | "SYSTEM_ACCESSTOKEN"): boolean {
     const pending = identifiersIn(headerLine);
     const seen = new Set<string>();
 
@@ -818,7 +824,7 @@ export function credentialTracesToDeployToken(fileText: string, headerLine: stri
         }
         seen.add(name);
 
-        if (name === "DEPLOY_TOKEN") {
+        if (name === expected) {
             return true;
         }
         pending.push(...assignmentsOf(fileText, name).flatMap(identifiersIn));
@@ -939,19 +945,22 @@ describe("logical commands fold the lines a curl invocation is spread over", () 
     });
 });
 
-describe("the deploy-token trace follows the escaping hop", () => {
+describe("the Azure Authorization-token trace follows the escaping hop", () => {
     // The escaping hop is mandatory -- a curl config value is a quoted string --
     // so a check that cannot see through one assignment rejects the only
     // correct way to write this.
     const escaped = ["          token_escaped=${DEPLOY_TOKEN//\\\\/\\\\\\\\}", '          token_escaped=${token_escaped//\\"/\\\\\\"}'].join("\n");
 
     it("traces a header through the escape assignment to DEPLOY_TOKEN", () => {
-        expect(credentialTracesToDeployToken(escaped, 'printf \'header = "Authorization: %s"\\n\' "$token_escaped" |')).toBe(true);
+        expect(credentialTracesToAzureToken(escaped, 'printf \'header = "Authorization: %s"\\n\' "$token_escaped" |', "DEPLOY_TOKEN")).toBe(true);
     });
 
     it("still accepts the direct interpolation", () => {
-        expect(credentialTracesToDeployToken("", '-H "Authorization: ${DEPLOY_TOKEN}"')).toBe(true);
-        expect(credentialTracesToDeployToken("", '-H "Authorization: $(DEPLOY_TOKEN)"')).toBe(true);
+        expect(credentialTracesToAzureToken("", '-H "Authorization: ${DEPLOY_TOKEN}"', "DEPLOY_TOKEN")).toBe(true);
+        expect(credentialTracesToAzureToken("", '-H "Authorization: $(DEPLOY_TOKEN)"', "DEPLOY_TOKEN")).toBe(true);
+        expect(credentialTracesToAzureToken("", '-H "Authorization: ${SYSTEM_ACCESSTOKEN}"', "SYSTEM_ACCESSTOKEN")).toBe(true);
+        expect(credentialTracesToAzureToken("", '-H "Authorization: ${SYSTEM_ACCESSTOKEN}"', "DEPLOY_TOKEN")).toBe(false);
+        expect(credentialTracesToAzureToken("", '-H "Authorization: ${DEPLOY_TOKEN}"', "SYSTEM_ACCESSTOKEN")).toBe(false);
     });
 
     it("rejects a header wired to something that is not the deploy token", () => {
@@ -961,12 +970,12 @@ describe("the deploy-token trace follows the escaping hop", () => {
         const decoy = ["# DEPLOY_TOKEN comes from the BabylonJS-Deployment group", "          DEPLOY_TOKEN: $(DEPLOY_TOKEN)", "          other_escaped=${SOME_OTHER_VALUE}"].join(
             "\n"
         );
-        expect(credentialTracesToDeployToken(decoy, 'printf \'header = "Authorization: %s"\\n\' "$other_escaped" |')).toBe(false);
+        expect(credentialTracesToAzureToken(decoy, 'printf \'header = "Authorization: %s"\\n\' "$other_escaped" |', "DEPLOY_TOKEN")).toBe(false);
     });
 
     it("terminates on a cycle", () => {
         const cyclic = ["          a=${b}", "          b=${a}"].join("\n");
-        expect(credentialTracesToDeployToken(cyclic, '-H "Authorization: ${a}"')).toBe(false);
+        expect(credentialTracesToAzureToken(cyclic, '-H "Authorization: ${a}"', "DEPLOY_TOKEN")).toBe(false);
     });
 });
 

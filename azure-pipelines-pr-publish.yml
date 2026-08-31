@@ -1,8 +1,8 @@
 # Azure Pipelines — Babylon Lite PR Publish (trusted, master-only)
 #
-# Publishes the artifacts a pull-request CI run staged: the lab site, the
-# playground snapshot, the API-report and bundle-size comment bodies, and the
-# label half of the breaking-change rule.
+# Publishes the inert comment artifacts a pull-request CI run staged, and runs
+# the label half of the breaking-change rule. Preview artifacts are deliberately
+# not published until a dedicated untrusted origin exists.
 #
 # ── WHY THIS IS A SEPARATE DEFINITION ────────────────────────────────────────
 #
@@ -36,8 +36,9 @@
 # triggered pipelines share a repository, Azure runs the triggered pipeline on the
 # *triggering run's* branch — which for a pull-request build is the pull request's
 # own merge ref. This file would then be read from the pull request, holding every
-# credential above. So publication is deliberately a manual, parameterised run
-# queued from master by a maintainer.
+# credential above. Until the scheduled master poller in #627 is ready, this
+# pipeline is only an emergency/debug interface queued from master by a
+# maintainer; manual operation is not the mergeable steady state.
 #
 # ── HOW TO RUN IT ────────────────────────────────────────────────────────────
 #
@@ -71,16 +72,6 @@ parameters:
     - name: prCiDefinitionId
       displayName: "PR CI pipeline definition id"
       type: number
-
-    - name: publishLabSite
-      displayName: "Upload the lab site"
-      type: boolean
-      default: true
-
-    - name: publishPlayground
-      displayName: "Upload the playground snapshot"
-      type: boolean
-      default: true
 
     - name: postComments
       displayName: "Post the API-report and bundle-size comments"
@@ -123,6 +114,7 @@ stages:
           # are nonsense. Holds nothing, so it is safe for it to be first.
           - job: Preflight
             displayName: "Validate run parameters"
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -150,8 +142,48 @@ stages:
                           fi
                       done
 
-                      echo "Publishing artifacts of run $RUN_ID (definition $DEFINITION_ID) for PR #$PR_NUMBER."
-                  displayName: "Check the parameters are positive integers"
+                      case "${SYSTEM_ACCESSTOKEN:-}" in
+                          "" | '$('*')')
+                              echo "Refusing to publish: System.AccessToken is unavailable."
+                              exit 1
+                              ;;
+                      esac
+
+                      BUILD_JSON="$(Agent.TempDirectory)/pr-ci-build-${RUN_ID}.json"
+                      trap 'rm -f "$BUILD_JSON"' EXIT
+                      token_escaped=${SYSTEM_ACCESSTOKEN//\\/\\\\}
+                      token_escaped=${token_escaped//\"/\\\"}
+
+                      printf 'header = "Authorization: Bearer %s"\n' "$token_escaped" |
+                          curl --fail --silent --show-error \
+                              --proto '=https' \
+                              --config - \
+                              --output "$BUILD_JSON" \
+                              "${SYSTEM_COLLECTIONURI}${SYSTEM_TEAMPROJECTID}/_apis/build/builds/${RUN_ID}?api-version=7.1"
+
+                      jq -e \
+                          --argjson runId "$RUN_ID" \
+                          --argjson definitionId "$DEFINITION_ID" \
+                          --arg sourceBranch "refs/pull/${PR_NUMBER}/merge" \
+                          '
+                              .id == $runId and
+                              .definition.id == $definitionId and
+                              .reason == "pullRequest" and
+                              .status == "completed" and
+                              .sourceBranch == $sourceBranch and
+                              .repository.type == "GitHub" and
+                              .repository.name == "BabylonJS/Babylon-Lite"
+                          ' "$BUILD_JSON" >/dev/null || {
+                              echo "Refusing to publish: run $RUN_ID is not a completed BabylonJS/Babylon-Lite PR CI run for PR #$PR_NUMBER in definition $DEFINITION_ID."
+                              exit 1
+                          }
+
+                      echo "Validated PR CI run $RUN_ID (definition $DEFINITION_ID) for PR #$PR_NUMBER."
+                  displayName: "Validate parameters and PR CI run provenance"
+                  env:
+                      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+                      SYSTEM_COLLECTIONURI: $(System.CollectionUri)
+                      SYSTEM_TEAMPROJECTID: $(System.TeamProjectId)
 
           # ──────────────────────────────────────────────────────────────
           # Job 1: Release marker labels (trusted source checkout)
@@ -202,89 +234,27 @@ stages:
                       GITHUB_TOKEN: "$(GITHUB_TOKEN)"
 
           # ──────────────────────────────────────────────────────────────
-          # Job 2: Publish Lab Site
+          # Job 2: PR previews disabled
           # ──────────────────────────────────────────────────────────────
-          # `lite/pr-<N>/lab` matches the base path PR CI baked into the build
-          # (LAB_BASE_PATH), so the deployed copy resolves its own assets.
-          - job: PublishLabSite
-            displayName: "Publish Lab Site"
+          # Both preview artifacts contain pull-request-authored JavaScript.
+          # They must not be published under production origins, where they
+          # would share localStorage, cookies and service-worker scope with
+          # reviewed code. Publishing stays disabled until a separate
+          # registrable domain, storage account and CDN are provisioned.
+          - job: PreviewPublishingDisabled
+            displayName: "PR previews disabled"
             dependsOn: Preflight
-            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'), eq('${{ parameters.publishLabSite }}', 'true'))
+            condition: succeeded()
             pool:
                 vmImage: "ubuntu-latest"
-            variables:
-                - group: BabylonJS-Deployment
             steps:
                 - checkout: none
 
-                - task: DownloadPipelineArtifact@2
-                  displayName: "Download lab site from the PR CI run"
-                  inputs:
-                      buildType: specific
-                      project: $(System.TeamProject)
-                      definition: ${{ parameters.prCiDefinitionId }}
-                      buildVersionToDownload: specific
-                      pipelineId: ${{ parameters.prCiRunId }}
-                      artifact: lab-site
-                      path: $(Pipeline.Workspace)/lab-site
-
-                # The link comment is posted from here, by the job that knows the
-                # upload succeeded. `commentId` carries the pull-request number
-                # because this run is not a pull-request build, so the template's
-                # default (System.PullRequest.PullRequestNumber) is empty.
-                - template: config/templates/upload-static-site.yml
-                  parameters:
-                      siteDir: $(Pipeline.Workspace)/lab-site
-                      deployPath: lite/pr-${{ parameters.prNumber }}/lab
-                      siteName: "Lab"
-                      linkUrl: $(SERVE_DOMAIN)/lite/pr-${{ parameters.prNumber }}/lab/index.html
-                      commentId: ${{ parameters.prNumber }}
-                      requireHostAllowlist: true
-                      continueOnError: false
+                - script: echo "PR preview publishing is disabled until a dedicated untrusted origin is configured."
+                  displayName: "Skip untrusted preview artifacts"
 
           # ──────────────────────────────────────────────────────────────
-          # Job 3: Publish Playground Snapshot
-          # ──────────────────────────────────────────────────────────────
-          # BabylonJS-CI-Infrastructure provides TOOLS_STORAGE_ACCOUNT (the
-          # account backing liteplayground.babylonjs.com). The `litePlayground`
-          # container maps to the subdomain root, so this path becomes /pr/<N>/ —
-          # which is the base PR CI baked into the snapshot.
-          - job: PublishPlaygroundSnapshot
-            displayName: "Publish Playground Snapshot"
-            dependsOn: Preflight
-            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'), eq('${{ parameters.publishPlayground }}', 'true'))
-            pool:
-                vmImage: "ubuntu-latest"
-            variables:
-                - group: BabylonJS-Deployment
-                - group: BabylonJS-CI-Infrastructure
-            steps:
-                - checkout: none
-
-                - task: DownloadPipelineArtifact@2
-                  displayName: "Download playground snapshot from the PR CI run"
-                  inputs:
-                      buildType: specific
-                      project: $(System.TeamProject)
-                      definition: ${{ parameters.prCiDefinitionId }}
-                      buildVersionToDownload: specific
-                      pipelineId: ${{ parameters.prCiRunId }}
-                      artifact: playground-site
-                      path: $(Pipeline.Workspace)/playground-site
-
-                - template: config/templates/upload-static-site.yml
-                  parameters:
-                      siteDir: $(Pipeline.Workspace)/playground-site
-                      deployPath: litePlayground/pr/${{ parameters.prNumber }}
-                      storageAccount: $(TOOLS_STORAGE_ACCOUNT)
-                      siteName: "Lite Playground"
-                      linkUrl: https://liteplayground.babylonjs.com/pr/${{ parameters.prNumber }}/
-                      commentId: ${{ parameters.prNumber }}
-                      requireHostAllowlist: true
-                      continueOnError: false
-
-          # ──────────────────────────────────────────────────────────────
-          # Job 4: Post PR comments
+          # Job 3: Post PR comments
           # ──────────────────────────────────────────────────────────────
           # The API-report and bundle-size comment bodies are produced by jobs
           # that run pull-request code, so they are untrusted *content*. Content
@@ -297,9 +267,6 @@ stages:
           # pull-request code cannot issue logging commands inside the job that
           # holds the GitHub connection.
           #
-          # The preview links are posted by the upload jobs above, from their own
-          # compile-time parameters — the job that knows whether the site is
-          # actually there is the one that says so.
           - job: PostPrComments
             displayName: "Post PR Comments"
             dependsOn: Preflight
@@ -345,6 +312,13 @@ stages:
                   condition: always()
                   continueOnError: true
                   displayName: "Load and neutralise comment bodies"
+                  target:
+                      commands: restricted
+                      settableVariables:
+                          - API_COMMENT_BODY
+                          - POST_API_COMMENT
+                          - BUNDLE_COMMENT_BODY
+                          - POST_BUNDLE_COMMENT
 
                 - task: GitHubComment@0
                   condition: and(always(), eq(variables['POST_API_COMMENT'], 'true'))
@@ -352,7 +326,7 @@ stages:
                   displayName: "Post API changes to PR"
                   inputs:
                       gitHubConnection: "BabylonBotPAT"
-                      repositoryName: "$(Build.Repository.Name)"
+                      repositoryName: "BabylonJS/Babylon-Lite"
                       id: "${{ parameters.prNumber }}"
                       comment: "$(API_COMMENT_BODY)"
 
@@ -362,6 +336,6 @@ stages:
                   displayName: "Post bundle-size changes to PR"
                   inputs:
                       gitHubConnection: "BabylonBotPAT"
-                      repositoryName: "$(Build.Repository.Name)"
+                      repositoryName: "BabylonJS/Babylon-Lite"
                       id: "${{ parameters.prNumber }}"
                       comment: "$(BUNDLE_COMMENT_BODY)"
