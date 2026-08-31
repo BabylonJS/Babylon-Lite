@@ -2592,6 +2592,16 @@
         "skipPerf": true
     },
     {
+        "id": 290,
+        "slug": "scene290-physics-thin-instances",
+        "name": "Scene 290 — Havok Thin Instances",
+        "maxMad": 0.5,
+        "maxRawKB": 66,
+        "description": "Havok Physics V2 drives 1,000 boxes, 1,000 spheres, and 8 convex torus knots through three thin-instance matrix buffers, ported from playground #PX6E6C#25 without GUI or Ammo.",
+        "tags": ["std", "procedural", "physics", "havok", "thin-instances"],
+        "skipPerf": true
+    },
+    {
         "id": 300,
         "slug": "scene300-npe-sprite2d",
         "name": "Scene 300 — NPE on Sprite2D",

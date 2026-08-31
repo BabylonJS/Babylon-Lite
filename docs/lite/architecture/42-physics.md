@@ -37,11 +37,52 @@ the caller and only referenced once `createHavokWorld` runs.
 | `PhysicsViewer` class      | `createPhysicsViewer(...)` + `show*/hide*` functions                |
 | Engine-owned step observer | a callback pushed onto `scene._beforeRender` at world creation       |
 
+### Thin-instance rigid bodies
+
+`enableHavokThinInstancePhysics(world)` lazily installs the thin-instance body
+factory. This explicit enabler owns all matrix synchronization code so ordinary
+physics scenes retain none of the feature module. After enabling,
+`createPhysicsBody(world, mesh, motionType, startsAsleep)` detects an existing
+`mesh.thinInstances` matrix slab. A non-empty slab creates one native Havok body
+per active matrix while retaining one Lite `PhysicsBody` handle:
+
+- `PhysicsBody._hkBody` remains the first native handle for backwards
+  compatibility and single-body consumers.
+- `PhysicsBody._hkBodies` is allocated only for thin-instance bodies and stores
+  handles in thin-instance index order. Ordinary bodies pay no array allocation.
+- Each native body is initialized from its corresponding matrix translation and
+  rotation. The carrier mesh transform is intentionally ignored, matching
+  Babylon.js Physics V2 thin-instance semantics.
+- Shape, mass, motion, velocity, impulse, force, event-mask, removal, and disposal
+  operations that address the Lite body apply to every native instance. Getters
+  and APIs that inherently accept one native body use instance zero.
+- Constraints and single-body query exclusions use instance zero. Raycast,
+  collision, trigger, and character-controller contact resolution recognize
+  every native handle. Collision-style event payloads return the shared Lite
+  body plus the zero-based thin-instance index, matching Babylon.js
+  `colliderIndex` / `collidedAgainstIndex` semantics; ordinary bodies report
+  index `0`.
+
+Dynamic thin-instance bodies synchronize Havok transforms directly into the
+existing matrix slab after every step, then dirty the matrix range once through
+`flushThinInstances(mesh)`. The update writes a rigid rotation/translation
+matrix; authored scale is not preserved after simulation. With TELEPORT
+pre-step enabled, every matrix is copied back to its matching Havok body.
+DISABLED remains the default. ACTION retains Babylon.js behavior and sends the
+carrier node's single target transform to every instance.
+
+`getPhysicsBodyInstanceCount(body)` reports the native count (`1` for ordinary
+bodies). The active thin-instance count is fixed when the body is created:
+callers must populate matrices before body construction. Floating-origin
+multi-region simulation rejects thin-instance bodies explicitly until it can
+track one region per native instance.
+
 ### Module files
 
 | File                              | Responsibility                                                        |
 | --------------------------------- | --------------------------------------------------------------------- |
 | `havok.ts`                        | Core: world create/step/dispose, bodies, shapes, aggregates, forces   |
+| `havok-thin-instances.ts`         | Lazy native-body fan-out and matrix synchronization for thin instances |
 | `havok-collision.ts`              | Opt-in collision-started/continued/finished events (`onPhysicsCollision`) |
 | `havok-trigger.ts`                | Opt-in trigger volume enter/exit events                               |
 | `havok-heightfield.ts`            | Heightfield collision shape                                           |
@@ -211,10 +252,15 @@ last axis is unlocked.
 
 - **Collision events** (`havok-collision.ts`): `setPhysicsBodyCollisionEventsEnabled`
   + `onPhysicsCollision` register an after-step drain on `world._afterStep`.
+  Each event identifies `collider`, `colliderIndex`, `collidedAgainst`, and
+  `collidedAgainstIndex`, and reports contact distance in addition to the point,
+  normal, and impulse.
 - **Triggers** (`havok-trigger.ts`): `setPhysicsShapeIsTrigger`, `onPhysicsTrigger`,
   and body-aware `onPhysicsTriggerBodies`; both subscriptions return a disposer.
   `onPhysicsTrigger` previously returned `void`; callers that ignore its return value
   need no runtime changes, while callers can now retain the disposer to unsubscribe.
+  Body-aware events include `bodyAIndex` / `bodyBIndex` (`-1` when an event refers
+  to a body that is no longer tracked).
 - **Queries** (`havok-queries.ts`): `physicsRaycast`, `shapeCast`, `shapeProximity`.
   Shape casts accept one `ignoreBody`, matching Havok's single optional ignored body
   ID, so callers can sweep a body's own shape without immediately hitting that body.
@@ -245,5 +291,10 @@ last axis is unlocked.
   into body space; single-axis locks preserve free-plane coupling, mass updates
   preserve active locks, selective unlocking restores the latest unlocked
   properties, and empty input/native read failures do not write mass properties.
+- `tests/lite/unit/physics-thin-instances.test.ts` — matrix-order native body
+  creation, shared shape/mass propagation, post-step matrix synchronization, one
+  dirty-range publication, complete native-body disposal, and nonzero-instance
+  Babylon.js-compatible body and instance-index reporting from native collision
+  and character-controller events.
 - Parity scenes (physics drop/stack/constraint scenes) set
   `scene.fixedDeltaMs = 1000 / 60` so Lite and Babylon.js step identically.

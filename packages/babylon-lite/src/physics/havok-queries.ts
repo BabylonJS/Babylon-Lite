@@ -26,6 +26,7 @@
 
 import type { ShapeCastInput as HavokShapeCastInput } from "@babylonjs/havok";
 import type { Quat, Vec3 } from "../math/types.js";
+import { physicsBodyHasNativeId } from "./havok.js";
 import type { PhysicsBody, PhysicsShape, PhysicsWorld } from "./havok.js";
 
 /** Query parameters for {@link shapeProximity}. */
@@ -243,7 +244,7 @@ export function physicsRaycast(world: PhysicsWorld, from: Vec3, to: Vec3, query:
 function findBodyById(world: PhysicsWorld, hitBodyId: unknown): PhysicsBody | null {
     const bodies = world._bodies;
     for (let i = 0; i < bodies.length; i++) {
-        if (bodies[i]!._hkBody[0] === hitBodyId) {
+        if (physicsBodyHasNativeId(bodies[i]!, hitBodyId)) {
             return bodies[i]!;
         }
     }
