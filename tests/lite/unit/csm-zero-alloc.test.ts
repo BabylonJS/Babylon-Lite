@@ -3,8 +3,7 @@
  * CSM cascade refactor and shadow-base ToRef helpers.
  */
 import { describe, expect, it, vi } from "vitest";
-import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh.js";
-import { buildLightViewMatrix, casterVersionSum } from "../../../packages/babylon-lite/src/shadow/shadow-base.js";
+import { buildLightViewMatrix } from "../../../packages/babylon-lite/src/shadow/shadow-base.js";
 import {
     _biasViewProjection,
     _createCascadeScratch,

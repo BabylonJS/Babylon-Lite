@@ -45,6 +45,7 @@ export function buildLightViewMatrix(dirX: number, dirY: number, dirZ: number, p
         upY = 0;
         upZ = 1;
     }
+    // right = cross(up, forward)
     let rx = upY * fz - upZ * fy;
     let ry = upZ * fx - upX * fz;
     let rz = upX * fy - upY * fx;
@@ -53,10 +54,12 @@ export function buildLightViewMatrix(dirX: number, dirY: number, dirZ: number, p
     ry /= rLen;
     rz /= rLen;
 
+    // up = cross(forward, right)
     const ux = fy * rz - fz * ry;
     const uy = fz * rx - fx * rz;
     const uz = fx * ry - fy * rx;
 
+    // Column-major view matrix (stores basis as rows of rotation, plus translation column)
     return new F32([rx, ux, fx, 0, ry, uy, fy, 0, rz, uz, fz, 0, -(rx * px + ry * py + rz * pz), -(ux * px + uy * py + uz * pz), -(fx * px + fy * py + fz * pz), 1]);
 }
 
@@ -181,7 +184,7 @@ export function createSharedShadowUBO(
     return { ubo, data };
 }
 
-/** Sum caster transform versions plus non-transform geometry/count/bounds mutations. */
+/** Sum caster transform versions plus non-transform geometry/count mutations. */
 export function casterVersionSum(casterMeshes: readonly Mesh[]): number {
     let sum = 0;
     for (const mesh of casterMeshes) {
