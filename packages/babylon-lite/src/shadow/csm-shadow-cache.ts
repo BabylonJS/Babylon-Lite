@@ -264,7 +264,7 @@ export function ensureCsmShadowCacheState(
             cacheTexture.destroy();
         },
     };
-    const casterMatGens = new Map<Material, number>();
+    const casterMatGens = new Map<Material, number | undefined>();
     const casterMaterials = new Map<Material, Material>();
     const casterMaxCascades = new Map<Mesh, number | undefined>();
     for (const mesh of casterMeshes) {

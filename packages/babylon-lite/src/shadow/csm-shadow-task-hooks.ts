@@ -87,7 +87,7 @@ export interface CsmTaskState extends ShadowTaskInternalState {
      *  while every current caster's material gen is unchanged — i.e. no CASTER material was rebuilt (which would
      *  leave its cached no-color view dangling). This is precise, unlike the global `_materialEpoch` which also
      *  bumps for swaps of unrelated (non-caster) materials. */
-    _casterMatGens: Map<Material, number>;
+    _casterMatGens: Map<Material, number | undefined>;
     /** @internal Per-caster cascade-cap snapshot used to update task membership incrementally. */
     _casterMaxCascades: Map<Mesh, number | undefined>;
     /** @internal Pre-allocated scratch storage for per-frame cascade computation, sized for `_numCascades`. */
@@ -284,7 +284,7 @@ export function ensureCsmShadowTaskState(
 
     // Snapshot each caster material's gen so the next caster-set change can tell whether a CASTER material was
     // rebuilt (→ full rebuild) or only the set changed (→ incremental, keeping unchanged casters' packets).
-    const casterMatGens = new Map<Material, number>();
+    const casterMatGens = new Map<Material, number | undefined>();
     const casterMaterials = new Map<Material, Material>();
     const casterMaxCascades = new Map<Mesh, number | undefined>();
     for (const m of casterMeshes) {

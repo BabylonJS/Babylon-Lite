@@ -85,7 +85,7 @@ describe("the caster-view resolver shared by the PCF and CSM paths", () => {
             const first = fakeMaterial("first");
             const second = fakeMaterial("second");
             const terminals = new Map<Material, Material>();
-            const generations = new Map<Material, number>();
+            const generations = new Map<Material, number | undefined>();
 
             setShadowCasterMaterial(visible, first);
             snapshotShadowCasterMaterial(visible, terminals, generations);
@@ -104,7 +104,7 @@ describe("the caster-view resolver shared by the PCF and CSM paths", () => {
             const intermediate = fakeMaterial("intermediate");
             const terminal = fakeMaterial("terminal");
             const terminals = new Map<Material, Material>();
-            const generations = new Map<Material, number>();
+            const generations = new Map<Material, number | undefined>();
 
             setShadowCasterMaterial(visible, intermediate);
             setShadowCasterMaterial(intermediate, terminal);

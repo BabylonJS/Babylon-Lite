@@ -183,16 +183,16 @@ export function resolveShadowCasterMaterial(material: Material): Material {
 }
 
 /** @internal Record the terminal caster identity and generation for invalidation checks. */
-export function snapshotShadowCasterMaterial(material: Material, terminals: Map<Material, Material>, generations: Map<Material, number>): void {
+export function snapshotShadowCasterMaterial(material: Material, terminals: Map<Material, Material>, generations: Map<Material, number | undefined>): void {
     const terminal = resolveShadowCasterMaterial(material);
     terminals.set(material, terminal);
-    generations.set(material, terminal._csmGen ?? 0);
+    generations.set(material, terminal._csmGen);
 }
 
 /** @internal Whether an override changed, was cleared, or its terminal material was rebuilt. */
-export function shadowCasterMaterialChanged(material: Material, terminals: Map<Material, Material>, generations: Map<Material, number>): boolean {
+export function shadowCasterMaterialChanged(material: Material, terminals: Map<Material, Material>, generations: Map<Material, number | undefined>): boolean {
     const terminal = resolveShadowCasterMaterial(material);
-    return terminals.has(material) && (terminals.get(material) !== terminal || generations.get(material) !== (terminal._csmGen ?? 0));
+    return terminals.has(material) && (terminals.get(material) !== terminal || generations.get(material) !== terminal._csmGen);
 }
 
 export function renderPcfShadowMap(
