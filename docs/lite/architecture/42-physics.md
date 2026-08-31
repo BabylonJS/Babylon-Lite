@@ -257,8 +257,6 @@ last axis is unlocked.
   normal, and impulse.
 - **Triggers** (`havok-trigger.ts`): `setPhysicsShapeIsTrigger`, `onPhysicsTrigger`,
   and body-aware `onPhysicsTriggerBodies`; both subscriptions return a disposer.
-  `onPhysicsTrigger` previously returned `void`; callers that ignore its return value
-  need no runtime changes, while callers can now retain the disposer to unsubscribe.
   Body-aware events include `bodyAIndex` / `bodyBIndex` (`-1` when an event refers
   to a body that is no longer tracked).
 - **Queries** (`havok-queries.ts`): `physicsRaycast`, `shapeCast`, `shapeProximity`.
