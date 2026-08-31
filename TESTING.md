@@ -564,6 +564,18 @@ the directory is still absent, the reconciler raises an ordinary error and the
 poller retries. The probe lives in `Preflight` because that job holds
 `System.AccessToken` and no GitHub credential, so the two never share a job.
 
+The probe fails closed, which matters more than it sounds. `curl --fail` only
+rejects HTTP error statuses, so a sign-in page, an interstitial or a change in
+the API's shape all arrive as a successful body. Reading "jq found nothing" and
+"jq could not read that" as the same answer would skip the download, reconcile
+`unavailable`, exit green and retire the bundle axis for good — #627 restored
+through the one path nothing else guards. So the response must first prove it is
+an object whose `.value` is an array; only then is jq's exit status believed, and
+only `0` and `1` are decisions. Anything else is an error with the first bytes of
+the response echoed for diagnosis. `tests/lite/unit/pr-publish-artifact-probe.test.ts`
+extracts that step out of the pipeline and executes it against real fixtures, so
+it cannot pass while describing shell that no longer exists.
+
 **The API comment stays create-only, and stays automatic.** `GitHubComment@0`
 cannot update, and #627 does not change that. What it does change is that the API
 path is queued at most once per selected PR CI build, so a bundle retry no longer
