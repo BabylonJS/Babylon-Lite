@@ -5,19 +5,21 @@
 # This template hands a long-lived deploy token to an authenticated upload. It
 # MUST only be used from a job that has not executed repository-authored code —
 # no checkout of a PR ref, no `pnpm install` (which runs dependency lifecycle
-# scripts), no build and no test steps. PR CI therefore builds the site in an
-# untrusted, secretless job, publishes it as a pipeline artifact, and calls this
-# template from a separate `checkout: none` job. That job boundary is what makes
-# the destination trustworthy: a runtime `##vso[task.setvariable]` can rewrite
+# scripts), no build and no test steps. That job boundary is what makes the
+# destination trustworthy: a runtime `##vso[task.setvariable]` can rewrite
 # DEPLOYMENT_SERVER, STORAGE_ACCOUNT and friends, so if attacker-controlled code
 # had run first it could point this authenticated curl at its own host and
 # capture DEPLOY_TOKEN.
 #
-# For a pull-request build Azure reads the pipeline definition from the pull
-# request, so the call site itself is only as trustworthy as the file it lives
-# in. Every PR-context call site must therefore sit in `config/templates/pr-ci.yml`,
-# which `azure-pipelines.yml` reaches through a repository resource pinned to
-# refs/heads/master, and must pass `requireHostAllowlist: true`.
+# It MUST also only be used from a pipeline definition that a pull request cannot
+# rewrite. For a pull-request build Azure reads the definition from the pull
+# request, and pipeline authorization is per definition rather than per file — so
+# a definition with a `pr:` trigger must not be authorized for BabylonJS-Deployment
+# at all, and therefore cannot call this template. PR CI accordingly builds its
+# sites in secretless jobs and stages them as artifacts;
+# `azure-pipelines-pr-publish.yml` (trigger: none, pr: none, branch-controlled to
+# refs/heads/master) is the definition that uploads them. Every call site passes
+# `requireHostAllowlist: true`.
 #
 # As defence in depth the script below also:
 #   * refuses any deploy path outside a fixed allowlist (see ALLOWED_PATH_RE),
@@ -38,6 +40,8 @@
 #   postComment    - post a PR comment with the link (default true)
 #   storageAccount - storage account to upload to (default $(STORAGE_ACCOUNT))
 #   linkUrl        - public URL to link in the PR comment (when postComment)
+#   commentId      - pull request to comment on; defaults to the ambient PR
+#                    context, which is empty outside a pull-request build
 #   cdnEndpoint    - CDN endpoint to purge after upload; "" skips the purge
 #   cdnProfile     - CDN profile the endpoint belongs to
 #   requireHostAllowlist - refuse to fall back to the runtime DEPLOY_HOST_ALLOWLIST
@@ -102,6 +106,15 @@ parameters:
     - name: linkUrl
       type: string
       default: ""
+    # Which pull request the link comment goes to. Defaults to the ambient PR
+    # context, which is right for a pull-request build and empty everywhere else
+    # — `azure-pipelines-pr-publish.yml` runs from master and publishes a PR's
+    # artifacts after the fact, so it passes the number as a compile-time
+    # parameter. A parameter, not a variable: the value decides which repository
+    # thread is written to, and a run must not be able to move it at runtime.
+    - name: commentId
+      type: string
+      default: $(System.PullRequest.PullRequestNumber)
     # CDN purge after upload. Both must be non-empty for the purge to run; the
     # storage hosts that serve build artifacts are uncached and need none.
     - name: cdnEndpoint
@@ -345,7 +358,7 @@ steps:
             inputs:
                 gitHubConnection: "BabylonBotPAT"
                 repositoryName: "$(Build.Repository.Name)"
-                id: "$(System.PullRequest.PullRequestNumber)"
+                id: "${{ parameters.commentId }}"
                 comment: |
                     ### ${{ parameters.siteName }} - Static Site
 

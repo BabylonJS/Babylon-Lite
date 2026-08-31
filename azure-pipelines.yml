@@ -1,7 +1,7 @@
 # Azure Pipelines — Babylon Lite PR CI (entry point only)
 #
-# This file deliberately contains no job, no variable group, no service
-# connection and no script. It exists to name the trigger and to hand the run to
+# This file deliberately contains no job, no variable group, no script and no
+# credentialed service connection. It names the trigger and hands the run to
 # `config/templates/pr-ci.yml` read from `refs/heads/master`.
 #
 # ── WHY ──────────────────────────────────────────────────────────────────────
@@ -16,21 +16,36 @@
 #
 # and there is no setting that changes that. So anything written here is written
 # by the author of the pull request under review. Every job definition — which
-# job holds which credential, which job runs `checkout: none`, where an upload is
-# pointed — therefore lives in the template below, behind a repository resource
-# pinned to master. Repository resources are resolved from their pinned ref, so
-# the jobs that run are the reviewed, merged ones regardless of the branch that
-# queued the build.
+# job runs `checkout: none`, which suite runs at all — therefore lives in the
+# template below, behind a repository resource pinned to master. Repository
+# resources are resolved from their pinned ref, so the jobs that run are the
+# reviewed, merged ones regardless of the branch that queued the build.
 #
-# A pull request can of course delete the `extends:` line and write its own jobs.
-# That is what the server-side **Required template** check is for: configured on
-# each protected resource by an administrator, not expressible in YAML, and
-# evaluated before a stage starts. A run that does not extend
-# `config/templates/pr-ci.yml` from `refs/heads/master` is refused every variable
-# group and every service connection — so the tampered run still builds, but with
-# nothing worth stealing. TESTING.md ("CI/CD Secret Handling") lists every check
-# an administrator must configure; they are the half of this design that no file
-# in this repository can assert.
+# ── WHY THAT IS NOT THE LOAD-BEARING PART ────────────────────────────────────
+#
+# A pull request can delete the `extends:` line and write its own jobs, and no
+# file in this repository can stop it. Pipeline authorization is *definition*
+# level, not YAML level: any resource this pipeline definition is authorized for
+# can be asked for by a job the pull request wrote itself. A required-template
+# check is the server-side answer, but it cannot be applied to a resource that
+# master pipelines also consume — those declare their stages inline and would be
+# refused the resource outright.
+#
+# So the resources are separated instead of the checks. This definition is
+# authorized for exactly one protected resource: `BabylonLite-PRCI-RepoRead`, a
+# GitHub service connection with **read** access to this repository and nothing
+# else. It exists so the pinned template can be fetched. A pull request that
+# rewrites this file and asks for it gets read access to a repository it is
+# already reading — there is nothing here to steal, which is the property that
+# makes the check regime consistent rather than aspirational.
+#
+# Every credential — `BabylonJS-Deployment`, `BabylonJS-CI-Infrastructure`,
+# `BabylonJS-BrowserStack`, `BabylonJS-NpmPublish`, `BabylonBotPAT` — is
+# master-only, carries a branch-control check, and must NOT be authorized for
+# this definition. TESTING.md ("Protected resource matrix") is the full list.
+#
+# PR previews and PR comments are produced from artifacts this run stages, by
+# `azure-pipelines-pr-publish.yml`, which is a separate, master-only definition.
 #
 # ── CHANGING CI ──────────────────────────────────────────────────────────────
 #
@@ -51,12 +66,19 @@ resources:
     repositories:
         # The same repository this pipeline lives in, pinned to master, so the
         # template below is read from a reviewed ref rather than from the pull
-        # request. `endpoint` must name a GitHub service connection with read
-        # access to this repository; `ref` must stay a protected branch.
+        # request.
+        #
+        # `endpoint` must name a GitHub service connection whose PAT is scoped to
+        # **read** this repository — no contents write, no issue/PR write, no
+        # deployment. It is the only protected resource a pull-request build
+        # touches, and it is deliberately NOT `BabylonBotPAT`: that connection can
+        # comment and tag, is consumed by the master-only publish pipelines, and a
+        # resource shared with them could not carry the required-template check
+        # this one does. `ref` must stay a protected branch.
         - repository: trusted
           type: github
           name: BabylonJS/Babylon-Lite
-          endpoint: BabylonBotPAT
+          endpoint: BabylonLite-PRCI-RepoRead
           ref: refs/heads/master
 
 extends:

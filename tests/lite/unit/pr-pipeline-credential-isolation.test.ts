@@ -11,27 +11,43 @@ const repoRoot = join(__dirname, "..", "..", "..");
  * For a pull-request build, Azure reads the pipeline definition from the pull
  * request, not from the target branch. Whatever `azure-pipelines.yml` says about
  * which job holds which secret is therefore written by the author of the change
- * being reviewed. The repository's answer is to keep nothing in that file: it is
- * a shell that `extends` `config/templates/pr-ci.yml` through a repository
+ * being reviewed. The repository's first answer is to keep nothing in that file:
+ * it is a shell that `extends` `config/templates/pr-ci.yml` through a repository
  * resource pinned to `refs/heads/master`, and repository resources resolve from
- * their pinned ref, so the jobs that actually run are the reviewed ones. The
- * server-side Required-template check is what stops a pull request from dropping
- * the `extends` — it is configured on the protected resources, not in YAML, and
- * cannot be asserted from here.
+ * their pinned ref, so the jobs that actually run are the reviewed ones.
  *
- * What *can* be asserted from here is everything that check is protecting:
+ * That is not the load-bearing part, and treating it as though it were is the
+ * defect this file now also guards. Pipeline authorization is per *definition*,
+ * not per file: a pull request that deletes the `extends` and writes its own
+ * jobs can ask for anything the PR CI definition is authorized for. The
+ * server-side answer is a Required-template check — which cannot be applied to a
+ * resource that master pipelines also consume, because those declare their
+ * stages inline and would be refused it outright. `BabylonJS-Deployment`,
+ * `BabylonJS-CI-Infrastructure` and `BabylonBotPAT` were consumed by both sides,
+ * so the check that was supposed to protect them could never be turned on.
+ *
+ * So the *resources* are separated rather than the checks argued about, and that
+ * separation is what the assertions below are mostly about:
  *
  *   - the entry point stays a shell, pinned to master;
+ *   - nothing a pull request can reach — the entry point, the pinned template,
+ *     any template they include — names a variable group, a deploy credential or
+ *     a write-capable service connection. The one protected resource PR CI
+ *     consumes is a read-only GitHub connection whose compromise buys read
+ *     access to a repository the attacker is already reading;
+ *   - no protected resource is consumed by both a PR-reachable definition and a
+ *     master-only one, so no resource needs two incompatible check regimes;
  *   - no job that checks out the pull request holds a credential of any kind —
  *     no variable group, no GITHUB_TOKEN, no System.AccessToken, and no
  *     `persistCredentials`, which leaves the OAuth token in `.git/config` for
  *     every later step including dependency lifecycle scripts;
- *   - authenticated uploads run in jobs that check out nothing, and pin the
- *     destination host to an allowlist rather than to "it is https".
+ *   - authenticated uploads run in jobs that check out nothing, in definitions a
+ *     pull request cannot trigger, and pin the destination host to an allowlist
+ *     rather than to "it is https".
  *
- * These are invisible in review: a template call moved back into a build job, or
- * a `checkout: self` added to a publish job, looks like a tidy-up and silently
- * restores the whole vulnerability.
+ * These are invisible in review: a variable group moved back into the pinned
+ * template, or a `checkout: self` added to a publish job, looks like a tidy-up
+ * and silently restores the whole vulnerability.
  */
 
 /** The pull-request entry point: the only pipeline with a `pr:` trigger. */
@@ -39,6 +55,40 @@ const ENTRY_POINT = "azure-pipelines.yml";
 
 /** Where the pull-request stages actually live, read from the pinned ref. */
 const PINNED_TEMPLATE = "config/templates/pr-ci.yml";
+
+/**
+ * The master-only definition that publishes what a pull-request run staged.
+ *
+ * Every credentialed operation PR CI used to perform in its own `Publish` stage
+ * — the lab-site and playground uploads, the API/bundle-size comments, the
+ * release-marker label check — lives here instead. It is `trigger: none` /
+ * `pr: none` and is queued by hand from master with the PR CI run id, because a
+ * `resources.pipelines` completion trigger would run *this* file from the
+ * triggering run's branch when the two share a repository — that is, from the
+ * pull request, holding every credential below.
+ */
+const PUBLISHER = "azure-pipelines-pr-publish.yml";
+
+/**
+ * The only protected resource a pull-request build is allowed to consume.
+ *
+ * A GitHub service connection scoped to *read* this repository, which is what a
+ * repository resource needs in order to resolve the pinned template. It is
+ * deliberately not `BabylonBotPAT`: that connection can comment and tag, and is
+ * consumed by the master-only publishers, so a required-template check on it
+ * would break them — the exact incompatibility this split removes.
+ */
+const PR_READ_ENDPOINT = "BabylonLite-PRCI-RepoRead";
+
+/**
+ * Every protected resource that carries a secret, a write or a deploy.
+ *
+ * Named as strings rather than as `- group:` patterns because a group import is
+ * only one of the ways to reach one: an `endpoint:` on a repository resource, a
+ * `gitHubConnection:` on a task and a hand-mapped `env:` are three more, and the
+ * assertions below look for the name anywhere in a PR-reachable file.
+ */
+const MASTER_ONLY_RESOURCES = ["BabylonJS-Deployment", "BabylonJS-CI-Infrastructure", "BabylonJS-BrowserStack", "BabylonJS-NpmPublish", "BabylonBotPAT"];
 
 const UPLOAD_TEMPLATES = ["config/templates/upload-static-site.yml", "config/templates/upload-test-report.yml"];
 
@@ -150,12 +200,26 @@ function allPipelines(): string[] {
     return files.sort();
 }
 
-/** Pipelines that build from a pull-request ref, and so run untrusted code. */
+/**
+ * Pipelines that build from a pull-request ref, and so run untrusted code.
+ *
+ * Three cases, and the third is the one that has to fail closed. `pr: none` opts
+ * out; a bare `pr:` opens a branch-filter block and opts in; and **omitting the
+ * key entirely also opts in** — Microsoft: "If you specify no pull request
+ * trigger, pull requests to any branch trigger a build."
+ *
+ * That third case used to be a gap in coverage. It is now a permission: the
+ * complement of this set is what `masterOnlyFiles()` treats as entitled to
+ * `BabylonJS-Deployment` and `BabylonBotPAT`. A future pipeline that forgets
+ * `pr: none` is genuinely pull-request-triggered, so classifying it as master-only
+ * would put a credential behind a definition a pull request can rewrite — the
+ * finding this file exists to close, reintroduced by a classifier default.
+ */
 function prTriggeredPipelines(): string[] {
-    const files = allPipelines();
-
-    // `pr: none` opts out; a bare `pr:` opens a branch-filter block and opts in.
-    return files.filter((f) => /^pr:\s*$/m.test(read(f)));
+    return allPipelines().filter((f) => {
+        const source = read(f);
+        return /^pr:\s*$/m.test(source) || !/^pr:/m.test(source);
+    });
 }
 
 interface Job {
@@ -298,12 +362,86 @@ function fileScopedVariables(source: string): string {
     return end === -1 ? rest : rest.slice(0, end);
 }
 
+/**
+ * Every template a file pulls in, as repo-relative paths.
+ *
+ * Both shapes, because they are the two ways YAML arrives here: `extends:` with
+ * a `template:` under it, and a `- template:` step or stage. A `@alias` suffix
+ * names the repository resource the template is read from and is stripped — the
+ * file is the same file either way, since the resource is this repository. A
+ * reference with no directory is resolved relative to the referring file, which
+ * is how `pr-ci.yml` used to reach `upload-static-site.yml`.
+ */
+function includedTemplates(file: string, source: string): string[] {
+    const dir = file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "";
+    return [...withoutComments(source).matchAll(/^\s*-?\s*template:\s*(\S+?)(?:@\S+)?\s*$/gm)].flatMap((match) => {
+        const reference = match[1];
+        if (reference === undefined) {
+            return [];
+        }
+        return [reference.includes("/") || dir === "" ? reference : `${dir}/${reference}`];
+    });
+}
+
+/**
+ * Every file a pull-request build can execute, entry point included.
+ *
+ * Computed by following `extends` and `template:` from the entry point rather
+ * than listed, because a list cannot see a new include. This is the set that has
+ * to be free of credentials: whatever it names, the PR CI *definition* must be
+ * authorized for, and whatever the definition is authorized for, a pull request
+ * that rewrites the entry point can ask for.
+ */
+function prReachableFiles(): string[] {
+    const seen = new Set<string>();
+    const queue = prTriggeredPipelines();
+
+    while (queue.length > 0) {
+        const file = queue.shift();
+        if (file === undefined || seen.has(file)) {
+            continue;
+        }
+        seen.add(file);
+        queue.push(...includedTemplates(file, read(file)));
+    }
+
+    // Guard the guard: a walk that returns nothing makes every assertion about
+    // the set vacuously true, which is the failure this file exists to prevent.
+    expect(seen.size, "no pull-request-reachable file was discovered").toBeGreaterThan(0);
+    return [...seen].sort();
+}
+
+/** Every pipeline or template in the repository that a pull request cannot trigger. */
+function masterOnlyFiles(): string[] {
+    const reachable = new Set(prReachableFiles());
+    return allPipelines()
+        .concat(
+            readdirSync(join(repoRoot, "config", "templates"))
+                .filter((f) => /\.ya?ml$/.test(f))
+                .map((f) => `config/templates/${f}`)
+        )
+        .filter((file) => !reachable.has(file))
+        .sort();
+}
+
 describe("the pull-request entry point defines nothing and pins everything", () => {
     const pipelines = prTriggeredPipelines();
 
     it("has exactly one pr-triggered pipeline, and it is the known entry point", () => {
         expect(pipelines, "no pipeline declares a `pr:` trigger").not.toHaveLength(0);
         expect(pipelines, "a new pr-triggered pipeline appeared; it must be a shell too, and this guard must be taught about it").toEqual([ENTRY_POINT]);
+    });
+
+    it("makes every pipeline state its pull-request trigger explicitly", () => {
+        // Absence of the key is not neutral — it enables PR validation on every
+        // branch. The classifier above treats a missing `pr:` as PR-triggered so
+        // that it fails closed; this clause is the other half, so the ambiguity
+        // is fixed at the source rather than compensated for downstream.
+        const silent = allPipelines().filter((file) => !/^pr:/m.test(read(file)));
+        expect(
+            silent,
+            "these pipelines declare no `pr:` key, which enables pull-request validation on every branch. Add `pr: none` unless the pipeline is genuinely a PR pipeline:"
+        ).toEqual([]);
     });
 
     it("contains no job, no step and no credential of its own", () => {
@@ -339,6 +477,261 @@ describe("the pull-request entry point defines nothing and pins everything", () 
         // silently the wrong one if the default ever changes.
         expect(resource, `the ${alias} repository resource must pin an explicit ref`).toMatch(/^\s*ref:\s*refs\/heads\/master\s*$/m);
         expect(resource, `the ${alias} repository resource must name a service connection endpoint`).toMatch(/^\s*endpoint:\s*\S+\s*$/m);
+    });
+});
+
+describe("the pull-request definition consumes nothing worth stealing", () => {
+    // The finding this closes. Job isolation kept PR *code* away from
+    // DEPLOY_TOKEN, but the resources still had to be authorized for a
+    // definition whose YAML the pull request writes, so a run that deleted the
+    // `extends` could ask for them by name. The only fix that holds is for the
+    // definition to be authorized for nothing that matters — and the only way to
+    // check that from here is that the YAML never names one.
+    const reachable = prReachableFiles();
+
+    it("discovers the entry point and the pinned template as reachable", () => {
+        // Floor with an upper bound: the set has to contain the two files whose
+        // contents every other assertion here depends on, and the reachability
+        // walk has to be what found the second one.
+        expect(reachable, "the reachability walk lost the entry point").toContain(ENTRY_POINT);
+        expect(reachable, `the reachability walk did not follow \`extends\` into ${PINNED_TEMPLATE}`).toContain(PINNED_TEMPLATE);
+    });
+
+    it.each(MASTER_ONLY_RESOURCES)("never names %s in a file a pull request can reach", (resource) => {
+        for (const file of reachable) {
+            // The name anywhere, not a `- group:` line: an `endpoint:` on a
+            // repository resource, a `gitHubConnection:` on a task and a
+            // hand-written `env:` mapping are all ways to consume the same
+            // resource, and only one of them is a group import.
+            expect(withoutComments(read(file)), `${file} is reachable from a pull request and names ${resource}`).not.toContain(resource);
+        }
+    });
+
+    it("imports no variable group anywhere a pull request can reach", () => {
+        for (const file of reachable) {
+            expect(declaredGroups(read(file)), `${file} is reachable from a pull request and imports a variable group`).toEqual([]);
+        }
+    });
+
+    it("names no service connection other than the read-only repository endpoint", () => {
+        for (const file of reachable) {
+            const source = withoutComments(read(file));
+
+            // A service connection is consumed by naming it in one of these
+            // keys. `endpoint:` is the only one a pull-request build has any
+            // business using, and only for the read-only connection.
+            expect(source, `${file} posts to GitHub from a pull-request build`).not.toMatch(/gitHubConnection:/);
+            expect(source, `${file} names an Azure subscription from a pull-request build`).not.toMatch(/azureSubscription:/);
+
+            const endpoints = [...source.matchAll(/^\s*endpoint:\s*(\S+)\s*$/gm)].map((match) => match[1]);
+            expect(
+                endpoints.filter((name) => name !== PR_READ_ENDPOINT),
+                `${file} names a service connection other than ${PR_READ_ENDPOINT}`
+            ).toEqual([]);
+        }
+    });
+
+    it("takes the pinned template through the read-only endpoint", () => {
+        // The other direction of the clause above: not merely "no other
+        // endpoint" but "this one, present". Dropping the resource entirely
+        // would satisfy every negative assertion here and leave the template
+        // unpinned.
+        expect(withoutComments(read(ENTRY_POINT)), `${ENTRY_POINT} does not resolve its pinned template through ${PR_READ_ENDPOINT}`).toMatch(
+            new RegExp(`^\\s*endpoint:\\s*${PR_READ_ENDPOINT}\\s*$`, "m")
+        );
+    });
+
+    it("keeps that endpoint out of every definition a pull request cannot trigger", () => {
+        // The whole point of the split. If a master pipeline consumed the same
+        // connection, it would inherit the PR definition's check regime — a
+        // required-template check it cannot satisfy, because it declares its
+        // stages inline — and the incompatibility would be back.
+        for (const file of masterOnlyFiles()) {
+            expect(withoutComments(read(file)), `${file} is master-only and consumes ${PR_READ_ENDPOINT}, which is the pull-request definition's resource`).not.toContain(
+                PR_READ_ENDPOINT
+            );
+        }
+    });
+
+    it("maps no token of any kind into a pull-request build", () => {
+        for (const file of reachable) {
+            const source = withoutComments(read(file));
+            expect(source, `${file} maps System.AccessToken into a pull-request build`).not.toMatch(/System\.AccessToken/);
+            expect(source, `${file} persists the checkout credential in a pull-request build`).not.toMatch(/persistCredentials/);
+        }
+    });
+});
+
+describe("no protected resource is shared by a PR-reachable and a master-only definition", () => {
+    // A resource consumed by both sides can carry only one set of checks, and
+    // the two sides need opposite ones: PR CI runs from `refs/pull/<n>/merge`,
+    // so branch control excludes it; the master pipelines declare their stages
+    // inline, so a required-template check excludes them. Sharing forces the
+    // administrator to pick one, and the resource ends up with neither.
+    const reachable = prReachableFiles();
+    const master = masterOnlyFiles();
+
+    it("has both sides to compare", () => {
+        expect(reachable.length, "no pull-request-reachable file — the comparison would be vacuous").toBeGreaterThan(0);
+        expect(master.length, "no master-only file — the comparison would be vacuous").toBeGreaterThan(0);
+    });
+
+    it("lists no variable group in both sets", () => {
+        const groupsIn = (files: string[]): Set<string> => new Set(files.flatMap((file) => declaredGroups(read(file))));
+        const prGroups = groupsIn(reachable);
+        const masterGroups = groupsIn(master);
+
+        expect(masterGroups.size, "no master-only file imports a variable group — the intersection below would be vacuous").toBeGreaterThan(0);
+        expect(
+            [...prGroups].filter((group) => masterGroups.has(group)),
+            "these variable groups are consumed by both a pull-request-reachable definition and a master-only one, so no single check regime fits them:"
+        ).toEqual([]);
+    });
+
+    it("lists no service connection in both sets", () => {
+        const connectionsIn = (files: string[]): Set<string> =>
+            new Set(
+                files.flatMap((file) =>
+                    [...withoutComments(read(file)).matchAll(/^\s*(?:endpoint|gitHubConnection|azureSubscription):\s*"?([\w.-]+)"?\s*$/gm)].map((m) => m[1] ?? "")
+                )
+            );
+        const prConnections = connectionsIn(reachable);
+        const masterConnections = connectionsIn(master);
+
+        expect(masterConnections.size, "no master-only file names a service connection — the intersection below would be vacuous").toBeGreaterThan(0);
+        expect(
+            [...prConnections].filter((connection) => masterConnections.has(connection)),
+            "these service connections are consumed by both a pull-request-reachable definition and a master-only one, so no single check regime fits them:"
+        ).toEqual([]);
+    });
+});
+
+describe("the trusted publisher takes over what PR CI gave up", () => {
+    // Removing the credential by removing the capability would satisfy every
+    // assertion above. The publisher has to exist, has to be unreachable from a
+    // pull request, and has to consume exactly the artifacts PR CI stages.
+    const publisher = read(PUBLISHER);
+    const template = read(PINNED_TEMPLATE);
+
+    it("is a definition no pull request can trigger", () => {
+        expect(publisher, `${PUBLISHER} must opt out of pull-request triggers with \`pr: none\``).toMatch(/^pr:\s*none\s*$/m);
+        expect(publisher, `${PUBLISHER} must not run automatically on push either; it is queued by hand with a run id`).toMatch(/^trigger:\s*none\s*$/m);
+        expect(prTriggeredPipelines(), `${PUBLISHER} is pull-request triggered`).not.toContain(PUBLISHER);
+    });
+
+    it("never subscribes to PR CI completing", () => {
+        // A `resources.pipelines` completion trigger is the one wiring that
+        // would undo this: when the triggering and triggered pipelines share a
+        // repository, Azure runs the triggered pipeline on the triggering run's
+        // branch — the pull request's own merge ref — and this file, holding
+        // every credential, would then be read from the pull request.
+        expect(withoutComments(publisher), `${PUBLISHER} declares a pipeline resource, which can be triggered from a pull-request run of the source pipeline`).not.toMatch(
+            /^\s*pipelines:\s*$/m
+        );
+    });
+
+    it("publishes the artifacts PR CI actually stages", () => {
+        const staged = new Set(
+            jobsOf(template)
+                .flatMap((job) => [...withoutComments(job.body).matchAll(/PublishPipelineArtifact@\d[\s\S]*?artifact:\s*(\S+)/g)])
+                .map((match) => match[1] ?? "")
+        );
+        const consumed = new Set([...withoutComments(publisher).matchAll(/DownloadPipelineArtifact@\d[\s\S]*?artifact:\s*(\S+)/g)].map((match) => match[1] ?? ""));
+
+        expect(staged.size, `${PINNED_TEMPLATE} stages no artifact — the publisher would have nothing to publish`).toBeGreaterThan(0);
+        expect(consumed.size, `${PUBLISHER} downloads no artifact`).toBeGreaterThan(0);
+        expect(
+            [...consumed].filter((artifact) => !staged.has(artifact)),
+            `${PUBLISHER} downloads artifacts ${PINNED_TEMPLATE} does not stage, so the publish silently produces nothing:`
+        ).toEqual([]);
+    });
+
+    it("decides every destination at compile time, from a parameter", () => {
+        // The values that say which pull request is written to and where the
+        // upload lands must be `${{ parameters.* }}`, fixed when the run is
+        // compiled. A runtime variable is something a downloaded artifact's
+        // content could be talked into moving, and these jobs hold DEPLOY_TOKEN
+        // and the GitHub connection.
+        for (const job of jobsOf(publisher)) {
+            const body = withoutComments(job.body);
+            for (const [line] of body.matchAll(/^\s*(?:deployPath|commentId|id|pipelineId|definition):.*$/gm)) {
+                expect(line, `${PUBLISHER}: job ${job.name} takes a destination from a runtime macro rather than a compile-time parameter`).not.toMatch(
+                    /\$\((?!System\.TeamProject)/
+                );
+            }
+        }
+    });
+
+    it("gates the pull-request number to a number", () => {
+        // `type: number` is validated by the server at queue time, so a deploy
+        // path built from it cannot carry a traversal or an injection.
+        expect(publisher, `${PUBLISHER} does not declare prNumber as a numeric parameter`).toMatch(/-\s*name:\s*prNumber\b[\s\S]{0,200}?type:\s*number/);
+        expect(publisher, `${PUBLISHER} does not declare prCiRunId as a numeric parameter`).toMatch(/-\s*name:\s*prCiRunId\b[\s\S]{0,200}?type:\s*number/);
+    });
+
+    it("agrees with PR CI about where the lab site will be served", () => {
+        // The base path is baked into the build by PR CI and the upload path is
+        // chosen by the publisher. If they disagree the site deploys and every
+        // asset 404s, which is the kind of break that looks like a bad build.
+        expect(template, `${PINNED_TEMPLATE} no longer bakes a per-PR lab base path`).toMatch(/LAB_BASE_PATH:\s*"\/lite\/pr-\$\(System\.PullRequest\.PullRequestNumber\)\/lab\/"/);
+        expect(publisher, `${PUBLISHER} does not upload the lab site to the path PR CI baked into it`).toMatch(
+            /deployPath:\s*lite\/pr-\$\{\{\s*parameters\.prNumber\s*\}\}\/lab\s*$/m
+        );
+    });
+});
+
+describe("no other pull-request-triggered definition holds a secret", () => {
+    // The Azure side is covered above by construction; this is the same question
+    // asked of the other CI system in the repository, because "PR-reachable" is
+    // a property of the trigger rather than of the file format.
+    const workflowDir = join(repoRoot, ".github", "workflows");
+    const workflows = readdirSync(workflowDir).filter((name) => /\.ya?ml$/.test(name));
+
+    it("has workflows to inspect", () => {
+        expect(workflows.length, "no GitHub Actions workflow found — the assertion below would be vacuous").toBeGreaterThan(0);
+    });
+
+    it.each(workflows)(".github/workflows/%s is not triggered by a pull request", (name) => {
+        const source = withoutComments(readFileSync(join(workflowDir, name), "utf8"));
+
+        // The `on:` block, however it is written. GitHub accepts a mapping
+        // (`on:\n  pull_request:`), a sequence (`on: [push, pull_request]`) and a
+        // bare scalar (`on: pull_request`), and only the first puts the trigger
+        // at the start of a line with a colon after it. Anchoring on that shape
+        // would pass the other two, which are the same trigger.
+        const start = source.search(/^on:/m);
+        expect(start, `.github/workflows/${name} declares no \`on:\` block, so this guard has nothing to read`).toBeGreaterThanOrEqual(0);
+        const rest = source.slice(start);
+        const end = rest.search(/\n(?=\S)/);
+        const triggers = end === -1 ? rest : rest.slice(0, end);
+
+        // `pull_request_target` runs with the base repository's secrets, and
+        // `pull_request` still exposes whatever the workflow asks for. Either
+        // one makes this file a pull-request-reachable definition, which is the
+        // category the whole design is about — so it has to be an argued
+        // exception rather than an accident.
+        expect(triggers, `.github/workflows/${name} triggers on pull_request_target, which runs with the base repository's secrets`).not.toMatch(/\bpull_request_target\b/);
+        expect(triggers, `.github/workflows/${name} triggers on pull_request; if that is intended, it must hold no secret and this guard must be taught about it`).not.toMatch(
+            /\bpull_request\b/
+        );
+    });
+
+    it("reads the trigger block in every form GitHub accepts", () => {
+        // The clause above is only as good as the block it slices, and the
+        // workflow in this repository exercises exactly one of the three forms.
+        // Pin the other two against fixtures so a regex that quietly stops
+        // matching them is a failure here rather than a silent pass there.
+        const triggersOf = (source: string): string => {
+            const start = source.search(/^on:/m);
+            const rest = source.slice(start);
+            const end = rest.search(/\n(?=\S)/);
+            return start < 0 ? "" : end === -1 ? rest : rest.slice(0, end);
+        };
+
+        expect(triggersOf("name: x\non:\n    pull_request:\n        branches: [master]\njobs:\n")).toMatch(/\bpull_request\b/);
+        expect(triggersOf("name: x\non: [push, pull_request]\njobs:\n")).toMatch(/\bpull_request\b/);
+        expect(triggersOf("name: x\non: pull_request_target\njobs:\n")).toMatch(/\bpull_request_target\b/);
+        expect(triggersOf("name: x\non:\n    issues:\n        types: [labeled]\njobs:\n    pull_request_helper:\n        steps: []\n")).not.toMatch(/\bpull_request\b/);
     });
 });
 
@@ -763,7 +1156,7 @@ describe("the npm registry credential comes from a job-scoped protected group", 
     });
 
     it("keeps the publish credential out of everything a pull request reaches", () => {
-        const reachable = [...new Set(prTriggeredPipelines().concat([ENTRY_POINT, PINNED_TEMPLATE], UPLOAD_TEMPLATES))];
+        const reachable = [...new Set(prReachableFiles().concat(UPLOAD_TEMPLATES))];
 
         // Guard the guard: the entry point and the templates are named
         // literally, so this cannot silently empty, but the pr-triggered half
@@ -883,37 +1276,64 @@ describe("npm publishing never executes the package it publishes", () => {
 });
 
 describe("authenticated uploads run where no pull-request code has run", () => {
-    const source = read(PINNED_TEMPLATE);
-    const uploaders = jobsOf(source).filter((job) => callsUploadTemplate(job.body));
+    // Repository-wide, because the upload jobs left the pull-request template:
+    // they now live in the master-only publishers, and "PR CI has no upload job"
+    // is asserted separately below rather than by an empty subject here.
+    const uploaders = allPipelines()
+        .concat([PINNED_TEMPLATE])
+        .flatMap((file) =>
+            jobsOf(read(file))
+                .filter((job) => callsUploadTemplate(job.body))
+                .map((job) => ({ file, job }))
+        );
 
     it("has upload jobs to inspect", () => {
-        expect(uploaders.length, `${PINNED_TEMPLATE} calls no upload template — the selector has drifted`).toBeGreaterThan(0);
+        expect(uploaders.length, "no pipeline calls an upload template — the selector has drifted").toBeGreaterThan(0);
     });
 
-    it.each(uploaders.map((job) => job.name))("%s checks out nothing and runs no pull-request code", (name) => {
-        const job = uploaders.find((candidate) => candidate.name === name);
-        expect(job, `job ${name} disappeared between selection and assertion`).toBeDefined();
-        expect(job?.body, `job ${name} uploads with a deploy token but does not use \`checkout: none\``).toMatch(/^\s*-\s*checkout:\s*none\s*$/m);
-        expect(runsPullRequestCode(job?.body ?? ""), `job ${name} uploads with a deploy token and also runs pull-request code`).toBe(false);
+    it("has none of them in a file a pull request can reach", () => {
+        const reachable = new Set(prReachableFiles());
+        expect(
+            uploaders.filter(({ file }) => reachable.has(file)).map(({ file, job }) => `${file}:${job.name}`),
+            "these upload jobs are reachable from a pull request, so the deploy credential must be authorized for a definition the pull request writes:"
+        ).toEqual([]);
     });
 
-    it.each(uploaders.map((job) => job.name))("%s requires the destination host allowlist", (name) => {
-        const job = uploaders.find((candidate) => candidate.name === name);
-        expect(job, `job ${name} disappeared between selection and assertion`).toBeDefined();
-        // An https URL is not a destination check: an attacker's host serves
-        // https too. Only the allowlist names the host this token may reach.
-        expect(job?.body, `job ${name} calls an upload template without requireHostAllowlist: true`).toMatch(/requireHostAllowlist:\s*true/);
+    it.each(uploaders.map(({ file, job }) => `${file}:${job.name}`))("%s checks out nothing and runs no pull-request code", (id) => {
+        const entry = uploaders.find(({ file, job }) => `${file}:${job.name}` === id);
+        expect(entry, `job ${id} disappeared between selection and assertion`).toBeDefined();
+        expect(entry?.job.body, `job ${id} uploads with a deploy token but does not use \`checkout: none\``).toMatch(/^\s*-\s*checkout:\s*none\s*$/m);
+        expect(runsPullRequestCode(entry?.job.body ?? ""), `job ${id} uploads with a deploy token and also runs pull-request code`).toBe(false);
+    });
+
+    it.each(uploaders.filter(({ file }) => file === PUBLISHER).map(({ file, job }) => `${file}:${job.name}`))("%s requires the destination host allowlist", (id) => {
+        const entry = uploaders.find(({ file, job }) => `${file}:${job.name}` === id);
+        expect(entry, `job ${id} disappeared between selection and assertion`).toBeDefined();
+        // The publisher uploads artifacts built by pull-request code. An https
+        // URL is not a destination check — an attacker's host serves https too —
+        // and neither is a runtime variable, which is what the allowlist
+        // parameter replaces.
+        expect(entry?.job.body, `job ${id} publishes pull-request output without requireHostAllowlist: true`).toMatch(/requireHostAllowlist:\s*true/);
+    });
+
+    it("has publisher upload jobs to inspect", () => {
+        expect(
+            uploaders.filter(({ file }) => file === PUBLISHER).length,
+            `${PUBLISHER} calls no upload template — the clause above would be vacuous and pull-request previews would have no publisher`
+        ).toBeGreaterThan(0);
     });
 
     it("never lets a repository-set variable gate a deploy credential", () => {
-        for (const job of jobsOf(source)) {
-            if (!declaredGroups(job.body).includes("BabylonJS-Deployment")) {
-                continue;
+        for (const file of allPipelines().concat([PINNED_TEMPLATE])) {
+            for (const job of jobsOf(read(file))) {
+                if (!declaredGroups(job.body).includes("BabylonJS-Deployment")) {
+                    continue;
+                }
+                // `ArtifactsSafe` is set by a repository-authored script through
+                // `##vso[task.setvariable]`, so PR code can set it too. It may
+                // gate artifact publication; it must never gate the deploy token.
+                expect(job.body, `${file}: job ${job.name} holds the deploy token and gates on ArtifactsSafe, which PR code can set`).not.toContain("ArtifactsSafe");
             }
-            // `ArtifactsSafe` is set by a repository-authored script through
-            // `##vso[task.setvariable]`, so PR code can set it too. It may gate
-            // artifact publication; it must never gate the deploy token.
-            expect(job.body, `job ${job.name} holds the deploy token and gates on ArtifactsSafe, which PR code can set`).not.toContain("ArtifactsSafe");
         }
     });
 });

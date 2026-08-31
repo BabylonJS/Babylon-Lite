@@ -32,51 +32,63 @@
 # Everything below therefore comes from master — reviewed, merged code — no
 # matter which branch the build was queued from.
 #
-# ── WHAT MAKES THAT ENFORCEABLE ──────────────────────────────────────────────
+# ── WHY PINNING IS NOT THE LOAD-BEARING PART ─────────────────────────────────
 #
 # A pull request can still delete the `extends` from the shell and write its own
-# jobs. That is exactly what the **Required template** check is for: it is
-# configured on each protected resource by an administrator, is not expressed in
-# YAML, and is evaluated before a stage starts:
+# jobs. The obvious answer is a **Required template** check — configured on a
+# protected resource by an administrator, not expressible in YAML, evaluated
+# before a stage starts:
 #
 #   "Approvals and other checks aren't defined in the yaml file. Users modifying
 #    the pipeline yaml file can't modify the checks performed before start of a
 #    stage."
 #   — learn.microsoft.com/azure/devops/pipelines/process/approvals
 #
-# With a Required template check naming this file at `refs/heads/master`, a run
-# whose YAML does not extend it is refused every variable group and every service
-# connection it asks for. The abandoned-`extends` pull request still builds — it
-# simply builds with nothing worth stealing. TESTING.md ("CI/CD Secret Handling")
-# lists the checks an administrator must configure; they are the server half of
-# this design and no file in this repository can assert them.
+# That check cannot be applied to a resource a master pipeline also consumes.
+# `azure-pipelines-npm-publish.yml`, `-playground.yml`, `-demos.yml`,
+# `-bundle-manifest.yml` and `-cloud-tests.yml` declare their stages inline; a
+# required-template check on `BabylonJS-Deployment` or on `BabylonBotPAT` would
+# refuse them the resource and break master. So for as long as this file asked
+# for those groups, the check that was supposed to protect them could not be
+# turned on — and pipeline authorization is *definition* level, so a pull request
+# that rewrote the entry point could ask for anything the PR CI definition was
+# authorized for and be handed it.
 #
-# ── STAGE LAYOUT (the reason there are two) ─────────────────────────────────
+# The fix is to separate the resources rather than to argue about the checks:
 #
-# Checks are evaluated per stage, so the trust boundaries are stages:
+#   * This template, the entry point that extends it, and every job below hold
+#     **zero** variable groups, **zero** service connections, **zero** tokens.
+#     The PR CI definition is authorized for exactly one protected resource —
+#     `BabylonLite-PRCI-RepoRead`, the read-only GitHub connection the pinned
+#     repository resource needs — so a rewritten entry point gains read access to
+#     a repository it is already reading, and nothing else.
+#   * Every credential lives on master-only definitions with branch control
+#     restricting them to `refs/heads/master`, which a pull-request run
+#     (`refs/pull/<n>/merge`) can never satisfy.
 #
-#   CI       — runs pull-request code. Holds no variable group, no service
-#              connection, no `persistCredentials`, no token of any kind. Nothing
-#              here is protected because there is nothing here to protect.
-#   Publish  — holds the deploy token and the GitHub connection. Every job in it
-#              either checks out nothing at all or checks out the pinned master
-#              resource. No job in this stage runs a line of pull-request code,
-#              which is what makes its destination variables trustworthy: a
-#              `##vso[task.setvariable]` can rewrite an ordinary pipeline
-#              variable, so an authenticated upload sharing a job with PR code
-#              can be redirected to another host and made to hand over
-#              DEPLOY_TOKEN.
+# TESTING.md ("Protected resource matrix") is the authoritative list, and
+# `tests/lite/unit/pr-pipeline-credential-isolation.test.ts` fails if this file
+# ever names one of those resources again.
 #
-# There is deliberately no cloud-browser stage. Perf and parity on BrowserStack
-# need a long-lived account key, and there is no way to give it to a job that
-# also runs pull-request code without giving it to the pull request's author —
-# sanitizing output does not help once the key is in that process's environment.
-# Those suites therefore run from master only, in
-# `azure-pipelines-cloud-tests.yml`, which is `pr: none`.
+# ── WHAT HAPPENED TO THE PUBLISH STAGE ──────────────────────────────────────
 #
-# Artifacts are the only thing that crosses from CI into Publish, and the upload
-# templates allowlist both the destination path and — at compile time — the
-# destination host.
+# It used to live here: a `checkout: none` stage holding DEPLOY_TOKEN and the
+# GitHub connection, uploading the lab site and the playground snapshot and
+# posting the API/bundle-size comments. Job isolation made it safe against PR
+# *code*, but not against PR *YAML* — the resources still had to be authorized
+# for a definition a pull request can rewrite, and that is what forced the two
+# incompatible check regimes onto one group.
+#
+# So the credentialed half moved out of the pull-request definition entirely,
+# into `azure-pipelines-pr-publish.yml` (`trigger: none`, `pr: none`, master
+# only). This stage stages plain artifacts — a built site, a built playground, a
+# markdown comment body — and a maintainer publishes them from there. Artifacts
+# are inert: nothing here can name a destination, a host or a credential.
+#
+# There is likewise no cloud-browser stage. Perf and parity on BrowserStack need
+# a long-lived account key, and there is no way to give it to a job that also
+# runs pull-request code without giving it to the pull request's author.
+# Those suites run from master only, in `azure-pipelines-cloud-tests.yml`.
 
 variables:
     - name: NODE_VERSION
@@ -90,7 +102,7 @@ variables:
 
 stages:
     # ══════════════════════════════════════════════════════════════════════
-    # Stage 1: CI — pull-request code, zero credentials
+    # Stage 1 of 1: CI — pull-request code, zero credentials, zero resources
     # ══════════════════════════════════════════════════════════════════════
     - stage: CI
       displayName: "PR Validation"
@@ -100,7 +112,7 @@ stages:
           # ──────────────────────────────────────────────────────────────
           # Commit-message half of the check, which needs no credential. The
           # label half needs the GitHub API and therefore a token, so it runs in
-          # the Publish stage against the pinned master checkout instead.
+          # `azure-pipelines-pr-publish.yml` against the pinned master checkout.
           - job: ReleaseMarkers
             displayName: "Release Markers"
             pool:
@@ -152,9 +164,10 @@ stages:
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
-                # No GITHUB_TOKEN: this step runs PR-authored source. The script
-                # falls back to the Azure PR context and writes the comment body
-                # to a file, which the Publish stage posts.
+                # No GITHUB_TOKEN: this step runs PR-authored source, and no job
+                # in this pipeline holds a credential. The script falls back to
+                # the Azure PR context and writes the comment body to a file,
+                # which `azure-pipelines-pr-publish.yml` posts.
                 - script: pnpm report:api-changes
                   displayName: "Generate API report diff"
 
@@ -344,8 +357,8 @@ stages:
                       testRunTitle: "Bundle Size"
 
                 # Generate bundle-size delta comment for PR. Written to a file and
-                # posted from the Publish stage; this job holds no GitHub
-                # credential, so it cannot post it itself.
+                # posted by `azure-pipelines-pr-publish.yml`; no job in this
+                # pipeline holds a GitHub credential, so it cannot post it itself.
                 - script: npx tsx scripts/report-bundle-size-deltas.ts
                   condition: always()
                   displayName: "Generate bundle-size delta comment"
@@ -360,15 +373,21 @@ stages:
                       targetPath: $(System.DefaultWorkingDirectory)/test-results/bundle-size-comment.md
                       artifact: bundle-comment
 
+                # The public base path is derived from the pull-request number,
+                # not from `Build.BuildNumber`. The publisher that uploads this
+                # artifact is a different run with a different build number, so a
+                # build-number path would bake links the deployed copy cannot
+                # serve. `pr-<N>` also satisfies the upload template's deploy-path
+                # allowlist (`lite/<segment>/lab`), which a `pr/<N>` path would
+                # not.
                 - script: pnpm build:lab-site
                   displayName: "Build static lab site"
                   env:
-                      LAB_BASE_PATH: "/lite/$(Build.BuildNumber)/lab/"
+                      LAB_BASE_PATH: "/lite/pr-$(System.PullRequest.PullRequestNumber)/lab/"
 
-                # The deploy token is deliberately NOT in scope for this job — it
-                # has just run PR-authored install/build/test code. The built site
-                # is handed to the Publish stage, which holds the credential and
-                # runs nothing from the repository.
+                # No deploy token is in scope anywhere in this pipeline. The built
+                # site is staged as a plain artifact; `azure-pipelines-pr-publish.yml`
+                # — a master-only definition — is where a maintainer uploads it.
                 - task: PublishPipelineArtifact@1
                   displayName: "Stage lab site for trusted upload"
                   condition: succeeded()
@@ -506,9 +525,9 @@ stages:
           # ──────────────────────────────────────────────────────────────
           # Builds the Lite Playground from THIS PR's source — the self-hosted
           # engine is bundled from the same commit, so the runner executes the PR's
-          # engine code — and hands the result to the Publish stage, which deploys
-          # it to a per-PR sub-path on the tools account (served at
-          # liteplayground.babylonjs.com/pr/<N>/) and comments the URL on the PR.
+          # engine code — and stages the result as an artifact.
+          # `azure-pipelines-pr-publish.yml` deploys it to a per-PR sub-path on the
+          # tools account (served at liteplayground.babylonjs.com/pr/<N>/).
           # PLAYGROUND_BASE is set to match the public sub-path so every asset, the
           # runner iframe, the self-hosted engine, and the SPA snippet routes
           # resolve under it.
@@ -518,8 +537,9 @@ stages:
                 vmImage: "ubuntu-latest"
             variables:
                 # Public base path baked into the build. The upload path and the
-                # public URL are decided in the Publish stage, which is the only
-                # place they cannot be rewritten by the code being built.
+                # public URL are decided by the publisher, from its own
+                # compile-time parameter — the only place they cannot be rewritten
+                # by the code being built.
                 - name: playgroundBase
                   value: /pr/$(System.PullRequest.PullRequestNumber)/
             steps:
@@ -555,194 +575,3 @@ stages:
                   inputs:
                       targetPath: $(System.DefaultWorkingDirectory)/playground/dist
                       artifact: playground-site
-
-    # ══════════════════════════════════════════════════════════════════════
-    # Stage 2: Publish — the only stage that holds a deploy or GitHub credential
-    # ══════════════════════════════════════════════════════════════════════
-    # Every job here either checks out nothing (`checkout: none`) or checks out
-    # the `trusted` repository resource, which is pinned to refs/heads/master.
-    # None of them runs a line of pull-request code. That is what makes the
-    # destination variables trustworthy — with no PR code in the job, there is
-    # nothing to rewrite DEPLOYMENT_SERVER or STORAGE_ACCOUNT before the upload —
-    # and it is why the upload templates additionally allowlist the destination
-    # host and path.
-    #
-    # `succeededOrFailed()` because a red CI stage should still get its
-    # bundle-size and API-report comments, and its lab-site preview.
-    - stage: Publish
-      displayName: "Trusted Publish"
-      dependsOn:
-          - CI
-      condition: succeededOrFailed()
-      jobs:
-          # ──────────────────────────────────────────────────────────────
-          # Job 7: Release marker labels (trusted source checkout)
-          # ──────────────────────────────────────────────────────────────
-          # The label half of the release-marker rule needs the GitHub API, and
-          # therefore a token. Running the PR's own copy of the validator with a
-          # token in scope is precisely what must not happen, so this job checks
-          # out `trusted` — master — and runs master's validator against the PR's
-          # metadata. `--ignore-scripts` keeps even master's dependency lifecycle
-          # scripts out of the job that holds the token.
-          - job: ReleaseMarkerLabels
-            displayName: "Release Markers (labels)"
-            pool:
-                vmImage: "ubuntu-latest"
-            variables:
-                # GITHUB_TOKEN must resolve from a protected variable group so the
-                # Required template / pipeline-permission checks cover it. See
-                # TESTING.md: while it remains a pipeline-level UI variable it is
-                # readable by any job in this definition and no check applies.
-                - group: BabylonJS-Deployment
-            steps:
-                - checkout: trusted
-                  fetchDepth: 1
-
-                - task: UseNode@1
-                  inputs:
-                      version: $(NODE_VERSION)
-
-                - script: |
-                      corepack enable
-                      corepack prepare pnpm@$(PNPM_VERSION) --activate
-                  displayName: "Enable pnpm via corepack"
-
-                - script: pnpm install --frozen-lockfile --ignore-scripts
-                  displayName: "Install dependencies (no lifecycle scripts)"
-
-                - script: pnpm validate:release-markers
-                  displayName: "Enforce breaking-change labels"
-                  env:
-                      GITHUB_REPOSITORY: "BabylonJS/Babylon-Lite"
-                      PR_NUMBER: "$(System.PullRequest.PullRequestNumber)"
-                      GITHUB_TOKEN: "$(GITHUB_TOKEN)"
-
-          # ──────────────────────────────────────────────────────────────
-          # Job 8: Publish Lab Site
-          # ──────────────────────────────────────────────────────────────
-          - job: PublishLabSite
-            displayName: "Publish Lab Site"
-            pool:
-                vmImage: "ubuntu-latest"
-            variables:
-                - group: BabylonJS-Deployment
-            steps:
-                - checkout: none
-
-                - task: DownloadPipelineArtifact@2
-                  displayName: "Download lab site"
-                  continueOnError: true
-                  inputs:
-                      artifact: lab-site
-                      path: $(Pipeline.Workspace)/lab-site
-
-                - template: upload-static-site.yml
-                  parameters:
-                      siteDir: $(Pipeline.Workspace)/lab-site
-                      deployPath: lite/$(Build.BuildNumber)/lab
-                      siteName: "Lab"
-                      linkUrl: $(SERVE_DOMAIN)/lite/$(Build.BuildNumber)/lab/index.html
-                      requireHostAllowlist: true
-
-          # ──────────────────────────────────────────────────────────────
-          # Job 9: Publish Playground Snapshot
-          # ──────────────────────────────────────────────────────────────
-          # BabylonJS-CI-Infrastructure provides TOOLS_STORAGE_ACCOUNT (the
-          # account backing liteplayground.babylonjs.com). The upload path and the
-          # public URL are computed here, in a job with no repository code, rather
-          # than in the job that built the snapshot.
-          - job: PublishPlaygroundSnapshot
-            displayName: "Publish Playground Snapshot"
-            pool:
-                vmImage: "ubuntu-latest"
-            variables:
-                - group: BabylonJS-Deployment
-                - group: BabylonJS-CI-Infrastructure
-                # The `litePlayground` container maps to the subdomain root, so
-                # this path becomes /pr/<N>/.
-                - name: deployPath
-                  value: litePlayground/pr/$(System.PullRequest.PullRequestNumber)
-                - name: playgroundUrl
-                  value: https://liteplayground.babylonjs.com/pr/$(System.PullRequest.PullRequestNumber)/
-            steps:
-                - checkout: none
-
-                - task: DownloadPipelineArtifact@2
-                  displayName: "Download playground snapshot"
-                  continueOnError: true
-                  inputs:
-                      artifact: playground-site
-                      path: $(Pipeline.Workspace)/playground-site
-
-                - template: upload-static-site.yml
-                  parameters:
-                      siteDir: $(Pipeline.Workspace)/playground-site
-                      deployPath: $(deployPath)
-                      storageAccount: $(TOOLS_STORAGE_ACCOUNT)
-                      siteName: "Lite Playground"
-                      linkUrl: $(playgroundUrl)
-                      requireHostAllowlist: true
-
-          # ──────────────────────────────────────────────────────────────
-          # Job 10: Post PR comments
-          # ──────────────────────────────────────────────────────────────
-          # The API-report and bundle-size comment bodies are produced by jobs
-          # that run PR code, so they are untrusted *content*. Content is fine —
-          # it ends up as markdown in a comment — but it must not be interpreted.
-          # Echoing it back through `##vso[task.setvariable]` would let it emit
-          # logging commands of its own, so `strip-logging-commands.sh` (from the
-          # pinned master checkout) neutralises every `##vso[` / `##[` sequence
-          # before the body is ever set as a variable.
-          - job: PostPrComments
-            displayName: "Post PR Comments"
-            pool:
-                vmImage: "ubuntu-latest"
-            steps:
-                - checkout: trusted
-                  fetchDepth: 1
-
-                - task: DownloadPipelineArtifact@2
-                  displayName: "Download API comment"
-                  continueOnError: true
-                  inputs:
-                      artifact: api-comment
-                      path: $(Pipeline.Workspace)/api-comment
-
-                - task: DownloadPipelineArtifact@2
-                  displayName: "Download bundle comment"
-                  continueOnError: true
-                  inputs:
-                      artifact: bundle-comment
-                      path: $(Pipeline.Workspace)/bundle-comment
-
-                - script: |
-                      set -euo pipefail
-                      bash scripts/strip-logging-commands.sh \
-                          "$(Pipeline.Workspace)/api-comment/api-report-comment.md" \
-                          API_COMMENT_BODY POST_API_COMMENT
-                      bash scripts/strip-logging-commands.sh \
-                          "$(Pipeline.Workspace)/bundle-comment/bundle-size-comment.md" \
-                          BUNDLE_COMMENT_BODY POST_BUNDLE_COMMENT
-                  condition: always()
-                  continueOnError: true
-                  displayName: "Load and neutralise comment bodies"
-
-                - task: GitHubComment@0
-                  condition: and(always(), eq(variables['POST_API_COMMENT'], 'true'))
-                  continueOnError: true
-                  displayName: "Post API changes to PR"
-                  inputs:
-                      gitHubConnection: "BabylonBotPAT"
-                      repositoryName: "$(Build.Repository.Name)"
-                      id: "$(System.PullRequest.PullRequestNumber)"
-                      comment: "$(API_COMMENT_BODY)"
-
-                - task: GitHubComment@0
-                  condition: and(always(), eq(variables['POST_BUNDLE_COMMENT'], 'true'))
-                  continueOnError: true
-                  displayName: "Post bundle-size changes to PR"
-                  inputs:
-                      gitHubConnection: "BabylonBotPAT"
-                      repositoryName: "$(Build.Repository.Name)"
-                      id: "$(System.PullRequest.PullRequestNumber)"
-                      comment: "$(BUNDLE_COMMENT_BODY)"
