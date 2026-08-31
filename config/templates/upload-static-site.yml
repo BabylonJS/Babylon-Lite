@@ -26,8 +26,9 @@
 #     since any host can serve https,
 #   * rejects deploy variables containing multipart/form-data metacharacters,
 #   * pins curl to https, refuses redirects, and passes DEPLOY_TOKEN through
-#     `env:` instead of macro-expanding it into the generated script body, so the
-#     secret never reaches a command line.
+#     `env:` instead of macro-expanding it into the generated script body, then
+#     hands it to curl on stdin as a `--config -` file rather than in an `-H`
+#     argument, so the secret reaches neither the script text nor a command line.
 #
 # Parameters:
 #   siteDir        - path to the static site folder to zip and upload
@@ -284,15 +285,29 @@ steps:
           fi
 
           # DEPLOY_TOKEN is read from the environment rather than macro-expanded,
-          # so the secret is never written into the generated script body.
+          # so the secret is never written into the generated script body, and it
+          # reaches curl on stdin as a config file rather than in argv. An
+          # argument is not a private channel: it sits in the process's own
+          # /proc/<pid>/cmdline for the life of the call, readable by every
+          # process running as the same user on the agent, it is what `ps` prints,
+          # and agent diagnostics collect it. Log masking does not touch any of
+          # that. `--config -` takes the same `header =` setting `-H` does.
+          #
+          # The escaping is required because a curl config value is a quoted
+          # string: a token containing a backslash or a double quote would
+          # otherwise end the value early and send a truncated header.
+          #
           # --proto '=https' and --location-trusted's absence keep the
           # Authorization header on the host validated above: curl does not
           # follow redirects unless asked, and cannot be talked down to plain
           # http by the server's response.
-          curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --fail-with-body --silent --show-error -X POST \
+          token_escaped=${DEPLOY_TOKEN//\\/\\\\}
+          token_escaped=${token_escaped//\"/\\\"}
+
+          printf 'header = "Authorization: %s"\n' "$token_escaped" |
+          curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --config - --fail-with-body --silent --show-error -X POST \
             --proto '=https' --max-time 600 \
             -H "Content-Type: multipart/form-data" \
-            -H "Authorization: ${DEPLOY_TOKEN}" \
             -F "path=${DEPLOY_PATH}" \
             -F "storageAccount=${STORAGE_ACCOUNT}" \
             "$@" \
@@ -300,11 +315,16 @@ steps:
 
           # Purge the CDN in the same step, against the same validated host, so
           # a caller cannot aim the purge somewhere the upload was not allowed.
+          # The emitter is repeated rather than hoisted into a helper on purpose:
+          # the guard in tests/lite/unit/pipeline-secret-hygiene.test.ts reads the
+          # header and the `--config -` that consumes it as one logical command,
+          # and a helper would put the two on opposite sides of a function call
+          # where nothing can check that they still belong together.
           if test -n "$CDN_ENDPOINT" && test -n "$CDN_PROFILE"; then
+              printf 'header = "Authorization: %s"\n' "$token_escaped" |
               curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_PURGE}?endpoint=${CDN_ENDPOINT}&profileName=${CDN_PROFILE}" \
-                --fail-with-body --silent --show-error -X POST \
-                --proto '=https' --max-time 600 \
-                -H "Authorization: ${DEPLOY_TOKEN}"
+                --config - --fail-with-body --silent --show-error -X POST \
+                --proto '=https' --max-time 600
           fi
       condition: succeeded()
       continueOnError: ${{ parameters.continueOnError }}

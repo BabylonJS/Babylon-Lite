@@ -716,11 +716,51 @@ obvious phrasing, deliberately:
 - Azure pipelines and their step templates must additionally reference
   `DEPLOY_TOKEN`. This one is **not** applied repo-wide: the GitHub Actions
   workflow authenticates with `Basic ${AUTH}`, which is correct, and demanding
-  `DEPLOY_TOKEN` of it would be a misfire.
+  `DEPLOY_TOKEN` of it would be a misfire. It is a **trace** through the
+  assignments in the header's own file, not a match on the header line: the
+  token takes one escaping hop before it reaches the header, and a single-line
+  pattern would call the correct form a violation.
+- No credential may sit in **argument position**. A command line is not
+  private — `/proc/<pid>/cmdline` is world-readable, `ps` prints it, and agent
+  diagnostics collect it — so `env:` and stdin are the only channels. This
+  started as a `curl -u` clause keyed on the flag name, which is why it watched
+  all four uploads spend a live deploy token on
+  `-H "Authorization: ${DEPLOY_TOKEN}"` without a word: `-u` was the specimen,
+  not the property. It now reads any payload-carrying flag (`-H`, `-d`, `-F`
+  and their long spellings) whose value interpolates a credential. Literal
+  headers such as `-H "Content-Type: multipart/form-data"` still pass, which is
+  what keeps the clause alive.
+- Every `Authorization:` header in an Azure pipeline must be **fed to curl
+  through `--config`**. This is the positive counterpart to the clause above:
+  that one says where the token must not be, this one says where it must be.
+  They fail on different mutations — reverting to `-H` trips both, but hoisting
+  the emitter into a shell function keeps the token out of argv while silently
+  detaching it from the request, and only this clause sees that. A detached
+  emitter sends no credential at all and the deployment server answers 401,
+  which reads like a server problem rather than a pipeline one.
+
+The four authenticated uploads therefore look like this. The escaping is not
+optional: a curl config value is a quoted string, so a token containing a
+backslash or a double quote would end the value early and send a truncated
+header.
+
+```bash
+token_escaped=${DEPLOY_TOKEN//\\/\\\\}
+token_escaped=${token_escaped//\"/\\\"}
+
+printf 'header = "Authorization: %s"\n' "$token_escaped" |
+curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --config - --fail-with-body ...
+```
+
+`printf` is a bash builtin, so the token never becomes another process's argv
+either. Keep the emitter immediately above the `curl` that consumes it rather
+than hoisting it into a helper: the guard folds the two into one logical
+command, and a function call puts them where nothing can check that they still
+belong together.
 
 The subject is every `azure-pipelines*.yml`, every file under
-`config/templates/`, and every file under `.github/workflows/` — 10
-`Authorization:` headers today. The first version read the repo root alone and
+`config/templates/`, and every file under `.github/workflows/` — 5
+`Authorization:` headers today, four of them config-fed uploads. The first version read the repo root alone and
 so covered 7 of them, while claiming the pipelines; the three it missed were the
 `curl` uploads in the shared templates, which `azure-pipelines.yml` includes at
 four call sites and which therefore run on every PR. If you add a CI file

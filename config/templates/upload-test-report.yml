@@ -191,14 +191,28 @@ steps:
           (cd "$REPORT_DIR" && zip -q -r "$ARCHIVE" .)
 
           # DEPLOY_TOKEN is read from the environment rather than macro-expanded,
-          # so the secret is never written into the generated script body.
+          # so the secret is never written into the generated script body, and it
+          # reaches curl on stdin as a config file rather than in argv. An
+          # argument is not a private channel: it sits in the process's own
+          # /proc/<pid>/cmdline for the life of the call, readable by every
+          # process running as the same user on the agent, it is what `ps` prints,
+          # and agent diagnostics collect it. Log masking does not touch any of
+          # that. `--config -` takes the same `header =` setting `-H` does.
+          #
+          # The escaping is required because a curl config value is a quoted
+          # string: a token containing a backslash or a double quote would
+          # otherwise end the value early and send a truncated header.
+          #
           # --proto '=https' keeps the Authorization header on the host validated
           # above: curl does not follow redirects unless asked, and cannot be
           # talked down to plain http by the server's response.
-          curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --fail-with-body --silent --show-error -X POST \
+          token_escaped=${DEPLOY_TOKEN//\\/\\\\}
+          token_escaped=${token_escaped//\"/\\\"}
+
+          printf 'header = "Authorization: %s"\n' "$token_escaped" |
+          curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --config - --fail-with-body --silent --show-error -X POST \
             --proto '=https' --max-time 600 \
             -H "Content-Type: multipart/form-data" \
-            -H "Authorization: ${DEPLOY_TOKEN}" \
             -F "path=${DEPLOY_PATH}" \
             -F "storageAccount=${STORAGE_ACCOUNT}" \
             -F "zip=@${ARCHIVE}"

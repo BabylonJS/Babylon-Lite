@@ -300,7 +300,9 @@ stages:
                 #
                 # DEPLOYMENT_SERVER/DEPLOY_ENDPOINT_UPLOAD/STORAGE_ACCOUNT are read
                 # from env: (see the preflight step above for why), and DEPLOY_TOKEN
-                # too, so the secret never appears on a command line the agent logs.
+                # too, so the secret never appears in the generated script body —
+                # and it goes to curl on stdin as a `--config -` file rather than
+                # in an `-H` argument, so it never appears in argv either.
                 #
                 # No repository code has run on this agent — the job checks out
                 # nothing and only downloads an artifact — so unlike the former
@@ -363,15 +365,31 @@ stages:
                         echo "##vso[task.logissue type=warning]DEPLOY_HOST_ALLOWLIST is empty; uploading to '$SERVER_HOST' unchecked."
                       fi
 
+                      # DEPLOY_TOKEN reaches curl on stdin as a config file rather
+                      # than in argv. An argument is not a private channel: it
+                      # sits in the process's own /proc/<pid>/cmdline for the
+                      # life of the call, readable by every process running as
+                      # the same user on the agent, it is what `ps` prints, and
+                      # agent diagnostics collect it. None of that is touched by
+                      # log masking. `--config -` takes the same `header =`
+                      # setting `-H` does.
+                      #
+                      # The escaping is required because a curl config value is a
+                      # quoted string: a token containing a backslash or a double
+                      # quote would otherwise end the value early and send a
+                      # truncated header.
+                      token_escaped=${DEPLOY_TOKEN//\\/\\\\}
+                      token_escaped=${token_escaped//\"/\\\"}
+
                       # Immutable per-commit copy first. If that upload fails the step stops
                       # here and the mutable copy is left untouched, so "latest" and its
                       # per-commit twin never disagree about what a commit measured.
                       for deployPath in "$(baselineDeployPath)/$(Build.SourceVersion)" "$(baselineDeployPath)"; do
                         echo "Uploading baseline to $deployPath"
-                        curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --fail-with-body --silent --show-error -X POST \
+                        printf 'header = "Authorization: Bearer %s"\n' "$token_escaped" |
+                        curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --config - --fail-with-body --silent --show-error -X POST \
                           --proto '=https' --max-time 600 \
                           -H "Content-Type: multipart/form-data" \
-                          -H "Authorization: Bearer ${DEPLOY_TOKEN}" \
                           -F "path=$deployPath" \
                           -F "storageAccount=${STORAGE_ACCOUNT}" \
                           -F "zip=@$WORK/baseline.zip"
