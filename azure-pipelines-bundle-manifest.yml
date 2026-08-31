@@ -236,7 +236,7 @@ stages:
                       BUNDLE_BASELINE_MANIFEST="$MANIFEST" BUNDLE_BASELINE_STAGING="$WORK" \
                         pnpm exec tsx scripts/publish-bundle-baseline.ts
 
-                      (cd "$WORK" && zip -j baseline.zip manifest.json meta.json)
+                      (cd "$WORK" && zip -j baseline.zip manifest.json impact-manifest.json meta.json)
 
                       # Immutable per-commit copy first. If that upload fails the step stops
                       # here and the mutable copy is left untouched, so "latest" and its
