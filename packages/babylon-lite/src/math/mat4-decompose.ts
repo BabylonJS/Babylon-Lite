@@ -2,7 +2,7 @@
  *  Standalone function for tree-shaking — only bundled when used. */
 
 import type { Mat4, Quat, Vec3 } from "./types.js";
-import { _quatFromRotationBasis } from "./quat-from-rotation-matrix.js";
+import { _quatFromRotationBasisToRef } from "./quat-from-rotation-matrix.js";
 import { mat4Determinant3 } from "./mat4-determinant3.js";
 
 /** Result of {@link mat4Decompose}: a TRS triple. */
@@ -54,7 +54,12 @@ export function mat4Decompose(m: Mat4): DecomposedTransform {
     const invSy = syAbs > 1e-8 ? 1 / sy : 0;
     const invSz = sz > 1e-8 ? 1 / sz : 0;
     // Strip scale from the basis columns, then extract the rotation quaternion.
-    const q = _quatFromRotationBasis(m[0]! * invSx, m[4]! * invSy, m[8]! * invSz, m[1]! * invSx, m[5]! * invSy, m[9]! * invSz, m[2]! * invSx, m[6]! * invSy, m[10]! * invSz);
+    const q = _quatFromRotationBasisToRef(m[0]! * invSx, m[4]! * invSy, m[8]! * invSz, m[1]! * invSx, m[5]! * invSy, m[9]! * invSz, m[2]! * invSx, m[6]! * invSy, m[10]! * invSz, {
+        x: 0,
+        y: 0,
+        z: 0,
+        w: 1,
+    });
     // Renormalize — dividing by per-axis scale introduces small drift.
     const invLen = 1 / Math.hypot(q.x, q.y, q.z, q.w);
     return {
