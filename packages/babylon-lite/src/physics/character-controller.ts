@@ -39,7 +39,7 @@ import {
     setPhysicsBodyShape,
     worldStepSeconds,
 } from "./havok.js";
-import type { PhysicsBody, PhysicsShape, PhysicsWorld } from "./havok.js";
+import type { PhysicsBody, PhysicsShape, PhysicsWorld, ResolvedPhysicsBodyInstance } from "./havok.js";
 
 // ─── Public types ────────────────────────────────────────────────────
 
@@ -675,9 +675,8 @@ export class PhysicsCharacterController {
         hknp.HP_World_ShapeCastWithCollector(hkWorld, this._castCollector, castQuery);
     }
 
-    private _findBody(id: unknown): { body: PhysicsBody; nativeBody: any; instanceIndex: number } | null {
-        const hit = resolvePhysicsBodyInstanceById(this._world, id);
-        return hit ? { body: hit.body, nativeBody: hit.handle, instanceIndex: hit.index } : null;
+    private _findBody(id: unknown): ResolvedPhysicsBodyInstance | null {
+        return resolvePhysicsBodyInstanceById(this._world, id);
     }
 
     private _contactFromCast(cp: any, castPath: Vec3, hitFraction: number): Contact {
@@ -690,8 +689,8 @@ export class PhysicsCharacterController {
             distance: dist,
             fraction: hitFraction,
             body: hit?.body ?? null,
-            nativeBody: hit?.nativeBody ?? null,
-            instanceIndex: hit?.instanceIndex ?? -1,
+            nativeBody: hit?.handle ?? null,
+            instanceIndex: hit?.index ?? -1,
             allowedPenetration: clamp(this.keepDistance - dist, 0, this.keepDistance),
         };
     }
@@ -716,8 +715,8 @@ export class PhysicsCharacterController {
                     distance,
                     fraction: 0,
                     body: hit?.body ?? null,
-                    nativeBody: hit?.nativeBody ?? null,
-                    instanceIndex: hit?.instanceIndex ?? -1,
+                    nativeBody: hit?.handle ?? null,
+                    instanceIndex: hit?.index ?? -1,
                     allowedPenetration: clamp(this.keepDistance - distance, 0, this.keepDistance),
                 });
             }

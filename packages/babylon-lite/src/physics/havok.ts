@@ -161,6 +161,10 @@ export interface PhysicsBody {
     readonly _hkBodies?: any[];
     /** @internal Thin-instance synchronization seam. Undefined for ordinary bodies. */
     readonly _instances?: PhysicsBodyInstances;
+    /** @internal Reusable native transform payload for thin-instance prestep synchronization. */
+    readonly _instanceTransform?: [number[], number[]];
+    /** @internal Reusable quaternion output paired with `_instanceTransform`. */
+    readonly _instanceRotation?: Quat;
     /** @internal */ readonly _world: PhysicsWorld;
     /** @internal */ _shape?: PhysicsShape | null;
     /** @internal */ _rotationLockMask?: number;
@@ -204,6 +208,10 @@ export interface PhysicsWorld {
     /** @internal */ readonly _hknp: any;
     /** @internal */ readonly _hkWorld: any;
     /** @internal */ readonly _bodies: PhysicsBody[];
+    /** @internal Bodies removed since the last step, retained while already-produced events drain. */
+    _removedBodies?: PhysicsBody[];
+    /** @internal Lazily-created native body resolver used by events and queries. */
+    _bodyResolver?: PhysicsBodyResolver;
     /** @internal Owning scene, retained so out-of-step callers (e.g. the character controller) can
      *  read the current per-frame delta (`scene.fixedDeltaMs` / `engine._currentDelta`) when the
      *  world has no fixed step configured. The world already captures the scene in its per-frame
@@ -223,6 +231,8 @@ export interface PhysicsWorld {
     _thinInstances?: HavokThinInstanceContext;
     /** @internal Callbacks run after each physics step (post body→node sync, pre-render). */
     _afterStep?: ((timestep: number) => void)[];
+    /** @internal True while after-step callbacks drain events produced by the current native step. */
+    _runningAfterStep?: boolean;
     /** @internal Lazily-created Havok query collector, cached by the standalone `physics/havok-queries.ts` module. */
     _queryCollector?: any;
     /** @internal Removes the per-frame step callback from the scene; called by `disposePhysics` before the native world is released. */
@@ -231,27 +241,28 @@ export interface PhysicsWorld {
 
 /** @internal Operations implemented by the lazy thin-instance physics module. */
 export interface PhysicsBodyInstances {
-    count(body: PhysicsBody): number;
-    forEach(body: PhysicsBody, cb: (hkBody: any, index: number) => void): void;
-    find(body: PhysicsBody, nativeId: unknown): PhysicsBodyInstance | null;
     syncFromHavok(hknp: any, body: PhysicsBody): void;
     syncToHavok(hknp: any, body: PhysicsBody): void;
     setTransform(body: PhysicsBody, position: Vec3, rotation: Quat): void;
 }
 
-/** @internal One native Havok body and its index within a Lite physics body. */
-export interface PhysicsBodyInstance {
+/** @internal A tracked Lite body paired with one of its native Havok instances. */
+export interface ResolvedPhysicsBodyInstance {
+    body: PhysicsBody;
     handle: any;
     index: number;
 }
 
-/** @internal A tracked Lite body paired with one of its native Havok instances. */
-export interface ResolvedPhysicsBodyInstance extends PhysicsBodyInstance {
-    body: PhysicsBody;
+/** @internal Lazily installed so worlds without events or queries retain no lookup implementation. */
+interface PhysicsBodyResolver {
+    add(body: PhysicsBody): void;
+    remove(body: PhysicsBody): void;
+    get(nativeId: unknown): ResolvedPhysicsBodyInstance | null;
 }
 
 /** @internal Factory seam installed only when thin-instance physics is enabled. */
 export interface HavokThinInstanceContext {
+    validate(world: PhysicsWorld, node: Mesh): void;
     createBody(world: PhysicsWorld, node: Mesh, motionType: PhysicsMotionType, startsAsleep: boolean): PhysicsBody;
 }
 
@@ -340,6 +351,14 @@ const MAX_STEP_MS = 100;
 
 function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
     const { _hknp: hknp, _hkWorld: hkWorld, _bodies: bodies } = world;
+    const removedBodies = world._removedBodies;
+    if (removedBodies) {
+        for (const body of removedBodies) {
+            world._bodyResolver?.remove(body);
+            forEachPhysicsBodyHandle(body, (handle) => hknp.HP_Body_Release(handle));
+        }
+    }
+    world._removedBodies = undefined;
     // Step size in ms: the world's own fixed step when set (`> 0`), otherwise the live per-frame delta
     // the scene supplies — which the render loop already resolves as `scene.fixedDeltaMs > 0 ?
     // scene.fixedDeltaMs : engine._currentDelta`, so runtime changes to `scene.fixedDeltaMs` flow
@@ -389,8 +408,13 @@ function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
     // post-step scene logic runs in `onAfterRenderObservable`.
     if (world._afterStep) {
         const cbs = world._afterStep.slice();
-        for (let i = 0; i < cbs.length; i++) {
-            cbs[i]!(dt);
+        world._runningAfterStep = true;
+        try {
+            for (let i = 0; i < cbs.length; i++) {
+                cbs[i]!(dt);
+            }
+        } finally {
+            world._runningAfterStep = false;
         }
     }
 }
@@ -583,10 +607,9 @@ export function getPhysicsVelocityLimits(world: PhysicsWorld): { maxLinear: numb
 export function createPhysicsBody(world: PhysicsWorld, node: SceneNode, motionType: PhysicsMotionType, startsAsleep = false): PhysicsBody {
     const { _hknp: hknp, _hkWorld: hkWorld } = world;
     if (isMesh(node) && node.thinInstances) {
-        if (!world._thinInstances) {
-            throw new Error("Call enableHavokThinInstancePhysics(world) before creating a thin-instance physics body.");
-        }
-        return world._thinInstances.createBody(world, node, motionType, startsAsleep);
+        const body = _getThinInstanceContext(world).createBody(world, node, motionType, startsAsleep);
+        world._bodyResolver?.add(body);
+        return body;
     }
     const hkMotion =
         motionType === PhysicsMotionType.STATIC ? hknp.MotionType.STATIC : motionType === PhysicsMotionType.ANIMATED ? hknp.MotionType.KINEMATIC : hknp.MotionType.DYNAMIC;
@@ -619,60 +642,48 @@ export function createPhysicsBody(world: PhysicsWorld, node: SceneNode, motionTy
     }
 
     world._bodies.push(body);
+    world._bodyResolver?.add(body);
     return body;
 }
 
 /** Return the number of native rigid bodies represented by a Lite physics body. */
 export function getPhysicsBodyInstanceCount(body: PhysicsBody): number {
-    return body._instances?.count(body) ?? 1;
+    return body._hkBodies?.length ?? 1;
 }
 
 /** @internal Apply a native operation to every rigid body represented by a Lite physics body. */
 export function forEachPhysicsBodyHandle(body: PhysicsBody, cb: (hkBody: any, index: number) => void): void {
-    if (body._instances) {
-        body._instances.forEach(body, cb);
-    } else {
-        cb(body._hkBody, 0);
+    const handles = body._hkBodies;
+    if (!handles) {
+        return cb(body._hkBody, 0);
     }
-}
-
-function nativeBodyIdsEqual(left: unknown, right: unknown): boolean {
-    if (left === right) {
-        return true;
+    for (let i = 0; i < handles.length; i++) {
+        cb(handles[i], i);
     }
-    if (typeof left === "bigint" && typeof right === "number" && Number.isInteger(right)) {
-        return left === BigInt(right);
-    }
-    if (typeof left === "number" && Number.isInteger(left) && typeof right === "bigint") {
-        return BigInt(left) === right;
-    }
-    return false;
-}
-
-/** @internal Resolve one native Havok ID to its handle and index within this body. */
-export function findPhysicsBodyInstanceById(body: PhysicsBody, nativeId: unknown): PhysicsBodyInstance | null {
-    return body._instances?.find(body, nativeId) ?? (nativeBodyIdsEqual(body._hkBody[0], nativeId) ? { handle: body._hkBody, index: 0 } : null);
 }
 
 /** @internal Resolve one native Havok ID across every body tracked by a world. */
 export function resolvePhysicsBodyInstanceById(world: PhysicsWorld, nativeId: unknown): ResolvedPhysicsBodyInstance | null {
-    for (const body of world._bodies) {
-        const instance = findPhysicsBodyInstanceById(body, nativeId);
-        if (instance) {
-            return { body, handle: instance.handle, index: instance.index };
+    if (!world._bodyResolver) {
+        const cache = new Map<number, ResolvedPhysicsBodyInstance>();
+        const add = (body: PhysicsBody): void => {
+            forEachPhysicsBodyHandle(body, (handle, index) => cache.set(Number(handle[0]), { body, handle, index }));
+        };
+        world._bodyResolver = {
+            add,
+            remove: (body) => forEachPhysicsBodyHandle(body, (handle) => cache.delete(Number(handle[0]))),
+            get: (id) => cache.get(Number(id)) ?? null,
+        };
+        for (const body of world._bodies) {
+            add(body);
+        }
+        if (world._removedBodies) {
+            for (const body of world._removedBodies) {
+                add(body);
+            }
         }
     }
-    return null;
-}
-
-/** @internal Resolve one native Havok ID to this body's matching handle. */
-export function findPhysicsBodyHandleById(body: PhysicsBody, nativeId: unknown): any | null {
-    return findPhysicsBodyInstanceById(body, nativeId)?.handle ?? null;
-}
-
-/** @internal Test whether a native Havok ID belongs to a Lite physics body. */
-export function physicsBodyHasNativeId(body: PhysicsBody, nativeId: unknown): boolean {
-    return findPhysicsBodyHandleById(body, nativeId) !== null;
+    return world._bodyResolver.get(nativeId);
 }
 
 /**
@@ -1460,10 +1471,11 @@ export function setPhysicsBodyTransform(world: PhysicsWorld, body: PhysicsBody, 
 // ─── Removal ─────────────────────────────────────────────────────────
 
 /**
- * Remove a single body from the world and release its native handle (the per-frame step skips it from
- * now on). After this the body must not be reused. A body that isn't in the world is ignored, so this is
- * safe to call once per body. Does NOT release the body's collision shape — release that separately with
- * {@link releasePhysicsShape} if it isn't shared.
+ * Remove a single body from the world (the per-frame step skips it from now on). Calls made during an
+ * after-step callback defer native-handle release until the next step so already-produced events can
+ * still identify the body; other calls release immediately. After this the body must not be reused.
+ * A body that isn't in the world is ignored, so this is safe to call once per body. Does NOT release
+ * the body's collision shape — release that separately with {@link releasePhysicsShape} if it isn't shared.
  * @param world - The physics world.
  * @param body - The body to remove.
  */
@@ -1474,10 +1486,13 @@ export function removePhysicsBody(world: PhysicsWorld, body: PhysicsBody): void 
         return; // already removed / not part of this world
     }
     bodies.splice(i, 1);
-    forEachPhysicsBodyHandle(body, (hkBody) => {
-        hknp.HP_World_RemoveBody(hkWorld, hkBody);
-        hknp.HP_Body_Release(hkBody);
-    });
+    forEachPhysicsBodyHandle(body, (hkBody) => hknp.HP_World_RemoveBody(hkWorld, hkBody));
+    if (world._runningAfterStep) {
+        (world._removedBodies ??= []).push(body);
+    } else {
+        world._bodyResolver?.remove(body);
+        forEachPhysicsBodyHandle(body, (hkBody) => hknp.HP_Body_Release(hkBody));
+    }
 }
 
 /**
@@ -1500,6 +1515,9 @@ export function releasePhysicsShape(world: PhysicsWorld, shape: PhysicsShape): v
  */
 export function createPhysicsAggregate(world: PhysicsWorld, node: Mesh, type: PhysicsShapeType, options: PhysicsAggregateOptions): PhysicsAggregate {
     const motionType = options.mass === 0 ? PhysicsMotionType.STATIC : PhysicsMotionType.DYNAMIC;
+    if (node.thinInstances) {
+        _getThinInstanceContext(world).validate(world, node);
+    }
 
     // Use a caller-supplied pre-built shape if present (e.g. a mesh/convex-hull
     // shape built via createPhysicsShape); otherwise build a primitive shape.
@@ -1531,6 +1549,14 @@ export function createPhysicsAggregate(world: PhysicsWorld, node: Mesh, type: Ph
     }
 
     return { body, shape };
+}
+
+function _getThinInstanceContext(world: PhysicsWorld): HavokThinInstanceContext {
+    const context = world._thinInstances;
+    if (!context) {
+        throw new Error("Call enableHavokThinInstancePhysics(world) before creating a thin-instance physics body.");
+    }
+    return context;
 }
 
 function _buildShapeParams(node: Mesh, type: PhysicsShapeType, options: PhysicsAggregateOptions): PhysicsShapeParameters {
@@ -1649,6 +1675,15 @@ export function disposePhysics(world: PhysicsWorld): void {
         });
     }
     bodies.length = 0;
+    const removedBodies = world._removedBodies;
+    if (removedBodies) {
+        for (const body of removedBodies) {
+            forEachPhysicsBodyHandle(body, (hkBody) => hknp.HP_Body_Release(hkBody));
+        }
+    }
+    world._removedBodies = undefined;
+    world._bodyResolver = undefined;
+    world._runningAfterStep = false;
 
     // Release world
     hknp.HP_World_Release(hkWorld);
