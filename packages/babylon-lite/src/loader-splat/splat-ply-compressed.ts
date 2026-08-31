@@ -74,12 +74,13 @@ function parseHeader(data: ArrayBuffer): PlyHeader | null {
         return null;
     }
     const idx = headerEnd.index;
-    const vmatch = /element vertex (\d+)\r?\n/.exec(headerText);
+    const header = headerText.slice(0, idx);
+    const vmatch = /element vertex (\d+)\r?\n/.exec(header);
     if (!vmatch) {
         return null;
     }
     const vertexCount = parseInt(vmatch[1]!, 10);
-    const cmatch = /element chunk (\d+)\r?\n/.exec(headerText);
+    const cmatch = /element chunk (\d+)\r?\n/.exec(header);
     const chunkCount = cmatch ? parseInt(cmatch[1]!, 10) : 0;
     let section: Section = Section.Chunk;
     let rowVertex = 0;
@@ -88,7 +89,7 @@ function parseHeader(data: ArrayBuffer): PlyHeader | null {
     const chunkProps: PlyProp[] = [];
     const shProps: PlyProp[] = [];
     let shDegree = 0;
-    for (const line of headerText.slice(0, idx).split(/\r?\n/)) {
+    for (const line of header.split(/\r?\n/)) {
         if (line.startsWith("element ")) {
             const [, kind] = line.split(" ");
             section = kind === "chunk" ? Section.Chunk : kind === "vertex" ? Section.Vertex : kind === "sh" ? Section.SH : Section.Unused;

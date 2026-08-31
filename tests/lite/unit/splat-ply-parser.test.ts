@@ -46,4 +46,17 @@ describe("PLY parser", () => {
         expect(isPlyCompressedOrSH(data)).toBe(true);
         expect(Array.from(new Float32Array(convertCompressedPlyToParsedSplat(data).data, 0, 3))).toEqual([1, 2, 3]);
     });
+
+    it("does not read standard PLY element declarations from the binary payload", () => {
+        const data = combine("ply\nformat binary_little_endian 1.0\nend_header\n", new TextEncoder().encode("element vertex 1\n"));
+
+        expect(convertPlyToSplat(data).data).toBe(data);
+    });
+
+    it("does not read compressed PLY element declarations from the binary payload", () => {
+        const body = new TextEncoder().encode("element vertex 1\nelement chunk 1\n");
+        const data = combine("ply\nformat binary_little_endian 1.0\nend_header\n", body);
+
+        expect(convertCompressedPlyToParsedSplat(data).data).toBe(data);
+    });
 });

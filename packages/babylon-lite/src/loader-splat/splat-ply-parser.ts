@@ -50,8 +50,9 @@ export function convertPlyToSplat(data: ArrayBuffer): ParsedSplat {
         return { data };
     }
     const headerEndIndex = headerEnd.index;
+    const headerText = header.slice(0, headerEndIndex);
 
-    const vmatch = /element vertex (\d+)\r?\n/.exec(header);
+    const vmatch = /element vertex (\d+)\r?\n/.exec(headerText);
     if (!vmatch) {
         return { data };
     }
@@ -60,7 +61,7 @@ export function convertPlyToSplat(data: ArrayBuffer): ParsedSplat {
     const offsets: Record<string, number> = { double: 8, int: 4, uint: 4, float: 4, short: 2, ushort: 2, uchar: 1 };
     const properties: { name: string; type: string; offset: number }[] = [];
     let rowOffset = 0;
-    for (const line of header.slice(0, headerEndIndex).split(/\r?\n/)) {
+    for (const line of headerText.split(/\r?\n/)) {
         if (!line.startsWith("property ")) {
             continue;
         }
