@@ -311,13 +311,16 @@ there. [Why](#why-the-jobs-are-not-in-azure-pipelinesyml) is the whole of the
 next section — it is not a tidy-up, and moving a job back into the entry point
 reintroduces a vulnerability.
 
-The run is three stages, because Azure evaluates approvals and checks per stage:
+The run is two stages, because Azure evaluates approvals and checks per stage:
 
 | Stage       | Runs PR code | Credentials held                                   |
 | ----------- | ------------ | -------------------------------------------------- |
 | **CI**      | yes          | none                                                |
-| **Cloud**   | yes          | `BabylonJS-BrowserStack` only                       |
 | **Publish** | no           | `BabylonJS-Deployment`, `BabylonJS-CI-Infrastructure`, `BabylonBotPAT` |
+
+There is deliberately no cloud-browser stage. PR CI holds **no** credential in
+any job that runs pull-request code — see
+[Cloud browser tests run post-merge](#cloud-browser-tests-run-post-merge).
 
 Jobs:
 
@@ -330,11 +333,39 @@ Jobs:
 | **Lint**                     | CI      | ESLint + TypeScript `--noEmit` type-check               |
 | **Compat**                   | CI      | Cross-version compatibility checks                      |
 | **Playground Snapshot**      | CI      | Builds the playground; publishes it as an artifact      |
-| **Perf Regression**          | Cloud   | Current vs baseline on BrowserStack (macOS Chrome)      |
-| **Parity (Cloud)**           | Cloud   | Pixel-diff on BrowserStack (macOS Chrome, real WebGPU)  |
 | **Release Markers (labels)** | Publish | Label half of the rule, run from the pinned master checkout |
 | **Publish \***                 | Publish | Credentialed uploads, in `checkout: none` jobs          |
 | **Post PR Comments**         | Publish | Posts the API and bundle-size comment bodies            |
+
+### Cloud browser tests run post-merge
+
+**Pipeline:** `azure-pipelines-cloud-tests.yml`
+**Trigger:** pushes to `master`, plus a nightly schedule. `pr: none`.
+
+| Job                 | What it does                                            |
+| ------------------- | ------------------------------------------------------- |
+| **Perf Regression** | Current vs baseline on BrowserStack (macOS Chrome)      |
+| **Parity (Cloud)**  | Pixel-diff on BrowserStack (macOS Chrome, real WebGPU)  |
+| **Publish reports** | Uploads both reports, in `checkout: none` jobs          |
+
+These two jobs used to run in a `Cloud` stage of PR CI, holding
+`BabylonJS-BrowserStack` while executing the pull request's own test code. The
+justification was that a cloud browser cannot be driven without giving the tests
+the account key, and that a leaked key only buys browser minutes. Both halves
+were wrong. The key is long-lived, so a pull request that is never merged still
+walks away with it permanently; and a BrowserStack session is a browser inside
+someone else's network, which is a position to attack from rather than a metered
+resource.
+
+The credential cannot be removed from the tests, so the tests moved to where the
+code they run has already been reviewed. The cost is that a cloud-browser
+regression is caught after merge rather than before it. The nightly schedule and
+the per-push trigger keep that window to a single commit.
+
+The reports are still redacted before they leave the credentialed job — see
+[Test Reporting](#test-reporting) — because "master code" is not the same as
+"code that never prints a secret". The publish jobs then upload them with
+`checkout: none`, exactly as PR CI does.
 
 ### Why the jobs are not in `azure-pipelines.yml`
 
@@ -379,10 +410,10 @@ Three rules, all enforced by
    variable group, no `GITHUB_TOKEN`, no `System.AccessToken`, no
    `gitHubConnection`, and no `persistCredentials` — that last one leaves the
    build's OAuth token in `.git/config`, where every later step in the job,
-   including a dependency's install script, can read it. The single exception is
-   `BabylonJS-BrowserStack` in the Cloud stage: a cloud browser cannot be driven
-   without giving the tests the account key. That stage holds nothing else, so a
-   leaked key buys browser minutes rather than a deploy.
+   including a dependency's install script, can read it. **There is no
+   exception.** `BabylonJS-BrowserStack` used to be one; it is now banned from
+   the entry point and the pinned template by name, not merely as a `- group:`
+   line, so mapping `BROWSERSTACK_ACCESS_KEY` by hand fails the guard too.
 3. **Privileged work runs where no PR code has run.** Every upload happens in a
    `checkout: none` job that consumes a pipeline artifact, and the two jobs that
    need repository code with a credential in scope (`Release Markers (labels)`,
@@ -397,11 +428,29 @@ through `scripts/strip-logging-commands.sh`, which neutralises every `##vso[` an
 body could issue logging commands inside the job that holds the GitHub
 connection.
 
-The upload templates allowlist their deploy paths, require the destination host
-to appear in `DEPLOY_HOST_ALLOWLIST`, pin `curl` to `https` with no redirect
-following, and pass `DEPLOY_TOKEN` via `env:` so it never reaches a command line.
-An https URL on its own is not a destination check: an attacker's host serves
-https too.
+The upload templates allowlist their deploy paths, pin `curl` to `https` with no
+redirect following, and pass `DEPLOY_TOKEN` via `env:` so it never reaches a
+command line. An https URL on its own is not a destination check: an attacker's
+host serves https too.
+
+The destination host is checked against `allowedDeployHosts`, a **template
+parameter**, not a variable. Parameters are expanded when the run is compiled,
+before any step executes, so no `##vso[task.setvariable]`, no queue-time override
+and no variable-group edit can add a host to the list. That is the difference
+from the `DEPLOY_HOST_ALLOWLIST` variable it replaces: a variable is something a
+run can be talked into changing.
+
+`allowedDeployHosts` ships **empty**, because the Babylon deployment host is not
+public and cannot be committed by anyone without access to
+`BabylonJS-Deployment`. Until an administrator fills it in
+([see below](#settings-that-repository-files-cannot-enforce)):
+
+- PR-reachable uploads pass `requireHostAllowlist: true` and therefore **refuse
+  to run**. They are all `continueOnError: true`, so PR builds stay green and
+  only lose their preview links.
+- Trusted master-only uploads fall back to the `DEPLOY_HOST_ALLOWLIST` variable
+  with a warning. Those jobs run no repository code at all, so there is no step
+  that could have rewritten it.
 
 #### Changing CI
 
@@ -443,13 +492,33 @@ protections above are conventions rather than controls.
   it from `BabylonJS-Deployment`; the pipeline-level UI variable of the same name
   must be **deleted**, or the whole isolation is bypassable by a pull request
   that simply asks for `$(GITHUB_TOKEN)` in its own job.
-- **`DEPLOY_HOST_ALLOWLIST` must be set** in `BabylonJS-Deployment`, to a space-
-  or comma-separated list of the exact `host[:port]` values uploads may reach. PR
-  CI passes `requireHostAllowlist: true`, so if this variable is missing the
-  upload aborts rather than falling back to "any https host". It must live beside
-  the token it protects, in a group only an administrator can edit — not in the
-  pipeline UI, and not in the repository, where a pull request could add its own
-  host to it.
+- **`allowedDeployHosts` must be filled in, in both upload templates.** This is
+  the one change this work could not make: the exact deployment host is not
+  public and appears nowhere in this repository. Add the `host[:port]` literals
+  to the `allowedDeployHosts` parameter default in **both**
+  `config/templates/upload-static-site.yml` and
+  `config/templates/upload-test-report.yml` — a unit test requires the two lists
+  to be identical, so a half-done edit fails CI rather than leaving one template
+  open. Until then, every PR-reachable upload refuses to run. Because this is a
+  compile-time parameter, changing it is a reviewed commit to `master`, which is
+  the property that makes it stronger than the variable it replaces.
+- **`DEPLOY_HOST_ALLOWLIST` should be set** in `BabylonJS-Deployment`, to a space-
+  or comma-separated list of the same values. It is now only the fallback for
+  trusted master-only uploads, used while `allowedDeployHosts` is empty. Once
+  `allowedDeployHosts` is populated it is ignored entirely, and can be deleted.
+- **Create the `azure-pipelines-cloud-tests.yml` pipeline definition.** The file
+  is merged but a YAML file is not a pipeline until someone creates a definition
+  pointing at it. Until it exists, perf and parity-cloud do not run anywhere —
+  they no longer run in PR CI. Authorize `BabylonJS-BrowserStack` for this
+  definition and **remove that authorization from the PR CI definition**;
+  otherwise a pull request can still ask for the group by name, and the guard in
+  this repository is the only thing refusing it.
+- **`BabylonBotPAT` must be authorized for the npm-publish pipelines.** Both
+  publish pipelines now create their release tag with `GitHubRelease@1` through
+  that service connection, instead of `git push` from a checkout carrying
+  persisted credentials. If the connection is not authorized for those
+  definitions, tagging fails at the last job — after the packages are already on
+  npm.
 - **Pipeline permissions.** Each protected resource should be authorized only for
   the pipelines that need it: `BabylonJS-Deployment` and
   `BabylonJS-CI-Infrastructure` for the pipelines that upload,
@@ -460,10 +529,16 @@ protections above are conventions rather than controls.
   be blocked outright, taking the lab-site and report previews with it. Apply it
   to the release and publish pipelines, where every run is a master run, and rely
   on the required-template check for PR CI.
-- **Approvals on the cloud stage (optional).** Because the Cloud stage is the
-  only place a credential meets pull-request code, an approval check on
-  `BabylonJS-BrowserStack` gates exactly that exposure — and nothing else — at
-  the cost of a manual click per PR.
+- **Branch control on `BabylonJS-BrowserStack`.** No pull-request build has any
+  legitimate use for it now. Restricting it to `refs/heads/master` makes that a
+  server-side fact rather than a repository convention, and is the single check
+  that most directly enforces the move described in
+  [Cloud browser tests run post-merge](#cloud-browser-tests-run-post-merge).
+- **`NPM_TOKEN` should be a granular publish-only token.** It is now in scope only
+  in a `checkout: none` job that runs `npm publish --ignore-scripts` on a tarball
+  built by an earlier, credential-free job, so no repository lifecycle script can
+  observe it. Scoping the token to the two published packages bounds what a
+  failure of that boundary would be worth.
 - **Fork secrets stay off.** "Make secrets available to builds of forks" and
   "Make fork builds run with the same permissions" must both be disabled.
   Enabling either hands every secret above to fork-authored code.
@@ -486,7 +561,7 @@ protections above are conventions rather than controls.
 ### Required Pipeline Variable Groups
 
 Azure Pipelines uses `BabylonJS-BrowserStack` for shared BrowserStack
-credentials:
+credentials, in `azure-pipelines-cloud-tests.yml` and nowhere else:
 
 - `BROWSERSTACK_USERNAME`
 - `BROWSERSTACK_ACCESS_KEY`
@@ -497,7 +572,9 @@ uploading failed Playwright HTML reports:
 - `DEPLOYMENT_SERVER`
 - `DEPLOY_TOKEN`
 - `DEPLOY_ENDPOINT_UPLOAD`
-- `DEPLOY_HOST_ALLOWLIST` — exact `host[:port]` values uploads may reach
+- `DEPLOY_HOST_ALLOWLIST` — exact `host[:port]` values uploads may reach.
+  Fallback only, for trusted master-only uploads, and only while the
+  `allowedDeployHosts` template parameter is still empty
 - `GITHUB_TOKEN` — read-only PR metadata, read by `Release Markers (labels)`
 
 It uses `BabylonJS-CI-Infrastructure` for the storage accounts and CDN profiles
@@ -511,7 +588,10 @@ that uploads target:
 This third group is easy to miss. It was **omitted from this list until the
 bundle-manifest pipeline failed on it**, even though PR CI (now
 `config/templates/pr-ci.yml`), `azure-pipelines-playground.yml` and
-`azure-pipelines-npm-publish.yml` had all three been importing it all along. A pipeline that needs a storage account and
+`azure-pipelines-npm-publish.yml` had all three been importing it all along.
+`azure-pipelines-cloud-tests.yml` imports `BabylonJS-BrowserStack` in its test
+jobs and `BabylonJS-Deployment` in its `checkout: none` report-upload jobs, never
+both in one job. A pipeline that needs a storage account and
 declares only the first two groups will not fail at parse time — see the trap
 described below.
 

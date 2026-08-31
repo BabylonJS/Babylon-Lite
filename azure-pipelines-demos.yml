@@ -2,6 +2,21 @@
 #
 # Builds the standalone Lite demos and deploys the generated static output to
 # the Babylon.js website CDN through the deployment server.
+#
+# ── WHY THIS IS TWO JOBS ─────────────────────────────────────────────────────
+#
+# Building the demos runs repository code: `pnpm install` executes dependency
+# lifecycle scripts, `pnpm build:bundle-demos` executes the repository's own
+# build and a real browser. Any of that can emit `##vso[task.setvariable]` and
+# rewrite a pipeline variable for every later step in the same job — including
+# DEPLOYMENT_SERVER, which decides where DEPLOY_TOKEN is sent.
+#
+# So the build never shares an agent with the credential. `Build` holds no
+# variable group at all and hands its output over as a pipeline artifact;
+# `Deploy` starts from a clean agent with `checkout: none`, so the only thing on
+# it is the artifact and the upload template itself. A compromised dependency
+# can still produce bad demo content, which is a supply-chain problem for the
+# site — it can no longer take the deployment credential with it.
 
 trigger:
     branches:
@@ -11,7 +26,6 @@ trigger:
 pr: none
 
 variables:
-    - group: BabylonJS-Deployment
     - name: NODE_VERSION
       value: "22.x"
     - name: PNPM_VERSION
@@ -20,21 +34,16 @@ variables:
       value: "true"
     - name: HEADLESS
       value: "true"
-    - name: deploymentPath
-      value: cdn/website/lite-demos
-    - name: storageAccount
-      value: babylonsnapshots
-    - name: cdnEndpoint
-      value: babylonjs-webbsite
-    - name: cdnProfile
-      value: babylonjscdn
 
 stages:
     - stage: DeployDemos
       displayName: "Deploy Lite Demos"
       jobs:
-          - job: BuildAndDeploy
-            displayName: "Build and Deploy Lite Demos"
+          # ──────────────────────────────────────────────────────────────
+          # Build — repository code, no credentials
+          # ──────────────────────────────────────────────────────────────
+          - job: Build
+            displayName: "Build Lite Demos"
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -62,28 +71,47 @@ stages:
 
                 - script: |
                       set -euo pipefail
-
                       DEMOS_DIR="$(System.DefaultWorkingDirectory)/lab/public/bundle/demos"
-                      ZIP_PATH="$(Build.ArtifactStagingDirectory)/lite-demos.zip"
-
                       if ! test -d "$DEMOS_DIR"; then
                         echo "No demos build output found at $DEMOS_DIR"
                         exit 1
                       fi
+                  displayName: "Verify demos build output"
 
-                      mkdir -p "$(Build.ArtifactStagingDirectory)"
-                      cd "$DEMOS_DIR"
-                      zip -r "$ZIP_PATH" .
+                - task: PublishPipelineArtifact@1
+                  displayName: "Stage demos for trusted deploy"
+                  inputs:
+                      targetPath: $(System.DefaultWorkingDirectory)/lab/public/bundle/demos
+                      artifact: demos-site
 
-                      curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD)" --fail-with-body -i -X POST \
-                        -H "Content-Type: multipart/form-data" \
-                        -H "Authorization: Bearer $(DEPLOY_TOKEN)" \
-                        -F "path=$(deploymentPath)" \
-                        -F "storageAccount=$(storageAccount)" \
-                        -F "cdnEndpoint=$(cdnEndpoint)" \
-                        -F "cdnProfile=$(cdnProfile)" \
-                        -F "zip=@$ZIP_PATH"
+          # ──────────────────────────────────────────────────────────────
+          # Deploy — credentials, no repository code
+          # ──────────────────────────────────────────────────────────────
+          - job: Deploy
+            displayName: "Deploy Lite Demos"
+            dependsOn: Build
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                - group: BabylonJS-Deployment
+            steps:
+                - checkout: none
 
-                      curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_PURGE)?endpoint=$(cdnEndpoint)&profileName=$(cdnProfile)" --fail-with-body -i -X POST \
-                        -H "Authorization: Bearer $(DEPLOY_TOKEN)"
-                  displayName: "Upload demos to deployment server"
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download demos"
+                  inputs:
+                      artifact: demos-site
+                      path: $(Pipeline.Workspace)/demos-site
+
+                - template: config/templates/upload-static-site.yml
+                  parameters:
+                      siteDir: $(Pipeline.Workspace)/demos-site
+                      deployPath: cdn/website/lite-demos
+                      storageAccount: babylonsnapshots
+                      siteName: "Lite Demos"
+                      cdnEndpoint: babylonjs-webbsite
+                      cdnProfile: babylonjscdn
+                      postComment: false
+                      # A master deployment is not advisory: a refused or failed
+                      # upload must fail the pipeline, not pass quietly.
+                      continueOnError: false

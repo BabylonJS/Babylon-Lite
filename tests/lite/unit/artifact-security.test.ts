@@ -163,11 +163,15 @@ describe("BrowserStack artifact security", () => {
 });
 
 describe("BrowserStack pipeline publication gates", () => {
-    // The cloud jobs live in the master-pinned template rather than in
-    // azure-pipelines.yml: for a pull-request build Azure reads the entry point
-    // from the pull request itself, so job definitions there are written by the
-    // change under review. See tests/lite/unit/pr-pipeline-credential-isolation.test.ts.
-    const pipeline = readFileSync(resolve(repoRoot, "config/templates/pr-ci.yml"), "utf8");
+    // The cloud jobs live in their own master-only pipeline. A pull-request
+    // build reads its definition from the pull request itself, so no amount of
+    // gating written there is trustworthy — and the BrowserStack key is
+    // long-lived, so a pull request that never merges would still keep it. The
+    // gates below therefore protect a post-merge run, where the code being
+    // tested has been reviewed and only the *report* needs redacting before it
+    // leaves the credentialed job. See
+    // tests/lite/unit/pr-pipeline-credential-isolation.test.ts.
+    const pipeline = readFileSync(resolve(repoRoot, "azure-pipelines-cloud-tests.yml"), "utf8");
     const uploadTemplate = readFileSync(resolve(repoRoot, "config/templates/upload-test-report.yml"), "utf8");
     const parityConfig = readFileSync(resolve(repoRoot, "config/playwright.parity-cloud.config.ts"), "utf8");
     const perfConfig = readFileSync(resolve(repoRoot, "config/playwright.perf-cloud.config.ts"), "utf8");
@@ -198,12 +202,12 @@ describe("BrowserStack pipeline publication gates", () => {
             );
 
             // The report leaves the credentialed job as a pipeline artifact and
-            // is uploaded from the Publish stage, so the redaction gate has to
-            // sit on the staging step -- that is the last point at which this
-            // job can still withhold the report.
+            // is uploaded from the PublishReports stage, so the redaction gate
+            // has to sit on the staging step -- that is the last point at which
+            // this job can still withhold the report.
             expect(pipeline).toMatch(
                 new RegExp(
-                    `condition: and\\(failed\\(\\), eq\\(variables\\['ArtifactsSafe'\\], 'true'\\)\\)[\\s\\S]*?targetPath: \\$\\(System\\.DefaultWorkingDirectory\\)/test-results/${suite}-report\\s+artifact: ${suite}-report`
+                    `condition: and\\(always\\(\\), eq\\(variables\\['ArtifactsSafe'\\], 'true'\\)\\)[\\s\\S]*?targetPath: \\$\\(System\\.DefaultWorkingDirectory\\)/test-results/${suite}-report\\s+artifact: ${suite}-report`
                 )
             );
         }

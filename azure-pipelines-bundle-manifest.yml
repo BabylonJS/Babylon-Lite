@@ -32,6 +32,23 @@
 # advisory delta report, so if it is ever missing or stale the report is skipped
 # and no build fails.
 
+# ── WHY THE UPLOAD IS ITS OWN JOB ────────────────────────────────────────────
+#
+# Measuring ~230 scenes runs repository code and a real browser for the better
+# part of an hour: `pnpm install` runs dependency lifecycle scripts, and
+# `pnpm build:bundle-scenes` runs the repository's own build. Anything in that
+# hour can emit `##vso[task.setvariable]` and rewrite a pipeline variable for
+# every later step in the same job — DEPLOYMENT_SERVER included, which is where
+# the next step sends DEPLOY_TOKEN in an Authorization header.
+#
+# The measurement job therefore holds no variable group and no token. It stages
+# the baseline as a pipeline artifact, and a separate `checkout: none` job with
+# no repository code on it at all performs the authenticated upload.
+#
+# Preflight runs first, and Measure waits for it, so a missing deploy variable
+# still costs seconds rather than the full measurement run — the failure mode
+# this pipeline was originally written to avoid.
+
 trigger:
     branches:
         include:
@@ -40,22 +57,6 @@ trigger:
 pr: none
 
 variables:
-    # DEPLOYMENT_SERVER / DEPLOY_TOKEN / DEPLOY_ENDPOINT_UPLOAD come from this
-    # group — the same upload path the failed-Playwright-report and
-    # static-lab-site templates use.
-    - group: BabylonJS-Deployment
-    # The snapshots storage account lives here as SNAPSHOTS_STORAGE_ACCOUNT.
-    # Note the rename: the upload templates take a variable called STORAGE_ACCOUNT,
-    # but no group exports that name — each pipeline maps its own account into the
-    # template's parameter (see azure-pipelines-playground.yml, which does the same
-    # with TOOLS_STORAGE_ACCOUNT).
-    #
-    # Assuming a bare STORAGE_ACCOUNT existed is what broke the first master run
-    # (build 20260825.1): ADO leaves an unknown $(VAR) as literal text, bash then
-    # evaluated it as a command substitution ("STORAGE_ACCOUNT: command not found"),
-    # the upload was posted with an empty storageAccount, and the deployment server
-    # answered 401 — after 28 minutes of scene measurement had already succeeded.
-    - group: BabylonJS-CI-Infrastructure
     - name: NODE_VERSION
       value: "22.x"
     - name: PNPM_VERSION
@@ -64,10 +65,6 @@ variables:
       value: "true"
     - name: HEADLESS
       value: "true"
-    # Resolved from the group rather than hardcoded to "babylonsnapshots" (which
-    # azure-pipelines-demos.yml does) so the account name has one source of truth.
-    - name: storageAccount
-      value: $(SNAPSHOTS_STORAGE_ACCOUNT)
     # Public path the baseline is served from. Must stay in sync with
     # DEFAULT_MASTER_MANIFEST_URL in scripts/bundle-scenes-core.ts.
     # The snapshots account is served at $(SERVE_DOMAIN), so this lands at
@@ -86,24 +83,37 @@ stages:
     - stage: BundleBaseline
       displayName: "Bundle-Size Baseline"
       jobs:
-          - job: PublishBaseline
-            displayName: "Measure scenes and publish the baseline"
-            timeoutInMinutes: 120
+          # ──────────────────────────────────────────────────────────────
+          # Preflight — deploy configuration only, no repository code
+          # ──────────────────────────────────────────────────────────────
+          # Fail fast on a deploy misconfiguration BEFORE spending ~28 minutes
+          # measuring scenes. The first master run did all that work and then
+          # lost it in a 2-second publish step.
+          #
+          # Variables are read through env: rather than inline $(VAR) so an
+          # unresolved one arrives as the harmless literal string "$(VAR)"
+          # instead of being evaluated by bash as a command substitution.
+          # That is what turned a missing variable into an opaque HTTP 401
+          # rather than a named error.
+          - job: Preflight
+            displayName: "Check deploy configuration"
             pool:
                 vmImage: "ubuntu-latest"
+            variables:
+                # DEPLOYMENT_SERVER / DEPLOY_TOKEN / DEPLOY_ENDPOINT_UPLOAD come
+                # from this group — the same upload path the test-report and
+                # static-lab-site templates use.
+                - group: BabylonJS-Deployment
+                # The snapshots storage account lives here as
+                # SNAPSHOTS_STORAGE_ACCOUNT. Note the rename: the upload
+                # templates take a parameter called storageAccount, but no group
+                # exports that name — each pipeline maps its own account
+                # variable into it. Assuming a bare STORAGE_ACCOUNT existed is
+                # what broke the first master run (build 20260825.1).
+                - group: BabylonJS-CI-Infrastructure
             steps:
-                - checkout: self
+                - checkout: none
 
-                # Fail fast on a deploy misconfiguration BEFORE spending ~28
-                # minutes measuring scenes. The first master run did all that work
-                # and then lost it in a 2-second publish step. This sits ahead of the
-                # toolchain install too, so a bad variable costs seconds, not minutes.
-                #
-                # Variables are read through env: rather than inline $(VAR) so an
-                # unresolved one arrives as the harmless literal string "$(VAR)"
-                # instead of being evaluated by bash as a command substitution.
-                # That is what turned a missing variable into an opaque HTTP 401
-                # rather than a named error.
                 - script: |
                       set -euo pipefail
 
@@ -162,7 +172,19 @@ stages:
                       DEPLOYMENT_SERVER: $(DEPLOYMENT_SERVER)
                       DEPLOY_ENDPOINT_UPLOAD: $(DEPLOY_ENDPOINT_UPLOAD)
                       DEPLOY_TOKEN: $(DEPLOY_TOKEN)
-                      STORAGE_ACCOUNT: $(storageAccount)
+                      STORAGE_ACCOUNT: $(SNAPSHOTS_STORAGE_ACCOUNT)
+
+          # ──────────────────────────────────────────────────────────────
+          # Measure — repository code, no credentials
+          # ──────────────────────────────────────────────────────────────
+          - job: Measure
+            displayName: "Measure scenes and stage the baseline"
+            dependsOn: Preflight
+            timeoutInMinutes: 120
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
 
                 - task: UseNode@1
                   inputs:
@@ -193,7 +215,7 @@ stages:
 
                 # Enforces the per-scene maxRawKB ceilings byte-exactly and fails
                 # the job when one is exceeded, so a breach can never be published
-                # as the new baseline by the step below.
+                # as the new baseline by the job below.
                 #
                 # BUNDLE_MASTER_MANIFEST_URL is blanked so this build does not
                 # fetch the previous baseline just to overwrite it.
@@ -203,19 +225,9 @@ stages:
                       SKIP_BJS: "true"
                       BUNDLE_MASTER_MANIFEST_URL: ""
 
-                # Publish the aggregate manifest to the same public storage that
-                # serves the per-build test reports and lab sites, at a stable
-                # path. PR builds and local developers read it over plain HTTPS —
-                # no auth, no ADO artifact retention window, and it works for fork
-                # PRs.
-                #
-                # --fail-with-body so an upload rejection fails the step instead of
-                # silently leaving the baseline stale.
-                #
-                # DEPLOYMENT_SERVER/DEPLOY_ENDPOINT_UPLOAD/STORAGE_ACCOUNT are read
-                # from env: (see the preflight step above for why). DEPLOY_TOKEN
-                # stays inline: ADO does not auto-map secret variables into env, so
-                # macro substitution is the supported way to reference it.
+                # Stamps each scene with the ceiling it was measured against and
+                # writes the meta.json provenance sidecar. Exits non-zero on an
+                # empty or unreadable manifest.
                 - script: |
                       set -euo pipefail
 
@@ -228,22 +240,108 @@ stages:
                       fi
 
                       SCENES="$(node -e 'process.stdout.write(String(Object.keys(require(process.argv[1])).length))' "$MANIFEST")"
-                      echo "Publishing bundle-size baseline for $SCENES scene(s)."
+                      echo "Staging bundle-size baseline for $SCENES scene(s)."
 
-                      # Stamps each scene with the ceiling it was measured against and writes
-                      # the meta.json provenance sidecar into $WORK. Exits non-zero on an empty
-                      # or unreadable manifest, so the guard above is belt-and-braces.
                       BUNDLE_BASELINE_MANIFEST="$MANIFEST" BUNDLE_BASELINE_STAGING="$WORK" \
                         pnpm exec tsx scripts/publish-bundle-baseline.ts
+                  displayName: "Stage bundle-size baseline"
+
+                - task: PublishPipelineArtifact@1
+                  displayName: "Stage baseline for trusted publish"
+                  inputs:
+                      targetPath: $(Build.ArtifactStagingDirectory)/bundle-baseline
+                      artifact: bundle-baseline
+
+          # ──────────────────────────────────────────────────────────────
+          # Publish — credentials, no repository code
+          # ──────────────────────────────────────────────────────────────
+          # Immutable per-commit copy first. If that upload fails the job stops
+          # there and the mutable copy is left untouched, so "latest" and its
+          # per-commit twin never disagree about what a commit measured.
+          - job: Publish
+            displayName: "Publish the baseline"
+            dependsOn: Measure
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                - group: BabylonJS-Deployment
+                - group: BabylonJS-CI-Infrastructure
+            steps:
+                - checkout: none
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download staged baseline"
+                  inputs:
+                      artifact: bundle-baseline
+                      path: $(Pipeline.Workspace)/bundle-baseline
+
+                # Publish the aggregate manifest to the same public storage that
+                # serves the per-build test reports and lab sites, at a stable
+                # path. PR builds and local developers read it over plain HTTPS —
+                # no auth, no ADO artifact retention window, and it works for fork
+                # PRs.
+                #
+                # --fail-with-body so an upload rejection fails the step instead of
+                # silently leaving the baseline stale. --proto '=https' and the
+                # absence of -L keep the Authorization header on the host that was
+                # checked: a redirect is otherwise a way to move a bearer token to
+                # a destination nothing validated.
+                #
+                # DEPLOYMENT_SERVER/DEPLOY_ENDPOINT_UPLOAD/STORAGE_ACCOUNT are read
+                # from env: (see the preflight step above for why), and DEPLOY_TOKEN
+                # too, so the secret never appears on a command line the agent logs.
+                #
+                # No repository code has run on this agent — the job checks out
+                # nothing and only downloads an artifact — so unlike the former
+                # single-job shape there is no step that could have redirected
+                # DEPLOYMENT_SERVER with `##vso[task.setvariable]` before this runs.
+                - script: |
+                      set -euo pipefail
+
+                      WORK="$(Pipeline.Workspace)/bundle-baseline"
+
+                      if ! test -s "$WORK/manifest.json"; then
+                        echo "No staged manifest at $WORK/manifest.json — refusing to publish an empty baseline."
+                        exit 1
+                      fi
+
+                      SCENES="$(node -e 'process.stdout.write(String(Object.keys(require(process.argv[1])).length))' "$WORK/manifest.json")"
+                      echo "Publishing bundle-size baseline for $SCENES scene(s)."
 
                       (cd "$WORK" && zip -j baseline.zip manifest.json meta.json)
+
+                      # An https URL is not a destination check — any host serves
+                      # https. When the deployment group carries an allowlist, the
+                      # host has to be in it. This job runs no repository code, so
+                      # nothing here can have rewritten either variable first.
+                      SERVER_HOST="$(printf '%s' "${DEPLOYMENT_SERVER}" | sed -e 's#^https\{0,1\}://##' -e 's#[:/].*$##')"
+                      case "${DEPLOYMENT_SERVER}" in
+                          https://*) ;;
+                          *)
+                              echo "Refusing upload: DEPLOYMENT_SERVER is not an https URL."
+                              exit 1
+                              ;;
+                      esac
+                      if [ -n "${DEPLOY_HOST_ALLOWLIST:-}" ]; then
+                        matched=""
+                        for allowed in ${DEPLOY_HOST_ALLOWLIST}; do
+                          if [ "$SERVER_HOST" = "$allowed" ]; then matched="yes"; fi
+                        done
+                        if [ -z "$matched" ]; then
+                          echo "Refusing upload: '$SERVER_HOST' is not in DEPLOY_HOST_ALLOWLIST."
+                          exit 1
+                        fi
+                      else
+                        echo "##vso[task.logissue type=warning]DEPLOY_HOST_ALLOWLIST is empty; uploading to '$SERVER_HOST' unchecked."
+                      fi
 
                       # Immutable per-commit copy first. If that upload fails the step stops
                       # here and the mutable copy is left untouched, so "latest" and its
                       # per-commit twin never disagree about what a commit measured.
                       for deployPath in "$(baselineDeployPath)/$(Build.SourceVersion)" "$(baselineDeployPath)"; do
                         echo "Uploading baseline to $deployPath"
-                        curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --fail-with-body -i -X POST \
+                        curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --fail-with-body --silent --show-error -X POST \
+                          --proto '=https' --max-time 600 \
                           -H "Content-Type: multipart/form-data" \
                           -H "Authorization: Bearer ${DEPLOY_TOKEN}" \
                           -F "path=$deployPath" \
@@ -254,5 +352,6 @@ stages:
                   env:
                       DEPLOYMENT_SERVER: $(DEPLOYMENT_SERVER)
                       DEPLOY_ENDPOINT_UPLOAD: $(DEPLOY_ENDPOINT_UPLOAD)
-                      STORAGE_ACCOUNT: $(storageAccount)
+                      DEPLOY_HOST_ALLOWLIST: $(DEPLOY_HOST_ALLOWLIST)
+                      STORAGE_ACCOUNT: $(SNAPSHOTS_STORAGE_ACCOUNT)
                       DEPLOY_TOKEN: $(DEPLOY_TOKEN)

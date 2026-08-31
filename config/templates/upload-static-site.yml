@@ -21,9 +21,9 @@
 #
 # As defence in depth the script below also:
 #   * refuses any deploy path outside a fixed allowlist (see ALLOWED_PATH_RE),
-#   * requires the destination host to appear in DEPLOY_HOST_ALLOWLIST, which is
-#     mandatory whenever `requireHostAllowlist` is true — an https URL alone is
-#     not a destination check, since any host can serve https,
+#   * requires the destination host to appear in the COMPILE-TIME allowlist
+#     `allowedDeployHosts` below — an https URL alone is not a destination check,
+#     since any host can serve https,
 #   * rejects deploy variables containing multipart/form-data metacharacters,
 #   * pins curl to https, refuses redirects, and passes DEPLOY_TOKEN through
 #     `env:` instead of macro-expanding it into the generated script body, so the
@@ -37,13 +37,17 @@
 #   postComment    - post a PR comment with the link (default true)
 #   storageAccount - storage account to upload to (default $(STORAGE_ACCOUNT))
 #   linkUrl        - public URL to link in the PR comment (when postComment)
-#   requireHostAllowlist - fail closed when DEPLOY_HOST_ALLOWLIST is unset.
-#                    Mandatory for every call site reachable from a PR build.
+#   cdnEndpoint    - CDN endpoint to purge after upload; "" skips the purge
+#   cdnProfile     - CDN profile the endpoint belongs to
+#   requireHostAllowlist - refuse to fall back to the runtime DEPLOY_HOST_ALLOWLIST
+#                    variable. Mandatory for every call site reachable from a PR
+#                    build, where a runtime variable is not an acceptable source
+#                    for a destination.
 #
 # Required pipeline variables:
-#   BabylonJS-Deployment variable group: DEPLOYMENT_SERVER, DEPLOY_TOKEN,
-#     DEPLOY_HOST_ALLOWLIST (space- or comma-separated host[:port] list)
-#   Report upload settings: DEPLOY_ENDPOINT_UPLOAD, STORAGE_ACCOUNT, SERVE_DOMAIN
+#   BabylonJS-Deployment variable group: DEPLOYMENT_SERVER, DEPLOY_TOKEN
+#   Report upload settings: DEPLOY_ENDPOINT_UPLOAD, DEPLOY_ENDPOINT_PURGE,
+#     STORAGE_ACCOUNT, SERVE_DOMAIN
 #   Playground snapshots additionally pass TOOLS_STORAGE_ACCOUNT via storageAccount.
 #   Scope these groups to the calling job — never to the whole pipeline.
 # Required service connection:
@@ -56,6 +60,28 @@ parameters:
       type: string
     - name: siteName
       type: string
+    # ── Compile-time destination allowlist ────────────────────────────────
+    # The set of hosts this template may ever send DEPLOY_TOKEN to. It is a
+    # template parameter, so it is fixed when the run is compiled, before any
+    # step executes: no `##vso[task.setvariable]`, no queue-time variable and no
+    # variable-group edit can add a host to it. That is the difference between
+    # this and the DEPLOY_HOST_ALLOWLIST variable it replaces — a variable is
+    # something a run can be talked into changing, a parameter is not.
+    #
+    # ADMINISTRATOR ACTION REQUIRED: this list ships empty because the Babylon
+    # deployment host is not public and therefore cannot be committed by anyone
+    # without access to the BabylonJS-Deployment group. Until it is filled in:
+    #   * PR-reachable uploads (requireHostAllowlist: true) REFUSE to run. They
+    #     are all `continueOnError: true`, so PR builds stay green and only lose
+    #     their preview links.
+    #   * Trusted master-only uploads fall back to the DEPLOY_HOST_ALLOWLIST
+    #     variable, which is safe there because those jobs run no repository
+    #     code — see the security contract above.
+    # Add the host to BOTH this list and the identical one in
+    # upload-test-report.yml; a unit test asserts the two stay in step.
+    - name: allowedDeployHosts
+      type: object
+      default: []
     # When false, upload the site but skip the PR comment. Used by non-PR
     # pipelines (e.g. the npm-publish versioned playground) where there is no
     # System.PullRequest context to comment on.
@@ -75,12 +101,27 @@ parameters:
     - name: linkUrl
       type: string
       default: ""
-    # True for any call site that a pull-request build can reach. The host
-    # allowlist then has to be configured, and an unset one aborts the upload
-    # rather than falling back to "any https host".
+    # CDN purge after upload. Both must be non-empty for the purge to run; the
+    # storage hosts that serve build artifacts are uncached and need none.
+    - name: cdnEndpoint
+      type: string
+      default: ""
+    - name: cdnProfile
+      type: string
+      default: ""
+    # True for any call site that a pull-request build can reach. The
+    # compile-time host allowlist is then the only permitted source of
+    # destination hosts, and an empty one aborts the upload rather than falling
+    # back to a runtime variable.
     - name: requireHostAllowlist
       type: boolean
       default: false
+    # PR previews are advisory, so a failed upload must not redden a PR build.
+    # A master deployment is not advisory: those call sites pass false so a
+    # refused or failed upload fails the pipeline instead of passing silently.
+    - name: continueOnError
+      type: boolean
+      default: true
 
 steps:
     - script: |
@@ -94,7 +135,7 @@ steps:
           # Allowlist of every destination this template is permitted to write.
           # Anything else -- including a destination smuggled in through a
           # runtime variable override -- is refused rather than uploaded.
-          ALLOWED_PATH_RE='^(lite/[A-Za-z0-9._-]+/lab|litePlayground/pr/[0-9]+|litePlayground/v/[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?)$'
+          ALLOWED_PATH_RE='^(lite/[A-Za-z0-9._-]+/lab|lite/bundle-baseline(/[0-9a-f]{40})?|litePlayground|litePlayground/v|litePlayground/pr/[0-9]+|litePlayground/v/[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?|cdn/website/lite-demos)$'
 
           case "$DEPLOY_PATH" in
               *..*)
@@ -105,7 +146,7 @@ steps:
 
           if ! printf '%s' "$DEPLOY_PATH" | grep -Eq "$ALLOWED_PATH_RE"; then
               echo "Refusing upload: deploy path '$DEPLOY_PATH' is not in the allowlist."
-              echo "Permitted destinations: lite/<build>/lab, litePlayground/pr/<number>, litePlayground/v/<version>."
+              echo "Permitted destinations: lite/<build>/lab, lite/bundle-baseline[/<sha>], litePlayground[/v], litePlayground/pr/<number>, litePlayground/v/<version>, cdn/website/lite-demos."
               exit 1
           fi
 
@@ -155,23 +196,43 @@ steps:
           esac
 
           # "It is https" is not a destination check -- an attacker's host serves
-          # https too. The host must be one this deployment is actually allowed
-          # to talk to, named in DEPLOY_HOST_ALLOWLIST alongside the credential
-          # it protects, where only a project administrator can change it.
+          # https too, and neither is a *variable* holding the allowlist: a
+          # variable is something a run can be talked into changing, whether by
+          # `##vso[task.setvariable]` from an earlier step or by a queue-time
+          # override. COMPILE_TIME_HOSTS is rendered from the template parameter
+          # `allowedDeployHosts` when the run is compiled, before any step
+          # exists, so nothing that happens during the run can add to it.
+          COMPILE_TIME_HOSTS="${{ join(' ', parameters.allowedDeployHosts) }}"
           REQUIRE_HOST_ALLOWLIST="${{ parameters.requireHostAllowlist }}"
-          ALLOWLIST="${DEPLOY_HOST_ALLOWLIST-}"
-          case "$ALLOWLIST" in
-              *'$'*) ALLOWLIST="" ;;
-          esac
 
-          if test -z "$ALLOWLIST"; then
-              if test "$REQUIRE_HOST_ALLOWLIST" = "True" || test "$REQUIRE_HOST_ALLOWLIST" = "true"; then
-                  echo "Refusing upload: DEPLOY_HOST_ALLOWLIST is not configured, and this call site requires it."
-                  echo "Add DEPLOY_HOST_ALLOWLIST to the BabylonJS-Deployment variable group as a space- or comma-separated list of permitted host[:port] values."
-                  exit 1
-              fi
-              echo "DEPLOY_HOST_ALLOWLIST is not configured; skipping host allowlist check for this non-PR call site."
+          if test -n "$COMPILE_TIME_HOSTS"; then
+              ALLOWLIST="$COMPILE_TIME_HOSTS"
+              ALLOWLIST_SOURCE="the compile-time allowedDeployHosts parameter"
+          elif test "$REQUIRE_HOST_ALLOWLIST" = "True" || test "$REQUIRE_HOST_ALLOWLIST" = "true"; then
+              # PR-reachable call site with nothing pinned at compile time. A
+              # runtime variable is not an acceptable substitute here, so refuse.
+              echo "Refusing upload: allowedDeployHosts is empty and this call site may be reached by a pull-request build."
+              echo "A pull-request-reachable upload may only send DEPLOY_TOKEN to a host pinned at compile time."
+              echo "Add the deployment host to the allowedDeployHosts default in config/templates/upload-static-site.yml"
+              echo "and config/templates/upload-test-report.yml, in a pull request merged to master."
+              exit 1
           else
+              # Trusted master-only call site: this job runs no repository code
+              # (see the security contract at the top of this file), so nothing
+              # in it can rewrite the variable. Kept as a migration path until
+              # allowedDeployHosts is filled in.
+              ALLOWLIST="${DEPLOY_HOST_ALLOWLIST-}"
+              case "$ALLOWLIST" in
+                  *'$'*) ALLOWLIST="" ;;
+              esac
+              ALLOWLIST_SOURCE="the DEPLOY_HOST_ALLOWLIST variable"
+              if test -z "$ALLOWLIST"; then
+                  echo "##vso[task.logissue type=warning]allowedDeployHosts is empty and DEPLOY_HOST_ALLOWLIST is unset; this upload's destination is unpinned. Add the deployment host to allowedDeployHosts in config/templates/upload-static-site.yml."
+                  ALLOWLIST=""
+              fi
+          fi
+
+          if test -n "$ALLOWLIST"; then
               HOST_ALLOWED="false"
               for allowed in $(printf '%s' "$ALLOWLIST" | tr ',' ' '); do
                   if test "$DEPLOY_HOST" = "$allowed"; then
@@ -179,7 +240,7 @@ steps:
                   fi
               done
               if test "$HOST_ALLOWED" != "true"; then
-                  echo "Refusing upload: DEPLOYMENT_SERVER host is not in DEPLOY_HOST_ALLOWLIST."
+                  echo "Refusing upload: DEPLOYMENT_SERVER host '$DEPLOY_HOST' is not in $ALLOWLIST_SOURCE."
                   exit 1
               fi
           fi
@@ -202,6 +263,26 @@ steps:
 
           (cd "$SITE_DIR" && zip -q -r "$ARCHIVE" .)
 
+          # CDN purge target. Both are compile-time parameters, so they are fixed
+          # before the run starts; validated anyway because they are interpolated
+          # into a query string.
+          CDN_ENDPOINT="${{ parameters.cdnEndpoint }}"
+          CDN_PROFILE="${{ parameters.cdnProfile }}"
+          for value in "$CDN_ENDPOINT" "$CDN_PROFILE"; do
+              case "$value" in
+                  *[!A-Za-z0-9._-]*)
+                      echo "Refusing upload: CDN endpoint/profile contains characters that are not permitted in a query parameter."
+                      exit 1
+                      ;;
+              esac
+          done
+
+          if test -n "$CDN_ENDPOINT" && test -n "$CDN_PROFILE"; then
+              set -- -F "cdnEndpoint=${CDN_ENDPOINT}" -F "cdnProfile=${CDN_PROFILE}"
+          else
+              set --
+          fi
+
           # DEPLOY_TOKEN is read from the environment rather than macro-expanded,
           # so the secret is never written into the generated script body.
           # --proto '=https' and --location-trusted's absence keep the
@@ -214,13 +295,24 @@ steps:
             -H "Authorization: ${DEPLOY_TOKEN}" \
             -F "path=${DEPLOY_PATH}" \
             -F "storageAccount=${STORAGE_ACCOUNT}" \
+            "$@" \
             -F "zip=@${ARCHIVE}"
+
+          # Purge the CDN in the same step, against the same validated host, so
+          # a caller cannot aim the purge somewhere the upload was not allowed.
+          if test -n "$CDN_ENDPOINT" && test -n "$CDN_PROFILE"; then
+              curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_PURGE}?endpoint=${CDN_ENDPOINT}&profileName=${CDN_PROFILE}" \
+                --fail-with-body --silent --show-error -X POST \
+                --proto '=https' --max-time 600 \
+                -H "Authorization: ${DEPLOY_TOKEN}"
+          fi
       condition: succeeded()
-      continueOnError: true
+      continueOnError: ${{ parameters.continueOnError }}
       displayName: "Upload ${{ parameters.siteName }} static site"
       env:
           DEPLOYMENT_SERVER: $(DEPLOYMENT_SERVER)
           DEPLOY_ENDPOINT_UPLOAD: $(DEPLOY_ENDPOINT_UPLOAD)
+          DEPLOY_ENDPOINT_PURGE: $(DEPLOY_ENDPOINT_PURGE)
           DEPLOY_TOKEN: $(DEPLOY_TOKEN)
           DEPLOY_HOST_ALLOWLIST: $(DEPLOY_HOST_ALLOWLIST)
           STORAGE_ACCOUNT: ${{ parameters.storageAccount }}

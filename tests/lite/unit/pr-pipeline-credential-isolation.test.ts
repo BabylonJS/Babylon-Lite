@@ -46,14 +46,43 @@ const UPLOAD_TEMPLATES = ["config/templates/upload-static-site.yml", "config/tem
 const PRIVILEGED_GROUPS = ["BabylonJS-Deployment", "BabylonJS-CI-Infrastructure"];
 
 /**
- * The one credential a job running pull-request code is allowed to hold.
+ * Credentials a job running pull-request code may hold: none.
  *
- * A cloud browser test cannot be run without giving the tests the account key,
- * so this exception is structural rather than an oversight. It is contained by
- * keeping those jobs in a stage of their own, holding nothing else: a leaked
- * BrowserStack key buys browser minutes, not a deploy.
+ * This list used to contain `BabylonJS-BrowserStack`, on the reasoning that a
+ * cloud browser test cannot run without the account key and a leaked key only
+ * buys browser minutes. That was wrong twice over. The key is long-lived, so a
+ * pull request that never merges still walks away with it permanently; and a
+ * BrowserStack session is a browser on someone else's network, which is a
+ * position to attack from rather than a metered resource. The cloud tests moved
+ * to azure-pipelines-cloud-tests.yml, which has no `pr:` trigger and therefore
+ * only ever runs reviewed master code.
+ *
+ * Deliberately empty. Adding an entry here is the change this file exists to
+ * make someone argue for.
  */
-const ALLOWED_IN_PULL_REQUEST_JOBS = ["BabylonJS-BrowserStack"];
+const ALLOWED_IN_PULL_REQUEST_JOBS: string[] = [];
+
+/** Where the cloud-browser tests live now: master only, never a pull request. */
+const CLOUD_PIPELINE = "azure-pipelines-cloud-tests.yml";
+
+/** The cloud-browser credential, banned from anything a pull request reaches. */
+const CLOUD_GROUP = "BabylonJS-BrowserStack";
+
+/**
+ * Credentials that can write to npm, GitHub or the deployment server.
+ *
+ * A job holding one of these must not run repository code on the same agent —
+ * not the pull request's, and not master's dependency tree either. `pnpm
+ * install` alone executes every transitive dependency's install hooks, and
+ * `npm publish` of a directory runs the package's own prepack hooks.
+ */
+const DEPLOYMENT_CREDENTIAL_MARKERS = [
+    /^\s*-\s*group:\s*BabylonJS-Deployment\s*$/m,
+    /^\s*-\s*group:\s*BabylonJS-CI-Infrastructure\s*$/m,
+    /NPM_TOKEN:/,
+    /gitHubConnection:/,
+    /GITHUB_TOKEN:/,
+];
 
 function read(file: string): string {
     return readFileSync(join(repoRoot, file), "utf8");
@@ -75,13 +104,19 @@ function withoutComments(source: string): string {
         .join("\n");
 }
 
-/** Pipelines that build from a pull-request ref, and so run untrusted code. */
-function prTriggeredPipelines(): string[] {
+/** Every pipeline definition at the repository root. */
+function allPipelines(): string[] {
     const files = readdirSync(repoRoot).filter((f) => /^azure-pipelines.*\.ya?ml$/.test(f));
 
     // Guard the guard: an empty subject makes every assertion below vacuously
     // true, which is precisely the failure this file exists to prevent.
     expect(files.length, "found no azure-pipelines*.yml files to inspect").toBeGreaterThan(0);
+    return files.sort();
+}
+
+/** Pipelines that build from a pull-request ref, and so run untrusted code. */
+function prTriggeredPipelines(): string[] {
+    const files = allPipelines();
 
     // `pr: none` opts out; a bare `pr:` opens a branch-filter block and opts in.
     return files.filter((f) => /^pr:\s*$/m.test(read(f)));
@@ -231,7 +266,7 @@ describe("no job that runs pull-request code holds a credential", () => {
         }
     });
 
-    it("gives a job that checks out the pull request no credential beyond the cloud browser key", () => {
+    it("gives a job that checks out the pull request no credential at all", () => {
         // Stated as an allowlist rather than a list of things to exclude: a
         // variable group added tomorrow is denied by default instead of being
         // permitted until someone remembers to name it here.
@@ -240,7 +275,7 @@ describe("no job that runs pull-request code holds a credential", () => {
                 continue;
             }
             const unexpected = declaredGroups(job.body).filter((group) => !ALLOWED_IN_PULL_REQUEST_JOBS.includes(group));
-            expect(unexpected, `${PINNED_TEMPLATE}: job ${job.name} checks out the pull request and imports a credential that is not the cloud browser key`).toEqual([]);
+            expect(unexpected, `${PINNED_TEMPLATE}: job ${job.name} checks out the pull request and imports a credential`).toEqual([]);
         }
     });
 
@@ -257,27 +292,48 @@ describe("no job that runs pull-request code holds a credential", () => {
     });
 });
 
-describe("the cloud stage is the only place a credential meets pull-request code", () => {
-    const jobs = jobsOf(read(PINNED_TEMPLATE));
+describe("no cloud-browser credential is reachable from a pull request", () => {
+    it("does not name the cloud credential anywhere a pull request can reach", () => {
+        // Not "no job holds it" but "the string does not occur": a job that
+        // imports the group, a step that maps BROWSERSTACK_USERNAME by hand, and
+        // a `variables:` entry pulling it from the pipeline UI are three ways to
+        // arrive at the same leak, and only one of them is a `- group:` line.
+        for (const file of [ENTRY_POINT, PINNED_TEMPLATE]) {
+            const source = withoutComments(read(file));
+            expect(source, `${file} names ${CLOUD_GROUP}, which no pull-request build may hold`).not.toContain(CLOUD_GROUP);
+            expect(source, `${file} maps a BrowserStack credential into a pull-request build`).not.toMatch(/BROWSERSTACK/i);
+        }
+    });
 
-    it("has a job importing the cloud credential", () => {
-        const cloud = jobs.filter((job) => declaredGroups(job.body).includes("BabylonJS-BrowserStack"));
-        expect(cloud.length, "no job imports BabylonJS-BrowserStack — the selector has drifted").toBeGreaterThan(0);
+    it("kept the cloud tests rather than deleting them", () => {
+        // Removing the credential by removing the coverage would satisfy every
+        // other assertion in this file. The tests have to still exist, and to
+        // still be the thing holding the key.
+        const cloud = read(CLOUD_PIPELINE);
+        expect(cloud, `${CLOUD_PIPELINE} no longer imports ${CLOUD_GROUP} — the cloud tests have lost their credential`).toContain(CLOUD_GROUP);
+        expect(cloud, `${CLOUD_PIPELINE} no longer runs the perf-regression suite`).toMatch(/test:perf/);
+        expect(cloud, `${CLOUD_PIPELINE} no longer runs the cloud parity suite`).toMatch(/test:parity/);
+    });
+
+    it("runs those tests from master only, never from a pull request", () => {
+        const cloud = read(CLOUD_PIPELINE);
+        expect(cloud, `${CLOUD_PIPELINE} must opt out of pull-request triggers with \`pr: none\``).toMatch(/^pr:\s*none\s*$/m);
+        expect(prTriggeredPipelines(), `${CLOUD_PIPELINE} is pull-request triggered`).not.toContain(CLOUD_PIPELINE);
     });
 
     it("never combines the cloud credential with a deploy or infrastructure credential", () => {
-        for (const job of jobs) {
+        // Cloud browser tests cannot run without giving the account key to the
+        // tests themselves, so those jobs are where a compromise starts even on
+        // master. Nothing else may be reachable from there.
+        for (const job of jobsOf(read(CLOUD_PIPELINE))) {
             const groups = declaredGroups(job.body);
-            if (!groups.includes("BabylonJS-BrowserStack")) {
+            if (!groups.includes(CLOUD_GROUP)) {
                 continue;
             }
-            // Cloud browser tests cannot be run without giving the account key
-            // to the tests themselves, so these jobs are where a compromise
-            // starts. Nothing else may be reachable from there.
             for (const privileged of PRIVILEGED_GROUPS) {
-                expect(groups, `job ${job.name} holds both the cloud credential and ${privileged}`).not.toContain(privileged);
+                expect(groups, `${CLOUD_PIPELINE}: job ${job.name} holds both the cloud credential and ${privileged}`).not.toContain(privileged);
             }
-            expect(withoutComments(job.body), `job ${job.name} holds the cloud credential and also posts to GitHub`).not.toMatch(/gitHubConnection:/);
+            expect(withoutComments(job.body), `${CLOUD_PIPELINE}: job ${job.name} holds the cloud credential and also posts to GitHub`).not.toMatch(/gitHubConnection:/);
         }
     });
 
@@ -285,10 +341,82 @@ describe("the cloud stage is the only place a credential meets pull-request code
         // `System.PullRequest.IsFork` is documented read-only, but Microsoft
         // does not document the agent refusing a `task.setvariable` that
         // shadows it for later steps. A control that may or may not hold is not
-        // a control; the cloud jobs detect the absence of the key itself.
-        expect(withoutComments(read(PINNED_TEMPLATE)), "pipeline logic branches on System.PullRequest.IsFork, which may be shadowable at runtime").not.toMatch(
-            /variables\[.System\.PullRequest\.IsFork.\]/
-        );
+        // a control.
+        for (const file of [ENTRY_POINT, PINNED_TEMPLATE, CLOUD_PIPELINE]) {
+            expect(withoutComments(read(file)), `${file} branches on System.PullRequest.IsFork, which may be shadowable at runtime`).not.toMatch(
+                /variables\[.System\.PullRequest\.IsFork.\]/
+            );
+        }
+    });
+});
+
+describe("a deployment credential never shares an agent with repository code", () => {
+    // Repository-wide, not just the pull-request pipeline: a master-only
+    // pipeline that runs `pnpm install` and then uploads with DEPLOY_TOKEN in
+    // scope is one compromised transitive dependency away from handing the
+    // token over, and a pull request can add that dependency.
+    const credentialed = allPipelines().flatMap((file) =>
+        jobsOf(read(file))
+            .filter((job) => DEPLOYMENT_CREDENTIAL_MARKERS.some((marker) => marker.test(withoutComments(job.body))))
+            .map((job) => ({ file, job }))
+    );
+
+    it("has credentialed jobs to inspect", () => {
+        expect(credentialed.length, "no job in any pipeline holds a deployment credential — the selector has drifted").toBeGreaterThan(0);
+    });
+
+    it.each(credentialed.map(({ file, job }) => `${file}:${job.name}`))("%s checks out nothing, or only the pinned trusted ref", (id) => {
+        const entry = credentialed.find(({ file, job }) => `${file}:${job.name}` === id);
+        expect(entry, `job ${id} disappeared between selection and assertion`).toBeDefined();
+        const body = entry?.job.body ?? "";
+        expect(body, `job ${id} holds a deployment credential without an explicit checkout — Azure defaults to \`self\``).toMatch(/^\s*-\s*checkout:\s*(none|trusted)\s*$/m);
+        expect(body, `job ${id} holds a deployment credential and checks out the branch under build`).not.toMatch(/^\s*-\s*checkout:\s*self\b/m);
+    });
+
+    it.each(credentialed.map(({ file, job }) => `${file}:${job.name}`))("%s runs no build, test or lifecycle code", (id) => {
+        const entry = credentialed.find(({ file, job }) => `${file}:${job.name}` === id);
+        expect(entry, `job ${id} disappeared between selection and assertion`).toBeDefined();
+        const body = withoutComments(entry?.job.body ?? "");
+
+        // A dependency install is arbitrary third-party code execution unless
+        // lifecycle scripts are off. `pnpm install --ignore-scripts` from the
+        // pinned trusted ref is the one shape allowed, and it has to say so.
+        for (const install of body.match(/^\s*-?\s*script:.*\b(?:pnpm|npm|yarn)\s+(?:install|ci)\b.*$/gm) ?? []) {
+            expect(install, `job ${id} installs dependencies with lifecycle scripts enabled while holding a deployment credential`).toMatch(/--ignore-scripts/);
+        }
+
+        expect(body, `job ${id} builds the repository while holding a deployment credential`).not.toMatch(/\b(?:pnpm|npm)\s+(?:run\s+)?build\b/);
+        expect(body, `job ${id} runs tests while holding a deployment credential`).not.toMatch(/\b(?:pnpm|npm)\s+(?:run\s+)?test[:\s]/);
+        expect(body, `job ${id} installs a browser while holding a deployment credential`).not.toMatch(/playwright\s+install/);
+    });
+});
+
+describe("nothing anywhere persists the checkout credential", () => {
+    it.each(allPipelines().concat(UPLOAD_TEMPLATES, [PINNED_TEMPLATE]))("%s does not use persistCredentials", (file) => {
+        // `persistCredentials: true` writes the build's OAuth token into
+        // `.git/config`, where every later step in the job can read it —
+        // including a dependency's install script. The release pipelines used it
+        // to `git push` a tag; they create the tag through the GitHub API now.
+        expect(withoutComments(read(file)), `${file} uses persistCredentials, leaving the OAuth token readable by every later step`).not.toMatch(/persistCredentials/);
+    });
+});
+
+describe("npm publishing never executes the package it publishes", () => {
+    const publishers = allPipelines().filter((file) => /^\s*npm publish\s/m.test(read(file)));
+
+    it("has publishing pipelines to inspect", () => {
+        expect(publishers.length, "no pipeline runs `npm publish` — the selector has drifted").toBeGreaterThan(0);
+    });
+
+    it.each(publishers)("%s publishes a validated tarball, not a directory", (file) => {
+        const source = withoutComments(read(file));
+        for (const command of source.match(/^\s*npm publish\s.*$/gm) ?? []) {
+            // Publishing a directory runs that package's prepack and
+            // prepublishOnly hooks on the agent holding NPM_TOKEN. Publishing a
+            // tarball still does, unless scripts are off.
+            expect(command, `${file}: \`${command.trim()}\` publishes without --ignore-scripts`).toMatch(/--ignore-scripts/);
+            expect(command, `${file}: \`${command.trim()}\` publishes a working directory rather than a packed tarball`).not.toMatch(/npm publish\s+\.?\//);
+        }
     });
 });
 
@@ -328,12 +456,50 @@ describe("authenticated uploads run where no pull-request code has run", () => {
     });
 });
 
-describe("the upload templates enforce the destination host themselves", () => {
+/**
+ * The `allowedDeployHosts` default, as written in a template.
+ *
+ * Returned verbatim so two templates can be compared for equality: the point is
+ * that they name the same hosts, and normalising would hide a difference in how
+ * one of them is written.
+ */
+function allowedDeployHostsDefault(source: string): string {
+    const block = /^\s*-\s*name:\s*allowedDeployHosts\s*$(?:\n(?!\s*-\s*name:).*)*/m.exec(source)?.[0];
+    expect(block, "template declares no allowedDeployHosts parameter").toBeDefined();
+    const inline = /^\s*default:\s*(\[.*\])\s*$/m.exec(block ?? "")?.[1];
+    if (inline !== undefined) {
+        return inline.replace(/\s+/g, "");
+    }
+    return [...(block ?? "").matchAll(/^\s*-\s*(\S+)\s*$/gm)].map((m) => m[1]).join(",");
+}
+
+describe("the upload templates fix their destination at compile time", () => {
+    it.each(UPLOAD_TEMPLATES)("%s takes its host allowlist as a parameter, not a variable", (template) => {
+        const source = read(template);
+
+        // A parameter is expanded when the run is compiled, before any step
+        // executes, so `##vso[task.setvariable]` from repository code cannot
+        // reach it and neither can a queue-time variable override. That is the
+        // entire difference between this and the DEPLOY_HOST_ALLOWLIST variable
+        // it replaced: a variable is something a run can be talked into
+        // changing.
+        expect(source, `${template} does not declare an allowedDeployHosts parameter`).toMatch(/^\s*-\s*name:\s*allowedDeployHosts\s*$/m);
+        expect(source, `${template} does not resolve allowedDeployHosts at compile time`).toMatch(/\$\{\{\s*join\([^)]*parameters\.allowedDeployHosts\s*\)\s*\}\}/);
+    });
+
+    it("gives both templates the identical allowlist", () => {
+        // Two upload paths to the same deployment server. If one of them can
+        // reach a host the other cannot, the tighter one is decorative.
+        const [first, second] = UPLOAD_TEMPLATES;
+        expect(first).toBeDefined();
+        expect(second).toBeDefined();
+        expect(allowedDeployHostsDefault(read(first ?? "")), `${first} and ${second} allow different deployment hosts`).toEqual(allowedDeployHostsDefault(read(second ?? "")));
+    });
+
     it.each(UPLOAD_TEMPLATES)("%s exposes and honours requireHostAllowlist", (template) => {
         const source = read(template);
 
         expect(source, `${template} does not declare a requireHostAllowlist parameter`).toMatch(/^\s*-\s*name:\s*requireHostAllowlist\s*$/m);
-        expect(source, `${template} does not read DEPLOY_HOST_ALLOWLIST`).toMatch(/DEPLOY_HOST_ALLOWLIST/);
         expect(source, `${template} does not fail closed when the allowlist is missing but required`).toMatch(/REQUIRE_HOST_ALLOWLIST/);
         // Redirects and protocol downgrades are how an https-only check gets
         // turned back into a delivery of the Authorization header elsewhere.

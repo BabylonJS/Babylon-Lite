@@ -6,6 +6,25 @@
 # Manual runs can choose patch, minor, major, or auto. Scheduled runs use auto.
 # Pushes to master that change config/release-gl.json read the release type from
 # that file, so repeated patch releases can be requested by bumping its nonce.
+#
+# ── WHY BUILDING AND PUBLISHING ARE DIFFERENT JOBS ───────────────────────────
+#
+# Same reasoning as azure-pipelines-npm-publish.yml: `pnpm install`, the build,
+# the test suites and every npm lifecycle script they trigger are repository
+# code, and repository code sharing an agent with NPM_TOKEN can read it out of
+# the environment — one compromised transitive dependency is enough. So the
+# build job carries no credential at all and ends at `npm pack`; a second job
+# starts clean with `checkout: none`, validates the tarball it was handed, and
+# publishes it with `--ignore-scripts`.
+#
+# The release tag was previously created by `git tag && git push` from a
+# checkout made with `persistCredentials: true`, which left the build's OAuth
+# token in .git/config for the whole job — readable by anything that ran there.
+# GitHubRelease@1 now creates the tag through the GitHub API from a service
+# connection in a job with no checkout, so persistCredentials is gone. The
+# visible difference is that the tag now arrives attached to a GitHub release
+# rather than as a bare tag; `npm-lite-gl-v<version>` is unchanged, so
+# RELEASE_TAG_PATTERN resolution keeps working.
 
 trigger:
     branches:
@@ -50,15 +69,20 @@ stages:
     - stage: PublishNpm
       displayName: "Publish @babylonjs/lite-gl to npm"
       jobs:
-          - job: BuildTestAndPublish
-            displayName: "Build, Test, and Publish"
+          # ══════════════════════════════════════════════════════════════
+          # Build and pack — repository code, zero credentials
+          # ══════════════════════════════════════════════════════════════
+          - job: BuildAndPack
+            displayName: "Build, Test, and Pack"
             pool:
                 vmImage: "ubuntu-latest"
             steps:
+                # No persistCredentials: nothing in this job pushes to the
+                # repository, so the build's OAuth token must not be written to
+                # .git/config where a lifecycle script could read it.
                 - checkout: self
                   fetchDepth: 0
                   fetchTags: true
-                  persistCredentials: true
 
                 - task: UseNode@1
                   inputs:
@@ -116,9 +140,87 @@ stages:
                   env:
                       PACKAGE_VERSION: $(PACKAGE_VERSION)
 
-                - script: npm pack --dry-run ./packages/babylon-lite-gl/dist
-                  displayName: "Validate npm package contents"
+                # Pack the real tarball rather than `npm pack --dry-run`: the
+                # artifact that gets published is then exactly the artifact that
+                # was validated, instead of a second pack of a directory a later
+                # step could have edited.
+                - script: |
+                      set -euo pipefail
+                      OUT="$(Build.ArtifactStagingDirectory)/tarballs"
+                      mkdir -p "$OUT"
+                      npm pack ./packages/babylon-lite-gl/dist --pack-destination "$OUT"
+                      printf '%s\n' "$PACKAGE_VERSION" > "$OUT/version.txt"
+                      ls -l "$OUT"
+                  displayName: "Pack npm tarball"
+                  env:
+                      PACKAGE_VERSION: $(PACKAGE_VERSION)
 
+                - task: PublishPipelineArtifact@1
+                  displayName: "Stage tarball for trusted publish"
+                  inputs:
+                      targetPath: $(Build.ArtifactStagingDirectory)/tarballs
+                      artifact: npm-gl-tarball
+
+          # ══════════════════════════════════════════════════════════════
+          # Publish to npm — NPM_TOKEN, no repository code
+          # ══════════════════════════════════════════════════════════════
+          - job: PublishToNpm
+            displayName: "Publish tarball to npm"
+            dependsOn: BuildAndPack
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: none
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download tarball"
+                  inputs:
+                      artifact: npm-gl-tarball
+                      path: $(Pipeline.Workspace)/npm-gl-tarball
+
+                # Validate what is about to be published without running anything
+                # out of the tarball. Everything here is inline in this file, which
+                # is only ever read from master, so no checkout is needed.
+                - script: |
+                      set -euo pipefail
+                      DIR="$(Pipeline.Workspace)/npm-gl-tarball"
+                      VERSION="$(cat "$DIR/version.txt")"
+
+                      if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?$'; then
+                        echo "Refusing to publish: '$VERSION' is not a version."
+                        exit 1
+                      fi
+
+                      COUNT="$(find "$DIR" -maxdepth 1 -name '*.tgz' | wc -l | tr -d ' ')"
+                      if [ "$COUNT" != "1" ]; then
+                        echo "Refusing to publish: expected exactly one tarball, found $COUNT."
+                        exit 1
+                      fi
+                      TGZ="$(find "$DIR" -maxdepth 1 -name '*.tgz' -print -quit)"
+
+                      NAME="$(tar -xzOf "$TGZ" package/package.json | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).name')"
+                      ACTUAL="$(tar -xzOf "$TGZ" package/package.json | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).version')"
+                      if [ "$NAME" != "@babylonjs/lite-gl" ]; then
+                        echo "Refusing to publish: tarball is '$NAME', expected @babylonjs/lite-gl."
+                        exit 1
+                      fi
+                      if [ "$ACTUAL" != "$VERSION" ]; then
+                        echo "Refusing to publish: tarball is version $ACTUAL, expected $VERSION."
+                        exit 1
+                      fi
+
+                      echo "Validated $NAME@$ACTUAL"
+                      echo "##vso[task.setvariable variable=GL_TGZ]$TGZ"
+                      echo "##vso[task.setvariable variable=RELEASE_VERSION]$VERSION"
+                  displayName: "Validate tarball contents"
+
+                # --ignore-scripts: publishing a tarball still runs the package's
+                # own prepack/prepublishOnly hooks otherwise, which would put
+                # repository-controlled code back on the agent holding NPM_TOKEN.
                 - script: |
                       set -euo pipefail
 
@@ -128,27 +230,51 @@ stages:
                       fi
 
                       printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > ~/.npmrc
-                      npm publish ./packages/babylon-lite-gl/dist --access public --registry https://registry.npmjs.org/
+                      trap 'rm -f ~/.npmrc' EXIT
+
+                      npm publish "$GL_TGZ" --ignore-scripts --access public --registry https://registry.npmjs.org/
                   displayName: "Publish package to npm"
                   env:
                       NPM_TOKEN: $(NPM_TOKEN)
+                      GL_TGZ: $(GL_TGZ)
+
+          # ══════════════════════════════════════════════════════════════
+          # Tag — GitHub connection, no repository code
+          # ══════════════════════════════════════════════════════════════
+          - job: TagAndRelease
+            displayName: "Tag published npm version"
+            dependsOn: PublishToNpm
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: none
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download tarball metadata"
+                  inputs:
+                      artifact: npm-gl-tarball
+                      path: $(Pipeline.Workspace)/npm-gl-tarball
 
                 - script: |
                       set -euo pipefail
-
-                      TAG="npm-lite-gl-v$(PACKAGE_VERSION)"
-                      git config user.email "bjsplat@gmail.com"
-                      git config user.name "Babylon.js CI"
-
-                      if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-                        echo "Tag $TAG already exists locally; skipping creation."
-                      else
-                        git tag "$TAG" -m "Publish @babylonjs/lite-gl $(PACKAGE_VERSION)"
+                      VERSION="$(cat "$(Pipeline.Workspace)/npm-gl-tarball/version.txt")"
+                      if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?$'; then
+                        echo "Refusing to tag: '$VERSION' is not a version."
+                        exit 1
                       fi
+                      echo "##vso[task.setvariable variable=RELEASE_VERSION]$VERSION"
+                  displayName: "Read published version"
 
-                      if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-                        echo "Tag $TAG already exists on origin; skipping push."
-                      else
-                        git push origin "refs/tags/$TAG"
-                      fi
-                  displayName: "Tag published npm version"
+                - task: GitHubRelease@1
+                  displayName: "Create GitHub release and tag"
+                  inputs:
+                      gitHubConnection: "BabylonBotPAT"
+                      repositoryName: "$(Build.Repository.Name)"
+                      action: "create"
+                      target: "$(Build.SourceVersion)"
+                      tagSource: "userSpecifiedTag"
+                      tag: "npm-lite-gl-v$(RELEASE_VERSION)"
+                      title: "@babylonjs/lite-gl v$(RELEASE_VERSION)"
+                      releaseNotesSource: "inline"
+                      releaseNotesInline: "Publish @babylonjs/lite-gl $(RELEASE_VERSION)"
+                      addChangeLog: false

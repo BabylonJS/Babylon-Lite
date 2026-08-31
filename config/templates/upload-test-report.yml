@@ -19,10 +19,11 @@
 # Parameters:
 #   reportType — allowlisted report/deploy name (perf or parity)
 #   reportDir  — directory holding the sanitized HTML report to upload
+#   postComment — post a PR comment with the report link. Master-only pipelines
+#     have no System.PullRequest context and pass false.
 #
 # Required pipeline variables:
-#   BabylonJS-Deployment variable group: DEPLOYMENT_SERVER, DEPLOY_TOKEN,
-#     DEPLOY_HOST_ALLOWLIST (space- or comma-separated host[:port] list)
+#   BabylonJS-Deployment variable group: DEPLOYMENT_SERVER, DEPLOY_TOKEN
 #   Report upload settings: DEPLOY_ENDPOINT_UPLOAD, STORAGE_ACCOUNT, SERVE_DOMAIN
 #   Scope these groups to the calling job — never to the whole pipeline.
 # Required service connection:
@@ -32,8 +33,8 @@
 # request itself, so a call site is only as trustworthy as the file it lives in.
 # Every PR-context call site must therefore sit in `config/templates/pr-ci.yml`,
 # which `azure-pipelines.yml` reaches through a repository resource pinned to
-# refs/heads/master, and must pass `requireHostAllowlist: true` so that "some
-# https host" cannot stand in for "the deployment host".
+# refs/heads/master, and must pass `requireHostAllowlist: true` so that a
+# runtime variable cannot stand in for a pinned destination host.
 
 parameters:
     - name: reportType
@@ -43,12 +44,23 @@ parameters:
           - perf
     - name: reportDir
       type: string
-    # True for any call site that a pull-request build can reach. The host
-    # allowlist then has to be configured, and an unset one aborts the upload
-    # rather than falling back to "any https host".
+    # Compile-time allowlist of hosts DEPLOY_TOKEN may be sent to. Must be kept
+    # identical to the list in config/templates/upload-static-site.yml — a unit
+    # test asserts that. See that file for why this is a parameter and not a
+    # variable, and for the administrator action required to populate it.
+    - name: allowedDeployHosts
+      type: object
+      default: []
+    # True for any call site that a pull-request build can reach. The
+    # compile-time host allowlist is then the only permitted source of
+    # destination hosts, and an empty one aborts the upload rather than falling
+    # back to a runtime variable.
     - name: requireHostAllowlist
       type: boolean
       default: false
+    - name: postComment
+      type: boolean
+      default: true
 
 steps:
     - script: |
@@ -117,23 +129,36 @@ steps:
           esac
 
           # "It is https" is not a destination check -- an attacker's host serves
-          # https too. The host must be one this deployment is actually allowed
-          # to talk to, named in DEPLOY_HOST_ALLOWLIST alongside the credential
-          # it protects, where only a project administrator can change it.
+          # https too, and neither is a *variable* holding the allowlist: a
+          # variable is something a run can be talked into changing, whether by
+          # `##vso[task.setvariable]` from an earlier step or by a queue-time
+          # override. COMPILE_TIME_HOSTS is rendered from the template parameter
+          # `allowedDeployHosts` when the run is compiled, before any step
+          # exists, so nothing that happens during the run can add to it.
+          COMPILE_TIME_HOSTS="${{ join(' ', parameters.allowedDeployHosts) }}"
           REQUIRE_HOST_ALLOWLIST="${{ parameters.requireHostAllowlist }}"
-          ALLOWLIST="${DEPLOY_HOST_ALLOWLIST-}"
-          case "$ALLOWLIST" in
-              *'$'*) ALLOWLIST="" ;;
-          esac
 
-          if test -z "$ALLOWLIST"; then
-              if test "$REQUIRE_HOST_ALLOWLIST" = "True" || test "$REQUIRE_HOST_ALLOWLIST" = "true"; then
-                  echo "Refusing upload: DEPLOY_HOST_ALLOWLIST is not configured, and this call site requires it."
-                  echo "Add DEPLOY_HOST_ALLOWLIST to the BabylonJS-Deployment variable group as a space- or comma-separated list of permitted host[:port] values."
-                  exit 1
-              fi
-              echo "DEPLOY_HOST_ALLOWLIST is not configured; skipping host allowlist check for this non-PR call site."
+          if test -n "$COMPILE_TIME_HOSTS"; then
+              ALLOWLIST="$COMPILE_TIME_HOSTS"
+              ALLOWLIST_SOURCE="the compile-time allowedDeployHosts parameter"
+          elif test "$REQUIRE_HOST_ALLOWLIST" = "True" || test "$REQUIRE_HOST_ALLOWLIST" = "true"; then
+              echo "Refusing upload: allowedDeployHosts is empty and this call site may be reached by a pull-request build."
+              echo "A pull-request-reachable upload may only send DEPLOY_TOKEN to a host pinned at compile time."
+              echo "Add the deployment host to the allowedDeployHosts default in config/templates/upload-static-site.yml"
+              echo "and config/templates/upload-test-report.yml, in a pull request merged to master."
+              exit 1
           else
+              ALLOWLIST="${DEPLOY_HOST_ALLOWLIST-}"
+              case "$ALLOWLIST" in
+                  *'$'*) ALLOWLIST="" ;;
+              esac
+              ALLOWLIST_SOURCE="the DEPLOY_HOST_ALLOWLIST variable"
+              if test -z "$ALLOWLIST"; then
+                  echo "##vso[task.logissue type=warning]allowedDeployHosts is empty and DEPLOY_HOST_ALLOWLIST is unset; this upload's destination is unpinned."
+              fi
+          fi
+
+          if test -n "$ALLOWLIST"; then
               HOST_ALLOWED="false"
               for allowed in $(printf '%s' "$ALLOWLIST" | tr ',' ' '); do
                   if test "$DEPLOY_HOST" = "$allowed"; then
@@ -141,7 +166,7 @@ steps:
                   fi
               done
               if test "$HOST_ALLOWED" != "true"; then
-                  echo "Refusing upload: DEPLOYMENT_SERVER host is not in DEPLOY_HOST_ALLOWLIST."
+                  echo "Refusing upload: DEPLOYMENT_SERVER host '$DEPLOY_HOST' is not in $ALLOWLIST_SOURCE."
                   exit 1
               fi
           fi
@@ -187,17 +212,18 @@ steps:
           DEPLOY_HOST_ALLOWLIST: $(DEPLOY_HOST_ALLOWLIST)
           STORAGE_ACCOUNT: $(STORAGE_ACCOUNT)
 
-    - task: GitHubComment@0
-      condition: eq(variables['ReportUploaded'], 'true')
-      continueOnError: true
-      displayName: "Post ${{ parameters.reportType }} report link to PR"
-      inputs:
-          gitHubConnection: "BabylonBotPAT"
-          repositoryName: "$(Build.Repository.Name)"
-          id: "$(System.PullRequest.PullRequestNumber)"
-          comment: |
-              ### 📋 ${{ parameters.reportType }} — Test Report
+    - ${{ if eq(parameters.postComment, true) }}:
+          - task: GitHubComment@0
+            condition: eq(variables['ReportUploaded'], 'true')
+            continueOnError: true
+            displayName: "Post ${{ parameters.reportType }} report link to PR"
+            inputs:
+                gitHubConnection: "BabylonBotPAT"
+                repositoryName: "$(Build.Repository.Name)"
+                id: "$(System.PullRequest.PullRequestNumber)"
+                comment: |
+                    ### 📋 ${{ parameters.reportType }} — Test Report
 
-              [View full Playwright report]($(SERVE_DOMAIN)/lite/$(Build.BuildNumber)/testResults/${{ parameters.reportType }}/index.html)
+                    [View full Playwright report]($(SERVE_DOMAIN)/lite/$(Build.BuildNumber)/testResults/${{ parameters.reportType }}/index.html)
 
-              <sub>Build $(Build.BuildNumber) · $(Build.SourceBranchName) @ $(Build.SourceVersion)</sub>
+                    <sub>Build $(Build.BuildNumber) · $(Build.SourceBranchName) @ $(Build.SourceVersion)</sub>
