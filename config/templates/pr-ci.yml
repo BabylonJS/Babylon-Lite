@@ -278,11 +278,13 @@ stages:
           # ──────────────────────────────────────────────────────────────
           - job: BundleSize
             displayName: "Bundle Size"
+            timeoutInMinutes: 120
             pool:
                 vmImage: "ubuntu-latest"
             steps:
                 # See ApiReport: no `persistCredentials`.
                 - checkout: self
+                  fetchDepth: 0
 
                 - task: UseNode@1
                   inputs:
@@ -296,8 +298,11 @@ stages:
                 - script: pnpm install --frozen-lockfile
                   displayName: "Install dependencies"
 
+                - template: select-affected-scenes.yml
+
                 - script: pnpm exec playwright install chromium
                   displayName: "Install Playwright browsers"
+                  condition: eq(variables['RUN_BUNDLE_TESTS'], 'true')
 
                 # Cache remote scene assets (models/textures/env fetched during
                 # measurement) across runs/PRs. The cache is a pure URL->bytes store
@@ -310,6 +315,7 @@ stages:
                 # never incorrect.
                 - task: Cache@2
                   displayName: "Cache remote scene assets"
+                  condition: eq(variables['RUN_BUNDLE_TESTS'], 'true')
                   inputs:
                       key: 'bundle-assets | v1 | "$(Build.BuildId)"'
                       restoreKeys: |
@@ -328,8 +334,10 @@ stages:
                 # are what actually gate size, are unaffected.
                 - script: pnpm build:bundle-scenes
                   displayName: "Build bundle scenes"
+                  condition: eq(variables['RUN_BUNDLE_TESTS'], 'true')
                   env:
                       SKIP_BJS: "true"
+                      BUNDLE_SCENES: "$(AFFECTED_BUNDLE_SCENES)"
 
                 # Bundle-content unit specs read the per-scene manifests under
                 # lab/public/bundle/manifest/. Those are build output rather than
@@ -337,20 +345,24 @@ stages:
                 # build) self-skips them — run them here, where the build exists.
                 - script: npx vitest run --project unit tests/lite/unit/bundle-content-no-f64.test.ts tests/lite/unit/npe-particle-bundle-content.test.ts
                   displayName: "Bundle content unit tests"
+                  condition: eq(variables['RUN_BUNDLE_TESTS'], 'true')
 
                 # Absolute ceiling checks (scene-config.json maxRawKB)
                 - script: npx playwright test tests/lite/parity/bundle-size.spec.ts --reporter=junit
                   displayName: "Bundle size ceiling checks"
+                  condition: eq(variables['RUN_BUNDLE_TESTS'], 'true')
                   env:
                       HEADLESS: "true"
+                      REUSE_BROWSER: "1"
+                      BUNDLE_SCENES: "$(AFFECTED_BUNDLE_SCENES)"
                       PLAYWRIGHT_JUNIT_OUTPUT_NAME: test-results/bundle-ceiling-junit.xml
 
                 - script: npx tsx scripts/report-test-results.ts test-results/bundle-ceiling-junit.xml
-                  condition: always()
+                  condition: and(always(), eq(variables['RUN_BUNDLE_TESTS'], 'true'))
                   displayName: "Report bundle-size results to Azure"
 
                 - task: PublishTestResults@2
-                  condition: always()
+                  condition: and(always(), eq(variables['RUN_BUNDLE_TESTS'], 'true'))
                   displayName: "Publish bundle-size test results"
                   inputs:
                       testResultsFormat: JUnit
@@ -361,13 +373,13 @@ stages:
                 # posted by `azure-pipelines-pr-publish.yml`; no job in this
                 # pipeline holds a GitHub credential, so it cannot post it itself.
                 - script: npx tsx scripts/report-bundle-size-deltas.ts
-                  condition: always()
+                  condition: and(always(), eq(variables['RUN_BUNDLE_TESTS'], 'true'))
                   displayName: "Generate bundle-size delta comment"
 
                 # See the API report job: staged only when there is a delta to
                 # report, matching the previous comment-on-change behaviour.
                 - task: PublishPipelineArtifact@1
-                  condition: and(always(), eq(variables['POST_BUNDLE_COMMENT'], 'true'))
+                  condition: and(always(), eq(variables['RUN_BUNDLE_TESTS'], 'true'), eq(variables['POST_BUNDLE_COMMENT'], 'true'))
                   continueOnError: true
                   displayName: "Stage bundle comment for trusted posting"
                   inputs:

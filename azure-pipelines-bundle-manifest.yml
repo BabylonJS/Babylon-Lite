@@ -321,7 +321,7 @@ stages:
                       SCENES="$(node -e 'process.stdout.write(String(Object.keys(require(process.argv[1])).length))' "$WORK/manifest.json")"
                       echo "Publishing bundle-size baseline for $SCENES scene(s)."
 
-                      (cd "$WORK" && zip -j baseline.zip manifest.json meta.json)
+                      (cd "$WORK" && zip -j baseline.zip manifest.json impact-manifest.json meta.json)
 
                       # An https URL is not a destination check — any host serves
                       # https. When the deployment group carries an allowlist, the

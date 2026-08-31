@@ -22,12 +22,12 @@ const GRAPH_PLUMBING_SCENES = [...CANONICAL_PARTICLE_SCENES, 302, 305];
  *  read them self-skip in CI's Unit Tests job (which runs before any build). The
  *  Bundle Size job re-runs them after `pnpm build:bundle-scenes`, and local
  *  `pnpm test` builds first. Specs that assert on pure helpers always run. */
-function hasManifests(sceneIds: readonly number[]): boolean {
-    return sceneIds.every((sceneId) => existsSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`)));
+function scenesWithManifests(sceneIds: readonly number[]): number[] {
+    return sceneIds.filter((sceneId) => existsSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`)));
 }
-const HAS_MANIFEST = hasManifests(CANONICAL_PARTICLE_SCENES);
-const HAS_MOVING_EMITTER_MANIFEST = hasManifests(PROVIDER_ISOLATION_SCENES);
-const HAS_SPRITE_2D_MANIFEST = hasManifests(SPRITE_2D_BLEND_SCENES);
+const AVAILABLE_CANONICAL_PARTICLE_SCENES = scenesWithManifests(CANONICAL_PARTICLE_SCENES);
+const AVAILABLE_PROVIDER_ISOLATION_SCENES = scenesWithManifests(PROVIDER_ISOLATION_SCENES);
+const AVAILABLE_SPRITE_2D_BLEND_SCENES = scenesWithManifests(SPRITE_2D_BLEND_SCENES);
 const UNUSED_FEATURE_CHUNK =
     /particle-(blend|billboard-renderable|billboard-scene)|registry-(variants|extra-basic|extra-emitters|extra-remaining|extra-values|local-shapes)|update-(attractor|flow-map|noise|direction|angle)-block|npe-(blend-modes|emitter-provider|flow-map-runtime|graph-plumbing(?:-runtime)?|live-emitter|noise-runtime|texture-update-runtime|texture-content)|cpu-texture-source|random-once-typed|random-composed-typed|setup-sprite-sheet-random|system-dynamic-emit-rate|particle-(condition|float-to-int|local-variable|vector-length)|particle-input-local|local-position|box-shape-local|sphere-shape-local|point-shape|cone-shape|cylinder-shape|mesh-shape/;
 const OPTIONAL_BLEND_MODULE = /particle\/(particle-(blend|billboard-renderable|billboard-scene)|node\/npe-blend-modes)/;
@@ -74,8 +74,8 @@ describe("Particle bundle feature isolation", () => {
         expect(findUnexpectedEmbeddedTextureChunks(281, [chunk])).toEqual([]);
     });
 
-    it.skipIf(!HAS_MANIFEST)("canonical particle scenes do not fetch unused optional features", () => {
-        for (const sceneId of CANONICAL_PARTICLE_SCENES) {
+    it.skipIf(AVAILABLE_CANONICAL_PARTICLE_SCENES.length === 0)("canonical particle scenes do not fetch unused optional features", () => {
+        for (const sceneId of AVAILABLE_CANONICAL_PARTICLE_SCENES) {
             const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`), "utf8")) as SceneManifest;
             const chunks = manifest.runtimeChunks ?? [];
             expect(chunks.length, `scene${sceneId} has no runtime chunks recorded`).toBeGreaterThan(0);
@@ -159,8 +159,8 @@ describe("Particle bundle feature isolation", () => {
         }
     });
 
-    it.skipIf(!HAS_MOVING_EMITTER_MANIFEST)("keeps the moving-emitter provider isolated to scene302", () => {
-        for (const sceneId of PROVIDER_ISOLATION_SCENES) {
+    it.skipIf(AVAILABLE_PROVIDER_ISOLATION_SCENES.length === 0)("keeps the moving-emitter provider isolated to scene302", () => {
+        for (const sceneId of AVAILABLE_PROVIDER_ISOLATION_SCENES) {
             const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`), "utf8")) as SceneManifest;
             const runtimeChunks = new Set(manifest.runtimeChunks ?? []);
             expect(runtimeChunks.size, `scene${sceneId} has no runtime chunks recorded`).toBeGreaterThan(0);
@@ -188,8 +188,8 @@ describe("Particle bundle feature isolation", () => {
         }
     });
 
-    it.skipIf(!HAS_SPRITE_2D_MANIFEST)("keeps exact Sprite2D particle blending isolated to scene301", () => {
-        for (const sceneId of SPRITE_2D_BLEND_SCENES) {
+    it.skipIf(AVAILABLE_SPRITE_2D_BLEND_SCENES.length === 0)("keeps exact Sprite2D particle blending isolated to scene301", () => {
+        for (const sceneId of AVAILABLE_SPRITE_2D_BLEND_SCENES) {
             const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`), "utf8")) as SceneManifest;
             const runtimeChunks = new Set(manifest.runtimeChunks ?? []);
             expect(runtimeChunks.size, `scene${sceneId} has no runtime chunks recorded`).toBeGreaterThan(0);
@@ -228,7 +228,7 @@ describe("Particle bundle feature isolation", () => {
     });
 
     for (const sceneId of GRAPH_PLUMBING_SCENES) {
-        it.skipIf(!hasManifests([sceneId]))(`fetches graph plumbing and local storage only for the Phase 3 graph in scene${sceneId}`, () => {
+        it.skipIf(scenesWithManifests([sceneId]).length === 0)(`fetches graph plumbing and local storage only for the Phase 3 graph in scene${sceneId}`, () => {
             const manifest = JSON.parse(readFileSync(resolve(MANIFEST_DIR, `scene${sceneId}.json`), "utf8")) as SceneManifest;
             const runtimeChunks = new Set(manifest.runtimeChunks ?? []);
             expect(runtimeChunks.size, `scene${sceneId} has no runtime chunks recorded`).toBeGreaterThan(0);

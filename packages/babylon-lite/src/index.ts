@@ -915,6 +915,7 @@ export {
     setPhysicsBodyMotionType,
     setPhysicsBodyTransform,
     removePhysicsBody,
+    releasePhysicsConstraint,
     releasePhysicsShape,
     disposePhysics,
     PhysicsShapeType,
