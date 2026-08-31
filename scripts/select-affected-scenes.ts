@@ -1,9 +1,9 @@
 import { createHash } from "crypto";
 import { execFileSync } from "child_process";
-import { readFileSync } from "fs";
+import { readFileSync, readdirSync } from "fs";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
-import { isSceneImpactManifest, localDependencies, selectAffectedScenes, type SceneImpactManifest } from "./scene-impact";
+import { isSceneImpactManifest, localDependencies, requiredBundleScenesForChanges, selectAffectedScenes, type SceneImpactManifest } from "./scene-impact";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_IMPACT_URL = "https://snapshots-cvgtc2eugrd3cgfd.z01.azurefd.net/lite/bundle-baseline/impact-manifest.json";
@@ -12,7 +12,6 @@ interface SceneConfigEntry {
     id: number;
     maxRawKB?: number;
     skipBundleSize?: boolean;
-    skipParity?: boolean;
     skipPerf?: boolean;
     [key: string]: unknown;
 }
@@ -94,10 +93,17 @@ function setAzureSceneGroup(name: string, scenes: readonly string[]): void {
 async function main(): Promise<void> {
     const sceneConfig = JSON.parse(readFileSync(resolve(ROOT, "scene-config.json"), "utf-8")) as SceneConfigEntry[];
     const allScenes = sceneConfig.map((entry) => `scene${entry.id}`);
+    const paritySceneSet = new Set(
+        readdirSync(resolve(ROOT, "tests/lite/parity/scenes"))
+            .map((file) => file.match(/^scene(\d+)-.*\.spec\.ts$/)?.[1])
+            .filter((id): id is string => id !== undefined)
+            .map((id) => `scene${id}`)
+    );
+    let changedFiles: string[] = [];
     let selection;
     try {
         const baseCommit = git(["merge-base", "HEAD", targetRef()]);
-        const changedFiles = git(["diff", "--name-only", "--diff-filter=ACDMRTUXB", baseCommit, "HEAD"])
+        changedFiles = git(["diff", "--name-only", "--diff-filter=ACDMRTUXB", baseCommit, "HEAD"])
             .split("\n")
             .map((file) => file.trim())
             .filter(Boolean);
@@ -119,11 +125,12 @@ async function main(): Promise<void> {
     }
     const sceneIds = selection.scenes.map((scene) => scene.slice("scene".length));
     const sceneConfigByName = new Map(sceneConfig.map((entry) => [`scene${entry.id}`, entry]));
-    const bundleScenes = selection.scenes.filter((scene) => {
+    const bundleSceneSet = new Set([...selection.scenes, ...requiredBundleScenesForChanges(changedFiles)]);
+    const bundleScenes = allScenes.filter((scene) => {
         const config = sceneConfigByName.get(scene);
-        return !config?.skipBundleSize && config?.maxRawKB != null;
+        return bundleSceneSet.has(scene) && !config?.skipBundleSize && config?.maxRawKB != null;
     });
-    const parityScenes = selection.scenes.filter((scene) => !sceneConfigByName.get(scene)?.skipParity);
+    const parityScenes = selection.scenes.filter((scene) => paritySceneSet.has(scene));
     const perfScenes = selection.scenes.filter((scene) => !sceneConfigByName.get(scene)?.skipPerf);
 
     console.log(`Scene selection: ${selection.scenes.length}/${allScenes.length}${selection.fullRun ? " (full fallback)" : ""}`);

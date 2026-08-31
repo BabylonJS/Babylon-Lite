@@ -13,8 +13,8 @@
  *     ceiling makes master retroactively appear to have been in breach. A
  *     measurement and the limit it was taken against have to travel together.
  *
- *  2. **Scene impact data**, in an `impact-manifest.json` sidecar: which runtime
- *     source files contribute to each scene.
+ *  2. **Scene impact data**, in an `impact-manifest.json` sidecar: which source
+ *     files are statically reachable from each scene.
  *
  *  3. **Provenance**, in a `meta.json` sidecar: which commit produced these bytes,
  *     which build, and when.

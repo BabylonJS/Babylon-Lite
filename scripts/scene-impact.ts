@@ -59,10 +59,31 @@ export interface SceneSelectionInput {
 }
 
 const DIRECT_SCENE_PATTERNS = [
-    /^lab\/lite\/(?:src\/(?:lite|bjs|shared)\/)?scene(\d+)(?:[./-]|$)/,
+    /^lab\/lite\/(?:src\/(?:lite|bjs)\/)?scene(\d+)(?:[./-]|$)/,
     /^tests\/lite\/parity\/scenes\/scene(\d+)(?:-|\.spec\.ts$)/,
     /^reference\/lite\/scene(\d+)(?:-|\/)/,
 ];
+
+const REQUIRED_BUNDLE_SCENES_BY_TEST: Readonly<Record<string, readonly string[]>> = {
+    "tests/lite/unit/bundle-content-no-f64.test.ts": ["scene2", "scene201"],
+    "tests/lite/unit/npe-particle-bundle-content.test.ts": [
+        "scene12",
+        "scene50",
+        "scene262",
+        "scene263",
+        "scene264",
+        "scene276",
+        "scene277",
+        "scene280",
+        "scene281",
+        "scene283",
+        "scene284",
+        "scene300",
+        "scene301",
+        "scene302",
+        "scene305",
+    ],
+};
 
 const IGNORED_PATH_PATTERNS = [
     /^docs\//,
@@ -105,6 +126,10 @@ export function directSceneForPath(path: string): string | null {
         }
     }
     return null;
+}
+
+export function requiredBundleScenesForChanges(changedFiles: readonly string[]): string[] {
+    return sortScenes(changedFiles.flatMap((file) => REQUIRED_BUNDLE_SCENES_BY_TEST[normalizePath(file)] ?? []));
 }
 
 export function normalizeImpactModulePath(moduleId: string): string | null {
@@ -232,17 +257,13 @@ export function createSceneImpactManifest(root: string, commit: string, bundleMa
     const scenes = sortScenes(Object.keys(bundleManifest));
 
     for (const scene of scenes) {
-        const runtimeChunks = new Set(bundleManifest[scene]?.runtimeChunks ?? []);
         const bundleInfoPath = resolve(bundleInfoDir, `${scene}.json`);
-        if (runtimeChunks.size === 0 || !existsSync(bundleInfoPath)) {
-            throw new Error(`Cannot build scene impact data for ${scene}: runtime chunks or bundle info are missing.`);
+        if (!existsSync(bundleInfoPath)) {
+            throw new Error(`Cannot build scene impact data for ${scene}: bundle info is missing.`);
         }
 
         const bundleInfo = JSON.parse(readFileSync(bundleInfoPath, "utf-8")) as BundleInfo;
         for (const chunk of bundleInfo.chunks) {
-            if (!runtimeChunks.has(chunk.file)) {
-                continue;
-            }
             for (const module of chunk.modules) {
                 for (const file of impactSourcePaths(root, module.id)) {
                     addWithDependencies(root, fileScenes, dependencyCache, file, [scene]);

@@ -123,7 +123,7 @@ Builds master file/module breakdowns for selected scenes (`BUNDLE_SCENES=...`) f
 
 ## PR Scene Impact Selection
 
-The full master bundle build publishes `impact-manifest.json` beside the bundle-size baseline. It is generated from each scene's runtime-loaded Rollup chunks and maps repository source files to the scenes that consume them. Local source dependencies such as raw WGSL imports are included in the map. The file is a generated deployment artifact, not tracked source.
+The full master bundle build publishes `impact-manifest.json` beside the bundle-size baseline. It is generated from every Rollup chunk statically reachable from each scene and maps repository source files to the scenes that can consume them. This deliberately includes lazy chunks that a single baseline measurement did not fetch, so later interactions and nondeterministic runtime branches cannot create false-negative scene selections. Local source dependencies such as raw WGSL imports are included in the map. The file is a generated deployment artifact, not tracked source.
 
 PR jobs run `pnpm select:affected-scenes -- --azure` against the exact merge-base commit's immutable impact manifest. The selector combines that map with directly named scene files and changed `scene-config.json` entries, then sets separate Azure variables for bundle-size, parity, and performance scenes. New files inherit the scenes of changed mapped modules that import them.
 
@@ -131,8 +131,10 @@ Selection fails closed:
 
 - an unavailable or mismatched impact manifest makes runtime changes run all scenes;
 - an unmapped or unclassified runtime file runs all scenes;
-- documentation, thumbnails, unit tests, lite-gl, compat, and playground-only changes skip WebGPU scene jobs;
-- scenes opting out of bundle-size, parity, or performance checks are removed only from that specific job.
+- documentation, thumbnails, most unit tests, lite-gl, compat, and playground-only changes skip WebGPU scene jobs;
+- bundle-content unit tests explicitly select the scene fixtures required by their bundle-backed assertions;
+- cloud scene tests are selected by the presence of a Playwright scene spec, independently of whether `skipParity` disables Babylon/golden comparison for that scene;
+- scenes opting out of bundle-size or performance checks are removed only from that specific job.
 
 Every master build still measures all scenes and republishes both the size and impact manifests. This refreshes the dependency map after each merge and preserves repository-wide coverage without making generated metadata a merge-conflict source.
 

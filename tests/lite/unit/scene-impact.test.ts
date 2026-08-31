@@ -2,7 +2,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { resolve } from "path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createSceneImpactManifest, isSceneImpactManifest, normalizeImpactModulePath, selectAffectedScenes, type SceneImpactManifest } from "../../../scripts/scene-impact";
+import {
+    createSceneImpactManifest,
+    isSceneImpactManifest,
+    normalizeImpactModulePath,
+    requiredBundleScenesForChanges,
+    selectAffectedScenes,
+    type SceneImpactManifest,
+} from "../../../scripts/scene-impact";
 
 const tempDirs: string[] = [];
 
@@ -39,7 +46,7 @@ describe("scene impact manifest", () => {
         expect(normalizeImpactModulePath("node_modules/vite/index.js")).toBeNull();
     });
 
-    it("uses only runtime-loaded chunks and includes local source dependencies", () => {
+    it("uses all statically reachable chunks and includes local source dependencies", () => {
         const root = makeTempDir();
         const sourceDir = resolve(root, "packages/babylon-lite/src/material/pbr");
         const shaderDir = resolve(root, "packages/babylon-lite/src/shaders");
@@ -65,11 +72,11 @@ describe("scene impact manifest", () => {
             })
         );
 
-        const manifest = createSceneImpactManifest(root, "abc123", { scene1: { runtimeChunks: ["scene1.js"] } }, infoDir);
+        const manifest = createSceneImpactManifest(root, "abc123", { scene1: {} }, infoDir);
 
         expect(manifest.files["packages/babylon-lite/src/material/pbr/pbr-renderable.ts"]).toEqual(["scene1"]);
         expect(manifest.files["packages/babylon-lite/src/shaders/pbr.wgsl"]).toEqual(["scene1"]);
-        expect(manifest.files["packages/babylon-lite/src/material/pbr/unused.ts"]).toBeUndefined();
+        expect(manifest.files["packages/babylon-lite/src/material/pbr/unused.ts"]).toEqual(["scene1"]);
     });
 
     it("resolves generated library chunks through their source maps", () => {
@@ -94,7 +101,7 @@ describe("scene impact manifest", () => {
             })
         );
 
-        const manifest = createSceneImpactManifest(root, "abc123", { scene1: { runtimeChunks: ["scene1.js"] } }, infoDir);
+        const manifest = createSceneImpactManifest(root, "abc123", { scene1: {} }, infoDir);
 
         expect(manifest.files["packages/babylon-lite/src/loader-env/load-env.ts"]).toEqual(["scene1"]);
         expect(Object.keys(manifest.files).some((file) => file.startsWith("packages/babylon-lite/src/_chunks/"))).toBe(false);
@@ -146,6 +153,15 @@ describe("affected scene selection", () => {
         expect(selection).toMatchObject({ scenes: allScenes, fullRun: true });
     });
 
+    it("runs all scenes for a shared numbered source without a published manifest", () => {
+        const selection = selectAffectedScenes({
+            allScenes,
+            changedFiles: ["lab/lite/src/shared/scene1-data.ts"],
+        });
+
+        expect(selection).toMatchObject({ scenes: allScenes, fullRun: true });
+    });
+
     it("skips scene tests for documentation-only changes", () => {
         const selection = selectAffectedScenes({
             allScenes,
@@ -165,5 +181,26 @@ describe("affected scene selection", () => {
         });
 
         expect(selection).toMatchObject({ scenes: ["scene2"], fullRun: false });
+    });
+
+    it("selects bundle fixtures required by bundle-backed unit tests", () => {
+        expect(requiredBundleScenesForChanges(["tests/lite/unit/bundle-content-no-f64.test.ts"])).toEqual(["scene2", "scene201"]);
+        expect(requiredBundleScenesForChanges(["tests/lite/unit/npe-particle-bundle-content.test.ts"])).toEqual([
+            "scene12",
+            "scene50",
+            "scene262",
+            "scene263",
+            "scene264",
+            "scene276",
+            "scene277",
+            "scene280",
+            "scene281",
+            "scene283",
+            "scene284",
+            "scene300",
+            "scene301",
+            "scene302",
+            "scene305",
+        ]);
     });
 });
