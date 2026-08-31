@@ -613,8 +613,7 @@ export class PhysicsBody {
 
 /** Babylon.js-shaped Physics V2 constraint backed by Lite's native constraint factory. */
 export class PhysicsConstraint {
-    private _isBound = false;
-    private _lite: LitePhysicsConstraint | null = null;
+    private readonly _lite: LitePhysicsConstraint[] = [];
     private readonly _world: PhysicsWorld;
 
     public constructor(
@@ -636,31 +635,30 @@ export class PhysicsConstraint {
 
     /** @internal */
     public _bind(world: PhysicsWorld, bodyA: LitePhysicsBody, bodyB: LitePhysicsBody): void {
-        if (this._isBound) {
-            throw new Error("PhysicsConstraint instances can only be added to one body pair");
-        }
         if (this._world !== world) {
             throw new Error("PhysicsConstraint and PhysicsBody must belong to the same scene");
         }
-        this._lite = createPhysicsConstraint(
-            world,
-            bodyA,
-            bodyB,
-            liteConstraintType(this.type),
-            this._options,
-            this._limits.map((limit) => ({ ...limit, axis: liteConstraintAxis(limit.axis) }))
+        this._lite.push(
+            createPhysicsConstraint(
+                world,
+                bodyA,
+                bodyB,
+                liteConstraintType(this.type),
+                this._options,
+                this._limits.map((limit) => ({ ...limit, axis: liteConstraintAxis(limit.axis) }))
+            )
         );
-        this._isBound = true;
     }
 
     public dispose(): void {
-        const constraint = this._lite;
-        if (constraint) {
+        if (this._lite.length > 0) {
             // Releasing the Havok world invalidates all of its constraint handles.
             if (this._scene.getPhysicsEngine()?.getPhysicsPlugin().world === this._world) {
-                releasePhysicsConstraint(this._world, constraint);
+                for (const constraint of this._lite) {
+                    releasePhysicsConstraint(this._world, constraint);
+                }
             }
-            this._lite = null;
+            this._lite.length = 0;
         }
     }
 }
