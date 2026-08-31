@@ -2644,5 +2644,15 @@
         "skipParity": true,
         "skipParityReason": "Behavioral browser test validates the embedded Khronos graph directly; no immutable visual golden is needed for interaction-state assertions.",
         "skipPerf": true
+    },
+    {
+        "id": 305,
+        "slug": "scene305-npe-teleport",
+        "name": "Scene 305 — NPE Teleport Graph Plumbing",
+        "maxMad": 0.01,
+        "maxRawKB": 45,
+        "description": "Scene 262's deterministic NPE particle field with Teleport fan-out plus Elbow, Debug, and a Particle-scope LocalVariable around its per-particle size. Lite normalizes the graph before evaluator traversal and must preserve Babylon.js pixels.",
+        "tags": ["npe", "particles", "billboards", "teleport", "local-variable", "graph-plumbing"],
+        "skipPerf": true
     }
 ]

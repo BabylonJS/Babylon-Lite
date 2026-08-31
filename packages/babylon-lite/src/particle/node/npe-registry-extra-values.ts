@@ -9,6 +9,8 @@ export async function loadValueBlockEvaluator(className: string): Promise<NpeBlo
             return (await import("./blocks/particle-float-to-int-block.js")).particleFloatToIntBlock;
         case "ParticleVectorLengthBlock":
             return (await import("./blocks/particle-vector-length-block.js")).particleVectorLengthBlock;
+        case "ParticleLocalVariableBlock":
+            return (await import("./blocks/particle-local-variable-block.js")).particleLocalVariableBlock;
         default:
             throw new Error(`NodeParticle: unsupported value block "${className}"`);
     }

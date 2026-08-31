@@ -13,6 +13,7 @@ import {
     PhysicsMotionType,
     PhysicsPrestepType,
     PhysicsConstraintType,
+    PhysicsCharacterController,
 } from "../src/physics/physics";
 import type { TransformNode } from "../src/meshes/meshes";
 import { Vector3 } from "../src/math/vector";
@@ -37,6 +38,7 @@ function makeMockHknp() {
 }
 
 function makeAggregateMockHknp() {
+    const filterInfo = new WeakMap<object, [number, number]>();
     return {
         ...makeMockHknp(),
         MotionType: { STATIC: 0, KINEMATIC: 1, DYNAMIC: 2 },
@@ -47,16 +49,23 @@ function makeAggregateMockHknp() {
         HP_Shape_CreateCylinder: vi.fn(() => [0, { __shape: true }]),
         HP_Shape_SetMaterial: vi.fn(),
         HP_Shape_SetTrigger: vi.fn(),
+        HP_Shape_GetFilterInfo: vi.fn((shape: object) => [0, filterInfo.get(shape) ?? [0xffffffff, 0xffffffff]]),
+        HP_Shape_SetFilterInfo: vi.fn((shape: object, value: [number, number]) => filterInfo.set(shape, value)),
         HP_Shape_Release: vi.fn(),
         HP_Body_Create: vi.fn(() => [0, { __body: true }]),
         HP_Body_SetMotionType: () => undefined,
         HP_Body_SetQTransform: () => undefined,
         HP_Body_SetShape: () => undefined,
+        HP_Body_GetShape: () => [0, { __shape: true }],
+        HP_Body_SetMassProperties: vi.fn(),
         HP_Body_GetLinearVelocity: () => [0, [4, 5, 6]],
         HP_Body_GetAngularVelocity: () => [0, [1, 2, 3]],
         HP_Body_Release: vi.fn(),
         HP_World_AddBody: () => undefined,
         HP_World_RemoveBody: () => undefined,
+        HP_Shape_BuildMassProperties: () => [0, [[0, 0, 0], 1, [1, 1, 1], [0, 0, 0, 1]]],
+        HP_QueryCollector_Create: vi.fn(() => [0, { __collector: true }]),
+        HP_QueryCollector_Release: vi.fn(),
     };
 }
 
@@ -440,6 +449,137 @@ describe("PhysicsEngine", () => {
             const shape = new PhysicsShape({ type: PhysicsShapeType.BOX }, scene);
             (shape._lite as unknown as { _type: number })._type = 98;
             expect(() => shape.type).toThrow("Invalid Lite PhysicsShapeType value: 98");
+        });
+
+        describe("PhysicsCharacterController", () => {
+            it("forwards construction, vectors, properties, collisions, and disposal to Lite", () => {
+                const hknp = makeAggregateMockHknp();
+                const plugin = new HavokPlugin(false, hknp);
+                plugin._attachToLiteScene(makeScene(1000 / 60));
+                const physicsEngine = new PhysicsEngine(plugin, Vector3.Zero());
+                const scene = { getPhysicsEngine: () => physicsEngine } as unknown as Scene;
+                const collider = new PhysicsAggregate(makePhysicsNode(scene), PhysicsShapeType.BOX, { mass: 1 }, scene);
+                const controller = new PhysicsCharacterController(new Vector3(1, 2, 3), { capsuleHeight: 2, capsuleRadius: 0.4 }, scene);
+
+                const position = controller.getPosition();
+                expect(position).toEqual(new Vector3(1, 2, 3));
+                expect(position).toBeInstanceOf(Vector3);
+                controller.setPosition(new Vector3(4, 5, 6));
+                expect(controller.getPosition()).toBe(position);
+                expect(position).toEqual(new Vector3(4, 5, 6));
+                expect(controller.getPosition()).toEqual(new Vector3(4, 5, 6));
+
+                const velocity = controller.getVelocity();
+                controller.setVelocity(new Vector3(7, 8, 9));
+                expect(controller.getVelocity()).toBe(velocity);
+                expect(controller.getVelocity()).toEqual(new Vector3(7, 8, 9));
+                expect(controller.getVelocity()).toBeInstanceOf(Vector3);
+
+                controller.keepDistance = 0.2;
+                controller.characterMass = 12;
+                expect(controller._lite.keepDistance).toBe(0.2);
+                expect(controller._lite.characterMass).toBe(12);
+
+                const up = new Vector3(0, 0, 1);
+                controller.up = up;
+                up.x = 0.25;
+                expect(controller._lite.up).toBe(up);
+                expect(controller._lite.up.x).toBe(0.25);
+
+                const collision = vi.fn();
+                controller.onTriggerCollisionObservable.add(collision);
+                controller._lite.onTriggerCollisionObservable.notify({
+                    collider: collider.body._lite,
+                    impulse: { x: 1, y: 2, z: 3 },
+                    impulsePosition: { x: 4, y: 5, z: 6 },
+                });
+                expect(collision).toHaveBeenCalledWith({
+                    collider: collider.body,
+                    colliderIndex: 0,
+                    impulse: new Vector3(1, 2, 3),
+                    impulsePosition: new Vector3(4, 5, 6),
+                });
+
+                expect(() => {
+                    controller.maxStepHeight = 0.5;
+                }).toThrow(/additional sweep\/manifold policy/);
+                expect(() => {
+                    controller.footOffset = 0.25;
+                }).toThrow(/foot-offset policy/);
+                expect(() => {
+                    controller.shape = collider.shape;
+                }).toThrow(/ownership\/lifetime contract/);
+
+                const originalShape = controller.shape;
+                const originalLiteShape = originalShape._lite;
+                originalShape.material = { friction: 0.4, restitution: 0.1, staticFriction: 0.8 };
+                originalShape.filterMembershipMask = 7;
+                originalShape.filterCollideMask = 11;
+                originalShape.isTrigger = true;
+                hknp.HP_Shape_SetMaterial.mockClear();
+                hknp.HP_Shape_SetFilterInfo.mockClear();
+                hknp.HP_Shape_SetTrigger.mockClear();
+                expect(controller.shapeOptions).toEqual({ capsuleHeight: 2, capsuleRadius: 0.4 });
+                controller.setShapeOptions({ capsuleHeight: 2.2, capsuleRadius: 0.5 });
+                expect(controller.shape).toBe(originalShape);
+                expect(controller.shape._lite).not.toBe(originalLiteShape);
+                expect(controller.shape.material).toEqual({ friction: 0.4, restitution: 0.1, staticFriction: 0.8 });
+                expect(controller.shape.filterMembershipMask).toBe(7);
+                expect(controller.shape.filterCollideMask).toBe(11);
+                expect(controller.shape.isTrigger).toBe(true);
+                expect(hknp.HP_Shape_SetMaterial).toHaveBeenCalledWith(controller.shape._lite._hkShape, [0.8, 0.4, 0.1, 0, 1]);
+                expect(hknp.HP_Shape_SetFilterInfo).toHaveBeenLastCalledWith(controller.shape._lite._hkShape, [7, 11]);
+                expect(hknp.HP_Shape_SetTrigger).toHaveBeenCalledWith(controller.shape._lite._hkShape, true);
+                expect(controller.shapeOptions).toEqual({ capsuleHeight: 2.2, capsuleRadius: 0.5 });
+                expect(hknp.HP_Shape_Release).toHaveBeenCalledOnce();
+                controller.shape.dispose();
+                expect(hknp.HP_Shape_Release).toHaveBeenCalledOnce();
+                controller.dispose();
+                controller.dispose();
+                expect(hknp.HP_Shape_Release).toHaveBeenCalledTimes(2);
+                expect(hknp.HP_QueryCollector_Release).toHaveBeenCalledTimes(2);
+                expect(controller.onTriggerCollisionObservable.hasObservers()).toBe(false);
+                collider.dispose();
+            });
+
+            it("implements Babylon.js to-ref movement semantics over Lite", () => {
+                const hknp = makeAggregateMockHknp();
+                const plugin = new HavokPlugin(false, hknp);
+                plugin._attachToLiteScene(makeScene(1000 / 60));
+                const scene = { getPhysicsEngine: () => new PhysicsEngine(plugin, Vector3.Zero()) } as unknown as Scene;
+                const controller = new PhysicsCharacterController(Vector3.Zero(), { capsuleHeight: 1.8, capsuleRadius: 0.6 }, scene);
+                const result = new Vector3(99, 99, 99);
+
+                expect(
+                    controller.calculateMovementToRef(
+                        1 / 60,
+                        new Vector3(0, 0, 1),
+                        new Vector3(0, 1, 0),
+                        Vector3.Zero(),
+                        Vector3.Zero(),
+                        new Vector3(0, 0, 2),
+                        new Vector3(0, 1, 0),
+                        result
+                    )
+                ).toBe(true);
+                expect(result).not.toEqual(new Vector3(99, 99, 99));
+
+                result.set(99, 99, 99);
+                expect(
+                    controller.calculateMovementToRef(
+                        1 / 60,
+                        new Vector3(0, 1, 0),
+                        new Vector3(0, 1, 0),
+                        Vector3.Zero(),
+                        Vector3.Zero(),
+                        Vector3.Zero(),
+                        new Vector3(0, 1, 0),
+                        result
+                    )
+                ).toBe(false);
+                expect(result).toEqual(new Vector3(99, 99, 99));
+                controller.dispose();
+            });
         });
     });
 });
