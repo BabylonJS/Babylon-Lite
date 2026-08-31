@@ -97,6 +97,14 @@ stages:
           # rather than a named error.
           - job: Preflight
             displayName: "Check deploy configuration"
+            # Exact full ref, and a reason that is not a pull request. This job
+            # maps the deployment groups purely to check them, so it holds the
+            # same credentials the publish job does; a manual queue can name any
+            # ref, so the branch filter above is not by itself a statement about
+            # which commit runs. The enforceable half is a server-side
+            # branch-control check on the two variable groups — see TESTING.md,
+            # "Settings that repository files cannot enforce".
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
             pool:
                 vmImage: "ubuntu-latest"
             variables:
@@ -261,6 +269,9 @@ stages:
           - job: Publish
             displayName: "Publish the baseline"
             dependsOn: Measure
+            # Exact full ref and reason, as on Preflight above: this job holds
+            # DEPLOY_TOKEN.
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
             pool:
                 vmImage: "ubuntu-latest"
             variables:
@@ -314,7 +325,6 @@ stages:
                       # https. When the deployment group carries an allowlist, the
                       # host has to be in it. This job runs no repository code, so
                       # nothing here can have rewritten either variable first.
-                      SERVER_HOST="$(printf '%s' "${DEPLOYMENT_SERVER}" | sed -e 's#^https\{0,1\}://##' -e 's#[:/].*$##')"
                       case "${DEPLOYMENT_SERVER}" in
                           https://*) ;;
                           *)
@@ -322,9 +332,27 @@ stages:
                               exit 1
                               ;;
                       esac
+
+                      # Extract the host the same way the upload templates do,
+                      # and refuse the shapes that move the request — and with it
+                      # the Authorization header — somewhere else while still
+                      # reading as the right host: embedded userinfo
+                      # ('https://real-host@attacker/'), or characters that are
+                      # not valid in a host or port. The former matters most
+                      # exactly when the allowlist below is empty, which is the
+                      # one path that does not compare the host to anything.
+                      SERVER_HOST="${DEPLOYMENT_SERVER#https://}"
+                      SERVER_HOST="${SERVER_HOST%%/*}"
+                      case "$SERVER_HOST" in
+                          "" | *[!A-Za-z0-9.:-]*)
+                              echo "Refusing upload: DEPLOYMENT_SERVER host is empty or contains characters that are not permitted in a host."
+                              exit 1
+                              ;;
+                      esac
+
                       if [ -n "${DEPLOY_HOST_ALLOWLIST:-}" ]; then
                         matched=""
-                        for allowed in ${DEPLOY_HOST_ALLOWLIST}; do
+                        for allowed in $(printf '%s' "${DEPLOY_HOST_ALLOWLIST}" | tr ',' ' '); do
                           if [ "$SERVER_HOST" = "$allowed" ]; then matched="yes"; fi
                         done
                         if [ -z "$matched" ]; then

@@ -57,13 +57,31 @@ GRANTED=0
 
 # --- Helpers ----------------------------------------------------------------
 
+# Ask the plan API, with the account credential kept off the command line.
+#
+# `curl -u "$USER:$KEY"` puts a long-lived credential in the process's argv,
+# which every other process on the agent can read (`ps`, /proc/<pid>/cmdline) and
+# which some job-diagnostics tooling captures. `--config -` makes curl read the
+# same setting from stdin instead, so the key is only ever in this shell's
+# memory and curl's. The backslash/quote escaping matters because a curl config
+# value is a quoted string: a key containing either would otherwise end the
+# value early.
+plan_json() {
+    local user_escaped key_escaped
+    user_escaped=${BROWSERSTACK_USERNAME//\\/\\\\}
+    user_escaped=${user_escaped//\"/\\\"}
+    key_escaped=${BROWSERSTACK_ACCESS_KEY//\\/\\\\}
+    key_escaped=${key_escaped//\"/\\\"}
+    printf 'user = "%s:%s"\n' "$user_escaped" "$key_escaped" | curl -sf --config - "$API_URL" 2>/dev/null
+}
+
 wait_for_sessions() {
     local elapsed=0
     echo "[browserstack-wait] Looking for ${PREFERRED} session(s) (minimum: ${MINIMUM}) — timeout: ${WAIT_TIMEOUT}s"
 
     while [ "$elapsed" -lt "$WAIT_TIMEOUT" ]; do
         local response
-        response=$(curl -sf -u "${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}" "$API_URL" 2>/dev/null) || {
+        response=$(plan_json) || {
             echo "[browserstack-wait]   API request failed — retrying in ${INTERVAL}s"
             sleep "$INTERVAL"
             elapsed=$((elapsed + INTERVAL))

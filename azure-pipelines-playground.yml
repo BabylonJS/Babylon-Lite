@@ -93,6 +93,11 @@ stages:
           - job: Deploy
             displayName: "Deploy Lite Playground"
             dependsOn: Build
+            # Exact full ref, and a reason that is not a pull request — see the
+            # identical condition in azure-pipelines-demos.yml. A manual queue
+            # can name any ref; only a server-side branch-control check on
+            # BabylonJS-Deployment stops that ref's own YAML from removing this.
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
             pool:
                 vmImage: "ubuntu-latest"
             variables:

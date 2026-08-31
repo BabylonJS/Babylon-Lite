@@ -166,6 +166,80 @@ function runsPullRequestCode(body: string): boolean {
     return !/^\s*-\s*checkout:\s*\S+/m.test(body);
 }
 
+/**
+ * Names that mean "credential", wherever they appear in a job.
+ *
+ * The clauses above name the credentials this repository has today —
+ * `- group:`, `GITHUB_TOKEN`, `System.AccessToken`, `gitHubConnection`. That is
+ * a denylist of known specimens, and the vulnerability being guarded is
+ * precisely someone arriving with a new one: the BrowserStack key reached
+ * pull-request code as `BROWSERSTACK_ACCESS_KEY:` in an `env:` block, which is
+ * none of those four shapes. This pattern is the general form, so a credential
+ * added tomorrow is refused by default rather than until somebody remembers to
+ * extend a list.
+ */
+const CREDENTIAL_NAME = /(?:TOKEN|SECRET|PASSW(?:OR)?D|ACCESS_?KEY|API_?KEY|CREDENTIAL|BROWSERSTACK|_PAT\b)/i;
+
+/**
+ * Names that match the pattern above but are not credentials.
+ *
+ * Kept deliberately tiny and explained one by one: an exemption list is how a
+ * general rule decays back into a specimen list.
+ */
+const NOT_A_CREDENTIAL = [
+    // Playwright's own knob for where its JUnit file goes.
+    "PLAYWRIGHT_JUNIT_OUTPUT_NAME",
+];
+
+/**
+ * Every name a job introduces or reads that looks like a credential.
+ *
+ * Reads three shapes, because they are three ways to the same place: an `env:`
+ * or `variables:` key (`NPM_TOKEN: $(NPM_TOKEN)`), a `- name:` variable
+ * declaration, and a macro dereference (`$(NPM_TOKEN)`, `${{ secrets.X }}`) of
+ * a name the job never declares.
+ */
+function credentialNamesIn(body: string): string[] {
+    const found = new Set<string>();
+    const consider = (name: string | undefined): void => {
+        if (name && CREDENTIAL_NAME.test(name) && !NOT_A_CREDENTIAL.includes(name)) {
+            found.add(name);
+        }
+    };
+
+    for (const line of withoutComments(body).split("\n")) {
+        // Two shapes, because they are two different lines: a mapping key
+        // (`NPM_TOKEN: $(NPM_TOKEN)`) carries the colon after the name, and an
+        // ADO variable declaration (`- name: DEPLOY_TOKEN`) carries it before.
+        consider(/^\s*-\s*name:\s*([A-Za-z_][\w.]*)\s*$/.exec(line)?.[1]);
+        consider(/^\s*([A-Za-z_][\w.]*)\s*:/.exec(line)?.[1]);
+        for (const macro of line.matchAll(/\$\(\s*([A-Za-z_][\w.]*)\s*\)|\$\{\{\s*[\w.]*\.([\w.]+)\s*\}\}/g)) {
+            consider(macro[1] ?? macro[2]);
+        }
+    }
+
+    return [...found].sort();
+}
+
+/**
+ * A job's own properties: everything above its `steps:`.
+ *
+ * A job-level `condition:` and a step-level one are the same six letters at
+ * different indentation, and only the first decides whether the job runs at
+ * all. Slicing at `steps:` is what keeps the ref-gate clause from being
+ * satisfied by a condition on some step inside the job.
+ */
+function jobHeader(body: string): string {
+    const lines = body.split("\n");
+    const steps = lines.findIndex((line) => /^\s*steps:\s*$/.test(line));
+    return lines.slice(0, steps === -1 ? lines.length : steps).join("\n");
+}
+
+/** A job's own `condition:`, or "" when it has none. */
+function jobCondition(body: string): string {
+    return /^\s*condition:\s*(.+)$/m.exec(jobHeader(body))?.[1]?.trim() ?? "";
+}
+
 function declaredGroups(body: string): string[] {
     return [...body.matchAll(/^\s*-\s*group:\s*(\S+)\s*$/gm)].flatMap((m) => (m[1] === undefined ? [] : [m[1]]));
 }
@@ -279,6 +353,22 @@ describe("no job that runs pull-request code holds a credential", () => {
         }
     });
 
+    it("names no credential of any kind in a job that checks out the pull request", () => {
+        // The general form of the four clauses above. `BabylonJS-BrowserStack`
+        // reached PR code as an `env:` mapping, not as a `- group:` line, and
+        // every clause here passed while it did — which is what a denylist of
+        // known specimens buys.
+        for (const job of jobs) {
+            if (!runsPullRequestCode(job.body)) {
+                continue;
+            }
+            expect(
+                credentialNamesIn(job.body),
+                `${PINNED_TEMPLATE}: job ${job.name} checks out the pull request and names a credential. There is no exception: if the check genuinely needs one, it runs in the Publish stage against the pinned master checkout instead.`
+            ).toEqual([]);
+        }
+    });
+
     it("keeps GitHub and Azure tokens out of every job that checks out the pull request", () => {
         for (const job of jobs) {
             if (!runsPullRequestCode(job.body)) {
@@ -388,6 +478,137 @@ describe("a deployment credential never shares an agent with repository code", (
         expect(body, `job ${id} builds the repository while holding a deployment credential`).not.toMatch(/\b(?:pnpm|npm)\s+(?:run\s+)?build\b/);
         expect(body, `job ${id} runs tests while holding a deployment credential`).not.toMatch(/\b(?:pnpm|npm)\s+(?:run\s+)?test[:\s]/);
         expect(body, `job ${id} installs a browser while holding a deployment credential`).not.toMatch(/playwright\s+install/);
+    });
+});
+
+describe("a credentialed job outside pull-request CI runs only from the protected ref", () => {
+    // `pr: none` and a `- master` branch filter describe the pipeline's
+    // *automatic* triggers. Neither says anything about a manual queue, and a
+    // manual run may name any ref — including one whose YAML is not this YAML,
+    // because Azure reads the definition from the ref being built. So the ref
+    // gate cannot be the whole control: it is what states the rule for every run
+    // still executing master's definition, and TESTING.md records the
+    // server-side branch-control check that holds for the rest.
+    //
+    // Without it, "this pipeline only runs on master" was a property of the
+    // trigger block alone — one that a queue-time ref selection sets aside while
+    // every guard in this file stays green.
+    const REF_CLAUSE = "eq(variables['Build.SourceBranch'], 'refs/heads/master')";
+    const REASON_CLAUSE = "ne(variables['Build.Reason'], 'PullRequest')";
+
+    const gated = allPipelines()
+        .filter((file) => file !== ENTRY_POINT)
+        .flatMap((file) =>
+            jobsOf(read(file))
+                .filter((job) =>
+                    DEPLOYMENT_CREDENTIAL_MARKERS.concat([new RegExp(`^\\s*-\\s*group:\\s*${CLOUD_GROUP}\\s*$`, "m")]).some((marker) => marker.test(withoutComments(job.body)))
+                )
+                .map((job) => ({ file, job }))
+        );
+
+    it("has credentialed non-PR jobs to inspect", () => {
+        expect(gated.length, "no job outside the pull-request entry point holds a credential — the selector has drifted").toBeGreaterThan(0);
+    });
+
+    it.each(gated.map(({ file, job }) => `${file}:${job.name}`))("%s is gated on the exact full ref and a non-pull-request reason", (id) => {
+        const entry = gated.find(({ file, job }) => `${file}:${job.name}` === id);
+        expect(entry, `job ${id} disappeared between selection and assertion`).toBeDefined();
+        const condition = jobCondition(entry?.job.body ?? "");
+
+        expect(condition, `job ${id} holds a credential with no job-level condition, so any ref this pipeline is queued from reaches it`).not.toBe("");
+        // The full ref, not the branch name: `Build.SourceBranchName` is the
+        // last path segment, so a branch literally named `heads/master` — or a
+        // tag named `master` — satisfies a check written against it.
+        expect(condition, `job ${id} does not pin Build.SourceBranch to the full ref refs/heads/master`).toContain(REF_CLAUSE);
+        expect(condition, `job ${id} does not exclude pull-request runs by reason`).toContain(REASON_CLAUSE);
+    });
+
+    it("gates on the full ref rather than on the branch name anywhere", () => {
+        // `Build.SourceBranchName` is `master` for refs/heads/master and for
+        // refs/tags/master and for refs/heads/anything/master. It reads as the
+        // same check and is not one.
+        for (const file of allPipelines().concat([PINNED_TEMPLATE])) {
+            expect(withoutComments(read(file)), `${file} gates on Build.SourceBranchName, which is not a ref`).not.toMatch(/condition:.*Build\.SourceBranchName/);
+        }
+    });
+});
+
+describe("npm publishing keeps its registry credential in a job-scoped file", () => {
+    // `npm publish` needs the token in a config file, and the obvious place is
+    // `~/.npmrc`. That file outlives the step, is 0644 under the default umask,
+    // and on a self-hosted agent outlives the *build*. The publish jobs run with
+    // `checkout: none`, so nothing repository-authored shares the agent — but
+    // the credential still has to leave with the job.
+    const publishers = allPipelines().filter((file) => /^\s*npm publish\s/m.test(read(file)));
+
+    it("has publishing pipelines to inspect", () => {
+        expect(publishers.length, "no pipeline runs `npm publish` — the selector has drifted").toBeGreaterThan(0);
+    });
+
+    it.each(publishers)("%s writes no npmrc into the agent's home directory", (file) => {
+        const source = withoutComments(read(file));
+        expect(source, `${file} writes an npmrc into $HOME, where it outlives the step that needed it`).not.toMatch(/~\/\.npmrc|\$HOME\/\.npmrc|\$\{HOME\}\/\.npmrc/);
+    });
+
+    it.each(publishers)("%s creates the npmrc private before the token reaches it, and removes it", (file) => {
+        const source = withoutComments(read(file));
+
+        // Order matters and is asserted by shape: `umask 077` on the creation
+        // means the file is 0600 from the moment it exists. Writing the token
+        // first and chmod'ing afterwards leaves a window in which it is
+        // world-readable, which is the version this replaced.
+        expect(source, `${file} does not create its npmrc under a restrictive umask`).toMatch(/umask 077/);
+        expect(source, `${file} does not pin the npmrc to 0600`).toMatch(/chmod 600 "\$NPMRC"/);
+        expect(source, `${file} does not keep the npmrc in the agent's temp directory`).toMatch(/NPMRC="\$\(Agent\.TempDirectory\)/);
+        expect(source, `${file} does not remove the npmrc on every exit path`).toMatch(/trap 'rm -f "\$NPMRC"' EXIT/);
+
+        for (const command of source.match(/^\s*npm publish\s.*$/gm) ?? []) {
+            expect(command, `${file}: \`${command.trim()}\` does not name the job-scoped npmrc, so npm falls back to the ambient config`).toMatch(/--userconfig "\$NPMRC"/);
+        }
+    });
+});
+
+describe("a credentialed job constrains artifact content before it can act as a command", () => {
+    // The publishing jobs read a version and a tarball path out of an artifact
+    // staged by the job that ran repository code, and echo them into
+    // `##vso[task.setvariable]`. The agent obeys any logging command that starts
+    // a line of step output, so an unconstrained value there is an instruction
+    // channel into the job holding NPM_TOKEN — `task.prependpath` alone puts an
+    // attacker-chosen `npm` ahead of the real one.
+    //
+    // `grep -Eq '^…$'` is specifically not enough: grep matches when ANY line
+    // matches, so it accepts "1.2.3\n##vso[…]". Bash's `[[ =~ ]]` has no
+    // multiline mode and rejects it.
+    // The subject is narrow on purpose: a job that runs repository code and
+    // echoes a value it computed itself is not this hazard — it already had
+    // every privilege the echo could reach. What matters is the crossing: a job
+    // holding a credential and running none of that code, echoing a value that
+    // arrived from a job that did.
+    const echoing = allPipelines()
+        .concat([PINNED_TEMPLATE])
+        .flatMap((file) =>
+            jobsOf(read(file))
+                .filter((job) => {
+                    const body = withoutComments(job.body);
+                    return !runsPullRequestCode(body) && /DownloadPipelineArtifact/.test(body) && /##vso\[task\.setvariable[^\]]*\]\$/.test(body);
+                })
+                .map((job) => ({ file, job }))
+        );
+
+    it("has jobs that echo artifact content into a logging command to inspect", () => {
+        expect(echoing.length, "no artifact-consuming job echoes an interpolated `##vso[task.setvariable]` — the selector has drifted").toBeGreaterThan(0);
+    });
+
+    it.each(echoing.map(({ file, job }) => `${file}:${job.name}`))("%s matches the whole value, not one of its lines", (id) => {
+        const entry = echoing.find(({ file, job }) => `${file}:${job.name}` === id);
+        expect(entry, `job ${id} disappeared between selection and assertion`).toBeDefined();
+        const body = withoutComments(entry?.job.body ?? "");
+
+        expect(body, `job ${id} echoes an artifact-derived value into a logging command without a whole-value match`).toMatch(/\[\[\s*!?\s*\$?\{?\w+\}?\s*=~\s*\^/);
+        expect(
+            body,
+            `job ${id} validates with \`grep -Eq '^…$'\`, which passes a multi-line value on the strength of one good line, and then echoes it into a logging command`
+        ).not.toMatch(/grep -Eq\s+'\^/);
     });
 });
 
@@ -551,6 +772,41 @@ describe("the job-block parser accepts and rejects the right shapes", () => {
 
     it("treats a checkout of a pinned repository resource as trusted", () => {
         expect(runsPullRequestCode(["- job: Delta", "  steps:", "      - checkout: trusted", "      - script: pnpm install"].join("\n"))).toBe(false);
+    });
+
+    it("reads a job's own condition, not a step's", () => {
+        // The two are the same key at different indentation, and only the first
+        // decides whether the job runs. A clause that accepted either would be
+        // satisfied by `condition: always()` on some publish step while the job
+        // itself ran from any ref.
+        const job = [
+            "          - job: Epsilon",
+            "            dependsOn: Build",
+            "            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))",
+            "            steps:",
+            "                - checkout: none",
+            "                - script: echo hi",
+            "                  condition: always()",
+        ].join("\n");
+
+        expect(jobCondition(job)).toBe("and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))");
+        expect(jobCondition(["          - job: Zeta", "            steps:", "                - script: echo hi", "                  condition: always()"].join("\n"))).toBe("");
+    });
+
+    it.each([
+        ["                      NPM_TOKEN: $(NPM_TOKEN)", ["NPM_TOKEN"]],
+        ['                      BROWSERSTACK_ACCESS_KEY: "$(BROWSERSTACK_ACCESS_KEY)"', ["BROWSERSTACK_ACCESS_KEY"]],
+        ["                - name: DEPLOY_TOKEN", ["DEPLOY_TOKEN"]],
+        ['                      comment: "$(GITHUB_TOKEN)"', ["GITHUB_TOKEN"]],
+        ["                      GH: ${{ secrets.DEPLOY_TOKEN }}", ["DEPLOY_TOKEN"]],
+        // Correct code, in the shapes this repository actually contains. A
+        // clause that fires on any of these gets deleted rather than debugged.
+        ["                      PLAYWRIGHT_JUNIT_OUTPUT_NAME: test-results/x.xml", []],
+        ["                      LAB_BASE_PATH: /lite/$(Build.BuildNumber)/lab/", []],
+        ["                      storageAccount: $(TOOLS_STORAGE_ACCOUNT)", []],
+        ["                  # NPM_TOKEN must never appear in this job", []],
+    ])("credentialNamesIn(%s) -> %s", (line, expected) => {
+        expect(credentialNamesIn(line as string)).toEqual(expected);
     });
 
     it("recognises an upload template call only when it is a template step", () => {

@@ -243,6 +243,18 @@ stages:
           - job: PublishToNpm
             displayName: "Publish tarballs to npm"
             dependsOn: BuildAndPack
+            # Exact full ref, and a reason that is not a pull request. `pr: none`
+            # and the `- master` branch filter describe the *automatic* triggers;
+            # neither constrains a manual queue, which may name any ref, and the
+            # YAML a run of that ref executes is that ref's YAML. A run from
+            # anywhere but refs/heads/master therefore reaches this job's
+            # credential only if this condition — and, on the server side, a
+            # branch-control check on the resources it uses — lets it. The
+            # condition alone is not the control (a run from another ref could
+            # delete it); it is what makes the intent enforceable for every run
+            # that is still executing master's definition. See TESTING.md,
+            # "Settings that repository files cannot enforce".
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -268,37 +280,72 @@ stages:
                 # running anything out of the tarball. Everything here is inline
                 # in this file — which is only ever read from master — so no
                 # repository checkout is needed to perform the check.
+                #
+                # Nothing read out of the artifact is echoed before it has been
+                # constrained to a character set. The artifact was produced by
+                # the job that ran repository code, so a tarball's file name and
+                # the `name`/`version` inside it are attacker-influenced; the
+                # agent obeys any `##vso[...]` that starts a line of step output,
+                # so echoing an unconstrained value here would let the artifact
+                # issue logging commands in the job that holds NPM_TOKEN —
+                # `task.prependpath` alone is enough to put a fake `npm` on PATH.
                 - script: |
                       set -euo pipefail
                       TARBALLS="$(Pipeline.Workspace)/npm-tarballs"
                       VERSION="$(cat "$(Pipeline.Workspace)/release-assets/version.txt")"
 
-                      if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?$'; then
-                        echo "Refusing to publish: '$VERSION' is not a version."
+                      # Anchored against the WHOLE value. `grep -Eq '^…$'`
+                      # matches when ANY line matches, so a version.txt holding
+                      # "1.2.3\n##vso[…]" passes it; bash's `=~` has no multiline
+                      # mode, so a value carrying a newline fails here instead.
+                      version_ok() { [[ $1 =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?$ ]]; }
+
+                      if ! version_ok "$VERSION"; then
+                        echo "Refusing to publish: version.txt does not hold a single well-formed version."
                         exit 1
                       fi
 
-                      check() {
-                        local expected_name="$1" expected_version="$2" tarball
-                        tarball="$(find "$TARBALLS" -maxdepth 1 -name '*.tgz' -print | while read -r f; do
-                          name="$(tar -xzOf "$f" package/package.json | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).name')"
-                          if [ "$name" = "$expected_name" ]; then printf '%s' "$f"; fi
-                        done)"
-                        if [ -z "$tarball" ]; then
-                          echo "Refusing to publish: no tarball for $expected_name."
+                      # Sets SELECTED to the one tarball declaring the expected
+                      # name and version, having first checked that every staged
+                      # tarball is safe to name in a log line at all.
+                      SELECTED=""
+                      select_tarball() {
+                        local expected_name="$1" expected_version="$2"
+                        local file base name version
+                        SELECTED=""
+                        for file in "$TARBALLS"/*.tgz; do
+                          test -e "$file" || continue
+                          base="$(basename "$file")"
+                          if [[ ! $base =~ ^[A-Za-z0-9@._-]+\.tgz$ ]]; then
+                            echo "Refusing to publish: a staged tarball's file name is outside [A-Za-z0-9@._-]."
+                            exit 1
+                          fi
+                          name="$(tar -xzOf "$file" package/package.json | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).name')"
+                          version="$(tar -xzOf "$file" package/package.json | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).version')"
+                          if [[ ! $name =~ ^@?[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?$ ]]; then
+                            echo "Refusing to publish: a staged tarball declares a package name outside the npm character set."
+                            exit 1
+                          fi
+                          if ! version_ok "$version"; then
+                            echo "Refusing to publish: a staged tarball declares a version that is not a single well-formed version."
+                            exit 1
+                          fi
+                          if [ "$name" = "$expected_name" ] && [ "$version" = "$expected_version" ]; then
+                            SELECTED="$file"
+                          fi
+                        done
+                        if [ -z "$SELECTED" ]; then
+                          echo "Refusing to publish: no staged tarball is $expected_name@$expected_version."
                           exit 1
                         fi
-                        actual="$(tar -xzOf "$tarball" package/package.json | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).version')"
-                        if [ "$actual" != "$expected_version" ]; then
-                          echo "Refusing to publish: $expected_name tarball is version $actual, expected $expected_version."
-                          exit 1
-                        fi
-                        echo "Validated $expected_name@$actual ($(basename "$tarball"))"
-                        printf '%s' "$tarball"
+                        echo "Validated $expected_name@$expected_version ($(basename "$SELECTED"))"
                       }
 
-                      LITE_TGZ="$(check '@babylonjs/lite' "$VERSION" | tail -1)"
-                      COMPAT_TGZ="$(check '@babylonjs/lite-compat' "${VERSION}-preview" | tail -1)"
+                      select_tarball '@babylonjs/lite' "$VERSION"
+                      LITE_TGZ="$SELECTED"
+                      select_tarball '@babylonjs/lite-compat' "${VERSION}-preview"
+                      COMPAT_TGZ="$SELECTED"
+
                       echo "##vso[task.setvariable variable=LITE_TGZ]$LITE_TGZ"
                       echo "##vso[task.setvariable variable=COMPAT_TGZ]$COMPAT_TGZ"
                   displayName: "Validate tarball contents"
@@ -314,8 +361,19 @@ stages:
                         exit 1
                       fi
 
-                      printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > ~/.npmrc
-                      trap 'rm -f ~/.npmrc' EXIT
+                      # A job-scoped npmrc rather than ~/.npmrc: created empty
+                      # under a 077 umask so it is 0600 *before* the token is
+                      # written to it (a token written first and chmod'd second
+                      # is world-readable in between), kept in the agent's temp
+                      # directory, named only by `--userconfig`, and removed on
+                      # every exit path. Nothing is left in $HOME for a later
+                      # step — or, on a self-hosted agent, a later build — to
+                      # read.
+                      NPMRC="$(Agent.TempDirectory)/npm-publish-$(Build.BuildId).npmrc"
+                      trap 'rm -f "$NPMRC"' EXIT
+                      ( umask 077 && : > "$NPMRC" )
+                      chmod 600 "$NPMRC"
+                      printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" >> "$NPMRC"
 
                       EXTRA=""
                       if [ "$(echo "${DRY_RUN:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
@@ -323,8 +381,8 @@ stages:
                         EXTRA="--dry-run"
                       fi
 
-                      npm publish "$LITE_TGZ" $EXTRA --ignore-scripts --access public --registry https://registry.npmjs.org/
-                      npm publish "$COMPAT_TGZ" $EXTRA --ignore-scripts --access public --registry https://registry.npmjs.org/
+                      npm publish "$LITE_TGZ" $EXTRA --ignore-scripts --access public --userconfig "$NPMRC" --registry https://registry.npmjs.org/
+                      npm publish "$COMPAT_TGZ" $EXTRA --ignore-scripts --access public --userconfig "$NPMRC" --registry https://registry.npmjs.org/
                   displayName: "Publish packages to npm"
                   env:
                       NPM_TOKEN: $(NPM_TOKEN)
@@ -341,7 +399,9 @@ stages:
           - job: TagAndRelease
             displayName: "Tag and create GitHub release"
             dependsOn: PublishToNpm
-            condition: and(succeeded(), ne(lower(variables['DRY_RUN']), 'true'))
+            # Full ref and reason, as on PublishToNpm above: this job holds the
+            # GitHub service connection.
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'), ne(lower(variables['DRY_RUN']), 'true'))
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -356,8 +416,11 @@ stages:
                 - script: |
                       set -euo pipefail
                       VERSION="$(cat "$(Pipeline.Workspace)/release-assets/version.txt")"
-                      if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?$'; then
-                        echo "Refusing to tag: '$VERSION' is not a version."
+                      # Whole-value match: see "Validate tarball contents" above
+                      # for why `grep -Eq` is not enough for a value that is
+                      # about to be echoed into a logging command.
+                      if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?$ ]]; then
+                        echo "Refusing to tag: version.txt does not hold a single well-formed version."
                         exit 1
                       fi
                       echo "##vso[task.setvariable variable=RELEASE_VERSION]$VERSION"
@@ -388,7 +451,9 @@ stages:
           - job: PublishPlayground
             displayName: "Publish versioned playground"
             dependsOn: PublishToNpm
-            condition: and(succeeded(), ne(lower(variables['DRY_RUN']), 'true'))
+            # Full ref and reason, as on PublishToNpm above: this job holds
+            # DEPLOY_TOKEN.
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'), ne(lower(variables['DRY_RUN']), 'true'))
             pool:
                 vmImage: "ubuntu-latest"
             variables:
@@ -420,8 +485,11 @@ stages:
                 - script: |
                       set -euo pipefail
                       VERSION="$(cat "$(Pipeline.Workspace)/release-assets/version.txt")"
-                      if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?$'; then
-                        echo "Refusing to deploy: '$VERSION' is not a version."
+                      # Whole-value match: see "Validate tarball contents" above.
+                      # This one also becomes part of an upload path, so a value
+                      # carrying anything but a version must not reach it.
+                      if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?$ ]]; then
+                        echo "Refusing to deploy: version.txt does not hold a single well-formed version."
                         exit 1
                       fi
                       echo "##vso[task.setvariable variable=RELEASE_VERSION]$VERSION"

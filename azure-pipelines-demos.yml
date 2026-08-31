@@ -90,6 +90,15 @@ stages:
           - job: Deploy
             displayName: "Deploy Lite Demos"
             dependsOn: Build
+            # Exact full ref, and a reason that is not a pull request. `pr: none`
+            # plus the `- master` branch filter describe the automatic trigger;
+            # neither constrains a manual queue, which may name any ref — and the
+            # YAML such a run executes is that ref's YAML, which is why the
+            # enforceable half of this is a server-side branch-control check on
+            # BabylonJS-Deployment (see TESTING.md, "Settings that repository
+            # files cannot enforce"). This condition is what states the rule for
+            # every run that is still executing master's definition.
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
             pool:
                 vmImage: "ubuntu-latest"
             variables:

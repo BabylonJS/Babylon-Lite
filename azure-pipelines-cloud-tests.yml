@@ -82,6 +82,16 @@ stages:
           - job: PerfRegression
             displayName: "Performance: Lite vs Stable"
             timeoutInMinutes: 120
+            # Exact full ref, and a reason that is not a pull request. `pr: none`
+            # keeps pull-request *triggers* off this pipeline; it says nothing
+            # about a manual queue, which may name any ref — and a run of some
+            # other ref executes that ref's YAML, so this condition binds only
+            # runs still executing master's definition. The enforceable half is a
+            # branch-control check on BabylonJS-BrowserStack, configured in Azure
+            # DevOps: see TESTING.md, "Settings that repository files cannot
+            # enforce". Together they are what keeps a long-lived cloud-browser
+            # key away from code that has not been reviewed.
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
             pool:
                 vmImage: "ubuntu-latest"
             variables:
@@ -251,6 +261,9 @@ stages:
           - job: ParityCloud
             displayName: "Parity Tests (Cloud Browser)"
             timeoutInMinutes: 180
+            # Exact full ref and reason, as on PerfRegression above: this job
+            # holds the same long-lived cloud-browser key.
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
             pool:
                 vmImage: "ubuntu-latest"
             variables:
@@ -378,6 +391,10 @@ stages:
       jobs:
           - job: PublishPerfReport
             displayName: "Publish Perf Report"
+            # Exact full ref and reason: this job holds DEPLOY_TOKEN. `succeeded()`
+            # is the default job condition, restated so adding the ref clauses
+            # does not quietly change when this job runs.
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
             pool:
                 vmImage: "ubuntu-latest"
             variables:
@@ -402,6 +419,10 @@ stages:
 
           - job: PublishParityReport
             displayName: "Publish Parity Report"
+            # Exact full ref and reason: this job holds DEPLOY_TOKEN. `succeeded()`
+            # is the default job condition, restated so adding the ref clauses
+            # does not quietly change when this job runs.
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
             pool:
                 vmImage: "ubuntu-latest"
             variables:

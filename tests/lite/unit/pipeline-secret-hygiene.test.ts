@@ -45,8 +45,60 @@ export function hasMaskedSecret(line: string): boolean {
     // assignment, never inside a log banner.
     //
     // Known gap, stated rather than implied: forms carrying the credential
-    // with no separator (`curl -u ******`) are not detected, and were not before.
+    // with no separator (`curl -u ******`) are not detected here, and
+    // were not before. They are the subject of `carriesCredentialOnCommandLine`
+    // below, which is a different question — not "was a value replaced by a
+    // mask" but "is a live credential being passed as an argument" — asked by
+    // its own clause and included in the closure walk's union.
     return /(?:authorization|authenticate|token|secret|passw(?:or)?d|credential|api[-_]?key)["']?\s*[:=]\s*["']?(?:(?:bearer|basic|token)\s+)?\*{3,}(?=["'\s]|$)/i.test(code);
+}
+
+/**
+ * Names that mean "this value is a credential".
+ *
+ * Shared by the command-line clause below so its two halves — "this is an
+ * argument" and "this is a secret" — cannot drift apart.
+ */
+const CREDENTIAL_NAME = /(?:TOKEN|SECRET|PASSW(?:OR)?D|ACCESS_?KEY|API_?KEY|CREDENTIAL|_PAT\b|AUTH_?KEY)/i;
+
+/**
+ * True when a line hands a live credential to a program as a command-line
+ * argument.
+ *
+ * This is the gap the mask guard names and does not cover, and it was a live
+ * finding rather than a hypothetical: `scripts/browserstack-wait.sh` polled the
+ * BrowserStack plan API with
+ *
+ *     curl -sf -u "${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}" …
+ *
+ * in a job holding the account key. An argument is not a secret channel — it is
+ * in the process's own `/proc/<pid>/cmdline`, readable by every other process
+ * running as the same user on the agent, and it is what `ps` prints for anyone
+ * (or anything) sampling the machine. `env:` and stdin are the channels that are
+ * not. The script now feeds curl the same setting through `--config -`.
+ *
+ * Both halves are required, and neither alone would work: a flag with an
+ * interpolation is ordinary shell (`sort -u "$FILE"`, `mkdir -p "$WORK"`,
+ * `tsc -p "$PROJECT"`), and a credential name on a line is most often the
+ * correct `env:` mapping this repository uses everywhere. It is the conjunction
+ * — a credential-named value in argument position — that is the defect.
+ */
+export function carriesCredentialOnCommandLine(line: string): boolean {
+    const code = line.replace(/(^|\s)#.*$/, "");
+
+    // The value alternation has to know each dialect's idea of "one argument":
+    // a GitHub Actions expression contains spaces, so `\S+` alone captures
+    // `${{` and reads as no interpolation at all. Found by the fixture below
+    // rather than by review.
+    for (const match of code.matchAll(/(?:^|\s)(?:-u|-p|--user|--proxy-user|--password|--api-key|--auth|--token)(?:=|\s+)("[^"]*"|'[^']*'|\$\{\{[^}]*\}\}|\S+)/g)) {
+        const value = match[1] ?? "";
+        // An interpolation in any of this repo's CI dialects, naming a secret.
+        if (interpolatesAVariable(value) && CREDENTIAL_NAME.test(value)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /**
@@ -406,6 +458,31 @@ describe("the Authorization selector accepts and rejects the right lines", () =>
     });
 });
 
+describe("the command-line credential selector accepts and rejects the right lines", () => {
+    // Both directions, and the rejections are the load-bearing half here. The
+    // acceptances come from one real defect; the rejections come from ordinary
+    // shell this repository is full of, and they are what decides whether this
+    // clause survives its first false positive.
+    it.each([
+        ['        response=$(curl -sf -u "${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}" "$API_URL")', true],
+        ['curl --user "$DEPLOY_TOKEN" https://deploy.invalid/upload', true],
+        ["docker login -u ci -p ${{ secrets.REGISTRY_PASSWORD }} registry.invalid", true],
+        ["npm publish --token=$NPM_TOKEN", true],
+        // Ordinary shell: a flag with an interpolation, and no credential.
+        ['sort -u "$JUNIT_FILES"', false],
+        ['mkdir -p "$WORK"', false],
+        ["npx tsc -p $PROJECT --noEmit", false],
+        // The correct forms. A credential named in an `env:` mapping, read from
+        // the environment, or fed to curl on stdin is the shape this repository
+        // uses deliberately -- flagging it would delete the guard.
+        ["          DEPLOY_TOKEN: $(DEPLOY_TOKEN)", false],
+        ['printf \'user = "%s:%s"\\n\' "$user_escaped" "$key_escaped" | curl -sf --config - "$API_URL"', false],
+        ["    # curl -u $BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY -- do not do this", false],
+    ])("%s -> carriesCredentialOnCommandLine=%s", (line, expected) => {
+        expect(carriesCredentialOnCommandLine(line as string)).toBe(expected);
+    });
+});
+
 describe("variable interpolation is recognised in every CI dialect", () => {
     // Pinned as a population, not a specimen. Each row is a dialect this repo
     // can contain; a predicate fitted to one of them reports a plausible count
@@ -582,6 +659,37 @@ export function credentialTracesToASecretStore(fileText: string, headerLine: str
 
     return false;
 }
+
+describe("no credential is passed to a program as an argument", () => {
+    // Separate from the mask and header clauses because it reads a different
+    // property of a line, and separate from the credential-isolation guards
+    // because those decide *which job* may hold a secret at all: this one is
+    // about how a job that legitimately holds one hands it to a process.
+    //
+    // A command line is not private. `/proc/<pid>/cmdline` is world-readable on
+    // Linux, `ps` prints it, and agent diagnostics collect it -- so an argument
+    // exposes the value to everything else running on the box for the lifetime
+    // of the call, which no amount of log masking touches. `env:` and stdin do
+    // not have that property, and every credential in this repository now uses
+    // one of them.
+    it("has no credential in argument position in any file the guard reads", () => {
+        const contributing = new Set(pipelineLines().map(({ location }) => location));
+        const silent = pipelineFiles()
+            .map(({ location }) => location)
+            .filter((location) => !contributing.has(location))
+            .sort();
+        expect(silent, "these files were collected but contributed no line to scan — the assertion below would pass over a file it never read").toEqual([]);
+
+        const offenders = pipelineLines()
+            .filter(({ line }) => carriesCredentialOnCommandLine(line))
+            .map(({ location, number }) => `${location}:${number}`);
+
+        expect(
+            offenders,
+            "a credential is being passed as a command-line argument, where every process on the agent can read it out of /proc. Pass it through `env:` (an ADO `env:` block, a GitHub `env:` key) or on stdin — `curl --config -` takes the same `user =` setting that `-u` does. Locations only; the line is not printed because it holds the value."
+        ).toEqual([]);
+    });
+});
 
 describe("the deploy-token exemption is granted for its reason", () => {
     it("binds every exempt Authorization header to the platform secret store", () => {
@@ -774,6 +882,10 @@ export function isWalkableDir(name: string): boolean {
  * roots, was invisible: 33 passed, nothing named. Discovering by a narrower
  * category than the guards read is a closure check that certifies part of its
  * subject and reports on all of it.
+ *
+ * `carriesCredentialOnCommandLine` joined the union with the clause that reads
+ * it, for the same reason and in the same edit: a predicate added to the guard
+ * and not to the walk leaves the walk certifying the smaller of the two.
  */
 function allYamlCarryingACredentialShape(root: string = repoRoot): string[] {
     const found: string[] = [];
@@ -795,7 +907,7 @@ function allYamlCarryingACredentialShape(root: string = repoRoot): string[] {
                 isDiscoverableFile(name) &&
                 stripDocumentationText(readFileSync(full, "utf8"))
                     .split("\n")
-                    .some((l) => isAuthorizationHeader(l) || hasMaskedSecret(l))
+                    .some((l) => isAuthorizationHeader(l) || hasMaskedSecret(l) || carriesCredentialOnCommandLine(l))
             ) {
                 found.push(relative(root, full).split(sep).join("/"));
             }
@@ -1170,7 +1282,7 @@ describe("the mask guard reads every file carrying anything its clauses examine"
 
         expect(
             unread.filter((file) => !isYamlFile(file)),
-            "these non-YAML files carry a credential shape. The guard parses pipeline YAML, so do NOT add them to the roots list — remove the credential instead, or mask it at the source rather than pasting a redacted build log:"
+            "these non-YAML files carry a credential shape. The guard parses pipeline YAML, so do NOT add them to the roots list — remove the credential instead. For a mask, mask it at the source rather than pasting a redacted build log; for a credential in argument position, pass it through the environment or on stdin:"
         ).toEqual([]);
     });
 });

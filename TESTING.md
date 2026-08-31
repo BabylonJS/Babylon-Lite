@@ -414,6 +414,13 @@ Three rules, all enforced by
    exception.** `BabylonJS-BrowserStack` used to be one; it is now banned from
    the entry point and the pinned template by name, not merely as a `- group:`
    line, so mapping `BROWSERSTACK_ACCESS_KEY` by hand fails the guard too.
+   Beyond those named shapes the guard refuses **any credential-shaped name** —
+   `…TOKEN`, `…SECRET`, `…PASSWORD`, `…ACCESS_KEY`, `…API_KEY`, `…CREDENTIAL`,
+   `BROWSERSTACK…`, `…_PAT` — appearing as a key, as a `- name:` declaration or
+   as a `$(…)` / `${{ … }}` dereference in such a job. That is the general form
+   of the rule: the BrowserStack key reached PR code as an `env:` mapping, which
+   none of the four named shapes covers, so a credential invented tomorrow is
+   denied by default rather than until someone remembers to add it to a list.
 3. **Privileged work runs where no PR code has run.** Every upload happens in a
    `checkout: none` job that consumes a pipeline artifact, and the two jobs that
    need repository code with a credential in scope (`Release Markers (labels)`,
@@ -450,7 +457,72 @@ public and cannot be committed by anyone without access to
   only lose their preview links.
 - Trusted master-only uploads fall back to the `DEPLOY_HOST_ALLOWLIST` variable
   with a warning. Those jobs run no repository code at all, so there is no step
-  that could have rewritten it.
+  that could have rewritten it. The host is still parsed the same way the
+  templates parse it — an `https://` scheme, no embedded userinfo, and no
+  character that is not valid in a host or port — so
+  `https://real-host@attacker.invalid/` is refused even with no allowlist to
+  compare it against. `azure-pipelines-bundle-manifest.yml` performs its own
+  upload rather than calling a template, and applies the same parse.
+
+#### Credentials leave the job with the job
+
+Three rules about *how* a credentialed job holds its secret, each enforced by a
+clause in `tests/lite/unit/pr-pipeline-credential-isolation.test.ts` or
+`tests/lite/unit/pipeline-secret-hygiene.test.ts`:
+
+1. **No credential is passed as a command-line argument.** A command line is not
+   private: `/proc/<pid>/cmdline` is world-readable, `ps` prints it, and agent
+   diagnostics collect it. `scripts/browserstack-wait.sh` used to poll the
+   BrowserStack plan API with `curl -u "$USER:$ACCESS_KEY"`; it now feeds curl
+   the same setting on stdin with `curl --config -`. `env:` and stdin are the
+   channels; an argument is not one.
+2. **npm publishes with a job-scoped npmrc.** Both publish pipelines create
+   `$(Agent.TempDirectory)/npm-publish-<build>.npmrc` under `umask 077` — so it
+   is `0600` before the token is written into it, not after — pass it to `npm
+   publish` with `--userconfig`, and remove it in an `EXIT` trap. Nothing is
+   written to `~/.npmrc`, which would outlive the step and, on a self-hosted
+   agent, the build.
+3. **Artifact content is constrained before it can act as a command.** The
+   publish jobs read a version and a tarball path out of an artifact staged by
+   the job that ran repository code, and echo them into
+   `##vso[task.setvariable]`. The agent obeys any logging command that starts a
+   line of step output, so those values are matched against a whole-value
+   pattern with bash's `[[ … =~ ]]` first. `grep -Eq '^…$'` is not sufficient
+   and is rejected by the guard: grep matches when *any* line matches, so it
+   accepts `1.2.3\n##vso[task.prependpath]…`.
+
+The same rule covers test output. `scripts/report-test-results.ts` copies a
+JUnit test title and failure message into `##vso[task.logissue]` annotations,
+and a JUnit `name="…"` attribute may contain a raw newline — so a test titled
+`ok\n##vso[task.setvariable …]` used to be executed rather than reported. Every
+interpolated value now goes through a neutraliser that puts it on one line and
+defangs `##vso[` / `##[`. `tests/lite/unit/ci-log-command-injection.test.ts`
+asserts that both that script and `scripts/strip-logging-commands.sh` emit only
+the logging commands they compose themselves — and that they still report the
+test, so the fix cannot be silence.
+
+#### Credentialed pipelines run only from the protected ref
+
+`pr: none` and a `- master` branch filter describe a pipeline's *automatic*
+triggers. Neither says anything about a **manual queue**, which may name any ref
+— and Azure reads the pipeline definition from the ref being built, so a run
+queued from another branch executes that branch's YAML.
+
+Every job that holds a credential outside PR CI therefore also carries:
+
+```yaml
+condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
+```
+
+The full ref, not `Build.SourceBranchName`: that variable is the last path
+segment, so a tag named `master`, or a branch named `heads/master`, satisfies a
+check written against it while being a different ref. A guard clause rejects
+`Build.SourceBranchName` in a condition anywhere.
+
+This condition is not by itself the control — a run from another ref could
+simply not have it, because it is that ref's YAML that runs. It is what states
+the rule for every run still executing master's definition; the enforceable half
+is the **branch-control check** on each protected resource, listed below.
 
 #### Changing CI
 
@@ -528,17 +600,26 @@ protections above are conventions rather than controls.
   the resources PR CI uses: a PR build runs from `refs/pull/<n>/merge` and would
   be blocked outright, taking the lab-site and report previews with it. Apply it
   to the release and publish pipelines, where every run is a master run, and rely
-  on the required-template check for PR CI.
+  on the required-template check for PR CI. Every credentialed job in those
+  pipelines already carries the matching YAML condition
+  ([above](#credentialed-pipelines-run-only-from-the-protected-ref)), but a run
+  queued from another ref executes that ref's YAML and can simply omit it — the
+  branch-control check is the half that a rewritten YAML cannot reach.
 - **Branch control on `BabylonJS-BrowserStack`.** No pull-request build has any
   legitimate use for it now. Restricting it to `refs/heads/master` makes that a
   server-side fact rather than a repository convention, and is the single check
   that most directly enforces the move described in
   [Cloud browser tests run post-merge](#cloud-browser-tests-run-post-merge).
-- **`NPM_TOKEN` should be a granular publish-only token.** It is now in scope only
-  in a `checkout: none` job that runs `npm publish --ignore-scripts` on a tarball
-  built by an earlier, credential-free job, so no repository lifecycle script can
-  observe it. Scoping the token to the two published packages bounds what a
-  failure of that boundary would be worth.
+- **`NPM_TOKEN` should be a granular publish-only token, in a protected variable
+  group.** It is now used only in a `checkout: none` job that runs `npm publish
+  --ignore-scripts` on a tarball built by an earlier, credential-free job,
+  through a `0600` npmrc in the agent's temp directory that is deleted when the
+  step ends. Scoping the token to the published packages bounds what a failure of
+  that boundary would be worth. Note that a **pipeline-level UI variable is not a
+  protected resource**: like `GITHUB_TOKEN` above, `NPM_TOKEN` should come from a
+  variable group scoped to the publishing job, so the required-template and
+  branch-control checks cover it — while it lives in the pipeline's UI variables,
+  every job in that definition can ask for it and no check applies.
 - **Fork secrets stay off.** "Make secrets available to builds of forks" and
   "Make fork builds run with the same permissions" must both be disabled.
   Enabling either hands every secret above to fork-authored code.
