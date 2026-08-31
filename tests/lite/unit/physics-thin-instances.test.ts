@@ -4,6 +4,7 @@ import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { CharacterCollisionObservable, PhysicsCharacterController } from "../../../packages/babylon-lite/src/physics/character-controller";
 import { onPhysicsCollision } from "../../../packages/babylon-lite/src/physics/havok-collision";
+import { physicsRaycast } from "../../../packages/babylon-lite/src/physics/havok-queries";
 import {
     createHavokWorld,
     createPhysicsBody,
@@ -222,6 +223,24 @@ describe("thin-instance physics bodies", () => {
             impulse: 4.5,
             distance: -0.25,
         });
+    });
+
+    it("reports the thin-instance index from a raycast hit", async () => {
+        const hknp = makeMockHknp();
+        Object.assign(hknp, {
+            HP_QueryCollector_Create: vi.fn(() => [0, ["collector"]]),
+            HP_World_CastRayWithCollector: vi.fn(),
+            HP_QueryCollector_GetNumHits: vi.fn(() => [0, 1]),
+            HP_QueryCollector_GetCastRayResult: vi.fn(() => [0, [0.5, [[2], null, null, [0, 4, 0], [0, 1, 0], -1]]]),
+        });
+        const world = createHavokWorld(makeScene(), hknp);
+        await enableHavokThinInstancePhysics(world);
+        const body = createPhysicsBody(world, makeThinMesh(), PhysicsMotionType.STATIC);
+
+        const result = physicsRaycast(world, { x: 0, y: 10, z: 0 }, { x: 0, y: 0, z: 0 });
+
+        expect(result.body).toBe(body);
+        expect(result.bodyIndex).toBe(1);
     });
 
     it("applies character-controller impulses to the struck native instance", async () => {

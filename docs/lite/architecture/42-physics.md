@@ -262,6 +262,9 @@ last axis is unlocked.
   Body-aware events include `bodyAIndex` / `bodyBIndex` (`-1` when an event refers
   to a body that is no longer tracked).
 - **Queries** (`havok-queries.ts`): `physicsRaycast`, `shapeCast`, `shapeProximity`.
+  Raycasts return the shared Lite `body` plus `bodyIndex`, the zero-based
+  thin-instance index resolved from the native hit handle (`0` for ordinary
+  bodies and `-1` when no tracked body is resolved), matching Babylon.js.
   Shape casts accept one `ignoreBody`, matching Havok's single optional ignored body
   ID, so callers can sweep a body's own shape without immediately hitting that body.
 - **Heightfield** (`havok-heightfield.ts`): `createHeightFieldShape`.
