@@ -286,6 +286,8 @@ function liteConstraintType(type: PhysicsConstraintType): LitePhysicsConstraintT
             return LitePhysicsConstraintType.PRISMATIC;
         case PhysicsConstraintType.SIX_DOF:
             return LitePhysicsConstraintType.SIX_DOF;
+        default:
+            throw new Error(`Invalid PhysicsConstraintType value: ${type}`);
     }
 }
 
@@ -305,6 +307,8 @@ function liteConstraintAxis(axis: PhysicsConstraintAxis): LitePhysicsConstraintA
             return LitePhysicsConstraintAxis.ANGULAR_Z;
         case PhysicsConstraintAxis.LINEAR_DISTANCE:
             return LitePhysicsConstraintAxis.LINEAR_DISTANCE;
+        default:
+            throw new Error(`Invalid PhysicsConstraintAxis value: ${axis}`);
     }
 }
 

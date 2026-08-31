@@ -12,7 +12,11 @@ import {
     PhysicsShapeType,
     PhysicsMotionType,
     PhysicsPrestepType,
+    PhysicsConstraint,
+    PhysicsConstraintAxis,
     PhysicsConstraintType,
+    Physics6DoFConstraint,
+    Physics6DoFLimit,
     HingeConstraint,
     PhysicsCharacterController,
 } from "../src/physics/physics";
@@ -322,6 +326,24 @@ describe("PhysicsEngine", () => {
             expect(hknp.HP_Body_Create).not.toHaveBeenCalled();
             expect(hknp.HP_Shape_CreateBox).not.toHaveBeenCalled();
             expect(node.physicsBody).toBe(firstBody);
+        });
+
+        it("rejects invalid constraint enum values before calling Lite", () => {
+            const hknp = makeAggregateMockHknp();
+            const plugin = new HavokPlugin(true, hknp);
+            plugin._attachToLiteScene(makeScene());
+            const physicsEngine = new PhysicsEngine(plugin, Vector3.Zero());
+            const scene = { getPhysicsEngine: () => physicsEngine } as unknown as Scene;
+            const parent = new PhysicsBody(makePhysicsNode(scene), PhysicsMotionType.STATIC, false, scene);
+            const child = new PhysicsBody(makePhysicsNode(scene), PhysicsMotionType.DYNAMIC, false, scene);
+            const invalidType = new PhysicsConstraint(99 as PhysicsConstraintType, {}, scene);
+            const invalidLimit = new Physics6DoFLimit();
+            invalidLimit.axis = 98 as PhysicsConstraintAxis;
+            const invalidAxis = new Physics6DoFConstraint({}, [invalidLimit], scene);
+
+            expect(() => parent.addConstraint(child, invalidType)).toThrow("Invalid PhysicsConstraintType value: 99");
+            expect(() => parent.addConstraint(child, invalidAxis)).toThrow("Invalid PhysicsConstraintAxis value: 98");
+            expect(hknp.HP_Constraint_Create).not.toHaveBeenCalled();
         });
 
         it("fails before allocation for parented nodes and thin instances", () => {
