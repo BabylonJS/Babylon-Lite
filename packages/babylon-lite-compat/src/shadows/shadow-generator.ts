@@ -171,13 +171,21 @@ export class ShadowGenerator {
 
 /** Babylon.js `CascadedShadowGenerator` backed by Lite's native CSM generator. */
 export class CascadedShadowGenerator extends ShadowGenerator {
-    public numCascades = 4;
+    private _numCascades = 4;
     public lambda = 0.5;
     public cascadeBlendPercentage = 0.1;
     public stabilizeCascades = false;
     public shadowMaxZ: number | undefined;
     public depthClamp = true;
     public autoCalcDepthBounds = false;
+
+    public get numCascades(): number {
+        return this._numCascades;
+    }
+
+    public set numCascades(value: number) {
+        this._numCascades = Math.min(Math.max(value, 2), 4);
+    }
 
     public override getClassName(): string {
         return "CascadedShadowGenerator";

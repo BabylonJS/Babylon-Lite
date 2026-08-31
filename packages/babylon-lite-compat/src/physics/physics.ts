@@ -37,6 +37,7 @@ import {
     PhysicsConstraintAxis as LitePhysicsConstraintAxis,
     PhysicsConstraintType as LitePhysicsConstraintType,
     PhysicsShapeType as LitePhysicsShapeType,
+    releasePhysicsConstraint,
     releasePhysicsShape,
     removePhysicsBody,
     setPhysicsBodyAngularVelocity,
@@ -58,6 +59,7 @@ import type {
     Mesh as LiteMesh,
     PhysicsBody as LitePhysicsBody,
     PhysicsCharacterController as LitePhysicsCharacterController,
+    PhysicsConstraint as LitePhysicsConstraint,
     PhysicsMassProperties,
     PhysicsShape as LitePhysicsShape,
     PhysicsShapeParameters,
@@ -612,6 +614,7 @@ export class PhysicsBody {
 /** Babylon.js-shaped Physics V2 constraint backed by Lite's native constraint factory. */
 export class PhysicsConstraint {
     private _isBound = false;
+    private _lite: LitePhysicsConstraint | null = null;
 
     public constructor(
         public readonly type: PhysicsConstraintType,
@@ -638,7 +641,7 @@ export class PhysicsConstraint {
         if (requirePhysicsWorld(this._scene) !== world) {
             throw new Error("PhysicsConstraint and PhysicsBody must belong to the same scene");
         }
-        createPhysicsConstraint(
+        this._lite = createPhysicsConstraint(
             world,
             bodyA,
             bodyB,
@@ -647,6 +650,14 @@ export class PhysicsConstraint {
             this._limits.map((limit) => ({ ...limit, axis: liteConstraintAxis(limit.axis) }))
         );
         this._isBound = true;
+    }
+
+    public dispose(): void {
+        const constraint = this._lite;
+        if (constraint) {
+            releasePhysicsConstraint(requirePhysicsWorld(this._scene), constraint);
+            this._lite = null;
+        }
     }
 }
 

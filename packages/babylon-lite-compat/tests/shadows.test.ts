@@ -50,4 +50,17 @@ describe("CascadedShadowGenerator", () => {
         expect(light._lite.shadowGenerator).toEqual({ kind: "csm" });
         expect(setShadowTaskCasterMeshes).toHaveBeenCalledWith({ kind: "csm" }, []);
     });
+
+    it("clamps the cascade count to the Babylon.js range", () => {
+        const generator = new CascadedShadowGenerator(2048, new DirectionalLight("directional", new Vector3(0, -1, -1)));
+
+        generator.numCascades = 0;
+        expect(generator.numCascades).toBe(2);
+        generator.numCascades = 1;
+        expect(generator.numCascades).toBe(2);
+        generator.numCascades = 4;
+        expect(generator.numCascades).toBe(4);
+        generator.numCascades = 5;
+        expect(generator.numCascades).toBe(4);
+    });
 });

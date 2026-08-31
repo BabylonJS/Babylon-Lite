@@ -74,6 +74,7 @@ function makeAggregateMockHknp() {
         HP_Constraint_SetAxisMode: vi.fn(),
         HP_Constraint_SetCollisionsEnabled: vi.fn(),
         HP_Constraint_SetEnabled: vi.fn(),
+        HP_Constraint_Release: vi.fn(),
         HP_Shape_BuildMassProperties: () => [0, [[0, 0, 0], 1, [1, 1, 1], [0, 0, 0, 1]]],
         HP_QueryCollector_Create: vi.fn(() => [0, { __collector: true }]),
         HP_QueryCollector_Release: vi.fn(),
@@ -360,6 +361,12 @@ describe("PhysicsEngine", () => {
             expect(hknp.HP_Constraint_SetAnchorInChild).toHaveBeenCalledWith(expect.anything(), [0.25, 0, 0], [0, 0, 1], expect.anything());
             expect(hknp.HP_Constraint_SetAxisMode).toHaveBeenCalledTimes(5);
             expect(hknp.HP_Constraint_SetEnabled).toHaveBeenCalledWith(expect.anything(), true);
+
+            hinge.dispose();
+            hinge.dispose();
+
+            expect(hknp.HP_Constraint_SetEnabled).toHaveBeenCalledWith(expect.anything(), false);
+            expect(hknp.HP_Constraint_Release).toHaveBeenCalledOnce();
         });
     });
 
