@@ -71,6 +71,15 @@ export const FLOATS_PER_FRAME = 16;
 /** `vec4`s in the CSM receiver payload: 4 cascade matrices + viewFrustumZ + frustumLengths + shadowsInfo + csmParams. */
 export const CSM_RECEIVER_VEC4S = 20;
 
+/** Precreate byte views so recurring GPU uploads do not wrap the float arrays each frame. */
+export function createTrackUploadViews(frameData: Float32Array, infoData: Float32Array, csmData: Float32Array): readonly [Uint8Array, Uint8Array, Uint8Array] {
+    return [
+        new Uint8Array(frameData.buffer, frameData.byteOffset, frameData.byteLength),
+        new Uint8Array(infoData.buffer, infoData.byteOffset, infoData.byteLength),
+        new Uint8Array(csmData.buffer, csmData.byteOffset, csmData.byteLength),
+    ];
+}
+
 /** The four road sheets the node material samples, in the roles it gives them. */
 export interface TrackTextures {
     /** 2048×512 RGB straight-track diffuse. */
@@ -264,6 +273,7 @@ export function createTrackMaterial(engine: EngineContext, textures: TrackTextur
     const frameData = new Float32Array(RING_COUNT * FLOATS_PER_FRAME);
     const infoData = new Float32Array(RING_COUNT * 4);
     const csmData = new Float32Array(CSM_RECEIVER_VEC4S * 4);
+    const [frameBytes, infoBytes, csmBytes] = createTrackUploadViews(frameData, infoData, csmData);
 
     const material = createShaderMaterial({
         name: "antigrav-track",
@@ -296,9 +306,9 @@ export function createTrackMaterial(engine: EngineContext, textures: TrackTextur
     setShaderTexture(material, "boostArrow", textures.boost);
     setShaderTexture(material, "csmShadow", getCsmReceiverTexture(shadowGenerator));
 
-    const frameBuffer: StorageBuffer = createStorageBuffer(engine, frameData, "antigrav-track-frames");
-    const infoBuffer: StorageBuffer = createStorageBuffer(engine, infoData, "antigrav-track-info");
-    const csmBuffer: StorageBuffer = createStorageBuffer(engine, csmData, "antigrav-track-csm");
+    const frameBuffer: StorageBuffer = createStorageBuffer(engine, frameBytes, "antigrav-track-frames");
+    const infoBuffer: StorageBuffer = createStorageBuffer(engine, infoBytes, "antigrav-track-info");
+    const csmBuffer: StorageBuffer = createStorageBuffer(engine, csmBytes, "antigrav-track-csm");
     setShaderStorageBuffer(material, "trackFrames", frameBuffer);
     setShaderStorageBuffer(material, "trackInfo", infoBuffer);
     setShaderStorageBuffer(material, "csmReceiver", csmBuffer);
@@ -311,7 +321,7 @@ export function createTrackMaterial(engine: EngineContext, textures: TrackTextur
             return;
         }
         csmData.set(data);
-        updateStorageBuffer(engine, csmBuffer, csmData);
+        updateStorageBuffer(engine, csmBuffer, csmBytes);
     });
 
     const casterMaterial = createShaderMaterial({
@@ -336,8 +346,8 @@ export function createTrackMaterial(engine: EngineContext, textures: TrackTextur
             if (disposed) {
                 return;
             }
-            updateStorageBuffer(engine, frameBuffer, frameData);
-            updateStorageBuffer(engine, infoBuffer, infoData);
+            updateStorageBuffer(engine, frameBuffer, frameBytes);
+            updateStorageBuffer(engine, infoBuffer, infoBytes);
         },
         dispose(): void {
             if (disposed) {

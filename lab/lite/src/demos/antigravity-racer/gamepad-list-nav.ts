@@ -25,6 +25,7 @@ export interface ButtonListNav {
 
 export function createButtonListNav(buttons: readonly HTMLButtonElement[]): ButtonListNav {
     let focusIndex = 0;
+    const managedIndex = (element: Element | null): number => buttons.indexOf(element as HTMLButtonElement);
     const focusButton = (i: number): void => {
         if (buttons.length === 0) {
             return;
@@ -32,6 +33,14 @@ export function createButtonListNav(buttons: readonly HTMLButtonElement[]): Butt
         focusIndex = ((i % buttons.length) + buttons.length) % buttons.length;
         buttons[focusIndex]?.focus();
     };
+    buttons.forEach((button, index) => {
+        button.addEventListener("focus", () => {
+            focusIndex = index;
+        });
+        button.addEventListener("pointerdown", () => {
+            focusIndex = index;
+        });
+    });
     return {
         activate(input): void {
             input.resetNavEdges();
@@ -41,13 +50,20 @@ export function createButtonListNav(buttons: readonly HTMLButtonElement[]): Butt
             input.resetNavEdges();
         },
         poll(input): void {
+            const activeIndex = managedIndex(document.activeElement);
+            if (activeIndex >= 0) {
+                focusIndex = activeIndex;
+            }
             if (input.consumeMenuDown()) {
                 focusButton(focusIndex + 1);
             } else if (input.consumeMenuUp()) {
                 focusButton(focusIndex - 1);
             }
             if (input.consumeConfirm()) {
-                (document.activeElement as HTMLElement | null)?.click?.();
+                const activeButtonIndex = managedIndex(document.activeElement);
+                if (activeButtonIndex >= 0) {
+                    buttons[activeButtonIndex]?.click();
+                }
             }
         },
     };

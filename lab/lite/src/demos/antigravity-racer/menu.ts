@@ -41,7 +41,7 @@ export function createMainMenu(handlers: MainMenuHandlers): MainMenu {
             <div class="ag-menu-kicker">BABYLON LITE DEMO</div>
             <h1 class="ag-menu-title">ANTIGRAVITY<span>RACER</span></h1>
             <p class="ag-menu-tagline">Bank through a floating loop track. Boost off the energy strips. Beat the field.</p>
-            <div class="ag-menu-buttons" role="menu">
+            <div class="ag-menu-buttons">
                 <button type="button" class="ag-btn ag-btn-primary" data-action="race1p">🏁 Race (1 Player)</button>
                 <button type="button" class="ag-btn" data-action="race2p">🎮 Split-Screen (2 Players)</button>
                 <button type="button" class="ag-btn" data-action="test">🛠 Test Track (no opponents)</button>
