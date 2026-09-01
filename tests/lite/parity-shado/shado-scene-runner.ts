@@ -1,5 +1,5 @@
 import { createHeadlessCanvas, encodePng, installHeadlessKtx2Transcoder, installHeadlessWebGpu, installImageDecoder, type HeadlessGpu } from "@knervous/shado/devtools";
-import { createCanvas as createRasterCanvas } from "@napi-rs/canvas";
+import { createCanvas as createRasterCanvas, ImageData as RasterImageData } from "@napi-rs/canvas";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -43,6 +43,11 @@ interface LiteRuntime {
 
 interface TestGlobals {
     __shadoParityEngines?: TestEngine[];
+}
+
+interface HeadlessImageBitmap extends Uint8Array {
+    height: number;
+    width: number;
 }
 
 class BrowserWorker {
@@ -106,10 +111,12 @@ export interface ShadoSceneResult {
 }
 
 export interface ShadoSceneOptions {
+    height?: number;
     query?: string;
     settleMs?: number;
     timeoutMs?: number;
     waitFlag?: string;
+    width?: number;
 }
 
 let server: ViteDevServer | null = null;
@@ -117,6 +124,117 @@ let headlessGpu: HeadlessGpu | null = null;
 let lite: LiteRuntime | null = null;
 let serverOrigin = "";
 let originalFetch: typeof fetch | null = null;
+let originalGpu: GPU | null = null;
+
+function bindMember(target: object, property: PropertyKey): unknown {
+    const value = Reflect.get(target, property);
+    return typeof value === "function" ? value.bind(target) : value;
+}
+
+function readCoordinate(value: unknown, key: "x" | "y" | "width" | "height", index: number, fallback: number): number {
+    if (Array.isArray(value)) {
+        return value[index] ?? fallback;
+    }
+    if (typeof value === "object" && value !== null) {
+        const coordinate = Reflect.get(value, key);
+        if (typeof coordinate === "number") {
+            return coordinate;
+        }
+    }
+    return fallback;
+}
+
+function isHeadlessImageBitmap(value: unknown): value is HeadlessImageBitmap {
+    return value instanceof Uint8Array && typeof Reflect.get(value, "width") === "number" && typeof Reflect.get(value, "height") === "number";
+}
+
+function adaptShadoQueue(queue: GPUQueue): GPUQueue {
+    return new Proxy(queue, {
+        get(target, property) {
+            if (property !== "copyExternalImageToTexture") {
+                return bindMember(target, property);
+            }
+            return (source: GPUImageCopyExternalImage, destination: GPUImageCopyTextureTagged, copySize: GPUExtent3D): void => {
+                const image = source.source;
+                if (!isHeadlessImageBitmap(image)) {
+                    target.copyExternalImageToTexture(source, destination, copySize);
+                    return;
+                }
+
+                const width = readCoordinate(copySize, "width", 0, image.width);
+                const height = readCoordinate(copySize, "height", 1, image.height);
+                const originX = readCoordinate(source.origin, "x", 0, 0);
+                const originY = readCoordinate(source.origin, "y", 1, 0);
+                if (originX < 0 || originY < 0 || originX + width > image.width || originY + height > image.height) {
+                    throw new RangeError("External image copy exceeds the decoded image bounds");
+                }
+
+                const rowBytes = width * 4;
+                const imageRowBytes = image.width * 4;
+                const pixels = new Uint8Array(rowBytes * height);
+                for (let destinationRow = 0; destinationRow < height; destinationRow++) {
+                    const sourceRow = originY + (source.flipY ? height - 1 - destinationRow : destinationRow);
+                    const sourceOffset = sourceRow * imageRowBytes + originX * 4;
+                    pixels.set(image.subarray(sourceOffset, sourceOffset + rowBytes), destinationRow * rowBytes);
+                }
+
+                target.writeTexture(
+                    {
+                        texture: destination.texture,
+                        mipLevel: destination.mipLevel,
+                        origin: destination.origin,
+                        aspect: destination.aspect,
+                    },
+                    pixels,
+                    { bytesPerRow: rowBytes, rowsPerImage: height },
+                    { width, height, depthOrArrayLayers: 1 }
+                );
+            };
+        },
+    });
+}
+
+function adaptShadoDevice(device: GPUDevice): GPUDevice {
+    let queue: GPUQueue | null = null;
+    return new Proxy(device, {
+        get(target, property) {
+            if (property === "queue") {
+                return (queue ??= adaptShadoQueue(target.queue));
+            }
+            return bindMember(target, property);
+        },
+    });
+}
+
+function adaptShadoAdapter(adapter: GPUAdapter): GPUAdapter {
+    return new Proxy(adapter, {
+        get(target, property) {
+            if (property === "requestDevice") {
+                return async (descriptor?: GPUDeviceDescriptor) => adaptShadoDevice(await target.requestDevice(descriptor));
+            }
+            return bindMember(target, property);
+        },
+    });
+}
+
+function installShadoExternalImageCopyFix(): void {
+    originalGpu = navigator.gpu;
+    const gpu = originalGpu;
+    Object.defineProperty(navigator, "gpu", {
+        configurable: true,
+        value: new Proxy(gpu, {
+            get(target, property) {
+                if (property === "requestAdapter") {
+                    return async (options?: GPURequestAdapterOptions) => {
+                        const adapter = await target.requestAdapter(options);
+                        return adapter ? adaptShadoAdapter(adapter) : null;
+                    };
+                }
+                return bindMember(target, property);
+            },
+        }),
+    });
+}
 
 function liteAliasPlugin(): Plugin {
     return {
@@ -160,11 +278,51 @@ function decorateCanvas(canvas: TestCanvas): TestCanvas {
     return canvas;
 }
 
+function createRasterCanvasElement(): TestCanvas {
+    const canvas = createRasterCanvas(1, 1);
+    return new Proxy(canvas, {
+        set(target, property, value) {
+            return Reflect.set(target, property, value, target);
+        },
+        get(target, property) {
+            if (property !== "getContext") {
+                return bindMember(target, property);
+            }
+            return (contextId: string, options?: unknown) => {
+                const context = Reflect.apply(target.getContext, target, [contextId, options]);
+                if (contextId !== "2d" || !context) {
+                    return context;
+                }
+                return new Proxy(context, {
+                    set(contextTarget, contextProperty, value) {
+                        return Reflect.set(contextTarget, contextProperty, value, contextTarget);
+                    },
+                    get(contextTarget, contextProperty) {
+                        if (contextProperty !== "drawImage") {
+                            return bindMember(contextTarget, contextProperty);
+                        }
+                        return (image: unknown, ...args: unknown[]) => {
+                            if (!isHeadlessImageBitmap(image)) {
+                                return Reflect.apply(contextTarget.drawImage, contextTarget, [image, ...args]);
+                            }
+                            const source = createRasterCanvas(image.width, image.height);
+                            const sourceContext = source.getContext("2d");
+                            const pixels = new Uint8ClampedArray(image.buffer, image.byteOffset, image.byteLength);
+                            sourceContext.putImageData(new RasterImageData(pixels, image.width, image.height), 0, 0);
+                            return Reflect.apply(contextTarget.drawImage, contextTarget, [source, ...args]);
+                        };
+                    },
+                });
+            };
+        },
+    }) as unknown as TestCanvas;
+}
+
 function installDom(canvas: TestCanvas, query: string): void {
     const listeners = new EventTarget();
     const createElement = (tagName: string): Record<string, unknown> => {
         if (tagName.toLowerCase() === "canvas") {
-            return decorateCanvas(createRasterCanvas(1, 1) as unknown as TestCanvas) as unknown as Record<string, unknown>;
+            return decorateCanvas(createRasterCanvasElement()) as unknown as Record<string, unknown>;
         }
         return {
             style: {},
@@ -282,6 +440,7 @@ export async function startShadoSceneRunner(): Promise<void> {
     }
 
     headlessGpu = await installHeadlessWebGpu();
+    installShadoExternalImageCopyFix();
     await installHeadlessKtx2Transcoder();
     installImageDecoder(async (bytes) => {
         const { data, info } = await sharp(bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
@@ -331,6 +490,10 @@ export async function stopShadoSceneRunner(): Promise<void> {
     }
     await server?.close();
     server = null;
+    if (originalGpu) {
+        Object.defineProperty(navigator, "gpu", { configurable: true, value: originalGpu });
+        originalGpu = null;
+    }
     headlessGpu?.dispose();
     headlessGpu = null;
     lite = null;
@@ -343,7 +506,7 @@ export async function renderShadoScene(sceneId: number, outputPath: string, opti
 
     const query = options.query ?? "";
     const timeoutMs = options.timeoutMs ?? 60_000;
-    const canvas = decorateCanvas(createHeadlessCanvas(1280, 720) as unknown as TestCanvas);
+    const canvas = decorateCanvas(createHeadlessCanvas(options.width ?? 1280, options.height ?? 720) as unknown as TestCanvas);
     installDom(canvas, query);
 
     const globals = globalThis as typeof globalThis & TestGlobals;

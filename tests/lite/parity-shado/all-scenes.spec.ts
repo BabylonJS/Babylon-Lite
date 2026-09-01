@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { PNG } from "pngjs";
 import type { SceneConfig } from "../../shared/compare-core";
 import { compareImages, shouldSkipParity } from "../parity/compare-utils";
 import { renderShadoScene, startShadoSceneRunner, stopShadoSceneRunner, type ShadoSceneOptions } from "./shado-scene-runner";
@@ -64,7 +65,12 @@ for (const sceneConfig of sceneConfigs) {
         test.skip(shouldSkipParity(sceneConfig), "Scene excluded from parity");
         test.skip(!fs.existsSync(goldenPath), "No committed golden is available");
 
-        const { actualPath } = await renderShadoScene(sceneConfig.id, testInfo.outputPath(`scene${sceneConfig.id}-actual.png`), sceneOptions.get(sceneConfig.id));
+        const golden = PNG.sync.read(fs.readFileSync(goldenPath));
+        const { actualPath } = await renderShadoScene(sceneConfig.id, testInfo.outputPath(`scene${sceneConfig.id}-actual.png`), {
+            ...sceneOptions.get(sceneConfig.id),
+            width: golden.width,
+            height: golden.height,
+        });
         const result = compareImages(actualPath, goldenPath);
         expect(result.mad, `MAD should be <= ${sceneConfig.maxMad}; max channel delta was ${result.maxDiff}`).toBeLessThanOrEqual(sceneConfig.maxMad);
     });
