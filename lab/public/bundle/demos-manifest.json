@@ -66,5 +66,9 @@
   "npe-sprite2d": {
     "rawKB": 33.9,
     "gzipKB": 21.5
+  },
+  "antigravity-racer": {
+    "rawKB": 230.9,
+    "gzipKB": 89.2
   }
 }

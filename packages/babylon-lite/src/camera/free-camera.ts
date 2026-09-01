@@ -35,6 +35,15 @@ export interface FreeCamera extends Camera, IWorldMatrixProvider, IParentable {
 
 /** Create a FreeCamera at the given position looking at target. Pure data, no scene knowledge. */
 export function createFreeCamera(position: Vec3, target: Vec3): FreeCamera {
+    return _createFreeCamera(position, target, Vec3Up);
+}
+
+/** @internal Shared FreeCamera factory. `up` is read fresh every time the local matrix is rebuilt, so
+ *  it accepts either the shared immutable `Vec3Up` constant (plain {@link createFreeCamera}) or a
+ *  mutable vector owned by a caller (`createBankedFreeCamera`, whose `ObservableVec3` up vector rolls
+ *  the camera when written). This module has no notion of "banked" — it just reads `up.x/y/z` — so the
+ *  banked opt-in adds zero branches and zero extra allocations here. */
+export function _createFreeCamera(position: Vec3, target: Vec3, up: Vec3): FreeCamera {
     // Compute initial yaw/pitch from position→target direction
     const dx = target.x - position.x;
     const dy = target.y - position.y;
@@ -44,7 +53,7 @@ export function createFreeCamera(position: Vec3, target: Vec3): FreeCamera {
     const _localMat: Mat4 = allocateMat4();
 
     function cameraLocalWorldMatrix(): Mat4 {
-        mat4LookAtWorldLHToRef(_localMat as unknown as Mat4Storage, cam.position, cam.target, Vec3Up);
+        mat4LookAtWorldLHToRef(_localMat as unknown as Mat4Storage, cam.position, cam.target, up);
         return _localMat;
     }
 
