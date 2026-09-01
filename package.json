@@ -69,10 +69,12 @@
         "docs:check": "typedoc --emit none --treatValidationWarningsAsErrors"
     },
     "devDependencies": {
+        "@babylonjs/ktx2decoder": "9.22.1",
         "@eslint/js": "^10.0.1",
         "@kmamal/gpu": "0.1.6",
         "@knervous/shado": "1.8.0",
         "@microsoft/api-extractor": "^7.58.12",
+        "@napi-rs/canvas": "0.1.97",
         "@playwright/test": "^1.62.1",
         "@types/node": "^26.2.0",
         "@types/pngjs": "^6.0.5",
@@ -92,6 +94,7 @@
         "node-web-audio-api": "^2.2.0",
         "pngjs": "^7.0.0",
         "rollup-plugin-visualizer": "^7.1.1",
+        "sharp": "^0.35.3",
         "terser": "5.49.0",
         "tsx": "^4.23.12",
         "typedoc": "^0.28.20",

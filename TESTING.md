@@ -112,15 +112,26 @@ BSTACK_SESSIONS_REQUIRED=2 bash scripts/browserstack-wait.sh pnpm test:parity-cl
 
 ### Experimental headless parity with Shado
 
-`pnpm test:parity:shado` builds the local Lite package and renders scene 159
-server-side through Shado's Dawn adapter. It launches no browser and compares
-the raw GPU readback against the same committed Babylon.js golden.
+`pnpm test:parity:shado` builds the local Lite package and runs the existing
+Lite scene modules server-side through Vite SSR and Shado's Dawn adapter. It
+launches no browser, reads the rendered swapchain texture back from the GPU,
+and compares every parity-enabled scene that has a committed Babylon.js golden.
+Scenes without committed goldens are skipped because a browser-free run cannot
+generate its own Babylon.js reference.
 
-This is intentionally a non-blocking CI experiment. Shado sessions construct
-scenes through a Node API rather than loading the existing browser scene pages,
-so only scene 159 is ported today. BrowserStack remains the full parity gate
-until the headless path has broader scene coverage and stable hosted-Linux
-results.
+Use `SHADO_SCENES` for a focused run:
+
+```sh
+REUSE_BROWSER=1 SHADO_SCENES=159,161 pnpm test:parity:shado
+```
+
+The runner supplies Node adapters for image decoding, generated 2D canvases,
+KTX2 transcoding, and inline workers. Scene-specific capture times and readiness
+flags are mirrored where deterministic parity requires them.
+
+This remains an intentionally non-blocking CI experiment while Dawn/Mesa
+differences from the browser-generated goldens are classified. BrowserStack
+continues to be the complete parity gate.
 
 ### Golden References
 
