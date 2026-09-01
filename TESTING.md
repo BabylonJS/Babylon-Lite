@@ -12,6 +12,7 @@ jobs on every PR targeting `master`.
 | ------------------------ | -------------------------------------------------------- |
 | `pnpm test`              | Build bundles → parity tests (local)                     |
 | `pnpm test:parity`       | Parity pixel-diff tests (local Chrome)                   |
+| `pnpm test:parity:shado` | Experimental headless parity test in Node via Shado/Dawn |
 | `pnpm test:parity-cloud` | Parity tests on BrowserStack (macOS Chrome, real WebGPU) |
 | `pnpm test:perf`         | Performance regression tests (local)                     |
 | `pnpm test:perf-cloud`   | Performance regression on BrowserStack                   |
@@ -108,6 +109,18 @@ pnpm test:parity-cloud
 # Shard across up to N sessions (falls back to fewer when the plan is busy):
 BSTACK_SESSIONS_REQUIRED=2 bash scripts/browserstack-wait.sh pnpm test:parity-cloud
 ```
+
+### Experimental headless parity with Shado
+
+`pnpm test:parity:shado` builds the local Lite package and renders scene 159
+server-side through Shado's Dawn adapter. It launches no browser and compares
+the raw GPU readback against the same committed Babylon.js golden.
+
+This is intentionally a non-blocking CI experiment. Shado sessions construct
+scenes through a Node API rather than loading the existing browser scene pages,
+so only scene 159 is ported today. BrowserStack remains the full parity gate
+until the headless path has broader scene coverage and stable hosted-Linux
+results.
 
 ### Golden References
 
@@ -305,13 +318,13 @@ For local development, add these to `.env.local` (git-ignored).
 
 Five parallel jobs:
 
-| Job                 | What it does                                           |
-| ------------------- | ------------------------------------------------------ |
-| **Unit Tests**      | Vitest unit tests + Playwright plumbing tests          |
-| **Bundle Size**     | Ceiling checks + delta vs baseline                     |
-| **Perf Regression** | Current vs baseline on BrowserStack (macOS Chrome)     |
-| **Parity (Cloud)**  | Pixel-diff on BrowserStack (macOS Chrome, real WebGPU) |
-| **Lint**            | ESLint + TypeScript `--noEmit` type-check              |
+| Job                 | What it does                                                              |
+| ------------------- | ------------------------------------------------------------------------- |
+| **Unit Tests**      | Vitest unit tests + Playwright plumbing tests                             |
+| **Bundle Size**     | Ceiling checks + delta vs baseline                                        |
+| **Perf Regression** | Current vs baseline on BrowserStack (macOS Chrome)                        |
+| **Parity (Cloud)**  | Non-blocking Shado/Dawn experiment, then the BrowserStack pixel-diff gate |
+| **Lint**            | ESLint + TypeScript `--noEmit` type-check                                 |
 
 ### Required Pipeline Variable Groups
 

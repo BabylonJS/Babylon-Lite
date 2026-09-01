@@ -501,6 +501,20 @@ stages:
                       SKIP_MEASURE: "true"
                       BUNDLE_SCENES: "$(AFFECTED_PARITY_SCENES)"
 
+                # Experimental Node/Dawn parity path. It currently covers one
+                # representative ShaderMaterial scene and remains non-blocking
+                # until broader scene coverage is proven on hosted Linux agents.
+                - script: |
+                      sudo apt-get update
+                      sudo apt-get install --yes --no-install-recommends libvulkan1 mesa-vulkan-drivers
+                  displayName: "Install Dawn software Vulkan dependencies"
+                  condition: eq(variables['RUN_PARITY_TESTS'], 'true')
+
+                - script: pnpm test:parity:shado
+                  displayName: "Run headless parity experiment (Shado/Dawn)"
+                  condition: eq(variables['RUN_PARITY_TESTS'], 'true')
+                  continueOnError: true
+
                 # Run parity tests on BrowserStack (macOS Chrome with real WebGPU)
                 # via a direct CDP connection — NO browserstack-node-sdk. The wait
                 # script grabs up to BSTACK_SESSIONS_REQUIRED parallel sessions and
