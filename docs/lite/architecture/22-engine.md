@@ -171,11 +171,15 @@ Scenes read `engine._currentDelta` during their `_update()` step. If `scene.fixe
 Each frame consists of:
 
 1. **Create command encoder**: `device.createCommandEncoder({ label: "frame" })` and assign `engine._currentEncoder`.
-2. **Obtain swapchain view**: `engine.context.getCurrentTexture().createView()` and assign `engine._swapchainView`.
-3. **Update/record contexts**: For each registered `RenderingContext`, call `_update()` then `_record()`.
+2. **Prepare each surface**: run its optional screenshot pre-frame hook, then acquire the surface's current swapchain texture into `surface.scRT`.
+3. **Update/record contexts**: For each surface, call `_update()` then `_record()` on every registered `RenderingContext`.
     - A scene `_update()` runs before-render callbacks, material swaps, shadow maps, legacy pre-passes, and shared uniform updaters.
     - A scene `_record()` delegates to `scene._frameGraph.execute()`.
-4. **Submit**: finish the command encoder and submit via the reusable `engine._cbs` array to avoid per-frame array allocation.
+    - A render task that targets `scene.surface.scRT` re-reads that surface's attachment view immediately before opening the pass. It must not compare against `engine.scRT`, which identifies only the primary canvas and would leave auxiliary scenes submitting an expired build-time swapchain view.
+4. **Record screenshot copies**: each promoted surface with queued requests copies its just-rendered swapchain texture into one staging buffer.
+5. **Submit**: finish the command encoder and submit via the reusable `engine._cbs` array to avoid per-frame array allocation.
+
+The per-surface attachment refresh is required because `GPUCanvasContext.getCurrentTexture()` returns a new swapchain texture over time. Reusing the auxiliary surface's view captured during frame-graph build produces a WebGPU validation error; because one command buffer contains every surface's work, that invalid auxiliary pass also discards the primary canvas's rendering.
 
 ### Deferred Builder Execution
 
