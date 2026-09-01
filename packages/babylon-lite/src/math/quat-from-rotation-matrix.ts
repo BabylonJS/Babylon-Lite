@@ -8,23 +8,46 @@ import type { Mat4, Quat } from "./types.js";
  *  Shepperd's trace method, byte-for-byte matching Babylon.js
  *  `Quaternion.FromRotationMatrix`.
  *  @internal */
-export function _quatFromRotationBasis(m11: number, m12: number, m13: number, m21: number, m22: number, m23: number, m31: number, m32: number, m33: number): Quat {
+export function _quatFromRotationBasis(
+    m11: number,
+    m12: number,
+    m13: number,
+    m21: number,
+    m22: number,
+    m23: number,
+    m31: number,
+    m32: number,
+    m33: number,
+    out: Quat = { x: 0, y: 0, z: 0, w: 1 }
+): Quat {
     const trace = m11 + m22 + m33;
     let s: number;
     if (trace > 0) {
         s = 0.5 / Math.sqrt(trace + 1.0);
-        return { x: (m32 - m23) * s, y: (m13 - m31) * s, z: (m21 - m12) * s, w: 0.25 / s };
-    }
-    if (m11 > m22 && m11 > m33) {
+        out.x = (m32 - m23) * s;
+        out.y = (m13 - m31) * s;
+        out.z = (m21 - m12) * s;
+        out.w = 0.25 / s;
+    } else if (m11 > m22 && m11 > m33) {
         s = 2.0 * Math.sqrt(1.0 + m11 - m22 - m33);
-        return { x: 0.25 * s, y: (m12 + m21) / s, z: (m13 + m31) / s, w: (m32 - m23) / s };
-    }
-    if (m22 > m33) {
+        out.x = 0.25 * s;
+        out.y = (m12 + m21) / s;
+        out.z = (m13 + m31) / s;
+        out.w = (m32 - m23) / s;
+    } else if (m22 > m33) {
         s = 2.0 * Math.sqrt(1.0 + m22 - m11 - m33);
-        return { x: (m12 + m21) / s, y: 0.25 * s, z: (m23 + m32) / s, w: (m13 - m31) / s };
+        out.x = (m12 + m21) / s;
+        out.y = 0.25 * s;
+        out.z = (m23 + m32) / s;
+        out.w = (m13 - m31) / s;
+    } else {
+        s = 2.0 * Math.sqrt(1.0 + m33 - m11 - m22);
+        out.x = (m13 + m31) / s;
+        out.y = (m23 + m32) / s;
+        out.z = 0.25 * s;
+        out.w = (m21 - m12) / s;
     }
-    s = 2.0 * Math.sqrt(1.0 + m33 - m11 - m22);
-    return { x: (m13 + m31) / s, y: (m23 + m32) / s, z: 0.25 * s, w: (m21 - m12) / s };
+    return out;
 }
 
 /**

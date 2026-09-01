@@ -163,6 +163,8 @@ export interface PhysicsBody {
     readonly _instances?: PhysicsBodyInstances;
     /** @internal Reusable native transform payload for thin-instance prestep synchronization. */
     readonly _instanceTransform?: [number[], number[]];
+    /** @internal Reusable quaternion output paired with `_instanceTransform`. */
+    readonly _instanceRotation?: Quat;
     /** @internal */ readonly _world: PhysicsWorld;
     /** @internal */ _shape?: PhysicsShape | null;
     /** @internal */ _rotationLockMask?: number;

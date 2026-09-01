@@ -2,10 +2,11 @@ import { mat4ComposeInto } from "../math/mat4-compose-into.js";
 import { _quatFromRotationBasis } from "../math/quat-from-rotation-matrix.js";
 import { flushThinInstances } from "../mesh/thin-instance.js";
 import type { Mesh } from "../mesh/mesh.js";
+import type { Quat } from "../math/types.js";
 import { PhysicsPrestepType } from "./havok.js";
 import type { HavokThinInstanceContext, PhysicsBody, PhysicsBodyInstances, PhysicsMotionType, PhysicsWorld } from "./havok.js";
 
-function thinInstanceTransform(matrices: Float32Array | Float64Array, index: number, transform: [number[], number[]]): [number[], number[]] {
+function thinInstanceTransform(matrices: Float32Array | Float64Array, index: number, transform: [number[], number[]], rotation: Quat): [number[], number[]] {
     const offset = index * 16;
     const sx = Math.hypot(matrices[offset]!, matrices[offset + 1]!, matrices[offset + 2]!);
     const syMagnitude = Math.hypot(matrices[offset + 4]!, matrices[offset + 5]!, matrices[offset + 6]!);
@@ -18,7 +19,7 @@ function thinInstanceTransform(matrices: Float32Array | Float64Array, index: num
     const invSx = sx > 1e-8 ? 1 / sx : 0;
     const invSy = syMagnitude > 1e-8 ? 1 / sy : 0;
     const invSz = sz > 1e-8 ? 1 / sz : 0;
-    const rotation = _quatFromRotationBasis(
+    _quatFromRotationBasis(
         matrices[offset]! * invSx,
         matrices[offset + 4]! * invSy,
         matrices[offset + 8]! * invSz,
@@ -27,7 +28,8 @@ function thinInstanceTransform(matrices: Float32Array | Float64Array, index: num
         matrices[offset + 9]! * invSz,
         matrices[offset + 2]! * invSx,
         matrices[offset + 6]! * invSy,
-        matrices[offset + 10]! * invSz
+        matrices[offset + 10]! * invSz,
+        rotation
     );
     const invLength = 1 / Math.hypot(rotation.x, rotation.y, rotation.z, rotation.w);
     const positionOut = transform[0];
@@ -57,7 +59,7 @@ const instances: PhysicsBodyInstances = {
     syncToHavok(hknp, body) {
         const thin = (body.node as Mesh).thinInstances!;
         for (let i = 0; i < body._hkBodies!.length; i++) {
-            hknp.HP_Body_SetQTransform(body._hkBodies![i], thinInstanceTransform(thin.matrices, i, body._instanceTransform!));
+            hknp.HP_Body_SetQTransform(body._hkBodies![i], thinInstanceTransform(thin.matrices, i, body._instanceTransform!, body._instanceRotation!));
         }
     },
     setTransform(body, position, rotation) {
@@ -89,18 +91,20 @@ function createBody(world: PhysicsWorld, node: Mesh, motionType: PhysicsMotionTy
         [0, 0, 0],
         [0, 0, 0, 1],
     ];
+    const rotation: Quat = { x: 0, y: 0, z: 0, w: 1 };
     for (let i = 0; i < handles.length; i++) {
         const handle = hknp.HP_Body_Create()[1];
         handles[i] = handle;
         hknp.HP_Body_SetMotionType(handle, hkMotion);
         hknp.HP_World_AddBody(world._hkWorld, handle, startsAsleep);
-        hknp.HP_Body_SetQTransform(handle, thinInstanceTransform(thin.matrices, i, transform));
+        hknp.HP_Body_SetQTransform(handle, thinInstanceTransform(thin.matrices, i, transform, rotation));
     }
     const body: PhysicsBody = {
         _hkBody: handles[0],
         _hkBodies: handles,
         _instances: instances,
         _instanceTransform: transform,
+        _instanceRotation: rotation,
         _shape: null,
         _preStep: false,
         _prestepType: PhysicsPrestepType.TELEPORT,

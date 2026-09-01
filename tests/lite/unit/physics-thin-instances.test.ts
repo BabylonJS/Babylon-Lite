@@ -183,12 +183,22 @@ describe("thin-instance physics bodies", () => {
         const mesh = makeThinMesh();
         const world = createHavokWorld(scene, hknp);
         await enableHavokThinInstancePhysics(world);
-        createPhysicsBody(world, mesh, PhysicsMotionType.ANIMATED);
+        const body = createPhysicsBody(world, mesh, PhysicsMotionType.ANIMATED);
+        const rotationOutput = body._instanceRotation;
         mesh.thinInstances!.matrices[12] = 4;
         mesh.thinInstances!.matrices[28] = 9;
+        for (const offset of [0, 16]) {
+            mesh.thinInstances!.matrices[offset] = 0;
+            mesh.thinInstances!.matrices[offset + 1] = 1;
+            mesh.thinInstances!.matrices[offset + 4] = -1;
+            mesh.thinInstances!.matrices[offset + 5] = 0;
+        }
 
         stepFrame(scene);
 
+        expect(body._instanceRotation).toBe(rotationOutput);
+        expect(rotationOutput?.z).toBeCloseTo(Math.SQRT1_2);
+        expect(rotationOutput?.w).toBeCloseTo(Math.SQRT1_2);
         expect(hknp.HP_Body_SetQTransform.mock.calls[2]![1]).toBe(hknp.HP_Body_SetQTransform.mock.calls[3]![1]);
         expect(hknp.transforms.get(1)![0][0]).toBe(4);
         expect(hknp.transforms.get(2)![0][0]).toBe(9);
