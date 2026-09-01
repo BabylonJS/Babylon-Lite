@@ -1,0 +1,6 @@
+gpt-*
+gemini-*
+mai-code-*
+grok-*
+
+fallback: gpt-5.6-sol
