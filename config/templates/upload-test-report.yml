@@ -2,14 +2,39 @@
 # its link to the PR. Raw Playwright output and trace directories are never
 # accepted by this template.
 #
+# SECURITY CONTRACT (read before adding a call site)
+# --------------------------------------------------
+# Identical to config/templates/upload-static-site.yml: this template uses a
+# long-lived deploy token, so it MUST only run in a job that has executed no
+# repository-authored code (`checkout: none`, no install, no build, no tests).
+# The job that produced the report is untrusted, so it sanitizes the report and
+# publishes it as a pipeline artifact; this template then uploads that artifact
+# from a fresh job.
+#
+# This template deliberately does NOT gate on a pipeline variable such as the
+# former `ArtifactsSafe` flag. That flag was set by a repository-authored script
+# via `##vso[task.setvariable]`, so PR code could set it itself; the trusted job
+# boundary is the control, not a runtime variable.
+#
 # Parameters:
 #   reportType — allowlisted report/deploy name (perf or parity)
+#   reportDir  — directory holding the sanitized HTML report to upload
+#   postComment — post a PR comment with the report link. Master-only pipelines
+#     have no System.PullRequest context and pass false.
 #
 # Required pipeline variables:
 #   BabylonJS-Deployment variable group: DEPLOYMENT_SERVER, DEPLOY_TOKEN
 #   Report upload settings: DEPLOY_ENDPOINT_UPLOAD, STORAGE_ACCOUNT, SERVE_DOMAIN
+#   Scope these groups to the calling job — never to the whole pipeline.
 # Required service connection:
 #   BabylonBotPAT — GitHub PAT service connection for PR comments
+#
+# For a pull-request build Azure reads the pipeline definition from the pull
+# request itself, so a call site is only as trustworthy as the file it lives in.
+# Every PR-context call site must therefore sit in `config/templates/pr-ci.yml`,
+# which `azure-pipelines.yml` reaches through a repository resource pinned to
+# refs/heads/master, and must pass `requireHostAllowlist: true` so that a
+# runtime variable cannot stand in for a pinned destination host.
 
 parameters:
     - name: reportType
@@ -17,43 +42,202 @@ parameters:
       values:
           - parity
           - perf
+    - name: reportDir
+      type: string
+    # Compile-time allowlist of hosts DEPLOY_TOKEN may be sent to. Must be kept
+    # identical to the list in config/templates/upload-static-site.yml — a unit
+    # test asserts that. See that file for why this is a parameter and not a
+    # variable, and for the administrator action required to populate it.
+    - name: allowedDeployHosts
+      type: object
+      default: []
+    # True for any call site that a pull-request build can reach. The
+    # compile-time host allowlist is then the only permitted source of
+    # destination hosts, and an empty one aborts the upload rather than falling
+    # back to a runtime variable.
+    - name: requireHostAllowlist
+      type: boolean
+      default: false
+    - name: postComment
+      type: boolean
+      default: true
 
 steps:
     - script: |
           set -euo pipefail
-          REPORT_DIR="$(System.DefaultWorkingDirectory)/test-results/${{ parameters.reportType }}-report"
-          ARCHIVE="$(Build.SourcesDirectory)/_test_report.zip"
+          REPORT_DIR="${{ parameters.reportDir }}"
+          ARCHIVE="$(Build.ArtifactStagingDirectory)/_test_report.zip"
           trap 'rm -f "$ARCHIVE"' EXIT
 
-          if ! test -d "$REPORT_DIR"; then
-            echo "Allowlisted report directory is unavailable; refusing upload."
-            exit 1
+          # Build.BuildNumber is a read-only system variable, and reportType is a
+          # compile-time parameter constrained to the enum above, so the whole
+          # destination path is fixed before the job starts.
+          DEPLOY_PATH="lite/$(Build.BuildNumber)/testResults/${{ parameters.reportType }}"
+
+          case "$DEPLOY_PATH" in
+              *..*)
+                  echo "Refusing upload: deploy path '$DEPLOY_PATH' contains a parent-directory segment."
+                  exit 1
+                  ;;
+          esac
+
+          if ! printf '%s' "$DEPLOY_PATH" | grep -Eq '^lite/[A-Za-z0-9._-]+/testResults/(parity|perf)$'; then
+              echo "Refusing upload: deploy path '$DEPLOY_PATH' is not in the allowlist."
+              exit 1
           fi
 
-          cd "$REPORT_DIR"
-          zip -q -r "$ARCHIVE" .
-          cd "$(Build.SourcesDirectory)"
+          # An unresolved ADO macro arrives as literal text rather than an empty
+          # string, so an emptiness test alone is not sufficient.
+          for name in DEPLOYMENT_SERVER DEPLOY_ENDPOINT_UPLOAD STORAGE_ACCOUNT; do
+              value="${!name-}"
+              if test -z "$value"; then
+                  echo "Refusing upload: required deploy variable $name is empty."
+                  exit 1
+              fi
+              case "$value" in
+                  *'$'*)
+                      echo "Refusing upload: required deploy variable $name did not resolve."
+                      exit 1
+                      ;;
+              esac
+          done
 
-          curl --fail-with-body --silent --show-error "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD)" -X POST \
+          if test -z "${DEPLOY_TOKEN-}"; then
+              echo "Refusing upload: DEPLOY_TOKEN is missing."
+              exit 1
+          fi
+
+          case "$DEPLOYMENT_SERVER" in
+              https://*) ;;
+              *)
+                  echo "Refusing upload: DEPLOYMENT_SERVER must use https."
+                  exit 1
+                  ;;
+          esac
+
+          # Reject anything that could move the request -- and with it the
+          # Authorization header -- to a different host: embedded userinfo
+          # ('https://real-host@attacker/'), or a host containing characters
+          # that are not valid in a hostname or port.
+          DEPLOY_HOST="${DEPLOYMENT_SERVER#https://}"
+          DEPLOY_HOST="${DEPLOY_HOST%%/*}"
+          case "$DEPLOY_HOST" in
+              "" | *[!A-Za-z0-9.:-]*)
+                  echo "Refusing upload: DEPLOYMENT_SERVER host is empty or contains characters that are not permitted in a host."
+                  exit 1
+                  ;;
+          esac
+
+          # "It is https" is not a destination check -- an attacker's host serves
+          # https too, and neither is a *variable* holding the allowlist: a
+          # variable is something a run can be talked into changing, whether by
+          # `##vso[task.setvariable]` from an earlier step or by a queue-time
+          # override. COMPILE_TIME_HOSTS is rendered from the template parameter
+          # `allowedDeployHosts` when the run is compiled, before any step
+          # exists, so nothing that happens during the run can add to it.
+          COMPILE_TIME_HOSTS="${{ join(' ', parameters.allowedDeployHosts) }}"
+          REQUIRE_HOST_ALLOWLIST="${{ parameters.requireHostAllowlist }}"
+
+          if test -n "$COMPILE_TIME_HOSTS"; then
+              ALLOWLIST="$COMPILE_TIME_HOSTS"
+              ALLOWLIST_SOURCE="the compile-time allowedDeployHosts parameter"
+          elif test "$REQUIRE_HOST_ALLOWLIST" = "True" || test "$REQUIRE_HOST_ALLOWLIST" = "true"; then
+              echo "Refusing upload: allowedDeployHosts is empty and this call site may be reached by a pull-request build."
+              echo "A pull-request-reachable upload may only send DEPLOY_TOKEN to a host pinned at compile time."
+              echo "Add the deployment host to the allowedDeployHosts default in config/templates/upload-static-site.yml"
+              echo "and config/templates/upload-test-report.yml, in a pull request merged to master."
+              exit 1
+          else
+              ALLOWLIST="${DEPLOY_HOST_ALLOWLIST-}"
+              case "$ALLOWLIST" in
+                  *'$'*) ALLOWLIST="" ;;
+              esac
+              ALLOWLIST_SOURCE="the DEPLOY_HOST_ALLOWLIST variable"
+              if test -z "$ALLOWLIST"; then
+                  echo "##vso[task.logissue type=warning]allowedDeployHosts is empty and DEPLOY_HOST_ALLOWLIST is unset; this upload's destination is unpinned."
+              fi
+          fi
+
+          if test -n "$ALLOWLIST"; then
+              HOST_ALLOWED="false"
+              for allowed in $(printf '%s' "$ALLOWLIST" | tr ',' ' '); do
+                  if test "$DEPLOY_HOST" = "$allowed"; then
+                      HOST_ALLOWED="true"
+                  fi
+              done
+              if test "$HOST_ALLOWED" != "true"; then
+                  echo "Refusing upload: DEPLOYMENT_SERVER host '$DEPLOY_HOST' is not in $ALLOWLIST_SOURCE."
+                  exit 1
+              fi
+          fi
+
+          for name in DEPLOY_ENDPOINT_UPLOAD STORAGE_ACCOUNT; do
+              case "${!name}" in
+                  *[!A-Za-z0-9._/-]*)
+                      echo "Refusing upload: $name contains characters that are not permitted in a request field."
+                      exit 1
+                      ;;
+              esac
+          done
+
+          # The producing job stages this directory only after it has sanitized
+          # it. If it failed before that point there is simply nothing to
+          # publish, which is not itself an error -- that job is already red.
+          if ! test -d "$REPORT_DIR"; then
+              echo "No sanitized ${{ parameters.reportType }} report was staged; nothing to upload."
+              exit 0
+          fi
+
+          (cd "$REPORT_DIR" && zip -q -r "$ARCHIVE" .)
+
+          # DEPLOY_TOKEN is read from the environment rather than macro-expanded,
+          # so the secret is never written into the generated script body, and it
+          # reaches curl on stdin as a config file rather than in argv. An
+          # argument is not a private channel: it sits in the process's own
+          # /proc/<pid>/cmdline for the life of the call, readable by every
+          # process running as the same user on the agent, it is what `ps` prints,
+          # and agent diagnostics collect it. Log masking does not touch any of
+          # that. `--config -` takes the same `header =` setting `-H` does.
+          #
+          # The escaping is required because a curl config value is a quoted
+          # string: a token containing a backslash or a double quote would
+          # otherwise end the value early and send a truncated header.
+          #
+          # --proto '=https' keeps the Authorization header on the host validated
+          # above: curl does not follow redirects unless asked, and cannot be
+          # talked down to plain http by the server's response.
+          token_escaped=${DEPLOY_TOKEN//\\/\\\\}
+          token_escaped=${token_escaped//\"/\\\"}
+
+          printf 'header = "Authorization: Bearer %s"\n' "$token_escaped" |
+          curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --config - --fail-with-body --silent --show-error -X POST \
+            --proto '=https' --max-time 600 \
             -H "Content-Type: multipart/form-data" \
-            -H "Authorization: Bearer $(DEPLOY_TOKEN)" \
-            -F "path=lite/$(Build.BuildNumber)/testResults/${{ parameters.reportType }}" \
-            -F "storageAccount=$(STORAGE_ACCOUNT)" \
-            -F "zip=@$ARCHIVE"
+            -F "path=${DEPLOY_PATH}" \
+            -F "storageAccount=${STORAGE_ACCOUNT}" \
+            -F "zip=@${ARCHIVE}"
           echo "##vso[task.setvariable variable=ReportUploaded]true"
-      condition: and(failed(), eq(variables['ArtifactsSafe'], 'true'))
+      continueOnError: true
       displayName: "Upload ${{ parameters.reportType }} test report"
+      env:
+          DEPLOYMENT_SERVER: $(DEPLOYMENT_SERVER)
+          DEPLOY_ENDPOINT_UPLOAD: $(DEPLOY_ENDPOINT_UPLOAD)
+          DEPLOY_TOKEN: $(DEPLOY_TOKEN)
+          DEPLOY_HOST_ALLOWLIST: $(DEPLOY_HOST_ALLOWLIST)
+          STORAGE_ACCOUNT: $(STORAGE_ACCOUNT)
 
-    - task: GitHubComment@0
-      condition: and(failed(), eq(variables['ArtifactsSafe'], 'true'), eq(variables['ReportUploaded'], 'true'))
-      displayName: "Post ${{ parameters.reportType }} report link to PR"
-      inputs:
-          gitHubConnection: "BabylonBotPAT"
-          repositoryName: "$(Build.Repository.Name)"
-          id: "$(System.PullRequest.PullRequestNumber)"
-          comment: |
-              ### 📋 ${{ parameters.reportType }} — Test Report
+    - ${{ if eq(parameters.postComment, true) }}:
+          - task: GitHubComment@0
+            condition: eq(variables['ReportUploaded'], 'true')
+            continueOnError: true
+            displayName: "Post ${{ parameters.reportType }} report link to PR"
+            inputs:
+                gitHubConnection: "BabylonBotPAT"
+                repositoryName: "$(Build.Repository.Name)"
+                id: "$(System.PullRequest.PullRequestNumber)"
+                comment: |
+                    ### 📋 ${{ parameters.reportType }} — Test Report
 
-              [View full Playwright report]($(SERVE_DOMAIN)/lite/$(Build.BuildNumber)/testResults/${{ parameters.reportType }}/index.html)
+                    [View full Playwright report]($(SERVE_DOMAIN)/lite/$(Build.BuildNumber)/testResults/${{ parameters.reportType }}/index.html)
 
-              <sub>Build $(Build.BuildNumber) · $(Build.SourceBranchName) @ $(Build.SourceVersion)</sub>
+                    <sub>Build $(Build.BuildNumber) · $(Build.SourceBranchName) @ $(Build.SourceVersion)</sub>

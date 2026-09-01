@@ -158,5 +158,5 @@ pnpm --filter lab dev
 ```
 
 CI runs the compat unit tests + typecheck + build on every PR (the **Compat Layer**
-job in [azure-pipelines.yml](../../azure-pipelines.yml)); it does **not** publish
+job in [config/templates/pr-ci.yml](../../config/templates/pr-ci.yml)); it does **not** publish
 the package. Pixel-parity and bundle-size gates run in the lab/CI on a real GPU.

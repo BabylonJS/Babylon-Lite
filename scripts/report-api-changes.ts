@@ -861,13 +861,17 @@ async function getPullRequestFromGitHub(): Promise<PullRequestInfo | undefined> 
     };
 }
 
-async function hasBreakingMarkerInPullRequest(): Promise<boolean> {
-    const pullRequest = getPullRequestFromEnv() ?? (await getPullRequestFromGitHub());
+export function breakingMarkerStatus(pullRequest: PullRequestInfo | undefined): "present" | "absent" | "unavailable" {
     if (!pullRequest) {
-        return false;
+        return "unavailable";
     }
 
-    return BREAKING_MARKER.test(`${pullRequest.title}\n\n${pullRequest.body}`);
+    return BREAKING_MARKER.test(`${pullRequest.title}\n\n${pullRequest.body}`) ? "present" : "absent";
+}
+
+async function pullRequestBreakingMarkerStatus(): Promise<"present" | "absent" | "unavailable"> {
+    const pullRequest = getPullRequestFromEnv() ?? (await getPullRequestFromGitHub());
+    return breakingMarkerStatus(pullRequest);
 }
 
 async function main(): Promise<void> {
@@ -915,12 +919,17 @@ async function main(): Promise<void> {
         console.log(`##vso[task.setvariable variable=POST_API_COMMENT]${hasApiChanges ? "true" : "false"}`);
         console.log(`##vso[task.setvariable variable=API_COMMENT_BODY]${escapeAzureVariableValue(comment)}`);
 
-        if (breakingLines.length > 0 && !(await hasBreakingMarkerInPullRequest())) {
-            console.error(
-                "API Extractor detected removed or changed public API lines, but the PR title or description does not contain a breaking-change marker. " +
-                    "Add a Conventional Commit breaking marker such as 'feat!: ...' or a 'BREAKING CHANGE:' footer."
-            );
-            process.exitCode = 1;
+        if (breakingLines.length > 0) {
+            const markerStatus = await pullRequestBreakingMarkerStatus();
+            if (markerStatus === "absent") {
+                console.error(
+                    "API Extractor detected removed or changed public API lines, but the PR title or description does not contain a breaking-change marker. " +
+                        "Add a Conventional Commit breaking marker such as 'feat!: ...' or a 'BREAKING CHANGE:' footer."
+                );
+                process.exitCode = 1;
+            } else if (markerStatus === "unavailable") {
+                console.warn("PR title/body metadata is unavailable in this credential-free job; deferring breaking-marker enforcement.");
+            }
         }
     } finally {
         if (targetWorktree) {

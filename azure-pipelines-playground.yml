@@ -15,6 +15,15 @@
 # upload step needs only the storage account + path; the CDN endpoint
 # (`lite-playground`) and profile (CDN_PROFILE_TOOLS) are used solely for the
 # post-deploy purge.
+#
+# ── WHY THIS IS TWO JOBS ─────────────────────────────────────────────────────
+#
+# `pnpm install` and `pnpm build:playground` run repository code, and repository
+# code that shares a job with DEPLOY_TOKEN can emit `##vso[task.setvariable]` to
+# point DEPLOYMENT_SERVER at a host it controls and collect the token from the
+# Authorization header of the upload that follows. The build therefore holds no
+# variable group and publishes an artifact; the deploy job starts clean with
+# `checkout: none` and never runs repository code.
 
 trigger:
     branches:
@@ -24,34 +33,22 @@ trigger:
 pr: none
 
 variables:
-    - group: BabylonJS-Deployment
-    # Provides TOOLS_STORAGE_ACCOUNT (tools storage account) and CDN_PROFILE_TOOLS
-    # (CDN profile backing the tools subdomain), used for upload + purge below.
-    - group: BabylonJS-CI-Infrastructure
     - name: NODE_VERSION
       value: "22.x"
     - name: PNPM_VERSION
       value: "11.9.0"
     - name: CI
       value: "true"
-    # Container path within the tools storage account.
-    - name: deploymentPath
-      value: litePlayground
-    # Tools storage account (from the BabylonJS-CI-Infrastructure variable group).
-    - name: storageAccount
-      value: $(TOOLS_STORAGE_ACCOUNT)
-    # CDN endpoint + profile — used only for the post-deploy purge.
-    - name: cdnEndpoint
-      value: lite-playground
-    - name: cdnProfile
-      value: $(CDN_PROFILE_TOOLS)
 
 stages:
     - stage: DeployPlayground
       displayName: "Deploy Lite Playground"
       jobs:
-          - job: BuildAndDeploy
-            displayName: "Build and Deploy Lite Playground"
+          # ──────────────────────────────────────────────────────────────
+          # Build — repository code, no credentials
+          # ──────────────────────────────────────────────────────────────
+          - job: Build
+            displayName: "Build Lite Playground"
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -77,26 +74,53 @@ stages:
 
                 - script: |
                       set -euo pipefail
-
                       DIST_DIR="$(System.DefaultWorkingDirectory)/playground/dist"
-                      ZIP_PATH="$(Build.ArtifactStagingDirectory)/lite-playground.zip"
-
                       if ! test -d "$DIST_DIR"; then
                         echo "No playground build output found at $DIST_DIR"
                         exit 1
                       fi
+                  displayName: "Verify playground build output"
 
-                      mkdir -p "$(Build.ArtifactStagingDirectory)"
-                      cd "$DIST_DIR"
-                      zip -r "$ZIP_PATH" .
+                - task: PublishPipelineArtifact@1
+                  displayName: "Stage playground for trusted deploy"
+                  inputs:
+                      targetPath: $(System.DefaultWorkingDirectory)/playground/dist
+                      artifact: playground-dist
 
-                      curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD)" --fail-with-body -i -X POST \
-                        -H "Content-Type: multipart/form-data" \
-                        -H "Authorization: Bearer $(DEPLOY_TOKEN)" \
-                        -F "path=$(deploymentPath)" \
-                        -F "storageAccount=$(storageAccount)" \
-                        -F "zip=@$ZIP_PATH"
+          # ──────────────────────────────────────────────────────────────
+          # Deploy — credentials, no repository code
+          # ──────────────────────────────────────────────────────────────
+          - job: Deploy
+            displayName: "Deploy Lite Playground"
+            dependsOn: Build
+            # Exact full ref, and a reason that is not a pull request — see the
+            # identical condition in azure-pipelines-demos.yml. A manual queue
+            # can name any ref; only a server-side branch-control check on
+            # BabylonJS-Deployment stops that ref's own YAML from removing this.
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                - group: BabylonJS-Deployment
+                # Provides TOOLS_STORAGE_ACCOUNT (tools storage account) and
+                # CDN_PROFILE_TOOLS (CDN profile backing the tools subdomain).
+                - group: BabylonJS-CI-Infrastructure
+            steps:
+                - checkout: none
 
-                      curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_PURGE)?endpoint=$(cdnEndpoint)&profileName=$(cdnProfile)" --fail-with-body -i -X POST \
-                        -H "Authorization: Bearer $(DEPLOY_TOKEN)"
-                  displayName: "Upload playground to deployment server"
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download playground"
+                  inputs:
+                      artifact: playground-dist
+                      path: $(Pipeline.Workspace)/playground-dist
+
+                - template: config/templates/upload-static-site.yml
+                  parameters:
+                      siteDir: $(Pipeline.Workspace)/playground-dist
+                      deployPath: litePlayground
+                      storageAccount: $(TOOLS_STORAGE_ACCOUNT)
+                      siteName: "Lite Playground"
+                      cdnEndpoint: lite-playground
+                      cdnProfile: $(CDN_PROFILE_TOOLS)
+                      postComment: false
+                      continueOnError: false

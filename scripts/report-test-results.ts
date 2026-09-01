@@ -5,6 +5,16 @@
  * ##vso[task.logissue type=warning] → shows as warning annotation
  * ##vso[task.complete result=SucceededWithIssues] → marks step yellow on warnings
  *
+ * SECURITY: everything this script prints is derived from a JUnit file written
+ * by the test run — that is, by repository-authored code, which in PR CI is the
+ * code under review. The agent obeys any logging command that starts a line of
+ * step output, so a test title or failure message containing a newline followed
+ * by `##vso[task.setvariable …]` would be *executed* rather than reported. Every
+ * interpolated value therefore goes through `logIssue`/`neutralize` below, which
+ * put the value on a single line and defang the command introducers. The failure
+ * message was already collapsed by `sanitize`; the test *name* was not, and it
+ * comes from the same file.
+ *
  * Usage: tsx scripts/report-test-results.ts <junit-file> [<junit-file> ...]
  */
 import { readFileSync, existsSync } from "fs";
@@ -23,7 +33,7 @@ let totalWarnings = 0;
 
 for (const file of files) {
     if (!existsSync(file)) {
-        console.log(`##vso[task.logissue type=warning]JUnit file not found: ${file}`);
+        logIssue("warning", `JUnit file not found: ${file}`);
         continue;
     }
 
@@ -58,7 +68,7 @@ for (const file of files) {
             const bodyText = (failMatch?.[2] ?? errMatch?.[2] ?? "").trim();
             // Prefer body text (has full error + expected/received), fall back to message attr
             const raw = bodyText || msgAttr || "Test failed";
-            console.log(`##vso[task.logissue type=error]${name}: ${sanitize(raw)}`);
+            logIssue("error", `${name}: ${sanitize(raw)}`);
         } else if (skipMatch) {
             // Prefer the skip reason (test.skip(true, "[NOT A PERFORMANCE ISSUE] …") stores
             // this in <skipped message="…"> or inside the body). Fall back to annotation
@@ -75,7 +85,7 @@ for (const file of files) {
             warnings.push(...extractWarningAnnotations(cBody));
             for (const w of warnings) {
                 totalWarnings++;
-                console.log(`##vso[task.logissue type=warning]${name}: ${sanitize(w)}`);
+                logIssue("warning", `${name}: ${sanitize(w)}`);
             }
         }
     }
@@ -88,9 +98,31 @@ const failed = totalFailed + totalErrors;
 console.log(`\nTest Results: ${passed} passed, ${failed} failed, ${totalSkipped} skipped, ${totalTests} total`);
 
 if (failed > 0) {
-    console.log(`##vso[task.complete result=Failed]${failed} test(s) failed`);
+    console.log(`##vso[task.complete result=Failed]${neutralize(String(failed))} test(s) failed`);
 } else if (totalWarnings > 0) {
-    console.log(`##vso[task.complete result=SucceededWithIssues]${totalWarnings} warning(s)`);
+    console.log(`##vso[task.complete result=SucceededWithIssues]${neutralize(String(totalWarnings))} warning(s)`);
+}
+
+/**
+ * Emit one `task.logissue`, with a message that cannot become a second command.
+ *
+ * The agent scans step output line by line and obeys anything that starts with
+ * `##vso[`. A JUnit `name="…"` attribute may legally contain a raw newline — the
+ * attribute regexes here match across lines — so an interpolated test title is
+ * an injection point into the job running this script. `neutralize` removes the
+ * only thing that makes a logging command reachable (a line break) and defangs
+ * the introducer as well, so the value is reported rather than executed.
+ */
+function logIssue(type: "error" | "warning", message: string): void {
+    console.log(`##vso[task.logissue type=${type}]${neutralize(message)}`);
+}
+
+/** One line, and no logging-command introducer left in it. */
+function neutralize(text: string): string {
+    return text
+        .replace(/[\r\n\u2028\u2029]+/g, " ")
+        .replace(/##vso\[/gi, "##vso(")
+        .replace(/##\[/g, "##(");
 }
 
 function attr(str: string, name: string): string {

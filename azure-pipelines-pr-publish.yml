@@ -1,0 +1,341 @@
+# Azure Pipelines — Babylon Lite PR Publish (trusted, master-only)
+#
+# Publishes the inert comment artifacts a pull-request CI run staged, and runs
+# the label half of the breaking-change rule. Preview artifacts are deliberately
+# not published until a dedicated untrusted origin exists.
+#
+# ── WHY THIS IS A SEPARATE DEFINITION ────────────────────────────────────────
+#
+# All of this used to be a `Publish` stage inside PR CI. Job isolation made it
+# safe against pull-request *code* — every job ran `checkout: none` or checked
+# out a pinned master ref — but not against pull-request *YAML*. Azure reads a
+# pull request's pipeline definition from the pull request, and pipeline
+# authorization is per *definition*, not per file: while `BabylonJS-Deployment`,
+# `BabylonJS-CI-Infrastructure` and `BabylonBotPAT` were authorized for the PR CI
+# definition, a pull request could delete the `extends` line, write its own job,
+# ask for those resources by name and be handed them.
+#
+# The server-side answer to a rewritten definition is a **Required template**
+# check. It could not be turned on, because the same three resources are consumed
+# by `azure-pipelines-npm-publish.yml`, `-playground.yml`, `-demos.yml`,
+# `-bundle-manifest.yml` and `-cloud-tests.yml`, which declare their stages inline
+# and would have been refused the resources outright. One resource cannot carry a
+# required-template check for one consumer and not for another.
+#
+# So the consumers were separated instead. PR CI now holds nothing worth taking,
+# and every credential lives on definitions like this one: `pr: none`,
+# `trigger: none`, every credentialed job gated on the exact ref, and — the half
+# that YAML cannot assert — a **branch control** check on each resource allowing
+# only `refs/heads/master`. A pull-request run is `refs/pull/<n>/merge` and can
+# never satisfy it.
+#
+# ── WHY IT IS NOT TRIGGERED BY PR CI COMPLETING ──────────────────────────────
+#
+# A `resources.pipelines` completion trigger looks like the obvious wiring and is
+# the one shape that would reintroduce the whole problem. When the triggering and
+# triggered pipelines share a repository, Azure runs the triggered pipeline on the
+# *triggering run's* branch — which for a pull-request build is the pull request's
+# own merge ref. This file would then be read from the pull request, holding every
+# credential above. Until the scheduled master poller in #627 is ready, this
+# pipeline is only an emergency/debug interface queued from master by a
+# maintainer; manual operation is not the mergeable steady state.
+#
+# ── HOW TO RUN IT ────────────────────────────────────────────────────────────
+#
+#   Pipelines → "Babylon Lite PR Publish" → Run pipeline
+#     Branch:            master (nothing else is permitted)
+#     prNumber:          the pull request number, e.g. 641
+#     prCiRunId:         the PR CI run id — the number in the run's URL
+#     prCiDefinitionId:  the PR CI pipeline's definition id (see TESTING.md)
+#
+# Every one of those is a compile-time parameter, fixed before the first step
+# runs, so nothing downloaded from the artifacts can influence where an upload
+# goes or which pull request is commented on.
+
+trigger: none
+
+pr: none
+
+parameters:
+    # `type: number` is validated by the server at queue time, so a destination
+    # path built from it cannot be talked into a traversal or an injection. The
+    # preflight job below additionally rejects zero and negatives, which are
+    # numbers.
+    - name: prNumber
+      displayName: "Pull request number"
+      type: number
+
+    - name: prCiRunId
+      displayName: "PR CI run id (the build whose artifacts are published)"
+      type: number
+
+    - name: prCiDefinitionId
+      displayName: "PR CI pipeline definition id"
+      type: number
+
+    - name: postComments
+      displayName: "Post the API-report and bundle-size comments"
+      type: boolean
+      default: true
+
+resources:
+    repositories:
+        # The scripts this pipeline runs come from master, not from whichever ref
+        # the run was queued on. `pr: none` describes automatic triggers only; a
+        # manual queue may name any ref, and Azure reads the definition from that
+        # ref. Pinning the checkout means the run can be given the wrong YAML but
+        # not the wrong scripts, and the branch-control check on each resource is
+        # what refuses the wrong YAML its credentials.
+        #
+        # `BabylonBotPAT` here, never `BabylonLite-PRCI-RepoRead`: the read-only
+        # connection is the one resource PR CI is authorized for, and sharing it
+        # with a credentialed master pipeline is exactly the coupling this file
+        # exists to undo.
+        - repository: trusted
+          type: github
+          name: BabylonJS/Babylon-Lite
+          endpoint: BabylonBotPAT
+          ref: refs/heads/master
+
+variables:
+    - name: NODE_VERSION
+      value: "22.x"
+    - name: PNPM_VERSION
+      value: "11.9.0"
+
+stages:
+    - stage: PublishPrArtifacts
+      displayName: "Publish PR artifacts"
+      jobs:
+          # ──────────────────────────────────────────────────────────────
+          # Job 0: Preflight — no credential, no artifact, no repository
+          # ──────────────────────────────────────────────────────────────
+          # Fails the run before any credentialed job starts if the parameters
+          # are nonsense. Holds nothing, so it is safe for it to be first.
+          - job: Preflight
+            displayName: "Validate run parameters"
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: none
+
+                - script: |
+                      set -euo pipefail
+
+                      PR_NUMBER="${{ parameters.prNumber }}"
+                      RUN_ID="${{ parameters.prCiRunId }}"
+                      DEFINITION_ID="${{ parameters.prCiDefinitionId }}"
+
+                      for pair in "prNumber=$PR_NUMBER" "prCiRunId=$RUN_ID" "prCiDefinitionId=$DEFINITION_ID"; do
+                          name="${pair%%=*}"
+                          value="${pair#*=}"
+                          case "$value" in
+                              "" | *[!0-9]*)
+                                  echo "Refusing to publish: $name must be a positive integer, got '$value'."
+                                  exit 1
+                                  ;;
+                          esac
+                          if test "$value" -le 0; then
+                              echo "Refusing to publish: $name must be greater than zero, got '$value'."
+                              exit 1
+                          fi
+                      done
+
+                      case "${SYSTEM_ACCESSTOKEN:-}" in
+                          "" | '$('*')')
+                              echo "Refusing to publish: System.AccessToken is unavailable."
+                              exit 1
+                              ;;
+                      esac
+
+                      BUILD_JSON="$(Agent.TempDirectory)/pr-ci-build-${RUN_ID}.json"
+                      trap 'rm -f "$BUILD_JSON"' EXIT
+                      token_escaped=${SYSTEM_ACCESSTOKEN//\\/\\\\}
+                      token_escaped=${token_escaped//\"/\\\"}
+
+                      printf 'header = "Authorization: Bearer %s"\n' "$token_escaped" |
+                          curl --fail --silent --show-error \
+                              --proto '=https' \
+                              --config - \
+                              --output "$BUILD_JSON" \
+                              "${SYSTEM_COLLECTIONURI}${SYSTEM_TEAMPROJECTID}/_apis/build/builds/${RUN_ID}?api-version=7.1"
+
+                      jq -e \
+                          --argjson runId "$RUN_ID" \
+                          --argjson definitionId "$DEFINITION_ID" \
+                          --arg sourceBranch "refs/pull/${PR_NUMBER}/merge" \
+                          '
+                              .id == $runId and
+                              .definition.id == $definitionId and
+                              .reason == "pullRequest" and
+                              .status == "completed" and
+                              .sourceBranch == $sourceBranch and
+                              .repository.type == "GitHub" and
+                              .repository.name == "BabylonJS/Babylon-Lite"
+                          ' "$BUILD_JSON" >/dev/null || {
+                              echo "Refusing to publish: run $RUN_ID is not a completed BabylonJS/Babylon-Lite PR CI run for PR #$PR_NUMBER in definition $DEFINITION_ID."
+                              exit 1
+                          }
+
+                      echo "Validated PR CI run $RUN_ID (definition $DEFINITION_ID) for PR #$PR_NUMBER."
+                  displayName: "Validate parameters and PR CI run provenance"
+                  env:
+                      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+                      SYSTEM_COLLECTIONURI: $(System.CollectionUri)
+                      SYSTEM_TEAMPROJECTID: $(System.TeamProjectId)
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 1: Release marker labels (trusted source checkout)
+          # ──────────────────────────────────────────────────────────────
+          # The label half of the release-marker rule needs the GitHub API, and
+          # therefore a token. Running the pull request's own copy of the
+          # validator with a token in scope is precisely what must not happen, so
+          # this job checks out `trusted` — master — and runs master's validator
+          # against the pull request's metadata. `--ignore-scripts` keeps even
+          # master's dependency lifecycle scripts out of the job that holds the
+          # token.
+          #
+          # The commit-message half of the same rule still runs on every pull
+          # request, in PR CI, with no credential at all.
+          - job: ReleaseMarkerLabels
+            displayName: "Release Markers (labels)"
+            dependsOn: Preflight
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                # GITHUB_TOKEN resolves from a protected variable group so the
+                # branch-control check covers it. A pipeline-level UI variable is
+                # not a protected resource: no check applies to one and every job
+                # in the definition can read it.
+                - group: BabylonJS-Deployment
+            steps:
+                - checkout: trusted
+                  fetchDepth: 1
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile --ignore-scripts
+                  displayName: "Install dependencies (no lifecycle scripts)"
+
+                - script: pnpm validate:release-markers
+                  displayName: "Enforce breaking-change labels"
+                  env:
+                      GITHUB_REPOSITORY: "BabylonJS/Babylon-Lite"
+                      PR_NUMBER: "${{ parameters.prNumber }}"
+                      GITHUB_TOKEN: "$(GITHUB_TOKEN)"
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 2: PR previews disabled
+          # ──────────────────────────────────────────────────────────────
+          # Both preview artifacts contain pull-request-authored JavaScript.
+          # They must not be published under production origins, where they
+          # would share localStorage, cookies and service-worker scope with
+          # reviewed code. Publishing stays disabled until a separate
+          # registrable domain, storage account and CDN are provisioned.
+          - job: PreviewPublishingDisabled
+            displayName: "PR previews disabled"
+            dependsOn: Preflight
+            condition: succeeded()
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: none
+
+                - script: echo "PR preview publishing is disabled until a dedicated untrusted origin is configured."
+                  displayName: "Skip untrusted preview artifacts"
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 3: Post PR comments
+          # ──────────────────────────────────────────────────────────────
+          # The API-report and bundle-size comment bodies are produced by jobs
+          # that run pull-request code, so they are untrusted *content*. Content
+          # is fine — it ends up as markdown in a comment — but it must not be
+          # interpreted. Echoing it back through `##vso[task.setvariable]` would
+          # let it emit logging commands of its own, so
+          # `strip-logging-commands.sh` (from the pinned master checkout)
+          # neutralises every `##vso[` / `##[` sequence before the body is ever
+          # set as a variable, so a body that arrives from a job that ran
+          # pull-request code cannot issue logging commands inside the job that
+          # holds the GitHub connection.
+          #
+          - job: PostPrComments
+            displayName: "Post PR Comments"
+            dependsOn: Preflight
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'), eq('${{ parameters.postComments }}', 'true'))
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: trusted
+                  fetchDepth: 1
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download API comment"
+                  continueOnError: true
+                  inputs:
+                      buildType: specific
+                      project: $(System.TeamProject)
+                      definition: ${{ parameters.prCiDefinitionId }}
+                      buildVersionToDownload: specific
+                      pipelineId: ${{ parameters.prCiRunId }}
+                      artifact: api-comment
+                      path: $(Pipeline.Workspace)/api-comment
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download bundle comment"
+                  continueOnError: true
+                  inputs:
+                      buildType: specific
+                      project: $(System.TeamProject)
+                      definition: ${{ parameters.prCiDefinitionId }}
+                      buildVersionToDownload: specific
+                      pipelineId: ${{ parameters.prCiRunId }}
+                      artifact: bundle-comment
+                      path: $(Pipeline.Workspace)/bundle-comment
+
+                - script: |
+                      set -euo pipefail
+                      bash scripts/strip-logging-commands.sh \
+                          "$(Pipeline.Workspace)/api-comment/api-report-comment.md" \
+                          API_COMMENT_BODY POST_API_COMMENT
+                      bash scripts/strip-logging-commands.sh \
+                          "$(Pipeline.Workspace)/bundle-comment/bundle-size-comment.md" \
+                          BUNDLE_COMMENT_BODY POST_BUNDLE_COMMENT
+                  condition: always()
+                  continueOnError: true
+                  displayName: "Load and neutralise comment bodies"
+                  target:
+                      commands: restricted
+                      settableVariables:
+                          - API_COMMENT_BODY
+                          - POST_API_COMMENT
+                          - BUNDLE_COMMENT_BODY
+                          - POST_BUNDLE_COMMENT
+
+                - task: GitHubComment@0
+                  condition: and(always(), eq(variables['POST_API_COMMENT'], 'true'))
+                  continueOnError: true
+                  displayName: "Post API changes to PR"
+                  inputs:
+                      gitHubConnection: "BabylonBotPAT"
+                      repositoryName: "BabylonJS/Babylon-Lite"
+                      id: "${{ parameters.prNumber }}"
+                      comment: "$(API_COMMENT_BODY)"
+
+                - task: GitHubComment@0
+                  condition: and(always(), eq(variables['POST_BUNDLE_COMMENT'], 'true'))
+                  continueOnError: true
+                  displayName: "Post bundle-size changes to PR"
+                  inputs:
+                      gitHubConnection: "BabylonBotPAT"
+                      repositoryName: "BabylonJS/Babylon-Lite"
+                      id: "${{ parameters.prNumber }}"
+                      comment: "$(BUNDLE_COMMENT_BODY)"

@@ -7,11 +7,34 @@ const docPath = join(repoRoot, "TESTING.md");
 const sectionHeading = "### Required Pipeline Variable Groups";
 
 /**
+ * The files this guard reads, as repo-relative paths.
+ *
+ * Root `azure-pipelines*.yml` files, plus `config/templates`. The templates used
+ * to be out of scope on the structural argument that a step template cannot
+ * declare a variable group -- true, but it stopped being true when PR CI moved
+ * its stages into `config/templates/pr-ci.yml` so that they would be read from a
+ * pinned master ref rather than from the pull request. Every group PR CI imports
+ * now lives there. The last assertion in this file is what caught the gap; keep
+ * it, because the same move can happen again into a directory nobody adds here.
+ */
+function scannedFiles(): string[] {
+    const roots = readdirSync(repoRoot)
+        .filter((f) => /^azure-pipelines.*\.ya?ml$/.test(f))
+        .sort();
+    const templateDir = join("config", "templates");
+    const templates = readdirSync(join(repoRoot, templateDir))
+        .filter((f) => /\.ya?ml$/.test(f))
+        .sort()
+        .map((f) => [templateDir, f].join("/"));
+    return [...roots, ...templates];
+}
+
+/**
  * Every `- group:` an Azure pipeline imports, keyed by the file importing it.
  */
 function declaredGroups(): Map<string, string[]> {
     const byGroup = new Map<string, string[]>();
-    const files = readdirSync(repoRoot).filter((f) => /^azure-pipelines.*\.ya?ml$/.test(f));
+    const files = scannedFiles();
 
     // Guard the guard: if the glob ever stops matching, an empty declared set
     // would make every assertion below vacuously true. That is the exact
@@ -39,22 +62,15 @@ function declaredGroups(): Map<string, string[]> {
     return byGroup;
 }
 
-/** Repo-relative paths of the files `declaredGroups()` actually reads. */
-function scannedFiles(): string[] {
-    return readdirSync(repoRoot).filter((f) => /^azure-pipelines.*\.ya?ml$/.test(f));
-}
-
 /**
  * Every YAML file in the repository, as repo-relative paths.
  *
  * Discovered by walking rather than listed, because a list is the thing under
- * test. `scannedFiles()` reads the repo root only, which is correct today for a
- * reason that is easy to mistake for luck: variable groups are valid solely in a
- * pipeline/stage/job `variables:` block, and both files under `config/templates`
- * are pure step templates, so they *cannot* declare one. That is a structural
- * argument, not a placement one -- but it stops holding the moment someone
- * converts a step template into a job template, or adds a pipeline in a new
- * directory, and nothing about that change would look like it touched this test.
+ * test. `scannedFiles()` names two directories; nothing in the assertions above
+ * checks that those are the only two that matter. A pipeline or job template
+ * added anywhere else would import groups this guard never reads, and the
+ * omission would look nothing like a change to this test -- which is exactly how
+ * `config/templates` came to be missed until the assertion below caught it.
  */
 function allYamlFiles(): string[] {
     const skip = new Set(["node_modules", ".git", "dist", "build", "coverage", "out", ".turbo"]);
@@ -105,7 +121,7 @@ describe("pipeline variable groups are documented", () => {
     // about: the unresolved macro is passed through as literal text, the
     // upload posts an empty storage account, and the deploy server answers
     // 401 after the 28-minute measurement step has already succeeded.
-    it("lists every group imported by an azure-pipelines file", () => {
+    it("lists every group imported by a pipeline or pipeline template", () => {
         const section = documentedSection();
         const undocumented = [...declaredGroups().entries()].filter(([group]) => !section.includes(group)).map(([group, files]) => `${group} (imported by ${files.join(", ")})`);
 
@@ -115,7 +131,7 @@ describe("pipeline variable groups are documented", () => {
     // The reverse direction, so the list cannot rot in the other direction:
     // a group that no pipeline imports is a name a reader may propagate into
     // a new pipeline, which is how the original defect would recur inverted.
-    it("does not list groups no azure-pipelines file imports", () => {
+    it("does not list groups no pipeline or template imports", () => {
         const declared = declaredGroups();
         const stale = [...documentedSection().matchAll(/`(BabylonJS-[A-Za-z0-9-]+)`/g)]
             .map((m) => m[1])

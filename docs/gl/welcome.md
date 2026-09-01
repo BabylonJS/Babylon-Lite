@@ -35,7 +35,7 @@ mirror the lite harness under `tests/gl/`:
 - `pnpm build:bundle-scenes:gl` — esbuild per-scene + Babylon-ref bundle sizes → `lab/public/gl/bundle/manifest.json`
 - GL lab scenes live in `lab/gl/` — auto-discovered (`lab/gl/scene{N}.html` + `src/scene{N}.ts`), listed in `scene-config-webgl.json`.
 
-CI wiring: the `azure-pipelines.yml` UnitTests job runs `gl-unit`, `gl-build`,
+CI wiring: the `config/templates/pr-ci.yml` UnitTests job runs `gl-unit`, `gl-build`,
 GL tsc checks, `test:parity:gl`, and `test:perf-regression:gl` (headless
 SwiftShader). Parity needs the committed `reference/gl/<slug>/babylon-ref-golden.png`
 goldens (generate them with the same SwiftShader path:

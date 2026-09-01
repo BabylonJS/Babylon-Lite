@@ -1,0 +1,590 @@
+# Babylon Lite — pull-request CI, defined on a protected ref
+#
+# ── WHY THIS FILE IS NOT azure-pipelines.yml ─────────────────────────────────
+#
+# For a pull-request build, Azure Pipelines reads the pipeline definition from
+# the pull request itself:
+#
+#   "the YAML file that is used to run the pipeline is also a merge between the
+#    source and the target branch. As a result, the changes you make to the YAML
+#    file in source branch of the pull request can override the behavior defined
+#    by the YAML file in target branch."
+#   — learn.microsoft.com/azure/devops/pipelines/repos/github#pr-triggers
+#
+# There is no setting that makes a PR build use the target branch's YAML. So for
+# as long as the job definitions live in `azure-pipelines.yml`, the author of a
+# pull request writes them. Everything a reviewer might rely on — which job holds
+# which variable group, which job runs `checkout: none`, which destination an
+# upload is pointed at, whether an OAuth token is left in `.git/config` — is
+# theirs to rewrite, and the rewrite ships with the PR that is being reviewed.
+# `System.PullRequest.IsFork` does not help: it only distinguishes forks, and
+# Microsoft documents system variables as read-only without documenting that the
+# agent stops `##vso[task.setvariable]` from shadowing one for later steps.
+#
+# So `azure-pipelines.yml` no longer contains any job. It is a shell that does
+# nothing but `extends` this file through a repository resource pinned to
+# `refs/heads/master`, and repository resources are resolved from the pinned ref:
+#
+#   "Repositories are resolved only once, when the pipeline starts up. After
+#    that, the same resource is used during the pipeline run."
+#   — learn.microsoft.com/azure/devops/pipelines/process/templates
+#
+# Everything below therefore comes from master — reviewed, merged code — no
+# matter which branch the build was queued from.
+#
+# ── WHY PINNING IS NOT THE LOAD-BEARING PART ─────────────────────────────────
+#
+# A pull request can still delete the `extends` from the shell and write its own
+# jobs. The obvious answer is a **Required template** check — configured on a
+# protected resource by an administrator, not expressible in YAML, evaluated
+# before a stage starts:
+#
+#   "Approvals and other checks aren't defined in the yaml file. Users modifying
+#    the pipeline yaml file can't modify the checks performed before start of a
+#    stage."
+#   — learn.microsoft.com/azure/devops/pipelines/process/approvals
+#
+# That check cannot be applied to a resource a master pipeline also consumes.
+# `azure-pipelines-npm-publish.yml`, `-playground.yml`, `-demos.yml`,
+# `-bundle-manifest.yml` and `-cloud-tests.yml` declare their stages inline; a
+# required-template check on `BabylonJS-Deployment` or on `BabylonBotPAT` would
+# refuse them the resource and break master. So for as long as this file asked
+# for those groups, the check that was supposed to protect them could not be
+# turned on — and pipeline authorization is *definition* level, so a pull request
+# that rewrote the entry point could ask for anything the PR CI definition was
+# authorized for and be handed it.
+#
+# The fix is to separate the resources rather than to argue about the checks:
+#
+#   * This template, the entry point that extends it, and every job below hold
+#     **zero** variable groups, **zero** service connections, **zero** tokens.
+#     The PR CI definition is authorized for exactly one protected resource —
+#     `BabylonLite-PRCI-RepoRead`, the read-only GitHub connection the pinned
+#     repository resource needs — so a rewritten entry point gains read access to
+#     a repository it is already reading, and nothing else.
+#   * Every credential lives on master-only definitions with branch control
+#     restricting them to `refs/heads/master`, which a pull-request run
+#     (`refs/pull/<n>/merge`) can never satisfy.
+#
+# TESTING.md ("Protected resource matrix") is the authoritative list, and
+# `tests/lite/unit/pr-pipeline-credential-isolation.test.ts` fails if this file
+# ever names one of those resources again.
+#
+# ── WHAT HAPPENED TO THE PUBLISH STAGE ──────────────────────────────────────
+#
+# It used to live here: a `checkout: none` stage holding DEPLOY_TOKEN and the
+# GitHub connection, uploading the lab site and the playground snapshot and
+# posting the API/bundle-size comments. Job isolation made it safe against PR
+# *code*, but not against PR *YAML* — the resources still had to be authorized
+# for a definition a pull request can rewrite, and that is what forced the two
+# incompatible check regimes onto one group.
+#
+# So the credentialed half moved out of the pull-request definition entirely,
+# into `azure-pipelines-pr-publish.yml` (`trigger: none`, `pr: none`, master
+# only). This stage stages plain artifacts — a built site, a built playground, a
+# markdown comment body — and a maintainer publishes them from there. Artifacts
+# are inert: nothing here can name a destination, a host or a credential.
+#
+# There is likewise no cloud-browser stage. Perf and parity on BrowserStack need
+# a long-lived account key, and there is no way to give it to a job that also
+# runs pull-request code without giving it to the pull request's author.
+# Those suites run from master only, in `azure-pipelines-cloud-tests.yml`.
+
+variables:
+    - name: NODE_VERSION
+      value: "22.x"
+    - name: PNPM_VERSION
+      value: "11.9.0"
+    - name: CI
+      value: "true"
+    - name: HEADLESS
+      value: "true"
+
+stages:
+    # ══════════════════════════════════════════════════════════════════════
+    # Stage 1 of 1: CI — pull-request code, zero credentials, zero resources
+    # ══════════════════════════════════════════════════════════════════════
+    - stage: CI
+      displayName: "PR Validation"
+      jobs:
+          # ──────────────────────────────────────────────────────────────
+          # Job 0: Release Marker Validation
+          # ──────────────────────────────────────────────────────────────
+          # Commit-message half of the check, which needs no credential. The
+          # label half needs the GitHub API and therefore a token, so it runs in
+          # `azure-pipelines-pr-publish.yml` against the pinned master checkout.
+          - job: ReleaseMarkers
+            displayName: "Release Markers"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+                  fetchDepth: 0
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: pnpm validate:release-markers
+                  displayName: "Validate breaking-change markers"
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 1: API Report
+          # ──────────────────────────────────────────────────────────────
+          - job: ApiReport
+            displayName: "API Report"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                # No `persistCredentials`. It leaves the OAuth token in the
+                # checkout's git config ("Set to 'true' to leave the OAuth token
+                # in the Git config after the initial fetch"), where every later
+                # step — including dependency lifecycle scripts — can read it.
+                # The report only reads history, which the fetch already has.
+                - checkout: self
+                  fetchDepth: 0
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                # No GITHUB_TOKEN: this step runs PR-authored source, and no job
+                # in this pipeline holds a credential. The script writes the
+                # comment body to a file for `azure-pipelines-pr-publish.yml`;
+                # when trusted PR metadata is unavailable here, marker
+                # enforcement is deferred rather than rejecting a valid marker.
+                - script: pnpm report:api-changes
+                  displayName: "Generate API report diff"
+
+                # The report script always writes the body, but sets
+                # POST_API_COMMENT only when the diff is non-empty. Staging on
+                # that flag keeps the previous behaviour of commenting only when
+                # the public API actually moved. The flag is set by PR code, so
+                # it decides nothing but whether the PR gets its own comment.
+                - task: PublishPipelineArtifact@1
+                  condition: and(always(), eq(variables['POST_API_COMMENT'], 'true'))
+                  continueOnError: true
+                  displayName: "Stage API comment for trusted posting"
+                  inputs:
+                      targetPath: $(System.DefaultWorkingDirectory)/test-results/api-report/api-report-comment.md
+                      artifact: api-comment
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 2: Unit Tests
+          # ──────────────────────────────────────────────────────────────
+          - job: UnitTests
+            displayName: "Unit Tests"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: pnpm exec playwright install chromium
+                  displayName: "Install Playwright browsers"
+
+                - script: npx vitest run --project unit --project gl-unit --project no-webgpu
+                  displayName: "Run vitest unit tests"
+                  env:
+                      CI: "true"
+
+                - script: npx vitest run --project build
+                  displayName: "Run vitest build-output tests"
+
+                - script: npx vitest run --project gl-build
+                  displayName: "Run vitest lite-gl build-output tests"
+
+                # lite-gl visual parity vs the Babylon ThinEngine reference. WebGL2
+                # runs headless (SwiftShader in CI, enabled by CI=true in
+                # playwright.config.ts), so no cloud browser is needed — unlike the
+                # WebGPU parity job below. Compares the live lite-gl render against the
+                # committed goldens in reference/gl/<slug>/babylon-ref-golden.png; those
+                # goldens MUST be generated with the same SwiftShader path
+                # (CI=true HEADLESS=true RECAPTURE_GOLDEN=true pnpm test:parity:gl) so
+                # the renderer matches. If a golden is missing the harness self-captures
+                # it live (the run still passes, but without a reviewed baseline).
+                - script: pnpm test:parity:gl
+                  displayName: "Run lite-gl parity tests"
+                  env:
+                      HEADLESS: "true"
+                      CI: "true"
+
+                # lite-gl perf vs the Babylon ThinEngine it replaces (same headless
+                # SwiftShader render — no cloud browser needed, and no committed golden
+                # required since both engines render live). Gates that lite-gl is not
+                # materially slower than Babylon; a generous margin absorbs CI software-
+                # rendering noise (where the lite-gl/Babylon ratio compresses) while
+                # still catching a gross regression. Writes the Perf-Regression manifest.
+                - script: pnpm test:perf-regression:gl
+                  displayName: "Run lite-gl perf regression"
+                  env:
+                      HEADLESS: "true"
+                      CI: "true"
+                      PERF_DURATION: "3"
+                      PERF_REGRESSION_PCT: "50"
+
+                - script: |
+                      npx playwright test tests/lite/plumbing/dispose.spec.ts
+                      npx playwright test tests/lite/plumbing/material-swap.spec.ts
+                      npx playwright test tests/lite/plumbing/memory-leak.spec.ts
+                      npx playwright test tests/lite/plumbing/picking.spec.ts
+                  displayName: "Run plumbing tests"
+                  env:
+                      HEADLESS: "true"
+
+                - task: PublishTestResults@2
+                  condition: always()
+                  inputs:
+                      testResultsFormat: "JUnit"
+                      testResultsFiles: "**/test-results/unit-junit.xml"
+                      mergeTestResults: true
+                      testRunTitle: "Unit Tests"
+                  continueOnError: true
+
+                - script: npx tsx scripts/report-test-results.ts test-results/unit-junit.xml
+                  condition: always()
+                  continueOnError: true
+                  displayName: "Report test results"
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 3: Bundle Size
+          # ──────────────────────────────────────────────────────────────
+          - job: BundleSize
+            displayName: "Bundle Size"
+            timeoutInMinutes: 120
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                # See ApiReport: no `persistCredentials`.
+                - checkout: self
+                  fetchDepth: 0
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - template: select-affected-scenes.yml
+
+                - script: pnpm exec playwright install chromium
+                  displayName: "Install Playwright browsers"
+                  condition: eq(variables['RUN_BUNDLE_TESTS'], 'true')
+
+                # Cache remote scene assets (models/textures/env fetched during
+                # measurement) across runs/PRs. The cache is a pure URL->bytes store
+                # independent of source, so a constant prefix is shared broadly. The
+                # per-run key component means the exact key never hits (so newly
+                # fetched assets are always saved at job end), while restoreKeys
+                # restores the most recent prefix match — a rolling cache that
+                # accumulates new assets instead of freezing. Measurement still
+                # fetches-with-retry on a miss, so a cold/expired cache is only slower,
+                # never incorrect.
+                - task: Cache@2
+                  displayName: "Cache remote scene assets"
+                  condition: eq(variables['RUN_BUNDLE_TESTS'], 'true')
+                  inputs:
+                      key: 'bundle-assets | v1 | "$(Build.BuildId)"'
+                      restoreKeys: |
+                          bundle-assets | v1
+                      path: $(System.DefaultWorkingDirectory)/.bundle-asset-cache
+
+                # The master baseline for the delta report is published by
+                # azure-pipelines-bundle-manifest.yml to public storage, so it is
+                # fetched over plain HTTPS rather than read out of git. Nothing is
+                # tracked, so there is nothing for branches to conflict on and
+                # nothing that can go stale and turn this job red.
+                #
+                # build:bundle-scenes fetches it itself (see
+                # writeMasterBundleManifest); a missing baseline is not an error —
+                # the delta report is skipped and the ceiling checks below, which
+                # are what actually gate size, are unaffected.
+                - script: pnpm build:bundle-scenes
+                  displayName: "Build bundle scenes"
+                  condition: eq(variables['RUN_BUNDLE_TESTS'], 'true')
+                  env:
+                      SKIP_BJS: "true"
+                      BUNDLE_SCENES: "$(AFFECTED_BUNDLE_SCENES)"
+
+                # Bundle-content unit specs read the per-scene manifests under
+                # lab/public/bundle/manifest/. Those are build output rather than
+                # tracked source, so the Unit Tests job (which runs vitest before any
+                # build) self-skips them — run them here, where the build exists.
+                - script: npx vitest run --project unit tests/lite/unit/bundle-content-no-f64.test.ts tests/lite/unit/npe-particle-bundle-content.test.ts
+                  displayName: "Bundle content unit tests"
+                  condition: eq(variables['RUN_BUNDLE_TESTS'], 'true')
+
+                # Absolute ceiling checks (scene-config.json maxRawKB)
+                - script: npx playwright test tests/lite/parity/bundle-size.spec.ts --reporter=junit
+                  displayName: "Bundle size ceiling checks"
+                  condition: eq(variables['RUN_BUNDLE_TESTS'], 'true')
+                  env:
+                      HEADLESS: "true"
+                      REUSE_BROWSER: "1"
+                      BUNDLE_SCENES: "$(AFFECTED_BUNDLE_SCENES)"
+                      PLAYWRIGHT_JUNIT_OUTPUT_NAME: test-results/bundle-ceiling-junit.xml
+
+                - script: npx tsx scripts/report-test-results.ts test-results/bundle-ceiling-junit.xml
+                  condition: and(always(), eq(variables['RUN_BUNDLE_TESTS'], 'true'))
+                  displayName: "Report bundle-size results to Azure"
+
+                - task: PublishTestResults@2
+                  condition: and(always(), eq(variables['RUN_BUNDLE_TESTS'], 'true'))
+                  displayName: "Publish bundle-size test results"
+                  inputs:
+                      testResultsFormat: JUnit
+                      testResultsFiles: "test-results/bundle-ceiling-junit.xml"
+                      testRunTitle: "Bundle Size"
+
+                # Generate bundle-size delta comment for PR. Written to a file and
+                # posted by `azure-pipelines-pr-publish.yml`; no job in this
+                # pipeline holds a GitHub credential, so it cannot post it itself.
+                - script: npx tsx scripts/report-bundle-size-deltas.ts
+                  condition: and(always(), eq(variables['RUN_BUNDLE_TESTS'], 'true'))
+                  displayName: "Generate bundle-size delta comment"
+
+                # See the API report job: staged only when there is a delta to
+                # report, matching the previous comment-on-change behaviour.
+                - task: PublishPipelineArtifact@1
+                  condition: and(always(), eq(variables['RUN_BUNDLE_TESTS'], 'true'), eq(variables['POST_BUNDLE_COMMENT'], 'true'))
+                  continueOnError: true
+                  displayName: "Stage bundle comment for trusted posting"
+                  inputs:
+                      targetPath: $(System.DefaultWorkingDirectory)/test-results/bundle-size-comment.md
+                      artifact: bundle-comment
+
+                # The public base path is derived from the pull-request number,
+                # not from `Build.BuildNumber`. The publisher that uploads this
+                # artifact is a different run with a different build number, so a
+                # build-number path would bake links the deployed copy cannot
+                # serve. `pr-<N>` also satisfies the upload template's deploy-path
+                # allowlist (`lite/<segment>/lab`), which a `pr/<N>` path would
+                # not.
+                - script: pnpm build:lab-site
+                  displayName: "Build static lab site"
+                  env:
+                      LAB_BASE_PATH: "/lite/pr-$(System.PullRequest.PullRequestNumber)/lab/"
+
+                # No deploy token is in scope anywhere in this pipeline. The built
+                # site is staged as a plain artifact; `azure-pipelines-pr-publish.yml`
+                # — a master-only definition — is where a maintainer uploads it.
+                - task: PublishPipelineArtifact@1
+                  displayName: "Stage lab site for trusted upload"
+                  condition: succeeded()
+                  continueOnError: true
+                  inputs:
+                      targetPath: $(System.DefaultWorkingDirectory)/lab/dist
+                      artifact: lab-site
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 4: Lint
+          # ──────────────────────────────────────────────────────────────
+          - job: Lint
+            displayName: "Lint & Type Check"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                - script: npx eslint . --format ./scripts/eslint-vso-formatter.cjs
+                  displayName: "ESLint"
+
+                # Every type-check below pipes tsc into sed to turn TS diagnostics into
+                # `##vso[task.logissue]` annotations. A shell pipeline exits with the status
+                # of its LAST command, and sed always succeeds — so without `pipefail` a
+                # failing tsc reported green. `task.logissue type=error` annotates the build
+                # but does not fail the task on its own, so nothing else caught it either.
+                - script: |
+                      set -euo pipefail
+                      npx tsc -p packages/babylon-lite/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (package)"
+
+                - script: |
+                      set -euo pipefail
+                      npx tsc -p lab/tsconfig.typecheck.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (lab)"
+
+                - script: |
+                      set -euo pipefail
+                      npx tsc -p tests/lite/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (tests)"
+
+                - script: |
+                      set -euo pipefail
+                      npx tsc -p packages/babylon-lite-gl/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (gl package)"
+
+                - script: |
+                      set -euo pipefail
+                      npx tsc -p tests/gl/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (gl tests)"
+
+                # Verifies docs/lite/02-feature-comparison.md is in sync with its
+                # source of truth (lab/lite/docs/feature-comparison.html). The check
+                # exits non-zero either when the doc is OUT OF SYNC or when generation
+                # itself fails (e.g. malformed HTML). On failure, emit a task.logissue
+                # so the error surfaces in the ADO build's Errors summary (the GitHub
+                # check links here via "Details"); the step log above has the specifics.
+                - script: |
+                      if ! pnpm gen:feature-doc:check; then
+                          echo "##vso[task.logissue type=error;sourcepath=docs/lite/02-feature-comparison.md]Feature-comparison doc check failed (see the step log above for details). If it reports OUT OF SYNC, run 'pnpm gen:feature-doc' and commit the result; otherwise fix the reported generation error."
+                          exit 1
+                      fi
+                  displayName: "Feature-comparison doc in sync"
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 5: Compat Layer (@babylonjs/lite-compat)
+          # ──────────────────────────────────────────────────────────────
+          # Type-checks, builds, and unit-tests the opt-in compatibility layer so
+          # regressions are caught in PR CI. NOTE: this job intentionally does NOT
+          # publish the package — @babylonjs/lite-compat is not released yet. The
+          # npm-publish pipeline only publishes packages/babylon-lite/build.
+          - job: Compat
+            displayName: "Compat Layer"
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: self
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                # `set -euo pipefail` is required here for the same reason as in the Lint
+                # job above: sed is the last command in the pipeline, so without it a
+                # failing tsc is masked by sed's zero exit and the step reports green.
+                - script: |
+                      set -euo pipefail
+                      npx tsc -p packages/babylon-lite-compat/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (compat src)"
+
+                - script: |
+                      set -euo pipefail
+                      npx tsc -p packages/babylon-lite-compat/tests/tsconfig.json --noEmit 2>&1 | sed -E 's/^(.+)\(([0-9]+),([0-9]+)\): error (TS[0-9]+): (.+)/##vso[task.logissue type=error;sourcepath=\1;linenumber=\2;columnnumber=\3]\4: \5/'
+                  displayName: "TypeScript type-check (compat tests)"
+
+                - script: pnpm --filter @babylonjs/lite-compat build
+                  displayName: "Build compat package (dist)"
+
+                - script: npx vitest run --project compat
+                  displayName: "Run compat unit tests"
+                  env:
+                      CI: "true"
+
+                - task: PublishTestResults@2
+                  condition: always()
+                  inputs:
+                      testResultsFormat: "JUnit"
+                      testResultsFiles: "**/test-results/unit-junit.xml"
+                      mergeTestResults: true
+                      testRunTitle: "Compat Layer"
+                  continueOnError: true
+
+          # ──────────────────────────────────────────────────────────────
+          # Job 6: PR Playground Snapshot (build only)
+          # ──────────────────────────────────────────────────────────────
+          # Builds the Lite Playground from THIS PR's source — the self-hosted
+          # engine is bundled from the same commit, so the runner executes the PR's
+          # engine code — and stages the result as an artifact.
+          # `azure-pipelines-pr-publish.yml` deploys it to a per-PR sub-path on the
+          # tools account (served at liteplayground.babylonjs.com/pr/<N>/).
+          # PLAYGROUND_BASE is set to match the public sub-path so every asset, the
+          # runner iframe, the self-hosted engine, and the SPA snippet routes
+          # resolve under it.
+          - job: PlaygroundSnapshot
+            displayName: "PR Playground Snapshot"
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                # Public base path baked into the build. The upload path and the
+                # public URL are decided by the publisher, from its own
+                # compile-time parameter — the only place they cannot be rewritten
+                # by the code being built.
+                - name: playgroundBase
+                  value: /pr/$(System.PullRequest.PullRequestNumber)/
+            steps:
+                # fetchDepth: 0 + tags so the engine build can resolve the latest
+                # npm-lite-v* tag for its version stamp (see vite.engine.config.ts).
+                - checkout: self
+                  fetchDepth: 0
+                  fetchTags: true
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile
+                  displayName: "Install dependencies"
+
+                # PLAYGROUND_BASE must be leading- and trailing-slashed and match
+                # the public sub-path so the built app resolves assets under it.
+                - script: pnpm build:playground
+                  displayName: "Build the playground (engine + app)"
+                  env:
+                      PLAYGROUND_BASE: $(playgroundBase)
+
+                - task: PublishPipelineArtifact@1
+                  displayName: "Stage playground snapshot for trusted upload"
+                  condition: succeeded()
+                  continueOnError: true
+                  inputs:
+                      targetPath: $(System.DefaultWorkingDirectory)/playground/dist
+                      artifact: playground-site

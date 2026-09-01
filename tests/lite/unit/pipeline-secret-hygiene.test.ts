@@ -45,8 +45,151 @@ export function hasMaskedSecret(line: string): boolean {
     // assignment, never inside a log banner.
     //
     // Known gap, stated rather than implied: forms carrying the credential
-    // with no separator (`curl -u ******`) are not detected, and were not before.
+    // with no separator (`curl -u ******`) are not detected here, and
+    // were not before. They are the subject of `carriesCredentialOnCommandLine`
+    // below, which is a different question — not "was a value replaced by a
+    // mask" but "is a live credential being passed as an argument" — asked by
+    // its own clause and included in the closure walk's union.
     return /(?:authorization|authenticate|token|secret|passw(?:or)?d|credential|api[-_]?key)["']?\s*[:=]\s*["']?(?:(?:bearer|basic|token)\s+)?\*{3,}(?=["'\s]|$)/i.test(code);
+}
+
+/**
+ * Names that mean "this value is a credential".
+ *
+ * Shared by the command-line clause below so its two halves — "this is an
+ * argument" and "this is a secret" — cannot drift apart.
+ */
+const CREDENTIAL_NAME = /(?:TOKEN|SECRET|PASSW(?:OR)?D|ACCESS_?KEY|API_?KEY|CREDENTIAL|_PAT\b|AUTH_?KEY)/i;
+
+/**
+ * True when a line hands a live credential to a program as a command-line
+ * argument.
+ *
+ * This is the gap the mask guard names and does not cover, and it was a live
+ * finding rather than a hypothetical: `scripts/browserstack-wait.sh` polled the
+ * BrowserStack plan API with
+ *
+ *     curl -sf -u "${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}" …
+ *
+ * in a job holding the account key. An argument is not a secret channel — it is
+ * in the process's own `/proc/<pid>/cmdline`, readable by every other process
+ * running as the same user on the agent, and it is what `ps` prints for anyone
+ * (or anything) sampling the machine. `env:` and stdin are the channels that are
+ * not. The script now feeds curl the same setting through `--config -`.
+ *
+ * Both halves are required, and neither alone would work: a flag with an
+ * interpolation is ordinary shell (`sort -u "$FILE"`, `mkdir -p "$WORK"`,
+ * `tsc -p "$PROJECT"`), and a credential name on a line is most often the
+ * correct `env:` mapping this repository uses everywhere. It is the conjunction
+ * — a credential-named value in argument position — that is the defect.
+ *
+ * The second clause is the one that closes the finding this suite was written
+ * around. `-u` is not the only argument that carries a credential, and it was
+ * not the form this repository actually used: the four authenticated uploads
+ * expanded the deploy token straight into a header argument,
+ *
+ *     curl … -H "Authorization: ${DEPLOY_TOKEN}"
+ *
+ * which is byte-for-byte the same exposure as `-u` — same argv, same
+ * `/proc/<pid>/cmdline`, same `ps` — while passing every clause here, because
+ * the flag-name alternation above simply did not list `-H`. A guard keyed on
+ * *which flag* rather than on *what is in argument position* only ever catches
+ * the specimen it was written from. So a payload-carrying flag (`-H`, `-d`,
+ * `-F` and their long spellings) whose value interpolates a credential — or
+ * which is an `Authorization:` header interpolating anything at all — is an
+ * argument-position credential too. The correct form, used by all four call
+ * sites now, emits `header = "Authorization: …"` into `curl --config -` on
+ * stdin, which is not argv and is pinned by its own clause below.
+ */
+export function carriesCredentialOnCommandLine(line: string): boolean {
+    const code = line.replace(/(^|\s)#.*$/, "");
+
+    // The value alternation has to know each dialect's idea of "one argument":
+    // a GitHub Actions expression contains spaces, so `\S+` alone captures
+    // `${{` and reads as no interpolation at all. Found by the fixture below
+    // rather than by review.
+    for (const match of code.matchAll(/(?:^|\s)(?:-u|-p|--user|--proxy-user|--password|--api-key|--auth|--token)(?:=|\s+)("[^"]*"|'[^']*'|\$\{\{[^}]*\}\}|\S+)/g)) {
+        const value = match[1] ?? "";
+        // An interpolation in any of this repo's CI dialects, naming a secret.
+        if (interpolatesAVariable(value) && CREDENTIAL_NAME.test(value)) {
+            return true;
+        }
+    }
+
+    for (const match of code.matchAll(/(?:^|\s)(?:-H|--header|-d|--data|--data-raw|--data-binary|--data-urlencode|-F|--form)(?:=|\s+)("[^"]*"|'[^']*'|\$\{\{[^}]*\}\}|\S+)/g)) {
+        const value = match[1] ?? "";
+        if (!interpolatesAVariable(value)) {
+            // A literal header is not a credential channel. `-H "Content-Type:
+            // multipart/form-data"` is on three of the four call sites and must
+            // stay correct, or this clause is deleted the first time it runs.
+            continue;
+        }
+        if (CREDENTIAL_NAME.test(value) || isAuthorizationHeader(value)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * A shell line that emits an `Authorization` header into a curl config file.
+ *
+ * This is the *correct* shape — the value goes to curl on stdin via
+ * `--config -`, never through argv — and it has to be recognisable so the
+ * clause below can require that the curl consuming it actually reads a config.
+ * An emitter whose curl lost `--config` sends no credential at all and gets a
+ * 401 that reads like a server problem; an emitter that quietly became an `-H`
+ * again is the original finding.
+ */
+export function emitsCurlConfigHeader(line: string): boolean {
+    return /header\s*=\s*"[^"]*authorization\s*:/i.test(line.replace(/(^|\s)#.*$/, ""));
+}
+
+/**
+ * Physical lines folded into the logical shell commands they form.
+ *
+ * A curl invocation in these pipelines spans six or seven physical lines joined
+ * by trailing backslashes, and the credential now arrives from a `printf` on
+ * the other side of a trailing `|`. Every interesting property here — "this
+ * header is consumed by a curl", "that curl reads `--config`" — is a property
+ * of the whole command and is invisible to any single line of it, which is how
+ * a line-at-a-time guard could watch `-H "Authorization: ${DEPLOY_TOKEN}"` for
+ * as long as it did.
+ *
+ * The reported number is the line the command starts on, so a failure points at
+ * something a reader can open.
+ */
+export function logicalCommands(text: string): { command: string; number: number; lines: number[] }[] {
+    const out: { command: string; number: number; lines: number[] }[] = [];
+    const lines = text.split("\n");
+
+    for (let index = 0; index < lines.length; index++) {
+        const first = lines[index] ?? "";
+        if (first.trim() === "" || /^\s*#/.test(first)) {
+            continue;
+        }
+
+        let command = first;
+        const number = index + 1;
+        const covered = [number];
+        // A trailing `\` or `|` means the command continues. Comment-only
+        // continuation lines are skipped rather than joined, so a comment
+        // between a printf and its curl does not split the pair.
+        while (/(\\|\|)\s*$/.test(command) && index + 1 < lines.length) {
+            index++;
+            const next = lines[index] ?? "";
+            covered.push(index + 1);
+            if (/^\s*#/.test(next)) {
+                continue;
+            }
+            command = `${command.replace(/(\\)\s*$/, " ")} ${next.trim()}`;
+        }
+
+        out.push({ command, number, lines: covered });
+    }
+
+    return out;
 }
 
 /**
@@ -406,6 +549,31 @@ describe("the Authorization selector accepts and rejects the right lines", () =>
     });
 });
 
+describe("the command-line credential selector accepts and rejects the right lines", () => {
+    // Both directions, and the rejections are the load-bearing half here. The
+    // acceptances come from one real defect; the rejections come from ordinary
+    // shell this repository is full of, and they are what decides whether this
+    // clause survives its first false positive.
+    it.each([
+        ['        response=$(curl -sf -u "${BROWSERSTACK_USERNAME}:${BROWSERSTACK_ACCESS_KEY}" "$API_URL")', true],
+        ['curl --user "$DEPLOY_TOKEN" https://deploy.invalid/upload', true],
+        ["docker login -u ci -p ${{ secrets.REGISTRY_PASSWORD }} registry.invalid", true],
+        ["npm publish --token=$NPM_TOKEN", true],
+        // Ordinary shell: a flag with an interpolation, and no credential.
+        ['sort -u "$JUNIT_FILES"', false],
+        ['mkdir -p "$WORK"', false],
+        ["npx tsc -p $PROJECT --noEmit", false],
+        // The correct forms. A credential named in an `env:` mapping, read from
+        // the environment, or fed to curl on stdin is the shape this repository
+        // uses deliberately -- flagging it would delete the guard.
+        ["          DEPLOY_TOKEN: $(DEPLOY_TOKEN)", false],
+        ['printf \'user = "%s:%s"\\n\' "$user_escaped" "$key_escaped" | curl -sf --config - "$API_URL"', false],
+        ["    # curl -u $BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY -- do not do this", false],
+    ])("%s -> carriesCredentialOnCommandLine=%s", (line, expected) => {
+        expect(carriesCredentialOnCommandLine(line as string)).toBe(expected);
+    });
+});
+
 describe("variable interpolation is recognised in every CI dialect", () => {
     // Pinned as a population, not a specimen. Each row is a dialect this repo
     // can contain; a predicate fitted to one of them reports a plausible count
@@ -460,7 +628,7 @@ describe("pipeline secret hygiene", () => {
     // looked like a header. Assert the stronger property: an Authorization
     // header must actually reference the token, in either the ADO macro form
     // or the shell form used when the secret is passed through `env:`.
-    it("references the deploy token in every Authorization header", () => {
+    it("references an approved token in every Authorization header", () => {
         const headers = pipelineLines().filter(({ line }) => isAuthorizationHeader(line));
 
         // Print N, and where. An assertion of the form "N things, all correct"
@@ -514,14 +682,70 @@ describe("pipeline secret hygiene", () => {
         // `Basic ${AUTH}` -- and a guard that rejects correct code gets deleted
         // rather than debugged, which for an invariant whose violation is
         // invisible costs everything the guard protects.
+        //
+        // Traced rather than matched on the line. The headers are no longer
+        // `-H "Authorization: ${DEPLOY_TOKEN}"` -- that form put the secret in
+        // argv -- so the reference is one escaping hop away, and the old
+        // single-line pattern would have called the fix a violation.
+        const bodies = new Map(pipelineFiles().map((file) => [file.location, readFileSync(file.path, "utf8")]));
         const tokenless = headers
             .filter(({ requiresDeployToken }) => requiresDeployToken)
-            .filter(({ line }) => !/\$[({]DEPLOY_TOKEN[)}]/.test(line))
+            .filter(({ location, line }) => {
+                const expected = location === "azure-pipelines-pr-publish.yml" ? "SYSTEM_ACCESSTOKEN" : "DEPLOY_TOKEN";
+                return !credentialTracesToAzureToken(bodies.get(location) ?? "", line, expected);
+            })
             .map(({ location, number }) => `${location}:${number}`);
 
-        expect(tokenless, "Authorization header in an Azure pipeline does not reference DEPLOY_TOKEN.").toEqual([]);
+        expect(
+            tokenless,
+            "Authorization header in an Azure pipeline does not reference the token approved for its endpoint class, directly or through an assignment in its own file."
+        ).toEqual([]);
+
+        const wrongScheme = headers
+            .filter(({ requiresDeployToken }) => requiresDeployToken)
+            .filter(({ line }) => !/Authorization\s*:\s*Bearer\s+/i.test(line))
+            .map(({ location, number }) => `${location}:${number}`);
+
+        expect(wrongScheme, "Authorization headers for deployment and Azure Build API endpoints must use the Bearer scheme.").toEqual([]);
     });
 });
+
+/**
+ * Names a text interpolates, in any dialect this repo uses.
+ *
+ * Extracted from the secret-store tracer when the deploy-token tracer below
+ * needed the same two questions asked the same way. Two tracers with private
+ * copies of "what does this line reference" is the duplication class these
+ * guards keep finding in the pipelines they read.
+ *
+ * The extraction immediately paid for itself: the original omitted the Azure
+ * macro `$(NAME)` -- the form `DEPLOY_TOKEN: $(DEPLOY_TOKEN)` takes in every
+ * `env:` block in this repository -- while `interpolatesAVariable` two hundred
+ * lines above already knew it. One of the two tracers would have been blind to
+ * the repo's most common dialect, which is precisely the drift a shared
+ * predicate removes.
+ */
+export function identifiersIn(text: string): string[] {
+    return [
+        ...[...text.matchAll(/\$(?:\{\{\s*(?:secrets\.)?|\{|\()?([A-Za-z_]\w*)/g)].map(([, name]) => name ?? ""),
+        ...[...text.matchAll(/\bprocess\.env\.([A-Za-z_]\w*)/g)].map(([, name]) => name ?? ""),
+    ];
+}
+
+/**
+ * Every same-file assignment of `name`, as the text right of the separator.
+ *
+ * Both spellings of "this name gets a value": a shell assignment and a YAML
+ * `env:` key. The exempt workflow uses one of each in the same chain, and the
+ * upload templates use the shell form to escape the token for curl's config
+ * parser.
+ */
+export function assignmentsOf(fileText: string, name: string): string[] {
+    return fileText
+        .split("\n")
+        .filter((line) => new RegExp(`(^|\\s)${name}\\s*[:=]`).test(line))
+        .map((line) => line.slice(line.search(/[:=]/) + 1));
+}
 
 /**
  * Whether a header's credential can be traced, through assignments in its own
@@ -545,10 +769,6 @@ describe("pipeline secret hygiene", () => {
  * one-level check would report that correct chain as unbound.
  */
 export function credentialTracesToASecretStore(fileText: string, headerLine: string): boolean {
-    const identifiers = (text: string): string[] => [
-        ...[...text.matchAll(/\$\{?\{?\s*(?:secrets\.)?([A-Za-z_]\w*)/g)].map(([, name]) => name ?? ""),
-        ...[...text.matchAll(/\bprocess\.env\.([A-Za-z_]\w*)/g)].map(([, name]) => name ?? ""),
-    ];
     const secretExpression = String.raw`\$\{\{\s*(?:secrets\.[A-Za-z_]\w*|github\.token)\s*\}\}`;
     const mentionsSecretStore = (text: string): boolean => new RegExp(secretExpression).test(text);
     const isSecretStoreValue = (text: string): boolean => new RegExp(`^\\s*["']?${secretExpression}["']?\\s*(?:#.*)?$`).test(text);
@@ -557,8 +777,7 @@ export function credentialTracesToASecretStore(fileText: string, headerLine: str
         return true;
     }
 
-    const lines = fileText.split("\n");
-    const pending = identifiers(headerLine);
+    const pending = identifiersIn(headerLine);
     const seen = new Set<string>();
 
     // Bounded because assignments can be mutually referential; a cycle must end
@@ -570,18 +789,274 @@ export function credentialTracesToASecretStore(fileText: string, headerLine: str
         }
         seen.add(name);
 
-        // Both spellings of "this name gets a value": shell assignment and a
-        // YAML `env:` key. The exempt file uses one of each in the same chain.
-        const assignments = lines.filter((line) => new RegExp(`(^|\\s)${name}\\s*[:=]`).test(line)).map((line) => line.slice(line.search(/[:=]/) + 1));
+        const assignments = assignmentsOf(fileText, name);
 
         if (assignments.some(isSecretStoreValue)) {
             return true;
         }
-        pending.push(...assignments.flatMap(identifiers));
+        pending.push(...assignments.flatMap(identifiersIn));
     }
 
     return false;
 }
+
+/**
+ * True when a header's credential is the expected token, directly or through
+ * same-file assignments.
+ *
+ * The Azure clause used to ask this of a single line, with
+ * `/\$[({]DEPLOY_TOKEN[)}]/` -- correct only while every header interpolated
+ * the secret in place, which is exactly what the argv fix had to stop doing.
+ * The header now reads `"$token_escaped"`, one hop from `DEPLOY_TOKEN`, and a
+ * one-line test calls that correct chain tokenless. That is the failure
+ * direction this file keeps warning about: a guard that rejects the fix it was
+ * written to require gets deleted rather than debugged.
+ *
+ * The hop is not incidental and cannot be removed to satisfy a simpler check --
+ * a curl config value is a quoted string, so the token has to be escaped before
+ * it is written into one, and an escape is an assignment.
+ *
+ * Written as a trace rather than as "mentions DEPLOY_TOKEN anywhere in the
+ * file", which every one of these files does in prose and in its `env:` block,
+ * and which would therefore pass on a header wired to nothing at all.
+ */
+export function credentialTracesToAzureToken(fileText: string, headerLine: string, expected: "DEPLOY_TOKEN" | "SYSTEM_ACCESSTOKEN"): boolean {
+    const pending = identifiersIn(headerLine);
+    const seen = new Set<string>();
+
+    while (pending.length > 0 && seen.size < 64) {
+        const name = pending.shift() ?? "";
+        if (name === "" || seen.has(name)) {
+            continue;
+        }
+        seen.add(name);
+
+        if (name === expected) {
+            return true;
+        }
+        pending.push(...assignmentsOf(fileText, name).flatMap(identifiersIn));
+    }
+
+    return false;
+}
+
+describe("no credential is passed to a program as an argument", () => {
+    // Separate from the mask and header clauses because it reads a different
+    // property of a line, and separate from the credential-isolation guards
+    // because those decide *which job* may hold a secret at all: this one is
+    // about how a job that legitimately holds one hands it to a process.
+    //
+    // A command line is not private. `/proc/<pid>/cmdline` is world-readable on
+    // Linux, `ps` prints it, and agent diagnostics collect it -- so an argument
+    // exposes the value to everything else running on the box for the lifetime
+    // of the call, which no amount of log masking touches. `env:` and stdin do
+    // not have that property, and every credential in this repository now uses
+    // one of them.
+    it("has no credential in argument position in any file the guard reads", () => {
+        const contributing = new Set(pipelineLines().map(({ location }) => location));
+        const silent = pipelineFiles()
+            .map(({ location }) => location)
+            .filter((location) => !contributing.has(location))
+            .sort();
+        expect(silent, "these files were collected but contributed no line to scan — the assertion below would pass over a file it never read").toEqual([]);
+
+        const offenders = pipelineLines()
+            .filter(({ line }) => carriesCredentialOnCommandLine(line))
+            .map(({ location, number }) => `${location}:${number}`);
+
+        expect(
+            offenders,
+            "a credential is being passed as a command-line argument, where every process on the agent can read it out of /proc. Pass it through `env:` (an ADO `env:` block, a GitHub `env:` key) or on stdin — `curl --config -` takes the same `user =` setting that `-u` does. Locations only; the line is not printed because it holds the value."
+        ).toEqual([]);
+    });
+});
+
+describe("the argument-position selector sees a header, not just a flag name", () => {
+    // The rows that matter here are the `-H` ones. Every one of them passed the
+    // flag-name-only version of this predicate while putting a live deploy
+    // token in argv, which is the whole finding: `-u` was the specimen, not the
+    // property. The rejections are what keeps the widened clause alive -- three
+    // of the four call sites carry a literal `Content-Type` header, and a
+    // clause that fails on those gets deleted the day it lands.
+    it.each([
+        // The four uploads as they were.
+        ['            -H "Authorization: ${DEPLOY_TOKEN}" \\', true],
+        ['                          -H "Authorization: Bearer ${DEPLOY_TOKEN}" \\', true],
+        ['-H "Authorization: $(DEPLOY_TOKEN)"', true],
+        ['-H "Authorization: Bearer ${{ secrets.DEPLOY_TOKEN }}"', true],
+        ["--header=Authorization:${DEPLOY_TOKEN}", true],
+        // Not a header, but the same mistake in a body.
+        ['-d "token=${DEPLOY_TOKEN}"', true],
+        ['-F "apiKey=${API_KEY}"', true],
+        // Correct code on the very lines this clause reads.
+        ['            -H "Content-Type: multipart/form-data" \\', false],
+        ['            -F "path=${DEPLOY_PATH}" \\', false],
+        ['            -F "storageAccount=${STORAGE_ACCOUNT}" \\', false],
+        ['            -F "zip=@${ARCHIVE}"', false],
+        // A literal header with no interpolation cannot be carrying a secret
+        // that came from anywhere but the file, which the mask clause owns.
+        ['-H "Authorization: Bearer static-text"', false],
+        // The fix itself. The header exists, the token is in it, and neither is
+        // an argument: `printf` is a bash builtin and curl reads it on stdin.
+        ['          printf \'header = "Authorization: %s"\\n\' "$token_escaped" |', false],
+        ['          curl "${DEPLOYMENT_SERVER}/${DEPLOY_ENDPOINT_UPLOAD}" --config - --fail-with-body --silent --show-error -X POST \\', false],
+        // A documented example of the mistake is prose, not a mistake.
+        ['          # -H "Authorization: ${DEPLOY_TOKEN}" -- do not do this', false],
+    ])("%s -> carriesCredentialOnCommandLine=%s", (line, expected) => {
+        expect(carriesCredentialOnCommandLine(line as string)).toBe(expected);
+    });
+});
+
+describe("the curl-config emitter selector accepts and rejects the right lines", () => {
+    it.each([
+        ['printf \'header = "Authorization: %s"\\n\' "$token_escaped" |', true],
+        ['printf \'header = "Authorization: Bearer %s"\\n\' "$token_escaped" |', true],
+        ['printf \'header = "authorization: %s"\\n\' "$t" |', true],
+        // A different setting in the same config dialect is not this one.
+        ['printf \'user = "%s:%s"\\n\' "$user_escaped" "$key_escaped" | curl -sf --config - "$API_URL"', false],
+        // The argv form is precisely what this must not accept, or the clause
+        // below would certify the bug as the fix.
+        ['-H "Authorization: ${DEPLOY_TOKEN}"', false],
+        ["# printf 'header = \"Authorization: %s\"\\n' -- example", false],
+    ])("%s -> emitsCurlConfigHeader=%s", (line, expected) => {
+        expect(emitsCurlConfigHeader(line as string)).toBe(expected);
+    });
+});
+
+describe("logical commands fold the lines a curl invocation is spread over", () => {
+    it("joins a stdin emitter to the curl that consumes it", () => {
+        const script = [
+            "token_escaped=${DEPLOY_TOKEN//\\\\/\\\\\\\\}",
+            'printf \'header = "Authorization: %s"\\n\' "$token_escaped" |',
+            "# a comment between the two must not split the pair",
+            'curl "${SERVER}/upload" --config - --fail-with-body \\',
+            '  -F "zip=@${ARCHIVE}"',
+        ].join("\n");
+
+        const commands = logicalCommands(script);
+        const authenticated = commands.filter(({ command }) => isAuthorizationHeader(command));
+
+        expect(authenticated.length, "the emitter and its curl did not fold into one command, so the clause below cannot see the pair").toBe(1);
+        const [folded] = authenticated;
+        expect(folded?.command).toContain("--config -");
+        expect(folded?.command).toContain("zip=@");
+        // The reported line is where a reader should open the file, and the
+        // covered set is what maps a header line back to its command.
+        expect(folded?.number).toBe(2);
+        expect(folded?.lines).toEqual([2, 3, 4, 5]);
+    });
+
+    it("does not fold two unrelated commands into one", () => {
+        const commands = logicalCommands(['curl "$A/one" --config -', 'curl "$B/two" --config -'].join("\n"));
+        expect(commands.length).toBe(2);
+    });
+});
+
+describe("the Azure Authorization-token trace follows the escaping hop", () => {
+    // The escaping hop is mandatory -- a curl config value is a quoted string --
+    // so a check that cannot see through one assignment rejects the only
+    // correct way to write this.
+    const escaped = ["          token_escaped=${DEPLOY_TOKEN//\\\\/\\\\\\\\}", '          token_escaped=${token_escaped//\\"/\\\\\\"}'].join("\n");
+
+    it("traces a header through the escape assignment to DEPLOY_TOKEN", () => {
+        expect(credentialTracesToAzureToken(escaped, 'printf \'header = "Authorization: %s"\\n\' "$token_escaped" |', "DEPLOY_TOKEN")).toBe(true);
+    });
+
+    it("still accepts the direct interpolation", () => {
+        expect(credentialTracesToAzureToken("", '-H "Authorization: ${DEPLOY_TOKEN}"', "DEPLOY_TOKEN")).toBe(true);
+        expect(credentialTracesToAzureToken("", '-H "Authorization: $(DEPLOY_TOKEN)"', "DEPLOY_TOKEN")).toBe(true);
+        expect(credentialTracesToAzureToken("", '-H "Authorization: ${SYSTEM_ACCESSTOKEN}"', "SYSTEM_ACCESSTOKEN")).toBe(true);
+        expect(credentialTracesToAzureToken("", '-H "Authorization: ${SYSTEM_ACCESSTOKEN}"', "DEPLOY_TOKEN")).toBe(false);
+        expect(credentialTracesToAzureToken("", '-H "Authorization: ${DEPLOY_TOKEN}"', "SYSTEM_ACCESSTOKEN")).toBe(false);
+    });
+
+    it("rejects a header wired to something that is not the deploy token", () => {
+        // The counterfactual. A file that mentions DEPLOY_TOKEN in prose and in
+        // its env: block -- as all three of these files do -- must not thereby
+        // certify a header that never reaches it.
+        const decoy = ["# DEPLOY_TOKEN comes from the BabylonJS-Deployment group", "          DEPLOY_TOKEN: $(DEPLOY_TOKEN)", "          other_escaped=${SOME_OTHER_VALUE}"].join(
+            "\n"
+        );
+        expect(credentialTracesToAzureToken(decoy, 'printf \'header = "Authorization: %s"\\n\' "$other_escaped" |', "DEPLOY_TOKEN")).toBe(false);
+    });
+
+    it("terminates on a cycle", () => {
+        const cyclic = ["          a=${b}", "          b=${a}"].join("\n");
+        expect(credentialTracesToAzureToken(cyclic, '-H "Authorization: ${a}"', "DEPLOY_TOKEN")).toBe(false);
+    });
+});
+
+describe("every authenticated curl takes its credential from a config on stdin", () => {
+    // The positive counterpart to the argument-position clause. That one says
+    // where the token must not be; this one says where it must be, and the two
+    // fail on different mutations: reverting a call site to `-H` trips both,
+    // but hoisting the emitter into a shell function -- which keeps the token
+    // out of argv and silently detaches it from the request -- trips only this.
+    //
+    // A detached emitter is not a theoretical concern. It sends no credential
+    // at all, and the deployment server answers 401, which reads like a server
+    // problem rather than a pipeline one. That is the exact failure this branch
+    // already spent a fix on.
+    it("consumes every Azure-pipeline Authorization header through curl --config", () => {
+        const offenders: string[] = [];
+        const consumed: string[] = [];
+
+        for (const file of pipelineFiles().filter(({ requiresDeployToken }) => requiresDeployToken)) {
+            const text = stripDocumentationText(readFileSync(file.path, "utf8"));
+            const byLine = new Map<number, string>();
+            for (const { command, lines } of logicalCommands(text)) {
+                for (const number of lines) {
+                    byLine.set(number, command);
+                }
+            }
+
+            text.split("\n").forEach((line, index) => {
+                if (!isAuthorizationHeader(line)) {
+                    return;
+                }
+                const at = `${file.location}:${index + 1}`;
+                const command = byLine.get(index + 1) ?? line;
+                const readsConfig = /(^|\s)--config(=|\s)/.test(command);
+                const invokesCurl = /(^|[\s|])curl\s/.test(command);
+
+                if (!emitsCurlConfigHeader(command) || !invokesCurl || !readsConfig) {
+                    offenders.push(at);
+                    return;
+                }
+                consumed.push(at);
+            });
+        }
+
+        expect(
+            offenders,
+            'an Authorization header in an Azure pipeline is not being fed to a curl through `--config`. Emit it as `printf \'header = "Authorization: %s"\\n\' "$token_escaped" |` directly into the `curl … --config -` that sends it: an `-H` argument is world-readable in /proc/<pid>/cmdline, and an emitter separated from its curl sends no credential at all. Locations only; the line is not printed because it holds the value.'
+        ).toEqual([]);
+
+        // Floors, because the assertion above is satisfied by an empty input.
+        // Named per file rather than counted in total: a total floor cannot see
+        // one file stop contributing while the others hold the number up, which
+        // is the same within-file shrinkage the header clause guards against.
+        for (const required of ["azure-pipelines-bundle-manifest.yml", "config/templates/upload-static-site.yml", "config/templates/upload-test-report.yml"]) {
+            expect(
+                consumed.filter((at) => at.startsWith(`${required}:`)).length,
+                `no config-fed Authorization header found in ${required} — its authenticated upload either lost its credential or stopped being read here`
+            ).toBeGreaterThan(0);
+        }
+
+        // The static-site template authenticates twice, an upload and a CDN
+        // purge, and the purge is the one inside a conditional -- the shape a
+        // line-at-a-time reader is most likely to lose.
+        expect(
+            consumed.filter((at) => at.startsWith("config/templates/upload-static-site.yml:")).length,
+            "the static-site template has two authenticated requests; only one was seen"
+        ).toBe(2);
+
+        console.log(`config-fed Authorization headers: ${consumed.length}`);
+        for (const at of consumed) {
+            console.log(`  ${at}`);
+        }
+    });
+});
 
 describe("the deploy-token exemption is granted for its reason", () => {
     it("binds every exempt Authorization header to the platform secret store", () => {
@@ -774,6 +1249,10 @@ export function isWalkableDir(name: string): boolean {
  * roots, was invisible: 33 passed, nothing named. Discovering by a narrower
  * category than the guards read is a closure check that certifies part of its
  * subject and reports on all of it.
+ *
+ * `carriesCredentialOnCommandLine` joined the union with the clause that reads
+ * it, for the same reason and in the same edit: a predicate added to the guard
+ * and not to the walk leaves the walk certifying the smaller of the two.
  */
 function allYamlCarryingACredentialShape(root: string = repoRoot): string[] {
     const found: string[] = [];
@@ -795,7 +1274,7 @@ function allYamlCarryingACredentialShape(root: string = repoRoot): string[] {
                 isDiscoverableFile(name) &&
                 stripDocumentationText(readFileSync(full, "utf8"))
                     .split("\n")
-                    .some((l) => isAuthorizationHeader(l) || hasMaskedSecret(l))
+                    .some((l) => isAuthorizationHeader(l) || hasMaskedSecret(l) || carriesCredentialOnCommandLine(l))
             ) {
                 found.push(relative(root, full).split(sep).join("/"));
             }
@@ -1170,7 +1649,7 @@ describe("the mask guard reads every file carrying anything its clauses examine"
 
         expect(
             unread.filter((file) => !isYamlFile(file)),
-            "these non-YAML files carry a credential shape. The guard parses pipeline YAML, so do NOT add them to the roots list — remove the credential instead, or mask it at the source rather than pasting a redacted build log:"
+            "these non-YAML files carry a credential shape. The guard parses pipeline YAML, so do NOT add them to the roots list — remove the credential instead. For a mask, mask it at the source rather than pasting a redacted build log; for a credential in argument position, pass it through the environment or on stdin:"
         ).toEqual([]);
     });
 });

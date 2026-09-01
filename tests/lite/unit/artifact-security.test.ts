@@ -163,7 +163,15 @@ describe("BrowserStack artifact security", () => {
 });
 
 describe("BrowserStack pipeline publication gates", () => {
-    const pipeline = readFileSync(resolve(repoRoot, "azure-pipelines.yml"), "utf8");
+    // The cloud jobs live in their own master-only pipeline. A pull-request
+    // build reads its definition from the pull request itself, so no amount of
+    // gating written there is trustworthy — and the BrowserStack key is
+    // long-lived, so a pull request that never merges would still keep it. The
+    // gates below therefore protect a post-merge run, where the code being
+    // tested has been reviewed and only the *report* needs redacting before it
+    // leaves the credentialed job. See
+    // tests/lite/unit/pr-pipeline-credential-isolation.test.ts.
+    const pipeline = readFileSync(resolve(repoRoot, "azure-pipelines-cloud-tests.yml"), "utf8");
     const uploadTemplate = readFileSync(resolve(repoRoot, "config/templates/upload-test-report.yml"), "utf8");
     const parityConfig = readFileSync(resolve(repoRoot, "config/playwright.parity-cloud.config.ts"), "utf8");
     const perfConfig = readFileSync(resolve(repoRoot, "config/playwright.perf-cloud.config.ts"), "utf8");
@@ -176,7 +184,9 @@ describe("BrowserStack pipeline publication gates", () => {
     it("sets ArtifactsSafe only after sanitize and verify commands", () => {
         const safetySteps = [...pipeline.matchAll(/npx tsx scripts\/redact-secrets\.ts sanitize[\s\S]*?##vso\[task\.setvariable variable=ArtifactsSafe\]true/g)];
         expect(safetySteps).toHaveLength(2);
-        expect(pipeline.match(/ArtifactsSafe: "false"/g)).toHaveLength(2);
+        // Declared false per job, so a job that never reaches the sanitize step
+        // publishes nothing rather than inheriting a neighbour's "true".
+        expect(pipeline.match(/- name: ArtifactsSafe\n\s+value: "false"/g)).toHaveLength(2);
         for (const step of safetySteps) {
             expect(step[0]).toContain("redact-secrets.ts verify");
             expect(step[0]).not.toContain("continueOnError");
@@ -190,10 +200,31 @@ describe("BrowserStack pipeline publication gates", () => {
                     `PublishTestResults@2\\s+condition: and\\(always\\(\\), eq\\(variables\\['ArtifactsSafe'\\], 'true'\\)\\)[\\s\\S]*?${suite}-junit\\.xml[\\s\\S]*?publishRunAttachments: false`
                 )
             );
+
+            // The report leaves the credentialed job as a pipeline artifact and
+            // is uploaded from the PublishReports stage, so the redaction gate
+            // has to sit on the staging step -- that is the last point at which
+            // this job can still withhold the report.
+            expect(pipeline).toMatch(
+                new RegExp(
+                    `condition: and\\(always\\(\\), eq\\(variables\\['ArtifactsSafe'\\], 'true'\\)\\)[\\s\\S]*?targetPath: \\$\\(System\\.DefaultWorkingDirectory\\)/test-results/${suite}-report\\s+artifact: ${suite}-report`
+                )
+            );
         }
-        expect(uploadTemplate).toContain("condition: and(failed(), eq(variables['ArtifactsSafe'], 'true'))");
-        expect(uploadTemplate).toContain("test-results/${{ parameters.reportType }}-report");
-        expect(uploadTemplate).not.toContain("reportDir");
+
+        // Only the sanitized HTML report directory is ever staged. Raw
+        // Playwright output and trace directories stay on the agent.
+        expect(pipeline).not.toMatch(/targetPath:.*(-artifacts|playwright-report|test-results\s*$)/m);
+
+        // The upload template deliberately carries no ArtifactsSafe condition:
+        // that variable is set by a repository-authored script, so PR code can
+        // set it too. It gates what the untrusted job hands over; it must never
+        // be what a job holding DEPLOY_TOKEN relies on.
+        // (Matched against conditions rather than the whole file: the template
+        // explains this rule in a comment, and prose about a rule must not read
+        // as a breach of it.)
+        expect(uploadTemplate).not.toMatch(/^\s*condition:.*ArtifactsSafe/m);
+        expect(uploadTemplate).toContain("reportDir");
         expect(uploadTemplate).not.toContain("-artifacts");
     });
 });

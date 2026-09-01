@@ -1,7 +1,10 @@
 # Azure Pipelines — Babylon Lite npm Publish
 #
-# Publishes the built @babylonjs/lite package to npm. Configure NPM_TOKEN as
-# a secret pipeline variable or variable-group value before enabling this run.
+# Publishes the built @babylonjs/lite package to npm. The registry credential is
+# `NPM_PUBLISH_TOKEN`, and it comes from the protected variable group
+# `BabylonJS-NpmPublish`, imported by the publishing job and by nothing else. A
+# pipeline-level UI variable is deliberately NOT a supported way to configure it:
+# see TESTING.md, "Settings that repository files cannot enforce".
 #
 # Manual runs can choose patch, minor, major, or auto. Scheduled runs use auto.
 # Pushes to master that change config/release.json read the release type from
@@ -14,8 +17,30 @@
 #
 # Set the `dryRun` parameter (manual run) to exercise the whole pipeline —
 # build, test, version resolution, and package-content validation — without
-# uploading to npm or pushing a release tag. In dry-run mode both `npm publish`
-# calls use `--dry-run` and the git tag is created locally but not pushed.
+# uploading to npm or pushing a release tag. In dry-run mode `npm publish` runs
+# with `--dry-run` and no release (and therefore no tag) is created.
+#
+# ── WHY BUILDING AND PUBLISHING ARE DIFFERENT JOBS ───────────────────────────
+#
+# `pnpm install`, `pnpm build`, `pnpm test:*` and every npm lifecycle script
+# they trigger are repository-controlled code. When that code shares an agent
+# with the publish token it can simply read it out of the environment, and when
+# the checkout was made with `persistCredentials: true` it can read the build's
+# OAuth token out of `.git/config` and push to the repository as CI. Neither
+# needs a malicious commit — one compromised transitive dependency is enough,
+# and `npm publish` runs `prepublishOnly`/`prepack` from the package itself.
+#
+# So:
+#   * `BuildAndPack` runs all of that with no credential of any kind in scope
+#     and no persisted checkout auth. It ends at `npm pack`, producing tarballs
+#     as pipeline artifacts.
+#   * `PublishNpm` starts from a clean agent with `checkout: none`, holds
+#     NPM_PUBLISH_TOKEN, validates the tarballs it was handed, and publishes them with
+#     `--ignore-scripts` so nothing inside a tarball executes here either.
+#   * `TagAndRelease` and `PublishPlayground` likewise never check out the
+#     repository. The release tag is created through the GitHub API by
+#     GitHubRelease@1 rather than by `git push` from a credentialed checkout,
+#     which is what let `persistCredentials: true` be removed outright.
 
 trigger:
     branches:
@@ -51,11 +76,6 @@ parameters:
       default: false
 
 variables:
-    - group: BabylonJS-Deployment
-    # Provides TOOLS_STORAGE_ACCOUNT — the tools storage account backing
-    # liteplayground.babylonjs.com, so versioned playground snapshots serve
-    # same-origin as nightly (required by the client-side deploy coordinator).
-    - group: BabylonJS-CI-Infrastructure
     - name: NODE_VERSION
       value: "22.x"
     - name: PNPM_VERSION
@@ -71,15 +91,21 @@ stages:
     - stage: PublishNpm
       displayName: "Publish @babylonjs/lite to npm"
       jobs:
-          - job: BuildTestAndPublish
-            displayName: "Build, Test, and Publish"
+          # ══════════════════════════════════════════════════════════════
+          # Build and pack — repository code, zero credentials
+          # ══════════════════════════════════════════════════════════════
+          - job: BuildAndPack
+            displayName: "Build, Test, and Pack"
+            timeoutInMinutes: 120
             pool:
                 vmImage: "ubuntu-latest"
             steps:
+                # No persistCredentials: nothing in this job may push to the
+                # repository, and the build's OAuth token must not be left in
+                # .git/config where a lifecycle script can read it.
                 - checkout: self
                   fetchDepth: 0
                   fetchTags: true
-                  persistCredentials: true
 
                 - task: UseNode@1
                   inputs:
@@ -123,98 +149,31 @@ stages:
                       PACKAGE_VERSION: $(PACKAGE_VERSION)
 
                 # Generate the changelog from the Conventional-Commit history.
-                # This must run BEFORE the new release tag is created below, so the
-                # auto-detected "previous tag" is the prior release rather than the
-                # tag we are about to push. Two artefacts: the full cumulative
-                # CHANGELOG.md ships inside the npm tarball (build root), and the
-                # single latest section feeds the GitHub release notes.
+                # This must run BEFORE the release tag is created by the release
+                # job, so the auto-detected "previous tag" is the prior release
+                # rather than the tag this run is about to create. Two artefacts:
+                # the full cumulative CHANGELOG.md ships inside the npm tarball
+                # (build root), and the single latest section feeds the GitHub
+                # release notes.
                 - script: |
                       set -euo pipefail
-                      mkdir -p "$(Build.ArtifactStagingDirectory)"
+                      mkdir -p "$(Build.ArtifactStagingDirectory)/release"
                       npx tsx scripts/generate-changelog.ts
                   displayName: "Generate release changelog"
                   env:
                       PACKAGE_VERSION: $(PACKAGE_VERSION)
                       PACKAGE_NAME: $(PACKAGE_NAME)
                       CHANGELOG_OUTPUT: packages/babylon-lite/build/CHANGELOG.md
-                      RELEASE_NOTES_OUTPUT: $(Build.ArtifactStagingDirectory)/release-notes.md
+                      RELEASE_NOTES_OUTPUT: $(Build.ArtifactStagingDirectory)/release/release-notes.md
                       GITHUB_REPOSITORY: $(Build.Repository.Name)
                       BUILD_REPOSITORY_URI: $(Build.Repository.Uri)
-
-                - script: npm pack --dry-run ./packages/babylon-lite/build
-                  displayName: "Validate npm package contents"
-
-                - script: |
-                      set -euo pipefail
-
-                      if [ -z "${NPM_TOKEN:-}" ]; then
-                        echo "NPM_TOKEN must be configured as a secret pipeline variable."
-                        exit 1
-                      fi
-
-                      printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > ~/.npmrc
-
-                      EXTRA=""
-                      if [ "$(echo "${DRY_RUN:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
-                        echo "DRY RUN: npm publish will run with --dry-run (nothing is uploaded)."
-                        EXTRA="--dry-run"
-                      fi
-                      npm publish ./packages/babylon-lite/build $EXTRA --access public --registry https://registry.npmjs.org/
-                  displayName: "Publish package to npm"
-                  env:
-                      NPM_TOKEN: $(NPM_TOKEN)
-
-                - script: |
-                      set -euo pipefail
-
-                      TAG="npm-lite-v$(PACKAGE_VERSION)"
-                      git config user.email "bjsplat@gmail.com"
-                      git config user.name "Babylon.js CI"
-                      git tag "$TAG" -m "Publish @babylonjs/lite $(PACKAGE_VERSION)"
-                      if [ "$(echo "${DRY_RUN:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
-                        echo "DRY RUN: created tag $TAG locally but will NOT push it."
-                      else
-                        git push origin "refs/tags/$TAG"
-                      fi
-                  displayName: "Tag published npm version"
-
-                # --- GitHub release ---------------------------------------------
-                # Publish a GitHub release for the just-pushed npm tag, attaching a
-                # zip of the built @babylonjs/lite package (build/ contents). Skipped
-                # in dry-run mode because the underlying tag is never pushed.
-                - script: |
-                      set -euo pipefail
-
-                      ZIP_PATH="$(Build.ArtifactStagingDirectory)/babylonjs-lite-$(PACKAGE_VERSION).zip"
-                      ( cd ./packages/babylon-lite/build && zip -r "$ZIP_PATH" . )
-                      echo "Created release archive: $ZIP_PATH"
-                  displayName: "Zip @babylonjs/lite dist for release"
-                  condition: and(succeeded(), ne(lower(variables['DRY_RUN']), 'true'))
-
-                - task: GitHubRelease@1
-                  displayName: "Create GitHub release"
-                  condition: and(succeeded(), ne(lower(variables['DRY_RUN']), 'true'))
-                  inputs:
-                      gitHubConnection: "BabylonBotPAT"
-                      repositoryName: "$(Build.Repository.Name)"
-                      action: "create"
-                      target: "$(Build.SourceVersion)"
-                      tagSource: "userSpecifiedTag"
-                      tag: "npm-lite-v$(PACKAGE_VERSION)"
-                      title: "@babylonjs/lite v$(PACKAGE_VERSION)"
-                      releaseNotesSource: "filePath"
-                      releaseNotesFilePath: "$(Build.ArtifactStagingDirectory)/release-notes.md"
-                      assets: "$(Build.ArtifactStagingDirectory)/babylonjs-lite-$(PACKAGE_VERSION).zip"
-                      addChangeLog: false
 
                 # --- @babylonjs/lite-compat -------------------------------------
                 # The compatibility layer publishes each build as
                 # `<lite-version>-preview` under npm's default `latest` dist-tag.
                 # npm requires every package to carry a `latest` tag, so there is no
                 # "preview-only" state: the `-preview` version suffix is what marks
-                # these builds as pre-release. Each run records the @babylonjs/lite
-                # version it was built against.
-
+                # these builds as pre-release.
                 - script: pnpm --filter @babylonjs/lite-compat build
                   displayName: "Build @babylonjs/lite-compat"
 
@@ -223,110 +182,424 @@ stages:
                   env:
                       LITE_VERSION: $(PACKAGE_VERSION)
 
-                - script: npm pack --dry-run ./packages/babylon-lite-compat/dist
-                  displayName: "Validate compat package contents"
-
+                # Pack both packages into real tarballs. This replaces the former
+                # `npm pack --dry-run` content check: the artifact that gets
+                # published is now exactly the artifact that was validated, rather
+                # than a second pack of a directory a later step could have edited.
                 - script: |
                       set -euo pipefail
+                      OUT="$(Build.ArtifactStagingDirectory)/tarballs"
+                      mkdir -p "$OUT"
+                      npm pack ./packages/babylon-lite/build --pack-destination "$OUT"
+                      npm pack ./packages/babylon-lite-compat/dist --pack-destination "$OUT"
+                      ls -l "$OUT"
+                  displayName: "Pack npm tarballs"
 
-                      if [ -z "${NPM_TOKEN:-}" ]; then
-                        echo "NPM_TOKEN must be configured as a secret pipeline variable."
-                        exit 1
-                      fi
-
-                      printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > ~/.npmrc
-
-                      EXTRA=""
-                      if [ "$(echo "${DRY_RUN:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
-                        echo "DRY RUN: npm publish will run with --dry-run (nothing is uploaded)."
-                        EXTRA="--dry-run"
-                      fi
-                      npm publish ./packages/babylon-lite-compat/dist $EXTRA --access public --registry https://registry.npmjs.org/
-                  displayName: "Publish compat package to npm"
+                # Version handoff as data, not as a cross-job variable: the
+                # publishing jobs read it from the artifact rather than trusting a
+                # value a build step set at runtime.
+                - script: |
+                      set -euo pipefail
+                      printf '%s\n' "$PACKAGE_VERSION" > "$(Build.ArtifactStagingDirectory)/release/version.txt"
+                      ( cd ./packages/babylon-lite/build && zip -qr "$(Build.ArtifactStagingDirectory)/release/babylonjs-lite-${PACKAGE_VERSION}.zip" . )
+                  displayName: "Stage release assets"
                   env:
-                      NPM_TOKEN: $(NPM_TOKEN)
+                      PACKAGE_VERSION: $(PACKAGE_VERSION)
 
-                # --- Versioned playground snapshot ------------------------------
-                # After a successful publish, build the Lite Playground from this
-                # tagged commit and deploy it to an immutable per-version sub-path
-                # on the tools account (served at liteplayground.babylonjs.com/v/<ver>/),
-                # so every release gets a permanent, self-consistent playground URL
-                # served same-origin as nightly (its self-hosted engine is built
-                # from — and stamped with — the published version via PACKAGE_VERSION).
+                # Versioned playground snapshot, built here (with the rest of the
+                # repository code) and deployed from a clean agent later.
                 # PLAYGROUND_BASE matches the public sub-path so assets, the runner,
                 # the engine, and SPA snippet routes resolve under it.
                 #
-                # The build itself runs unconditionally. It is the heaviest step in
-                # this pipeline and the only one that has broken a release so far (a
-                # Node OOM, which struck *after* npm publish had already succeeded),
-                # so a dry run has to exercise it to be worth running. Only the steps
-                # with external side effects — the upload and the shared versions
-                # manifest — are compile-time gated on dryRun.
+                # The build runs unconditionally, including in a dry run: it is the
+                # heaviest step in this pipeline and the only one that has broken a
+                # release so far (a Node OOM, which struck *after* npm publish had
+                # already succeeded), so a dry run has to exercise it to be worth
+                # running. Only the steps with external side effects are gated.
                 - script: pnpm build:playground
                   displayName: "Build versioned playground"
                   env:
                       PACKAGE_VERSION: $(PACKAGE_VERSION)
                       PLAYGROUND_BASE: /v/$(PACKAGE_VERSION)/
 
-                - ${{ if eq(parameters.dryRun, false) }}:
-                      - template: config/templates/upload-static-site.yml
-                        parameters:
-                            siteDir: $(System.DefaultWorkingDirectory)/playground/dist
-                            deployPath: litePlayground/v/$(PACKAGE_VERSION)
-                            storageAccount: $(TOOLS_STORAGE_ACCOUNT)
-                            siteName: "Lite Playground v$(PACKAGE_VERSION)"
-                            postComment: false
+                - task: PublishPipelineArtifact@1
+                  displayName: "Stage tarballs for trusted publish"
+                  inputs:
+                      targetPath: $(Build.ArtifactStagingDirectory)/tarballs
+                      artifact: npm-tarballs
 
-                      # Record this release in the deployed-versions manifest the
-                      # playground reads to populate its version selector (only
-                      # versions with a live /v/<ver>/ snapshot are offered). The
-                      # manifest lives at the origin root (/v/versions.json), shared
-                      # by every snapshot. Read-modify-write: fetch the current list,
-                      # add this version, dedupe + sort newest first, then re-upload
-                      # just that file to the /v path. The deploy server overlays at
-                      # the given path, so sibling /v/<ver>/ snapshots are left
-                      # intact. Finally purge the manifest (a .json, otherwise cached
-                      # at the CDN default TTL) so the new release shows up promptly.
-                      - script: |
-                            set -euo pipefail
+                - task: PublishPipelineArtifact@1
+                  displayName: "Stage release assets"
+                  inputs:
+                      targetPath: $(Build.ArtifactStagingDirectory)/release
+                      artifact: release-assets
 
-                            VER="$(PACKAGE_VERSION)"
-                            MANIFEST_URL="https://liteplayground.babylonjs.com/v/versions.json"
-                            WORK="$(Build.ArtifactStagingDirectory)/versions-manifest"
-                            mkdir -p "$WORK"
+                - task: PublishPipelineArtifact@1
+                  displayName: "Stage versioned playground"
+                  inputs:
+                      targetPath: $(System.DefaultWorkingDirectory)/playground/dist
+                      artifact: playground-versioned
 
-                            # Fetch the current manifest, distinguishing "not there yet"
-                            # from a transient failure. A 404 is the first-run empty
-                            # case; any other non-200 (5xx, network error) must NOT be
-                            # treated as empty, or we'd overwrite the manifest with just
-                            # this version and drop older still-deployed releases from
-                            # the selector. On such failures, skip the update (the step
-                            # is continueOnError) and leave the manifest intact — this
-                            # version is picked up by the next successful publish.
-                            HTTP_CODE="$(curl -sS -o "$WORK/current.json" -w '%{http_code}' "$MANIFEST_URL" || echo 000)"
-                            if [ "$HTTP_CODE" = "404" ]; then
-                              echo "No existing manifest (404); starting a new list."
-                              echo '[]' > "$WORK/current.json"
-                            elif [ "$HTTP_CODE" != "200" ]; then
-                              echo "Manifest fetch failed (HTTP $HTTP_CODE); skipping update to avoid clobbering existing versions."
+          # ══════════════════════════════════════════════════════════════
+          # Publish to npm — NPM_PUBLISH_TOKEN, no repository code
+          # ══════════════════════════════════════════════════════════════
+          - job: PublishToNpm
+            displayName: "Publish tarballs to npm"
+            dependsOn: BuildAndPack
+            # Exact full ref, and a reason that is not a pull request. `pr: none`
+            # and the `- master` branch filter describe the *automatic* triggers;
+            # neither constrains a manual queue, which may name any ref, and the
+            # YAML a run of that ref executes is that ref's YAML. A run from
+            # anywhere but refs/heads/master therefore reaches this job's
+            # credential only if this condition — and, on the server side, a
+            # branch-control check on the resources it uses — lets it. The
+            # condition alone is not the control (a run from another ref could
+            # delete it); it is what makes the intent enforceable for every run
+            # that is still executing master's definition. See TESTING.md,
+            # "Settings that repository files cannot enforce".
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                # The registry credential, imported here and nowhere else in this
+                # file. A variable group is a *protected resource*: the
+                # branch-control and pipeline-authorization checks an
+                # administrator configures on it are evaluated before this job
+                # starts, and they cannot be edited from YAML. A pipeline-level
+                # UI variable is not a protected resource — no check applies to
+                # it, every job in the definition can read it, and a run queued
+                # manually from any ref executes that ref's YAML while still
+                # being handed it. That is what this import replaces, and it is
+                # why the variable was renamed at the same time: a leftover UI
+                # variable called `NPM_TOKEN` cannot satisfy `NPM_PUBLISH_TOKEN`,
+                # so a half-finished migration fails the assertion below instead
+                # of publishing with the credential the group was meant to
+                # protect. See TESTING.md, "Settings that repository files cannot
+                # enforce", for the checks an administrator must add.
+                - group: BabylonJS-NpmPublish
+            steps:
+                - checkout: none
+
+                # Fail closed, before anything is downloaded or run. An
+                # unresolved macro does not arrive as an empty string: Azure
+                # passes `$(NAME)` through as literal text when the variable is
+                # not in scope, which is exactly what this job sees when a check
+                # refuses the group, when the group is not authorized for this
+                # definition, or when it does not define the variable at all.
+                # Emptiness alone is therefore not the test — and a token-shaped
+                # literal reaching `npm publish` fails at the registry with an
+                # authentication error that reads like a credential problem
+                # rather than the configuration problem it is.
+                - script: |
+                      set -uo pipefail
+                      case "${NPM_PUBLISH_TOKEN:-}" in
+                          "" | *'$('*)
+                              echo "BabylonJS-NpmPublish is not in scope for this run, or does not define NPM_PUBLISH_TOKEN; refusing to publish."
                               exit 1
-                            fi
+                              ;;
+                      esac
+                  displayName: "Require publish credential"
+                  env:
+                      NPM_PUBLISH_TOKEN: $(NPM_PUBLISH_TOKEN)
 
-                            node -e 'const fs=require("fs");const ver=process.argv[1];let list=[];try{const p=JSON.parse(fs.readFileSync(process.argv[2],"utf8"));if(Array.isArray(p))list=p.filter(v=>typeof v==="string");}catch{}if(!list.includes(ver))list.push(ver);const cmp=(a,b)=>{const pa=a.split(".").map(Number),pb=b.split(".").map(Number);for(let i=0;i<3;i++){const d=(pa[i]||0)-(pb[i]||0);if(d)return d;}return 0;};list=list.filter(v=>!v.includes("-")).sort(cmp).reverse();fs.writeFileSync(process.argv[3],JSON.stringify(list)+"\n");' "$VER" "$WORK/current.json" "$WORK/versions.json"
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
 
-                            echo "Updated manifest:"; cat "$WORK/versions.json"
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download tarballs"
+                  inputs:
+                      artifact: npm-tarballs
+                      path: $(Pipeline.Workspace)/npm-tarballs
 
-                            (cd "$WORK" && zip -j versions.zip versions.json)
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download release assets"
+                  inputs:
+                      artifact: release-assets
+                      path: $(Pipeline.Workspace)/release-assets
 
-                            curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_UPLOAD)" --fail-with-body -i -X POST \
-                              -H "Content-Type: multipart/form-data" \
-                              -H "Authorization: Bearer $(DEPLOY_TOKEN)" \
-                              -F "path=litePlayground/v" \
-                              -F "storageAccount=$(TOOLS_STORAGE_ACCOUNT)" \
-                              -F "zip=@$WORK/versions.zip"
+                # Validate what is about to be published, from this job, without
+                # running anything out of the tarball. Everything here is inline
+                # in this file — which is only ever read from master — so no
+                # repository checkout is needed to perform the check.
+                #
+                # Nothing read out of the artifact is echoed before it has been
+                # constrained to a character set. The artifact was produced by
+                # the job that ran repository code, so a tarball's file name and
+                # the `name`/`version` inside it are attacker-influenced; the
+                # agent obeys any `##vso[...]` that starts a line of step output,
+                # so echoing an unconstrained value here would let the artifact
+                # issue logging commands in the job that holds the publish token —
+                # `task.prependpath` alone is enough to put a fake `npm` on PATH.
+                - script: |
+                      set -euo pipefail
+                      TARBALLS="$(Pipeline.Workspace)/npm-tarballs"
+                      VERSION="$(cat "$(Pipeline.Workspace)/release-assets/version.txt")"
 
-                            curl "$(DEPLOYMENT_SERVER)/$(DEPLOY_ENDPOINT_PURGE)?endpoint=lite-playground&profileName=$(CDN_PROFILE_TOOLS)" --fail-with-body -i -X POST \
-                              -H "Authorization: Bearer $(DEPLOY_TOKEN)"
-                        displayName: "Update deployed-versions manifest"
-                        condition: succeeded()
-                        continueOnError: true
+                      # Anchored against the WHOLE value. `grep -Eq '^…$'`
+                      # matches when ANY line matches, so a version.txt holding
+                      # "1.2.3\n##vso[…]" passes it; bash's `=~` has no multiline
+                      # mode, so a value carrying a newline fails here instead.
+                      version_ok() { [[ $1 =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?$ ]]; }
+
+                      if ! version_ok "$VERSION"; then
+                        echo "Refusing to publish: version.txt does not hold a single well-formed version."
+                        exit 1
+                      fi
+
+                      # Sets SELECTED to the one tarball declaring the expected
+                      # name and version, having first checked that every staged
+                      # tarball is safe to name in a log line at all.
+                      SELECTED=""
+                      select_tarball() {
+                        local expected_name="$1" expected_version="$2"
+                        local file base name version
+                        SELECTED=""
+                        for file in "$TARBALLS"/*.tgz; do
+                          test -e "$file" || continue
+                          base="$(basename "$file")"
+                          if [[ ! $base =~ ^[A-Za-z0-9@._-]+\.tgz$ ]]; then
+                            echo "Refusing to publish: a staged tarball's file name is outside [A-Za-z0-9@._-]."
+                            exit 1
+                          fi
+                          name="$(tar -xzOf "$file" package/package.json | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).name')"
+                          version="$(tar -xzOf "$file" package/package.json | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).version')"
+                          if [[ ! $name =~ ^@?[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)?$ ]]; then
+                            echo "Refusing to publish: a staged tarball declares a package name outside the npm character set."
+                            exit 1
+                          fi
+                          if ! version_ok "$version"; then
+                            echo "Refusing to publish: a staged tarball declares a version that is not a single well-formed version."
+                            exit 1
+                          fi
+                          if [ "$name" = "$expected_name" ] && [ "$version" = "$expected_version" ]; then
+                            SELECTED="$file"
+                          fi
+                        done
+                        if [ -z "$SELECTED" ]; then
+                          echo "Refusing to publish: no staged tarball is $expected_name@$expected_version."
+                          exit 1
+                        fi
+                        echo "Validated $expected_name@$expected_version ($(basename "$SELECTED"))"
+                      }
+
+                      select_tarball '@babylonjs/lite' "$VERSION"
+                      LITE_TGZ="$SELECTED"
+                      select_tarball '@babylonjs/lite-compat' "${VERSION}-preview"
+                      COMPAT_TGZ="$SELECTED"
+
+                      echo "##vso[task.setvariable variable=LITE_TGZ]$LITE_TGZ"
+                      echo "##vso[task.setvariable variable=COMPAT_TGZ]$COMPAT_TGZ"
+                  displayName: "Validate tarball contents"
+
+                # --ignore-scripts: publishing a tarball still runs the package's
+                # own prepack/prepublishOnly hooks otherwise, which would put
+                # repository-controlled code back on the agent holding the
+                # publish token.
+                - script: |
+                      set -euo pipefail
+
+                      # Repeated from the gate step above rather than assumed: a
+                      # later edit that reorders or deletes that step must not
+                      # silently restore "publish with whatever is in scope".
+                      # The literal `$(` test is the unresolved-macro case; see
+                      # the gate step for why emptiness alone is not enough.
+                      case "${NPM_PUBLISH_TOKEN:-}" in
+                        "" | *'$('*)
+                          echo "NPM_PUBLISH_TOKEN must come from the BabylonJS-NpmPublish variable group."
+                          exit 1
+                          ;;
+                      esac
+
+                      # A job-scoped npmrc rather than ~/.npmrc: created empty
+                      # under a 077 umask so it is 0600 *before* the token is
+                      # written to it (a token written first and chmod'd second
+                      # is world-readable in between), kept in the agent's temp
+                      # directory, named only by `--userconfig`, and removed on
+                      # every exit path. Nothing is left in $HOME for a later
+                      # step — or, on a self-hosted agent, a later build — to
+                      # read.
+                      NPMRC="$(Agent.TempDirectory)/npm-publish-$(Build.BuildId).npmrc"
+                      trap 'rm -f "$NPMRC"' EXIT
+                      ( umask 077 && : > "$NPMRC" )
+                      chmod 600 "$NPMRC"
+                      printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_PUBLISH_TOKEN" >> "$NPMRC"
+
+                      EXTRA=""
+                      if [ "$(echo "${DRY_RUN:-false}" | tr '[:upper:]' '[:lower:]')" = "true" ]; then
+                        echo "DRY RUN: npm publish will run with --dry-run (nothing is uploaded)."
+                        EXTRA="--dry-run"
+                      fi
+
+                      npm publish "$LITE_TGZ" $EXTRA --ignore-scripts --access public --userconfig "$NPMRC" --registry https://registry.npmjs.org/
+                      npm publish "$COMPAT_TGZ" $EXTRA --ignore-scripts --access public --userconfig "$NPMRC" --registry https://registry.npmjs.org/
+                  displayName: "Publish packages to npm"
+                  env:
+                      NPM_PUBLISH_TOKEN: $(NPM_PUBLISH_TOKEN)
+                      LITE_TGZ: $(LITE_TGZ)
+                      COMPAT_TGZ: $(COMPAT_TGZ)
+
+          # ══════════════════════════════════════════════════════════════
+          # Tag and release — GitHub connection, no repository code
+          # ══════════════════════════════════════════════════════════════
+          # The release tag used to be created by `git tag && git push` from a
+          # checkout made with persistCredentials: true. GitHubRelease@1 creates
+          # the tag through the API from the service connection instead, so no
+          # git credential is ever written to disk on any agent in this pipeline.
+          - job: TagAndRelease
+            displayName: "Tag and create GitHub release"
+            dependsOn: PublishToNpm
+            # Full ref and reason, as on PublishToNpm above: this job holds the
+            # GitHub service connection.
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'), ne(lower(variables['DRY_RUN']), 'true'))
+            pool:
+                vmImage: "ubuntu-latest"
+            steps:
+                - checkout: none
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download release assets"
+                  inputs:
+                      artifact: release-assets
+                      path: $(Pipeline.Workspace)/release-assets
+
+                - script: |
+                      set -euo pipefail
+                      VERSION="$(cat "$(Pipeline.Workspace)/release-assets/version.txt")"
+                      # Whole-value match: see "Validate tarball contents" above
+                      # for why `grep -Eq` is not enough for a value that is
+                      # about to be echoed into a logging command.
+                      if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?$ ]]; then
+                        echo "Refusing to tag: version.txt does not hold a single well-formed version."
+                        exit 1
+                      fi
+                      echo "##vso[task.setvariable variable=RELEASE_VERSION]$VERSION"
+                  displayName: "Read published version"
+
+                - task: GitHubRelease@1
+                  displayName: "Create GitHub release"
+                  inputs:
+                      gitHubConnection: "BabylonBotPAT"
+                      repositoryName: "$(Build.Repository.Name)"
+                      action: "create"
+                      target: "$(Build.SourceVersion)"
+                      tagSource: "userSpecifiedTag"
+                      tag: "npm-lite-v$(RELEASE_VERSION)"
+                      title: "@babylonjs/lite v$(RELEASE_VERSION)"
+                      releaseNotesSource: "filePath"
+                      releaseNotesFilePath: "$(Pipeline.Workspace)/release-assets/release-notes.md"
+                      assets: "$(Pipeline.Workspace)/release-assets/babylonjs-lite-$(RELEASE_VERSION).zip"
+                      addChangeLog: false
+
+          # ══════════════════════════════════════════════════════════════
+          # Publish playground snapshot — DEPLOY_TOKEN, no repository code
+          # ══════════════════════════════════════════════════════════════
+          # Deploys the versioned playground to an immutable per-version sub-path
+          # on the tools account (served at liteplayground.babylonjs.com/v/<ver>/),
+          # so every release gets a permanent, self-consistent playground URL
+          # served same-origin as nightly.
+          - job: PublishPlayground
+            displayName: "Publish versioned playground"
+            dependsOn: PublishToNpm
+            # Full ref and reason, as on PublishToNpm above: this job holds
+            # DEPLOY_TOKEN.
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'), ne(lower(variables['DRY_RUN']), 'true'))
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                - group: BabylonJS-Deployment
+                # Provides TOOLS_STORAGE_ACCOUNT — the tools storage account
+                # backing liteplayground.babylonjs.com, so versioned playground
+                # snapshots serve same-origin as nightly (required by the
+                # client-side deploy coordinator).
+                - group: BabylonJS-CI-Infrastructure
+            steps:
+                - checkout: none
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download release assets"
+                  inputs:
+                      artifact: release-assets
+                      path: $(Pipeline.Workspace)/release-assets
+
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download versioned playground"
+                  inputs:
+                      artifact: playground-versioned
+                      path: $(Pipeline.Workspace)/playground-versioned
+
+                - script: |
+                      set -euo pipefail
+                      VERSION="$(cat "$(Pipeline.Workspace)/release-assets/version.txt")"
+                      # Whole-value match: see "Validate tarball contents" above.
+                      # This one also becomes part of an upload path, so a value
+                      # carrying anything but a version must not reach it.
+                      if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9._-]+)?$ ]]; then
+                        echo "Refusing to deploy: version.txt does not hold a single well-formed version."
+                        exit 1
+                      fi
+                      echo "##vso[task.setvariable variable=RELEASE_VERSION]$VERSION"
+                  displayName: "Read published version"
+
+                - template: config/templates/upload-static-site.yml
+                  parameters:
+                      siteDir: $(Pipeline.Workspace)/playground-versioned
+                      deployPath: litePlayground/v/$(RELEASE_VERSION)
+                      storageAccount: $(TOOLS_STORAGE_ACCOUNT)
+                      siteName: "Lite Playground v$(RELEASE_VERSION)"
+                      postComment: false
+                      continueOnError: false
+
+                # Record this release in the deployed-versions manifest the
+                # playground reads to populate its version selector (only versions
+                # with a live /v/<ver>/ snapshot are offered). The manifest lives at
+                # the origin root (/v/versions.json), shared by every snapshot.
+                # Read-modify-write: fetch the current list, add this version,
+                # dedupe + sort newest first, then re-upload just that file to the
+                # /v path. The deploy server overlays at the given path, so sibling
+                # /v/<ver>/ snapshots are left intact.
+                - script: |
+                      set -euo pipefail
+
+                      VER="$(RELEASE_VERSION)"
+                      MANIFEST_URL="https://liteplayground.babylonjs.com/v/versions.json"
+                      WORK="$(Build.ArtifactStagingDirectory)/versions-manifest"
+                      mkdir -p "$WORK"
+
+                      # Fetch the current manifest, distinguishing "not there yet"
+                      # from a transient failure. A 404 is the first-run empty case;
+                      # any other non-200 (5xx, network error) must NOT be treated as
+                      # empty, or we would overwrite the manifest with just this
+                      # version and drop older still-deployed releases from the
+                      # selector. On such failures, skip the update (the step is
+                      # continueOnError) and leave the manifest intact — this version
+                      # is picked up by the next successful publish.
+                      HTTP_CODE="$(curl -sS -o "$WORK/current.json" -w '%{http_code}' "$MANIFEST_URL" || echo 000)"
+                      if [ "$HTTP_CODE" = "404" ]; then
+                        echo "No existing manifest (404); starting a new list."
+                        echo '[]' > "$WORK/current.json"
+                      elif [ "$HTTP_CODE" != "200" ]; then
+                        echo "Manifest fetch failed (HTTP $HTTP_CODE); skipping update to avoid clobbering existing versions."
+                        exit 1
+                      fi
+
+                      mkdir -p "$WORK/manifest-out"
+                      node -e 'const fs=require("fs");const ver=process.argv[1];let list=[];try{const p=JSON.parse(fs.readFileSync(process.argv[2],"utf8"));if(Array.isArray(p))list=p.filter(v=>typeof v==="string");}catch{}if(!list.includes(ver))list.push(ver);const cmp=(a,b)=>{const pa=a.split(".").map(Number),pb=b.split(".").map(Number);for(let i=0;i<3;i++){const d=(pa[i]||0)-(pb[i]||0);if(d)return d;}return 0;};list=list.filter(v=>!v.includes("-")).sort(cmp).reverse();fs.writeFileSync(process.argv[3],JSON.stringify(list)+"\n");' "$VER" "$WORK/current.json" "$WORK/manifest-out/versions.json"
+
+                      echo "Updated manifest:"; cat "$WORK/manifest-out/versions.json"
+                  displayName: "Build deployed-versions manifest"
+                  continueOnError: true
+
+                - template: config/templates/upload-static-site.yml
+                  parameters:
+                      siteDir: $(Build.ArtifactStagingDirectory)/versions-manifest/manifest-out
+                      deployPath: litePlayground/v
+                      storageAccount: $(TOOLS_STORAGE_ACCOUNT)
+                      siteName: "Lite Playground versions manifest"
+                      cdnEndpoint: lite-playground
+                      cdnProfile: $(CDN_PROFILE_TOOLS)
+                      postComment: false

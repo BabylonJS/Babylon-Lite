@@ -59,6 +59,28 @@ const PUBLISH_STEP = "Publish bundle-size baseline";
 const GATED_STEPS = ["Build bundle scenes", PUBLISH_STEP];
 
 /**
+ * Publish variables the check is not required to validate, because they are
+ * optional at the publish step.
+ *
+ * The clause at the bottom of this file predicted this list before it existed:
+ * "checked" and "required" coincided while every publish variable was
+ * mandatory, and the first optional one separates them. Wiring an optional
+ * variable into the preflight would make its absence fail the build, which is a
+ * behaviour change dressed as a test repair.
+ *
+ * DEPLOY_HOST_ALLOWLIST is that variable. It names the hosts the upload may
+ * send DEPLOY_TOKEN to; when the deployment group does not carry it, the step
+ * warns and proceeds, because refusing every master deploy until an
+ * administrator populates a variable this repository cannot see is worse than
+ * the risk it manages on an agent that runs no repository code.
+ *
+ * An exemption that only subtracts is a hole. Every entry is therefore
+ * cross-checked below against the publish step actually treating it as
+ * optional, so naming a required variable here fails instead of silencing.
+ */
+const OPTIONAL_PUBLISH_VARIABLES = ["DEPLOY_HOST_ALLOWLIST"];
+
+/**
  * Commands that make a step expensive because of what they do, not because a
  * list says so.
  *
@@ -589,9 +611,35 @@ const NESTING_SPECIMENS: Array<{ label: string; yaml: string; parser: "accepts" 
  */
 function pipelineSteps(source?: string): string[] {
     const lines = (source ?? readFileSync(join(repoRoot, pipelineFile), "utf8")).split("\n");
-    const stepsAt = lines.findIndex((l) => /^\s*steps:\s*$/.test(l));
-    expect(stepsAt, `${pipelineFile} declares no \`steps:\` block — re-point this guard rather than deleting it`).toBeGreaterThanOrEqual(0);
+    const blocks = lines.flatMap((l, i) => (/^\s*steps:\s*$/.test(l) ? [i] : []));
+    expect(blocks.length, `${pipelineFile} declares no \`steps:\` block — re-point this guard rather than deleting it`).toBeGreaterThan(0);
 
+    // Every `steps:` block, concatenated in file order, because the pipeline is
+    // three jobs now and not one. The split is a security boundary — the
+    // measurement job holds no deploy credential and the publish job checks out
+    // nothing — but this guard's subject did not change with it: the question is
+    // still "does the cheap configuration check precede the expensive work", and
+    // the answer still has to be read across the whole run rather than one job.
+    //
+    // Reading only the first block would have made every clause below vacuous,
+    // which is how this was found: the preflight job's two steps invoke no
+    // package manager, so the cost floor fired rather than passing quietly.
+    //
+    // File order means execution order only because the jobs form a linear
+    // `dependsOn` chain. That is not an assumption here; it is asserted by "runs
+    // its jobs in the order they are written" below, without which this
+    // concatenation would be comparing positions that nothing enforces.
+    const steps = blocks.flatMap((stepsAt) => stepsOfBlock(lines, stepsAt));
+
+    // Without this the clauses below are satisfied by a file the parser failed
+    // to read: "no expensive step precedes the check" is trivially true of an
+    // empty list, and that is the same silence this guard exists to break.
+    expect(steps.length, `parsed no steps out of ${pipelineFile} — the assertions below would be vacuous`).toBeGreaterThan(0);
+    return steps;
+}
+
+/** One `steps:` block, from the line it is declared on, as raw step blocks. */
+function stepsOfBlock(lines: string[], stepsAt: number): string[] {
     const parentIndent = indentOf(lines[stepsAt] ?? "");
     const steps: string[] = [];
     let itemIndent: number | null = null;
@@ -626,11 +674,6 @@ function pipelineSteps(source?: string): string[] {
     if (current) {
         steps.push(current.join("\n"));
     }
-
-    // Without this the clauses below are satisfied by a file the parser failed
-    // to read: "no expensive step precedes the check" is trivially true of an
-    // empty list, and that is the same silence this guard exists to break.
-    expect(steps.length, `parsed no steps out of ${pipelineFile} — the assertions below would be vacuous`).toBeGreaterThan(0);
     return steps;
 }
 
@@ -1794,6 +1837,49 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         ).toEqual([]);
     });
 
+    it("runs its jobs in the order they are written", () => {
+        // `pipelineSteps` concatenates every `steps:` block in file order and
+        // then asks which step comes first. Across a single job that is simply
+        // true. Across three jobs it is true only because each one waits for the
+        // one above: Azure runs jobs in parallel by default, so without this
+        // chain the preflight could still be starting while the scenes are
+        // measured, and "the check comes first" would be a statement about text
+        // rather than about the build.
+        //
+        // Measured: delete the `dependsOn` from the measurement job and every
+        // other clause in this file stays green while the fail-fast ordering
+        // this pipeline exists to have is gone.
+        const source = readFileSync(join(repoRoot, pipelineFile), "utf8");
+        const lines = withoutComments(source).split("\n");
+
+        const jobs: { name: string; dependsOn: string | null }[] = [];
+        for (const [i, line] of lines.entries()) {
+            const name = /^\s*-\s*job:\s*(\S+)\s*$/.exec(line)?.[1];
+            if (name === undefined) {
+                continue;
+            }
+            const end = lines.findIndex((l, j) => j > i && /^\s*-\s*job:\s*\S+\s*$/.test(l));
+            const body = lines.slice(i, end === -1 ? lines.length : end).join("\n");
+            jobs.push({ name, dependsOn: /^\s*dependsOn:\s*(\S+)\s*$/m.exec(body)?.[1] ?? null });
+        }
+
+        expect(jobs.length, `parsed no jobs out of ${pipelineFile} — the chain assertion below would be vacuous`).toBeGreaterThan(0);
+
+        // A linear chain, each link naming the job written above it. Anything
+        // else — a fan-out, a job depending on a later one, a job depending on
+        // nothing — breaks the equivalence between file order and run order.
+        for (const [index, job] of jobs.entries()) {
+            if (index === 0) {
+                expect(job.dependsOn, `${pipelineFile}: the first job ${job.name} should start the chain, not wait on ${String(job.dependsOn)}`).toBeNull();
+                continue;
+            }
+            expect(
+                job.dependsOn,
+                `${pipelineFile}: job ${job.name} does not wait for ${String(jobs[index - 1]?.name)}, so it can run before the step ordering this file asserts`
+            ).toBe(jobs[index - 1]?.name);
+        }
+    });
+
     it("checks every deploy variable the publish step will read", () => {
         // Derived from the publish step rather than listed here, so a variable
         // added to the publish path later cannot arrive unchecked. The original
@@ -1802,7 +1888,24 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         // after the expensive part.
         const steps = pipelineSteps();
         const checked = envKeys(steps[stepIndex(steps, PREFLIGHT_STEP)] ?? "");
-        const needed = envKeys(steps[stepIndex(steps, PUBLISH_STEP)] ?? "");
+        const publishStep = steps[stepIndex(steps, PUBLISH_STEP)] ?? "";
+        const needed = envKeys(publishStep).filter((k) => !OPTIONAL_PUBLISH_VARIABLES.includes(k));
+
+        // The exemption has to earn itself. A variable is optional only if the
+        // publish step reads it through `${VAR:-}` or tests it for emptiness —
+        // the shapes that mean "carry on without it". Naming a variable the step
+        // dereferences unconditionally fails here rather than removing it from
+        // the subset assertion below.
+        for (const optional of OPTIONAL_PUBLISH_VARIABLES) {
+            expect(envKeys(publishStep), `${optional} is exempted as optional but "${PUBLISH_STEP}" does not read it at all — remove the stale exemption`).toContain(optional);
+
+            const body = shellBodyOf(publishStep);
+            const tolerant = new RegExp(`\\$\\{${optional}:-|-n\\s+"\\$\\{?${optional}`).test(body);
+            expect(
+                tolerant,
+                `${optional} is exempted from "${PREFLIGHT_STEP}" as optional, but "${PUBLISH_STEP}" dereferences it unconditionally. Either it is required — in which case check it — or make the step tolerate its absence.`
+            ).toBe(true);
+        }
 
         // Floor both sides. A step whose `env:` block stops parsing yields an
         // empty list, and "every needed variable is checked" is satisfied by
