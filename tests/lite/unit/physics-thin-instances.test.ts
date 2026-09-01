@@ -47,6 +47,8 @@ function makeMockHknp() {
         HP_Shape_BuildMassProperties: vi.fn(() => [0, [[0, 0, 0], 1, [1, 1, 1], [0, 0, 0, 1]]]),
         HP_Body_SetMassProperties: vi.fn(),
         HP_Body_Release: vi.fn(),
+        HP_Shape_Release: vi.fn(),
+        HP_QueryCollector_Release: vi.fn(),
     };
 }
 
@@ -420,5 +422,36 @@ describe("thin-instance physics bodies", () => {
         expect(getLinearVelocity).toHaveBeenCalledWith(body._hkBodies![1]);
         expect(applyImpulse).toHaveBeenCalledWith(body._hkBodies![1], [3, 8, 0], expect.any(Array));
         expect(applyImpulse).not.toHaveBeenCalledWith(body._hkBodies![0], expect.anything(), expect.anything());
+    });
+
+    it("drops tracked instance handles and contacts on controller disposal", async () => {
+        const hknp = makeMockHknp();
+        const world = createHavokWorld(makeScene(), hknp);
+        await enableHavokThinInstancePhysics(world);
+        const body = createPhysicsBody(world, makeThinMesh(), PhysicsMotionType.ANIMATED);
+        const instanceHandle = body._hkBodies![1] as object;
+        interface DisposableController {
+            _world: typeof world;
+            _body: PhysicsBody;
+            _shape: PhysicsShape;
+            _startCollector: unknown;
+            _castCollector: unknown;
+            _bodyTracking: WeakMap<object, { prev: number[]; frameId: number }>;
+            _manifold: unknown[];
+            dispose(): void;
+        }
+        const controller = Object.create(PhysicsCharacterController.prototype) as DisposableController;
+        controller._world = world;
+        controller._body = body;
+        controller._shape = { _hkShape: ["shape"], _type: PhysicsShapeType.CAPSULE };
+        controller._startCollector = ["start"];
+        controller._castCollector = ["cast"];
+        controller._bodyTracking = new WeakMap([[instanceHandle, { prev: new Array(16), frameId: 1 }]]);
+        controller._manifold = [{ body, nativeBody: instanceHandle }];
+
+        controller.dispose();
+
+        expect(controller._bodyTracking.has(instanceHandle)).toBe(false);
+        expect(controller._manifold).toHaveLength(0);
     });
 });

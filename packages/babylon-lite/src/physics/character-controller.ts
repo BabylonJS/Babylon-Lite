@@ -335,7 +335,7 @@ export class PhysicsCharacterController {
     private _frameId = 0;
     private readonly _contactAngleSensitivity = 10.0;
     private readonly _displacementEps = 1e-4;
-    private readonly _bodyTracking = new Map<unknown, BodyTracking>();
+    private _bodyTracking = new WeakMap<object, BodyTracking>();
 
     /** Construct a controller. Prefer the {@link createPhysicsCharacterController} factory. */
     public constructor(world: PhysicsWorld, position: Vec3, options: PhysicsCharacterControllerOptions) {
@@ -368,6 +368,8 @@ export class PhysicsCharacterController {
         hknp.HP_Shape_Release(this._shape._hkShape);
         hknp.HP_QueryCollector_Release(this._startCollector);
         hknp.HP_QueryCollector_Release(this._castCollector);
+        this._bodyTracking = new WeakMap();
+        this._manifold.length = 0;
     }
 
     /** Get the current character position (world space). The returned vector is owned by the controller. */
@@ -873,7 +875,7 @@ export class PhysicsCharacterController {
         } else if (motionType === (PhysicsMotionType.ANIMATED as number) && contact.body && contact.nativeBody) {
             const body = contact.body;
             const currentWorld = this._getBodyWorldMatrix(body, contact.nativeBody);
-            const trackingKey = body._instances ? contact.nativeBody : body;
+            const trackingKey: object = body._instances ? contact.nativeBody : body;
             const tracking = this._bodyTracking.get(trackingKey);
             if (!tracking) {
                 this._bodyTracking.set(trackingKey, { prev: matToArray(currentWorld), frameId: this._frameId });
