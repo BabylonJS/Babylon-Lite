@@ -985,7 +985,7 @@ describe("RenderPassTask transparent sorting", () => {
 });
 
 describe("RenderTask MSAA resolveTarget", () => {
-    it("wires a single-sample resolveTarget as the color attachment's end-of-pass resolve when the RT is MSAA", () => {
+    it("wires a single-sample resolveTarget at execution when the RT is MSAA", () => {
         const engine = makeMockEngine({ msaaSamples: 4 });
         const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
         scene.camera = makeCamera();
@@ -1006,6 +1006,7 @@ describe("RenderTask MSAA resolveTarget", () => {
 
         const task = createRenderTask({ name: "msaa-scene", rt: msaaRt, rst: resolveTarget }, engine, scene);
         task.record();
+        task.execute!();
 
         // The resolve target's color view must be allocated and used as the
         // attachment's resolveTarget so WebGPU resolves the 4x MSAA in-pass.

@@ -435,10 +435,8 @@ function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
     const att = task._colorAttachment;
     att.view = rt._colorView!;
     // End-of-pass MSAA resolve into a caller-supplied single-sample target.
-    // record() only builds the target's color view for an MSAA rt, so its
-    // presence is the gate. The swapchain case is wired per-frame in
-    // executePass (its view changes each frame); this custom view is stable.
-    att.resolveTarget = config.rst?._colorView ?? undefined;
+    // executePass wires the resolve target immediately before every pass so
+    // swapchain targets pick up their current per-frame view.
     task._renderPassDescriptor.colorAttachments = rt._colorView ? [att] : [];
 
     const depthSrc = config.depth ?? rt;
