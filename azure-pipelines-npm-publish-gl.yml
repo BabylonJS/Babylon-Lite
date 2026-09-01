@@ -124,7 +124,7 @@ stages:
                       set -euo pipefail
 
                       if [ -z "${NPM_TOKEN:-}" ]; then
-                        echo "NPM_TOKEN must be configured as a secret pipeline variable."
+                        echo "NPM_TOKEN must be configured as a secret in the NPM_Publish variable group."
                         exit 1
                       fi
 
