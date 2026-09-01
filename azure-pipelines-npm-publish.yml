@@ -1,7 +1,7 @@
 # Azure Pipelines — Babylon Lite npm Publish
 #
-# Publishes the built @babylonjs/lite package to npm. Configure NPM_TOKEN as
-# a secret pipeline variable or variable-group value before enabling this run.
+# Publishes the built @babylonjs/lite package to npm. NPM_TOKEN is provided by
+# the NPM_Publish variable group.
 #
 # Manual runs can choose patch, minor, major, or auto. Scheduled runs use auto.
 # Pushes to master that change config/release.json read the release type from
@@ -51,6 +51,7 @@ parameters:
       default: false
 
 variables:
+    - group: NPM_Publish
     - group: BabylonJS-Deployment
     # Provides TOOLS_STORAGE_ACCOUNT — the tools storage account backing
     # liteplayground.babylonjs.com, so versioned playground snapshots serve
