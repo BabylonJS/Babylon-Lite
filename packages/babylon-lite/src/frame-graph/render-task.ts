@@ -515,12 +515,13 @@ function executePass(task: RenderTask, eng: EngineContext, targetSignature: Rend
     const att = task._colorAttachment;
     const cfg = task._config;
     if (cfg.rt._colorView) {
-        // The engine scRT's color view is re-acquired every frame, so re-read
-        // it here. Offscreen color views are stable between rebuilds — leaving att.view
-        // untouched preserves an external override (swapchain-overlay shares the base
-        // scene's MSAA color view). The resolve target (rst) is re-read each frame so an
-        // `rst === scRT` picks up its fresh per-frame view.
-        if (cfg.rt === eng.scRT) {
+        // This scene's surface scRT color view is re-acquired every frame, so re-read it
+        // here. Checking the bound surface (not the engine's primary scRT) is required for
+        // auxiliary createSurface scenes. Offscreen color views are stable between rebuilds
+        // — leaving att.view untouched preserves an external override (swapchain-overlay
+        // shares the base scene's MSAA color view). The resolve target (rst) is re-read each
+        // frame so an `rst === scRT` picks up its fresh per-frame view.
+        if (cfg.rt === sc.surface.scRT) {
             att.view = cfg.rt._colorView;
         }
         att.resolveTarget = cfg.rst?._colorView ?? undefined;
