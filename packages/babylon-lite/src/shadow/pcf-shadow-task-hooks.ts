@@ -40,6 +40,10 @@ export interface PcfTaskState extends ShadowTaskInternalState {
     _shadowUboData: Float32Array;
     /** @internal */
     _casterMeshes: readonly Mesh[];
+    /** @internal Terminal caster material last resolved for each caster mesh. */
+    _casterMaterials: (Material | null)[];
+    /** @internal Generation of each terminal caster material when the task was built. */
+    _casterMatGens: number[];
     /** @internal Owning scene — used to read the live floating-origin offset (camera world position). */
     _scene: SceneContext;
 }
@@ -65,10 +69,7 @@ export async function preloadPcfShadowTaskState(casterMeshes: readonly Mesh[]): 
         // `_shadowCasterMaterial` override casts through an alternate material, whose family can differ
         // from the receive material's. Scanning only `mesh.material` would leave that family's factory
         // unimported and the shadow pass would then call an undefined factory.
-        let material = mesh.material;
-        while (material?._shadowCasterMaterial) {
-            material = material._shadowCasterMaterial;
-        }
+        const material = mesh.material ? resolveShadowCasterMaterial(mesh.material) : undefined;
         const family = material?._buildGroup._materialFamily;
         needsStandard ||= family === "standard";
         needsPbr ||= family === "pbr";
@@ -115,13 +116,24 @@ export function ensurePcfShadowTaskState(
 ): PcfTaskState {
     const existing = existingState as PcfTaskState | null;
     if (existing) {
-        if (existing._casterMeshes === casterMeshes) {
+        let casterMaterialChanged = false;
+        for (let i = 0; i < casterMeshes.length; i++) {
+            const material = casterMeshes[i]!.material;
+            const terminal = material ? resolveShadowCasterMaterial(material) : null;
+            if (existing._casterMaterials[i] !== terminal || existing._casterMatGens[i] !== (terminal?._csmGen ?? 0)) {
+                casterMaterialChanged = true;
+                break;
+            }
+        }
+        if (existing._casterMeshes === casterMeshes && !casterMaterialChanged) {
             return existing;
         }
         existing._task.dispose();
     }
 
     const materialViews = new Map<Material, MaterialView>();
+    const casterMaterials: (Material | null)[] = [];
+    const casterMatGens: number[] = [];
     const camera = createShadowCamera(sg);
     const rt = createShadowRenderTarget(sg);
     const state: PcfTaskState = {
@@ -143,17 +155,44 @@ export function ensurePcfShadowTaskState(
         _lastFoVersion: -1,
         _shadowUboData: new F32(24),
         _casterMeshes: casterMeshes,
+        _casterMaterials: casterMaterials,
+        _casterMatGens: casterMatGens,
         _scene: scene,
     };
 
     for (const mesh of casterMeshes) {
         const material = mesh.material;
+        const terminal = material ? resolveShadowCasterMaterial(material) : null;
+        casterMaterials.push(terminal);
+        casterMatGens.push(terminal?._csmGen ?? 0);
         if (material) {
             state._task.addMesh(mesh, { material: getNoColorView(material, materialViews) });
         }
     }
 
     return state;
+}
+
+/** @internal Resolve the terminal material used by the shadow caster view. */
+export function resolveShadowCasterMaterial(material: Material): Material {
+    let terminal = material;
+    while (terminal._shadowCasterMaterial) {
+        terminal = terminal._shadowCasterMaterial;
+    }
+    return terminal;
+}
+
+/** @internal Record the terminal caster identity and generation for invalidation checks. */
+export function snapshotShadowCasterMaterial(material: Material, terminals: Map<Material, Material>, generations: Map<Material, number | undefined>): void {
+    const terminal = resolveShadowCasterMaterial(material);
+    terminals.set(material, terminal);
+    generations.set(material, terminal._csmGen);
+}
+
+/** @internal Whether an override changed, was cleared, or its terminal material was rebuilt. */
+export function shadowCasterMaterialChanged(material: Material, terminals: Map<Material, Material>, generations: Map<Material, number | undefined>): boolean {
+    const terminal = resolveShadowCasterMaterial(material);
+    return terminals.has(material) && (terminals.get(material) !== terminal || generations.get(material) !== terminal._csmGen);
 }
 
 export function renderPcfShadowMap(

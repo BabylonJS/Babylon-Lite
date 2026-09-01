@@ -127,6 +127,12 @@ generator's comparison sampler, and whose sample type is depth. The same wrapper
 object is returned for every call on one generator. It shares the generator's
 lifetime and must not be released or disposed independently.
 
+A custom `ShaderMaterial` that both **receives** CSM shadows and **casts** them must not cast through
+itself: the depth-only caster view shares the source material's bind group, so the caster pass would
+sample the cascade array it is rendering into. Give it a sampler-free caster material (same vertex
+stage, and it may share the same storage buffers so GPU-deformed geometry casts its real silhouette)
+and wire it with the public `setShadowCasterMaterial(visibleMaterial, casterMaterial)`.
+
 ## Internal Architecture
 
 ### `ShadowGenerator` extensions (shared interface, type-only)
