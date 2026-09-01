@@ -31,6 +31,15 @@ function makePositionPly(newline: "\n" | "\r\n", compressed = false): ArrayBuffe
     return combine(header, body);
 }
 
+type PackedProperty = "packed_position" | "packed_rotation" | "packed_scale" | "packed_color";
+
+function makePackedPly(vertexCount: number, chunkCount: number, property: PackedProperty): ArrayBuffer {
+    const header = ["ply", "format binary_little_endian 1.0", `element chunk ${chunkCount}`, `element vertex ${vertexCount}`, `property uint ${property}`, "end_header", ""].join(
+        "\n"
+    );
+    return combine(header, new Uint8Array(vertexCount * 4));
+}
+
 describe("PLY parser", () => {
     it.each(["\n", "\r\n"] as const)("parses standard PLY headers using %j line endings", (newline) => {
         const data = makePositionPly(newline);
@@ -58,5 +67,21 @@ describe("PLY parser", () => {
         const data = combine("ply\nformat binary_little_endian 1.0\nend_header\n", body);
 
         expect(convertCompressedPlyToParsedSplat(data).data).toBe(data);
+    });
+
+    it.each(["packed_position", "packed_scale", "packed_color"] as const)("rejects %s without chunk metadata", (property) => {
+        expect(() => convertCompressedPlyToParsedSplat(makePackedPly(1, 0, property))).toThrow("packed vertex properties require chunk metadata");
+    });
+
+    it("rejects packed vertices when the final chunk metadata is missing", () => {
+        expect(() => convertCompressedPlyToParsedSplat(makePackedPly(257, 1, "packed_position"))).toThrow("packed vertex properties require chunk metadata");
+    });
+
+    it("allows packed rotation without chunk metadata", () => {
+        expect(convertCompressedPlyToParsedSplat(makePackedPly(1, 0, "packed_rotation")).data.byteLength).toBe(32);
+    });
+
+    it("allows packed vertices with chunk metadata for every 256 vertices", () => {
+        expect(convertCompressedPlyToParsedSplat(makePackedPly(257, 2, "packed_position")).data.byteLength).toBe(257 * 32);
     });
 });
