@@ -22,7 +22,6 @@
  */
 
 import type { Quat, Vec3 } from "../math/types.js";
-import { mat4Compose } from "../math/mat4-compose.js";
 import { mat4Invert } from "../math/mat4-invert.js";
 import type { Mat4 } from "../math/types.js";
 import { createTransformNode } from "../scene/transform-node.js";
@@ -30,7 +29,6 @@ import type { TransformNode } from "../scene/transform-node.js";
 import {
     createPhysicsBody,
     createPhysicsShape,
-    resolvePhysicsBodyInstanceById,
     PhysicsMotionType,
     PhysicsShapeType,
     removePhysicsBody,
@@ -39,7 +37,7 @@ import {
     setPhysicsBodyShape,
     worldStepSeconds,
 } from "./havok.js";
-import type { PhysicsBody, PhysicsShape, PhysicsWorld, ResolvedPhysicsBodyInstance } from "./havok.js";
+import type { PhysicsBody, PhysicsShape, PhysicsWorld } from "./havok.js";
 
 // ─── Public types ────────────────────────────────────────────────────
 
@@ -237,11 +235,6 @@ function vdot(a: Vec3, b: Vec3): number {
 }
 function vcross(a: Vec3, b: Vec3): Vec3 {
     return { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x };
-}
-function vrotateQuat(a: Vec3, qx: number, qy: number, qz: number, qw: number): Vec3 {
-    const uv = vcross(v(qx, qy, qz), a);
-    const uuv = vcross(v(qx, qy, qz), uv);
-    return vadd(a, vscale(vadd(vscale(uv, qw), uuv), 2));
 }
 function vlenSq(a: Vec3): number {
     return a.x * a.x + a.y * a.y + a.z * a.z;
@@ -677,24 +670,38 @@ export class PhysicsCharacterController {
         hknp.HP_World_ShapeCastWithCollector(hkWorld, this._castCollector, castQuery);
     }
 
-    private _findBody(id: unknown): ResolvedPhysicsBodyInstance | null {
-        return resolvePhysicsBodyInstanceById(this._world, id);
+    private _findBody(id: unknown, contact: Contact): PhysicsBody | null {
+        const thin = this._world._thin?.resolve(id);
+        if (thin) {
+            contact.nativeBody = thin[1];
+            contact.instanceIndex = thin[2];
+            return thin[0];
+        }
+        const bodies = this._world._bodies;
+        for (let i = 0; i < bodies.length; i++) {
+            const body = bodies[i]!;
+            if (body._hkBody[0] === id) {
+                return body;
+            }
+        }
+        return null;
     }
 
     private _contactFromCast(cp: any, castPath: Vec3, hitFraction: number): Contact {
         const normal = v(cp[4][0], cp[4][1], cp[4][2]);
         const dist = -hitFraction * vdot(castPath, normal);
-        const hit = this._findBody(cp[0][0]);
-        return {
+        const contact: Contact = {
             position: v(cp[3][0], cp[3][1], cp[3][2]),
             normal,
             distance: dist,
             fraction: hitFraction,
-            body: hit?.body ?? null,
-            nativeBody: hit?.handle ?? null,
-            instanceIndex: hit?.index ?? -1,
+            body: null,
+            nativeBody: null,
+            instanceIndex: 0,
             allowedPenetration: clamp(this.keepDistance - dist, 0, this.keepDistance),
         };
+        contact.body = this._findBody(cp[0][0], contact);
+        return contact;
     }
 
     private _validateManifold(): void {
@@ -710,17 +717,18 @@ export class PhysicsCharacterController {
             for (let i = 0; i < numProximityHits; i++) {
                 const [distance, , contactWorld] = hknp.HP_QueryCollector_GetShapeProximityResult(this._startCollector, i)[1];
                 minDistance = Math.min(minDistance, distance);
-                const hit = this._findBody(contactWorld[0][0]);
-                newContacts.push({
+                const contact: Contact = {
                     position: v(contactWorld[3][0], contactWorld[3][1], contactWorld[3][2]),
                     normal: v(contactWorld[4][0], contactWorld[4][1], contactWorld[4][2]),
                     distance,
                     fraction: 0,
-                    body: hit?.body ?? null,
-                    nativeBody: hit?.handle ?? null,
-                    instanceIndex: hit?.index ?? -1,
+                    body: null,
+                    nativeBody: null,
+                    instanceIndex: 0,
                     allowedPenetration: clamp(this.keepDistance - distance, 0, this.keepDistance),
-                });
+                };
+                contact.body = this._findBody(contactWorld[0][0], contact);
+                newContacts.push(contact);
             }
             for (let i = this._manifold.length - 1; i >= 0; i--) {
                 const bestMatch = this._findContact(this._manifold[i]!, newContacts, 1.1);
@@ -805,30 +813,22 @@ export class PhysicsCharacterController {
 
     private _getComWorld(body: PhysicsBody, nativeBody = body._hkBody): Vec3 {
         const com = this._getMassProperties(body, nativeBody)[0];
-        if (body._instances) {
-            const transform = this._world._hknp.HP_Body_GetQTransform(nativeBody)[1];
-            const position = transform[0];
-            const rotation = transform[1];
-            const rotated = vrotateQuat(v(com[0], com[1], com[2]), rotation[0], rotation[1], rotation[2], rotation[3]);
-            return v(position[0] + rotated.x, position[1] + rotated.y, position[2] + rotated.z);
+        const thinCom = this._world._thin?.com(body, nativeBody, com);
+        if (thinCom) {
+            return thinCom;
         }
         return transformCoord(body.node.worldMatrix, v(com[0], com[1], com[2]));
     }
 
-    private _getBodyWorldMatrix(body: PhysicsBody, nativeBody: any): Mat4 {
-        if (!body._instances) {
-            return body.node.worldMatrix;
-        }
-        const transform = this._world._hknp.HP_Body_GetQTransform(nativeBody)[1];
-        const position = transform[0];
-        const rotation = transform[1];
-        return mat4Compose(position[0], position[1], position[2], rotation[0], rotation[1], rotation[2], rotation[3], 1, 1, 1);
+    private _getBodyWorldMatrix(body: PhysicsBody, nativeBody: any): Mat4 | undefined {
+        return this._world._thin?.matrix(body, nativeBody);
     }
 
     private _getPointVelocity(body: PhysicsBody | null, pointWorld: Vec3, nativeBody?: any): Vec3 {
-        if (!body || !nativeBody) {
+        if (!body) {
             return v();
         }
+        nativeBody ??= body._hkBody;
         const hknp = this._world._hknp;
         const comWorld = this._getComWorld(body, nativeBody);
         const relPos = vsub(pointWorld, comWorld);
@@ -872,10 +872,12 @@ export class PhysicsCharacterController {
         constraint.planeDistance -= shift;
         if (motionType === (PhysicsMotionType.STATIC as number)) {
             constraint.priority = 2;
-        } else if (motionType === (PhysicsMotionType.ANIMATED as number) && contact.body && contact.nativeBody) {
+        } else if (motionType === (PhysicsMotionType.ANIMATED as number) && contact.body) {
             const body = contact.body;
-            const currentWorld = this._getBodyWorldMatrix(body, contact.nativeBody);
-            const trackingKey: object = body._instances ? contact.nativeBody : body;
+            const nativeBody = contact.nativeBody ?? body._hkBody;
+            const thinWorld = this._getBodyWorldMatrix(body, nativeBody);
+            const currentWorld = thinWorld ?? body.node.worldMatrix;
+            const trackingKey: object = thinWorld ? nativeBody : body;
             const tracking = this._bodyTracking.get(trackingKey);
             if (!tracking) {
                 this._bodyTracking.set(trackingKey, { prev: matToArray(currentWorld), frameId: this._frameId });
@@ -952,10 +954,10 @@ export class PhysicsCharacterController {
         const hknp = this._world._hknp;
         for (const contact of this._manifold) {
             const body = contact.body;
-            const nativeBody = contact.nativeBody;
-            if (!body || !nativeBody || body.motionType !== (PhysicsMotionType.DYNAMIC as number)) {
+            if (!body || body.motionType !== (PhysicsMotionType.DYNAMIC as number)) {
                 continue;
             }
+            const nativeBody = contact.nativeBody ?? body._hkBody;
             const pointRelVel = this._getPointVelocity(body, contact.position, nativeBody);
             vsubIn(pointRelVel, this._velocity);
             const inputProjectedVelocity = vdot(pointRelVel, contact.normal);

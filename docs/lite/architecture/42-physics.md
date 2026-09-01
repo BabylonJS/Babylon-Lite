@@ -39,17 +39,26 @@ the caller and only referenced once `createHavokWorld` runs.
 
 ### Thin-instance rigid bodies
 
-`enableHavokThinInstancePhysics(world)` lazily installs the thin-instance body
-factory. This explicit enabler owns all matrix synchronization code so ordinary
-physics scenes retain none of the feature module. After enabling,
-`createPhysicsBody(world, mesh, motionType, startsAsleep)` detects an existing
-`mesh.thinInstances` matrix slab. A non-empty slab creates one native Havok body
-per active matrix while retaining one Lite `PhysicsBody` handle:
+`enableHavokThinInstancePhysics(world)` lazily installs a per-world Havok facade
+as `world._hknp`. The lazy context retains the raw Havok module and maps each
+thin body's primary handle identity to module-private native handles and reusable
+matrix-decomposition scratch values. This explicit enabler owns all
+thin-instance detection, validation, fan-out, and matrix synchronization, so
+ordinary body state has no thin fields and ordinary physics scenes retain none
+of the feature module. After enabling,
+`createPhysicsBody(world, mesh, motionType, startsAsleep)` creates one native
+Havok body per active matrix while retaining one Lite `PhysicsBody` handle:
 
 - `PhysicsBody._hkBody` remains the first native handle for backwards
   compatibility and single-body consumers.
-- `PhysicsBody._hkBodies` is allocated only for thin-instance bodies and stores
-  handles in thin-instance index order. Ordinary bodies pay no array allocation.
+- Generic body setters, impulses, removal, and release keep their ordinary
+  direct Havok calls. The facade recognizes only the exact primary handle object
+  and fans those calls out; equivalent cloned tuples delegate once to raw Havok.
+- Getter calls on the primary handle naturally read native instance zero.
+  Instance resolution returns stable cloned handle tuples, including for index
+  zero, so controller contact impulses affect only the struck instance.
+- Event-safe deferred release and controller native-transform math remain private
+  to the lazy enabler.
 - Each native body is initialized from its corresponding matrix translation and
   rotation. The carrier mesh transform is intentionally ignored, matching
   Babylon.js Physics V2 thin-instance semantics.
@@ -58,8 +67,9 @@ per active matrix while retaining one Lite `PhysicsBody` handle:
   and APIs that inherently accept one native body use instance zero.
 - Constraints and single-body query exclusions use instance zero. Raycast,
   collision, trigger, and character-controller contact resolution recognize
-  every native handle. Collision-style event payloads return the shared Lite
-  body plus the zero-based thin-instance index, matching Babylon.js
+  every native handle by consulting the optional thin resolver before the
+  ordinary linear lookup. Collision-style event payloads return the
+  shared Lite body plus the zero-based thin-instance index, matching Babylon.js
   `colliderIndex` / `collidedAgainstIndex` semantics; ordinary bodies report
   index `0`.
 
@@ -68,14 +78,24 @@ existing matrix slab after every step, then dirty the matrix range once through
 `flushThinInstances(mesh)`. The update writes a rigid rotation/translation
 matrix; authored scale is not preserved after simulation. With TELEPORT
 pre-step enabled, every matrix is copied back to its matching Havok body.
-DISABLED remains the default. ACTION retains Babylon.js behavior and sends the
-carrier node's single target transform to every instance.
+TELEPORT is the default. ACTION retains Babylon.js behavior and sends the
+carrier node's single target transform to every instance. Public body transform
+sets fan out through the facade and rewrite/flush every thin matrix. The core
+step retains only three optional synchronization hooks (TELEPORT, ACTION, and
+dynamic body-to-matrix sync), while their algorithms stay in the lazy module.
+
+Thin bodies removed while after-step callbacks are draining remain resolvable
+until all callbacks complete. Minimal begin/end hooks bracket that drain; the
+facade defers only thin releases until the end hook, while ordinary removals and
+all removals outside the drain release immediately.
 
 `getPhysicsBodyInstanceCount(body)` reports the native count (`1` for ordinary
 bodies). The active thin-instance count is fixed when the body is created:
-callers must populate matrices before body construction. Floating-origin
-multi-region simulation rejects thin-instance bodies explicitly until it can
-track one region per native instance.
+callers must populate matrices and explicitly enable thin-instance physics before
+body construction. Without the enabler, core body creation performs no
+thin-instance detection and follows the ordinary single-body path.
+Floating-origin multi-region simulation rejects thin-instance bodies explicitly
+until it can track one region per native instance.
 
 ### Module files
 

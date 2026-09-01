@@ -20,8 +20,8 @@
  */
 
 import type { Vec3 } from "../math/types.js";
-import { forEachPhysicsBodyHandle, onPhysicsAfterStep, resolvePhysicsBodyInstanceById } from "./havok.js";
-import type { PhysicsBody, PhysicsWorld } from "./havok.js";
+import { onPhysicsAfterStep } from "./havok.js";
+import type { PhysicsBody, PhysicsWorld, ResolvedPhysicsBodyInstance } from "./havok.js";
 
 /** A single collision event reported by Havok after a physics step. */
 export interface PhysicsCollisionInfo {
@@ -57,7 +57,7 @@ export interface PhysicsCollisionInfo {
 export function setPhysicsBodyCollisionEventsEnabled(world: PhysicsWorld, body: PhysicsBody, enabled: boolean): void {
     const hknp = world._hknp;
     const mask = hknp.EventType.COLLISION_STARTED.value | hknp.EventType.COLLISION_CONTINUED.value | hknp.EventType.COLLISION_FINISHED.value;
-    forEachPhysicsBodyHandle(body, (hkBody) => hknp.HP_Body_SetEventMask(hkBody, enabled ? mask : 0));
+    hknp.HP_Body_SetEventMask(body._hkBody, enabled ? mask : 0);
 }
 
 /**
@@ -82,8 +82,8 @@ export function onPhysicsCollision(world: PhysicsWorld, cb: (info: PhysicsCollis
             const type = intBuf[0];
             const offA = 2;
             const offB = 18;
-            const bodyA = resolvePhysicsBodyInstanceById(world, intBuf[offA]!);
-            const bodyB = resolvePhysicsBodyInstanceById(world, intBuf[offB]!);
+            const bodyA = findBodyById(world, intBuf[offA]!);
+            const bodyB = findBodyById(world, intBuf[offB]!);
             if (!bodyA || !bodyB) {
                 addr = hknp.HP_World_GetNextCollisionEvent(world._hkWorld, addr);
                 continue;
@@ -92,10 +92,10 @@ export function onPhysicsCollision(world: PhysicsWorld, cb: (info: PhysicsCollis
             const pointB = { x: floatBuf[offB + 8]!, y: floatBuf[offB + 9]!, z: floatBuf[offB + 10]! };
             const normal = { x: floatBuf[offA + 11]!, y: floatBuf[offA + 12]!, z: floatBuf[offA + 13]! };
             const info: PhysicsCollisionInfo = {
-                collider: bodyA.body,
-                colliderIndex: bodyA.index,
-                collidedAgainst: bodyB.body,
-                collidedAgainstIndex: bodyB.index,
+                collider: bodyA[0],
+                colliderIndex: bodyA[2],
+                collidedAgainst: bodyB[0],
+                collidedAgainstIndex: bodyB[2],
                 type: type === startedValue ? "STARTED" : type === continuedValue ? "CONTINUED" : "FINISHED",
                 point: pointA,
                 normal,
@@ -106,4 +106,17 @@ export function onPhysicsCollision(world: PhysicsWorld, cb: (info: PhysicsCollis
             addr = hknp.HP_World_GetNextCollisionEvent(world._hkWorld, addr);
         }
     });
+}
+
+function findBodyById(world: PhysicsWorld, nativeId: unknown): ResolvedPhysicsBodyInstance | null {
+    const thinBody = world._thin?.resolve(nativeId);
+    if (thinBody) {
+        return thinBody;
+    }
+    for (const body of world._bodies) {
+        if (body._hkBody[0] === nativeId) {
+            return [body, body._hkBody, 0];
+        }
+    }
+    return null;
 }

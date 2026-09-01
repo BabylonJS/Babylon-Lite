@@ -26,8 +26,7 @@
 
 import type { ShapeCastInput as HavokShapeCastInput } from "@babylonjs/havok";
 import type { Quat, Vec3 } from "../math/types.js";
-import { resolvePhysicsBodyInstanceById } from "./havok.js";
-import type { PhysicsBody, PhysicsShape, PhysicsWorld } from "./havok.js";
+import type { PhysicsBody, PhysicsShape, PhysicsWorld, ResolvedPhysicsBodyInstance } from "./havok.js";
 
 /** Query parameters for {@link shapeProximity}. */
 export interface ShapeProximityQuery {
@@ -230,18 +229,33 @@ export function physicsRaycast(world: PhysicsWorld, from: Vec3, to: Vec3, query:
         const dx = from.x - hitPos[0];
         const dy = from.y - hitPos[1];
         const dz = from.z - hitPos[2];
-        const body = resolvePhysicsBodyInstanceById(world, hitData[0][0]);
+        const body = findBodyById(world, hitData[0][0]);
         return {
             hasHit: true,
             hitPoint: hitVec(hitPos),
             hitNormal: hitVec(hitData[4]),
             hitDistance: Math.sqrt(dx * dx + dy * dy + dz * dz),
             triangleIndex: hitData[5],
-            body: body?.body ?? null,
-            bodyIndex: body?.index ?? -1,
+            body: body?.[0] ?? null,
+            bodyIndex: body?.[2] ?? -1,
         };
     }
     return { hasHit: false, hitPoint: { x: 0, y: 0, z: 0 }, hitNormal: { x: 0, y: 0, z: 0 }, hitDistance: 0, triangleIndex: -1, body: null, bodyIndex: -1 };
+}
+
+function findBodyById(world: PhysicsWorld, hitBodyId: unknown): ResolvedPhysicsBodyInstance | null {
+    const thinBody = world._thin?.resolve(hitBodyId);
+    if (thinBody) {
+        return thinBody;
+    }
+    const bodies = world._bodies;
+    for (let i = 0; i < bodies.length; i++) {
+        const body = bodies[i]!;
+        if (body._hkBody[0] === hitBodyId) {
+            return [body, body._hkBody, 0];
+        }
+    }
+    return null;
 }
 
 /** Zeroed no-hit result shared by both queries. */

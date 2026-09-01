@@ -23,8 +23,8 @@
  * ```
  */
 
-import { onPhysicsAfterStep, resolvePhysicsBodyInstanceById } from "./havok.js";
-import type { PhysicsBody, PhysicsShape, PhysicsWorld } from "./havok.js";
+import { onPhysicsAfterStep } from "./havok.js";
+import type { PhysicsBody, PhysicsShape, PhysicsWorld, ResolvedPhysicsBodyInstance } from "./havok.js";
 
 type PhysicsTriggerType = PhysicsTriggerInfo["type"];
 
@@ -89,14 +89,14 @@ export function onPhysicsTrigger(world: PhysicsWorld, cb: (info: PhysicsTriggerI
 export function onPhysicsTriggerBodies(world: PhysicsWorld, cb: (info: PhysicsTriggerBodyInfo) => void): () => void {
     return registerTriggerDrain(world, () =>
         drainTriggerEvents(world, (type, bodyAId, bodyBId) => {
-            const bodyA = resolvePhysicsBodyInstanceById(world, bodyAId);
-            const bodyB = resolvePhysicsBodyInstanceById(world, bodyBId);
+            const bodyA = findBodyById(world, bodyAId);
+            const bodyB = findBodyById(world, bodyBId);
             cb({
                 type,
-                bodyA: bodyA?.body ?? null,
-                bodyAIndex: bodyA?.index ?? -1,
-                bodyB: bodyB?.body ?? null,
-                bodyBIndex: bodyB?.index ?? -1,
+                bodyA: bodyA?.[0] ?? null,
+                bodyAIndex: bodyA?.[2] ?? -1,
+                bodyB: bodyB?.[0] ?? null,
+                bodyBIndex: bodyB?.[2] ?? -1,
             });
         })
     );
@@ -124,4 +124,18 @@ function registerTriggerDrain(world: PhysicsWorld, drain: () => void): () => voi
             callbacks!.splice(index, 1);
         }
     };
+}
+
+function findBodyById(world: PhysicsWorld, bodyId: number): ResolvedPhysicsBodyInstance | null {
+    const thinBody = world._thin?.resolve(bodyId);
+    if (thinBody) {
+        return thinBody;
+    }
+    for (const body of world._bodies) {
+        const nativeId = body._hkBody[0];
+        if (nativeId === bodyId || (typeof nativeId === "bigint" && nativeId === BigInt(bodyId))) {
+            return [body, body._hkBody, 0];
+        }
+    }
+    return null;
 }
