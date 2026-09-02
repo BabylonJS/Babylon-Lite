@@ -578,13 +578,9 @@ export default defineConfig(({ mode }) => {
             plugins: [
                 stripManifoldNodeRequire(),
                 liteErrorPlugin(),
-                // `mangle: false` — strip WGSL whitespace/comments but do NOT short-rename
-                // identifiers (the per-chunk mangler is unsafe across the package's many
-                // code-split chunks). `templates: false` — only minify `?raw` `.wgsl` files,
-                // not inline backtick-template WGSL: this output is not esbuild-minified, so
-                // the template minifier would corrupt raw source, and the scene/demo harness
-                // already minifies inline templates once when it bundles this output.
-                wgslMinifyPlugin({ mangle: false, templates: false }),
+                // Explicit `wgsl` tagged templates are safely minified from their
+                // TypeScript AST before emit; unrelated JavaScript templates are untouched.
+                wgslMinifyPlugin(),
                 minifyBrowserChunks(),
                 stripInlinedWorkerSourcemap(),
                 dts({
@@ -636,13 +632,6 @@ export default defineConfig(({ mode }) => {
             format: "es" as const,
             plugins: () => [minifyInlinedWorker()],
         },
-        plugins: [
-            stripManifoldNodeRequire(),
-            liteErrorPlugin(),
-            wgslMinifyPlugin({ mangle: false, templates: false }),
-            stripInlinedWorkerSourcemap(),
-            emitPackageJson(),
-            emitThirdPartyNotices(),
-        ],
+        plugins: [stripManifoldNodeRequire(), liteErrorPlugin(), wgslMinifyPlugin(), stripInlinedWorkerSourcemap(), emitPackageJson(), emitThirdPartyNotices()],
     };
 });

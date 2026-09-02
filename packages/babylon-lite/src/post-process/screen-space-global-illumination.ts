@@ -39,6 +39,7 @@ import {
     resolveScreenSpaceSourceSize,
 } from "./screen-space-temporal.js";
 import type { ScreenSpaceTemporalOwner } from "./screen-space-temporal.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** Configuration for `createScreenSpaceGlobalIlluminationPostProcessTask`. */
 export interface ScreenSpaceGlobalIlluminationPostProcessTaskConfig {
@@ -137,14 +138,14 @@ export function clampScreenSpaceGlobalIlluminationConfig(config: ScreenSpaceGlob
 export const SS_GI_PRODUCER_UNIFORM_FLOATS = 48;
 const SS_GI_PRODUCER_UNIFORM_BYTES = SS_GI_PRODUCER_UNIFORM_FLOATS * 4;
 
-const GI_PRODUCER_UNIFORM_WGSL = `struct SsGiParams{invViewProj:mat4x4f,viewProj:mat4x4f,cameraPos:vec3f,stepCount:f32,rayLength:f32,thickness:f32,bias:f32,fadeStart:f32,fadeEnd:f32,edgeFade:f32,phase:f32,rayCount:f32,outputDims:vec2f,depthDims:vec2f}`;
+const GI_PRODUCER_UNIFORM_WGSL = wgsl`struct SsGiParams{invViewProj:mat4x4f,viewProj:mat4x4f,cameraPos:vec3f,stepCount:f32,rayLength:f32,thickness:f32,bias:f32,fadeStart:f32,fadeEnd:f32,edgeFade:f32,phase:f32,rayCount:f32,outputDims:vec2f,depthDims:vec2f}`;
 
-const GI_PRODUCER_BINDINGS_WGSL = `@group(0)@binding(0) var ssGiDepth:texture_depth_2d;
+const GI_PRODUCER_BINDINGS_WGSL = wgsl`@group(0)@binding(0) var ssGiDepth:texture_depth_2d;
 @group(0)@binding(1) var ssGiColorSampler:sampler;
 @group(0)@binding(2) var ssGiColor:texture_2d<f32>;
 @group(0)@binding(3) var<uniform> ssGi:SsGiParams;`;
 
-const GI_HEMISPHERE_WGSL = `fn ssCosineHemisphere(n:vec3f,u1:f32,u2:f32)->vec3f{
+const GI_HEMISPHERE_WGSL = wgsl`fn ssCosineHemisphere(n:vec3f,u1:f32,u2:f32)->vec3f{
   let r=sqrt(u1);
   let theta=6.2831853*u2;
   let x=r*cos(theta);
@@ -157,13 +158,13 @@ const GI_HEMISPHERE_WGSL = `fn ssCosineHemisphere(n:vec3f,u1:f32,u2:f32)->vec3f{
   return normalize(tangent*x+bitangent*y+n*z);
 }`;
 
-const GI_PRODUCER_VERTEX_WGSL = `struct SsGVOut{@builtin(position) position:vec4f}
+const GI_PRODUCER_VERTEX_WGSL = wgsl`struct SsGVOut{@builtin(position) position:vec4f}
 @vertex fn ssGiVertex(@builtin(vertex_index) i:u32)->SsGVOut{
   let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3))[i];
   return SsGVOut(vec4f(p,0,1));
 }`;
 
-const GI_PRODUCER_FRAGMENT_WGSL = `@fragment fn ssGiFragment(v:SsGVOut)->@location(0) vec4f{
+const GI_PRODUCER_FRAGMENT_WGSL = wgsl`@fragment fn ssGiFragment(v:SsGVOut)->@location(0) vec4f{
   let coord=vec2i(v.position.xy);
   let uv=ssTexelUv(coord,ssGi.outputDims);
   let depth=textureLoad(ssGiDepth,ssUvToCoord(uv,ssGi.depthDims),0);
@@ -204,16 +205,16 @@ const GI_PRODUCER_FRAGMENT_WGSL = `@fragment fn ssGiFragment(v:SsGVOut)->@locati
 
 /** Full GI producer shader module source. Exported for WGSL-contract unit tests. */
 export function screenSpaceGlobalIlluminationProducerWGSL(): string {
-    return `${GI_PRODUCER_VERTEX_WGSL}\n${GI_PRODUCER_UNIFORM_WGSL}\n${GI_PRODUCER_BINDINGS_WGSL}\n${screenSpaceRaymarchWGSL()}\n${GI_HEMISPHERE_WGSL}\n${GI_PRODUCER_FRAGMENT_WGSL}`;
+    return wgsl`${GI_PRODUCER_VERTEX_WGSL}\n${GI_PRODUCER_UNIFORM_WGSL}\n${GI_PRODUCER_BINDINGS_WGSL}\n${screenSpaceRaymarchWGSL()}\n${GI_HEMISPHERE_WGSL}\n${GI_PRODUCER_FRAGMENT_WGSL}`;
 }
 
-const COMPOSITE_EXTRA_TEXTURE_WGSL = `@group(0)@binding(2) var ssGiTex:texture_2d<f32>;`;
-const COMPOSITE_UNIFORM_WGSL = `struct SsGiCompositeParams{intensity:f32,enabled:f32,colorBleedGain:f32,colorBleedMax:f32}
+const COMPOSITE_EXTRA_TEXTURE_WGSL = wgsl`@group(0)@binding(2) var ssGiTex:texture_2d<f32>;`;
+const COMPOSITE_UNIFORM_WGSL = wgsl`struct SsGiCompositeParams{intensity:f32,enabled:f32,colorBleedGain:f32,colorBleedMax:f32}
 @group(0)@binding(3) var<uniform> ssGiComposite:SsGiCompositeParams;`;
 
 function compositeFragmentWGSL(mode: "additive" | "color-bleed"): string {
     if (mode === "color-bleed") {
-        return `fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{
+        return wgsl`fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{
   if(ssGiComposite.enabled<0.5){return color;}
   let illum=textureSample(ssGiTex,sourceSampler,uv).rgb;
   let luminance=dot(illum,vec3f(0.2126,0.7152,0.0722));
@@ -221,7 +222,7 @@ function compositeFragmentWGSL(mode: "additive" | "color-bleed"): string {
   return vec4f(color.rgb*mix(vec3f(1.0),illum/max(luminance,1e-4),amount),color.a);
 }`;
     }
-    return `fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{
+    return wgsl`fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{
   if(ssGiComposite.enabled<0.5){return color;}
   let illum=textureSample(ssGiTex,sourceSampler,uv).rgb;
   return vec4f(color.rgb+illum*ssGiComposite.intensity,color.a);

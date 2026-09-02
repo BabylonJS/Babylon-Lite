@@ -34,6 +34,7 @@ import { MSH_HAS_MORPH_TARGETS, MSH_HAS_THIN_INSTANCES } from "../mesh-features.
 import type { StandardSceneShaderContext } from "./standard-material.js";
 import { composeStandardShader } from "./standard-pipeline.js";
 import { HAS_SKELETON, HAS_SKELETON_8, HAS_SPECULAR_TEXTURE, MATERIAL_ALPHA_BLEND, SPECULAR_USES_UV2 } from "./standard-flags.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 const STAGE_VERTEX = 0x1;
@@ -82,42 +83,42 @@ function attachmentExpr(type: GeometryTextureType, wg: string, hasSpecular: bool
     switch (type) {
         case GeometryTextureType.IRRADIANCE:
             // BJS Standard material can't split irradiance — outputs (0, 0, 0).
-            return `vec4<f32>(0.0, 0.0, 0.0, ${wg})`;
+            return wgsl`vec4<f32>(0.0, 0.0, 0.0, ${wg})`;
         case GeometryTextureType.WORLD_POSITION:
-            return `vec4<f32>(input.vp, ${wg})`;
+            return wgsl`vec4<f32>(input.vp, ${wg})`;
         case GeometryTextureType.LOCAL_POSITION:
             // `vLocalPos` is contributed by the geometry-params fragment (added
             // only when LOCAL_POSITION is requested).
-            return `vec4<f32>(input.vLocalPos, ${wg})`;
+            return wgsl`vec4<f32>(input.vLocalPos, ${wg})`;
         case GeometryTextureType.REFLECTIVITY:
             // BJS: vec4(toLinearSpace(specularMapColor)) * writeGeometryInfo
             // (.a is glossiness when a specular texture is present). The std
             // pipeline drops the texture .a inside `specularColor`, so the
             // geometry path re-samples the specular texture here to recover it.
             return hasSpecular
-                ? `(vec4<f32>(pow(textureSample(sT, sS, ${specularUv}).rgb, vec3<f32>(2.2)), textureSample(sT, sS, ${specularUv}).a) * ${wg})`
-                : `vec4<f32>(pow(mat.sc.rgb, vec3<f32>(2.2)), 1.0) * ${wg}`;
+                ? wgsl`(vec4<f32>(pow(textureSample(sT, sS, ${specularUv}).rgb, vec3<f32>(2.2)), textureSample(sT, sS, ${specularUv}).a) * ${wg})`
+                : wgsl`vec4<f32>(pow(mat.sc.rgb, vec3<f32>(2.2)), 1.0) * ${wg}`;
         case GeometryTextureType.VIEW_DEPTH:
-            return `vec4<f32>((scene.view * vec4<f32>(input.vp, 1.0)).z, 0.0, 0.0, ${wg})`;
+            return wgsl`vec4<f32>((scene.view * vec4<f32>(input.vp, 1.0)).z, 0.0, 0.0, ${wg})`;
         case GeometryTextureType.NORMALIZED_VIEW_DEPTH:
-            return `vec4<f32>(((scene.view * vec4<f32>(input.vp, 1.0)).z - gp.cameraNearFar.x) / (gp.cameraNearFar.y - gp.cameraNearFar.x), 0.0, 0.0, ${wg})`;
+            return wgsl`vec4<f32>(((scene.view * vec4<f32>(input.vp, 1.0)).z - gp.cameraNearFar.x) / (gp.cameraNearFar.y - gp.cameraNearFar.x), 0.0, 0.0, ${wg})`;
         case GeometryTextureType.SCREENSPACE_DEPTH:
             // `clipPos` is the @builtin(position) fragment input declared by
             // shader-composer (fragment input struct).
-            return `vec4<f32>(input.clipPos.z, 0.0, 0.0, ${wg})`;
+            return wgsl`vec4<f32>(input.clipPos.z, 0.0, 0.0, ${wg})`;
         case GeometryTextureType.VIEW_NORMAL:
-            return `vec4<f32>(normalize((scene.view * vec4<f32>(normalW, 0.0)).xyz), ${wg})`;
+            return wgsl`vec4<f32>(normalize((scene.view * vec4<f32>(normalW, 0.0)).xyz), ${wg})`;
         case GeometryTextureType.WORLD_NORMAL:
-            return `vec4<f32>(normalW * 0.5 + vec3<f32>(0.5), ${wg})`;
+            return wgsl`vec4<f32>(normalW * 0.5 + vec3<f32>(0.5), ${wg})`;
         case GeometryTextureType.ALBEDO:
             // BJS: vec4(baseColor.rgb, writeGeometryInfo). The standard
             // fragment already multiplied the diffuse sample by `mat.tl`
             // (texture level) when building `baseColor`.
-            return `vec4<f32>(baseColor, ${wg})`;
+            return wgsl`vec4<f32>(baseColor, ${wg})`;
         case GeometryTextureType.LINEAR_VELOCITY: {
             const cur = `(input.vCurrentClip.xy / input.vCurrentClip.w)`;
             const prev = `(input.vPreviousClip.xy / input.vPreviousClip.w)`;
-            return `vec4<f32>(0.5 * (${prev} - ${cur}), 0.0, ${wg})`;
+            return wgsl`vec4<f32>(0.5 * (${prev} - ${cur}), 0.0, ${wg})`;
         }
     }
 }
@@ -146,7 +147,7 @@ function createGeometryParamsFragment(
             _visibility: STAGE_VERTEX,
         });
     }
-    const helpers = needsParamsUbo ? `struct gpUniforms { previousViewProjection: mat4x4<f32>, cameraNearFar: vec4<f32>, };` : "";
+    const helpers = needsParamsUbo ? wgsl`struct gpUniforms { previousViewProjection: mat4x4<f32>, cameraNearFar: vec4<f32>, };` : "";
     const varyings: Varying[] = [];
     if (needsVelocityVaryings) {
         varyings.push({ _name: "vCurrentClip", _type: "vec4<f32>" }, { _name: "vPreviousClip", _type: "vec4<f32>" });
@@ -156,25 +157,25 @@ function createGeometryParamsFragment(
     }
     const vbParts: string[] = [];
     if (needsVelocityVaryings) {
-        vbParts.push(`out.vCurrentClip = scene.viewProjection * vec4<f32>(out.vp, 1.0);`);
+        vbParts.push(wgsl`out.vCurrentClip = scene.viewProjection * vec4<f32>(out.vp, 1.0);`);
         if (meshFeatures & MSH_HAS_THIN_INSTANCES) {
-            vbParts.push(`out.vPreviousClip = out.vCurrentClip;`);
+            vbParts.push(wgsl`out.vPreviousClip = out.vCurrentClip;`);
         } else {
             const localPosition = (meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0 ? "morphedPos" : "position";
             if (hasSkeletonVelocity) {
-                vbParts.push(`${makePreviousSkinningCode((features & HAS_SKELETON_8) !== 0)}
+                vbParts.push(wgsl`${makePreviousSkinningCode((features & HAS_SKELETON_8) !== 0)}
 let previousWorldPos = mesh.previousWorld * previousInfluence * vec4<f32>(${localPosition}, 1.0);
 let trackedPreviousClip = gp.previousViewProjection * previousWorldPos;
 out.vPreviousClip = select(out.vCurrentClip, trackedPreviousClip, mesh.velocityEnabled > 0.5);`);
             } else {
-                vbParts.push(`let previousWorldPos = mesh.previousWorld * vec4<f32>(${localPosition}, 1.0);
+                vbParts.push(wgsl`let previousWorldPos = mesh.previousWorld * vec4<f32>(${localPosition}, 1.0);
 let trackedPreviousClip = gp.previousViewProjection * previousWorldPos;
 out.vPreviousClip = select(out.vCurrentClip, trackedPreviousClip, mesh.velocityEnabled > 0.5);`);
             }
         }
     }
     if (needsLocalPosVarying) {
-        vbParts.push(`out.vLocalPos = ${(meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0 ? "morphedPos" : "position"};`);
+        vbParts.push(wgsl`out.vLocalPos = ${(meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0 ? "morphedPos" : "position"};`);
     }
     const slots: ShaderFragment["_vertexSlots"] = vbParts.length > 0 ? { VB: vbParts.join("\n") } : {};
     return {
@@ -196,12 +197,12 @@ out.vPreviousClip = select(out.vCurrentClip, trackedPreviousClip, mesh.velocityE
 }
 
 function makePreviousSkinningCode(hasEightInfluences: boolean): string {
-    let code = `var previousInfluence = readMatrixFromRawSampler(previousBoneSampler, f32(joints[0])) * weights[0];
+    let code = wgsl`var previousInfluence = readMatrixFromRawSampler(previousBoneSampler, f32(joints[0])) * weights[0];
 previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints[1])) * weights[1];
 previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints[2])) * weights[2];
 previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints[3])) * weights[3];`;
     if (hasEightInfluences) {
-        code += `
+        code += wgsl`
 previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints1[0])) * weights1[0];
 previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints1[1])) * weights1[1];
 previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints1[2])) * weights1[2];
@@ -264,12 +265,12 @@ export function composeStandardGeometryShader(
     //    standard `color` output (the "real" lit material color), with
     //    N = attachments.length.
     const colorSlot = attachments.length;
-    const extraColorLine = emitColor ? `\n@location(${colorSlot}) color: vec4<f32>,` : "";
-    const outputStruct = `struct FragmentOutput {
-${attachments.map((_, i) => `@location(${i}) f${i}: vec4<f32>,`).join("\n")}${extraColorLine}
+    const extraColorLine = emitColor ? wgsl`\n@location(${colorSlot}) color: vec4<f32>,` : "";
+    const outputStruct = wgsl`struct FragmentOutput {
+${attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`).join("\n")}${extraColorLine}
 };
 `;
-    frag = frag.replace("@fragment fn main", `${outputStruct}@fragment fn main`);
+    frag = frag.replace("@fragment fn main", wgsl`${outputStruct}@fragment fn main`);
 
     // 3) Replace `return color;` with MRT writes + `return out;`. We use
     //    `alpha` (the standard fragment's running alpha) for the
@@ -277,9 +278,9 @@ ${attachments.map((_, i) => `@location(${i}) f${i}: vec4<f32>,`).join("\n")}${ex
     //    materials get a correct binary mask under the per-attachment
     //    ALPHA_COMBINE blend pipeline state.
     const wg = `select(0.0, 1.0, alpha > 0.4)`;
-    const writes = attachments.map((type, i) => `out.f${i} = ${attachmentExpr(type, wg, hasSpecular, specularUv)};`).join("\n");
-    const extraColorWrite = emitColor ? `\nout.color = color;` : "";
-    const replacement = `var out: FragmentOutput;
+    const writes = attachments.map((type, i) => wgsl`out.f${i} = ${attachmentExpr(type, wg, hasSpecular, specularUv)};`).join("\n");
+    const extraColorWrite = emitColor ? wgsl`\nout.color = color;` : "";
+    const replacement = wgsl`var out: FragmentOutput;
 ${writes}${extraColorWrite}
 return out;`;
     if (!frag.includes("return color;")) {

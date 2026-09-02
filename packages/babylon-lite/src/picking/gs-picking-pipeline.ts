@@ -32,6 +32,7 @@ import { getRenderTargetSize } from "../engine/engine.js";
 import { getViewMatrix, getProjectionMatrix } from "../camera/camera.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { PickContributor, PickPassContext } from "./pick-contributor.js";
+import { wgsl as wgslTag } from "../shader/wgsl.js";
 
 interface GsPickingCache {
     device: GPUDevice;
@@ -68,7 +69,7 @@ const _gsPickMx = new F32(16);
  *  bundle pipeline, so the slot markers survive minification.
  */
 function buildPickingWgsl(detailed: boolean): string {
-    const wgsl = /* wgsl */ `
+    const wgsl = wgslTag`
 struct GsPickScene { pickMatrix: mat4x4<f32> };
 @group(0) @binding(0) var<uniform> gsPickScene: GsPickScene;
 

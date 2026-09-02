@@ -19,6 +19,7 @@ import { syncThinInstanceGpuData } from "./thin-instance-gpu.js";
 import type { ThinInstanceDrawBuffers } from "./thin-instance-gpu.js";
 import { bumpVisibilityEpoch } from "../engine/engine.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
+import { wgsl } from "../shader/wgsl.js";
 
 const WORKGROUP_SIZE = 64;
 const PARAM_BYTES = 192;
@@ -33,7 +34,7 @@ const CAM_POS_DIST_F32_OFFSET = 48;
 const LOD_BAND_F32_OFFSET = 52;
 const INDIRECT_ARGS_BYTES = 20;
 
-const CULL_WGSL_NO_COLOR = /* wgsl */ `
+const CULL_WGSL_NO_COLOR = wgsl`
 struct CullParams{planes:array<vec4<f32>,6>,meshWorld:mat4x4<f32>,localSphere:vec4<f32>,count:u32,boundsPad:f32};
 @group(0)@binding(0)var<storage,read> srcMatrices:array<mat4x4<f32>>;
 @group(0)@binding(1)var<storage,read_write> dstMatrices:array<mat4x4<f32>>;
@@ -61,7 +62,7 @@ let outIndex=atomicAdd(&args[1],1u);
 dstMatrices[outIndex]=srcMatrices[i];
 }`;
 
-const CULL_WGSL_COLOR = `${CULL_WGSL_NO_COLOR}
+const CULL_WGSL_COLOR = wgsl`${CULL_WGSL_NO_COLOR}
 @group(0)@binding(4)var<storage,read> srcColors:array<vec4<f32>>;
 @group(0)@binding(5)var<storage,read_write> dstColors:array<vec4<f32>>;
 @compute @workgroup_size(64)
@@ -79,7 +80,7 @@ dstColors[outIndex]=srcColors[i];
 // distance — near keeps the mesh's own compacted bucket, far fills the partner's bucket. `isNear`
 // dithers the threshold per instance by ±lodBand/2 via a pure hash of the instance index (PCG), so
 // the split is deterministic frame-to-frame with no time or randomness input.
-const CULL_WGSL_LOD_NO_COLOR = /* wgsl */ `
+const CULL_WGSL_LOD_NO_COLOR = wgsl`
 struct CullParams{planes:array<vec4<f32>,6>,meshWorld:mat4x4<f32>,localSphere:vec4<f32>,count:u32,boundsPad:f32,camPosDist:vec4<f32>,lodBand:f32};
 @group(0)@binding(0)var<storage,read> srcMatrices:array<mat4x4<f32>>;
 @group(0)@binding(1)var<storage,read_write> dstMatrices:array<mat4x4<f32>>;
@@ -122,7 +123,7 @@ lodMatrices[outIndex]=srcMatrices[i];
 }
 }`;
 
-const CULL_WGSL_LOD_COLOR = `${CULL_WGSL_LOD_NO_COLOR}
+const CULL_WGSL_LOD_COLOR = wgsl`${CULL_WGSL_LOD_NO_COLOR}
 @group(0)@binding(4)var<storage,read> srcColors:array<vec4<f32>>;
 @group(0)@binding(5)var<storage,read_write> dstColors:array<vec4<f32>>;
 @group(0)@binding(8)var<storage,read_write> lodColors:array<vec4<f32>>;

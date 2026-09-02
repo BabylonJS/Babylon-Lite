@@ -1,4 +1,5 @@
 import type { BlockEmitter } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export const emitter: BlockEmitter = {
     className: "SimplexPerlin3DBlock",
@@ -6,7 +7,7 @@ export const emitter: BlockEmitter = {
         const seed = ctx.cast(ctx.resolve(block, "seed", stage, state), "vec3f");
         state[stage].helpers.set(
             "nme_simplexPerlin3D",
-            `fn nme_simplexPerlin3D(source: vec3<f32>) -> f32 {
+            wgsl`fn nme_simplexPerlin3D(source: vec3<f32>) -> f32 {
 let SKEWFACTOR = 1.0 / 3.0;
 let UNSKEWFACTOR = 1.0 / 6.0;
 let SIMPLEX_CORNER_POS = 0.5;

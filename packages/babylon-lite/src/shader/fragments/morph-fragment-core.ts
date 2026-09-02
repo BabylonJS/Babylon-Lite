@@ -17,11 +17,12 @@
  */
 
 import type { ComposedShader, ShaderFragment } from "../fragment-types.js";
+import { wgsl } from "../wgsl.js";
 
 // WebGPU shader stage constants
 const STAGE_VERTEX = 0x1;
 
-const MORPH_PRE_SKINNING = `var morphedPos = position;
+const MORPH_PRE_SKINNING = wgsl`var morphedPos = position;
 var morphedNorm = normal;
 for (var i = 0u; i < morph.count; i = i + 1u) {
   let w = morph.weights[i];
@@ -49,7 +50,7 @@ function patchMorphStorage(composed: ComposedShader): ComposedShader {
     const vertexWGSL = composed._vertexWGSL.replace(/@group\(1\)@binding\((\d+)\)\s*var<uniform>\s*(morphDeltas|morph)\s*:/g, (_match, num: string, name: string) => {
         morphBindings.add(Number(num));
         rewrites++;
-        return `@group(1)@binding(${num}) var<storage, read> ${name}:`;
+        return wgsl`@group(1)@binding(${num}) var<storage, read> ${name}:`;
     });
     // The morph fragment always contributes exactly two vertex bindings (deltas + weights).
     // Anything else means the composer's decl format drifted from what this rewrite expects.
@@ -73,7 +74,7 @@ export function createMorphFragment(): ShaderFragment {
 
         _vertexBuiltins: [{ _name: "vertexIndex", _builtin: "vertex_index", _type: "u32" }],
 
-        _vertexHelperFunctions: `struct morphUniforms {\ncount: u32,\nvertexCount: u32,\n_p0: u32,\n_p1: u32,\nweights: array<f32>,\n}\nstruct morphDeltasUniforms {\nd: array<f32>,\n}`,
+        _vertexHelperFunctions: wgsl`struct morphUniforms {\ncount: u32,\nvertexCount: u32,\n_p0: u32,\n_p1: u32,\nweights: array<f32>,\n}\nstruct morphDeltasUniforms {\nd: array<f32>,\n}`,
 
         // Declared as uniform-buffer placeholders; `_postCompose` rewrites them to storage.
         _vertexBindings: [

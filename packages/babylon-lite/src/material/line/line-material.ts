@@ -5,6 +5,7 @@ import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { ShaderMaterial } from "../shader/shader-material.js";
 import { createShaderMaterial, setShaderUniform } from "../shader/shader-material.js";
 import { getShaderGroupBuilder } from "../shader/shader-group-builder.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 /** Options for the unlit material used by line-list meshes. */
 export interface LineMaterialOptions {
@@ -58,7 +59,7 @@ function getLineGroupBuilder(): MeshGroupBuilder {
 }
 
 function vertexOutput(hasColor: boolean): string {
-    return `struct VertexOutput{@builtin(position) position:vec4<f32>,${hasColor ? "@location(0) color:vec4<f32>," : ""}};`;
+    return wgsl`struct VertexOutput{@builtin(position) position:vec4<f32>,${hasColor ? "@location(0) color:vec4<f32>," : ""}};`;
 }
 
 function vertexSource(useVertexColor: boolean, useThinInstances: boolean, useThinInstanceColors: boolean): string {
@@ -74,12 +75,12 @@ function vertexSource(useVertexColor: boolean, useThinInstances: boolean, useThi
               : useThinInstanceColors
                 ? "out.color=input.instanceColor;"
                 : "";
-    return `${vertexOutput(hasColor)}
+    return wgsl`${vertexOutput(hasColor)}
 @vertex fn mainVertex(input:VertexInput)->VertexOutput{var out:VertexOutput;${world}out.position=shaderSystem.viewProjection*finalWorld*vec4<f32>(input.position,1.0);${outputColor}return out;}`;
 }
 
 function fragmentSource(hasColor: boolean): string {
-    return `${vertexOutput(hasColor)}
+    return wgsl`${vertexOutput(hasColor)}
 @fragment fn mainFragment(input:VertexOutput)->@location(0) vec4<f32>{return ${hasColor ? "input.color" : "shaderUniforms.lineColor"};}`;
 }
 

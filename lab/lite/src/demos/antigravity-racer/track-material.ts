@@ -64,6 +64,7 @@ import {
 } from "babylon-lite";
 
 import { RING_COUNT, SHADOW_CASCADES } from "./constants.js";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 /** Floats per segment row in the frame buffer: four vec4 columns. */
 export const FLOATS_PER_FRAME = 16;
@@ -107,7 +108,7 @@ export interface TrackMaterial {
 
 /** The deformation, shared by the visible material and its shadow-caster twin. */
 function vertexSource(): string {
-    return `struct VertexOutput {
+    return wgsl`struct VertexOutput {
 @builtin(position) position: vec4<f32>,
 @location(0) worldNormal: vec3<f32>,
 @location(1) undeformed: vec2<f32>,
@@ -134,7 +135,7 @@ return out;
 
 /** Cascade select + 5×5 PCF, mirroring `shader/fragments/csm-shadow-fragment-core.ts` exactly. */
 function csmReceiverWgsl(): string {
-    return `fn csmMatrix(layer: i32) -> mat4x4<f32> {
+    return wgsl`fn csmMatrix(layer: i32) -> mat4x4<f32> {
 let b = u32(layer) * 4u;
 return mat4x4<f32>(csmReceiver[b], csmReceiver[b + 1u], csmReceiver[b + 2u], csmReceiver[b + 3u]);
 }
@@ -194,7 +195,7 @@ return shadow;
 }
 
 function fragmentSource(): string {
-    return `struct VertexOutput {
+    return wgsl`struct VertexOutput {
 @builtin(position) position: vec4<f32>,
 @location(0) worldNormal: vec3<f32>,
 @location(1) undeformed: vec2<f32>,
@@ -252,7 +253,7 @@ return vec4<f32>(2.0 * emissive + diffuseColor * irradiance + arrow.rgb * boostM
 /** Never compiled: the depth-only shadow target has no colour attachment, so the caster's fragment
  *  stage is dropped. It exists only because `createShaderMaterial` requires a fragment source. */
 function casterFragmentSource(): string {
-    return `struct VertexOutput {
+    return wgsl`struct VertexOutput {
 @builtin(position) position: vec4<f32>,
 @location(0) worldNormal: vec3<f32>,
 @location(1) undeformed: vec2<f32>,

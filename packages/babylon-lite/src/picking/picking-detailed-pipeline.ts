@@ -5,6 +5,7 @@ import type { PickDiscardRule } from "./gpu-picker.js";
 import { getPickingSceneBGL } from "./picking-scene-bgl.js";
 import type { PickingVertexProjection } from "./picking-advanced-pipeline.js";
 import type { PickingVertexProjectionShader } from "./picking-advanced-shader.js";
+import { wgsl } from "../shader/wgsl.js";
 
 export interface PickingPipelineSet {
     readonly regularPipeline: GPURenderPipeline;
@@ -46,13 +47,13 @@ function group2(engine: EngineContext, rule: PickDiscardRule): GPUBindGroupLayou
 }
 
 function shader(rule: PickDiscardRule | null, projection: PickingVertexProjectionShader | null): string {
-    const declarations = rule?.storage?.map((s, binding) => `@group(2) @binding(${binding}) var<storage, read> ${s.name}: ${s.type};`).join("\n") ?? "";
+    const declarations = rule?.storage?.map((s, binding) => wgsl`@group(2) @binding(${binding}) var<storage, read> ${s.name}: ${s.type};`).join("\n") ?? "";
     const discard =
         rule?.wgsl ??
-        `fn shouldDiscardPick(input: PickDiscardInput) -> bool {
+        wgsl`fn shouldDiscardPick(input: PickDiscardInput) -> bool {
 return false;
 }`;
-    const shared = `enable primitive_index;
+    const shared = wgsl`enable primitive_index;
 struct SceneUniforms { viewProjection: mat4x4f, fragmentCoord: vec2f }
 @group(0) @binding(0) var<uniform> scene: SceneUniforms;
 struct PickDiscardInput {
@@ -82,13 +83,13 @@ let g = f32((i.id >> 8u) & 255u) / 255.0;
 let b = f32(i.id & 255u) / 255.0;
 return F(vec4f(r, g, b, 1), i.p.z, vec4u(primitiveIndex, bitcast<u32>(i.local.x), bitcast<u32>(i.local.y), bitcast<u32>(i.local.z)));
 }`;
-    return `${shared}
+    return wgsl`${shared}
 ${projection?.regularDeclarations ?? ""}
 struct M { world: mat4x4f, pickId: u32 }
 @group(1) @binding(0) var<uniform> mesh: M;
 @vertex fn vs(@location(0) position: vec3f${projection?.regularInputs ?? ""}) -> O {
 var o: O;
-${projection ? `${projection.regularBody}\nlet w = projectedWorld;` : "let w = (mesh.world * vec4f(position, 1)).xyz;"}
+${projection ? wgsl`${projection.regularBody}\nlet w = projectedWorld;` : "let w = (mesh.world * vec4f(position, 1)).xyz;"}
 o.p = scene.viewProjection * vec4f(w, 1);
 o.id = mesh.pickId;
 o.w = w;

@@ -11,6 +11,7 @@ import { retargetShaderPipelineCache } from "./shader-pipeline-cache.js";
 import { _resolveShaderPipelineVariantKey, getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings, type ShaderPipelineBindings } from "./shader-pipeline.js";
 import type { ShaderMaterial } from "./shader-material.js";
 import { _installAsyncShaderPipelineRegistrar } from "./shader-renderable.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 /** Logical vertex-input layout for a ShaderMaterial pipeline. */
 export type ShaderMaterialPipelineLayout = "mesh" | "thin-instances" | "thin-instances-color";
@@ -240,7 +241,7 @@ function resolveLayout(
             ],
         },
     ];
-    let instanceAttrs = `@location(${baseLocation}) world0: vec4<f32>,
+    let instanceAttrs = wgsl`@location(${baseLocation}) world0: vec4<f32>,
 @location(${baseLocation + 1}) world1: vec4<f32>,
 @location(${baseLocation + 2}) world2: vec4<f32>,
 @location(${baseLocation + 3}) world3: vec4<f32>,
@@ -251,7 +252,7 @@ function resolveLayout(
             stepMode: "instance",
             attributes: [{ shaderLocation: baseLocation + 4, offset: 0, format: "float32x4" }],
         });
-        instanceAttrs += `@location(${baseLocation + 4}) instanceColor: vec4<f32>,
+        instanceAttrs += wgsl`@location(${baseLocation + 4}) instanceColor: vec4<f32>,
 `;
     }
     return { variantKey: "" + +hasColor, vertexBuffers: [...bindings.vertexBuffers, ...instanceLayouts], instanceAttrs };

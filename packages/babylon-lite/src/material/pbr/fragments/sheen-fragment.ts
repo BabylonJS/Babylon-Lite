@@ -15,6 +15,7 @@ import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/frag
 import type { PbrMaterialProps, SheenProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { PBR_HAS_SHEEN, PBR_HAS_SHEEN_TEXTURE, PBR_HAS_SHEEN_ALBEDO_SCALING } from "../pbr-flag-bits.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 const PBR2_HAS_SHEEN_UV_TX = 8192; // 1 << 13
@@ -25,7 +26,7 @@ const PBR2_HAS_SHEEN_UV_TX = 8192; // 1 << 13
 // roughness is then read from that texture's A channel at its own (animatable) UV transform.
 const PBR2_HAS_SHEEN_ROUGH_TEX = -2147483648; // 1 << 31
 
-const SHEEN_HELPERS = `
+const SHEEN_HELPERS = wgsl`
 fn normalDistributionFunction_CharlieSheen(NdotH_sh: f32, alphaG_sh: f32) -> f32 {
 let invR = 1.0 / alphaG_sh;
 let cos2h = NdotH_sh * NdotH_sh;
@@ -37,7 +38,7 @@ return 1.0 / (4.0 * (NdotL_sh + NdotV_sh - NdotL_sh * NdotV_sh));
 }
 `;
 
-const SHEEN_DIRECT_MOD = (intensityExpr: string): string => `
+const SHEEN_DIRECT_MOD = (intensityExpr: string): string => wgsl`
 {
 let shIntensity = ${intensityExpr};
 let shColorScaled = sheenColorFinal * shIntensity;
@@ -49,7 +50,7 @@ sheenDirectTerm = shColorScaled * shD * shV * NdotL * lightColor * lightAtten * 
 }
 `;
 
-const SHEEN_IBL_MOD = (intensityExpr: string, albedoScaling: boolean): string => `
+const SHEEN_IBL_MOD = (intensityExpr: string, albedoScaling: boolean): string => wgsl`
 {
 let shIntensity_ibl = ${intensityExpr};
 let shColorScaled = sheenColorFinal * shIntensity_ibl;
@@ -66,7 +67,7 @@ ${albedoScaling ? "let shMax = max(shColorScaled.r, max(shColorScaled.g, shColor
 
 const SHEEN_IBL_COLOR_MOD = (albedoScaling: boolean): string =>
     albedoScaling
-        ? `
+        ? wgsl`
 {
 color = (finalIrradiance
       + finalRadianceScaled
@@ -77,7 +78,7 @@ color = (finalIrradiance
       + emissive;
 }
 `
-        : `
+        : wgsl`
 {
 color = finalIrradiance
       + finalRadianceScaled
@@ -89,7 +90,7 @@ color = finalIrradiance
 }
 `;
 
-const SHEEN_NON_IBL_MOD = `
+const SHEEN_NON_IBL_MOD = wgsl`
 {
 color = color + sheenDirectTerm;
 }
@@ -111,7 +112,7 @@ export function createSheenFragment(
     hasSheenUvTx: boolean = false,
     hasSheenRoughTex: boolean = false
 ): ShaderFragment {
-    let scopeVars = `var sheenDirectTerm = vec3<f32>(0.0);
+    let scopeVars = wgsl`var sheenDirectTerm = vec3<f32>(0.0);
 var sheenIblTerm = vec3<f32>(0.0);
 var sheenAlbedoScaling = 1.0;
 var sheenColorFinal = material.sheenParams.rgb;
@@ -124,7 +125,7 @@ var sheenRoughnessAdjusted = material.sheenParams2.x;`;
         // Roughness from the colour texture's alpha only when there is no distinct
         // sheenRoughnessTexture (BJS useRoughnessFromMainTexture); otherwise it is read below.
         const roughFromColor = hasSheenRoughTex ? "" : "\nsheenRoughnessAdjusted *= sheenMapData.a;";
-        scopeVars += `
+        scopeVars += wgsl`
 {
 ${sheenUvDecl}
 let sheenMapData = textureSample(sheenTexture_, sheenSampler_, sheenUV);
@@ -133,7 +134,7 @@ sheenColorFinal *= ${gammaStmt};${roughFromColor}
     }
     if (hasSheenRoughTex) {
         // Distinct sheenRoughnessTexture: roughness from its A channel at its own animatable UV.
-        scopeVars += `
+        scopeVars += wgsl`
 {
 let sheenRoughUV = vec2<f32>(dot(material.sheenRoughUVm.xy, input.uv), dot(material.sheenRoughUVm.zw, input.uv)) + material.sheenRoughUVt.xy;
 sheenRoughnessAdjusted *= textureSample(sheenRoughTexture_, sheenRoughSampler_, sheenRoughUV).a;

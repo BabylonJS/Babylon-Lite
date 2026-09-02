@@ -1,7 +1,8 @@
 import type { BlockEmitter, NodeExpr } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const HELPER_KEY = "nme_ambientOcclusion";
-const HELPER_WGSL = `
+const HELPER_WGSL = wgsl`
 fn nme_aoNormalFromDepth(depthTex: texture_2d<f32>, depthSamp: sampler, depth: f32, coords: vec2<f32>, radius: f32) -> vec3<f32> {
     let offset1 = vec2<f32>(0.0, radius);
     let offset2 = vec2<f32>(radius, 0.0);

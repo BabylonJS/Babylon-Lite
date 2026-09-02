@@ -39,6 +39,7 @@ import { getRenderTargetSize } from "../../engine/engine.js";
 import { disposeGaussianSplattingMesh, uploadPendingSplatOrder, postSplatSortIfDirty, type GaussianSplattingMesh, type GsShaderFragment } from "./gaussian-splatting-mesh.js";
 import { registerPickSource } from "../../picking/pick-contributor.js";
 import { applyGsFragments } from "./gaussian-splatting-pipeline.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 interface PipelineEntry {
     pipeline: GPURenderPipeline;
@@ -63,13 +64,13 @@ function buildShShaderSource(shDegree: number): string {
     // ── SH texture bindings (6, 7, …) ───────────────────────────────
     let textureBindings = "";
     for (let i = 0; i < textureCount; i++) {
-        textureBindings += `@group(1) @binding(${6 + i}) var shTexture${i}: texture_2d<u32>;\n`;
+        textureBindings += wgsl`@group(1) @binding(${6 + i}) var shTexture${i}: texture_2d<u32>;\n`;
     }
 
     // ── textureLoad calls inside readSplat ──────────────────────────
     let textureLoads = "";
     for (let i = 0; i < textureCount; i++) {
-        textureLoads += `  let sh${i}_u32 = textureLoad(shTexture${i}, splatUVi32, 0);\n`;
+        textureLoads += wgsl`  let sh${i}_u32 = textureLoad(shTexture${i}, splatUVi32, 0);\n`;
     }
 
     // ── Unpack the byte stream into sh[1..shVectorCount] vec3 values.
@@ -79,7 +80,7 @@ function buildShShaderSource(shDegree: number): string {
     // component of the [R0,G0,B0, R1,G1,B1, …, R(N-1),G(N-1),B(N-1)] sequence.
     // sh[k+1] (k = 0..shVectorCount-1) reads bytes [3k, 3k+1, 3k+2]. `decompose`
     // returns `(byte * 2/255) - 1`, matching BJS exactly.
-    let shUnpack = `  var sh: array<vec3<f32>, ${shVectorCount + 1}>;\n  sh[0] = vec3<f32>(0.0);\n`;
+    let shUnpack = wgsl`  var sh: array<vec3<f32>, ${shVectorCount + 1}>;\n  sh[0] = vec3<f32>(0.0);\n`;
     const byteRef = (j: number): string => {
         // texture index, u32 index within texel (0..3), byte index within u32 (0..3 == x/y/z/w).
         const tex = (j / 16) | 0;
@@ -91,40 +92,39 @@ function buildShShaderSource(shDegree: number): string {
     };
     for (let k = 0; k < shVectorCount; k++) {
         const j = k * 3;
-        shUnpack += `  sh[${k + 1}] = vec3<f32>(${byteRef(j)}, ${byteRef(j + 1)}, ${byteRef(j + 2)});\n`;
+        shUnpack += wgsl`  sh[${k + 1}] = vec3<f32>(${byteRef(j)}, ${byteRef(j + 1)}, ${byteRef(j + 2)});\n`;
     }
 
     // ── Polynomial evaluation, conditional on shDegree ──────────────
     let shPoly = "  result = sh[0];\n";
     if (shDegree >= 1) {
-        shPoly += `  result += -SH_C1 * y * sh[1] + SH_C1 * z * sh[2] - SH_C1 * x * sh[3];\n`;
+        shPoly += wgsl`  result += -SH_C1 * y * sh[1] + SH_C1 * z * sh[2] - SH_C1 * x * sh[3];\n`;
     }
     if (shDegree >= 2) {
-        shPoly += `  result +=\n    SH_C2[0] * xy * sh[4] +\n    SH_C2[1] * yz * sh[5] +\n    SH_C2[2] * (2.0 * zz - xx - yy) * sh[6] +\n    SH_C2[3] * xz * sh[7] +\n    SH_C2[4] * (xx - yy) * sh[8];\n`;
+        shPoly += wgsl`  result +=\n    SH_C2[0] * xy * sh[4] +\n    SH_C2[1] * yz * sh[5] +\n    SH_C2[2] * (2.0 * zz - xx - yy) * sh[6] +\n    SH_C2[3] * xz * sh[7] +\n    SH_C2[4] * (xx - yy) * sh[8];\n`;
     }
     if (shDegree >= 3) {
-        shPoly += `  result +=\n    SH_C3[0] * y * (3.0 * xx - yy) * sh[9] +\n    SH_C3[1] * xy * z * sh[10] +\n    SH_C3[2] * y * (4.0 * zz - xx - yy) * sh[11] +\n    SH_C3[3] * z * (2.0 * zz - 3.0 * xx - 3.0 * yy) * sh[12] +\n    SH_C3[4] * x * (4.0 * zz - xx - yy) * sh[13] +\n    SH_C3[5] * z * (xx - yy) * sh[14] +\n    SH_C3[6] * x * (xx - 3.0 * yy) * sh[15];\n`;
+        shPoly += wgsl`  result +=\n    SH_C3[0] * y * (3.0 * xx - yy) * sh[9] +\n    SH_C3[1] * xy * z * sh[10] +\n    SH_C3[2] * y * (4.0 * zz - xx - yy) * sh[11] +\n    SH_C3[3] * z * (2.0 * zz - 3.0 * xx - 3.0 * yy) * sh[12] +\n    SH_C3[4] * x * (4.0 * zz - xx - yy) * sh[13] +\n    SH_C3[5] * z * (xx - yy) * sh[14] +\n    SH_C3[6] * x * (xx - 3.0 * yy) * sh[15];\n`;
     }
     if (shDegree >= 4) {
-        shPoly += `  result +=\n    SH_C4[0] * x * y * (xx - yy) * sh[16] +\n    SH_C4[1] * y * z * (3.0 * xx - yy) * sh[17] +\n    SH_C4[2] * x * y * (7.0 * zz - 1.0) * sh[18] +\n    SH_C4[3] * y * z * (7.0 * zz - 3.0) * sh[19] +\n    SH_C4[4] * (zz * (35.0 * zz - 30.0) + 3.0) * sh[20] +\n    SH_C4[5] * x * z * (7.0 * zz - 3.0) * sh[21] +\n    SH_C4[6] * (xx - yy) * (7.0 * zz - 1.0) * sh[22] +\n    SH_C4[7] * x * z * (xx - 3.0 * yy) * sh[23] +\n    SH_C4[8] * (xx * (xx - 3.0 * yy) - yy * (3.0 * xx - yy)) * sh[24];\n`;
+        shPoly += wgsl`  result +=\n    SH_C4[0] * x * y * (xx - yy) * sh[16] +\n    SH_C4[1] * y * z * (3.0 * xx - yy) * sh[17] +\n    SH_C4[2] * x * y * (7.0 * zz - 1.0) * sh[18] +\n    SH_C4[3] * y * z * (7.0 * zz - 3.0) * sh[19] +\n    SH_C4[4] * (zz * (35.0 * zz - 30.0) + 3.0) * sh[20] +\n    SH_C4[5] * x * z * (7.0 * zz - 3.0) * sh[21] +\n    SH_C4[6] * (xx - yy) * (7.0 * zz - 1.0) * sh[22] +\n    SH_C4[7] * x * z * (xx - 3.0 * yy) * sh[23] +\n    SH_C4[8] * (xx * (xx - 3.0 * yy) - yy * (3.0 * xx - yy)) * sh[24];\n`;
     }
 
     // SH_C2..SH_C4 constants — only declare what's referenced (silences
     // WGSL "unused array" warnings on lower degrees).
-    let constantsBlock = `const SH_C1: f32 = 0.48860251;\n`;
+    let constantsBlock = wgsl`const SH_C1: f32 = 0.48860251;\n`;
     if (shDegree >= 2) {
-        constantsBlock += `const SH_C2: array<f32, 5> = array<f32, 5>(1.092548430, -1.09254843, 0.315391565, -1.09254843, 0.546274215);\n`;
+        constantsBlock += wgsl`const SH_C2: array<f32, 5> = array<f32, 5>(1.092548430, -1.09254843, 0.315391565, -1.09254843, 0.546274215);\n`;
     }
     if (shDegree >= 3) {
-        constantsBlock += `const SH_C3: array<f32, 7> = array<f32, 7>(-0.59004358, 2.890611442, -0.45704579, 0.373176332, -0.45704579, 1.445305721, -0.59004358);\n`;
+        constantsBlock += wgsl`const SH_C3: array<f32, 7> = array<f32, 7>(-0.59004358, 2.890611442, -0.45704579, 0.373176332, -0.45704579, 1.445305721, -0.59004358);\n`;
     }
     if (shDegree >= 4) {
-        constantsBlock += `const SH_C4: array<f32, 9> = array<f32, 9>(2.5033429418, -1.7701307698, 0.9461746958, -0.6690465436, 0.1057855469, -0.6690465436, 0.4730873479, -1.7701307698, 0.6258357354);\n`;
+        constantsBlock += wgsl`const SH_C4: array<f32, 9> = array<f32, 9>(2.5033429418, -1.7701307698, 0.9461746958, -0.6690465436, 0.1057855469, -0.6690465436, 0.4730873479, -1.7701307698, 0.6258357354);\n`;
     }
 
-    return `// Gaussian Splatting — vertex + fragment WGSL (SH degree ${shDegree}).
-// Generated by buildShShaderSource. Mirrors BJS gaussianSplatting.vertex.fx +
-// gaussianSplatting.fx (SH_DEGREE = ${shDegree}, no compound parts).
+    return wgsl`// Gaussian Splatting vertex + fragment WGSL.
+// Generated by buildShShaderSource from the matching BJS shaders.
 struct U {
   world: mat4x4<f32>,
   view: mat4x4<f32>,

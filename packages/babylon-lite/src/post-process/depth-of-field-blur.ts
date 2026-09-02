@@ -2,6 +2,7 @@ import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { createPostProcessTask, type PostProcessShaderConfig, type PostProcessTask, type PostProcessTaskConfig } from "../frame-graph/post-process-task.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** @internal A 2-component vector `{ x, y }` used for the blur direction. */
 export interface PostProcessVec2 {
@@ -36,14 +37,14 @@ export interface DepthOfFieldBlurPostProcessTask extends PostProcessTask {
 
 const MAX_VERTEX_BLUR_SAMPLES = 8;
 
-const DOF_BLUR_EXTRA_TEXTURE_WGSL = `@group(0) @binding(2) var dofCocTexture:texture_2d<f32>;`;
+const DOF_BLUR_EXTRA_TEXTURE_WGSL = wgsl`@group(0) @binding(2) var dofCocTexture:texture_2d<f32>;`;
 
-const DOF_BLUR_UNIFORM_WGSL = `struct DofBlurParams{delta:vec2f,p0:f32,p1:f32}
+const DOF_BLUR_UNIFORM_WGSL = wgsl`struct DofBlurParams{delta:vec2f,p0:f32,p1:f32}
 @group(0) @binding(3) var<uniform> dofBlurParams:DofBlurParams;`;
 
 // Samples the CoC at `uv` with the shared (bilinear) source sampler — matches
 // BJS `sampleCoC` in `ShadersInclude/kernelBlur*Fragment.fx`.
-const DOF_BLUR_COC_SAMPLE_WGSL = `fn sampleCoC(uv:vec2f)->f32{return textureSample(dofCocTexture,sourceSampler,uv).r;}`;
+const DOF_BLUR_COC_SAMPLE_WGSL = wgsl`fn sampleCoC(uv:vec2f)->f32{return textureSample(dofCocTexture,sourceSampler,uv).r;}`;
 
 interface BlurSample {
     offset: number;
@@ -119,20 +120,20 @@ function updateDofBlurShader(shader: PostProcessShaderConfig, kernel: number): v
     shader.vertexOutputWGSL = "";
     shader.vertexMainWGSL = "";
     for (let i = 0; i < varyingCount; i++) {
-        shader.vertexOutputWGSL += `,@location(${i + 1}) sampleCoord${i}:vec2f`;
-        shader.vertexMainWGSL += `out.sampleCoord${i}=out.uv+dofBlurParams.delta*${wgslFloat(offsetSamples[i]!.offset)};`;
+        shader.vertexOutputWGSL += wgsl`,@location(${i + 1}) sampleCoord${i}:vec2f`;
+        shader.vertexMainWGSL += wgsl`out.sampleCoord${i}=out.uv+dofBlurParams.delta*${wgslFloat(offsetSamples[i]!.offset)};`;
     }
-    let body = `var blend=textureSample(sourceTextureSampler,sourceSampler,input.uv)*${wgslFloat(center.weight)};`;
-    body += `var sumOfWeights=${wgslFloat(center.weight)};`;
+    let body = wgsl`var blend=textureSample(sourceTextureSampler,sourceSampler,input.uv)*${wgslFloat(center.weight)};`;
+    body += wgsl`var sumOfWeights=${wgslFloat(center.weight)};`;
     for (let i = 0; i < offsetSamples.length; i++) {
         const sample = offsetSamples[i]!;
         const coord = i < varyingCount ? `input.sampleCoord${i}` : `(input.uv+dofBlurParams.delta*${wgslFloat(sample.offset)})`;
-        body += `let f${i}=sampleCoC(${coord});let w${i}=${wgslFloat(sample.weight)}*f${i};sumOfWeights=sumOfWeights+w${i};`;
-        body += `blend=blend+textureSample(sourceTextureSampler,sourceSampler,${coord})*w${i};`;
+        body += wgsl`let f${i}=sampleCoC(${coord});let w${i}=${wgslFloat(sample.weight)}*f${i};sumOfWeights=sumOfWeights+w${i};`;
+        body += wgsl`blend=blend+textureSample(sourceTextureSampler,sourceSampler,${coord})*w${i};`;
     }
-    body += `return blend/sumOfWeights;`;
+    body += wgsl`return blend/sumOfWeights;`;
     shader.fragmentWGSL = DOF_BLUR_COC_SAMPLE_WGSL;
-    shader.fragmentWrapperWGSL = `@fragment fn postProcessFragment(input:PostProcessVertexOutput)->@location(0) vec4f{${body}}`;
+    shader.fragmentWrapperWGSL = wgsl`@fragment fn postProcessFragment(input:PostProcessVertexOutput)->@location(0) vec4f{${body}}`;
 }
 
 /**

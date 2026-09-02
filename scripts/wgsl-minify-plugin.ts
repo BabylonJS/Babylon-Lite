@@ -8,14 +8,264 @@
  * identically, so the harness can measure the real published artifact.
  *
  * Two minification paths (see {@link wgslMinifyPlugin}):
- *   - `transform` on `?raw` `.wgsl` imports → miniray whitespace removal (+ optional
- *     identifier mangling). This is where the bulk of WGSL lives (standalone `.wgsl`
- *     shader files).
- *   - `renderChunk` on emitted JS → strips whitespace/comments inside inline
- *     backtick-template WGSL in TypeScript source.
+ *   - `transform` on `?raw` `.wgsl` imports → miniray whitespace removal and identifier
+ *     mangling. This is where the bulk of WGSL lives (standalone `.wgsl` shader files).
+ *   - `transform` on TypeScript source → strips comments/whitespace from template
+ *     literals tagged by the imported `wgsl` helper, preserving `${...}` expressions.
  */
 import { type Plugin } from "vite";
 import { initialize as initMiniray, minify as minifyWgslMiniray } from "miniray";
+import MagicString from "magic-string";
+import ts from "typescript";
+
+const WGSL_TAG_MODULE_RE = /(?:^|\/)wgsl\.js$/;
+const WGSL_MULTI_CHAR_TOKENS = new Set(["->", "<<", ">>", "<=", ">=", "==", "!=", "&&", "||", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "++", "--", "//", "/*", "*/"]);
+const WGSL_INJECTION_MARKER_RE = /^\/\*[A-Z][A-Z0-9_]*\*\/$/;
+
+/** WGSL recognizes only these ASCII characters as token-separating whitespace. */
+function isWgslWhitespace(ch: string): boolean {
+    return ch === " " || ch === "\n" || ch === "\t" || ch === "\r";
+}
+
+/**
+ * Determine whether removed whitespace must remain as one space. Besides preventing
+ * identifier/number fusion, this avoids accidentally creating a multi-character operator
+ * or comment delimiter from two separate tokens.
+ */
+function needsWgslSeparator(previous: string, next: string): boolean {
+    const word = /[A-Za-z0-9_]/;
+    return (word.test(previous) && word.test(next)) || WGSL_MULTI_CHAR_TOKENS.has(previous + next);
+}
+
+/**
+ * Minify one static section of a tagged template without inspecting its expressions.
+ * Each quasi is processed independently, so whitespace adjacent to `${...}` is preserved
+ * when present: the expression may produce an identifier that must not merge with a static token.
+ */
+function minifyTaggedWgslText(code: string, preserveLeadingSpace: boolean, preserveTrailingSpace: boolean): string {
+    let out = "";
+    // Defer whitespace until the next token is known; most punctuation needs no separator.
+    let pendingSpace = false;
+    let i = 0;
+    while (i < code.length) {
+        const ch = code[i]!;
+        if (isWgslWhitespace(ch)) {
+            pendingSpace = true;
+            i++;
+            continue;
+        }
+        if (ch === "/" && code[i + 1] === "/") {
+            pendingSpace = true;
+            i += 2;
+            let endedBeforeBoundary = false;
+            while (i < code.length && code[i] !== "\n" && code[i] !== "\r") {
+                if (code[i] === "\\" && (code[i + 1] === "n" || code[i + 1] === "r")) {
+                    i += 2;
+                    endedBeforeBoundary = true;
+                    break;
+                }
+                i++;
+            }
+            // Removing a comment that continues through an interpolation would change which
+            // runtime text is commented out, so reject that composition instead of guessing.
+            if (i === code.length && preserveTrailingSpace && !endedBeforeBoundary) {
+                throw new Error("WGSL line comments cannot cross a tagged-template interpolation boundary.");
+            }
+            continue;
+        }
+        if (ch === "/" && code[i + 1] === "*") {
+            const end = code.indexOf("*/", i + 2);
+            if (end < 0) {
+                throw new Error("WGSL block comments cannot cross a tagged-template interpolation boundary.");
+            }
+            const comment = code.slice(i, end + 2);
+            // Runtime shader composition replaces uppercase block-comment markers such as
+            // `/*SU*/` and `/*GS_FRAGMENT_DEFINITIONS*/`; ordinary comments are discarded.
+            if (WGSL_INJECTION_MARKER_RE.test(comment)) {
+                if (pendingSpace && (out.length > 0 || preserveLeadingSpace)) {
+                    out += " ";
+                }
+                out += comment;
+                pendingSpace = false;
+                i = end + 2;
+                continue;
+            }
+            pendingSpace = true;
+            i = end + 2;
+            continue;
+        }
+        if (ch === "\\") {
+            // Escaped whitespace has the same runtime meaning as literal whitespace in a template.
+            if (code[i + 1] === "n" || code[i + 1] === "r" || code[i + 1] === "t") {
+                pendingSpace = true;
+                i += 2;
+                continue;
+            }
+            // Preserve all other JavaScript template escapes verbatim.
+            if (pendingSpace) {
+                if ((out.length === 0 && preserveLeadingSpace) || (out.length > 0 && needsWgslSeparator(out.at(-1)!, ch))) {
+                    out += " ";
+                }
+                pendingSpace = false;
+            }
+            out += code.slice(i, i + 2);
+            i += 2;
+            continue;
+        }
+        if (pendingSpace) {
+            // At an interpolation boundary the neighboring token is unknown; internally,
+            // retain a separator only when removing it could create a different WGSL token.
+            if ((out.length === 0 && preserveLeadingSpace) || (out.length > 0 && needsWgslSeparator(out.at(-1)!, ch))) {
+                out += " ";
+            }
+            pendingSpace = false;
+        }
+        out += ch;
+        i++;
+    }
+    if (pendingSpace && preserveTrailingSpace) {
+        out += " ";
+    }
+    return out;
+}
+
+/**
+ * Find the local names of explicit `wgsl` named imports, including aliases. Requiring the
+ * helper import prevents unrelated tags or variables named `wgsl` from being transformed.
+ */
+function taggedWgslBindings(sourceFile: ts.SourceFile): Set<string> {
+    const bindings = new Set<string>();
+    for (const statement of sourceFile.statements) {
+        if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier) || !WGSL_TAG_MODULE_RE.test(statement.moduleSpecifier.text.replace(/\\/g, "/"))) {
+            continue;
+        }
+        const namedBindings = statement.importClause?.namedBindings;
+        if (!namedBindings || !ts.isNamedImports(namedBindings)) {
+            continue;
+        }
+        for (const element of namedBindings.elements) {
+            if ((element.propertyName?.text ?? element.name.text) === "wgsl") {
+                bindings.add(element.name.text);
+            }
+        }
+    }
+    return bindings;
+}
+
+/**
+ * Conservatively reject any runtime binding that reuses an imported tag name. The transform
+ * intentionally avoids a full TypeScript program/type checker, so rejecting shadowing is safer
+ * than syntactically mistaking a local tag for the imported WGSL helper.
+ */
+function shadowingBinding(sourceFile: ts.SourceFile, bindings: ReadonlySet<string>): ts.Identifier | null {
+    let shadow: ts.Identifier | null = null;
+    // Binding patterns may hide the conflicting identifier inside array/object destructuring.
+    const findBinding = (name: ts.BindingName): void => {
+        if (ts.isIdentifier(name)) {
+            if (bindings.has(name.text)) {
+                shadow = name;
+            }
+            return;
+        }
+        for (const element of name.elements) {
+            if (ts.isBindingElement(element)) {
+                findBinding(element.name);
+            }
+        }
+    };
+    // Imports are skipped because they contain the legitimate binding being checked.
+    const visit = (node: ts.Node): void => {
+        if (shadow || ts.isImportDeclaration(node)) {
+            return;
+        }
+        if (ts.isVariableDeclaration(node) || ts.isParameter(node)) {
+            findBinding(node.name);
+        } else if (
+            (ts.isFunctionDeclaration(node) ||
+                ts.isFunctionExpression(node) ||
+                ts.isClassDeclaration(node) ||
+                ts.isClassExpression(node) ||
+                ts.isEnumDeclaration(node) ||
+                ts.isModuleDeclaration(node)) &&
+            node.name &&
+            ts.isIdentifier(node.name) &&
+            bindings.has(node.name.text)
+        ) {
+            shadow = node.name;
+        }
+        ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(sourceFile, visit);
+    return shadow;
+}
+
+/**
+ * Transform only explicitly imported `wgsl` tagged templates, leaving all other templates
+ * untouched. TypeScript supplies reliable template/expression boundaries; MagicString applies
+ * edits to the original source so interpolation code and source mappings remain intact.
+ */
+export function transformTaggedWgsl(code: string, id: string): { code: string; map: ReturnType<MagicString["generateMap"]> } | null {
+    const cleanId = id.split("?")[0]!;
+    // Avoid parsing assets and the overwhelmingly common case with no helper import.
+    if (!/\.[cm]?[jt]sx?$/.test(cleanId) || !code.includes("wgsl")) {
+        return null;
+    }
+    const scriptKind = cleanId.endsWith("x")
+        ? ts.ScriptKind.TSX
+        : cleanId.endsWith(".js") || cleanId.endsWith(".mjs") || cleanId.endsWith(".cjs")
+          ? ts.ScriptKind.JS
+          : ts.ScriptKind.TS;
+    const sourceFile = ts.createSourceFile(cleanId, code, ts.ScriptTarget.Latest, true, scriptKind);
+    const bindings = taggedWgslBindings(sourceFile);
+    if (bindings.size === 0) {
+        return null;
+    }
+    const shadow = shadowingBinding(sourceFile, bindings);
+    if (shadow) {
+        const { line, character } = sourceFile.getLineAndCharacterOfPosition(shadow.getStart(sourceFile));
+        throw new Error(`Imported WGSL tag "${shadow.text}" is shadowed by another binding at ${cleanId}:${line + 1}:${character + 1}. Rename the local binding.`);
+    }
+
+    const output = new MagicString(code);
+    let changed = false;
+    // Template node ranges include their delimiters; overwrite only the static text within.
+    const rewriteLiteral = (contentStart: number, contentEnd: number, preserveLeadingSpace: boolean, preserveTrailingSpace: boolean): void => {
+        const original = code.slice(contentStart, contentEnd);
+        const minified = minifyTaggedWgslText(original, preserveLeadingSpace, preserveTrailingSpace);
+        if (minified !== original) {
+            output.overwrite(contentStart, contentEnd, minified);
+        }
+    };
+    // Removing the tag restores a plain runtime template. Each quasi is rewritten separately,
+    // while TypeScript's expression nodes are deliberately never inspected or modified.
+    const visit = (node: ts.Node): void => {
+        if (ts.isTaggedTemplateExpression(node) && ts.isIdentifier(node.tag) && bindings.has(node.tag.text)) {
+            output.remove(node.tag.getStart(sourceFile), node.template.getStart(sourceFile));
+            if (ts.isNoSubstitutionTemplateLiteral(node.template)) {
+                rewriteLiteral(node.template.getStart(sourceFile) + 1, node.template.getEnd() - 1, false, false);
+            } else {
+                const head = node.template.head;
+                rewriteLiteral(head.getStart(sourceFile) + 1, head.getEnd() - 2, false, true);
+                for (const span of node.template.templateSpans) {
+                    const literal = span.literal;
+                    const isTail = ts.isTemplateTail(literal);
+                    rewriteLiteral(literal.getStart(sourceFile) + 1, literal.getEnd() - (isTail ? 1 : 2), true, !isTail);
+                }
+            }
+            changed = true;
+        }
+        ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+
+    if (!changed) {
+        return null;
+    }
+    return {
+        code: output.toString(),
+        map: output.generateMap({ hires: true, includeContent: true, source: cleanId }),
+    };
+}
 
 function replaceWgslIdentifiers(code: string, replacements: readonly (readonly [string, string])[]): string {
     let out = code;
@@ -69,253 +319,6 @@ function mangleGaussianSplattingWgsl(code: string): string {
     ]);
 }
 
-/** Strip spaces around WGSL operators inside template literal content.
- *  When `mangle` is true, also shorten known WGSL identifiers (scene size optimization). */
-function minifyTemplateWgsl(code: string, mangle = true): string {
-    const out: string[] = [];
-    let i = 0;
-    const len = code.length;
-
-    while (i < len) {
-        const ch = code[i]!;
-
-        // Skip regular string literals
-        if (ch === '"' || ch === "'") {
-            const q = ch;
-            let j = i + 1;
-            while (j < len && code[j] !== q) {
-                if (code[j] === "\\") j++;
-                j++;
-            }
-            out.push(code.slice(i, j + 1));
-            i = j + 1;
-            continue;
-        }
-
-        // Skip line comments
-        if (ch === "/" && i + 1 < len && code[i + 1] === "/") {
-            let j = i;
-            while (j < len && code[j] !== "\n") j++;
-            out.push(code.slice(i, j));
-            i = j;
-            continue;
-        }
-
-        // Template literal — minify WGSL whitespace
-        if (ch === "`") {
-            out.push("`");
-            i++;
-            i = processTemplateLiteral(code, i, len, out, mangle);
-            continue;
-        }
-
-        out.push(ch);
-        i++;
-    }
-    return out.join("");
-}
-
-function processTemplateLiteral(code: string, i: number, len: number, out: string[], mangle = true): number {
-    const wgsl: string[] = [];
-    const flushWgsl = (): void => {
-        if (wgsl.length > 0) {
-            const joined = wgsl.join("");
-            out.push(mangle ? mangleWgslIdentifiers(joined) : joined);
-            wgsl.length = 0;
-        }
-    };
-    while (i < len) {
-        const ch = code[i]!;
-
-        if (ch === "\\") {
-            wgsl.push(ch, code[i + 1] ?? "");
-            i += 2;
-            continue;
-        }
-        if (ch === "`") {
-            flushWgsl();
-            out.push("`");
-            return i + 1;
-        }
-        if (ch === "$" && i + 1 < len && code[i + 1] === "{") {
-            flushWgsl();
-            out.push("${");
-            i += 2;
-            let depth = 1;
-            while (i < len && depth > 0) {
-                const ec = code[i]!;
-                if (ec === "{") depth++;
-                else if (ec === "}") {
-                    depth--;
-                    if (depth === 0) {
-                        out.push("}");
-                        i++;
-                        break;
-                    }
-                } else if (ec === "`") {
-                    out.push("`");
-                    i++;
-                    i = processTemplateLiteral(code, i, len, out, mangle);
-                    continue;
-                } else if (ec === '"' || ec === "'") {
-                    const q = ec;
-                    let j = i + 1;
-                    while (j < len && code[j] !== q) {
-                        if (code[j] === "\\") j++;
-                        j++;
-                    }
-                    out.push(code.slice(i, j + 1));
-                    i = j + 1;
-                    continue;
-                }
-                out.push(ec);
-                i++;
-            }
-            continue;
-        }
-
-        // Strip WGSL line comments
-        if (ch === "/" && i + 1 < len && code[i + 1] === "/") {
-            i += 2;
-            while (i < len && code[i] !== "\n") i++;
-            continue;
-        }
-
-        // Collapse WGSL whitespace and strip it around punctuation/operators.
-        if (ch === " " || ch === "\n" || ch === "\t" || ch === "\r") {
-            const prev = wgsl.length > 0 ? wgsl[wgsl.length - 1]! : "";
-            const prevCh = prev.length > 0 ? prev[prev.length - 1]! : "";
-            let j = i + 1;
-            while (j < len && (code[j] === " " || code[j] === "\n" || code[j] === "\t" || code[j] === "\r")) j++;
-            const next = j < len ? code[j]! : "";
-            const ops = ":=,+-*/<>(){}[];";
-            if (ops.includes(prevCh) || ops.includes(next)) {
-                i = j;
-                continue;
-            }
-            if (prevCh !== " " && prevCh !== "`" && next !== "`") {
-                wgsl.push(" ");
-            }
-            i = j;
-            continue;
-        }
-
-        wgsl.push(ch);
-        i++;
-    }
-    flushWgsl();
-    return i;
-}
-
-function mangleWgslIdentifiers(code: string): string {
-    const replacements: [string, string][] = [
-        ["computeLighting", "cl"],
-        ["computeSphericalCoords", "csc"],
-        ["computePlanarCoords", "cpc"],
-        ["computePbrLight", "cpl"],
-        ["perturbNormal", "pn"],
-        ["PbrLightResult", "PLR"],
-        ["LightEntry", "LE"],
-        ["lightsUniforms", "LU"],
-        ["vLightData", "d"],
-        ["vLightDiffuse", "c"],
-        ["vLightSpecular", "s"],
-        ["vLightDirection", "r"],
-        ["viewDirectionW", "vdw"],
-        ["normalW", "nw"],
-        ["diffuseBase", "db"],
-        ["specularBase", "sb"],
-        ["baseAmbientColor", "bac"],
-        ["reflectionColor", "rc"],
-        ["finalDiffuse", "fd"],
-        ["finalSpecular", "fs"],
-        ["directDiffuse", "dd"],
-        ["directSpecular", "ds"],
-        ["directRoughness", "dr"],
-        ["directAlphaG", "dag"],
-        ["shadowFactors", "sf"],
-        ["lightIndex0", "li0"],
-        ["lightIndex", "lix"],
-        ["lightColor", "lc"],
-        ["lightAtten", "la"],
-        ["specColor", "sc"],
-        ["isHemi", "ih"],
-        ["viewNormal", "vn"],
-        ["viewDir", "vd"],
-        ["reflCoords", "rcd"],
-        ["finalWorld", "fw"],
-        ["worldPos4", "wp4"],
-        ["normalWorld", "nwm"],
-        ["positionW", "pw"],
-        ["bumpScale", "bs"],
-        ["opSample", "os"],
-        ["diffuseColor", "dc"],
-        ["emissiveContrib", "ec"],
-        ["specularColor", "spc"],
-        ["baseColor", "bc"],
-        ["glossiness", "gl"],
-        ["alpha", "al"],
-        ["surfaceAlbedo", "sa"],
-        ["roughness", "rg"],
-        ["colorF0", "f0"],
-        ["colorF90", "f90"],
-        ["finalIrradiance", "fi"],
-        ["finalRadianceScaled", "fr"],
-        ["finalSpecularScaled", "fss"],
-        ["AA_factor_x", "aax"],
-        ["AA_factor_y", "aay"],
-        ["alphaG", "ag"],
-        ["NdotV", "nv"],
-        ["rangeAtten", "ra"],
-        ["rangeAtt", "rat"],
-        ["spotC", "sc2"],
-        ["lightToFrag", "ltf"],
-        ["lightDist2", "ld2"],
-        ["lightDist", "ld"],
-        ["toLight", "tl"],
-        ["dist", "dst"],
-        ["entry", "e"],
-        ["hemiDiffuse", "hd"],
-        ["coloredFresnel", "cf"],
-        ["BillboardSystem", "BS"],
-        ["BillboardBasis", "BB"],
-        ["getBillboardBasis", "gbb"],
-        ["billboards", "bb"],
-        ["opacityMul", "om"],
-        ["cameraRight", "cr"],
-        ["cameraUp", "cu"],
-        ["lockAxis", "la"],
-        ["projectedRightLen", "prl"],
-        ["safeProjectedRightLen", "sprl"],
-        ["projectedRight", "pr"],
-        ["fallbackSeed", "fsd"],
-        ["fallbackRightRaw", "frr"],
-        ["fallbackRight", "fr"],
-        ["sampleColor", "scol"],
-        ["cosRot", "cr2"],
-        ["sinRot", "sr2"],
-        ["rotated", "rot"],
-        // NOTE: Do NOT add WGSL struct-varying member names (e.g. "worldPos",
-        // "worldNormal", "worldTangent", ...) to this list. Their struct is
-        // assembled at runtime from JS string literals (e.g. {Z:"worldPos"})
-        // which this mangler deliberately never touches (it only rewrites bare
-        // identifiers inside backtick WGSL template literals). Mangling the
-        // hardcoded `out.worldPos`/`input.worldPos` usages while leaving the
-        // string-built struct member as `worldPos` produces invalid WGSL
-        // ("struct member wp not found"), especially when usages and the struct
-        // declaration land in different code-split chunks. Only chunk-local
-        // temporaries like `worldPos4` (mangled to `wp4` above) are safe here.
-        ["iUvMin", "ium"],
-        ["iUvMax", "iux"],
-        ["iPivot", "ip"],
-        ["iColor", "ic"],
-        ["iSize", "isz"],
-        ["iPos", "ipos"],
-        ["iRot", "ir"],
-    ];
-    return replaceWgslIdentifiers(code, replacements);
-}
-
 /**
  * Vite plugin: minify WGSL shader text using miniray (whitespace removal + identifier mangling).
  * For `?raw` WGSL imports: miniray minifies whitespace AND short-renames module/local identifiers.
@@ -330,25 +333,10 @@ function mangleWgslIdentifiers(code: string): string {
  *     encode each marker as a `const _GS_FRAGMENT_X_:u32=0u;` declaration before miniray
  *     (which survives with `treeShaking: false`), then decode back to a comment marker
  *     after minification — keeping the runtime API and source format unchanged.
- * For inline template-literal WGSL in JS output: regex-based operator/whitespace stripping.
+ * For explicitly tagged TypeScript templates: AST-targeted comment/whitespace stripping.
  * Gaussian-splatting raw WGSL gets a small shader-specific identifier compaction pass.
  */
-export function wgslMinifyPlugin(opts: { mangle?: boolean; templates?: boolean } = {}): Plugin {
-    // Identifier mangling shortens scene WGSL to satisfy bundle-size ceilings, but it
-    // rewrites bare tokens (e.g. worldPos -> wp) PER CHUNK. That is only safe when a
-    // shader's struct declaration and all its usages land in the same chunk. The demo
-    // bundler splits code far more aggressively, so the declaration and usage can end up
-    // in different chunks (and esbuild may turn no-substitution templates into plain
-    // strings the mangler skips), producing inconsistent names like "struct member wp
-    // not found". Demos have no size ceilings, so they opt out of mangling entirely.
-    const mangle = opts.mangle !== false;
-    // `templates: false` disables the inline-template `renderChunk` minification, keeping
-    // only the `?raw` `.wgsl` `transform`. The package build sets this: its module-granular
-    // output is NOT esbuild-minified, so running the template minifier on raw source (with
-    // `//` comments, nested templates and complex `${…}` JS) is unsafe, and the scene/demo
-    // harness already minifies inline templates once when it bundles the package's output —
-    // running it in BOTH places double-processes and corrupts `/* … */` shader markers.
-    const templates = opts.templates !== false;
+export function wgslMinifyPlugin(): Plugin {
     return {
         name: "wgsl-minify",
         enforce: "pre",
@@ -356,34 +344,23 @@ export function wgslMinifyPlugin(opts: { mangle?: boolean; templates?: boolean }
             await initMiniray({});
         },
         transform(code: string, id: string) {
-            if (!id.includes(".wgsl")) return null;
-            const match = code.match(/^export default "(.*)"$/s);
-            if (!match) return null;
-            const raw = JSON.parse(`"${match[1]}"`);
-            const isGs = id.includes("gaussian-splatting.wgsl");
-            // Encode `/* GS_FRAGMENT_X */` comment markers as const declarations so they
-            // survive miniray's comment stripping. Decoded back below.
-            const encoded = isGs ? raw.replace(/\/\*(GS_FRAGMENT_\w+)\*\//g, "const _$1_:u32=0u;") : raw;
-            const result = minifyWgslMiniray(encoded, isGs ? { keepNames: ["u", "in", "finalColor"], treeShaking: false } : {});
-            let minified = typeof result === "string" ? result : result.code;
-            if (isGs) {
-                minified = minified.replace(/const\s+_(GS_FRAGMENT_\w+)_\s*:\s*u32\s*=\s*0u\s*;/g, "/*$1*/");
+            if (id.includes(".wgsl")) {
+                const match = code.match(/^export default "(.*)"$/s);
+                if (!match) return null;
+                const raw = JSON.parse(`"${match[1]}"`);
+                const isGs = id.includes("gaussian-splatting.wgsl");
+                // Encode `/* GS_FRAGMENT_X */` comment markers as const declarations so they
+                // survive miniray's comment stripping. Decoded back below.
+                const encoded = isGs ? raw.replace(/\/\*(GS_FRAGMENT_\w+)\*\//g, "const _$1_:u32=0u;") : raw;
+                const result = minifyWgslMiniray(encoded, isGs ? { keepNames: ["u", "in", "finalColor"], treeShaking: false } : {});
+                let minified = typeof result === "string" ? result : result.code;
+                if (isGs) {
+                    minified = minified.replace(/const\s+_(GS_FRAGMENT_\w+)_\s*:\s*u32\s*=\s*0u\s*;/g, "/*$1*/");
+                }
+                const compact = isGs ? mangleGaussianSplattingWgsl(minified) : minified;
+                return { code: `export default ${JSON.stringify(compact)}`, map: null };
             }
-            const compact = isGs ? mangleGaussianSplattingWgsl(minified) : minified;
-            return { code: `export default ${JSON.stringify(compact)}`, map: null };
-        },
-        renderChunk(code: string) {
-            if (!templates) return null;
-            // NOTE: the NME inline WGSL mangler (mangleInlineWgsl) was removed. It ran
-            // per-chunk only on "pbr-metallic-roughness-block" chunks, but NME PBR helper
-            // functions / shared bindings (nme_pbr_fresSchlick, nmeBrdfLUT, ...) live in
-            // sibling chunks (pbr-mr-helper-*, iridescence-block) that escaped the filter,
-            // so their definitions stayed unmangled while call sites were mangled — the
-            // assembled shader then failed with "unresolved call target". Renaming across
-            // code-split chunks cannot be done safely per-chunk, so we no longer mangle
-            // these identifiers at all (a small bundle-size cost on NME scenes only).
-            const minified = minifyTemplateWgsl(code, mangle);
-            return { code: minified, map: null };
+            return transformTaggedWgsl(code, id);
         },
     };
 }

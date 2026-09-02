@@ -35,6 +35,7 @@ import { decodePatch } from "../wad/graphics.js";
 import type { Player } from "../player/player.js";
 import { Weapon } from "../player/player.js";
 import { Pickup } from "../mobj/info.js";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 const FRAME_W = 320;
 const FRAME_H = 200;
@@ -42,14 +43,7 @@ const BAR_Y = 168; // top of the 32px status bar in the virtual 320x200 frame
 
 // ARMS panel: the six selectable weapon slots, displayed as digits 2..7. The grey
 // digits are baked into STARMS; a yellow STYSNUM is drawn over a slot once owned.
-const ARMS_WEAPONS: readonly Weapon[] = [
-    Weapon.PISTOL,
-    Weapon.SHOTGUN,
-    Weapon.CHAINGUN,
-    Weapon.ROCKET,
-    Weapon.PLASMA,
-    Weapon.BFG,
-];
+const ARMS_WEAPONS: readonly Weapon[] = [Weapon.PISTOL, Weapon.SHOTGUN, Weapon.CHAINGUN, Weapon.ROCKET, Weapon.PLASMA, Weapon.BFG];
 
 // Small ammo list rows: [player.ammo index, virtual Y]. DOOM lists clip, shell,
 // rocket, cell top-to-bottom; player.ammo is [bullets, shells, cells, rockets].
@@ -80,7 +74,7 @@ const ATLAS_WIDTH = 1024;
 
 // Full-bright UI fragment: palette-indexed sample → COLORMAP row 0, cutout discard.
 // Identical to the weapon overlay; the world's COLORMAP texture is reused.
-const HUD_FRAGMENT = `let src = textureSample(atlasTex, atlasSamp, in.uv);
+const HUD_FRAGMENT = wgsl`let src = textureSample(atlasTex, atlasSamp, in.uv);
 if (src.a < 0.5) { discard; }
 let idx = floor(src.r * 255.0 + 0.5);
 let lut = textureSample(colormapTex, colormapSamp, vec2<f32>((idx + 0.5) / 256.0, 0.5 / 34.0));
@@ -156,7 +150,8 @@ export class DoomHud {
 
         // Death prompt: hidden until the player is killed.
         const death = document.createElement("div");
-        death.style.cssText = "position:fixed;left:50%;top:36%;transform:translateX(-50%);text-align:center;pointer-events:none;z-index:52;opacity:0;transition:opacity .4s linear;font-family:'Courier New',monospace";
+        death.style.cssText =
+            "position:fixed;left:50%;top:36%;transform:translateX(-50%);text-align:center;pointer-events:none;z-index:52;opacity:0;transition:opacity .4s linear;font-family:'Courier New',monospace";
         death.innerHTML =
             `<div style="color:#d21d12;font-weight:bold;font-size:52px;letter-spacing:4px;text-shadow:3px 3px 0 #000,0 0 16px rgba(210,29,18,.8)">YOU DIED</div>` +
             `<div style="margin-top:14px;color:#e8e8b0;font-weight:bold;font-size:18px;text-shadow:2px 2px 0 #000">Press SPACE to restart</div>`;

@@ -1,6 +1,7 @@
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { ShaderMaterial, ShaderUniformOption, ShaderSamplerOption } from "../shader/shader-material.js";
 import { createShaderMaterial, setShaderTexture } from "../shader/shader-material.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 /** A 3-component color/vector expressed as a readonly tuple. */
 export type GridVec3 = readonly [number, number, number];
@@ -42,13 +43,13 @@ export interface GridMaterialOptions {
 
 /** Build the VertexOutput struct shared by the vertex and fragment stages. */
 function buildVertexOutputStruct(hasOpacity: boolean): string {
-    return `struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) vPosition:vec3<f32>,@location(1) vNormal:vec3<f32>,${
+    return wgsl`struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) vPosition:vec3<f32>,@location(1) vNormal:vec3<f32>,${
         hasOpacity ? "@location(2) vUv:vec2<f32>," : ""
     }};`;
 }
 
 function buildVertexSource(hasOpacity: boolean): string {
-    return `${buildVertexOutputStruct(hasOpacity)}
+    return wgsl`${buildVertexOutputStruct(hasOpacity)}
 @vertex fn mainVertex(input:VertexInput)->VertexOutput{var out:VertexOutput;out.position=shaderSystem.projection*(shaderSystem.view*(shaderSystem.world*vec4<f32>(input.position,1.0)));out.vPosition=input.position;out.vNormal=input.normal;${
         hasOpacity ? "out.vUv=input.uv;" : ""
     }return out;}`;
@@ -60,7 +61,7 @@ function buildFragmentSource(opts: { antialias: boolean; useMaxLine: boolean; tr
     const transparent = opts.transparent ? "opacity=clamp(grid,0.08,shaderUniforms.gridControl.w*grid);" : "";
     const opacityTex = opts.hasOpacity ? "opacity=opacity*textureSample(opacitySampler,opacitySamplerSampler,input.vUv).a;" : "";
     const premultiply = opts.transparent && opts.preMultiplyAlpha ? "rgb=rgb*opacity;" : "";
-    return `${buildVertexOutputStruct(opts.hasOpacity)}
+    return wgsl`${buildVertexOutputStruct(opts.hasOpacity)}
 const SQRT2:f32=1.41421356;
 const PI:f32=3.14159;
 fn gridDynamicVisibility(position:f32)->f32{let f=shaderUniforms.gridControl.y;if(floor(position+0.5)==floor(position/f+0.5)*f){return 1.0;}return shaderUniforms.gridControl.z;}

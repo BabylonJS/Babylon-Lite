@@ -21,6 +21,7 @@ import type { EngineContext, Mesh, ShaderMaterial, StorageBuffer, Vec3 } from "b
 import { createMeshFromData, createShaderMaterial, createStorageBuffer, disposeStorageBuffer, setShaderStorageBuffer, updateStorageBuffer } from "babylon-lite";
 
 import { HUGE_BOUND_MAX, HUGE_BOUND_MIN } from "./constants.js";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 /** History samples kept per ship (`trailLength` in the playground). */
 export const TRAIL_HISTORY = 256;
@@ -73,13 +74,13 @@ export function buildTrailStrip(): { positions: Float32Array; normals: Float32Ar
 
 /** Vertex stage: the node graph, statement for statement. */
 function vertexSource(): string {
-    return `struct VertexOutput {
+    return wgsl`struct VertexOutput {
 @builtin(position) position: vec4<f32>,
 @location(0) vv: f32,
 @location(1) sx: f32,
 @location(2) intensity: f32,
 };
-// Clamped, linearly filtered fetch of the 1x${TRAIL_HISTORY} float history — the sampler state
+// Clamped, linearly filtered fetch of the float history buffer — the sampler state
 // Babylon's RawTexture gives the original (CLAMP_ADDRESSMODE, LINEAR_LINEAR).
 fn sampleHistory(v: f32) -> vec4<f32> {
 let t = clamp(v * ${TRAIL_HISTORY}.0 - 0.5, 0.0, ${TRAIL_HISTORY - 1}.0);
@@ -108,7 +109,7 @@ return out;
 
 /** Fragment stage: the graph's constant cyan with `sin(3.14·sx) · sin(1.57·v) · intensity` alpha. */
 function fragmentSource(): string {
-    return `struct VertexOutput {
+    return wgsl`struct VertexOutput {
 @builtin(position) position: vec4<f32>,
 @location(0) vv: f32,
 @location(1) sx: f32,

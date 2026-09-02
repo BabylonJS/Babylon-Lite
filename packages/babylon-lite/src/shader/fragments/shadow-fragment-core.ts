@@ -10,6 +10,7 @@
  */
 
 import type { ShaderFragment, BindingDecl, Varying } from "../fragment-types.js";
+import { wgsl } from "../wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 const STAGE_VERTEX = 0x1;
@@ -54,17 +55,17 @@ export function createShadowFragment(id: string, shadowLights: ShadowLightSlot[]
         bindings.push({ _name: `shadowInfo${suffix}`, _type: { _kind: "uniform-buffer" }, _group: "shadow", _visibility: STAGE_FRAGMENT | STAGE_VERTEX });
 
         vertexLines.push(
-            `out.vPosFromLight${suffix} = shadowInfo${suffix}.lightMatrix * worldPos4;`,
-            `out.vDepthMetric${suffix} = (out.vPosFromLight${suffix}.z + shadowInfo${suffix}.depthValues.x) / shadowInfo${suffix}.depthValues.y;`
+            wgsl`out.vPosFromLight${suffix} = shadowInfo${suffix}.lightMatrix * worldPos4;`,
+            wgsl`out.vDepthMetric${suffix} = (out.vPosFromLight${suffix}.z + shadowInfo${suffix}.depthValues.x) / shadowInfo${suffix}.depthValues.y;`
         );
 
         if (slot.shadowType === "pcf") {
             fragmentLines.push(
-                `shadowFactors[${li}] = computeShadowPCF${suffix}(input.vPosFromLight${suffix}, input.vDepthMetric${suffix}, shadowInfo${suffix}.shadowsInfo.x, shadowInfo${suffix}.shadowsInfo.y, shadowInfo${suffix}.shadowsInfo.z);`
+                wgsl`shadowFactors[${li}] = computeShadowPCF${suffix}(input.vPosFromLight${suffix}, input.vDepthMetric${suffix}, shadowInfo${suffix}.shadowsInfo.x, shadowInfo${suffix}.shadowsInfo.y, shadowInfo${suffix}.shadowsInfo.z);`
             );
         } else {
             fragmentLines.push(
-                `shadowFactors[${li}] = computeShadowESM${suffix}(input.vPosFromLight${suffix}, input.vDepthMetric${suffix}, shadowInfo${suffix}.shadowsInfo.x, shadowInfo${suffix}.shadowsInfo.z, shadowInfo${suffix}.shadowsInfo.w);`
+                wgsl`shadowFactors[${li}] = computeShadowESM${suffix}(input.vPosFromLight${suffix}, input.vDepthMetric${suffix}, shadowInfo${suffix}.shadowsInfo.x, shadowInfo${suffix}.shadowsInfo.z, shadowInfo${suffix}.shadowsInfo.w);`
             );
         }
     }
@@ -73,10 +74,10 @@ export function createShadowFragment(id: string, shadowLights: ShadowLightSlot[]
     for (const slot of shadowLights) {
         const li = slot.lightIndex;
         const suffix = `_${li}`;
-        helperParts.push(`struct shadowInfo${suffix}Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };`);
+        helperParts.push(wgsl`struct shadowInfo${suffix}Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };`);
 
         if (slot.shadowType === "pcf") {
-            helperParts.push(`
+            helperParts.push(wgsl`
 fn computeShadowPCF${suffix}(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, mapSz: f32, invMapSz: f32) -> f32 {
 let clipSpace = posFromLight.xyz / posFromLight.w;
 let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
@@ -104,7 +105,7 @@ sh /= 144.0;
 return mix(darkness, 1.0, sh);
 }`);
         } else {
-            helperParts.push(`
+            helperParts.push(wgsl`
 fn computeFallOff${suffix}(value: f32, clipSpace: vec2<f32>, frustumEdgeFalloff: f32) -> f32 {
 let mask = smoothstep(1.0 - frustumEdgeFalloff, 1.00000012, clamp(dot(clipSpace, clipSpace), 0.0, 1.0));
 return mix(value, 1.0, mask);
@@ -125,7 +126,7 @@ return computeFallOff${suffix}(esm, clipSpace.xy, frustumEdgeFalloff);
     const vertexHelperParts: string[] = [];
     for (const slot of shadowLights) {
         const suffix = `_${slot.lightIndex}`;
-        vertexHelperParts.push(`struct shadowInfo${suffix}Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };`);
+        vertexHelperParts.push(wgsl`struct shadowInfo${suffix}Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };`);
     }
 
     return {

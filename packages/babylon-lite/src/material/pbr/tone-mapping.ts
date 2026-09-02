@@ -13,6 +13,8 @@
  * mapping change?" check in `setSceneImageProcessing`. Two tone mappings with the
  * same `id` are treated as equivalent.
  */
+import { wgsl } from "../../shader/wgsl.js";
+
 export interface ToneMapping {
     /** Stable identifier for this algorithm (e.g. "standard", "aces"). Used for change detection. */
     readonly id: string;
@@ -39,6 +41,6 @@ export interface ToneMapping {
 export const StandardToneMapping: ToneMapping = {
     id: "standard",
     helpersWGSL: "",
-    callWGSL: `color*=scene.vImageInfos.x;
+    callWGSL: wgsl`color*=scene.vImageInfos.x;
 color=1.0-exp2(-1.590579*color);`,
 };

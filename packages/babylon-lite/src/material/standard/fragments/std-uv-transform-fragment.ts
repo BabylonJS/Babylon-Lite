@@ -16,6 +16,7 @@ import {
     SPECULAR_USES_UV2,
 } from "../standard-flags.js";
 import { _registerStdExt, type StdExt } from "../standard-flags.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const STAGE_VERTEX = 0x1;
 // Reserved Standard feature bit 23. Kept in this lazy fragment so scenes that
@@ -107,13 +108,13 @@ function createStdUvTransformFragment(features: number): ShaderFragment {
         if (name !== "d") {
             varyings.push({ _name: varying, _type: "vec2<f32>" });
         }
-        assignments.push(`out.${varying}=stdTxfUV(${usesUv2 ? "uv2" : "uv"},stdUvTx.${name}m,stdUvTx.${name}t.xy);`);
+        assignments.push(wgsl`out.${varying}=stdTxfUV(${usesUv2 ? "uv2" : "uv"},stdUvTx.${name}m,stdUvTx.${name}t.xy);`);
     }
     return {
         _id: "0-std-uv-transform",
         _varyings: varyings,
         _bindings: [{ _name: "stdUvTx", _type: { _kind: "uniform-buffer" }, _visibility: STAGE_VERTEX }],
-        _vertexHelperFunctions: `struct stdUvTxUniforms {
+        _vertexHelperFunctions: wgsl`struct stdUvTxUniforms {
 dm:vec4<f32>,dt:vec4<f32>,
 em:vec4<f32>,et:vec4<f32>,
 bm:vec4<f32>,bt:vec4<f32>,

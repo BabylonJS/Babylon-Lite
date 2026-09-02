@@ -1,4 +1,6 @@
-export const CLUSTERED_LIGHT_STRUCTS = `
+import { wgsl } from "../../../shader/wgsl.js";
+
+export const CLUSTERED_LIGHT_STRUCTS = wgsl`
 struct clusteredLightParamsUniforms {
 tileCountX: u32,
 tileCountY: u32,
@@ -28,7 +30,7 @@ fn clusteredTexel(index:u32)->vec2<u32>{return vec2<u32>(index%clusteredLightPar
  *  `lightAngleScale` / `lightAngleOffset` are derived from `cosHalfAngle` in the
  *  shader instead of being uploaded, which is exact for BJS' default inner angle of 0. */
 function clusteredLightBlock(stride: string, cone: string): string {
-    return `
+    return wgsl`
 {
 let clip=scene.viewProjection*vec4<f32>(input.worldPos,1.0);
 let ndc=clip.xyz/clip.w;
@@ -99,7 +101,7 @@ export function _clusteredPointLightBlock(): string {
 export function _clusteredSpotLightBlock(): string {
     return clusteredLightBlock(
         "3u",
-        `let dirCone=textureLoad(clusteredLights,clusteredTexel(lightTexel+2u),0);
+        wgsl`let dirCone=textureLoad(clusteredLights,clusteredTexel(lightTexel+2u),0);
 if(dirCone.w>=0.0){
 let cd=dot(-dirCone.xyz,Lc);
 let coneAtt=saturate((cd-dirCone.w)/max(1.0-dirCone.w,0.001));

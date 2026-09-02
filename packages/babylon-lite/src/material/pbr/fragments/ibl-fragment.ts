@@ -13,7 +13,7 @@ import type { ShaderFragment } from "../../../shader/fragment-types.js";
 // WebGPU shader stage constants
 const STAGE_FRAGMENT = 0x2;
 
-const IBL_HELPERS = `
+const IBL_HELPERS = wgsl`
 fn environmentHorizonOcclusion(V: vec3<f32>, N: vec3<f32>, geoN: vec3<f32>) -> f32 {
 let R = reflect(V, N);
 let temp = saturate(1.0 + 1.1 * dot(R, geoN));
@@ -36,18 +36,18 @@ function makeIblCalculation(hasNormalMap: boolean, anisoBentNormalCode: string =
         return skyboxCalculation;
     }
 
-    const ehoLine = hasNormalMap ? `let eho = environmentHorizonOcclusion(-V, N, N_geom);` : `let eho = 1.0;`;
+    const ehoLine = hasNormalMap ? wgsl`let eho = environmentHorizonOcclusion(-V, N, N_geom);` : wgsl`let eho = 1.0;`;
 
     // Normal PBR: use reflected view or anisotropy bent normal.
-    const reflectionDir = anisoBentNormalCode ? anisoBentNormalCode : `let R_raw = reflect(-V, N);`;
+    const reflectionDir = anisoBentNormalCode ? anisoBentNormalCode : wgsl`let R_raw = reflect(-V, N);`;
 
-    const irradianceCode = `let environmentIrradiance = (scene.vSphericalL00.rgb
+    const irradianceCode = wgsl`let environmentIrradiance = (scene.vSphericalL00.rgb
   + scene.vSphericalL1_1.rgb * N_env.y + scene.vSphericalL10.rgb * N_env.z + scene.vSphericalL11.rgb * N_env.x
   + scene.vSphericalL2_2.rgb * (N_env.y * N_env.x) + scene.vSphericalL2_1.rgb * (N_env.y * N_env.z)
   + scene.vSphericalL20.rgb * (3.0 * N_env.z * N_env.z - 1.0) + scene.vSphericalL21.rgb * (N_env.z * N_env.x)
   + scene.vSphericalL22.rgb * (N_env.x * N_env.x - N_env.y * N_env.y)) * material.environmentIntensity;`;
 
-    return `${reflectionDir}
+    return wgsl`${reflectionDir}
 let R = rotateY(R_raw, scene.envRotationY);
 let N_env = rotateY(N, scene.envRotationY);
 let brdf = textureSample(brdfLUT, brdfSampler_, vec2<f32>(NdotV, roughness));
@@ -93,12 +93,13 @@ export function createIblFragment(hasNormalMap: boolean, anisoBentNormalCode: st
 
         _fragmentSlots: {
             AI: makeIblCalculation(hasNormalMap, anisoBentNormalCode, skyboxCalculation),
-            BA: `luminanceOverAlpha += dot(finalRadianceScaled, vec3<f32>(0.2126, 0.7152, 0.0722));`,
+            BA: wgsl`luminanceOverAlpha += dot(finalRadianceScaled, vec3<f32>(0.2126, 0.7152, 0.0722));`,
         },
     };
 }
 
 import type { PbrExt } from "../pbr-flags.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export const pbrExt: PbrExt = {
     id: "ibl",

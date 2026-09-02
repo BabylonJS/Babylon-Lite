@@ -9,10 +9,11 @@
  */
 
 import { MAX_LIGHTS } from "../../../light/types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export const NME_LIGHTING_HELPER_KEY = "nme_lighting";
 
-export const NME_LIGHTING_HELPER_WGSL = `struct NmeLightResult {
+export const NME_LIGHTING_HELPER_WGSL = wgsl`struct NmeLightResult {
     diffuse: vec3<f32>,
     specular: vec3<f32>,
     shadow: f32,

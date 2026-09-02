@@ -3,6 +3,7 @@ import type { PbrMaterialProps, SubSurfaceProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { getTrilinearAnisotropicSampler } from "../../../resource/trilinear-anisotropic-sampler.js";
 import { PBR_HAS_THICKNESS_MAP, PBR2_HAS_REFRACTION } from "../pbr-flag-bits.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 type TransmissionMat = PbrMaterialProps & { _linearImageProcessing?: boolean };
 export const PBR2_HAS_VOLUME = 1 << 5;
@@ -20,26 +21,26 @@ function makeRefractionMod(
     hasDispersion: boolean,
     dispersionSampleWgsl: string | undefined
 ): string {
-    const thicknessScaleLine = hasVolume || hasThicknessMap ? `let ts=max(length(mesh.world[0].xyz),max(length(mesh.world[1].xyz),length(mesh.world[2].xyz)));` : ``;
+    const thicknessScaleLine = hasVolume || hasThicknessMap ? wgsl`let ts=max(length(mesh.world[0].xyz),max(length(mesh.world[1].xyz),length(mesh.world[2].xyz)));` : ``;
     const mapUvDecl = hasMap
-        ? `let refractionMapUV=vec2<f32>(dot(material.refractionMapUVm.xy,input.uv),dot(material.refractionMapUVm.zw,input.uv))+material.refractionMapUVt.xy;\n`
+        ? wgsl`let refractionMapUV=vec2<f32>(dot(material.refractionMapUVm.xy,input.uv),dot(material.refractionMapUVm.zw,input.uv))+material.refractionMapUVt.xy;\n`
         : ``;
     const thickUvDecl = hasThicknessMap
-        ? `let thicknessUV=vec2<f32>(dot(material.thicknessUVm.xy,input.uv),dot(material.thicknessUVm.zw,input.uv))+material.thicknessUVt.xy;\n`
+        ? wgsl`let thicknessUV=vec2<f32>(dot(material.thicknessUVm.xy,input.uv),dot(material.thicknessUVm.zw,input.uv))+material.thicknessUVt.xy;\n`
         : ``;
     const thicknessLine = hasThicknessMap
-        ? `let ths=textureSample(thicknessTexture_,thicknessSampler_,thicknessUV).${useGltfThicknessChannel ? "g" : "r"};
+        ? wgsl`let ths=textureSample(thicknessTexture_,thicknessSampler_,thicknessUV).${useGltfThicknessChannel ? "g" : "r"};
 let th=(material.thicknessParams.x+ths*material.thicknessParams.y)*ts;`
         : hasVolume
-          ? `let th=material.refractionParams.z*ts;`
-          : `let th=material.refractionParams.z;`;
+          ? wgsl`let th=material.refractionParams.z*ts;`
+          : wgsl`let th=material.refractionParams.z;`;
     const textureLine = hasMap
-        ? `let ri=material.refractionParams.x*textureSample(refractionMapTexture,refractionMapSampler,refractionMapUV).r;`
-        : `let ri=material.refractionParams.x;`;
-    const absorptionLine = hasVolume ? `let ab=exp(material.volumeParams.rgb*th);` : ``;
+        ? wgsl`let ri=material.refractionParams.x*textureSample(refractionMapTexture,refractionMapSampler,refractionMapUV).r;`
+        : wgsl`let ri=material.refractionParams.x;`;
+    const absorptionLine = hasVolume ? wgsl`let ab=exp(material.volumeParams.rgb*th);` : ``;
     const refractionLine = hasVolume
-        ? `let fr=er*surfaceAlbedo*(ri*ab)*(vec3<f32>(1.0)-colorSpecularEnvReflectance.rgb);`
-        : `let fr=er*surfaceAlbedo*ri*(vec3<f32>(1.0)-colorSpecularEnvReflectance.rgb);`;
+        ? wgsl`let fr=er*surfaceAlbedo*(ri*ab)*(vec3<f32>(1.0)-colorSpecularEnvReflectance.rgb);`
+        : wgsl`let fr=er*surfaceAlbedo*ri*(vec3<f32>(1.0)-colorSpecularEnvReflectance.rgb);`;
 
     // Refracted environment sample. Dispersion splits the refracted ray into
     // per-RGB index-of-refraction offsets (chromatic aberration); that 3-ray WGSL
@@ -48,12 +49,12 @@ let th=(material.thicknessParams.x+ths*material.thicknessParams.y)*ts;`
     const sampleLines =
         hasDispersion && dispersionSampleWgsl
             ? dispersionSampleWgsl
-            : `let rd=refract(-V,N,material.refractionParams.y);
+            : wgsl`let rd=refract(-V,N,material.refractionParams.y);
 let cp=scene.viewProjection*vec4<f32>(input.worldPos+rd*th,1.0);
 let ruv=(cp.xy/cp.w)*vec2<f32>(0.5,-0.5)+vec2<f32>(0.5,0.5);
 let er=textureSampleLevel(refractionTexture,refractionSampler_,ruv,lv).rgb*material.environmentIntensity;`;
 
-    return `{
+    return wgsl`{
 ${thicknessScaleLine}
 ${mapUvDecl}${thickUvDecl}${textureLine}
 ${thicknessLine}

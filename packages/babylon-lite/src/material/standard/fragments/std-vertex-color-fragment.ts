@@ -8,6 +8,7 @@
  *  Without the opt-in the vertex colour is RGB-only — matching BJS, which gates
  *  every vertex-alpha effect behind the VERTEXALPHA define. */
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export function createStdVertexColorFragment(hasDiffuse = false, hasVertexAlpha = false): ShaderFragment {
     // RGB is always applied. Alpha (and the vertex-alpha alpha-test) is appended only
@@ -16,7 +17,7 @@ export function createStdVertexColorFragment(hasDiffuse = false, hasVertexAlpha 
     let at = "baseColor *= input.vColor.rgb;";
     if (hasVertexAlpha) {
         const alphaTest = hasDiffuse ? "_ds.a * input.vColor.a" : "input.vColor.a";
-        at += `\nalpha *= input.vColor.a;\nif (${alphaTest} < mat.aCut) { discard; }`;
+        at += wgsl`\nalpha *= input.vColor.a;\nif (${alphaTest} < mat.aCut) { discard; }`;
     }
     return {
         _id: "std-vertex-color",

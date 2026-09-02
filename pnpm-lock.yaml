@@ -84,6 +84,9 @@ importers:
       globals:
         specifier: ^17.11.0
         version: 17.11.0
+      magic-string:
+        specifier: 0.30.21
+        version: 0.30.21
       miniray:
         specifier: ^0.3.1
         version: 0.3.1

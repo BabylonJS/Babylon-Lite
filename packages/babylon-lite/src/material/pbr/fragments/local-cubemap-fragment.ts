@@ -19,6 +19,7 @@ import {
     MAX_PBR_LOCAL_ENVIRONMENT_CANDIDATES,
     MAX_PBR_LOCAL_ENVIRONMENT_PROBES,
 } from "../pbr-local-cubemap-limits.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const PBR_HAS_LOCAL_ENVIRONMENT = 1 << 31;
 const STAGE_FRAGMENT = 0x2;
@@ -41,7 +42,7 @@ const LOCAL_SH_FIELDS = [
 
 const LOCAL_SH_UBO_FIELDS: readonly UboField[] = LOCAL_SH_FIELDS.map((_name) => ({ _name, _type: "vec3<f32>" }));
 
-const SINGLE_CUBEMAP_HELPERS = `fn parallaxCorrectBoxNormal(vertexPos:vec3f,origVec:vec3f,cubeSize:vec3f,cubePos:vec3f,capturePos:vec3f)->vec3f{
+const SINGLE_CUBEMAP_HELPERS = wgsl`fn parallaxCorrectBoxNormal(vertexPos:vec3f,origVec:vec3f,cubeSize:vec3f,cubePos:vec3f,capturePos:vec3f)->vec3f{
 let invOrigVec=vec3f(1.0)/origVec;
 let halfSize=cubeSize*0.5;
 let intersecAtMaxPlane=(cubePos+halfSize-vertexPos)*invOrigVec;
@@ -68,13 +69,13 @@ if(mode==${LOCAL_ENVIRONMENT_SPHERE_MODE}.0){return parallaxCorrectSphereNormal(
 return origVec;
 }`;
 
-const IBL_SCENE_IRRADIANCE = `let environmentIrradiance = (scene.vSphericalL00.rgb
+const IBL_SCENE_IRRADIANCE = wgsl`let environmentIrradiance = (scene.vSphericalL00.rgb
   + scene.vSphericalL1_1.rgb * N_env.y + scene.vSphericalL10.rgb * N_env.z + scene.vSphericalL11.rgb * N_env.x
   + scene.vSphericalL2_2.rgb * (N_env.y * N_env.x) + scene.vSphericalL2_1.rgb * (N_env.y * N_env.z)
   + scene.vSphericalL20.rgb * (3.0 * N_env.z * N_env.z - 1.0) + scene.vSphericalL21.rgb * (N_env.z * N_env.x)
   + scene.vSphericalL22.rgb * (N_env.x * N_env.x - N_env.y * N_env.y)) * material.environmentIntensity;`;
 
-const IBL_SCENE_OR_LOCAL_IRRADIANCE = `let sceneEnvironmentIrradiance = (scene.vSphericalL00.rgb
+const IBL_SCENE_OR_LOCAL_IRRADIANCE = wgsl`let sceneEnvironmentIrradiance = (scene.vSphericalL00.rgb
   + scene.vSphericalL1_1.rgb * N_env.y + scene.vSphericalL10.rgb * N_env.z + scene.vSphericalL11.rgb * N_env.x
   + scene.vSphericalL2_2.rgb * (N_env.y * N_env.x) + scene.vSphericalL2_1.rgb * (N_env.y * N_env.z)
   + scene.vSphericalL20.rgb * (3.0 * N_env.z * N_env.z - 1.0) + scene.vSphericalL21.rgb * (N_env.z * N_env.x)
@@ -86,14 +87,14 @@ let localEnvironmentIrradiance = (material.localSphericalL00.rgb
   + material.localSphericalL22.rgb * (N_env.x * N_env.x - N_env.y * N_env.y)) * material.environmentIntensity;
 let environmentIrradiance=select(localEnvironmentIrradiance,sceneEnvironmentIrradiance,material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0);`;
 
-const IBL_LOCAL_IRRADIANCE = `let environmentIrradiance = (material.localSphericalL00.rgb
+const IBL_LOCAL_IRRADIANCE = wgsl`let environmentIrradiance = (material.localSphericalL00.rgb
   + material.localSphericalL1_1.rgb * N_env.y + material.localSphericalL10.rgb * N_env.z + material.localSphericalL11.rgb * N_env.x
   + material.localSphericalL2_2.rgb * (N_env.y * N_env.x) + material.localSphericalL2_1.rgb * (N_env.y * N_env.z)
   + material.localSphericalL20.rgb * (3.0 * N_env.z * N_env.z - 1.0) + material.localSphericalL21.rgb * (N_env.z * N_env.x)
   + material.localSphericalL22.rgb * (N_env.x * N_env.x - N_env.y * N_env.y)) * material.environmentIntensity;`;
 
 function createProbeArrayHelpers(): string {
-    return `struct LocalEnvironmentProbe{
+    return wgsl`struct LocalEnvironmentProbe{
 projectionCentreAndLayer:vec4f,
 projectionHalfSizeAndLodScale:vec4f,
 capturePositionAndLodBias:vec4f,
@@ -273,7 +274,7 @@ function patchProbeGridStorage(composed: ComposedShader): ComposedShader {
     const fragmentWGSL = composed._fragmentWGSL.replace(/@group\(1\)@binding\((\d+)\)\s*var<uniform>\s*localProbeGrid\s*:/g, (_match, value: string) => {
         binding = Number(value);
         rewrites++;
-        return `@group(1)@binding(${value}) var<storage, read> localProbeGrid:`;
+        return wgsl`@group(1)@binding(${value}) var<storage, read> localProbeGrid:`;
     });
     if (rewrites !== 1) {
         throw new Error(`local probe array _postCompose: expected to rewrite 1 voxel-grid binding declaration, rewrote ${rewrites}`);
@@ -290,7 +291,7 @@ function patchProbeCubeArray(composed: ComposedShader): ComposedShader {
     const fragmentWGSL = composed._fragmentWGSL.replace(/@group\(1\)@binding\((\d+)\)\s*var\s+localProbeTexture\s*:\s*texture_cube<f32>/g, (_match, value: string) => {
         binding = Number(value);
         rewrites++;
-        return `@group(1)@binding(${value}) var localProbeTexture:texture_cube_array<f32>`;
+        return wgsl`@group(1)@binding(${value}) var localProbeTexture:texture_cube_array<f32>`;
     });
     if (rewrites !== 1) {
         throw new Error(`local probe array _postCompose: expected to rewrite 1 cube-array binding declaration, rewrote ${rewrites}`);
@@ -316,7 +317,7 @@ function patchLayeredLocalIbl(fragmentWGSL: string, composed: ComposedShader): s
             /let\s+ccEnvRadiance_ibl\s*=\s*textureSampleLevel\(\s*iblTexture\s*,\s*iblSampler\s*,\s*ccR_ibl\s*,\s*clamp\(\s*ccSpecLod_ibl\s*,\s*0\.0\s*,\s*maxLod\s*\)\s*\)\.rgb\s*\*\s*material\.environmentIntensity\s*;/g,
             () => {
                 rewrites++;
-                return `var ccEnvRadiance_ibl:vec3f;
+                return wgsl`var ccEnvRadiance_ibl:vec3f;
 if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0){ccEnvRadiance_ibl=sampleLocalProbeRadiance(input.worldPos,ccR_raw,ccAlphaG_ibl,scene.envRotationY,material.environmentIntensity);}else{ccEnvRadiance_ibl=textureSampleLevel(iblTexture,iblSampler,ccR_ibl,clamp(ccSpecLod_ibl,0.0,maxLod)).rgb*material.environmentIntensity;}`;
             }
         );
@@ -330,7 +331,7 @@ if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0){ccEnvRadia
             /let\s+shEnvRadiance\s*=\s*textureSampleLevel\(\s*iblTexture\s*,\s*iblSampler\s*,\s*R\s*,\s*clamp\(\s*shSpecLod\s*,\s*0\.0\s*,\s*maxLod\s*\)\s*\)\.rgb\s*\*\s*material\.environmentIntensity\s*;/g,
             () => {
                 rewrites++;
-                return `var shEnvRadiance:vec3f;
+                return wgsl`var shEnvRadiance:vec3f;
 if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0){shEnvRadiance=sampleLocalProbeRadiance(input.worldPos,R_raw,shAlphaG_ibl,scene.envRotationY,material.environmentIntensity);}else{shEnvRadiance=textureSampleLevel(iblTexture,iblSampler,R,clamp(shSpecLod,0.0,maxLod)).rgb*material.environmentIntensity;}`;
             }
         );
@@ -365,7 +366,7 @@ function patchSceneIbl(composed: ComposedShader, hasSceneEnvironment: boolean): 
         /var\s+environmentRadiance\s*=\s*textureSampleLevel\(\s*iblTexture\s*,\s*iblSampler\s*,\s*R\s*,\s*clamp\(\s*specLod\s*,\s*0\.0\s*,\s*maxLod\s*\)\s*\)\.rgb\s*\*\s*material\.environmentIntensity\s*;/g,
         () => {
             baseRewrites++;
-            return `var environmentRadiance:vec3f;
+            return wgsl`var environmentRadiance:vec3f;
 if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0){environmentRadiance=sampleLocalProbeRadiance(input.worldPos,R_raw,alphaG,scene.envRotationY,material.environmentIntensity);}else{environmentRadiance=textureSampleLevel(iblTexture,iblSampler,R,clamp(specLod,0.0,maxLod)).rgb*material.environmentIntensity;}
 let localProbeDebugOutput=environmentRadiance;`;
         }
@@ -402,7 +403,7 @@ function createLocalEnvironmentFragment(hasSceneEnvironment: boolean): ShaderFra
         _bindings: localBindings(),
         _helperFunctions: `${SINGLE_CUBEMAP_HELPERS}\n${createProbeArrayHelpers()}`,
         _fragmentSlots: {
-            BC: `if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0&&(localProbeData.params.w&${_PBR_LOCAL_ENVIRONMENT_DEBUG_COLOR_FLAG}u)!=0u){color=localProbeDebugOutput;}`,
+            BC: wgsl`if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0&&(localProbeData.params.w&${_PBR_LOCAL_ENVIRONMENT_DEBUG_COLOR_FLAG}u)!=0u){color=localProbeDebugOutput;}`,
         },
         _pc: (composed) => patchSceneIbl(composed, hasSceneEnvironment),
     };
