@@ -1,3 +1,5 @@
+import { wgsl } from "../../shader/wgsl.js";
+
 /**
  * Pluggable tone mapping for PBR materials.
  *
@@ -13,8 +15,6 @@
  * mapping change?" check in `setSceneImageProcessing`. Two tone mappings with the
  * same `id` are treated as equivalent.
  */
-import { wgsl } from "../../shader/wgsl.js";
-
 export interface ToneMapping {
     /** Stable identifier for this algorithm (e.g. "standard", "aces"). Used for change detection. */
     readonly id: string;

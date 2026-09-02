@@ -13,6 +13,7 @@
  */
 
 import type { ShaderFragment, VertexAttribute } from "../../../shader/fragment-types.js";
+import { wgsl, type WgslSource } from "../../../shader/wgsl.js";
 
 // WebGPU shader stage constants
 const STAGE_VERTEX = 0x1;
@@ -170,7 +171,6 @@ export function createVatFragment(has8Bones: boolean, instanced: boolean): Shade
 
 import type { PbrExt } from "../pbr-flags.js";
 import { MSH_VAT, MSH_HAS_SKELETON_8, MSH_HAS_THIN_INSTANCES } from "../../mesh-features.js";
-import { wgsl, type WgslSource } from "../../../shader/wgsl.js";
 
 export const pbrExt: PbrExt = {
     id: "vat",

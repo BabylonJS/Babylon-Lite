@@ -9,6 +9,7 @@
  */
 
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
+import { wgsl, type WgslSource } from "../../../shader/wgsl.js";
 
 // WebGPU shader stage constants
 const STAGE_FRAGMENT = 0x2;
@@ -99,7 +100,6 @@ export function createIblFragment(hasNormalMap: boolean, anisoBentNormalCode: Wg
 }
 
 import type { PbrExt } from "../pbr-flags.js";
-import { wgsl, type WgslSource } from "../../../shader/wgsl.js";
 
 export const pbrExt: PbrExt = {
     id: "ibl",

@@ -1,5 +1,6 @@
 /** Standard Reflection Texture Fragment — spherical/planar environment reflection. */
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -42,7 +43,6 @@ import type { StandardMaterialProps } from "../standard-material.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { StdExt } from "../standard-flags.js";
 import { HAS_REFLECTION_TEXTURE } from "../standard-flags.js";
-import { wgsl } from "../../../shader/wgsl.js";
 
 export const stdReflectionExt: StdExt = {
     _id: "std-reflection",

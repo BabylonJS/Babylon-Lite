@@ -128,10 +128,10 @@ describe("build/index.d.ts", () => {
     it("strips the shader-source brand so consumers can pass plain strings", () => {
         const dts = readFileSync(DTS_PATH, "utf-8");
 
-        expect(dts).toMatch(/declare type WgslSource = string & \{\s*\};/);
-        expect(dts).not.toContain("_wgslSourceBrand");
-        expect(dts).toContain("readonly vertexSource: WgslSource;");
-        expect(dts).toContain("readonly fragmentSource: WgslSource;");
+        expect(dts).not.toContain("WgslSource");
+        expect(dts).not.toContain("wgslSourceBrand");
+        expect(dts).toContain("readonly vertexSource: string;");
+        expect(dts).toContain("readonly fragmentSource: string;");
 
         const probePath = resolve(BUILD_DIR, "wgsl-source-types.probe.ts");
         try {

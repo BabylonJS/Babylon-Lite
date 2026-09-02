@@ -463,6 +463,18 @@ function relocateDts(): Plugin {
 }
 
 /**
+ * Keep the nominal WGSL brand as a source-only enforcement mechanism. Published
+ * declarations expose ordinary strings so this remains API-compatible for consumers.
+ */
+function exposeWgslSourceAsString(content: string): string {
+    const alias = /^declare type WgslSource = string & \{\s*\};\r?\n/m;
+    if (!alias.test(content)) {
+        throw new Error("Could not find the trimmed WgslSource declaration");
+    }
+    return content.replace(alias, "").replace(/\bWgslSource\b/g, "string");
+}
+
+/**
  * Every first-party source module, keyed by its `src`-relative path without
  * extension (forward-slashed). Used as the Rollup input map for the `lib` build so
  * each module becomes its own entry chunk — reproducing `preserveModules`-style
@@ -588,7 +600,16 @@ export default defineConfig(({ mode }) => {
                     tsconfigPath: resolve(__dirname, "tsconfig.json"),
                     outDir: DIST_OUT_DIR,
                 }),
-                ...(isWatch ? [] : [trimInternalDts({ outDir: DIST_OUT_DIR, projectFolder: __dirname }), relocateDts()]),
+                ...(isWatch
+                    ? []
+                    : [
+                          trimInternalDts({
+                              outDir: DIST_OUT_DIR,
+                              projectFolder: __dirname,
+                              transform: exposeWgslSourceAsString,
+                          }),
+                          relocateDts(),
+                      ]),
             ],
         };
     }
