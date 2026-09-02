@@ -37,9 +37,10 @@ function fakeScene(): Scene {
 
 /** A WebGPUEngine instance with just the fields the tested getters read. */
 function fakeEngine(canvas: { width: number; height: number }, deltaMs: number): WebGPUEngine {
-    const engine = Object.create(WebGPUEngine.prototype) as WebGPUEngine & { _canvas: unknown; _lastDeltaMs: number };
+    const engine = Object.create(WebGPUEngine.prototype) as WebGPUEngine & { _canvas: unknown; _lastDeltaMs: number; _lite: unknown };
     (engine as unknown as { _canvas: unknown })._canvas = canvas;
     engine._lastDeltaMs = deltaMs;
+    (engine as unknown as { _lite: unknown })._lite = { msaaSamples: 4 };
     return engine;
 }
 
@@ -63,6 +64,13 @@ describe("WebGPUEngine scalar getters", () => {
         expect(fakeEngine({ width: 1, height: 1 }, 20).getFps()).toBeCloseTo(50);
         // A zero delta (before the first frame) falls back to 60.
         expect(fakeEngine({ width: 1, height: 1 }, 0).getFps()).toBe(60);
+    });
+
+    it("reports the active surface's MSAA sample count", () => {
+        const engine = fakeEngine({ width: 1, height: 1 }, 16) as WebGPUEngine & { _lite: { msaaSamples: number } };
+        expect(engine.currentSampleCount).toBe(4);
+        engine._lite.msaaSamples = 1;
+        expect(engine.currentSampleCount).toBe(1);
     });
 
     it("derives compressed-texture caps from the WebGPU device features", () => {

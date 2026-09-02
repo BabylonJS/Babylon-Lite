@@ -23,10 +23,9 @@ describe("NullEngine (headless)", () => {
         expect(engine.isWebGPU).toBe(true);
     });
 
-    it("throws LiteCompatError for the MSAA / alpha-to-coverage engine APIs (no Lite backing)", () => {
+    it("reports headless sample count and rejects engine-wide alpha-to-coverage state", () => {
         const engine = new NullEngine();
-        expect(() => engine.currentSampleCount).toThrow(LiteCompatError);
-        expect(() => engine.currentSampleCount).toThrow(/currentSampleCount/);
+        expect(engine.currentSampleCount).toBe(1);
         expect(() => engine.getAlphaToCoverage()).toThrow(LiteCompatError);
         expect(() => engine.getAlphaToCoverage()).toThrow(/getAlphaToCoverage/);
         expect(() => engine.setAlphaToCoverage(true)).toThrow(LiteCompatError);
