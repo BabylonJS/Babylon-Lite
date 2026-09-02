@@ -32,6 +32,7 @@ import {
     disposePhysics,
     getPhysicsBodyAngularVelocity,
     getPhysicsBodyLinearVelocity,
+    CharacterSupportedState as LiteCharacterSupportedState,
     PhysicsMotionType as LitePhysicsMotionType,
     PhysicsPrestepType as LitePhysicsPrestepType,
     PhysicsConstraintAxis as LitePhysicsConstraintAxis,
@@ -309,6 +310,32 @@ function liteConstraintAxis(axis: PhysicsConstraintAxis): LitePhysicsConstraintA
             return LitePhysicsConstraintAxis.LINEAR_DISTANCE;
         default:
             throw new Error(`Invalid PhysicsConstraintAxis value: ${axis}`);
+    }
+}
+
+function liteCharacterSupportedState(state: CharacterSupportedState): LiteCharacterSupportedState {
+    switch (state) {
+        case CharacterSupportedState.UNSUPPORTED:
+            return LiteCharacterSupportedState.UNSUPPORTED;
+        case CharacterSupportedState.SLIDING:
+            return LiteCharacterSupportedState.SLIDING;
+        case CharacterSupportedState.SUPPORTED:
+            return LiteCharacterSupportedState.SUPPORTED;
+        default:
+            throw new Error(`Invalid CharacterSupportedState value: ${state}`);
+    }
+}
+
+function compatCharacterSupportedState(state: LiteCharacterSupportedState): CharacterSupportedState {
+    switch (state) {
+        case LiteCharacterSupportedState.UNSUPPORTED:
+            return CharacterSupportedState.UNSUPPORTED;
+        case LiteCharacterSupportedState.SLIDING:
+            return CharacterSupportedState.SLIDING;
+        case LiteCharacterSupportedState.SUPPORTED:
+            return CharacterSupportedState.SUPPORTED;
+        default:
+            throw new Error(`Invalid Lite CharacterSupportedState value: ${state}`);
     }
 }
 
@@ -748,7 +775,7 @@ function vectorFromLiteOwned(value: Vec3Like): Vector3 {
 function surfaceInfoFromLite(value: LiteCharacterSurfaceInfo): CharacterSurfaceInfo {
     return {
         isSurfaceDynamic: value.isSurfaceDynamic,
-        supportedState: Number(value.supportedState) as CharacterSupportedState,
+        supportedState: compatCharacterSupportedState(value.supportedState),
         averageSurfaceNormal: vectorFromLite(value.averageSurfaceNormal),
         averageSurfaceVelocity: vectorFromLite(value.averageSurfaceVelocity),
         averageAngularSurfaceVelocity: vectorFromLite(value.averageAngularSurfaceVelocity),
@@ -840,7 +867,7 @@ export class PhysicsCharacterController {
     }
 
     public integrate(deltaTime: number, surfaceInfo: CharacterSurfaceInfo, gravity: Vector3): void {
-        this._lite.integrate(deltaTime, { ...surfaceInfo, supportedState: Number(surfaceInfo.supportedState) }, gravity);
+        this._lite.integrate(deltaTime, { ...surfaceInfo, supportedState: liteCharacterSupportedState(surfaceInfo.supportedState) }, gravity);
     }
 
     public checkSupport(deltaTime: number, direction: Vector3): CharacterSurfaceInfo {
@@ -850,7 +877,7 @@ export class PhysicsCharacterController {
     public checkSupportToRef(deltaTime: number, direction: Vector3, result: CharacterSurfaceInfo): void {
         const value = this._lite.checkSupport(deltaTime, direction);
         result.isSurfaceDynamic = value.isSurfaceDynamic;
-        result.supportedState = Number(value.supportedState) as CharacterSupportedState;
+        result.supportedState = compatCharacterSupportedState(value.supportedState);
         result.averageSurfaceNormal.set(value.averageSurfaceNormal.x, value.averageSurfaceNormal.y, value.averageSurfaceNormal.z);
         result.averageSurfaceVelocity.set(value.averageSurfaceVelocity.x, value.averageSurfaceVelocity.y, value.averageSurfaceVelocity.z);
         result.averageAngularSurfaceVelocity.set(value.averageAngularSurfaceVelocity.x, value.averageAngularSurfaceVelocity.y, value.averageAngularSurfaceVelocity.z);

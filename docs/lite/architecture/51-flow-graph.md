@@ -89,8 +89,8 @@ GUIDANCE §4b forbids components from referencing the scene. A flow graph
 obviously needs to read/write node transforms, fire on scene events, and play
 animations — so the wiring is inverted exactly like the animation subsystem:
 
-- The **scene owns** the graphs via an **optional** `scene._flowGraphs?:
-FgRuntime[]` field (plain data). It is left `undefined` for non-interactivity
+- The **scene owns** the graphs via an **optional** `scene._flowGraphs?: FgRuntime[]`
+  field (plain data). It is left `undefined` for non-interactivity
   scenes and **lazily created by `attachFlowGraph()`** — so core stays
   byte-identical when no graph is attached (verified: the per-scene bundle
   manifest is unchanged by this subsystem's existence).
