@@ -40,7 +40,7 @@
 # makes the check regime consistent rather than aspirational.
 #
 # Every credential — `BabylonJS-Deployment`, `BabylonJS-CI-Infrastructure`,
-# `BabylonJS-BrowserStack`, `BabylonJS-NpmPublish`, `BabylonBotPAT` — is
+# `BabylonJS-BrowserStack`, `NPM_Publish`, `BabylonBotPAT` — is
 # master-only, carries a branch-control check, and must NOT be authorized for
 # this definition. TESTING.md ("Protected resource matrix") is the full list.
 #

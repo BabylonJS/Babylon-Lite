@@ -88,7 +88,7 @@ const PR_READ_ENDPOINT = "BabylonLite-PRCI-RepoRead";
  * `gitHubConnection:` on a task and a hand-mapped `env:` are three more, and the
  * assertions below look for the name anywhere in a PR-reachable file.
  */
-const MASTER_ONLY_RESOURCES = ["BabylonJS-Deployment", "BabylonJS-CI-Infrastructure", "BabylonJS-BrowserStack", "BabylonJS-NpmPublish", "BabylonBotPAT"];
+const MASTER_ONLY_RESOURCES = ["BabylonJS-Deployment", "BabylonJS-CI-Infrastructure", "BabylonJS-BrowserStack", "NPM_Publish", "BabylonBotPAT"];
 
 const UPLOAD_TEMPLATES = ["config/templates/upload-static-site.yml", "config/templates/upload-test-report.yml"];
 
@@ -116,7 +116,7 @@ const PRIVILEGED_GROUPS = ["BabylonJS-Deployment", "BabylonJS-CI-Infrastructure"
  * the exact configuration error this change exists to make impossible would be
  * invisible, and the credential in use would still be the unprotected one.
  */
-const PUBLISH_GROUP = "BabylonJS-NpmPublish";
+const PUBLISH_GROUP = "NPM_Publish";
 const PUBLISH_TOKEN = "NPM_PUBLISH_TOKEN";
 
 /**
@@ -125,7 +125,7 @@ const PUBLISH_TOKEN = "NPM_PUBLISH_TOKEN";
  * `NPM_TOKEN` is the retired one; the others are the spellings a future edit is
  * most likely to reach for when wiring npm auth from an environment rather than
  * from the group. Any of them appearing in a pipeline means a credential is
- * being taken from somewhere other than `BabylonJS-NpmPublish` — which, since
+ * being taken from somewhere other than `NPM_Publish` — which, since
  * nothing in this repository defines them, means a pipeline UI variable.
  */
 const RETIRED_PUBLISH_TOKEN_NAMES = ["NPM_TOKEN", "NPM_AUTH_TOKEN", "NODE_AUTH_TOKEN"];
@@ -165,7 +165,7 @@ const TESTING_GUIDE = "TESTING.md";
 const DEPLOYMENT_CREDENTIAL_MARKERS = [
     /^\s*-\s*group:\s*BabylonJS-Deployment\s*$/m,
     /^\s*-\s*group:\s*BabylonJS-CI-Infrastructure\s*$/m,
-    /^\s*-\s*group:\s*BabylonJS-NpmPublish\s*$/m,
+    /^\s*-\s*group:\s*NPM_Publish\s*$/m,
     /NPM_PUBLISH_TOKEN:/,
     /gitHubConnection:/,
     /GITHUB_TOKEN:/,
@@ -1361,6 +1361,17 @@ describe("authenticated uploads run where no pull-request code has run", () => {
         expect(entry, `job ${id} disappeared between selection and assertion`).toBeDefined();
         expect(entry?.job.body, `job ${id} uploads with a deploy token but does not use \`checkout: none\``).toMatch(/^\s*-\s*checkout:\s*none\s*$/m);
         expect(runsPullRequestCode(entry?.job.body ?? ""), `job ${id} uploads with a deploy token and also runs pull-request code`).toBe(false);
+    });
+
+    it.each(uploaders.map(({ file, job }) => `${file}:${job.name}`))("%s imports both live ADO upload groups", (id) => {
+        const entry = uploaders.find(({ file, job }) => `${file}:${job.name}` === id);
+        expect(entry, `job ${id} disappeared between selection and assertion`).toBeDefined();
+        expect(entry?.job.body, `job ${id} does not import BabylonJS-Deployment, which provides DEPLOYMENT_SERVER and DEPLOY_TOKEN`).toMatch(
+            /^\s*-\s*group:\s*BabylonJS-Deployment\s*$/m
+        );
+        expect(entry?.job.body, `job ${id} does not import BabylonJS-CI-Infrastructure, which provides DEPLOY_ENDPOINT_UPLOAD`).toMatch(
+            /^\s*-\s*group:\s*BabylonJS-CI-Infrastructure\s*$/m
+        );
     });
 
     it("keeps all authenticated upload templates out of the PR publisher while previews are disabled", () => {

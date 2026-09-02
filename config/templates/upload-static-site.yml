@@ -51,8 +51,10 @@
 #
 # Required pipeline variables:
 #   BabylonJS-Deployment variable group: DEPLOYMENT_SERVER, DEPLOY_TOKEN
-#   Report upload settings: DEPLOY_ENDPOINT_UPLOAD, DEPLOY_ENDPOINT_PURGE,
-#     STORAGE_ACCOUNT, SERVE_DOMAIN
+#   BabylonJS-CI-Infrastructure variable group: DEPLOY_ENDPOINT_UPLOAD,
+#     DEPLOY_ENDPOINT_PURGE and the storage/CDN target variables mapped by each
+#     caller
+#   Caller-specific settings: STORAGE_ACCOUNT, SERVE_DOMAIN
 #   Playground snapshots additionally pass TOOLS_STORAGE_ACCOUNT via storageAccount.
 #   Scope these groups to the calling job — never to the whole pipeline.
 # Required service connection:

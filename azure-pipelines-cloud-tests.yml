@@ -399,6 +399,8 @@ stages:
                 vmImage: "ubuntu-latest"
             variables:
                 - group: BabylonJS-Deployment
+                # DEPLOY_ENDPOINT_UPLOAD is stored here in the live ADO project.
+                - group: BabylonJS-CI-Infrastructure
                 - name: ReportUploaded
                   value: "false"
             steps:
@@ -427,6 +429,8 @@ stages:
                 vmImage: "ubuntu-latest"
             variables:
                 - group: BabylonJS-Deployment
+                # DEPLOY_ENDPOINT_UPLOAD is stored here in the live ADO project.
+                - group: BabylonJS-CI-Infrastructure
                 - name: ReportUploaded
                   value: "false"
             steps:

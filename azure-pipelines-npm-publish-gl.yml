@@ -2,7 +2,7 @@
 #
 # Publishes the built @babylonjs/lite-gl package to npm. The registry credential
 # is `NPM_PUBLISH_TOKEN`, from the protected variable group
-# `BabylonJS-NpmPublish`, imported by the publishing job and by nothing else — a
+# `NPM_Publish`, imported by the publishing job and by nothing else — a
 # pipeline-level UI variable is deliberately not a supported way to configure it.
 # See TESTING.md, "Settings that repository files cannot enforce".
 #
@@ -189,7 +189,7 @@ stages:
                 # variable was renamed along with the move so a leftover UI
                 # `NPM_TOKEN` cannot stand in for missing group configuration.
                 # See the identical import in azure-pipelines-npm-publish.yml.
-                - group: BabylonJS-NpmPublish
+                - group: NPM_Publish
             steps:
                 - checkout: none
 
@@ -202,7 +202,7 @@ stages:
                       set -uo pipefail
                       case "${NPM_PUBLISH_TOKEN:-}" in
                           "" | *'$('*)
-                              echo "BabylonJS-NpmPublish is not in scope for this run, or does not define NPM_PUBLISH_TOKEN; refusing to publish."
+                              echo "NPM_Publish is not in scope for this run, or does not define NPM_PUBLISH_TOKEN; refusing to publish."
                               exit 1
                               ;;
                       esac
@@ -285,7 +285,7 @@ stages:
                       # "publish with whatever happens to be in scope".
                       case "${NPM_PUBLISH_TOKEN:-}" in
                         "" | *'$('*)
-                          echo "NPM_PUBLISH_TOKEN must come from the BabylonJS-NpmPublish variable group."
+                          echo "NPM_PUBLISH_TOKEN must come from the NPM_Publish variable group."
                           exit 1
                           ;;
                       esac

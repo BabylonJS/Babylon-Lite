@@ -2,7 +2,7 @@
 #
 # Publishes the built @babylonjs/lite package to npm. The registry credential is
 # `NPM_PUBLISH_TOKEN`, and it comes from the protected variable group
-# `BabylonJS-NpmPublish`, imported by the publishing job and by nothing else. A
+# `NPM_Publish`, imported by the publishing job and by nothing else. A
 # pipeline-level UI variable is deliberately NOT a supported way to configure it:
 # see TESTING.md, "Settings that repository files cannot enforce".
 #
@@ -276,7 +276,7 @@ stages:
                 # of publishing with the credential the group was meant to
                 # protect. See TESTING.md, "Settings that repository files cannot
                 # enforce", for the checks an administrator must add.
-                - group: BabylonJS-NpmPublish
+                - group: NPM_Publish
             steps:
                 - checkout: none
 
@@ -294,7 +294,7 @@ stages:
                       set -uo pipefail
                       case "${NPM_PUBLISH_TOKEN:-}" in
                           "" | *'$('*)
-                              echo "BabylonJS-NpmPublish is not in scope for this run, or does not define NPM_PUBLISH_TOKEN; refusing to publish."
+                              echo "NPM_Publish is not in scope for this run, or does not define NPM_PUBLISH_TOKEN; refusing to publish."
                               exit 1
                               ;;
                       esac
@@ -406,7 +406,7 @@ stages:
                       # the gate step for why emptiness alone is not enough.
                       case "${NPM_PUBLISH_TOKEN:-}" in
                         "" | *'$('*)
-                          echo "NPM_PUBLISH_TOKEN must come from the BabylonJS-NpmPublish variable group."
+                          echo "NPM_PUBLISH_TOKEN must come from the NPM_Publish variable group."
                           exit 1
                           ;;
                       esac

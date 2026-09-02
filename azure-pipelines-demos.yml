@@ -95,14 +95,17 @@ stages:
             # neither constrains a manual queue, which may name any ref — and the
             # YAML such a run executes is that ref's YAML, which is why the
             # enforceable half of this is a server-side branch-control check on
-            # BabylonJS-Deployment (see TESTING.md, "Settings that repository
-            # files cannot enforce"). This condition is what states the rule for
-            # every run that is still executing master's definition.
+            # BabylonJS-Deployment and BabylonJS-CI-Infrastructure (see
+            # TESTING.md, "Settings that repository files cannot enforce"). This
+            # condition is what states the rule for every run that is still
+            # executing master's definition.
             condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'))
             pool:
                 vmImage: "ubuntu-latest"
             variables:
                 - group: BabylonJS-Deployment
+                # DEPLOY_ENDPOINT_UPLOAD is stored here in the live ADO project.
+                - group: BabylonJS-CI-Infrastructure
             steps:
                 - checkout: none
 

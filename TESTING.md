@@ -527,9 +527,9 @@ matrix replaced.
 | --- | --- | --- | --- |
 | `BabylonLite-PRCI-RepoRead` (GitHub service connection) | read-only PAT, no write scope | `azure-pipelines.yml` **only** | **Required template**: `config/templates/pr-ci.yml` @ `refs/heads/master` |
 | `BabylonJS-Deployment` | yes — `DEPLOY_TOKEN`, `GITHUB_TOKEN` | `azure-pipelines-pr-publish.yml`, `-demos.yml`, `-playground.yml`, `-bundle-manifest.yml`, `-cloud-tests.yml`, `-npm-publish.yml` | **Branch control**: `refs/heads/master` only |
-| `BabylonJS-CI-Infrastructure` | no secrets, but names deploy targets | `-playground.yml`, `-bundle-manifest.yml`, `-npm-publish.yml` | **Branch control**: `refs/heads/master` only |
+| `BabylonJS-CI-Infrastructure` | no secrets, but names deploy targets | `-playground.yml`, `-bundle-manifest.yml`, `-cloud-tests.yml`, `-demos.yml`, `-npm-publish.yml` | **Branch control**: `refs/heads/master` only |
 | `BabylonJS-BrowserStack` | yes — account key | `azure-pipelines-cloud-tests.yml` **only** | **Branch control**: `refs/heads/master` only |
-| `BabylonJS-NpmPublish` | yes — registry token | `azure-pipelines-npm-publish.yml`, `azure-pipelines-npm-publish-gl.yml` | **Branch control**: `refs/heads/master` only |
+| `NPM_Publish` | yes — registry token | `azure-pipelines-npm-publish.yml`, `azure-pipelines-npm-publish-gl.yml` | **Branch control**: `refs/heads/master` only |
 | `BabylonBotPAT` (GitHub service connection) | yes — comment/tag write | `azure-pipelines-pr-publish.yml`, `-npm-publish.yml`, `-npm-publish-gl.yml`, and any master pipeline calling an upload template | **Branch control**: `refs/heads/master` only |
 
 Reading the table:
@@ -737,7 +737,7 @@ conditions hold:
 1. the resource authorizations, checks, pipeline definitions, security settings
    and credential rotations below are complete;
 2. the same-repository pinned-template shape has passed the empirical validation
-   in step 8; and
+   in step 9; and
 3. the stacked #627 scheduled poller and sticky-comment reconciliation are ready
    and validated against the publisher contract above.
 
@@ -753,7 +753,7 @@ conditions hold:
   make it. In *Pipelines → the PR CI definition → Security / resource
   authorization*, and on each resource's **Pipeline permissions**, revoke
   `BabylonJS-Deployment`, `BabylonJS-CI-Infrastructure`, `BabylonJS-BrowserStack`,
-  `BabylonJS-NpmPublish` and `BabylonBotPAT`. While any of them remains
+  `NPM_Publish` and `BabylonBotPAT`. While any of them remains
   authorized, a pull request that deletes the `extends` line and writes its own
   job is handed it — the YAML in this repository is not what is being consulted.
   Do **not** enable "Grant access permission to all pipelines" on any of them.
@@ -770,7 +770,7 @@ conditions hold:
   not treat this check as a substitute for step 2's resource separation.
 - **4. Branch control on every other resource, `refs/heads/master` only.** On
   `BabylonJS-Deployment`, `BabylonJS-CI-Infrastructure`, `BabylonJS-BrowserStack`,
-  `BabylonJS-NpmPublish` and the `BabylonBotPAT` service connection, add a
+  `NPM_Publish` and the `BabylonBotPAT` service connection, add a
   **Branch control** check allowing only `refs/heads/master`, with "Verify branch
   protection" enabled. A pull-request run is `refs/pull/<n>/merge` and can never
   satisfy it. Nothing legitimate is blocked, because after step 2 no
@@ -838,12 +838,16 @@ conditions hold:
   repository, so Azure would run it on the triggering run's branch — the pull
   request's own merge ref — with both protected resources in scope. Keep this
   change draft until the stacked #627 scheduled poller is ready.
-- **11. `GITHUB_TOKEN` must live in a protected variable group.** A variable
-  defined in the pipeline's UI **is not a protected resource**, so no check
-  applies to it and every job in the definition can read it. `Release Markers
-  (labels)` in the publisher reads it from `BabylonJS-Deployment`; any
-  pipeline-level UI variable of the same name must be **deleted**, on the PR CI
-  definition above all.
+- **11. Delete every ambient variable from the PR CI definition.** A variable
+  defined in the pipeline UI **is not a protected resource**, so no resource
+  check applies to it and every job in the definition can read it. Definition
+  44 currently carries `BASIC_AUTH`, `BROWSERSTACK_ACCESS_KEY`,
+  `BROWSERSTACK_USERNAME`, `DEPLOYMENT_SERVER`, `DEPLOY_ENDPOINT_UPLOAD`,
+  `GITHUB_TOKEN`, `SERVE_DOMAIN` and `STORAGE_ACCOUNT`; delete all eight.
+  Values still needed elsewhere must resolve only from their job-scoped,
+  branch-controlled groups. In particular, add a rotated, secret, read-only
+  `GITHUB_TOKEN` to `BabylonJS-Deployment` for `Release Markers (labels)`;
+  `DEPLOY_ENDPOINT_UPLOAD` already lives in `BabylonJS-CI-Infrastructure`.
 - **12. `allowedDeployHosts` must be filled in, in both upload templates.** This is
   the one change this work could not make: the exact deployment host is not
   public and appears nowhere in this repository. Add the `host[:port]` literals
@@ -862,32 +866,35 @@ conditions hold:
   is merged but a YAML file is not a pipeline until someone creates a definition
   pointing at it. Until it exists, perf and parity-cloud do not run anywhere —
   they no longer run in PR CI. Authorize `BabylonJS-BrowserStack` for this
-  definition and for nothing else.
+  definition and for nothing else. Its two checkout-free report-upload jobs also
+  need `BabylonJS-Deployment` for the deploy token/server and
+  `BabylonJS-CI-Infrastructure` for `DEPLOY_ENDPOINT_UPLOAD`.
 - **15. `BabylonBotPAT` must be authorized for the npm-publish pipelines.** Both
   publish pipelines create their release tag with `GitHubRelease@1` through that
   service connection, instead of `git push` from a checkout carrying persisted
   credentials. If the connection is not authorized for those definitions, tagging
   fails at the last job — after the packages are already on npm.
-- **16. Create `BabylonJS-NpmPublish`, and delete the old `NPM_TOKEN` UI variable.**
+- **16. Update `NPM_Publish`, and delete the old `NPM_TOKEN` variable.**
   Both publish pipelines now import the protected variable group
-  `BabylonJS-NpmPublish` inside their `PublishToNpm` job only, and read the
+  `NPM_Publish` inside their `PublishToNpm` job only, and read the
   credential as **`NPM_PUBLISH_TOKEN`** — a deliberately new name. In order:
 
-  1. **Create the group.** `BabylonJS-NpmPublish`, with a single variable
-     `NPM_PUBLISH_TOKEN`, **marked secret**, holding a granular, publish-only npm
+  1. **Update the existing group.** ADO group `NPM_Publish` currently exports
+     secret `NPM_TOKEN`. Add `NPM_PUBLISH_TOKEN`, **marked secret**, holding a
+     granular, publish-only npm
      token scoped to `@babylonjs/lite`, `@babylonjs/lite-compat` and
      `@babylonjs/lite-gl`. Scoping the token to those packages bounds what a
      failure of the publishing boundary would be worth. The credential is used
      only in a `checkout: none` job that runs `npm publish --ignore-scripts` on a
      tarball built by an earlier, credential-free job, through a `0600` npmrc in
      the agent's temp directory that is deleted when the step ends.
-  2. **Delete the old pipeline UI variables, and rotate the token.** Remove
-     `NPM_TOKEN` from the pipeline-level variables of **both** the
-     `azure-pipelines-npm-publish.yml` and `azure-pipelines-npm-publish-gl.yml`
-     definitions, and issue a **new** npm token for the group rather than copying
-     the old value across. The old one was readable by every job in those
-     definitions — including a job written by a manually queued run of an
-     arbitrary branch, whose YAML is that branch's YAML — so treat it as exposed.
+  2. **Delete the retired name, and rotate the token.** After
+     `NPM_PUBLISH_TOKEN` is present, remove `NPM_TOKEN` from group `NPM_Publish`
+     and verify that neither npm pipeline definition has an `NPM_TOKEN` UI
+     variable (the current definitions have no pipeline-level variables).
+     Issue a **new** npm token rather than copying the old value across. The old
+     token was previously readable by jobs in definitions queueable from
+     arbitrary refs, whose YAML is that ref's YAML, so treat it as exposed.
      The rename is what makes this step checkable: nothing reads `NPM_TOKEN` any
      more, so a forgotten UI variable cannot quietly keep publishing working
      while the group is missing, misnamed or unauthorized. Both jobs refuse to
@@ -958,7 +965,6 @@ pull-request-triggered definition may be authorized for it.
 
 - `DEPLOYMENT_SERVER`
 - `DEPLOY_TOKEN`
-- `DEPLOY_ENDPOINT_UPLOAD`
 - `DEPLOY_HOST_ALLOWLIST` — exact `host[:port]` values uploads may reach.
   Fallback only, for trusted master-only uploads, and only while the
   `allowedDeployHosts` template parameter is still empty
@@ -968,12 +974,13 @@ pull-request-triggered definition may be authorized for it.
 It uses `BabylonJS-CI-Infrastructure` for the storage accounts and CDN profiles
 that uploads target. Master-only, for the same reason:
 
+- `DEPLOY_ENDPOINT_UPLOAD` — upload route used by both shared upload templates
 - `SNAPSHOTS_STORAGE_ACCOUNT` — snapshots account, used by
   `azure-pipelines-bundle-manifest.yml` for the bundle-size baseline
 - `TOOLS_STORAGE_ACCOUNT` — tools account backing `liteplayground.babylonjs.com`
 - `CDN_PROFILE_TOOLS`
 
-It uses `BabylonJS-NpmPublish` for the npm registry credential, imported by the
+It uses `NPM_Publish` for the npm registry credential, imported by the
 `PublishToNpm` job of `azure-pipelines-npm-publish.yml` and
 `azure-pipelines-npm-publish-gl.yml` and by no other job in either file:
 
@@ -996,8 +1003,9 @@ bundle-manifest pipeline failed on it**, even though the PR CI template,
 three been importing it all along. (PR CI imports nothing now — its credentialed
 half is `azure-pipelines-pr-publish.yml`.)
 `azure-pipelines-cloud-tests.yml` imports `BabylonJS-BrowserStack` in its test
-jobs and `BabylonJS-Deployment` in its `checkout: none` report-upload jobs, never
-both in one job. A pipeline that needs a storage account and
+jobs, then imports `BabylonJS-Deployment` and
+`BabylonJS-CI-Infrastructure` together in its `checkout: none` report-upload
+jobs. A pipeline that needs a storage account and
 declares only the first two groups will not fail at parse time — see the trap
 described below.
 
@@ -1122,7 +1130,7 @@ as commentary.
 
 The failed-test report upload template also expects these pipeline variables:
 
-- `DEPLOY_ENDPOINT_UPLOAD` — from `BabylonJS-Deployment`, listed above
+- `DEPLOY_ENDPOINT_UPLOAD` — from `BabylonJS-CI-Infrastructure`, listed above
 - `SERVE_DOMAIN` — group not verified; confirm against a build log before
   relying on it in a new pipeline
 - `STORAGE_ACCOUNT` — **not exported by any variable group.** This is the upload
@@ -1144,8 +1152,11 @@ variable, and validate it before doing expensive work.
 > this repo.** It documents the same ADO organisation but a different group
 > layout — it places `DEPLOY_ENDPOINT_UPLOAD` in `BabylonJS-CI-Infrastructure`
 > and names the BrowserStack group `Browserstack-Opensource`, whereas here
-> `DEPLOY_ENDPOINT_UPLOAD` resolves from `BabylonJS-Deployment` (observed in
-> build `20260825.1`, which imported only that group) and the BrowserStack group
+> `DEPLOY_ENDPOINT_UPLOAD` resolves from `BabylonJS-CI-Infrastructure` in the
+> current Babylon-Lite ADO project. Build `20260825.1` imported only
+> `BabylonJS-Deployment` because its pipeline-level UI variable masked the
+> missing group import; PR #649 removes those ambient UI variables. The
+> BrowserStack group
 > is `BabylonJS-BrowserStack`. The two repos have drifted; verify against an
 > actual build log rather than the sibling repo's documentation.
 

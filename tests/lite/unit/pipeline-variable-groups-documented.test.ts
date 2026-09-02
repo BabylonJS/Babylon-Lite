@@ -133,7 +133,7 @@ describe("pipeline variable groups are documented", () => {
     // a new pipeline, which is how the original defect would recur inverted.
     it("does not list groups no pipeline or template imports", () => {
         const declared = declaredGroups();
-        const stale = [...documentedSection().matchAll(/`(BabylonJS-[A-Za-z0-9-]+)`/g)]
+        const stale = [...documentedSection().matchAll(/`(BabylonJS-[A-Za-z0-9-]+|NPM_Publish)`/g)]
             .map((m) => m[1])
             .filter((group): group is string => group !== undefined)
             .filter((group, index, all) => all.indexOf(group) === index)
