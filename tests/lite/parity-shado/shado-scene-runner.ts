@@ -124,116 +124,14 @@ let headlessGpu: HeadlessGpu | null = null;
 let lite: LiteRuntime | null = null;
 let serverOrigin = "";
 let originalFetch: typeof fetch | null = null;
-let originalGpu: GPU | null = null;
 
 function bindMember(target: object, property: PropertyKey): unknown {
     const value = Reflect.get(target, property);
     return typeof value === "function" ? value.bind(target) : value;
 }
 
-function readCoordinate(value: unknown, key: "x" | "y" | "width" | "height", index: number, fallback: number): number {
-    if (Array.isArray(value)) {
-        return value[index] ?? fallback;
-    }
-    if (typeof value === "object" && value !== null) {
-        const coordinate = Reflect.get(value, key);
-        if (typeof coordinate === "number") {
-            return coordinate;
-        }
-    }
-    return fallback;
-}
-
 function isHeadlessImageBitmap(value: unknown): value is HeadlessImageBitmap {
     return value instanceof Uint8Array && typeof Reflect.get(value, "width") === "number" && typeof Reflect.get(value, "height") === "number";
-}
-
-function adaptShadoQueue(queue: GPUQueue): GPUQueue {
-    return new Proxy(queue, {
-        get(target, property) {
-            if (property !== "copyExternalImageToTexture") {
-                return bindMember(target, property);
-            }
-            return (source: GPUImageCopyExternalImage, destination: GPUImageCopyTextureTagged, copySize: GPUExtent3D): void => {
-                const image = source.source;
-                if (!isHeadlessImageBitmap(image)) {
-                    target.copyExternalImageToTexture(source, destination, copySize);
-                    return;
-                }
-
-                const width = readCoordinate(copySize, "width", 0, image.width);
-                const height = readCoordinate(copySize, "height", 1, image.height);
-                const originX = readCoordinate(source.origin, "x", 0, 0);
-                const originY = readCoordinate(source.origin, "y", 1, 0);
-                if (originX < 0 || originY < 0 || originX + width > image.width || originY + height > image.height) {
-                    throw new RangeError("External image copy exceeds the decoded image bounds");
-                }
-
-                const rowBytes = width * 4;
-                const imageRowBytes = image.width * 4;
-                const pixels = new Uint8Array(rowBytes * height);
-                for (let destinationRow = 0; destinationRow < height; destinationRow++) {
-                    const sourceRow = originY + (source.flipY ? height - 1 - destinationRow : destinationRow);
-                    const sourceOffset = sourceRow * imageRowBytes + originX * 4;
-                    pixels.set(image.subarray(sourceOffset, sourceOffset + rowBytes), destinationRow * rowBytes);
-                }
-
-                target.writeTexture(
-                    {
-                        texture: destination.texture,
-                        mipLevel: destination.mipLevel,
-                        origin: destination.origin,
-                        aspect: destination.aspect,
-                    },
-                    pixels,
-                    { bytesPerRow: rowBytes, rowsPerImage: height },
-                    { width, height, depthOrArrayLayers: 1 }
-                );
-            };
-        },
-    });
-}
-
-function adaptShadoDevice(device: GPUDevice): GPUDevice {
-    let queue: GPUQueue | null = null;
-    return new Proxy(device, {
-        get(target, property) {
-            if (property === "queue") {
-                return (queue ??= adaptShadoQueue(target.queue));
-            }
-            return bindMember(target, property);
-        },
-    });
-}
-
-function adaptShadoAdapter(adapter: GPUAdapter): GPUAdapter {
-    return new Proxy(adapter, {
-        get(target, property) {
-            if (property === "requestDevice") {
-                return async (descriptor?: GPUDeviceDescriptor) => adaptShadoDevice(await target.requestDevice(descriptor));
-            }
-            return bindMember(target, property);
-        },
-    });
-}
-
-function installShadoExternalImageCopyFix(): void {
-    originalGpu = navigator.gpu;
-    const gpu = originalGpu;
-    Object.defineProperty(navigator, "gpu", {
-        configurable: true,
-        value: new Proxy(gpu, {
-            get(target, property) {
-                if (property === "requestAdapter") {
-                    return async (options?: GPURequestAdapterOptions) => {
-                        const adapter = await target.requestAdapter(options);
-                        return adapter ? adaptShadoAdapter(adapter) : null;
-                    };
-                }
-                return bindMember(target, property);
-            },
-        }),
-    });
 }
 
 function liteAliasPlugin(): Plugin {
@@ -440,7 +338,6 @@ export async function startShadoSceneRunner(): Promise<void> {
     }
 
     headlessGpu = await installHeadlessWebGpu();
-    installShadoExternalImageCopyFix();
     await installHeadlessKtx2Transcoder();
     installImageDecoder(async (bytes) => {
         const { data, info } = await sharp(bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
@@ -490,10 +387,6 @@ export async function stopShadoSceneRunner(): Promise<void> {
     }
     await server?.close();
     server = null;
-    if (originalGpu) {
-        Object.defineProperty(navigator, "gpu", { configurable: true, value: originalGpu });
-        originalGpu = null;
-    }
     headlessGpu?.dispose();
     headlessGpu = null;
     lite = null;
