@@ -129,13 +129,21 @@ export abstract class AbstractEngine {
         this._canvas = canvas;
         // Babylon.js's WebGPUEngine takes an options object as the second arg;
         // accept a bare boolean too (some older call sites pass `antialias`).
-        const opts = typeof options === "object" ? { ...options } : undefined;
+        const opts: ({ antialias?: boolean; adaptToDeviceRatio?: boolean; useLargeWorldRendering?: boolean } & EngineOptions) | undefined =
+            typeof options === "object" ? { ...options } : options === false ? { msaaSamples: 1 } : undefined;
+        if (opts) {
+            const antialias = opts.antialias;
+            delete opts.antialias;
+            if (antialias === false) {
+                opts.msaaSamples = 1;
+            }
+        }
         // Babylon.js exposes floating-origin / large-world rendering through a
         // single `useLargeWorldRendering` flag. Babylon Lite splits it into
         // `useHighPrecisionMatrix` + `useFloatingOrigin` (the latter requires the
         // former). Translate so compat scenes that pass the BJS flag light up LWR.
-        if (opts && (opts as { useLargeWorldRendering?: boolean }).useLargeWorldRendering) {
-            delete (opts as { useLargeWorldRendering?: boolean }).useLargeWorldRendering;
+        if (opts?.useLargeWorldRendering) {
+            delete opts.useLargeWorldRendering;
             opts.useHighPrecisionMatrix = true;
             opts.useFloatingOrigin = true;
         }

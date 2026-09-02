@@ -7,6 +7,8 @@ import {
     ShaderMaterial,
     OpenPBRMaterial,
     OpenPBRMaterialDefines,
+    RegisterOpenpbrMaterial,
+    OpenPBRMaterialLoadingAdapter,
     RectAreaLight,
     GPUParticleSystem,
     SolidParticleSystem,
@@ -58,6 +60,7 @@ import {
     GeospatialClippingBehavior,
     SceneSerializer,
 } from "../src/unsupported/unsupported-apis";
+import { GLTF2, OpenPBRMaterialLoadingAdapter as RootOpenPBRMaterialLoadingAdapter, RegisterOpenpbrMaterial as RootRegisterOpenpbrMaterial } from "../src/index";
 import { MeshBuilder, CreateTiledBox, CreateTiledPlane } from "../src/meshes/meshes";
 import { SceneLoader } from "../src/loading/scene-loader";
 
@@ -83,8 +86,9 @@ describe("Unsupported API stubs throw on construction", () => {
     const cases: Array<[string, () => unknown]> = [
         ["MultiMaterial", () => new MultiMaterial()],
         ["ShaderMaterial", () => new ShaderMaterial()],
-        ["OpenPBRMaterial", () => new OpenPBRMaterial()],
-        ["OpenPBRMaterialDefines", () => new OpenPBRMaterialDefines()],
+        ["OpenPBRMaterial", () => new OpenPBRMaterial("openpbr", undefined, true)],
+        ["OpenPBRMaterialDefines", () => new OpenPBRMaterialDefines({ CUSTOM: { type: "boolean", default: false } })],
+        ["OpenPBRMaterialLoadingAdapter", () => new OpenPBRMaterialLoadingAdapter({} as never)],
         ["RectAreaLight", () => new RectAreaLight()],
         ["ParticleSystem", () => new ParticleSystem()],
         ["GPUParticleSystem", () => new GPUParticleSystem()],
@@ -122,6 +126,18 @@ describe("Unsupported API stubs throw on construction", () => {
     it.each(cases)("%s throws LiteCompatError naming the API", (name, construct) => {
         expect(construct).toThrow(LiteCompatError);
         expect(construct).toThrow(new RegExp(name));
+    });
+});
+
+describe("OpenPBR unsupported exports", () => {
+    it("exposes the registration function and loading adapter through the expected barrels", () => {
+        expect(RootRegisterOpenpbrMaterial).toBe(RegisterOpenpbrMaterial);
+        expect(GLTF2.OpenPBRMaterialLoadingAdapter).toBe(RootOpenPBRMaterialLoadingAdapter);
+    });
+
+    it("throws when OpenPBR registration is requested", () => {
+        expect(() => RegisterOpenpbrMaterial()).toThrow(LiteCompatError);
+        expect(() => RegisterOpenpbrMaterial()).toThrow(/RegisterOpenpbrMaterial/);
     });
 });
 

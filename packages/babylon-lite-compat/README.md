@@ -143,6 +143,7 @@ overloads within a supported area may still be absent.
 | Feature area                                                                                   | Status | Notes                                                                                                      |
 | ---------------------------------------------------------------------------------------------- | :----: | ---------------------------------------------------------------------------------------------------------- |
 | glTF 2.0 (+ extensions), `.babylon`                                                            |   ✅   | via Lite `loadGltf` / `loadBabylon`                                                                        |
+| OpenPBR glTF material adapter                                                                  |   ❌   | exported at root and under `GLTF2`; throws because Lite has no OpenPBR material subsystem                  |
 | `SceneLoader` (`ImportMeshAsync` / `AppendAsync` / `LoadAssetContainerAsync`), `AssetsManager` |   ⚡   | `AssetContainer` partial                                                                                   |
 | Gaussian Splatting (`.ply` / `.splat` / `.sog` / `.spz`)                                       |   ⚡   | via `GaussianSplattingMesh`; LOD-streaming + glTF-embedded (`KHR_gaussian_splatting`) variants unsupported |
 | `OBJ` / `STL` / `FBX` / `BVH`                                                                  |   ❌   | not in Lite — convert to glTF                                                                              |

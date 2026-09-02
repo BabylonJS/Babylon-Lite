@@ -13,6 +13,8 @@
  */
 
 import { unsupported } from "../error.js";
+import type { Material } from "../materials/materials.js";
+import type { Scene } from "../scene/scene.js";
 
 // ─── Materials ───────────────────────────────────────────────────────
 export class MultiMaterial {
@@ -34,7 +36,7 @@ export class BackgroundMaterial {
 }
 
 export class OpenPBRMaterial {
-    public constructor() {
+    public constructor(_name: string, _scene?: Scene, _forceGLSL = false) {
         unsupported(
             "OpenPBRMaterial",
             "OpenPBR requires a distinct shader/material model and parameter mapping that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
@@ -43,10 +45,26 @@ export class OpenPBRMaterial {
 }
 
 export class OpenPBRMaterialDefines {
-    public constructor() {
+    public constructor(_externalProperties?: Record<string, { type: string; default: unknown }>) {
         unsupported(
             "OpenPBRMaterialDefines",
             "OpenPBR requires a distinct shader/material model and parameter mapping that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
+        );
+    }
+}
+
+export function RegisterOpenpbrMaterial(): void {
+    unsupported(
+        "RegisterOpenpbrMaterial",
+        "OpenPBR registration would install a material parser and shader subsystem that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
+    );
+}
+
+export class OpenPBRMaterialLoadingAdapter {
+    public constructor(_material: Material) {
+        unsupported(
+            "OpenPBRMaterialLoadingAdapter",
+            "The adapter translates glTF material data into OpenPBRMaterial, whose shader/material subsystem requires Lite maintainer design."
         );
     }
 }

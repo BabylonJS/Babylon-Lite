@@ -252,6 +252,8 @@ export {
     BackgroundMaterial,
     OpenPBRMaterial,
     OpenPBRMaterialDefines,
+    RegisterOpenpbrMaterial,
+    OpenPBRMaterialLoadingAdapter,
     RectAreaLight,
     GPUParticleSystem,
     SolidParticleSystem,
@@ -306,6 +308,7 @@ export {
     GeospatialClippingBehavior,
     SceneSerializer,
 } from "./unsupported/unsupported-apis.js";
+export * as GLTF2 from "./loading/gltf2.js";
 export type {
     IHtmlTextureOptions,
     IHtmlInteractionManagerOptions,
