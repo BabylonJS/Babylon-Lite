@@ -169,6 +169,17 @@ const DEPLOYMENT_CREDENTIAL_MARKERS = [
     /NPM_PUBLISH_TOKEN:/,
     /gitHubConnection:/,
     /GITHUB_TOKEN:/,
+    // #627's three. Without them the sticky-comment token, the publisher-queue
+    // identity and the pull-request metadata token would each be a credential
+    // that *no* suite below selects for — the poller job would have been swept
+    // by none of the checkout, install, ref-gate or agent-sharing rules, which
+    // is precisely how a new credential quietly escapes an old guard.
+    /^\s*-\s*group:\s*BabylonLite-PRComments\s*$/m,
+    /^\s*-\s*group:\s*BabylonLite-PRPublishQueue\s*$/m,
+    /^\s*-\s*group:\s*BabylonLite-PRMetadata\s*$/m,
+    /PR_COMMENT_TOKEN:/,
+    /PR_PUBLISH_QUEUE_TOKEN:/,
+    /PR_METADATA_TOKEN:/,
 ];
 
 function read(file: string): string {
@@ -631,6 +642,36 @@ describe("the trusted publisher exposes a narrow interface for PR CI output", ()
         );
     });
 
+    it("stages the bundle comment on every run, whatever the scene selection decided", () => {
+        // #627 turns on the artifact being unconditional: the run that should
+        // withdraw a stale comment is exactly the run with nothing to say, so a
+        // condition that suppresses staging suppresses the withdrawal too.
+        //
+        // The affected-scene selection (#638) is the live threat here, because
+        // gating the bundle job's expensive steps on `RUN_BUNDLE_TESTS` reads as
+        // an obvious thing to extend to the staging step as well.
+        const step = /-\s*task:\s*PublishPipelineArtifact@\d(?:(?!PublishPipelineArtifact@)[\s\S])*?artifact:\s*bundle-comment/.exec(withoutComments(template));
+        expect(step, `${PINNED_TEMPLATE} does not stage the bundle comment`).toBeDefined();
+
+        const condition = /condition:\s*([^\n]*)/.exec(step?.[0] ?? "")?.[1]?.trim();
+        expect(condition, `${PINNED_TEMPLATE} stages the bundle comment conditionally, so a quiet run cannot retract a stale comment`).toBe("always()");
+
+        // The generator has to survive the same gating, or the directory it is
+        // supposed to fill is simply absent and the reconciler reads "leave it
+        // alone" — which is the stale comment, restored.
+        const generator = /-\s*script:\s*npx tsx scripts\/report-bundle-size-deltas\.ts[\s\S]*?(?=\n\s{16}-\s)/.exec(withoutComments(template));
+        expect(generator, `${PINNED_TEMPLATE} does not generate the bundle comment`).toBeDefined();
+        expect(/condition:\s*([^\n]*)/.exec(generator?.[0] ?? "")?.[1]?.trim(), `${PINNED_TEMPLATE} skips the bundle-comment generator, so quiet runs stage no state`).toBe(
+            "always()"
+        );
+
+        // Skipping measurement is only safe to report as `none` because the
+        // selector positively said so; the generator must be told which it was.
+        expect(generator?.[0], `${PINNED_TEMPLATE} does not tell the generator whether any bundle scene was affected`).toMatch(
+            /BUNDLE_SCENES_AFFECTED:\s*"\$\(RUN_BUNDLE_TESTS\)"/
+        );
+    });
+
     it("consumes only the inert comment artifacts PR CI stages", () => {
         const staged = new Set(
             jobsOf(template)
@@ -688,8 +729,15 @@ describe("the trusted publisher exposes a narrow interface for PR CI output", ()
     it("fixes every GitHub destination to BabylonJS/Babylon-Lite", () => {
         const uncommented = withoutComments(publisher);
         expect(uncommented).not.toContain("$(Build.Repository.Name)");
-        const destinations = [...uncommented.matchAll(/repositoryName:\s*"([^"]+)"/g)];
-        expect(destinations, `${PUBLISHER} has no GitHub repository destinations to inspect`).toHaveLength(2);
+
+        // Three fixed destinations, expressed two ways: `repositoryName:` is the
+        // `GitHubComment@0` input, `GITHUB_REPOSITORY:` is what the release-marker
+        // check and (since #627) the bundle reconciler read. Both forms are counted
+        // and the count is exact, because dropping a form from this pattern — or
+        // adding a fourth destination — is how a repository target stops being
+        // checked without any test going red.
+        const destinations = [...uncommented.matchAll(/(?:repositoryName|GITHUB_REPOSITORY):\s*"([^"]+)"/g)];
+        expect(destinations, `${PUBLISHER} has no GitHub repository destinations to inspect`).toHaveLength(3);
         for (const match of destinations) {
             expect(match[1]).toBe("BabylonJS/Babylon-Lite");
         }
@@ -703,20 +751,40 @@ describe("the trusted publisher exposes a narrow interface for PR CI output", ()
         expect(uncommented).not.toMatch(/-\s*name:\s*publish(?:LabSite|Playground)/);
     });
 
-    it("lets untrusted comment content set only the four variables the posting tasks consume", () => {
-        const comments = jobsOf(publisher).find((job) => job.name === "PostPrComments");
-        expect(comments, `${PUBLISHER} has no PostPrComments job`).toBeDefined();
-        const target =
-            /displayName:\s*"Load and neutralise comment bodies"[\s\S]*?target:\s*\n\s*commands:\s*restricted\s*\n\s*settableVariables:\s*\n((?:\s*-\s*[A-Z][A-Z_]*\s*\n?)+)/.exec(
-                comments?.body ?? ""
-            );
-        expect(target, "the comment-body step has no restricted settableVariables target").toBeDefined();
-        expect([...(target?.[1] ?? "").matchAll(/-\s*(\w+)/g)].map((match) => match[1])).toEqual([
-            "API_COMMENT_BODY",
-            "POST_API_COMMENT",
-            "BUNDLE_COMMENT_BODY",
-            "POST_BUNDLE_COMMENT",
-        ]);
+    it("lets untrusted comment content set only the variables the posting steps consume", () => {
+        // #627 split `PostPrComments` in two so a bundle retry cannot re-post the
+        // create-only API comment. The rule the old single-job assertion encoded —
+        // a step that touches downloaded PR CI output runs restricted, and may set
+        // only an explicit list of variables — is re-expressed per job rather than
+        // relaxed to "some step somewhere is restricted".
+        const jobs = jobsOf(publisher).filter((job) => job.name === "PostApiComment" || job.name === "PostBundleComment");
+        expect(jobs.map((job) => job.name).sort()).toEqual(["PostApiComment", "PostBundleComment"]);
+
+        const permitted: Record<string, string[]> = {
+            // The API path still loads the artifact into variables the
+            // `GitHubComment@0` task reads, so it names them.
+            PostApiComment: ["API_COMMENT_BODY", "POST_API_COMMENT"],
+            // The bundle path reads its artifact from disk inside the reconciler
+            // and needs no pipeline variable at all, so it permits none.
+            PostBundleComment: [],
+        };
+
+        for (const job of jobs) {
+            // Every step that reads the downloaded artifact must be restricted:
+            // that is where untrusted bytes enter a credentialed agent.
+            const steps = job.body
+                .split(/\n(?=\s{18}-\s)/)
+                .filter((step) => step.includes("$(Pipeline.Workspace)") && !/^\s*-\s*(?:task|download):/m.test(step.split("\n")[0] ?? ""));
+            for (const step of steps) {
+                expect(step, `${job.name} has an unrestricted step reading downloaded artifacts`).toMatch(/target:\s*\n\s*commands:\s*restricted/);
+            }
+
+            const target = /target:\s*\n\s*commands:\s*restricted\s*\n\s*settableVariables:\s*(none\s*$|\n((?:\s*-\s*[A-Z][A-Z_]*\s*\n?)+))/m.exec(job.body);
+            expect(target, `${job.name} has no restricted settableVariables target`).toBeDefined();
+
+            const declared = target?.[2] === undefined ? [] : [...target[2].matchAll(/-\s*(\w+)/g)].map((match) => match[1]);
+            expect(declared, `${job.name} permits variables its posting step does not consume`).toEqual(permitted[job.name]);
+        }
     });
 });
 
@@ -731,9 +799,21 @@ describe("the administrator runbook closes the job-token queue path", () => {
     });
 
     it("requires an empirical 403 and a separate #627 queue identity", () => {
-        expect(guide).toContain("every request must return 403");
+        expect(guide).toContain("all three** must return\n  403");
         expect(guide).toContain("dedicated queue identity");
         expect(guide).toContain("Do not use `System.AccessToken` to queue the");
+    });
+
+    it("also denies the build-metadata writes that could forge publish history", () => {
+        // Queue permission alone is not enough. The poller matches prior publish
+        // attempts on build numbers and confirms them against queue-time
+        // parameters, and build numbers and tags are *mutable* by an identity
+        // holding these verbs — both of which are Allow by default. A pull
+        // request that can rewrite them cannot publish anything, but it can make
+        // the poller believe its comment was already posted, and so suppress its
+        // own bundle-size report.
+        expect(guide).toContain("Update build information");
+        expect(guide).toContain("Edit build quality");
     });
 });
 
@@ -1529,5 +1609,191 @@ describe("the job-block parser accepts and rejects the right shapes", () => {
         expect(callsUploadTemplate("          - template: upload-static-site.yml")).toBe(true);
         expect(callsUploadTemplate("          - template: config/templates/upload-static-site.yml")).toBe(true);
         expect(callsUploadTemplate("# see config/templates/upload-static-site.yml for the contract")).toBe(false);
+    });
+});
+
+/**
+ * Issue #627 restored *automatic* bundle-size comments after this repository's
+ * pull-request CI lost every write credential. The mechanism everyone reaches
+ * for — a pipeline completion trigger on the publisher — is the one that undoes
+ * the split: for two pipelines in the same repository, Azure runs the triggered
+ * pipeline on the triggering run's branch, so a pull-request build would make
+ * the credentialed publisher's YAML come from `refs/pull/<n>/merge`.
+ *
+ * The replacement is a scheduled poller on master that reads build metadata and
+ * queues the publisher. These assertions pin the properties that make that
+ * safe, and each is written so that the obvious convenience shortcut — a
+ * completion trigger, a shared token, the ambient job token, a runtime
+ * destination — fails rather than works.
+ */
+describe("the scheduled comment poller cannot be reached or steered from a pull request", () => {
+    const POLLER = "azure-pipelines-pr-comment-poller.yml";
+    const poller = read(POLLER);
+    const uncommented = withoutComments(poller);
+
+    it("is never triggered by a pull request or by another pipeline", () => {
+        expect(uncommented).toMatch(/^trigger:\s*none\s*$/m);
+        expect(uncommented).toMatch(/^pr:\s*none\s*$/m);
+
+        // The whole point. A `pipelines:` resource here would reintroduce the
+        // same-repository completion trigger the design forbids.
+        expect(uncommented, `${POLLER} declares a pipeline resource, which would run this credentialed YAML from a pull-request ref`).not.toMatch(/^\s*pipelines:\s*$/m);
+    });
+
+    it("schedules itself only on master and checks out master through a read-only connection", () => {
+        expect(uncommented).toMatch(/schedules:[\s\S]*?branches:\s*\n\s*include:\s*\n\s*-\s*master/);
+
+        const resource = /-\s*repository:\s*trusted[\s\S]*?ref:\s*(\S+)/.exec(uncommented);
+        expect(resource, `${POLLER} has no pinned trusted repository resource`).toBeDefined();
+        expect(resource?.[1]).toBe("refs/heads/master");
+        expect(uncommented).toMatch(/endpoint:\s*BabylonLite-Trusted-RepoRead/);
+
+        // The connection pull-request CI is authorized for must not also be the
+        // one a credentialed definition uses.
+        expect(uncommented, `${POLLER} reuses the PR CI checkout connection`).not.toContain("BabylonLite-PRCI-RepoRead");
+    });
+
+    it("holds no credential that can write to GitHub", () => {
+        // It reads pull-request metadata and it queues a build. Anything that can
+        // comment, label, push or deploy belongs in the publisher, behind the
+        // preflight, not in the thing that decides *when* to publish.
+        for (const forbidden of ["PR_COMMENT_TOKEN", "BabylonLite-PRComments", "gitHubConnection:", "NPM_PUBLISH_TOKEN", "DEPLOY_TOKEN", "BabylonJS-Deployment"]) {
+            expect(uncommented, `${POLLER} holds ${forbidden}, a credential the poller has no reason to be able to use`).not.toContain(forbidden);
+        }
+    });
+
+    it("takes its queue and metadata credentials from protected groups, not from pipeline variables", () => {
+        expect(uncommented).toMatch(/^\s*-\s*group:\s*BabylonLite-PRPublishQueue\s*$/m);
+        expect(uncommented).toMatch(/^\s*-\s*group:\s*BabylonLite-PRMetadata\s*$/m);
+
+        // A pipeline-level `- name:/value:` variable is not a protected resource,
+        // so no branch-control check would apply to it.
+        for (const secret of ["PR_PUBLISH_QUEUE_TOKEN", "PR_METADATA_TOKEN"]) {
+            expect(uncommented, `${POLLER} defines ${secret} as a plain pipeline variable, which no check protects`).not.toMatch(
+                new RegExp(`-\\s*name:\\s*${secret}\\s*\\n\\s*value:`)
+            );
+        }
+    });
+
+    it("runs the reconciler under a restricted agent that can set no variables at all", () => {
+        const step = /-\s*script:\s*pnpm poll:pr-comments[\s\S]*?target:\s*\n\s*commands:\s*(\w+)\s*\n\s*settableVariables:\s*(\S+)/.exec(uncommented);
+        expect(step, `${POLLER} does not run the poller under a restricted target`).toBeDefined();
+        expect(step?.[1]).toBe("restricted");
+        expect(step?.[2]).toBe("none");
+    });
+
+    it("fixes the repository it inspects at compile time", () => {
+        expect(uncommented).toMatch(/GITHUB_REPOSITORY:\s*"BabylonJS\/Babylon-Lite"/);
+        expect(uncommented).not.toContain("$(Build.Repository.Name)");
+    });
+
+    it("never installs dependency lifecycle scripts on the credentialed agent", () => {
+        const install = /-\s*script:\s*pnpm install[^\n]*/.exec(uncommented);
+        expect(install, `${POLLER} does not install dependencies`).toBeDefined();
+        expect(install?.[0]).toContain("--ignore-scripts");
+    });
+});
+
+describe("the publisher splits the two comment paths so a retry cannot duplicate a comment", () => {
+    const publisher = read(PUBLISHER);
+    const uncommented = withoutComments(publisher);
+
+    it("exposes an independent switch per comment path, defaulting to today's behaviour", () => {
+        // Both default `true` so a manual, emergency queue keeps behaving exactly
+        // as it does today; the poller is what narrows them per axis.
+        for (const parameter of ["postApiComment", "postBundleComment"]) {
+            const declaration = new RegExp(`-\\s*name:\\s*${parameter}\\b[\\s\\S]{0,240}?type:\\s*boolean[\\s\\S]{0,240}?default:\\s*true`);
+            expect(publisher, `${PUBLISHER} does not declare ${parameter} as a boolean defaulting to true`).toMatch(declaration);
+        }
+    });
+
+    it("keeps the API and bundle comments in separate jobs", () => {
+        // `GitHubComment@0` is create-only: re-running it posts a second comment.
+        // The bundle path must be retryable, so the two cannot share a job result.
+        const names = jobsOf(publisher).map((job) => job.name);
+        expect(names).toContain("PostApiComment");
+        expect(names).toContain("PostBundleComment");
+        expect(names, "PostPrComments still exists, so a bundle retry would re-post the create-only API comment").not.toContain("PostPrComments");
+    });
+
+    it("lets the bundle path fail, so the poller can see it and retry", () => {
+        const bundle = jobsOf(publisher).find((job) => job.name === "PostBundleComment");
+        expect(bundle, `${PUBLISHER} has no PostBundleComment job`).toBeDefined();
+
+        // Nothing in this job may swallow a failure. The job it replaced was
+        // tolerant at both the download *and* the task level, which is exactly
+        // why a failed bundle post was invisible and stale comments survived.
+        //
+        // The download in particular must stay intolerant. A tolerant download
+        // turns a transient fetch failure into an empty directory, the reconciler
+        // reads that as "nothing measured", and the warning-level job result
+        // retires the bundle axis as published against the latest build — issue
+        // #627 restored in full. "Nothing to download" is established from the
+        // server instead, by the condition below.
+        expect(withoutComments(bundle?.body ?? ""), "a tolerant step in the bundle job hides the failure the poller retries on").not.toMatch(/continueOnError:\s*true/);
+
+        const step = /-\s*script:\s*pnpm reconcile:bundle-comment[\s\S]*?(?=\n\s{18}-\s|$)/.exec(withoutComments(bundle?.body ?? ""));
+        expect(step, `${PUBLISHER} does not run the bundle reconciler`).toBeDefined();
+        expect(step?.[0], "the bundle reconciler swallows its own failures, so no retry can ever be triggered").not.toMatch(/continueOnError:\s*true/);
+    });
+
+    it("decides whether an artifact exists on the server, not from the agent's filesystem", () => {
+        // The two states are indistinguishable on disk and must be handled
+        // oppositely, so the answer has to come from somewhere a failed download
+        // cannot forge.
+        const preflight = jobsOf(publisher).find((job) => job.name === "Preflight");
+        const probe = /-\s*script:[\s\S]*?_apis\/build\/builds\/\$\{RUN_ID\}\/artifacts[\s\S]*?(?=\n\s{16}-\s|$)/.exec(withoutComments(preflight?.body ?? ""));
+        expect(probe, `${PUBLISHER} never asks the Build API which artifacts the PR CI run published`).toBeDefined();
+        expect(probe?.[0]).toMatch(/isOutput=true/);
+        expect(probe?.[0], "the probe must name the artifact it is looking for").toContain("bundle-comment");
+
+        // Preflight is the right place for it precisely because it has no GitHub
+        // credential: the ADO token and the comment token never share a job.
+        expect(preflight?.body, "Preflight must not gain a GitHub credential").not.toMatch(/PR_COMMENT_TOKEN|BabylonLite-PRComments/);
+    });
+
+    it("gates the bundle download on the server's answer, sourced from Preflight rather than an artifact", () => {
+        const bundle = jobsOf(publisher).find((job) => job.name === "PostBundleComment");
+        const body = withoutComments(bundle?.body ?? "");
+
+        const download = /-\s*task:\s*DownloadPipelineArtifact@2[\s\S]*?(?=\n\s{16}-\s|$)/.exec(body);
+        expect(download, `${PUBLISHER} does not download the bundle comment`).toBeDefined();
+        expect(download?.[0], "the download must be skipped when the server says there is no artifact").toMatch(/condition:[^\n]*BUNDLE_ARTIFACT_PRESENT/);
+
+        // Sourced from the trusted job's output. Anything artifact-derived here
+        // would let a pull request decide whether its own stale comment is
+        // retracted.
+        expect(body).toMatch(/BUNDLE_ARTIFACT_PRESENT[\s\S]{0,120}dependencies\.Preflight\.outputs\['bundleArtifact\.bundleArtifactPresent'\]/);
+        expect(body, "the reconciler must be told what the server said").toMatch(/BUNDLE_ARTIFACT_PRESENT:\s*"\$\(BUNDLE_ARTIFACT_PRESENT\)"/);
+    });
+
+    it("keeps the API path tolerant, because its task cannot be retried safely", () => {
+        // The asymmetry is deliberate and worth pinning: `GitHubComment@0` is
+        // create-only, so a retry duplicates the comment. Its download warns on
+        // every pull request that did not move the public API.
+        const api = jobsOf(publisher).find((job) => job.name === "PostApiComment");
+        expect(withoutComments(api?.body ?? ""), "the API path lost its tolerance, so ordinary runs will now be retried and duplicated").toMatch(/continueOnError:\s*true/);
+    });
+
+    it("gives every publisher run a build number derived only from compile-time parameters", () => {
+        const name = /^name:\s*(.+)$/m.exec(uncommented);
+        expect(name, `${PUBLISHER} has no build number format`).toBeDefined();
+
+        // The poller finds prior attempts for a triple by build number, so the
+        // format must be fixed at compile time from the parameters themselves.
+        const format = name?.[1] ?? "";
+        expect(format).toContain("${{ parameters.prNumber }}");
+        expect(format).toContain("${{ parameters.prCiRunId }}");
+        expect(format.replace(/\$\{\{[^}]*\}\}/g, "")).not.toMatch(/\$\((?!Rev:)/);
+    });
+
+    it("reconciles the bundle comment with trusted code rather than a create-only task", () => {
+        const bundle = withoutComments(jobsOf(publisher).find((job) => job.name === "PostBundleComment")?.body ?? "");
+        expect(bundle).toContain("pnpm reconcile:bundle-comment");
+
+        // The sticky comment needs update and list permissions, which the
+        // `GitHubComment@0` service connection does not expose to a script.
+        expect(bundle, "the bundle path still posts through the create-only comment task").not.toContain("GitHubComment@");
+        expect(bundle).toContain("PR_COMMENT_TOKEN");
     });
 });

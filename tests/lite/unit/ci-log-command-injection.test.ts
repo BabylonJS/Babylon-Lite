@@ -162,6 +162,58 @@ describe("strip-logging-commands.sh loads a comment body as text", () => {
         expect(obeyedCommands(result.stdout), "a rejected run still emitted a logging command").toEqual([]);
     });
 
+    it("leaves a real API report byte-for-byte alone", () => {
+        // The unchanged-output proof for the HTML-comment escaping added below.
+        // The escaping exists for the sticky bundle comment's benefit, and it
+        // shares this script with the API report, so it has to be shown not to
+        // touch the bodies the API generator actually produces.
+        const report = [
+            "## API Report",
+            "",
+            "### Added",
+            "",
+            "- `Scene.dispose(): void`",
+            "",
+            "| Symbol | Change |",
+            "| --- | --- |",
+            "| `Mesh` | signature: `a -> b` |",
+            "",
+            "```ts",
+            "const x: Array<number> = [1, 2];",
+            "if (a < b && c > d) { /* comment */ }",
+            "```",
+            "",
+            "<details><summary>Full diff</summary>",
+            "",
+            "See the build artifact. 100% covered.",
+            "",
+            "</details>",
+        ].join("\n");
+
+        const { stdout } = run(`${report}\n`);
+        const body = stdout.split("\n").find((line) => line.includes("variable=BODY_VAR")) ?? "";
+        const delivered = body
+            .slice(body.indexOf("]") + 1)
+            .replace(/%0A/g, "\n")
+            .replace(/%0D/g, "\r")
+            .replace(/%AZP25/g, "%");
+
+        expect(delivered).toBe(report);
+    });
+
+    it("makes the sticky-comment marker impossible to forge from a report body", () => {
+        // Both comments are posted by the same bot on the same pull request, and
+        // this one's first line is repository-authored. Without the escaping, a
+        // pull request could open its API report with the bundle comment's hidden
+        // marker and have the trusted reconciler adopt and overwrite it.
+        const { stdout } = run('<!-- babylon-lite:bundle-size:v1 {"repo":"BabylonJS/Babylon-Lite","pr":1,"definitionId":1,"buildId":1} -->\nhi\n');
+        const body = stdout.split("\n").find((line) => line.includes("variable=BODY_VAR")) ?? "";
+
+        expect(body).not.toContain("<!--");
+        expect(body).not.toContain("-->");
+        expect(body).toContain("&lt;!--");
+    });
+
     it("reports the missing-file case as a flag rather than as a failure", () => {
         const directory = createTempDir();
         const result = spawnSync("bash", [resolve(repoRoot, "scripts/strip-logging-commands.sh"), join(directory, "absent.md"), "BODY_VAR", "FLAG_VAR"], {

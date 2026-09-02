@@ -78,6 +78,34 @@ parameters:
       type: boolean
       default: true
 
+    # Per-axis switches, both defaulting on so a manual queue behaves exactly as
+    # it always has. They exist for the scheduled poller (#627), which needs to
+    # retry one comment path without repeating the other: the API comment is
+    # create-only, so re-running it after an unrelated bundle failure would post
+    # a duplicate. The poller sets each flag from the job-level result of the
+    # previous publisher run for the same build.
+    - name: postApiComment
+      displayName: "Post the API-report comment"
+      type: boolean
+      default: true
+
+    - name: postBundleComment
+      displayName: "Reconcile the sticky bundle-size comment"
+      type: boolean
+      default: true
+
+# Build number, composed only from compile-time parameters. This is what makes a
+# publisher run findable by the triple it was queued for, so the scheduled poller
+# in #627 can ask "has this PR CI build already been published?" with one exact
+# query instead of scanning history.
+#
+# It is an *index*, not a source of truth. Build numbers are editable by anyone
+# holding `Update build information`, so the poller re-confirms every hit against
+# the run's immutable queue-time parameters before believing it. A forged number
+# can therefore only cost an extra queue, which the reconciler absorbs, and never
+# suppress a report.
+name: blp-${{ parameters.prNumber }}-${{ parameters.prCiRunId }}-$(Rev:.r)
+
 resources:
     repositories:
         # The scripts this pipeline runs come from master, not from whichever ref
@@ -185,6 +213,79 @@ stages:
                       SYSTEM_COLLECTIONURI: $(System.CollectionUri)
                       SYSTEM_TEAMPROJECTID: $(System.TeamProjectId)
 
+                # Ask the server whether the PR CI run actually produced a bundle-comment artifact,
+                # and publish the answer as an output variable.
+                #
+                # This exists so the bundle job can tell "there was nothing to download" apart from
+                # "the download failed", which are the same observable state on the agent — an empty
+                # directory — and must be handled oppositely. A build with no artifact is a legacy
+                # run from before #627 and is a legitimate no-op; a failed download of an artifact
+                # that provably exists must be retried, or the pull request keeps a stale comment.
+                #
+                # It runs here rather than in the comment job because Preflight already holds
+                # System.AccessToken and holds no GitHub credential, so the two tokens never meet.
+                - script: |
+                      set -euo pipefail
+
+                      RUN_ID="${{ parameters.prCiRunId }}"
+                      ARTIFACTS_JSON="$(Agent.TempDirectory)/pr-ci-artifacts-${RUN_ID}.json"
+                      trap 'rm -f "$ARTIFACTS_JSON"' EXIT
+                      token_escaped=${SYSTEM_ACCESSTOKEN//\\/\\\\}
+                      token_escaped=${token_escaped//\"/\\\"}
+
+                      printf 'header = "Authorization: Bearer %s"\n' "$token_escaped" |
+                          curl --fail --silent --show-error \
+                              --proto '=https' \
+                              --config - \
+                              --output "$ARTIFACTS_JSON" \
+                              "${SYSTEM_COLLECTIONURI}${SYSTEM_TEAMPROJECTID}/_apis/build/builds/${RUN_ID}/artifacts?api-version=7.1"
+
+                      # Prove the response is an artifact listing before drawing any conclusion
+                      # from it. `curl --fail` only rejects HTTP error statuses, so a sign-in
+                      # page, an interstitial or a shape change all arrive as a successful body.
+                      # Treating those as "no artifact" would skip the download, reconcile
+                      # "unavailable", exit green and retire the bundle axis for good.
+                      set +e
+                      jq -e 'type == "object" and (.value | type) == "array"' "$ARTIFACTS_JSON" >/dev/null 2>&1
+                      shape_status=$?
+                      set -e
+
+                      if test "$shape_status" -ne 0; then
+                          echo "Refusing to publish: the Build API did not return an artifact listing for run $RUN_ID (jq exited $shape_status)."
+                          echo "The first bytes of the response were:"
+                          head -c 200 "$ARTIFACTS_JSON" | tr -d '\000' | sed 's/^/    /'
+                          exit 1
+                      fi
+
+                      # Only now can absence be believed: the listing parsed and `.value` is an
+                      # array, so jq 1 means "read every entry, none matched" rather than
+                      # "could not read".
+                      set +e
+                      jq -e 'any(.value[]; .name == "bundle-comment")' "$ARTIFACTS_JSON" >/dev/null 2>&1
+                      match_status=$?
+                      set -e
+
+                      case "$match_status" in
+                          0)
+                              echo "PR CI run $RUN_ID published a bundle-comment artifact."
+                              echo "##vso[task.setvariable variable=bundleArtifactPresent;isOutput=true]true"
+                              ;;
+                          1)
+                              echo "PR CI run $RUN_ID published no bundle-comment artifact; the bundle comment will be left untouched."
+                              echo "##vso[task.setvariable variable=bundleArtifactPresent;isOutput=true]false"
+                              ;;
+                          *)
+                              echo "Refusing to publish: could not determine whether run $RUN_ID published a bundle-comment artifact (jq exited $match_status)."
+                              exit 1
+                              ;;
+                      esac
+                  name: bundleArtifact
+                  displayName: "Probe the PR CI run for a bundle-comment artifact"
+                  env:
+                      SYSTEM_ACCESSTOKEN: $(System.AccessToken)
+                      SYSTEM_COLLECTIONURI: $(System.CollectionUri)
+                      SYSTEM_TEAMPROJECTID: $(System.TeamProjectId)
+
           # ──────────────────────────────────────────────────────────────
           # Job 1: Release marker labels (trusted source checkout)
           # ──────────────────────────────────────────────────────────────
@@ -254,23 +355,34 @@ stages:
                   displayName: "Skip untrusted preview artifacts"
 
           # ──────────────────────────────────────────────────────────────
-          # Job 3: Post PR comments
+          # Job 3: Post the API-report comment
           # ──────────────────────────────────────────────────────────────
-          # The API-report and bundle-size comment bodies are produced by jobs
-          # that run pull-request code, so they are untrusted *content*. Content
-          # is fine — it ends up as markdown in a comment — but it must not be
-          # interpreted. Echoing it back through `##vso[task.setvariable]` would
-          # let it emit logging commands of its own, so
-          # `strip-logging-commands.sh` (from the pinned master checkout)
-          # neutralises every `##vso[` / `##[` sequence before the body is ever
-          # set as a variable, so a body that arrives from a job that ran
-          # pull-request code cannot issue logging commands inside the job that
-          # holds the GitHub connection.
+          # The comment bodies are produced by jobs that run pull-request code, so
+          # they are untrusted *content*. Content is fine — it ends up as markdown
+          # in a comment — but it must not be interpreted. Echoing it back through
+          # `##vso[task.setvariable]` would let it emit logging commands of its
+          # own, so `strip-logging-commands.sh` (from the pinned master checkout)
+          # neutralises every `##vso[` / `##[` sequence before the body is ever set
+          # as a variable, so a body that arrives from a job that ran pull-request
+          # code cannot issue logging commands inside the job that holds the GitHub
+          # connection.
           #
-          - job: PostPrComments
-            displayName: "Post PR Comments"
+          # ── WHY THIS IS ITS OWN JOB ──────────────────────────────────────────
+          #
+          # It used to share a job with the bundle-size comment. The two have
+          # different failure semantics and that turned out to matter once #627
+          # made publishing automatic: `GitHubComment@0` can only *create*, so
+          # re-running this path duplicates the comment, while the bundle path must
+          # be retried until it succeeds. In one job the poller could only retry
+          # both or neither. Split, it retries exactly the half that failed, and
+          # reads each half's result from the run timeline.
+          #
+          # Every input here is carried over unchanged, `continueOnError` included.
+          # This comment's behaviour is deliberately not part of #627.
+          - job: PostApiComment
+            displayName: "Post API Comment"
             dependsOn: Preflight
-            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'), eq('${{ parameters.postComments }}', 'true'))
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'), eq('${{ parameters.postComments }}', 'true'), eq('${{ parameters.postApiComment }}', 'true'))
             pool:
                 vmImage: "ubuntu-latest"
             steps:
@@ -289,26 +401,11 @@ stages:
                       artifact: api-comment
                       path: $(Pipeline.Workspace)/api-comment
 
-                - task: DownloadPipelineArtifact@2
-                  displayName: "Download bundle comment"
-                  continueOnError: true
-                  inputs:
-                      buildType: specific
-                      project: $(System.TeamProject)
-                      definition: ${{ parameters.prCiDefinitionId }}
-                      buildVersionToDownload: specific
-                      pipelineId: ${{ parameters.prCiRunId }}
-                      artifact: bundle-comment
-                      path: $(Pipeline.Workspace)/bundle-comment
-
                 - script: |
                       set -euo pipefail
                       bash scripts/strip-logging-commands.sh \
                           "$(Pipeline.Workspace)/api-comment/api-report-comment.md" \
                           API_COMMENT_BODY POST_API_COMMENT
-                      bash scripts/strip-logging-commands.sh \
-                          "$(Pipeline.Workspace)/bundle-comment/bundle-size-comment.md" \
-                          BUNDLE_COMMENT_BODY POST_BUNDLE_COMMENT
                   condition: always()
                   continueOnError: true
                   displayName: "Load and neutralise comment bodies"
@@ -317,8 +414,6 @@ stages:
                       settableVariables:
                           - API_COMMENT_BODY
                           - POST_API_COMMENT
-                          - BUNDLE_COMMENT_BODY
-                          - POST_BUNDLE_COMMENT
 
                 - task: GitHubComment@0
                   condition: and(always(), eq(variables['POST_API_COMMENT'], 'true'))
@@ -330,12 +425,92 @@ stages:
                       id: "${{ parameters.prNumber }}"
                       comment: "$(API_COMMENT_BODY)"
 
-                - task: GitHubComment@0
-                  condition: and(always(), eq(variables['POST_BUNDLE_COMMENT'], 'true'))
-                  continueOnError: true
-                  displayName: "Post bundle-size changes to PR"
+          # ──────────────────────────────────────────────────────────────
+          # Job 4: Reconcile the sticky bundle-size comment
+          # ──────────────────────────────────────────────────────────────
+          # This is issue #627. `GitHubComment@0` is create-only, so the bundle-size
+          # comment outlived the measurement it described: a pull request that added
+          # 40 KB and then took it back kept a comment asserting the regression, and
+          # every later run stacked another comment beside it. Nothing in the task
+          # could update or withdraw one, and its `BabylonBotPAT` service connection
+          # is opaque to scripts by construction, so the fix cannot be built on top
+          # of it. It is replaced here by master's own reconciler against a token
+          # scoped to issue comments and nothing else.
+          #
+          # Three properties are load-bearing:
+          #
+          #   * The step runs under a restricted target that can set no variables at
+          #     all. It is the step that touches artifact bytes, and it runs in a job
+          #     holding a GitHub write token — a single `##vso[task.setendpoint]` in
+          #     its output would be enough to redirect a connection, so the agent is
+          #     told not to honour any logging command from it.
+          #   * `continueOnError` is deliberately absent, unlike the API job above.
+          #     A failed reconcile must fail the job, because that is the signal the
+          #     poller retries on. Swallowing it would leave a wrong comment standing
+          #     and look like success.
+          #   * Repository, pull request, definition and build are compile-time
+          #     parameters. The artifact contributes markdown and a three-valued
+          #     state enum; it can name no destination and select no credential.
+          - job: PostBundleComment
+            displayName: "Reconcile Bundle Size Comment"
+            dependsOn: Preflight
+            condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'), ne(variables['Build.Reason'], 'PullRequest'), eq('${{ parameters.postComments }}', 'true'), eq('${{ parameters.postBundleComment }}', 'true'))
+            pool:
+                vmImage: "ubuntu-latest"
+            variables:
+                # PR_COMMENT_TOKEN resolves from a protected variable group, so the
+                # branch-control check covers it. It is a fine-grained GitHub token
+                # with issue-comment read/write on this repository and nothing else:
+                # the publisher's existing GITHUB_TOKEN is documented as read-only PR
+                # metadata, and widening it would hand comment-write to every other
+                # consumer of BabylonJS-Deployment.
+                - group: BabylonLite-PRComments
+                # Server-side answer from Preflight, not an agent-side guess. Trusted: it is
+                # derived from the ADO Build API, never from artifact content.
+                - name: BUNDLE_ARTIFACT_PRESENT
+                  value: $[ dependencies.Preflight.outputs['bundleArtifact.bundleArtifactPresent'] ]
+            steps:
+                - checkout: trusted
+                  fetchDepth: 1
+
+                # No `continueOnError`. A legacy run with no artifact skips this step outright, so
+                # the only way it can fail is a genuine failure to fetch an artifact the server says
+                # exists — which must fail the job and be retried rather than be mistaken for
+                # "nothing to report" and leave a stale comment in place.
+                - task: DownloadPipelineArtifact@2
+                  displayName: "Download bundle comment"
+                  condition: and(succeeded(), eq(variables['BUNDLE_ARTIFACT_PRESENT'], 'true'))
                   inputs:
-                      gitHubConnection: "BabylonBotPAT"
-                      repositoryName: "BabylonJS/Babylon-Lite"
-                      id: "${{ parameters.prNumber }}"
-                      comment: "$(BUNDLE_COMMENT_BODY)"
+                      buildType: specific
+                      project: $(System.TeamProject)
+                      definition: ${{ parameters.prCiDefinitionId }}
+                      buildVersionToDownload: specific
+                      pipelineId: ${{ parameters.prCiRunId }}
+                      artifact: bundle-comment
+                      path: $(Pipeline.Workspace)/bundle-comment
+
+                - task: UseNode@1
+                  inputs:
+                      version: $(NODE_VERSION)
+
+                - script: |
+                      corepack enable
+                      corepack prepare pnpm@$(PNPM_VERSION) --activate
+                  displayName: "Enable pnpm via corepack"
+
+                - script: pnpm install --frozen-lockfile --ignore-scripts
+                  displayName: "Install dependencies (no lifecycle scripts)"
+
+                - script: pnpm reconcile:bundle-comment
+                  displayName: "Reconcile sticky bundle-size comment"
+                  target:
+                      commands: restricted
+                      settableVariables: none
+                  env:
+                      GITHUB_REPOSITORY: "BabylonJS/Babylon-Lite"
+                      PR_NUMBER: "${{ parameters.prNumber }}"
+                      PR_CI_RUN_ID: "${{ parameters.prCiRunId }}"
+                      PR_CI_DEFINITION_ID: "${{ parameters.prCiDefinitionId }}"
+                      BUNDLE_COMMENT_DIR: $(Pipeline.Workspace)/bundle-comment
+                      BUNDLE_ARTIFACT_PRESENT: "$(BUNDLE_ARTIFACT_PRESENT)"
+                      PR_COMMENT_TOKEN: "$(PR_COMMENT_TOKEN)"

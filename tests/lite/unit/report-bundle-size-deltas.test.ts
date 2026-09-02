@@ -14,9 +14,10 @@ interface RunReporterOptions {
     current?: unknown;
     master?: unknown;
     scenes?: unknown;
+    env?: Record<string, string>;
 }
 
-function runReporter(options: RunReporterOptions): { stdout: string; comment: string | null } {
+function runReporter(options: RunReporterOptions): { stdout: string; comment: string | null; state: string | null } {
     const dir = mkdtempSync(resolve(tmpdir(), "bundle-size-deltas-"));
     tempDirs.push(dir);
 
@@ -42,12 +43,16 @@ function runReporter(options: RunReporterOptions): { stdout: string; comment: st
             BUNDLE_SIZE_MASTER_MANIFEST: masterPath,
             BUNDLE_SIZE_SCENE_CONFIG: sceneConfigPath,
             BUNDLE_SIZE_COMMENT_PATH: outputPath,
+            ...options.env,
         },
     });
+
+    const statePath = resolve(dir, "bundle-comment-state.json");
 
     return {
         stdout,
         comment: existsSync(outputPath) ? readFileSync(outputPath, "utf-8") : null,
+        state: existsSync(statePath) ? (JSON.parse(readFileSync(statePath, "utf-8")) as { state: string }).state : null,
     };
 }
 
@@ -567,6 +572,103 @@ describe("report-bundle-size-deltas", () => {
 
             expect(result.stdout).toContain("##vso[task.setvariable variable=POST_BUNDLE_COMMENT]false");
             expect(result.comment).toContain("No changes detected");
+        });
+    });
+
+    /**
+     * Issue #627 made the bundle comment sticky, which means the publisher now has to be able to
+     * *retract* a report as well as post one. That only works if this script says which of three
+     * things happened, every time it runs — and in particular if "I could not measure" is
+     * distinguishable from "I measured, and there is nothing to report".
+     *
+     * Collapsing those two would be silent and wrong in the worst direction: a failed baseline
+     * download would look like a clean run and retract a regression report that is still accurate.
+     */
+    describe("stages an explicit comment state for the trusted publisher", () => {
+        it("says `report` when there is something worth saying", () => {
+            const result = runReporter({
+                current: { scene1: { rawKB: 95.4 } },
+                master: { scene1: { rawKB: 93.0 } },
+                scenes: [{ id: 1, slug: "scene1", name: "Scene 1" }],
+            });
+
+            expect(result.state).toBe("report");
+            expect(result.comment).not.toBeNull();
+        });
+
+        it("says `none` when the run was clean, so a stale comment can be retracted", () => {
+            const result = runReporter({
+                current: { scene1: { rawKB: 93.4 } },
+                master: { scene1: { rawKB: 93.0 } },
+                scenes: [{ id: 1, slug: "scene1", name: "Scene 1" }],
+            });
+
+            expect(result.state).toBe("none");
+        });
+
+        it("says `unavailable`, not `none`, when the master baseline could not be read", () => {
+            // The distinction that keeps a real regression report on the pull request when the
+            // baseline fetch fails.
+            const result = runReporter({
+                current: { scene1: { rawKB: 95.4 } },
+                scenes: [{ id: 1, slug: "scene1", name: "Scene 1" }],
+            });
+
+            expect(result.state).toBe("unavailable");
+        });
+
+        it("says `none` when no bundle scene is affected, so nothing was measured on purpose", () => {
+            // PR CI skips the build and the ceiling checks when the diff cannot reach a bundle
+            // scene (#638). Nothing is measured, but sizes provably did not move, so a comment
+            // an earlier push left behind has to be retracted rather than stranded.
+            const result = runReporter({
+                current: { scene1: { rawKB: 95.4 } },
+                master: { scene1: { rawKB: 93.0 } },
+                scenes: [{ id: 1, slug: "scene1", name: "Scene 1" }],
+                env: { BUNDLE_SCENES_AFFECTED: "false" },
+            });
+
+            expect(result.state, "a skipped measurement must retract, not report").toBe("none");
+            expect(result.comment, "no comment body should be produced when nothing was measured").toBeNull();
+        });
+
+        it("still measures when the selector says a bundle scene is affected", () => {
+            const result = runReporter({
+                current: { scene1: { rawKB: 95.4 } },
+                master: { scene1: { rawKB: 93.0 } },
+                scenes: [{ id: 1, slug: "scene1", name: "Scene 1" }],
+                env: { BUNDLE_SCENES_AFFECTED: "true" },
+            });
+
+            expect(result.state).toBe("report");
+        });
+
+        it("measures rather than retracting when the selector's answer is missing or unexpanded", () => {
+            // If the selection step never ran, Azure leaves `$(RUN_BUNDLE_TESTS)` unexpanded. That
+            // is an unknown, and an unknown must never take the retracting branch.
+            for (const value of ["$(RUN_BUNDLE_TESTS)", "", "False", "no"]) {
+                const result = runReporter({
+                    current: { scene1: { rawKB: 95.4 } },
+                    master: { scene1: { rawKB: 93.0 } },
+                    scenes: [{ id: 1, slug: "scene1", name: "Scene 1" }],
+                    env: { BUNDLE_SCENES_AFFECTED: value },
+                });
+
+                expect(result.state, `'${value}' was treated as a definite "no scenes affected"`).toBe("report");
+            }
+        });
+
+        it("writes the state file next to the markdown the publisher downloads", () => {
+            // Both live in the `bundle-comment` artifact directory. If the state file were written
+            // anywhere else the publisher would see a missing state and no-op forever, which is
+            // exactly the silent-nothing-happens failure the sticky comment exists to remove.
+            const result = runReporter({
+                current: { scene1: { rawKB: 95.4 } },
+                master: { scene1: { rawKB: 93.0 } },
+                scenes: [{ id: 1, slug: "scene1", name: "Scene 1" }],
+            });
+
+            expect(result.state).not.toBeNull();
         });
     });
 });
