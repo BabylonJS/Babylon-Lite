@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 import { LiteCompatError, unsupported } from "../src/error";
 import { ParticleSystem } from "../src/particles/particle-system";
@@ -63,6 +63,7 @@ import {
 import { GLTF2, OpenPBRMaterialLoadingAdapter as RootOpenPBRMaterialLoadingAdapter, RegisterOpenpbrMaterial as RootRegisterOpenpbrMaterial } from "../src/index";
 import { MeshBuilder, CreateTiledBox, CreateTiledPlane } from "../src/meshes/meshes";
 import { SceneLoader } from "../src/loading/scene-loader";
+import { Material } from "../src/materials/materials";
 
 describe("LiteCompatError", () => {
     it("formats a message with the API name", () => {
@@ -88,7 +89,6 @@ describe("Unsupported API stubs throw on construction", () => {
         ["ShaderMaterial", () => new ShaderMaterial()],
         ["OpenPBRMaterial", () => new OpenPBRMaterial("openpbr", undefined, true)],
         ["OpenPBRMaterialDefines", () => new OpenPBRMaterialDefines({ CUSTOM: { type: "boolean", default: false } })],
-        ["OpenPBRMaterialLoadingAdapter", () => new OpenPBRMaterialLoadingAdapter({} as never)],
         ["RectAreaLight", () => new RectAreaLight()],
         ["ParticleSystem", () => new ParticleSystem()],
         ["GPUParticleSystem", () => new GPUParticleSystem()],
@@ -138,6 +138,14 @@ describe("OpenPBR unsupported exports", () => {
     it("throws when OpenPBR registration is requested", () => {
         expect(() => RegisterOpenpbrMaterial()).toThrow(LiteCompatError);
         expect(() => RegisterOpenpbrMaterial()).toThrow(/RegisterOpenpbrMaterial/);
+    });
+
+    it("accepts an OpenPBRMaterial in the loading adapter", () => {
+        expectTypeOf<OpenPBRMaterial>().toMatchTypeOf<Material>();
+        const material: OpenPBRMaterial = Object.create(OpenPBRMaterial.prototype);
+
+        expect(() => new OpenPBRMaterialLoadingAdapter(material)).toThrow(LiteCompatError);
+        expect(() => new OpenPBRMaterialLoadingAdapter(material)).toThrow(/OpenPBRMaterialLoadingAdapter/);
     });
 });
 

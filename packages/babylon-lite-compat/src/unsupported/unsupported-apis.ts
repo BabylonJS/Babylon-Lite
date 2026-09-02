@@ -13,7 +13,7 @@
  */
 
 import { unsupported } from "../error.js";
-import type { Material } from "../materials/materials.js";
+import { Material } from "../materials/materials.js";
 import type { Scene } from "../scene/scene.js";
 
 // ─── Materials ───────────────────────────────────────────────────────
@@ -35,10 +35,21 @@ export class BackgroundMaterial {
     }
 }
 
-export class OpenPBRMaterial {
+export class OpenPBRMaterial extends Material {
+    /** @internal Unsupported stubs never expose a backing Lite material. */
+    declare public readonly _lite: never;
+
     public constructor(_name: string, _scene?: Scene, _forceGLSL = false) {
+        super(_name);
         unsupported(
             "OpenPBRMaterial",
+            "OpenPBR requires a distinct shader/material model and parameter mapping that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
+        );
+    }
+
+    public clone(_name: string): OpenPBRMaterial {
+        return unsupported(
+            "OpenPBRMaterial.clone",
             "OpenPBR requires a distinct shader/material model and parameter mapping that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
         );
     }
