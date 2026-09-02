@@ -63,7 +63,7 @@ import {
 import { GLTF2, OpenPBRMaterialLoadingAdapter as RootOpenPBRMaterialLoadingAdapter, RegisterOpenpbrMaterial as RootRegisterOpenpbrMaterial } from "../src/index";
 import { MeshBuilder, CreateTiledBox, CreateTiledPlane } from "../src/meshes/meshes";
 import { SceneLoader } from "../src/loading/scene-loader";
-import { Material } from "../src/materials/materials";
+import { Material, PushMaterial } from "../src/materials/materials";
 
 describe("LiteCompatError", () => {
     it("formats a message with the API name", () => {
@@ -142,10 +142,18 @@ describe("OpenPBR unsupported exports", () => {
 
     it("accepts an OpenPBRMaterial in the loading adapter", () => {
         expectTypeOf<OpenPBRMaterial>().toMatchTypeOf<Material>();
+        expectTypeOf<OpenPBRMaterial>().toMatchTypeOf<PushMaterial>();
         const material: OpenPBRMaterial = Object.create(OpenPBRMaterial.prototype);
 
         expect(() => new OpenPBRMaterialLoadingAdapter(material)).toThrow(LiteCompatError);
         expect(() => new OpenPBRMaterialLoadingAdapter(material)).toThrow(/OpenPBRMaterialLoadingAdapter/);
+    });
+
+    it("exposes the upstream-shaped clone signature", () => {
+        const material: OpenPBRMaterial = Object.create(OpenPBRMaterial.prototype);
+
+        expect(() => material.clone("clone", false, "/textures/")).toThrow(LiteCompatError);
+        expect(() => material.clone("clone", false, "/textures/")).toThrow(/OpenPBRMaterial\.clone/);
     });
 });
 
