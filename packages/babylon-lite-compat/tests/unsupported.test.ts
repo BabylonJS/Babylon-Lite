@@ -155,6 +155,13 @@ describe("OpenPBR unsupported exports", () => {
         expect(() => material.clone("clone", false, "/textures/")).toThrow(LiteCompatError);
         expect(() => material.clone("clone", false, "/textures/")).toThrow(/OpenPBRMaterial\.clone/);
     });
+
+    it("fails loudly when its unsupported Lite backing is accessed", () => {
+        const material: OpenPBRMaterial = Object.create(OpenPBRMaterial.prototype);
+
+        expect(() => material._lite).toThrow(LiteCompatError);
+        expect(() => material._lite).toThrow(/OpenPBRMaterial\._lite/);
+    });
 });
 
 describe("HTML-texture function stubs throw on call", () => {

@@ -38,7 +38,12 @@ export class BackgroundMaterial {
 
 export class OpenPBRMaterial extends PushMaterial {
     /** @internal Unsupported stubs never expose a backing Lite material. */
-    declare public readonly _lite: never;
+    public override get _lite(): never {
+        return unsupported(
+            "OpenPBRMaterial._lite",
+            "OpenPBR requires a distinct shader/material model and parameter mapping that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
+        );
+    }
 
     public constructor(_name: string, _scene?: Scene, _forceGLSL = false) {
         super(_name);
