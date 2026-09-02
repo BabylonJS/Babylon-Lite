@@ -1,8 +1,9 @@
 import { addToScene, createArcRotateCamera, createEngine, createPlane, createSceneContext, createShaderMaterial, registerScene, startEngine } from "babylon-lite";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
-const vertexSource = `struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>,};
+const vertexSource = wgsl`struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>,};
 @vertex fn mainVertex(input:VertexInput)->VertexOutput{var out:VertexOutput;out.position=shaderSystem.worldViewProjection*vec4<f32>(input.position,1.0);out.uv=input.uv;return out;}`;
-const fragmentSource = `struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>,};
+const fragmentSource = wgsl`struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>,};
 @fragment fn mainFragment(input:VertexOutput)->@location(0) vec4<f32>{if(distance(input.uv,vec2<f32>(0.5,0.5))<0.18){discard;}return vec4<f32>(1.0,0.25,0.05,0.55);}`;
 
 async function main(): Promise<void> {

@@ -117,21 +117,21 @@ function updateDofBlurShader(shader: PostProcessShaderConfig, kernel: number): v
     const center = samples[samples.length - 1]!;
     const offsetSamples = samples.slice(0, samples.length - 1);
     const varyingCount = Math.min(offsetSamples.length, MAX_VERTEX_BLUR_SAMPLES);
-    shader.vertexOutputWGSL = "";
-    shader.vertexMainWGSL = "";
+    shader.vertexOutputWGSL = wgsl``;
+    shader.vertexMainWGSL = wgsl``;
     for (let i = 0; i < varyingCount; i++) {
-        shader.vertexOutputWGSL += wgsl`,@location(${i + 1}) sampleCoord${i}:vec2f`;
-        shader.vertexMainWGSL += wgsl`out.sampleCoord${i}=out.uv+dofBlurParams.delta*${wgslFloat(offsetSamples[i]!.offset)};`;
+        shader.vertexOutputWGSL = wgsl`${shader.vertexOutputWGSL},@location(${i + 1}) sampleCoord${i}:vec2f`;
+        shader.vertexMainWGSL = wgsl`${shader.vertexMainWGSL}out.sampleCoord${i}=out.uv+dofBlurParams.delta*${wgslFloat(offsetSamples[i]!.offset)};`;
     }
     let body = wgsl`var blend=textureSample(sourceTextureSampler,sourceSampler,input.uv)*${wgslFloat(center.weight)};`;
-    body += wgsl`var sumOfWeights=${wgslFloat(center.weight)};`;
+    body = wgsl`${body}var sumOfWeights=${wgslFloat(center.weight)};`;
     for (let i = 0; i < offsetSamples.length; i++) {
         const sample = offsetSamples[i]!;
         const coord = i < varyingCount ? `input.sampleCoord${i}` : `(input.uv+dofBlurParams.delta*${wgslFloat(sample.offset)})`;
-        body += wgsl`let f${i}=sampleCoC(${coord});let w${i}=${wgslFloat(sample.weight)}*f${i};sumOfWeights=sumOfWeights+w${i};`;
-        body += wgsl`blend=blend+textureSample(sourceTextureSampler,sourceSampler,${coord})*w${i};`;
+        body = wgsl`${body}let f${i}=sampleCoC(${coord});let w${i}=${wgslFloat(sample.weight)}*f${i};sumOfWeights=sumOfWeights+w${i};`;
+        body = wgsl`${body}blend=blend+textureSample(sourceTextureSampler,sourceSampler,${coord})*w${i};`;
     }
-    body += wgsl`return blend/sumOfWeights;`;
+    body = wgsl`${body}return blend/sumOfWeights;`;
     shader.fragmentWGSL = DOF_BLUR_COC_SAMPLE_WGSL;
     shader.fragmentWrapperWGSL = wgsl`@fragment fn postProcessFragment(input:PostProcessVertexOutput)->@location(0) vec4f{${body}}`;
 }
@@ -165,7 +165,7 @@ export function createDepthOfFieldBlurPostProcessTask(config: DepthOfFieldBlurPo
             data[0] = params.direction.x / width;
             data[1] = params.direction.y / height;
         },
-        fragmentWGSL: "",
+        fragmentWGSL: wgsl``,
     };
     updateDofBlurShader(shader, params.kernel);
     const task = createPostProcessTask(

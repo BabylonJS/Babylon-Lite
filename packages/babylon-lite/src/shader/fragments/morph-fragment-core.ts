@@ -60,7 +60,7 @@ function patchMorphStorage(composed: ComposedShader): ComposedShader {
     const entries = (composed._meshBGLDescriptor.entries as GPUBindGroupLayoutEntry[]).map((e) =>
         morphBindings.has(e.binding) ? { ...e, buffer: { type: "read-only-storage" as const } } : e
     );
-    return { ...composed, _vertexWGSL: vertexWGSL, _meshBGLDescriptor: { ...composed._meshBGLDescriptor, entries } };
+    return { ...composed, _vertexWGSL: wgsl`${vertexWGSL}`, _meshBGLDescriptor: { ...composed._meshBGLDescriptor, entries } };
 }
 
 /**

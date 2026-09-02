@@ -7,7 +7,7 @@ import { buildRenderTarget, createRenderTarget, disposeRenderTarget, targetSigna
 import { getBilinearSampler, getNearestSampler } from "../resource/samplers.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
-import { wgsl } from "../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../shader/wgsl.js";
 
 /** Source sampling filter for a post-process pass. */
 export type PostProcessSamplingMode = "nearest" | "linear";
@@ -15,15 +15,15 @@ export type PostProcessSamplingMode = "nearest" | "linear";
 export type PostProcessAlphaMode = 0 | 1 | 2 | 7;
 
 export interface PostProcessShaderConfig {
-    fragmentWGSL: string;
-    vertexOutputWGSL?: string;
-    vertexMainWGSL?: string;
-    fragmentWrapperWGSL?: string;
-    uniformWGSL?: string;
+    fragmentWGSL: WgslSource;
+    vertexOutputWGSL?: WgslSource;
+    vertexMainWGSL?: WgslSource;
+    fragmentWrapperWGSL?: WgslSource;
+    uniformWGSL?: WgslSource;
     uniformByteLength?: number;
     uniformBinding?: number;
     writeUniforms?: (data: Float32Array) => void;
-    extraTextureWGSL?: string;
+    extraTextureWGSL?: WgslSource;
     extraTextures?: readonly RenderTarget[];
 }
 

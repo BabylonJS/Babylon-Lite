@@ -77,7 +77,7 @@ export function createThinInstanceFragment(hasInstanceColor: boolean): ShaderFra
 
         _vertexSlots: {
             VW: wgsl`let instanceWorld = mat4x4<f32>(world0, world1, world2, world3);\nfinalWorld = mesh.world * instanceWorld;`,
-            VB: hasInstanceColor ? wgsl`out.vInstanceColor = instanceColor;` : "",
+            VB: hasInstanceColor ? wgsl`out.vInstanceColor = instanceColor;` : wgsl``,
         },
 
         _fragmentSlots: hasInstanceColor

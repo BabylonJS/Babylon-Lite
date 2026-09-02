@@ -2,7 +2,7 @@ import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { createPostProcessTask, type PostProcessTask, type PostProcessTaskConfig } from "../frame-graph/post-process-task.js";
 import type { SceneContext } from "../scene/scene-core.js";
-import { wgsl as wgslTag } from "../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../shader/wgsl.js";
 
 /**
  * Configuration for `createDepthOfFieldMergePostProcessTask`.
@@ -26,44 +26,39 @@ export type DepthOfFieldMergePostProcessTask = PostProcessTask;
 
 // Binds `dofCocTexture` then `blurStep0..N`, where `blurStep0` is the MOST
 // blurred step (matches the BJS reverse binding in `depthOfFieldMergeTask`).
-function buildMergeExtraTextureWGSL(blurLevel: number): string {
-    let wgsl = wgslTag`@group(0) @binding(2) var dofCocTexture:texture_2d<f32>;@group(0) @binding(3) var blurStep0:texture_2d<f32>;`;
+function buildMergeExtraTextureWGSL(blurLevel: number): WgslSource {
+    let source = wgsl`@group(0) @binding(2) var dofCocTexture:texture_2d<f32>;@group(0) @binding(3) var blurStep0:texture_2d<f32>;`;
     if (blurLevel > 0) {
-        wgsl += wgslTag`@group(0) @binding(4) var blurStep1:texture_2d<f32>;`;
+        source = wgsl`${source}@group(0) @binding(4) var blurStep1:texture_2d<f32>;`;
     }
     if (blurLevel > 1) {
-        wgsl += wgslTag`@group(0) @binding(5) var blurStep2:texture_2d<f32>;`;
+        source = wgsl`${source}@group(0) @binding(5) var blurStep2:texture_2d<f32>;`;
     }
-    return wgsl;
+    return source;
 }
 
 // Ports `depthOfFieldMerge.fragment.fx`. `color` is the original image (the
 // framework already sampled the source). All other reads use
 // `textureSampleLevel(..., 0.0)` like BJS.
-function buildMergeFragmentWGSL(blurLevel: number): string {
-    const head =
-        wgslTag`fn applyPostProcess(color:vec4f,uv:vec2f)->vec4f{` +
-        wgslTag`let coc=textureSampleLevel(dofCocTexture,sourceSampler,uv,0.0).r;` +
-        wgslTag`let blurred0=textureSampleLevel(blurStep0,sourceSampler,uv,0.0);`;
+function buildMergeFragmentWGSL(blurLevel: number): WgslSource {
+    const head = wgsl`fn applyPostProcess(color:vec4f,uv:vec2f)->vec4f{
+let coc=textureSampleLevel(dofCocTexture,sourceSampler,uv,0.0).r;
+let blurred0=textureSampleLevel(blurStep0,sourceSampler,uv,0.0);`;
     if (blurLevel === 0) {
-        return head + wgslTag`return mix(color,blurred0,coc);}`;
+        return wgsl`${head}return mix(color,blurred0,coc);}`;
     }
     if (blurLevel === 1) {
-        return (
-            head +
-            wgslTag`let blurred1=textureSampleLevel(blurStep1,sourceSampler,uv,0.0);` +
-            wgslTag`if(coc<0.5){return mix(color,blurred1,coc/0.5);}` +
-            wgslTag`return mix(blurred1,blurred0,(coc-0.5)/0.5);}`
-        );
+        return wgsl`${head}
+let blurred1=textureSampleLevel(blurStep1,sourceSampler,uv,0.0);
+if(coc<0.5){return mix(color,blurred1,coc/0.5);}
+return mix(blurred1,blurred0,(coc-0.5)/0.5);}`;
     }
-    return (
-        head +
-        wgslTag`let blurred1=textureSampleLevel(blurStep1,sourceSampler,uv,0.0);` +
-        wgslTag`let blurred2=textureSampleLevel(blurStep2,sourceSampler,uv,0.0);` +
-        wgslTag`if(coc<0.33){return mix(color,blurred2,coc/0.33);}` +
-        wgslTag`if(coc<0.66){return mix(blurred2,blurred1,(coc-0.33)/0.33);}` +
-        wgslTag`return mix(blurred1,blurred0,(coc-0.66)/0.34);}`
-    );
+    return wgsl`${head}
+let blurred1=textureSampleLevel(blurStep1,sourceSampler,uv,0.0);
+let blurred2=textureSampleLevel(blurStep2,sourceSampler,uv,0.0);
+if(coc<0.33){return mix(color,blurred2,coc/0.33);}
+if(coc<0.66){return mix(blurred2,blurred1,(coc-0.33)/0.33);}
+return mix(blurred1,blurred0,(coc-0.66)/0.34);}`;
 }
 
 /**

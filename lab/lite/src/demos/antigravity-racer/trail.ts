@@ -21,7 +21,7 @@ import type { EngineContext, Mesh, ShaderMaterial, StorageBuffer, Vec3 } from "b
 import { createMeshFromData, createShaderMaterial, createStorageBuffer, disposeStorageBuffer, setShaderStorageBuffer, updateStorageBuffer } from "babylon-lite";
 
 import { HUGE_BOUND_MAX, HUGE_BOUND_MIN } from "./constants.js";
-import { wgsl } from "babylon-lite/shader/wgsl.js";
+import { wgsl, type WgslSource } from "babylon-lite/shader/wgsl.js";
 
 /** History samples kept per ship (`trailLength` in the playground). */
 export const TRAIL_HISTORY = 256;
@@ -73,7 +73,7 @@ export function buildTrailStrip(): { positions: Float32Array; normals: Float32Ar
 }
 
 /** Vertex stage: the node graph, statement for statement. */
-function vertexSource(): string {
+function vertexSource(): WgslSource {
     return wgsl`struct VertexOutput {
 @builtin(position) position: vec4<f32>,
 @location(0) vv: f32,
@@ -108,7 +108,7 @@ return out;
 }
 
 /** Fragment stage: the graph's constant cyan with `sin(3.14·sx) · sin(1.57·v) · intensity` alpha. */
-function fragmentSource(): string {
+function fragmentSource(): WgslSource {
     return wgsl`struct VertexOutput {
 @builtin(position) position: vec4<f32>,
 @location(0) vv: f32,

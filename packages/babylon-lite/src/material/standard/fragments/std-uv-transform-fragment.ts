@@ -126,9 +126,9 @@ om:vec4<f32>,ot:vec4<f32>,
 fn stdTxfUV(uv:vec2<f32>,m:vec4<f32>,t:vec2<f32>)->vec2<f32>{
 return vec2<f32>(dot(m.xy,uv),dot(m.zw,uv))+t;
 }`,
-        _vertexSlots: { VB: assignments.join("\n") },
+        _vertexSlots: { VB: wgsl`${assignments.join("\n")}` },
         _pc: (composed) => {
-            let fragmentWGSL = composed._fragmentWGSL;
+            let fragmentWGSL: string = composed._fragmentWGSL;
             for (const [texture, sampler, varying] of [
                 ["eT", "eS", "ve"],
                 ["sT", "sS", "vs"],
@@ -143,7 +143,7 @@ return vec2<f32>(dot(m.xy,uv),dot(m.zw,uv))+t;
             fragmentWGSL = fragmentWGSL
                 .replace(/perturbNormal\(input\.vn,\s*input\.vp,\s*input\.vu,\s*mat\.bs\)/g, "perturbNormal(input.vn, input.vp, input.vb, mat.bs)")
                 .replace(/textureSample\(lT,\s*lS,\s*(?:input\.v[uv]|vec2<f32>\(input\.v[uv]\.x,\s*1\.0\s*-\s*input\.v[uv]\.y\))\)/g, "textureSample(lT, lS, input.vl)");
-            return { ...composed, _fragmentWGSL: fragmentWGSL };
+            return { ...composed, _fragmentWGSL: wgsl`${fragmentWGSL}` };
         },
     };
 }

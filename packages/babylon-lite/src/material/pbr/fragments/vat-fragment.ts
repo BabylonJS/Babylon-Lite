@@ -46,7 +46,7 @@ ${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints[1]), ${row}) * weig
 ${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints[2]), ${row}) * weights[2];
 ${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints[3]), ${row}) * weights[3];`;
     if (has8Bones) {
-        s += wgsl`
+        s = wgsl`${s}
 ${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints1[0]), ${row}) * weights1[0];
 ${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints1[1]), ${row}) * weights1[1];
 ${dest} = ${dest} + readMatrixFromVat(vatSampler, f32(joints1[2]), ${row}) * weights1[2];
@@ -82,7 +82,7 @@ ${vatSkinSum("infB", "rowB", has8Bones)}
 var influence: mat4x4f = infA * (1.0 - vatB.z) + infB * vatB.z;`;
 }
 
-function makeVatSkinningCode(has8Bones: boolean, instanced: boolean): string {
+function makeVatSkinningCode(has8Bones: boolean, instanced: boolean): WgslSource {
     if (!instanced) {
         // Non-instanced: shared settings UBO, single clip (Stage 1).
         return wgsl`${vatRegularInfluence(has8Bones)}
@@ -93,7 +93,7 @@ finalWorld = mesh.world * influence;`;
     // reproducing a weighted gait cross-fade. A single-clip instance just sets B==A with blend=0, so this
     // ONE variant covers both — no extra mesh-feature bit, so mesh-features.ts (a shared chunk) stays
     // byte-identical for non-VAT scenes. The 2x bone reads are negligible vs the one-draw-call win.
-    return `${vatInstancedInfluence(has8Bones, "vatInstanceIndex")}
+    return wgsl`${vatInstancedInfluence(has8Bones, "vatInstanceIndex")}
 ${VAT_INSTANCE_PLACEMENT}`;
 }
 
@@ -170,7 +170,7 @@ export function createVatFragment(has8Bones: boolean, instanced: boolean): Shade
 
 import type { PbrExt } from "../pbr-flags.js";
 import { MSH_VAT, MSH_HAS_SKELETON_8, MSH_HAS_THIN_INSTANCES } from "../../mesh-features.js";
-import { wgsl } from "../../../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../../../shader/wgsl.js";
 
 export const pbrExt: PbrExt = {
     id: "vat",

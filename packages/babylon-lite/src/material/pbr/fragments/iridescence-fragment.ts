@@ -11,7 +11,7 @@ import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { PbrExt } from "../pbr-flags.js";
 import type { IridescenceProps, PbrMaterialProps } from "../pbr-material.js";
 import { PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP, PBR2_HAS_REFLECTANCE_FACTORS } from "../pbr-flag-bits.js";
-import { wgsl } from "../../../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 const PBR2_HAS_IRIDESCENCE = 1 << 17;
@@ -92,7 +92,7 @@ function uvBaseExpr(features2: number, meshFeatures: number, uv2Flag: number): s
     return (features2 & uv2Flag) !== 0 && (meshFeatures & IRI_MSH_HAS_UV2) !== 0 ? "input.uv2" : "input.uv";
 }
 
-function uvDecl(name: string, baseUv: string, hasTx: boolean): string {
+function uvDecl(name: string, baseUv: string, hasTx: boolean): WgslSource {
     return hasTx ? wgsl`let ${name}=vec2<f32>(dot(material.${name}m.xy,${baseUv}),dot(material.${name}m.zw,${baseUv}))+material.${name}t.xy;` : wgsl`let ${name}=${baseUv};`;
 }
 
@@ -164,7 +164,7 @@ function createIridescenceFragment(features: number, features2: number, meshFeat
         }
     }
 
-    const scopeVars: string[] = [];
+    const scopeVars: WgslSource[] = [];
     if (hasIntensityMap) {
         scopeVars.push(uvDecl("iridescenceUV", uvBaseExpr(features2, meshFeatures, PBR2_HAS_IRIDESCENCE_UV2), hasIntensityUvTx));
     }
@@ -184,7 +184,7 @@ function createIridescenceFragment(features: number, features2: number, meshFeat
         _bindings: bindings,
         _helperFunctions: IRIDESCENCE_HELPERS,
         _fragmentSlots: {
-            ...(scopeVars.length ? { SV: scopeVars.join("\n") } : undefined),
+            ...(scopeVars.length ? { SV: wgsl`${scopeVars.join("\n")}` } : undefined),
             MF: wgsl`{
 let iriIntensity=clamp(${intensity},0.0,1.0);
 let iriThickness=max(${thickness},0.0);

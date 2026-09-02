@@ -29,7 +29,7 @@ return vec3<f32>(v.x * c + v.z * s, v.y, -v.x * s + v.z * c);
 }
 `;
 
-function makeIblCalculation(hasNormalMap: boolean, anisoBentNormalCode: string = "", skyboxCalculation: string = ""): string {
+function makeIblCalculation(hasNormalMap: boolean, anisoBentNormalCode: WgslSource = wgsl``, skyboxCalculation: WgslSource = wgsl``): WgslSource {
     // Skybox mode: caller passes pre-baked WGSL (from ibl-skybox-wgsl.ts) to avoid
     // bundling that ~1 KB string into scenes that don't use skyboxMode.
     if (skyboxCalculation) {
@@ -75,7 +75,7 @@ color = finalIrradiance + finalRadianceScaled + finalSpecularScaled + directDiff
  * @param anisoBentNormalCode - WGSL code for anisotropic bent normal (empty string = standard reflection).
  * @param skyboxCalculation - Pre-baked skybox-mode WGSL from ibl-skybox-wgsl.ts (empty string = normal PBR).
  */
-export function createIblFragment(hasNormalMap: boolean, anisoBentNormalCode: string = "", skyboxCalculation: string = ""): ShaderFragment {
+export function createIblFragment(hasNormalMap: boolean, anisoBentNormalCode: WgslSource = wgsl``, skyboxCalculation: WgslSource = wgsl``): ShaderFragment {
     return {
         _id: "ibl",
 
@@ -99,7 +99,7 @@ export function createIblFragment(hasNormalMap: boolean, anisoBentNormalCode: st
 }
 
 import type { PbrExt } from "../pbr-flags.js";
-import { wgsl } from "../../../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../../../shader/wgsl.js";
 
 export const pbrExt: PbrExt = {
     id: "ibl",
@@ -108,7 +108,7 @@ export const pbrExt: PbrExt = {
         if (!ctx._hasIbl) {
             return null;
         }
-        return createIblFragment(ctx._hasAnyNormal, ctx._anisoBentNormalCode ?? "", ctx._iblSkyboxCalc ?? "");
+        return createIblFragment(ctx._hasAnyNormal, ctx._anisoBentNormalCode, ctx._iblSkyboxCalc);
     },
     bind(ctx, entries, b) {
         if (!ctx._env) {

@@ -86,22 +86,22 @@ function wgslFloat(value: number): string {
 function updateBlurShader(shader: PostProcessShaderConfig, kernel: number): void {
     const samples = getOptimizedBlurSamples(kernel);
     const varyingCount = Math.min(samples.length, MAX_VERTEX_BLUR_SAMPLES);
-    shader.vertexOutputWGSL = "";
-    shader.vertexMainWGSL = "";
+    shader.vertexOutputWGSL = wgsl``;
+    shader.vertexMainWGSL = wgsl``;
     for (let i = 0; i < varyingCount; i++) {
-        shader.vertexOutputWGSL += wgsl`,@location(${i + 1}) sampleCoord${i}:vec2f`;
-        shader.vertexMainWGSL += wgsl`out.sampleCoord${i}=out.uv+blurParams.delta*${wgslFloat(samples[i]!.offset)};`;
+        shader.vertexOutputWGSL = wgsl`${shader.vertexOutputWGSL},@location(${i + 1}) sampleCoord${i}:vec2f`;
+        shader.vertexMainWGSL = wgsl`${shader.vertexMainWGSL}out.sampleCoord${i}=out.uv+blurParams.delta*${wgslFloat(samples[i]!.offset)};`;
     }
-    let body = "var blend=vec4f(0);";
+    let body = wgsl`var blend=vec4f(0);`;
     for (let i = 0; i < varyingCount; i++) {
-        body += wgsl`blend+=textureSample(sourceTextureSampler,sourceSampler,input.sampleCoord${i})*${wgslFloat(samples[i]!.weight)};`;
+        body = wgsl`${body}blend+=textureSample(sourceTextureSampler,sourceSampler,input.sampleCoord${i})*${wgslFloat(samples[i]!.weight)};`;
     }
     for (let i = varyingCount; i < samples.length; i++) {
         const sample = samples[i]!;
-        body += wgsl`blend+=samplePostProcessSource(input.uv+blurParams.delta*${wgslFloat(sample.offset)})*${wgslFloat(sample.weight)};`;
+        body = wgsl`${body}blend+=samplePostProcessSource(input.uv+blurParams.delta*${wgslFloat(sample.offset)})*${wgslFloat(sample.weight)};`;
     }
-    body += "return blend;";
-    shader.fragmentWGSL = "";
+    body = wgsl`${body}return blend;`;
+    shader.fragmentWGSL = wgsl``;
     shader.fragmentWrapperWGSL = wgsl`@fragment fn postProcessFragment(input:PostProcessVertexOutput)->@location(0) vec4f{${body}}`;
 }
 
@@ -123,7 +123,7 @@ export function createBlurPostProcessTask(config: BlurPostProcessTaskConfig, eng
             data[0] = params.direction.x / width;
             data[1] = params.direction.y / height;
         },
-        fragmentWGSL: "",
+        fragmentWGSL: wgsl``,
     };
     updateBlurShader(shader, params.kernel);
     const task = createPostProcessTask(

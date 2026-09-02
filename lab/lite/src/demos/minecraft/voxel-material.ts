@@ -11,11 +11,11 @@
 // water shimmer can use the world coordinate directly.
 
 import { createShaderMaterial, setShaderTexture, setShaderVector3, setShaderFloat, type ShaderMaterial, type Texture2D } from "babylon-lite";
-import { wgsl } from "babylon-lite/shader/wgsl.js";
+import { wgsl, type WgslSource } from "babylon-lite/shader/wgsl.js";
 
 export type VoxelMaterialMode = "opaque" | "cutout" | "blend";
 
-function vertexSource(mode: VoxelMaterialMode): string {
+function vertexSource(mode: VoxelMaterialMode): WgslSource {
     return wgsl`struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) uv: vec2<f32>,
@@ -68,7 +68,7 @@ const FACE_SHADE_FN = wgsl`fn mcFaceShade(n: vec3<f32>) -> f32 {
   return 0.7;
 }`;
 
-function fragmentSource(mode: VoxelMaterialMode): string {
+function fragmentSource(mode: VoxelMaterialMode): WgslSource {
     const alphaTest = mode === "cutout" ? wgsl`if (tex.a < 0.5) { discard; }` : ``;
     let outColor: string;
     if (mode === "blend") {

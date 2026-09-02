@@ -282,7 +282,7 @@ function patchProbeGridStorage(composed: ComposedShader): ComposedShader {
     const entries = (composed._meshBGLDescriptor.entries as GPUBindGroupLayoutEntry[]).map((entry) =>
         entry.binding === binding ? { ...entry, buffer: { type: "read-only-storage" as const } } : entry
     );
-    return { ...composed, _fragmentWGSL: fragmentWGSL, _meshBGLDescriptor: { ...composed._meshBGLDescriptor, entries } };
+    return { ...composed, _fragmentWGSL: wgsl`${fragmentWGSL}`, _meshBGLDescriptor: { ...composed._meshBGLDescriptor, entries } };
 }
 
 function patchProbeCubeArray(composed: ComposedShader): ComposedShader {
@@ -299,7 +299,7 @@ function patchProbeCubeArray(composed: ComposedShader): ComposedShader {
     const entries = (composed._meshBGLDescriptor.entries as GPUBindGroupLayoutEntry[]).map((entry) =>
         entry.binding === binding && entry.texture ? { ...entry, texture: { ...entry.texture, viewDimension: "cube-array" as const } } : entry
     );
-    return { ...composed, _fragmentWGSL: fragmentWGSL, _meshBGLDescriptor: { ...composed._meshBGLDescriptor, entries } };
+    return { ...composed, _fragmentWGSL: wgsl`${fragmentWGSL}`, _meshBGLDescriptor: { ...composed._meshBGLDescriptor, entries } };
 }
 
 function patchLayeredLocalIbl(fragmentWGSL: string, composed: ComposedShader): string {
@@ -343,7 +343,7 @@ if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0){shEnvRadia
 }
 
 function patchSceneIbl(composed: ComposedShader, hasSceneEnvironment: boolean): ComposedShader {
-    let fragmentWGSL = composed._fragmentWGSL;
+    let fragmentWGSL: string = composed._fragmentWGSL;
     let reflectionRewrites = 0;
     fragmentWGSL = fragmentWGSL.replace(/let\s+R\s*=\s*rotateY\(\s*R_raw\s*,\s*scene\.envRotationY\s*\);/g, () => {
         reflectionRewrites++;
@@ -375,7 +375,7 @@ let localProbeDebugOutput=environmentRadiance;`;
         throw new Error(`local cubemap _postCompose: expected to rewrite 1 base radiance sample, rewrote ${baseRewrites}`);
     }
     fragmentWGSL = patchLayeredLocalIbl(fragmentWGSL, composed);
-    return patchProbeCubeArray(patchProbeGridStorage({ ...composed, _fragmentWGSL: fragmentWGSL }));
+    return patchProbeCubeArray(patchProbeGridStorage({ ...composed, _fragmentWGSL: wgsl`${fragmentWGSL}` }));
 }
 
 function localBindings(): NonNullable<ShaderFragment["_bindings"]> {
@@ -401,7 +401,7 @@ function createLocalEnvironmentFragment(hasSceneEnvironment: boolean): ShaderFra
         _dependencies: ["ibl"],
         _uboFields: uboFields,
         _bindings: localBindings(),
-        _helperFunctions: `${SINGLE_CUBEMAP_HELPERS}\n${createProbeArrayHelpers()}`,
+        _helperFunctions: wgsl`${SINGLE_CUBEMAP_HELPERS}\n${createProbeArrayHelpers()}`,
         _fragmentSlots: {
             BC: wgsl`if(material.localEnvironmentMode==${LOCAL_ENVIRONMENT_PROBES_MODE}.0&&(localProbeData.params.w&${_PBR_LOCAL_ENVIRONMENT_DEBUG_COLOR_FLAG}u)!=0u){color=localProbeDebugOutput;}`,
         },

@@ -10,7 +10,7 @@ import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/frag
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { PBR_HAS_ANISOTROPY } from "../pbr-flag-bits.js";
-import { wgsl } from "../../../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -121,7 +121,7 @@ export interface AnisoTemplateHooks {
     /** @internal Tangent/bitangent computation block for the given normal/texture mode. */
     readonly _anisoTB: (hasNormal: boolean, hasTexture: boolean) => string;
     /** @internal IBL bent-normal computation. */
-    readonly _anisoBentNormal: string;
+    readonly _anisoBentNormal: WgslSource;
     /** @internal features2 bit set when an anisotropyTexture is present. */
     readonly _anisoTexBit: number;
 }

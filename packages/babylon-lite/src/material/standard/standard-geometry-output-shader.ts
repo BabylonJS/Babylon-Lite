@@ -34,7 +34,7 @@ import { MSH_HAS_MORPH_TARGETS, MSH_HAS_THIN_INSTANCES } from "../mesh-features.
 import type { StandardSceneShaderContext } from "./standard-material.js";
 import { composeStandardShader } from "./standard-pipeline.js";
 import { HAS_SKELETON, HAS_SKELETON_8, HAS_SPECULAR_TEXTURE, MATERIAL_ALPHA_BLEND, SPECULAR_USES_UV2 } from "./standard-flags.js";
-import { wgsl } from "../../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 const STAGE_VERTEX = 0x1;
@@ -79,7 +79,7 @@ function needsLocalPos(attachments: readonly GeometryTextureType[]): boolean {
  *       params UBO (added only when `needsGpUbo`).
  *    - `input.vCurrentClip` / `input.vPreviousClip` — added by the velocity
  *       fragment when LINEAR_VELOCITY is requested. */
-function attachmentExpr(type: GeometryTextureType, wg: string, hasSpecular: boolean, specularUv: string): string {
+function attachmentExpr(type: GeometryTextureType, wg: string, hasSpecular: boolean, specularUv: string): WgslSource {
     switch (type) {
         case GeometryTextureType.IRRADIANCE:
             // BJS Standard material can't split irradiance — outputs (0, 0, 0).
@@ -147,7 +147,7 @@ function createGeometryParamsFragment(
             _visibility: STAGE_VERTEX,
         });
     }
-    const helpers = needsParamsUbo ? wgsl`struct gpUniforms { previousViewProjection: mat4x4<f32>, cameraNearFar: vec4<f32>, };` : "";
+    const helpers = needsParamsUbo ? wgsl`struct gpUniforms { previousViewProjection: mat4x4<f32>, cameraNearFar: vec4<f32>, };` : wgsl``;
     const varyings: Varying[] = [];
     if (needsVelocityVaryings) {
         varyings.push({ _name: "vCurrentClip", _type: "vec4<f32>" }, { _name: "vPreviousClip", _type: "vec4<f32>" });
@@ -177,7 +177,7 @@ out.vPreviousClip = select(out.vCurrentClip, trackedPreviousClip, mesh.velocityE
     if (needsLocalPosVarying) {
         vbParts.push(wgsl`out.vLocalPos = ${(meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0 ? "morphedPos" : "position"};`);
     }
-    const slots: ShaderFragment["_vertexSlots"] = vbParts.length > 0 ? { VB: vbParts.join("\n") } : {};
+    const slots: ShaderFragment["_vertexSlots"] = vbParts.length > 0 ? { VB: wgsl`${vbParts.join("\n")}` } : {};
     return {
         _id: "~geometry-params",
         _uboFields: needsVelocityVaryings
@@ -196,13 +196,13 @@ out.vPreviousClip = select(out.vCurrentClip, trackedPreviousClip, mesh.velocityE
     };
 }
 
-function makePreviousSkinningCode(hasEightInfluences: boolean): string {
+function makePreviousSkinningCode(hasEightInfluences: boolean): WgslSource {
     let code = wgsl`var previousInfluence = readMatrixFromRawSampler(previousBoneSampler, f32(joints[0])) * weights[0];
 previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints[1])) * weights[1];
 previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints[2])) * weights[2];
 previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints[3])) * weights[3];`;
     if (hasEightInfluences) {
-        code += wgsl`
+        code = wgsl`${code}
 previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints1[0])) * weights1[0];
 previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints1[1])) * weights1[1];
 previousInfluence += readMatrixFromRawSampler(previousBoneSampler, f32(joints1[2])) * weights1[2];
@@ -265,7 +265,7 @@ export function composeStandardGeometryShader(
     //    standard `color` output (the "real" lit material color), with
     //    N = attachments.length.
     const colorSlot = attachments.length;
-    const extraColorLine = emitColor ? wgsl`\n@location(${colorSlot}) color: vec4<f32>,` : "";
+    const extraColorLine = emitColor ? wgsl`\n@location(${colorSlot}) color: vec4<f32>,` : wgsl``;
     const outputStruct = wgsl`struct FragmentOutput {
 ${attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`).join("\n")}${extraColorLine}
 };
@@ -278,8 +278,8 @@ ${attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`).join("\n")}
     //    materials get a correct binary mask under the per-attachment
     //    ALPHA_COMBINE blend pipeline state.
     const wg = `select(0.0, 1.0, alpha > 0.4)`;
-    const writes = attachments.map((type, i) => wgsl`out.f${i} = ${attachmentExpr(type, wg, hasSpecular, specularUv)};`).join("\n");
-    const extraColorWrite = emitColor ? wgsl`\nout.color = color;` : "";
+    const writes = wgsl`${attachments.map((type, i) => wgsl`out.f${i} = ${attachmentExpr(type, wg, hasSpecular, specularUv)};`).join("\n")}`;
+    const extraColorWrite = emitColor ? wgsl`\nout.color = color;` : wgsl``;
     const replacement = wgsl`var out: FragmentOutput;
 ${writes}${extraColorWrite}
 return out;`;
@@ -288,5 +288,5 @@ return out;`;
     }
     frag = frag.replace("return color;", replacement);
 
-    return { ...base, _fragmentWGSL: frag };
+    return { ...base, _fragmentWGSL: wgsl`${frag}` };
 }

@@ -18,15 +18,16 @@ import type { PbrMaterialProps } from "./pbr-material.js";
 import { _t, enableSceneTransmission } from "../../frame-graph/transmission.js";
 import { makeRefractionRttExt } from "./fragments/refraction-rtt-fragment.js";
 import { _registerPbrExt } from "./pbr-flags.js";
+import type { WgslSource } from "../../shader/wgsl.js";
 
-let _dispersionSampleWgsl: string | undefined;
+let _dispersionSampleWgsl: WgslSource | undefined;
 
 /** @internal Supply the per-RGB chromatic-dispersion sample WGSL. Called by
  *  `setPbrDispersion` so the 3-ray code chunk is bundled solely by dispersion scenes
  *  and never weighs on other transmission scenes. The string is read when
  *  `registerPbrTransmission` builds the refraction ext, so — per the documented
  *  contract on `setPbrDispersion` — it must be set before the first build. */
-export function _setDispersionSampleWgsl(wgsl: string): void {
+export function _setDispersionSampleWgsl(wgsl: WgslSource): void {
     _dispersionSampleWgsl = wgsl;
 }
 

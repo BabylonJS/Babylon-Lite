@@ -14,7 +14,7 @@
  */
 
 import type { ShaderFragment, BindingDecl, Varying } from "../fragment-types.js";
-import { wgsl } from "../wgsl.js";
+import { wgsl, type WgslSource } from "../wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -54,8 +54,8 @@ export function createCsmShadowFragment(id: string, shadowLights: CsmShadowLight
     const outputSlot = opts.outputSlot ?? "AD";
     const varyings: Varying[] = [];
     const bindings: BindingDecl[] = [];
-    const fragmentLines: string[] = [];
-    const helperParts: string[] = [];
+    const fragmentLines: WgslSource[] = [];
+    const helperParts: WgslSource[] = [];
 
     for (const slot of shadowLights) {
         const li = slot.lightIndex;
@@ -130,9 +130,9 @@ return shadow;
         _id: id,
         _varyings: varyings,
         _bindings: bindings,
-        _helperFunctions: helperParts.join("\n"),
+        _helperFunctions: wgsl`${helperParts.join("\n")}`,
         _fragmentSlots: {
-            [outputSlot]: fragmentLines.join("\n"),
+            [outputSlot]: wgsl`${fragmentLines.join("\n")}`,
         },
     };
 }

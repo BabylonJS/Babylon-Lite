@@ -1,4 +1,4 @@
-import { wgsl } from "../../../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../../../shader/wgsl.js";
 
 export const CLUSTERED_LIGHT_STRUCTS = wgsl`
 struct clusteredLightParamsUniforms {
@@ -29,7 +29,7 @@ fn clusteredTexel(index:u32)->vec2<u32>{return vec2<u32>(index%clusteredLightPar
  *  for range and `computeDirectionalLightFalloff_GLTF` for the cone. The cone's
  *  `lightAngleScale` / `lightAngleOffset` are derived from `cosHalfAngle` in the
  *  shader instead of being uploaded, which is exact for BJS' default inner angle of 0. */
-function clusteredLightBlock(stride: string, cone: string): string {
+function clusteredLightBlock(stride: string, cone: WgslSource): WgslSource {
     return wgsl`
 {
 let clip=scene.viewProjection*vec4<f32>(input.worldPos,1.0);
@@ -93,12 +93,12 @@ directSpecular+=Fc*Dc*Gc*NdotLc*lightRadiance;
 }
 
 /** @internal Point-only clustered shader. */
-export function _clusteredPointLightBlock(): string {
-    return clusteredLightBlock("2u", "");
+export function _clusteredPointLightBlock(): WgslSource {
+    return clusteredLightBlock("2u", wgsl``);
 }
 
 /** @internal Point+spot clustered shader with smooth cone falloff. */
-export function _clusteredSpotLightBlock(): string {
+export function _clusteredSpotLightBlock(): WgslSource {
     return clusteredLightBlock(
         "3u",
         wgsl`let dirCone=textureLoad(clusteredLights,clusteredTexel(lightTexel+2u),0);

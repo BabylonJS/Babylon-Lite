@@ -5,7 +5,7 @@ import type { MeshGroupBuilder } from "../../render/renderable.js";
 import type { ShaderMaterial } from "../shader/shader-material.js";
 import { createShaderMaterial, setShaderUniform } from "../shader/shader-material.js";
 import { getShaderGroupBuilder } from "../shader/shader-group-builder.js";
-import { wgsl } from "../../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
 /** Options for the unlit material used by line-list meshes. */
 export interface LineMaterialOptions {
@@ -58,11 +58,11 @@ function getLineGroupBuilder(): MeshGroupBuilder {
     return (_lineGroupBuilder = builder);
 }
 
-function vertexOutput(hasColor: boolean): string {
+function vertexOutput(hasColor: boolean): WgslSource {
     return wgsl`struct VertexOutput{@builtin(position) position:vec4<f32>,${hasColor ? "@location(0) color:vec4<f32>," : ""}};`;
 }
 
-function vertexSource(useVertexColor: boolean, useThinInstances: boolean, useThinInstanceColors: boolean): string {
+function vertexSource(useVertexColor: boolean, useThinInstances: boolean, useThinInstanceColors: boolean): WgslSource {
     const hasColor = useVertexColor || useThinInstanceColors;
     const world = useThinInstances
         ? "let instanceWorld=mat4x4<f32>(input.world0,input.world1,input.world2,input.world3);let finalWorld=shaderSystem.world*instanceWorld;"
@@ -79,7 +79,7 @@ function vertexSource(useVertexColor: boolean, useThinInstances: boolean, useThi
 @vertex fn mainVertex(input:VertexInput)->VertexOutput{var out:VertexOutput;${world}out.position=shaderSystem.viewProjection*finalWorld*vec4<f32>(input.position,1.0);${outputColor}return out;}`;
 }
 
-function fragmentSource(hasColor: boolean): string {
+function fragmentSource(hasColor: boolean): WgslSource {
     return wgsl`${vertexOutput(hasColor)}
 @fragment fn mainFragment(input:VertexOutput)->@location(0) vec4<f32>{return ${hasColor ? "input.color" : "shaderUniforms.lineColor"};}`;
 }

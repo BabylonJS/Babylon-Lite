@@ -252,7 +252,7 @@ function resolveLayout(
             stepMode: "instance",
             attributes: [{ shaderLocation: baseLocation + 4, offset: 0, format: "float32x4" }],
         });
-        instanceAttrs += wgsl`@location(${baseLocation + 4}) instanceColor: vec4<f32>,
+        instanceAttrs = wgsl`${instanceAttrs}@location(${baseLocation + 4}) instanceColor: vec4<f32>,
 `;
     }
     return { variantKey: "" + +hasColor, vertexBuffers: [...bindings.vertexBuffers, ...instanceLayouts], instanceAttrs };

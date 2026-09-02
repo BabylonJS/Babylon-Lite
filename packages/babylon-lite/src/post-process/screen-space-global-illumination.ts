@@ -39,7 +39,7 @@ import {
     resolveScreenSpaceSourceSize,
 } from "./screen-space-temporal.js";
 import type { ScreenSpaceTemporalOwner } from "./screen-space-temporal.js";
-import { wgsl } from "../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../shader/wgsl.js";
 
 /** Configuration for `createScreenSpaceGlobalIlluminationPostProcessTask`. */
 export interface ScreenSpaceGlobalIlluminationPostProcessTaskConfig {
@@ -212,7 +212,7 @@ const COMPOSITE_EXTRA_TEXTURE_WGSL = wgsl`@group(0)@binding(2) var ssGiTex:textu
 const COMPOSITE_UNIFORM_WGSL = wgsl`struct SsGiCompositeParams{intensity:f32,enabled:f32,colorBleedGain:f32,colorBleedMax:f32}
 @group(0)@binding(3) var<uniform> ssGiComposite:SsGiCompositeParams;`;
 
-function compositeFragmentWGSL(mode: "additive" | "color-bleed"): string {
+function compositeFragmentWGSL(mode: "additive" | "color-bleed"): WgslSource {
     if (mode === "color-bleed") {
         return wgsl`fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{
   if(ssGiComposite.enabled<0.5){return color;}

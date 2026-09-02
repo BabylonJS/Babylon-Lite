@@ -124,26 +124,26 @@ export function createReflectanceFragment(
     let f0Code = wgsl`var mrFactors = vec4<f32>(material.metallicReflectanceColor, material.metallicF0Factor);
 var specularWeight = material.specularWeight;`;
     if (hasReflectanceMap) {
-        f0Code += wgsl`
+        f0Code = wgsl`${f0Code}
 { let rSample = textureSample(reflectanceMap, reflectanceMapSampler, ${reflUv});
   let rLinear = pow(rSample.rgb, vec3<f32>(2.2));
   mrFactors = vec4<f32>(mrFactors.rgb * rLinear, mrFactors.a); }`;
     }
     if (hasMetallicReflectanceMap) {
         if (!useAlphaOnlyMR) {
-            f0Code += wgsl`
+            f0Code = wgsl`${f0Code}
 { let mrSample = textureSample(metallicReflectanceMap, metallicReflectanceMapSampler, ${mrReflUv});
   let mrLinear = pow(mrSample.rgb, vec3<f32>(2.2));
   mrFactors = vec4<f32>(mrFactors.rgb * mrLinear, mrFactors.a * mrSample.a);
   specularWeight *= mrSample.a; }`;
         } else {
-            f0Code += wgsl`
+            f0Code = wgsl`${f0Code}
 { let mrSample = textureSample(metallicReflectanceMap, metallicReflectanceMapSampler, ${mrReflUv});
   mrFactors = vec4<f32>(mrFactors.rgb, mrFactors.a * mrSample.a);
   specularWeight *= mrSample.a; }`;
         }
     }
-    f0Code += wgsl`
+    f0Code = wgsl`${f0Code}
 let dielectricF0 = material.reflectance * mrFactors.a;
 let surfaceReflectivityColor = mrFactors.rgb;
 let dielectricColorF0 = vec3<f32>(dielectricF0) * surfaceReflectivityColor;

@@ -276,31 +276,31 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
         ? wgsl`\nstruct MaterialUniforms{\n${_materialUboSpec._structBody}\n}\n@group(1)@binding(1) var<uniform> material:MaterialUniforms;`
         : "";
 
-    let _vertexWGSL = template._vertexTemplate;
-    _vertexWGSL = _vertexWGSL.replace("/*SU*/", SCENE_UBO_WGSL);
-    _vertexWGSL = _vertexWGSL.replace("/*MU*/", meshStruct);
-    _vertexWGSL = _vertexWGSL.replace("/*VI*/", wgsl`struct VertexInput{\n${inputLines.join("\n")}\n}`);
-    _vertexWGSL = _vertexWGSL.replace("/*VO*/", wgsl`struct VertexOutput{\n${varyBody}\n}`);
-    _vertexWGSL = _vertexWGSL.replace("/*VD*/", vDecls.join("\n"));
-    _vertexWGSL = _vertexWGSL.replace("/*VP*/", vParams);
-    _vertexWGSL = _vertexWGSL.replace("/*VH*/", vHelpers.join("\n"));
+    let vertexWGSL: string = template._vertexTemplate;
+    vertexWGSL = vertexWGSL.replace("/*SU*/", SCENE_UBO_WGSL);
+    vertexWGSL = vertexWGSL.replace("/*MU*/", meshStruct);
+    vertexWGSL = vertexWGSL.replace("/*VI*/", wgsl`struct VertexInput{\n${inputLines.join("\n")}\n}`);
+    vertexWGSL = vertexWGSL.replace("/*VO*/", wgsl`struct VertexOutput{\n${varyBody}\n}`);
+    vertexWGSL = vertexWGSL.replace("/*VD*/", vDecls.join("\n"));
+    vertexWGSL = vertexWGSL.replace("/*VP*/", vParams);
+    vertexWGSL = vertexWGSL.replace("/*VH*/", vHelpers.join("\n"));
     // These dynamic keys are reserved from Terser property mangling in bundle-scenes-core.ts.
-    _vertexWGSL = injectSlots(_vertexWGSL, sorted, "_vertexSlots");
+    vertexWGSL = injectSlots(vertexWGSL, sorted, "_vertexSlots");
 
-    let _fragmentWGSL = template._fragmentTemplate;
-    _fragmentWGSL = _fragmentWGSL.replace("/*SU*/", SCENE_UBO_WGSL);
-    _fragmentWGSL = _fragmentWGSL.replace("/*MU*/", meshStruct + materialStruct);
-    _fragmentWGSL = _fragmentWGSL.replace("/*FI*/", wgsl`struct FragmentInput{\n${varyBody}\n}`);
-    _fragmentWGSL = _fragmentWGSL.replace("/*HF*/", helpers.join("\n"));
-    _fragmentWGSL = _fragmentWGSL.replace("/*FB*/", fDecls.join("\n"));
-    _fragmentWGSL = injectSlots(_fragmentWGSL, sorted, "_fragmentSlots");
+    let fragmentWGSL: string = template._fragmentTemplate;
+    fragmentWGSL = fragmentWGSL.replace("/*SU*/", SCENE_UBO_WGSL);
+    fragmentWGSL = fragmentWGSL.replace("/*MU*/", meshStruct + materialStruct);
+    fragmentWGSL = fragmentWGSL.replace("/*FI*/", wgsl`struct FragmentInput{\n${varyBody}\n}`);
+    fragmentWGSL = fragmentWGSL.replace("/*HF*/", helpers.join("\n"));
+    fragmentWGSL = fragmentWGSL.replace("/*FB*/", fDecls.join("\n"));
+    fragmentWGSL = injectSlots(fragmentWGSL, sorted, "_fragmentSlots");
 
     const _meshBGLDescriptor = { entries: meshBGL };
     const _shadowBGLDescriptor = shadowBGL.length ? { entries: shadowBGL } : null;
 
     return {
-        _vertexWGSL,
-        _fragmentWGSL,
+        _vertexWGSL: wgsl`${vertexWGSL}`,
+        _fragmentWGSL: wgsl`${fragmentWGSL}`,
         _meshBGLDescriptor,
         _shadowBGLDescriptor,
         _vertexBufferLayouts,

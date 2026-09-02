@@ -125,7 +125,7 @@ var sheenRoughnessAdjusted = material.sheenParams2.x;`;
         // Roughness from the colour texture's alpha only when there is no distinct
         // sheenRoughnessTexture (BJS useRoughnessFromMainTexture); otherwise it is read below.
         const roughFromColor = hasSheenRoughTex ? "" : "\nsheenRoughnessAdjusted *= sheenMapData.a;";
-        scopeVars += wgsl`
+        scopeVars = wgsl`${scopeVars}
 {
 ${sheenUvDecl}
 let sheenMapData = textureSample(sheenTexture_, sheenSampler_, sheenUV);
@@ -134,7 +134,7 @@ sheenColorFinal *= ${gammaStmt};${roughFromColor}
     }
     if (hasSheenRoughTex) {
         // Distinct sheenRoughnessTexture: roughness from its A channel at its own animatable UV.
-        scopeVars += wgsl`
+        scopeVars = wgsl`${scopeVars}
 {
 let sheenRoughUV = vec2<f32>(dot(material.sheenRoughUVm.xy, input.uv), dot(material.sheenRoughUVm.zw, input.uv)) + material.sheenRoughUVt.xy;
 sheenRoughnessAdjusted *= textureSample(sheenRoughTexture_, sheenRoughSampler_, sheenRoughUV).a;

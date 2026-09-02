@@ -64,7 +64,7 @@ import {
 } from "babylon-lite";
 
 import { RING_COUNT, SHADOW_CASCADES } from "./constants.js";
-import { wgsl } from "babylon-lite/shader/wgsl.js";
+import { wgsl, type WgslSource } from "babylon-lite/shader/wgsl.js";
 
 /** Floats per segment row in the frame buffer: four vec4 columns. */
 export const FLOATS_PER_FRAME = 16;
@@ -107,7 +107,7 @@ export interface TrackMaterial {
 }
 
 /** The deformation, shared by the visible material and its shadow-caster twin. */
-function vertexSource(): string {
+function vertexSource(): WgslSource {
     return wgsl`struct VertexOutput {
 @builtin(position) position: vec4<f32>,
 @location(0) worldNormal: vec3<f32>,
@@ -194,7 +194,7 @@ return shadow;
 }`;
 }
 
-function fragmentSource(): string {
+function fragmentSource(): WgslSource {
     return wgsl`struct VertexOutput {
 @builtin(position) position: vec4<f32>,
 @location(0) worldNormal: vec3<f32>,
@@ -252,7 +252,7 @@ return vec4<f32>(2.0 * emissive + diffuseColor * irradiance + arrow.rgb * boostM
 
 /** Never compiled: the depth-only shadow target has no colour attachment, so the caster's fragment
  *  stage is dropped. It exists only because `createShaderMaterial` requires a fragment source. */
-function casterFragmentSource(): string {
+function casterFragmentSource(): WgslSource {
     return wgsl`struct VertexOutput {
 @builtin(position) position: vec4<f32>,
 @location(0) worldNormal: vec3<f32>,

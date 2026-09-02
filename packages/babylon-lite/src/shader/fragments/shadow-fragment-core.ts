@@ -10,7 +10,7 @@
  */
 
 import type { ShaderFragment, BindingDecl, Varying } from "../fragment-types.js";
-import { wgsl } from "../wgsl.js";
+import { wgsl, type WgslSource } from "../wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 const STAGE_VERTEX = 0x1;
@@ -31,9 +31,9 @@ export interface ShadowLightSlot {
 export function createShadowFragment(id: string, shadowLights: ShadowLightSlot[]): ShaderFragment {
     const varyings: Varying[] = [];
     const bindings: BindingDecl[] = [];
-    const vertexLines: string[] = [];
-    const fragmentLines: string[] = [];
-    const helperParts: string[] = [];
+    const vertexLines: WgslSource[] = [];
+    const fragmentLines: WgslSource[] = [];
+    const helperParts: WgslSource[] = [];
 
     for (const slot of shadowLights) {
         const li = slot.lightIndex;
@@ -123,7 +123,7 @@ return computeFallOff${suffix}(esm, clipSpace.xy, frustumEdgeFalloff);
     }
 
     // Vertex helper: UBO struct declarations (needed for lightMatrix access in vertex shader)
-    const vertexHelperParts: string[] = [];
+    const vertexHelperParts: WgslSource[] = [];
     for (const slot of shadowLights) {
         const suffix = `_${slot.lightIndex}`;
         vertexHelperParts.push(wgsl`struct shadowInfo${suffix}Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };`);
@@ -133,13 +133,13 @@ return computeFallOff${suffix}(esm, clipSpace.xy, frustumEdgeFalloff);
         _id: id,
         _varyings: varyings,
         _bindings: bindings,
-        _helperFunctions: helperParts.join("\n"),
-        _vertexHelperFunctions: vertexHelperParts.join("\n"),
+        _helperFunctions: wgsl`${helperParts.join("\n")}`,
+        _vertexHelperFunctions: wgsl`${vertexHelperParts.join("\n")}`,
         _vertexSlots: {
-            VB: vertexLines.join("\n"),
+            VB: wgsl`${vertexLines.join("\n")}`,
         },
         _fragmentSlots: {
-            AD: fragmentLines.join("\n"),
+            AD: wgsl`${fragmentLines.join("\n")}`,
         },
     };
 }

@@ -1,7 +1,7 @@
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { ShaderMaterial, ShaderUniformOption, ShaderSamplerOption } from "../shader/shader-material.js";
 import { createShaderMaterial, setShaderTexture } from "../shader/shader-material.js";
-import { wgsl } from "../../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
 /** A 3-component color/vector expressed as a readonly tuple. */
 export type GridVec3 = readonly [number, number, number];
@@ -42,20 +42,20 @@ export interface GridMaterialOptions {
 }
 
 /** Build the VertexOutput struct shared by the vertex and fragment stages. */
-function buildVertexOutputStruct(hasOpacity: boolean): string {
+function buildVertexOutputStruct(hasOpacity: boolean): WgslSource {
     return wgsl`struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) vPosition:vec3<f32>,@location(1) vNormal:vec3<f32>,${
         hasOpacity ? "@location(2) vUv:vec2<f32>," : ""
     }};`;
 }
 
-function buildVertexSource(hasOpacity: boolean): string {
+function buildVertexSource(hasOpacity: boolean): WgslSource {
     return wgsl`${buildVertexOutputStruct(hasOpacity)}
 @vertex fn mainVertex(input:VertexInput)->VertexOutput{var out:VertexOutput;out.position=shaderSystem.projection*(shaderSystem.view*(shaderSystem.world*vec4<f32>(input.position,1.0)));out.vPosition=input.position;out.vNormal=input.normal;${
         hasOpacity ? "out.vUv=input.uv;" : ""
     }return out;}`;
 }
 
-function buildFragmentSource(opts: { antialias: boolean; useMaxLine: boolean; transparent: boolean; preMultiplyAlpha: boolean; hasOpacity: boolean }): string {
+function buildFragmentSource(opts: { antialias: boolean; useMaxLine: boolean; transparent: boolean; preMultiplyAlpha: boolean; hasOpacity: boolean }): WgslSource {
     const onLine = opts.antialias ? "fr=clamp(fr,-1.0,1.0);return 0.5+0.5*cos(fr*PI);" : "if(abs(fr)<SQRT2/4.0){return 1.0;}return 0.0;";
     const grid = opts.useMaxLine ? "let grid=clamp(max(max(x,y),z),0.0,1.0);" : "let grid=clamp(x+y+z,0.0,1.0);";
     const transparent = opts.transparent ? "opacity=clamp(grid,0.08,shaderUniforms.gridControl.w*grid);" : "";

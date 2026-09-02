@@ -30,7 +30,7 @@ import { GeometryTextureType } from "../../frame-graph/geometry-types.js";
 import { PBR_HAS_ALPHA_BLEND, PBR_HAS_ENV, _registerPbrExt, type _PbrBindCtx, type _PbrFragCtx, type PbrExt } from "./pbr-flags.js";
 import type { createPbrComposer, PbrLightMode } from "./pbr-compose.js";
 import type { MeshVbLayout } from "../../mesh/mesh.js";
-import { wgsl } from "../../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 const STAGE_VERTEX = 0x1;
@@ -59,7 +59,7 @@ function needsLocalPos(attachments: readonly GeometryTextureType[]): boolean {
  *  PBR-specific: world-position varying is `out.worldPos`. */
 function createPbrGeometryParamsFragment(needsParamsUbo: boolean, needsVelocityVaryings: boolean, needsLocalPosVarying: boolean): ShaderFragment {
     const bindings = needsParamsUbo ? [{ _name: "gp", _type: { _kind: "uniform-buffer" as const }, _visibility: STAGE_FRAGMENT | STAGE_VERTEX }] : [];
-    const helpers = needsParamsUbo ? wgsl`struct gpUniforms { previousViewProjection: mat4x4<f32>, cameraNearFar: vec4<f32>, };` : "";
+    const helpers = needsParamsUbo ? wgsl`struct gpUniforms { previousViewProjection: mat4x4<f32>, cameraNearFar: vec4<f32>, };` : wgsl``;
     const varyings: Varying[] = [];
     if (needsVelocityVaryings) {
         varyings.push({ _name: "vCurrentClip", _type: "vec4<f32>" }, { _name: "vPreviousClip", _type: "vec4<f32>" });
@@ -75,7 +75,7 @@ function createPbrGeometryParamsFragment(needsParamsUbo: boolean, needsVelocityV
     if (needsLocalPosVarying) {
         vbParts.push(wgsl`out.vLocalPos = position;`);
     }
-    const slots: ShaderFragment["_vertexSlots"] = vbParts.length > 0 ? { VB: vbParts.join("\n") } : {};
+    const slots: ShaderFragment["_vertexSlots"] = vbParts.length > 0 ? { VB: wgsl`${vbParts.join("\n")}` } : {};
     return {
         _id: "pbr-geometry-params",
         _bindings: bindings,
@@ -135,7 +135,7 @@ export function _ensurePbrGeometryExt(getAttachments: () => readonly GeometryTex
  *  in-scope PBR fragment vars at the BC slot location (after tonemap +
  *  gamma + contrast; same scope as the alpha-block).
  *  @internal */
-function attachmentExpr(type: GeometryTextureType, wg: string, hasIbl: boolean): string {
+function attachmentExpr(type: GeometryTextureType, wg: string, hasIbl: boolean): WgslSource {
     switch (type) {
         case GeometryTextureType.IRRADIANCE:
             // BJS PREPASS_IRRADIANCE (pbrBlockPrePass.fx): `finalDiffuse + finalIrradiance`
@@ -236,7 +236,7 @@ export function composePbrGeometryShader(
     //    `emitColor` is true, append an extra slot at @location(N) for the
     //    real lit colour (matches BJS `targetTexture`).
     const colorSlot = attachments.length;
-    const extraColorLine = emitColor ? wgsl`\n@location(${colorSlot}) color: vec4<f32>,` : "";
+    const extraColorLine = emitColor ? wgsl`\n@location(${colorSlot}) color: vec4<f32>,` : wgsl``;
     const outputStruct = wgsl`struct FragmentOutput {
 ${attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`).join("\n")}${extraColorLine}
 };
@@ -246,8 +246,8 @@ ${attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`).join("\n")}
     // 3) Replace the alpha-block return with MRT writes. With ALPHA_BLEND
     //    stripped, the template emits the simpler return form.
     const wg = `select(0.0, 1.0, alpha > 0.4)`;
-    const writes = attachments.map((type, i) => wgsl`out.f${i} = ${attachmentExpr(type, wg, hasIbl)};`).join("\n");
-    const extraColorWrite = emitColor ? wgsl`\nout.color = vec4<f32>(color, alpha * material.materialAlpha);` : "";
+    const writes = wgsl`${attachments.map((type, i) => wgsl`out.f${i} = ${attachmentExpr(type, wg, hasIbl)};`).join("\n")}`;
+    const extraColorWrite = emitColor ? wgsl`\nout.color = vec4<f32>(color, alpha * material.materialAlpha);` : wgsl``;
     const replacement = wgsl`var out: FragmentOutput;
 ${writes}${extraColorWrite}
 return out;`;
@@ -257,5 +257,5 @@ return out;`;
     }
     frag = frag.replace(returnPattern, replacement);
 
-    return { ...base, _fragmentWGSL: frag };
+    return { ...base, _fragmentWGSL: wgsl`${frag}` };
 }

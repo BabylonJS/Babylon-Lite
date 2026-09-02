@@ -16,7 +16,7 @@ export function createStandardFogFragment(): ShaderFragment {
         _id: "std-fog",
         _varyings: [{ _name: "vf", _type: "vec3<f32>" }],
         _helperFunctions: STD_FOG_HELPER,
-        _vertexSlots: { VB: "out.vf = (scene.view * vec4<f32>(out.vp, 1.0)).xyz;" },
+        _vertexSlots: { VB: wgsl`out.vf = (scene.view * vec4<f32>(out.vp, 1.0)).xyz;` },
         _fragmentSlots: { BA: STD_FOG_BLOCK },
     };
 }
