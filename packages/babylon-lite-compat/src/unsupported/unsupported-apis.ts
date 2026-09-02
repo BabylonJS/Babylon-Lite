@@ -33,6 +33,24 @@ export class BackgroundMaterial {
     }
 }
 
+export class OpenPBRMaterial {
+    public constructor() {
+        unsupported(
+            "OpenPBRMaterial",
+            "OpenPBR requires a distinct shader/material model and parameter mapping that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
+        );
+    }
+}
+
+export class OpenPBRMaterialDefines {
+    public constructor() {
+        unsupported(
+            "OpenPBRMaterialDefines",
+            "OpenPBR requires a distinct shader/material model and parameter mapping that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
+        );
+    }
+}
+
 // ─── Lights ──────────────────────────────────────────────────────────
 export class RectAreaLight {
     public constructor() {

@@ -5,6 +5,8 @@ import { ParticleSystem } from "../src/particles/particle-system";
 import {
     MultiMaterial,
     ShaderMaterial,
+    OpenPBRMaterial,
+    OpenPBRMaterialDefines,
     RectAreaLight,
     GPUParticleSystem,
     SolidParticleSystem,
@@ -81,6 +83,8 @@ describe("Unsupported API stubs throw on construction", () => {
     const cases: Array<[string, () => unknown]> = [
         ["MultiMaterial", () => new MultiMaterial()],
         ["ShaderMaterial", () => new ShaderMaterial()],
+        ["OpenPBRMaterial", () => new OpenPBRMaterial()],
+        ["OpenPBRMaterialDefines", () => new OpenPBRMaterialDefines()],
         ["RectAreaLight", () => new RectAreaLight()],
         ["ParticleSystem", () => new ParticleSystem()],
         ["GPUParticleSystem", () => new GPUParticleSystem()],

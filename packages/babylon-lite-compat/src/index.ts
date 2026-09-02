@@ -250,6 +250,8 @@ export {
     MultiMaterial,
     ShaderMaterial,
     BackgroundMaterial,
+    OpenPBRMaterial,
+    OpenPBRMaterialDefines,
     RectAreaLight,
     GPUParticleSystem,
     SolidParticleSystem,

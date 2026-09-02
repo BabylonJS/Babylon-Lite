@@ -376,29 +376,31 @@ export abstract class AbstractEngine {
         return unsupported("WebGPUEngine.endFrame", "Babylon Lite's frame graph owns the frame loop; drive rendering with `runRenderLoop`.");
     }
 
-    /**
-     * Babylon.js `engine.currentSampleCount` — the MSAA sample count of the current render target.
-     * Babylon Lite manages MSAA internally and exposes no public sample-count accessor, so this
-     * needs a tree-shakeable Lite core addition before it can report a real value.
-     */
-    public get currentSampleCount(): never {
-        return unsupported("AbstractEngine.currentSampleCount", "Babylon Lite manages MSAA internally and exposes no public sample-count accessor.");
+    /** Babylon.js `engine.currentSampleCount` — the active surface's MSAA sample count. */
+    public get currentSampleCount(): number {
+        return this._headless ? 1 : this._lite.msaaSamples;
     }
 
     /**
-     * Babylon.js `engine.getAlphaToCoverage()` — alpha-to-coverage state. Babylon Lite does not
-     * expose an engine-level alpha-to-coverage toggle, so this is unsupported.
+     * Babylon.js `engine.getAlphaToCoverage()` — alpha-to-coverage state. Lite's API is scoped to
+     * individual material/sprite/text pipeline owners, not the engine-wide state BJS exposes.
      */
     public getAlphaToCoverage(): never {
-        return unsupported("AbstractEngine.getAlphaToCoverage", "Babylon Lite does not expose an engine-level alpha-to-coverage toggle.");
+        return unsupported(
+            "AbstractEngine.getAlphaToCoverage",
+            "Lite's alpha-to-coverage API is target-scoped; mapping BJS's engine-wide state requires a pipeline-owner lifecycle policy."
+        );
     }
 
     /**
-     * Babylon.js `engine.setAlphaToCoverage(enable)` — toggle alpha-to-coverage. Babylon Lite does
-     * not expose an engine-level alpha-to-coverage toggle, so this is unsupported.
+     * Babylon.js `engine.setAlphaToCoverage(enable)` — toggle alpha-to-coverage. Lite's target-
+     * scoped API cannot reproduce the engine-wide state without a pipeline-owner lifecycle policy.
      */
     public setAlphaToCoverage(_enable: boolean): never {
-        return unsupported("AbstractEngine.setAlphaToCoverage", "Babylon Lite does not expose an engine-level alpha-to-coverage toggle.");
+        return unsupported(
+            "AbstractEngine.setAlphaToCoverage",
+            "Lite's alpha-to-coverage API is target-scoped; mapping BJS's engine-wide state requires a pipeline-owner lifecycle policy."
+        );
     }
 
     /**
