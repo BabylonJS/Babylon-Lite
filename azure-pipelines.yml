@@ -1,6 +1,7 @@
 # Azure Pipelines — Babylon Lite CI
 #
-# Runs on every PR targeting master. Eight parallel jobs:
+# Runs on every PR targeting master or the experimental Shado parity branch.
+# Eight parallel jobs:
 #   1. Release Markers  — breaking-change marker validation
 #   2. API Report       — public API diff comment + breaking-change validation
 #   3. Unit Tests       — vitest + plumbing (Playwright)
@@ -17,6 +18,7 @@ pr:
     branches:
         include:
             - master
+            - raananw-shiro-parity-experiment
 
 variables:
     - group: BabylonJS-BrowserStack
