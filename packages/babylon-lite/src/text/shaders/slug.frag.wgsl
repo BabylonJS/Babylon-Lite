@@ -106,7 +106,7 @@ fn main(in: FIn) -> @location(0) vec4<f32> {
   let hbandOffset = i32(hbandRaw.y + 0.5);
   let hbandLoc = calcBandLoc(glyphLoc, hbandOffset);
   for (var ci: i32 = 0; ci < hbandCount; ci = ci + 1) {
-    let locRaw = textureLoad(bandTex, vec2<i32>(hbandLoc.x + ci, hbandLoc.y), 0);
+    let locRaw = textureLoad(bandTex, calcBandLoc(hbandLoc, ci), 0);
     let curveLoc = vec2<i32>(i32(locRaw.x + 0.5), i32(locRaw.y + 0.5));
     let p12 = textureLoad(curveTex, curveLoc, 0) - vec4<f32>(renderCoord, renderCoord);
     let p3 = textureLoad(curveTex, vec2<i32>(curveLoc.x + 1, curveLoc.y), 0).xy - renderCoord;
@@ -132,7 +132,7 @@ fn main(in: FIn) -> @location(0) vec4<f32> {
   let vbandOffset = i32(vbandRaw.y + 0.5);
   let vbandLoc = calcBandLoc(glyphLoc, vbandOffset);
   for (var ci: i32 = 0; ci < vbandCount; ci = ci + 1) {
-    let locRaw = textureLoad(bandTex, vec2<i32>(vbandLoc.x + ci, vbandLoc.y), 0);
+    let locRaw = textureLoad(bandTex, calcBandLoc(vbandLoc, ci), 0);
     let curveLoc = vec2<i32>(i32(locRaw.x + 0.5), i32(locRaw.y + 0.5));
     let p12 = textureLoad(curveTex, curveLoc, 0) - vec4<f32>(renderCoord, renderCoord);
     let p3 = textureLoad(curveTex, vec2<i32>(curveLoc.x + 1, curveLoc.y), 0).xy - renderCoord;
