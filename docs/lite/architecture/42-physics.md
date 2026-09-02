@@ -29,13 +29,13 @@ the caller and only referenced once `createHavokWorld` runs.
 
 ## Design: pure-state handle + functions
 
-| Concept                    | Babylon Lite                                                         |
-| -------------------------- | ------------------------------------------------------------------- |
-| `PhysicsEngine` + plugin   | one `PhysicsWorld` state interface + standalone functions           |
-| `PhysicsBody` class        | `PhysicsBody` state interface + `createPhysicsBody(...)` etc.        |
-| `body.applyForce()`        | `applyPhysicsBodyForce(world, body, ...)`                           |
-| `PhysicsViewer` class      | `createPhysicsViewer(...)` + `show*/hide*` functions                |
-| Engine-owned step observer | a callback pushed onto `scene._beforeRender` at world creation       |
+| Concept                    | Babylon Lite                                                   |
+| -------------------------- | -------------------------------------------------------------- |
+| `PhysicsEngine` + plugin   | one `PhysicsWorld` state interface + standalone functions      |
+| `PhysicsBody` class        | `PhysicsBody` state interface + `createPhysicsBody(...)` etc.  |
+| `body.applyForce()`        | `applyPhysicsBodyForce(world, body, ...)`                      |
+| `PhysicsViewer` class      | `createPhysicsViewer(...)` + `show*/hide*` functions           |
+| Engine-owned step observer | a callback pushed onto `scene._beforeRender` at world creation |
 
 ### Thin-instance rigid bodies
 
@@ -65,10 +65,10 @@ Havok body per active matrix while retaining one Lite `PhysicsBody` handle:
 - Shape, mass, motion, velocity, impulse, force, event-mask, removal, and disposal
   operations that address the Lite body apply to every native instance. Getters
   and APIs that inherently accept one native body use instance zero.
-- Constraints and single-body query exclusions use instance zero. Raycast,
-  collision, trigger, and character-controller contact resolution recognize
-  every native handle by consulting the optional thin resolver before the
-  ordinary linear lookup. Collision-style event payloads return the
+- Constraints and single-body query exclusions use instance zero. Raycast and
+  character-controller contact resolution consult the optional thin resolver.
+  Body-aware collision and trigger subscriptions install a shared lazy event
+  resolver that recognizes both ordinary and thin native handles. Collision-style event payloads return the
   shared Lite body plus the zero-based thin-instance index, matching Babylon.js
   `colliderIndex` / `collidedAgainstIndex` semantics; ordinary bodies report
   index `0`.
@@ -84,10 +84,11 @@ sets fan out through the facade and rewrite/flush every thin matrix. The core
 step retains only three optional synchronization hooks (TELEPORT, ACTION, and
 dynamic body-to-matrix sync), while their algorithms stay in the lazy module.
 
-Thin bodies removed while after-step callbacks are draining remain resolvable
-until all callbacks complete. Minimal begin/end hooks bracket that drain; the
-facade defers only thin releases until the end hook, while ordinary removals and
-all removals outside the drain release immediately.
+Bodies removed while after-step callbacks are draining remain resolvable until
+all callbacks complete. Body-aware collision or trigger registration installs a
+lazy event-lifetime seam whose begin/end hooks bracket the drain and defer native
+release for both ordinary and thin bodies. Removals outside the drain release
+immediately.
 
 `getPhysicsBodyInstanceCount(body)` reports the native count (`1` for ordinary
 bodies). The active thin-instance count is fixed when the body is created:
@@ -99,17 +100,18 @@ until it can track one region per native instance.
 
 ### Module files
 
-| File                              | Responsibility                                                        |
-| --------------------------------- | --------------------------------------------------------------------- |
-| `havok.ts`                        | Core: world create/step/dispose, bodies, shapes, aggregates, forces   |
-| `havok-thin-instances.ts`         | Lazy native-body fan-out and matrix synchronization for thin instances |
-| `havok-collision.ts`              | Opt-in collision-started/continued/finished events (`onPhysicsCollision`) |
-| `havok-trigger.ts`                | Opt-in trigger volume enter/exit events                               |
-| `havok-heightfield.ts`            | Heightfield collision shape                                           |
-| `havok-queries.ts`                | Raycast, shape-cast, shape-proximity queries                         |
-| `havok-floating-origin.ts`        | Multi-region simulation for Large World Rendering (loaded on demand)  |
-| `character-controller.ts`         | Kinematic character controller (cast-and-slide)                      |
-| `physics-viewer.ts` + `physics-debug-line-material.ts` | Debug wireframe overlay of collider shapes         |
+| File                                                   | Responsibility                                                            |
+| ------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `havok.ts`                                             | Core: world create/step/dispose, bodies, shapes, aggregates, forces       |
+| `havok-thin-instances.ts`                              | Lazy native-body fan-out and matrix synchronization for thin instances    |
+| `havok-events.ts`                                      | Lazy body resolution and event-safe deferred release                      |
+| `havok-collision.ts`                                   | Opt-in collision-started/continued/finished events (`onPhysicsCollision`) |
+| `havok-trigger.ts`                                     | Opt-in trigger volume enter/exit events                                   |
+| `havok-heightfield.ts`                                 | Heightfield collision shape                                               |
+| `havok-queries.ts`                                     | Raycast, shape-cast, shape-proximity queries                              |
+| `havok-floating-origin.ts`                             | Multi-region simulation for Large World Rendering (loaded on demand)      |
+| `character-controller.ts`                              | Kinematic character controller (cast-and-slide)                           |
+| `physics-viewer.ts` + `physics-debug-line-material.ts` | Debug wireframe overlay of collider shapes                                |
 
 ---
 
@@ -119,9 +121,9 @@ until it can track one region per native instance.
 import HavokPhysics from "@babylonjs/havok";
 
 const hknp = await HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" });
-const world = createHavokWorld(scene, hknp);          // world step defaults to 0 (follows the scene)
+const world = createHavokWorld(scene, hknp); // world step defaults to 0 (follows the scene)
 // ... create bodies/aggregates ...
-disposePhysics(world);                                 // stops stepping, releases native world
+disposePhysics(world); // stops stepping, releases native world
 ```
 
 `createHavokWorld` registers the per-frame step by **unshifting a callback onto
@@ -164,8 +166,8 @@ animation and sprite managers use:
 ```ts
 // havok.ts _stepWorld(world, deltaMs)
 const stepMs = world._fixedDeltaMs > 0 ? world._fixedDeltaMs : deltaMs;
-if (!Number.isFinite(stepMs) || stepMs <= 0) return;   // reject NaN / non-positive
-const dt = Math.min(stepMs / 1000, 0.1);               // → seconds, clamped (see below)
+if (!Number.isFinite(stepMs) || stepMs <= 0) return; // reject NaN / non-positive
+const dt = Math.min(stepMs / 1000, 0.1); // → seconds, clamped (see below)
 hknp.HP_World_Step(hkWorld, dt);
 ```
 
@@ -194,8 +196,8 @@ write `_fixedDeltaMs` in **milliseconds**, matching `SceneContext.fixedDeltaMs`.
 scene's per-frame delta:
 
 ```ts
-setPhysicsTimestepMs(world, 1000 / 30);   // force a 30 fps physics step
-setPhysicsTimestepMs(world, 0);           // back to following the scene's delta
+setPhysicsTimestepMs(world, 1000 / 30); // force a 30 fps physics step
+setPhysicsTimestepMs(world, 0); // back to following the scene's delta
 ```
 
 `setPhysicsTimestep(world, seconds)` / `getPhysicsTimestep(world)` are the equivalent
@@ -231,17 +233,17 @@ huge `dt`. Integrating one giant step makes fast bodies **tunnel** through thin
 geometry (they teleport past a collider between two solver samples) and can
 destabilise the constraint solver. Capping turns a stall into a brief slow-motion
 instead of an explosion. Babylon.js caps its physics substep the same way. The
-clamp is intentionally *not* a substepping loop: Lite runs a single fixed step per
+clamp is intentionally _not_ a substepping loop: Lite runs a single fixed step per
 frame, trading perfect catch-up for simplicity and a stable bundle.
 
 ### Consistency with other time-based subsystems
 
-| Subsystem | Gate                                             | Source                        |
-| --------- | ------------------------------------------------ | ----------------------------- |
-| Scene     | `fixedDeltaMs > 0 ? fixedDeltaMs : currentDelta` | `scene-core.ts`               |
-| Animation | `fixedDeltaMs > 0 ? fixedDeltaMs : deltaMs`      | `animation-manager.ts`        |
-| Sprites   | `fixedDeltaMs > 0 ? fixedDeltaMs : deltaMs`      | `sprite-animation.ts`         |
-| Physics   | `_fixedDeltaMs > 0 ? _fixedDeltaMs : deltaMs`    | `havok.ts` `_stepWorld`       |
+| Subsystem | Gate                                             | Source                  |
+| --------- | ------------------------------------------------ | ----------------------- |
+| Scene     | `fixedDeltaMs > 0 ? fixedDeltaMs : currentDelta` | `scene-core.ts`         |
+| Animation | `fixedDeltaMs > 0 ? fixedDeltaMs : deltaMs`      | `animation-manager.ts`  |
+| Sprites   | `fixedDeltaMs > 0 ? fixedDeltaMs : deltaMs`      | `sprite-animation.ts`   |
+| Physics   | `_fixedDeltaMs > 0 ? _fixedDeltaMs : deltaMs`    | `havok.ts` `_stepWorld` |
 
 The only physics-specific differences are the ms→seconds conversion at the Havok
 boundary and the 100 ms tunnelling clamp; the guard against non-finite / negative
@@ -271,10 +273,10 @@ last axis is unlocked.
 ## Feature modules (opt-in)
 
 - **Collision events** (`havok-collision.ts`): `setPhysicsBodyCollisionEventsEnabled`
-  + `onPhysicsCollision` register an after-step drain on `world._afterStep`.
-  Each event identifies `collider`, `colliderIndex`, `collidedAgainst`, and
-  `collidedAgainstIndex`, and reports contact distance in addition to the point,
-  normal, and impulse.
+    - `onPhysicsCollision` register an after-step drain on `world._afterStep`.
+      Each event identifies `collider`, `colliderIndex`, `collidedAgainst`, and
+      `collidedAgainstIndex`, and reports contact distance in addition to the point,
+      normal, and impulse.
 - **Triggers** (`havok-trigger.ts`): `setPhysicsShapeIsTrigger`, `onPhysicsTrigger`,
   and body-aware `onPhysicsTriggerBodies`; both subscriptions return a disposer.
   Body-aware events include `bodyAIndex` / `bodyBIndex` (`-1` when an event refers

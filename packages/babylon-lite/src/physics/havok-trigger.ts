@@ -23,8 +23,9 @@
  * ```
  */
 
+import { ensureHavokEventContext } from "./havok-events.js";
 import { onPhysicsAfterStep } from "./havok.js";
-import type { PhysicsBody, PhysicsShape, PhysicsWorld, ResolvedPhysicsBodyInstance } from "./havok.js";
+import type { PhysicsBody, PhysicsShape, PhysicsWorld } from "./havok.js";
 
 type PhysicsTriggerType = PhysicsTriggerInfo["type"];
 
@@ -87,10 +88,11 @@ export function onPhysicsTrigger(world: PhysicsWorld, cb: (info: PhysicsTriggerI
  * @returns A disposer that removes the callback.
  */
 export function onPhysicsTriggerBodies(world: PhysicsWorld, cb: (info: PhysicsTriggerBodyInfo) => void): () => void {
+    const events = ensureHavokEventContext(world);
     return registerTriggerDrain(world, () =>
         drainTriggerEvents(world, (type, bodyAId, bodyBId) => {
-            const bodyA = findBodyById(world, bodyAId);
-            const bodyB = findBodyById(world, bodyBId);
+            const bodyA = events.resolve(bodyAId);
+            const bodyB = events.resolve(bodyBId);
             cb({
                 type,
                 bodyA: bodyA?.[0] ?? null,
@@ -124,18 +126,4 @@ function registerTriggerDrain(world: PhysicsWorld, drain: () => void): () => voi
             callbacks!.splice(index, 1);
         }
     };
-}
-
-function findBodyById(world: PhysicsWorld, bodyId: number): ResolvedPhysicsBodyInstance | null {
-    const thinBody = world._thin?.resolve(bodyId);
-    if (thinBody) {
-        return thinBody;
-    }
-    for (const body of world._bodies) {
-        const nativeId = body._hkBody[0];
-        if (nativeId === bodyId || (typeof nativeId === "bigint" && nativeId === BigInt(bodyId))) {
-            return [body, body._hkBody, 0];
-        }
-    }
-    return null;
 }

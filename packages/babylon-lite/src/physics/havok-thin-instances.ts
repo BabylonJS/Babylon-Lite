@@ -4,6 +4,7 @@ import { _quatFromRotationBasis } from "../math/quat-from-rotation-matrix.js";
 import type { Quat } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { flushThinInstances } from "../mesh/thin-instance.js";
+import type { SceneNode } from "../scene/scene-node.js";
 import { PhysicsMotionType, PhysicsPrestepType } from "./havok.js";
 import type { HavokThinInstanceContext, PhysicsBody, PhysicsWorld } from "./havok.js";
 
@@ -54,8 +55,6 @@ export function createHavokThinInstanceContext(world: PhysicsWorld): HavokThinIn
     const hkWorld = world._hkWorld;
     const states = new Map<any, ThinBodyState>();
     const facade = Object.create(raw);
-    let draining = false;
-    let pending: ThinBodyState[] | undefined;
 
     for (const name of [
         "HP_Body_SetShape",
@@ -126,28 +125,33 @@ export function createHavokThinInstanceContext(world: PhysicsWorld): HavokThinIn
         if (!state) {
             return raw.HP_Body_Release(handle);
         }
-        if (draining) {
-            (pending ??= []).push(state);
-        } else {
-            release(state);
-        }
+        release(state);
     };
 
     world._hknp = facade;
 
+    const validate = (node: SceneNode): void => {
+        const thin = (node as Mesh).thinInstances;
+        if (!thin) {
+            return;
+        }
+        if (world._fo) {
+            throw new Error("Thin-instance physics bodies do not support floating-origin worlds.");
+        }
+        if (!thin.count) {
+            throw new Error("Thin-instance physics requires a non-empty matrix buffer before body creation.");
+        }
+    };
+
     return {
+        validate,
         create(node, motionType, startsAsleep) {
             const mesh = node as Mesh;
             const thin = mesh.thinInstances;
             if (!thin) {
                 return undefined;
             }
-            if (world._fo) {
-                throw new Error("Thin-instance physics bodies do not support floating-origin worlds.");
-            }
-            if (!thin.count) {
-                throw new Error("Thin-instance physics requires a non-empty matrix buffer before body creation.");
-            }
+            validate(node);
             const hkMotion =
                 motionType === PhysicsMotionType.STATIC ? raw.MotionType.STATIC : motionType === PhysicsMotionType.ANIMATED ? raw.MotionType.KINEMATIC : raw.MotionType.DYNAMIC;
             const handles = new Array<any>(thin.count);
@@ -275,22 +279,7 @@ export function createHavokThinInstanceContext(world: PhysicsWorld): HavokThinIn
             }
             return true;
         },
-        begin() {
-            draining = true;
-        },
-        end() {
-            draining = false;
-            const deferred = pending;
-            pending = undefined;
-            if (deferred) {
-                for (const state of deferred) {
-                    release(state);
-                }
-            }
-        },
         dispose() {
-            draining = false;
-            pending = undefined;
             for (const state of states.values()) {
                 release(state);
             }

@@ -218,6 +218,8 @@ export interface PhysicsWorld {
     _fo?: HavokFloatingOriginContext;
     /** @internal Lazily installed thin-instance body seam. */
     _thin?: HavokThinInstanceContext;
+    /** @internal Lazily installed body-aware event lifetime seam. */
+    _events?: HavokEventContext;
     /** @internal Callbacks run after each physics step (post body→node sync, pre-render). */
     _afterStep?: ((timestep: number) => void)[];
     /** @internal Lazily-created Havok query collector, cached by the standalone `physics/havok-queries.ts` module. */
@@ -229,8 +231,18 @@ export interface PhysicsWorld {
 /** @internal A tracked Lite body, native Havok handle, and instance index. */
 export type ResolvedPhysicsBodyInstance = [PhysicsBody, any, number];
 
+/** @internal Installed only when body-aware collision or trigger events are enabled. */
+export interface HavokEventContext {
+    begin(): void;
+    end(): void;
+    remove(body: PhysicsBody): boolean;
+    resolve(nativeId: unknown): ResolvedPhysicsBodyInstance | null;
+    dispose(): void;
+}
+
 /** @internal Installed only when thin-instance physics is explicitly enabled. */
 export interface HavokThinInstanceContext {
+    validate(node: SceneNode): void;
     create(node: SceneNode, motionType: PhysicsMotionType, startsAsleep: boolean): PhysicsBody | undefined;
     from(body: PhysicsBody): boolean;
     to(body: PhysicsBody): boolean;
@@ -240,8 +252,6 @@ export interface HavokThinInstanceContext {
     com(body: PhysicsBody, nativeBody: any, localCenter: readonly [number, number, number]): Vec3 | undefined;
     matrix(body: PhysicsBody, nativeBody: any): Mat4 | undefined;
     impulse(body: PhysicsBody, impulse: Vec3): boolean;
-    begin(): void;
-    end(): void;
     dispose(): void;
 }
 
@@ -383,14 +393,14 @@ function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
     // post-step scene logic runs in `onAfterRenderObservable`.
     if (world._afterStep) {
         const cbs = world._afterStep.slice();
-        const thinInstances = world._thin;
-        thinInstances?.begin();
+        const events = world._events;
+        events?.begin();
         try {
             for (let i = 0; i < cbs.length; i++) {
                 cbs[i]!(dt);
             }
         } finally {
-            thinInstances?.end();
+            events?.end();
         }
     }
 }
@@ -1395,6 +1405,9 @@ export function setPhysicsBodyTransform(world: PhysicsWorld, body: PhysicsBody, 
         [position.x, position.y, position.z],
         [rotation.x, rotation.y, rotation.z, rotation.w],
     ]);
+    if (world._thin?.count(body) !== undefined) {
+        return;
+    }
     body.node.position.set(position.x, position.y, position.z);
     body.node.rotationQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
 }
@@ -1417,7 +1430,9 @@ export function removePhysicsBody(world: PhysicsWorld, body: PhysicsBody): void 
     }
     bodies.splice(i, 1);
     hknp.HP_World_RemoveBody(hkWorld, body._hkBody);
-    hknp.HP_Body_Release(body._hkBody);
+    if (!world._events?.remove(body)) {
+        hknp.HP_Body_Release(body._hkBody);
+    }
 }
 
 /**
@@ -1454,6 +1469,7 @@ export function releasePhysicsConstraint(world: PhysicsWorld, constraint: Physic
  */
 export function createPhysicsAggregate(world: PhysicsWorld, node: Mesh, type: PhysicsShapeType, options: PhysicsAggregateOptions): PhysicsAggregate {
     const motionType = options.mass === 0 ? PhysicsMotionType.STATIC : PhysicsMotionType.DYNAMIC;
+    world._thin?.validate(node);
 
     // Use a caller-supplied pre-built shape if present (e.g. a mesh/convex-hull
     // shape built via createPhysicsShape); otherwise build a primitive shape.
@@ -1601,6 +1617,7 @@ export function disposePhysics(world: PhysicsWorld): void {
         hknp.HP_Body_Release(b._hkBody);
     }
     bodies.length = 0;
+    world._events?.dispose();
     world._thin?.dispose();
 
     // Release world

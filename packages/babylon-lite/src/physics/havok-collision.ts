@@ -20,8 +20,9 @@
  */
 
 import type { Vec3 } from "../math/types.js";
+import { ensureHavokEventContext } from "./havok-events.js";
 import { onPhysicsAfterStep } from "./havok.js";
-import type { PhysicsBody, PhysicsWorld, ResolvedPhysicsBodyInstance } from "./havok.js";
+import type { PhysicsBody, PhysicsWorld } from "./havok.js";
 
 /** A single collision event reported by Havok after a physics step. */
 export interface PhysicsCollisionInfo {
@@ -71,6 +72,7 @@ export function setPhysicsBodyCollisionEventsEnabled(world: PhysicsWorld, body: 
  */
 export function onPhysicsCollision(world: PhysicsWorld, cb: (info: PhysicsCollisionInfo) => void): void {
     const hknp = world._hknp;
+    const events = ensureHavokEventContext(world);
     const startedValue = hknp.EventType.COLLISION_STARTED.value;
     const continuedValue = hknp.EventType.COLLISION_CONTINUED.value;
 
@@ -82,8 +84,8 @@ export function onPhysicsCollision(world: PhysicsWorld, cb: (info: PhysicsCollis
             const type = intBuf[0];
             const offA = 2;
             const offB = 18;
-            const bodyA = findBodyById(world, intBuf[offA]!);
-            const bodyB = findBodyById(world, intBuf[offB]!);
+            const bodyA = events.resolve(intBuf[offA]!);
+            const bodyB = events.resolve(intBuf[offB]!);
             if (!bodyA || !bodyB) {
                 addr = hknp.HP_World_GetNextCollisionEvent(world._hkWorld, addr);
                 continue;
@@ -106,17 +108,4 @@ export function onPhysicsCollision(world: PhysicsWorld, cb: (info: PhysicsCollis
             addr = hknp.HP_World_GetNextCollisionEvent(world._hkWorld, addr);
         }
     });
-}
-
-function findBodyById(world: PhysicsWorld, nativeId: unknown): ResolvedPhysicsBodyInstance | null {
-    const thinBody = world._thin?.resolve(nativeId);
-    if (thinBody) {
-        return thinBody;
-    }
-    for (const body of world._bodies) {
-        if (body._hkBody[0] === nativeId) {
-            return [body, body._hkBody, 0];
-        }
-    }
-    return null;
 }

@@ -10,6 +10,7 @@ import {
     applyPhysicsBodyImpulse,
     applyPhysicsImpulse,
     createHavokWorld,
+    createPhysicsAggregate,
     createPhysicsBody,
     disposePhysics,
     enableHavokThinInstancePhysics,
@@ -140,6 +141,22 @@ describe("thin-instance physics bodies", () => {
 
         expect(() => createPhysicsBody(world, mesh, PhysicsMotionType.DYNAMIC)).toThrow("non-empty matrix buffer");
         expect(hknp.HP_Body_Create).not.toHaveBeenCalled();
+    });
+
+    it("validates thin aggregates before allocating an owned shape", async () => {
+        const hknp = makeMockHknp();
+        const world = createHavokWorld(makeScene(), hknp);
+        await enableHavokThinInstancePhysics(world);
+        const mesh = makeThinMesh();
+        mesh.thinInstances!.count = 0;
+
+        expect(() => createPhysicsAggregate(world, mesh, PhysicsShapeType.BOX, { mass: 1 })).toThrow("non-empty matrix buffer");
+        expect(hknp.HP_Shape_CreateBox).not.toHaveBeenCalled();
+
+        mesh.thinInstances!.count = 2;
+        Object.assign(world, { _fo: {} });
+        expect(() => createPhysicsAggregate(world, mesh, PhysicsShapeType.BOX, { mass: 1 })).toThrow("floating-origin worlds");
+        expect(hknp.HP_Shape_CreateBox).not.toHaveBeenCalled();
     });
 
     it("removes positive and mirrored scale before extracting native body rotations", async () => {
@@ -303,6 +320,8 @@ describe("thin-instance physics bodies", () => {
     it("fans a public transform through the facade and flushes every thin matrix", async () => {
         const hknp = makeMockHknp();
         const mesh = makeThinMesh();
+        mesh.position.set = vi.fn((x, y, z) => Object.assign(mesh.position, { x, y, z }));
+        mesh.rotationQuaternion.set = vi.fn((x, y, z, w) => Object.assign(mesh.rotationQuaternion, { x, y, z, w }));
         const world = createHavokWorld(makeScene(), hknp);
         await enableHavokThinInstancePhysics(world);
         const body = createPhysicsBody(world, mesh, PhysicsMotionType.DYNAMIC);
@@ -314,6 +333,10 @@ describe("thin-instance physics bodies", () => {
         expect(Array.from(mesh.thinInstances!.matrices.slice(12, 15))).toEqual([7, 8, 9]);
         expect(Array.from(mesh.thinInstances!.matrices.slice(28, 31))).toEqual([7, 8, 9]);
         expect(mesh.thinInstances!._version).toBe(2);
+        expect(mesh.position).toMatchObject({ x: 50, y: 60, z: 70 });
+        expect(mesh.rotationQuaternion).toMatchObject({ x: 0, y: 0, z: 0, w: 1 });
+        expect(mesh.position.set).not.toHaveBeenCalled();
+        expect(mesh.rotationQuaternion.set).not.toHaveBeenCalled();
     });
 
     it("writes every simulated transform back to the matrix slab once per step", async () => {
@@ -492,6 +515,75 @@ describe("thin-instance physics bodies", () => {
         const reusedBody = createPhysicsBody(world, makeThinMesh(), PhysicsMotionType.DYNAMIC);
         expect(world._thin!.resolve(2)).toEqual([reusedBody, expect.any(Array), 0]);
         expect(world._thin!.resolve(1)).toEqual([reusedBody, expect.any(Array), 1]);
+    });
+
+    it("matches ordinary collision body handles across number and BigInt IDs", () => {
+        const hknp = makeMockHknp();
+        const memory = new ArrayBuffer(256);
+        const address = 16;
+        const ints = new Int32Array(memory, address);
+        ints[0] = 1;
+        ints[2] = 1;
+        ints[18] = 1;
+        Object.assign(hknp, {
+            HEAPU8: new Uint8Array(memory),
+            EventType: {
+                COLLISION_STARTED: { value: 1 },
+                COLLISION_CONTINUED: { value: 2 },
+                COLLISION_FINISHED: { value: 4 },
+            },
+            HP_World_GetCollisionEvents: vi.fn(() => [0, address]),
+            HP_World_GetNextCollisionEvent: vi.fn(() => 0),
+        });
+        const scene = makeScene();
+        const world = createHavokWorld(scene, hknp);
+        const mesh = makeThinMesh();
+        mesh.thinInstances = undefined;
+        const body = createPhysicsBody(world, mesh, PhysicsMotionType.STATIC);
+        body._hkBody[0] = BigInt(1);
+        const received = vi.fn();
+        onPhysicsCollision(world, received);
+
+        stepFrame(scene);
+
+        expect(received).toHaveBeenCalledWith(expect.objectContaining({ collider: body, collidedAgainst: body }));
+    });
+
+    it("reports ordinary collisions when a participant is removed before event draining", () => {
+        const hknp = makeMockHknp();
+        const memory = new ArrayBuffer(256);
+        const address = 16;
+        const ints = new Int32Array(memory, address);
+        ints[0] = 1;
+        ints[2] = 1;
+        ints[18] = 1;
+        Object.assign(hknp, {
+            HEAPU8: new Uint8Array(memory),
+            EventType: {
+                COLLISION_STARTED: { value: 1 },
+                COLLISION_CONTINUED: { value: 2 },
+                COLLISION_FINISHED: { value: 4 },
+            },
+            HP_World_GetCollisionEvents: vi.fn(() => [0, address]),
+            HP_World_GetNextCollisionEvent: vi.fn(() => 0),
+        });
+        const scene = makeScene();
+        const world = createHavokWorld(scene, hknp);
+        const mesh = makeThinMesh();
+        mesh.thinInstances = undefined;
+        const body = createPhysicsBody(world, mesh, PhysicsMotionType.DYNAMIC);
+        const received = vi.fn();
+        onPhysicsAfterStep(world, () => {
+            removePhysicsBody(world, body);
+            expect(hknp.HP_Body_Release).not.toHaveBeenCalled();
+        });
+        onPhysicsCollision(world, received);
+
+        stepFrame(scene);
+
+        expect(received).toHaveBeenCalledWith(expect.objectContaining({ collider: body, collidedAgainst: body }));
+        expect(hknp.HP_Body_Release).toHaveBeenCalledWith(body._hkBody);
+        expect(world._bodies).not.toContain(body);
     });
 
     it("reports the thin-instance index from a raycast hit", async () => {
