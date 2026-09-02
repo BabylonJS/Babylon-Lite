@@ -1425,7 +1425,7 @@ export async function buildBundleScenes(): Promise<void> {
             base: "./",
             publicDir: false,
             logLevel: "warn",
-            plugins: isBjs ? [bjsSideEffectsFalsePlugin()] : [terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
+            plugins: isBjs ? [bjsSideEffectsFalsePlugin()] : [wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
             resolve: {
                 // Resolve `babylon-lite` to the built `build/lib` tree (NOT the TS source)
                 // so the measured bundle reflects exactly what a consumer of the published
