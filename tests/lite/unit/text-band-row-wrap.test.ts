@@ -29,7 +29,8 @@ describe("Slug band-reference row wrapping", () => {
         const bandRef = (texel: number) => Array.from(atlas._bandTexData.subarray(texel * 4, texel * 4 + 2));
         expect(bandRef(TEX_WIDTH - 1)).toEqual([0, 0]);
         expect(bandRef(TEX_WIDTH)).toEqual([2, 0]);
-        expect(slugFragment).toContain("textureLoad(bandTex, calcBandLoc(hbandLoc, ci), 0)");
-        expect(slugFragment).toContain("textureLoad(bandTex, calcBandLoc(vbandLoc, ci), 0)");
+        const normalizedSlugFragment = slugFragment.replace(/\s+/g, " ");
+        expect(normalizedSlugFragment).toContain("textureLoad(bandTex, calcBandLoc(hbandLoc, ci), 0)");
+        expect(normalizedSlugFragment).toContain("textureLoad(bandTex, calcBandLoc(vbandLoc, ci), 0)");
     });
 });
