@@ -60,8 +60,8 @@ describe("Havok trigger events", () => {
         world._afterStep![0]!(1 / 60);
 
         expect(received.mock.calls.map(([event]) => event)).toEqual([
-            { type: "ENTERED", bodyA, bodyB },
-            { type: "EXITED", bodyA, bodyB: null },
+            { type: "ENTERED", bodyA, bodyAIndex: 0, bodyB, bodyBIndex: 0 },
+            { type: "EXITED", bodyA, bodyAIndex: 0, bodyB: null, bodyBIndex: -1 },
         ]);
     });
 

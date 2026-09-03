@@ -23,6 +23,7 @@
  * ```
  */
 
+import { ensureHavokEventContext } from "./havok-events.js";
 import { onPhysicsAfterStep } from "./havok.js";
 import type { PhysicsBody, PhysicsShape, PhysicsWorld } from "./havok.js";
 
@@ -41,8 +42,12 @@ export interface PhysicsTriggerInfo {
 export interface PhysicsTriggerBodyInfo extends PhysicsTriggerInfo {
     /** First body reported by Havok, or `null` if it is no longer tracked. */
     bodyA: PhysicsBody | null;
+    /** Thin-instance index of `bodyA`, or `-1` when the body is no longer tracked. */
+    bodyAIndex: number;
     /** Second body reported by Havok, or `null` if it is no longer tracked. */
     bodyB: PhysicsBody | null;
+    /** Thin-instance index of `bodyB`, or `-1` when the body is no longer tracked. */
+    bodyBIndex: number;
 }
 
 /**
@@ -83,9 +88,18 @@ export function onPhysicsTrigger(world: PhysicsWorld, cb: (info: PhysicsTriggerI
  * @returns A disposer that removes the callback.
  */
 export function onPhysicsTriggerBodies(world: PhysicsWorld, cb: (info: PhysicsTriggerBodyInfo) => void): () => void {
+    const events = ensureHavokEventContext(world);
     return registerTriggerDrain(world, () =>
         drainTriggerEvents(world, (type, bodyAId, bodyBId) => {
-            cb({ type, bodyA: findBodyById(world, bodyAId), bodyB: findBodyById(world, bodyBId) });
+            const bodyA = events.resolve(bodyAId);
+            const bodyB = events.resolve(bodyBId);
+            cb({
+                type,
+                bodyA: bodyA?.[0] ?? null,
+                bodyAIndex: bodyA?.[2] ?? -1,
+                bodyB: bodyB?.[0] ?? null,
+                bodyBIndex: bodyB?.[2] ?? -1,
+            });
         })
     );
 }
@@ -112,14 +126,4 @@ function registerTriggerDrain(world: PhysicsWorld, drain: () => void): () => voi
             callbacks!.splice(index, 1);
         }
     };
-}
-
-function findBodyById(world: PhysicsWorld, bodyId: number): PhysicsBody | null {
-    for (const body of world._bodies) {
-        const nativeId = body._hkBody[0];
-        if (nativeId === bodyId || (typeof nativeId === "bigint" && nativeId === BigInt(bodyId))) {
-            return body;
-        }
-    }
-    return null;
 }

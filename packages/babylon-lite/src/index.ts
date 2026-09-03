@@ -883,7 +883,9 @@ export {
 export {
     createHavokWorld,
     enableHavokFloatingOrigin,
+    enableHavokThinInstancePhysics,
     createPhysicsBody,
+    getPhysicsBodyInstanceCount,
     createPhysicsShape,
     createPhysicsAggregate,
     createPhysicsConstraint,

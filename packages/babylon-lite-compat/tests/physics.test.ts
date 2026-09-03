@@ -625,6 +625,7 @@ describe("PhysicsEngine", () => {
                 controller.onTriggerCollisionObservable.add(collision);
                 controller._lite.onTriggerCollisionObservable.notify({
                     collider: collider.body._lite,
+                    colliderIndex: 0,
                     impulse: { x: 1, y: 2, z: 3 },
                     impulsePosition: { x: 4, y: 5, z: 6 },
                 });
