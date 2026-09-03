@@ -28,6 +28,7 @@
  *  and at all four corners. `wdst` below reads nothing from the base loops and does its own
  *  radius-bounded scan across every h-band the search radius touches. */
 
+import { wgsl } from "../../shader/wgsl.js";
 import type { TextShaderFragment } from "./text-shader-fragment.js";
 
 /** @internal The font-weight offset fragment. `_id` is the variant field of the pipeline
@@ -35,17 +36,17 @@ import type { TextShaderFragment } from "./text-shader-fragment.js";
 export const WEIGHT_SHADER_FRAGMENT: TextShaderFragment = {
     _id: "w",
     _vertexSlots: {
-        VO: `@location(4) @interpolate(flat) wo:f32,`,
-        VD: `d.wo=0.0;`,
+        VO: wgsl`@location(4) @interpolate(flat) wo:f32,`,
+        VD: wgsl`d.wo=0.0;`,
         // Inflate the font-space glyph bounds symmetrically so the quad covers the expanded
         // contour.
-        VB: `let wo=sy.p.y;
+        VB: wgsl`let wo=sy.p.y;
 let sb=vec4<f32>(md.b.xy-vec2<f32>(wo),md.b.zw+vec2<f32>(wo));`,
-        VA: `out.wo=wo;`,
+        VA: wgsl`out.wo=wo;`,
     },
     _fragmentSlots: {
-        FI: `@location(4) @interpolate(flat) wo:f32,`,
-        FH: `fn dot2(v:vec2<f32>)->f32{return dot(v,v);}
+        FI: wgsl`@location(4) @interpolate(flat) wo:f32,`,
+        FH: wgsl`fn dot2(v:vec2<f32>)->f32{return dot(v,v);}
 // Exact distance from a point to a quadratic Bezier: solve the depressed cubic for the
 // closest-point parameter, clamped to the segment.
 fn dq(p:vec2<f32>,A:vec2<f32>,B:vec2<f32>,C:vec2<f32>)->f32{
@@ -125,7 +126,7 @@ return md;
         // overestimated distance can never punch a hole into the glyph. The `wo != 0` guard
         // means a stale or zero style entry in a variant group renders exactly as the base
         // shader and skips the scan.
-        CO: `if(in.wo!=0.0){
+        CO: wgsl`if(in.wo!=0.0){
 let aas=max(max(pe.x,pe.y),1.0e-8);
 let d=wdst(rc,gp,bm,in.bn,in.wo+1.0/aas);
 let wc=clamp((in.wo-d)*aas+0.5,0.0,1.0);

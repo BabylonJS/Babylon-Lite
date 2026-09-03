@@ -32,20 +32,21 @@
  *    cv p12 p3  curve texel location | first two control points | third control point
  *    cov        final coverage in [0,1] */
 
+import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 import type { TextShaderFragment } from "./text-shader-fragment.js";
 
 /** @internal Composed WGSL pair for one shader variant. */
 export interface ComposedSlugShader {
     /** @internal Vertex stage WGSL. */
-    readonly _vert: string;
+    readonly _vert: WgslSource;
     /** @internal Fragment stage WGSL. */
-    readonly _frag: string;
+    readonly _frag: WgslSource;
     /** @internal Composed fragment id — `""` for the base variant. Part of the pipeline cache key. */
     readonly _key: string;
 }
 
 /** Shared `TextU` block declaration — identical in both stages (same buffer, binding 0). */
-const TEXT_UNIFORM = `struct TU{mvp:mat4x4<f32>,vp:vec4<f32>,col:vec4<f32>};
+const TEXT_UNIFORM = wgsl`struct TU{mvp:mat4x4<f32>,vp:vec4<f32>,col:vec4<f32>};
 @group(0)@binding(0) var<uniform> tu:TU;`;
 
 /** Compose the Slug shader pair.
@@ -62,7 +63,7 @@ export function composeSlugShader(fragment: TextShaderFragment | null): Composed
     // the glyph's own bounds, which keeps the base variant byte-for-byte free of the seam.
     const bounds = v?.VB ? "sb" : "md.b";
 
-    const _vert = `${TEXT_UNIFORM}
+    const _vert = wgsl`${TEXT_UNIFORM}
 struct GM{b:vec4<f32>,a:vec4<f32>,t:vec4<f32>};
 @group(0)@binding(3) var<storage,read> gm:array<GM>;
 struct TS{col:vec4<f32>,p:vec4<f32>};
@@ -129,7 +130,7 @@ ${v?.VA ?? ""}
 return out;
 }`;
 
-    const _frag = `@group(0)@binding(1) var ct:texture_2d<f32>;
+    const _frag = wgsl`@group(0)@binding(1) var ct:texture_2d<f32>;
 @group(0)@binding(2) var bt:texture_2d<f32>;
 ${TEXT_UNIFORM}
 // Pipeline-overridable: when true, output straight (non-premultiplied) alpha so the hardware

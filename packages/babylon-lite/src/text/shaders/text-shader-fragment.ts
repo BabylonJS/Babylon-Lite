@@ -12,6 +12,8 @@
  *  Slot contracts are specified in `docs/lite/architecture/33-text.md` ("Injection slots")
  *  and restated at each interpolation site in `slug-shader.ts`. */
 
+import type { WgslSource } from "../../shader/wgsl.js";
+
 /** Vertex-stage injection points.
  *  - `VO` — extra `VOut` members (comma-terminated; base uses `@location(0..3)`).
  *  - `VD` — dead-slot defaults for those members, assigned on the local `d: VOut`.
@@ -41,7 +43,7 @@ export interface TextShaderFragment {
     /** @internal Stable id. Folded into the pipeline cache key and the module labels. */
     readonly _id: string;
     /** @internal WGSL injected at named vertex slots. */
-    readonly _vertexSlots?: Partial<Record<TextVertexSlot, string>>;
+    readonly _vertexSlots?: Partial<Record<TextVertexSlot, WgslSource>>;
     /** @internal WGSL injected at named fragment slots. */
-    readonly _fragmentSlots?: Partial<Record<TextFragmentSlot, string>>;
+    readonly _fragmentSlots?: Partial<Record<TextFragmentSlot, WgslSource>>;
 }
