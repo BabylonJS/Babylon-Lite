@@ -137,3 +137,37 @@ describe("shadow caster preload race", () => {
         expect(String(thrown ?? "")).not.toContain("is not a function");
     });
 });
+
+describe("shadow caster preload during scene registration", () => {
+    it("parks the caster set on the generator until the registration preload resolves", async () => {
+        const sg = makeGenerator();
+        let releasePreload!: () => void;
+        const preloaded = new Promise<void>((resolve) => (releasePreload = resolve));
+        const generator = sg as unknown as { _preloadShadowTask: unknown; _ensureShadowTaskState: unknown };
+        generator._preloadShadowTask = () => preloaded;
+        const ensureState = vi.fn(() => ({ _task: { record: vi.fn(), dispose: vi.fn() }, _casterMeshes: [] }));
+        generator._ensureShadowTaskState = ensureState;
+
+        const scene = { lights: [{ shadowGenerator: sg }], _renderableVersion: 1 } as unknown as SceneContext;
+        const task = createShadowTask({} as EngineContext, scene);
+        _setShadowTaskInputPreloader(() => Promise.resolve());
+        const casters = [{} as Mesh];
+        setShadowTaskCasterMeshes(sg, casters);
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(sg._preloadPending).toBeUndefined();
+
+        // Registration: `_preload()` is awaited, but the scene is already `_built`, so an application
+        // rebuild can call `record()` in the meantime. The generator must stay parked until the import lands.
+        const preloading = task._preload!();
+        expect(sg._preloadPending).toBe(casters);
+        task.record();
+        expect(ensureState).not.toHaveBeenCalled();
+
+        releasePreload();
+        await preloading;
+        expect(sg._preloadPending).toBeUndefined();
+        task.record();
+        expect(ensureState).toHaveBeenCalledTimes(1);
+    });
+});

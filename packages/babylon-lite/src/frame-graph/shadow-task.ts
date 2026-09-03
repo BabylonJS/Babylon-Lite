@@ -39,7 +39,19 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
                 const casterMeshes = sg ? _getShadowTaskCasterMeshes(sg) : null;
                 if (sg?._preloadShadowTask && casterMeshes) {
                     shadowGenerators.add(sg);
-                    loads.push(sg._preloadShadowTask(casterMeshes));
+                    // Park the set while its no-colour views import, exactly like a runtime re-supply
+                    // (`setShadowTaskCasterMeshes`). Registration awaits this preload, but the scene is
+                    // already `_built` by then: a rebuild the application triggers during the await
+                    // (material swap, mesh added) runs `frameGraph.build()` → `record()` and would call a
+                    // family factory that is still undefined. `record`/`execute` skip a parked generator.
+                    sg._preloadPending = casterMeshes;
+                    loads.push(
+                        sg._preloadShadowTask(casterMeshes).then(() => {
+                            if (sg._preloadPending === casterMeshes) {
+                                sg._preloadPending = undefined;
+                            }
+                        })
+                    );
                 }
             }
             await Promise.all(loads);
