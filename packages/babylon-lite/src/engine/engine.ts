@@ -242,8 +242,13 @@ export function getRenderingContexts(surface: SurfaceContext): readonly Renderin
  * The return type is intentionally a raw `string`, not a string-literal union,
  * so adding a rendering-context family is not a breaking API change. Treat the
  * values above as the documented set to match against.
+ *
+ * Throws when `context` is not a rendering context created by Lite.
  */
 export function getRenderingContextKind(context: RenderingContext): string {
+    if (!context || typeof context._kind !== "string") {
+        throw new TypeError("Invalid RenderingContext: missing internal kind discriminator");
+    }
     return context._kind;
 }
 

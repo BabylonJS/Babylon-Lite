@@ -114,6 +114,7 @@ describe("getMaterialTextures", () => {
                 value: { type: "f32", value: 1 },
             },
         };
+        Object.setPrototypeOf(node.inputs, { inherited: { type: "texture2d", texture: otherTexture } });
 
         expect(getMaterialTextures(shader)).toEqual([texture]);
         expect(getMaterialTextures(node)).toEqual([texture]);

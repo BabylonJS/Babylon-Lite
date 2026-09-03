@@ -24,12 +24,23 @@ export function getMaterialTextures(material: Material): readonly Texture2D[] {
         case "shader":
             return getSlotTextures((source as ShaderMaterial)._textureSlots.values());
         case "node":
-            return Object.values((source as NodeMaterial).inputs)
-                .filter((input) => input.type === "texture2d" && input.texture)
-                .map((input) => input.texture!);
+            return getNodeTextures((source as NodeMaterial).inputs);
         default:
             return [];
     }
+}
+
+function getNodeTextures(inputs: NodeMaterial["inputs"]): Texture2D[] {
+    const textures: Texture2D[] = [];
+    for (const name in inputs) {
+        if (Object.hasOwn(inputs, name)) {
+            const input = inputs[name]!;
+            if (input.type === "texture2d" && input.texture) {
+                textures.push(input.texture);
+            }
+        }
+    }
+    return textures;
 }
 
 function getSlotTextures(slots: Iterable<{ readonly current: Texture2D | null }>): Texture2D[] {

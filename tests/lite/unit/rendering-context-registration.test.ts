@@ -122,6 +122,12 @@ describe("rendering context registration helpers", () => {
         expect(contexts.map(getRenderingContextKind)).toEqual(["scene", "frame-graph-context", "effect-renderer"]);
     });
 
+    it("rejects a public structural object without an internal discriminator", () => {
+        const context = { clearColor: { r: 0, g: 0, b: 0, a: 1 } } as RenderingContext;
+
+        expect(() => getRenderingContextKind(context)).toThrow(new TypeError("Invalid RenderingContext: missing internal kind discriminator"));
+    });
+
     it("registers and unregisters idempotently", () => {
         const engine = makeMockEngine();
         const context = makeRenderingContext();
