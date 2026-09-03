@@ -14,6 +14,23 @@ The render canvas may be either a DOM `HTMLCanvasElement` (main thread) or an `O
 /** A surface the engine can render into: a DOM canvas or an OffscreenCanvas. */
 export type RenderCanvas = HTMLCanvasElement | OffscreenCanvas;
 
+/** Read-only public view of a registered rendering context. */
+export interface RenderingContext {
+    clearColor: GPUColorDict;
+}
+
+/** Return the surface's live rendering-context list in render order. */
+export function getRenderingContexts(surface: SurfaceContext): readonly RenderingContext[];
+
+/** Return the rendering context's stable family identifier. */
+export function getRenderingContextKind(context: RenderingContext): string;
+
+/** Top-level scene context. */
+export interface SceneContext extends RenderingContext {
+    /** Optional display name for tooling and diagnostics. */
+    name?: string;
+}
+
 /** Handle to the WebGPU engine — public API surface.
  *  GPU internals (device, context, format) are @internal — not user-facing. */
 export interface EngineContext {
@@ -99,6 +116,10 @@ interface EngineContextInternal extends EngineContext {
 4. **Swap chain configure**: `context.configure({ device, format, alphaMode })` where `format = navigator.gpu.getPreferredCanvasFormat()` and `alphaMode = options?.alphaMode ?? "opaque"`.
 5. **MSAA**: Defaults to `msaaSamples = 4`, or `1` when requested.
 6. **Rendering contexts**: Initializes an empty `_renderingContexts` list. Scenes and other renderers register themselves with the engine.
+
+### Rendering-Context Introspection
+
+`getRenderingContexts(surface)` returns the surface's existing registry array as a readonly live view; it does not allocate a snapshot. Registration and unregistration are therefore visible through a previously returned reference, in render order, with no per-frame work. `getRenderingContextKind(context)` returns `"scene"`, `"frame-graph-context"`, `"effect-renderer"`, `"sprite-renderer"`, or `"text-renderer"` for the current built-in contexts. Its return type is intentionally the open `string` type, so adding a new context family is not a breaking API change. It throws a `TypeError` when passed a structural public object that is not a rendering context created by Lite. A utility layer registers an ordinary scene context with the default name `"UtilityLayer"`; tools can display `SceneContext.name` without treating utility layers as a separate rendering-context family.
 
 ### Render Targets
 
@@ -276,6 +297,7 @@ Disabling task timing destroys its query set, resolve buffer, pooled readbacks, 
 | `start/stop manages rAF`                          | Verify `requestAnimationFrame` called on start, `cancelAnimationFrame` on stop                 |
 | `waitForGpuIdle returns the queue fence`          | Verify `onSubmittedWorkDone()` is called once and its exact Promise is returned                |
 | `renderFrame calls scene callbacks`               | Verify pre-passes → updaters → renderables order                                               |
+| `rendering-context query is live and readonly`    | Verify stable array identity, registration-order updates, and public kind discriminators       |
 | `MSAA resolve target is swap chain view`          | Inspect color attachment `resolveTarget` in render pass descriptor                             |
 | `depth format is depth24plus-stencil8`            | Verify `depthTexture.format`                                                                   |
 

@@ -11,11 +11,13 @@ export {
     resizeEngine,
     setEngineSize,
     disposeEngine,
+    getRenderingContextKind,
+    getRenderingContexts,
     setGpuTimingEnabled,
     isGpuTimingSupported,
 } from "./engine/engine.js";
 export { VERSION } from "./engine/version.js";
-export type { EngineContext, EngineOptions, RenderCanvas } from "./engine/engine.js";
+export type { EngineContext, EngineOptions, RenderCanvas, RenderingContext } from "./engine/engine.js";
 export { createNullEngine, stepScene, runHeadlessSteps } from "./engine/null-engine.js";
 export type { NullEngineOptions } from "./engine/null-engine.js";
 export { setRenderTaskGpuTimingEnabled, isRenderTaskGpuTimingSupported, getRenderTaskGpuTimings, measureRenderTaskOverdrawCost } from "./engine/gpu-task-timing.js";
@@ -381,6 +383,7 @@ export { createNodeNoColorMaterialView } from "./material/node/no-color-view.js"
 export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./material/node/node-material.js";
 export { createMaterialView } from "./material/material-view.js";
 export { getMaterialFamily } from "./material/material-family.js";
+export { getMaterialTextures } from "./material/material-textures.js";
 export { isPbrMaterial, isStandardMaterial, isShaderMaterial, isNodeMaterial } from "./material/material-guards.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { enableMaterialUvTransform } from "./material/enable-material-uv-transform.js";
