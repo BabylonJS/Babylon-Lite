@@ -1,12 +1,16 @@
 import { describe, it, expect, vi } from "vitest";
 
 import {
+    getRenderingContextKind,
+    getRenderingContexts,
     isRenderingContextRegistered,
     registerRenderingContext,
     unregisterRenderingContext,
     type EngineContext,
     type RenderingContext,
 } from "../../../packages/babylon-lite/src/engine/engine";
+import { createEffectRenderer, createEffectWrapper } from "../../../packages/babylon-lite/src/effect/effect-renderer";
+import { createFrameGraphContext } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-context";
 import { addTaskAtStart } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-actions";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
 import { addToScene, createSceneContext, disposeScene, registerScene, unregisterScene, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
@@ -14,6 +18,7 @@ import { _installAsyncShaderPipelinePreparation } from "../../../packages/babylo
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
+import { createUtilityLayer } from "../../../packages/babylon-lite/src/gizmo/utility-layer";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUShaderStage" | "GPUBufferUsage" | "GPUTextureUsage"> & {
     GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
@@ -89,6 +94,34 @@ function makeRenderingContext(): RenderingContext {
 }
 
 describe("rendering context registration helpers", () => {
+    it("returns a stable live view with public context kinds and scene names", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const utility = createUtilityLayer(engine, scene, { addDefaultLight: false });
+        const frameGraph = createFrameGraphContext(engine);
+        const effect = createEffectRenderer(
+            engine,
+            createEffectWrapper(engine, {
+                fragmentWGSL: "@fragment fn main()->@location(0) vec4<f32>{return vec4<f32>(1);}",
+            })
+        );
+        const contexts = getRenderingContexts(engine);
+
+        expect(contexts).toBe(getRenderingContexts(engine));
+        expect(contexts).toHaveLength(0);
+
+        registerRenderingContext(engine, scene);
+        registerRenderingContext(engine, utility.scene);
+        registerRenderingContext(engine, frameGraph);
+        registerRenderingContext(engine, effect);
+
+        expect(contexts.map(getRenderingContextKind)).toEqual(["scene", "scene", "frame-graph-context", "effect-renderer"]);
+        expect(utility.scene.name).toBe("UtilityLayer");
+
+        unregisterRenderingContext(engine, utility.scene);
+        expect(contexts.map(getRenderingContextKind)).toEqual(["scene", "frame-graph-context", "effect-renderer"]);
+    });
+
     it("registers and unregisters idempotently", () => {
         const engine = makeMockEngine();
         const context = makeRenderingContext();

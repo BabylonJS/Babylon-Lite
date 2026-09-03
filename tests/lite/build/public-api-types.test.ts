@@ -154,6 +154,25 @@ describe("build/index.d.ts", () => {
         expect(dts).toMatch(/unlockPhysicsBodyRotationAxes\(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis\[\]\): void/);
     });
 
+    it("exposes readonly rendering-context introspection without internal registries", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).toMatch(/getRenderingContextKind\(context: RenderingContext(?:_\d+)?\): string/);
+        expect(dts).toMatch(/getRenderingContexts\(surface: SurfaceContext\): readonly RenderingContext(?:_\d+)?\[\]/);
+        expect(dts).not.toMatch(/\btype RenderingContextKind\b/);
+        expect(dts).not.toMatch(/declare interface RenderingContext(?:_\d+)? \{[^}]*\bkind:/s);
+        expect(dts).not.toContain("_renderingContextKind");
+        expect(dts).not.toMatch(/^\s*_renderingContexts:/m);
+        expect(dts).toMatch(/interface SceneContext extends RenderingContext(?:_\d+)? \{[^}]*name\?: string;/s);
+    });
+
+    it("exposes readonly material texture introspection without internal slots", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).toMatch(/getMaterialTextures\(material: Material(?:_\d+)?\): readonly Texture2D(?:_\d+)?\[\]/);
+        expect(dts).not.toMatch(/^\s*_textureSlots:/m);
+    });
+
     it("rejects invalid emitter fields while preserving extended provider options", () => {
         const probePath = resolve(BUILD_DIR, "public-api-types.probe.ts");
         try {
