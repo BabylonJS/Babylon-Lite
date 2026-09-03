@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { GlyphCurves } from "../../../packages/babylon-lite/src/text/glyph-storage";
 import { createSharedAtlas, packAppendGlyph, TEX_WIDTH } from "../../../packages/babylon-lite/src/text/glyph-storage";
-import slugFragment from "../../../packages/babylon-lite/src/text/shaders/slug.frag.wgsl?raw";
+import { composeSlugShader } from "../../../packages/babylon-lite/src/text/shaders/slug-shader";
+import { WEIGHT_SHADER_FRAGMENT } from "../../../packages/babylon-lite/src/text/shaders/weight-shader-fragment";
 
 describe("Slug band-reference row wrapping", () => {
-    it("wraps every horizontal and vertical band-reference read to the next texture row", () => {
+    it("wraps every base and weighted band-reference read to the next texture row", () => {
         const glyph: GlyphCurves = {
             glyphId: 1,
             curves: [
@@ -29,8 +30,11 @@ describe("Slug band-reference row wrapping", () => {
         const bandRef = (texel: number) => Array.from(atlas._bandTexData.subarray(texel * 4, texel * 4 + 2));
         expect(bandRef(TEX_WIDTH - 1)).toEqual([0, 0]);
         expect(bandRef(TEX_WIDTH)).toEqual([2, 0]);
-        const normalizedSlugFragment = slugFragment.replace(/\s+/g, "");
-        expect(normalizedSlugFragment).toContain("textureLoad(bandTex,calcBandLoc(hbandLoc,ci),0)");
-        expect(normalizedSlugFragment).toContain("textureLoad(bandTex,calcBandLoc(vbandLoc,ci),0)");
+        const normalizedBaseFragment = composeSlugShader(null)._frag.replace(/\s+/g, "");
+        expect(normalizedBaseFragment).toContain("textureLoad(bt,bloc(hl,i),0)");
+        expect(normalizedBaseFragment).toContain("textureLoad(bt,bloc(vl,i),0)");
+
+        const normalizedWeightedFragment = composeSlugShader(WEIGHT_SHADER_FRAGMENT)._frag.replace(/\s+/g, "");
+        expect(normalizedWeightedFragment).toContain("textureLoad(bt,bloc(hl,i),0)");
     });
 });
