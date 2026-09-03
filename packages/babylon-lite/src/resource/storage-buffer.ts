@@ -92,7 +92,8 @@ export function updateStorageBuffer(engine: EngineContext, buffer: StorageBuffer
         return;
     }
     engine._device.queue.writeBuffer(buffer._buffer!, byteOffset, data.buffer as ArrayBuffer, data.byteOffset, data.byteLength);
-    buffer._data!.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), byteOffset);
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    buffer._data!.set(bytes, byteOffset);
 }
 
 /** Destroy a storage buffer. Repeated disposal is a no-op. */

@@ -129,13 +129,21 @@ export abstract class AbstractEngine {
         this._canvas = canvas;
         // Babylon.js's WebGPUEngine takes an options object as the second arg;
         // accept a bare boolean too (some older call sites pass `antialias`).
-        const opts = typeof options === "object" ? { ...options } : undefined;
+        const opts: ({ antialias?: boolean; adaptToDeviceRatio?: boolean; useLargeWorldRendering?: boolean } & EngineOptions) | undefined =
+            typeof options === "object" ? { ...options } : options === false ? { msaaSamples: 1 } : undefined;
+        if (opts) {
+            const antialias = opts.antialias;
+            delete opts.antialias;
+            if (antialias === false) {
+                opts.msaaSamples = 1;
+            }
+        }
         // Babylon.js exposes floating-origin / large-world rendering through a
         // single `useLargeWorldRendering` flag. Babylon Lite splits it into
         // `useHighPrecisionMatrix` + `useFloatingOrigin` (the latter requires the
         // former). Translate so compat scenes that pass the BJS flag light up LWR.
-        if (opts && (opts as { useLargeWorldRendering?: boolean }).useLargeWorldRendering) {
-            delete (opts as { useLargeWorldRendering?: boolean }).useLargeWorldRendering;
+        if (opts?.useLargeWorldRendering) {
+            delete opts.useLargeWorldRendering;
             opts.useHighPrecisionMatrix = true;
             opts.useFloatingOrigin = true;
         }
@@ -376,29 +384,31 @@ export abstract class AbstractEngine {
         return unsupported("WebGPUEngine.endFrame", "Babylon Lite's frame graph owns the frame loop; drive rendering with `runRenderLoop`.");
     }
 
-    /**
-     * Babylon.js `engine.currentSampleCount` — the MSAA sample count of the current render target.
-     * Babylon Lite manages MSAA internally and exposes no public sample-count accessor, so this
-     * needs a tree-shakeable Lite core addition before it can report a real value.
-     */
-    public get currentSampleCount(): never {
-        return unsupported("AbstractEngine.currentSampleCount", "Babylon Lite manages MSAA internally and exposes no public sample-count accessor.");
+    /** Babylon.js `engine.currentSampleCount` — the active surface's MSAA sample count. */
+    public get currentSampleCount(): number {
+        return this._headless ? 1 : this._lite.msaaSamples;
     }
 
     /**
-     * Babylon.js `engine.getAlphaToCoverage()` — alpha-to-coverage state. Babylon Lite does not
-     * expose an engine-level alpha-to-coverage toggle, so this is unsupported.
+     * Babylon.js `engine.getAlphaToCoverage()` — alpha-to-coverage state. Lite's API is scoped to
+     * individual material/sprite/text pipeline owners, not the engine-wide state BJS exposes.
      */
     public getAlphaToCoverage(): never {
-        return unsupported("AbstractEngine.getAlphaToCoverage", "Babylon Lite does not expose an engine-level alpha-to-coverage toggle.");
+        return unsupported(
+            "AbstractEngine.getAlphaToCoverage",
+            "Lite's alpha-to-coverage API is target-scoped; mapping BJS's engine-wide state requires a pipeline-owner lifecycle policy."
+        );
     }
 
     /**
-     * Babylon.js `engine.setAlphaToCoverage(enable)` — toggle alpha-to-coverage. Babylon Lite does
-     * not expose an engine-level alpha-to-coverage toggle, so this is unsupported.
+     * Babylon.js `engine.setAlphaToCoverage(enable)` — toggle alpha-to-coverage. Lite's target-
+     * scoped API cannot reproduce the engine-wide state without a pipeline-owner lifecycle policy.
      */
     public setAlphaToCoverage(_enable: boolean): never {
-        return unsupported("AbstractEngine.setAlphaToCoverage", "Babylon Lite does not expose an engine-level alpha-to-coverage toggle.");
+        return unsupported(
+            "AbstractEngine.setAlphaToCoverage",
+            "Lite's alpha-to-coverage API is target-scoped; mapping BJS's engine-wide state requires a pipeline-owner lifecycle policy."
+        );
     }
 
     /**

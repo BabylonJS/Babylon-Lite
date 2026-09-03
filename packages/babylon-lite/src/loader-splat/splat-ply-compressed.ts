@@ -69,17 +69,18 @@ function shDegreeForIndex(i: number): number {
 
 function parseHeader(data: ArrayBuffer): PlyHeader | null {
     const headerText = new TextDecoder().decode(new U8(data, 0, Math.min(data.byteLength, 1024 * 10)));
-    const headerEnd = "end_header\n";
-    const idx = headerText.indexOf(headerEnd);
-    if (idx < 0) {
+    const headerEnd = /end_header\r?\n/.exec(headerText);
+    if (!headerEnd) {
         return null;
     }
-    const vmatch = /element vertex (\d+)\n/.exec(headerText);
+    const idx = headerEnd.index;
+    const header = headerText.slice(0, idx);
+    const vmatch = /element vertex (\d+)\r?\n/.exec(header);
     if (!vmatch) {
         return null;
     }
     const vertexCount = parseInt(vmatch[1]!, 10);
-    const cmatch = /element chunk (\d+)\n/.exec(headerText);
+    const cmatch = /element chunk (\d+)\r?\n/.exec(header);
     const chunkCount = cmatch ? parseInt(cmatch[1]!, 10) : 0;
     let section: Section = Section.Chunk;
     let rowVertex = 0;
@@ -88,7 +89,7 @@ function parseHeader(data: ArrayBuffer): PlyHeader | null {
     const chunkProps: PlyProp[] = [];
     const shProps: PlyProp[] = [];
     let shDegree = 0;
-    for (const line of headerText.slice(0, idx).split("\n")) {
+    for (const line of header.split(/\r?\n/)) {
         if (line.startsWith("element ")) {
             const [, kind] = line.split(" ");
             section = kind === "chunk" ? Section.Chunk : kind === "vertex" ? Section.Vertex : kind === "sh" ? Section.SH : Section.Unused;
@@ -129,7 +130,7 @@ function parseHeader(data: ArrayBuffer): PlyHeader | null {
         shProps,
         shDegree,
         shCoefficientCount,
-        dataStart: idx + headerEnd.length,
+        dataStart: idx + headerEnd[0].length,
     };
 }
 
@@ -310,6 +311,10 @@ export function convertCompressedPlyToParsedSplat(data: ArrayBuffer): ParsedSpla
     }
 
     const isCompressed = header.chunkCount > 0;
+    const needsChunk = header.vertexProps.some((prop) => prop.name === "packed_position" || prop.name === "packed_scale" || prop.name === "packed_color");
+    if (needsChunk && header.chunkCount < Math.ceil(header.vertexCount / 256)) {
+        throw new Error("Invalid compressed PLY: packed vertex properties require chunk metadata for every vertex");
+    }
     const dv = new DV(data, header.dataStart);
     const out = new ArrayBuffer(ROW_OUTPUT_LENGTH * header.vertexCount);
 

@@ -14,12 +14,13 @@ import { F32, U8C, U8, DV } from "../engine/typed-arrays.js";
 import type { ParsedSplat } from "./splat-data.js";
 
 const SH_C0 = 0.28209479177387814;
+const HEADER_END = /end_header\r?\n/;
 
-/** True when the buffer starts with a PLY ASCII header that contains `end_header\n`. */
+/** True when the buffer starts with a complete PLY ASCII header. */
 export function isPly(data: ArrayBuffer): boolean {
     const ubuf = new U8(data, 0, Math.min(data.byteLength, 1024 * 10));
     const header = new TextDecoder().decode(ubuf);
-    return header.startsWith("ply") && header.indexOf("end_header\n") >= 0;
+    return header.startsWith("ply") && HEADER_END.test(header);
 }
 
 /** True when the PLY header declares either an `element chunk` block
@@ -29,11 +30,11 @@ export function isPly(data: ArrayBuffer): boolean {
 export function isPlyCompressedOrSH(data: ArrayBuffer): boolean {
     const ubuf = new U8(data, 0, Math.min(data.byteLength, 1024 * 10));
     const header = new TextDecoder().decode(ubuf);
-    const end = header.indexOf("end_header\n");
-    if (end < 0) {
+    const end = HEADER_END.exec(header);
+    if (!end) {
         return false;
     }
-    const slice = header.slice(0, end);
+    const slice = header.slice(0, end.index);
     return slice.indexOf("element chunk ") >= 0 || slice.indexOf("element sh ") >= 0 || slice.indexOf("f_rest_") >= 0;
 }
 
@@ -44,13 +45,14 @@ export function isPlyCompressedOrSH(data: ArrayBuffer): boolean {
 export function convertPlyToSplat(data: ArrayBuffer): ParsedSplat {
     const ubuf = new U8(data);
     const header = new TextDecoder().decode(ubuf.slice(0, 1024 * 10));
-    const headerEnd = "end_header\n";
-    const headerEndIndex = header.indexOf(headerEnd);
-    if (headerEndIndex < 0) {
+    const headerEnd = HEADER_END.exec(header);
+    if (!headerEnd) {
         return { data };
     }
+    const headerEndIndex = headerEnd.index;
+    const headerText = header.slice(0, headerEndIndex);
 
-    const vmatch = /element vertex (\d+)\n/.exec(header);
+    const vmatch = /element vertex (\d+)\r?\n/.exec(headerText);
     if (!vmatch) {
         return { data };
     }
@@ -59,7 +61,7 @@ export function convertPlyToSplat(data: ArrayBuffer): ParsedSplat {
     const offsets: Record<string, number> = { double: 8, int: 4, uint: 4, float: 4, short: 2, ushort: 2, uchar: 1 };
     const properties: { name: string; type: string; offset: number }[] = [];
     let rowOffset = 0;
-    for (const line of header.slice(0, headerEndIndex).split("\n")) {
+    for (const line of headerText.split(/\r?\n/)) {
         if (!line.startsWith("property ")) {
             continue;
         }
@@ -71,7 +73,7 @@ export function convertPlyToSplat(data: ArrayBuffer): ParsedSplat {
         rowOffset += offsets[type]!;
     }
 
-    const dv = new DV(data, headerEndIndex + headerEnd.length);
+    const dv = new DV(data, headerEndIndex + headerEnd[0].length);
     const ROW_OUTPUT_LENGTH = 32;
     const out = new ArrayBuffer(ROW_OUTPUT_LENGTH * vertexCount);
 

@@ -137,6 +137,37 @@ world transform back to unit scale so the default rigid view inverse remains exa
 parameters remain in source glTF units. Zero/non-uniform or animated ancestor scale is not
 supported. The loader then exposes the result via `AssetContainer.cameras`.
 
+### `banked-free-camera.ts` — Opt-in Rollable Up Vector
+
+```typescript
+/** A FreeCamera with an explicit, mutable world-space up vector. */
+export interface BankedFreeCamera extends FreeCamera {
+    readonly upVector: ObservableVec3;
+}
+
+/** Create a FreeCamera whose look-at up vector is explicit and mutable, so the camera can roll. */
+export function createBankedFreeCamera(position: Vec3, target: Vec3, up?: Vec3): BankedFreeCamera;
+```
+
+A plain `createFreeCamera` builds its basis against the shared `Vec3Up` constant and can never roll.
+A chase camera bolted to a vehicle on a banked or inverted track needs the third basis vector to
+follow the vehicle instead; `createBankedFreeCamera` exposes exactly that and nothing else.
+
+Both constructors share ONE factory — `_createFreeCamera(position, target, up: Vec3)` in
+`free-camera.ts`, which always uses whatever `up` it is handed and has no notion of "banked": it never
+branches on the up vector's origin and never defines an `upVector` property. `createFreeCamera` passes
+the shared `Vec3Up` constant, so scenes that never import the banked constructor are byte-identical to
+before this feature existed. `createBankedFreeCamera` does all of the opt-in work itself: it builds its
+own `ObservableVec3` up vector — deferring its dirty callback to `_markWorldMatrixDirty(cam)` once `cam`
+exists, since the factory computes `wm` internally — and only then defines the public `upVector`
+property on the returned camera. Writing `upVector` invalidates the world matrix exactly like
+`position` / `target` do. `up` defaults to world +Y, which makes a banked camera's initial world matrix
+identical to a plain one's. A degenerate up (parallel to the view direction) falls back to identity
+rotation, matching `mat4LookAtWorldLHToRef`.
+
+Equivalent to Babylon.js `camera.upVector`, which `TargetCamera._getViewMatrix` feeds to
+`Matrix.LookAtLHToRef`.
+
 ### `free-camera-controls.ts`
 
 ```typescript
@@ -268,7 +299,7 @@ The local world matrix is: transpose(upper 3×3 of view) + eye position.
 
 ### FreeCamera Position & Orientation
 
-The FreeCamera's local world matrix is computed via `mat4LookAtWorldLHToRef(_localMat, position, target, Vec3Up)` — see **World Matrix (all cameras)** below.
+The FreeCamera's local world matrix is computed via `mat4LookAtWorldLHToRef(_localMat, position, target, up)` — see **World Matrix (all cameras)** below. `up` is the shared `Vec3Up` constant for `createFreeCamera` and the camera's own `upVector` for `createBankedFreeCamera`; `_createFreeCamera` reads whichever it is handed without branching.
 
 Initial yaw/pitch are derived from the position→target direction:
 
@@ -283,7 +314,7 @@ _pitch = atan2(dy, sqrt(dx² + dz²))
 
 ### FreeCamera Dirty Tracking
 
-`position` and `target` are `ObservableVec3` instances. `_yaw` and `_pitch` use `Object.defineProperty`. All mutations call `wm.markLocalDirty()`.
+`position` and `target` are `ObservableVec3` instances. `_yaw` and `_pitch` use `Object.defineProperty`. All mutations call `wm.markLocalDirty()`. A `BankedFreeCamera` adds `upVector`, its own `ObservableVec3` (constructed and defined entirely in `banked-free-camera.ts`) whose dirty callback invalidates the camera's world matrix via the shared `_markWorldMatrixDirty()` seam.
 
 ### View Matrix
 
@@ -586,6 +617,7 @@ Cleanup removes all 6 event listeners and the `_beforeRender` callback.
 | Pinch → zoom radius (direct, no inertia)             | `ArcRotateCameraPointersInput` multitouch pinch                            |
 | Beta clamped to `[0.01, π-0.01]`                     | `camera.lowerBetaLimit / upperBetaLimit`                                   |
 | `createFreeCamera(position, target)`                 | `new BABYLON.FreeCamera("cam", position, scene); camera.setTarget(target)` |
+| `createBankedFreeCamera(position, target, up)`       | ditto, plus `camera.upVector = up` (used by `Matrix.LookAtLHToRef`)        |
 | `camera.speed` (default 2.0)                         | `camera.speed` (default 2.0)                                               |
 | `camera.angularSensitivity` (default 2000)           | `camera.inputs.attached.mouse.angularSensibility`                          |
 | `attachFreeControl(camera, canvas, scene)`           | `camera.attachControl(canvas)`                                             |
@@ -656,6 +688,7 @@ Cleanup removes all 6 event listeners and the `_beforeRender` callback.
 | `src/camera/camera.ts`               | ~15 lines  | Shared `Camera` interface contract                     |
 | `src/camera/arc-rotate.ts`           | ~198 lines | ArcRotateCamera data + world matrix + dirty tracking   |
 | `src/camera/arc-rotate-controls.ts`  | ~220 lines | ArcRotate pointer/wheel/touch input with inertia model |
-| `src/camera/free-camera.ts`          | ~152 lines | FreeCamera data + world matrix + dirty tracking        |
+| `src/camera/free-camera.ts`          | ~161 lines | FreeCamera data + world matrix + dirty tracking        |
+| `src/camera/banked-free-camera.ts`   | ~44 lines  | Opt-in FreeCamera with an explicit mutable up vector   |
 | `src/camera/free-camera-controls.ts` | ~184 lines | FreeCamera keyboard/mouse input with inertia           |
 | `src/camera/orthographic.ts`         | ~75 lines  | Opt-in orthographic projection (installs the seam)     |
