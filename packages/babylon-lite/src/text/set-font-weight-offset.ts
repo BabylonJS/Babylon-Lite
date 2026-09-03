@@ -32,7 +32,6 @@ let _keys: Map<CurveSetId, object> | null = null;
 /** Composed + compiled module pair per device. A `WeakMap` keyed by `GPUDevice` both scopes
  *  the modules to their device and auto-invalidates on device change. */
 let _variants: WeakMap<GPUDevice, TextPipelineVariant> | null = null;
-let _installed = false;
 
 /** Style parameter for a run: its weight offset, or 0. Packed into `TextStyle.params.y`.
  *  Reads through the nullable map rather than creating it, so a query — including the
@@ -50,7 +49,7 @@ function runGroupKey(run: GlyphRun): TextGroupKey {
     const keys = (_keys ??= new Map());
     let key = keys.get(run.curveSet);
     if (!key) {
-        key = { _curveSetId: run.curveSet };
+        key = {};
         keys.set(run.curveSet, key);
     }
     return key;
@@ -71,18 +70,6 @@ function variantForDevice(device: GPUDevice): TextPipelineVariant {
         variants.set(device, variant);
     }
     return variant;
-}
-
-function ensureInstalled(): void {
-    if (_installed) {
-        return;
-    }
-    _installed = true;
-    // Feed text-data's neutral styling seam: one float packed into TextStyle.params.y, and
-    // one opaque draw-group key. text-data attaches no meaning to either.
-    _installTextStyleSeam({ _key: runGroupKey, _param: runOffset });
-    // Supply the compiled module pair that variant draw groups render with.
-    _installTextVariantResolver(variantForDevice);
 }
 
 /** Set the synthetic font-weight contour offset (in font design units) of one run of `data`.
@@ -126,15 +113,23 @@ export function setFontWeightOffset(data: TextData, run: GlyphRun | number, offs
     // the delete branch), so "had no entry" and "had an entry worth 0" cannot both occur today,
     // but capturing presence rather than inferring it from the value keeps the rollback correct
     // even if that invariant ever changes.
-    const hadPrevious = _offsets?.has(target) ?? false;
-    const previous = hadPrevious ? _offsets!.get(target)! : 0;
+    if (_offsets === null) {
+        _offsets = new WeakMap();
+        // Feed text-data's neutral styling seam: one float packed into TextStyle.params.y, and
+        // one opaque draw-group key. text-data attaches no meaning to either.
+        _installTextStyleSeam({ _key: runGroupKey, _param: runOffset });
+        // Supply the compiled module pair that variant draw groups render with.
+        _installTextVariantResolver(variantForDevice);
+    }
+    const offsets = _offsets;
+    const hadPrevious = offsets.has(target);
+    const previous = hadPrevious ? offsets.get(target)! : 0;
     if (clamped === 0) {
         // A nonzero current value implies the map exists.
-        _offsets?.delete(target);
+        offsets.delete(target);
     } else {
-        (_offsets ??= new WeakMap()).set(target, clamped);
+        offsets.set(target, clamped);
     }
-    ensureInstalled();
     try {
         // Narrowest existing rebuild that both re-reads every run's draw-group key and rewrites
         // every style entry's params.y. It keeps the current run objects (`reset` with no `runs`
@@ -151,9 +146,9 @@ export function setFontWeightOffset(data: TextData, run: GlyphRun | number, offs
         // silently do nothing instead of repacking. `data` itself, and the seams installed
         // above, are not rolled back; see the architecture doc's setter-lifecycle note.
         if (hadPrevious) {
-            _offsets!.set(target, previous);
+            offsets.set(target, previous);
         } else {
-            _offsets?.delete(target);
+            offsets.delete(target);
         }
         throw err;
     }

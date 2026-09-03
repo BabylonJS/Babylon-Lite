@@ -46,7 +46,7 @@ export interface ComposedSlugShader {
 }
 
 /** Shared `TextU` block declaration — identical in both stages (same buffer, binding 0). */
-const TEXT_UNIFORM = wgsl`struct TU{mvp:mat4x4<f32>,vp:vec4<f32>,col:vec4<f32>};
+const TEXT_UNIFORM = wgsl`struct TU{mvp:mat4x4f,vp:vec4f,col:vec4f};
 @group(0)@binding(0) var<uniform> tu:TU;`;
 
 /** Compose the Slug shader pair.
@@ -59,22 +59,22 @@ const TEXT_UNIFORM = wgsl`struct TU{mvp:mat4x4<f32>,vp:vec4<f32>,col:vec4<f32>};
 export function composeSlugShader(fragment: TextShaderFragment | null): ComposedSlugShader {
     const v = fragment?._vertexSlots;
     const f = fragment?._fragmentSlots;
-    // `VB` must declare `let sb: vec4<f32>` (shaped bounds); without it the template reads
+    // `VB` must declare `let sb: vec4f` (shaped bounds); without it the template reads
     // the glyph's own bounds, which keeps the base variant byte-for-byte free of the seam.
     const bounds = v?.VB ? "sb" : "md.b";
 
     const _vert = wgsl`${TEXT_UNIFORM}
-struct GM{b:vec4<f32>,a:vec4<f32>,t:vec4<f32>};
+struct GM{b:vec4f,a:vec4f,t:vec4f};
 @group(0)@binding(3) var<storage,read> gm:array<GM>;
-struct TS{col:vec4<f32>,p:vec4<f32>};
+struct TS{col:vec4f,p:vec4f};
 @group(0)@binding(4) var<storage,read> sty:array<TS>;
-struct VIn{@location(0) cn:vec2<f32>,@location(1) an:vec2<f32>,@location(2) pk:u32};
+struct VIn{@location(0) cn:vec2f,@location(1) an:vec2f,@location(2) pk:u32};
 struct VOut{
-@builtin(position) pos:vec4<f32>,
-@location(0) tc:vec2<f32>,
-@location(1) @interpolate(flat) bn:vec4<f32>,
-@location(2) @interpolate(flat) ga:vec4<f32>,
-@location(3) @interpolate(flat) cl:vec4<f32>,
+@builtin(position) pos:vec4f,
+@location(0) tc:vec2f,
+@location(1) @interpolate(flat) bn:vec4f,
+@location(2) @interpolate(flat) ga:vec4f,
+@location(3) @interpolate(flat) cl:vec4f,
 ${v?.VO ?? ""}
 };
 @vertex fn main(in:VIn)->VOut{
@@ -83,11 +83,11 @@ ${v?.VO ?? ""}
 // the rasterizer culls six zero-area triangles cheaply.
 if(in.pk==0xffffffffu){
 var d:VOut;
-d.pos=vec4<f32>(-2.0,-2.0,-2.0,1.0);
-d.tc=vec2<f32>(0.0);
-d.bn=vec4<f32>(0.0);
-d.ga=vec4<f32>(0.0);
-d.cl=vec4<f32>(0.0);
+d.pos=vec4f(-2.0,-2.0,-2.0,1.0);
+d.tc=vec2f(0.0);
+d.bn=vec4f(0.0);
+d.ga=vec4f(0.0);
+d.cl=vec4f(0.0);
 ${v?.VD ?? ""}
 return d;
 }
@@ -96,7 +96,7 @@ let sy=sty[in.pk>>16u];
 ${v?.VB ?? ""}
 // Reconstruct the corner from the shared unit quad: em-space bounds -> object-space pixels.
 // The corner sign doubles as the dilation direction, so it needs no separate attribute.
-let im=step(vec2<f32>(0.0),in.cn);
+let im=step(vec2f(0.0),in.cn);
 let tx=mix(${bounds}.xy,${bounds}.zw,im);
 let iv=sy.p.x;
 let sf=select(0.0,1.0/iv,iv!=0.0);
@@ -104,9 +104,9 @@ let ps=in.an+tx*sf;
 let m=tu.mvp;
 // MVP rows out of column-major storage. Only the xy and w terms are ever used, so each row
 // is kept as a vec3 of (x, y, w).
-let r0=vec3<f32>(m[0].x,m[1].x,m[3].x);
-let r1=vec3<f32>(m[0].y,m[1].y,m[3].y);
-let r3=vec3<f32>(m[0].w,m[1].w,m[3].w);
+let r0=vec3f(m[0].x,m[1].x,m[3].x);
+let r1=vec3f(m[0].y,m[1].y,m[3].y);
+let r3=vec3f(m[0].w,m[1].w,m[3].w);
 // Dynamic dilation (SlugDilate): expand the quad by exactly one fragment in screen space,
 // and carry the same expansion into the texcoord through the inverse glyph Jacobian — which
 // is the diagonal (iv, iv), so the transform is a plain scale.
@@ -119,13 +119,13 @@ let uv=u*u+vv*vv;
 let q=s*t;
 let dl=in.cn*(s*s*(q+sqrt(uv))/(uv-q*q));
 var out:VOut;
-out.pos=m*vec4<f32>(ps+dl,0.0,1.0);
+out.pos=m*vec4f(ps+dl,0.0,1.0);
 out.tc=tx+dl*iv;
 out.bn=md.t;
 out.ga=md.a;
 // Color comes entirely from the style entry; the uniform contributes only whole-draw
 // opacity (tu.col is always (gamma,1,1,opacity)).
-out.cl=vec4<f32>(sy.col.rgb,sy.col.a*tu.col.a);
+out.cl=vec4f(sy.col.rgb,sy.col.a*tu.col.a);
 ${v?.VA ?? ""}
 return out;
 }`;
@@ -139,10 +139,10 @@ ${TEXT_UNIFORM}
 // \`a2c\`, breaking pipeline creation for A2C consumers.
 @id(0) override a2c:bool=false;
 struct FIn{
-@location(0) tc:vec2<f32>,
-@location(1) @interpolate(flat) bn:vec4<f32>,
-@location(2) @interpolate(flat) ga:vec4<f32>,
-@location(3) @interpolate(flat) cl:vec4<f32>,
+@location(0) tc:vec2f,
+@location(1) @interpolate(flat) bn:vec4f,
+@location(2) @interpolate(flat) ga:vec4f,
+@location(3) @interpolate(flat) cl:vec4f,
 ${f?.FI ?? ""}
 @builtin(front_facing) ff:bool
 };
@@ -154,9 +154,9 @@ return (0x2E74>>s)&0x0101;
 }
 // Both solvers return the two ray/curve intersection ordinates; they differ only in which
 // axis is the ray axis (kept as two functions so neither pays a branch per curve).
-fn solveH(p12:vec4<f32>,p3:vec2<f32>)->vec2<f32>{
-let a=vec2<f32>(p12.x-p12.z*2.0+p3.x,p12.y-p12.w*2.0+p3.y);
-let b=vec2<f32>(p12.x-p12.z,p12.y-p12.w);
+fn solveH(p12:vec4f,p3:vec2f)->vec2f{
+let a=vec2f(p12.x-p12.z*2.0+p3.x,p12.y-p12.w*2.0+p3.y);
+let b=vec2f(p12.x-p12.z,p12.y-p12.w);
 let ra=1.0/a.y;
 let rb=0.5/b.y;
 let dc=sqrt(max(b.y*b.y-a.y*p12.y,0.0));
@@ -167,11 +167,11 @@ if(abs(a.y)<=max(abs(b.y),abs(p12.y))*1.0e-4){
 t1=p12.y*rb;
 t2=p12.y*rb;
 }
-return vec2<f32>((a.x*t1-b.x*2.0)*t1+p12.x,(a.x*t2-b.x*2.0)*t2+p12.x);
+return vec2f((a.x*t1-b.x*2.0)*t1+p12.x,(a.x*t2-b.x*2.0)*t2+p12.x);
 }
-fn solveV(p12:vec4<f32>,p3:vec2<f32>)->vec2<f32>{
-let a=vec2<f32>(p12.x-p12.z*2.0+p3.x,p12.y-p12.w*2.0+p3.y);
-let b=vec2<f32>(p12.x-p12.z,p12.y-p12.w);
+fn solveV(p12:vec4f,p3:vec2f)->vec2f{
+let a=vec2f(p12.x-p12.z*2.0+p3.x,p12.y-p12.w*2.0+p3.y);
+let b=vec2f(p12.x-p12.z,p12.y-p12.w);
 let ra=1.0/a.x;
 let rb=0.5/b.x;
 let dc=sqrt(max(b.x*b.x-a.x*p12.x,0.0));
@@ -181,41 +181,41 @@ if(abs(a.x)<=max(abs(b.x),abs(p12.x))*1.0e-4){
 t1=p12.x*rb;
 t2=p12.x*rb;
 }
-return vec2<f32>((a.y*t1-b.y*2.0)*t1+p12.y,(a.y*t2-b.y*2.0)*t2+p12.y);
+return vec2f((a.y*t1-b.y*2.0)*t1+p12.y,(a.y*t2-b.y*2.0)*t2+p12.y);
 }
 // Per-root coverage and edge weight, shared by both band loops: how much of the pixel the
 // crossing covers, and how perpendicular the ray was to the contour it crossed.
 fn ccov(r:f32)->f32{return clamp(r+0.5,0.0,1.0);}
 fn cwgt(r:f32)->f32{return clamp(1.0-abs(r)*2.0,0.0,1.0);}
 // Band lists wrap at 4096 texels; fold the overflow into the next texture row.
-fn bloc(g:vec2<i32>,o:i32)->vec2<i32>{
+fn bloc(g:vec2i,o:i32)->vec2i{
 let x=g.x+o;
-return vec2<i32>(x&4095,g.y+(x>>12u));
+return vec2i(x&4095,g.y+(x>>12u));
 }
 ${f?.FH ?? ""}
-@fragment fn main(in:FIn)->@location(0) vec4<f32>{
+@fragment fn main(in:FIn)->@location(0) vec4f{
 // Text quads are one-sided sheets of paper: without this the back of a rotated quad shows
 // geometrically correct mirror-image text. Double-sided readable text uses a second
 // renderable rotated 180 degrees.
 if(!in.ff){discard;}
 let rc=in.tc;
 let pe=1.0/fwidth(rc);
-let gp=vec2<i32>(i32(in.ga.x+0.5),i32(in.ga.y+0.5));
-let bm=vec2<i32>(i32(in.ga.z+0.5),i32(in.ga.w+0.5));
-let bi=clamp(vec2<i32>(rc*in.bn.xy+in.bn.zw),vec2<i32>(0),bm);
+let gp=vec2i(i32(in.ga.x+0.5),i32(in.ga.y+0.5));
+let bm=vec2i(i32(in.ga.z+0.5),i32(in.ga.w+0.5));
+let bi=clamp(vec2i(rc*in.bn.xy+in.bn.zw),vec2i(0),bm);
 var xc=0.0;
 var xw=0.0;
 var yc=0.0;
 var yw=0.0;
 // Horizontal band: signed crossings of the +x ray through this pixel.
-let hr=textureLoad(bt,vec2<i32>(gp.x+bi.y,gp.y),0);
+let hr=textureLoad(bt,vec2i(gp.x+bi.y,gp.y),0);
 let hn=i32(hr.x+0.5);
 let hl=bloc(gp,i32(hr.y+0.5));
 for(var i:i32=0;i<hn;i=i+1){
 let lr=textureLoad(bt,bloc(hl,i),0);
-let cv=vec2<i32>(i32(lr.x+0.5),i32(lr.y+0.5));
-let p12=textureLoad(ct,cv,0)-vec4<f32>(rc,rc);
-let p3=textureLoad(ct,vec2<i32>(cv.x+1,cv.y),0).xy-rc;
+let cv=vec2i(i32(lr.x+0.5),i32(lr.y+0.5));
+let p12=textureLoad(ct,cv,0)-vec4f(rc,rc);
+let p3=textureLoad(ct,vec2i(cv.x+1,cv.y),0).xy-rc;
 // Curves are sorted along the band axis: once one is fully behind the pixel, so are the rest.
 if(max(max(p12.x,p12.z),p3.x)*pe.x < -0.5){break;}
 let cd=rcode(p12.y,p12.w,p3.y);
@@ -232,14 +232,14 @@ xw=max(xw,cwgt(r.y));
 }
 }
 // Vertical band: same walk along +y (signs mirrored).
-let vr=textureLoad(bt,vec2<i32>(gp.x+bm.y+1+bi.x,gp.y),0);
+let vr=textureLoad(bt,vec2i(gp.x+bm.y+1+bi.x,gp.y),0);
 let vn=i32(vr.x+0.5);
 let vl=bloc(gp,i32(vr.y+0.5));
 for(var i:i32=0;i<vn;i=i+1){
 let lr=textureLoad(bt,bloc(vl,i),0);
-let cv=vec2<i32>(i32(lr.x+0.5),i32(lr.y+0.5));
-let p12=textureLoad(ct,cv,0)-vec4<f32>(rc,rc);
-let p3=textureLoad(ct,vec2<i32>(cv.x+1,cv.y),0).xy-rc;
+let cv=vec2i(i32(lr.x+0.5),i32(lr.y+0.5));
+let p12=textureLoad(ct,cv,0)-vec4f(rc,rc);
+let p3=textureLoad(ct,vec2i(cv.x+1,cv.y),0).xy-rc;
 if(max(max(p12.y,p12.w),p3.y)*pe.y < -0.5){break;}
 let cd=rcode(p12.x,p12.z,p3.x);
 if(cd!=0){
@@ -264,7 +264,7 @@ ${f?.CO ?? ""}
 cov=pow(cov,tu.col.x);
 // a2c false -> RGB is coverage-weighted (premultiplied). a2c true -> coverage lives in alpha only.
 let rw=select(cov,1.0,a2c);
-return vec4<f32>(in.cl.rgb*rw,in.cl.a*cov);
+return vec4f(in.cl.rgb*rw,in.cl.a*cov);
 }`;
 
     return { _vert, _frag, _key: fragment?._id ?? "" };

@@ -31,10 +31,10 @@ describe("tagged WGSL package output", () => {
 
         expect(slugCode).not.toContain("Dead-slot sentinel");
         expect(slugCode).not.toContain("struct GM {");
-        expect(slugCode).toContain("struct GM{b:vec4<f32>,a:vec4<f32>,t:vec4<f32>}");
+        expect(slugCode).toContain("struct GM{b:vec4f,a:vec4f,t:vec4f}");
         expect(weightCode).not.toContain("Exact distance from a point");
-        expect(weightCode).not.toContain("fn dq(p: vec2<f32>");
-        expect(weightCode).toContain("fn dq(p:vec2<f32>,A:vec2<f32>,B:vec2<f32>,C:vec2<f32>)->f32{");
+        expect(weightCode).not.toContain("fn dq(p: vec2f");
+        expect(weightCode).toContain("fn dq(p:vec2f,A:vec2f,B:vec2f,C:vec2f)->f32{");
     });
 
     it("removes the identity-tag import from every emitted module", () => {

@@ -782,7 +782,7 @@ describe("Slug shader composition", () => {
         expect(variant._vert).toContain("out.wo=wo;");
         expect(variant._vert).toContain("d.wo=0.0;");
         // Shaped bounds replace the glyph's own bounds only in the composed variant.
-        expect(variant._vert).toContain("let sb=vec4<f32>(");
+        expect(variant._vert).toContain("let sb=vec4f(");
         expect(variant._vert).toContain("mix(sb.xy,sb.zw,im)");
         expect(base._vert).toContain("mix(md.b.xy,md.b.zw,im)");
 

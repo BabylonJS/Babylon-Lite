@@ -41,15 +41,15 @@ export const WEIGHT_SHADER_FRAGMENT: TextShaderFragment = {
         // Inflate the font-space glyph bounds symmetrically so the quad covers the expanded
         // contour.
         VB: wgsl`let wo=sy.p.y;
-let sb=vec4<f32>(md.b.xy-vec2<f32>(wo),md.b.zw+vec2<f32>(wo));`,
+let sb=vec4f(md.b.xy-vec2f(wo),md.b.zw+vec2f(wo));`,
         VA: wgsl`out.wo=wo;`,
     },
     _fragmentSlots: {
         FI: wgsl`@location(4) @interpolate(flat) wo:f32,`,
-        FH: wgsl`fn dot2(v:vec2<f32>)->f32{return dot(v,v);}
+        FH: wgsl`fn dot2(v:vec2f)->f32{return dot(v,v);}
 // Exact distance from a point to a quadratic Bezier: solve the depressed cubic for the
 // closest-point parameter, clamped to the segment.
-fn dq(p:vec2<f32>,A:vec2<f32>,B:vec2<f32>,C:vec2<f32>)->f32{
+fn dq(p:vec2f,A:vec2f,B:vec2f,C:vec2f)->f32{
 let a=B-A;
 let b=A-2.0*B+C;
 let c=a*2.0;
@@ -73,8 +73,8 @@ let h=q*q+4.0*pp3;
 if(h>=0.0){
 // One real root: Cardano.
 let hh=sqrt(h);
-let x=(vec2<f32>(hh,-hh)-q)/2.0;
-let uv=sign(x)*pow(abs(x),vec2<f32>(1.0/3.0));
+let x=(vec2f(hh,-hh)-q)/2.0;
+let uv=sign(x)*pow(abs(x),vec2f(1.0/3.0));
 let t=clamp(uv.x+uv.y-kx,0.0,1.0);
 res=dot2(d+(c+b*t)*t);
 }else{
@@ -83,7 +83,7 @@ let z=sqrt(-pp);
 let v=acos(q/(pp*z*2.0))/3.0;
 let m=cos(v);
 let n=sin(v)*1.732050808;
-let t=clamp(vec3<f32>(m+m,-n-m,n-m)*z-kx,vec3<f32>(0.0),vec3<f32>(1.0));
+let t=clamp(vec3f(m+m,-n-m,n-m)*z-kx,vec3f(0.0),vec3f(1.0));
 res=min(dot2(d+(c+b*t.x)*t.x),dot2(d+(c+b*t.y)*t.y));
 }
 return sqrt(res);
@@ -98,20 +98,20 @@ return sqrt(res);
 // (bn.y, bn.w) is monotone non-decreasing and never negative by construction there, so the
 // two ends of the range stay ordered; a zero scale (zero-height glyph) collapses them to
 // band 0, its only band.
-fn wdst(rc:vec2<f32>,gp:vec2<i32>,bm:vec2<i32>,bn:vec4<f32>,rad:f32)->f32{
+fn wdst(rc:vec2f,gp:vec2i,bm:vec2i,bn:vec4f,rad:f32)->f32{
 let y0=clamp(i32((rc.y-rad)*bn.y+bn.w),0,bm.y);
 let y1=clamp(i32((rc.y+rad)*bn.y+bn.w),0,bm.y);
 let xl=rc.x-rad;
 var md=1.0e9;
 for(var b:i32=y0;b<=y1;b=b+1){
-let hr=textureLoad(bt,vec2<i32>(gp.x+b,gp.y),0);
+let hr=textureLoad(bt,vec2i(gp.x+b,gp.y),0);
 let hn=i32(hr.x+0.5);
 let hl=bloc(gp,i32(hr.y+0.5));
 for(var i:i32=0;i<hn;i=i+1){
 let lr=textureLoad(bt,bloc(hl,i),0);
-let cv=vec2<i32>(i32(lr.x+0.5),i32(lr.y+0.5));
+let cv=vec2i(i32(lr.x+0.5),i32(lr.y+0.5));
 let q12=textureLoad(ct,cv,0);
-let q3=textureLoad(ct,vec2<i32>(cv.x+1,cv.y),0).xy;
+let q3=textureLoad(ct,vec2i(cv.x+1,cv.y),0).xy;
 // Curves are sorted by descending max-x: once one's right extent is farther left than
 // the search radius, so is every later curve in this band. A curve with a point within
 // rad has max-x >= rc.x - rad, so it is never behind this bound.
