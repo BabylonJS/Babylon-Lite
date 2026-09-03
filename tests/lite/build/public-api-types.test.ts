@@ -97,6 +97,74 @@ describe("build/index.d.ts", () => {
         expect(result.status).toBe(0);
     }, 300_000);
 
+    it("supports public enum values with verbatimModuleSyntax", () => {
+        const probePath = resolve(BUILD_DIR, "public-enums-verbatim.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    CharacterSupportedState,
+    FgAnimationValueType,
+    FgBlockType,
+    FgEventType,
+    FgType,
+    PhysicsConstraintAxis,
+    PhysicsConstraintType,
+    PhysicsMotionType,
+    PhysicsPrestepType,
+    PhysicsShapeType,
+} from "./index.js";
+
+const publicEnumValues = [
+    CharacterSupportedState.SUPPORTED,
+    FgAnimationValueType.Quaternion,
+    FgBlockType.NoOp,
+    FgEventType.Start,
+    FgType.Number,
+    PhysicsConstraintAxis.LINEAR_X,
+    PhysicsConstraintType.HINGE,
+    PhysicsMotionType.DYNAMIC,
+    PhysicsPrestepType.TELEPORT,
+    PhysicsShapeType.SPHERE,
+] as const;
+void publicEnumValues;
+`
+            );
+
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--verbatimModuleSyntax",
+                    "true",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                {
+                    cwd: PACKAGE_DIR,
+                    encoding: "utf-8",
+                }
+            );
+
+            const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+            expect(result.status, output).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("does not reference any external (npm) modules", () => {
         expect(existsSync(DTS_PATH)).toBe(true);
 

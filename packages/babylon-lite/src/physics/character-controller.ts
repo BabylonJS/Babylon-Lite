@@ -42,14 +42,15 @@ import type { PhysicsBody, PhysicsShape, PhysicsWorld } from "./havok.js";
 // ─── Public types ────────────────────────────────────────────────────
 
 /** Contact state of the character against the geometry beneath it. */
-export const enum CharacterSupportedState {
+export const CharacterSupportedState = {
     /** No surface within reach. */
-    UNSUPPORTED = 0,
+    UNSUPPORTED: 0,
     /** Touching a surface too steep to stand on; the character slides. */
-    SLIDING = 1,
+    SLIDING: 1,
     /** Standing on a walkable surface. */
-    SUPPORTED = 2,
-}
+    SUPPORTED: 2,
+} as const;
+export type CharacterSupportedState = (typeof CharacterSupportedState)[keyof typeof CharacterSupportedState];
 
 /** Options describing the character's collision capsule. */
 export interface PhysicsCharacterControllerOptions {
