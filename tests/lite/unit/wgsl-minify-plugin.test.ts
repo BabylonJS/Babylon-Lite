@@ -53,7 +53,7 @@ const result = shader\`
         expect(result!.code).not.toContain("shader`");
         expect(result!.code).toContain("`${body} let wp=projectedWorld;`");
         expect(result!.code).toContain("`let wp=originalWorld;`");
-        expect(result!.code).toContain("`@vertex fn main(){ ${projected} }`");
+        expect(result!.code).toContain("`@vertex fn main(){${projected}}`");
     });
 
     it("minifies escaped newlines in tagged template sections", () => {

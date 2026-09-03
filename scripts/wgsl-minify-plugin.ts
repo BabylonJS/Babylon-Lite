@@ -21,6 +21,7 @@ import ts from "typescript";
 const WGSL_TAG_MODULE_RE = /(?:^|\/)wgsl\.js$/;
 const WGSL_MULTI_CHAR_TOKENS = new Set(["->", "<<", ">>", "<=", ">=", "==", "!=", "&&", "||", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "++", "--", "//", "/*", "*/"]);
 const WGSL_INJECTION_MARKER_RE = /^\/\*[A-Z][A-Z0-9_]*\*\/$/;
+const WGSL_INTERPOLATION_DELIMITERS = new Set([":", ",", "(", ")", "{", "}", "[", "]", ";"]);
 
 /** WGSL recognizes only these ASCII characters as token-separating whitespace. */
 function isWgslWhitespace(ch: string): boolean {
@@ -103,7 +104,10 @@ function minifyTaggedWgslText(code: string, preserveLeadingSpace: boolean, prese
             }
             // Preserve all other JavaScript template escapes verbatim.
             if (pendingSpace) {
-                if ((out.length === 0 && preserveLeadingSpace) || (out.length > 0 && needsWgslSeparator(out.at(-1)!, ch))) {
+                if (
+                    (out.length === 0 && preserveLeadingSpace && !WGSL_INTERPOLATION_DELIMITERS.has(ch)) ||
+                    (out.length > 0 && needsWgslSeparator(out.at(-1)!, ch))
+                ) {
                     out += " ";
                 }
                 pendingSpace = false;
@@ -115,7 +119,10 @@ function minifyTaggedWgslText(code: string, preserveLeadingSpace: boolean, prese
         if (pendingSpace) {
             // At an interpolation boundary the neighboring token is unknown; internally,
             // retain a separator only when removing it could create a different WGSL token.
-            if ((out.length === 0 && preserveLeadingSpace) || (out.length > 0 && needsWgslSeparator(out.at(-1)!, ch))) {
+            if (
+                (out.length === 0 && preserveLeadingSpace && !WGSL_INTERPOLATION_DELIMITERS.has(ch)) ||
+                (out.length > 0 && needsWgslSeparator(out.at(-1)!, ch))
+            ) {
                 out += " ";
             }
             pendingSpace = false;
@@ -123,7 +130,7 @@ function minifyTaggedWgslText(code: string, preserveLeadingSpace: boolean, prese
         out += ch;
         i++;
     }
-    if (pendingSpace && preserveTrailingSpace) {
+    if (pendingSpace && preserveTrailingSpace && (out.length === 0 || !WGSL_INTERPOLATION_DELIMITERS.has(out.at(-1)!))) {
         out += " ";
     }
     return out;
