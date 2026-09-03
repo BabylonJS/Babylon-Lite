@@ -1,7 +1,7 @@
 # Azure Pipelines — Babylon Lite GL npm Publish
 #
-# Publishes the built @babylonjs/lite-gl package to npm. Configure NPM_TOKEN as
-# a secret pipeline variable or variable-group value before enabling this run.
+# Publishes the built @babylonjs/lite-gl package to npm. NPM_TOKEN is provided
+# by the NPM_Publish variable group.
 #
 # Manual runs can choose patch, minor, major, or auto. Scheduled runs use auto.
 # Pushes to master that change config/release-gl.json read the release type from
@@ -37,6 +37,7 @@ parameters:
           - major
 
 variables:
+    - group: NPM_Publish
     - name: NODE_VERSION
       value: "22.x"
     - name: PNPM_VERSION
@@ -123,7 +124,7 @@ stages:
                       set -euo pipefail
 
                       if [ -z "${NPM_TOKEN:-}" ]; then
-                        echo "NPM_TOKEN must be configured as a secret pipeline variable."
+                        echo "NPM_TOKEN must be configured as a secret in the NPM_Publish variable group."
                         exit 1
                       fi
 

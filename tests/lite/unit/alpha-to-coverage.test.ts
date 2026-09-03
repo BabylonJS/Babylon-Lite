@@ -24,6 +24,7 @@ import type { Sprite2DLayer } from "../../../packages/babylon-lite/src/sprite/sp
 import { createSpritePipelineCache, getOrCreateSpritePipeline } from "../../../packages/babylon-lite/src/sprite/sprite-pipeline";
 import { clearTextPipelineCache, getOrCreateTextPipeline } from "../../../packages/babylon-lite/src/text/_gpu/text-pipeline";
 import type { TextRenderable } from "../../../packages/babylon-lite/src/text/text-renderable";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 
 function makeEngine() {
     const createRenderPipeline = vi.fn((descriptor: GPURenderPipelineDescriptor) => descriptor as unknown as GPURenderPipeline);
@@ -79,8 +80,8 @@ function meshBindGroupLayout(pipeline: GPURenderPipeline): GPUBindGroupLayout {
 
 function makeShaderMaterial(options?: { needAlphaBlending?: boolean; depthWrite?: boolean }) {
     return createShaderMaterial({
-        vertexSource: "@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }",
-        fragmentSource: "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }",
+        vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
+        fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
         attributes: ["position"],
         ...options,
     });

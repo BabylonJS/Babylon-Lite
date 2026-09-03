@@ -111,6 +111,7 @@ export type { IUploadImageToTexture2DArrayLayerOptions, ICreateTexture2DArrayFro
 
 // ─── Loading ─────────────────────────────────────────────────────────
 export { SceneLoader, AssetContainer, ImportMeshAsync, AppendSceneAsync, LoadAssetContainerAsync } from "./loading/scene-loader.js";
+export type { ISceneLoaderProgressEvent, ISceneLoaderOptions, ImportMeshOptions, AppendOptions, LoadAssetContainerOptions } from "./loading/scene-loader.js";
 export { AssetsManager, AbstractAssetTask, CustomAssetTask } from "./loading/assets-manager.js";
 export { KHR_materials_variants } from "./loading/material-variants.js";
 
@@ -249,6 +250,10 @@ export {
     MultiMaterial,
     ShaderMaterial,
     BackgroundMaterial,
+    OpenPBRMaterial,
+    OpenPBRMaterialDefines,
+    RegisterOpenpbrMaterial,
+    OpenPBRMaterialLoadingAdapter,
     RectAreaLight,
     GPUParticleSystem,
     SolidParticleSystem,
@@ -303,6 +308,7 @@ export {
     GeospatialClippingBehavior,
     SceneSerializer,
 } from "./unsupported/unsupported-apis.js";
+export * as GLTF2 from "./loading/gltf2.js";
 export type {
     IHtmlTextureOptions,
     IHtmlInteractionManagerOptions,
@@ -361,8 +367,29 @@ export {
     PhysicsMotionType,
     PhysicsPrestepType,
     PhysicsConstraintType,
+    PhysicsConstraintAxis,
+    PhysicsConstraint,
+    HingeConstraint,
+    BallAndSocketConstraint,
+    DistanceConstraint,
+    SliderConstraint,
+    LockConstraint,
+    PrismaticConstraint,
+    Physics6DoFConstraint,
+    Physics6DoFLimit,
+    SpringConstraint,
+    PhysicsCharacterController,
+    CharacterSupportedState,
 } from "./physics/physics.js";
-export type { PhysicsAggregateParameters, PhysicsMaterial, PhysicShapeOptions } from "./physics/physics.js";
+export type {
+    PhysicsAggregateParameters,
+    PhysicsMaterial,
+    PhysicShapeOptions,
+    CharacterShapeOptions,
+    CharacterSurfaceInfo,
+    ICharacterControllerCollisionEvent,
+    PhysicsConstraintParameters,
+} from "./physics/physics.js";
 
 // ─── Node Particle Editor (NPE) ──────────────────────────────────────
 export { NodeParticleSystemSet, ParticleSystemSet } from "./particles/node-particle-system-set.js";

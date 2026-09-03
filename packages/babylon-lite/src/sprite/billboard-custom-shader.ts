@@ -39,6 +39,7 @@ import {
 } from "./custom-shader-core.js";
 import type { BillboardFxHook } from "./sprite-fx-hook.js";
 import { _registerBillboardFxHook } from "./sprite-fx-hook.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** One extra texture bound after the atlas (group 1, bindings 3, 5, 7, …). */
 export type BillboardCustomTexture = CustomShaderTexture;
@@ -71,7 +72,7 @@ export interface BillboardCustomShader {
 
 function makeCustomBillboardWgsl(orientation: BillboardOrientation, extraTextures: readonly BillboardCustomTexture[], fragment: string): string {
     const fxBinding = 3 + extraTextures.length * 2;
-    return `${SCENE_UBO_WGSL}
+    return wgsl`${SCENE_UBO_WGSL}
 struct S {
 opacityMul: vec4f,
 axisAndCutoff: vec4f,

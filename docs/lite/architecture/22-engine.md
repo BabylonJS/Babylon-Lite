@@ -171,11 +171,15 @@ Scenes read `engine._currentDelta` during their `_update()` step. If `scene.fixe
 Each frame consists of:
 
 1. **Create command encoder**: `device.createCommandEncoder({ label: "frame" })` and assign `engine._currentEncoder`.
-2. **Obtain swapchain view**: `engine.context.getCurrentTexture().createView()` and assign `engine._swapchainView`.
-3. **Update/record contexts**: For each registered `RenderingContext`, call `_update()` then `_record()`.
+2. **Prepare each surface**: run its optional screenshot pre-frame hook, then acquire the surface's current swapchain texture into `surface.scRT`.
+3. **Update/record contexts**: For each surface, call `_update()` then `_record()` on every registered `RenderingContext`.
     - A scene `_update()` runs before-render callbacks, material swaps, shadow maps, legacy pre-passes, and shared uniform updaters.
     - A scene `_record()` delegates to `scene._frameGraph.execute()`.
-4. **Submit**: finish the command encoder and submit via the reusable `engine._cbs` array to avoid per-frame array allocation.
+    - A render task that targets `scene.surface.scRT` re-reads that surface's attachment view immediately before opening the pass. It must not compare against `engine.scRT`, which identifies only the primary canvas and would leave auxiliary scenes submitting an expired build-time swapchain view.
+4. **Record screenshot copies**: each promoted surface with queued requests copies its just-rendered swapchain texture into one staging buffer.
+5. **Submit**: finish the command encoder and submit via the reusable `engine._cbs` array to avoid per-frame array allocation.
+
+The per-surface attachment refresh is required because `GPUCanvasContext.getCurrentTexture()` returns a new swapchain texture over time. Reusing the auxiliary surface's view captured during frame-graph build produces a WebGPU validation error; because one command buffer contains every surface's work, that invalid auxiliary pass also discards the primary canvas's rendering.
 
 ### Deferred Builder Execution
 
@@ -187,7 +191,7 @@ Swapchain MSAA/depth attachments are managed by the default scene `RenderTask` t
 
 `setGpuTimingEnabled(engine, true)` measures how long the **GPU** spends on each frame (distinct from CPU/wall-clock time), publishing a lightly-smoothed value to `engine.gpuFrameTimeMs` (milliseconds). It's a developer/HUD profiling aid, disabled by default.
 
-The feature is implemented so that scenes which never enable it pay **zero** for it — the heavy timer code (`src/engine/gpu-timer.ts`) is reachable only through a dynamic `import()` inside `setGpuTimingEnabled`, which is itself tree-shaken away when unused. `renderFrame` carries only three optional-chain short-circuits (no-ops while timing is off). The only always-bundled cost is requesting the `timestamp-query` device feature opportunistically in `createEngine` (free at runtime) and a one-field initializer — a handful of bytes that round to zero in bundle-size measurements (e.g. scene1/BoomBox shows no measurable delta).
+The feature is implemented so that scenes which never enable it pay **zero** for it — the heavy timer code (`src/engine/gpu-timer.ts`) is reachable only through a dynamic `import()` inside `setGpuTimingEnabled`, which is itself tree-shaken away when unused. `renderFrame` carries three frame-timing optional-chain short-circuits plus the independent task-timing resolve short-circuit described below; all are no-ops while their profiler is off. The only other always-bundled cost is requesting the `timestamp-query` device feature opportunistically in `createEngine` (free at runtime) and a one-field initializer — a handful of bytes that remain within the existing scene bundle ceilings.
 
 How it works when enabled:
 
@@ -195,7 +199,7 @@ How it works when enabled:
 2. The first `setGpuTimingEnabled(engine, true)` dynamic-imports `gpu-timer.ts`, lazily creates a `GpuFrameTimer` (a 2-slot `timestamp` query set + a recycled MAP_READ readback buffer), and installs three per-frame hooks on the engine (`_gpuTimerBegin` / `_gpuTimerEnd` / `_gpuTimerResolve`).
 3. `renderFrame` writes the opening timestamp into the frame's command encoder right after creating it and the closing timestamp right before finishing it — so both are commands **inside the frame's command buffer**, and the GPU runs them contiguously around exactly that frame's passes. This measures the frame's **GPU work**, independent of how long the CPU took to record it. After the frame is submitted, `_gpuTimerResolve` issues a tiny separate `resolveQuerySet` + buffer copy and maps the result asynchronously, off the render critical path, so the readout (lightly smoothed) lags a frame or two but never stalls the frame.
 
-Disabling clears the three hooks (renderFrame's optional-chains become no-ops again) and resets `gpuFrameTimeMs` to 0; the timer's GPU resources are kept and reused if it is re-enabled.
+Disabling clears the frame begin/end hooks and resets `gpuFrameTimeMs` to 0; the shared resolve hook becomes a no-op unless task timing remains enabled independently. The frame timer's GPU resources are kept and reused if it is re-enabled.
 
 ### GPU Render-Task Timing (optional, zero-cost when unused)
 
@@ -221,7 +225,9 @@ Bundle-size protection mirrors screenshot capture and frame timing:
 2. The public API lives in a thin module (`engine/gpu-task-timing.ts`). The timestamp-query implementation (`engine/gpu-task-timer.ts`) is reachable only through the dynamic import inside `setRenderTaskGpuTimingEnabled`.
 3. Non-users do not fetch the profiler chunk and do not carry task-profiling code in the always-fetched frame-graph module. On enable, the dynamic profiler wraps the currently registered frame graphs' `execute()` functions, plus newly pushed surfaces/contexts, so timestamp passes are written only while profiling is explicitly enabled.
 
-When enabled, the first timed task seen for a new frame encoder clears the current record list. The dynamic frame-graph wrapper writes an empty timestamped compute pass before and after each `Task` execution. After `renderFrame` submits the frame command buffer, the profiler chains through the existing post-frame GPU timing hook, resolves/copies the used query slots through a tiny follow-up command buffer, then maps a recycled readback buffer asynchronously. Results are one or more frames behind and include the existing `Task.name` label plus an execution-order `index` to disambiguate duplicate names. If the fixed query capacity is exceeded, excess tasks execute normally and `droppedTaskCount` reports how many were not timed.
+When enabled, the first timed task seen for a new frame encoder clears the current record list. The dynamic frame-graph wrapper writes an empty timestamped compute pass before and after each `Task` execution. After `renderFrame` submits the frame command buffer, one shared resolve hook dispatches frame timing first (when enabled) and task timing second. Task timing owns that hook directly when frame timing is off, so either profiler works independently without double-resolving when both are enabled. The task profiler resolves/copies the used query slots through a tiny follow-up command buffer, then maps a recycled readback buffer asynchronously. Results are one or more frames behind and include the existing `Task.name` label plus an execution-order `index` to disambiguate duplicate names. If the fixed query capacity is exceeded, excess tasks execute normally and `droppedTaskCount` reports how many were not timed.
+
+Disabling task timing destroys its query set, resolve buffer, pooled readbacks, and any pending readback buffers. A readback that settles after disable is ignored, and re-enabling creates a fresh task timer. This intentionally differs from the frame timer above, whose smaller resource set is retained for reuse.
 
 ## State Machine / Lifecycle
 

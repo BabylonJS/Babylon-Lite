@@ -20,8 +20,9 @@ import {
     startEngine,
 } from "babylon-lite";
 import { installFetchProgress } from "./loading-progress.js";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
-const FRAGMENT_WGSL = /* wgsl */ `
+const FRAGMENT_WGSL = wgsl`
 struct U {
 iResolution : vec2f,
 iTime : f32,

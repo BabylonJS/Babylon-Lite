@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 
+import { perCommitBaselineUrl } from "../../../scripts/bundle-scenes-core";
+
 const repoRoot = join(__dirname, "..", "..", "..");
 const pipelineFile = "azure-pipelines-bundle-manifest.yml";
 
@@ -762,8 +764,13 @@ function resolveMacros(text: string, source: string): string {
 }
 
 interface PublishedBaseline {
-    /** Storage path the upload targets, with pipeline macros resolved. */
-    deployPath: string;
+    /**
+     * Storage paths the upload targets, with pipeline macros resolved.
+     *
+     * A list rather than one path because the step uploads the same archive twice:
+     * once under the commit it measured, once as the mutable "latest" copy.
+     */
+    deployPaths: string[];
     /** Archive the upload sends, by basename. */
     uploaded: string;
     /** Archive the script builds, by basename. */
@@ -771,6 +778,38 @@ interface PublishedBaseline {
     /** Files placed inside that archive. */
     members: string[];
 }
+
+/**
+ * Resolve a `-F "path=..."` field that names a shell variable back to the literal
+ * values the enclosing `for` loop assigns it.
+ *
+ * Without this the extraction reads `$deployPath` and the binding below compares
+ * the reader's URL against a variable name, which can never match. That failure is
+ * loud, so it is not the danger; the danger is the repair it invites. The obvious
+ * way to make a red assertion green is to relax it, and relaxing this one removes
+ * the only mechanism in the tree keeping the write and the read of the baseline
+ * together. Following the loop keeps the guard pointed at what the step does.
+ */
+function loopValues(script: string, variable: string): string[] {
+    const loop = new RegExp(`\\bfor\\s+${variable}\\s+in\\s+([^\\n;]*)`).exec(script);
+    if (!loop) return [];
+    return (loop[1]?.match(/"[^"]*"|\S+/g) ?? []).map((token) => token.replace(/^"|"$/g, "")).filter(Boolean);
+}
+
+/**
+ * ADO built-ins the publish step relies on, mapped to a stand-in value.
+ *
+ * These are set by the agent rather than declared in the pipeline's `variables:`
+ * block, so the "unresolved macro" floor below would otherwise read them as typos.
+ *
+ * The stand-in for a commit is SHA-shaped rather than a bracketed placeholder, and
+ * that is not cosmetic: it is substituted into a URL and compared against one the
+ * reader builds, so a value containing characters `new URL` percent-encodes fails
+ * the comparison on the encoding rather than on the paths disagreeing. All-zeroes
+ * is recognisably not a real commit while still exercising the character class a
+ * real one uses.
+ */
+const PIPELINE_BUILT_INS: Record<string, string> = { "Build.SourceVersion": "0".repeat(40) };
 
 /** Where the publish step actually puts the baseline, read out of what it runs. */
 function publishedBaseline(step: string, source: string): PublishedBaseline {
@@ -796,11 +835,23 @@ function publishedBaseline(step: string, source: string): PublishedBaseline {
     const basename = (p: string): string => p.split("/").pop() ?? "";
 
     return {
-        deployPath: resolveMacros(/-F\s+"path=([^"]*)"/.exec(script)?.[1] ?? "", source),
+        deployPaths: publishedDeployPaths(script, source),
         uploaded: basename(/-F\s+"zip=@([^"]*)"/.exec(script)?.[1] ?? ""),
         built: basename(zipped?.[2] ?? ""),
         members: (zipped?.[3] ?? "").split(/\s+/).filter(Boolean),
     };
+}
+
+/** The `-F "path=..."` targets of the upload, with loops unrolled and macros resolved. */
+function publishedDeployPaths(script: string, source: string): string[] {
+    const field = /-F\s+"path=([^"]*)"/.exec(script)?.[1] ?? "";
+    if (!field) return [];
+
+    // `$deployPath` / `${deployPath}` — the value comes from the loop header.
+    const shellVar = /^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$/.exec(field);
+    const raw = shellVar?.[1] ? loopValues(script, shellVar[1]) : [field];
+
+    return raw.map((path) => resolveMacros(path, source).replace(/\$\(([A-Za-z_][A-Za-z0-9_.]*)\)/g, (whole, name: string) => PIPELINE_BUILT_INS[name] ?? whole));
 }
 
 /** The path component of the URL the reader fetches the baseline from. */
@@ -1882,13 +1933,17 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         // that attributes the failure correctly, and attribution is what a
         // failing CI check is for.
         expect(
-            published.deployPath,
-            `no \`-F "path=..."\` field in "${PUBLISH_STEP}" — nothing says where the baseline is being uploaded to, so the comparison against ${readerFile} below has nothing to compare. If the upload moved to a task or a different transport, re-point \`publishedBaseline\` at it rather than letting this read an empty string.`
-        ).not.toBe("");
+            published.deployPaths.length,
+            `no \`-F "path=..."\` field in "${PUBLISH_STEP}" resolved to a storage path — nothing says where the baseline is being uploaded to, so the comparison against ${readerFile} below has nothing to compare. If the upload moved to a task, a different transport, or a shell variable this file cannot follow, re-point \`publishedDeployPaths\` at it rather than letting this read an empty list.`
+        ).toBeGreaterThan(0);
         expect(
-            published.deployPath,
-            `the upload path in "${PUBLISH_STEP}" still contains an unresolved \`$(...)\` macro after substitution against the pipeline's own \`variables:\` block: "${published.deployPath}". A macro naming a variable that is not declared here resolves to nothing at runtime and publishes the baseline to the wrong place.`
-        ).not.toMatch(/\$\(/);
+            published.deployPaths.filter((path) => path.includes("$(")),
+            `an upload path in "${PUBLISH_STEP}" still contains an unresolved \`$(...)\` macro after substitution against the pipeline's own \`variables:\` block and the known agent built-ins. A macro naming a variable that is declared in neither resolves to nothing at runtime and publishes the baseline to the wrong place; if it is a built-in this file has not met yet, add it to \`PIPELINE_BUILT_INS\`.`
+        ).toEqual([]);
+        expect(
+            published.deployPaths.filter((path) => /\$[A-Za-z_{]/.test(path)),
+            `an upload path in "${PUBLISH_STEP}" is still an unresolved shell variable. \`publishedDeployPaths\` follows a \`for VAR in ...\` header to its literal values; if the path now comes from an assignment, a command substitution, or a loop this file cannot read, re-point that helper — comparing a variable name against ${readerFile} silently compares nothing.`
+        ).toEqual([]);
         expect(
             published.members.length,
             `parsed no files out of the \`zip\` command in "${PUBLISH_STEP}" — the archive's contents are what the reader ends up fetching by name, so an empty list makes the comparison below vacuous`
@@ -1907,13 +1962,34 @@ describe("the baseline pipeline validates its deploy configuration before doing 
         ).toBe(published.built);
 
         // The binding itself. The reader fetches one specific path; the pipeline
-        // writes a set of files under one specific prefix. The first has to be
+        // writes a set of files under each of its prefixes. The first has to be
         // in the second.
-        const publishedPaths = published.members.map((member) => `/${published.deployPath}/${member}`);
+        const publishedPaths = published.deployPaths.flatMap((deployPath) => published.members.map((member) => `/${deployPath}/${member}`));
 
         expect(
             publishedPaths,
             `${readerFile} fetches the baseline from \`${readerPath}\`, but "${PUBLISH_STEP}" publishes ${publishedPaths.map((p) => `\`${p}\``).join(", ")}. These two are the write and the read of the same file and there is no mechanism keeping them together except this assertion — both files carry a comment saying "must stay in sync with" the other, and a comment has never stopped an edit. Change both, or change neither.`
         ).toContain(readerPath);
+
+        // The second write/read pair, which arrived with per-commit publishing and
+        // has the same shape as the first: the step uploads the archive a second
+        // time under the commit it measured, and the reader derives that location
+        // itself in `perCommitBaselineUrl`. Nothing but this clause keeps the two
+        // agreeing.
+        //
+        // This pair is the more dangerous of the two, because its failure is quiet.
+        // A drift in the mutable path is a 404 with no fallback behind it, so every
+        // PR delta disappears at once and someone notices. A drift in the per-commit
+        // path is a 404 that falls back to the mutable baseline — which is precisely
+        // the behaviour this change replaced. The feature would report itself as
+        // working, deltas would keep appearing, and they would be mis-attributed in
+        // exactly the way the per-commit lookup exists to prevent.
+        const commit = PIPELINE_BUILT_INS["Build.SourceVersion"]!;
+        const derived = new URL(perCommitBaselineUrl(`https://example.invalid${readerPath}`, commit)).pathname;
+
+        expect(
+            publishedPaths,
+            `${readerFile} derives the per-commit baseline URL as \`${derived}\` (via \`perCommitBaselineUrl\`, with the commit stood in for), but "${PUBLISH_STEP}" publishes ${publishedPaths.map((p) => `\`${p}\``).join(", ")}. The reader would fetch a path nothing writes, get a 404, and fall back to the mutable baseline — restoring the mis-attributed deltas this pair exists to prevent, while every check stays green. Change the upload path and \`perCommitBaselineUrl\` together, or change neither.`
+        ).toContain(derived);
     });
 });

@@ -122,10 +122,15 @@ describe("updateDynamicTexture", () => {
 });
 
 describe("createDynamicTexture device-lost recovery", () => {
-    /** Enable recovery by making `engine._dlr` truthy. createDynamicTexture stamps
-     *  the recovery source (pure data only — no logic) inline when it is. */
+    /** Enable recovery by making `engine._dlr` truthy. The capture hook owns both halves of a
+     *  stamp — assigning `_recoverySource` and remembering the texture so recovery can rebuild it
+     *  even when nothing else references it — so the stub mirrors the assignment. */
     function withRecovery(engine: EngineContext): void {
-        (engine as unknown as { _dlr: unknown })._dlr = {};
+        (engine as unknown as { _dlr: unknown })._dlr = {
+            t: (tex: { _recoverySource?: unknown }, source: unknown): void => {
+                tex._recoverySource = source;
+            },
+        };
     }
 
     it("registers a pure-data 'dynamic' recovery source (creation params, no logic)", () => {

@@ -16,6 +16,7 @@ import type { PbrMaterialProps, SubSurfaceProps } from "../pbr-material.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { PBR_HAS_SUBSURFACE, PBR_HAS_THICKNESS_MAP } from "../pbr-flag-bits.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 // Subsurface-only features2 bits (reserved in pbr-flag-bits.ts). Defined here,
 // not in the shared flag module, so they aren't retained in the entry/shared
@@ -25,7 +26,7 @@ const PBR2_HAS_TRANSLUCENCY_COLOR_MAP = 1 << 22;
 const PBR2_HAS_TRANSLUCENCY_INTENSITY_MAP = 1 << 23;
 const PBR2_HAS_TRANSLUCENCY_UV_TX = 1 << 24;
 
-const SS_HELPERS = `
+const SS_HELPERS = wgsl`
 fn transmittanceBRDF_Burley(tintColor: vec3<f32>, diffusionDistance: vec3<f32>, thickness: f32) -> vec3<f32> {
 let S = 1.0 / max(vec3<f32>(0.000001), diffusionDistance);
 let temp = exp((-0.333333333 * thickness) * S);
@@ -39,7 +40,7 @@ return saturate((NdotL + w) * invt2);
 `;
 
 // SV: declare subsurface scope variables
-const SS_SCOPE_VARS = `var translucencyDirect = vec3<f32>(0.0);
+const SS_SCOPE_VARS = wgsl`var translucencyDirect = vec3<f32>(0.0);
 var ssTransmittance = vec3<f32>(0.0);
 var ssIntensity = 0.0;`;
 
@@ -48,7 +49,7 @@ var ssIntensity = 0.0;`;
 // KHR_materials_volume flag is on (spec mandates G channel).
 function makeThicknessBlock(hasThicknessMap: boolean, useGltfChannel: boolean, hasColorMap: boolean, hasIntensityMap: boolean, hasUvTx: boolean): string {
     const chan = useGltfChannel ? "g" : "r";
-    const texSample = hasThicknessMap ? `let thicknessSample = textureSample(thicknessTexture_, thicknessSampler_, input.uv).${chan};` : `let thicknessSample = 1.0;`;
+    const texSample = hasThicknessMap ? wgsl`let thicknessSample = textureSample(thicknessTexture_, thicknessSampler_, input.uv).${chan};` : wgsl`let thicknessSample = 1.0;`;
     // The translucency color and intensity textures each carry their own
     // KHR_texture_transform (driven live by animation pointers), so they are
     // sampled with independent transformed UVs.
@@ -56,16 +57,16 @@ function makeThicknessBlock(hasThicknessMap: boolean, useGltfChannel: boolean, h
     let colorUv = "input.uv";
     let intensityUv = "input.uv";
     if (hasUvTx && hasColorMap) {
-        uvDecl += `let ssColorUV = vec2<f32>(dot(material.translucencyColorUVm.xy, input.uv), dot(material.translucencyColorUVm.zw, input.uv)) + material.translucencyColorUVt.xy;\n`;
+        uvDecl += wgsl`let ssColorUV = vec2<f32>(dot(material.translucencyColorUVm.xy, input.uv), dot(material.translucencyColorUVm.zw, input.uv)) + material.translucencyColorUVt.xy;\n`;
         colorUv = "ssColorUV";
     }
     if (hasUvTx && hasIntensityMap) {
-        uvDecl += `let ssIntUV = vec2<f32>(dot(material.translucencyIntensityUVm.xy, input.uv), dot(material.translucencyIntensityUVm.zw, input.uv)) + material.translucencyIntensityUVt.xy;\n`;
+        uvDecl += wgsl`let ssIntUV = vec2<f32>(dot(material.translucencyIntensityUVm.xy, input.uv), dot(material.translucencyIntensityUVm.zw, input.uv)) + material.translucencyIntensityUVt.xy;\n`;
         intensityUv = "ssIntUV";
     }
-    const colorMul = hasColorMap ? ` * textureSample(translucencyColorTexture_, translucencyColorSampler_, ${colorUv}).rgb` : ``;
-    const intensityMul = hasIntensityMap ? ` * textureSample(translucencyIntensityTexture_, translucencyIntensitySampler_, ${intensityUv}).a` : ``;
-    return `${uvDecl}${texSample}
+    const colorMul = hasColorMap ? wgsl` * textureSample(translucencyColorTexture_, translucencyColorSampler_, ${colorUv}).rgb` : ``;
+    const intensityMul = hasIntensityMap ? wgsl` * textureSample(translucencyIntensityTexture_, translucencyIntensitySampler_, ${intensityUv}).a` : ``;
+    return wgsl`${uvDecl}${texSample}
 let ssThickness = max(material.subsurfaceParams.y + thicknessSample * material.subsurfaceParams.z, 0.000001);
 let ssTranslucencyColor = material.subsurfaceParams3.rgb${colorMul};
 let ssDiffDist = material.subsurfaceParams2.rgb;
@@ -77,7 +78,7 @@ ssTransmittance = transmittanceBRDF_Burley(ssTranslucencyColor, ssDiffDist, ssTh
 // BJS also scales the front-facing direct diffuse by (1 - ssIntensity); we cannot easily
 // modify `directDiffuse` at compute time, so compensate via `color -= directDiffuse * ssIntensity`
 // in the AI/NI slot below.
-const SS_DIRECT = `{
+const SS_DIRECT = wgsl`{
 let NdotLU = dot(N, L);
 if (NdotLU < 0.0) {
 let wrapNdotL = computeWrappedDiffuseNdotL(abs(NdotLU), 0.02);
@@ -90,7 +91,7 @@ translucencyDirect += (1.0 / PI) * wrapNdotL * ssTransmittance * lightAtten * li
 // where refractionIrradiance = environmentIrradiance(-N) * transmittance (no albedo by default).
 // AO/occlusion applies to the full finalIrradiance in BJS.
 // Also: scale direct diffuse by (1-ssI) and add translucencyDirect lobe.
-const SS_IBL_MOD = `{
+const SS_IBL_MOD = wgsl`{
 let N_back = -N_env;
 let envIrrBack = (scene.vSphericalL00.rgb
   + scene.vSphericalL1_1.rgb * N_back.y + scene.vSphericalL10.rgb * N_back.z + scene.vSphericalL11.rgb * N_back.x
@@ -105,7 +106,7 @@ color += translucencyDirect * occlusion;
 }`;
 
 // NI: no-IBL path — just scale direct diffuse and add translucency lobe.
-const SS_NO_IBL_MOD = `color -= directDiffuse * ssIntensity;
+const SS_NO_IBL_MOD = wgsl`color -= directDiffuse * ssIntensity;
 color += translucencyDirect;`;
 
 const STAGE_FRAGMENT = 0x2;

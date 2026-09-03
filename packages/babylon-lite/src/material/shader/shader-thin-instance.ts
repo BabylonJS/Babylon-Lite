@@ -26,6 +26,7 @@ import type { ShaderPipelineBindings } from "./shader-pipeline.js";
 import type { ShaderPacket, ShaderRenderPass } from "./shader-renderable.js";
 import { syncThinInstanceBuffers, syncThinInstanceForDraw } from "../../mesh/thin-instance-gpu.js";
 import type { UniformCopyBatch } from "../../render/uniform-copy-batch.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 type CullModule = typeof import("../../mesh/thin-instance-cull-binding.js");
 
@@ -76,16 +77,16 @@ function instanceVertexLayouts(baseLocation: number, hasColor: boolean): GPUVert
 
 /** WGSL lines appended inside `VertexInput` for instanced variants. */
 function instancePreludeAttributes(baseLocation: number, hasColor: boolean): string {
-    let wgsl = `@location(${baseLocation}) world0: vec4<f32>,
+    let source = wgsl`@location(${baseLocation}) world0: vec4<f32>,
 @location(${baseLocation + 1}) world1: vec4<f32>,
 @location(${baseLocation + 2}) world2: vec4<f32>,
 @location(${baseLocation + 3}) world3: vec4<f32>,
 `;
     if (hasColor) {
-        wgsl += `@location(${baseLocation + 4}) instanceColor: vec4<f32>,
+        source = wgsl`${source}@location(${baseLocation + 4}) instanceColor: vec4<f32>,
 `;
     }
-    return wgsl;
+    return source;
 }
 
 /** Build ONE thin-instance renderable for a ShaderMaterial mesh (opaque or transparent). */

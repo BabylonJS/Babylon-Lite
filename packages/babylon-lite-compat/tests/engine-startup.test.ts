@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { startEngineMock } = vi.hoisted(() => ({
+const { createEngineMock, startEngineMock } = vi.hoisted(() => ({
+    createEngineMock: vi.fn(),
     startEngineMock: vi.fn<() => Promise<void>>(),
 }));
 
@@ -8,12 +9,13 @@ vi.mock("babylon-lite", async (importActual) => {
     const actual = await importActual<typeof import("babylon-lite")>();
     return {
         ...actual,
+        createEngine: createEngineMock,
         startEngine: startEngineMock,
     };
 });
 
 import type { EngineContext } from "babylon-lite";
-import { WebGPUEngine } from "../src/engine/engine";
+import { Engine, WebGPUEngine } from "../src/engine/engine";
 
 interface TestEngine {
     _startupComplete: boolean;
@@ -39,7 +41,33 @@ function makeEngine(): TestEngine {
 
 describe("compat engine startup ordering", () => {
     beforeEach(() => {
+        createEngineMock.mockReset();
+        createEngineMock.mockResolvedValue({});
         startEngineMock.mockReset();
+    });
+
+    it("translates disabled antialiasing into a single-sample Lite surface", async () => {
+        const canvas = {} as ConstructorParameters<typeof Engine>[0];
+
+        const booleanEngine = new Engine(canvas, false);
+        await booleanEngine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
+
+        const objectEngine = new Engine(canvas, { antialias: false, msaaSamples: 4 });
+        await objectEngine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
+    });
+
+    it("retains Lite's sample-count setting when antialiasing is not disabled", async () => {
+        const canvas = {} as ConstructorParameters<typeof Engine>[0];
+
+        const defaultEngine = new Engine(canvas, true);
+        await defaultEngine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, undefined);
+
+        const configuredEngine = new Engine(canvas, { antialias: true, msaaSamples: 1 });
+        await configuredEngine.initAsync();
+        expect(createEngineMock).toHaveBeenLastCalledWith(canvas, { msaaSamples: 1 });
     });
 
     it("starts the main engine before awaiting utility-layer work", async () => {

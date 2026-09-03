@@ -1,8 +1,14 @@
 {
+  // The project an editor picks up for lab/ and the one `pnpm lint` checks through
+  // tsconfig.typecheck.json, which extends this file.
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "./dist",
-    "rootDir": "."
+    "noEmit": true,
+    "paths": {
+      "babylon-lite": ["../packages/babylon-lite/src/index.ts"],
+      "babylon-lite/*": ["../packages/babylon-lite/src/*"],
+      "babylon-lite-gl": ["../packages/babylon-lite-gl/src/index.ts"]
+    }
   },
-  "include": ["lite/src", "gl/src"]
+  "include": ["lite/src", "gl/src", "../packages/babylon-lite/src/vite-env.d.ts", "../packages/babylon-lite/src/xr/xr-webgpu-globals.d.ts"]
 }

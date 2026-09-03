@@ -97,6 +97,74 @@ describe("build/index.d.ts", () => {
         expect(result.status).toBe(0);
     }, 300_000);
 
+    it("supports public enum values with verbatimModuleSyntax", () => {
+        const probePath = resolve(BUILD_DIR, "public-enums-verbatim.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    CharacterSupportedState,
+    FgAnimationValueType,
+    FgBlockType,
+    FgEventType,
+    FgType,
+    PhysicsConstraintAxis,
+    PhysicsConstraintType,
+    PhysicsMotionType,
+    PhysicsPrestepType,
+    PhysicsShapeType,
+} from "./index.js";
+
+const publicEnumValues = [
+    CharacterSupportedState.SUPPORTED,
+    FgAnimationValueType.Quaternion,
+    FgBlockType.NoOp,
+    FgEventType.Start,
+    FgType.Number,
+    PhysicsConstraintAxis.LINEAR_X,
+    PhysicsConstraintType.HINGE,
+    PhysicsMotionType.DYNAMIC,
+    PhysicsPrestepType.TELEPORT,
+    PhysicsShapeType.SPHERE,
+] as const;
+void publicEnumValues;
+`
+            );
+
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--verbatimModuleSyntax",
+                    "true",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                {
+                    cwd: PACKAGE_DIR,
+                    encoding: "utf-8",
+                }
+            );
+
+            const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+            expect(result.status, output).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("does not reference any external (npm) modules", () => {
         expect(existsSync(DTS_PATH)).toBe(true);
 
@@ -125,6 +193,59 @@ describe("build/index.d.ts", () => {
         expect(external, `build/index.d.ts leaks types from external modules: ${external.join(", ")}`).toEqual([]);
     });
 
+    it("strips the shader-source brand so consumers can pass plain strings", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).not.toContain("WgslSource");
+        expect(dts).not.toContain("wgslSourceBrand");
+        expect(dts).toContain("readonly vertexSource: string;");
+        expect(dts).toContain("readonly fragmentSource: string;");
+
+        const probePath = resolve(BUILD_DIR, "wgsl-source-types.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import type { ShaderMaterialOptions } from "./index.js";
+const options: ShaderMaterialOptions = {
+    vertexSource: "plain consumer vertex WGSL",
+    fragmentSource: "plain consumer fragment WGSL",
+    attributes: [],
+};
+void options;
+`,
+                "utf-8"
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                {
+                    cwd: PACKAGE_DIR,
+                    encoding: "utf-8",
+                }
+            );
+            const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+            expect(result.status, output).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes only the build-time moving-emitter provider API", () => {
         const dts = readFileSync(DTS_PATH, "utf-8");
 
@@ -134,6 +255,24 @@ describe("build/index.d.ts", () => {
         expect(dts).toContain("buildNodeParticleSetWithEmitterProvider");
         expect(dts).not.toContain("enableNodeParticleEmitterProvider");
         expect(dts).not.toMatch(/\b_(?:capture|setup)Emitter\b|\b_emitterProvider\b|\bParticleEmitterState\b/);
+    });
+
+    it("exposes the graph normalizer without its internal runtime or marker", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).toContain("normalizeNodeParticleGraph");
+        expect(dts).toMatch(/normalizeNodeParticleGraph\(graph: ParticleGraph\): Promise<ParticleGraph>/);
+        expect(dts).not.toContain("normalizeNodeParticleGraphRuntime");
+        expect(dts).not.toContain("_isGraphPlumbingNormalized");
+        expect(dts).not.toContain("_localVariableLoopEpoch");
+    });
+
+    it("exposes rigid-body rotation axis locks", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).toContain('type PhysicsRotationAxis = "x" | "y" | "z"');
+        expect(dts).toMatch(/lockPhysicsBodyRotationAxes\(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis\[\]\): void/);
+        expect(dts).toMatch(/unlockPhysicsBodyRotationAxes\(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis\[\]\): void/);
     });
 
     it("rejects invalid emitter fields while preserving extended provider options", () => {

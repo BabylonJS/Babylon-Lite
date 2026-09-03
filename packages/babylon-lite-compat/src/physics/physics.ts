@@ -22,16 +22,23 @@
 import {
     applyPhysicsBodyForce,
     applyPhysicsBodyImpulse,
+    calculatePhysicsCharacterMovementToRef,
+    createPhysicsCharacterController,
     createHavokWorld,
     createPhysicsAggregate,
     createPhysicsBody,
+    createPhysicsConstraint,
     createPhysicsShape,
     disposePhysics,
     getPhysicsBodyAngularVelocity,
     getPhysicsBodyLinearVelocity,
+    CharacterSupportedState as LiteCharacterSupportedState,
     PhysicsMotionType as LitePhysicsMotionType,
     PhysicsPrestepType as LitePhysicsPrestepType,
+    PhysicsConstraintAxis as LitePhysicsConstraintAxis,
+    PhysicsConstraintType as LitePhysicsConstraintType,
     PhysicsShapeType as LitePhysicsShapeType,
+    releasePhysicsConstraint,
     releasePhysicsShape,
     removePhysicsBody,
     setPhysicsBodyAngularVelocity,
@@ -48,8 +55,12 @@ import {
     setPhysicsTimestep,
 } from "babylon-lite";
 import type {
+    CharacterCollisionEvent as LiteCharacterCollisionEvent,
+    CharacterSurfaceInfo as LiteCharacterSurfaceInfo,
     Mesh as LiteMesh,
     PhysicsBody as LitePhysicsBody,
+    PhysicsCharacterController as LitePhysicsCharacterController,
+    PhysicsConstraint as LitePhysicsConstraint,
     PhysicsMassProperties,
     PhysicsShape as LitePhysicsShape,
     PhysicsShapeParameters,
@@ -61,6 +72,7 @@ import { unsupported } from "../error.js";
 import { Vector3 } from "../math/vector.js";
 import type { Mesh, TransformNode } from "../meshes/meshes.js";
 import type { ObserverCallback } from "../misc/observable.js";
+import { Observable } from "../misc/observable.js";
 import type { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
 
@@ -69,6 +81,12 @@ interface Vec3Like {
     x: number;
     y: number;
     z: number;
+}
+
+let physicsBodyWrappers: WeakMap<LitePhysicsBody, PhysicsBody> | null = null;
+
+function getPhysicsBodyWrappers(): WeakMap<LitePhysicsBody, PhysicsBody> {
+    return (physicsBodyWrappers ??= new WeakMap());
 }
 
 // ─── Enums (values match Babylon.js `@babylonjs/core`) ───────────────
@@ -108,6 +126,64 @@ export enum PhysicsConstraintType {
     LOCK = 5,
     PRISMATIC = 6,
     SIX_DOF = 7,
+}
+
+/** Axis addressed by a Physics V2 constraint limit. */
+export enum PhysicsConstraintAxis {
+    LINEAR_X = 0,
+    LINEAR_Y = 1,
+    LINEAR_Z = 2,
+    ANGULAR_X = 3,
+    ANGULAR_Y = 4,
+    ANGULAR_Z = 5,
+    LINEAR_DISTANCE = 6,
+}
+
+/** Contact state of a physics character against its supporting surface. */
+export enum CharacterSupportedState {
+    UNSUPPORTED = 0,
+    SLIDING = 1,
+    SUPPORTED = 2,
+}
+
+export interface CharacterShapeOptions {
+    shape?: PhysicsShape;
+    capsuleHeight?: number;
+    capsuleRadius?: number;
+}
+
+export interface CharacterSurfaceInfo {
+    isSurfaceDynamic: boolean;
+    supportedState: CharacterSupportedState;
+    averageSurfaceNormal: Vector3;
+    averageSurfaceVelocity: Vector3;
+    averageAngularSurfaceVelocity: Vector3;
+}
+
+export interface ICharacterControllerCollisionEvent {
+    collider: PhysicsBody;
+    colliderIndex: number;
+    impulse: Vector3;
+    impulsePosition: Vector3;
+}
+
+export interface PhysicsConstraintParameters {
+    pivotA?: Vec3Like;
+    pivotB?: Vec3Like;
+    axisA?: Vec3Like;
+    axisB?: Vec3Like;
+    perpAxisA?: Vec3Like;
+    perpAxisB?: Vec3Like;
+    maxDistance?: number;
+    collision?: boolean;
+}
+
+export class Physics6DoFLimit {
+    public axis!: PhysicsConstraintAxis;
+    public minLimit?: number;
+    public maxLimit?: number;
+    public stiffness?: number;
+    public damping?: number;
 }
 
 export interface PhysicsMaterial {
@@ -195,10 +271,78 @@ function litePrestepType(type: PhysicsPrestepType): LitePhysicsPrestepType {
     }
 }
 
+function liteConstraintType(type: PhysicsConstraintType): LitePhysicsConstraintType {
+    switch (type) {
+        case PhysicsConstraintType.BALL_AND_SOCKET:
+            return LitePhysicsConstraintType.BALL_AND_SOCKET;
+        case PhysicsConstraintType.DISTANCE:
+            return LitePhysicsConstraintType.DISTANCE;
+        case PhysicsConstraintType.HINGE:
+            return LitePhysicsConstraintType.HINGE;
+        case PhysicsConstraintType.SLIDER:
+            return LitePhysicsConstraintType.SLIDER;
+        case PhysicsConstraintType.LOCK:
+            return LitePhysicsConstraintType.LOCK;
+        case PhysicsConstraintType.PRISMATIC:
+            return LitePhysicsConstraintType.PRISMATIC;
+        case PhysicsConstraintType.SIX_DOF:
+            return LitePhysicsConstraintType.SIX_DOF;
+        default:
+            throw new Error(`Invalid PhysicsConstraintType value: ${type}`);
+    }
+}
+
+function liteConstraintAxis(axis: PhysicsConstraintAxis): LitePhysicsConstraintAxis {
+    switch (axis) {
+        case PhysicsConstraintAxis.LINEAR_X:
+            return LitePhysicsConstraintAxis.LINEAR_X;
+        case PhysicsConstraintAxis.LINEAR_Y:
+            return LitePhysicsConstraintAxis.LINEAR_Y;
+        case PhysicsConstraintAxis.LINEAR_Z:
+            return LitePhysicsConstraintAxis.LINEAR_Z;
+        case PhysicsConstraintAxis.ANGULAR_X:
+            return LitePhysicsConstraintAxis.ANGULAR_X;
+        case PhysicsConstraintAxis.ANGULAR_Y:
+            return LitePhysicsConstraintAxis.ANGULAR_Y;
+        case PhysicsConstraintAxis.ANGULAR_Z:
+            return LitePhysicsConstraintAxis.ANGULAR_Z;
+        case PhysicsConstraintAxis.LINEAR_DISTANCE:
+            return LitePhysicsConstraintAxis.LINEAR_DISTANCE;
+        default:
+            throw new Error(`Invalid PhysicsConstraintAxis value: ${axis}`);
+    }
+}
+
+function liteCharacterSupportedState(state: CharacterSupportedState): LiteCharacterSupportedState {
+    switch (state) {
+        case CharacterSupportedState.UNSUPPORTED:
+            return LiteCharacterSupportedState.UNSUPPORTED;
+        case CharacterSupportedState.SLIDING:
+            return LiteCharacterSupportedState.SLIDING;
+        case CharacterSupportedState.SUPPORTED:
+            return LiteCharacterSupportedState.SUPPORTED;
+        default:
+            throw new Error(`Invalid CharacterSupportedState value: ${state}`);
+    }
+}
+
+function compatCharacterSupportedState(state: LiteCharacterSupportedState): CharacterSupportedState {
+    switch (state) {
+        case LiteCharacterSupportedState.UNSUPPORTED:
+            return CharacterSupportedState.UNSUPPORTED;
+        case LiteCharacterSupportedState.SLIDING:
+            return CharacterSupportedState.SLIDING;
+        case LiteCharacterSupportedState.SUPPORTED:
+            return CharacterSupportedState.SUPPORTED;
+        default:
+            throw new Error(`Invalid Lite CharacterSupportedState value: ${state}`);
+    }
+}
+
 /** Babylon.js-shaped collision shape backed by a Babylon Lite physics shape. */
 export class PhysicsShape {
     /** @internal */
-    public readonly _lite!: LitePhysicsShape;
+    public _lite!: LitePhysicsShape;
     /** @internal */
     private readonly _world: PhysicsWorld;
     /** @internal */
@@ -211,6 +355,8 @@ export class PhysicsShape {
     private _isTrigger = false;
     /** @internal */
     private _disposed = false;
+    /** @internal Whether this wrapper is responsible for releasing the native shape. */
+    private _ownsLiteShape = true;
 
     public constructor(options: PhysicShapeOptions, scene: Scene) {
         this._world = requirePhysicsWorld(scene);
@@ -224,18 +370,28 @@ export class PhysicsShape {
     }
 
     /** @internal */
-    public static _fromLite(shape: LitePhysicsShape, world: PhysicsWorld): PhysicsShape {
+    public static _fromLite(shape: LitePhysicsShape, world: PhysicsWorld, ownsLiteShape = true): PhysicsShape {
         const wrapper = Object.create(PhysicsShape.prototype) as PhysicsShape;
         Object.defineProperties(wrapper, {
-            _lite: { value: shape, enumerable: true },
+            _lite: { value: shape, enumerable: true, writable: true },
             _world: { value: world },
             _material: { value: {}, writable: true },
             _membershipMask: { value: 0xffffffff, writable: true },
             _collideMask: { value: 0xffffffff, writable: true },
             _isTrigger: { value: false, writable: true },
             _disposed: { value: false, writable: true },
+            _ownsLiteShape: { value: ownsLiteShape },
         });
         return wrapper;
+    }
+
+    /** @internal */
+    public _replaceLiteShape(shape: LitePhysicsShape): void {
+        this._lite = shape;
+        this.material = this._material;
+        this.filterMembershipMask = this._membershipMask;
+        this.filterCollideMask = this._collideMask;
+        this.isTrigger = this._isTrigger;
     }
 
     public getClassName(): string {
@@ -300,7 +456,9 @@ export class PhysicsShape {
 
     public dispose(): void {
         if (!this._disposed) {
-            releasePhysicsShape(this._world, this._lite);
+            if (this._ownsLiteShape) {
+                releasePhysicsShape(this._world, this._lite);
+            }
             this._disposed = true;
         }
     }
@@ -328,6 +486,7 @@ export class PhysicsBody {
         this.startAsleep = startsAsleep;
         this._world = requirePhysicsWorld(scene);
         this._lite = createPhysicsBody(this._world, transformNode._node, liteMotionType(motionType), startsAsleep);
+        getPhysicsBodyWrappers().set(this._lite, this);
         setPhysicsBodyPrestepType(this._lite, LitePhysicsPrestepType.DISABLED);
         this._attachToNode();
     }
@@ -346,6 +505,7 @@ export class PhysicsBody {
             startAsleep: { value: startsAsleep, enumerable: true },
         });
         setPhysicsBodyPrestepType(wrapper._lite, LitePhysicsPrestepType.DISABLED);
+        getPhysicsBodyWrappers().set(wrapper._lite, wrapper);
         wrapper._attachToNode();
         return wrapper;
     }
@@ -450,12 +610,19 @@ export class PhysicsBody {
     public applyForce(force: Vec3Like, location: Vec3Like): void {
         applyPhysicsBodyForce(this._world, this._lite, force, location);
     }
+    public addConstraint(childBody: PhysicsBody, constraint: PhysicsConstraint): void {
+        if (childBody._world !== this._world) {
+            throw new Error("PhysicsBody.addConstraint requires both bodies to belong to the same scene");
+        }
+        constraint._bind(this._world, this._lite, childBody._lite);
+    }
 
     public dispose(): void {
         if (!this._disposed) {
             this.transformNode.onDisposeObservable.remove(this._nodeDisposeObserver);
             this._nodeDisposeObserver = null;
             removePhysicsBody(this._world, this._lite);
+            getPhysicsBodyWrappers().delete(this._lite);
             if (this.transformNode.physicsBody === this) {
                 this.transformNode.physicsBody = null;
             }
@@ -472,6 +639,406 @@ export class PhysicsBody {
     private _attachToNode(): void {
         this.transformNode.physicsBody = this;
         this._nodeDisposeObserver = this.transformNode.onDisposeObservable.add(() => this.dispose());
+    }
+}
+
+/** Babylon.js-shaped Physics V2 constraint backed by Lite's native constraint factory. */
+export class PhysicsConstraint {
+    private readonly _lite: LitePhysicsConstraint[] = [];
+    private readonly _world: PhysicsWorld;
+
+    public constructor(
+        public readonly type: PhysicsConstraintType,
+        protected readonly _options: PhysicsConstraintParameters,
+        protected readonly _scene: Scene,
+        protected readonly _limits: readonly Physics6DoFLimit[] = []
+    ) {
+        this._world = requirePhysicsWorld(_scene);
+    }
+
+    public get options(): PhysicsConstraintParameters {
+        return this._options;
+    }
+
+    public getClassName(): string {
+        return "PhysicsConstraint";
+    }
+
+    /** @internal */
+    public _bind(world: PhysicsWorld, bodyA: LitePhysicsBody, bodyB: LitePhysicsBody): void {
+        if (this._world !== world) {
+            throw new Error("PhysicsConstraint and PhysicsBody must belong to the same scene");
+        }
+        this._lite.push(
+            createPhysicsConstraint(
+                world,
+                bodyA,
+                bodyB,
+                liteConstraintType(this.type),
+                this._options,
+                this._limits.map((limit) => ({ ...limit, axis: liteConstraintAxis(limit.axis) }))
+            )
+        );
+    }
+
+    public dispose(): void {
+        if (this._lite.length > 0) {
+            // Releasing the Havok world invalidates all of its constraint handles.
+            if (this._scene.getPhysicsEngine()?.getPhysicsPlugin().world === this._world) {
+                for (const constraint of this._lite) {
+                    releasePhysicsConstraint(this._world, constraint);
+                }
+            }
+            this._lite.length = 0;
+        }
+    }
+}
+
+/** Babylon.js `HingeConstraint` adapter. */
+export class HingeConstraint extends PhysicsConstraint {
+    public constructor(pivotA: Vector3, pivotB: Vector3, axisA: Vector3, axisB: Vector3, scene: Scene) {
+        super(PhysicsConstraintType.HINGE, { pivotA, pivotB, axisA, axisB }, scene);
+    }
+
+    public override getClassName(): string {
+        return "HingeConstraint";
+    }
+}
+
+export class BallAndSocketConstraint extends PhysicsConstraint {
+    public constructor(pivotA: Vector3, pivotB: Vector3, axisA: Vector3, axisB: Vector3, scene: Scene) {
+        super(PhysicsConstraintType.BALL_AND_SOCKET, { pivotA, pivotB, axisA, axisB }, scene);
+    }
+}
+
+export class DistanceConstraint extends PhysicsConstraint {
+    public constructor(maxDistance: number, scene: Scene) {
+        super(PhysicsConstraintType.DISTANCE, { maxDistance }, scene);
+    }
+}
+
+export class SliderConstraint extends PhysicsConstraint {
+    public constructor(pivotA: Vector3, pivotB: Vector3, axisA: Vector3, axisB: Vector3, scene: Scene) {
+        super(PhysicsConstraintType.SLIDER, { pivotA, pivotB, axisA, axisB }, scene);
+    }
+}
+
+export class LockConstraint extends PhysicsConstraint {
+    public constructor(pivotA: Vector3, pivotB: Vector3, axisA: Vector3, axisB: Vector3, scene: Scene) {
+        super(PhysicsConstraintType.LOCK, { pivotA, pivotB, axisA, axisB }, scene);
+    }
+}
+
+export class PrismaticConstraint extends PhysicsConstraint {
+    public constructor(pivotA: Vector3, pivotB: Vector3, axisA: Vector3, axisB: Vector3, scene: Scene) {
+        super(PhysicsConstraintType.PRISMATIC, { pivotA, pivotB, axisA, axisB }, scene);
+    }
+}
+
+export class Physics6DoFConstraint extends PhysicsConstraint {
+    public constructor(
+        constraintParams: PhysicsConstraintParameters,
+        public readonly limits: Physics6DoFLimit[],
+        scene: Scene
+    ) {
+        super(PhysicsConstraintType.SIX_DOF, constraintParams, scene, limits);
+    }
+}
+
+export class SpringConstraint extends Physics6DoFConstraint {
+    public constructor(
+        pivotA: Vector3,
+        pivotB: Vector3,
+        axisA: Vector3,
+        axisB: Vector3,
+        minDistance: number,
+        maxDistance: number,
+        stiffness: number,
+        damping: number,
+        scene: Scene
+    ) {
+        super({ pivotA, pivotB, axisA, axisB }, [{ axis: PhysicsConstraintAxis.LINEAR_DISTANCE, minLimit: minDistance, maxLimit: maxDistance, stiffness, damping }], scene);
+    }
+}
+
+function vectorFromLite(value: Vec3Like): Vector3 {
+    return new Vector3(value.x, value.y, value.z);
+}
+
+function vectorFromLiteOwned(value: Vec3Like): Vector3 {
+    if (!(value instanceof Vector3)) {
+        Object.setPrototypeOf(value, Vector3.prototype);
+    }
+    return value as Vector3;
+}
+
+function surfaceInfoFromLite(value: LiteCharacterSurfaceInfo): CharacterSurfaceInfo {
+    return {
+        isSurfaceDynamic: value.isSurfaceDynamic,
+        supportedState: compatCharacterSupportedState(value.supportedState),
+        averageSurfaceNormal: vectorFromLite(value.averageSurfaceNormal),
+        averageSurfaceVelocity: vectorFromLite(value.averageSurfaceVelocity),
+        averageAngularSurfaceVelocity: vectorFromLite(value.averageAngularSurfaceVelocity),
+    };
+}
+
+/**
+ * Babylon.js-shaped character controller backed by Lite's native, tree-shakeable
+ * Havok character controller.
+ */
+export class PhysicsCharacterController {
+    /** @internal */
+    public readonly _lite: LitePhysicsCharacterController;
+    public readonly onTriggerCollisionObservable = new Observable<ICharacterControllerCollisionEvent>();
+    private _shape: PhysicsShape;
+    private _up: Vector3;
+    private _maxStepHeight = 0;
+    private _footOffset: number;
+    private _disposed = false;
+
+    public constructor(position: Vector3, characterShapeOptions: CharacterShapeOptions, scene: Scene) {
+        if (characterShapeOptions.shape) {
+            unsupported(
+                "PhysicsCharacterController custom shapes",
+                "Lite's controller owns and rebuilds a capsule internally; exposing caller-owned shape replacement requires an ownership/lifetime design in Lite."
+            );
+        }
+        const world = requirePhysicsWorld(scene);
+        this._lite = createPhysicsCharacterController(world, position, {
+            capsuleHeight: characterShapeOptions.capsuleHeight ?? 1.8,
+            capsuleRadius: characterShapeOptions.capsuleRadius ?? 0.6,
+        });
+        this._up = vectorFromLite(this._lite.up);
+        this._lite.up = this._up;
+        this._footOffset = (characterShapeOptions.capsuleHeight ?? 1.8) * 0.5;
+        const liteShape = this._lite.getBody()._shape;
+        if (!liteShape) {
+            throw new Error("Babylon Lite character controller did not create a collision shape.");
+        }
+        this._shape = PhysicsShape._fromLite(liteShape, world, false);
+        this._lite.onTriggerCollisionObservable.add((event) => this._notifyCollision(event));
+    }
+
+    public get shape(): PhysicsShape {
+        return this._shape;
+    }
+
+    public set shape(_value: PhysicsShape) {
+        unsupported("PhysicsCharacterController.shape", "Lite's controller owns its cast shape; replacing it requires an explicit Lite ownership/lifetime contract.");
+    }
+
+    public get shapeOptions(): CharacterShapeOptions {
+        const { capsuleHeight, capsuleRadius } = this._lite.shapeOptions;
+        return { capsuleHeight, capsuleRadius };
+    }
+
+    public setShapeOptions(options: CharacterShapeOptions, preserveFootPosition = true): void {
+        if (options.shape) {
+            this.shape = options.shape;
+            return;
+        }
+        this._lite.setShapeOptions({ capsuleHeight: options.capsuleHeight ?? 1.8, capsuleRadius: options.capsuleRadius ?? 0.6 }, preserveFootPosition);
+        const liteShape = this._lite.getBody()._shape;
+        if (!liteShape) {
+            throw new Error("Babylon Lite character controller did not rebuild its collision shape.");
+        }
+        this._shape._replaceLiteShape(liteShape);
+        this._footOffset = (options.capsuleHeight ?? 1.8) * 0.5;
+    }
+
+    public getPosition(): Vector3 {
+        return vectorFromLiteOwned(this._lite.getPosition());
+    }
+
+    public setPosition(position: Vector3): void {
+        this._lite.setPosition(position);
+    }
+
+    public getVelocity(): Vector3 {
+        return vectorFromLiteOwned(this._lite.getVelocity());
+    }
+
+    public setVelocity(velocity: Vector3): void {
+        this._lite.setVelocity(velocity);
+    }
+
+    public moveWithCollisions(displacement: Vector3): void {
+        this._lite.moveWithCollisions(displacement);
+    }
+
+    public integrate(deltaTime: number, surfaceInfo: CharacterSurfaceInfo, gravity: Vector3): void {
+        this._lite.integrate(deltaTime, { ...surfaceInfo, supportedState: liteCharacterSupportedState(surfaceInfo.supportedState) }, gravity);
+    }
+
+    public checkSupport(deltaTime: number, direction: Vector3): CharacterSurfaceInfo {
+        return surfaceInfoFromLite(this._lite.checkSupport(deltaTime, direction));
+    }
+
+    public checkSupportToRef(deltaTime: number, direction: Vector3, result: CharacterSurfaceInfo): void {
+        const value = this._lite.checkSupport(deltaTime, direction);
+        result.isSurfaceDynamic = value.isSurfaceDynamic;
+        result.supportedState = compatCharacterSupportedState(value.supportedState);
+        result.averageSurfaceNormal.set(value.averageSurfaceNormal.x, value.averageSurfaceNormal.y, value.averageSurfaceNormal.z);
+        result.averageSurfaceVelocity.set(value.averageSurfaceVelocity.x, value.averageSurfaceVelocity.y, value.averageSurfaceVelocity.z);
+        result.averageAngularSurfaceVelocity.set(value.averageAngularSurfaceVelocity.x, value.averageAngularSurfaceVelocity.y, value.averageAngularSurfaceVelocity.z);
+    }
+
+    public calculateMovement(
+        deltaTime: number,
+        forwardWorld: Vector3,
+        surfaceNormal: Vector3,
+        currentVelocity: Vector3,
+        surfaceVelocity: Vector3,
+        desiredVelocity: Vector3,
+        upWorld: Vector3
+    ): Vector3 {
+        return vectorFromLite(this._lite.calculateMovement(deltaTime, forwardWorld, surfaceNormal, currentVelocity, surfaceVelocity, desiredVelocity, upWorld));
+    }
+
+    public calculateMovementToRef(
+        deltaTime: number,
+        forwardWorld: Vector3,
+        surfaceNormal: Vector3,
+        currentVelocity: Vector3,
+        surfaceVelocity: Vector3,
+        desiredVelocity: Vector3,
+        upWorld: Vector3,
+        result: Vector3
+    ): boolean {
+        return calculatePhysicsCharacterMovementToRef(this._lite, deltaTime, forwardWorld, surfaceNormal, currentVelocity, surfaceVelocity, desiredVelocity, upWorld, result);
+    }
+
+    public dispose(): void {
+        if (!this._disposed) {
+            this._lite.dispose();
+            this.onTriggerCollisionObservable.clear();
+            this._disposed = true;
+        }
+    }
+
+    public get up(): Vector3 {
+        return this._up;
+    }
+
+    public set up(value: Vector3) {
+        this._up = value;
+        this._lite.up = value;
+    }
+
+    public get maxStepHeight(): number {
+        return this._maxStepHeight;
+    }
+
+    public set maxStepHeight(value: number) {
+        if (value !== 0) {
+            unsupported(
+                "PhysicsCharacterController.maxStepHeight",
+                "Step-up needs a substantial additional sweep/manifold policy in Lite's controller and cannot be implemented as compat translation."
+            );
+        }
+        this._maxStepHeight = 0;
+    }
+
+    public get footOffset(): number {
+        return this._footOffset;
+    }
+
+    public set footOffset(value: number) {
+        if (value !== this._footOffset) {
+            unsupported(
+                "PhysicsCharacterController.footOffset",
+                "Lite derives the character foot from capsule height and does not expose the custom-shape foot-offset policy used by Babylon.js."
+            );
+        }
+    }
+
+    private _notifyCollision(event: LiteCharacterCollisionEvent): void {
+        const collider = getPhysicsBodyWrappers().get(event.collider);
+        if (!collider) {
+            unsupported(
+                "PhysicsCharacterController collision body mapping",
+                "The contacted Lite body was not created through the compat physics API and has no Babylon.js TransformNode wrapper."
+            );
+        }
+        this.onTriggerCollisionObservable.notifyObservers({
+            collider,
+            colliderIndex: 0,
+            impulse: vectorFromLite(event.impulse),
+            impulsePosition: vectorFromLite(event.impulsePosition),
+        });
+    }
+
+    public get keepDistance(): number {
+        return this._lite.keepDistance;
+    }
+    public set keepDistance(value: number) {
+        this._lite.keepDistance = value;
+    }
+    public get keepContactTolerance(): number {
+        return this._lite.keepContactTolerance;
+    }
+    public set keepContactTolerance(value: number) {
+        this._lite.keepContactTolerance = value;
+    }
+    public get maxCastIterations(): number {
+        return this._lite.maxCastIterations;
+    }
+    public set maxCastIterations(value: number) {
+        this._lite.maxCastIterations = value;
+    }
+    public get penetrationRecoverySpeed(): number {
+        return this._lite.penetrationRecoverySpeed;
+    }
+    public set penetrationRecoverySpeed(value: number) {
+        this._lite.penetrationRecoverySpeed = value;
+    }
+    public get staticFriction(): number {
+        return this._lite.staticFriction;
+    }
+    public set staticFriction(value: number) {
+        this._lite.staticFriction = value;
+    }
+    public get dynamicFriction(): number {
+        return this._lite.dynamicFriction;
+    }
+    public set dynamicFriction(value: number) {
+        this._lite.dynamicFriction = value;
+    }
+    public get maxSlopeCosine(): number {
+        return this._lite.maxSlopeCosine;
+    }
+    public set maxSlopeCosine(value: number) {
+        this._lite.maxSlopeCosine = value;
+    }
+    public get maxCharacterSpeedForSolver(): number {
+        return this._lite.maxCharacterSpeedForSolver;
+    }
+    public set maxCharacterSpeedForSolver(value: number) {
+        this._lite.maxCharacterSpeedForSolver = value;
+    }
+    public get characterStrength(): number {
+        return this._lite.characterStrength;
+    }
+    public set characterStrength(value: number) {
+        this._lite.characterStrength = value;
+    }
+    public get acceleration(): number {
+        return this._lite.acceleration;
+    }
+    public set acceleration(value: number) {
+        this._lite.acceleration = value;
+    }
+    public get maxAcceleration(): number {
+        return this._lite.maxAcceleration;
+    }
+    public set maxAcceleration(value: number) {
+        this._lite.maxAcceleration = value;
+    }
+    public get characterMass(): number {
+        return this._lite.characterMass;
+    }
+    public set characterMass(value: number) {
+        this._lite.characterMass = value;
     }
 }
 

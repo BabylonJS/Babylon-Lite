@@ -6,12 +6,13 @@
  */
 
 import type { BlockEmitter } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export const emitter: BlockEmitter = {
     className: "SheenBlock",
     stage: "fragment",
     emit(_block, _outputName, _stage, state, _ctx) {
         state.usesSheen = true;
-        return { expr: `vec3<f32>(0.0)`, type: "vec3f" };
+        return { expr: wgsl`vec3<f32>(0.0)`, type: "vec3f" };
     },
 };

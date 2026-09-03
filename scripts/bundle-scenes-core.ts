@@ -16,6 +16,15 @@ import { resolve, dirname, join, extname } from "path";
 import { rmSync, readdirSync, readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync } from "fs";
 import { minify as terserMinify, type ECMA, type SourceMapOptions } from "terser";
 import { bytesToRoundedKB, IGNORED_BUNDLE_MODULE_PATTERN, isVendorRuntimeChunkFile, summarizeRuntimeBundle, type RuntimeJsPayload } from "./bundle-size-accounting";
+import {
+    computeSceneHeadroom,
+    CRITICAL_HEADROOM_BYTES,
+    formatHeadroomThreshold,
+    HEADROOM_LIST_LIMIT,
+    scenesUnderHeadroom,
+    TIGHT_HEADROOM_BYTES,
+    type SceneHeadroomInput,
+} from "./bundle-ceiling-headroom";
 import { wgslMinifyPlugin } from "./wgsl-minify-plugin";
 
 /**
@@ -28,6 +37,8 @@ export function terserPropertyManglePlugin(): Plugin {
         name: "terser-property-mangle",
         async generateBundle(_options, bundle) {
             const nameCache: Record<string, unknown> = {};
+            // ESM export names are fixed, so namespace reads in another chunk must not be mangled.
+            const exportedProperties = [...new Set(Object.values(bundle).flatMap((entry) => (entry.type === "chunk" ? entry.exports.filter((name) => /^_[a-z]/.test(name)) : [])))];
 
             for (const [, chunk] of Object.entries(bundle)) {
                 if (chunk.type !== "chunk") continue;
@@ -93,6 +104,7 @@ export function terserPropertyManglePlugin(): Plugin {
                                 "_free",
                                 "_vertexSlots",
                                 "_fragmentSlots",
+                                ...exportedProperties,
                                 ...wasmReserved,
                             ],
                         },
@@ -240,6 +252,20 @@ interface BundleManifestEntry {
      *  hides sub-50-byte drift — including a ceiling overflow on a zero-headroom scene. Tools
      *  comparing sizes (the build's ceiling check, the delta report) use this. */
     rawBytes?: number;
+    /**
+     * The scene's `maxRawKB` ceiling **as it stood on the commit this baseline was measured
+     * from**, stamped in at publish time by `scripts/publish-bundle-baseline.ts`.
+     *
+     * Without it, a consumer asking "was master already over its ceiling?" has only the
+     * baseline's bytes and the *branch's* `scene-config.json`, so a PR that tightens a
+     * ceiling makes master retroactively look like it was in breach. The measurement and
+     * the limit it was measured against have to travel together to answer that.
+     *
+     * Optional because baselines published before this field existed do not carry it, and
+     * because a scene may legitimately have no ceiling (`skipBundleSize`, or no `maxRawKB`).
+     * Consumers must treat "absent" as "unknown", never as "no ceiling".
+     */
+    ceilingKB?: number;
     ignoredRawKB?: number;
     bjsRawKB?: number;
     bjsGzipKB?: number;
@@ -434,6 +460,120 @@ function readMasterBundleManifestFromGit(refs = ["upstream/master", "origin/mast
     return null;
 }
 
+/** A full 40-character git object name, the only form the published layout uses. */
+const FULL_SHA_PATTERN = /^[0-9a-f]{40}$/;
+
+function gitOutput(args: string[]): string | null {
+    try {
+        return execFileSync("git", args, { cwd: ROOT, encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Commits whose published baseline would be a like-for-like comparison for this
+ * build, most specific first.
+ *
+ * The problem being solved: the mutable `manifest.json` is whatever master
+ * published most recently, which is not necessarily the commit this build was
+ * merged with. Comparing against it silently attributes bytes from every master
+ * commit in between to the PR under test.
+ *
+ * Candidates, at most one of which normally applies:
+ *  - `BUNDLE_BASELINE_COMMIT` — an explicit override. Set but empty means "do not
+ *    look up a per-commit baseline at all", mirroring `BUNDLE_MASTER_MANIFEST_URL`.
+ *  - HEAD's **first parent, only when HEAD is a merge commit**. Azure DevOps checks
+ *    PRs out at `refs/pull/N/merge`, whose first parent is exactly the master commit
+ *    the PR was merged with. Read from the raw commit object rather than via
+ *    `rev-parse HEAD^1`, because CI checks out at `--depth=1`, where the shallow
+ *    graft makes `rev-parse HEAD^1` fail outright ("unknown revision") even though
+ *    the commit object still records both parents. Using `cat-file` therefore needs
+ *    no `fetchDepth` change in the pipeline. The merge-commit requirement matters:
+ *    on an ordinary commit the first parent is just the previous commit, which
+ *    carries no "this is what I was merged with" meaning.
+ *  - The merge base with master, for local `pnpm build:bundle-scenes` runs — the
+ *    commit the branch actually diverged from. Needs real history, so it simply
+ *    yields nothing in CI's shallow checkout.
+ *
+ * Deliberately *not* a candidate: the current `origin/master` SHA. That is the
+ * mutable baseline by another name, so probing it would reintroduce the exact
+ * mis-attribution this lookup exists to remove, while costing an extra request.
+ *
+ * A candidate with no published baseline is a plain 404 — one round trip, then the
+ * mutable baseline. Nothing waits and nothing fails.
+ */
+/**
+ * The outcome of working out which commit's baseline to ask for.
+ *
+ * `disabled` is kept separate from an empty `commits` list because the two lead a
+ * reader to different places: an explicit opt-out is this build's own
+ * configuration doing what it was told, while an empty list is a checkout that
+ * could not say what it was merged with. Collapsing them would report a
+ * deliberate setting as a fault.
+ */
+interface BaselineCommitLookup {
+    /** True when the caller explicitly switched per-commit lookup off. */
+    disabled: boolean;
+    /** Full SHAs to try, in order. Empty when none could be determined. */
+    commits: string[];
+}
+
+function readBaselineCommitCandidates(): BaselineCommitLookup {
+    const explicit = process.env.BUNDLE_BASELINE_COMMIT;
+    if (explicit !== undefined) {
+        const trimmed = explicit.trim();
+        // Set-but-empty is the documented off switch. A non-empty value that is not
+        // a full SHA is a failed attempt at naming a commit, not an opt-out, so it
+        // reports as undetermined rather than as disabled.
+        if (trimmed === "") return { disabled: true, commits: [] };
+        return { disabled: false, commits: FULL_SHA_PATTERN.test(trimmed) ? [trimmed] : [] };
+    }
+
+    const candidates: string[] = [];
+
+    const head = gitOutput(["cat-file", "-p", "HEAD"]);
+    if (head) {
+        // Header lines are ordered: tree, then parent(s), then author.
+        const parents: string[] = [];
+        for (const line of head.split("\n")) {
+            if (line.startsWith("tree ")) continue;
+            if (!line.startsWith("parent ")) break;
+            parents.push(line.slice("parent ".length).trim());
+        }
+        if (parents.length > 1 && parents[0]) candidates.push(parents[0]);
+    }
+
+    for (const ref of ["upstream/master", "origin/master"]) {
+        const base = gitOutput(["merge-base", "HEAD", ref]);
+        if (base) {
+            candidates.push(base);
+            break;
+        }
+    }
+
+    return { disabled: false, commits: [...new Set(candidates.filter((sha) => FULL_SHA_PATTERN.test(sha)))] };
+}
+
+/**
+ * Rewrite a baseline manifest URL to the immutable per-commit copy beside it:
+ * `.../bundle-baseline/manifest.json` -> `.../bundle-baseline/<sha>/manifest.json`.
+ *
+ * Derived from the URL actually in effect rather than from the hardcoded default,
+ * so `BUNDLE_MASTER_MANIFEST_URL` overrides (tests, mirrors) keep working.
+ *
+ * Exported for tests/lite/unit/pipeline-fail-fast-ordering.test.ts, which binds
+ * this derivation to the path the publish step actually uploads to. Nothing else
+ * keeps the two in agreement, and a drift between them is a silent 404 on every
+ * per-commit lookup — which degrades to the mutable baseline and so looks exactly
+ * like the pre-existing behaviour this change was made to replace.
+ */
+export function perCommitBaselineUrl(manifestUrl: string, commit: string): string {
+    const slash = manifestUrl.lastIndexOf("/");
+    if (slash < 0) return manifestUrl;
+    return `${manifestUrl.slice(0, slash)}/${commit}${manifestUrl.slice(slash)}`;
+}
+
 /** Guard against a CDN or proxy serving something that parses as JSON but isn't a manifest. */
 function isBundleManifest(value: unknown): value is BundleManifest {
     if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -456,12 +596,17 @@ function readMasterBundleManifestFromFile(path: string): BundleManifest | null {
  * (first run after this change, or a fork with no deployment) and is not an
  * error — the caller degrades to "no baseline", which only costs the advisory
  * delta report.
+ *
+ * `quiet404` suppresses the miss message for per-commit probes, where a 404 is
+ * the ordinary case (the base commit's baseline build may still be running, may
+ * have failed, or may predate per-commit publishing) and the caller reports the
+ * outcome once it knows which candidate, if any, hit.
  */
-async function fetchMasterBundleManifest(url: string): Promise<BundleManifest | null> {
+async function fetchMasterBundleManifest(url: string, { quiet404 = false }: { quiet404?: boolean } = {}): Promise<BundleManifest | null> {
     try {
         const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
         if (response.status === 404) {
-            console.warn(`No published bundle-size baseline at ${url} yet; skipping the master delta.`);
+            if (!quiet404) console.warn(`No published bundle-size baseline at ${url} yet; skipping the master delta.`);
             return null;
         }
         if (!response.ok) {
@@ -483,9 +628,10 @@ async function fetchMasterBundleManifest(url: string): Promise<BundleManifest | 
 /**
  * Resolve the master baseline, in order of preference:
  *   1. `BUNDLE_MASTER_MANIFEST_FILE` — a baseline CI already downloaded.
- *   2. The published baseline over HTTP (skipped when `refs` is given, i.e. when
- *      the caller explicitly asked to compare against a specific git ref, or
- *      when `BUNDLE_MASTER_MANIFEST_URL` is set to an empty value).
+ *   2. The baseline published for *this build's own base commit*, then the
+ *      mutable latest baseline (both skipped when `refs` is given, i.e. when the
+ *      caller explicitly asked to compare against a specific git ref, or when
+ *      `BUNDLE_MASTER_MANIFEST_URL` is set to an empty value).
  *   3. Git refs — the legacy tracked layout, still readable on old refs.
  */
 export async function resolveMasterBundleManifest(refs?: string[]): Promise<{ source: string; manifest: BundleManifest } | null> {
@@ -502,8 +648,41 @@ export async function resolveMasterBundleManifest(refs?: string[]): Promise<{ so
         // baseline anyway. Trimmed because a YAML-supplied blank can arrive as " ".
         const url = (process.env.BUNDLE_MASTER_MANIFEST_URL ?? DEFAULT_MASTER_MANIFEST_URL).trim();
         if (url) {
+            const lookup = readBaselineCommitCandidates();
+            for (const commit of lookup.commits) {
+                const commitUrl = perCommitBaselineUrl(url, commit);
+                const manifest = await fetchMasterBundleManifest(commitUrl, { quiet404: true });
+                if (manifest) {
+                    console.log(`✓ Bundle-size baseline matched this build's base commit ${commit.slice(0, 8)}.`);
+                    return { source: commitUrl, manifest };
+                }
+            }
+
             const manifest = await fetchMasterBundleManifest(url);
-            if (manifest) return { source: url, manifest };
+            if (manifest) {
+                // Say so explicitly. This baseline may have been measured on a different
+                // commit than the one this build was merged with, so any delta computed
+                // from it can attribute another PR's bytes to this one. Silently doing
+                // that is the failure this per-commit lookup exists to avoid, so when the
+                // fallback fires the reader needs to know it did.
+                //
+                // The three ways of getting here need different words, because they send
+                // the reader to three different places: a base commit with no baseline is
+                // a producer-side gap that closes on its own; an undetermined base commit
+                // is a property of this checkout that will not; and an explicit opt-out is
+                // this build doing what it was configured to do, which is not a fault at
+                // all and should not be reported as one.
+                let why: string;
+                if (lookup.disabled) {
+                    why = "per-commit baseline lookup is switched off for this run";
+                } else if (lookup.commits.length > 0) {
+                    why = "no baseline was published for this build's base commit";
+                } else {
+                    why = "this build's base commit could not be determined, so no per-commit baseline was requested";
+                }
+                console.warn(`Using the latest published bundle-size baseline (${url}); ${why}.`);
+                return { source: url, manifest };
+            }
         }
     }
 
@@ -901,10 +1080,7 @@ function elapsed(startMs: number): string {
  *  preload form too late for a renderChunk/generateBundle hook to see it. */
 export function stripNoopPreloadWrappers(code: string): string {
     return code
-        .replace(
-            /[\w$]+\(async\(\)=>\{const\{([\w$]+):([\w$]+)\}=await (import\([^()]*\));return\{\1:\2\}\},\[\]\)/g,
-            "$3"
-        )
+        .replace(/[\w$]+\(async\(\)=>\{const\{([\w$]+):([\w$]+)\}=await (import\([^()]*\));return\{\1:\2\}\},\[\]\)/g, "$3")
         .replace(/[\w$]+\(\s*\(\s*\)\s*=>\s*(import\([^()]*\)(?:\.then\(\s*[\w$]+\s*=>\s*[\w$]+\.[\w$]+\s*\))?)\s*,\s*\[\s*\]\s*\)/g, "$1");
 }
 
@@ -1096,7 +1272,7 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
         base: "./",
         publicDir: false,
         logLevel: "warn",
-        plugins: [wgslMinifyPlugin({ mangle: false }), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
+        plugins: [wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
         resolve: {
             // Master-comparison bundle-info resolves `babylon-lite` to the TS SOURCE of an
             // arbitrary master worktree (`sourceRoot`), NOT its `build/lib`: that worktree
@@ -1175,13 +1351,6 @@ function softwareRenderRequested(): boolean {
  *  measurement as the authoritative one for these three. */
 const DEVICE_DEPENDENT_NOTE = "device-dependent chunk set — differs from the CI-measured baseline (reproduce CI with: pnpm build:bundle-manifest:device)";
 
-/** A scene with less than this much room under its ceiling is reported after a build: at
- *  that margin the next shared-path change lands on it, and finding that out from CI costs
- *  ~35 minutes. */
-const TIGHT_HEADROOM_BYTES = 256;
-/** Cap the tight-headroom list so a build's output stays readable; the rest are counted. */
-const TIGHT_HEADROOM_LIST_LIMIT = 10;
-
 export async function buildBundleScenes(): Promise<void> {
     const t0 = performance.now();
     // Scenes are bundled against the built `build/lib` tree by default; old baseline
@@ -1256,7 +1425,7 @@ export async function buildBundleScenes(): Promise<void> {
             base: "./",
             publicDir: false,
             logLevel: "warn",
-            plugins: isBjs ? [bjsSideEffectsFalsePlugin()] : [wgslMinifyPlugin({ mangle: false }), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
+            plugins: isBjs ? [bjsSideEffectsFalsePlugin()] : [wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
             resolve: {
                 // Resolve `babylon-lite` to the built `build/lib` tree (NOT the TS source)
                 // so the measured bundle reflects exactly what a consumer of the published
@@ -1412,40 +1581,43 @@ export async function buildBundleScenes(): Promise<void> {
  * surfaces in CI's bundle-size job, ~35 minutes later.
  * Comparing exact bytes here surfaces it immediately, and listing the tightest scenes makes
  * a zero-margin scene visible *before* it is the thing that breaks someone else's PR.
+ *
+ * The thresholds and the arithmetic live in `bundle-ceiling-headroom.ts` because the PR
+ * comment reports the same numbers; see that module for why the tight band is 1 KB. Only
+ * the `over` set affects the exit code — the tight list is advisory and never fails a build.
  */
 function reportCeilingHeadroom(scenes: readonly string[], manifest: Record<string, BundleManifestEntry>): void {
-    const over: string[] = [];
-    const tight: { scene: string; headroom: number; ceilingKB: number }[] = [];
+    const inputs: SceneHeadroomInput[] = [];
 
     for (const scene of scenes) {
-        const measured = manifest[scene]?.rawBytes;
+        // Exact bytes only, deliberately: this is the path that can set a non-zero exit code,
+        // and a `rawKB` fallback would let a 0.1 KB-quantised size decide it. The PR comment
+        // does fall back, because being approximate there costs nothing.
+        const measuredBytes = manifest[scene]?.rawBytes;
         const config = sceneConfigByName.get(scene);
         const ceilingKB = config?.maxRawKB;
         // Honour the same opt-out as the ceiling test in bundle-size.spec.ts.
-        if (measured == null || ceilingKB == null || config?.skipBundleSize) {
+        if (measuredBytes == null || ceilingKB == null || config?.skipBundleSize) {
             continue;
         }
-        const ceilingBytes = ceilingKB * 1024;
-        // Compare before rounding: a ceiling like 92.2 KB is 94412.8 bytes, so 94413 bytes is
-        // over by 0.2 — which `Math.round` would turn into `-0` and wave through.
-        if (measured > ceilingBytes) {
-            over.push(`  ${scene}: ${(measured / 1024).toFixed(3)} KB exceeds ceiling ${ceilingKB} KB by ${Math.ceil(measured - ceilingBytes)} bytes`);
-        } else {
-            const headroom = Math.floor(ceilingBytes - measured);
-            if (headroom < TIGHT_HEADROOM_BYTES) {
-                tight.push({ scene, headroom, ceilingKB });
-            }
-        }
+        inputs.push({ scene, measuredBytes, ceilingKB });
     }
 
+    const { over, under } = computeSceneHeadroom(inputs);
+    const tight = scenesUnderHeadroom(under, TIGHT_HEADROOM_BYTES);
+    const critical = scenesUnderHeadroom(under, CRITICAL_HEADROOM_BYTES);
+
     if (tight.length > 0) {
-        tight.sort((a, b) => a.headroom - b.headroom);
-        const shown = tight.slice(0, TIGHT_HEADROOM_LIST_LIMIT).map((t) => `  ${t.scene}: ${t.headroom} B below its ${t.ceilingKB} KB ceiling`);
-        const more = tight.length > shown.length ? `\n  … and ${tight.length - shown.length} more under ${TIGHT_HEADROOM_BYTES} B` : "";
-        console.log(`\n⚠ ${tight.length} scene(s) with little headroom — a shared-path change may push them over:\n${shown.join("\n")}${more}`);
+        const shown = tight.slice(0, HEADROOM_LIST_LIMIT).map((t) => `  ${t.scene}: ${t.headroomBytes} B below its ${t.ceilingKB} KB ceiling`);
+        const more = tight.length > shown.length ? `\n  … and ${tight.length - shown.length} more under ${formatHeadroomThreshold(TIGHT_HEADROOM_BYTES)}` : "";
+        const criticalNote = critical.length > 0 ? `, ${critical.length} under ${formatHeadroomThreshold(CRITICAL_HEADROOM_BYTES)}` : "";
+        console.log(
+            `\n⚠ ${tight.length} scene(s) under ${formatHeadroomThreshold(TIGHT_HEADROOM_BYTES)} of headroom${criticalNote} — a shared-path change may push them over:\n${shown.join("\n")}${more}`
+        );
     }
     if (over.length > 0) {
-        console.error(`\n✘ Bundle-size ceiling exceeded (exact bytes; scene-config.json maxRawKB):\n${over.join("\n")}`);
+        const lines = over.map((o) => `  ${o.scene}: ${(o.measuredBytes / 1024).toFixed(3)} KB exceeds ceiling ${o.ceilingKB} KB by ${o.headroomBytes} bytes`);
+        console.error(`\n✘ Bundle-size ceiling exceeded (exact bytes; scene-config.json maxRawKB):\n${lines.join("\n")}`);
         console.error(`\nRaising a ceiling requires explicit user approval — see GUIDANCE.md.`);
         process.exitCode = 1;
     }

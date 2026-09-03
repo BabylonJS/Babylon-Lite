@@ -11,12 +11,13 @@ import type { Mesh } from "../mesh/mesh.js";
 import { _getStorageBufferHandle } from "../resource/storage-buffer.js";
 import { createVatPickProjectionWgsl } from "../material/pbr/fragments/vat-fragment.js";
 import type { PickingVertexProjection } from "./picking-advanced-pipeline.js";
+import { wgsl } from "../shader/wgsl.js";
 
 let _device: GPUDevice | null = null;
 let _projections: Map<string, PickingVertexProjection> | null = null;
 
 function skinInputs(has8Bones: boolean): string {
-    return `, @location(1) joints: vec4<u32>, @location(2) weights: vec4<f32>${has8Bones ? ", @location(3) joints1: vec4<u32>, @location(4) weights1: vec4<f32>" : ""}`;
+    return wgsl`, @location(1) joints: vec4<u32>, @location(2) weights: vec4<f32>${has8Bones ? ", @location(3) joints1: vec4<u32>, @location(4) weights1: vec4<f32>" : ""}`;
 }
 
 function skinLayouts(has8Bones: boolean): GPUVertexBufferLayout[] {
@@ -53,14 +54,14 @@ function createProjection(engine: EngineContext, has8Bones: boolean, instanceSto
                 : { binding: 2, visibility: SS.VERTEX, texture: { sampleType: "unfilterable-float" } },
         ],
     });
-    const commonDeclarations = `${source.helpers}
+    const commonDeclarations = wgsl`${source.helpers}
 @group(3) @binding(0) var vatSampler: texture_2d<f32>;
 @group(3) @binding(1) var<uniform> vat: vatUniforms;`;
     return {
         key: `vat-${has8Bones ? 8 : 4}-${instanceStorage ? "storage" : "texture"}`,
         shader: {
             regularDeclarations: commonDeclarations,
-            thinDeclarations: `${commonDeclarations}
+            thinDeclarations: wgsl`${commonDeclarations}
 @group(3) @binding(2) ${instanceStorage ? "var<storage, read> vatInstanceStorage: array<vec4<f32>>;" : "var vatInstanceTex: texture_2d<f32>;"}`,
             regularInputs: skinInputs(has8Bones),
             thinInputs: skinInputs(has8Bones),

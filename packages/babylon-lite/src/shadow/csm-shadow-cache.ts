@@ -14,9 +14,18 @@ import type { SceneContext } from "../scene/scene-core.js";
 import { _buildBindings, _resolvePendingMeshes, createRenderTask, removeMeshFromTask, type RenderTask } from "../frame-graph/render-task.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
-import { getNoColorView } from "./pcf-shadow-task-hooks.js";
+import { getNoColorView, shadowCasterMaterialChanged, snapshotShadowCasterMaterial } from "./pcf-shadow-task-hooks.js";
 import { createCsmRefitGate, type CsmRefitGate } from "./csm-refit-gate.js";
-import { _biasViewProjection, _computeCsmCascades, _writeCsmUbo, csmCameraAspect, csmWorldBiasClipOffset, type CsmConfig, type CsmTaskState } from "./csm-shadow-task-hooks.js";
+import {
+    _biasViewProjection,
+    _computeCsmCascades,
+    _createCascadeScratch,
+    _writeCsmUbo,
+    csmCameraAspect,
+    csmWorldBiasClipOffset,
+    type CsmConfig,
+    type CsmTaskState,
+} from "./csm-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 
 interface CsmCachedTaskState extends CsmTaskState {
@@ -30,11 +39,6 @@ interface CsmCachedTaskState extends CsmTaskState {
     /** Scene renderable version the cached static layer was last RENDERED at. Distinct from
      *  `_renderableVersion`, which records when the caster/task membership was last reconciled. */
     _cachedContentVersion: number;
-}
-
-function effectiveCasterGen(material: Material): number {
-    const effective = material._shadowCasterMaterial ?? material;
-    return (effective as { _csmGen?: number })._csmGen ?? 0;
 }
 
 /** @internal Rebuild one destination task's binding lists after `transferMeshBetweenTasks` moved meshes into it. */
@@ -110,28 +114,25 @@ export function ensureCsmShadowCacheState(
         replacedDefaultState = true;
     }
     if (existing) {
-        if (existing._casterMeshes === casterMeshes && existing._renderableVersion === scene._renderableVersion) {
-            return existing;
-        }
-        if (existing._casterMeshes === casterMeshes && existing._materialEpoch === scene._materialEpoch) {
-            existing._renderableVersion = scene._renderableVersion;
-            return existing;
-        }
         let casterMatChanged = false;
         for (const mesh of casterMeshes) {
             const material = mesh.material;
-            if (!material) {
-                continue;
-            }
-            const stored = existing._casterMatGens.get(material);
-            if (stored !== undefined && stored !== effectiveCasterGen(material)) {
+            if (material && shadowCasterMaterialChanged(material, existing._casterMaterials, existing._casterMatGens)) {
                 casterMatChanged = true;
                 break;
             }
         }
+        if (!casterMatChanged && existing._casterMeshes === casterMeshes && existing._renderableVersion === scene._renderableVersion) {
+            return existing;
+        }
+        if (!casterMatChanged && existing._casterMeshes === casterMeshes && existing._materialEpoch === scene._materialEpoch) {
+            existing._renderableVersion = scene._renderableVersion;
+            return existing;
+        }
         if (!casterMatChanged) {
             const nextSet = new Set(casterMeshes);
             const views = existing._materialViews;
+            const materials = existing._casterMaterials;
             const gens = existing._casterMatGens;
             const caps = existing._casterMaxCascades;
             existing._gate.syncCasters(casterMeshes);
@@ -155,7 +156,7 @@ export function ensureCsmShadowCacheState(
                             existing._tasks[cascade]!.addMesh(mesh, { material: view });
                         }
                     }
-                    gens.set(mesh.material, effectiveCasterGen(mesh.material));
+                    snapshotShadowCasterMaterial(mesh.material, materials, gens);
                     existing._gate.markDynamic(mesh);
                 }
                 caps.set(mesh, maxCascade);
@@ -263,12 +264,13 @@ export function ensureCsmShadowCacheState(
             cacheTexture.destroy();
         },
     };
-    const casterMatGens = new Map<Material, number>();
+    const casterMatGens = new Map<Material, number | undefined>();
+    const casterMaterials = new Map<Material, Material>();
     const casterMaxCascades = new Map<Mesh, number | undefined>();
     for (const mesh of casterMeshes) {
         casterMaxCascades.set(mesh, mesh._shadowMaxCascade);
         if (mesh.material) {
-            casterMatGens.set(mesh.material, effectiveCasterGen(mesh.material));
+            snapshotShadowCasterMaterial(mesh.material, casterMaterials, casterMatGens);
         }
     }
     const state: CsmCachedTaskState = {
@@ -286,8 +288,10 @@ export function ensureCsmShadowCacheState(
         _renderableVersion: scene._renderableVersion,
         _materialEpoch: scene._materialEpoch,
         _materialViews: materialViews,
+        _casterMaterials: casterMaterials,
         _casterMatGens: casterMatGens,
         _casterMaxCascades: casterMaxCascades,
+        _cascadeScratch: _createCascadeScratch(cascadeCount),
         _staticTasks: staticTasks,
         _cacheTexture: cacheTexture,
         _gate: gate,
@@ -363,7 +367,7 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
 }
 
 function applyCsmRefit(engine: EngineContext, sg: ShadowGenerator, state: CsmTaskState, cfg: CsmConfig, camera: NonNullable<SceneContext["camera"]>): void {
-    const cascades = _computeCsmCascades(state._scene, camera, sg._light as DirectionalLight, cfg, state._casterMeshes);
+    const cascades = _computeCsmCascades(state._scene, camera, sg._light as DirectionalLight, cfg, state._casterMeshes, state._cascadeScratch);
     _writeCsmUbo(state._uboData, cascades, cfg);
     sg._version++;
     engine._device.queue.writeBuffer(sg._shadowUBO, 0, state._uboData as Float32Array<ArrayBuffer>);
@@ -378,14 +382,8 @@ function applyCsmRefit(engine: EngineContext, sg: ShadowGenerator, state: CsmTas
         const cascadeCamera = state._cameras[i]!;
         cascadeCamera.fov = 1;
         const clipBias = cfg._worldSpaceBias === null ? cfg._bias * 0.5 : csmWorldBiasClipOffset(cfg._worldSpaceBias, cascades._near[i]!, cascades._far[i]!);
-        updateShadowCameraBase(
-            cascadeCamera,
-            state._cameraVersion,
-            cascades._near[i]!,
-            cascades._far[i]!,
-            cascades._views[i]!,
-            _biasViewProjection(cascades._biased[i]!, clipBias)
-        );
+        _biasViewProjection(cascades._transforms[i]!, clipBias);
+        updateShadowCameraBase(cascadeCamera, state._cameraVersion, cascades._near[i]!, cascades._far[i]!, cascades._views[i]!, cascades._transforms[i]!);
     }
 }
 

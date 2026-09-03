@@ -10,12 +10,13 @@ import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { createUniformBuffer } from "../resource/gpu-buffers.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { SS } from "../engine/gpu-flags.js";
+import { wgsl } from "../shader/wgsl.js";
 
 interface PhysicsDebugLineMaterial extends Material {
     color: [number, number, number, number];
 }
 
-const LINE_WGSL = `
+const LINE_WGSL = wgsl`
 struct SceneUniforms { viewProjection: mat4x4<f32>, };
 struct MeshUniforms { world: mat4x4<f32>, };
 struct MaterialUniforms { color: vec4<f32>, };

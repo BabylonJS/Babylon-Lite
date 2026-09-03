@@ -107,7 +107,7 @@ let hr=textureLoad(bt,vec2<i32>(gp.x+b,gp.y),0);
 let hn=i32(hr.x+0.5);
 let hl=bloc(gp,i32(hr.y+0.5));
 for(var i:i32=0;i<hn;i=i+1){
-let lr=textureLoad(bt,vec2<i32>(hl.x+i,hl.y),0);
+let lr=textureLoad(bt,bloc(hl,i),0);
 let cv=vec2<i32>(i32(lr.x+0.5),i32(lr.y+0.5));
 let q12=textureLoad(ct,cv,0);
 let q3=textureLoad(ct,vec2<i32>(cv.x+1,cv.y),0).xy;

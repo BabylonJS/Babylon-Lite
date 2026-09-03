@@ -1215,7 +1215,7 @@
         "slug": "scene117-sprite-2d-picking",
         "name": "Scene 117 — 2D Sprite Picking",
         "maxMad": 0.05,
-        "maxRawKB": 16.56,
+        "maxRawKB": 16.6,
         "description": "Visual 2D sprite-picking validation: pickSprite2D resolves the centre sprite of a deterministic 5×3 HUD grid and the hit is highlighted with a gold tint. The BJS oracle replicates the same highlight via ThinSprite.",
         "tags": ["sprite", "2d", "picking"],
         "skipPerf": true
@@ -1588,7 +1588,7 @@
         "slug": "scene164-device-lost-recovery",
         "name": "Scene 164 - Device Lost Recovery",
         "maxMad": 0.01,
-        "maxRawKB": 141.7,
+        "maxRawKB": 144,
         "description": "Forces WebGPU device loss on a scene that exercises every resource family the recovery pipeline must rebuild - a skinned, morphed, animated glTF plus IBL environment, PBR fallback texture, and an ESM directional shadow generator with a shadow-only receiver - then verifies the post-recovery image matches the pre-loss image and that Viewer-order teardown (disable recovery, stop engine, dispose scene, dispose engine) is clean. Lite-only: device loss has no stable-Babylon counterpart, so the comparison is pre-loss vs post-recovery within the same run.",
         "tags": ["gltf", "pbr", "environment", "shadows", "skeleton", "morph", "anim", "recovery"],
         "skipPerf": true
@@ -1942,7 +1942,7 @@
         "slug": "scene214-cascaded-shadows",
         "name": "Scene 214 — Cascaded Shadow Maps",
         "maxMad": 0.4,
-        "maxRawKB": 67.7,
+        "maxRawKB": 67.8,
         "description": "A deterministic field of 200 green torus-knot casters (playground #KY0N7T#84) drops shadows onto a large Standard ground receiver, lit by a single DirectionalLight with a 4-cascade CascadedShadowGenerator (PCF5). A seeded PRNG places every knot identically to the Babylon.js CSM oracle; cascade Z bounds auto-fit the caster AABB.",
         "tags": ["shadows", "csm", "standard", "directional"],
         "skipPerf": true
@@ -2643,6 +2643,16 @@
         "tags": ["gltf", "khr-interactivity", "flow-graph", "interaction"],
         "skipParity": true,
         "skipParityReason": "Behavioral browser test validates the embedded Khronos graph directly; no immutable visual golden is needed for interaction-state assertions.",
+        "skipPerf": true
+    },
+    {
+        "id": 305,
+        "slug": "scene305-npe-teleport",
+        "name": "Scene 305 — NPE Teleport Graph Plumbing",
+        "maxMad": 0.01,
+        "maxRawKB": 45,
+        "description": "Scene 262's deterministic NPE particle field with Teleport fan-out plus Elbow, Debug, and a Particle-scope LocalVariable around its per-particle size. Lite normalizes the graph before evaluator traversal and must preserve Babylon.js pixels.",
+        "tags": ["npe", "particles", "billboards", "teleport", "local-variable", "graph-plumbing"],
         "skipPerf": true
     }
 ]

@@ -24,6 +24,11 @@ let routes: Record<string, { status: number; contentType: string; body: string }
 beforeEach(async () => {
     requestCount = 0;
     routes = {};
+    // These cases exercise the mutable-baseline fetch in isolation, so the
+    // per-commit lookup is switched off rather than left to depend on the git
+    // state of whatever checkout the suite runs in. Its own behaviour is covered
+    // by the "per-commit baseline" block below.
+    process.env.BUNDLE_BASELINE_COMMIT = "";
     server = createServer((req, res) => {
         requestCount += 1;
         const route = routes[req.url ?? ""];
@@ -44,6 +49,7 @@ beforeEach(async () => {
 afterEach(async () => {
     delete process.env.BUNDLE_MASTER_MANIFEST_URL;
     delete process.env.BUNDLE_MASTER_MANIFEST_FILE;
+    delete process.env.BUNDLE_BASELINE_COMMIT;
     for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
     await new Promise<void>((done, fail) => server.close((err) => (err ? fail(err) : done())));
 });
@@ -134,5 +140,155 @@ describe("resolveMasterBundleManifest", () => {
 
         expect(requestCount).toBe(0);
         expect(warnings.filter((line) => line.includes("Could not fetch the bundle-size baseline"))).toEqual([]);
+    });
+});
+
+/**
+ * The mutable baseline is whatever master published most recently, which after any
+ * intervening merge is not the commit the PR under test was merged with. Every byte
+ * master moved in between then lands in the PR's delta. The publisher writes an
+ * immutable copy per commit so a build can ask for its own base commit instead.
+ */
+describe("resolveMasterBundleManifest — per-commit baseline", () => {
+    const COMMIT = "c4284aa6c4284aa6c4284aa6c4284aa6c4284aa6";
+    /** What master published for the commit this build was actually merged with. */
+    const BASE_MANIFEST = { scene1: { rawKB: 12.3, gzipKB: 4.5, ceilingKB: 13 } };
+    /** What master has published since — includes another PR's bytes. */
+    const LATEST_MANIFEST = { scene1: { rawKB: 99.9, gzipKB: 40 } };
+
+    it("prefers the baseline published for this build's base commit", async () => {
+        routes[`/${COMMIT}/manifest.json`] = { status: 200, contentType: "application/json", body: JSON.stringify(BASE_MANIFEST) };
+        routes["/manifest.json"] = { status: 200, contentType: "application/json", body: JSON.stringify(LATEST_MANIFEST) };
+        process.env.BUNDLE_MASTER_MANIFEST_URL = `${baseUrl}/manifest.json`;
+        process.env.BUNDLE_BASELINE_COMMIT = COMMIT;
+
+        const baseline = await resolveMasterBundleManifest();
+
+        // The whole point: the newer, closer-to-hand manifest is the wrong answer.
+        expect(baseline?.manifest).toEqual(BASE_MANIFEST);
+        expect(baseline?.source).toBe(`${baseUrl}/${COMMIT}/manifest.json`);
+    });
+
+    it("carries the ceilings the baseline was measured against", async () => {
+        // Without this the only ceiling a consumer can see is its own working tree's,
+        // so a PR that tightens a ceiling makes master look retroactively in breach.
+        routes[`/${COMMIT}/manifest.json`] = { status: 200, contentType: "application/json", body: JSON.stringify(BASE_MANIFEST) };
+        process.env.BUNDLE_MASTER_MANIFEST_URL = `${baseUrl}/manifest.json`;
+        process.env.BUNDLE_BASELINE_COMMIT = COMMIT;
+
+        const baseline = await resolveMasterBundleManifest();
+
+        expect(baseline?.manifest.scene1?.ceilingKB).toBe(13);
+    });
+
+    it("falls back to the mutable baseline when the base commit has none, and says so", async () => {
+        // A base commit has no baseline whenever master's build is still running,
+        // failed, or predates per-commit publishing. That must degrade, not wait or
+        // fail — but silently degrading is what causes mis-attributed deltas, so the
+        // fallback has to announce itself.
+        routes["/manifest.json"] = { status: 200, contentType: "application/json", body: JSON.stringify(LATEST_MANIFEST) };
+        process.env.BUNDLE_MASTER_MANIFEST_URL = `${baseUrl}/manifest.json`;
+        process.env.BUNDLE_BASELINE_COMMIT = COMMIT;
+
+        const warnings: string[] = [];
+        const originalWarn = console.warn;
+        console.warn = (...args: unknown[]) => void warnings.push(args.join(" "));
+        let baseline;
+        try {
+            baseline = await resolveMasterBundleManifest();
+        } finally {
+            console.warn = originalWarn;
+        }
+
+        expect(baseline?.manifest).toEqual(LATEST_MANIFEST);
+        expect(baseline?.source).toBe(`${baseUrl}/manifest.json`);
+        expect(warnings.some((line) => line.includes("no baseline was published for this build's base commit"))).toBe(true);
+    });
+
+    it("does not warn about the per-commit miss as if the baseline were unreachable", async () => {
+        // The per-commit probe 404s on most builds today. Reporting each one the way
+        // a missing baseline is reported would train readers to ignore the message
+        // that actually means the delta is unavailable.
+        routes["/manifest.json"] = { status: 200, contentType: "application/json", body: JSON.stringify(LATEST_MANIFEST) };
+        process.env.BUNDLE_MASTER_MANIFEST_URL = `${baseUrl}/manifest.json`;
+        process.env.BUNDLE_BASELINE_COMMIT = COMMIT;
+
+        const warnings: string[] = [];
+        const originalWarn = console.warn;
+        console.warn = (...args: unknown[]) => void warnings.push(args.join(" "));
+        try {
+            await resolveMasterBundleManifest();
+        } finally {
+            console.warn = originalWarn;
+        }
+
+        expect(warnings.filter((line) => line.includes("No published bundle-size baseline at"))).toEqual([]);
+    });
+
+    it("costs exactly one extra request when the base commit has no baseline", async () => {
+        routes["/manifest.json"] = { status: 200, contentType: "application/json", body: JSON.stringify(LATEST_MANIFEST) };
+        process.env.BUNDLE_MASTER_MANIFEST_URL = `${baseUrl}/manifest.json`;
+        process.env.BUNDLE_BASELINE_COMMIT = COMMIT;
+
+        await resolveMasterBundleManifest();
+
+        expect(requestCount).toBe(2);
+    });
+
+    it("ignores a malformed BUNDLE_BASELINE_COMMIT instead of fetching a bogus path", async () => {
+        // A short SHA, a branch name, or a stray "refs/heads/master" must not become
+        // part of a URL — the published layout only ever uses full object names.
+        routes["/manifest.json"] = { status: 200, contentType: "application/json", body: JSON.stringify(LATEST_MANIFEST) };
+        process.env.BUNDLE_MASTER_MANIFEST_URL = `${baseUrl}/manifest.json`;
+        process.env.BUNDLE_BASELINE_COMMIT = "origin/master";
+
+        const warnings: string[] = [];
+        const originalWarn = console.warn;
+        console.warn = (...args: unknown[]) => void warnings.push(args.join(" "));
+        let baseline;
+        try {
+            baseline = await resolveMasterBundleManifest();
+        } finally {
+            console.warn = originalWarn;
+        }
+
+        expect(requestCount).toBe(1);
+        expect(baseline?.source).toBe(`${baseUrl}/manifest.json`);
+        // Reporting "no baseline was published for this build's base commit" here would
+        // send the reader to the publisher for a fault that is in this build's own
+        // configuration, so the two fallback reasons have to stay distinguishable.
+        expect(warnings.some((line) => line.includes("base commit could not be determined"))).toBe(true);
+    });
+
+    it("reports an explicit opt-out as a setting rather than as a fault", async () => {
+        // beforeEach blanks BUNDLE_BASELINE_COMMIT, which is the documented off
+        // switch. Describing that as "could not be determined" would send a reader
+        // looking for a broken checkout to explain a value someone set on purpose.
+        routes["/manifest.json"] = { status: 200, contentType: "application/json", body: JSON.stringify(LATEST_MANIFEST) };
+        process.env.BUNDLE_MASTER_MANIFEST_URL = `${baseUrl}/manifest.json`;
+
+        const warnings: string[] = [];
+        const originalWarn = console.warn;
+        console.warn = (...args: unknown[]) => void warnings.push(args.join(" "));
+        try {
+            await resolveMasterBundleManifest();
+        } finally {
+            console.warn = originalWarn;
+        }
+
+        expect(requestCount).toBe(1);
+        expect(warnings.some((line) => line.includes("switched off for this run"))).toBe(true);
+        expect(warnings.some((line) => line.includes("could not be determined"))).toBe(false);
+    });
+
+    it("does not adopt a malformed per-commit response", async () => {
+        routes[`/${COMMIT}/manifest.json`] = { status: 200, contentType: "application/json", body: "<html>nope</html>" };
+        routes["/manifest.json"] = { status: 200, contentType: "application/json", body: JSON.stringify(LATEST_MANIFEST) };
+        process.env.BUNDLE_MASTER_MANIFEST_URL = `${baseUrl}/manifest.json`;
+        process.env.BUNDLE_BASELINE_COMMIT = COMMIT;
+
+        const baseline = await resolveMasterBundleManifest();
+
+        expect(baseline?.manifest).toEqual(LATEST_MANIFEST);
     });
 });

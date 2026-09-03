@@ -38,6 +38,7 @@ import {
 } from "./bundle-scenes-core";
 import { wgslMinifyPlugin } from "./wgsl-minify-plugin";
 import { fetchDemoAssets } from "./demo-fetchers";
+import { demoOwnsBundleFile } from "./demo-bundle-name";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PAGES_SRC = resolve(ROOT, "pages");
@@ -51,6 +52,7 @@ const TETRIS_SRC = resolve(labDir, "public/tetris");
 const PLATFORMER_SRC = resolve(labDir, "public/platformer");
 const SANDBLOX_SRC = resolve(labDir, "public/sandblox");
 const RACER_SRC = resolve(labDir, "public/racer");
+const ANTIGRAVITY_RACER_SRC = resolve(labDir, "public/antigravity-racer");
 const SCREEN_SPACE_EFFECTS_SRC = resolve(labDir, "public/screen-space-effects");
 const DRACO_FILES = ["draco_decoder.js", "draco_decoder.wasm"];
 
@@ -253,6 +255,16 @@ function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
         copyRequiredDir(SCREEN_SPACE_EFFECTS_SRC, resolve(demosDir, "screen-space-effects"), "Screen-space effects");
     }
 
+    if (demos.some((demo) => demo.slug === "antigravity-racer")) {
+        const required = ["track/road-straight.png", "track/road-curve.png", "track/road-emissive.png", "track/boost-arrow.png", "rhs-x.glb", "rock.glb"];
+        for (const file of required) {
+            if (!existsSync(resolve(ANTIGRAVITY_RACER_SRC, file))) {
+                throw new Error(`Missing Antigravity Racer asset ${file} at ${ANTIGRAVITY_RACER_SRC}`);
+            }
+        }
+        copyRequiredDir(ANTIGRAVITY_RACER_SRC, resolve(demosDir, "antigravity-racer"), "Antigravity Racer");
+    }
+
     if (demos.some((demo) => demo.slug === "bath-day")) {
         const glb = resolve(labDir, "public", "bath_day.glb");
         if (existsSync(glb)) {
@@ -318,7 +330,7 @@ export async function buildDemo(slug: string): Promise<void> {
         base: "./",
         publicDir: false,
         logLevel: "warn",
-        plugins: [wgslMinifyPlugin({ mangle: false }), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
+        plugins: [wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
         resolve: {
             // Demos resolve `babylon-lite` to the TS SOURCE (not `build/lib`) on purpose:
             // demos have no bundle-size ceilings, and using source keeps the dev iteration
@@ -348,15 +360,12 @@ export async function buildDemo(slug: string): Promise<void> {
             },
         },
         // Demos may spawn a module Web Worker via `new Worker(new URL("./x.ts", import.meta.url), { type: "module" })`
-        // (see the offscreen demo). Build the worker with the same WGSL/property-mangle
+        // (see the offscreen demo). Build the worker with the same tagged-WGSL/property-mangle
         // pipeline and emit its chunks prefixed with the slug so the copy + stale-cleanup
-        // logic below picks them up alongside the main entry. WGSL identifier mangling is
-        // disabled (mangle: false) because the worker's aggressive code-splitting can place
-        // a shader struct declaration and its usages in different chunks, which per-chunk
-        // mangling would rename inconsistently (e.g. "struct member wp not found").
+        // logic below picks them up alongside the main entry.
         worker: {
             format: "es",
-            plugins: () => [wgslMinifyPlugin({ mangle: false }), terserPropertyManglePlugin()],
+            plugins: () => [wgslMinifyPlugin(), terserPropertyManglePlugin()],
             rollupOptions: {
                 output: {
                     entryFileNames: `${slug}-worker-[hash].js`,
@@ -380,8 +389,9 @@ export async function buildDemo(slug: string): Promise<void> {
         newNames.add(f);
         writeFileSync(resolve(demosDir, f), readFileSync(resolve(demoOutDir, f)));
     }
+    const demoSlugs = [...loadDemosConfig().map((demo) => demo.slug), ...DEMO_SUPPORT_BUNDLES];
     for (const existing of readdirSync(demosDir)) {
-        if ((existing === `${slug}.js` || existing.startsWith(`${slug}-`)) && !newNames.has(existing)) {
+        if (demoOwnsBundleFile(existing, slug, demoSlugs) && !newNames.has(existing)) {
             rmSync(resolve(demosDir, existing));
         }
     }

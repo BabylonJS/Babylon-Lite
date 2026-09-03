@@ -378,6 +378,14 @@ function resolvePendingMeshes(task: RenderTask, sc: SceneContext): void {
     task._pendingMeshes.length = 0;
 }
 
+function compareTransparentBindings(a: DrawBinding, b: DrawBinding): number {
+    return b._sortDistance! - a._sortDistance! || a.renderable.order - b.renderable.order;
+}
+
+function compareBindingOrder(a: DrawBinding, b: DrawBinding): number {
+    return a.renderable.order - b.renderable.order;
+}
+
 /** Per-frame back-to-front sort for transparent bindings using the active camera. */
 function sortTransparentBindings(task: RenderTask, camera: Camera | null | undefined): void {
     const arr = task._transparentBindings;
@@ -389,7 +397,7 @@ function sortTransparentBindings(task: RenderTask, camera: Camera | null | undef
         const wc = b.renderable._worldCenter;
         b._sortDistance = wc ? wc[0]! * v[2]! + wc[1]! * v[6]! + wc[2]! * v[10]! + v[14]! : 0;
     }
-    arr.sort((a, b) => b._sortDistance! - a._sortDistance! || a.renderable.order - b.renderable.order);
+    arr.sort(compareTransparentBindings);
 }
 
 /** (Re)bucket task._renderables into bound lists. */
@@ -413,8 +421,8 @@ function buildBindings(task: RenderTask, eng: EngineContext, targetSignature: Re
             opaque.push(binding);
         }
     }
-    opaque.sort((a, b) => a.renderable.order - b.renderable.order);
-    direct.sort((a, b) => a.renderable.order - b.renderable.order);
+    opaque.sort(compareBindingOrder);
+    direct.sort(compareBindingOrder);
     task._ob.length = 0;
     task._lastVersion = (task.scene as SceneContext)._renderableVersion;
 }
@@ -427,10 +435,8 @@ function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
     const att = task._colorAttachment;
     att.view = rt._colorView!;
     // End-of-pass MSAA resolve into a caller-supplied single-sample target.
-    // record() only builds the target's color view for an MSAA rt, so its
-    // presence is the gate. The swapchain case is wired per-frame in
-    // executePass (its view changes each frame); this custom view is stable.
-    att.resolveTarget = config.rst?._colorView ?? undefined;
+    // executePass wires the resolve target immediately before every pass so
+    // swapchain targets pick up their current per-frame view.
     task._renderPassDescriptor.colorAttachments = rt._colorView ? [att] : [];
 
     const depthSrc = config.depth ?? rt;
@@ -507,12 +513,13 @@ function executePass(task: RenderTask, eng: EngineContext, targetSignature: Rend
     const att = task._colorAttachment;
     const cfg = task._config;
     if (cfg.rt._colorView) {
-        // The engine scRT's color view is re-acquired every frame, so re-read
-        // it here. Offscreen color views are stable between rebuilds — leaving att.view
-        // untouched preserves an external override (swapchain-overlay shares the base
-        // scene's MSAA color view). The resolve target (rst) is re-read each frame so an
-        // `rst === scRT` picks up its fresh per-frame view.
-        if (cfg.rt === eng.scRT) {
+        // This scene's surface scRT color view is re-acquired every frame, so re-read it
+        // here. Checking the bound surface (not the engine's primary scRT) is required for
+        // auxiliary createSurface scenes. Offscreen color views are stable between rebuilds
+        // — leaving att.view untouched preserves an external override (swapchain-overlay
+        // shares the base scene's MSAA color view). The resolve target (rst) is re-read each
+        // frame so an `rst === scRT` picks up its fresh per-frame view.
+        if (cfg.rt === sc.surface.scRT) {
             att.view = cfg.rt._colorView;
         }
         att.resolveTarget = cfg.rst?._colorView ?? undefined;
@@ -639,16 +646,16 @@ export function _writePassSceneUBO(task: RenderTask, eng: EngineContext, scene: 
     _packSceneUniforms(data, eng, scene, camera, aspect);
     const contribs = scene._sceneUboContributors;
     if (contribs) {
-        for (const c of contribs) {
-            c(data, scene);
+        for (const contributor of contribs) {
+            contributor(data, scene);
         }
     }
     eng._device.queue.writeBuffer(task._sceneUBO, 0, data as Float32Array<ArrayBuffer>);
 }
 
 function updateBindings(list: readonly DrawBinding[], context: DrawUpdateContext): void {
-    for (const b of list) {
-        b.update?.(context);
+    for (const binding of list) {
+        binding.update?.(context);
     }
 }
 

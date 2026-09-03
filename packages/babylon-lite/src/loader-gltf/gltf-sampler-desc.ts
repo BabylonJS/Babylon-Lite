@@ -75,7 +75,16 @@ export function buildSampledPbrTextures(
     const cached = (bitmap: ImageBitmap, srgb: boolean, texInfo: any): Texture2D => {
         const s = samplerFor(texInfo);
         const tex = getCachedTex(bitmap, srgb);
-        return s === defaultSampler ? tex : { ...tex, sampler: s };
+        if (s === defaultSampler) {
+            return tex;
+        }
+        // Same upload, different sampler: a derived wrapper that owns its own `texture` field but
+        // never passed through the capture stamp. Registered through the capture seam rather than
+        // texture-2d's hook so this module keeps its type-only import of texture-2d — a runtime
+        // import edge here pulls that module into bundles that otherwise never load it.
+        const derived = { ...tex, sampler: s } as Texture2D;
+        engine._dlr?.d(tex, derived);
+        return derived;
     };
 
     const baseColorTexture = mat._baseColorImage

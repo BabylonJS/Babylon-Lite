@@ -2,6 +2,7 @@ import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import { parseNodeParticleSource } from "./npe-parser.js";
 import { buildNodeParticleSet } from "./npe-build.js";
+import { normalizeNodeParticleGraph } from "./npe-graph-plumbing.js";
 import type { BuildNodeParticleOptions, NodeParticleSet } from "./npe-build.js";
 
 export { buildNodeParticleSet };
@@ -18,7 +19,8 @@ export interface ParseNodeParticleOptions extends BuildNodeParticleOptions {
 
 /**
  * Parse a Node Particle Editor graph (from the Babylon snippet server or inline JSON) and build its runtime
- * particle systems. The analogue of `parseNodeMaterialFromSnippet` for particles.
+ * particle systems. Inline and network snippets automatically normalize supported graph plumbing before building. The analogue of
+ * `parseNodeMaterialFromSnippet` for particles.
  *
  * @param engine - The engine (used for texture loads).
  * @param scene - The hosting scene (carried in the per-particle evaluation context).
@@ -39,6 +41,6 @@ export async function parseNodeParticleSetFromSnippet(
         source = await (await import("./npe-snippet.js")).fetchNodeParticleSnippet(snippetId, options.snippetServer);
     }
 
-    const graph = parseNodeParticleSource(source);
+    const graph = await normalizeNodeParticleGraph(parseNodeParticleSource(source));
     return await buildNodeParticleSet(engine, scene, graph, options);
 }

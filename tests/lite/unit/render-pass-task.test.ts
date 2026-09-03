@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 
 import type { Camera } from "../../../packages/babylon-lite/src/camera/camera";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import type { SurfaceContext } from "../../../packages/babylon-lite/src/engine/surface";
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
@@ -742,6 +743,45 @@ describe("RenderPassTask transparent sorting", () => {
         expect(colorAttachments[0]!.resolveTarget).toBeUndefined();
     });
 
+    it("refreshes the default task from an auxiliary surface scRT every frame", async () => {
+        const seenDescriptors: GPURenderPassDescriptor[] = [];
+        const engine = makeMockEngine({
+            msaaSamples: 1,
+            onBeginPass: (descriptor) => {
+                seenDescriptors.push(descriptor);
+            },
+        });
+        const initialView = {} as GPUTextureView;
+        const currentView = {} as GPUTextureView;
+        const surface = {
+            engine,
+            canvas: { width: 320, height: 240 },
+            msaaSamples: 1,
+            format: engine.format,
+            scRT: {
+                _colorTexture: {},
+                _colorView: initialView,
+                _depthTexture: null,
+                _depthView: null,
+                _descriptor: { format: engine.format, samples: 1, size: { width: 320, height: 240 } },
+                _width: 320,
+                _height: 240,
+                _eager: true,
+            } as unknown as RenderTarget,
+            _renderingContexts: [],
+        } as unknown as SurfaceContext;
+        const scene = createSceneContext(surface);
+        await registerScene(scene);
+        surface.scRT._colorView = currentView;
+
+        scene._record();
+
+        const swapDescriptor = seenDescriptors[seenDescriptors.length - 1]!;
+        const colorAttachments = swapDescriptor.colorAttachments as readonly GPURenderPassColorAttachment[];
+        expect(colorAttachments[0]!.view).toBe(currentView);
+        expect(colorAttachments[0]!.view).not.toBe(engine.scRT._colorView);
+    });
+
     it("binds an external depthTexture in place of the color RT's own depth view", async () => {
         const seenDescriptors: GPURenderPassDescriptor[] = [];
         const bundleDescriptors: GPURenderBundleEncoderDescriptor[] = [];
@@ -945,7 +985,7 @@ describe("RenderPassTask transparent sorting", () => {
 });
 
 describe("RenderTask MSAA resolveTarget", () => {
-    it("wires a single-sample resolveTarget as the color attachment's end-of-pass resolve when the RT is MSAA", () => {
+    it("wires a single-sample resolveTarget at execution when the RT is MSAA", () => {
         const engine = makeMockEngine({ msaaSamples: 4 });
         const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
         scene.camera = makeCamera();
@@ -966,6 +1006,7 @@ describe("RenderTask MSAA resolveTarget", () => {
 
         const task = createRenderTask({ name: "msaa-scene", rt: msaaRt, rst: resolveTarget }, engine, scene);
         task.record();
+        task.execute!();
 
         // The resolve target's color view must be allocated and used as the
         // attachment's resolveTarget so WebGPU resolves the 4x MSAA in-pass.

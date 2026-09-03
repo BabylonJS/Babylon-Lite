@@ -141,6 +141,7 @@ export type { AttachControlOptions, ArcRotateCameraLimits } from "./camera/arc-r
 export { interpolateArcRotateCamera } from "./camera/arc-rotate-interpolate.js";
 export type { ArcRotateInterpolationGoal, ArcRotateInterpolationOptions } from "./camera/arc-rotate-interpolate.js";
 export { createFreeCamera } from "./camera/free-camera.js";
+export { createBankedFreeCamera } from "./camera/banked-free-camera.js";
 export { attachFreeControl } from "./camera/free-camera-controls.js";
 export { enableOrthographicCamera, disableOrthographicCamera } from "./camera/orthographic.js";
 export type { OrthographicBounds, OrthographicBoundsOptions } from "./camera/orthographic.js";
@@ -450,6 +451,7 @@ export { createCsmRefitGate } from "./shadow/csm-refit-gate.js";
 export { enableMorphTargetShadows } from "./shadow/enable-morph-target-shadows.js";
 export { enableSkeletonShadows } from "./shadow/enable-skeleton-shadows.js";
 export { setShadowTaskCasterMeshes, setShadowCasterMaxCascade } from "./frame-graph/shadow-inputs.js";
+export { setShadowCasterMaterial } from "./material/set-shadow-caster-material.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
 export { createAnimationController } from "./skeleton/skeleton-updater.js";
@@ -558,7 +560,7 @@ export {
 } from "./math/spherical.js";
 export type { SphericalCoordinates } from "./math/spherical.js";
 export { scaleBoundsFromCenterToRef } from "./math/scale-bounds-from-center-to-ref.js";
-export type { Vec2, Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
+export type { Vec2, Bounds2D, Vec3, Vec3Tuple, Vec4, Color3, Color4, Mat4, Quat } from "./math/types.js";
 export type { Aabb } from "./math/aabb.js";
 export { computeAabb } from "./math/aabb.js";
 export { eulerToQuat, quatToEulerXYZ } from "./math/quat-euler.js";
@@ -604,6 +606,7 @@ export { getEffectiveAspectRatio } from "./camera/camera.js";
 export { resolveCameraViewport } from "./camera/viewport.js";
 export type { PixelViewport } from "./camera/viewport.js";
 export type { FreeCamera } from "./camera/free-camera.js";
+export type { BankedFreeCamera } from "./camera/banked-free-camera.js";
 export type { Mesh, MeshGPU } from "./mesh/mesh.js";
 export { disposeMeshGpu } from "./mesh/mesh-dispose.js";
 export { computeMaxExtents } from "./mesh/compute-max-extents.js";
@@ -737,6 +740,7 @@ export {
     setSprite2DFrameIndex,
     setSprite2DShaderParams,
 } from "./sprite/sprite-2d.js";
+export { sprite2DWorldToScreenToRef, sprite2DScreenToWorldToRef, getSprite2DVisibleBoundsToRef, centerSprite2DView } from "./sprite/sprite-2d-view.js";
 export type { CustomShaderTexture } from "./sprite/custom-shader-core.js";
 export { setSprite2DCoverageGamma } from "./sprite/sprite-2d-coverage-gamma.js";
 export { setSprite2DUvOffset } from "./sprite/sprite-2d-uvscroll.js";
@@ -826,6 +830,7 @@ export {
 
 // ─── Node Particles (NPE) ────────────────────────────────────────────
 export { parseNodeParticleSource } from "./particle/node/npe-parser.js";
+export { normalizeNodeParticleGraph } from "./particle/node/npe-graph-plumbing.js";
 export type { NodeParticleSet, BuildNodeParticleOptions, ParseNodeParticleOptions } from "./particle/node/node-particle.js";
 export { buildNodeParticleSet, parseNodeParticleSetFromSnippet } from "./particle/node/node-particle.js";
 export { buildNodeParticleSetWithFlowMaps } from "./particle/node/npe-flow-map.js";
@@ -909,9 +914,12 @@ export {
     getPhysicsBodyLinearVelocity,
     getPhysicsBodyAngularVelocity,
     setPhysicsBodyAngularVelocity,
+    lockPhysicsBodyRotationAxes,
+    unlockPhysicsBodyRotationAxes,
     setPhysicsBodyMotionType,
     setPhysicsBodyTransform,
     removePhysicsBody,
+    releasePhysicsConstraint,
     releasePhysicsShape,
     disposePhysics,
     PhysicsShapeType,
@@ -930,6 +938,7 @@ export type {
     PhysicsShapeParameters,
     PhysicsAggregateOptions,
     PhysicsMassProperties,
+    PhysicsRotationAxis,
     PhysicsConstraintOptions,
     PhysicsConstraintLimit,
 } from "./physics/havok.js";
@@ -951,6 +960,7 @@ export {
     CharacterCollisionObservable,
 } from "./physics/character-controller.js";
 export type { PhysicsCharacterControllerOptions, CharacterSurfaceInfo, CharacterCollisionEvent } from "./physics/character-controller.js";
+export { calculatePhysicsCharacterMovementToRef } from "./physics/character-controller-to-ref.js";
 
 // ─── Navigation (Recast V2) ──────────────────────────────────────────
 export {
