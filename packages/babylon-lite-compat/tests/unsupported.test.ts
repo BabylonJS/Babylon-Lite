@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
+import { AbstractEngine } from "../src/engine/engine";
 import { LiteCompatError, unsupported } from "../src/error";
 import { ParticleSystem } from "../src/particles/particle-system";
 import {
@@ -59,11 +60,32 @@ import {
     InterpolatingBehavior,
     GeospatialClippingBehavior,
     SceneSerializer,
+    MinTemperatureKelvin,
+    MaxTintMagnitude,
+    TemperatureTintToXyz,
+    GetWhiteBalanceMatrix,
+    FluidRenderingObject,
+    FluidRenderingObjectParticleSystem,
+    FluidRenderingObjectCustomParticles,
+    FluidRenderingTargetRenderer,
+    FluidRenderer,
+    FluidRendererSceneComponent,
+    RegisterFluidRenderer,
 } from "../src/unsupported/unsupported-apis";
-import { GLTF2, OpenPBRMaterialLoadingAdapter as RootOpenPBRMaterialLoadingAdapter, RegisterOpenpbrMaterial as RootRegisterOpenpbrMaterial } from "../src/index";
+import {
+    GLTF1,
+    GLTF2,
+    ImageProcessingConfiguration,
+    RegisterAbstractEngineTextureLoaders,
+    RegisterImageProcessingConfiguration,
+    OpenPBRMaterialLoadingAdapter as RootOpenPBRMaterialLoadingAdapter,
+    RegisterOpenpbrMaterial as RootRegisterOpenpbrMaterial,
+} from "../src/index";
 import { MeshBuilder, CreateTiledBox, CreateTiledPlane } from "../src/meshes/meshes";
 import { SceneLoader } from "../src/loading/scene-loader";
 import { Material, PushMaterial } from "../src/materials/materials";
+import { NullEngine } from "../src/engine/engine";
+import { Scene } from "../src/scene/scene";
 
 describe("LiteCompatError", () => {
     it("formats a message with the API name", () => {
@@ -165,8 +187,9 @@ describe("OpenPBR unsupported exports", () => {
 });
 
 describe("HTML-texture function stubs throw on call", () => {
+    const engine = Object.create(AbstractEngine.prototype) as AbstractEngine;
     const cases: Array<[string, () => unknown]> = [
-        ["IsHtmlInCanvasUploadSupported", () => IsHtmlInCanvasUploadSupported()],
+        ["IsHtmlInCanvasUploadSupported", () => IsHtmlInCanvasUploadSupported(engine)],
         ["UploadHtmlElementToTexture", () => UploadHtmlElementToTexture()],
         ["ComputeOverlayCssTransform", () => ComputeOverlayCssTransform()],
         ["GetElementPixelFromUv", () => GetElementPixelFromUv()],
@@ -178,6 +201,11 @@ describe("HTML-texture function stubs throw on call", () => {
     it.each(cases)("%s throws LiteCompatError naming the API", (name, call) => {
         expect(call).toThrow(LiteCompatError);
         expect(call).toThrow(new RegExp(name));
+    });
+
+    it("exposes the upstream engine parameter", () => {
+        expectTypeOf(IsHtmlInCanvasUploadSupported).parameter(0).toEqualTypeOf<AbstractEngine>();
+        expectTypeOf(IsHtmlInCanvasUploadSupported).returns.toEqualTypeOf<boolean>();
     });
 });
 
@@ -255,5 +283,94 @@ describe("MeshBuilder unsupported primitives", () => {
 describe("SceneLoader.RegisterPlugin", () => {
     it("throws (out of scope, side-effectful registry)", () => {
         expect(() => SceneLoader.RegisterPlugin()).toThrow(LiteCompatError);
+    });
+});
+
+describe("image-processing additions", () => {
+    it("forwards supported properties through the Scene facade", () => {
+        const scene = new Scene(new NullEngine());
+        const config = scene.imageProcessingConfiguration;
+
+        config.exposure = 1.5;
+        config.contrast = 1.25;
+        config.toneMappingEnabled = true;
+
+        expect(scene.imageProcessingConfiguration).toBe(config);
+        expect(scene._lite.imageProcessing.exposure).toBe(1.5);
+        expect(scene._lite.imageProcessing.contrast).toBe(1.25);
+        expect(scene._lite.imageProcessing.toneMappingEnabled).toBe(true);
+        expect(config.exposure).toBe(1.5);
+        expect(config.contrast).toBe(1.25);
+        expect(config.toneMappingEnabled).toBe(true);
+    });
+
+    it("exposes constants and fails loudly for the unsupported white-balance subsystem", () => {
+        const config = new ImageProcessingConfiguration();
+        expect(MinTemperatureKelvin).toBe(1e6 / 600);
+        expect(MaxTintMagnitude).toBe(150);
+        expect(() => TemperatureTintToXyz(6500, 0)).toThrow(LiteCompatError);
+        expect(() => GetWhiteBalanceMatrix(6500, 0)).toThrow(LiteCompatError);
+        expect(config.whiteBalanceEnabled).toBe(false);
+        expect(config.temperature).toBe(6500);
+        expect(config.tint).toBe(0);
+        expect(() => {
+            config.whiteBalanceEnabled = false;
+            config.temperature = 6500;
+            config.tint = 0;
+        }).not.toThrow();
+        expect(() => {
+            config.whiteBalanceEnabled = true;
+        }).toThrow(LiteCompatError);
+        expect(() => {
+            config.temperature = 5000;
+        }).toThrow(LiteCompatError);
+        expect(() => {
+            config.tint = 1;
+        }).toThrow(LiteCompatError);
+        expect(() => RegisterImageProcessingConfiguration()).toThrow(LiteCompatError);
+    });
+
+    it("treats Lite's direct texture loader dispatch as already registered", () => {
+        expectTypeOf(RegisterAbstractEngineTextureLoaders).returns.toEqualTypeOf<void>();
+        expect(RegisterAbstractEngineTextureLoaders()).toBeUndefined();
+    });
+});
+
+describe("fluid-rendering additions", () => {
+    it("preserves the static flag and exposes fail-fast classes", () => {
+        expect(FluidRenderingObject.UsePerParticleSizeAttribute).toBe(false);
+        expect(() => new FluidRenderer({} as Scene)).toThrow(LiteCompatError);
+        expect(() => new FluidRendererSceneComponent({} as Scene)).toThrow(LiteCompatError);
+        expect(() => new FluidRenderingObjectParticleSystem({} as Scene, {})).toThrow(LiteCompatError);
+        expect(() => new FluidRenderingObjectCustomParticles({} as Scene, {}, 0)).toThrow(LiteCompatError);
+        expect(() => new FluidRenderingTargetRenderer({} as Scene)).toThrow(LiteCompatError);
+        expect(() => RegisterFluidRenderer()).toThrow(LiteCompatError);
+    });
+
+    it("adds fail-fast Scene augmentation methods", () => {
+        const scene = new Scene(new NullEngine());
+        expect(scene.fluidRenderer).toBeNull();
+        expect(() => scene.enableFluidRenderer()).toThrow(LiteCompatError);
+        expect(scene.disableFluidRenderer()).toBeUndefined();
+        expect(() => {
+            scene.fluidRenderer = null;
+        }).not.toThrow();
+    });
+});
+
+describe("GLTF1 pure registration exports", () => {
+    it.each([
+        ["RegisterGLTF1Loader", GLTF1.RegisterGLTF1Loader],
+        ["RegisterGLTFBinaryExtension", GLTF1.RegisterGLTFBinaryExtension],
+        ["RegisterGLTFMaterialsCommonExtension", GLTF1.RegisterGLTFMaterialsCommonExtension],
+    ])("%s throws a named LiteCompatError", (name, register) => {
+        expect(register).toThrow(LiteCompatError);
+        expect(register).toThrow(new RegExp(name));
+    });
+
+    it("exposes fail-fast legacy loader classes", () => {
+        expect(() => new GLTF1.GLTFLoader()).toThrow(LiteCompatError);
+        expect(() => new GLTF1.GLTFBinaryExtension()).toThrow(LiteCompatError);
+        expect(() => new GLTF1.GLTFMaterialsCommonExtension()).toThrow(LiteCompatError);
     });
 });

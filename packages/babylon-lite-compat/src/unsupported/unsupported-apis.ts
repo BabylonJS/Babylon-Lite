@@ -13,9 +13,73 @@
  */
 
 import { unsupported } from "../error.js";
+import type { AbstractEngine } from "../engine/engine.js";
 import { PushMaterial } from "../materials/materials.js";
 import type { Material } from "../materials/materials.js";
 import type { Scene } from "../scene/scene.js";
+import type { Camera } from "../cameras/cameras.js";
+import type { ShaderLanguage } from "../misc/engine-constants.js";
+import type { Vector3 } from "../math/vector.js";
+
+const WHITE_BALANCE_UNSUPPORTED =
+    "White balance requires color-temperature math, a shader uniform, material/post-process defines, and pipeline invalidation that Babylon Lite does not expose; adding it needs a cross-cutting Lite subsystem design.";
+const FLUID_RENDERER_UNSUPPORTED =
+    "Fluid rendering requires dedicated depth, thickness, and diffuse passes plus render-target lifecycle and composition policies that Babylon Lite does not define.";
+
+// ─── Math / image processing ─────────────────────────────────────────
+export const MinTemperatureKelvin = 1e6 / 600;
+export const MaxTintMagnitude = 150;
+
+export function TemperatureTintToXyz(_temperatureKelvin: number, _tint: number): Vector3 {
+    return unsupported("TemperatureTintToXyz", WHITE_BALANCE_UNSUPPORTED);
+}
+
+export function GetWhiteBalanceMatrix(_temperatureKelvin: number, _tint: number): Float32Array | number[] {
+    return unsupported("GetWhiteBalanceMatrix", WHITE_BALANCE_UNSUPPORTED);
+}
+
+// ─── Fluid rendering ─────────────────────────────────────────────────
+export abstract class FluidRenderingObject {
+    public static UsePerParticleSizeAttribute = false;
+
+    protected constructor(_scene: Scene, _shaderLanguage?: ShaderLanguage) {
+        unsupported("FluidRenderingObject", FLUID_RENDERER_UNSUPPORTED);
+    }
+}
+
+export class FluidRenderingObjectParticleSystem extends FluidRenderingObject {
+    public constructor(scene: Scene, _particleSystem: unknown, shaderLanguage?: ShaderLanguage) {
+        super(scene, shaderLanguage);
+    }
+}
+
+export class FluidRenderingObjectCustomParticles extends FluidRenderingObject {
+    public constructor(scene: Scene, _buffers: Record<string, ArrayLike<number>>, _numParticles: number, shaderLanguage?: ShaderLanguage) {
+        super(scene, shaderLanguage);
+    }
+}
+
+export class FluidRenderingTargetRenderer {
+    public constructor(_scene: Scene, _camera?: Camera, _shaderLanguage?: ShaderLanguage) {
+        unsupported("FluidRenderingTargetRenderer", FLUID_RENDERER_UNSUPPORTED);
+    }
+}
+
+export class FluidRenderer {
+    public constructor(_scene: Scene) {
+        unsupported("FluidRenderer", FLUID_RENDERER_UNSUPPORTED);
+    }
+}
+
+export class FluidRendererSceneComponent {
+    public constructor(_scene: Scene) {
+        unsupported("FluidRendererSceneComponent", FLUID_RENDERER_UNSUPPORTED);
+    }
+}
+
+export function RegisterFluidRenderer(): void {
+    unsupported("RegisterFluidRenderer", FLUID_RENDERER_UNSUPPORTED);
+}
 
 // ─── Materials ───────────────────────────────────────────────────────
 export class MultiMaterial {
@@ -428,9 +492,13 @@ export class HtmlRaycastInteractionManager {
     }
 }
 
-/** Babylon.js `IsHtmlInCanvasUploadSupported` — HTML texture upload is unsupported by the compat layer. */
-export function IsHtmlInCanvasUploadSupported(): never {
-    return unsupported("IsHtmlInCanvasUploadSupported", "HTML-element texture upload is not supported by Babylon Lite.");
+/** Babylon.js `IsHtmlInCanvasUploadSupported` — kept in lockstep with the unavailable upload helper. */
+export function IsHtmlInCanvasUploadSupported(engine: AbstractEngine): boolean {
+    void engine;
+    return unsupported(
+        "IsHtmlInCanvasUploadSupported",
+        "Lite's HTML texture owns its element and texture together; it cannot back BJS's arbitrary InternalTexture upload contract."
+    );
 }
 
 /** Babylon.js `UploadHtmlElementToTexture` — HTML texture upload is unsupported by the compat layer. */
