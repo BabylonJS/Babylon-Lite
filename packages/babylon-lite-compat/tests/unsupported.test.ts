@@ -205,6 +205,7 @@ describe("HTML-texture function stubs throw on call", () => {
 
     it("exposes the upstream engine parameter", () => {
         expectTypeOf(IsHtmlInCanvasUploadSupported).parameter(0).toEqualTypeOf<AbstractEngine>();
+        expectTypeOf(IsHtmlInCanvasUploadSupported).returns.toEqualTypeOf<boolean>();
     });
 });
 

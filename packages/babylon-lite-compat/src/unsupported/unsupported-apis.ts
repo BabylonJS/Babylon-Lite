@@ -493,7 +493,7 @@ export class HtmlRaycastInteractionManager {
 }
 
 /** Babylon.js `IsHtmlInCanvasUploadSupported` — kept in lockstep with the unavailable upload helper. */
-export function IsHtmlInCanvasUploadSupported(engine: AbstractEngine): never {
+export function IsHtmlInCanvasUploadSupported(engine: AbstractEngine): boolean {
     void engine;
     return unsupported(
         "IsHtmlInCanvasUploadSupported",
