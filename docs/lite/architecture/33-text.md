@@ -445,7 +445,8 @@ fit Lite's instance-buffer + bind-group plumbing.
 
 The vertex stage (the vertex half of `shaders/slug-shader.ts`):
 
-1. **Dead-slot detection.** `if (slugAnchor.w > 0.5) → emit (-2,-2,-2,1) point`.
+1. **Dead-slot detection.** `if (in.pk == 0xffffffffu) → emit (-2,-2,-2,1) point`.
+   Dead slots use an all-ones packed glyph/style index.
 2. **Quad corner expansion.** `tex = mix(slugBounds.xy, slugBounds.zw, isMax)`
    maps the unit corner sign to the glyph's font-unit bounds; `pos = slugAnchor.xy + tex * scale`
    puts the corner in object-space pixels.
