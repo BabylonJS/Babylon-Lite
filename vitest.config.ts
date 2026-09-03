@@ -1,6 +1,12 @@
 import { defineConfig } from "vitest/config";
+import { resolve } from "node:path";
 
 export default defineConfig({
+    resolve: {
+        alias: {
+            "babylon-lite/shader/wgsl.js": resolve(__dirname, "packages/babylon-lite/src/shader/wgsl.ts"),
+        },
+    },
     test: {
         environment: "node",
         setupFiles: ["./tests/lite/unit/setup-webgpu-globals.ts"],

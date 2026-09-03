@@ -11,6 +11,7 @@ import { _isShaderSystemUniform } from "./shader-material.js";
 import type { ResolvedStencil } from "../stencil-state.js";
 import type { StencilState } from "../material.js";
 import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 /** Stencil resolver, installed only by `enableMaterialStencil`. Module-local with a single exported setter:
  *  when `enableMaterialStencil` is absent from the bundle the setter tree-shakes, the bundler proves this is
@@ -141,8 +142,8 @@ export function getOrCreateShaderPipeline(
     }
     if (!vertModule) {
         const prelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
-        vertModule = device.createShaderModule({ label: `${material.name ?? "shader"}-vertex`, code: `${prelude}\n${material.vertexSource}` });
-        fragModule = wantsFragment ? device.createShaderModule({ label: `${material.name ?? "shader"}-fragment`, code: `${prelude}\n${material.fragmentSource}` }) : null;
+        vertModule = device.createShaderModule({ label: `${material.name ?? "shader"}-vertex`, code: wgsl`${prelude}\n${material.vertexSource}` });
+        fragModule = wantsFragment ? device.createShaderModule({ label: `${material.name ?? "shader"}-fragment`, code: wgsl`${prelude}\n${material.fragmentSource}` }) : null;
     }
     const colorTarget: GPUColorTargetState | null = sig._colorFormat
         ? {
@@ -273,14 +274,14 @@ function attributeLayout(name: ShaderAttributeName, shaderLocation: number): GPU
 }
 
 function buildShaderPrelude(material: ShaderMaterial, systemSpec: UboSpec, customSpec: UboSpec | null, instanceAttrs = ""): string {
-    let wgsl = `${SCENE_UBO_WGSL}
+    let source = wgsl`${SCENE_UBO_WGSL}
 struct ShaderSystemUniforms {
 ${systemSpec._structBody}
 }
 @group(1) @binding(0) var<uniform> shaderSystem: ShaderSystemUniforms;
 `;
     if (customSpec) {
-        wgsl += `struct ShaderUniforms {
+        source = wgsl`${source}struct ShaderUniforms {
 ${customSpec._structBody}
 }
 @group(1) @binding(1) var<uniform> shaderUniforms: ShaderUniforms;
@@ -292,29 +293,29 @@ ${customSpec._structBody}
         const isDepth = sampler.comparison === true || sampler.sampleType === "depth";
         const texType = isDepth ? (isArray ? "texture_depth_2d_array" : "texture_depth_2d") : isArray ? "texture_2d_array<f32>" : "texture_2d<f32>";
         const samplerType = sampler.comparison === true ? "sampler_comparison" : "sampler";
-        wgsl += `@group(1) @binding(${nextBinding++}) var ${sampler.name}: ${texType};
+        source = wgsl`${source}@group(1) @binding(${nextBinding++}) var ${sampler.name}: ${texType};
 @group(1) @binding(${nextBinding++}) var ${sampler.name}Sampler: ${samplerType};
 `;
     }
     for (const storage of material.storageBufferDecls) {
-        wgsl += `@group(1) @binding(${nextBinding++}) var<storage, read> ${storage.name}: ${storage.type};
+        source = wgsl`${source}@group(1) @binding(${nextBinding++}) var<storage, read> ${storage.name}: ${storage.type};
 `;
     }
     for (const define of material.defines) {
-        wgsl += `const ${define.name}: ${typeof define.value === "boolean" ? "bool" : "f32"} = ${formatDefineValue(define.value)};
+        source = wgsl`${source}const ${define.name}: ${typeof define.value === "boolean" ? "bool" : "f32"} = ${formatDefineValue(define.value)};
 `;
     }
-    wgsl += `struct VertexInput {
+    source = wgsl`${source}struct VertexInput {
 `;
     for (let i = 0; i < material.attributes.length; i++) {
         const attr = material.attributes[i]!;
-        wgsl += `@location(${i}) ${attr}: ${attributeWgslType(attr)},
+        source = wgsl`${source}@location(${i}) ${attr}: ${attributeWgslType(attr)},
 `;
     }
-    wgsl += instanceAttrs;
-    wgsl += `};
+    source = wgsl`${source}${instanceAttrs}`;
+    source = wgsl`${source}};
 `;
-    return wgsl;
+    return source;
 }
 
 function formatDefineValue(value: boolean | number): string {

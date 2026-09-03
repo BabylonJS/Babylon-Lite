@@ -1,6 +1,7 @@
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { PBR_HAS_ALPHA_TEST } from "../pbr-flag-bits.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export const pbrExt: PbrExt = {
     id: "alpha-test",
@@ -13,7 +14,7 @@ export const pbrExt: PbrExt = {
             ? {
                   _id: "alpha-test",
                   _uboFields: [{ _name: "alphaCutOff", _type: "f32" }],
-                  _fragmentSlots: { AT: `if(alpha*material.materialAlpha<material.alphaCutOff){discard;}` },
+                  _fragmentSlots: { AT: wgsl`if(alpha*material.materialAlpha<material.alphaCutOff){discard;}` },
               }
             : null;
     },

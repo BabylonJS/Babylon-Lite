@@ -1,4 +1,5 @@
 import type { BlockEmitter } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export const emitter: BlockEmitter = {
     className: "DesaturateBlock",
@@ -8,6 +9,6 @@ export const emitter: BlockEmitter = {
         const minColor = `min(min((${color}).x, (${color}).y), (${color}).z)`;
         const maxColor = `max(max((${color}).x, (${color}).y), (${color}).z)`;
         const merge = `(0.5 * (${minColor} + ${maxColor}))`;
-        return { expr: `mix(${color}, vec3<f32>(${merge}), ${level})`, type: "vec3f" };
+        return { expr: wgsl`mix(${color}, vec3<f32>(${merge}), ${level})`, type: "vec3f" };
     },
 };

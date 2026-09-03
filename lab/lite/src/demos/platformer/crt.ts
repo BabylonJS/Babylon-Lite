@@ -38,6 +38,7 @@ import {
     type SpriteRenderer,
     type Texture2D,
 } from "babylon-lite";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 /**
  * CRT fragment for `createSprite2DCustomShader`.
@@ -58,7 +59,7 @@ import {
  *   fx.params.z = scanline cycles down the screen (≈ height / 6 → ~6 device-px pitch)
  *   fx.params.w = device width in px (aperture-mask pitch)
  */
-export const CRT_FRAGMENT = `
+export const CRT_FRAGMENT = wgsl`
 let strength = fx.params.x;
 let lines = fx.params.z;
 let devW = fx.params.w;

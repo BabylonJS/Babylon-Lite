@@ -8,6 +8,7 @@
  */
 
 import type { PbrExt } from "../pbr-flags.js";
+import type { WgslSource } from "../../../shader/wgsl.js";
 import { PBR_HAS_SKYBOX } from "../pbr-flag-bits.js";
 import { IBL_SKYBOX_CALCULATION } from "./ibl-skybox-wgsl.js";
 
@@ -17,7 +18,7 @@ import { IBL_SKYBOX_CALCULATION } from "./ibl-skybox-wgsl.js";
  *  once skybox-mode is registered (via {@link setPbrSkybox}). */
 export interface SkyboxTemplateHooks {
     /** @internal Skybox IBL-sampling WGSL injected into the IBL calculation. */
-    readonly _skyboxCalc: string;
+    readonly _skyboxCalc: WgslSource;
 }
 
 /** Skybox extension. Contributes only the `PBR_HAS_SKYBOX` feature bit (via `detect`) plus

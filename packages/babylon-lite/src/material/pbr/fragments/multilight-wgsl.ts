@@ -2,9 +2,10 @@
  *  Separated into its own module so non-shadow PBR scenes don't pay the bundle cost. */
 
 import { MAX_LIGHTS } from "../../../light/types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export function MULTI_LIGHT_STRUCTS(): string {
-    return `
+    return wgsl`
 struct LightEntry {
 vLightData: vec4<f32>,
 vLightDiffuse: vec4<f32>,
@@ -18,7 +19,7 @@ lights: array<LightEntry, ${MAX_LIGHTS}>,
 `;
 }
 
-export const COMPUTE_PBR_LIGHT = `
+export const COMPUTE_PBR_LIGHT = wgsl`
 struct PbrLightResult { L: vec3<f32>, NdotL: f32, atten: f32, color: vec3<f32>, specColor: vec3<f32>, isHemi: bool };
 fn computePbrLight(entry: LightEntry, N: vec3<f32>, worldPos: vec3<f32>, lightFalloffMode: f32) -> PbrLightResult {
 var r: PbrLightResult;
@@ -63,7 +64,7 @@ return r;
  *  Contains slot markers AD and BL for fragment injection.
  *  Generated at call time because MAX_LIGHTS is runtime-configurable via `setMaxLights`. */
 export function getMultiLightLoop(): string {
-    return `var directDiffuse = vec3<f32>(0.0);
+    return wgsl`var directDiffuse = vec3<f32>(0.0);
 var directSpecular = vec3<f32>(0.0);
 // BJS direct-light specular: roughness is clamped by the geometric AA factor
 // BEFORE being squared (matches BJS pbrDirectLightingFunctions.fx line 103).

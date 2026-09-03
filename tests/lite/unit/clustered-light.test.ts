@@ -18,6 +18,7 @@ import { pbrExt as iridescencePbrExt } from "../../../packages/babylon-lite/src/
 import { _computePbrMaterialFeatures, type PbrMaterialProps } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
 import { createPbrComposer } from "../../../packages/babylon-lite/src/material/pbr/pbr-compose";
 import { createPbrTemplateExt } from "../../../packages/babylon-lite/src/material/pbr/pbr-template-ext";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 import { PBR2_HAS_UV2 } from "../../../packages/babylon-lite/src/material/pbr/pbr-flag-bits";
 import { MSH_HAS_UV2 } from "../../../packages/babylon-lite/src/material/mesh-features";
 
@@ -244,7 +245,7 @@ describe("clustered light uploads", () => {
                 return {
                     _id: "test-coordinated-lightmap",
                     _fragmentSlots: {
-                        NI: `let coordinatedLightmapUv=${usesUv2 ? "input.uv2" : "input.uv"};color+=vec3<f32>(coordinatedLightmapUv,0.0)*0.0;`,
+                        NI: wgsl`let coordinatedLightmapUv=${usesUv2 ? "input.uv2" : "input.uv"};color+=vec3<f32>(coordinatedLightmapUv,0.0)*0.0;`,
                     },
                 };
             },

@@ -9,6 +9,7 @@ import { _getSpriteCoverageGammaHook } from "./sprite-coverage-gamma-hook.js";
 import { _getSprite2DYSortHook } from "./sprite-2d-y-sort-hook.js";
 import { DEPTH_INSTANCE_STRIDE_BYTES, PURE_2D_INSTANCE_STRIDE_BYTES } from "./sprite-2d.js";
 import { _getAlphaToCoverageResolver } from "../render/alpha-to-coverage-hook.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** @internal */
 export interface SpritePipelineDeviceCache {
@@ -33,7 +34,7 @@ const SPRITE_COLOR_OFFSET_BYTES = 36;
 const SPRITE_DEPTH_OFFSET_BYTES = 52;
 
 function makeSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll: boolean): string {
-    return `${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
+    return wgsl`${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
 @fragment
 fn fs(in: O) -> @location(0) vec4f {
 let s = textureSample(atlasTex, atlasSamp, in.uv);
@@ -50,11 +51,11 @@ return s * in.tint * L.opacityMul;
  * paths share one source of truth.
  */
 export function makeSpritePrologueWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, uvScroll = false): string {
-    const group = `@group(${spriteGroupIndex})`;
-    const zAttribute = hasDepth ? `,\n@location(6) z: f32` : "";
-    const uvOffsetAttribute = uvScroll ? `,\n@location(7) o: vec2f` : "";
+    const group = wgsl`@group(${spriteGroupIndex})`;
+    const zAttribute = hasDepth ? wgsl`,\n@location(6) z: f32` : "";
+    const uvOffsetAttribute = uvScroll ? wgsl`,\n@location(7) o: vec2f` : "";
     const zPosition = hasDepth ? "1 - in.z" : "0";
-    return `struct Lr {
+    return wgsl`struct Lr {
 viewPos: vec2f,
 viewScale: f32,
 viewRot: f32,

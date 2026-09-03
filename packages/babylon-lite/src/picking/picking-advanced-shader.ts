@@ -4,6 +4,8 @@
  * is produced from this owner so ID, depth, primitive identity, and hook inputs cannot drift.
  */
 
+import { wgsl } from "../shader/wgsl.js";
+
 export interface PickingShaderOptions {
     readonly discardWgsl?: string | null;
     readonly worldAdjustWgsl?: string | null;
@@ -28,7 +30,7 @@ export interface PickingVertexProjectionShader {
     readonly thinBody: string;
 }
 
-const PICK_SCENE = /* wgsl */ `
+const PICK_SCENE = wgsl`
 struct SceneUniforms {
 viewProjection: mat4x4f,
 fragmentCoord: vec2f,
@@ -36,20 +38,20 @@ fragmentCoord: vec2f,
 @group(0) @binding(0) var<uniform> scene: SceneUniforms;
 `;
 
-const DEFAULT_PICK_DISCARD = /* wgsl */ `
+const DEFAULT_PICK_DISCARD = wgsl`
 fn shouldDiscardPick(input: PickDiscardInput) -> bool {
 return false;
 }
 `;
 
-const DEFAULT_PICK_WORLD_ADJUST = /* wgsl */ `
+const DEFAULT_PICK_WORLD_ADJUST = wgsl`
 fn adjustPickWorld(input: PickWorldInput) -> vec3f {
 return input.worldPos;
 }
 `;
 
 function inputStructs(exposeVertexData: boolean): string {
-    return /* wgsl */ `
+    return wgsl`
 struct PickDiscardInput {
 worldPos: vec3f,
 fragmentCoord: vec2f,
@@ -75,11 +77,11 @@ vertexData: vec4f,
 }
 
 function storageDecls(opts: PickingShaderOptions): string {
-    return opts.storage?.length ? opts.storage.map((storage, binding) => `@group(2) @binding(${binding}) var<storage, read> ${storage.name}: ${storage.type};`).join("\n") : "";
+    return opts.storage?.length ? opts.storage.map((storage, binding) => wgsl`@group(2) @binding(${binding}) var<storage, read> ${storage.name}: ${storage.type};`).join("\n") : "";
 }
 
 function fragmentShader(exposeVertexData: boolean, detailed: boolean): string {
-    return /* wgsl */ `
+    return wgsl`
 struct VsOut {
 @builtin(position) p: vec4f,
 @location(0) @interpolate(flat) pickId: u32,
@@ -109,7 +111,7 @@ return FsOut(vec4f(r, g, b, 1.0), input.p.z${detailed ? ", vec4u(primitiveIndex,
 }
 
 function regularInput(components: 0 | 2 | 3 | 4): string {
-    return components === 0 ? "" : `, @location(5) vertexData: vec${components}f`;
+    return components === 0 ? "" : wgsl`, @location(5) vertexData: vec${components}f`;
 }
 
 function paddedVertexData(components: 0 | 2 | 3 | 4): string {
@@ -131,7 +133,7 @@ export function pickingShaderVariantSource(thinInstance: boolean, opts: PickingS
     const exposeVertexData = opts.exposeVertexData ?? false;
     const detailed = opts.detailed ?? false;
     const projection = opts._vertexProjection ?? null;
-    const shared = /* wgsl */ `
+    const shared = wgsl`
 ${detailed ? "enable primitive_index;" : ""}
 ${PICK_SCENE}
 ${inputStructs(exposeVertexData)}
@@ -143,7 +145,7 @@ ${fragmentShader(exposeVertexData, detailed)}
 `;
 
     if (!thinInstance) {
-        return /* wgsl */ `
+        return wgsl`
 ${shared}
 struct MeshUniforms {
 world: mat4x4f,
@@ -170,7 +172,7 @@ return out;
 `;
     }
 
-    return /* wgsl */ `
+    return wgsl`
 ${shared}
 struct TIMeshUniforms {
 world: mat4x4f,

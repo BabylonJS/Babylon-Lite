@@ -34,6 +34,7 @@ import {
 } from "babylon-lite";
 import { TILE_H, TILE_W } from "./iso.js";
 import type { GameMap } from "./worldgen.js";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 /** Tile sight radius (Manhattan) around cities and the scout. */
 const CITY_SIGHT = 2;
@@ -82,7 +83,7 @@ export interface Fog {
  * coverage threshold, so the frontier dissolves into drifting wisps while solid interiors
  * stay solid (the noise can't open holes where the field is already deep).
  */
-const FOG_FRAGMENT = `
+const FOG_FRAGMENT = wgsl`
 let wpx = in.tint.xy + in.uv * in.tint.zw;
 let tx = wpx.x / ${TILE_W}.0 + wpx.y / ${TILE_H}.0;
 let ty = wpx.y / ${TILE_H}.0 - wpx.x / ${TILE_W}.0;
@@ -160,7 +161,7 @@ export function createFog(engine: EngineContext, sr: SpriteRenderer, world: Game
     // pixel back to a tile coordinate to look the field up.
     const whiteTex = createTexture2DFromPixels(engine, new Uint8Array([255, 255, 255, 255]), 1, 1);
     const atlas = createGridSpriteAtlas(whiteTex, { cellWidthPx: 1, cellHeightPx: 1, pivot: [0.5, 0.5] });
-    const fragment = `const FOG_W = ${width}.0;\nconst FOG_H = ${height}.0;\n${FOG_FRAGMENT}`;
+    const fragment = wgsl`const FOG_W = ${width}.0;\nconst FOG_H = ${height}.0;\n${FOG_FRAGMENT}`;
     const shader = createSprite2DCustomShader({ fragment, extraTextures: [{ name: "field", texture: fieldTex }] });
     const layer = createSprite2DLayer(atlas, { capacity: 1, order: FOG_ORDER, pivot: [0.5, 0.5], customShader: shader });
     addSpriteRendererLayer(sr, layer);

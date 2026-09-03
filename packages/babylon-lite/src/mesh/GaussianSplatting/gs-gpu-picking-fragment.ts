@@ -16,18 +16,19 @@
  *  minimal-port scope confirmed for scene 129). */
 
 import type { GsShaderFragment } from "./gaussian-splatting-mesh.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 /** Lite port of `GaussianSplattingGpuPickingMaterialPlugin`'s non-compound path:
  *  declare a `picking` UBO at `@group(2) @binding(0)` (allocated by the picking
  *  pipeline) and override the fragment colour with the per-mesh pick id. */
 export const gsGpuPickingFragment: GsShaderFragment = {
     id: "gsGpuPicking",
-    helperFunctions: /* wgsl */ `
+    helperFunctions: wgsl`
 struct GsPickingU { pickingColor: vec3<f32> };
 @group(2) @binding(0) var<uniform> picking: GsPickingU;
 `,
     fragmentSlots: {
-        GS_FRAGMENT_BEFORE_FRAGCOLOR: /* wgsl */ `
+        GS_FRAGMENT_BEFORE_FRAGCOLOR: wgsl`
             if (finalColor.a < 0.001) { discard; }
             finalColor = vec4<f32>(picking.pickingColor, 1.0);
         `,

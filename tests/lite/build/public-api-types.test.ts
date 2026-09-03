@@ -125,6 +125,59 @@ describe("build/index.d.ts", () => {
         expect(external, `build/index.d.ts leaks types from external modules: ${external.join(", ")}`).toEqual([]);
     });
 
+    it("strips the shader-source brand so consumers can pass plain strings", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).not.toContain("WgslSource");
+        expect(dts).not.toContain("wgslSourceBrand");
+        expect(dts).toContain("readonly vertexSource: string;");
+        expect(dts).toContain("readonly fragmentSource: string;");
+
+        const probePath = resolve(BUILD_DIR, "wgsl-source-types.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import type { ShaderMaterialOptions } from "./index.js";
+const options: ShaderMaterialOptions = {
+    vertexSource: "plain consumer vertex WGSL",
+    fragmentSource: "plain consumer fragment WGSL",
+    attributes: [],
+};
+void options;
+`,
+                "utf-8"
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                {
+                    cwd: PACKAGE_DIR,
+                    encoding: "utf-8",
+                }
+            );
+            const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+            expect(result.status, output).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes only the build-time moving-emitter provider API", () => {
         const dts = readFileSync(DTS_PATH, "utf-8");
 

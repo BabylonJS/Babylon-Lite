@@ -85,6 +85,7 @@
         "eslint-plugin-tsdoc": "^0.5.2",
         "fflate": "^0.8.3",
         "globals": "^17.11.0",
+        "magic-string": "0.30.21",
         "miniray": "^0.3.1",
         "node-web-audio-api": "^2.2.0",
         "pngjs": "^7.0.0",

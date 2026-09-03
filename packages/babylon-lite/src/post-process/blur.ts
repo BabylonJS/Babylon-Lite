@@ -1,6 +1,7 @@
 import type { EngineContext } from "../engine/engine.js";
 import { createPostProcessTask, type PostProcessShaderConfig, type PostProcessTask, type PostProcessTaskConfig } from "../frame-graph/post-process-task.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import { wgsl } from "../shader/wgsl.js";
 
 export interface PostProcessVec2 {
     x: number;
@@ -21,7 +22,7 @@ export interface BlurPostProcessTask extends PostProcessTask {
 
 const MAX_VERTEX_BLUR_SAMPLES = 8;
 
-const BLUR_UNIFORM_WGSL = `struct BlurParams{delta:vec2f,p0:f32,p1:f32}
+const BLUR_UNIFORM_WGSL = wgsl`struct BlurParams{delta:vec2f,p0:f32,p1:f32}
 @group(0) @binding(2) var<uniform> blurParams:BlurParams;`;
 
 interface BlurSample {
@@ -85,23 +86,23 @@ function wgslFloat(value: number): string {
 function updateBlurShader(shader: PostProcessShaderConfig, kernel: number): void {
     const samples = getOptimizedBlurSamples(kernel);
     const varyingCount = Math.min(samples.length, MAX_VERTEX_BLUR_SAMPLES);
-    shader.vertexOutputWGSL = "";
-    shader.vertexMainWGSL = "";
+    shader.vertexOutputWGSL = wgsl``;
+    shader.vertexMainWGSL = wgsl``;
     for (let i = 0; i < varyingCount; i++) {
-        shader.vertexOutputWGSL += `,@location(${i + 1}) sampleCoord${i}:vec2f`;
-        shader.vertexMainWGSL += `out.sampleCoord${i}=out.uv+blurParams.delta*${wgslFloat(samples[i]!.offset)};`;
+        shader.vertexOutputWGSL = wgsl`${shader.vertexOutputWGSL},@location(${i + 1}) sampleCoord${i}:vec2f`;
+        shader.vertexMainWGSL = wgsl`${shader.vertexMainWGSL}out.sampleCoord${i}=out.uv+blurParams.delta*${wgslFloat(samples[i]!.offset)};`;
     }
-    let body = "var blend=vec4f(0);";
+    let body = wgsl`var blend=vec4f(0);`;
     for (let i = 0; i < varyingCount; i++) {
-        body += `blend+=textureSample(sourceTextureSampler,sourceSampler,input.sampleCoord${i})*${wgslFloat(samples[i]!.weight)};`;
+        body = wgsl`${body}blend+=textureSample(sourceTextureSampler,sourceSampler,input.sampleCoord${i})*${wgslFloat(samples[i]!.weight)};`;
     }
     for (let i = varyingCount; i < samples.length; i++) {
         const sample = samples[i]!;
-        body += `blend+=samplePostProcessSource(input.uv+blurParams.delta*${wgslFloat(sample.offset)})*${wgslFloat(sample.weight)};`;
+        body = wgsl`${body}blend+=samplePostProcessSource(input.uv+blurParams.delta*${wgslFloat(sample.offset)})*${wgslFloat(sample.weight)};`;
     }
-    body += "return blend;";
-    shader.fragmentWGSL = "";
-    shader.fragmentWrapperWGSL = `@fragment fn postProcessFragment(input:PostProcessVertexOutput)->@location(0) vec4f{${body}}`;
+    body = wgsl`${body}return blend;`;
+    shader.fragmentWGSL = wgsl``;
+    shader.fragmentWrapperWGSL = wgsl`@fragment fn postProcessFragment(input:PostProcessVertexOutput)->@location(0) vec4f{${body}}`;
 }
 
 /**
@@ -122,7 +123,7 @@ export function createBlurPostProcessTask(config: BlurPostProcessTaskConfig, eng
             data[0] = params.direction.x / width;
             data[1] = params.direction.y / height;
         },
-        fragmentWGSL: "",
+        fragmentWGSL: wgsl``,
     };
     updateBlurShader(shader, params.kernel);
     const task = createPostProcessTask(

@@ -1,4 +1,5 @@
 import type { BlockEmitter, NodeBlock, NodeBuildState, NodeEmitContext, NodeExpr, Stage } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 function optional(block: NodeBlock, inputName: string, stage: Stage, state: NodeBuildState, ctx: NodeEmitContext): NodeExpr | null {
     const input = block.inputs.get(inputName);
@@ -15,12 +16,12 @@ export const emitter: BlockEmitter = {
     emit(block, _outputName, stage, state, ctx) {
         const seed = ctx.resolve(block, "seed", stage, state);
         if (seed.type !== "vec2f" && seed.type !== "vec3f") {
-            throw new Error(`NodeMaterial: CloudBlock requires vec2 or vec3 seed; got ${seed.type}`);
+            throw new Error(wgsl`NodeMaterial: CloudBlock requires vec2 or vec3 seed; got ${seed.type}`);
         }
 
         state[stage].helpers.set(
             "nme_cloudNoise",
-            `fn nme_cloudRandom(p: f32) -> f32 {
+            wgsl`fn nme_cloudRandom(p: f32) -> f32 {
 var temp = fract(p * 0.011);
 temp *= temp + 7.5;
 temp *= temp + temp;
@@ -48,7 +49,7 @@ return mix(mix(mix(nme_cloudRandom(n + dot(stepv, vec3<f32>(0.0, 0.0, 0.0))), nm
         const helperKey = `nme_cloudFbm_${octaves}`;
         state[stage].helpers.set(
             helperKey,
-            `fn nme_cloudFbm2_${octaves}(st: vec2<f32>, chaos: vec2<f32>) -> f32 {
+            wgsl`fn nme_cloudFbm2_${octaves}(st: vec2<f32>, chaos: vec2<f32>) -> f32 {
 var value = 0.0;
 var amplitude = 0.5;
 var tempST = st;
@@ -73,18 +74,18 @@ return value;
         );
 
         const st = ctx.temp(state, "cloudSeed");
-        state[stage].body.push(`var ${st}: ${seed.type === "vec2f" ? "vec2<f32>" : "vec3<f32>"} = ${seed.expr};`);
+        state[stage].body.push(wgsl`var ${st}: ${seed.type === "vec2f" ? "vec2<f32>" : "vec3<f32>"} = ${seed.expr};`);
         const offsetX = scalarOffset(block, "offsetX", stage, state, ctx);
         const offsetY = scalarOffset(block, "offsetY", stage, state, ctx);
         const offsetZ = scalarOffset(block, "offsetZ", stage, state, ctx);
         if (offsetX) {
-            state[stage].body.push(`${st}.x += 0.1 * ${offsetX};`);
+            state[stage].body.push(wgsl`${st}.x += 0.1 * ${offsetX};`);
         }
         if (offsetY) {
-            state[stage].body.push(`${st}.y += 0.1 * ${offsetY};`);
+            state[stage].body.push(wgsl`${st}.y += 0.1 * ${offsetY};`);
         }
         if (offsetZ && seed.type === "vec3f") {
-            state[stage].body.push(`${st}.z += 0.1 * ${offsetZ};`);
+            state[stage].body.push(wgsl`${st}.z += 0.1 * ${offsetZ};`);
         }
 
         const chaos = optional(block, "chaos", stage, state, ctx);
