@@ -237,6 +237,9 @@ stages:
                 # accumulates new assets instead of freezing. Measurement still
                 # fetches-with-retry on a miss, so a cold/expired cache is only slower,
                 # never incorrect.
+                - script: mkdir -p "$(System.DefaultWorkingDirectory)/.bundle-asset-cache"
+                  displayName: "Initialize remote scene asset cache"
+
                 - task: Cache@2
                   displayName: "Cache remote scene assets"
                   condition: eq(variables['RUN_BUNDLE_TESTS'], 'true')
