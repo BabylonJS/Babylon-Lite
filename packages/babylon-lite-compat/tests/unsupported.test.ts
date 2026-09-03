@@ -1,5 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
+import { AbstractEngine } from "../src/engine/engine";
 import { LiteCompatError, unsupported } from "../src/error";
 import { ParticleSystem } from "../src/particles/particle-system";
 import {
@@ -186,8 +187,9 @@ describe("OpenPBR unsupported exports", () => {
 });
 
 describe("HTML-texture function stubs throw on call", () => {
+    const engine = Object.create(AbstractEngine.prototype) as AbstractEngine;
     const cases: Array<[string, () => unknown]> = [
-        ["IsHtmlInCanvasUploadSupported", () => IsHtmlInCanvasUploadSupported()],
+        ["IsHtmlInCanvasUploadSupported", () => IsHtmlInCanvasUploadSupported(engine)],
         ["UploadHtmlElementToTexture", () => UploadHtmlElementToTexture()],
         ["ComputeOverlayCssTransform", () => ComputeOverlayCssTransform()],
         ["GetElementPixelFromUv", () => GetElementPixelFromUv()],
@@ -199,6 +201,10 @@ describe("HTML-texture function stubs throw on call", () => {
     it.each(cases)("%s throws LiteCompatError naming the API", (name, call) => {
         expect(call).toThrow(LiteCompatError);
         expect(call).toThrow(new RegExp(name));
+    });
+
+    it("exposes the upstream engine parameter", () => {
+        expectTypeOf(IsHtmlInCanvasUploadSupported).parameter(0).toEqualTypeOf<AbstractEngine>();
     });
 });
 

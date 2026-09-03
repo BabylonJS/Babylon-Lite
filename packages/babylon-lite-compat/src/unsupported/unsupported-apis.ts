@@ -13,6 +13,7 @@
  */
 
 import { unsupported } from "../error.js";
+import type { AbstractEngine } from "../engine/engine.js";
 import { PushMaterial } from "../materials/materials.js";
 import type { Material } from "../materials/materials.js";
 import type { Scene } from "../scene/scene.js";
@@ -492,7 +493,8 @@ export class HtmlRaycastInteractionManager {
 }
 
 /** Babylon.js `IsHtmlInCanvasUploadSupported` — kept in lockstep with the unavailable upload helper. */
-export function IsHtmlInCanvasUploadSupported(): never {
+export function IsHtmlInCanvasUploadSupported(engine: AbstractEngine): never {
+    void engine;
     return unsupported(
         "IsHtmlInCanvasUploadSupported",
         "Lite's HTML texture owns its element and texture together; it cannot back BJS's arbitrary InternalTexture upload contract."
