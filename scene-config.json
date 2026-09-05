@@ -2607,7 +2607,7 @@
         "name": "Scene 286 — ShaderMaterial on Interleaved glTF",
         "maxMad": 0.01,
         "maxRawKB": 63.53,
-        "description": "glTF Buffer_Interleaved_03 drawn by a ShaderMaterial that reads POSITION (offset 0) and COLOR_0 (offset 12) out of one byteStride-28 bufferView. The ShaderMaterial path previously ignored MeshGPU._vbLayout and fetched both at their canonical tight strides, so the quad collapsed; the colour gradient fails the moment per-attribute offsets are ignored.",
+        "description": "glTF Buffer_Interleaved_03 drawn by a ShaderMaterial. POSITION keeps the source bufferView's non-canonical byteStride of 28 rather than its tight 12, while COLOR_0 is materialized into its own tight buffer by the loader, as it always is. The ShaderMaterial path previously ignored MeshGPU._vbLayout and fetched POSITION at the tight stride, collapsing the quad. So this scene proves a non-canonical STRIDE is honoured, and the mixed strided/tight case alongside it; a non-zero per-attribute OFFSET is covered by shader-vb-color-offset.test.ts, since no loader path currently produces one for this pipeline.",
         "tags": ["gltf", "interleaved", "shader"],
         "skipPerf": true
     },
