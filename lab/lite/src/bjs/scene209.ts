@@ -26,6 +26,7 @@ import "@babylonjs/core/Physics/joinedPhysicsEngineComponent";
 
 /** Mirrors `OFFSET` in lab/lite/src/lite/scene209.ts. */
 const OFFSET = 5_000_000;
+const PHYSICS_FPS = 60;
 
 (async function () {
     const __initStart = performance.now();
@@ -53,6 +54,7 @@ const OFFSET = 5_000_000;
     // so the plugin uses multi-region floating origin automatically.
     const havokInstance = await HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" });
     const hk = new HavokPlugin(true, havokInstance);
+    hk.setTimeStep(1 / PHYSICS_FPS);
     scene.enablePhysics(new Vector3(0, -9.8, 0), hk);
 
     new PhysicsAggregate(sphere, PhysicsShapeType.SPHERE, { mass: 1, restitution: 0.75 }, scene);

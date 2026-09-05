@@ -111,6 +111,8 @@ export interface ShadoSceneResult {
 }
 
 export interface ShadoSceneOptions {
+    clipHeight?: number;
+    clipWidth?: number;
     height?: number;
     query?: string;
     settleMs?: number;
@@ -411,6 +413,15 @@ export async function renderShadoScene(sceneId: number, outputPath: string, opti
             throw new Error(`Scene ${sceneId} did not create a Babylon Lite engine`);
         }
         const rgba = await captureCanvas(engine, canvas);
+        const clipWidth = options.clipWidth ?? canvas.width;
+        const clipHeight = options.clipHeight ?? canvas.height;
+        if (clipWidth < canvas.width || clipHeight < canvas.height) {
+            for (let y = 0; y < canvas.height; y++) {
+                const clippedRowStart = (y * canvas.width + Math.min(clipWidth, canvas.width)) * 4;
+                const clippedRowEnd = (y + 1) * canvas.width * 4;
+                rgba.fill(0, y >= clipHeight ? y * canvas.width * 4 : clippedRowStart, clippedRowEnd);
+            }
+        }
         fs.mkdirSync(path.dirname(outputPath), { recursive: true });
         fs.writeFileSync(outputPath, encodePng(rgba, canvas.width, canvas.height));
         return {
