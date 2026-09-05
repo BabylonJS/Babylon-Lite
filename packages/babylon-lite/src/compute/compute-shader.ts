@@ -104,6 +104,10 @@ export interface ComputeShader {
     /** @internal */ _pipeline: GPUComputePipeline | null;
     /** @internal */ _bindGroup: GPUBindGroup | null;
     /** @internal */ _bindGroupDirty: boolean;
+    /** @internal The GPUBuffers `_bindGroup` was built from, in binding order. A bound
+     *  allocation can be rebuilt or disposed without the device changing, which leaves the
+     *  cached group holding a handle nothing owns any more. */
+    _bindGroupHandles: (GPUBuffer | null)[] | null;
     /** @internal */ _destroyed: boolean;
     /** @internal Device every cached GPU object below belongs to. Compared on each use so
      *  a device-loss replacement invalidates them — GUIDANCE.md's cache rule. */
@@ -192,6 +196,7 @@ function refreshForDevice(shader: ComputeShader): void {
     shader._layout = null;
     shader._pipeline = null;
     shader._bindGroup = null;
+    shader._bindGroupHandles = null;
     shader._bindGroupDirty = true;
     if (shader._uboSpec && shader._uboData) {
         // The previous buffer died with its device; there is nothing to destroy.
@@ -304,23 +309,51 @@ export function setComputeStorageBuffer(shader: ComputeShader, name: string, buf
     shader._bindGroupDirty = true;
 }
 
+/** True when every buffer the cached group was built from is still the one its allocation
+ *  holds. Compares handles rather than a generation counter so nothing extra has to be
+ *  maintained on `StorageBuffer`, and reads `_buffer` directly rather than resolving it,
+ *  because resolving a disposed allocation throws and this is only a staleness question. */
+function bindGroupHandlesCurrent(shader: ComputeShader): boolean {
+    const recorded = shader._bindGroupHandles;
+    if (!recorded) {
+        return false;
+    }
+    let i = 0;
+    if (shader._uboSpec && recorded[i++] !== shader._uboBuffer) {
+        return false;
+    }
+    for (const decl of shader._storageDecls) {
+        if (recorded[i++] !== (shader._bindings.get(decl.name)?._buffer ?? null)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 function ensureBindGroup(shader: ComputeShader): GPUBindGroup {
-    if (shader._bindGroup && !shader._bindGroupDirty) {
+    if (shader._bindGroup && !shader._bindGroupDirty && bindGroupHandlesCurrent(shader)) {
         return shader._bindGroup;
     }
+    const handles: (GPUBuffer | null)[] = [];
     const entries: GPUBindGroupEntry[] = [];
     let binding = 0;
     if (shader._uboBuffer) {
         entries.push({ binding: binding++, resource: { buffer: shader._uboBuffer } });
+    }
+    if (shader._uboSpec) {
+        handles.push(shader._uboBuffer);
     }
     for (const decl of shader._storageDecls) {
         const bound = shader._bindings.get(decl.name);
         if (!bound) {
             throw new Error(`ComputeShader "${shader.name}": storage buffer "${decl.name}" was declared but never bound.`);
         }
-        entries.push({ binding: binding++, resource: { buffer: _getStorageBufferHandle(shader._engine, bound) } });
+        const handle = _getStorageBufferHandle(shader._engine, bound);
+        handles.push(handle);
+        entries.push({ binding: binding++, resource: { buffer: handle } });
     }
     shader._bindGroup = shader._engine._device.createBindGroup({ label: `${shader.name}-bindgroup`, layout: bindGroupLayout(shader), entries });
+    shader._bindGroupHandles = handles;
     shader._bindGroupDirty = false;
     return shader._bindGroup;
 }

@@ -116,13 +116,22 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
         : createMappedBuffer(engine, indices as Uint16Array | Uint32Array, BU.INDEX, `${name}-indices`);
 
     const offsets = options.attributeOffsets;
+    // Only streams that actually READ from the slab get a layout entry. Recording one for
+    // an attribute whose buffer is a tiny zero fallback hands the pipeline the slab's
+    // stride against a buffer far too small for it: wrong reads at best, a buffer-size
+    // validation failure at worst. position/normal/uv always point at the slab, so they
+    // are always described; the optional three are described only when the caller asked
+    // for them, which is also when they are wired up below.
+    const slabTangent = offsets?.tangent !== undefined;
+    const slabUv2 = offsets?.uv2 !== undefined;
+    const slabColor = offsets?.color !== undefined;
     const vbLayout: MeshVbLayout = {
         _p: { _stride: arrayStride, _offset: offsets?.position ?? 0 },
         _n: { _stride: arrayStride, _offset: offsets?.normal ?? 0 },
-        _t: { _stride: arrayStride, _offset: offsets?.tangent ?? 0 },
         _u: { _stride: arrayStride, _offset: offsets?.uv ?? 0 },
-        _u2: { _stride: arrayStride, _offset: offsets?.uv2 ?? 0 },
-        _c: { _stride: arrayStride, _offset: offsets?.color ?? 0 },
+        ...(slabTangent ? { _t: { _stride: arrayStride, _offset: offsets!.tangent! } } : {}),
+        ...(slabUv2 ? { _u2: { _stride: arrayStride, _offset: offsets!.uv2! } } : {}),
+        ...(slabColor ? { _c: { _stride: arrayStride, _offset: offsets!.color! } } : {}),
     };
 
     installHooks();
@@ -139,6 +148,10 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
             positionBuffer: vertexBuffer,
             normalBuffer: vertexBuffer,
             uvBuffer: vertexBuffer,
+            // Advertised by `attributeOffsets`, so they have to come from the slab too.
+            tangentBuffer: slabTangent ? vertexBuffer : null,
+            uv2Buffer: slabUv2 ? vertexBuffer : null,
+            colorBuffer: slabColor ? vertexBuffer : null,
             indexBuffer,
             indexCount,
             indexFormat,
@@ -146,7 +159,7 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
             _vbLayout: vbLayout,
             // Distinct from the loader's `vb…` keys, so a slab mesh and an interleaved glTF
             // mesh can never collide on one material's pipeline cache.
-            _vbKey: `sb${arrayStride}.${vbLayout._p!._offset}.${vbLayout._n!._offset}.${vbLayout._t!._offset}.${vbLayout._u!._offset}.${vbLayout._u2!._offset}.${vbLayout._c!._offset}`,
+            _vbKey: `sb${arrayStride}.${vbLayout._p!._offset}.${vbLayout._n!._offset}.${vbLayout._u!._offset}.${vbLayout._t?._offset ?? "-"}.${vbLayout._u2?._offset ?? "-"}.${vbLayout._c?._offset ?? "-"}`,
             // The slab belongs to whoever created it and is shared with every other
             // mesh holding a slot; this mesh only borrows it.
             _ownsVertexBuffers: false,

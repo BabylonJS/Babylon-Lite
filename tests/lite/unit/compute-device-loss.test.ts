@@ -108,3 +108,31 @@ describe("compute programs survive a device loss", () => {
         expect(first.createComputePipeline).toHaveBeenCalledTimes(1);
     });
 });
+
+describe("compute bind groups notice a bound allocation changing under them", () => {
+    it("rebuilds when a bound storage buffer is replaced without a device change", () => {
+        const { engine, shader, target } = setup();
+        const before = shader._bindGroup;
+
+        // A rebuild replaces `_buffer` in place. Device-loss recovery is one way there,
+        // but it is not the only one, and the device sentinel does not move when it
+        // happens on its own -- so a cached group would keep binding the dead handle.
+        const stale = target._buffer;
+        (target as unknown as { _buffer: GPUBuffer | null })._buffer = engine._device.createBuffer({ size: 256, usage: 0x80 }) as GPUBuffer;
+        expect(target._buffer).not.toBe(stale);
+
+        dispatchCompute(engine, shader, 1);
+
+        expect(shader._bindGroup).not.toBe(before);
+        const entries = (shader._bindGroup as unknown as { entries: { resource: { buffer: unknown } }[] }).entries;
+        expect(entries[entries.length - 1]!.resource.buffer).toBe(target._buffer);
+    });
+
+    it("reuses the cached group when nothing has moved", () => {
+        const { engine, shader } = setup();
+        dispatchCompute(engine, shader, 1);
+        const cached = shader._bindGroup;
+        dispatchCompute(engine, shader, 1);
+        expect(shader._bindGroup).toBe(cached);
+    });
+});
