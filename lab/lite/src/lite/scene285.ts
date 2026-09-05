@@ -15,6 +15,7 @@ import {
     setShaderAttributeFormats,
     startEngine,
 } from "babylon-lite";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 // Four terrain chunks generated entirely on the GPU into ONE storage allocation, each
 // drawn from its own slot in that slab. No readback, no copy: the compute pass writes
@@ -59,7 +60,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     slab[i] = vec4<f32>(x, h, z, h + p.tint);
 }`;
 
-const vertexSource = `struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) shade:f32,};
+const vertexSource = wgsl`struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) shade:f32,};
 @vertex fn mainVertex(input:VertexInput)->VertexOutput{
     var out:VertexOutput;
     out.position=shaderSystem.worldViewProjection*vec4<f32>(input.position.xyz,1.0);
@@ -67,7 +68,7 @@ const vertexSource = `struct VertexOutput{@builtin(position) position:vec4<f32>,
     return out;
 }`;
 
-const fragmentSource = `struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) shade:f32,};
+const fragmentSource = wgsl`struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) shade:f32,};
 @fragment fn mainFragment(input:VertexOutput)->@location(0) vec4<f32>{
     let t=clamp(input.shade*0.9+0.5,0.0,1.0);
     return vec4<f32>(0.10+t*0.35,0.35+t*0.50,0.55+t*0.40,1.0);
