@@ -64,6 +64,18 @@ export interface MeshGPU {
     readonly indexBuffer: GPUBuffer;
     readonly indexCount: number;
     readonly indexFormat: GPUIndexFormat;
+    /** @internal First vertex of this mesh within a shared vertex allocation, applied as the
+     *  draw call's `baseVertex`. Lets many meshes take slots in one GPU-resident slab without
+     *  a non-zero `setVertexBuffer` bind offset. Undefined/0 → canonical behaviour. */
+    readonly _baseVertex?: number;
+    /** @internal When false, disposing the mesh does NOT destroy its vertex-side buffers —
+     *  they are BORROWED from a longer-lived allocation (a GPU-resident slab shared by many
+     *  meshes) and must outlive this mesh. Without it, retiring one slot destroys the slab
+     *  every other slot is still drawing from. Defaults to owning. */
+    readonly _ownsVertexBuffers?: boolean;
+    /** @internal When false, disposing the mesh does NOT destroy `indexBuffer` — the topology
+     *  is shared across meshes and owned by the caller. Defaults to owning. */
+    readonly _ownsIndexBuffer?: boolean;
     /** @internal Reserved vertex capacity for grow-only procedural geometry. */
     _vertexCapacity?: number;
     /** @internal Reserved index capacity for grow-only procedural geometry. */
