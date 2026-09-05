@@ -147,6 +147,8 @@ export interface ShaderStorageBufferSlot {
  *  via `setShaderUniform()` / `setShaderTexture()` and friends. */
 export interface ShaderMaterial extends Material {
     readonly name?: string;
+    /** @internal Non-canonical vertex formats installed by `setShaderAttributeFormats`. */
+    _attributeFormats?: ShaderAttributeFormats;
     readonly vertexSource: WgslSource;
     readonly fragmentSource: WgslSource;
     readonly attributes: readonly ShaderAttributeName[];
