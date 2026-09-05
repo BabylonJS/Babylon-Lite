@@ -118,7 +118,7 @@ export type ShaderRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
  *  source geometry from a StorageBuffer stay byte-identical. */
 export interface ShaderVbRenderSupport {
     /** @internal Layouts + pipeline-key suffix for one mesh, or null when it is tightly packed. */
-    _forMesh(material: ShaderMaterial, bindings: ShaderPipelineBindings, mesh: Mesh): { readonly _vbs: readonly GPUVertexBufferLayout[]; readonly _key: string } | null;
+    _forMesh(material: ShaderMaterial, bindings: ShaderPipelineBindings, packet?: ShaderPacket): { readonly _vbs: readonly GPUVertexBufferLayout[]; readonly _key: string } | null;
     /** @internal Split packets into groups that can share one pipeline, or null when they all agree. */
     _group(packets: readonly ShaderPacket[]): readonly (readonly ShaderPacket[])[] | null;
     /** @internal Draw one packet, honouring a slot base inside a shared allocation. */
@@ -303,7 +303,10 @@ function createOpaqueRenderable(
         bind(eng, sig) {
             const bindings = getOrCreateShaderPipelineBindings(eng, material);
             const uniformBatch = getUniformBatch?.(sig);
-            const vb = _vbRender?._forMesh(material, bindings, packets[0]!.mesh);
+            // All packets can be disposed out from under a merged renderable (e.g. every mesh sharing this
+            // material was removed) before the next bind — `packets` is spliced live by registerMeshTextureDisposer.
+            // Fall back to the bindings-only pipeline (no vertex-buffer layout) rather than dereferencing packets[0].
+            const vb = _vbRender?._forMesh(material, bindings, packets[0]);
             return {
                 renderable: r,
                 pipeline: vb ? getOrCreateShaderPipeline(eng, sig, material, bindings, vb._key, vb._vbs) : getOrCreateShaderPipeline(eng, sig, material, bindings),
@@ -353,7 +356,7 @@ function createTransparentRenderable(scene: SceneContext, material: ShaderMateri
         bind(eng, sig) {
             const bindings = getOrCreateShaderPipelineBindings(eng, material);
             const uniformBatch = getUniformBatch?.(sig);
-            const vb = _vbRender?._forMesh(material, bindings, packet.mesh);
+            const vb = _vbRender?._forMesh(material, bindings, packet);
             return {
                 renderable: r,
                 pipeline: vb ? getOrCreateShaderPipeline(eng, sig, material, bindings, vb._key, vb._vbs) : getOrCreateShaderPipeline(eng, sig, material, bindings),

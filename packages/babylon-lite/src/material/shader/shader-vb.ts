@@ -25,15 +25,6 @@ import { _attributeLayout, _attributeWgslType, _installShaderVbSupport } from ".
 import type { ShaderPacket, ShaderRenderPass } from "./shader-renderable.js";
 import { _installShaderVbRenderSupport } from "./shader-renderable.js";
 
-/** Declared formats per material.
- *
- *  A side table rather than a `ShaderMaterialOptions` field, for the same reason
- *  `setShaderTexture` and `setShaderStorageBuffer` are functions rather than options:
- *  carrying the field on every material would cost bytes in every ShaderMaterial scene,
- *  including the overwhelming majority that never declare a non-canonical format. Here
- *  the whole mechanism lives in the opt-in module and costs nothing when absent. */
-const _formats = new WeakMap<ShaderMaterial, ShaderAttributeFormats>();
-
 /** Declare non-canonical vertex formats for a material's attributes — e.g. a `float32x4`
  *  position whose `.w` carries packed per-vertex data, arriving in WGSL as
  *  `input.position : vec4<f32>`.
@@ -43,7 +34,7 @@ const _formats = new WeakMap<ShaderMaterial, ShaderAttributeFormats>();
  *  Call before the material's first draw — the formats are baked into the generated WGSL
  *  prelude and the pipeline's vertex layout. */
 export function setShaderAttributeFormats(material: ShaderMaterial, formats: ShaderAttributeFormats): void {
-    _formats.set(material, formats);
+    material._attributeFormats = formats;
     _enableShaderVb();
 }
 
@@ -62,13 +53,16 @@ const VB_SLOT: Partial<Record<ShaderAttributeName, keyof MeshVbLayout>> = {
 /** Byte size of one vertex in `format` — the tight `arrayStride` when the geometry does
  *  not describe its own packing. */
 function formatBytes(format: GPUVertexFormat): number {
+    if (format.startsWith("unorm10")) {
+        return 4;
+    }
     const componentBytes = format.includes("8") ? 1 : format.includes("16") ? 2 : 4;
-    const components = format.endsWith("x2") ? 2 : format.endsWith("x3") ? 3 : format.endsWith("x4") ? 4 : 1;
-    return componentBytes * components;
+    const components = format.includes("x2") ? 2 : format.includes("x3") ? 3 : format.includes("x4") ? 4 : 1;
+    return (componentBytes * components + 3) & ~3;
 }
 
 function attributeLayoutFor(material: ShaderMaterial, name: ShaderAttributeName, shaderLocation: number, vb?: MeshVbAttr): GPUVertexBufferLayout {
-    const format = _formats.get(material)?.[name];
+    const format = material._attributeFormats?.[name];
     const canonical = _attributeLayout(name, shaderLocation);
     if (!format && !vb) {
         return canonical;
@@ -80,19 +74,15 @@ function attributeLayoutFor(material: ShaderMaterial, name: ShaderAttributeName,
     };
 }
 
-/** WGSL type of a vertex attribute in `format`. Normalized/packed formats all expand to
- *  f32 vectors, as WebGPU defines them. */
+/** WGSL type of a vertex attribute in `format`, per the WebGPU vertex-format-to-shader-type
+ *  table: `uint*` formats expand to `u32`/`vecN<u32>`, `sint*` formats expand to
+ *  `i32`/`vecN<i32>`, and every normalized/float/packed format (`unorm*`, `snorm*`,
+ *  `float16*`, `float32*`, and the two packed 4-component forms) expands to
+ *  `f32`/`vecN<f32>`. Component count comes from the format itself, not a fixed default. */
 function wgslTypeForFormat(format: GPUVertexFormat): string {
-    if (format.startsWith("uint32")) {
-        return format === "uint32" ? "u32" : `vec${format.slice(-1)}<u32>`;
-    }
-    if (format.startsWith("sint32")) {
-        return format === "sint32" ? "i32" : `vec${format.slice(-1)}<i32>`;
-    }
-    if (format.startsWith("float32")) {
-        return format === "float32" ? "f32" : `vec${format.slice(-1)}<f32>`;
-    }
-    return "vec4<f32>";
+    const components = format.startsWith("unorm10") ? 4 : format.includes("x2") ? 2 : format.includes("x3") ? 3 : format.includes("x4") ? 4 : 1;
+    const scalar = format.startsWith("uint") ? "u32" : format.startsWith("sint") ? "i32" : "f32";
+    return components === 1 ? scalar : `vec${components}<${scalar}>`;
 }
 
 let _installed = false;
@@ -108,15 +98,15 @@ export function _enableShaderVb(): void {
     _installShaderVbSupport({
         _layouts: (material) => material.attributes.map((name, i) => attributeLayoutFor(material, name, i)),
         _wgslType: (material, name) => {
-            const format = _formats.get(material)?.[name];
+            const format = material._attributeFormats?.[name];
             return format ? wgslTypeForFormat(format) : _attributeWgslType(name);
         },
     });
 
     _installShaderVbRenderSupport({
-        _forMesh: (material: ShaderMaterial, _bindings: ShaderPipelineBindings, mesh) => {
-            const layout = mesh._gpu._vbLayout;
-            const key = mesh._gpu._vbKey;
+        _forMesh: (material: ShaderMaterial, _bindings: ShaderPipelineBindings, packet) => {
+            const layout = packet?.mesh._gpu._vbLayout;
+            const key = packet?.mesh._gpu._vbKey;
             if (!layout || !key) {
                 return null;
             }
