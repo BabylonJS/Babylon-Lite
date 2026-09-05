@@ -136,7 +136,7 @@ export async function prepareAdvancedDraw(
                         deform.bindDeformPickingProjection(engine, pass, pipeline, mesh, 1, !!discardBG);
                     }
                     pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
-                    pass.drawIndexed(gpu.indexCount, ti.count);
+                    pass.drawIndexed(gpu.indexCount, ti.count, 0, gpu._baseVertex);
                     ranges.push({
                         base: nextId,
                         count: ti.count,
@@ -183,7 +183,7 @@ export async function prepareAdvancedDraw(
                     deform.bindDeformPickingProjection(engine, pass, pipeline, mesh, vertexData ? 2 : 1, !!discardBG);
                 }
                 pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
-                pass.drawIndexed(gpu.indexCount);
+                pass.drawIndexed(gpu.indexCount, 1, 0, gpu._baseVertex);
                 ranges.push({
                     base: nextId,
                     count: 1,

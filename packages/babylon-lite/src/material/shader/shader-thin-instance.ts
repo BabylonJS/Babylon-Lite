@@ -147,7 +147,7 @@ function createShaderInstancedRenderable(
         } else if (drawArgs) {
             pass.drawIndexedIndirect(drawArgs, 0);
         } else {
-            pass.drawIndexed(gpu.indexCount, ti.count);
+            pass.drawIndexed(gpu.indexCount, ti.count, 0, gpu._baseVertex);
         }
         return 1;
     };
