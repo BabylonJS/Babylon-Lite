@@ -56,7 +56,7 @@ function loadPng(path: string): { width: number; height: number; data: Uint8Arra
 }
 
 /** Compare two PNG files pixel-by-pixel. Returns stats for all pixels. */
-export function compareImages(actualPath: string, referencePath: string): CompareResult {
+export function compareImages(actualPath: string, referencePath: string, channelTolerance = 0): CompareResult {
     const actual = loadPng(actualPath);
     const ref = loadPng(referencePath);
     const w = Math.min(actual.width, ref.width);
@@ -78,7 +78,10 @@ export function compareImages(actualPath: string, referencePath: string): Compar
             let pixSum = 0;
             for (let c = 0; c < 3; c++) {
                 const d = Math.abs(actual.data[ai + c]! - ref.data[ri + c]!);
-                pixSum += d;
+                // Native WebGPU implementations can quantize an exact half-LSB
+                // in opposite directions. Headless comparisons may opt into a
+                // one-byte tolerance without weakening larger pixel deltas.
+                pixSum += d <= channelTolerance ? 0 : d;
                 if (d > pixMax) pixMax = d;
             }
             sumDiff += pixSum / 3;
