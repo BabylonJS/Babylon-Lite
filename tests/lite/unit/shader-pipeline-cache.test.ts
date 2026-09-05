@@ -6,6 +6,7 @@ import { createShaderMaterial } from "../../../packages/babylon-lite/src/materia
 import { clearShaderPipelineCache, enableShaderPipelineCache } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline-cache";
 import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline";
 import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/scene-helpers";
+import { wgsl, type WgslSource } from "../../../packages/babylon-lite/src/shader/wgsl";
 
 function makeEngine() {
     const createBindGroupLayout = vi.fn((descriptor: GPUBindGroupLayoutDescriptor) => descriptor as unknown as GPUBindGroupLayout);
@@ -27,9 +28,9 @@ function makeEngine() {
     };
 }
 
-function makeMaterial(fragment = "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }", blend?: GPUBlendState, topology?: GPUPrimitiveTopology) {
+function makeMaterial(fragment: WgslSource = wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`, blend?: GPUBlendState, topology?: GPUPrimitiveTopology) {
     const material = createShaderMaterial({
-        vertexSource: "@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }",
+        vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
         fragmentSource: fragment,
         attributes: ["position"],
         uniforms: ["world", { name: "tint", type: "vec3<f32>" }],
@@ -78,7 +79,7 @@ describe("ShaderMaterial pipeline cache", () => {
         clearSceneBGLCache();
         const { engine, createPipelineLayout, createShaderModule, createRenderPipeline } = makeEngine();
         const first = makeMaterial();
-        const second = makeMaterial("@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(0); }");
+        const second = makeMaterial(wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(0); }`);
         enableShaderPipelineCache(engine, [{ material: first }, { material: second }]);
         const firstBindings = getOrCreateShaderPipelineBindings(engine, first);
         getOrCreateShaderPipeline(engine, signature, first, firstBindings);

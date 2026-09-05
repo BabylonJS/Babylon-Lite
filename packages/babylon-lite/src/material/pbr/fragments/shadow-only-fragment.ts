@@ -41,6 +41,7 @@ import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { PBR_HAS_ALPHA_BLEND } from "../pbr-flags.js";
 import { MAX_LIGHTS } from "../../../light/types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 // Feature2 bit local to this lazy module (see pbr-flag-bits.ts): never retained
 // in the entry/shared chunk for scenes that don't load this fragment.
@@ -56,9 +57,9 @@ const PBR2_HAS_SHADOW_ONLY = 1 << 30;
 export function createShadowOnlyFragment(): ShaderFragment {
     const unrolled: string[] = [];
     for (let i = 0; i < MAX_LIGHTS; i++) {
-        unrolled.push(`so_shadowMin = min(so_shadowMin, shadowFactors[${i}]);`);
+        unrolled.push(wgsl`so_shadowMin = min(so_shadowMin, shadowFactors[${i}]);`);
     }
-    const bc = `
+    const bc = wgsl`
 {
 var so_shadowMin = 1.0;
 ${unrolled.join("\n")}
@@ -79,7 +80,7 @@ alpha = saturate((1.0 - so_shadowMin) * material.shadowOnlyFalloff) * material.s
             // Overwrite finalAlpha after the alpha block's luminanceOverAlpha fold so
             // environment/direct specular can't make the shadow catcher opaque. `alpha`
             // holds the shadow term set in BC.
-            FA: `finalAlpha = alpha * material.materialAlpha;`,
+            FA: wgsl`finalAlpha = alpha * material.materialAlpha;`,
         },
     };
 }

@@ -6,6 +6,7 @@
  */
 
 import type { BlockEmitter, NodeBlock, NodeBuildState, NodeEmitContext, NodeExpr, NodeValueType, Stage } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const OUTPUT: Record<string, { swizzle: string; type: NodeValueType }> = {
     rgba: { swizzle: "", type: "vec4f" },
@@ -37,10 +38,10 @@ function applyColorSpace(expr: string, outputName: string, convertToLinear: bool
     }
     const power = convertToLinear ? "2.2" : "0.45454545";
     if (outputName === "rgba") {
-        return `vec4<f32>(pow(max(${expr}.xyz, vec3<f32>(0.0)), vec3<f32>(${power})), ${expr}.w)`;
+        return wgsl`vec4<f32>(pow(max(${expr}.xyz, vec3<f32>(0.0)), vec3<f32>(${power})), ${expr}.w)`;
     }
     if (outputName === "rgb") {
-        return `pow(max(${expr}.xyz, vec3<f32>(0.0)), vec3<f32>(${power}))`;
+        return wgsl`pow(max(${expr}.xyz, vec3<f32>(0.0)), vec3<f32>(${power}))`;
     }
     if (outputName === "r" || outputName === "g" || outputName === "b") {
         return `pow(max(${expr}${OUTPUT[outputName]!.swizzle}, 0.0), ${power})`;
@@ -83,29 +84,29 @@ function emitBiPlanarSample(block: NodeBlock, stage: Stage, state: NodeBuildStat
     const w = `_w${temp}`;
     const sample = `_sample${temp}`;
 
-    stageState.body.push(`let ${p} = ${position.expr};`);
-    stageState.body.push(`let ${dx} = dpdx(${p});`);
-    stageState.body.push(`let ${dy} = dpdy(${p});`);
-    stageState.body.push(`let ${n} = abs(${normal.expr});`);
-    stageState.body.push(`var ${ma}: vec3<i32>;`);
+    stageState.body.push(wgsl`let ${p} = ${position.expr};`);
+    stageState.body.push(wgsl`let ${dx} = dpdx(${p});`);
+    stageState.body.push(wgsl`let ${dy} = dpdy(${p});`);
+    stageState.body.push(wgsl`let ${n} = abs(${normal.expr});`);
+    stageState.body.push(wgsl`var ${ma}: vec3<i32>;`);
     stageState.body.push(
-        `if (${n}.x > ${n}.y && ${n}.x > ${n}.z) { ${ma} = vec3<i32>(0, 1, 2); } else if (${n}.y > ${n}.z) { ${ma} = vec3<i32>(1, 2, 0); } else { ${ma} = vec3<i32>(2, 0, 1); }`
+        wgsl`if (${n}.x > ${n}.y && ${n}.x > ${n}.z) { ${ma} = vec3<i32>(0, 1, 2); } else if (${n}.y > ${n}.z) { ${ma} = vec3<i32>(1, 2, 0); } else { ${ma} = vec3<i32>(2, 0, 1); }`
     );
-    stageState.body.push(`var ${mi}: vec3<i32>;`);
+    stageState.body.push(wgsl`var ${mi}: vec3<i32>;`);
     stageState.body.push(
-        `if (${n}.x < ${n}.y && ${n}.x < ${n}.z) { ${mi} = vec3<i32>(0, 1, 2); } else if (${n}.y < ${n}.z) { ${mi} = vec3<i32>(1, 2, 0); } else { ${mi} = vec3<i32>(2, 0, 1); }`
+        wgsl`if (${n}.x < ${n}.y && ${n}.x < ${n}.z) { ${mi} = vec3<i32>(0, 1, 2); } else if (${n}.y < ${n}.z) { ${mi} = vec3<i32>(1, 2, 0); } else { ${mi} = vec3<i32>(2, 0, 1); }`
     );
-    stageState.body.push(`let ${me} = vec3<i32>(3, 3, 3) - ${mi} - ${ma};`);
+    stageState.body.push(wgsl`let ${me} = vec3<i32>(3, 3, 3) - ${mi} - ${ma};`);
     stageState.body.push(
-        `let ${x} = textureSampleGrad(nodeTex_${texX}, nodeSamp_${texX}, vec2<f32>(${p}[${ma}.y], ${p}[${ma}.z]), vec2<f32>(${dx}[${ma}.y], ${dx}[${ma}.z]), vec2<f32>(${dy}[${ma}.y], ${dy}[${ma}.z]));`
+        wgsl`let ${x} = textureSampleGrad(nodeTex_${texX}, nodeSamp_${texX}, vec2<f32>(${p}[${ma}.y], ${p}[${ma}.z]), vec2<f32>(${dx}[${ma}.y], ${dx}[${ma}.z]), vec2<f32>(${dy}[${ma}.y], ${dy}[${ma}.z]));`
     );
     stageState.body.push(
-        `let ${y} = textureSampleGrad(nodeTex_${texY}, nodeSamp_${texY}, vec2<f32>(${p}[${me}.y], ${p}[${me}.z]), vec2<f32>(${dx}[${me}.y], ${dx}[${me}.z]), vec2<f32>(${dy}[${me}.y], ${dy}[${me}.z]));`
+        wgsl`let ${y} = textureSampleGrad(nodeTex_${texY}, nodeSamp_${texY}, vec2<f32>(${p}[${me}.y], ${p}[${me}.z]), vec2<f32>(${dx}[${me}.y], ${dx}[${me}.z]), vec2<f32>(${dy}[${me}.y], ${dy}[${me}.z]));`
     );
-    stageState.body.push(`var ${w} = vec2<f32>(${n}[${ma}.x], ${n}[${me}.x]);`);
-    stageState.body.push(`${w} = clamp((${w} - vec2<f32>(0.5773)) / vec2<f32>(1.0 - 0.5773), vec2<f32>(0.0), vec2<f32>(1.0));`);
-    stageState.body.push(`${w} = pow(${w}, vec2<f32>(${sharpness} / 8.0));`);
-    stageState.body.push(`let ${sample} = (${x} * ${w}.x + ${y} * ${w}.y) / (${w}.x + ${w}.y);`);
+    stageState.body.push(wgsl`var ${w} = vec2<f32>(${n}[${ma}.x], ${n}[${me}.x]);`);
+    stageState.body.push(wgsl`${w} = clamp((${w} - vec2<f32>(0.5773)) / vec2<f32>(1.0 - 0.5773), vec2<f32>(0.0), vec2<f32>(1.0));`);
+    stageState.body.push(wgsl`${w} = pow(${w}, vec2<f32>(${sharpness} / 8.0));`);
+    stageState.body.push(wgsl`let ${sample} = (${x} * ${w}.x + ${y} * ${w}.y) / (${w}.x + ${w}.y);`);
 
     const result = { expr: sample, type: "vec4f" } as const;
     stageState.memo.set(memoKey, result);

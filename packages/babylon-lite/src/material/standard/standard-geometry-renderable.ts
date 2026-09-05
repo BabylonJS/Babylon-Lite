@@ -61,6 +61,7 @@ import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_MORPH_TARGETS, MS
 import { _getStandardGeometrySkeletonVelocityFactory, _getStandardGeometryThinInstanceHelpers } from "./geometry-view.js";
 import type { StandardGeometryMaterialView } from "./geometry-view.js";
 import type { StandardGeometryContext } from "./standard-renderable.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 /** Lazily-created singleton {@link MeshGroupBuilder} that geometry views point at
  *  via their overridden `_buildGroup`. The async builder body is unreachable —
@@ -457,7 +458,7 @@ function _ensureViewResources(
             frags.push({
                 ...rest,
                 _fragmentSlots: {
-                    BC: `color = vec4<f32>(color.rgb * input.vInstanceColor.rgb, color.a * input.vInstanceColor.a);`,
+                    BC: wgsl`color = vec4<f32>(color.rgb * input.vInstanceColor.rgb, color.a * input.vInstanceColor.a);`,
                 },
             });
         } else {

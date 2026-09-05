@@ -11,6 +11,7 @@
 
 import type { BlockEmitter, NodeBuildState, NodeEmitContext, NodeExpr, NodeValueType, Stage, NodeBlock } from "../node-types.js";
 import { WGSL } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 type BjsType = number; // NodeMaterialBlockConnectionPointTypes
 
@@ -21,7 +22,7 @@ function wgslLiteral(value: unknown, type: NodeValueType): string {
     }
     if (Array.isArray(value)) {
         const parts = value.map((v) => formatFloat(typeof v === "number" ? v : 0)).join(", ");
-        return `${WGSL[type]}(${parts})`;
+        return wgsl`${WGSL[type]}(${parts})`;
     }
     // Fallback to zero.
     if (type === "vec2f") {
@@ -80,7 +81,7 @@ function emitAttribute(block: NodeBlock, stage: Stage, state: NodeBuildState): N
     const vname = `v_attr_${attrName}`;
     if (!state.varyings.find((v) => v._name === vname)) {
         state.varyings.push({ _name: vname, _type: wgslType });
-        state.vertex.body.push(`out.${vname} = in.${attrName};`);
+        state.vertex.body.push(wgsl`out.${vname} = in.${attrName};`);
     }
     return { expr: `in.${vname}`, type };
 }

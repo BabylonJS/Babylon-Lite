@@ -16,6 +16,7 @@ import {
     SPECULAR_USES_UV2,
 } from "../standard-flags.js";
 import { _registerStdExt, type StdExt } from "../standard-flags.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const STAGE_VERTEX = 0x1;
 // Reserved Standard feature bit 23. Kept in this lazy fragment so scenes that
@@ -107,13 +108,13 @@ function createStdUvTransformFragment(features: number): ShaderFragment {
         if (name !== "d") {
             varyings.push({ _name: varying, _type: "vec2<f32>" });
         }
-        assignments.push(`out.${varying}=stdTxfUV(${usesUv2 ? "uv2" : "uv"},stdUvTx.${name}m,stdUvTx.${name}t.xy);`);
+        assignments.push(wgsl`out.${varying}=stdTxfUV(${usesUv2 ? "uv2" : "uv"},stdUvTx.${name}m,stdUvTx.${name}t.xy);`);
     }
     return {
         _id: "0-std-uv-transform",
         _varyings: varyings,
         _bindings: [{ _name: "stdUvTx", _type: { _kind: "uniform-buffer" }, _visibility: STAGE_VERTEX }],
-        _vertexHelperFunctions: `struct stdUvTxUniforms {
+        _vertexHelperFunctions: wgsl`struct stdUvTxUniforms {
 dm:vec4<f32>,dt:vec4<f32>,
 em:vec4<f32>,et:vec4<f32>,
 bm:vec4<f32>,bt:vec4<f32>,
@@ -125,9 +126,9 @@ om:vec4<f32>,ot:vec4<f32>,
 fn stdTxfUV(uv:vec2<f32>,m:vec4<f32>,t:vec2<f32>)->vec2<f32>{
 return vec2<f32>(dot(m.xy,uv),dot(m.zw,uv))+t;
 }`,
-        _vertexSlots: { VB: assignments.join("\n") },
+        _vertexSlots: { VB: wgsl`${assignments.join("\n")}` },
         _pc: (composed) => {
-            let fragmentWGSL = composed._fragmentWGSL;
+            let fragmentWGSL: string = composed._fragmentWGSL;
             for (const [texture, sampler, varying] of [
                 ["eT", "eS", "ve"],
                 ["sT", "sS", "vs"],
@@ -142,7 +143,7 @@ return vec2<f32>(dot(m.xy,uv),dot(m.zw,uv))+t;
             fragmentWGSL = fragmentWGSL
                 .replace(/perturbNormal\(input\.vn,\s*input\.vp,\s*input\.vu,\s*mat\.bs\)/g, "perturbNormal(input.vn, input.vp, input.vb, mat.bs)")
                 .replace(/textureSample\(lT,\s*lS,\s*(?:input\.v[uv]|vec2<f32>\(input\.v[uv]\.x,\s*1\.0\s*-\s*input\.v[uv]\.y\))\)/g, "textureSample(lT, lS, input.vl)");
-            return { ...composed, _fragmentWGSL: fragmentWGSL };
+            return { ...composed, _fragmentWGSL: wgsl`${fragmentWGSL}` };
         },
     };
 }

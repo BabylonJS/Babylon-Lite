@@ -21,6 +21,7 @@ import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/sc
 import type { Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { ShadowGenerator } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUShaderStage"> & {
     GPUShaderStage?: { VERTEX: number; FRAGMENT: number };
@@ -46,8 +47,8 @@ function makeEngine(createAsync?: (descriptor: GPURenderPipelineDescriptor) => P
 
 function makeMaterial() {
     return createShaderMaterial({
-        vertexSource: "@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }",
-        fragmentSource: "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }",
+        vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
+        fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
         attributes: ["position"],
     });
 }

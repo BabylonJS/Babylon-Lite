@@ -4,6 +4,7 @@ import { createMaterialView } from "../material-view.js";
 import type { MaterialView } from "../material.js";
 import { PBR_HAS_ALPHA_BLEND, PBR2_ESM_SHADOW_OUTPUT } from "./pbr-flags.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 export interface PbrEsmShadowMaterialView extends MaterialView {
     /** @internal */
@@ -12,7 +13,7 @@ export interface PbrEsmShadowMaterialView extends MaterialView {
     readonly _esmShadowDepthCode: string;
 }
 
-const PBR_ESM_SHADOW_DEPTH_CODE = `let depthMetricSM = (input.clipPos.z + shadowParams.depthValues.x) / shadowParams.depthValues.y + shadowParams.biasAndScale.x;
+const PBR_ESM_SHADOW_DEPTH_CODE = wgsl`let depthMetricSM = (input.clipPos.z + shadowParams.depthValues.x) / shadowParams.depthValues.y + shadowParams.biasAndScale.x;
 let depthSM = clamp(exp(-min(87.0, shadowParams.biasAndScale.z * depthMetricSM)), 0.0, 1.0);
 return vec4<f32>(depthSM, 1.0, 1.0, 1.0);`;
 

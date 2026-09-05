@@ -45,7 +45,7 @@ import { setSprite2DCoverageGamma } from "../../../packages/babylon-lite/src/spr
 import type { SpriteAtlas } from "../../../packages/babylon-lite/src/sprite/shared/sprite-atlas";
 import { disposeSpriteAtlas } from "../../../packages/babylon-lite/src/sprite/shared/sprite-atlas";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
-import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { getRenderingContextKind, type EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 
 // ── Mock GPU device ───────────────────────────────────────────────
 
@@ -155,12 +155,12 @@ function makeMockAtlas(): SpriteAtlas {
 // ── Tests ─────────────────────────────────────────────────────────
 
 describe("createSpriteRenderer", () => {
-    it("returns an object with _kind === 'sprite-renderer' and the RenderingContext methods", () => {
+    it("returns an object identified as a sprite renderer with the RenderingContext methods", () => {
         const { engine } = makeMockEngine();
         const atlas = makeMockAtlas();
         const layer = createSprite2DLayer(atlas);
         const sr = createSpriteRenderer(engine, { layers: [layer] });
-        expect(sr._kind).toBe("sprite-renderer");
+        expect(getRenderingContextKind(sr)).toBe("sprite-renderer");
         expect(typeof sr._update).toBe("function");
         expect(typeof sr._record).toBe("function");
         expect(sr._drawCallsPre).toBe(0);

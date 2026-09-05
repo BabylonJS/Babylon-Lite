@@ -7,8 +7,9 @@
  */
 
 import type { BlockEmitter } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
-const IRIDESCENCE_HELPERS = `const NME_PBR_XYZ_TO_REC709: mat3x3<f32> = mat3x3<f32>(
+const IRIDESCENCE_HELPERS = wgsl`const NME_PBR_XYZ_TO_REC709: mat3x3<f32> = mat3x3<f32>(
     3.2404542, -0.9692660, 0.0556434,
     -1.5371385, 1.8760108, -0.2040259,
     -0.4985314, 0.0415560, 1.0572252
@@ -69,6 +70,6 @@ export const emitter: BlockEmitter = {
     emit(_block, _outputName, _stage, state, _ctx) {
         state.usesIridescence = true;
         state.fragment.helpers.set("nme_pbr_iridescence_helpers", IRIDESCENCE_HELPERS);
-        return { expr: `vec3<f32>(0.0)`, type: "vec3f" };
+        return { expr: wgsl`vec3<f32>(0.0)`, type: "vec3f" };
     },
 };

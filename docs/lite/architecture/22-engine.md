@@ -14,6 +14,23 @@ The render canvas may be either a DOM `HTMLCanvasElement` (main thread) or an `O
 /** A surface the engine can render into: a DOM canvas or an OffscreenCanvas. */
 export type RenderCanvas = HTMLCanvasElement | OffscreenCanvas;
 
+/** Read-only public view of a registered rendering context. */
+export interface RenderingContext {
+    clearColor: GPUColorDict;
+}
+
+/** Return the surface's live rendering-context list in render order. */
+export function getRenderingContexts(surface: SurfaceContext): readonly RenderingContext[];
+
+/** Return the rendering context's stable family identifier. */
+export function getRenderingContextKind(context: RenderingContext): string;
+
+/** Top-level scene context. */
+export interface SceneContext extends RenderingContext {
+    /** Optional display name for tooling and diagnostics. */
+    name?: string;
+}
+
 /** Handle to the WebGPU engine — public API surface.
  *  GPU internals (device, context, format) are @internal — not user-facing. */
 export interface EngineContext {
@@ -100,6 +117,10 @@ interface EngineContextInternal extends EngineContext {
 5. **MSAA**: Defaults to `msaaSamples = 4`, or `1` when requested.
 6. **Rendering contexts**: Initializes an empty `_renderingContexts` list. Scenes and other renderers register themselves with the engine.
 
+### Rendering-Context Introspection
+
+`getRenderingContexts(surface)` returns the surface's existing registry array as a readonly live view; it does not allocate a snapshot. Registration and unregistration are therefore visible through a previously returned reference, in render order, with no per-frame work. `getRenderingContextKind(context)` returns `"scene"`, `"frame-graph-context"`, `"effect-renderer"`, `"sprite-renderer"`, or `"text-renderer"` for the current built-in contexts. Its return type is intentionally the open `string` type, so adding a new context family is not a breaking API change. It throws a `TypeError` when passed a structural public object that is not a rendering context created by Lite. A utility layer registers an ordinary scene context with the default name `"UtilityLayer"`; tools can display `SceneContext.name` without treating utility layers as a separate rendering-context family.
+
 ### Render Targets
 
 The engine no longer owns per-frame color/depth render targets directly. Render targets are owned by registered rendering contexts, primarily scene frame-graph `RenderTask`s. The engine owns the canvas/swapchain and exposes the current swapchain view once per frame through `_swapchainView`.
@@ -171,11 +192,15 @@ Scenes read `engine._currentDelta` during their `_update()` step. If `scene.fixe
 Each frame consists of:
 
 1. **Create command encoder**: `device.createCommandEncoder({ label: "frame" })` and assign `engine._currentEncoder`.
-2. **Obtain swapchain view**: `engine.context.getCurrentTexture().createView()` and assign `engine._swapchainView`.
-3. **Update/record contexts**: For each registered `RenderingContext`, call `_update()` then `_record()`.
+2. **Prepare each surface**: run its optional screenshot pre-frame hook, then acquire the surface's current swapchain texture into `surface.scRT`.
+3. **Update/record contexts**: For each surface, call `_update()` then `_record()` on every registered `RenderingContext`.
     - A scene `_update()` runs before-render callbacks, material swaps, shadow maps, legacy pre-passes, and shared uniform updaters.
     - A scene `_record()` delegates to `scene._frameGraph.execute()`.
-4. **Submit**: finish the command encoder and submit via the reusable `engine._cbs` array to avoid per-frame array allocation.
+    - A render task that targets `scene.surface.scRT` re-reads that surface's attachment view immediately before opening the pass. It must not compare against `engine.scRT`, which identifies only the primary canvas and would leave auxiliary scenes submitting an expired build-time swapchain view.
+4. **Record screenshot copies**: each promoted surface with queued requests copies its just-rendered swapchain texture into one staging buffer.
+5. **Submit**: finish the command encoder and submit via the reusable `engine._cbs` array to avoid per-frame array allocation.
+
+The per-surface attachment refresh is required because `GPUCanvasContext.getCurrentTexture()` returns a new swapchain texture over time. Reusing the auxiliary surface's view captured during frame-graph build produces a WebGPU validation error; because one command buffer contains every surface's work, that invalid auxiliary pass also discards the primary canvas's rendering.
 
 ### Deferred Builder Execution
 
@@ -272,6 +297,7 @@ Disabling task timing destroys its query set, resolve buffer, pooled readbacks, 
 | `start/stop manages rAF`                          | Verify `requestAnimationFrame` called on start, `cancelAnimationFrame` on stop                 |
 | `waitForGpuIdle returns the queue fence`          | Verify `onSubmittedWorkDone()` is called once and its exact Promise is returned                |
 | `renderFrame calls scene callbacks`               | Verify pre-passes → updaters → renderables order                                               |
+| `rendering-context query is live and readonly`    | Verify stable array identity, registration-order updates, and public kind discriminators       |
 | `MSAA resolve target is swap chain view`          | Inspect color attachment `resolveTarget` in render pass descriptor                             |
 | `depth format is depth24plus-stencil8`            | Verify `depthTexture.format`                                                                   |
 

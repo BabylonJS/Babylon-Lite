@@ -9,7 +9,9 @@
  * sampled prefiltered radiance directly.
  */
 
-export const IBL_SKYBOX_CALCULATION = `let R = input.worldPos - scene.vEyePosition.xyz;
+import { wgsl } from "../../../shader/wgsl.js";
+
+export const IBL_SKYBOX_CALCULATION = wgsl`let R = input.worldPos - scene.vEyePosition.xyz;
 let maxLod = f32(textureNumLevels(iblTexture) - 1);
 let cubemapDim = f32(textureDimensions(iblTexture).x);
 let skyboxAlphaG = max(roughness * roughness, 0.000001);

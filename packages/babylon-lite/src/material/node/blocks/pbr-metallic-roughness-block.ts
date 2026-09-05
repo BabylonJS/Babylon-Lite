@@ -1,8 +1,9 @@
 import type { BlockEmitter, NodeBlock, NodeBuildState, NodeEmitContext, Stage } from "../node-types.js";
 import { MAX_LIGHTS } from "../../../light/types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const HELPER_KEY_PREFIX = "nme_pbr_mr";
-const SHADOW_FACTORS_ONE = `array<f32, ${MAX_LIGHTS}>(${/* @__PURE__ */ new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
+const SHADOW_FACTORS_ONE = wgsl`array<f32, ${MAX_LIGHTS}>(${/* @__PURE__ */ new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
 
 function resolveOptional(block: NodeBlock, inputName: string, fallback: string, target: "vec3f" | "f32", stage: Stage, state: NodeBuildState, ctx: NodeEmitContext): string {
     const input = block.inputs.get(inputName);
@@ -70,7 +71,7 @@ export const emitter: BlockEmitter = {
             const sf = state.shadowLights.length > 0 ? `nme_computeShadowFactors(in)` : SHADOW_FACTORS_ONE;
             callVar = `_pbrR${ctx.temp(state, "pbr")}`;
             state.fragment.body.push(
-                `let ${callVar} = nme_pbr_mr_compute(${wp}, ${gn}, ${wn}, ${cp}, ${bc}, ${me}, ${ro}, ${ao}, 0.0, 0.0, 1.5, v3(0.5, 0.5, 1.0), v2(0.0), v3(1.0), 1.0, 0.0, 0.0, v3(1.0), 0.0, ${baseIorExpr}, 0.0, 1.5, 1.0, v3(1.0), 0.0, 0.0, v3(1.0), 0.0, v2(1.0, 0.0), v2(0.0), ${sf});`
+                wgsl`let ${callVar} = nme_pbr_mr_compute(${wp}, ${gn}, ${wn}, ${cp}, ${bc}, ${me}, ${ro}, ${ao}, 0.0, 0.0, 1.5, v3(0.5, 0.5, 1.0), v2(0.0), v3(1.0), 1.0, 0.0, 0.0, v3(1.0), 0.0, ${baseIorExpr}, 0.0, 1.5, 1.0, v3(1.0), 0.0, 0.0, v3(1.0), 0.0, v2(1.0, 0.0), v2(0.0), ${sf});`
             );
             state.fragment.memo.set(memoKey, { expr: callVar, type: "vec4f" });
         }

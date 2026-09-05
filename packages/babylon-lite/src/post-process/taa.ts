@@ -35,6 +35,7 @@ import { createPostProcessTask, type PostProcessTask, type PostProcessTaskSettin
 import type { RenderTask } from "../frame-graph/render-task.js";
 import type { Task } from "../frame-graph/task.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** Configuration for `createTaaPostProcessTask`. */
 export interface TaaPostProcessTaskConfig extends PostProcessTaskSettings {
@@ -83,16 +84,16 @@ interface TaaTaskInternal extends TaaPostProcessTask {
     _factor: number;
 }
 
-const TAA_HISTORY_TEXTURE_WGSL = `@group(0) @binding(2) var taaHistory:texture_2d<f32>;`;
+const TAA_HISTORY_TEXTURE_WGSL = wgsl`@group(0) @binding(2) var taaHistory:texture_2d<f32>;`;
 
-const TAA_UNIFORM_WGSL = `struct TaaParams{factor:f32,p0:f32,p1:f32,p2:f32}
+const TAA_UNIFORM_WGSL = wgsl`struct TaaParams{factor:f32,p0:f32,p1:f32,p2:f32}
 @group(0) @binding(3) var<uniform> taaParams:TaaParams;`;
 
 // mix(history, current, factor): factor=1 -> current only (first frame / reset).
-const TAA_FRAGMENT_WGSL = `fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{let h=textureSample(taaHistory,sourceSampler,uv);return mix(h,color,taaParams.factor);}`;
+const TAA_FRAGMENT_WGSL = wgsl`fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{let h=textureSample(taaHistory,sourceSampler,uv);return mix(h,color,taaParams.factor);}`;
 
 // Identity passthrough used by the present + history-update copies.
-const TAA_COPY_FRAGMENT_WGSL = `fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{return color;}`;
+const TAA_COPY_FRAGMENT_WGSL = wgsl`fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{return color;}`;
 
 /**
  * Create a Temporal Anti-Aliasing post-process task.

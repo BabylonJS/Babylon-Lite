@@ -339,6 +339,10 @@ Five parallel jobs:
 
 ### Required Pipeline Variable Groups
 
+The npm publish pipelines use `NPM_Publish` for the npm authentication secret:
+
+- `NPM_TOKEN`
+
 Azure Pipelines uses `BabylonJS-BrowserStack` for shared BrowserStack
 credentials:
 

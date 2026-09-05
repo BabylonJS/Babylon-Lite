@@ -6,6 +6,7 @@
  */
 
 import type { BlockEmitter } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export const emitter: BlockEmitter = {
     className: "ClipPlanesBlock",
@@ -19,11 +20,11 @@ export const emitter: BlockEmitter = {
             if (!state.varyings.find((v) => v._name === "vClipDistance")) {
                 state.varyings.push({ _name: "vClipDistance", _type: "f32" });
             }
-            state.vertex.body.push(`out.vClipDistance = dot(${worldPosition.expr}, sceneU.clipPlane);`);
+            state.vertex.body.push(wgsl`out.vClipDistance = dot(${worldPosition.expr}, sceneU.clipPlane);`);
             state.vertex.memo.set(memoKey, { expr: "out.vClipDistance", type: "f32" });
         }
         if (!state.fragment.memo.has(memoKey)) {
-            state.fragment.body.push(`if (in.vClipDistance > 0.0) { discard; }`);
+            state.fragment.body.push(wgsl`if (in.vClipDistance > 0.0) { discard; }`);
             state.fragment.memo.set(memoKey, { expr: "in.vClipDistance", type: "f32" });
         }
         return { expr: "0.0", type: "f32" };

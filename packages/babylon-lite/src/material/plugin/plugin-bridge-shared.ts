@@ -11,6 +11,7 @@
 import type { BindingDecl, FragmentSlot, ShaderFragment, UboField, UboSpec, VertexSlot, WgslScalarType } from "../../shader/fragment-types.js";
 import { computeUboLayout } from "../../shader/ubo-layout.js";
 import type { MaterialPlugin, MaterialPluginPoint, PluginTextureBinding } from "./material-plugin.js";
+import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -87,14 +88,14 @@ export function buildPluginFragment(plugins: readonly MaterialPlugin[], index: n
         return { _fragment: { _id: `plugin-${index}` }, _stdUboSpec: null };
     }
 
-    let helpers = "";
-    const fragmentSlots: Partial<Record<FragmentSlot, string>> = {};
-    const vertexSlots: Partial<Record<VertexSlot, string>> = {};
+    let helpers: WgslSource = wgsl``;
+    const fragmentSlots: Partial<Record<FragmentSlot, WgslSource>> = {};
+    const vertexSlots: Partial<Record<VertexSlot, WgslSource>> = {};
     const uboFields: UboField[] = [];
     const bindings: BindingDecl[] = [];
 
-    const append = (bucket: Record<string, string>, key: string, code: string): void => {
-        bucket[key] = (bucket[key] ?? "") + "\n" + code;
+    const append = (bucket: Partial<Record<string, WgslSource>>, key: string, code: string): void => {
+        bucket[key] = wgsl`${bucket[key] ?? ""}\n${code}`;
     };
 
     for (const p of enabled) {
@@ -106,7 +107,7 @@ export function buildPluginFragment(plugins: readonly MaterialPlugin[], index: n
                     continue;
                 }
                 if (point === "CUSTOM_FRAGMENT_DEFINITIONS") {
-                    helpers += "\n" + code;
+                    helpers = wgsl`${helpers}\n${code}`;
                     continue;
                 }
                 const slots = FRAG_POINT_TO_SLOTS[point];
@@ -153,7 +154,7 @@ export function buildPluginFragment(plugins: readonly MaterialPlugin[], index: n
         stdUboSpec = computeUboLayout(uboFields);
         // Declare the UBO struct (referenced by the generated `var<uniform>
         // pluginUbo:pluginUboUniforms;`). Module-scope WGSL allows forward refs.
-        helpers = `struct ${STD_PLUGIN_UBO}Uniforms{\n${stdUboSpec._structBody}\n}\n` + helpers;
+        helpers = wgsl`struct ${STD_PLUGIN_UBO}Uniforms{\n${stdUboSpec._structBody}\n}\n${helpers}`;
         // The UBO binding must be declared (and bound) BEFORE the texture entries
         // so it matches the order `StdExt._bind` pushes resources.
         bindings.unshift({ _name: STD_PLUGIN_UBO, _type: { _kind: "uniform-buffer" }, _group: "mesh", _visibility: STAGE_FRAGMENT });

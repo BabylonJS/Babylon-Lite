@@ -267,21 +267,7 @@ function installDom(canvas: TestCanvas, query: string): void {
     });
 }
 
-async function waitForReady(canvas: TestCanvas, timeoutMs: number): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (canvas.dataset.ready !== "true") {
-        if (canvas.dataset.error) {
-            throw new Error(canvas.dataset.error);
-        }
-        if (Date.now() >= deadline) {
-            throw new Error(`Timed out after ${timeoutMs}ms waiting for canvas.dataset.ready`);
-        }
-        await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-}
-
-async function waitForFlag(canvas: TestCanvas, flag: string, timeoutMs: number): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
+async function waitForFlag(canvas: TestCanvas, flag: string, deadline: number, timeoutMs: number): Promise<void> {
     while (canvas.dataset[flag] !== "true") {
         if (canvas.dataset.error) {
             throw new Error(canvas.dataset.error);
@@ -399,6 +385,7 @@ export async function renderShadoScene(sceneId: number, outputPath: string, opti
 
     const query = options.query ?? "";
     const timeoutMs = options.timeoutMs ?? 60_000;
+    const deadline = Date.now() + timeoutMs;
     const canvas = decorateCanvas(createHeadlessCanvas(options.width ?? 1280, options.height ?? 720) as unknown as TestCanvas);
     installDom(canvas, query);
 
@@ -413,9 +400,9 @@ export async function renderShadoScene(sceneId: number, outputPath: string, opti
 
     try {
         await server.ssrLoadModule(`/lite/src/lite/scene${sceneId}.ts?shado=${Date.now()}`);
-        await waitForReady(canvas, timeoutMs);
+        await waitForFlag(canvas, "ready", deadline, timeoutMs);
         if (options.waitFlag) {
-            await waitForFlag(canvas, options.waitFlag, timeoutMs);
+            await waitForFlag(canvas, options.waitFlag, deadline, timeoutMs);
         }
         await new Promise((resolve) => setTimeout(resolve, options.settleMs ?? 100));
 

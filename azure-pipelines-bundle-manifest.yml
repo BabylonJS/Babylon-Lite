@@ -183,6 +183,9 @@ stages:
                 # never hits (so newly fetched assets are always saved at job end)
                 # while restoreKeys restores the most recent prefix match.
                 # Measurement re-fetches on a miss, so a cold cache is only slower.
+                - script: mkdir -p "$(System.DefaultWorkingDirectory)/.bundle-asset-cache"
+                  displayName: "Initialize remote scene asset cache"
+
                 - task: Cache@2
                   displayName: "Cache remote scene assets"
                   inputs:

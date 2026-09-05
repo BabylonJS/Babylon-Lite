@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 
 function makeComposerDeps() {
     return {
@@ -34,7 +35,7 @@ describe("PBR post-compose extensions", () => {
                     _id: marker,
                     _pc: (composed) => ({
                         ...composed,
-                        _fragmentWGSL: `${composed._fragmentWGSL}\n// ${marker}`,
+                        _fragmentWGSL: wgsl`${composed._fragmentWGSL}\n// ${marker}`,
                     }),
                 }),
             });

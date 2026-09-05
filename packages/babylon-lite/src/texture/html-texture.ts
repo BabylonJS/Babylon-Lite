@@ -48,6 +48,7 @@ import { generateMipmaps } from "./generate-mipmaps.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 import { SS, TU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
+import { wgsl } from "../shader/wgsl.js";
 
 declare const htmlTexture2DBrand: unique symbol;
 
@@ -422,7 +423,7 @@ function loadSvgSnapshot(element: HTMLElement, width: number, height: number): P
 // inverted V. Resources are lazily built and cached per device (mirrors
 // generate-mipmaps), so an app that never creates an HTML texture bundles none of it.
 
-const FLIP_SHADER = `@group(0)@binding(0)var t:texture_2d<f32>;@group(0)@binding(1)var s:sampler;
+const FLIP_SHADER = wgsl`@group(0)@binding(0)var t:texture_2d<f32>;@group(0)@binding(1)var s:sampler;
 struct V{@builtin(position)p:vec4f,@location(0)u:vec2f};
 @vertex fn vs(@builtin(vertex_index)i:u32)->V{let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3))[i];return V(vec4f(p,0,1),p*vec2f(.5,.5)+.5);}
 @fragment fn fs(v:V)->@location(0)vec4f{return textureSample(t,s,v.u);}`;

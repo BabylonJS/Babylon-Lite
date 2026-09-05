@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { NullEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
-import { ArcRotateCamera, FreeCamera, GeospatialCamera } from "../src/cameras/cameras";
+import { ArcRotateCamera, FlyCamera, FreeCamera, GeospatialCamera } from "../src/cameras/cameras";
 import { Vector3 } from "../src/math/vector";
 import type { FreeCamera as LiteFreeCamera, ArcRotateCamera as LiteArcRotateCamera } from "babylon-lite";
 
@@ -107,6 +107,24 @@ describe("ArcRotateCamera input tuning delegates to the Lite camera", () => {
         expect(cam.wheelPrecision).toBe(150);
         expect(cam.angularSensibility).toBe(2000);
         expect(cam.panningSensibility).toBe(25);
+    });
+});
+
+describe("FlyCamera", () => {
+    it("forwards upVector assignment and in-place mutation to the banked Lite camera", () => {
+        const camera = new FlyCamera("fly", new Vector3(1, 2, 3));
+        const up = camera.upVector;
+
+        camera.upVector = new Vector3(0, 0, 1);
+        expect(camera._lite.upVector.x).toBe(0);
+        expect(camera._lite.upVector.y).toBe(0);
+        expect(camera._lite.upVector.z).toBe(1);
+
+        up.set(1, 0, 0);
+        expect(camera.upVector).toBe(up);
+        expect(camera._lite.upVector.x).toBe(1);
+        expect(camera._lite.upVector.y).toBe(0);
+        expect(camera._lite.upVector.z).toBe(0);
     });
 });
 
