@@ -6,6 +6,7 @@
  */
 
 import type { BlockEmitter } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export const emitter: BlockEmitter = {
     className: "FragmentOutputBlock",
@@ -22,11 +23,11 @@ export const emitter: BlockEmitter = {
             const aConn = block.inputs.get("a");
             const rgb = rgbConn && rgbConn.source ? ctx.cast(ctx.resolve(block, "rgb", stage, state), "vec3f") : { expr: "vec3<f32>(0.0, 0.0, 0.0)", type: "vec3f" as const };
             const a = aConn && aConn.source ? ctx.cast(ctx.resolve(block, "a", stage, state), "f32") : { expr: "1.0", type: "f32" as const };
-            finalVec4 = { expr: `vec4<f32>(${rgb.expr}, ${a.expr})`, type: "vec4f" as const };
+            finalVec4 = { expr: wgsl`vec4<f32>(${rgb.expr}, ${a.expr})`, type: "vec4f" as const };
         }
         const t = ctx.temp(state, "frag");
-        state.fragment.body.push(`let ${t} = ${finalVec4.expr};`);
-        state.fragment.body.push(`_NME_FRAG_OUTPUT_ = ${t};`);
+        state.fragment.body.push(wgsl`let ${t} = ${finalVec4.expr};`);
+        state.fragment.body.push(wgsl`_NME_FRAG_OUTPUT_ = ${t};`);
         return { expr: t, type: "vec4f" };
     },
 };

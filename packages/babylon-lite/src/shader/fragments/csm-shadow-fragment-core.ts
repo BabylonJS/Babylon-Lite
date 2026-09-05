@@ -14,6 +14,7 @@
  */
 
 import type { ShaderFragment, BindingDecl, Varying } from "../fragment-types.js";
+import { wgsl, type WgslSource } from "../wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -53,8 +54,8 @@ export function createCsmShadowFragment(id: string, shadowLights: CsmShadowLight
     const outputSlot = opts.outputSlot ?? "AD";
     const varyings: Varying[] = [];
     const bindings: BindingDecl[] = [];
-    const fragmentLines: string[] = [];
-    const helperParts: string[] = [];
+    const fragmentLines: WgslSource[] = [];
+    const helperParts: WgslSource[] = [];
 
     for (const slot of shadowLights) {
         const li = slot.lightIndex;
@@ -67,9 +68,9 @@ export function createCsmShadowFragment(id: string, shadowLights: CsmShadowLight
         );
 
         helperParts.push(
-            `struct csmInfo${suffix}Uniforms { cascadeTransforms: array<mat4x4<f32>, 4>, viewFrustumZ: vec4<f32>, frustumLengths: vec4<f32>, shadowsInfo: vec4<f32>, csmParams: vec4<f32> };`
+            wgsl`struct csmInfo${suffix}Uniforms { cascadeTransforms: array<mat4x4<f32>, 4>, viewFrustumZ: vec4<f32>, frustumLengths: vec4<f32>, shadowsInfo: vec4<f32>, csmParams: vec4<f32> };`
         );
-        helperParts.push(`
+        helperParts.push(wgsl`
 fn computeFallOffCsm${suffix}(value: f32, clipSpace: vec2<f32>, frustumEdgeFalloff: f32) -> f32 {
 let mask = smoothstep(1.0 - frustumEdgeFalloff, 1.00000012, clamp(dot(clipSpace, clipSpace), 0.0, 1.0));
 return mix(value, 1.0, mask);
@@ -122,16 +123,16 @@ shadow = mix(nextShadow, shadow, diffRatio);
 return shadow;
 }`);
 
-        fragmentLines.push(`shadowFactors[${li}] = computeShadowCSM${suffix}(vec4<f32>(${worldPosExpr}, 1.0), ${viewZExpr});`);
+        fragmentLines.push(wgsl`shadowFactors[${li}] = computeShadowCSM${suffix}(vec4<f32>(${worldPosExpr}, 1.0), ${viewZExpr});`);
     }
 
     return {
         _id: id,
         _varyings: varyings,
         _bindings: bindings,
-        _helperFunctions: helperParts.join("\n"),
+        _helperFunctions: wgsl`${helperParts.join("\n")}`,
         _fragmentSlots: {
-            [outputSlot]: fragmentLines.join("\n"),
+            [outputSlot]: wgsl`${fragmentLines.join("\n")}`,
         },
     };
 }

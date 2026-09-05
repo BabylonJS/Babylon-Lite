@@ -1,6 +1,7 @@
 /** ScreenSpaceBlock — transforms a vec3/vec4 by WVP and maps clip XY to 0..1 screen space. */
 
 import type { BlockEmitter, NodeValueType } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const OUTPUTS: Record<string, { readonly swizzle: string; readonly type: NodeValueType }> = {
     output: { swizzle: ".xy", type: "vec2f" },
@@ -17,9 +18,9 @@ export const emitter: BlockEmitter = {
         const wvp = ctx.cast(ctx.resolve(block, "worldViewProjection", stage, state), "mat4f");
         const clip = ctx.temp(state, "screenClip");
         const uv = ctx.temp(state, "screenUv");
-        const vectorExpr = vector.type === "vec4f" ? vector.expr : `vec4<f32>(${vector.expr}, 1.0)`;
-        state.fragment.body.push(`let ${clip} = ${wvp.expr} * ${vectorExpr};`);
-        state.fragment.body.push(`let ${uv} = (${clip}.xy / ${clip}.w) * 0.5 + vec2<f32>(0.5, 0.5);`);
+        const vectorExpr = vector.type === "vec4f" ? vector.expr : wgsl`vec4<f32>(${vector.expr}, 1.0)`;
+        state.fragment.body.push(wgsl`let ${clip} = ${wvp.expr} * ${vectorExpr};`);
+        state.fragment.body.push(wgsl`let ${uv} = (${clip}.xy / ${clip}.w) * 0.5 + vec2<f32>(0.5, 0.5);`);
         const out = OUTPUTS[outputName];
         if (!out) {
             throw new Error(`NodeMaterial: ScreenSpaceBlock has no output "${outputName}"`);

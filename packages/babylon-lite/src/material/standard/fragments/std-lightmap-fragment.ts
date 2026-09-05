@@ -7,13 +7,14 @@ import type { StandardMaterialProps } from "../standard-material.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { StdExt } from "../standard-flags.js";
 import { HAS_LIGHTMAP_TEXTURE, LIGHTMAP_USES_UV2, LIGHTMAP_SHADOWMAP, LIGHTMAP_FLIP_V } from "../standard-flags.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 
 export function createStdLightmapFragment(usesUV2: boolean, shadowmap: boolean, flipV: boolean): ShaderFragment {
     const baseUv = usesUV2 ? "input.vv" : "input.vu";
-    const uv = flipV ? `vec2<f32>(${baseUv}.x, 1.0 - ${baseUv}.y)` : baseUv;
-    const lm = `textureSample(lT, lS, ${uv}).rgb * mat.lmLvl`;
+    const uv = flipV ? wgsl`vec2<f32>(${baseUv}.x, 1.0 - ${baseUv}.y)` : baseUv;
+    const lm = wgsl`textureSample(lT, lS, ${uv}).rgb * mat.lmLvl`;
     const apply = shadowmap ? `color.rgb * (${lm})` : `color.rgb + ${lm}`;
     return {
         _id: "std-lightmap",
@@ -22,7 +23,7 @@ export function createStdLightmapFragment(usesUV2: boolean, shadowmap: boolean, 
             { _name: "lS", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT },
         ],
         _fragmentSlots: {
-            BC: `color = vec4<f32>(${apply}, color.a);`,
+            BC: wgsl`color = vec4<f32>(${apply}, color.a);`,
         },
     };
 }

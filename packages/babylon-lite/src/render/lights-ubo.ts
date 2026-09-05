@@ -12,6 +12,7 @@ import type { Mesh } from "../mesh/mesh.js";
 import { createUniformBuffer } from "../resource/gpu-buffers.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { UboField } from "../shader/fragment-types.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** Reusable typed-array pair for writing a u32 count as its float32 bit pattern.
  *  Avoids allocating a Uint32Array view on every fillLightsData call. */
@@ -153,7 +154,7 @@ export function appendMeshLightUboFields(fields: UboField[]): void {
 
 /** @internal */
 export function meshLightIndexWGSL(meshVar: string, functionName = "mli"): string {
-    return `fn ${functionName}(i: u32) -> u32 { return ${meshVar}.li[i / 4u][i % 4u]; }`;
+    return wgsl`fn ${functionName}(i: u32) -> u32 { return ${meshVar}.li[i / 4u][i % 4u]; }`;
 }
 
 function affectsMesh(light: LightBase, mesh: Mesh): boolean {

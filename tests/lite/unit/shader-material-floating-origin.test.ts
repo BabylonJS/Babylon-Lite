@@ -38,6 +38,7 @@ import { createShaderMaterial, type ShaderSystemUniformName } from "../../../pac
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { UboSpec } from "../../../packages/babylon-lite/src/shader/fragment-types";
 import { packMat4IntoF32WithOffset } from "../../../packages/babylon-lite/src/large-world/pack-mat4-with-offset";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 
 /** The numbers from the actual bug report: a 75,977 m planet approached from
  *  4,561 km down to 304 km. The disc should go from ~1.9° across to ~28°. */
@@ -69,8 +70,8 @@ function cameraAt(x: number, floatingOrigin: boolean): Camera {
 
 function shaderMaterial(uniforms: readonly ShaderSystemUniformName[]) {
     return createShaderMaterial({
-        vertexSource: "@vertex fn mainVertex() -> @builtin(position) vec4f { return vec4f(); }",
-        fragmentSource: "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(); }",
+        vertexSource: wgsl`@vertex fn mainVertex() -> @builtin(position) vec4f { return vec4f(); }`,
+        fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(); }`,
         attributes: ["position"],
         uniforms: [...uniforms],
     });

@@ -8,9 +8,10 @@
  */
 
 import type { BlockEmitter } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const FOG_HELPER_KEY = "nme_fog";
-const FOG_HELPER_WGSL = `
+const FOG_HELPER_WGSL = wgsl`
 fn nme_fogFactor(worldPos: vec3<f32>, cameraPos: vec3<f32>, fogParams: vec4<f32>) -> f32 {
     let dist = distance(worldPos, cameraPos);
     let mode = fogParams.x;
@@ -42,7 +43,7 @@ export const emitter: BlockEmitter = {
         const factor = `nme_fogFactor(${wp}, _NME_CAMERA_POS_, _NME_FOG_PARAMS_)`;
         const mixed = `mix(${fogColor}, ${inVec3}, ${factor})`;
         if (inType === "vec4f") {
-            return { expr: `vec4<f32>(${mixed}, (${input.expr}).w)`, type: "vec4f" };
+            return { expr: wgsl`vec4<f32>(${mixed}, (${input.expr}).w)`, type: "vec4f" };
         }
         return { expr: mixed, type: "vec3f" };
     },

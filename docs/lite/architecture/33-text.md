@@ -299,6 +299,7 @@ draw groups:
 
 ```typescript
 type TextDataDrawGroup = {
+    groupKey: TextGroupKey; // draw-group identity; === curveSetId unless a styling feature interned another
     curveSetId: CurveSetId;
     curveSet: GlyphStorageCurveSet; // cached pointer into _storage._curveSets
     slotStart: number;
@@ -310,7 +311,9 @@ type TextDataDrawGroup = {
 };
 ```
 
-One draw group per unique `curveSetId` used by the live runs. Each group owns a
+One draw group per unique `groupKey` used by the live runs — which is one per unique
+`curveSetId` unless an opt-in styling feature splits a curve set further (see
+"Draw-group keys"). Each group owns a
 contiguous `[slotStart, slotStart + slotCount)` slot range in the shared
 instance buffer; **live and dead slots intermix within that range**. The vertex
 shader detects dead slots and emits a degenerate off-screen quad, so they cost
@@ -410,12 +413,14 @@ from the same `Font`) pays the band-build cost only once.
 
 ### Pipeline (`_gpu/text-pipeline.ts`)
 
-One bind group layout + one pair of WGSL modules cached per `GPUDevice` (a
+One bind group layout + one pair of base WGSL modules cached per `GPUDevice` (a
 `WeakMap<GPUDevice, TextPipelineDeviceCache>`). The render pipeline itself is
-cached per `(colorFormat, sampleCount, depthStencilFormat, depthWrite, flipY)`
+cached per fixed-arity
+`(colorFormat, sampleCount, depthStencilFormat, depthWrite, alphaToCoverage, variantId)`
 key — so a `TextRenderable` with `ignoreDepth=true` and a `TextRenderable`
 with `ignoreDepth=false` share modules + bind group layout but get separate
-pipelines.
+pipelines. Optional shader variants are supplied as already-compiled opaque module
+pairs by an opt-in feature; see "Variant module lifecycle" below.
 
 Blend is fixed src-over:
 
@@ -438,9 +443,10 @@ table, and the screen-space dilation math all come from that reference
 implementation. The Babylon Lite shaders are the same algorithm reshaped to
 fit Lite's instance-buffer + bind-group plumbing.
 
-The vertex stage (`shaders/slug.vert.wgsl`):
+The vertex stage (the vertex half of `shaders/slug-shader.ts`):
 
-1. **Dead-slot detection.** `if (slugAnchor.w > 0.5) → emit (-2,-2,-2,1) point`.
+1. **Dead-slot detection.** `if (in.pk == 0xffffffffu) → emit (-2,-2,-2,1) point`.
+   Dead slots use an all-ones packed glyph/style index.
 2. **Quad corner expansion.** `tex = mix(slugBounds.xy, slugBounds.zw, isMax)`
    maps the unit corner sign to the glyph's font-unit bounds; `pos = slugAnchor.xy + tex * scale`
    puts the corner in object-space pixels.
@@ -451,7 +457,7 @@ The vertex stage (`shaders/slug.vert.wgsl`):
 4. Outputs the dilated clip position + dilated `vTexcoord` + flat
    `vBanding` / `vGlyph` / `vColor`.
 
-The fragment stage (`shaders/slug.frag.wgsl`):
+The fragment stage (the fragment half of `shaders/slug-shader.ts`):
 
 1. From `vTexcoord`, derive `(hBandIndex, vBandIndex)` via
    `bandScale * tex + bandOffset` clamped to `[0, bandMax]`.
@@ -472,6 +478,18 @@ only the packed atlas + instance buffer.
 `TextRenderable` is a `Renderable` with `isTransparent = true`. Its `bind` is
 called by the scene's frame graph; `update` does:
 
+0. **Late-installed variant refresh.** `bind` resolves both pipelines, but scene
+   bindings are built once — not per frame — so a styling feature enabled *after*
+   a binding exists would otherwise leave its weighted groups drawing with the base
+   pipeline until an unrelated scene mutation rebuilt the binding. The binding's
+   `update` therefore re-resolves the variant pipeline exactly once, when
+   `gpu._variantPipeline === gpu._pipeline && _textVariantResolver` — an identity
+   comparison that a base consumer fails on its first term and that stops matching
+   after the single refresh, so no cache key is ever built per frame. The
+   re-resolution reuses the *bind-time* target arguments captured in the binding
+   closure (`colorFormat`, `sampleCount`, `depthStencilFormat`, `depthWrite`, and the
+   renderable itself as the alpha-to-coverage owner), so the refreshed variant is the
+   exact sibling of the base pipeline the binding already declares.
 1. For each draw group: `ensureSharedAtlasGpu` (uploads / regrows curve+band
    textures); rebuild `bindGroup` when atlas was rebuilt or `bindGroupVersion`
    is stale.
@@ -484,10 +502,14 @@ called by the scene's frame graph; `update` does:
 4. Write viewport size at UBO offset 64 (16 bytes) when target size changed.
    Write `(1, 1, 1, opacity)` at UBO offset 80 when opacity changed.
 
-`draw` then iterates the draw groups: `setBindGroup(0, g.bindGroup)`;
+`draw` then iterates the draw groups: bind the group's pipeline (base, or the
+pre-resolved variant when `g.groupKey !== g.curveSetId`, deduped against the
+currently bound one); `setBindGroup(0, g.bindGroup)`;
 `pass.draw(6, g.slotCount, 0, g.slotStart)`. There is one draw call per
 non-empty group, and `slotCount` includes dead slots (which collapse in the
-vertex shader). Crucially, `TextRenderable` does **not** bind the scene's
+vertex shader). If any variant group was bound, the base pipeline is re-bound
+before returning so the draw list's `setPipeline` dedupe stays valid for the next
+renderable. Crucially, `TextRenderable` does **not** bind the scene's
 shared scene-UBO at group 0 — it composes its own MVP so the same pipeline can
 run from a `TextRenderer` with no scene at all.
 
@@ -608,6 +630,507 @@ Unit tests live in `tests/lite/unit/`:
 | `src/text/text-renderable.ts`     | `TextRenderable` + `createTextRenderable` / `addTextRenderable` / `disposeTextRenderable`; 3D `Renderable` implementation.                                                                                                                                                                                             |
 | `src/text/text-renderer.ts`       | `TextLayer` (2D pixel-space placement record) + `TextRenderer` (standalone `RenderingContext`) + their factories and the swapchain draw pass.                                                                                                                                                                          |
 | `src/text/_gpu/text-textures.ts`  | `ensureSharedAtlasGpu`; lazy `rgba32float` texture create + version-gated upload + capacity grow. (Atlas teardown is inlined in `disposeGlyphStorage` to avoid a circular import.)                                                                                                                                     |
-| `src/text/_gpu/text-pipeline.ts`  | `getOrCreateTextPipeline` / `clearTextPipelineCache`; per-device bind group layout + WGSL modules + per-target-key pipeline cache.                                                                                                                                                                                     |
-| `src/text/shaders/slug.vert.wgsl` | Vertex stage: dead-slot collapse + Slug dilation + MVP transform.                                                                                                                                                                                                                                                      |
-| `src/text/shaders/slug.frag.wgsl` | Fragment stage: per-band quadratic root solve + signed coverage accumulation.                                                                                                                                                                                                                                          |
+| `src/text/_gpu/text-pipeline.ts`  | `getOrCreateTextPipeline` / `getTextPipelineCache` / `clearTextPipelineCache` + the `TextPipelineVariant` seam; per-device bind group layout + base WGSL modules + per-target-key pipeline cache. Knows nothing about shader fragments and composes no WGSL.                                                            |
+| `src/text/shaders/slug-shader.ts` | **The single authoritative copy of the Slug WGSL.** Inline TypeScript template + `composeSlugShader(fragment)` — a deterministic builder that interpolates an optional `TextShaderFragment` into the base vertex/fragment source at named slots. Called with `null` for the base variant. |
+| `src/text/shaders/text-shader-fragment.ts` | Type-only module: `TextShaderFragment`, `TextVertexSlot`, `TextFragmentSlot`. Feature-agnostic — no font-weight (or any other feature's) semantics. Erased at build time. |
+| `src/text/set-font-weight-offset.ts` | Opt-in feature entry point: `setFontWeightOffset(data, run, offset)`. Owns the per-run offset map, the interned draw-group keys, and the per-`GPUDevice` composed+compiled variant module pair; validates and resolves the run against its `TextData`, installs the `text-data` styling seam and the `text-pipeline` variant resolver on first effective call, then repacks the data through `updateTextData({ update: "reset" })`. |
+| `src/text/shaders/weight-shader-fragment.ts` | The weight-only `TextShaderFragment`: distance-to-quadratic helper, bounded nearest-contour band scan, weight varying, quad inflation, and unsigned-distance coverage expansion. Contains **no** copy of any base Slug logic. Reachable only from `set-font-weight-offset.ts`. |
+
+---
+
+## Slug shader composition
+
+### One template, many variants
+
+There is exactly **one** copy of the base Slug vertex and fragment logic, and it lives
+in `src/text/shaders/slug-shader.ts` as an inline TypeScript template. There are no
+`slug.vert.wgsl` / `slug.frag.wgsl` `?raw` files, and there is no second "weighted"
+copy of the shader: optional features contribute *incremental* WGSL through a typed
+fragment that the template interpolates at named slots.
+
+```typescript
+export function composeSlugShader(fragment: TextShaderFragment | null): ComposedSlugShader;
+
+export interface ComposedSlugShader {
+    /** @internal Composed vertex WGSL. */ readonly _vert: string;
+    /** @internal Composed fragment WGSL. */ readonly _frag: string;
+    /** @internal Fragment id ("" for the base variant) — folded into the pipeline cache key. */
+    readonly _key: string;
+}
+```
+
+This mirrors the material stack's `ShaderTemplate` + `ShaderFragment` + `composeShader`
+model (`src/shader/fragment-types.ts`, `src/shader/shader-composer.ts`), but is a
+compact text-specific builder rather than a second instance of the generic material
+composer: text owns a fixed custom `@group(0)` layout (uniform + curve texture + band
+texture + glyph-metadata storage + style storage) with no mesh/material UBO, no shadow
+group, no vertex-attribute negotiation and no UBO layout computation, so none of the
+generic composer's machinery applies.
+
+Interpolation is **direct** (`${...}` into the template literal), not marker
+substitution and not a regex pass over emitted WGSL. Production bundles minify inline
+WGSL template literals (`scripts/wgsl-minify-plugin.ts` → `renderChunk`), which strips
+`//` comments and collapses whitespace; anything that depended on comment markers or on
+parsing the emitted string would break there (see GUIDANCE "Never parse emitted WGSL
+strings"). A builder that concatenates known strings is immune.
+
+### Injection slots
+
+`TextShaderFragment` is a pure-type description (`src/text/shaders/text-shader-fragment.ts`):
+
+```typescript
+export type TextVertexSlot = "VO" | "VD" | "VB" | "VA";
+export type TextFragmentSlot = "FI" | "FH" | "CO";
+
+export interface TextShaderFragment {
+    /** @internal Stable id — part of the pipeline cache key and the shader module label. */
+    readonly _id: string;
+    /** @internal */ readonly _vertexSlots?: Partial<Record<TextVertexSlot, string>>;
+    /** @internal */ readonly _fragmentSlots?: Partial<Record<TextFragmentSlot, string>>;
+}
+```
+
+| Slot | Stage    | Location                                                                     | Contract                                                                                                                                                     |
+| ---- | -------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `VO` | vertex   | End of the `VOut` struct body                                                | Comma-terminated member declarations. Locations `0..3` are taken by the base varyings, so fragments start at `@location(4)`.                                  |
+| `VD` | vertex   | Dead-slot early-return block                                                 | Statements assigning a defined value to every member the fragment added, on the local `d: VOut`.                                                              |
+| `VB` | vertex   | After `md` (glyph metadata) and `sy` (style) are in scope, before quad setup | Statements that **must** declare `let sb: vec4<f32>` — the shaped em-space glyph bounds. When the slot is present the template uses `sb` in place of `md.b`; when absent the template names `md.b` directly, so the base variant pays nothing. Values declared here stay in scope for `VA`. |
+| `VA` | vertex   | Just before `return out;`                                                    | Statements assigning the fragment's added varyings on `out`.                                                                                                 |
+| `FI` | fragment | End of the `FIn` struct body (before `@builtin(front_facing)`)               | Comma-terminated member declarations mirroring `VO`.                                                                                                          |
+| `FH` | fragment | Module scope, after the base helpers, before `@fragment fn main`             | Helper function / constant declarations. The base helpers (`rcode`, `solveH`, `solveV`, `ccov`, `cwgt`, `bloc`) and the `ct` / `bt` textures are already in scope, so a fragment that needs its own scan of the glyph's band lists writes it here as a self-contained function. |
+| `CO` | fragment | After base `cov` is computed and clamped, before the coverage-gamma `pow`    | Statements that may read and reassign `var cov: f32` (coverage in `[0,1]`). In scope: `rc` (em-space render coord), `pe` (pixels-per-em), `gp` (glyph texel origin), `bm` (max band indices), `in`. The gamma, the `a2c` premultiply select, and the final color write stay in the template. |
+
+There are deliberately **no** per-curve slots inside the base band loops. Those loops
+`break` as soon as a curve is behind the pixel along the band's sort axis, and they only
+ever visit the single band that contains the pixel — both correct for coverage, both
+wrong for anything that needs *nearest-contour* information (see "Why the weight fragment
+owns its own scan"). A feature that needs a different traversal writes its own bounded
+scan in `FH` rather than piggy-backing on a loop whose exit condition it does not control.
+
+Slot ids are short because they are WGSL-adjacent identifiers in a size-sensitive path;
+they are enumerated as a union type, so a typo is a compile error rather than a silently
+ignored injection.
+
+### Base variant is free
+
+`composeSlugShader(null)` emits exactly the base shader: no extra varying, no helper, no
+coverage override — the slot expressions collapse to `""` and the bounds expression names
+`md.b` directly. Unweighted (base) draw groups therefore execute behaviourally identical
+shader code to the pre-feature engine, with zero extra fragment-shader work.
+
+### Variant module lifecycle
+
+`src/text/_gpu/text-pipeline.ts` knows nothing about shader fragments and never composes
+WGSL. It accepts an already-compiled, opaque module pair:
+
+```typescript
+/** @internal Opaque compiled shader-module pair for one composed text shader variant. */
+export interface TextPipelineVariant {
+    /** @internal Stable id — the variant field of the pipeline cache key. */
+    readonly _id: string;
+    /** @internal */ readonly _vertModule: GPUShaderModule;
+    /** @internal */ readonly _fragModule: GPUShaderModule;
+}
+
+/** @internal Installed by an opt-in text styling feature; resolves that feature's compiled
+ *  module pair for a device. Null until a feature installs one. */
+export let _textVariantResolver: ((device: GPUDevice) => TextPipelineVariant) | null;
+/** @internal */ export function _installTextVariantResolver(resolve: (device: GPUDevice) => TextPipelineVariant): void;
+```
+
+- **The feature owns composition and compilation.** `set-font-weight-offset.ts` calls
+  `composeSlugShader(WEIGHT_SHADER_FRAGMENT)` and `device.createShaderModule` itself, and
+  memoizes the resulting `TextPipelineVariant` in a lazily created
+  `WeakMap<GPUDevice, TextPipelineVariant>` (no module-level allocation, auto-invalidating
+  per device — GUIDANCE §4). The core cache holds no variant module fields at all, so a
+  second feature can never overwrite or inherit another's stale modules.
+- **One styling feature at a time.** The resolver is a single nullable slot; installing a
+  second feature replaces the first. The group-key seam (below) and the variant resolver
+  are installed together by the same feature, so they cannot disagree.
+- The pipeline cache key is **fixed arity**, six `:`-separated fields, every field always
+  present:
+  `format : sampleCount : depthStencilFormat|"-" : "w"|"r" : "a"|"-" : variantId|"-"`.
+  There is no optional field and no delimiter alias, so a base A2C pipeline
+  (`…:a:-`) can never collide with a variant whose id happens to be `"a"` (`…:-:a`).
+- Alpha-to-coverage stays a **pipeline-overridable constant** (`@id(0) override a2c`) on
+  whichever module the pipeline uses — one module still serves both the blended and the
+  A2C pipeline for each variant.
+
+### Pipeline selection per draw group
+
+`getOrCreateTextPipeline` returns both pipelines for a target signature:
+
+```typescript
+export interface TextPipelineSet {
+    /** @internal Base Slug pipeline. */ _pipeline: GPURenderPipeline;
+    /** @internal Composed-variant pipeline; **aliases `_pipeline`** when no styling feature
+     *  is installed, so draw paths can bind it unconditionally. */ _variantPipeline: GPURenderPipeline;
+    /** @internal */ _cache: TextPipelineDeviceCache;
+}
+```
+
+Resolution happens once per bind (`TextRenderable`) / once per frame update
+(`TextRenderer`) and is stored on the per-renderable / per-layer GPU record — never inside
+the draw loop, which does no map lookups and builds no key strings. A `TextRenderable`
+binding additionally re-resolves its variant pipeline once if a styling feature was
+installed *after* the binding was built (see "`TextRenderable` (3D) per-frame" step 0);
+the `TextRenderer` path needs no equivalent because its `_update` already resolves both
+pipelines every frame. Draw paths that only need the shared quad buffer or bind-group
+layout call `getTextPipelineCache(engine)` instead, which is a single `WeakMap` get.
+
+A draw group selects between the two with one identity comparison,
+`g._groupKey === g._curveSetId` (see "Draw-group keys"), tracks the currently bound
+pipeline locally, and — in the `TextRenderable` path, which shares an encoder with the
+scene's draw list — restores the base pipeline before returning so the caller's
+`setPipeline` dedupe stays valid for the next renderable. The `TextRenderer` path records
+into a render bundle whose state does not outlive `executeBundles`, so it needs no restore.
+
+### Tree-shaking
+
+- `text-shader-fragment.ts` is types only → zero runtime bytes.
+- `slug-shader.ts` (base template + builder) is reached from `text-pipeline.ts`, so every
+  text consumer carries it — exactly one copy, as before.
+- `weight-shader-fragment.ts` is imported **only** by `set-font-weight-offset.ts`. A
+  consumer that does not import `setFontWeightOffset` never reaches it, so the
+  distance-to-quadratic WGSL, the band scan, the weight varying and the coverage override
+  are absent from the bundle. `tests/lite/build/text-shader-fragment-treeshake.test.ts`
+  asserts both directions against the real shipped `build/lib` output.
+- `text-data.ts` carries no font-weight semantics. It knows only an optional per-run style
+  parameter and an opaque draw-group key whose default is the run's own `CurveSetId`.
+
+---
+
+## Opt-in feature: synthetic font-weight offset
+
+### Purpose
+
+A synthetic contour offset (emboldening) per `GlyphRun`, evaluated
+analytically in the Slug fragment shader. This is **not** CSS font-weight face selection
+(100–900); it is a non-negative contour offset in font design units that thickens the
+rendered outlines by expanding them outward. Round
+contour joins fall out of the distance field automatically — no miter/bevel logic.
+
+The feature owns all of its cost at its enabler: importing `setFontWeightOffset` pulls in
+the weight shader fragment; calling it with an offset that actually changes a run installs
+the two core seams and composes the variant shader. Consumers that never import the setter
+pay zero shader bytes and zero shader work.
+
+### Public API
+
+```typescript
+export function setFontWeightOffset(data: TextData, run: GlyphRun | number, offset: number): void;
+```
+
+| Parameter | Type                | Description                                                                                                                                                                                                       |
+| --------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `data`    | `TextData`          | The `TextData` that owns the run. The setter mutates live data: it repacks and regroups `data` immediately, exactly like a setter on a live material.                                                              |
+| `run`     | `GlyphRun \| number` | The run to weight, as either its `GlyphRun` reference or its current index in `data.runs`. Must be a live run of `data`; anything else throws with the same message shape `updateTextData` uses.                    |
+| `offset`  | `number`            | Contour offset in **font design units** (the space of `GlyphCurves.bounds`). Positive = bolder. Must be finite; clamped to `[0, 100]` with a `console.warn`. Zero clears a previously set offset.                          |
+
+```typescript
+import { setFontWeightOffset, createDefaultTextData, loadFont } from "@babylonjs/lite";
+
+const font = await loadFont("/fonts/Inter.ttf");
+const data = createDefaultTextData(font, 48, "Bold text");
+setFontWeightOffset(data, data.runs[0]!, 10); // +10 font units
+setFontWeightOffset(data, 0, 10); // identical: runs may be addressed by index
+setFontWeightOffset(data, 0, 0); // back to the base pipeline
+```
+
+It takes the owning `TextData` — not a bare `GlyphRun` — because runs are packed
+**synchronously**. `createTextData` / `createDefaultTextData` pack their runs before they
+return, and `updateTextData` packs each edit as it is applied, so a setter that only
+recorded state on a detached run descriptor could never affect data that already existed;
+on a `DefaultTextData` (whose single run is created and packed inside the factory) there is
+no moment at which such a call could be made at all. Owning the `TextData` lets the setter
+repack and regroup on the spot, so the call works at any point in the data's life,
+including after it is already bound and rendering.
+
+### Setter lifecycle
+
+1. **Validate the offset.** Non-finite → `console.error`, return. Nothing is installed and
+   nothing is repacked.
+2. **Resolve the run against `data`.** `_resolveRunRef(data, run, "setFontWeightOffset")`
+   (`text-data.ts`) accepts a `GlyphRun` reference that is live in `data` or an in-range
+   index into `data.runs`, and throws otherwise — same wording as the `updateTextData`
+   errors (`… : run index N out of range (0..M).` / `… : GlyphRun reference is not in this
+   TextData.`). `updateTextData`'s own index path shares this helper, so the two can never
+   drift.
+3. **Clamp** to `[0, 100]` with a `console.warn` when out of range.
+4. **No-op detection.** If the resolved run's current effective offset already equals the
+   clamped value, return before touching anything: no seam install, no shader composition,
+   no `_version` / `_layoutVersion` churn. A zero call on a run that never had an offset is
+   therefore a *true* no-op — it does not install the feature or compile its shader — while
+   the first nonzero call always installs.
+5. **Capture** the `WeakMap`'s exact prior entry for this run — whether it had one at all,
+   and its value — then **store** the clamped offset (zero deletes the entry), then
+   **install the seams** (`_installTextStyleSeam` + `_installTextVariantResolver`),
+   idempotently.
+6. **Repack** via `updateTextData(data, { update: "reset" })` — the narrowest existing
+   TextData operation that both re-reads every run's draw-group key and rewrites every
+   style entry's `params.y`. `reset` with no `runs` keeps the current run objects (it
+   defensively copies `data._runs`), compacts the slot allocator, and reuses the previous
+   draw-group objects per key, so a run moving between the base and weighted groups is a
+   regrouping — not a rebuild of the caller's descriptors. The feature deliberately
+   re-implements none of the allocator, grouping or style-packing logic.
+7. **Roll back on failure.** If step 6 throws (e.g. the run's curve set is no longer in
+   `data`'s storage), the `WeakMap` entry written in step 5 is restored to its exact prior
+   state — deleted if the run had no entry before this call, set back to the previous value
+   if it did — before the error is rethrown unchanged. Without this, a failed repack would
+   leave the map at the *new* offset while the data itself was never actually repacked; a
+   caller that fixes the failure and retries with the same offset would then hit the no-op
+   guard in step 4 and get silent non-repair instead of a retry. The seams installed in step
+   5 are **not** rolled back — they are idempotent, side-effect-free until a run actually
+   uses them, and re-running `ensureInstalled` on a retry is a no-op, so leaving them
+   installed after a failed call is harmless.
+
+Zero therefore both clears the offset and returns the run's group to the base key (and the
+base pipeline) in the same call.
+
+### `DefaultTextData` and run replacement
+
+`createDefaultTextData` packs its single run before returning, so the setter is usable
+immediately: `setFontWeightOffset(data, data.runs[0]!, 10)` (or `setFontWeightOffset(data, 0, 10)`).
+
+`updateDefaultTextData` re-shapes the text into a **new** `GlyphRun` descriptor and applies
+it with `replaceRun`. Offsets are keyed by run identity, so they do **not** transfer to the
+replacement run: the block returns to the base pipeline until the caller re-applies
+`setFontWeightOffset(data, 0, offset)` on the new run (index form is the convenient one
+here, since the reference changed). This is deliberate — a generic "carry per-run feature
+state across replaceRun" seam would put feature semantics back into `text-data.ts` and cost
+every text consumer bytes for a transfer no base consumer can use. The same holds for any
+caller-driven `updateTextData({ update: "replaceRun" | "reset", runs })` that swaps run
+descriptors.
+
+### The core styling seam
+
+`text-data.ts` exposes exactly one nullable seam object and one opaque type:
+
+```typescript
+/** @internal Opaque draw-group identity, compared by `===` only. The default is the run's
+ *  own `CurveSetId`; a styling feature may substitute an interned non-string token, which
+ *  by construction can never equal a curve-set id. */
+export type TextGroupKey = CurveSetId | object;
+
+/** @internal */
+export interface TextStyleSeam {
+    /** @internal Draw-group key for a run — `run.curveSet` unless the run needs a different
+     *  pipeline variant. Must never return a value that equals another curve set's key. */
+    _key(run: GlyphRun): TextGroupKey;
+    /** @internal Extra style float, packed verbatim into `TextStyle.params.y`. */
+    _param(run: GlyphRun): number;
+}
+
+/** @internal */ export let _textStyleSeam: TextStyleSeam | null;
+/** @internal */ export function _installTextStyleSeam(seam: TextStyleSeam): void;
+```
+
+`text-data.ts` attaches **no** meaning to either result: `_param` is a float it copies into
+`params.y`, `_key` is a token it compares with `===`. Both call sites are single
+optional-chained calls with a neutral default (`_textStyleSeam?._key(run) ?? run.curveSet`,
+`_textStyleSeam?._param(run) ?? 0`), and only scalars / opaque values cross the boundary.
+All font-weight semantics live in `set-font-weight-offset.ts`.
+
+`text-data.ts` additionally exports one feature-agnostic helper so per-run feature setters
+resolve and validate their run argument exactly as `updateTextData` does:
+
+```typescript
+/** @internal Resolve a `GlyphRun | number` reference against `data`'s live runs. `op`
+ *  prefixes the thrown message. */
+export function _resolveRunRef(data: TextData, ref: GlyphRun | number, op: string): GlyphRun;
+```
+
+It is used by `updateTextData`'s own index path, so the two cannot drift, and it is
+tree-shaken away for consumers that import no feature setter.
+
+### Style packing
+
+`writeRunToSlots` calls `_param` once per run and writes the result into
+`TextStyle.params.y` (previously reserved/zero; `params.x` still carries `invScale`). No
+struct or stride change. The value is compared through `Math.fround` like every other style
+float, so an unchanged offset does not bump `_styleVersion`.
+
+### Draw-group keys
+
+`TextDataDrawGroup._groupKey: TextGroupKey` replaces the pre-feature implicit "one group per
+curve set" identity. Grouping, previous-group reuse across a `reset`, `addRun` lookup and
+`replaceRun`'s in-place fast path all compare **that one field by identity** — the flat
+`Map<TextGroupKey, GlyphRun[]>` / `Map<TextGroupKey, TextDataDrawGroup>` shape, allocation
+profile and iteration order of the pre-feature code are preserved exactly (one array per
+group, no nested maps, no per-curve-set array pairs). `_curveSetId` remains on the group for
+atlas lookup, bind-group labelling and error messages.
+
+- With no styling feature installed, `_groupKey === _curveSetId` for every group and the
+  grouping algorithm is byte-for-byte the pre-feature one.
+- `set-font-weight-offset.ts` returns `run.curveSet` for an unweighted run and an interned
+  **object** token (one per `CurveSetId`, from a lazily created `Map<CurveSetId, object>`)
+  for a weighted one. An object can never `===` a string, so a curve set whose id happens to
+  look like another group's variant key cannot collide — the pathological `"X"` / `"X:w"`
+  pair that a delimited composite string key would conflate stays in distinct groups
+  (regression-tested).
+- Base and weighted runs on the same curve set land in **separate** draw groups, because
+  they need different pipelines. Weighted runs with **different** nonzero offsets batch into
+  **one** group — the offset travels per style entry in `params.y`.
+- `g._groupKey !== g._curveSetId` is exactly "this group needs the variant pipeline", so the
+  draw paths need no extra per-group state.
+
+### Weight shader fragment
+
+`src/text/shaders/weight-shader-fragment.ts` exports one `TextShaderFragment`
+(`_id: "w"`), containing **only** incremental code:
+
+| Slot | Contribution                                                                                                                                                   |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VO` | `@location(4) @interpolate(flat) wo:f32,` — the per-instance weight offset varying.                                                                            |
+| `VD` | `d.wo=0.0;` — dead-slot default.                                                                                                                                |
+| `VB` | `let wo=sy.p.y; let sb=vec4<f32>(md.b.xy-vec2<f32>(wo),md.b.zw+vec2<f32>(wo));` — inflates the font-space bounds symmetrically so the quad covers the expanded contour. |
+| `VA` | `out.wo=wo;`                                                                                                                                                    |
+| `FI` | `@location(4) @interpolate(flat) wo:f32,`                                                                                                                      |
+| `FH` | `dot2` + `dq` (exact distance to a quadratic Bézier) + `wdst` (the bounded nearest-contour band scan).                                                           |
+| `CO` | Zero-offset guard, unsigned distance, weighted coverage, and monotone `max` finalization.                                                                         |
+
+### Why the weight fragment owns its own scan
+
+The base band walk is a *winding* query, not a *nearest-contour* query, and its two
+optimizations are only sound for winding:
+
+1. It reads exactly **one** h-band (the band containing the pixel's `y`) and one v-band.
+   That is complete for a `+x` / `+y` ray cast, because a ray from the pixel stays inside
+   its own band. It is **not** complete for distance: the nearest contour to a pixel near a
+   band boundary is frequently in the adjacent band.
+2. Inside a band it `break`s as soon as a curve's `max x` is more than half a pixel behind
+   the pixel (curves are sorted by descending `max x`). Every remaining curve is behind the
+   ray, so it cannot cross it — but curves to the *left* of the pixel are exactly the ones
+   that can be nearest to it.
+
+Accumulating a running minimum distance inside those loops therefore silently skips curves
+left of and below the pixel, which clips positive (emboldening) offsets on the right and
+top edges of a glyph and on all four corners. The weight fragment consequently declares its
+own complete, bounded scan in `FH` and reads nothing from the base loops:
+
+```wgsl
+fn wdst(rc:vec2<f32>,gp:vec2<i32>,bm:vec2<i32>,bn:vec4<f32>,rad:f32)->f32
+```
+
+- **Search radius.** `rad = wo + 1/aaScale` font units, where `aaScale = max(pe.x, pe.y)` is
+  pixels-per-font-unit. Beyond that radius the weighted coverage saturates to 0 (outside) or is
+  dominated by the base coverage (inside), so a curve farther than `rad` cannot change the
+  result.
+- **Complete band range.** Every h-band spans the full glyph width in `x` and partitions
+  `y` (`glyph-storage.ts` → `buildBandsInternal`), and a band holds every curve whose
+  `y`-extent intersects it. `wdst` therefore iterates **all** h-bands intersecting
+  `[rc.y - rad, rc.y + rad]`:
+  `y0 = clamp(i32((rc.y - rad) * bn.y + bn.w), 0, bm.y)`,
+  `y1 = clamp(i32((rc.y + rad) * bn.y + bn.w), 0, bm.y)`.
+  Any curve with a point within `rad` of the pixel has that point inside the glyph's
+  `y`-bounds, so its band index is inside `[y0, y1]` and the curve is in that band's list.
+  *Validated band-transform invariant:* `bandScaleY = hBandCount / heightFu` when
+  `heightFu > 0` and `0` otherwise, and `bandOffsetY = -yMin * bandScaleY`, so the transform
+  is monotone non-decreasing and never negative. A zero scale collapses the range to band 0,
+  which is the only band a zero-height glyph has. No sign guard is required; a unit test
+  pins the invariant in the builder.
+- **Radius-aware break only.** Within a band the scan still exploits the descending-`max x`
+  sort, but with the radius-aware bound `curveMaxX < rc.x - rad`. A curve with a point
+  within `rad` has `maxX >= rc.x - rad`, and every curve before it in sort order has a
+  `maxX` at least as large, so no in-range curve is ever skipped.
+- `dq` is the exact point-to-quadratic distance: a degenerate straight-segment fast path
+  when `dot(b,b) < 1e-7`, otherwise the closest-point depressed-cubic solve with `t` clamped
+  to `[0,1]` (Cardano for one real root, trigonometric form for three).
+
+### Shader math (the `CO` slot)
+
+```wgsl
+if(in.wo!=0.0){
+  let aas=max(max(pe.x,pe.y),1.0e-8);
+  let d=wdst(rc,gp,bm,in.bn,in.wo+1.0/aas);
+  let wc=clamp((in.wo-d)*aas+0.5,0.0,1.0);
+  cov=max(cov,wc);
+}
+```
+
+1. **Zero-offset guard.** A run whose offset is zero — including a stale style entry left in
+   a variant group — takes no distance scan at all and keeps the base coverage bit-exactly.
+2. **Base Slug coverage runs unchanged** and remains authoritative inside the original fill.
+3. **Unsigned contour distance.** Positive-only emboldening needs no inside/outside
+   classification: `wdst` is the distance to the nearest outline in either direction.
+4. **Offset threshold.** Coverage decreases with distance, and the offset pushes
+   the boundary outward: `wc = saturate((wo - d) * aaScale + 0.5)`, a ~1px screen-space
+   transition.
+5. **Monotone finalization.** Emboldening may only add coverage:
+   `cov = max(cov, wc)`. This keeps the analytic base coverage authoritative inside the
+   original fill, while the distance field contributes only its outward expansion. An
+   overestimated `wdst` can never punch holes into the original glyph.
+6. The template then applies the coverage gamma and the `a2c` premultiply select exactly as
+   for the base variant.
+
+`aaScale` is floored at `1e-8` so a degenerate derivative (`fwidth == inf`) cannot produce a
+non-finite radius; the coverage transfer function is unaffected for any real glyph.
+
+### Limits
+
+Offsets are clamped to `[0, 100]` font design units; out-of-range values are clamped with a
+`console.warn`, and non-finite values are rejected with a `console.error`. The proportional
+effect depends on the font's `unitsPerEm`: for a 2048-unit font, `100` is about `0.049 em`.
+The bound exists because large offsets expand the glyph quad into its neighbours and
+lengthen the per-pixel band scan (its cost is proportional to the number of bands the
+radius spans).
+
+### Test specification
+
+`tests/lite/unit/text-font-weight-offset.test.ts`:
+
+- **Setter semantics** — attach / overwrite / clear-with-zero on a live `TextData`; `NaN`
+  and `Infinity` rejected with `console.error` and no repack; values clamped to `[0, 100]` with
+  `console.warn`; setting the value a run already has is a no-op (`_version` and
+  `_layoutVersion` unchanged), and a zero call on a never-weighted run installs nothing.
+- **Run resolution** — the index form (`setFontWeightOffset(data, 0, …)`) is equivalent to
+  the reference form; an out-of-range index and a `GlyphRun` that belongs to another
+  `TextData` both throw with the `updateTextData`-shaped message.
+- **Post-create mutation** — a setter call made *after* `createTextData` (i.e. after the
+  runs are already packed) changes the run's draw-group key and its `params.y` immediately;
+  a following zero restores both to the base key and `0`.
+- **Style packing** — a weighted run's `params.y` holds `Math.fround(offset)`; a base run's
+  is `0`.
+- **`DefaultTextData` flow** — the setter works on `data.runs[0]` immediately after
+  `createDefaultTextData`, and after `updateDefaultTextData` replaces the run the offset
+  does not transfer but re-applying it by index does.
+- **Variant grouping** — one base + one weighted run on the same curve set produce two groups
+  with the same `_curveSetId`, one keyed by the curve set and one by an interned token; two
+  weighted runs with different offsets share one group; `addRun` / `replaceRun` / `removeRun`
+  respect the key.
+- **Group-key collision regression** — the `"X:w"` / `"X"` pair stays in distinct groups with
+  the correct curve set, on create and across a `reset` (group object identity is reused per
+  key).
+- **Band-scan completeness (algorithmic)** — a JS replica of `wdst`'s candidate selection,
+  driven by the real `buildGlyphBands` output for a synthetic square glyph, must consider the
+  true nearest curve for sample points on all four exterior sides and all four corners. The
+  pre-fix "accumulate inside the base loop" candidate set is asserted to *fail* the same
+  check, so the regression cannot silently return.
+- **Band-transform invariant** — `buildGlyphBands` + the packed metadata always produce a
+  non-negative, monotone band transform (what `wdst`'s range clamp relies on).
+- **Composition** — `composeSlugShader(null)` contains no weight varying, `dq`/`wdst` helper
+  or coverage override, and its band loops contain no injected statements; the composed
+  variant contains all of them; the base source is a subsequence of the variant at every
+  significant line, proving composition rather than duplication. `_key` is `""` for the base
+  and the fragment id for the variant.
+- **Coverage direction** — a JS replica of the `CO` transfer function proves positive offsets
+  expand and that `max` finalization can never remove analytic base coverage.
+- **Pipeline cache key** — the exported key builder is fixed arity and a base A2C pipeline
+  cannot collide with a variant whose id is `"a"`.
+
+`tests/lite/unit/text-renderer-variant-pipeline.test.ts`: a mocked device + render-bundle
+encoder records a layer holding base, weighted and base draw groups and asserts the exact
+`setPipeline` / `setBindGroup` / `draw` command sequence (base → variant → base), that a
+base-only layer records exactly the pre-feature command sequence, and that the variant
+pipeline is resolved during `_update`, not per draw. The same file covers the
+`TextRenderable` late-install path in module isolation (`vi.resetModules()` + dynamic
+import, so no earlier test has installed the resolver): a renderable is **bound first**,
+its binding `update` runs with no styling feature installed (variant pipeline aliases the
+base), the setter is then called on its live `TextData`, and the next binding `update`
+must refresh `gpu._variantPipeline` to a distinct pipeline built from the same target
+signature — after which the recorded draw sequence is base → variant → base.
+
+`tests/lite/build/text-shader-fragment-treeshake.test.ts` (Rollup over the shipped
+`build/lib`): a consumer importing text rendering but not `setFontWeightOffset` retains the
+base Slug source and **not** the weight fragment's WGSL; a text consumer that also imports
+`setFontWeightOffset` retains both, with the base Slug logic still declared exactly once.

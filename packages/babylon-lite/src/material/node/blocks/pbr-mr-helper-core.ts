@@ -1,5 +1,6 @@
 import type { NodePbrMrHelperRequest } from "../node-types.js";
 import { MAX_LIGHTS } from "../../../light/types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export function buildPbrMrHelperCore(request: NodePbrMrHelperRequest): string {
     if (
@@ -22,7 +23,7 @@ export function buildPbrMrHelperCore(request: NodePbrMrHelperRequest): string {
 
 function HELPER_WGSL(useEnv: boolean): string {
     const iblBlock = useEnv
-        ? `
+        ? wgsl`
     let envRot = sceneU.envRotationY;
     let cosA = cos(envRot); let sinA = sin(envRot);
     let N_specSrc = N;
@@ -62,12 +63,12 @@ function HELPER_WGSL(useEnv: boolean): string {
     let shFinalIbl = v3(0.0);
     let shAlbedoScaling: f32 = 1.0;
     r.lighting = finalIrradiance * shAlbedoScaling + ssRefractionIrradiance * ao_c + (finalRadianceScaled + finalSpecularScaledDirect + diffuseAcc) * shAlbedoScaling + diffuseTransmissionAcc + shDirectAcc + shFinalIbl + finalRefraction;`
-        : `
+        : wgsl`
     r.diffuseInd = v3(0.0);
     r.specularInd = v3(0.0);
     r.lighting = diffuseAcc + diffuseTransmissionAcc + specAcc + shDirectAcc;`;
 
-    return `alias v2 = vec2<f32>;
+    return wgsl`alias v2 = vec2<f32>;
 alias v3 = vec3<f32>;
 alias v4 = vec4<f32>;
 struct NmePbrMrResult {
@@ -229,10 +230,10 @@ fn nme_pbr_mr_compute(
 ${iblBlock}
     ${
         useEnv
-            ? `let _radLum = clamp(dot(finalRadianceScaled * shAlbedoScaling, v3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
+            ? wgsl`let _radLum = clamp(dot(finalRadianceScaled * shAlbedoScaling, v3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
     let _specLum = clamp(dot(finalSpecularScaledDirect * shAlbedoScaling, v3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
     r.lumOverAlpha = _radLum + _specLum;`
-            : `let _specLum = clamp(dot(specAcc, v3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
+            : wgsl`let _specLum = clamp(dot(specAcc, v3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
     r.lumOverAlpha = _specLum;`
     }
     var colorOut = max(r.lighting, v3(0.0)) * sceneU.vImageInfos.x;

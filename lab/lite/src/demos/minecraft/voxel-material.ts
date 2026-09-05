@@ -11,11 +11,12 @@
 // water shimmer can use the world coordinate directly.
 
 import { createShaderMaterial, setShaderTexture, setShaderVector3, setShaderFloat, type ShaderMaterial, type Texture2D } from "babylon-lite";
+import { wgsl, type WgslSource } from "babylon-lite/shader/wgsl.js";
 
 export type VoxelMaterialMode = "opaque" | "cutout" | "blend";
 
-function vertexSource(mode: VoxelMaterialMode): string {
-    return `struct VertexOutput {
+function vertexSource(mode: VoxelMaterialMode): WgslSource {
+    return wgsl`struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) uv: vec2<f32>,
   @location(1) ao: vec3<f32>,
@@ -29,14 +30,14 @@ function vertexSource(mode: VoxelMaterialMode): string {
   var p = input.position;
   ${
       mode === "blend"
-          ? `// Drop the fluid (water) surface slightly and ripple it for a liquid feel.
+          ? wgsl`// Drop the fluid (water) surface slightly and ripple it for a liquid feel.
   // Gated by the per-vertex fluid flag so solid translucent blocks (glass, ice)
   // stay perfectly still.
   let fluid = input.color.a;
   let wave = sin(p.x * 0.6 + shaderUniforms.uTime * 1.6) * 0.5 + sin(p.z * 0.7 + shaderUniforms.uTime * 1.3) * 0.5;
   p.y = p.y + (-0.12 + wave * 0.05) * fluid;`
           : mode === "cutout"
-            ? `// Gentle wind sway for foliage (leaves), gated by the per-vertex sway flag so
+            ? wgsl`// Gentle wind sway for foliage (leaves), gated by the per-vertex sway flag so
   // solid cutout blocks (cactus) stay rigid.
   let sway = input.color.a;
   let t = shaderUniforms.uTime;
@@ -44,7 +45,7 @@ function vertexSource(mode: VoxelMaterialMode): string {
   let sz = sin(p.z * 0.5 + p.y * 0.3 + t * 1.1) + sin(p.x * 0.6 + t * 0.7);
   p.x = p.x + sx * 0.045 * sway;
   p.z = p.z + sz * 0.045 * sway;`
-            : ``
+            : wgsl``
   }
   out.position = shaderSystem.worldViewProjection * vec4<f32>(p, 1.0);
   out.viewDepth = (shaderSystem.worldView * vec4<f32>(p, 1.0)).z;
@@ -60,18 +61,18 @@ function vertexSource(mode: VoxelMaterialMode): string {
 // Fixed Minecraft-style per-face shade derived from the dominant normal axis. Used
 // only as an artistic tint on the ambient term (not on direct sun), so the dynamic
 // sun direction still reads clearly on geometry.
-const FACE_SHADE_FN = `fn mcFaceShade(n: vec3<f32>) -> f32 {
+const FACE_SHADE_FN = wgsl`fn mcFaceShade(n: vec3<f32>) -> f32 {
   if (n.y > 0.5) { return 1.0; }
   if (n.y < -0.5) { return 0.5; }
   if (abs(n.x) > 0.5) { return 0.8; }
   return 0.7;
 }`;
 
-function fragmentSource(mode: VoxelMaterialMode): string {
-    const alphaTest = mode === "cutout" ? `if (tex.a < 0.5) { discard; }` : ``;
+function fragmentSource(mode: VoxelMaterialMode): WgslSource {
+    const alphaTest = mode === "cutout" ? wgsl`if (tex.a < 0.5) { discard; }` : ``;
     let outColor: string;
     if (mode === "blend") {
-        outColor = `let shimmer = 1.0 - input.fluid * (0.08 - 0.08 * sin(input.worldPos.x * 0.8 + input.worldPos.z * 0.8 + shaderUniforms.uTime * 2.0));
+        outColor = wgsl`let shimmer = 1.0 - input.fluid * (0.08 - 0.08 * sin(input.worldPos.x * 0.8 + input.worldPos.z * 0.8 + shaderUniforms.uTime * 2.0));
   var surf = tex.rgb;
   var outA = tex.a;
   if (input.fluid > 0.5) {
@@ -102,11 +103,11 @@ function fragmentSource(mode: VoxelMaterialMode): string {
   let foggy = mix(lit, shaderUniforms.fogColor, fogAmt);
   return vec4<f32>(foggy, outA * shaderUniforms.alpha);`;
     } else {
-        outColor = `let lit = tex.rgb * input.ao.r * irradiance;
+        outColor = wgsl`let lit = tex.rgb * input.ao.r * irradiance;
   let foggy = mix(lit, shaderUniforms.fogColor, fogAmt);
   return vec4<f32>(foggy, 1.0);`;
     }
-    return `${FACE_SHADE_FN}
+    return wgsl`${FACE_SHADE_FN}
 struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) uv: vec2<f32>,

@@ -1,9 +1,11 @@
 {
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "noEmit": true,
-    "types": ["@webgpu/types", "webxr"]
-  },
-  "include": ["**/*.ts", "../../scripts/**/*.ts", "../../packages/babylon-lite/src/vite-env.d.ts", "../../packages/babylon-lite/src/xr/xr-webgpu-globals.d.ts"]
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "noEmit": true,
+        "types": ["@webgpu/types", "webxr"],
+        "paths": {
+            "babylon-lite/shader/wgsl.js": ["../../packages/babylon-lite/src/shader/wgsl.ts"]
+        }
+    },
+    "include": ["**/*.ts", "../../scripts/**/*.ts", "../../packages/babylon-lite/src/vite-env.d.ts", "../../packages/babylon-lite/src/xr/xr-webgpu-globals.d.ts"]
 }
-

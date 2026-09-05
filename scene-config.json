@@ -1215,7 +1215,7 @@
         "slug": "scene117-sprite-2d-picking",
         "name": "Scene 117 — 2D Sprite Picking",
         "maxMad": 0.05,
-        "maxRawKB": 16.56,
+        "maxRawKB": 16.6,
         "description": "Visual 2D sprite-picking validation: pickSprite2D resolves the centre sprite of a deterministic 5×3 HUD grid and the hit is highlighted with a gold tint. The BJS oracle replicates the same highlight via ThinSprite.",
         "tags": ["sprite", "2d", "picking"],
         "skipPerf": true
@@ -1942,7 +1942,7 @@
         "slug": "scene214-cascaded-shadows",
         "name": "Scene 214 — Cascaded Shadow Maps",
         "maxMad": 0.4,
-        "maxRawKB": 67.7,
+        "maxRawKB": 67.8,
         "description": "A deterministic field of 200 green torus-knot casters (playground #KY0N7T#84) drops shadows onto a large Standard ground receiver, lit by a single DirectionalLight with a 4-cascade CascadedShadowGenerator (PCF5). A seeded PRNG places every knot identically to the Babylon.js CSM oracle; cascade Z bounds auto-fit the caster AABB.",
         "tags": ["shadows", "csm", "standard", "directional"],
         "skipPerf": true

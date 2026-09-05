@@ -2,11 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { createShaderMaterial, setShaderFloat, setShaderMatrix, setShaderUniform } from "../../../packages/babylon-lite/src/material/shader/shader-material";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 
 function material() {
     return createShaderMaterial({
-        vertexSource: "@vertex fn mainVertex() -> @builtin(position) vec4f { return vec4f(); }",
-        fragmentSource: "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(); }",
+        vertexSource: wgsl`@vertex fn mainVertex() -> @builtin(position) vec4f { return vec4f(); }`,
+        fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(); }`,
         attributes: ["position"],
         uniforms: [
             { name: "amount", type: "f32" },

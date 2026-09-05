@@ -18,7 +18,7 @@
         "fflate": "^0.8.3"
     },
     "devDependencies": {
-        "@webgpu/types": "^0.1.71",
+        "@webgpu/types": "^0.1.72",
         "esbuild-wasm": "0.27.7",
         "monaco-editor": "^0.56.0",
         "typescript": "^6.0.3",

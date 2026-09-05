@@ -222,6 +222,36 @@ export interface RenderingContext {
     _resize?(): void;
 }
 
+/**
+ * Return the rendering contexts currently registered on `surface`, in render order.
+ *
+ * The returned readonly array is the surface's live registry view, not a snapshot:
+ * later registrations and removals are visible through the same reference without
+ * allocating on each query.
+ */
+export function getRenderingContexts(surface: SurfaceContext): readonly RenderingContext[] {
+    return surface._renderingContexts;
+}
+
+/**
+ * Return a stable string identifying the concrete family of `context`.
+ *
+ * Current core values are `"scene"`, `"frame-graph-context"`, `"effect-renderer"`,
+ * `"sprite-renderer"`, and `"text-renderer"`.
+ *
+ * The return type is intentionally a raw `string`, not a string-literal union,
+ * so adding a rendering-context family is not a breaking API change. Treat the
+ * values above as the documented set to match against.
+ *
+ * Throws when `context` is not a rendering context created by Lite.
+ */
+export function getRenderingContextKind(context: RenderingContext): string {
+    if (!context || typeof context._kind !== "string") {
+        throw new TypeError("Invalid RenderingContext: missing internal kind discriminator");
+    }
+    return context._kind;
+}
+
 /** @internal */
 interface DeviceLostRecoveryCapture {
     t(tex: Texture2D, source: Texture2DRecoverySource): void;

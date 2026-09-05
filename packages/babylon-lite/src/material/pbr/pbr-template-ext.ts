@@ -7,6 +7,7 @@
  */
 
 import type { UboField, VertexAttribute, Varying, BindingDecl } from "../../shader/fragment-types.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -100,9 +101,9 @@ export function createPbrTemplateExt(flags: {
     // Each channel's sampled UV: with a UV transform it becomes a `${name}UV` local (built from
     // the channel's base UV set); without a transform it is the base UV set (input.uv / input.uv2).
     const uvVarName = (name: string, bit: number) => (_hasUvTransform ? `${name}UV` : baseUvFor(bit));
-    const uvTransformDecl = (name: string, bit: number) => (_hasUvTransform ? `let ${name}UV = txfUV(${baseUvFor(bit)}, material.${name}UVm, material.${name}UVt.xy);\n` : "");
+    const uvTransformDecl = (name: string, bit: number) => (_hasUvTransform ? wgsl`let ${name}UV = txfUV(${baseUvFor(bit)}, material.${name}UVm, material.${name}UVt.xy);\n` : "");
     const UV_TRANSFORM_HELPER_WGSL = _hasUvTransform
-        ? `fn txfUV(uv: vec2<f32>, m: vec4<f32>, t: vec2<f32>) -> vec2<f32> {
+        ? wgsl`fn txfUV(uv: vec2<f32>, m: vec4<f32>, t: vec2<f32>) -> vec2<f32> {
 return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
 }
 `
@@ -189,7 +190,7 @@ return vec2<f32>(dot(m.xy, uv), dot(m.zw, uv)) + t;
     // rewrites `baseColor` here to match the mangled `var bc=` declaration in
     // pbr-template.ts. A plain string is skipped by the mangler and produces
     // `unresolved value 'baseColor'` in the bundled shader. See thin-instance-fragment.ts.
-    const baseColorMod = _hasVertexColor ? `\nbaseColor *= input.vColor.rgb;\nalpha *= input.vColor.a;` : "";
+    const baseColorMod = _hasVertexColor ? wgsl`\nbaseColor *= input.vColor.rgb;\nalpha *= input.vColor.a;` : "";
 
     // ── Normal scale modifier ───────────────────────────────────
     // When ext is active, emit the scaledNormal line (replaces default normalMapRaw).

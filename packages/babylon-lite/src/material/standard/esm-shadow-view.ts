@@ -4,6 +4,7 @@ import { createMaterialView } from "../material-view.js";
 import type { MaterialView } from "../material.js";
 import { ESM_SHADOW_OUTPUT, MATERIAL_ALPHA_BLEND } from "./standard-flags.js";
 import type { StandardMaterialProps } from "./standard-material.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 export interface StandardEsmShadowMaterialView extends MaterialView {
     /** @internal */
@@ -12,7 +13,7 @@ export interface StandardEsmShadowMaterialView extends MaterialView {
     readonly _esmShadowDepthCode: string;
 }
 
-const STANDARD_ESM_SHADOW_DEPTH_CODE = `let depthMetricSM = (input.clipPos.z + shadowParams.depthValues.x) / shadowParams.depthValues.y + shadowParams.biasAndScale.x;
+const STANDARD_ESM_SHADOW_DEPTH_CODE = wgsl`let depthMetricSM = (input.clipPos.z + shadowParams.depthValues.x) / shadowParams.depthValues.y + shadowParams.biasAndScale.x;
 let depthSM = clamp(exp(-min(87.0, shadowParams.biasAndScale.z * depthMetricSM)), 0.0, 1.0);
 return vec4<f32>(depthSM, 1.0, 1.0, 1.0);`;
 

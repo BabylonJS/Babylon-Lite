@@ -1,6 +1,7 @@
 import type { EngineContext } from "../engine/engine.js";
 import { createPostProcessTask, type PostProcessTask, type PostProcessTaskConfig } from "../frame-graph/post-process-task.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** Configuration for `createExtractHighlightsPostProcessTask`: luminance `threshold` and `exposure` applied before thresholding. */
 export interface ExtractHighlightsPostProcessTaskConfig extends Omit<PostProcessTaskConfig, "_shader"> {
@@ -16,10 +17,10 @@ export interface ExtractHighlightsPostProcessTask extends PostProcessTask {
 
 const TO_GAMMA_SPACE = 1 / 2.2;
 
-const EXTRACT_HIGHLIGHTS_UNIFORM_WGSL = `struct ExtractHighlightsParams{threshold:f32,exposure:f32,p0:f32,p1:f32}
+const EXTRACT_HIGHLIGHTS_UNIFORM_WGSL = wgsl`struct ExtractHighlightsParams{threshold:f32,exposure:f32,p0:f32,p1:f32}
 @group(0) @binding(2) var<uniform> extractHighlightsParams:ExtractHighlightsParams;`;
 
-const EXTRACT_HIGHLIGHTS_FRAGMENT_WGSL = `fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{let luma=dot(vec3f(0.2126,0.7152,0.0722),color.rgb*extractHighlightsParams.exposure);return vec4f(step(extractHighlightsParams.threshold,luma)*color.rgb,color.a);}`;
+const EXTRACT_HIGHLIGHTS_FRAGMENT_WGSL = wgsl`fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{let luma=dot(vec3f(0.2126,0.7152,0.0722),color.rgb*extractHighlightsParams.exposure);return vec4f(step(extractHighlightsParams.threshold,luma)*color.rgb,color.a);}`;
 
 /**
  * Create a post-process task that isolates bright highlights above a luminance threshold (used as the first stage of bloom).

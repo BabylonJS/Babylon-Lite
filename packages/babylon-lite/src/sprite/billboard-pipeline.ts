@@ -8,6 +8,7 @@ import type { SpriteLayerFx } from "./custom-shader-core.js";
 import { _getBillboardFxHook } from "./sprite-fx-hook.js";
 import { BILLBOARD_ANCHOR_FLOATS_PER_SPRITE, BILLBOARD_INSTANCE_FLOATS_PER_SPRITE, BILLBOARD_INSTANCE_STRIDE_BYTES } from "./billboard-sprite.js";
 import { _getAlphaToCoverageResolver } from "../render/alpha-to-coverage-hook.js";
+import { wgsl } from "../shader/wgsl.js";
 
 export interface BillboardPipelineDeviceCache {
     /** @internal */
@@ -57,7 +58,7 @@ function getDepthModeEntry(depthMode: BillboardDepthMode): (typeof DEPTH_MODE_TA
 export function makeBillboardBasisWgsl(orientation: BillboardOrientation): string {
     switch (orientation) {
         case "facing":
-            return `struct B {
+            return wgsl`struct B {
 r: vec3f,
 u: vec3f,
 };
@@ -67,7 +68,7 @@ let u = normalize(vec3f(scene.view[0][1], scene.view[1][1], scene.view[2][1]));
 return B(r, -u);
 }`;
         case "axis-locked":
-            return `struct B {
+            return wgsl`struct B {
 r: vec3f,
 u: vec3f,
 };
@@ -86,7 +87,7 @@ return B(r, -a);
 
 function makeBillboardFragmentWgsl(depthMode: BillboardDepthMode, alphaToCoverage: boolean): string {
     if (depthMode === "cutout" && !alphaToCoverage) {
-        return `@fragment
+        return wgsl`@fragment
 fn fs(in: O) -> @location(0) vec4f {
 let s = textureSample(atlasTex, atlasSamp, in.uv);
 if (s.a < billboards.axisAndCutoff.w) {
@@ -95,7 +96,7 @@ discard;
 return s * in.tint * billboards.opacityMul;
 }`;
     }
-    return `@fragment
+    return wgsl`@fragment
 fn fs(in: O) -> @location(0) vec4f {
 let s = textureSample(atlasTex, atlasSamp, in.uv);
 return s * in.tint * billboards.opacityMul;
@@ -103,7 +104,7 @@ return s * in.tint * billboards.opacityMul;
 }
 
 function makeBillboardWgsl(orientation: BillboardOrientation, depthMode: BillboardDepthMode, alphaToCoverage: boolean): string {
-    return `${SCENE_UBO_WGSL}
+    return wgsl`${SCENE_UBO_WGSL}
 struct S {
 opacityMul: vec4f,
 axisAndCutoff: vec4f,
