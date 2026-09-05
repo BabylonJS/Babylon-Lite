@@ -25,11 +25,11 @@
  *  - CPU-side picking (`_cpuPositions`) is unavailable by construction.
  */
 import type { EngineContext } from "../engine/engine.js";
-import type { Mesh, MeshVbLayout } from "./mesh.js";
+import type { Mesh, MeshGPU, MeshVbLayout } from "./mesh.js";
 import { initMeshTransform } from "./mesh.js";
 import { BU } from "../engine/gpu-flags.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
-import { _getStorageBufferHandle, type StorageBuffer } from "../resource/storage-buffer.js";
+import { _getStorageBufferHandle, _installStorageRebuildObserver, type StorageBuffer } from "../resource/storage-buffer.js";
 import type { ShaderAttributeName } from "../material/shader/shader-material.js";
 import { _enableShaderVb } from "../material/shader/shader-vb.js";
 import { _installBorrowAwareGeometryDisposer } from "./mesh-dispose.js";
@@ -85,7 +85,7 @@ export interface MeshFromStorageOptions {
 export function createMeshFromStorageBuffer(engine: EngineContext, name: string, options: MeshFromStorageOptions): Mesh {
     const { storage, indices, vertexCount, arrayStride, baseVertex = 0 } = options;
 
-    if (!storage._vertex) {
+    if ((storage._usage & BU.VERTEX) === 0) {
         throw new Error("createMeshFromStorageBuffer: storage must be created with { vertex: true } so it carries GPUBufferUsage.VERTEX.");
     }
     if (!Number.isInteger(arrayStride) || arrayStride <= 0 || arrayStride % 4 !== 0) {
@@ -98,7 +98,7 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
 
     const vertexBuffer = _getStorageBufferHandle(engine, storage);
     const sharedIndices = !ArrayBuffer.isView(indices);
-    if (sharedIndices && !(indices as StorageBuffer)._index) {
+    if (sharedIndices && ((indices as StorageBuffer)._usage & BU.INDEX) === 0) {
         throw new Error("createMeshFromStorageBuffer: a StorageBuffer passed as `indices` must be created with { index: true } so it carries GPUBufferUsage.INDEX.");
     }
     const indexCount = options.indexCount ?? (sharedIndices ? 0 : (indices as Uint16Array | Uint32Array).length);
@@ -154,7 +154,64 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
         },
     });
 
+    (_slabSources ??= new WeakMap()).set(mesh._gpu, { _vb: storage, _ib: sharedIndices ? (indices as StorageBuffer) : null });
+    (_slabMeshes ??= new Set()).add(new WeakRef(mesh._gpu));
+
     return mesh;
+}
+
+/** Meshes that borrow a slab, so their cached `GPUBuffer` handles can be re-pointed after
+ *  a device-loss rebuild replaces the underlying allocations.
+ *
+ *  Held through `WeakRef`, matching `device-lost-recovery-capture.ts`: a strong registry
+ *  would keep a `MeshGPU` and two `GPUBuffer`s alive for the page's lifetime whenever a
+ *  mesh is dropped without going through `disposeMeshGpu`, which is a leak this module
+ *  would be introducing. Dead refs are pruned on each rebuild, so nothing has to be
+ *  unregistered on the dispose path and no per-disposal scan is needed.
+ *
+ *  Lazily created -- GUIDANCE.md forbids module-level allocations. */
+interface SlabSources {
+    readonly _vb: StorageBuffer;
+    readonly _ib: StorageBuffer | null;
+}
+/** The weak ref must target the MESH's own `_gpu`, which the mesh holds strongly -- a ref
+ *  to a wrapper object created here would have no other owner and collect immediately,
+ *  leaving the registry silently empty. The allocations hang off a WeakMap so they do not
+ *  keep the geometry alive either. */
+let _slabMeshes: Set<WeakRef<MeshGPU>> | null = null;
+let _slabSources: WeakMap<MeshGPU, SlabSources> | null = null;
+
+/** Re-point every borrowed handle at its allocation's current buffer. The allocations have
+ *  already been rebuilt when this runs; the meshes are still holding the dead handles. */
+function refreshSlabMeshes(engine: EngineContext): void {
+    for (const ref of _slabMeshes ?? []) {
+        const gpu = ref.deref();
+        const entry = gpu ? _slabSources?.get(gpu) : undefined;
+        if (!entry) {
+            _slabMeshes!.delete(ref);
+            continue;
+        }
+        // The registry is module-global but a page may run several engines; only this
+        // engine's allocations have been rebuilt, and resolving another's would throw.
+        if (entry._vb._engine !== engine) {
+            continue;
+        }
+        // An allocation disposed while a borrowing mesh is still alive would make
+        // `_getStorageBufferHandle` throw, and this runs inside a recovery step -- a throw
+        // here aborts the WHOLE device-loss recovery, taking every unrelated scene with it.
+        // A mesh borrowing a dead slab is already unusable; skip it rather than fail.
+        if (entry._vb._destroyed || entry._ib?._destroyed) {
+            continue;
+        }
+        const g = gpu as unknown as { positionBuffer: GPUBuffer; normalBuffer: GPUBuffer; uvBuffer: GPUBuffer; indexBuffer: GPUBuffer };
+        const vb = _getStorageBufferHandle(engine, entry._vb);
+        g.positionBuffer = vb;
+        g.normalBuffer = vb;
+        g.uvBuffer = vb;
+        if (entry._ib) {
+            g.indexBuffer = _getStorageBufferHandle(engine, entry._ib);
+        }
+    }
 }
 
 let _hooksInstalled = false;
@@ -186,4 +243,5 @@ function installHooks(): void {
             g.indexBuffer.destroy();
         }
     });
+    _installStorageRebuildObserver(refreshSlabMeshes);
 }

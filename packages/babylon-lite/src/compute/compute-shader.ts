@@ -105,6 +105,9 @@ export interface ComputeShader {
     /** @internal */ _bindGroup: GPUBindGroup | null;
     /** @internal */ _bindGroupDirty: boolean;
     /** @internal */ _destroyed: boolean;
+    /** @internal Device every cached GPU object below belongs to. Compared on each use so
+     *  a device-loss replacement invalidates them — GUIDANCE.md's cache rule. */
+    _device: GPUDevice | null;
 }
 
 function assertIdentifier(kind: string, name: string): void {
@@ -160,6 +163,7 @@ export function createComputeShader(engine: EngineContext, options: ComputeShade
         _bindGroup: null,
         _bindGroupDirty: true,
         _destroyed: false,
+        _device: engine._device,
     } as unknown as ComputeShader;
 
     for (const u of uniformDecls) {
@@ -168,6 +172,32 @@ export function createComputeShader(engine: EngineContext, options: ComputeShade
         }
     }
     return shader;
+}
+
+/** Drop every device-scoped object when the engine's device has been replaced.
+ *
+ *  A compute program caches a bind-group layout, a pipeline, a bind group and a uniform
+ *  buffer, all created against one `GPUDevice`. After device-lost recovery installs a
+ *  replacement, every one of them belongs to the dead device and using any of them is an
+ *  error. The uniform DATA survives — it lives in a CPU `ArrayBuffer` — so the buffer is
+ *  reallocated and marked dirty, and the next dispatch re-uploads the values the caller
+ *  already set rather than losing them. Storage bindings are re-read through
+ *  `_getStorageBufferHandle`, which resolves each allocation's rebuilt buffer. */
+function refreshForDevice(shader: ComputeShader): void {
+    const device = shader._engine._device;
+    if (shader._device === device) {
+        return;
+    }
+    shader._device = device;
+    shader._layout = null;
+    shader._pipeline = null;
+    shader._bindGroup = null;
+    shader._bindGroupDirty = true;
+    if (shader._uboSpec && shader._uboData) {
+        // The previous buffer died with its device; there is nothing to destroy.
+        shader._uboBuffer = createEmptyUniformBuffer(shader._engine, shader._uboSpec._totalBytes, `${shader.name}-ubo`);
+        shader._uboDirty = true;
+    }
 }
 
 function bindGroupLayout(shader: ComputeShader): GPUBindGroupLayout {
@@ -209,10 +239,23 @@ function ensurePipeline(shader: ComputeShader): GPUComputePipeline {
  * it happens on. Awaiting this beforehand moves that cost elsewhere.
  */
 export async function prepareComputeShader(shader: ComputeShader): Promise<void> {
-    if (shader._pipeline || shader._destroyed) {
+    if (shader._destroyed) {
         return;
     }
-    shader._pipeline = await shader._engine._device.createComputePipelineAsync(pipelineDescriptor(shader));
+    refreshForDevice(shader);
+    if (shader._pipeline) {
+        return;
+    }
+    // Capture the device and re-check after the await. A device loss during compilation
+    // would otherwise land a pipeline built against the DEAD device -- and land it after
+    // `refreshForDevice` has already recorded the new one, so the staleness latches and no
+    // later dispatch can detect it. Disposal during the await is the same hazard.
+    const device = shader._engine._device;
+    const pipeline = await device.createComputePipelineAsync(pipelineDescriptor(shader));
+    if (shader._destroyed || shader._engine._device !== device) {
+        return;
+    }
+    shader._pipeline = pipeline;
 }
 
 /**
@@ -302,6 +345,7 @@ export function dispatchCompute(engine: EngineContext, shader: ComputeShader, x:
         throw new Error(`ComputeShader "${shader.name}": workgroup counts must all be positive.`);
     }
 
+    refreshForDevice(shader);
     const device = engine._device;
     if (shader._uboDirty && shader._uboBuffer && shader._uboData) {
         device.queue.writeBuffer(shader._uboBuffer, 0, shader._uboData);
@@ -326,5 +370,6 @@ export function disposeComputeShader(shader: ComputeShader): void {
     shader._bindGroup = null;
     shader._layout = null;
     shader._bindings.clear();
+    shader._device = null;
     shader._destroyed = true;
 }

@@ -22,10 +22,9 @@ export interface StorageBuffer {
     readonly _label?: string;
     /** @internal Bound as `var<storage, read_write>` and usable as a compute target. */
     readonly _writable?: boolean;
-    /** @internal Carries `GPUBufferUsage.VERTEX`, so a mesh can source geometry from it. */
-    readonly _vertex?: boolean;
-    /** @internal Carries `GPUBufferUsage.INDEX`, so many meshes can share one topology. */
-    readonly _index?: boolean;
+    /** @internal Exact usage mask supplied at creation, so a device-loss rebuild
+     *  reproduces it rather than recomputing -- the two drifted once already. */
+    readonly _usage: GPUBufferUsageFlags;
 }
 
 /** Options for {@link createStorageBuffer}. */
@@ -65,8 +64,7 @@ export function createStorageBuffer(engine: EngineContext, source: ArrayBufferVi
     const requested = typeof source === "number" ? source : source.byteLength;
     const byteLength = align(Math.max(requested, 4), 4);
     // COPY_SRC on writable allocations keeps GPU-produced contents copyable — needed
-    // for debugging, capture tooling, and staging into other resources. A compute
-    // target you can never read out of is impractical to diagnose.
+    // for debugging, capture tooling, and staging into other resources.
     const usage = BU.STORAGE | (vertex ? BU.VERTEX : 0) | (index ? BU.INDEX : 0) | (writable ? BU.COPY_SRC : 0);
 
     // A writable buffer keeps no CPU shadow: the GPU owns its contents.
@@ -89,8 +87,7 @@ export function createStorageBuffer(engine: EngineContext, source: ArrayBufferVi
         _engine: { value: engine },
         _label: { value: label },
         _writable: { value: writable },
-        _vertex: { value: vertex },
-        _index: { value: index },
+        _usage: { value: usage },
     });
     (engine._storageBuffers ??= new Set()).add(storage);
     if (!engine._storageRequiredLimits) {
@@ -177,13 +174,23 @@ export function disposeStorageBuffer(buffer: StorageBuffer): void {
     }
 }
 
+/** Consumers that cached a `GPUBuffer` handle out of an allocation and must re-read it
+ *  after a rebuild. Installed by `mesh-from-storage`; null in any bundle that never
+ *  sources geometry from a StorageBuffer. */
+let _afterRebuild: ((engine: EngineContext) => void) | null = null;
+
+/** @internal Register a callback to run once every allocation has been rebuilt. */
+export function _installStorageRebuildObserver(fn: (engine: EngineContext) => void): void {
+    _afterRebuild = fn;
+}
+
 /** @internal Rebuild every live storage allocation after the engine device changes. */
 export function _rebuildStorageBuffers(engine: EngineContext): void {
     for (const buffer of engine._storageBuffers ?? []) {
         if (buffer._destroyed) {
             continue;
         }
-        const usage = BU.STORAGE | (buffer._vertex ? BU.VERTEX : 0);
+        const usage = buffer._usage;
         if (buffer._data) {
             buffer._buffer = createMappedBuffer(engine, buffer._data, usage, buffer._label);
         } else {
@@ -192,6 +199,10 @@ export function _rebuildStorageBuffers(engine: EngineContext): void {
             buffer._buffer = engine._device.createBuffer({ label: buffer._label, size: buffer.byteLength, usage: usage | BU.COPY_DST });
         }
     }
+    // Every allocation now holds a NEW GPUBuffer. Anything that cached the old handle —
+    // a storage-backed mesh points its vertex and index fields straight at one — is still
+    // holding the dead one and has to be re-pointed before the next draw.
+    _afterRebuild?.(engine);
 }
 
 /** @internal Dispose all live storage allocations before their engine device is destroyed. */
