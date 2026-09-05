@@ -15,10 +15,11 @@
 // loader path currently produces a non-zero-offset attribute for the ShaderMaterial pipeline.
 import { addToScene, createArcRotateCamera, createEngine, createSceneContext, createShaderMaterial, loadGltf, registerScene, startEngine } from "babylon-lite";
 import type { Mesh } from "babylon-lite";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 const MODEL_URL = "/gltf-assets/Buffer_Interleaved/Buffer_Interleaved_03.gltf";
 
-const vertexSource = `struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) color:vec3<f32>,};
+const vertexSource = wgsl`struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) color:vec3<f32>,};
 @vertex fn mainVertex(input:VertexInput)->VertexOutput{
     var out:VertexOutput;
     out.position=shaderSystem.worldViewProjection*vec4<f32>(input.position,1.0);
@@ -26,7 +27,7 @@ const vertexSource = `struct VertexOutput{@builtin(position) position:vec4<f32>,
     return out;
 }`;
 
-const fragmentSource = `struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) color:vec3<f32>,};
+const fragmentSource = wgsl`struct VertexOutput{@builtin(position) position:vec4<f32>,@location(0) color:vec3<f32>,};
 @fragment fn mainFragment(input:VertexOutput)->@location(0) vec4<f32>{
     return vec4<f32>(input.color,1.0);
 }`;
