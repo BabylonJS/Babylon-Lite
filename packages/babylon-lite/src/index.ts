@@ -269,7 +269,18 @@ export type { Csg2Solid } from "./mesh/csg2.js";
 
 // ─── Resources ───────────────────────────────────────────────────────
 export { createStorageBuffer, updateStorageBuffer, disposeStorageBuffer } from "./resource/storage-buffer.js";
-export type { StorageBuffer } from "./resource/storage-buffer.js";
+export type { StorageBuffer, StorageBufferOptions } from "./resource/storage-buffer.js";
+// GPU-resident geometry: a compute pass fills a storage allocation and the draw
+// reads it in place (no readback, no copy). Tree-shaken away when unused.
+export { createMeshFromStorageBuffer } from "./mesh/mesh-from-storage.js";
+export type { MeshFromStorageOptions } from "./mesh/mesh-from-storage.js";
+// Non-canonical vertex formats for a ShaderMaterial (e.g. a float32x4 position packing
+// data in .w). Opt-in: costs nothing in scenes that never declare one.
+export { setShaderAttributeFormats } from "./material/shader/shader-vb.js";
+// User-facing compute. Lite runs compute internally (mipmaps, culling, IBL); this
+// is the supported way for a caller to run their own — e.g. to produce geometry.
+export { createComputeShader, prepareComputeShader, setComputeUniform, setComputeStorageBuffer, dispatchCompute, disposeComputeShader } from "./compute/compute-shader.js";
+export type { ComputeShader, ComputeShaderOptions, ComputeUniformDecl, ComputeStorageBufferDecl } from "./compute/compute-shader.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
@@ -632,6 +643,7 @@ export type {
     ShaderDefineValue,
     ShaderDefineMap,
     ShaderDefine,
+    ShaderAttributeFormats,
 } from "./material/shader/shader-material.js";
 export type {
     PbrMaterialProps,
