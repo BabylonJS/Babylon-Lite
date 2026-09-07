@@ -8,11 +8,12 @@
 import type { ShaderMaterial } from "./shader-material.js";
 import { _installShaderFinalWorldResolver } from "./shader-pipeline.js";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
+import { getMaterialSource } from "../material-view.js";
 
 let enabledMaterials: WeakSet<ShaderMaterial> | null = null;
 
 function finalWorldWgsl(material: ShaderMaterial, instanced: boolean): WgslSource | undefined {
-    if (!enabledMaterials?.has(material)) {
+    if (!enabledMaterials?.has(getMaterialSource(material) as ShaderMaterial)) {
         return undefined;
     }
     return instanced

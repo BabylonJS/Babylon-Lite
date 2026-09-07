@@ -241,7 +241,7 @@ export function createPbrMeshBindGroup(
         _features2: features2,
         _meshFeatures: meshFeatures,
         _material: material,
-        _mesh: meshCtx,
+        _mesh: meshCtx ?? undefined,
         _env: env ?? _pbrIblFallbackResolver?.(material) ?? null,
         _refractionTexture: refractionTexture,
     };

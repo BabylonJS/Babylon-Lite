@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
 import { enableShaderMaterialInstanceWorld } from "../../../packages/babylon-lite/src/material/shader/enable-shader-material-instance-world";
-import { createShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
+import { createShaderNoColorMaterialView } from "../../../packages/babylon-lite/src/material/shader/no-color-view";
+import { createShaderNormalMaterialView } from "../../../packages/babylon-lite/src/material/shader/normal-view";
+import { createShaderMaterial, type ShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
 import { clearShaderPipelineCache, enableShaderPipelineCache } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline-cache";
 import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline";
 import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/scene-helpers";
@@ -197,6 +199,35 @@ describe("ShaderMaterial pipeline cache", () => {
         expect(vertexSources[1]).toContain("return shaderSystem.world;");
         expect(vertexSources[1]).not.toContain("input.world0");
         expect(vertexSources[2]).toContain("return shaderSystem.world * mat4x4<f32>(input.world0, input.world1, input.world2, input.world3);");
+    });
+
+    it("preserves getFinalWorld for ShaderMaterial views", () => {
+        clearSceneBGLCache();
+        const { engine, createShaderModule } = makeEngine();
+        const material = createShaderMaterial({
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return getFinalWorld(input) * vec4f(input.position, 1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+            attributes: ["position"],
+            uniforms: ["world"],
+        });
+        enableShaderMaterialInstanceWorld(material);
+        const shadowView = createShaderNoColorMaterialView(material) as ShaderMaterial;
+        const shadowSignature = {
+            _colorFormat: null,
+            _depthStencilFormat: "depth32float",
+            _sampleCount: 1,
+        } as RenderTargetSignature;
+
+        getOrCreateShaderPipeline(engine, shadowSignature, shadowView, getOrCreateShaderPipelineBindings(engine, shadowView));
+        const normalView = createShaderNormalMaterialView(material) as ShaderMaterial;
+        getOrCreateShaderPipeline(engine, signature, normalView, getOrCreateShaderPipelineBindings(engine, normalView));
+
+        const vertexSources = createShaderModule.mock.calls.map((call) => call[0].code).filter((code) => code.includes("@vertex fn mainVertex"));
+        expect(vertexSources).toHaveLength(2);
+        for (const source of vertexSources) {
+            expect(source).toContain("fn getFinalWorld(input: VertexInput) -> mat4x4<f32>");
+            expect(source).toContain("return shaderSystem.world;");
+        }
     });
 
     it("rejects the instance-world helper without the world system uniform", () => {
