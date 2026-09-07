@@ -211,15 +211,14 @@ describe("ShaderMaterial pipeline cache", () => {
             uniforms: ["world"],
         });
         enableShaderMaterialInstanceWorld(material);
-        const shadowView = createShaderNoColorMaterialView(material) as ShaderMaterial;
-        const shadowSignature = {
-            _colorFormat: null,
+        const shadowView = createShaderNoColorMaterialView(material) as unknown as ShaderMaterial;
+        const shadowSignature: RenderTargetSignature = {
             _depthStencilFormat: "depth32float",
             _sampleCount: 1,
-        } as RenderTargetSignature;
+        };
 
         getOrCreateShaderPipeline(engine, shadowSignature, shadowView, getOrCreateShaderPipelineBindings(engine, shadowView));
-        const normalView = createShaderNormalMaterialView(material) as ShaderMaterial;
+        const normalView = createShaderNormalMaterialView(material) as unknown as ShaderMaterial;
         getOrCreateShaderPipeline(engine, signature, normalView, getOrCreateShaderPipelineBindings(engine, normalView));
 
         const vertexSources = createShaderModule.mock.calls.map((call) => call[0].code).filter((code) => code.includes("@vertex fn mainVertex"));
