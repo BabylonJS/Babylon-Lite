@@ -11,7 +11,7 @@ import { _isShaderSystemUniform } from "./shader-material.js";
 import type { ResolvedStencil } from "../stencil-state.js";
 import type { StencilState } from "../material.js";
 import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
-import { wgsl } from "../../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
 /** Stencil resolver, installed only by `enableMaterialStencil`. Module-local with a single exported setter:
  *  when `enableMaterialStencil` is absent from the bundle the setter tree-shakes, the bundler proves this is
@@ -23,9 +23,9 @@ export function _installShaderStencilResolver(resolve: (stencil: StencilState) =
 }
 
 /** Optional ShaderMaterial prelude extension installed only by `enableShaderMaterialInstanceWorld`. */
-let _finalWorldResolver: ((material: ShaderMaterial, instanced: boolean) => string) | null = null;
+let _finalWorldResolver: ((material: ShaderMaterial, instanced: boolean) => WgslSource | undefined) | null = null;
 /** @internal Install the opt-in ShaderMaterial final-world helper resolver. */
-export function _installShaderFinalWorldResolver(resolve: (material: ShaderMaterial, instanced: boolean) => string): void {
+export function _installShaderFinalWorldResolver(resolve: (material: ShaderMaterial, instanced: boolean) => WgslSource | undefined): void {
     _finalWorldResolver = resolve;
 }
 

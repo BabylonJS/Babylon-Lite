@@ -166,9 +166,8 @@ describe("ShaderMaterial pipeline cache", () => {
         expect(createShaderModule.mock.calls[0]![0].code).not.toContain("getFinalWorld");
 
         const material = createShaderMaterial({
-            vertexSource:
-                "@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { let finalWorld = getFinalWorld(input); return finalWorld * vec4f(input.position, 1); }",
-            fragmentSource: "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }",
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { let finalWorld = getFinalWorld(input); return finalWorld * vec4f(input.position, 1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
             attributes: ["position"],
             uniforms: ["world"],
         });
@@ -202,8 +201,8 @@ describe("ShaderMaterial pipeline cache", () => {
 
     it("rejects the instance-world helper without the world system uniform", () => {
         const material = createShaderMaterial({
-            vertexSource: "@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }",
-            fragmentSource: "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }",
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
             attributes: ["position"],
         });
         expect(() => enableShaderMaterialInstanceWorld(material)).toThrow('enableShaderMaterialInstanceWorld requires the ShaderMaterial to declare the "world" system uniform.');

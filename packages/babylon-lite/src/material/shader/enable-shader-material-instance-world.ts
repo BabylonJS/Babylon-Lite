@@ -7,19 +7,20 @@
 
 import type { ShaderMaterial } from "./shader-material.js";
 import { _installShaderFinalWorldResolver } from "./shader-pipeline.js";
+import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
 let enabledMaterials: WeakSet<ShaderMaterial> | null = null;
 
-function finalWorldWgsl(material: ShaderMaterial, instanced: boolean): string {
+function finalWorldWgsl(material: ShaderMaterial, instanced: boolean): WgslSource | undefined {
     if (!enabledMaterials?.has(material)) {
-        return "";
+        return undefined;
     }
     return instanced
-        ? `fn getFinalWorld(input: VertexInput) -> mat4x4<f32> {
+        ? wgsl`fn getFinalWorld(input: VertexInput) -> mat4x4<f32> {
 return shaderSystem.world * mat4x4<f32>(input.world0, input.world1, input.world2, input.world3);
 }
 `
-        : `fn getFinalWorld(input: VertexInput) -> mat4x4<f32> {
+        : wgsl`fn getFinalWorld(input: VertexInput) -> mat4x4<f32> {
 return shaderSystem.world;
 }
 `;
