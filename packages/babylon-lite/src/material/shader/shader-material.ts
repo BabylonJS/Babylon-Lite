@@ -162,6 +162,8 @@ export interface ShaderMaterial extends Material {
     readonly depthBiasSlopeScale: number;
     /** @internal Primitive topology override. Undefined means triangle-list. */
     readonly _topology?: GPUPrimitiveTopology;
+    /** @internal Optional pipeline-specialized vertex prelude installed by an opt-in feature. */
+    _finalWorldWgsl?: (instanced: boolean) => WgslSource;
     /** Optional stencil-test state baked into the main-pass pipeline (mask write / discard). Set after
      *  creation (`mat.stencil = { ... }`) and call `enableMaterialStencil()` before `registerScene`. Default
      *  none. See `StencilState`. */

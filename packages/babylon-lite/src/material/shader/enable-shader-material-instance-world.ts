@@ -6,16 +6,9 @@
  */
 
 import type { ShaderMaterial } from "./shader-material.js";
-import { _installShaderFinalWorldResolver } from "./shader-pipeline.js";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
-import { getMaterialSource } from "../material-view.js";
 
-let enabledMaterials: WeakSet<ShaderMaterial> | null = null;
-
-function finalWorldWgsl(material: ShaderMaterial, instanced: boolean): WgslSource | undefined {
-    if (!enabledMaterials?.has(getMaterialSource(material) as ShaderMaterial)) {
-        return undefined;
-    }
+function finalWorldWgsl(instanced: boolean): WgslSource {
     return instanced
         ? wgsl`fn getFinalWorld(input: VertexInput) -> mat4x4<f32> {
 return shaderSystem.world * mat4x4<f32>(input.world0, input.world1, input.world2, input.world3);
@@ -35,6 +28,5 @@ export function enableShaderMaterialInstanceWorld(material: ShaderMaterial): voi
     if (!material.uniformDecls.some((uniform) => uniform.name === "world")) {
         throw new Error('enableShaderMaterialInstanceWorld requires the ShaderMaterial to declare the "world" system uniform.');
     }
-    (enabledMaterials ??= new WeakSet()).add(material);
-    _installShaderFinalWorldResolver(finalWorldWgsl);
+    material._finalWorldWgsl = finalWorldWgsl;
 }

@@ -131,8 +131,8 @@ For a regular mesh, `getFinalWorld` returns `shaderSystem.world`. For a thin-ins
 `shaderSystem.world * mat4x4<f32>(input.world0, input.world1, input.world2, input.world3)`. This lets one
 vertex source serve both mesh types without referencing instance-only attributes on the regular-mesh variant.
 The `"world"` system uniform must be present in `ShaderMaterialOptions.uniforms`; the enabler throws otherwise.
-Materials that do not call the enabler retain the original generated prelude and pull in none of the helper WGSL
-or material-tracking implementation.
+The enabler stores the helper factory on the material, so material views inherit it through their source prototype.
+Materials that do not call the enabler retain the original generated prelude and pull in none of the helper WGSL.
 
 The `world` system uniform stays the **mesh** world matrix. The baked `worldViewProjection` / `worldView`
 system uniforms are **not** instance-aware — shared regular/instanced shaders must use `viewProjection` and
