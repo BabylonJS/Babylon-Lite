@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
+import { enableShaderMaterialInstanceWorld } from "../../../packages/babylon-lite/src/material/shader/enable-shader-material-instance-world";
 import { createShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
 import { clearShaderPipelineCache, enableShaderPipelineCache } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline-cache";
 import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline";
@@ -155,5 +156,56 @@ describe("ShaderMaterial pipeline cache", () => {
         expect(createRenderPipeline).toHaveBeenCalledTimes(2);
         expect(createRenderPipeline.mock.calls[0]![0]!.primitive!.topology).toBe("triangle-list");
         expect(createRenderPipeline.mock.calls[1]![0]!.primitive!.topology).toBe("line-list");
+    });
+
+    it("specializes getFinalWorld for regular and thin-instanced pipelines", () => {
+        clearSceneBGLCache();
+        const { engine, createShaderModule } = makeEngine();
+        const disabledMaterial = makeMaterial();
+        getOrCreateShaderPipeline(engine, signature, disabledMaterial, getOrCreateShaderPipelineBindings(engine, disabledMaterial));
+        expect(createShaderModule.mock.calls[0]![0].code).not.toContain("getFinalWorld");
+
+        const material = createShaderMaterial({
+            vertexSource:
+                "@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { let finalWorld = getFinalWorld(input); return finalWorld * vec4f(input.position, 1); }",
+            fragmentSource: "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }",
+            attributes: ["position"],
+            uniforms: ["world"],
+        });
+        enableShaderMaterialInstanceWorld(material);
+        const bindings = getOrCreateShaderPipelineBindings(engine, material);
+
+        getOrCreateShaderPipeline(engine, signature, material, bindings);
+        const instanceAttrs = `@location(1) world0: vec4<f32>,
+@location(2) world1: vec4<f32>,
+@location(3) world2: vec4<f32>,
+@location(4) world3: vec4<f32>,
+`;
+        const instanceLayout: GPUVertexBufferLayout = {
+            arrayStride: 64,
+            stepMode: "instance",
+            attributes: [
+                { shaderLocation: 1, offset: 0, format: "float32x4" },
+                { shaderLocation: 2, offset: 16, format: "float32x4" },
+                { shaderLocation: 3, offset: 32, format: "float32x4" },
+                { shaderLocation: 4, offset: 48, format: "float32x4" },
+            ],
+        };
+        getOrCreateShaderPipeline(engine, signature, material, bindings, "0", [...bindings.vertexBuffers, instanceLayout], instanceAttrs);
+
+        const vertexSources = createShaderModule.mock.calls.map((call) => call[0].code).filter((code) => code.includes("@vertex fn mainVertex"));
+        expect(vertexSources[1]).toContain("fn getFinalWorld(input: VertexInput) -> mat4x4<f32>");
+        expect(vertexSources[1]).toContain("return shaderSystem.world;");
+        expect(vertexSources[1]).not.toContain("input.world0");
+        expect(vertexSources[2]).toContain("return shaderSystem.world * mat4x4<f32>(input.world0, input.world1, input.world2, input.world3);");
+    });
+
+    it("rejects the instance-world helper without the world system uniform", () => {
+        const material = createShaderMaterial({
+            vertexSource: "@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }",
+            fragmentSource: "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }",
+            attributes: ["position"],
+        });
+        expect(() => enableShaderMaterialInstanceWorld(material)).toThrow('enableShaderMaterialInstanceWorld requires the ShaderMaterial to declare the "world" system uniform.');
     });
 });

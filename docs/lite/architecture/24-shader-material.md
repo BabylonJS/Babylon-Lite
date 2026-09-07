@@ -22,6 +22,7 @@ The design follows the Lite material contract:
 
 ```typescript
 export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMaterial;
+export function enableShaderMaterialInstanceWorld(material: ShaderMaterial): void;
 ```
 
 `createShaderMaterial` is synchronous and accepts already-resolved WGSL source strings.
@@ -116,15 +117,26 @@ per-instance tint while its `_shadowCasterMaterial` uses `{ useThinInstanceColor
 share the mesh's one matrix buffer, while the caster avoids an unused color vertex stream. The override WGSL
 must not reference `input.instanceColor`. The option is ignored for non-instanced meshes.
 
-The user shader composes the instance transform itself (matching Babylon.js `instancesVertex`):
+Call `enableShaderMaterialInstanceWorld(material)` before `registerScene()` to opt one material into a
+generated `getFinalWorld(input: VertexInput)` helper. The helper has one stable signature for both regular
+and thin-instanced meshes:
 
 ```wgsl
-let iw = mat4x4<f32>(input.world0, input.world1, input.world2, input.world3);
-out.position = shaderSystem.viewProjection * (shaderSystem.world * iw) * vec4<f32>(input.position, 1.0);
+let finalWorld = getFinalWorld(input);
+out.position = shaderSystem.viewProjection * finalWorld * vec4<f32>(input.position, 1.0);
 // out.vColor = input.instanceColor;  // when instance colors are present
 ```
 
-The `world` system uniform stays the **mesh** world matrix; for thin instances the effective world is `world * iw`. The baked `worldViewProjection` / `worldView` system uniforms are **not** instance-aware — instanced shaders must use `viewProjection` (+ `world`) and compose with `iw` themselves.
+For a regular mesh, `getFinalWorld` returns `shaderSystem.world`. For a thin-instanced mesh, it returns
+`shaderSystem.world * mat4x4<f32>(input.world0, input.world1, input.world2, input.world3)`. This lets one
+vertex source serve both mesh types without referencing instance-only attributes on the regular-mesh variant.
+The `"world"` system uniform must be present in `ShaderMaterialOptions.uniforms`; the enabler throws otherwise.
+Materials that do not call the enabler retain the original generated prelude and pull in none of the helper WGSL
+or material-tracking implementation.
+
+The `world` system uniform stays the **mesh** world matrix. The baked `worldViewProjection` / `worldView`
+system uniforms are **not** instance-aware — shared regular/instanced shaders must use `viewProjection` and
+`getFinalWorld(input)`.
 
 Implementation notes (bundle discipline):
 
@@ -254,6 +266,7 @@ Lite prepends a generated prelude before user source:
 4. Texture/sampler declarations for `options.samplers`.
 5. WGSL const declarations for `options.defines`.
 6. `VertexInput` generated from `options.attributes`.
+7. Opt-in `getFinalWorld(input)`, specialized for the regular or thin-instance pipeline variant.
 
 User WGSL must not declare:
 
@@ -276,6 +289,7 @@ Generated names intentionally match the names listed in the options where possib
 ```text
 packages/babylon-lite/src/material/shader/
   shader-material.ts       Public types, factory, setters, validation.
+  enable-shader-material-instance-world.ts  Opt-in regular/thin-instance final-world helper.
   shader-group-builder.ts  MeshGroupBuilder entry point and lazy renderable import.
   shader-renderable.ts     Per-scene/per-mesh renderables, UBO writes, bind groups.
   shader-pipeline.ts       Generated prelude, BGL creation, pipeline cache.

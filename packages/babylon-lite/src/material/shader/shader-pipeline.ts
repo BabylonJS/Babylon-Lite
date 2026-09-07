@@ -22,6 +22,13 @@ export function _installShaderStencilResolver(resolve: (stencil: StencilState) =
     _stencilResolver = resolve;
 }
 
+/** Optional ShaderMaterial prelude extension installed only by `enableShaderMaterialInstanceWorld`. */
+let _finalWorldResolver: ((material: ShaderMaterial, instanced: boolean) => string) | null = null;
+/** @internal Install the opt-in ShaderMaterial final-world helper resolver. */
+export function _installShaderFinalWorldResolver(resolve: (material: ShaderMaterial, instanced: boolean) => string): void {
+    _finalWorldResolver = resolve;
+}
+
 export interface ShaderPipelineBindings {
     readonly group1BGL: GPUBindGroupLayout;
     readonly systemSpec: UboSpec;
@@ -315,6 +322,10 @@ ${customSpec._structBody}
     source = wgsl`${source}${instanceAttrs}`;
     source = wgsl`${source}};
 `;
+    const finalWorld = _finalWorldResolver?.(material, instanceAttrs !== "");
+    if (finalWorld) {
+        source = wgsl`${source}${finalWorld}`;
+    }
     return source;
 }
 
