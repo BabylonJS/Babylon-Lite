@@ -16,12 +16,13 @@ import groundFragSrc from "../../../shaders/background.ground.fragment.wgsl?raw"
 import { createMappedBuffer } from "../../resource/gpu-buffers.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 import { WGSL_DITHER, WGSL_NO_DITHER } from "../../shader/wgsl-helpers.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 // ── Ground-frag-only WGSL helpers (kept here so scenes that don't load the ground
 //    don't pay for the image-processing helper in the shared wgsl-helpers chunk). ──
 
 /** Image processing: exposure → Reinhard tonemap → gamma → contrast. */
-const WGSL_IMAGE_PROCESSING = `
+const WGSL_IMAGE_PROCESSING = wgsl`
 fn applyImageProcessing(result: vec4<f32>) -> vec4<f32> {
 var rgb = result.rgb;
 rgb *= scene.vImageInfos.x;

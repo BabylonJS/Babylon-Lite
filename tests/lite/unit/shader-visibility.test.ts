@@ -8,6 +8,7 @@ import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh"
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { setSubtreeVisible } from "../../../packages/babylon-lite/src/scene/visibility";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 
 function createFixture(): {
     engine: EngineContext;
@@ -30,8 +31,8 @@ function createFixture(): {
         canvas: { width: 64, height: 64 },
     } as unknown as EngineContext;
     const material = createShaderMaterial({
-        vertexSource: "@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }",
-        fragmentSource: "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }",
+        vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
+        fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
         attributes: ["position"],
     });
     const createMesh = (name: string): Mesh =>

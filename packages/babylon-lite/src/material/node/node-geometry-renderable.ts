@@ -40,6 +40,7 @@ import type { NodeMaterial } from "./node-material.js";
 import { sanitize, bjsTypeToNodeType, floatCount, extractDefault } from "./node-material.js";
 import { getAttrBuffer, writeAttributeFlags } from "./node-renderable.js";
 import type { NodeGeometryMaterialView } from "./node-geometry-view.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 /** Lazily-created singleton {@link MeshGroupBuilder} that node geometry views point
  *  at via their overridden `_buildGroup`. The async builder body is unreachable —
@@ -82,7 +83,7 @@ interface NodeGeometryViewResources {
     _nodeUBOReady: boolean;
 }
 
-const ZERO = (wg: string): string => `vec4<f32>(0.0, 0.0, 0.0, ${wg})`;
+const ZERO = (wg: string): string => wgsl`vec4<f32>(0.0, 0.0, 0.0, ${wg})`;
 
 /** Build the per-attachment WGSL write for one geometry texture type, reading a
  *  connected graph input when present and falling back to the engine default. */
@@ -92,39 +93,39 @@ function geomWrite(type: GeometryTextureType, inputs: Map<GeometryTextureType, N
     const wp = inputs.get(GeometryTextureType.WORLD_POSITION);
     switch (type) {
         case GeometryTextureType.WORLD_POSITION:
-            return v ? `vec4<f32>(${v.expr}, ${wg})` : ZERO(wg);
+            return v ? wgsl`vec4<f32>(${v.expr}, ${wg})` : ZERO(wg);
         case GeometryTextureType.LOCAL_POSITION:
-            return v ? `vec4<f32>(${v.expr}, ${wg})` : ZERO(wg);
+            return v ? wgsl`vec4<f32>(${v.expr}, ${wg})` : ZERO(wg);
         case GeometryTextureType.WORLD_NORMAL:
-            return v ? `vec4<f32>(normalize(${v.expr}) * 0.5 + vec3<f32>(0.5), ${wg})` : ZERO(wg);
+            return v ? wgsl`vec4<f32>(normalize(${v.expr}) * 0.5 + vec3<f32>(0.5), ${wg})` : ZERO(wg);
         case GeometryTextureType.VIEW_NORMAL:
-            return v ? `vec4<f32>(normalize(${v.expr}), ${wg})` : ZERO(wg);
+            return v ? wgsl`vec4<f32>(normalize(${v.expr}), ${wg})` : ZERO(wg);
         case GeometryTextureType.REFLECTIVITY:
             // Stored as vec4 — vec4(rgb, a) * writeGeometryInfo.
             return v ? `(${v.expr}) * ${wg}` : ZERO(wg);
         case GeometryTextureType.ALBEDO:
-            return v ? `vec4<f32>(${v.expr}, ${wg})` : ZERO(wg);
+            return v ? wgsl`vec4<f32>(${v.expr}, ${wg})` : ZERO(wg);
         case GeometryTextureType.IRRADIANCE:
-            return v ? `vec4<f32>(${v.expr}, ${wg})` : ZERO(wg);
+            return v ? wgsl`vec4<f32>(${v.expr}, ${wg})` : ZERO(wg);
         case GeometryTextureType.SCREENSPACE_DEPTH:
-            return v ? `vec4<f32>(${v.expr}, 0.0, 0.0, ${wg})` : `vec4<f32>(in.position.z, 0.0, 0.0, ${wg})`;
+            return v ? wgsl`vec4<f32>(${v.expr}, 0.0, 0.0, ${wg})` : wgsl`vec4<f32>(in.position.z, 0.0, 0.0, ${wg})`;
         case GeometryTextureType.VIEW_DEPTH:
             if (v) {
-                return `vec4<f32>(${v.expr}, 0.0, 0.0, ${wg})`;
+                return wgsl`vec4<f32>(${v.expr}, 0.0, 0.0, ${wg})`;
             }
-            return wp ? `vec4<f32>((scene.view * vec4<f32>(${wp.expr}, 1.0)).z, 0.0, 0.0, ${wg})` : ZERO(wg);
+            return wp ? wgsl`vec4<f32>((scene.view * vec4<f32>(${wp.expr}, 1.0)).z, 0.0, 0.0, ${wg})` : ZERO(wg);
         case GeometryTextureType.NORMALIZED_VIEW_DEPTH:
             if (v) {
-                return `vec4<f32>(${v.expr}, 0.0, 0.0, ${wg})`;
+                return wgsl`vec4<f32>(${v.expr}, 0.0, 0.0, ${wg})`;
             }
             if (wp) {
                 gpRef.needsGp = true;
-                return `vec4<f32>(((scene.view * vec4<f32>(${wp.expr}, 1.0)).z - nmeGeom.cameraNearFar.x) / (nmeGeom.cameraNearFar.y - nmeGeom.cameraNearFar.x), 0.0, 0.0, ${wg})`;
+                return wgsl`vec4<f32>(((scene.view * vec4<f32>(${wp.expr}, 1.0)).z - nmeGeom.cameraNearFar.x) / (nmeGeom.cameraNearFar.y - nmeGeom.cameraNearFar.x), 0.0, 0.0, ${wg})`;
             }
             return ZERO(wg);
         case GeometryTextureType.LINEAR_VELOCITY:
             // Stored as vec3 — node materials do not compute velocity, default 0.
-            return v ? `vec4<f32>(${v.expr}, ${wg})` : ZERO(wg);
+            return v ? wgsl`vec4<f32>(${v.expr}, ${wg})` : ZERO(wg);
     }
 }
 
@@ -160,9 +161,9 @@ function ensureGeometryResources(view: NodeGeometryMaterialView): NodeGeometryVi
     const inputs = state._geometryInputs ?? new Map<GeometryTextureType, NodeExpr>();
     const attachments = view._geometryAttachments;
     const gpRef = { needsGp: false };
-    const structLines = attachments.map((_, i) => `@location(${i}) f${i}: vec4<f32>,`);
-    const struct = `struct FragmentOutput {\n${structLines.join("\n")}\n};`;
-    const writeLines = attachments.map((type, i) => `out.f${i} = ${geomWrite(type, inputs, gpRef)};`);
+    const structLines = attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`);
+    const struct = wgsl`struct FragmentOutput {\n${structLines.join("\n")}\n};`;
+    const writeLines = attachments.map((type, i) => wgsl`out.f${i} = ${geomWrite(type, inputs, gpRef)};`);
     // Pre-indent the full return body here (one level + trailing newline) so the
     // node pipeline just splices the string — no geometry WGSL assembly in the
     // always-loaded compileNodePipeline.
@@ -207,7 +208,7 @@ function ensureGeometryCompile(view: NodeGeometryMaterialView, res: NodeGeometry
         _cacheKey: `3|mrt:${colorFormats.join()}:${cullMode}`,
         _needsGpUbo: res._needsGpUbo,
         _buildGeomUbo: (binding) => ({
-            _wgsl: `struct NmeGeomParams { previousViewProjection: mat4x4<f32>, cameraNearFar: vec4<f32> };\n@group(1) @binding(${binding}) var<uniform> nmeGeom: NmeGeomParams;`,
+            _wgsl: wgsl`struct NmeGeomParams { previousViewProjection: mat4x4<f32>, cameraNearFar: vec4<f32> };\n@group(1) @binding(${binding}) var<uniform> nmeGeom: NmeGeomParams;`,
             _bglEntry: { binding, visibility: SS.FRAGMENT, buffer: { type: "uniform" } },
         }),
         // Geometry MRT renders upright into offscreen targets (the task packs an

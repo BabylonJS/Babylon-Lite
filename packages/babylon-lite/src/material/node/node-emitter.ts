@@ -14,6 +14,7 @@
 
 import type { NodeBlock, NodeBuildState, NodeEmitContext, NodeExpr, NodeGraph, NodeValueType, Stage, StageState, BlockEmitter } from "./node-types.js";
 import { WGSL } from "./node-types.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 // ─── Build-state construction ───────────────────────────────────────
 
@@ -96,13 +97,13 @@ export function castExpr(value: NodeExpr, target: NodeValueType): NodeExpr {
         return { expr: `${t}(${value.expr})`, type: target };
     }
     if (value.type === "vec3f" && target === "vec4f") {
-        return { expr: `vec4<f32>(${value.expr}, 1.0)`, type: target };
+        return { expr: wgsl`vec4<f32>(${value.expr}, 1.0)`, type: target };
     }
     if (value.type === "vec2f" && target === "vec4f") {
-        return { expr: `vec4<f32>(${value.expr}, 0.0, 1.0)`, type: target };
+        return { expr: wgsl`vec4<f32>(${value.expr}, 0.0, 1.0)`, type: target };
     }
     if (value.type === "vec2f" && target === "vec3f") {
-        return { expr: `vec3<f32>(${value.expr}, 0.0)`, type: target };
+        return { expr: wgsl`vec3<f32>(${value.expr}, 0.0)`, type: target };
     }
     throw new Error(`NodeMaterial: cannot cast ${value.type} to ${target} for expression \`${value.expr}\``);
 }
@@ -190,7 +191,7 @@ function bridgeVarying(state: NodeBuildState, varyingName: string, value: NodeEx
     const already = state.varyings.find((v) => v._name === varyingName);
     if (!already) {
         state.varyings.push({ _name: varyingName, _type: WGSL[value.type] });
-        state.vertex.body.push(`out.${varyingName} = ${value.expr};`);
+        state.vertex.body.push(wgsl`out.${varyingName} = ${value.expr};`);
     }
 }
 

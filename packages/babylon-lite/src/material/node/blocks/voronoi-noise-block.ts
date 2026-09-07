@@ -1,4 +1,5 @@
 import type { BlockEmitter } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export const emitter: BlockEmitter = {
     className: "VoronoiNoiseBlock",
@@ -8,7 +9,7 @@ export const emitter: BlockEmitter = {
         const density = ctx.cast(ctx.resolve(block, "density", stage, state), "f32");
         state[stage].helpers.set(
             "nme_voronoi",
-            `fn nme_voronoiRandom(pIn: vec2<f32>) -> vec2<f32> {
+            wgsl`fn nme_voronoiRandom(pIn: vec2<f32>) -> vec2<f32> {
 let p = vec2<f32>(dot(pIn, vec2<f32>(127.1, 311.7)), dot(pIn, vec2<f32>(269.5, 183.3)));
 return fract(sin(p) * 18.5453);
 }
@@ -35,7 +36,7 @@ return vec2<f32>(outValue, cells);
 }`
         );
         const temp = ctx.temp(state, "voronoi");
-        state[stage].body.push(`let ${temp} = nme_voronoi(${seed.expr}, ${offset.expr}, ${density.expr});`);
+        state[stage].body.push(wgsl`let ${temp} = nme_voronoi(${seed.expr}, ${offset.expr}, ${density.expr});`);
         return { expr: outputName === "cells" ? `${temp}.y` : `${temp}.x`, type: "f32" };
     },
 };

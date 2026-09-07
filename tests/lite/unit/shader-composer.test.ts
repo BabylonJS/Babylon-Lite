@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { computeUboLayout } from "../../../packages/babylon-lite/src/shader/ubo-layout";
 import { composeShader } from "../../../packages/babylon-lite/src/shader/shader-composer";
 import type { ShaderFragment, ShaderTemplate, UboField } from "../../../packages/babylon-lite/src/shader/fragment-types";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 
 // WebGPU shader stage constants for testing (Node has no GPUShaderStage global)
 const FRAGMENT = 0x2;
@@ -105,7 +106,7 @@ describe("computeUboLayout", () => {
 /** Minimal template for testing */
 function makeTemplate(overrides?: Partial<ShaderTemplate>): ShaderTemplate {
     return {
-        _vertexTemplate: [
+        _vertexTemplate: wgsl`${[
             "/*SU*/",
             "@group(0) @binding(0) var<uniform> scene: SceneUniforms;",
             "/*MU*/",
@@ -120,8 +121,8 @@ function makeTemplate(overrides?: Partial<ShaderTemplate>): ShaderTemplate {
             "/*VB*/",
             "return out;",
             "}",
-        ].join("\n"),
-        _fragmentTemplate: [
+        ].join("\n")}`,
+        _fragmentTemplate: wgsl`${[
             "/*SU*/",
             "@group(0) @binding(0) var<uniform> scene: SceneUniforms;",
             "/*MU*/",
@@ -143,7 +144,7 @@ function makeTemplate(overrides?: Partial<ShaderTemplate>): ShaderTemplate {
             "/*BA*/",
             "return color;",
             "}",
-        ].join("\n"),
+        ].join("\n")}`,
         _baseMeshUboFields: [{ _name: "world", _type: "mat4x4<f32>" }],
         _baseVertexAttributes: [
             { _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
@@ -203,8 +204,8 @@ describe("composeShader", () => {
         const frag: ShaderFragment = {
             _id: "test",
             _fragmentSlots: {
-                SV: "var myVar = 1.0;",
-                AI: "color += vec4<f32>(0.1);",
+                SV: wgsl`var myVar = 1.0;`,
+                AI: wgsl`color += vec4<f32>(0.1);`,
             },
         };
         const result = composeShader(makeTemplate(), [frag]);
@@ -217,11 +218,11 @@ describe("composeShader", () => {
     it("concatenates multiple fragment contributions at the same slot", () => {
         const fragA: ShaderFragment = {
             _id: "alpha",
-            _fragmentSlots: { AD: "// from alpha" },
+            _fragmentSlots: { AD: wgsl`// from alpha` },
         };
         const fragB: ShaderFragment = {
             _id: "beta",
-            _fragmentSlots: { AD: "// from beta" },
+            _fragmentSlots: { AD: wgsl`// from beta` },
         };
         const result = composeShader(makeTemplate(), [fragA, fragB]);
         const idx1 = result._fragmentWGSL.indexOf("// from alpha");
@@ -235,7 +236,7 @@ describe("composeShader", () => {
         const frag: ShaderFragment = {
             _id: "skeleton",
             _vertexSlots: {
-                VW: "let finalWorld = computeSkinning();",
+                VW: wgsl`let finalWorld = computeSkinning();`,
             },
         };
         const result = composeShader(makeTemplate(), [frag]);
@@ -320,12 +321,12 @@ describe("composeShader", () => {
     it("respects dependency order for slot injection", () => {
         const base: ShaderFragment = {
             _id: "base-ext",
-            _fragmentSlots: { SV: "// base-ext first" },
+            _fragmentSlots: { SV: wgsl`// base-ext first` },
         };
         const dependent: ShaderFragment = {
             _id: "dependent",
             _dependencies: ["base-ext"],
-            _fragmentSlots: { SV: "// dependent second" },
+            _fragmentSlots: { SV: wgsl`// dependent second` },
         };
         // Provide in reverse order to prove topoSort works
         const result = composeShader(makeTemplate(), [dependent, base]);

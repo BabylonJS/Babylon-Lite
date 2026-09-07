@@ -10,11 +10,12 @@
 // createShaderMaterial shader. No engine internals.
 
 import { addToScene, createMeshFromData, createShaderMaterial, setShaderFloat, setShaderVector3, type EngineContext, type Mesh, type SceneContext } from "babylon-lite";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 const CLOUD_Y = 80; // world Y of the cloud layer
 const HALF = 420; // half extent of the quad (blocks)
 
-const vertexSource = `struct VertexOutput {
+const vertexSource = wgsl`struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) local: vec2<f32>,
 };
@@ -25,7 +26,7 @@ const vertexSource = `struct VertexOutput {
   return out;
 }`;
 
-const fragmentSource = `fn hash(p: vec2<f32>) -> f32 {
+const fragmentSource = wgsl`fn hash(p: vec2<f32>) -> f32 {
   var q = fract(p * vec2<f32>(123.34, 345.45));
   q = q + dot(q, q + 34.345);
   return fract(q.x * q.y);

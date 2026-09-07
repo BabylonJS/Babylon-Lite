@@ -21,6 +21,7 @@ import { SS } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import type { Texture2D } from "../texture/texture-2d.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** One extra texture bound after the atlas. In WGSL it becomes `<name>Tex` + `<name>Samp`. */
 export interface CustomShaderTexture {
@@ -75,7 +76,7 @@ export function makeExtraBindingsWgsl(group: number, startBinding: number, extra
     for (let i = 0; i < extras.length; i++) {
         const binding = startBinding + i * 2;
         const name = extras[i]!.name;
-        out += `@group(${group}) @binding(${binding}) var ${name}Tex: texture_2d<f32>;\n@group(${group}) @binding(${binding + 1}) var ${name}Samp: sampler;\n`;
+        out += wgsl`@group(${group}) @binding(${binding}) var ${name}Tex: texture_2d<f32>;\n@group(${group}) @binding(${binding + 1}) var ${name}Samp: sampler;\n`;
     }
     return out;
 }
@@ -89,7 +90,7 @@ export function makeExtraBindingsWgsl(group: number, startBinding: number, extra
  * `binding` is `3 + 2 * extraTextures.length` so the UBO always lands after the extra textures.
  */
 export function makeFxStructWgsl(group: number, binding: number): string {
-    return `struct SpriteFx {
+    return wgsl`struct SpriteFx {
 time: f32,
 _p0: f32,
 _p1: f32,

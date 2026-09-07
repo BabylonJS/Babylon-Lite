@@ -12,8 +12,9 @@
 import { SS } from "../../engine/gpu-flags.js";
 import { MAX_LIGHTS } from "../../light/types.js";
 import type { Varying } from "../../shader/fragment-types.js";
+import { wgsl } from "../../shader/wgsl.js";
 
-const SHADOW_FACTORS_TYPE = `array<f32, ${MAX_LIGHTS}>`;
+const SHADOW_FACTORS_TYPE = wgsl`array<f32, ${MAX_LIGHTS}>`;
 const SHADOW_FACTORS_ONE = `${SHADOW_FACTORS_TYPE}(${/* @__PURE__ */ new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
 
 /** @internal */
@@ -62,8 +63,8 @@ export function emitShadow(shadowLights: readonly { lightIndex: number; shadowTy
             varyings.push({ _name: `vDepthMetric${suf}`, _type: "f32" });
         }
     }
-    const vertLines: string[] = [`let _shadowWp4 = meshU.world * vec4<f32>(in.position, 1.0);`];
-    const dispatchLines: string[] = [`var _sf = ${SHADOW_FACTORS_ONE};`];
+    const vertLines: string[] = [wgsl`let _shadowWp4 = meshU.world * vec4<f32>(in.position, 1.0);`];
+    const dispatchLines: string[] = [wgsl`var _sf = ${SHADOW_FACTORS_ONE};`];
     let nextBinding = startBinding;
     for (const sl of shadowLights) {
         const suf = `_${sl.lightIndex}`;
@@ -74,14 +75,14 @@ export function emitShadow(shadowLights: readonly { lightIndex: number; shadowTy
         const _shadowType = sl.shadowType;
         _bindings.push({ _lightIndex, _texBinding, _sampBinding, _uboBinding, _shadowType });
         wgslDecls.push(
-            `struct shadowInfo${suf}Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };`,
-            `@group(1) @binding(${_uboBinding}) var<uniform> shadowInfo${suf}: shadowInfo${suf}Uniforms;`
+            wgsl`struct shadowInfo${suf}Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };`,
+            wgsl`@group(1) @binding(${_uboBinding}) var<uniform> shadowInfo${suf}: shadowInfo${suf}Uniforms;`
         );
         if (sl.shadowType === "pcf") {
             wgslDecls.push(
-                `@group(1) @binding(${_texBinding}) var shadowTex${suf}: texture_depth_2d;`,
-                `@group(1) @binding(${_sampBinding}) var shadowComp${suf}: sampler_comparison;`,
-                `fn computeShadowPCF${suf}(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, mapSz: f32, invMapSz: f32) -> f32 {
+                wgsl`@group(1) @binding(${_texBinding}) var shadowTex${suf}: texture_depth_2d;`,
+                wgsl`@group(1) @binding(${_sampBinding}) var shadowComp${suf}: sampler_comparison;`,
+                wgsl`fn computeShadowPCF${suf}(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, mapSz: f32, invMapSz: f32) -> f32 {
     let clipSpace = posFromLight.xyz / posFromLight.w;
     let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
     if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
@@ -109,7 +110,7 @@ export function emitShadow(shadowLights: readonly { lightIndex: number; shadowTy
 }`
             );
             dispatchLines.push(
-                `_sf[${sl.lightIndex}] = computeShadowPCF${suf}(input.vPosFromLight${suf}, input.vDepthMetric${suf}, shadowInfo${suf}.shadowsInfo.x, shadowInfo${suf}.shadowsInfo.y, shadowInfo${suf}.shadowsInfo.z);`
+                wgsl`_sf[${sl.lightIndex}] = computeShadowPCF${suf}(input.vPosFromLight${suf}, input.vDepthMetric${suf}, shadowInfo${suf}.shadowsInfo.x, shadowInfo${suf}.shadowsInfo.y, shadowInfo${suf}.shadowsInfo.z);`
             );
             _bglEntries.push(
                 { binding: _texBinding, visibility: SS.FRAGMENT, texture: { sampleType: "depth", viewDimension: "2d" } },
@@ -117,9 +118,9 @@ export function emitShadow(shadowLights: readonly { lightIndex: number; shadowTy
             );
         } else {
             wgslDecls.push(
-                `@group(1) @binding(${_texBinding}) var shadowTex${suf}: texture_2d<f32>;`,
-                `@group(1) @binding(${_sampBinding}) var shadowSamp${suf}: sampler;`,
-                `fn computeFallOff${suf}(value: f32, clipSpace: vec2<f32>, frustumEdgeFalloff: f32) -> f32 {
+                wgsl`@group(1) @binding(${_texBinding}) var shadowTex${suf}: texture_2d<f32>;`,
+                wgsl`@group(1) @binding(${_sampBinding}) var shadowSamp${suf}: sampler;`,
+                wgsl`fn computeFallOff${suf}(value: f32, clipSpace: vec2<f32>, frustumEdgeFalloff: f32) -> f32 {
     let mask = smoothstep(1.0 - frustumEdgeFalloff, 1.00000012, clamp(dot(clipSpace, clipSpace), 0.0, 1.0));
     return mix(value, 1.0, mask);
 }
@@ -134,7 +135,7 @@ fn computeShadowESM${suf}(posFromLight: vec4<f32>, depthMetric: f32, darkness: f
 }`
             );
             dispatchLines.push(
-                `_sf[${sl.lightIndex}] = computeShadowESM${suf}(input.vPosFromLight${suf}, input.vDepthMetric${suf}, shadowInfo${suf}.shadowsInfo.x, shadowInfo${suf}.shadowsInfo.z, shadowInfo${suf}.shadowsInfo.w);`
+                wgsl`_sf[${sl.lightIndex}] = computeShadowESM${suf}(input.vPosFromLight${suf}, input.vDepthMetric${suf}, shadowInfo${suf}.shadowsInfo.x, shadowInfo${suf}.shadowsInfo.z, shadowInfo${suf}.shadowsInfo.w);`
             );
             _bglEntries.push(
                 { binding: _texBinding, visibility: SS.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d" } },
@@ -142,8 +143,8 @@ fn computeShadowESM${suf}(posFromLight: vec4<f32>, depthMetric: f32, darkness: f
             );
         }
         vertLines.push(
-            `out.vPosFromLight${suf} = shadowInfo${suf}.lightMatrix * _shadowWp4;`,
-            `out.vDepthMetric${suf} = (out.vPosFromLight${suf}.z + shadowInfo${suf}.depthValues.x) / shadowInfo${suf}.depthValues.y;`
+            wgsl`out.vPosFromLight${suf} = shadowInfo${suf}.lightMatrix * _shadowWp4;`,
+            wgsl`out.vDepthMetric${suf} = (out.vPosFromLight${suf}.z + shadowInfo${suf}.depthValues.x) / shadowInfo${suf}.depthValues.y;`
         );
         _bglEntries.push({
             binding: _uboBinding,
@@ -151,12 +152,12 @@ fn computeShadowESM${suf}(posFromLight: vec4<f32>, depthMetric: f32, darkness: f
             buffer: { type: "uniform", minBindingSize: 96 },
         });
     }
-    dispatchLines.push(`for (var _i = 0u; _i < ${MAX_LIGHTS}u; _i++) { _sf[_i] = mix(1.0, _sf[_i], meshU.receivesShadow.x); }`);
-    dispatchLines.push(`return _sf;`);
+    dispatchLines.push(wgsl`for (var _i = 0u; _i < ${MAX_LIGHTS}u; _i++) { _sf[_i] = mix(1.0, _sf[_i], meshU.receivesShadow.x); }`);
+    dispatchLines.push(wgsl`return _sf;`);
     return {
         _bindings,
         _wgslDecls: wgslDecls.join("\n"),
-        _fragmentHelper: `fn nme_computeShadowFactors(input: VertexOut) -> ${SHADOW_FACTORS_TYPE} {\n    ${dispatchLines.join("\n    ")}\n}`,
+        _fragmentHelper: wgsl`fn nme_computeShadowFactors(input: VertexOut) -> ${SHADOW_FACTORS_TYPE} {\n    ${dispatchLines.join("\n    ")}\n}`,
         _vertexInject: vertLines.join("\n    "),
         _bglEntries,
         _bindingCount: shadowLights.length * 3,

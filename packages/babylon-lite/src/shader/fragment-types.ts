@@ -8,6 +8,7 @@
  * Zero global state. Zero WGSL strings in the composer. All shader
  * text lives in fragment modules for full tree-shaking.
  */
+import type { WgslSource } from "./wgsl.js";
 
 // ── WGSL types ──────────────────────────────────────────────────
 
@@ -146,7 +147,7 @@ export interface ShaderFragment {
     readonly _vertexBindings?: readonly BindingDecl[];
 
     /** @internal WGSL code injected at named vertex slots */
-    readonly _vertexSlots?: Partial<Record<VertexSlot, string>>;
+    readonly _vertexSlots?: Partial<Record<VertexSlot, WgslSource>>;
 
     /** @internal Extra pipeline vertex buffer layouts (skeleton joints/weights).
      *  Called with next available shader location. Returns layouts + next location. */
@@ -156,7 +157,7 @@ export interface ShaderFragment {
     readonly _vertexBuiltins?: readonly { readonly _name: string; readonly _builtin: string; readonly _type: string }[];
 
     /** @internal WGSL helper functions / struct definitions injected before `@vertex` fn main */
-    readonly _vertexHelperFunctions?: string;
+    readonly _vertexHelperFunctions?: WgslSource;
 
     // ── Fragment stage ──
 
@@ -167,10 +168,10 @@ export interface ShaderFragment {
     readonly _bindings?: readonly BindingDecl[];
 
     /** @internal WGSL helper functions injected before `@fragment` fn main */
-    readonly _helperFunctions?: string;
+    readonly _helperFunctions?: WgslSource;
 
     /** @internal Code injected at named fragment slots */
-    readonly _fragmentSlots?: Partial<Record<FragmentSlot, string>>;
+    readonly _fragmentSlots?: Partial<Record<FragmentSlot, WgslSource>>;
 
     /** @internal Optional material-owned post-compose patch. */
     readonly _pc?: (composed: ComposedShader) => ComposedShader;
@@ -188,9 +189,9 @@ export interface ShaderFragment {
  */
 export interface ShaderTemplate {
     /** @internal Base vertex shader WGSL with slot markers */
-    readonly _vertexTemplate: string;
+    readonly _vertexTemplate: WgslSource;
     /** @internal Base fragment shader WGSL with slot markers */
-    readonly _fragmentTemplate: string;
+    readonly _fragmentTemplate: WgslSource;
     /** @internal Base mesh UBO fields (e.g. world matrix for PBR, or mesh+lights+material for Standard) */
     readonly _baseMeshUboFields: readonly UboField[];
     /** @internal Base vertex attributes (e.g. position, normal) */
@@ -237,9 +238,9 @@ export interface ComposedShader {
      *  a cached variant can never be shared between meshes that disagree about it. */
     _prim?: GPUPrimitiveState;
     /** @internal Final vertex WGSL source */
-    readonly _vertexWGSL: string;
+    readonly _vertexWGSL: WgslSource;
     /** @internal Final fragment WGSL source */
-    readonly _fragmentWGSL: string;
+    readonly _fragmentWGSL: WgslSource;
     /** @internal Mesh bind group layout descriptor (group 1) */
     readonly _meshBGLDescriptor: GPUBindGroupLayoutDescriptor;
     /** @internal Shadow bind group layout descriptor (group 2), or null */

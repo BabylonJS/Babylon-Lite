@@ -17,9 +17,10 @@ import {
 } from "./particle-sprite-2d.js";
 import type { ParticleSystem } from "./particle-system.js";
 import { animateParticleSystem, startParticleSystem } from "./particle-system.js";
+import { wgsl } from "../shader/wgsl.js";
 
 const FRAME_MS = 1000 / 60;
-const MULTIPLY_FRAGMENT_WGSL = `let sampled = textureSample(atlasTex, atlasSamp, in.uv);
+const MULTIPLY_FRAGMENT_WGSL = wgsl`let sampled = textureSample(atlasTex, atlasSamp, in.uv);
 let baseColor = sampled * in.tint * L.opacityMul;
 let sourceAlpha = sampled.a * in.tint.a * L.opacityMul.a;
 return vec4f(baseColor.rgb * sourceAlpha + vec3f(1.0) * (1.0 - sourceAlpha), baseColor.a);`;

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { getPhysicsTimestepMs } from "babylon-lite";
+import { CharacterSupportedState as LiteCharacterSupportedState, getPhysicsTimestepMs } from "babylon-lite";
 import type { SceneContext } from "babylon-lite";
 
 import {
@@ -19,6 +19,7 @@ import {
     Physics6DoFLimit,
     HingeConstraint,
     PhysicsCharacterController,
+    CharacterSupportedState,
 } from "../src/physics/physics";
 import type { TransformNode } from "../src/meshes/meshes";
 import { Vector3 } from "../src/math/vector";
@@ -545,6 +546,47 @@ describe("PhysicsEngine", () => {
         });
 
         describe("PhysicsCharacterController", () => {
+            it("maps supported states exhaustively between compat and Lite", () => {
+                const plugin = new HavokPlugin(false, makeAggregateMockHknp());
+                plugin._attachToLiteScene(makeScene(1000 / 60));
+                const scene = { getPhysicsEngine: () => new PhysicsEngine(plugin, Vector3.Zero()) } as unknown as Scene;
+                const controller = new PhysicsCharacterController(Vector3.Zero(), { capsuleHeight: 1.8, capsuleRadius: 0.6 }, scene);
+                const gravity = new Vector3(0, -9.81, 0);
+                const surfaceInfo = {
+                    isSurfaceDynamic: false,
+                    supportedState: CharacterSupportedState.UNSUPPORTED,
+                    averageSurfaceNormal: new Vector3(0, 1, 0),
+                    averageSurfaceVelocity: Vector3.Zero(),
+                    averageAngularSurfaceVelocity: Vector3.Zero(),
+                };
+                const mappings = [
+                    [CharacterSupportedState.UNSUPPORTED, LiteCharacterSupportedState.UNSUPPORTED],
+                    [CharacterSupportedState.SLIDING, LiteCharacterSupportedState.SLIDING],
+                    [CharacterSupportedState.SUPPORTED, LiteCharacterSupportedState.SUPPORTED],
+                ] as const;
+                const integrate = vi.spyOn(controller._lite, "integrate").mockImplementation(() => undefined);
+                const checkSupport = vi.spyOn(controller._lite, "checkSupport");
+
+                for (const [compatState, liteState] of mappings) {
+                    controller.integrate(1 / 60, { ...surfaceInfo, supportedState: compatState }, gravity);
+                    expect(integrate).toHaveBeenLastCalledWith(1 / 60, expect.objectContaining({ supportedState: liteState }), gravity);
+
+                    checkSupport.mockReturnValue({
+                        isSurfaceDynamic: false,
+                        supportedState: liteState,
+                        averageSurfaceNormal: { x: 0, y: 1, z: 0 },
+                        averageSurfaceVelocity: { x: 0, y: 0, z: 0 },
+                        averageAngularSurfaceVelocity: { x: 0, y: 0, z: 0 },
+                    });
+                    expect(controller.checkSupport(1 / 60, new Vector3(0, -1, 0)).supportedState).toBe(compatState);
+                }
+
+                expect(() => controller.integrate(1 / 60, { ...surfaceInfo, supportedState: 99 as CharacterSupportedState }, gravity)).toThrow(
+                    "Invalid CharacterSupportedState value: 99"
+                );
+                controller.dispose();
+            });
+
             it("forwards construction, vectors, properties, collisions, and disposal to Lite", () => {
                 const hknp = makeAggregateMockHknp();
                 const plugin = new HavokPlugin(false, hknp);

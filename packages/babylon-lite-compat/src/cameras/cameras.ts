@@ -10,6 +10,7 @@
 
 import {
     createArcRotateCamera,
+    createBankedFreeCamera,
     createFreeCamera,
     createGeospatialCamera,
     setGeospatialOrientation,
@@ -21,10 +22,16 @@ import {
     getProjectionMatrix as liteGetProjectionMatrix,
     onBeforeRender,
 } from "babylon-lite";
-import type { ArcRotateCamera as LiteArcRotateCamera, FreeCamera as LiteFreeCamera, GeospatialCamera as LiteGeospatialCamera, Camera as LiteCamera } from "babylon-lite";
+import type {
+    ArcRotateCamera as LiteArcRotateCamera,
+    BankedFreeCamera as LiteBankedFreeCamera,
+    FreeCamera as LiteFreeCamera,
+    GeospatialCamera as LiteGeospatialCamera,
+    Camera as LiteCamera,
+} from "babylon-lite";
 
 import { unsupported } from "../error.js";
-import { Vector3 } from "../math/vector.js";
+import { liteBackedVector3, Vector3 } from "../math/vector.js";
 import { Matrix } from "../math/matrix.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
@@ -306,6 +313,22 @@ export class GamepadCamera extends UniversalCamera {
 
 /** Babylon.js `FlyCamera` — 6-DOF free-flight camera. */
 export class FlyCamera extends TargetCamera {
+    /** @internal Underlying banked Babylon Lite free camera. */
+    public override readonly _lite: LiteBankedFreeCamera;
+
+    public constructor(name: string, position: Vector3, scene?: Scene) {
+        const lite = createBankedFreeCamera({ x: position.x, y: position.y, z: position.z }, { x: position.x, y: position.y, z: position.z - 1 });
+        super(name, position, scene, lite);
+        this._lite = lite;
+    }
+
+    public get upVector(): Vector3 {
+        return liteBackedVector3(this._lite.upVector);
+    }
+    public set upVector(value: Vector3) {
+        this._lite.upVector.set(value.x, value.y, value.z);
+    }
+
     public override getClassName(): string {
         return "FlyCamera";
     }

@@ -13,6 +13,7 @@ import {
     startEngine,
 } from "babylon-lite";
 import type { EngineContext, ShaderMaterial } from "babylon-lite";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 /**
  * Scene 274 — Alpha-to-Coverage.
@@ -23,9 +24,9 @@ import type { EngineContext, ShaderMaterial } from "babylon-lite";
  * card covers two samples while the opaque rear card fills the other two, resolving to olive.
  */
 
-const VERTEX_SOURCE = `struct VertexOutput{@builtin(position) position:vec4<f32>,};
+const VERTEX_SOURCE = wgsl`struct VertexOutput{@builtin(position) position:vec4<f32>,};
 @vertex fn mainVertex(input:VertexInput)->VertexOutput{let c=cos(shaderUniforms.angle);let s=sin(shaderUniforms.angle);let local=input.position.xy*1.65;let rotated=vec2<f32>(local.x*c-local.y*s,local.x*s+local.y*c);let world=shaderUniforms.center+rotated;var out:VertexOutput;out.position=vec4<f32>(world.x/3.3,world.y/2.2,shaderUniforms.depth,1.0);return out;}`;
-const FRAGMENT_SOURCE = `@fragment fn mainFragment()->@location(0) vec4<f32>{return vec4<f32>(shaderUniforms.color,shaderUniforms.opacity);}`;
+const FRAGMENT_SOURCE = wgsl`@fragment fn mainFragment()->@location(0) vec4<f32>{return vec4<f32>(shaderUniforms.color,shaderUniforms.opacity);}`;
 
 // Exact 8-bit colours (n/255) whose per-channel sums are even. A 0.5-alpha alpha-to-coverage mix covers
 // 2 of 4 samples, so the MSAA resolve averages these two colours; an average landing on .5 has an

@@ -10,6 +10,8 @@
  * post-process (e.g. a CRT pass) later.
  */
 
+import { wgsl } from "babylon-lite/shader/wgsl.js";
+
 function makeCtx(w: number, h: number): CanvasRenderingContext2D {
     const c = document.createElement("canvas");
     c.width = w;
@@ -72,7 +74,7 @@ export function makeWhiteTextureDataUrl(size = 8): string {
  *   fx.params.x = iris radius (≈1.35 fully open → 0 fully closed)
  *   fx.params.y = canvas aspect (width / height)
  */
-export const IRIS_FRAGMENT = `
+export const IRIS_FRAGMENT = wgsl`
 let p = (in.uv - vec2<f32>(0.5, 0.5)) * vec2<f32>(fx.params.y, 1.0);
 let d = length(p);
 let a = smoothstep(fx.params.x - 0.012, fx.params.x + 0.012, d);

@@ -463,6 +463,18 @@ function relocateDts(): Plugin {
 }
 
 /**
+ * Keep the nominal WGSL brand as a source-only enforcement mechanism. Published
+ * declarations expose ordinary strings so this remains API-compatible for consumers.
+ */
+function exposeWgslSourceAsString(content: string): string {
+    const alias = /^declare type WgslSource = string & \{\s*\};\r?\n/m;
+    if (!alias.test(content)) {
+        throw new Error("Could not find the trimmed WgslSource declaration");
+    }
+    return content.replace(alias, "").replace(/\bWgslSource\b/g, "string");
+}
+
+/**
  * Every first-party source module, keyed by its `src`-relative path without
  * extension (forward-slashed). Used as the Rollup input map for the `lib` build so
  * each module becomes its own entry chunk — reproducing `preserveModules`-style
@@ -578,13 +590,9 @@ export default defineConfig(({ mode }) => {
             plugins: [
                 stripManifoldNodeRequire(),
                 liteErrorPlugin(),
-                // `mangle: false` — strip WGSL whitespace/comments but do NOT short-rename
-                // identifiers (the per-chunk mangler is unsafe across the package's many
-                // code-split chunks). `templates: false` — only minify `?raw` `.wgsl` files,
-                // not inline backtick-template WGSL: this output is not esbuild-minified, so
-                // the template minifier would corrupt raw source, and the scene/demo harness
-                // already minifies inline templates once when it bundles this output.
-                wgslMinifyPlugin({ mangle: false, templates: false }),
+                // Explicit `wgsl` tagged templates are safely minified from their
+                // TypeScript AST before emit; unrelated JavaScript templates are untouched.
+                wgslMinifyPlugin(),
                 minifyBrowserChunks(),
                 stripInlinedWorkerSourcemap(),
                 dts({
@@ -592,7 +600,16 @@ export default defineConfig(({ mode }) => {
                     tsconfigPath: resolve(__dirname, "tsconfig.json"),
                     outDir: DIST_OUT_DIR,
                 }),
-                ...(isWatch ? [] : [trimInternalDts({ outDir: DIST_OUT_DIR, projectFolder: __dirname }), relocateDts()]),
+                ...(isWatch
+                    ? []
+                    : [
+                          trimInternalDts({
+                              outDir: DIST_OUT_DIR,
+                              projectFolder: __dirname,
+                              transform: exposeWgslSourceAsString,
+                          }),
+                          relocateDts(),
+                      ]),
             ],
         };
     }
@@ -636,13 +653,6 @@ export default defineConfig(({ mode }) => {
             format: "es" as const,
             plugins: () => [minifyInlinedWorker()],
         },
-        plugins: [
-            stripManifoldNodeRequire(),
-            liteErrorPlugin(),
-            wgslMinifyPlugin({ mangle: false, templates: false }),
-            stripInlinedWorkerSourcemap(),
-            emitPackageJson(),
-            emitThirdPartyNotices(),
-        ],
+        plugins: [stripManifoldNodeRequire(), liteErrorPlugin(), wgslMinifyPlugin(), stripInlinedWorkerSourcemap(), emitPackageJson(), emitThirdPartyNotices()],
     };
 });

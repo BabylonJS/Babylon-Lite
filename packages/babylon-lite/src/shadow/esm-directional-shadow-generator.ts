@@ -29,6 +29,7 @@ import {
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 import blurVertSrc from "../../shaders/shadow-blur.vertex.wgsl?raw";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
+import { wgsl } from "../shader/wgsl.js";
 
 export interface EsmLightMatrix {
     /** @internal */
@@ -237,7 +238,7 @@ function wgslFloat(value: number): string {
 function createShadowBlurFragmentWGSL(blurKernel: number): string {
     const { offsets, weights } = createKernelBlurSamples(blurKernel);
     const count = offsets.length;
-    return `struct BlurParams{delta:vec2<f32>,_pad:vec2<f32>,};@group(0) @binding(0) var<uniform> params:BlurParams;@group(0) @binding(1) var srcTex:texture_2d<f32>;@group(0) @binding(2) var srcSampler:sampler;const OFFSETS=array<f32,${count}>(${offsets.map(wgslFloat).join(",")});const WEIGHTS=array<f32,${count}>(${weights.map(wgslFloat).join(",")});@fragment fn main(@location(0) sampleCenter:vec2<f32>)->@location(0) vec4<f32>{var blend=vec4<f32>(0.0);for(var i=0u;i<${count}u;i=i+1u){blend+=textureSample(srcTex,srcSampler,sampleCenter+params.delta*OFFSETS[i])*WEIGHTS[i];}return blend;}`;
+    return wgsl`struct BlurParams{delta:vec2<f32>,_pad:vec2<f32>,};@group(0) @binding(0) var<uniform> params:BlurParams;@group(0) @binding(1) var srcTex:texture_2d<f32>;@group(0) @binding(2) var srcSampler:sampler;const OFFSETS=array<f32,${count}>(${offsets.map(wgslFloat).join(",")});const WEIGHTS=array<f32,${count}>(${weights.map(wgslFloat).join(",")});@fragment fn main(@location(0) sampleCenter:vec2<f32>)->@location(0) vec4<f32>{var blend=vec4<f32>(0.0);for(var i=0u;i<${count}u;i=i+1u){blend+=textureSample(srcTex,srcSampler,sampleCenter+params.delta*OFFSETS[i])*WEIGHTS[i];}return blend;}`;
 }
 
 function ensureEsmShadowTaskState(

@@ -11,8 +11,9 @@
  */
 
 import type { ToneMapping } from "./tone-mapping.js";
+import { wgsl } from "../../shader/wgsl.js";
 
-export const NEUTRAL_HELPERS_WGSL = `
+export const NEUTRAL_HELPERS_WGSL = wgsl`
 const PBRNeutralStartCompression: f32 = 0.8 - 0.04;
 const PBRNeutralDesaturation: f32 = 0.15;
 fn PBRNeutralToneMapping(color: vec3<f32>) -> vec3<f32> {
@@ -29,7 +30,7 @@ fn PBRNeutralToneMapping(color: vec3<f32>) -> vec3<f32> {
 }
 `;
 
-export const NEUTRAL_TONEMAP_CALL_WGSL = `color *= scene.vImageInfos.x;
+export const NEUTRAL_TONEMAP_CALL_WGSL = wgsl`color *= scene.vImageInfos.x;
 color = PBRNeutralToneMapping(color);`;
 
 /** Khronos PBR Neutral tone mapping (Babylon.js `TONEMAPPING_KHR_PBR_NEUTRAL`). */

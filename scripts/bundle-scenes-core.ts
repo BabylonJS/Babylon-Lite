@@ -1080,10 +1080,7 @@ function elapsed(startMs: number): string {
  *  preload form too late for a renderChunk/generateBundle hook to see it. */
 export function stripNoopPreloadWrappers(code: string): string {
     return code
-        .replace(
-            /[\w$]+\(async\(\)=>\{const\{([\w$]+):([\w$]+)\}=await (import\([^()]*\));return\{\1:\2\}\},\[\]\)/g,
-            "$3"
-        )
+        .replace(/[\w$]+\(async\(\)=>\{const\{([\w$]+):([\w$]+)\}=await (import\([^()]*\));return\{\1:\2\}\},\[\]\)/g, "$3")
         .replace(/[\w$]+\(\s*\(\s*\)\s*=>\s*(import\([^()]*\)(?:\.then\(\s*[\w$]+\s*=>\s*[\w$]+\.[\w$]+\s*\))?)\s*,\s*\[\s*\]\s*\)/g, "$1");
 }
 
@@ -1275,7 +1272,7 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
         base: "./",
         publicDir: false,
         logLevel: "warn",
-        plugins: [wgslMinifyPlugin({ mangle: false }), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
+        plugins: [wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
         resolve: {
             // Master-comparison bundle-info resolves `babylon-lite` to the TS SOURCE of an
             // arbitrary master worktree (`sourceRoot`), NOT its `build/lib`: that worktree
@@ -1428,7 +1425,7 @@ export async function buildBundleScenes(): Promise<void> {
             base: "./",
             publicDir: false,
             logLevel: "warn",
-            plugins: isBjs ? [bjsSideEffectsFalsePlugin()] : [wgslMinifyPlugin({ mangle: false }), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
+            plugins: isBjs ? [bjsSideEffectsFalsePlugin()] : [wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
             resolve: {
                 // Resolve `babylon-lite` to the built `build/lib` tree (NOT the TS source)
                 // so the measured bundle reflects exactly what a consumer of the published

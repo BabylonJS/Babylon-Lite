@@ -20,6 +20,7 @@ import {
     type Texture2D,
 } from "babylon-lite";
 import type { SpriteImage, SpriteStore } from "./sprites.js";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 const DIST_PER_BAND = 224.0;
 
@@ -28,7 +29,7 @@ const DIST_PER_BAND = 224.0;
 // world units), the atlas (`atlasTex`/`atlasSamp`) and the `colormap` extra texture
 // (`colormapTex`/`colormapSamp`). Mirrors the wall material's distance-blended
 // COLORMAP banding so sprites depth-cue identically to the geometry around them.
-const fragmentSource = `let src = textureSample(atlasTex, atlasSamp, in.uv);
+const fragmentSource = wgsl`let src = textureSample(atlasTex, atlasSamp, in.uv);
 if (src.a < 0.5) { discard; }
 let idx = floor(src.r * 255.0 + 0.5);
 let sectorLight = in.tint.x * 255.0;

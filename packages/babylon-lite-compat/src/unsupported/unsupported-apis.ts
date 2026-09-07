@@ -13,6 +13,9 @@
  */
 
 import { unsupported } from "../error.js";
+import { PushMaterial } from "../materials/materials.js";
+import type { Material } from "../materials/materials.js";
+import type { Scene } from "../scene/scene.js";
 
 // ─── Materials ───────────────────────────────────────────────────────
 export class MultiMaterial {
@@ -30,6 +33,56 @@ export class ShaderMaterial {
 export class BackgroundMaterial {
     public constructor() {
         unsupported("BackgroundMaterial", "Standalone BackgroundMaterial is not wrapped. Use the compat `Scene` environment helpers / native `loadEnvironment` instead.");
+    }
+}
+
+export class OpenPBRMaterial extends PushMaterial {
+    /** @internal Unsupported stubs never expose a backing Lite material. */
+    public override get _lite(): never {
+        return unsupported(
+            "OpenPBRMaterial._lite",
+            "OpenPBR requires a distinct shader/material model and parameter mapping that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
+        );
+    }
+
+    public constructor(_name: string, _scene?: Scene, _forceGLSL = false) {
+        super(_name);
+        unsupported(
+            "OpenPBRMaterial",
+            "OpenPBR requires a distinct shader/material model and parameter mapping that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
+        );
+    }
+
+    public clone(_name: string, _cloneTexturesOnlyOnce = true, _rootUrl = ""): OpenPBRMaterial {
+        return unsupported(
+            "OpenPBRMaterial.clone",
+            "OpenPBR requires a distinct shader/material model and parameter mapping that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
+        );
+    }
+}
+
+export class OpenPBRMaterialDefines {
+    public constructor(_externalProperties?: Record<string, { type: string; default: unknown }>) {
+        unsupported(
+            "OpenPBRMaterialDefines",
+            "OpenPBR requires a distinct shader/material model and parameter mapping that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
+        );
+    }
+}
+
+export function RegisterOpenpbrMaterial(): void {
+    unsupported(
+        "RegisterOpenpbrMaterial",
+        "OpenPBR registration would install a material parser and shader subsystem that Babylon Lite does not define; adding that subsystem needs Lite maintainer design."
+    );
+}
+
+export class OpenPBRMaterialLoadingAdapter {
+    public constructor(_material: Material) {
+        unsupported(
+            "OpenPBRMaterialLoadingAdapter",
+            "The adapter translates glTF material data into OpenPBRMaterial, whose shader/material subsystem requires Lite maintainer design."
+        );
     }
 }
 

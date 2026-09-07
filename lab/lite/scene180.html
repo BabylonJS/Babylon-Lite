@@ -87,6 +87,7 @@
         <canvas id="renderCanvas"></canvas>
         <div id="panel">
             <textarea id="textInput" spellcheck="false">
+ABCDEFGHIJKLMNOPQRSTUVWXYZ
 Hello, TextRenderer!
 No scene. No camera.
 Just pixels.</textarea
@@ -101,6 +102,11 @@ Just pixels.</textarea
                     <label for="opacity">Opacity</label>
                     <input id="opacity" type="range" min="0" max="1" step="0.01" value="1" />
                     <span class="val" id="opacityVal">1.00</span>
+                </div>
+                <div class="row">
+                    <label for="weight">Weight</label>
+                    <input id="weight" type="range" min="0" max="100" step="1" value="0" />
+                    <span class="val" id="weightVal">0</span>
                 </div>
                 <div class="row">
                     <label for="red">Red</label>

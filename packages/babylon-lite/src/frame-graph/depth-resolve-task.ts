@@ -19,6 +19,7 @@ import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** Options for a depth-resolve frame-graph task. */
 export interface DepthResolveTaskConfig {
@@ -29,11 +30,11 @@ export interface DepthResolveTaskConfig {
     targetTexture: RenderTarget;
 }
 
-const VERTEX_WGSL = `struct V{@builtin(position)p:vec4f};
+const VERTEX_WGSL = wgsl`struct V{@builtin(position)p:vec4f};
 @vertex fn vs(@builtin(vertex_index)i:u32)->V{
 var pos=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));
 return V(vec4f(pos[i],0,1));}`;
-const FRAGMENT_WGSL = `@group(0)@binding(0)var src:texture_depth_multisampled_2d;
+const FRAGMENT_WGSL = wgsl`@group(0)@binding(0)var src:texture_depth_multisampled_2d;
 @fragment fn fs(v:V)->@builtin(frag_depth)f32{return textureLoad(src,vec2i(v.p.xy),0);}`;
 
 // Per-device cache (keyed by GPUDevice identity), lazily built on first use so scenes that never resolve depth
@@ -57,7 +58,7 @@ function getOrCreatePipeline(engine: EngineContext, depthFormat: GPUTextureForma
         label: "depth-resolve-bgl",
         entries: [{ binding: 0, visibility: SS.FRAGMENT, texture: { sampleType: "depth", multisampled: true } }],
     });
-    const module = device.createShaderModule({ code: `${VERTEX_WGSL}\n${FRAGMENT_WGSL}`, label: "depth-resolve" });
+    const module = device.createShaderModule({ code: wgsl`${VERTEX_WGSL}\n${FRAGMENT_WGSL}`, label: "depth-resolve" });
     const pipeline = device.createRenderPipeline({
         label: `depth-resolve-${depthFormat}`,
         layout: device.createPipelineLayout({ label: "depth-resolve-layout", bindGroupLayouts: [_bgl] }),

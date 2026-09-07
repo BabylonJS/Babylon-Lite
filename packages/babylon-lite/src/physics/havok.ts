@@ -24,23 +24,25 @@ import { mat4Decompose } from "../math/mat4-decompose.js";
 // ─── Enums ───────────────────────────────────────────────────────────
 
 /** Geometry type of a physics collision shape. */
-export const enum PhysicsShapeType {
-    SPHERE = 0,
-    CAPSULE = 1,
-    CYLINDER = 2,
-    BOX = 3,
-    CONVEX_HULL = 4,
-    CONTAINER = 5,
-    MESH = 6,
-    HEIGHTFIELD = 7,
-}
+export const PhysicsShapeType = {
+    SPHERE: 0,
+    CAPSULE: 1,
+    CYLINDER: 2,
+    BOX: 3,
+    CONVEX_HULL: 4,
+    CONTAINER: 5,
+    MESH: 6,
+    HEIGHTFIELD: 7,
+} as const;
+export type PhysicsShapeType = (typeof PhysicsShapeType)[keyof typeof PhysicsShapeType];
 
 /** How a body moves: `STATIC` (immovable), `ANIMATED` (driven by the node transform), or `DYNAMIC` (simulated). */
-export const enum PhysicsMotionType {
-    STATIC = 0,
-    ANIMATED = 1,
-    DYNAMIC = 2,
-}
+export const PhysicsMotionType = {
+    STATIC: 0,
+    ANIMATED: 1,
+    DYNAMIC: 2,
+} as const;
+export type PhysicsMotionType = (typeof PhysicsMotionType)[keyof typeof PhysicsMotionType];
 
 /**
  * How a moved transform node is propagated to its physics body before each step.
@@ -48,33 +50,36 @@ export const enum PhysicsMotionType {
  * and `ACTION` sets the body's velocity so it reaches the node (`HP_Body_SetTargetQTransform`,
  * dragging resting bodies via friction). Values match Babylon.js `PhysicsPrestepType`.
  */
-export const enum PhysicsPrestepType {
-    DISABLED = 0,
-    TELEPORT = 1,
-    ACTION = 2,
-}
+export const PhysicsPrestepType = {
+    DISABLED: 0,
+    TELEPORT: 1,
+    ACTION: 2,
+} as const;
+export type PhysicsPrestepType = (typeof PhysicsPrestepType)[keyof typeof PhysicsPrestepType];
 
 /** Type of Havok Physics V2 constraint. */
-export const enum PhysicsConstraintType {
-    BALL_AND_SOCKET = 1,
-    DISTANCE = 2,
-    HINGE = 3,
-    SLIDER = 4,
-    LOCK = 5,
-    PRISMATIC = 6,
-    SIX_DOF = 7,
-}
+export const PhysicsConstraintType = {
+    BALL_AND_SOCKET: 1,
+    DISTANCE: 2,
+    HINGE: 3,
+    SLIDER: 4,
+    LOCK: 5,
+    PRISMATIC: 6,
+    SIX_DOF: 7,
+} as const;
+export type PhysicsConstraintType = (typeof PhysicsConstraintType)[keyof typeof PhysicsConstraintType];
 
 /** Axis addressed by a Physics V2 constraint limit. */
-export const enum PhysicsConstraintAxis {
-    LINEAR_X = 0,
-    LINEAR_Y = 1,
-    LINEAR_Z = 2,
-    ANGULAR_X = 3,
-    ANGULAR_Y = 4,
-    ANGULAR_Z = 5,
-    LINEAR_DISTANCE = 6,
-}
+export const PhysicsConstraintAxis = {
+    LINEAR_X: 0,
+    LINEAR_Y: 1,
+    LINEAR_Z: 2,
+    ANGULAR_X: 3,
+    ANGULAR_Y: 4,
+    ANGULAR_Z: 5,
+    LINEAR_DISTANCE: 6,
+} as const;
+export type PhysicsConstraintAxis = (typeof PhysicsConstraintAxis)[keyof typeof PhysicsConstraintAxis];
 
 // ─── Option interfaces ───────────────────────────────────────────────
 

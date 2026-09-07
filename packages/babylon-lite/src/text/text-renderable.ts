@@ -19,7 +19,7 @@ import type { TextData } from "./text-data.js";
 import { TEXT_INSTANCE_BYTES } from "./text-data.js";
 import { ensureSharedAtlasGpu } from "./_gpu/text-textures.js";
 import { createStyleBuffer, ensureStyleGpu } from "./_gpu/text-style-gpu.js";
-import { getOrCreateTextPipeline } from "./_gpu/text-pipeline.js";
+import { getOrCreateTextPipeline, getTextPipelineCache, _textVariantResolver } from "./_gpu/text-pipeline.js";
 
 /** Initial transform and draw options for a scene-attached text renderable. */
 export interface TextRenderableOptions {
@@ -60,6 +60,9 @@ interface TextRenderableGpu {
     _styleBuf: GPUBuffer;
     _uploadedStyleVersion: number;
     _pipeline: GPURenderPipeline;
+    /** Composed-variant pipeline for the same target signature. Aliases `_pipeline` unless an
+     *  opt-in styling feature is installed, so the draw loop needs no null check. */
+    _variantPipeline: GPURenderPipeline;
     _uploadedDataVersion: number;
     _uploadedCameraVersion: number;
     _uploadedAspect: number;
@@ -116,16 +119,17 @@ export function createTextRenderable(data: TextData, options?: TextRenderableOpt
     return r;
 }
 
-function ensureGpu(r: TextRenderable, engine: EngineContext, target: RenderTargetSignature): TextRenderableGpu {
+function ensureGpu(
+    r: TextRenderable,
+    engine: EngineContext,
+    target: RenderTargetSignature,
+    colorFormat: GPUTextureFormat,
+    sampleCount: 1 | 4,
+    depthFormat: GPUTextureFormat | null,
+    depthWrite: boolean
+): TextRenderableGpu {
     const device = engine._device;
-    const sampleCount = target._sampleCount === 1 ? 1 : 4;
-    const colorFormat = target._colorFormat;
-    if (!colorFormat) {
-        throw new Error("TextRenderable: render target has no color format.");
-    }
-    const depthFormat = target._depthStencilFormat ?? null;
-    const depthWrite = !r.ignoreDepth;
-    const { _pipeline: pipeline } = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite, r);
+    const { _pipeline: pipeline, _variantPipeline: variantPipeline } = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite, r);
     const key = targetSig(target);
     let gpu = r._gpu;
     if (gpu && gpu._device !== device) {
@@ -149,6 +153,7 @@ function ensureGpu(r: TextRenderable, engine: EngineContext, target: RenderTarge
                 _styleBuf: createStyleBuffer(device, 1),
                 _uploadedStyleVersion: -1,
                 _pipeline: pipeline,
+                _variantPipeline: variantPipeline,
                 _uploadedDataVersion: -1,
                 _uploadedCameraVersion: -1,
                 _uploadedAspect: -1,
@@ -168,6 +173,9 @@ function ensureGpu(r: TextRenderable, engine: EngineContext, target: RenderTarge
             }
         }
     }
+    // Assigned unconditionally: a styling feature installed after this record was created
+    // changes only the variant pipeline, which the checks above do not observe.
+    gpu._variantPipeline = variantPipeline;
     return gpu;
 }
 
@@ -190,8 +198,18 @@ function ensureInstanceCapacity(device: GPUDevice, gpu: TextRenderableGpu, neede
 }
 
 function bindTextRenderable(r: TextRenderable, engine: EngineContext, target: RenderTargetSignature): DrawBinding {
-    const gpu = ensureGpu(r, engine, target);
-    const { _cache: cache } = getOrCreateTextPipeline(engine, target._colorFormat!, target._sampleCount === 1 ? 1 : 4, target._depthStencilFormat ?? null, !r.ignoreDepth, r);
+    const colorFormat = target._colorFormat;
+    if (!colorFormat) {
+        throw new Error("TextRenderable: render target has no color format.");
+    }
+    // Captured once, and reused verbatim by the late-install refresh below so the refreshed
+    // variant pipeline is the exact sibling of the base pipeline this binding declares —
+    // same target signature, same depth-write, same alpha-to-coverage owner.
+    const sampleCount = target._sampleCount === 1 ? 1 : 4;
+    const depthFormat = target._depthStencilFormat ?? null;
+    const depthWrite = !r.ignoreDepth;
+    const gpu = ensureGpu(r, engine, target, colorFormat, sampleCount, depthFormat, depthWrite);
+    const cache = getTextPipelineCache(engine);
     const quadVertex = cache._quadVertexBuffer;
     const bindGroupLayout = cache._bindGroupLayout;
 
@@ -199,6 +217,14 @@ function bindTextRenderable(r: TextRenderable, engine: EngineContext, target: Re
         renderable: r,
         pipeline: gpu._pipeline,
         update(context: DrawUpdateContext): void {
+            // Bindings are built when the scene's draw lists are, not per frame, so a styling
+            // feature enabled after this binding exists would otherwise draw its weighted
+            // groups with the base pipeline until an unrelated scene mutation rebuilt the
+            // binding. The aliasing test costs a base consumer one identity comparison per
+            // frame and stops matching after the single refresh, so no key is ever rebuilt.
+            if (gpu._variantPipeline === gpu._pipeline && _textVariantResolver) {
+                gpu._variantPipeline = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite, r)._variantPipeline;
+            }
             updateTextRenderable(r, engine, gpu, bindGroupLayout, context);
         },
         draw(pass): number {
@@ -294,13 +320,28 @@ function drawTextRenderable(gpu: TextRenderableGpu, data: TextData, quadVertex: 
     pass.setVertexBuffer(0, quadVertex);
     pass.setVertexBuffer(1, gpu._instanceBuf);
     let draws = 0;
+    // The caller (`drawList`) has already bound `gpu._pipeline` and dedupes subsequent
+    // `setPipeline` calls against it, so a group needing the composed pipeline must switch to
+    // it and the base pipeline must be restored before this draw returns. Both pipelines were
+    // resolved at bind time; a group needs the variant one exactly when its draw-group key is
+    // not its plain curve-set id.
+    const base = gpu._pipeline;
+    let bound = base;
     for (const g of data._groups) {
         if (g._slotCount === 0 || !g._bindGroup) {
             continue;
         }
+        const p = g._groupKey === g._curveSetId ? base : gpu._variantPipeline;
+        if (p !== bound) {
+            pass.setPipeline(p);
+            bound = p;
+        }
         pass.setBindGroup(0, g._bindGroup);
         pass.draw(6, g._slotCount, 0, g._slotStart);
         draws++;
+    }
+    if (bound !== base) {
+        pass.setPipeline(base);
     }
     return draws;
 }

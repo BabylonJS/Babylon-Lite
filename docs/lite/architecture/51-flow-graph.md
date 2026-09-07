@@ -54,15 +54,15 @@ interfaces, §4 zero module-level side effects, 100% tree-shakable).
 
 **Lite re-architects the same semantics as data + functions:**
 
-| Concern | Babylon.js (OOP) | Babylon Lite (pure-state) |
+| Concern          | Babylon.js (OOP)                                     | Babylon Lite (pure-state)                                                                             |
 |---|---|---|
-| A node | `class FooBlock extends FlowGraphBlock` with methods | `FgBlock` **plain data** + a `FgBlockDef` record of **pure functions** |
-| Node behaviour | `block._execute(ctx)` method | `def.execute(block, ctx, env, signal)` standalone fn |
-| Data output calc | `block._updateOutputs(ctx)` method | `def.updateOutputs(block, ctx, env)` standalone fn |
-| Type info | `class RichType` instances at module scope | `const enum FgType` string tags + pure `defaultForType()` |
-| className → ctor | global `RegisterClass` registry (side-effect) | tree-shakable `getBlockDef(type)` dynamic-import switch |
-| Per-run state | fields on `FlowGraphContext` instance | `FgContext` **plain data** mutated by standalone fns |
-| Scene access | block holds/queries `Scene` | block touches **only accessors/handles** wired by the loader; the scene **owns and drives** the graph |
+| A node           | `class FooBlock extends FlowGraphBlock` with methods | `FgBlock` **plain data** + a `FgBlockDef` record of **pure functions**                                |
+| Node behaviour   | `block._execute(ctx)` method                         | `def.execute(block, ctx, env, signal)` standalone fn                                                  |
+| Data output calc | `block._updateOutputs(ctx)` method                   | `def.updateOutputs(block, ctx, env)` standalone fn                                                    |
+| Type info        | `class RichType` instances at module scope           | `FgType` const-object string tags + pure `defaultForType()`                                           |
+| className → ctor | global `RegisterClass` registry (side-effect)        | tree-shakable `getBlockDef(type)` dynamic-import switch                                               |
+| Per-run state    | fields on `FlowGraphContext` instance                | `FgContext` **plain data** mutated by standalone fns                                                  |
+| Scene access     | block holds/queries `Scene`                          | block touches **only accessors/handles** wired by the loader; the scene **owns and drives** the graph |
 
 The key insight that makes this clean: **BJS already keeps per-instance state in
 `FlowGraphContext` keyed by block `uniqueId`, not on the block.** The block is
@@ -89,8 +89,8 @@ GUIDANCE §4b forbids components from referencing the scene. A flow graph
 obviously needs to read/write node transforms, fire on scene events, and play
 animations — so the wiring is inverted exactly like the animation subsystem:
 
-- The **scene owns** the graphs via an **optional** `scene._flowGraphs?:
-  FgRuntime[]` field (plain data). It is left `undefined` for non-interactivity
+- The **scene owns** the graphs via an **optional** `scene._flowGraphs?: FgRuntime[]`
+  field (plain data). It is left `undefined` for non-interactivity
   scenes and **lazily created by `attachFlowGraph()`** — so core stays
   byte-identical when no graph is attached (verified: the per-scene bundle
   manifest is unchanged by this subsystem's existence).
@@ -132,25 +132,26 @@ export type FgValue =
     | Color3 | Color4
     | null | undefined;
 
-/** Type tags. const enum → fully erased at build, zero runtime cost. */
-export const enum FgType {
-    Any = "any",
-    Number = "number",
-    Boolean = "boolean",
-    String = "string",
-    Integer = "FlowGraphInteger",
-    Vector2 = "Vector2",
-    Vector3 = "Vector3",
-    Vector4 = "Vector4",
-    Quaternion = "Quaternion",
-    Matrix = "Matrix",
-    Matrix2D = "Matrix2D",
-    Matrix3D = "Matrix3D",
-    Color3 = "Color3",
-    Color4 = "Color4",
+/** Type tags. */
+export const FgType = {
+    Any: "any",
+    Number: "number",
+    Boolean: "boolean",
+    String: "string",
+    Integer: "FlowGraphInteger",
+    Vector2: "Vector2",
+    Vector3: "Vector3",
+    Vector4: "Vector4",
+    Quaternion: "Quaternion",
+    Matrix: "Matrix",
+    Matrix2D: "Matrix2D",
+    Matrix3D: "Matrix3D",
+    Color3: "Color3",
+    Color4: "Color4",
     /** glTF JSON Pointer string. The empty string is the null reference. */
-    Reference = "ref",
-}
+    Reference: "ref",
+} as const;
+export type FgType = (typeof FgType)[keyof typeof FgType];
 
 /** A data input/output port — plain data. */
 export interface FgDataSocket {
@@ -252,7 +253,7 @@ export interface FgContext {
 /** One outstanding async task (a delay, an animation). Token enables precise cancel. */
 export interface FgPendingTask {
     readonly blockId: string;
-    readonly token: number;        // unique per task; a block may own several concurrently
+    readonly token: number;    // unique per task; a block may own several concurrently
     canceled: boolean;
     /** set by onTick when finished; compacted out after the frame's pending loop */
     done: boolean;
@@ -343,29 +344,42 @@ export function detachFlowGraph(scene: SceneContext, rt: FgRuntime): void;
 ### Block-type names & registry (`flow-graph/block-type.ts`, `block-registry.ts`)
 
 ```typescript
-/** Lite block type identifiers (const enum string tags). */
-export const enum FgBlockType {
+/** Lite block type identifiers. */
+export const FgBlockType = {
     // Events
-    SceneStart = "SceneReadyEvent",
-    SceneTick = "SceneTickEvent",
-    SendCustomEvent = "SendCustomEvent",
-    ReceiveCustomEvent = "ReceiveCustomEvent",
+    SceneStart: "SceneReadyEvent",
+    SceneTick: "SceneTickEvent",
+    SendCustomEvent: "SendCustomEvent",
+    ReceiveCustomEvent: "ReceiveCustomEvent",
     // Control flow
-    Branch = "Branch", Sequence = "Sequence", Switch = "Switch",
-    ForLoop = "ForLoop", WhileLoop = "WhileLoop", DoN = "DoN",
-    MultiGate = "MultiGate", WaitAll = "WaitAll", Throttle = "Throttle",
-    SetDelay = "SetDelay", CancelDelay = "CancelDelay",
+    Branch: "Branch",
+    Sequence: "Sequence",
+    Switch: "Switch",
+    ForLoop: "ForLoop",
+    WhileLoop: "WhileLoop",
+    DoN: "DoN",
+    MultiGate: "MultiGate",
+    WaitAll: "WaitAll",
+    Throttle: "Throttle",
+    SetDelay: "SetDelay",
+    CancelDelay: "CancelDelay",
     // Data / math (subset; see block list)
-    Constant = "Constant", Add = "Add", Subtract = "Subtract", /* … */
+    Constant: "Constant",
+    Add: "Add",
+    Subtract: "Subtract" /* … */,
     // Pointer / variable / animation
-    GetProperty = "GetProperty", SetProperty = "SetProperty",
-    JsonPointerParser = "JsonPointerParser",
-    GetVariable = "GetVariable", SetVariable = "SetVariable",
-    ValueInterpolation = "ValueInterpolation",
-    PlayAnimation = "PlayAnimation", StopAnimation = "StopAnimation",
+    GetProperty: "GetProperty",
+    SetProperty: "SetProperty",
+    JsonPointerParser: "JsonPointerParser",
+    GetVariable: "GetVariable",
+    SetVariable: "SetVariable",
+    ValueInterpolation: "ValueInterpolation",
+    PlayAnimation: "PlayAnimation",
+    StopAnimation: "StopAnimation",
     // Debug
-    ConsoleLog = "ConsoleLog",
-}
+    ConsoleLog: "ConsoleLog",
+} as const;
+export type FgBlockType = (typeof FgBlockType)[keyof typeof FgBlockType];
 
 /**
  * Tree-shakable, side-effect-free. Returns a lazy loader for one def.
@@ -615,18 +629,18 @@ parseConnections`. Output is plain data — **no block instances, no class regis
 
 glTF→Lite type table (from BJS, kept verbatim):
 
-| glTF type | length | FgType | element |
+| glTF type  | length | FgType    | element                           |
 |---|---|---|---|
-| `float` | 1 | Number | number |
-| `bool` | 1 | Boolean | boolean |
-| `int` | 1 | Integer | number |
-| `float2` | 2 | Vector2 | number |
-| `float3` | 3 | Vector3 | number |
-| `float4` | 4 | Vector4 | number |
-| `float2x2` | 4 | Matrix2D | number |
-| `float3x3` | 9 | Matrix3D | number |
-| `float4x4` | 16 | Matrix | number |
-| `ref` | 1 | Reference | JSON Pointer string (`""` = null) |
+| `float`    | 1      | Number    | number                            |
+| `bool`     | 1      | Boolean   | boolean                           |
+| `int`      | 1      | Integer   | number                            |
+| `float2`   | 2      | Vector2   | number                            |
+| `float3`   | 3      | Vector3   | number                            |
+| `float4`   | 4      | Vector4   | number                            |
+| `float2x2` | 4      | Matrix2D  | number                            |
+| `float3x3` | 9      | Matrix3D  | number                            |
+| `float4x4` | 16     | Matrix    | number                            |
+| `ref`      | 1      | Reference | JSON Pointer string (`""` = null) |
 
 Release-candidate parser semantics:
 
@@ -722,25 +736,25 @@ dispose
 
 ## Babylon.js Equivalence Map
 
-| Babylon.js | Babylon Lite |
+| Babylon.js                                         | Babylon Lite                                                          |
 |---|---|
-| `FlowGraphBlock` (class) | `FgBlock` (data) + `FgBlockDef` (functions) |
-| `FlowGraphExecutionBlock._execute` | `FgBlockDef.execute` |
-| `FlowGraphBlock._updateOutputs` | `FgBlockDef.updateOutputs` |
-| `FlowGraphAsyncExecutionBlock` | `FgBlockDef.execute` (starts task) + `onTick(task)` + `cancelPending` |
-| `FlowGraphEventBlock` | `FgBlock.event` + scene-driven bus dispatch |
-| `FlowGraphDataConnection.getValue/setValue` | `getDataValue` / `setDataValue` |
-| `FlowGraphSignalConnection._activateSignal` | `activateSignal` |
-| `FlowGraphContext` | `FgContext` (data) + `FgEnv` (resolved caps) |
-| `FlowGraphCoordinator` (multi-graph) | `scene._flowGraphs` + scene driver |
-| `FlowGraphSceneEventCoordinator` | `FgEventBus` fed by scene/input layer |
-| `RichType` instances | `const enum FgType` + `defaultForType()` |
-| `RegisterClass` global registry | `getBlockDef` dynamic-import switch |
-| `blockFactory` (already lazy) | `getBlockDef` (same shape, no classes) |
-| `gltfPathToObjectConverter` + `objectModelMapping` | `flow-graph/gltf/path-converter.ts` → `FgAccessor` |
-| `InteractivityGraphToFlowGraphParser` | `flow-graph/gltf/interactivity-parser.ts` |
-| `declarationMapper.ts` table | `flow-graph/gltf/declaration-mapper.ts` table |
-| `KHR_interactivity` loader extension | `loader-gltf/gltf-feature-interactivity.ts` |
+| `FlowGraphBlock` (class)                           | `FgBlock` (data) + `FgBlockDef` (functions)                           |
+| `FlowGraphExecutionBlock._execute`                 | `FgBlockDef.execute`                                                  |
+| `FlowGraphBlock._updateOutputs`                    | `FgBlockDef.updateOutputs`                                            |
+| `FlowGraphAsyncExecutionBlock`                     | `FgBlockDef.execute` (starts task) + `onTick(task)` + `cancelPending` |
+| `FlowGraphEventBlock`                              | `FgBlock.event` + scene-driven bus dispatch                           |
+| `FlowGraphDataConnection.getValue/setValue`        | `getDataValue` / `setDataValue`                                       |
+| `FlowGraphSignalConnection._activateSignal`        | `activateSignal`                                                      |
+| `FlowGraphContext`                                 | `FgContext` (data) + `FgEnv` (resolved caps)                          |
+| `FlowGraphCoordinator` (multi-graph)               | `scene._flowGraphs` + scene driver                                    |
+| `FlowGraphSceneEventCoordinator`                   | `FgEventBus` fed by scene/input layer                                 |
+| `RichType` instances                               | `FgType` const object + `defaultForType()`                            |
+| `RegisterClass` global registry                    | `getBlockDef` dynamic-import switch                                   |
+| `blockFactory` (already lazy)                      | `getBlockDef` (same shape, no classes)                                |
+| `gltfPathToObjectConverter` + `objectModelMapping` | `flow-graph/gltf/path-converter.ts` → `FgAccessor`                    |
+| `InteractivityGraphToFlowGraphParser`              | `flow-graph/gltf/interactivity-parser.ts`                             |
+| `declarationMapper.ts` table                       | `flow-graph/gltf/declaration-mapper.ts` table                         |
+| `KHR_interactivity` loader extension               | `loader-gltf/gltf-feature-interactivity.ts`                           |
 
 ---
 
@@ -800,7 +814,7 @@ packages/babylon-lite/src/flow-graph/
   index.ts                       # public exports
   types.ts                       # FgValue, FgType, FgBlock, FgGraph, sockets
   block-def.ts                   # FgBlockDef, FgBlockShape
-  block-type.ts                  # FgBlockType const enum
+  block-type.ts                  # FgBlockType const object + value-union type
   block-registry.ts              # getBlockDef() dynamic-import switch
   context.ts                     # FgContext, FgEnv, FgAccessor
   runtime.ts                     # getDataValue/setDataValue/activateSignal, FgRuntime, start/tick/dispose
@@ -861,11 +875,11 @@ seams. **Guard met:** non-interactivity bundle manifest byte-identical.
 proves the whole pipeline before the long tail of blocks: `SceneStart`,
 `SceneTick`, `Branch`, `Sequence`, one math op (`Add`), `GetProperty`/`SetProperty`
 + `JsonPointerParser`, `PlayAnimation`/`StopAnimation`; plus a **minimal**
-parser + declaration-mapper (just those ops) + path-converter + the
-`gltf-feature-interactivity.ts` loader hook; plus **one** Khronos
-`KHR_interactivity` sample running end-to-end as a parity scene. This surfaces
-mapper/accessor/runtime/handedness mismatches immediately rather than after the
-whole block library is written.
+  parser + declaration-mapper (just those ops) + path-converter + the
+  `gltf-feature-interactivity.ts` loader hook; plus **one** Khronos
+  `KHR_interactivity` sample running end-to-end as a parity scene. This surfaces
+  mapper/accessor/runtime/handedness mismatches immediately rather than after the
+  whole block library is written.
 
 **Phase 3 — Broaden block library.** Fill in the rest of the ~60 blocks
 (full math/trig/exp, vector/matrix/quaternion, integer bitwise, type conversion,

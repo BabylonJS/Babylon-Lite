@@ -71,6 +71,7 @@ import {
 } from "../frame-graph/post-process-task.js";
 import type { Task } from "../frame-graph/task.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** Configuration for `createSmaaPostProcessTask`. */
 export interface SmaaPostProcessTaskConfig extends PostProcessTaskSettings {
@@ -165,7 +166,7 @@ interface SmaaTaskInternal extends SmaaPostProcessTask {
     _weights: RenderTarget;
 }
 
-const EDGE_UNIFORM_WGSL = `struct SmaaEdgeParams{threshold:f32,srgb:f32,pad1:f32,pad2:f32}
+const EDGE_UNIFORM_WGSL = wgsl`struct SmaaEdgeParams{threshold:f32,srgb:f32,pad1:f32,pad2:f32}
 @group(0) @binding(2) var<uniform> smaaEdge:SmaaEdgeParams;`;
 
 // Pass 1 — luma edge detection.
@@ -176,7 +177,7 @@ const EDGE_UNIFORM_WGSL = `struct SmaaEdgeParams{threshold:f32,srgb:f32,pad1:f32
 // Local contrast adaptation is what stops a strong edge from dragging its weaker neighbours into
 // the pattern search: without it, a bright specular line makes the whole surrounding region look
 // like edges and the filter smears texture detail that was never aliased.
-const EDGE_FRAGMENT_WGSL = /* wgsl */ `fn smaaLuma(c:vec3f)->f32{return dot(c,vec3f(0.2126,0.7152,0.0722));}
+const EDGE_FRAGMENT_WGSL = wgsl`fn smaaLuma(c:vec3f)->f32{return dot(c,vec3f(0.2126,0.7152,0.0722));}
 // Sampling an sRGB VIEW decodes to linear, which would move the threshold's meaning into linear
 // space and lose most dark-region edges. Re-encode first when the caller says the source is sRGB, so
 // edge detection always measures the same gamma-space luma. Only detection does this; the blend pass
@@ -208,7 +209,7 @@ fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{
     return vec4f(edges, 0.0, 1.0);
 }`;
 
-const WEIGHT_UNIFORM_WGSL = `struct SmaaWeightParams{maxSearch:f32,diag:f32,corner:f32,pad:f32}
+const WEIGHT_UNIFORM_WGSL = wgsl`struct SmaaWeightParams{maxSearch:f32,diag:f32,corner:f32,pad:f32}
 @group(0) @binding(2) var<uniform> smaaWeight:SmaaWeightParams;`;
 
 // Pass 2 — blending weights.
@@ -246,7 +247,7 @@ const WEIGHT_UNIFORM_WGSL = `struct SmaaWeightParams{maxSearch:f32,diag:f32,corn
 // carrying it in `behind` keeps this at one fetch per step. Measured against the glsl-smaa oracle,
 // adding this took crossing thin lines from 31.5 dB to 36.4 dB (worst-case pixel error 152 -> 40)
 // and left clean staircases untouched, which is exactly the expected signature.
-const WEIGHT_FRAGMENT_WGSL = /* wgsl */ `
+const WEIGHT_FRAGMENT_WGSL = wgsl`
 fn smaaEdgeAt(uv:vec2f)->vec2f{return textureSampleLevel(sourceTextureSampler,sourceSampler,uv,0.0).rg;}
 
 // ── Diagonal patterns ──────────────────────────────────────────────────────────────────────────
@@ -477,8 +478,8 @@ fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{
     return w;
 }`;
 
-const NEIGHBOURHOOD_TEXTURE_WGSL = `@group(0) @binding(2) var smaaWeights:texture_2d<f32>;`;
-const NEIGHBOURHOOD_UNIFORM_WGSL = `struct SmaaBlendParams{dominant:f32,p0:f32,p1:f32,p2:f32}
+const NEIGHBOURHOOD_TEXTURE_WGSL = wgsl`@group(0) @binding(2) var smaaWeights:texture_2d<f32>;`;
+const NEIGHBOURHOOD_UNIFORM_WGSL = wgsl`struct SmaaBlendParams{dominant:f32,p0:f32,p1:f32,p2:f32}
 @group(0) @binding(3) var<uniform> smaaBlend:SmaaBlendParams;`;
 
 // Pass 3 — neighbourhood blending.
@@ -499,7 +500,7 @@ const NEIGHBOURHOOD_UNIFORM_WGSL = `struct SmaaBlendParams{dominant:f32,p0:f32,p
 //
 // The whole vec4 is blended, alpha included: taking RGB from the neighbours but alpha from the
 // centre desynchronises the two, breaking premultiplied-alpha invariants and fringing cut-outs.
-const NEIGHBOURHOOD_FRAGMENT_WGSL = /* wgsl */ `
+const NEIGHBOURHOOD_FRAGMENT_WGSL = wgsl`
 fn smaaFetch(uv:vec2f)->vec4f{return textureSampleLevel(sourceTextureSampler,sourceSampler,uv,0.0);}
 fn smaaWeightAt(uv:vec2f)->vec4f{return textureSampleLevel(smaaWeights,sourceSampler,uv,0.0);}
 fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{

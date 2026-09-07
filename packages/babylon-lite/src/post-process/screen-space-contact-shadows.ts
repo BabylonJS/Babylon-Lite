@@ -40,6 +40,7 @@ import {
     resolveScreenSpaceSourceSize,
 } from "./screen-space-temporal.js";
 import type { ScreenSpaceTemporalOwner } from "./screen-space-temporal.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** Configuration for `createScreenSpaceContactShadowsPostProcessTask`. */
 export interface ScreenSpaceContactShadowsPostProcessTaskConfig {
@@ -126,22 +127,22 @@ export function clampScreenSpaceContactShadowsConfig(config: ScreenSpaceContactS
 export const SS_CONTACT_PRODUCER_UNIFORM_FLOATS = 48;
 const SS_CONTACT_PRODUCER_UNIFORM_BYTES = SS_CONTACT_PRODUCER_UNIFORM_FLOATS * 4;
 
-const CONTACT_PRODUCER_UNIFORM_WGSL = `struct SsContactParams{invViewProj:mat4x4f,viewProj:mat4x4f,rayDir:vec3f,stepCount:f32,cameraPos:vec3f,maxDistance:f32,outputDims:vec2f,depthDims:vec2f,bias:f32,normalBias:f32,thickness:f32,phase:f32}`;
+const CONTACT_PRODUCER_UNIFORM_WGSL = wgsl`struct SsContactParams{invViewProj:mat4x4f,viewProj:mat4x4f,rayDir:vec3f,stepCount:f32,cameraPos:vec3f,maxDistance:f32,outputDims:vec2f,depthDims:vec2f,bias:f32,normalBias:f32,thickness:f32,phase:f32}`;
 
-const CONTACT_PRODUCER_BINDINGS_WGSL = `@group(0)@binding(0) var ssDepth:texture_depth_2d;
+const CONTACT_PRODUCER_BINDINGS_WGSL = wgsl`@group(0)@binding(0) var ssDepth:texture_depth_2d;
 @group(0)@binding(1) var<uniform> ssContact:SsContactParams;`;
 
-const CONTACT_TANGENT_PLANE_WGSL = `fn ssTangentPlaneClearance(candidateWorld:vec3f,receiverWorld:vec3f,receiverNormal:vec3f)->f32{
+const CONTACT_TANGENT_PLANE_WGSL = wgsl`fn ssTangentPlaneClearance(candidateWorld:vec3f,receiverWorld:vec3f,receiverNormal:vec3f)->f32{
   return dot(candidateWorld-receiverWorld,receiverNormal);
 }`;
 
-const CONTACT_PRODUCER_VERTEX_WGSL = `struct SsCVOut{@builtin(position) position:vec4f}
+const CONTACT_PRODUCER_VERTEX_WGSL = wgsl`struct SsCVOut{@builtin(position) position:vec4f}
 @vertex fn ssContactVertex(@builtin(vertex_index) i:u32)->SsCVOut{
   let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3))[i];
   return SsCVOut(vec4f(p,0,1));
 }`;
 
-const CONTACT_PRODUCER_FRAGMENT_WGSL = `@fragment fn ssContactFragment(v:SsCVOut)->@location(0) vec4f{
+const CONTACT_PRODUCER_FRAGMENT_WGSL = wgsl`@fragment fn ssContactFragment(v:SsCVOut)->@location(0) vec4f{
   let coord=vec2i(v.position.xy);
   let uv=ssTexelUv(coord,ssContact.outputDims);
   let depth=textureLoad(ssDepth,ssUvToCoord(uv,ssContact.depthDims),0);
@@ -175,13 +176,13 @@ const CONTACT_PRODUCER_FRAGMENT_WGSL = `@fragment fn ssContactFragment(v:SsCVOut
 
 /** Full contact-shadow producer shader module source. Exported for WGSL-contract unit tests. */
 export function screenSpaceContactShadowsProducerWGSL(): string {
-    return `${CONTACT_PRODUCER_VERTEX_WGSL}\n${CONTACT_PRODUCER_UNIFORM_WGSL}\n${CONTACT_PRODUCER_BINDINGS_WGSL}\n${screenSpaceRaymarchWGSL()}\n${CONTACT_TANGENT_PLANE_WGSL}\n${CONTACT_PRODUCER_FRAGMENT_WGSL}`;
+    return wgsl`${CONTACT_PRODUCER_VERTEX_WGSL}\n${CONTACT_PRODUCER_UNIFORM_WGSL}\n${CONTACT_PRODUCER_BINDINGS_WGSL}\n${screenSpaceRaymarchWGSL()}\n${CONTACT_TANGENT_PLANE_WGSL}\n${CONTACT_PRODUCER_FRAGMENT_WGSL}`;
 }
 
-const COMPOSITE_EXTRA_TEXTURE_WGSL = `@group(0)@binding(2) var ssShadowTex:texture_2d<f32>;`;
-const COMPOSITE_UNIFORM_WGSL = `struct SsContactCompositeParams{intensity:f32,enabled:f32,tintR:f32,tintG:f32,tintB:f32,p0:f32,p1:f32,p2:f32}
+const COMPOSITE_EXTRA_TEXTURE_WGSL = wgsl`@group(0)@binding(2) var ssShadowTex:texture_2d<f32>;`;
+const COMPOSITE_UNIFORM_WGSL = wgsl`struct SsContactCompositeParams{intensity:f32,enabled:f32,tintR:f32,tintG:f32,tintB:f32,p0:f32,p1:f32,p2:f32}
 @group(0)@binding(3) var<uniform> ssContactComposite:SsContactCompositeParams;`;
-const COMPOSITE_FRAGMENT_WGSL = `fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{
+const COMPOSITE_FRAGMENT_WGSL = wgsl`fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{
   if(ssContactComposite.enabled<0.5){return color;}
   let shadow=textureSample(ssShadowTex,sourceSampler,uv).r;
   let amount=clamp(shadow*ssContactComposite.intensity,0.0,1.0);

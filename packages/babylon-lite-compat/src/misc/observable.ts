@@ -21,8 +21,8 @@ export class Observable<T> {
     public add(callback: ObserverCallback<T>): ObserverCallback<T> {
         this._observers.push(callback);
         this._onObserverAdded?.(callback);
-        if (this._hasNotified && this.notifyIfTriggered && this._lastNotifiedValue !== undefined) {
-            callback(this._lastNotifiedValue);
+        if (this._hasNotified && this.notifyIfTriggered) {
+            callback(this._lastNotifiedValue as T);
         }
         return callback;
     }

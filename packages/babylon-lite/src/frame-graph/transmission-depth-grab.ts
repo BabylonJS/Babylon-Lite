@@ -3,6 +3,7 @@ import type { EngineContext } from "../engine/engine.js";
 import { getOrCreateSampler } from "../resource/gpu-pool.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import { _installDepthGrab, type TransmissionDepthGrabState } from "./transmission.js";
+import { wgsl } from "../shader/wgsl.js";
 /**
  * Lazy depth-grab implementation for `TransmissionOptions.grabDepth`. This module is dynamic-imported ONLY when a
  * task actually enables `grabDepth` (see `transmission.ts` → task `_preload`), so transmission scenes that do not
@@ -12,8 +13,8 @@ import { _installDepthGrab, type TransmissionDepthGrabState } from "./transmissi
 
 // Depth grab: copy the depth attachment's NDC depth into an `r32float` texel-for-texel (no filtering — depth must
 // never be interpolated across silhouettes). The MSAA variant resolves sample 0, matching `createDepthResolveTask`.
-const DEPTH_GRAB_SHADER = `@group(0)@binding(0)var t:texture_depth_2d;struct V{@builtin(position)p:vec4f};@vertex fn vs(@builtin(vertex_index)i:u32)->V{let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3))[i];return V(vec4f(p,0,1));}@fragment fn fs(@builtin(position)fc:vec4f)->@location(0)f32{return textureLoad(t,vec2<i32>(fc.xy),0);}`;
-const DEPTH_GRAB_MSAA_SHADER = `@group(0)@binding(0)var t:texture_depth_multisampled_2d;struct V{@builtin(position)p:vec4f};@vertex fn vs(@builtin(vertex_index)i:u32)->V{let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3))[i];return V(vec4f(p,0,1));}@fragment fn fs(@builtin(position)fc:vec4f)->@location(0)f32{return textureLoad(t,vec2<i32>(fc.xy),0);}`;
+const DEPTH_GRAB_SHADER = wgsl`@group(0)@binding(0)var t:texture_depth_2d;struct V{@builtin(position)p:vec4f};@vertex fn vs(@builtin(vertex_index)i:u32)->V{let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3))[i];return V(vec4f(p,0,1));}@fragment fn fs(@builtin(position)fc:vec4f)->@location(0)f32{return textureLoad(t,vec2<i32>(fc.xy),0);}`;
+const DEPTH_GRAB_MSAA_SHADER = wgsl`@group(0)@binding(0)var t:texture_depth_multisampled_2d;struct V{@builtin(position)p:vec4f};@vertex fn vs(@builtin(vertex_index)i:u32)->V{let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3))[i];return V(vec4f(p,0,1));}@fragment fn fs(@builtin(position)fc:vec4f)->@location(0)f32{return textureLoad(t,vec2<i32>(fc.xy),0);}`;
 
 // Depth-grab pipeline cache (single-sample + MSAA variants), reset on device change like the colour blits.
 let depthGrabPipelines: Map<string, GPURenderPipeline> | null = null;

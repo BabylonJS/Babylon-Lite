@@ -4,13 +4,14 @@ import type { StandardMaterialProps } from "../standard-material.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { StdExt } from "../standard-flags.js";
 import { HAS_OPACITY_TEXTURE, OPACITY_FROM_RGB } from "../standard-flags.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 
 export function createStdOpacityFragment(fromRGB: boolean): ShaderFragment {
     const opacityCalc = fromRGB
-        ? `{ let opSample = textureSample(oT, oS, input.vu); alpha *= dot(opSample.rgb, vec3<f32>(0.3, 0.59, 0.11)) * mat.opLvl; }`
-        : `alpha *= textureSample(oT, oS, input.vu).a * mat.opLvl;`;
+        ? wgsl`{ let opSample = textureSample(oT, oS, input.vu); alpha *= dot(opSample.rgb, vec3<f32>(0.3, 0.59, 0.11)) * mat.opLvl; }`
+        : wgsl`alpha *= textureSample(oT, oS, input.vu).a * mat.opLvl;`;
     return {
         _id: "std-opacity",
         _bindings: [

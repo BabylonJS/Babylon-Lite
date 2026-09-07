@@ -26,6 +26,7 @@ import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../e
 import { createPostProcessTask, type PostProcessTask } from "../frame-graph/post-process-task.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { screenSpaceRaymarchWGSL } from "./screen-space-raymarch-wgsl.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** Which effect the temporal owner is resolving: `"scalar"` for contact shadows
  *  (`rg16float`: value in `.r`, view distance in `.g`), or `"color"` for global
@@ -139,19 +140,19 @@ export function assertScreenSpaceTargetNotAliasingSource(taskName: string, targe
 
 // ─── WGSL fragment generation ───────────────────────────────────────────────
 
-const TEMPORAL_UNIFORM_WGSL = `struct SsTemporalParams{invViewProj:mat4x4f,currentView:mat4x4f,prevViewProj:mat4x4f,prevView:mat4x4f,effectDims:vec2f,depthDims:vec2f,params:vec4f}`;
+const TEMPORAL_UNIFORM_WGSL = wgsl`struct SsTemporalParams{invViewProj:mat4x4f,currentView:mat4x4f,prevViewProj:mat4x4f,prevView:mat4x4f,effectDims:vec2f,depthDims:vec2f,params:vec4f}`;
 
 /** Float count / byte size of `SsTemporalParams` (4 mat4x4f + 2 vec2f + f32 + padding, 16-byte aligned). */
 export const SS_TEMPORAL_UNIFORM_FLOATS = 72;
 export const SS_TEMPORAL_UNIFORM_BYTES = SS_TEMPORAL_UNIFORM_FLOATS * 4;
 
-const TEMPORAL_BINDINGS_WGSL = `@group(0)@binding(0) var ssLinearSampler:sampler;
+const TEMPORAL_BINDINGS_WGSL = wgsl`@group(0)@binding(0) var ssLinearSampler:sampler;
 @group(0)@binding(1) var ssCurrentDepth:texture_depth_2d;
 @group(0)@binding(2) var ssRawTex:texture_2d<f32>;
 @group(0)@binding(3) var ssHistoryTex:texture_2d<f32>;
 @group(0)@binding(4) var<uniform> ssTemporal:SsTemporalParams;`;
 
-const TEMPORAL_VERTEX_WGSL = `struct SsVOut{@builtin(position) position:vec4f}
+const TEMPORAL_VERTEX_WGSL = wgsl`struct SsVOut{@builtin(position) position:vec4f}
 @vertex fn ssResolveVertex(@builtin(vertex_index) i:u32)->SsVOut{
   let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3))[i];
   return SsVOut(vec4f(p,0,1));
@@ -161,7 +162,7 @@ const TEMPORAL_VERTEX_WGSL = `struct SsVOut{@builtin(position) position:vec4f}
  *  temporal blending (see the architecture doc's "Global-illumination producer" pipeline
  *  section). Combines a fixed spatial weight with relative view-depth agreement so it
  *  removes independent pixel noise without allocating another target or pass. */
-const GI_FUSED_FILTER_WGSL = `fn ssFusedGiFilter(coord:vec2i,effectDims:vec2f,depthDims:vec2f)->vec3f{
+const GI_FUSED_FILTER_WGSL = wgsl`fn ssFusedGiFilter(coord:vec2i,effectDims:vec2f,depthDims:vec2f)->vec3f{
   let centerUv=ssTexelUv(coord,effectDims);
   let centerDepth=textureLoad(ssCurrentDepth,ssUvToCoord(centerUv,depthDims),0);
   let centerWorld=ssWorldFromDepth(centerUv,centerDepth,ssTemporal.invViewProj);
@@ -189,7 +190,7 @@ const GI_FUSED_FILTER_WGSL = `fn ssFusedGiFilter(coord:vec2i,effectDims:vec2f,de
  *  selects one tap inside a bounded disk; depth validation prevents filtering
  *  across silhouettes while the temporal mean turns binary march hits into a
  *  stable, continuous contact term. */
-const CONTACT_TEMPORAL_SAMPLE_WGSL = `fn ssFusedContactFilter(coord:vec2i,effectDims:vec2f,depthDims:vec2f)->f32{
+const CONTACT_TEMPORAL_SAMPLE_WGSL = wgsl`fn ssFusedContactFilter(coord:vec2i,effectDims:vec2f,depthDims:vec2f)->f32{
   let centerUv=ssTexelUv(coord,effectDims);
   let centerDepth=textureLoad(ssCurrentDepth,ssUvToCoord(centerUv,depthDims),0);
   let centerWorld=ssWorldFromDepth(centerUv,centerDepth,ssTemporal.invViewProj);
@@ -243,12 +244,12 @@ fn ssContactTemporalSample(coord:vec2i,effectDims:vec2f,depthDims:vec2f)->f32{
  *  history channel layout (`.r`/`.g` vs `.rgb`/`.a`) differ. */
 function resolveFragmentWGSL(kind: ScreenSpaceTemporalKind): string {
     const isColor = kind === "color";
-    const rawSample = isColor ? `let rawValue=ssFusedGiFilter(coord,effectDims,depthDims);` : `let rawValue=ssContactTemporalSample(coord,effectDims,depthDims);`;
+    const rawSample = isColor ? wgsl`let rawValue=ssFusedGiFilter(coord,effectDims,depthDims);` : wgsl`let rawValue=ssContactTemporalSample(coord,effectDims,depthDims);`;
     const historyChannel = isColor ? "hist.rgb" : "hist.r";
     const storedPrevChannel = isColor ? "hist.a" : "hist.g";
     const zero = isColor ? "vec3f(0.0)" : "0.0";
     const clampBlock = isColor
-        ? `var mn=rawValue;var mx=rawValue;
+        ? wgsl`var mn=rawValue;var mx=rawValue;
   let nOffsets=array<vec2i,8>(vec2i(-1,-1),vec2i(0,-1),vec2i(1,-1),vec2i(-1,0),vec2i(1,0),vec2i(-1,1),vec2i(0,1),vec2i(1,1));
   for(var i=0;i<8;i=i+1){
     let n=textureLoad(ssRawTex,ssClampCoord(coord+nOffsets[i],effectDims),0).rgb;
@@ -256,7 +257,7 @@ function resolveFragmentWGSL(kind: ScreenSpaceTemporalKind): string {
     mx=max(mx,n);
   }
   historyValue=clamp(historyValue,mn,mx);`
-        : `var mn=rawValue;var mx=rawValue;
+        : wgsl`var mn=rawValue;var mx=rawValue;
   let nOffsets=array<vec2i,8>(vec2i(-1,-1),vec2i(0,-1),vec2i(1,-1),vec2i(-1,0),vec2i(1,0),vec2i(-1,1),vec2i(0,1),vec2i(1,1));
   for(var i=0;i<8;i=i+1){
     let n=textureLoad(ssRawTex,ssClampCoord(coord+nOffsets[i],effectDims),0).r;
@@ -264,9 +265,9 @@ function resolveFragmentWGSL(kind: ScreenSpaceTemporalKind): string {
     mx=max(mx,n);
   }
   historyValue=clamp(historyValue,mn,mx);`;
-    const output = isColor ? `vec4f(mix(historyValue,rawValue,weight),curDist)` : `vec4f(mix(historyValue,rawValue,weight),curDist,0.0,0.0)`;
+    const output = isColor ? wgsl`vec4f(mix(historyValue,rawValue,weight),curDist)` : wgsl`vec4f(mix(historyValue,rawValue,weight),curDist,0.0,0.0)`;
 
-    return `${isColor ? GI_FUSED_FILTER_WGSL : CONTACT_TEMPORAL_SAMPLE_WGSL}
+    return wgsl`${isColor ? GI_FUSED_FILTER_WGSL : CONTACT_TEMPORAL_SAMPLE_WGSL}
 @fragment fn ssResolveFragment(v:SsVOut)->@location(0) vec4f{
   let coord=vec2i(v.position.xy);
   let effectDims=ssTemporal.effectDims;
@@ -303,10 +304,10 @@ function resolveFragmentWGSL(kind: ScreenSpaceTemporalKind): string {
 /** Full resolve-pass shader module source for a given kind (vertex + shared raymarch
  *  library + bindings + fragment). Exported for WGSL-contract unit tests. */
 export function screenSpaceTemporalResolveWGSL(kind: ScreenSpaceTemporalKind): string {
-    return `${TEMPORAL_VERTEX_WGSL}\n${TEMPORAL_UNIFORM_WGSL}\n${TEMPORAL_BINDINGS_WGSL}\n${screenSpaceRaymarchWGSL()}\n${resolveFragmentWGSL(kind)}`;
+    return wgsl`${TEMPORAL_VERTEX_WGSL}\n${TEMPORAL_UNIFORM_WGSL}\n${TEMPORAL_BINDINGS_WGSL}\n${screenSpaceRaymarchWGSL()}\n${resolveFragmentWGSL(kind)}`;
 }
 
-const HISTORY_COPY_FRAGMENT_WGSL = `fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{return color;}`;
+const HISTORY_COPY_FRAGMENT_WGSL = wgsl`fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{return color;}`;
 
 /** Configuration for `createScreenSpaceTemporalOwner`. */
 export interface ScreenSpaceTemporalOwnerConfig {
