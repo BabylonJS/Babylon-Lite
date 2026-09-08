@@ -2,8 +2,9 @@
  * Module: mesh-from-storage
  *
  * Geometry that lives only on the GPU. A mesh created here sources its vertex
- * stream directly from a `StorageBuffer` — so a compute pass can produce vertices
- * and the draw can consume them in place, with **no readback and no copy**.
+ * stream directly from a `StorageBuffer`, so whoever fills that allocation — the CPU,
+ * or eventually a compute pass — produces vertices the draw consumes in place, with
+ * **no readback and no copy**.
  *
  * This is the seam that procedural/GPU-generated worlds need. Lite's canonical
  * path (`createMeshFromData`) takes CPU `Float32Array`s and uploads them, which
@@ -61,7 +62,7 @@ export interface MeshFromStorageOptions {
     readonly indexCount?: number;
     /** Number of vertices addressed by `indices`, used for validation only. */
     readonly vertexCount: number;
-    /** Byte stride of one vertex inside `storage`. Must match what the compute shader writes. */
+    /** Byte stride of one vertex inside `storage`. Must match the packing whatever wrote it used. */
     readonly arrayStride: number;
     /** Byte offset of each attribute inside one vertex. Omitted attributes sit at offset 0,
      *  which is the right default when a single `float32x4` position is the whole vertex.

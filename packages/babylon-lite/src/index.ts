@@ -270,8 +270,10 @@ export type { Csg2Solid } from "./mesh/csg2.js";
 // ─── Resources ───────────────────────────────────────────────────────
 export { createStorageBuffer, updateStorageBuffer, disposeStorageBuffer } from "./resource/storage-buffer.js";
 export type { StorageBuffer, StorageBufferOptions } from "./resource/storage-buffer.js";
-// GPU-resident geometry: a compute pass fills a storage allocation and the draw
-// reads it in place (no readback, no copy). Tree-shaken away when unused.
+// GPU-resident geometry: a mesh sources its vertices straight from a storage
+// allocation and the draw reads them in place, with no readback and no copy.
+// Whoever fills the allocation -- the CPU, or eventually a compute pass -- is the
+// caller's business. Tree-shaken away when unused.
 export { createMeshFromStorageBuffer } from "./mesh/mesh-from-storage.js";
 export type { MeshFromStorageOptions } from "./mesh/mesh-from-storage.js";
 // Non-canonical vertex formats for a ShaderMaterial (e.g. a float32x4 position packing
