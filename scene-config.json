@@ -2592,6 +2592,16 @@
         "skipPerf": true
     },
     {
+        "id": 285,
+        "slug": "scene285-storage-backed-geometry",
+        "name": "Scene 285 — Storage-Backed Geometry",
+        "maxMad": 0.01,
+        "maxRawKB": 44.05,
+        "description": "Four terrain chunks in ONE vertex-capable StorageBuffer, each drawn from its own slot through a non-zero baseVertex, all sharing a single index allocation. Position is a float32x4 whose .w carries a per-vertex value the shader reads back out, declared on the material with setShaderAttributeFormats. Vertices are seeded from the CPU: producing them with a compute pass is the same storage contract from the other end and is being designed separately. What this pins is that slab-backed geometry binds and draws — the real WebGPU usage flags, the vertex layout the pipeline is built from, and the indexed draw that reads the slot, none of which a unit test sees.",
+        "tags": ["storage-buffer", "shader", "geometry"],
+        "skipPerf": true
+    },
+    {
         "id": 300,
         "slug": "scene300-npe-sprite2d",
         "name": "Scene 300 — NPE on Sprite2D",
