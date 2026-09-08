@@ -82,13 +82,41 @@ export function createArcRotateCamera(alpha: number, beta: number, radius: numbe
 ### `arc-rotate-controls.ts`
 
 ```typescript
+/** Camera gesture assigned to a pointer button. */
+export type ArcRotatePointerAction = "rotate" | "pan";
+
+/** Optional non-touch pointer-button mappings.
+ *  Omitted fields preserve the default independently. */
+export interface ArcRotatePointerMappings {
+    /** Primary button (PointerEvent.button 0). Default: "rotate". */
+    primaryButton?: ArcRotatePointerAction;
+    /** Secondary button (PointerEvent.button 2). Default: "pan". */
+    secondaryButton?: ArcRotatePointerAction;
+}
+
+export interface AttachControlOptions {
+    /** Non-touch pointer-button mappings. Touch remains one-finger rotate + pinch zoom. */
+    pointerMappings?: ArcRotatePointerMappings;
+    shouldHandlePointerDown?: (event: PointerEvent) => boolean;
+    isExternalDragActive?: () => boolean;
+    isExternalPickPending?: () => boolean;
+}
+
 /** Attach orbit/zoom/pan controls to an ArcRotateCamera.
  *  Matches Babylon.js ArcRotateCameraPointersInput behavior with inertia.
  *  Input handlers accumulate into the camera's inertial offset properties.
  *  Inertia is applied each frame via scene._beforeRender (single RAF loop).
  *  Returns a cleanup function to remove all event listeners and the beforeRender hook. */
-export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement, scene?: SceneContext): () => void;
+export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement, scene?: SceneContext, options?: AttachControlOptions): () => void;
 ```
+
+`pointerMappings` is resolved on each non-touch `pointerdown`. Each button falls
+back independently, so `{ primaryButton: "pan" }` changes only the primary
+button while the secondary button continues to pan. The selected action remains
+fixed for that drag. Both actions use the existing inertial paths and pointer
+capture; wheel input is always zoom and is not remappable. Touch ignores
+`pointerMappings`: one finger rotates and two fingers pinch-zoom exactly as in
+the default controls.
 
 ### `free-camera.ts`
 
@@ -412,14 +440,14 @@ Both cameras: `mat4Multiply(projectionMatrix, viewMatrix)`.
 
 Input handlers do **not** directly modify camera properties. They accumulate into the camera's `inertial*` offset fields, which are applied and decayed each frame by `applyInertia()`.
 
-#### Left-drag (Rotate)
+#### Rotate action (primary-button default)
 
 ```
 camera.inertialAlphaOffset -= dx / angularSensibility
 camera.inertialBetaOffset  -= dy / angularSensibility
 ```
 
-#### Right-drag (Pan)
+#### Pan action (secondary-button default)
 
 ```
 camera.inertialPanningX += -dx / panningSensibility
@@ -503,6 +531,32 @@ When `scene` is omitted (fallback):
 | `touchend`    | `onTouchEnd`    | —                             |
 
 Pointer capture (`setPointerCapture`/`releasePointerCapture`) keeps drags active outside canvas.
+
+The primary and secondary buttons can independently select the rotate or pan
+action through `AttachControlOptions.pointerMappings`. Defaults are equivalent
+to the historic fixed mapping:
+
+```typescript
+attachControl(camera, canvas, scene, {
+    pointerMappings: {
+        primaryButton: "rotate",
+        secondaryButton: "pan",
+    },
+});
+```
+
+To make a primary-button drag pan without application-owned camera math:
+
+```typescript
+attachControl(camera, canvas, scene, {
+    pointerMappings: { primaryButton: "pan" },
+});
+```
+
+Non-touch pointers include mouse and pen input. Touch pointer events deliberately
+bypass this mapping so one-finger orbit and two-finger pinch zoom are stable.
+Wheel zoom, external-interaction guards, pointer capture, and cleanup do not
+depend on the mapping.
 
 ---
 
@@ -611,8 +665,8 @@ Cleanup removes all 6 event listeners and the `_beforeRender` callback.
 | `angularSensibility = 1000`                          | `camera.inputs.attached.pointers.angularSensibilityX/Y`                    |
 | `panningSensibility = 50`                            | `camera.inputs.attached.pointers.panningSensibility`                       |
 | `wheelPrecision = 3`                                 | `camera.inputs.attached.mousewheel.wheelPrecision`                         |
-| Left-drag → rotate                                   | `ArcRotateCameraPointersInput` button 0                                    |
-| Right-drag → pan                                     | `ArcRotateCameraPointersInput` button 2                                    |
+| Primary drag → rotate (default, configurable)        | `ArcRotateCameraPointersInput` button 0                                    |
+| Secondary drag → pan (default, configurable)         | `ArcRotateCameraPointersInput` button 2                                    |
 | Wheel → zoom radius                                  | `ArcRotateCameraMouseWheelInput`                                           |
 | Pinch → zoom radius (direct, no inertia)             | `ArcRotateCameraPointersInput` multitouch pinch                            |
 | Beta clamped to `[0.01, π-0.01]`                     | `camera.lowerBetaLimit / upperBetaLimit`                                   |
@@ -651,6 +705,8 @@ Cleanup removes all 6 event listeners and the `_beforeRender` callback.
 | `pinch zoom`                                   | Two-touch events correctly scale radius directly                                                  |
 | `inertia decay`                                | After input stops, offsets decay by `camera.inertia` per frame                                    |
 | `cleanup removes all listeners + beforeRender` | After cleanup, events and RAF hook removed                                                        |
+| `primary/secondary mappings are independent`   | Either button can select rotate or pan without changing the other button                          |
+| `custom mappings preserve touch`               | One-finger touch still rotates and two-finger pinch still zooms                                   |
 | **FreeCamera**                                 |                                                                                                   |
 | `initial yaw/pitch from position→target`       | Verify atan2 computation                                                                          |
 | `WASD movement in local space`                 | W moves along +Z local, A along −X local                                                          |
