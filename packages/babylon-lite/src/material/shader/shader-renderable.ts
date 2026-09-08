@@ -111,6 +111,27 @@ export function _installShaderUniformWriters(systemWriter: ShaderSystemUniformWr
 /** @internal */
 export type ShaderRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
 
+/** Per-mesh vertex-packing support, installed only by `mesh-from-storage`. Module-local
+ *  with a single exported setter, the same idiom as `_stencilResolver` in shader-pipeline:
+ *  without that factory in the bundle the setter tree-shakes, the bundler proves this is
+ *  always null, and every branch below folds away — so ShaderMaterial scenes that never
+ *  source geometry from a StorageBuffer stay byte-identical. */
+export interface ShaderVbRenderSupport {
+    /** @internal Layouts + pipeline-key suffix for one mesh, or null when it is tightly packed. */
+    _forMesh(material: ShaderMaterial, bindings: ShaderPipelineBindings, packet?: ShaderPacket): { readonly _vbs: readonly GPUVertexBufferLayout[]; readonly _key: string } | null;
+    /** @internal Split packets into groups that can share one pipeline, or null when they all agree. */
+    _group(packets: readonly ShaderPacket[]): readonly (readonly ShaderPacket[])[] | null;
+    /** @internal Draw one packet, honouring a slot base inside a shared allocation. */
+    _draw(pass: ShaderRenderPass, gpu: MeshGPU): void;
+}
+
+let _vbRender: ShaderVbRenderSupport | null = null;
+
+/** @internal Install per-mesh vertex-packing support (called by `mesh-from-storage`). */
+export function _installShaderVbRenderSupport(support: ShaderVbRenderSupport): void {
+    _vbRender = support;
+}
+
 export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh[], getUniformBatch?: UniformBatchFactory): MeshGroupBuildResult {
     const renderables: Renderable[] = [];
 
@@ -207,6 +228,12 @@ function buildMaterialRenderables(scene: SceneContext, material: ShaderMaterial,
     if (isTransparent) {
         return packets.map((packet) => createTransparentRenderable(scene, material, packet, isOverride, getUniformBatch));
     }
+    // One opaque renderable resolves ONE pipeline for all its packets, so meshes that
+    // describe their own vertex packing cannot share it with tightly-packed ones.
+    const groups = _vbRender?._group(packets);
+    if (groups) {
+        return groups.map((group) => createOpaqueRenderable(scene, material, group, isOverride, getUniformBatch));
+    }
     return [createOpaqueRenderable(scene, material, packets, isOverride, getUniformBatch)];
 }
 
@@ -276,9 +303,13 @@ function createOpaqueRenderable(
         bind(eng, sig) {
             const bindings = getOrCreateShaderPipelineBindings(eng, material);
             const uniformBatch = getUniformBatch?.(sig);
+            // All packets can be disposed out from under a merged renderable (e.g. every mesh sharing this
+            // material was removed) before the next bind — `packets` is spliced live by registerMeshTextureDisposer.
+            // Fall back to the bindings-only pipeline (no vertex-buffer layout) rather than dereferencing packets[0].
+            const vb = _vbRender?._forMesh(material, bindings, packets[0]);
             return {
                 renderable: r,
-                pipeline: getOrCreateShaderPipeline(eng, sig, material, bindings),
+                pipeline: vb ? getOrCreateShaderPipeline(eng, sig, material, bindings, vb._key, vb._vbs) : getOrCreateShaderPipeline(eng, sig, material, bindings),
                 _updateBatches: uniformBatch ? [uniformBatch] : undefined,
                 update: (context) => update(context, uniformBatch),
                 draw: (pass) => draw(pass, eng),
@@ -325,9 +356,10 @@ function createTransparentRenderable(scene: SceneContext, material: ShaderMateri
         bind(eng, sig) {
             const bindings = getOrCreateShaderPipelineBindings(eng, material);
             const uniformBatch = getUniformBatch?.(sig);
+            const vb = _vbRender?._forMesh(material, bindings, packet);
             return {
                 renderable: r,
-                pipeline: getOrCreateShaderPipeline(eng, sig, material, bindings),
+                pipeline: vb ? getOrCreateShaderPipeline(eng, sig, material, bindings, vb._key, vb._vbs) : getOrCreateShaderPipeline(eng, sig, material, bindings),
                 _updateBatches: uniformBatch ? [uniformBatch] : undefined,
                 update: (context) => update(context, uniformBatch),
                 draw: (pass) => draw(pass, eng),
@@ -407,7 +439,11 @@ function drawPacket(pass: ShaderRenderPass, engine: EngineContext, material: Sha
     }
     pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
     pass.setBindGroup(1, packet._bindGroup);
-    pass.drawIndexed(gpu.indexCount);
+    if (_vbRender) {
+        _vbRender._draw(pass, gpu);
+    } else {
+        pass.drawIndexed(gpu.indexCount);
+    }
 }
 
 function ensureCustomUbo(engine: EngineContext, material: ShaderMaterial, customSpec: UboSpec | null): void {

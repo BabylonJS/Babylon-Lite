@@ -3,6 +3,7 @@ import { targetSignatureKey } from "../../engine/render-target.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { ShaderMaterial } from "./shader-material.js";
 import type { ShaderPipelineBindings, ShaderPipelineCache } from "./shader-pipeline.js";
+import { _shaderVbSupport } from "./shader-pipeline.js";
 
 interface ShaderModuleEntry {
     readonly id: number;
@@ -121,6 +122,7 @@ function refresh(cache: DeviceCache): void {
 function bindingsKey(material: ShaderMaterial): string {
     return JSON.stringify([
         material.attributes,
+        _shaderVbSupport?._layouts(material) ?? null,
         material.uniformDecls.map((decl) => [decl.name, decl.type]),
         material.samplerDecls.map((decl) => [decl.name, decl.sampleType ?? "float", decl.viewDimension ?? "2d", decl.comparison === true]),
         material.storageBufferDecls.map((decl) => [decl.name, decl.type]),

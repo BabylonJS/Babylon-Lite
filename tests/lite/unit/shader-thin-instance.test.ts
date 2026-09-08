@@ -240,7 +240,9 @@ describe("ShaderMaterial thin instances", () => {
         } as unknown as GPURenderBundleEncoder;
 
         expect(binding.draw(pass, engine)).toBe(1);
-        expect(drawIndexed).toHaveBeenCalledWith(3, 0);
+        // `baseVertex` is now passed through so a slab-backed mesh draws from its own slot;
+        // `undefined` is WebIDL's default for the optional argument, so this is the same call.
+        expect(drawIndexed).toHaveBeenCalledWith(3, 0, 0, undefined);
         expect(drawIndexedIndirect).not.toHaveBeenCalled();
 
         mesh.thinInstances!.count = 1;

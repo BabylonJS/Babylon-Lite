@@ -360,7 +360,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         if (ti && thinDrawArgs) {
             pass.drawIndexedIndirect(thinDrawArgs, 0);
         } else {
-            pass.drawIndexed(g.indexCount, ti?.count);
+            pass.drawIndexed(g.indexCount, ti?.count, 0, g._baseVertex);
         }
         return 1;
     };
