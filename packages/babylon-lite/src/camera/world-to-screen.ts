@@ -28,7 +28,7 @@ export interface ScreenProjectionResult extends Vec3 {
     behindCamera: boolean;
     /** True when the point is outside any WebGPU clip plane or is non-finite. */
     clipped: boolean;
-    /** True when the point cannot appear inside the viewport's 2D rectangle. */
+    /** True when the point cannot appear inside the viewport's 2D rectangle, including negative clip W. */
     offscreen: boolean;
 }
 
@@ -46,7 +46,7 @@ function validateOptions(options: ScreenProjectionOptions): void {
         !(backingHeight > 0) ||
         !Number.isFinite(backingHeight)
     ) {
-        throw new RangeError("ScreenProjectionOptions backing dimensions and viewport must be positive and finite.");
+        throw new RangeError("ScreenProjectionOptions backing dimensions and viewport extents must be positive and finite; viewport offsets must be finite.");
     }
     if (
         (cssWidth === undefined) !== (cssHeight === undefined) ||

@@ -4,6 +4,8 @@ import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera
 import { getEffectiveAspectRatio, getViewMatrix, getViewProjectionMatrix } from "../../../packages/babylon-lite/src/camera/camera";
 import { enableOrthographicCamera } from "../../../packages/babylon-lite/src/camera/orthographic";
 import { resolveCameraViewport, type PixelViewport } from "../../../packages/babylon-lite/src/camera/viewport";
+import { mat4Identity } from "../../../packages/babylon-lite/src/math/mat4-identity";
+import type { Mat4Storage } from "../../../packages/babylon-lite/src/math/types";
 import {
     projectWorldToScreen,
     projectWorldToScreenToRef,
@@ -126,6 +128,26 @@ describe("world-to-screen projection", () => {
         });
     });
 
+    it("marks negative clip W as non-displayable independently of view-space facing", () => {
+        const { options } = setup();
+        const viewProjection = mat4Identity();
+        const storage = viewProjection as unknown as Mat4Storage;
+        storage[10] = -0.5;
+        storage[15] = -1;
+
+        const projected = projectWorldToScreen({ x: 0, y: 0, z: 1 }, mat4Identity(), viewProjection, options);
+
+        expect(projected).toMatchObject({
+            x: 400,
+            y: 300,
+            z: 0.5,
+            clipW: -1,
+            behindCamera: false,
+            clipped: true,
+            offscreen: true,
+        });
+    });
+
     it("distinguishes depth-only clipping from XY offscreen behavior", () => {
         const { project } = setup();
         const projected = project({ x: 0, y: 0, z: -9.95 });
@@ -176,8 +198,13 @@ describe("world-to-screen projection", () => {
         const viewProjection = getViewProjectionMatrix(camera, 4 / 3);
         const point = { x: 0, y: 0, z: 0 };
 
-        expect(() => projectWorldToScreen(point, view, viewProjection, { ...options, backingWidth: 0 })).toThrow(RangeError);
+        expect(() => projectWorldToScreen(point, view, viewProjection, { ...options, backingWidth: 0 })).toThrow(
+            "ScreenProjectionOptions backing dimensions and viewport extents must be positive and finite; viewport offsets must be finite."
+        );
         expect(() => projectWorldToScreen(point, view, viewProjection, { ...options, viewport: { ...options.viewport, height: Number.NaN } })).toThrow(RangeError);
+        expect(() => projectWorldToScreen(point, view, viewProjection, { ...options, viewport: { ...options.viewport, x: Number.NaN } })).toThrow(
+            "viewport offsets must be finite"
+        );
         expect(() => projectWorldToScreen(point, view, viewProjection, { ...options, cssHeight: undefined })).toThrow(RangeError);
     });
 });

@@ -48,7 +48,7 @@ export interface ScreenProjectionResult extends Vec3 {
     behindCamera: boolean;
     /** True when the point is outside any WebGPU clip plane or is non-finite. */
     clipped: boolean;
-    /** True when the point cannot appear inside the viewport's 2D rectangle. */
+    /** True when the point cannot appear inside the viewport's 2D rectangle, including negative clip W. */
     offscreen: boolean;
 }
 
@@ -108,8 +108,8 @@ This ratio handles device-pixel ratio, `maxDevicePixelRatio`, explicit backing-s
 ## Clipped and Offscreen Behavior
 
 - `behindCamera` is true when `viewZ <= 0`.
-- `clipped` is true when the point is behind the camera, any calculated coordinate is non-finite, `ndcX` or `ndcY` is outside `[-1, 1]`, or `ndcZ` is outside WebGPU's `[0, 1]` depth range.
-- `offscreen` concerns only whether the point can appear in the viewport's 2D rectangle. It is true for behind-camera/non-finite points or when `ndcX` / `ndcY` is outside `[-1, 1]`. A point inside the 2D rectangle but clipped only by near/far depth has `offscreen=false` and `clipped=true`.
+- `clipped` is true when the point is behind the camera, has negative `clipW`, has any non-finite calculated coordinate, has `ndcX` or `ndcY` outside `[-1, 1]`, or has `ndcZ` outside WebGPU's `[0, 1]` depth range.
+- `offscreen` concerns only whether the point can appear in the viewport's 2D rectangle. It is true for behind-camera/non-finite points, negative `clipW`, or `ndcX` / `ndcY` outside `[-1, 1]`. Negative `clipW` is non-displayable even if a separately supplied view matrix reports positive `viewZ`. A point inside the 2D rectangle but clipped only by near/far depth has `offscreen=false` and `clipped=true`.
 - Coordinates are not clamped. Finite points outside the viewport retain their extrapolated backing/CSS coordinates so callers can place edge indicators themselves.
 - When `clipW` is zero or any input calculation is non-finite, `x`, `y`, `z`, `cssX`, and `cssY` are `NaN`; all state flags except `behindCamera` report non-displayable behavior (`clipped=true`, `offscreen=true`).
 - Backing dimensions and viewport width/height must be positive finite numbers, and viewport x/y must be finite. CSS dimensions, when supplied, must both be positive finite numbers. Invalid options throw `RangeError` instead of returning success-shaped coordinates.
@@ -147,6 +147,7 @@ Both imports are type-only. The module remains a leaf and adds no runtime depend
 | Behind perspective | `behindCamera`, `clipped`, and `offscreen` are true |
 | Behind orthographic | Separate view-space test identifies it despite `clipW=1` |
 | XY offscreen | Extrapolated coordinates are retained; both clipped/offscreen true |
+| Negative clip W | Non-displayable even when the separately supplied view matrix reports a point in front |
 | Depth-only clip | Clipped true while offscreen remains false |
 | Zero clip W | Coordinates are NaN; clipped/offscreen true |
 | ToRef reuse | Exact result identity returned; every field overwritten |
