@@ -35,6 +35,7 @@ This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side
 | `scene.createDefaultCamera(true, true, true)`                       | `createDefaultCamera(scene)`                                                                                |
 | `camera.attachControl(canvas, true)`                                | `attachControl(camera, canvas, scene)` _(arc-rotate)_ / `attachFreeControl(camera, canvas, scene)` _(free)_ |
 | `camera.mode = Camera.ORTHOGRAPHIC_CAMERA`                          | `enableOrthographicCamera(camera, { halfHeight })`                                                          |
+| `Vector3.Project(point, world, scene.getTransformMatrix(), viewport)` | `projectWorldToScreen(point, view, viewProjection, options)`                                              |
 | `new HemisphericLight("h", new Vector3(0,1,0), scene)`              | `createHemisphericLight([0,1,0], 1.0)`                                                                      |
 | `new DirectionalLight("d", new Vector3(0,-1,0), scene)`             | `createDirectionalLight([0,-1,0])`                                                                          |
 | `new SpotLight("s", pos, dir, angle, exp, scene)`                   | `createSpotLight(pos, dir, angle, exp)`                                                                     |
@@ -125,6 +126,41 @@ const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0,
 scene.camera = camera;
 attachControl(camera, canvas, scene);
 ```
+
+#### Projecting a world point to canvas or CSS pixels
+
+Babylon.js `Vector3.Project` returns render pixels and leaves visibility checks and CSS scaling to the caller. Lite's generic helper returns backing pixels, CSS pixels, reverse-Z NDC depth, and explicit behind/clipped/offscreen flags:
+
+```typescript
+import {
+    getEffectiveAspectRatio,
+    getViewMatrix,
+    getViewProjectionMatrix,
+    projectWorldToScreen,
+    resolveCameraViewport,
+} from "@babylonjs/lite";
+
+const backingWidth = canvas.width;
+const backingHeight = canvas.height;
+const projection = projectWorldToScreen(
+    worldPoint,
+    getViewMatrix(camera),
+    getViewProjectionMatrix(camera, getEffectiveAspectRatio(camera, backingWidth, backingHeight)),
+    {
+        viewport: resolveCameraViewport(camera, backingWidth, backingHeight),
+        backingWidth,
+        backingHeight,
+        cssWidth: canvas.clientWidth,
+        cssHeight: canvas.clientHeight,
+    }
+);
+
+if (!projection.clipped) {
+    overlay.style.transform = `translate(${projection.cssX}px, ${projection.cssY}px)`;
+}
+```
+
+The projection helper itself has no DOM dependency. For `OffscreenCanvas`, pass the visible host canvas's CSS dimensions. Use `projectWorldToScreenToRef` with a reused result object when projecting many points per frame.
 
 ### 5. Loaders and Scene Registration
 

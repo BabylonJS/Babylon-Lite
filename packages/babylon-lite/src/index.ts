@@ -608,6 +608,8 @@ export { getViewMatrix, getProjectionMatrix, getViewProjectionMatrix, getCameraP
 export { getEffectiveAspectRatio } from "./camera/camera.js";
 export { resolveCameraViewport } from "./camera/viewport.js";
 export type { PixelViewport } from "./camera/viewport.js";
+export { projectWorldToScreen, projectWorldToScreenToRef } from "./camera/world-to-screen.js";
+export type { ScreenProjectionOptions, ScreenProjectionResult } from "./camera/world-to-screen.js";
 export type { FreeCamera } from "./camera/free-camera.js";
 export type { BankedFreeCamera } from "./camera/banked-free-camera.js";
 export type { Mesh, MeshGPU } from "./mesh/mesh.js";
