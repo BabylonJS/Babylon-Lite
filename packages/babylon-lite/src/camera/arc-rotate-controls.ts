@@ -1,6 +1,22 @@
 import type { ArcRotateCamera } from "./arc-rotate.js";
 import type { SceneContext } from "../scene/scene.js";
 
+/** Camera gesture assigned to an arc-rotate pointer button. */
+export type ArcRotatePointerAction = "rotate" | "pan";
+
+/**
+ * Optional mappings for non-touch pointer buttons.
+ *
+ * Each field falls back independently: the primary button rotates and the
+ * secondary button pans by default. Touch input is intentionally unaffected.
+ */
+export interface ArcRotatePointerMappings {
+    /** Gesture for `PointerEvent.button === 0`. Default: `"rotate"`. */
+    primaryButton?: ArcRotatePointerAction;
+    /** Gesture for `PointerEvent.button === 2`. Default: `"pan"`. */
+    secondaryButton?: ArcRotatePointerAction;
+}
+
 /**
  * Optional hooks that let an {@link attachControl} caller defer pointer
  * gestures to an external interactor (typically a gizmo pointer-drag
@@ -9,6 +25,11 @@ import type { SceneContext } from "../scene/scene.js";
  * the default behavior (the camera always handles its own pointer input).
  */
 export interface AttachControlOptions {
+    /**
+     * Independent primary/secondary mappings for mouse and pen drags.
+     * Touch remains one-finger rotate plus two-finger pinch zoom.
+     */
+    pointerMappings?: ArcRotatePointerMappings;
     /** Optional predicate consulted on every pointer-down.  When it returns
      *  false the camera ignores that gesture (no rotate / pan).  Used to defer
      *  to gizmo interaction so pressing or dragging a gizmo doesn't also orbit
@@ -140,10 +161,14 @@ export function setCameraLimits(camera: ArcRotateCamera, limits: ArcRotateCamera
 /**
  * Attach orbit/zoom/pan controls to an ArcRotateCamera.
  * Matches Babylon.js ArcRotateCameraPointersInput behavior with inertia:
- * - Left-drag: rotate (alpha/beta) with momentum
- * - Right-drag: pan (shift target) with momentum
+ * - Primary-button drag: rotate (alpha/beta) with momentum by default
+ * - Secondary-button drag: pan (shift target) with momentum by default
  * - Wheel: zoom (radius) with momentum
  * - Pinch: zoom (touch, direct — no inertia)
+ *
+ * Mouse and pen button actions can be configured independently through
+ * {@link AttachControlOptions.pointerMappings}. Touch and wheel behavior are
+ * fixed so remapping desktop pointer buttons cannot alter mobile gestures.
  *
  * Input handlers accumulate into the camera's inertial offset properties.
  * Inertia is applied each frame via scene._beforeRender (the engine's render
@@ -220,10 +245,19 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         lastX = e.clientX;
         lastY = e.clientY;
 
-        if (e.button === 0) {
+        const pointerAction =
+            e.button === 0
+                ? e.pointerType === "touch"
+                    ? "rotate"
+                    : (options?.pointerMappings?.primaryButton ?? "rotate")
+                : e.button === 2
+                  ? (options?.pointerMappings?.secondaryButton ?? "pan")
+                  : undefined;
+
+        if (pointerAction === "rotate") {
             isDragging = true;
             isPanning = false;
-        } else if (e.button === 2) {
+        } else if (pointerAction === "pan") {
             isDragging = false;
             isPanning = true;
         }
