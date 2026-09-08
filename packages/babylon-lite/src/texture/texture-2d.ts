@@ -50,6 +50,18 @@ export type Texture2DRecoverySource =
     | { kind: "solid"; rgba: readonly [number, number, number, number] }
     | { kind: "bitmap"; bitmap: ImageBitmap | null; srgb: boolean; mipMaps: boolean; fallback?: Uint8Array }
     | {
+          /** Factory-owned decoded image retained only while opt-in device-lost recovery is active. */
+          kind: "external";
+          bitmap: ImageBitmap | null;
+          width: number;
+          height: number;
+          format: GPUTextureFormat;
+          levels: number;
+          samplerDesc: GPUSamplerDescriptor;
+          flipY: boolean;
+          premultipliedAlpha: boolean;
+      }
+    | {
           kind: "pixels";
           data: Uint8Array;
           width: number;

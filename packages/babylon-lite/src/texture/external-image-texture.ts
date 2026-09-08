@@ -96,6 +96,7 @@ export async function createTexture2DFromExternalImage(engine: EngineContext, so
     const premultiplyAlpha = options.premultiplyAlpha ?? false;
     let uploadSource = source;
     let resized: ImageBitmap | null = null;
+    let recoveryBitmap: ImageBitmap | null = null;
 
     if (width !== sourceWidth || height !== sourceHeight) {
         resized = await createImageBitmap(source, {
@@ -111,6 +112,29 @@ export async function createTexture2DFromExternalImage(engine: EngineContext, so
     const device = engine._device;
     const format: GPUTextureFormat = options.srgb ? "rgba8unorm-srgb" : "rgba8unorm";
     const levels = mipMaps ? mipLevelCount(width, height) : 1;
+    const generate = levels > 1 ? (await import("./generate-mipmaps.js")).generateMipmaps : null;
+    const samplerDesc: GPUSamplerDescriptor = {
+        addressModeU: options.addressModeU ?? "repeat",
+        addressModeV: options.addressModeV ?? "repeat",
+        minFilter: options.minFilter ?? "linear",
+        magFilter: options.magFilter ?? "linear",
+        mipmapFilter: mipMaps ? "linear" : "nearest",
+    };
+    samplerDesc.maxAnisotropy = samplerDesc.minFilter === "linear" && samplerDesc.magFilter === "linear" && samplerDesc.mipmapFilter === "linear" ? 4 : 1;
+
+    if (engine._dlr) {
+        if (resized) {
+            recoveryBitmap = resized;
+            resized = null;
+        } else {
+            recoveryBitmap = await createImageBitmap(source, {
+                premultiplyAlpha: premultiplyAlpha ? "premultiply" : "none",
+                colorSpaceConversion: "none",
+            });
+            uploadSource = recoveryBitmap;
+        }
+    }
+
     let texture: GPUTexture | null = null;
     try {
         device.pushErrorScope("validation");
@@ -126,22 +150,11 @@ export async function createTexture2DFromExternalImage(engine: EngineContext, so
             });
             device.queue.copyExternalImageToTexture({ source: uploadSource, flipY: options.invertY ?? true }, { texture, premultipliedAlpha: premultiplyAlpha }, { width, height });
 
-            if (mipMaps && levels > 1) {
-                const { generateMipmaps } = await import("./generate-mipmaps.js");
-                generateMipmaps(engine, texture);
+            if (generate) {
+                generate(engine, texture);
             }
 
-            const minFilter = options.minFilter ?? "linear";
-            const magFilter = options.magFilter ?? "linear";
-            const mipmapFilter: GPUMipmapFilterMode = mipMaps ? "linear" : "nearest";
-            sampler = getOrCreateSampler(engine, {
-                addressModeU: options.addressModeU ?? "repeat",
-                addressModeV: options.addressModeV ?? "repeat",
-                minFilter,
-                magFilter,
-                mipmapFilter,
-                maxAnisotropy: minFilter === "linear" && magFilter === "linear" && mipmapFilter === "linear" ? 4 : 1,
-            });
+            sampler = getOrCreateSampler(engine, samplerDesc);
         } catch (error) {
             operationError = error;
         }
@@ -159,10 +172,29 @@ export async function createTexture2DFromExternalImage(engine: EngineContext, so
         }
 
         const result: Texture2D = { texture, view: texture.createView(), sampler, width, height };
+        if (recoveryBitmap) {
+            engine._dlr?.t(result, {
+                kind: "external",
+                bitmap: recoveryBitmap,
+                width,
+                height,
+                format,
+                levels,
+                samplerDesc,
+                flipY: options.invertY ?? true,
+                premultipliedAlpha: premultiplyAlpha,
+            });
+            if (result._recoverySource?.kind !== "external") {
+                recoveryBitmap.close();
+            } else {
+                recoveryBitmap = null;
+            }
+        }
         acquireTexture(result);
         return result;
     } catch (error) {
         texture?.destroy();
+        recoveryBitmap?.close();
         throw error;
     } finally {
         resized?.close();

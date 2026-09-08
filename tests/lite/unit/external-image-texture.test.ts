@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createTexture2DFromExternalImage } from "../../../packages/babylon-lite/src/texture/external-image-texture";
 import { releaseTexture } from "../../../packages/babylon-lite/src/resource/gpu-pool";
+import { rebuildTexture2D } from "../../../packages/babylon-lite/src/texture/texture-recovery";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 
 interface Captured {
@@ -14,31 +15,43 @@ function fakeSource(width = 8, height = 4): ImageBitmap {
     return { width, height, close: vi.fn() } as unknown as ImageBitmap;
 }
 
-function makeEngine(captured: Captured, options: { copyError?: Error; gpuError?: GPUError } = {}): EngineContext {
-    let errorScope = 0;
+function makeEngine(captured: Captured, options: { copyError?: Error; gpuError?: GPUError; gpuErrors?: GPUError[]; textureMipLevelCount?: number } = {}): EngineContext {
+    const errorScopes: Array<{ filter: GPUErrorFilter; error: GPUError | null }> = [];
     const device = {
-        pushErrorScope: () => {
-            errorScope++;
+        pushErrorScope: (filter: GPUErrorFilter) => {
+            errorScopes.push({ filter, error: null });
         },
-        popErrorScope: () => Promise.resolve(--errorScope === 0 ? (options.gpuError ?? null) : null),
+        popErrorScope: () => Promise.resolve(errorScopes.pop()?.error ?? null),
         createTexture: (descriptor: GPUTextureDescriptor) => {
             captured.createDescs.push(descriptor);
             return {
-                mipLevelCount: descriptor.mipLevelCount ?? 1,
+                mipLevelCount: options.textureMipLevelCount ?? descriptor.mipLevelCount ?? 1,
                 createView: () => ({ kind: "view" }),
                 destroy: () => captured.destroyed++,
             } as unknown as GPUTexture;
         },
+        createCommandEncoder: () => ({ finish: () => ({}) }),
         createSampler: (descriptor: GPUSamplerDescriptor) => {
             captured.samplerDesc = descriptor;
             return { kind: "sampler" } as unknown as GPUSampler;
         },
         queue: {
+            submit: () => undefined,
             copyExternalImageToTexture: (source: GPUCopyExternalImageSourceInfo, destination: GPUCopyExternalImageDestInfo, size: GPUExtent3DStrict) => {
                 if (options.copyError) {
                     throw options.copyError;
                 }
                 captured.copies.push({ source, destination, size });
+                const gpuError = options.gpuErrors?.shift() ?? options.gpuError;
+                if (gpuError) {
+                    for (let index = errorScopes.length - 1; index >= 0; index--) {
+                        const scope = errorScopes[index]!;
+                        if (scope.filter === "validation") {
+                            scope.error = gpuError;
+                            break;
+                        }
+                    }
+                }
             },
         },
     };
@@ -190,5 +203,59 @@ describe("createTexture2DFromExternalImage", () => {
             /GPU upload failed: external source is invalid/
         );
         expect(captured.destroyed).toBe(1);
+    });
+
+    it("keeps concurrent mipmapped uploads in their own WebGPU error scopes", async () => {
+        const captured = newCaptured();
+        const firstError = { message: "first upload failed" } as GPUError;
+        const secondError = { message: "second upload failed" } as GPUError;
+        const engine = makeEngine(captured, { gpuErrors: [firstError, secondError], textureMipLevelCount: 1 });
+
+        const [first, second] = await Promise.allSettled([createTexture2DFromExternalImage(engine, fakeSource(2, 1)), createTexture2DFromExternalImage(engine, fakeSource(2, 1))]);
+
+        expect(first.status).toBe("rejected");
+        expect(second.status).toBe("rejected");
+        expect((first as PromiseRejectedResult).reason.cause).toBe(firstError);
+        expect((second as PromiseRejectedResult).reason.cause).toBe(secondError);
+        expect(captured.destroyed).toBe(2);
+    });
+
+    it("retains and releases a factory-owned image for device-lost recovery", async () => {
+        const captured = newCaptured();
+        const engine = makeEngine(captured, { textureMipLevelCount: 1 });
+        const source = fakeSource(16, 8);
+        const owned = fakeSource(16, 8);
+        vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue(owned));
+        (engine as unknown as { _dlr: { t: (texture: { _recoverySource?: unknown }, recovery: unknown) => void } })._dlr = {
+            t(texture, recovery): void {
+                texture._recoverySource = recovery;
+            },
+        };
+
+        try {
+            const texture = await createTexture2DFromExternalImage(engine, source, {
+                invertY: false,
+                premultiplyAlpha: true,
+                srgb: true,
+                addressModeU: "clamp-to-edge",
+                minFilter: "nearest",
+            });
+            source.close();
+
+            const rebuilt = newCaptured();
+            engine._device = makeEngine(rebuilt, { textureMipLevelCount: 1 })._device;
+            await rebuildTexture2D(engine, texture);
+
+            expect(rebuilt.createDescs[0]).toMatchObject({ size: { width: 16, height: 8 }, format: "rgba8unorm-srgb", mipLevelCount: 5 });
+            expect(rebuilt.copies[0]!.source).toMatchObject({ source: owned, flipY: false });
+            expect(rebuilt.copies[0]!.destination.premultipliedAlpha).toBe(true);
+            expect(rebuilt.samplerDesc).toMatchObject({ addressModeU: "clamp-to-edge", minFilter: "nearest", mipmapFilter: "linear" });
+            expect(owned.close).not.toHaveBeenCalled();
+
+            expect(releaseTexture(texture)).toBe(true);
+            expect(owned.close).toHaveBeenCalledOnce();
+        } finally {
+            vi.unstubAllGlobals();
+        }
     });
 });

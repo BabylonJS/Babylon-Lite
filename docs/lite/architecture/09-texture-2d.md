@@ -176,15 +176,20 @@ const resized = await createImageBitmap(source, {
 
 The temporary bitmap is always closed after upload or failure. The original
 source is never closed. Without downscaling, the original source is copied
-directly, avoiding an intermediate allocation. This works in workers because
-`ImageBitmap`, `ImageData`, `OffscreenCanvas`, `VideoFrame`, and
+directly, avoiding an intermediate allocation unless opt-in device-lost
+recovery is active. Recovery retains a factory-owned `ImageBitmap` copy so the
+caller remains free to close its source immediately; that copy is closed when
+the texture's final ownership reference is released. This works in workers
+because `ImageBitmap`, `ImageData`, `OffscreenCanvas`, `VideoFrame`, and
 `createImageBitmap` do not require the document DOM.
 
 The destination texture and sampler match `loadTexture2D`: RGBA8 linear or
 sRGB format, optional full mip chain, caller-selected filtering/addressing,
 explicit `invertY` (default `true`), and explicit premultiplied-alpha handling.
-The allocation, upload, mip generation, and sampler creation run under nested
-WebGPU `validation` and `out-of-memory` error scopes. Synchronous platform
+The mipmap module is resolved before opening nested WebGPU `validation` and
+`out-of-memory` error scopes. Allocation, upload, mip generation, and sampler
+creation then run synchronously inside those scopes, preventing concurrent
+calls from interleaving the device-global scope stack. Synchronous platform
 exceptions reject unchanged; scoped GPU errors reject with the GPU error as
 their cause. The destination is destroyed on either path and no fallback
 texture is returned.
@@ -340,16 +345,18 @@ createTexture2DFromExternalImage(engine, source, opts)
   ├─ 4. Upload with explicit flipY / premultipliedAlpha
   ├─ 5. Generate mipmaps when enabled
   ├─ 6. Create/reuse the configured sampler
-  ├─ 7. Acquire one caller-owned resource-pool reference
-  ├─ 8. Close only the temporary resized bitmap
-  └─ 9. Return a normal Texture2D
+  ├─ 7. If recovery is active, retain a factory-owned decoded image and settings
+  ├─ 8. Acquire one caller-owned resource-pool reference
+  ├─ 9. Close any non-retained temporary resized bitmap
+  └─ 10. Return a normal Texture2D
 ```
 
 **Ownership:** `createTexture2DFromExternalImage` acquires one caller-owned
 reference. Material bindings acquire and release their own references. The
 factory's caller must call `releaseTexture(texture)` after the texture is
 detached from all materials. The factory never owns or closes the supplied
-source.
+source. If device-lost recovery is active, the factory owns a separate retained
+bitmap and closes it when the final texture reference is released.
 
 ---
 
@@ -479,6 +486,8 @@ loadGltf(engine, url)
 13. **External-image ownership** — Close temporary resized bitmaps on success and failure; never close the caller's source.
 14. **External-image failures** — Propagate resize/decode and upload failures and destroy partially-created GPU textures; never return a fallback.
 15. **External-image tree shaking** — A consumer that imports another root API retains no `createTexture2DFromExternalImage` implementation code.
+16. **Concurrent external-image uploads** — Concurrent mipmapped calls keep validation and out-of-memory errors associated with the invocation that issued them.
+17. **External-image recovery** — Opt-in device-lost recovery uses a factory-owned decoded image, restores upload and sampler settings, and releases the retained image with the texture.
 
 ---
 

@@ -37,6 +37,11 @@ export function releaseTexture(tex: Texture2D): boolean {
     const c = (m.get(tex.texture) ?? 1) - 1;
     if (c <= 0) {
         tex.texture.destroy();
+        const recovery = tex._recoverySource;
+        if (recovery?.kind === "external") {
+            recovery.bitmap?.close();
+            recovery.bitmap = null;
+        }
         // Zero is kept rather than deleted so a destroyed texture stays distinguishable from one
         // nothing ever took ownership of, which has no entry at all. `_isTextureReleased` reads
         // that difference; the key is weak either way, so the entry retains nothing.
