@@ -12,12 +12,8 @@
 //   • Per-instance colors use a fixed-seed LCG (identical in both engines) instead of Math.random().
 //
 // INSTANCE-INDEX RESOLUTION:
-//   • BJS: a PhysicsAggregate(baseBlock, BOX, { mass: 0 }) on a thin-instanced mesh auto-creates one
-//     body per instance; the raycast result's `bodyIndex` IS the thin-instance index.
-//   • Lite: has no thin-instance physics, so we build one STATIC per-instance BOX body (same i-order
-//     as the thin-instance matrix buffer, index = i + j*W + k*W*H) and map body→instance. The raycast
-//     returns the hit `body`; we look up its instance index. Geometrically identical boxes at identical
-//     transforms ⇒ the same ray hits the same instance index in both engines.
+//   • BJS and Lite each create one native body per thin-instance matrix from one aggregate.
+//   • The raycast result's `bodyIndex` is the thin-instance index.
 
 import HavokPhysics from "@babylonjs/havok";
 import {
@@ -30,28 +26,24 @@ import {
     createHavokWorld,
     createHemisphericLight,
     createPhysicsAggregate,
-    createPhysicsBody,
-    createPhysicsShape,
     createSceneContext,
     createSphere,
     createStandardMaterial,
-    createTransformNode,
+    enableHavokThinInstancePhysics,
     getCameraPosition,
     getViewProjectionMatrix,
     mat4Invert,
     onBeforeRender,
     onPhysicsAfterStep,
     physicsRaycast,
-    PhysicsMotionType,
     PhysicsShapeType,
     registerScene,
-    setPhysicsBodyShape,
     setThinInstanceColors,
     setThinInstances,
     startEngine,
     stopEngine,
 } from "babylon-lite";
-import type { Mat4, PhysicsBody, Vec3 } from "babylon-lite";
+import type { Mat4, Vec3 } from "babylon-lite";
 
 const PHYSICS_FPS = 60;
 const CAPTURE_DEFAULT_FRAME = 5;
@@ -160,6 +152,7 @@ async function main(): Promise<void> {
 
     const hknp = await HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" });
     const world = createHavokWorld(scene, hknp, { x: 0, y: -9.81, z: 0 });
+    await enableHavokThinInstancePhysics(world);
 
     // Ground.
     const ground = createGround(engine, { width: WALL_W * BLOCK_SIZE * 4, height: WALL_D * BLOCK_SIZE * 6 });
@@ -182,12 +175,6 @@ async function main(): Promise<void> {
     const colorBuffer = new Float32Array(TOTAL * 4);
     const seed = { value: 0x10_3a_5c };
 
-    // Per-instance STATIC BOX body, built in the SAME i-order as the thin-instance index so
-    // body→instance lines up with BJS's auto-created per-instance bodyIndex.
-    // BOX extents are full sizes (max-min); the cylinder's bounding box is BLOCK_SIZE on every axis.
-    const blockExtents: Vec3 = { x: BLOCK_SIZE, y: BLOCK_SIZE, z: BLOCK_SIZE };
-    const bodyToInstance = new Map<PhysicsBody, number>();
-
     for (let i = 0; i < WALL_W; i++) {
         for (let j = 0; j < WALL_H; j++) {
             for (let k = 0; k < WALL_D; k++) {
@@ -198,18 +185,13 @@ async function main(): Promise<void> {
                 colorBuffer[index * 4 + 1] = rand(seed);
                 colorBuffer[index * 4 + 2] = rand(seed);
                 colorBuffer[index * 4 + 3] = 1;
-
-                const node = createTransformNode(`block${index}`, p.x, p.y, p.z, 0, 0, 0, 1);
-                const shape = createPhysicsShape(world, { type: PhysicsShapeType.BOX, parameters: { extents: blockExtents } });
-                const body = createPhysicsBody(world, node, PhysicsMotionType.STATIC);
-                setPhysicsBodyShape(world, body, shape);
-                bodyToInstance.set(body, index);
             }
         }
     }
     setThinInstances(baseBlock, matrixBuffer, TOTAL);
     setThinInstanceColors(baseBlock, colorBuffer);
     addToScene(scene, baseBlock);
+    createPhysicsAggregate(world, baseBlock, PhysicsShapeType.BOX, { mass: 0, restitution: 0 });
 
     // Green indicator sphere placed at a raycast hit point.
     const indicator = createSphere(engine, { diameter: 2, segments: 24 });
@@ -227,8 +209,7 @@ async function main(): Promise<void> {
 
     function castInto(target: Vec3): RayHit {
         const result = physicsRaycast(world, camOrigin, target);
-        const instance = result.hasHit && result.body ? (bodyToInstance.get(result.body) ?? -1) : -1;
-        return { hasHit: result.hasHit, instance, point: { x: round(result.hitPoint.x), y: round(result.hitPoint.y), z: round(result.hitPoint.z) } };
+        return { hasHit: result.hasHit, instance: result.bodyIndex, point: { x: round(result.hitPoint.x), y: round(result.hitPoint.y), z: round(result.hitPoint.z) } };
     }
 
     onBeforeRender(scene, () => {

@@ -887,7 +887,9 @@ export { setFontWeightOffset } from "./text/set-font-weight-offset.js";
 export {
     createHavokWorld,
     enableHavokFloatingOrigin,
+    enableHavokThinInstancePhysics,
     createPhysicsBody,
+    getPhysicsBodyInstanceCount,
     createPhysicsShape,
     createPhysicsAggregate,
     createPhysicsConstraint,
