@@ -6,7 +6,7 @@ import type { MaterialPlugin } from "../../../packages/babylon-lite/src/material
 import { bakeStdPluginMaterial, refreshStdPluginUbos, registerStdPlugins } from "../../../packages/babylon-lite/src/material/plugin/std-plugin-bridge";
 import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material";
 import { _computeStandardMaterialFeatures, type StandardMaterialProps } from "../../../packages/babylon-lite/src/material/standard/standard-material";
-import { MATERIAL_ALPHA_BLEND } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
+import { HAS_SKELETON, MATERIAL_ALPHA_BLEND, VERTEX_ALPHA } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { StdExt } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
@@ -237,6 +237,20 @@ describe("dynamic Standard material plugins", () => {
         material.plugins = [];
         bakeStdPluginMaterial(material, scene);
         expect(material._renderFeatures).toBeUndefined();
+    });
+
+    it("does not interpret vertex-alpha or skeleton feature bits as a plugin signature", () => {
+        const { engine } = makeEngine();
+        const material = createStandardMaterial();
+        material.plugins = [valuePlugin({ current: 1 })];
+        const scene = pluginScene(engine, [material]);
+
+        registerStdPlugins(scene, (ext) => {
+            registered = ext;
+        });
+
+        expect(registered._frag(VERTEX_ALPHA | HAS_SKELETON)._id).toBe("plugin-0");
+        expect(registered._frag(material._renderFeatures!.features)._id).not.toBe("plugin-0");
     });
 
     it("destroys plugin UBOs when their scene is disposed", () => {

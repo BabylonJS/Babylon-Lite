@@ -7,7 +7,7 @@
  * Standard materials have no per-ext `detect` hook and a fixed-layout material
  * UBO, so this bridge:
  *   - pre-bakes a per-signature index into each plugin material's cached
- *     `_renderFeatures.features` (bits 24..30) so the feature/pipeline caches
+ *     `_renderFeatures.features` (the otherwise-free bits 25 and 28..31) so the feature/pipeline caches
  *     rebuild on any plugin change, and
  *   - delivers plugin uniforms through a SELF-MANAGED uniform buffer declared as
  *     a fragment binding and bound via the pre-existing `StdExt._bind` loop. This
@@ -28,8 +28,21 @@ import { createUniformBuffer } from "../../resource/gpu-buffers.js";
 import type { MaterialPlugin } from "./material-plugin.js";
 import { bindPluginTextures, buildPluginFragment, enabledPlugins, pluginSignature, writePluginUbo } from "./plugin-bridge-shared.js";
 
-const PLUGIN_INDEX_SHIFT = 24;
-const PLUGIN_INDEX_MASK = 0x7f;
+// Standard owns vertex-alpha at bit 24 and skeleton state at bits 26..27.
+// Pack the plugin signature around those bits so enabling the plugin bridge in
+// one scene cannot reinterpret those unrelated mesh features in a later scene.
+const PLUGIN_INDEX_LOW_BIT = 1 << 25;
+const PLUGIN_INDEX_HIGH_BITS = 0xf0000000;
+const PLUGIN_INDEX_FEATURE_MASK = PLUGIN_INDEX_LOW_BIT | PLUGIN_INDEX_HIGH_BITS;
+const MAX_PLUGIN_INDEX = 0x1f;
+
+function packPluginIndex(index: number): number {
+    return ((index & 1) << 25) | ((index & 0x1e) << 27);
+}
+
+function unpackPluginIndex(features: number): number {
+    return ((features >>> 25) & 1) | ((features >>> 27) & 0x1e);
+}
 
 interface PluginEntry {
     readonly _fragment: ShaderFragment;
@@ -60,6 +73,9 @@ function _indexFor(plugins: readonly MaterialPlugin[]): number {
     let idx = map.get(sig);
     if (idx === undefined) {
         idx = ++_counter;
+        if (idx > MAX_PLUGIN_INDEX) {
+            throw new Error(`Standard material plugins support at most ${MAX_PLUGIN_INDEX} distinct signatures per runtime`);
+        }
         map.set(sig, idx);
         const built = buildPluginFragment(plugins, idx, true);
         (_indexToEntry ??= new Map()).set(idx, { _fragment: built._fragment, _uboSpec: built._stdUboSpec });
@@ -151,9 +167,9 @@ function _sceneState(scene: SceneContext): ScenePluginState {
 const stdPluginExt: StdExt = {
     _id: "plugin",
     _phase: "mesh",
-    _feature: PLUGIN_INDEX_MASK << PLUGIN_INDEX_SHIFT,
+    _feature: PLUGIN_INDEX_FEATURE_MASK,
     _frag(features: number): ShaderFragment {
-        const idx = (features >>> PLUGIN_INDEX_SHIFT) & PLUGIN_INDEX_MASK;
+        const idx = unpackPluginIndex(features);
         return _indexToEntry?.get(idx)?._fragment ?? { _id: "plugin-0" };
     },
     _bind(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number, _mesh, scene): number {
@@ -255,7 +271,7 @@ export function bakeStdPluginMaterial(mat: StandardMaterialProps | null | undefi
         _releaseMaterialStateAfterBindings(scene, mat, old);
     }
     sceneState._materials.set(mat, state);
-    mat._renderFeatures = { features: _computeStandardMaterialFeatures(mat) | (idx << PLUGIN_INDEX_SHIFT) };
+    mat._renderFeatures = { features: _computeStandardMaterialFeatures(mat) | packPluginIndex(idx) };
     _queueBindingRebuild(scene, mat);
 }
 

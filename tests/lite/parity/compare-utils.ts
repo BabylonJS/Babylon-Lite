@@ -9,6 +9,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { Browser } from "@playwright/test";
 import { captureGolden as captureGoldenCore, shouldSkipParity, type SceneConfig, type CaptureGoldenOptions } from "../../shared/compare-core";
+import { getParitySceneCaptureOptions } from "./scene-capture-options";
 
 // Re-export the experience-agnostic comparison surface unchanged.
 export { compareImages, compareRegion, generateDiffMap, attachCompareArtifacts, shouldSkipParity, waitForCanvasReady } from "../../shared/compare-core";
@@ -39,10 +40,22 @@ export function getSceneConfig(sceneId: number): SceneConfig {
 
 /** Capture (or reuse) the Babylon golden reference for a scene. */
 export function captureGolden(browser: Browser, opts: CaptureGoldenOptions): Promise<string> {
-    return captureGoldenCore(browser, opts, {
-        refBaseDir: path.resolve(__dirname, "../../../reference/lite"),
-        slugForScene: (id) => getSceneConfig(id).slug,
-        refUrl: (id, query) => `/babylon-ref-scene${id}.html${query}`,
-        waitForBabylonLoadingScreen: true,
-    });
+    const canonical = getParitySceneCaptureOptions(opts.sceneId);
+    return captureGoldenCore(
+        browser,
+        {
+            ...opts,
+            queryParams: canonical.queryParams,
+            seekTime: canonical.seekTime,
+            settleMs: canonical.settleMs,
+            timeout: canonical.timeoutMs,
+            waitFlag: canonical.waitFlag,
+        },
+        {
+            refBaseDir: path.resolve(__dirname, "../../../reference/lite"),
+            slugForScene: (id) => getSceneConfig(id).slug,
+            refUrl: (id, query) => `/babylon-ref-scene${id}.html${query}`,
+            waitForBabylonLoadingScreen: true,
+        }
+    );
 }

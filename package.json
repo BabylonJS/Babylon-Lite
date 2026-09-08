@@ -42,6 +42,7 @@
         "test:bundle-size": "npx playwright test tests/lite/parity/bundle-size.spec.ts",
         "test:perf": "npx playwright test --config playwright.perf.config.ts",
         "test:parity": "npx playwright test tests/lite/parity",
+        "test:parity:shado": "pnpm build:lib && playwright test --config config/playwright.parity-shado.config.ts",
         "test:parity:gl": "npx playwright test tests/gl/parity",
         "test:perf:gl": "npx playwright test --config playwright.perf.gl.config.ts tests/gl/perf/gl-perf-raf.spec.ts",
         "test:all": "npx playwright test && npx playwright test --config playwright.perf.config.ts",
@@ -68,8 +69,11 @@
         "docs:check": "typedoc --emit none --treatValidationWarningsAsErrors"
     },
     "devDependencies": {
+        "@babylonjs/ktx2decoder": "9.22.1",
         "@eslint/js": "^10.0.1",
+        "@knervous/shado": "1.9.0",
         "@microsoft/api-extractor": "^7.59.0",
+        "@napi-rs/canvas": "0.1.97",
         "@playwright/test": "^1.62.1",
         "@types/node": "^26.3.0",
         "@types/pngjs": "^6.0.5",
@@ -90,6 +94,7 @@
         "node-web-audio-api": "^2.2.0",
         "pngjs": "^7.0.0",
         "rollup-plugin-visualizer": "^7.1.1",
+        "sharp": "^0.35.3",
         "terser": "5.49.0",
         "tsx": "^4.23.12",
         "typedoc": "^0.28.20",

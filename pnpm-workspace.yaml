@@ -25,24 +25,27 @@ nodeOptions: '--max-old-space-size=8192'
 # Enforced natively by pnpm >= 10.16 during resolution.
 minimumReleaseAge: 10080
 
-# Narrow, temporary exception: @babylonjs 9.19.0 ships the upstream .pure-split
-# back-compat fixes (MeshBuilder legacy statics, glTF InstancedMesh side-effect,
-# WGSL UBO include chunks) that let us drop the per-scene reference workarounds.
-# These are first-party BabylonJS packages we track closely, so we opt them out
-# of the release-age gate to adopt the fix promptly. Remove this once the pinned
-# versions are older than the age window.
+# Narrow, temporary exceptions:
+# - The @babylonjs packages ship upstream .pure-split compatibility fixes we
+#   track closely.
+# - @knervous/shado 1.9.0 and its webgpu 0.6.0 backend are required for the
+#   explicitly experimental Lite headless adapter and are pinned exactly.
+# Remove exceptions once the pinned versions are older than the age window.
 minimumReleaseAgeExclude:
   - '@babylonjs/core'
   - '@babylonjs/loaders'
   - '@babylonjs/materials'
   - '@babylonjs/addons'
+  - '@knervous/shado'
   - babylonjs-gltf2interface
+  - webgpu
 
 # pnpm >= 10 does not run dependency build scripts unless they are explicitly
 # approved here. Only these packages ship native binaries that must build.
 allowBuilds:
   esbuild: true
   sharp: true
+  webgpu: true
 
 overrides:
   protobufjs: '>=8.6.6'

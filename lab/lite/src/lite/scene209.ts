@@ -34,12 +34,16 @@ import {
 } from "babylon-lite";
 
 const OFFSET = 5_000_000;
+const PHYSICS_FPS = 60;
 
 async function main(): Promise<void> {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = await createEngine(canvas, { useHighPrecisionMatrix: true, useFloatingOrigin: true });
     const scene = createSceneContext(engine);
+    // A fixed step makes the settled pose deterministic and lets fast headless
+    // render loops advance simulation time at the same rate as browser runs.
+    scene.fixedDeltaMs = 1000 / PHYSICS_FPS;
 
     // Camera framing mirrors scene40, shifted to the OFFSET location.
     scene.camera = createFreeCamera({ x: OFFSET, y: 5, z: OFFSET - 10 }, { x: OFFSET, y: 0, z: OFFSET });
