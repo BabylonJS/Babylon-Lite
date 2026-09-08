@@ -480,7 +480,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             } else if (thinDrawArgs) {
                 pass.drawIndexedIndirect(thinDrawArgs, 0);
             } else {
-                pass.drawIndexed(gpu.indexCount, ti?.count);
+                pass.drawIndexed(gpu.indexCount, ti?.count, 0, gpu._baseVertex);
             }
             return 1;
         };

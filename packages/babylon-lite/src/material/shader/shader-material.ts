@@ -24,6 +24,15 @@ export type ShaderUniformValue = number | readonly number[] | Float32Array;
 export type ShaderSamplerOption = string | ShaderSamplerDecl;
 /** A storage-buffer entry: a read-only WGSL storage binding declaration. */
 export type ShaderStorageBufferOption = ShaderStorageBufferDecl;
+/** Per-attribute vertex FORMAT overrides, applied with `setShaderAttributeFormats`.
+ *  Omitted attributes keep the canonical format.
+ *
+ *  A format is part of the shader's own signature — it decides the WGSL type of
+ *  `input.<attribute>` — so it belongs to the material. WHERE those bytes sit (byte
+ *  stride and per-attribute offset) is a property of the geometry and lives on the
+ *  mesh, as `MeshGPU._vbLayout`. Keeping the two apart is what lets one material draw
+ *  both a tightly-packed CPU mesh and an interleaved GPU-produced one. */
+export type ShaderAttributeFormats = Partial<Record<ShaderAttributeName, GPUVertexFormat>>;
 /** Value of a WGSL preprocessor define — boolean toggle or numeric constant. */
 export type ShaderDefineValue = boolean | number;
 /** Map of WGSL preprocessor define names to their values. */
@@ -138,6 +147,8 @@ export interface ShaderStorageBufferSlot {
  *  via `setShaderUniform()` / `setShaderTexture()` and friends. */
 export interface ShaderMaterial extends Material {
     readonly name?: string;
+    /** @internal Non-canonical vertex formats installed by `setShaderAttributeFormats`. */
+    _attributeFormats?: ShaderAttributeFormats;
     readonly vertexSource: WgslSource;
     readonly fragmentSource: WgslSource;
     readonly attributes: readonly ShaderAttributeName[];
