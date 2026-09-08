@@ -207,23 +207,22 @@ material.diffuseTexture = texture;
 releaseTexture(texture);
 ```
 
-#### Edge DevTools Migration
+#### Migration from a Custom Image Loader
 
 ```typescript
-// Before: Dom3dTexture.createTextureFromImageUrl decoded, resized, and uploaded
-// a private texture for each paint-replay image.
-const image = await decodePaintReplayImage(imageUrl);
+// Before: application code decoded, resized, and uploaded a private texture.
+const image = await decodeApplicationImage(imageUrl);
 const texture = await createTexture2DFromExternalImage(engine, image, {
     maxDimension: maxTextureSize,
     invertY: true,
     srgb: true,
 });
 
-// Keep one Texture2D per paint-replay image exactly as before. Do not replace
-// this with loadTexture2D(imageUrl), whose URL cache intentionally shares.
-paintReplayMaterial.diffuseTexture = texture;
+// Keep one Texture2D per independently-owned image. Do not replace this with
+// loadTexture2D(imageUrl), whose URL cache intentionally shares.
+material.diffuseTexture = texture;
 
-// On paint-replay teardown, after material references are removed:
+// During teardown, after material references are removed:
 releaseTexture(texture);
 image.close();
 ```
