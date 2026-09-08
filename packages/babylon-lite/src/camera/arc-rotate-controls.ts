@@ -254,12 +254,9 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
                   ? (options?.pointerMappings?.secondaryButton ?? "pan")
                   : undefined;
 
-        if (pointerAction === "rotate") {
-            isDragging = true;
-            isPanning = false;
-        } else if (pointerAction === "pan") {
-            isDragging = false;
-            isPanning = true;
+        if (pointerAction) {
+            isDragging = pointerAction === "rotate";
+            isPanning = !isDragging;
         }
     }
 
