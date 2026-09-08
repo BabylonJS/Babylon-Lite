@@ -25,11 +25,11 @@
  *  - CPU-side picking (`_cpuPositions`) is unavailable by construction.
  */
 import type { EngineContext } from "../engine/engine.js";
-import type { Mesh, MeshVbLayout } from "./mesh.js";
+import type { Mesh, MeshGPU, MeshVbLayout } from "./mesh.js";
 import { initMeshTransform } from "./mesh.js";
 import { BU } from "../engine/gpu-flags.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
-import { _getStorageBufferHandle, type StorageBuffer } from "../resource/storage-buffer.js";
+import { _getStorageBufferHandle, _installStorageRebuildObserver, type StorageBuffer } from "../resource/storage-buffer.js";
 import type { ShaderAttributeName } from "../material/shader/shader-material.js";
 import { _enableShaderVb } from "../material/shader/shader-vb.js";
 import { _installBorrowAwareGeometryDisposer } from "./mesh-dispose.js";
@@ -85,7 +85,7 @@ export interface MeshFromStorageOptions {
 export function createMeshFromStorageBuffer(engine: EngineContext, name: string, options: MeshFromStorageOptions): Mesh {
     const { storage, indices, vertexCount, arrayStride, baseVertex = 0 } = options;
 
-    if (!storage._vertex) {
+    if ((storage._usage & BU.VERTEX) === 0) {
         throw new Error("createMeshFromStorageBuffer: storage must be created with { vertex: true } so it carries GPUBufferUsage.VERTEX.");
     }
     if (!Number.isInteger(arrayStride) || arrayStride <= 0 || arrayStride % 4 !== 0) {
@@ -98,7 +98,7 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
 
     const vertexBuffer = _getStorageBufferHandle(engine, storage);
     const sharedIndices = !ArrayBuffer.isView(indices);
-    if (sharedIndices && !(indices as StorageBuffer)._index) {
+    if (sharedIndices && ((indices as StorageBuffer)._usage & BU.INDEX) === 0) {
         throw new Error("createMeshFromStorageBuffer: a StorageBuffer passed as `indices` must be created with { index: true } so it carries GPUBufferUsage.INDEX.");
     }
     const indexCount = options.indexCount ?? (sharedIndices ? 0 : (indices as Uint16Array | Uint32Array).length);
@@ -116,13 +116,22 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
         : createMappedBuffer(engine, indices as Uint16Array | Uint32Array, BU.INDEX, `${name}-indices`);
 
     const offsets = options.attributeOffsets;
+    // Only streams that actually READ from the slab get a layout entry. Recording one for
+    // an attribute whose buffer is a tiny zero fallback hands the pipeline the slab's
+    // stride against a buffer far too small for it: wrong reads at best, a buffer-size
+    // validation failure at worst. position/normal/uv always point at the slab, so they
+    // are always described; the optional three are described only when the caller asked
+    // for them, which is also when they are wired up below.
+    const slabTangent = offsets?.tangent !== undefined;
+    const slabUv2 = offsets?.uv2 !== undefined;
+    const slabColor = offsets?.color !== undefined;
     const vbLayout: MeshVbLayout = {
         _p: { _stride: arrayStride, _offset: offsets?.position ?? 0 },
         _n: { _stride: arrayStride, _offset: offsets?.normal ?? 0 },
-        _t: { _stride: arrayStride, _offset: offsets?.tangent ?? 0 },
         _u: { _stride: arrayStride, _offset: offsets?.uv ?? 0 },
-        _u2: { _stride: arrayStride, _offset: offsets?.uv2 ?? 0 },
-        _c: { _stride: arrayStride, _offset: offsets?.color ?? 0 },
+        ...(slabTangent ? { _t: { _stride: arrayStride, _offset: offsets!.tangent! } } : {}),
+        ...(slabUv2 ? { _u2: { _stride: arrayStride, _offset: offsets!.uv2! } } : {}),
+        ...(slabColor ? { _c: { _stride: arrayStride, _offset: offsets!.color! } } : {}),
     };
 
     installHooks();
@@ -139,6 +148,10 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
             positionBuffer: vertexBuffer,
             normalBuffer: vertexBuffer,
             uvBuffer: vertexBuffer,
+            // Advertised by `attributeOffsets`, so they have to come from the slab too.
+            tangentBuffer: slabTangent ? vertexBuffer : null,
+            uv2Buffer: slabUv2 ? vertexBuffer : null,
+            colorBuffer: slabColor ? vertexBuffer : null,
             indexBuffer,
             indexCount,
             indexFormat,
@@ -146,7 +159,7 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
             _vbLayout: vbLayout,
             // Distinct from the loader's `vb…` keys, so a slab mesh and an interleaved glTF
             // mesh can never collide on one material's pipeline cache.
-            _vbKey: `sb${arrayStride}.${vbLayout._p!._offset}.${vbLayout._n!._offset}.${vbLayout._t!._offset}.${vbLayout._u!._offset}.${vbLayout._u2!._offset}.${vbLayout._c!._offset}`,
+            _vbKey: `sb${arrayStride}.${vbLayout._p!._offset}.${vbLayout._n!._offset}.${vbLayout._u!._offset}.${vbLayout._t?._offset ?? "-"}.${vbLayout._u2?._offset ?? "-"}.${vbLayout._c?._offset ?? "-"}`,
             // The slab belongs to whoever created it and is shared with every other
             // mesh holding a slot; this mesh only borrows it.
             _ownsVertexBuffers: false,
@@ -154,7 +167,64 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
         },
     });
 
+    (_slabSources ??= new WeakMap()).set(mesh._gpu, { _vb: storage, _ib: sharedIndices ? (indices as StorageBuffer) : null });
+    (_slabMeshes ??= new Set()).add(new WeakRef(mesh._gpu));
+
     return mesh;
+}
+
+/** Meshes that borrow a slab, so their cached `GPUBuffer` handles can be re-pointed after
+ *  a device-loss rebuild replaces the underlying allocations.
+ *
+ *  Held through `WeakRef`, matching `device-lost-recovery-capture.ts`: a strong registry
+ *  would keep a `MeshGPU` and two `GPUBuffer`s alive for the page's lifetime whenever a
+ *  mesh is dropped without going through `disposeMeshGpu`, which is a leak this module
+ *  would be introducing. Dead refs are pruned on each rebuild, so nothing has to be
+ *  unregistered on the dispose path and no per-disposal scan is needed.
+ *
+ *  Lazily created -- GUIDANCE.md forbids module-level allocations. */
+interface SlabSources {
+    readonly _vb: StorageBuffer;
+    readonly _ib: StorageBuffer | null;
+}
+/** The weak ref must target the MESH's own `_gpu`, which the mesh holds strongly -- a ref
+ *  to a wrapper object created here would have no other owner and collect immediately,
+ *  leaving the registry silently empty. The allocations hang off a WeakMap so they do not
+ *  keep the geometry alive either. */
+let _slabMeshes: Set<WeakRef<MeshGPU>> | null = null;
+let _slabSources: WeakMap<MeshGPU, SlabSources> | null = null;
+
+/** Re-point every borrowed handle at its allocation's current buffer. The allocations have
+ *  already been rebuilt when this runs; the meshes are still holding the dead handles. */
+function refreshSlabMeshes(engine: EngineContext): void {
+    for (const ref of _slabMeshes ?? []) {
+        const gpu = ref.deref();
+        const entry = gpu ? _slabSources?.get(gpu) : undefined;
+        if (!entry) {
+            _slabMeshes!.delete(ref);
+            continue;
+        }
+        // The registry is module-global but a page may run several engines; only this
+        // engine's allocations have been rebuilt, and resolving another's would throw.
+        if (entry._vb._engine !== engine) {
+            continue;
+        }
+        // An allocation disposed while a borrowing mesh is still alive would make
+        // `_getStorageBufferHandle` throw, and this runs inside a recovery step -- a throw
+        // here aborts the WHOLE device-loss recovery, taking every unrelated scene with it.
+        // A mesh borrowing a dead slab is already unusable; skip it rather than fail.
+        if (entry._vb._destroyed || entry._ib?._destroyed) {
+            continue;
+        }
+        const g = gpu as unknown as { positionBuffer: GPUBuffer; normalBuffer: GPUBuffer; uvBuffer: GPUBuffer; indexBuffer: GPUBuffer };
+        const vb = _getStorageBufferHandle(engine, entry._vb);
+        g.positionBuffer = vb;
+        g.normalBuffer = vb;
+        g.uvBuffer = vb;
+        if (entry._ib) {
+            g.indexBuffer = _getStorageBufferHandle(engine, entry._ib);
+        }
+    }
 }
 
 let _hooksInstalled = false;
@@ -186,4 +256,5 @@ function installHooks(): void {
             g.indexBuffer.destroy();
         }
     });
+    _installStorageRebuildObserver(refreshSlabMeshes);
 }
