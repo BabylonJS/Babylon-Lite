@@ -47,6 +47,10 @@ export abstract class Camera extends Node {
     /** @internal Underlying Babylon Lite camera. */
     public abstract readonly _lite: LiteCamera;
     private _detach: (() => void) | undefined;
+    private _orthoLeft: number | null = null;
+    private _orthoRight: number | null = null;
+    private _orthoBottom: number | null = null;
+    private _orthoTop: number | null = null;
 
     protected constructor(name: string, scene?: Scene) {
         super(name, scene);
@@ -78,6 +82,46 @@ export abstract class Camera extends Node {
         this._lite.farPlane = value;
     }
 
+    public get orthoLeft(): number | null {
+        return this._lite.ortho ? this._lite.ortho.left : this._orthoLeft;
+    }
+    public set orthoLeft(value: number | null) {
+        this._orthoLeft = value;
+        if (this._lite.ortho) {
+            this._lite.ortho.left = value;
+        }
+    }
+
+    public get orthoRight(): number | null {
+        return this._lite.ortho ? this._lite.ortho.right : this._orthoRight;
+    }
+    public set orthoRight(value: number | null) {
+        this._orthoRight = value;
+        if (this._lite.ortho) {
+            this._lite.ortho.right = value;
+        }
+    }
+
+    public get orthoBottom(): number | null {
+        return this._lite.ortho ? this._lite.ortho.bottom : this._orthoBottom;
+    }
+    public set orthoBottom(value: number | null) {
+        this._orthoBottom = value;
+        if (this._lite.ortho) {
+            this._lite.ortho.bottom = value;
+        }
+    }
+
+    public get orthoTop(): number | null {
+        return this._lite.ortho ? this._lite.ortho.top : this._orthoTop;
+    }
+    public set orthoTop(value: number | null) {
+        this._orthoTop = value;
+        if (this._lite.ortho) {
+            this._lite.ortho.top = value;
+        }
+    }
+
     public get mode(): number {
         return this._lite.ortho ? Camera.ORTHOGRAPHIC_CAMERA : Camera.PERSPECTIVE_CAMERA;
     }
@@ -86,10 +130,19 @@ export abstract class Camera extends Node {
             return;
         }
         if (value === Camera.ORTHOGRAPHIC_CAMERA) {
-            enableOrthographicCamera(this._lite);
+            enableOrthographicCamera(this._lite, {
+                left: this._orthoLeft,
+                right: this._orthoRight,
+                bottom: this._orthoBottom,
+                top: this._orthoTop,
+            });
             return;
         }
         if (value === Camera.PERSPECTIVE_CAMERA) {
+            this._orthoLeft = this.orthoLeft;
+            this._orthoRight = this.orthoRight;
+            this._orthoBottom = this.orthoBottom;
+            this._orthoTop = this.orthoTop;
             disableOrthographicCamera(this._lite);
             return;
         }
