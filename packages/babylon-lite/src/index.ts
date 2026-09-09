@@ -11,11 +11,13 @@ export {
     resizeEngine,
     setEngineSize,
     disposeEngine,
+    getRenderingContextKind,
+    getRenderingContexts,
     setGpuTimingEnabled,
     isGpuTimingSupported,
 } from "./engine/engine.js";
 export { VERSION } from "./engine/version.js";
-export type { EngineContext, EngineOptions, RenderCanvas } from "./engine/engine.js";
+export type { EngineContext, EngineOptions, RenderCanvas, RenderingContext } from "./engine/engine.js";
 export { createNullEngine, stepScene, runHeadlessSteps } from "./engine/null-engine.js";
 export type { NullEngineOptions } from "./engine/null-engine.js";
 export { setRenderTaskGpuTimingEnabled, isRenderTaskGpuTimingSupported, getRenderTaskGpuTimings, measureRenderTaskOverdrawCost } from "./engine/gpu-task-timing.js";
@@ -137,7 +139,7 @@ export type { ScreenSpaceGlobalIlluminationPostProcessTask, ScreenSpaceGlobalIll
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";
 export { attachControl, setCameraLimits } from "./camera/arc-rotate-controls.js";
-export type { AttachControlOptions, ArcRotateCameraLimits } from "./camera/arc-rotate-controls.js";
+export type { ArcRotatePointerAction, ArcRotatePointerMappings, AttachControlOptions, ArcRotateCameraLimits } from "./camera/arc-rotate-controls.js";
 export { interpolateArcRotateCamera } from "./camera/arc-rotate-interpolate.js";
 export type { ArcRotateInterpolationGoal, ArcRotateInterpolationOptions } from "./camera/arc-rotate-interpolate.js";
 export { createFreeCamera } from "./camera/free-camera.js";
@@ -361,6 +363,7 @@ export {
 } from "./material/shader/shader-material.js";
 export { enableShaderUniformRangeUpdates } from "./material/shader/shader-uniform-range.js";
 export { enableShaderMaterialUniformCaching } from "./material/shader/enable-shader-material-uniform-caching.js";
+export { enableShaderMaterialInstanceWorld } from "./material/shader/enable-shader-material-instance-world.js";
 export {
     enableAsyncShaderPipelineCompilation,
     prepareShaderMaterialPipeline,
@@ -381,6 +384,7 @@ export { createNodeNoColorMaterialView } from "./material/node/no-color-view.js"
 export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./material/node/node-material.js";
 export { createMaterialView } from "./material/material-view.js";
 export { getMaterialFamily } from "./material/material-family.js";
+export { getMaterialTextures } from "./material/material-textures.js";
 export { isPbrMaterial, isStandardMaterial, isShaderMaterial, isNodeMaterial } from "./material/material-guards.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { enableMaterialUvTransform } from "./material/enable-material-uv-transform.js";
@@ -878,12 +882,15 @@ export {
     unregisterTextRenderer,
     disposeTextRenderer,
 } from "./text/text-renderer.js";
+export { setFontWeightOffset } from "./text/set-font-weight-offset.js";
 
 // ─── Physics ─────────────────────────────────────────────────────────
 export {
     createHavokWorld,
     enableHavokFloatingOrigin,
+    enableHavokThinInstancePhysics,
     createPhysicsBody,
+    getPhysicsBodyInstanceCount,
     createPhysicsShape,
     createPhysicsAggregate,
     createPhysicsConstraint,

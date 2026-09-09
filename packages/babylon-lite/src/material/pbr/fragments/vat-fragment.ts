@@ -185,7 +185,7 @@ export const pbrExt: PbrExt = {
         return createVatFragment((ctx._meshFeatures & MSH_HAS_SKELETON_8) !== 0, (ctx._meshFeatures & MSH_HAS_THIN_INSTANCES) !== 0);
     },
     bind(ctx, entries, b) {
-        const mesh = ctx._mesh as { vat?: { texture: GPUTexture; settingsBuffer: GPUBuffer; instanceTexture?: GPUTexture | null } } | undefined;
+        const mesh = ctx._mesh as { vat?: { texture: GPUTexture; settingsBuffer: GPUBuffer; instanceTexture?: GPUTexture | null } } | null | undefined;
         if (!(ctx._meshFeatures & MSH_VAT) || !mesh?.vat) {
             return b;
         }

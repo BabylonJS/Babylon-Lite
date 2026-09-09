@@ -126,6 +126,23 @@ scene.camera = camera;
 attachControl(camera, canvas, scene);
 ```
 
+Pointer-button behavior can be migrated without adding application-owned orbit
+or pan math. The defaults stay primary-button rotate and secondary-button pan;
+set either mapping independently when the application uses a different
+interaction convention:
+
+```typescript
+attachControl(camera, canvas, scene, {
+    pointerMappings: {
+        primaryButton: "pan",
+        secondaryButton: "rotate",
+    },
+});
+```
+
+This mapping applies to mouse and pen buttons. Touch remains one-finger rotate
+and two-finger pinch zoom, and wheel input remains zoom.
+
 ### 5. Loaders and Scene Registration
 
 `loadEnvironment()` adds its environment data/renderables to the scene internally. `loadGltf()` returns an asset container; pass it to `addToScene()` so transform-node hierarchies, meshes, and animation groups are registered explicitly.
@@ -516,7 +533,7 @@ feature is tree-shakable: scenes that don't use it pay no bundle cost.
 | Morph targets                                 | ✅      | PBR meshes only (not `StandardMaterial`)                                                                                                                                                                               |
 | Skeletal animation (4 or 8 bones)             | ✅      | Driven by `createAnimationController(scene)`                                                                                                                                                                           |
 | Animation blending / weights / additive clips | ✅      | `AnimationManager` with `setAnimationWeight()`, `crossFadeAnimationGroups()`, and `setAnimationAdditive()` (Scenes 155-158)                                                                                            |
-| ShaderMaterial                                | ✅      | WGSL-only `createShaderMaterial()` with typed uniforms, samplers, defines, alpha blend/test (Scenes 159-163)                                                                                                           |
+| ShaderMaterial                                | ✅      | WGSL-only `createShaderMaterial()` with typed uniforms, samplers, defines, alpha blend/test; opt-in `enableShaderMaterialInstanceWorld()` enables shared regular/thin-instance vertex shaders (Scenes 159-163)       |
 | GridMaterial                                  | ✅      | Procedural unlit object-space grid via `createGridMaterial()`: mainColor/lineColor, gridRatio, gridOffset, major/minor units, opacity, antialias, useMaxLine, preMultiplyAlpha, opacityTexture, visibility (Scene 213) |
 | Node Material                                 | ✅      | NME snippet parser covering core, PBR, math, texture, procedural, normal, screen/depth, matrix, loop, and storage blocks (Scenes 60-89)                                                                                |
 | Sprites / billboards                          | ⚡      | 2D layers, depth-hosted sprites, facing/axis-locked/cutout billboards; not the full BJS SpriteManager API (Scenes 50-57)                                                                                               |

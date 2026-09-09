@@ -24,6 +24,19 @@ describe("tagged WGSL package output", () => {
         expect(code).toContain("${projection.regularBody} let wp=projectedWorld;");
     });
 
+    it("ships minified composed Slug WGSL", () => {
+        const libDirectory = dirname(LIB_ENTRY);
+        const slugCode = readFileSync(resolve(libDirectory, "text/shaders/slug-shader.js"), "utf8");
+        const weightCode = readFileSync(resolve(libDirectory, "text/shaders/weight-shader-fragment.js"), "utf8");
+
+        expect(slugCode).not.toContain("Dead-slot sentinel");
+        expect(slugCode).not.toContain("struct GM {");
+        expect(slugCode).toContain("struct GM{b:vec4f,a:vec4f,t:vec4f}");
+        expect(weightCode).not.toContain("Exact distance from a point");
+        expect(weightCode).not.toContain("fn dq(p: vec2f");
+        expect(weightCode).toContain("fn dq(p:vec2f,A:vec2f,B:vec2f,C:vec2f)->f32{");
+    });
+
     it("removes the identity-tag import from every emitted module", () => {
         const libDirectory = dirname(LIB_ENTRY);
         const offenders = emittedJavaScriptFiles(libDirectory)

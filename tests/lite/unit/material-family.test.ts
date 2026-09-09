@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { getMaterialFamily } from "../../../packages/babylon-lite/src/material/material-family";
+import { getMaterialTextures } from "../../../packages/babylon-lite/src/material/material-textures";
 import { createMaterialView } from "../../../packages/babylon-lite/src/material/material-view";
 import { isPbrMaterial, isStandardMaterial, isShaderMaterial, isNodeMaterial } from "../../../packages/babylon-lite/src/material/material-guards";
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
+import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
 
 /** Device-free material stub: getMaterialFamily only reads `_buildGroup._materialFamily`
  *  (unwrapping a view to its source first). */
@@ -75,5 +77,56 @@ describe("material type guards", () => {
         const view = createMaterialView(fakeMaterial("pbr"), { features: 0 });
         expect(isPbrMaterial(view)).toBe(true);
         expect(isStandardMaterial(view)).toBe(false);
+    });
+});
+
+describe("getMaterialTextures", () => {
+    const texture = {} as Texture2D;
+    const otherTexture = {} as Texture2D;
+
+    it("enumerates standard and PBR textures", () => {
+        const standard = {
+            ...fakeMaterial("standard"),
+            diffuseTexture: texture,
+        };
+        const pbr = {
+            ...fakeMaterial("pbr"),
+            baseColorTexture: texture,
+            normalTexture: otherTexture,
+        };
+
+        expect(getMaterialTextures(standard)).toEqual([texture]);
+        expect(getMaterialTextures(pbr)).toEqual([texture, otherTexture]);
+    });
+
+    it("enumerates shader and node textures", () => {
+        const shader = {
+            ...fakeMaterial("shader"),
+            _textureSlots: new Map([
+                ["texture", { current: texture }],
+                ["empty", { current: null }],
+            ]),
+        };
+        const node = {
+            ...fakeMaterial("node"),
+            inputs: {
+                texture: { type: "texture2d", texture },
+                value: { type: "f32", value: 1 },
+            },
+        };
+        Object.setPrototypeOf(node.inputs, { inherited: { type: "texture2d", texture: otherTexture } });
+
+        expect(getMaterialTextures(shader)).toEqual([texture]);
+        expect(getMaterialTextures(node)).toEqual([texture]);
+    });
+
+    it("unwraps material views and returns no textures for unknown families", () => {
+        const source = {
+            ...fakeMaterial("standard"),
+            diffuseTexture: texture,
+        };
+
+        expect(getMaterialTextures(createMaterialView(source, { features: 0 }))).toEqual([texture]);
+        expect(getMaterialTextures(fakeMaterial("unknown"))).toEqual([]);
     });
 });

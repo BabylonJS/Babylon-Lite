@@ -428,6 +428,11 @@ let finalWorld = mesh.world * instanceWorld;
 
 `finalWorld` replaces `mesh.world` in all subsequent vertex transforms (position, normal).
 
+ShaderMaterial exposes this specialization through the opt-in `enableShaderMaterialInstanceWorld(material)`
+helper. A custom vertex shader that declares the `"world"` system uniform can then call
+`getFinalWorld(input)` for both regular and thin-instanced meshes; the regular variant returns the mesh world
+matrix without requiring `world0..world3`.
+
 **Instance color passthrough** (varying):
 
 ```wgsl

@@ -100,14 +100,14 @@ export interface RenderTaskConfig {
 
 Important fields:
 
-| Field        | Meaning                                                                                                                                                  |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rt`         | Concrete render target. Swapchain tasks use `resolveToSwapchain: true`; RTT tasks allocate color/depth textures.                                         |
-| `clr`        | `true`/undefined clears color; `false` loads previous color content for overlays/multi-scene composition.                                                |
+| Field        | Meaning                                                                                                                                                   |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `rt`         | Concrete render target. Swapchain tasks use `resolveToSwapchain: true`; RTT tasks allocate color/depth textures.                                          |
+| `clr`        | `true`/undefined clears color; `false` loads previous color content for overlays/multi-scene composition.                                                 |
 | `depthClear` | Controls rt-owned depth independently. `true`/undefined clears depth; `false` loads existing depth. External `depth` targets keep their ownership policy. |
 | `sharedRt`   | Uses a target owned and recorded by an earlier task; this task does not build or dispose `rt`/`rst`.                                                      |
-| `cam`        | Per-pass camera override; defaults to `scene.camera`.                                                                                                    |
-| `cs`         | Use canvas dimensions for scene UBO aspect instead of RTT dimensions. Used when an RTT texture must be rendered with canvas aspect.                      |
+| `cam`        | Per-pass camera override; defaults to `scene.camera`.                                                                                                     |
+| `cs`         | Use canvas dimensions for scene UBO aspect instead of RTT dimensions. Used when an RTT texture must be rendered with canvas aspect.                       |
 | `autoMirror` | Set `false` to keep an empty explicit render list instead of mirroring the scene renderables.                                                             |
 
 `RenderTask.addMesh(mesh, { material })` accepts either a source material or a `MaterialView`. The mesh is resolved at `record()` time through the source material family's `_buildGroup._rebuildSingle` closure, so explicit offscreen tasks can render the same mesh with pass-specific material features without mutating `mesh.material`.
@@ -201,6 +201,9 @@ export function rebuildMaterial(scene: SceneContext, materialOrView: MaterialOrV
 // Public, read-only material-family discriminator.
 export function getMaterialFamily(material: MaterialOrView): string | undefined;
 
+// Public, read-only enumeration of the material's currently bound 2D textures.
+export function getMaterialTextures(material: MaterialOrView): readonly Texture2D[];
+
 // Public TypeScript type guards for the well-known core material families.
 export function isPbrMaterial(material: Material): material is PbrMaterialProps;
 export function isStandardMaterial(material: Material): material is StandardMaterialProps;
@@ -209,6 +212,8 @@ export function isNodeMaterial(material: Material): material is NodeMaterial;
 ```
 
 `getMaterialFamily()` returns a stable string identifying which concrete family a material belongs to, so scene explorers, serializers, and diagnostics can display the family using only public APIs — never private renderer fields or property-shape heuristics. It unwraps a `MaterialView` to its `source` and reads the family declared on the material's `_buildGroup`. It returns `"pbr"`, `"standard"`, `"shader"` (including the grid material and other `createShaderMaterial`-based materials), `"node"`, or `undefined` (deliberately discoverable from the `string | undefined` signature so callers handle the unknown case). The material-builder surface (`_buildGroup`) is `@internal`, so package consumers cannot author their own builder: a user-created "custom material" is a `createShaderMaterial` (reported as `"shader"`) or a node material (`"node"`), and `getMaterialFamily` will not return an arbitrary user-defined string today. The return type is nonetheless a raw `string` rather than a string-literal union so a new core family can be added without a breaking change, and so the function stays forward-compatible if a public custom-family builder API is introduced later (it passes any tagged string through unchanged).
+
+`getMaterialTextures()` returns a newly allocated readonly array containing the non-null `Texture2D` handles currently bound by the material. It supports standard, PBR, shader, and node material families, including registered material-extension and plugin textures. Unknown material families return an empty array. Material views are unwrapped to their source so enumeration reports the source material's bindings. The function is implemented in a side-effect-free module and costs zero bundle bytes until imported.
 
 `isPbrMaterial()`, `isStandardMaterial()`, `isShaderMaterial()`, and `isNodeMaterial()` are formal TypeScript type guards over `getMaterialFamily()`: each narrows a `Material` to the concrete family type (`PbrMaterialProps`, `StandardMaterialProps`, `ShaderMaterial`, `NodeMaterial`). A `MaterialView` over a matching source passes its family's guard, since it inherits every property from the source through its prototype chain. All of these functions are fully tree-shakable: scenes that never call them retain zero bytes for them.
 

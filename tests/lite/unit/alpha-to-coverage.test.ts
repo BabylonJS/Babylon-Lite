@@ -284,7 +284,7 @@ describe("WebGPU alpha-to-coverage", () => {
         // Exactly one fragment module is ever compiled, and the source actually handed to
         // createShaderModule — not merely the file on disk — declares the override that the
         // A2C pipeline specialises, under the numeric id the descriptor keys it by.
-        const fragmentSources = createShaderModule.mock.calls.map((call) => call[0].code).filter((code) => code.includes("@location(0) vec4<f32>"));
+        const fragmentSources = createShaderModule.mock.calls.filter((call) => call[0].label === "text-frag").map((call) => call[0].code);
         expect(fragmentSources).toHaveLength(1);
         expect(fragmentSources[0]).toMatch(/@id\(0\)\s+override\s+a2c\s*:\s*bool/);
     });

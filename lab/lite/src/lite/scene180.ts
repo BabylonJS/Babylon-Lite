@@ -12,13 +12,16 @@ import {
     createTextRenderer,
     registerTextRenderer,
 } from "babylon-lite";
+import type { setFontWeightOffset } from "babylon-lite";
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 const textarea = document.getElementById("textInput") as HTMLTextAreaElement;
 const rot = document.getElementById("rot") as HTMLInputElement;
 const opacity = document.getElementById("opacity") as HTMLInputElement;
+const weight = document.getElementById("weight") as HTMLInputElement;
 const rotVal = document.getElementById("rotVal")!;
 const opacityVal = document.getElementById("opacityVal")!;
+const weightVal = document.getElementById("weightVal")!;
 const red = document.getElementById("red") as HTMLInputElement;
 const green = document.getElementById("green") as HTMLInputElement;
 const blue = document.getElementById("blue") as HTMLInputElement;
@@ -52,16 +55,30 @@ async function run(): Promise<void> {
     });
     registerTextRenderer(tr);
 
+    let weightSetter: typeof setFontWeightOffset | null = null;
+    const applyWeight = async (): Promise<void> => {
+        const offset = +weight.value;
+        if (!weightSetter) {
+            if (offset === 0) {
+                return;
+            }
+            weightSetter = (await import("babylon-lite")).setFontWeightOffset;
+        }
+        weightSetter(data, 0, offset);
+    };
+
     textarea.addEventListener("input", () => {
         // updateDefaultTextData preserves whatever defaultColor the live run currently has,
         // so a previous color-slider change carries through automatically.
         updateDefaultTextData(data, textarea.value);
+        void applyWeight();
     });
 
     const onColor = (): void => {
         // Color isn't part of updateDefaultTextData; overlay it via replaceRun.
         const r = data.runs[0]!;
         updateTextData(data, { update: "replaceRun", previous: r, run: { ...r, defaultColor: currentColor() } });
+        void applyWeight();
         redVal.textContent = (+red.value).toFixed(2);
         greenVal.textContent = (+green.value).toFixed(2);
         blueVal.textContent = (+blue.value).toFixed(2);
@@ -77,6 +94,10 @@ async function run(): Promise<void> {
     opacity.addEventListener("input", () => {
         layer.opacity = +opacity.value;
         opacityVal.textContent = (+opacity.value).toFixed(2);
+    });
+    weight.addEventListener("input", () => {
+        void applyWeight();
+        weightVal.textContent = weight.value;
     });
 
     // Drag-to-move (in CSS pixels — matches layer.positionPx units).

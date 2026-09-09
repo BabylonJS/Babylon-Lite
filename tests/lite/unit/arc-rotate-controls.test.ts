@@ -7,16 +7,22 @@ import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scen
 
 interface FakeCanvas {
     listeners: Map<string, EventListener[]>;
+    capturedPointers: number[];
+    releasedPointers: number[];
     addEventListener(type: string, h: EventListener): void;
     removeEventListener(type: string, h: EventListener): void;
-    setPointerCapture(): void;
-    releasePointerCapture(): void;
+    setPointerCapture(pointerId: number): void;
+    releasePointerCapture(pointerId: number): void;
 }
 
 function makeCanvas(): FakeCanvas {
     const listeners = new Map<string, EventListener[]>();
+    const capturedPointers: number[] = [];
+    const releasedPointers: number[] = [];
     return {
         listeners,
+        capturedPointers,
+        releasedPointers,
         addEventListener(type, h): void {
             const arr = listeners.get(type) ?? [];
             arr.push(h);
@@ -31,11 +37,11 @@ function makeCanvas(): FakeCanvas {
                 }
             }
         },
-        setPointerCapture(): void {
-            return;
+        setPointerCapture(pointerId): void {
+            capturedPointers.push(pointerId);
         },
-        releasePointerCapture(): void {
-            return;
+        releasePointerCapture(pointerId): void {
+            releasedPointers.push(pointerId);
         },
     };
 }
@@ -67,8 +73,8 @@ function touchEvent(changedTouches: Array<{ identifier: number; clientX: number;
     return { changedTouches, preventDefault: vi.fn() };
 }
 
-function pointerEvent(props: Partial<{ button: number; clientX: number; clientY: number; pointerId: number }>): unknown {
-    return { button: 0, clientX: 0, clientY: 0, pointerId: 1, ...props, preventDefault: vi.fn() };
+function pointerEvent(props: Partial<{ button: number; clientX: number; clientY: number; pointerId: number; pointerType: string }>): unknown {
+    return { button: 0, clientX: 0, clientY: 0, pointerId: 1, pointerType: "mouse", ...props, preventDefault: vi.fn() };
 }
 
 describe("attachControl — pinch / touch handling", () => {
@@ -204,6 +210,85 @@ describe("attachControl — pinch / touch handling", () => {
         dispose();
         expect(c.listeners.get("touchmove")?.length).toBe(0);
         expect(c.listeners.get("pointermove")?.length).toBe(0);
+    });
+});
+
+describe("attachControl — pointer mappings", () => {
+    it("preserves primary rotate and secondary pan as the defaults", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, makeScene());
+
+        fire(canvas, "pointerdown", pointerEvent({ button: 0, pointerId: 1 }));
+        fire(canvas, "pointermove", pointerEvent({ clientX: 10, pointerId: 1 }));
+        fire(canvas, "pointerup", pointerEvent({ button: 0, clientX: 10, pointerId: 1 }));
+        expect(camera.inertialAlphaOffset).toBeCloseTo(-0.01, 5);
+        expect(camera.inertialPanningX).toBe(0);
+
+        fire(canvas, "pointerdown", pointerEvent({ button: 2, pointerId: 2 }));
+        fire(canvas, "pointermove", pointerEvent({ button: 2, clientX: 10, pointerId: 2 }));
+        fire(canvas, "pointerup", pointerEvent({ button: 2, clientX: 10, pointerId: 2 }));
+        expect(camera.inertialPanningX).toBeCloseTo(-0.2, 5);
+        expect(canvas.capturedPointers).toEqual([1, 2]);
+        expect(canvas.releasedPointers).toEqual([1, 2]);
+    });
+
+    it("configures primary and secondary actions independently", () => {
+        const primaryCanvas = makeCanvas();
+        const primaryCamera = makeCamera();
+        attachControl(primaryCamera, primaryCanvas as unknown as HTMLCanvasElement, makeScene(), {
+            pointerMappings: { primaryButton: "pan" },
+        });
+
+        fire(primaryCanvas, "pointerdown", pointerEvent({ button: 0 }));
+        fire(primaryCanvas, "pointermove", pointerEvent({ clientX: 10 }));
+        expect(primaryCamera.inertialAlphaOffset).toBe(0);
+        expect(primaryCamera.inertialPanningX).toBeCloseTo(-0.2, 5);
+
+        const secondaryCanvas = makeCanvas();
+        const secondaryCamera = makeCamera();
+        attachControl(secondaryCamera, secondaryCanvas as unknown as HTMLCanvasElement, makeScene(), {
+            pointerMappings: { secondaryButton: "rotate" },
+        });
+
+        fire(secondaryCanvas, "pointerdown", pointerEvent({ button: 0 }));
+        fire(secondaryCanvas, "pointermove", pointerEvent({ clientX: 10 }));
+        expect(secondaryCamera.inertialAlphaOffset).toBeCloseTo(-0.01, 5);
+
+        fire(secondaryCanvas, "pointerup", pointerEvent({ button: 0 }));
+        secondaryCamera.inertialAlphaOffset = 0;
+        fire(secondaryCanvas, "pointerdown", pointerEvent({ button: 2 }));
+        fire(secondaryCanvas, "pointermove", pointerEvent({ button: 2, clientX: 10 }));
+        expect(secondaryCamera.inertialAlphaOffset).toBeCloseTo(-0.01, 5);
+        expect(secondaryCamera.inertialPanningX).toBe(0);
+    });
+
+    it("keeps touch, wheel, cleanup, and reattachment behavior unchanged", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        const detach = attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, {
+            pointerMappings: { primaryButton: "pan", secondaryButton: "rotate" },
+        });
+
+        fire(canvas, "pointerdown", pointerEvent({ pointerType: "touch" }));
+        fire(canvas, "pointermove", pointerEvent({ clientX: 10, pointerType: "touch" }));
+        expect(camera.inertialAlphaOffset).toBeCloseTo(-0.01, 5);
+        expect(camera.inertialPanningX).toBe(0);
+
+        fire(canvas, "wheel", { deltaY: 120, preventDefault: vi.fn() });
+        expect(camera.inertialRadiusOffset).toBeCloseTo(-0.4, 5);
+
+        detach();
+        expect(canvas.listeners.get("pointerdown")?.length).toBe(0);
+        expect((scene as unknown as { _beforeRender: unknown[] })._beforeRender).toHaveLength(0);
+
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene);
+        camera.inertialAlphaOffset = 0;
+        fire(canvas, "pointerdown", pointerEvent({ button: 0, pointerId: 2 }));
+        fire(canvas, "pointermove", pointerEvent({ clientX: 10, pointerId: 2 }));
+        expect(camera.inertialAlphaOffset).toBeCloseTo(-0.01, 5);
+        expect(canvas.listeners.get("pointerdown")?.length).toBe(1);
     });
 });
 
