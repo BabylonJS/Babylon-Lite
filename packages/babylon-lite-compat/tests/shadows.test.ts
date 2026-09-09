@@ -15,10 +15,11 @@ vi.mock("babylon-lite", async (importOriginal) => ({
 
 import type { EngineContext, Mesh as LiteMesh } from "babylon-lite";
 
+import { NullEngine } from "../src/engine/engine";
 import { DirectionalLight, SpotLight } from "../src/lights/lights";
 import { Vector3 } from "../src/math/vector";
 import { AbstractMesh, TransformNode } from "../src/meshes/meshes";
-import type { Scene } from "../src/scene/scene";
+import { Scene } from "../src/scene/scene";
 import { CascadedShadowGenerator, ShadowGenerator } from "../src/shadows/shadow-generator";
 
 function createTestMesh(name: string): AbstractMesh {
@@ -144,7 +145,15 @@ describe("ShadowGenerator caster synchronization", () => {
         const flushCallbacks: (() => void)[] = [];
         const scene = {
             _registerShadowGenerator: vi.fn(),
-            _registerBeforeRenderFlush: (callback: () => void) => flushCallbacks.push(callback),
+            _registerBeforeRenderFlush: (callback: () => void) => {
+                flushCallbacks.push(callback);
+                return () => {
+                    const index = flushCallbacks.indexOf(callback);
+                    if (index !== -1) {
+                        flushCallbacks.splice(index, 1);
+                    }
+                };
+            },
         } as unknown as Scene;
         const light = new DirectionalLight("directional", new Vector3(0, -1, -1));
         vi.spyOn(light, "getScene").mockReturnValue(scene);
@@ -161,6 +170,53 @@ describe("ShadowGenerator caster synchronization", () => {
         expect(setShadowTaskCasterMeshes).toHaveBeenCalledWith(generator._liteGen, [caster._lite]);
         await flushCasterSync();
         expect(setShadowTaskCasterMeshes).toHaveBeenCalledOnce();
+    });
+
+    it("removes scene flush callbacks when generators are repeatedly created and disposed", () => {
+        const scene = new Scene(new NullEngine());
+        const flush = vi.fn();
+        const unregisterFlush = scene._registerBeforeRenderFlush(flush);
+
+        scene._tick(16);
+        expect(flush).toHaveBeenCalledOnce();
+        unregisterFlush();
+        unregisterFlush();
+        scene._tick(16);
+        expect(flush).toHaveBeenCalledOnce();
+
+        const activeFlushCallbacks = new Set<() => void>();
+        const generatorScene = {
+            _registerShadowGenerator: vi.fn(),
+            _registerBeforeRenderFlush: (callback: () => void) => {
+                activeFlushCallbacks.add(callback);
+                return () => {
+                    activeFlushCallbacks.delete(callback);
+                };
+            },
+        } as unknown as Scene;
+        const light = new DirectionalLight("directional", new Vector3(0, -1, -1));
+        vi.spyOn(light, "getScene").mockReturnValue(generatorScene);
+
+        for (let i = 0; i < 3; i++) {
+            const generator = new ShadowGenerator(1024, light);
+            generator.dispose();
+            generator.dispose();
+        }
+
+        expect(activeFlushCallbacks.size).toBe(0);
+    });
+
+    it("clears pending native caster synchronization on disposal", async () => {
+        const generator = new ShadowGenerator(1024, new DirectionalLight("directional", new Vector3(0, -1, -1)));
+        const caster = createTestMesh("caster");
+        generator._build({} as EngineContext);
+        vi.clearAllMocks();
+
+        generator.addShadowCaster(caster);
+        generator.dispose();
+        await flushCasterSync();
+
+        expect(setShadowTaskCasterMeshes).not.toHaveBeenCalled();
     });
 });
 

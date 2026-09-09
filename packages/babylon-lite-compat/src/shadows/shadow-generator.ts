@@ -34,6 +34,7 @@ export class ShadowGenerator {
     private readonly _casters: AbstractMesh[] = [];
     private _casterSyncScheduled = false;
     private _casterSyncDirty = false;
+    private readonly _disposeBeforeRenderFlush: (() => void) | undefined = undefined;
     /** @internal The built Lite shadow generator (set in `_build`). Used to wire NME receivers. */
     public _liteGen: LiteShadowGenerator | undefined;
 
@@ -71,7 +72,7 @@ export class ShadowGenerator {
         const scene = light.getScene();
         if (scene) {
             scene._registerShadowGenerator(this);
-            scene._registerBeforeRenderFlush(() => this._flushCasterSync());
+            this._disposeBeforeRenderFlush = scene._registerBeforeRenderFlush(() => this._flushCasterSync());
         }
     }
 
@@ -154,6 +155,9 @@ export class ShadowGenerator {
     }
 
     public dispose(): void {
+        this._disposeBeforeRenderFlush?.();
+        this._casterSyncScheduled = false;
+        this._casterSyncDirty = false;
         this._liteGen = undefined;
         this._light._lite.shadowGenerator = undefined;
     }
