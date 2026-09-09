@@ -32,7 +32,7 @@ import {
     enableHavokThinInstancePhysics,
     getCameraPosition,
     getViewProjectionMatrix,
-    mat4Invert,
+    invertMat4,
     onBeforeRender,
     onPhysicsAfterStep,
     physicsRaycast,
@@ -253,7 +253,7 @@ async function main(): Promise<void> {
             const ndcX = ((evt.clientX - rect.left) / rect.width) * 2 - 1;
             const ndcY = 1 - ((evt.clientY - rect.top) / rect.height) * 2;
             const vp = getViewProjectionMatrix(camera, rect.width / rect.height);
-            const invVp = mat4Invert(vp);
+            const invVp = invertMat4(vp);
             if (!invVp) {
                 return;
             }

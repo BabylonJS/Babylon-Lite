@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import type { NodeRest } from "../../../packages/babylon-lite/src/animation/types";
-import { mat4Compose } from "../../../packages/babylon-lite/src/math/mat4-compose";
-import { mat4Multiply } from "../../../packages/babylon-lite/src/math/mat4-multiply";
+import { composeMat4 } from "../../../packages/babylon-lite/src/math/compose-mat4";
+import { multiplyMat4 } from "../../../packages/babylon-lite/src/math/multiply-mat4";
 import { computeNodeWorldMatrices, computeTopoOrder, resetTRS, TRS_STRIDE } from "../../../packages/babylon-lite/src/skeleton/skeleton-pose";
 import { setBoneWorldPoseDeferred, type Bone, type Skeleton } from "../../../packages/babylon-lite/src/skeleton/bone-control";
 
@@ -28,15 +28,15 @@ describe("computeNodeWorldMatrices", () => {
         const currentTrs = new Float32Array(nodes.length * TRS_STRIDE);
         const localMatrices = new Float32Array(nodes.length * 16);
         const worldMatrices = new Float32Array(nodes.length * 16);
-        const rootMatrix = mat4Compose(1, 2, 3, 0.2, -0.3, 0.1, 0.92, 1, 1, 1);
+        const rootMatrix = composeMat4(1, 2, 3, 0.2, -0.3, 0.1, 0.92, 1, 1, 1);
         const rootWorld = new Float32Array(rootMatrix);
-        const childLocal = mat4Compose(0, 2, 0, 0, 0, 0, 1, 1, 1, 1);
+        const childLocal = composeMat4(0, 2, 0, 0, 0, 0, 1, 1, 1, 1);
         resetTRS(nodes, nodes.length, currentTrs);
 
         computeNodeWorldMatrices(nodes, nodes.length, computeTopoOrder(nodes), currentTrs, localMatrices, worldMatrices, new Map([[0, rootWorld]]));
 
         expect(Array.from(worldMatrices.subarray(0, 16))).toEqual(Array.from(rootWorld));
-        expect(Array.from(worldMatrices.subarray(16, 32))).toEqual(Array.from(mat4Multiply(rootMatrix, childLocal)));
+        expect(Array.from(worldMatrices.subarray(16, 32))).toEqual(Array.from(multiplyMat4(rootMatrix, childLocal)));
     });
 
     it("retains the glTF root reflection when an external world pose matches bind pose", () => {

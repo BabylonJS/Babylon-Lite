@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createRenderTarget, targetSignatureKey } from "../../../packages/babylon-lite/src/engine/render-target";
 import { createRenderPass, setRenderPassRenderTarget } from "../../../packages/babylon-lite/src/frame-graph/render-pass";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
-import { mat4PerspectiveLH } from "../../../packages/babylon-lite/src/math/mat4-perspective-lh";
+import { createPerspectiveMat4LH } from "../../../packages/babylon-lite/src/math/create-perspective-mat4-lh";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import { createPickingRay } from "../../../packages/babylon-lite/src/picking/ray";
 
@@ -32,7 +32,7 @@ describe("reverse-Z depth", () => {
     it("maps perspective near depth to 1 and far depth to 0", () => {
         const near = 0.25;
         const far = 1000;
-        const projection = mat4PerspectiveLH(Math.PI / 3, 16 / 9, near, far);
+        const projection = createPerspectiveMat4LH(Math.PI / 3, 16 / 9, near, far);
 
         expect(projectDepth(projection, near)).toBeCloseTo(1, 6);
         expect(projectDepth(projection, far)).toBeCloseTo(0, 6);
@@ -86,7 +86,7 @@ describe("reverse-Z depth", () => {
     it("unprojects picking rays from reverse-Z near and far depths", () => {
         const near = 0.25;
         const far = 1000;
-        const projection = mat4PerspectiveLH(Math.PI / 3, 1, near, far);
+        const projection = createPerspectiveMat4LH(Math.PI / 3, 1, near, far);
 
         const ray = createPickingRay(50, 50, projection, 100, 100);
 

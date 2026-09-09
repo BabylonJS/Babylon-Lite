@@ -57,7 +57,7 @@ This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side
 | `mesh.thinInstanceSetBuffer("color", data, 4)`                      | `setThinInstanceColors(mesh, data)`                                                                         |
 | `new Vector3(x, y, z)`                                              | `{ x, y, z }` or `[x, y, z]`                                                                                |
 | `new Color3(r, g, b)`                                               | `[r, g, b]`                                                                                                 |
-| `Matrix.Identity()`                                                 | `mat4Identity()`                                                                                            |
+| `Matrix.Identity()`                                                 | `createIdentityMat4()`                                                                                            |
 | `mesh.dispose()`                                                    | `removeFromScene(scene, mesh)`                                                                              |
 | `scene.onBeforeRenderObservable.add(fn)`                            | `onBeforeRender(scene, fn)`                                                                                 |
 

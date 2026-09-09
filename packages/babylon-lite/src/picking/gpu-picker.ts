@@ -7,7 +7,7 @@ import type { EngineContext } from "../engine/engine.js";
 import type { PickContributor, PickSource, PickPassContext } from "./pick-contributor.js";
 import { createEmptyPickingInfo } from "./picking-info.js";
 import { createPickingRay } from "./ray.js";
-import { mat4Invert } from "../math/mat4-invert.js";
+import { invertMat4 } from "../math/invert-mat4.js";
 import { getPickingSceneBGL } from "./picking-scene-bgl.js";
 import { getViewProjectionMatrix, getCameraPosition } from "../camera/camera.js";
 import { resolveCameraViewport } from "../camera/viewport.js";
@@ -542,7 +542,7 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
     info.ray = detailed ? pickRay : null;
 
     // Reconstruct world position from depth (using original full-res VP)
-    const invVP = mat4Invert(vp);
+    const invVP = invertMat4(vp);
     if (invVP) {
         const ndcX = (2 * sampleX) / w - 1;
         const ndcY = 1 - (2 * sampleY) / h;

@@ -28,11 +28,11 @@
 
 import type { Mat4, Quat, Vec3 } from "../math/types.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
-import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
+import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import type { Mat4Storage } from "../math/types.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
-import { mat4Compose } from "../math/mat4-compose.js";
-import { mat4Identity } from "../math/mat4-identity.js";
+import { composeMat4 } from "../math/compose-mat4.js";
+import { createIdentityMat4 } from "../math/create-identity-mat4.js";
 
 export interface WorldMatrixAccessors {
     /** Getter — returns lazily computed world matrix. */
@@ -86,7 +86,7 @@ export function composeTrsLocalMatrix(position: Vec3, rotation: Quat, scaling: V
         scaling.x === 1 &&
         scaling.y === 1 &&
         scaling.z === 1;
-    return isIdentity ? mat4Identity() : mat4Compose(position.x, position.y, position.z, rotation.x, rotation.y, rotation.z, rotation.w, scaling.x, scaling.y, scaling.z);
+    return isIdentity ? createIdentityMat4() : composeMat4(position.x, position.y, position.z, rotation.x, rotation.y, rotation.z, rotation.w, scaling.x, scaling.y, scaling.z);
 }
 
 /**
@@ -164,7 +164,7 @@ export function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixA
             const local = getLocalMatrix();
             if (_parent !== null) {
                 const pw = _parent.worldMatrix;
-                mat4MultiplyInto(_ownedWorld as unknown as Mat4Storage, 0, pw as unknown as Mat4Storage, 0, local as unknown as Mat4Storage, 0);
+                multiplyMat4IntoBuffer(_ownedWorld as unknown as Mat4Storage, 0, pw as unknown as Mat4Storage, 0, local as unknown as Mat4Storage, 0);
                 _cachedWorld = _ownedWorld;
             } else {
                 _cachedWorld = local;

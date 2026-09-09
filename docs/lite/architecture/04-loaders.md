@@ -277,7 +277,7 @@ const RH_TO_LH_ROOT: Mat4 = [-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 For top-level nodes: `worldMatrix = RH_TO_LH_ROOT × localMatrix`.
 For child nodes: `worldMatrix = parentWorldMatrix × localMatrix`.
 
-Local matrices are computed from glTF TRS: `mat4Compose(translation, rotation, scale)`, or directly from `node.matrix` if present.
+Local matrices are computed from glTF TRS: `composeMat4(translation, rotation, scale)`, or directly from `node.matrix` if present.
 
 Parent lookup is done by linear scan (`findParent`): iterates all nodes checking `children` arrays.
 
@@ -311,7 +311,7 @@ cameras. Every camera referenced by a `node.camera` index is instantiated and re
    `createSceneNodeFromMatrix(name, restWorld)` when unreachable, mirroring the
    `KHR_lights_punctual` fallback for the same case.
 3. **Camera.** `createFreeCamera({0,0,0}, {0,0,-1})`, parented to `fixupNode`. glTF cameras look
-   down their local -Z axis with +Y up; `mat4LookAtWorldLHToRef`'s "+Z points from eye to target"
+   down their local -Z axis with +Y up; `writeLookAtWorldMat4LHIntoBuffer`'s "+Z points from eye to target"
    convention reproduces exactly that local orientation for an eye at the origin looking toward
    `(0,0,-1)`. The fixup also cancels static uniform ancestor scale so the shared rigid view inverse
    remains exact. Projection parameters stay in source glTF units, matching Babylon.js.
@@ -702,7 +702,7 @@ output_L1_-1 = raw_L1_-1 × B1m
 
 ## Dependencies
 
-- **`load-gltf.ts` imports**: `EngineContext` from `../engine/engine.js`; `Mat4` from `../math/types.js`; `mat4Compose`, `mat4Multiply` from `../math/mat4.js`; `generateMipmaps`, `mipLevelCount` from `../texture/generate-mipmaps.js`; `Texture2D` from `../texture/texture-2d.js`; `PbrMaterialProps`, `pbrGroupBuilder` from `../material/pbr/pbr-material.js`; `createAnimationGroups` from `../animation/animation-group.js`; `AssetContainer` from `../asset-container.js`; dynamic glTF feature imports including `gltf-ext-basisu.ts`.
+- **`load-gltf.ts` imports**: `EngineContext` from `../engine/engine.js`; `Mat4` from `../math/types.js`; `composeMat4`, `multiplyMat4` from `../math/mat4.js`; `generateMipmaps`, `mipLevelCount` from `../texture/generate-mipmaps.js`; `Texture2D` from `../texture/texture-2d.js`; `PbrMaterialProps`, `pbrGroupBuilder` from `../material/pbr/pbr-material.js`; `createAnimationGroups` from `../animation/animation-group.js`; `AssetContainer` from `../asset-container.js`; dynamic glTF feature imports including `gltf-ext-basisu.ts`.
 - **`gltf-ext-basisu.ts` imports**: `decodeKtx2ImageBitmapFromBuffer`, `uploadKtx2Texture2D` from `../texture/ktx2-loader.js`; `resolveAccessor` from `./gltf-parser.js`; PBR and Texture2D types.
 - **`load-env.ts` imports**: `SceneContext` from `../scene/scene.js`.
 - **`load-dds-env.ts` imports**: `SceneContext`, `SceneContextInternal` from `../scene/scene.js`; `EngineInternal` from `../engine/engine.js`; `EnvironmentTextures` from `./load-env.js`; `acquireGPUTexture`, `releaseGPUTexture` from `../resource/gpu-pool.js`; `assembleEnvironmentTextures` from `./env-helpers.js`; dynamic import of `./rgbd-decode.js`.

@@ -132,7 +132,7 @@ export function createPointLight(
 | intensity | `1.0` |
 | range | `Number.MAX_VALUE` |
 
-**Local matrix:** `mat4Translation(position.x, position.y, position.z)` — position only, no orientation.
+**Local matrix:** `createTranslationMat4(position.x, position.y, position.z)` — position only, no orientation.
 
 ### Hemispheric Light (`hemispheric.ts`)
 
@@ -496,7 +496,7 @@ spot.angle = Math.PI / 4;
 ### point-light.ts
 
 - `./types.js` — `LightBase`
-- `../math/mat4.js` — `mat4Translation`
+- `../math/mat4.js` — `createTranslationMat4`
 - `./light-base.js` — `createLightBase`, `applyWorldMatrixAccessors`, `ObservableVec3`
 
 ### hemispheric.ts

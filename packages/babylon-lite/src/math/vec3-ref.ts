@@ -22,7 +22,7 @@ export function addVec3InPlace(target: Vec3, b: Vec3): Vec3 {
 }
 
 /** Subtract vector `b` from vector `a` into `out`. */
-export function subVec3ToRef(a: Vec3, b: Vec3, out: Vec3): Vec3 {
+export function subtractVec3ToRef(a: Vec3, b: Vec3, out: Vec3): Vec3 {
     out.x = a.x - b.x;
     out.y = a.y - b.y;
     out.z = a.z - b.z;
@@ -30,8 +30,8 @@ export function subVec3ToRef(a: Vec3, b: Vec3, out: Vec3): Vec3 {
 }
 
 /** Subtract `b` from `target`. */
-export function subVec3InPlace(target: Vec3, b: Vec3): Vec3 {
-    return subVec3ToRef(target, b, target);
+export function subtractVec3InPlace(target: Vec3, b: Vec3): Vec3 {
+    return subtractVec3ToRef(target, b, target);
 }
 
 /** Multiply every component of `v` by scalar `s` into `out`. */

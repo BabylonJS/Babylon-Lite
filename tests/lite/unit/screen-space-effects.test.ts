@@ -17,7 +17,7 @@ import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera
 import { getViewProjectionMatrix } from "../../../packages/babylon-lite/src/camera/camera";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { createRenderTarget, type RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
-import { mat4Invert } from "../../../packages/babylon-lite/src/math/mat4-invert";
+import { invertMat4 } from "../../../packages/babylon-lite/src/math/invert-mat4";
 import {
     createScreenSpaceContactShadowsPostProcessTask,
     clampScreenSpaceContactShadowsConfig,
@@ -216,7 +216,7 @@ describe("resolution scale + sizing helpers", () => {
 describe("screen-space reconstruction math", () => {
     const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 3, 5, { x: 0, y: 0, z: 0 });
     const viewProjection = getViewProjectionMatrix(camera, 16 / 9);
-    const inverse = mat4Invert(viewProjection)!;
+    const inverse = invertMat4(viewProjection)!;
 
     it("round-trips world position through top-left UV and reverse-Z depth", () => {
         const world: [number, number, number] = [0.35, 0, 0.2];

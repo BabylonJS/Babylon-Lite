@@ -1,6 +1,6 @@
 import type { Camera } from "./camera.js";
 import type { Vec3, Mat4 } from "../math/types.js";
-import { mat4LookAtWorldLHToRef } from "../math/mat4-look-at-world-lh.js";
+import { writeLookAtWorldMat4LHIntoBuffer } from "../math/write-look-at-world-mat4-lh-into-buffer.js";
 import { Vec3Up } from "../math/vec3-up.js";
 import type { IWorldMatrixProvider, IParentable } from "../scene/parentable.js";
 import { createWorldMatrixState, attachWorldMatrixState } from "../scene/world-matrix-state.js";
@@ -53,7 +53,7 @@ export function _createFreeCamera(position: Vec3, target: Vec3, up: Vec3): FreeC
     const _localMat: Mat4 = allocateMat4();
 
     function cameraLocalWorldMatrix(): Mat4 {
-        mat4LookAtWorldLHToRef(_localMat as unknown as Mat4Storage, cam.position, cam.target, up);
+        writeLookAtWorldMat4LHIntoBuffer(_localMat as unknown as Mat4Storage, cam.position, cam.target, up);
         return _localMat;
     }
 

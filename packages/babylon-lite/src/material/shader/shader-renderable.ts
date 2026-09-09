@@ -10,7 +10,7 @@ import { createEmptyUniformBuffer } from "../../resource/gpu-buffers.js";
 import { acquireTexture, releaseTexture } from "../../resource/gpu-pool.js";
 import { getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix, getViewProjectionMatrix, _cameraChangeKey } from "../../camera/camera.js";
 import type { Camera } from "../../camera/camera.js";
-import { mat4MultiplyInto } from "../../math/mat4-multiply-into.js";
+import { multiplyMat4IntoBuffer } from "../../math/multiply-mat4-into-buffer.js";
 import type { UboSpec } from "../../shader/fragment-types.js";
 import type { ShaderAttributeName, ShaderMaterial, ShaderUniformType } from "./shader-material.js";
 import type { ShaderPipelineBindings } from "./shader-pipeline.js";
@@ -664,12 +664,12 @@ function writeSystemUniforms(data: Float32Array, spec: UboSpec, material: Shader
                 break;
             case "worldView":
                 if (view) {
-                    mat4MultiplyInto(data, f, view, 0, world, 0);
+                    multiplyMat4IntoBuffer(data, f, view, 0, world, 0);
                 }
                 break;
             case "worldViewProjection":
                 if (viewProjection) {
-                    mat4MultiplyInto(data, f, viewProjection, 0, world, 0);
+                    multiplyMat4IntoBuffer(data, f, viewProjection, 0, world, 0);
                 }
                 break;
             case "cameraPosition":

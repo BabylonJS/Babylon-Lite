@@ -4,7 +4,7 @@
 // Cube 2 (Std): default standard material, 2 thin instances (green/blue), negative X scale
 // Ground: 6×6 standard material
 
-import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, createBox, createGround, createPbrMaterial, createStandardMaterial, createSolidTexture2D, loadDdsEnvironment, loadTexture2D, setThinInstances, setThinInstanceColors, attachControl, mat4Identity, mat4Translation, mat4Compose, registerScene } from "babylon-lite";
+import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, createHemisphericLight, createBox, createGround, createPbrMaterial, createStandardMaterial, createSolidTexture2D, loadDdsEnvironment, loadTexture2D, setThinInstances, setThinInstanceColors, attachControl, createIdentityMat4, createTranslationMat4, composeMat4, registerScene } from "babylon-lite";
 import type { ArcRotateCamera } from "babylon-lite";
 
 async function main(): Promise<void> {
@@ -46,9 +46,9 @@ async function main(): Promise<void> {
 
     // 2 instances: Translation(-2,2,0) and Identity
     const matrices1 = new Float32Array(16 * 2);
-    const m1 = mat4Translation(-2, 2, 0);
+    const m1 = createTranslationMat4(-2, 2, 0);
     matrices1.set(m1, 0);
-    const m2 = mat4Identity();
+    const m2 = createIdentityMat4();
     matrices1.set(m2, 16);
     setThinInstances(cube1, matrices1, 2);
 
@@ -66,9 +66,9 @@ async function main(): Promise<void> {
 
     // 2 instances with negative X scale: Compose(s=(-1,1,1), q=identity, t=(2,1,0)) and (s=(-1,1,1), q=identity, t=(-2,0,-3))
     const matrices2 = new Float32Array(16 * 2);
-    const m3 = mat4Compose(2, 1, 0, 0, 0, 0, 1, -1, 1, 1);
+    const m3 = composeMat4(2, 1, 0, 0, 0, 0, 1, -1, 1, 1);
     matrices2.set(m3, 0);
-    const m4 = mat4Compose(-2, 0, -3, 0, 0, 0, 1, -1, 1, 1);
+    const m4 = composeMat4(-2, 0, -3, 0, 0, 0, 1, -1, 1, 1);
     matrices2.set(m4, 16);
     setThinInstances(cube2, matrices2, 2);
 

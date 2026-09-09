@@ -31,10 +31,10 @@ import {
     handTracking,
     teleportation,
     readXrController,
-    mat4Compose,
-    mat4Invert,
-    mat4Multiply,
-    mat4Decompose,
+    composeMat4,
+    invertMat4,
+    multiplyMat4,
+    decomposeMat4,
     type Mat4,
     type Mesh,
     type XrSessionContext,
@@ -103,7 +103,7 @@ function meshWorldMatrix(mesh: Mesh): Mat4 {
     const p = mesh.position,
         q = mesh.rotationQuaternion,
         s = mesh.scaling;
-    return mat4Compose(p.x, p.y, p.z, q.x, q.y, q.z, q.w, s.x, s.y, s.z);
+    return composeMat4(p.x, p.y, p.z, q.x, q.y, q.z, q.w, s.x, s.y, s.z);
 }
 
 function releaseGrab(source: XRInputSource): void {
@@ -138,8 +138,8 @@ function updateGrab(ctx: XrSessionContext): void {
         }
 
         if (current) {
-            const world = mat4Multiply(w.gripMatrix as unknown as Mat4, current.offset);
-            const d = mat4Decompose(world);
+            const world = multiplyMat4(w.gripMatrix as unknown as Mat4, current.offset);
+            const d = decomposeMat4(world);
             current.grabbable.mesh.position.set(d.translation.x, d.translation.y, d.translation.z);
             current.grabbable.mesh.rotationQuaternion.set(d.rotation.x, d.rotation.y, d.rotation.z, d.rotation.w);
             continue;
@@ -165,9 +165,9 @@ function updateGrab(ctx: XrSessionContext): void {
             }
         }
         if (best) {
-            const inv = mat4Invert(w.gripMatrix as unknown as Mat4);
+            const inv = invertMat4(w.gripMatrix as unknown as Mat4);
             if (inv) {
-                held.set(w.source, { grabbable: best, offset: mat4Multiply(inv, meshWorldMatrix(best.mesh)) });
+                held.set(w.source, { grabbable: best, offset: multiplyMat4(inv, meshWorldMatrix(best.mesh)) });
                 heldMeshes.add(best.mesh);
                 setEmissive(best.material, GRAB_HIGHLIGHT);
             }

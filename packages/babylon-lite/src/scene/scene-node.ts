@@ -9,7 +9,7 @@ import type { IWorldMatrixProvider } from "./parentable.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
 import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrix } from "./world-matrix-state.js";
-import { eulerToQuat, quatToEulerXYZ } from "../math/quat-euler.js";
+import { eulerXYZToQuatTuple, quatToEulerXYZTuple } from "../math/quat-euler.js";
 
 // ─── EulerProxy ──────────────────────────────────────────────────────
 
@@ -50,7 +50,7 @@ export interface SceneNode {
 
 /** Create a live bidirectional EulerProxy backed by the given ObservableQuat.
  *
- *  Euler⇄quaternion is many-to-one and `quatToEulerXYZ` is unstable at gimbal lock
+ *  Euler⇄quaternion is many-to-one and `quatToEulerXYZTuple` is unstable at gimbal lock
  *  (e.g. yaw near ±π/2), so re-deriving Euler from the quaternion on every read makes
  *  per-axis updates (`node.rotation.x = …; node.rotation.y = …`) lossy and can flip the
  *  node. To stay stable, the proxy caches the Euler triple it last applied and reuses it
@@ -65,7 +65,7 @@ export function createEulerProxy(rq: ObservableQuat): EulerProxy {
 
     const sync = (): void => {
         if (rq.version !== syncedVersion) {
-            const e = quatToEulerXYZ(rq.x, rq.y, rq.z, rq.w);
+            const e = quatToEulerXYZTuple(rq.x, rq.y, rq.z, rq.w);
             ex = e[0];
             ey = e[1];
             ez = e[2];
@@ -77,7 +77,7 @@ export function createEulerProxy(rq: ObservableQuat): EulerProxy {
         ex = x;
         ey = y;
         ez = z;
-        const [a, b, c, d] = eulerToQuat(x, y, z);
+        const [a, b, c, d] = eulerXYZToQuatTuple(x, y, z);
         rq.set(a, b, c, d);
         // The cached Euler is authoritative for this quaternion value, so adopt the
         // version we just produced — avoids an immediate lossy re-derive on next read.

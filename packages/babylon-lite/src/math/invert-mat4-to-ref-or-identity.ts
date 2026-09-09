@@ -1,7 +1,7 @@
 import type { Mat4, Mat4Storage } from "./types.js";
 
 /** Write the inverse into an existing matrix, or identity when the input is singular. */
-export function mat4InvertToRefOrIdentity(input: Mat4, result: Mat4): void {
+export function invertMat4ToRefOrIdentity(input: Mat4, result: Mat4): void {
     const m = input as unknown as Mat4Storage;
     const a00 = m[0]!,
         a01 = m[1]!,
