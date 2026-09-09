@@ -178,7 +178,9 @@ The temporary bitmap is always closed after upload or failure. The original
 source is never closed. Without downscaling, the original source is copied
 directly, avoiding an intermediate allocation unless opt-in device-lost
 recovery is active. Recovery retains a factory-owned `ImageBitmap` copy so the
-caller remains free to close its source immediately; that copy is closed when
+caller remains free to close its source immediately. The immutable copy is
+created before upload and is used for both the initial upload and any recovery,
+so mutable canvases and videos cannot replay a later frame. It is closed when
 the texture's final ownership reference is released. This works in workers
 because `ImageBitmap`, `ImageData`, `OffscreenCanvas`, `VideoFrame`, and
 `createImageBitmap` do not require the document DOM.
@@ -493,7 +495,7 @@ loadGltf(engine, url)
 14. **External-image failures** — Propagate resize/decode and upload failures and destroy partially-created GPU textures; never return a fallback.
 15. **External-image tree shaking** — A consumer that imports another root API retains no `createTexture2DFromExternalImage` implementation code.
 16. **Concurrent external-image uploads** — Concurrent mipmapped calls keep validation and out-of-memory errors associated with the invocation that issued them.
-17. **External-image recovery** — Opt-in device-lost recovery uses a factory-owned decoded image, restores upload and sampler settings, and releases the retained image with the texture.
+17. **External-image recovery** — Opt-in device-lost recovery uses one factory-owned immutable image for both initial upload and replay, restores upload and sampler settings, and releases the retained image with the texture.
 18. **Recovery isolation** — External-image consumers that do not enable device-lost recovery retain no capture, recovery-source encoding, or retained-image release implementation.
 
 ---

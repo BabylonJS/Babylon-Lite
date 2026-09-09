@@ -96,7 +96,7 @@ export async function createTexture2DFromExternalImage(engine: EngineContext, so
     const premultiplyAlpha = options.premultiplyAlpha ?? false;
     let uploadSource = source;
     let resized: ImageBitmap | null = null;
-    let texture: GPUTexture | null = null;
+    const allocation: { texture: GPUTexture | null } = { texture: null };
     try {
         if (width !== sourceWidth || height !== sourceHeight) {
             resized = await createImageBitmap(source, {
@@ -122,46 +122,50 @@ export async function createTexture2DFromExternalImage(engine: EngineContext, so
         };
         samplerDesc.maxAnisotropy = samplerDesc.minFilter === "linear" && samplerDesc.magFilter === "linear" && samplerDesc.mipmapFilter === "linear" ? 4 : 1;
 
-        device.pushErrorScope("validation");
-        device.pushErrorScope("out-of-memory");
-        let operationError: unknown;
-        let sampler: GPUSampler | null = null;
-        try {
-            texture = device.createTexture({
-                size: { width, height },
-                format,
-                mipLevelCount: levels,
-                usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
-            });
-            device.queue.copyExternalImageToTexture({ source: uploadSource, flipY: options.invertY ?? true }, { texture, premultipliedAlpha: premultiplyAlpha }, { width, height });
+        const flipY = options.invertY ?? true;
+        const upload = async (resolvedSource: GPUCopyExternalImageSource): Promise<Texture2D> => {
+            device.pushErrorScope("validation");
+            device.pushErrorScope("out-of-memory");
+            let operationError: unknown;
+            let sampler: GPUSampler | null = null;
+            try {
+                const texture = (allocation.texture = device.createTexture({
+                    size: { width, height },
+                    format,
+                    mipLevelCount: levels,
+                    usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
+                }));
+                device.queue.copyExternalImageToTexture({ source: resolvedSource, flipY }, { texture, premultipliedAlpha: premultiplyAlpha }, { width, height });
 
-            if (generate) {
-                generate(engine, texture);
+                if (generate) {
+                    generate(engine, texture);
+                }
+
+                sampler = getOrCreateSampler(engine, samplerDesc);
+            } catch (error) {
+                operationError = error;
             }
 
-            sampler = getOrCreateSampler(engine, samplerDesc);
-        } catch (error) {
-            operationError = error;
-        }
+            const [outOfMemoryError, validationError] = await Promise.all([device.popErrorScope(), device.popErrorScope()]);
+            if (operationError) {
+                throw operationError;
+            }
+            const gpuError = validationError ?? outOfMemoryError;
+            if (gpuError) {
+                throw new Error(`createTexture2DFromExternalImage: GPU upload failed: ${gpuError.message}`, { cause: gpuError });
+            }
+            const texture = allocation.texture;
+            if (!texture || !sampler) {
+                throw new Error("createTexture2DFromExternalImage: texture creation did not produce GPU resources");
+            }
 
-        const [outOfMemoryError, validationError] = await Promise.all([device.popErrorScope(), device.popErrorScope()]);
-        if (operationError) {
-            throw operationError;
-        }
-        const gpuError = validationError ?? outOfMemoryError;
-        if (gpuError) {
-            throw new Error(`createTexture2DFromExternalImage: GPU upload failed: ${gpuError.message}`, { cause: gpuError });
-        }
-        if (!texture || !sampler) {
-            throw new Error("createTexture2DFromExternalImage: texture creation did not produce GPU resources");
-        }
-
-        const result: Texture2D = { texture, view: texture.createView(), sampler, width, height };
-        await engine._dlr?.x(result, uploadSource, width, height, format, levels, samplerDesc, options.invertY ?? true, premultiplyAlpha);
+            return { texture, view: texture.createView(), sampler, width, height };
+        };
+        const result = (await engine._dlr?.x(uploadSource, width, height, format, levels, samplerDesc, flipY, premultiplyAlpha, upload)) ?? (await upload(uploadSource));
         acquireTexture(result);
         return result;
     } catch (error) {
-        texture?.destroy();
+        allocation.texture?.destroy();
         throw error;
     } finally {
         resized?.close();

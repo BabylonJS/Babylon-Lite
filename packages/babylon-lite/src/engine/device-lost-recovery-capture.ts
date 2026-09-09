@@ -88,12 +88,13 @@ function attachRecoveryCapture(engine: EngineContext): void {
     _setTextureReleaseHook(releaseCapturedTexture);
     engine._dlr = {
         t: stamp,
-        async x(tex, source, width, height, format, levels, samplerDesc, flipY, premultipliedAlpha): Promise<void> {
+        async x(source, width, height, format, levels, samplerDesc, flipY, premultipliedAlpha, upload): Promise<Texture2D> {
             const bitmap = await createImageBitmap(source, {
                 premultiplyAlpha: premultipliedAlpha ? "premultiply" : "none",
                 colorSpaceConversion: "none",
             });
             try {
+                const tex = await upload(bitmap);
                 stamp(tex, {
                     kind: "external",
                     bitmap,
@@ -105,6 +106,7 @@ function attachRecoveryCapture(engine: EngineContext): void {
                     flipY,
                     premultipliedAlpha,
                 });
+                return tex;
             } catch (error) {
                 bitmap.close();
                 throw error;

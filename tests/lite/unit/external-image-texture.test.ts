@@ -16,7 +16,10 @@ function fakeSource(width = 8, height = 4): ImageBitmap {
     return { width, height, close: vi.fn() } as unknown as ImageBitmap;
 }
 
-function makeEngine(captured: Captured, options: { copyError?: Error; gpuError?: GPUError; gpuErrors?: GPUError[]; textureMipLevelCount?: number } = {}): EngineContext {
+function makeEngine(
+    captured: Captured,
+    options: { copyError?: Error; gpuError?: GPUError; gpuErrors?: GPUError[]; textureMipLevelCount?: number; errorScopeGate?: Promise<void> } = {}
+): EngineContext {
     const errorScopes: Array<{ filter: GPUErrorFilter; error: GPUError | null }> = [];
     const device = {
         features: new Set<GPUFeatureName>(),
@@ -24,7 +27,12 @@ function makeEngine(captured: Captured, options: { copyError?: Error; gpuError?:
         pushErrorScope: (filter: GPUErrorFilter) => {
             errorScopes.push({ filter, error: null });
         },
-        popErrorScope: () => Promise.resolve(errorScopes.pop()?.error ?? null),
+        popErrorScope: async () => {
+            if (options.errorScopeGate) {
+                await options.errorScopeGate;
+            }
+            return errorScopes.pop()?.error ?? null;
+        },
         createTexture: (descriptor: GPUTextureDescriptor) => {
             captured.createDescs.push(descriptor);
             return {
@@ -277,6 +285,43 @@ describe("createTexture2DFromExternalImage", () => {
             expect(releaseTexture(texture)).toBe(true);
             expect(owned.close).toHaveBeenCalledOnce();
         } finally {
+            recovery.disable();
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it("uploads and recovers the same immutable snapshot when a mutable source changes", async () => {
+        const captured = newCaptured();
+        let releaseScopes!: () => void;
+        const errorScopeGate = new Promise<void>((resolve) => {
+            releaseScopes = resolve;
+        });
+        const engine = makeEngine(captured, { textureMipLevelCount: 1, errorScopeGate });
+        const source = { width: 16, height: 8, frame: "A" } as unknown as GPUCopyExternalImageSource;
+        const snapshot = fakeSource(16, 8);
+        const createBitmap = vi.fn().mockResolvedValue(snapshot);
+        vi.stubGlobal("createImageBitmap", createBitmap);
+        const recovery = enableDeviceLostSceneRecovery(engine);
+
+        try {
+            const pending = createTexture2DFromExternalImage(engine, source, { mipMaps: false });
+            await vi.waitFor(() => expect(captured.copies).toHaveLength(1));
+            (source as unknown as { frame: string }).frame = "B";
+            releaseScopes();
+
+            const texture = await pending;
+            expect(createBitmap).toHaveBeenCalledOnce();
+            expect(captured.copies[0]!.source.source).toBe(snapshot);
+
+            const rebuilt = newCaptured();
+            engine._device = makeEngine(rebuilt, { textureMipLevelCount: 1 })._device;
+            await rebuildTexture2D(engine, texture);
+
+            expect(rebuilt.copies[0]!.source.source).toBe(snapshot);
+            expect(releaseTexture(texture)).toBe(true);
+            expect(snapshot.close).toHaveBeenCalledOnce();
+        } finally {
+            releaseScopes();
             recovery.disable();
             vi.unstubAllGlobals();
         }
