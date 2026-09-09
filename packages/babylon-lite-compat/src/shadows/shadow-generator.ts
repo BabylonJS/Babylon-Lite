@@ -30,6 +30,8 @@ export class ShadowGenerator {
     private readonly _mapSize: number;
     private readonly _light: Light;
     private readonly _casters: AbstractMesh[] = [];
+    private _casterSyncScheduled = false;
+    private _casterSyncDirty = false;
     /** @internal The built Lite shadow generator (set in `_build`). Used to wire NME receivers. */
     public _liteGen: unknown;
 
@@ -67,24 +69,69 @@ export class ShadowGenerator {
         const scene = light.getScene();
         if (scene) {
             scene._registerShadowGenerator(this);
+            scene._registerBeforeRenderFlush(() => this._flushCasterSync());
         }
     }
 
     /** Babylon.js `addShadowCaster(mesh, includeDescendants?)`. */
-    public addShadowCaster(mesh: AbstractMesh, _includeDescendants = true): ShadowGenerator {
-        if (!this._casters.includes(mesh)) {
-            this._casters.push(mesh);
+    public addShadowCaster(mesh: AbstractMesh, includeDescendants = true): ShadowGenerator {
+        let changed = false;
+        for (const caster of this._casterTree(mesh, includeDescendants)) {
+            if (!this._casters.some((existing) => existing._lite === caster._lite)) {
+                this._casters.push(caster);
+                changed = true;
+            }
+        }
+        if (changed) {
+            this._scheduleCasterSync();
         }
         return this;
     }
 
-    /** Babylon.js `removeShadowCaster(mesh)`. */
-    public removeShadowCaster(mesh: AbstractMesh): ShadowGenerator {
-        const i = this._casters.indexOf(mesh);
-        if (i >= 0) {
-            this._casters.splice(i, 1);
+    /** Babylon.js `removeShadowCaster(mesh, includeDescendants?)`. */
+    public removeShadowCaster(mesh: AbstractMesh, includeDescendants = true): ShadowGenerator {
+        let changed = false;
+        for (const caster of this._casterTree(mesh, includeDescendants)) {
+            const index = this._casters.findIndex((existing) => existing._lite === caster._lite);
+            if (index !== -1) {
+                this._casters.splice(index, 1);
+                changed = true;
+            }
+        }
+        if (changed) {
+            this._scheduleCasterSync();
         }
         return this;
+    }
+
+    private _casterTree(mesh: AbstractMesh, includeDescendants: boolean): AbstractMesh[] {
+        return includeDescendants ? [mesh, ...(mesh.getChildMeshes() as AbstractMesh[])] : [mesh];
+    }
+
+    private _scheduleCasterSync(): void {
+        if (!this._liteGen) {
+            return;
+        }
+        this._casterSyncDirty = true;
+        if (this._casterSyncScheduled) {
+            return;
+        }
+        this._casterSyncScheduled = true;
+        queueMicrotask(() => {
+            this._casterSyncScheduled = false;
+            this._flushCasterSync();
+        });
+    }
+
+    private _flushCasterSync(): void {
+        if (!this._casterSyncDirty || !this._liteGen) {
+            return;
+        }
+        this._casterSyncDirty = false;
+        setShadowTaskCasterMeshes(
+            this._liteGen,
+            this._casters.map((caster) => caster._lite as LiteMesh)
+        );
     }
 
     /** Babylon.js `getShadowMap()` — returns a minimal render-list holder for parity. */
@@ -105,6 +152,7 @@ export class ShadowGenerator {
     }
 
     public dispose(): void {
+        this._liteGen = undefined;
         this._light._lite.shadowGenerator = undefined;
     }
 
@@ -164,6 +212,7 @@ export class ShadowGenerator {
 
         (liteLight as { shadowGenerator?: unknown }).shadowGenerator = liteGen;
         this._liteGen = liteGen;
+        this._casterSyncDirty = false;
         const casterMeshes = this._casters.map((m) => m._lite as LiteMesh);
         setShadowTaskCasterMeshes(liteGen, casterMeshes);
     }
