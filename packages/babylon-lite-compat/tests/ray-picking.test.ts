@@ -116,6 +116,31 @@ describe("Scene.createPickingRay", () => {
         expect(ray.direction.length()).toBeCloseTo(1);
         expect(camera).toBe(scene.activeCamera);
     });
+
+    it("keeps large-world picking rays in absolute space for transformed meshes", () => {
+        const { engine, scene, box } = createPickScene();
+        const canvas = engine.getRenderingCanvas() as { width: number; height: number };
+        canvas.width = 800;
+        canvas.height = 600;
+        const target = new Vector3(10_000, 0, 0);
+        const camera = new ArcRotateCamera("camera", 0, Math.PI / 2, 10, target, scene);
+
+        // This is the camera/engine state established after useLargeWorldRendering
+        // enables Lite's floating-origin render path.
+        engine._lite.useFloatingOrigin = true;
+        camera._lite._useFloatingOrigin = true;
+        box.position = target;
+        box.rotation.y = Math.PI / 4;
+
+        const ray = scene.createPickingRay(400, 300);
+        const cameraSpaceRay = scene.createPickingRay(400, 300, null, camera, true);
+        const hit = scene.pickWithRay(ray);
+
+        expect(ray.origin.x).toBeGreaterThan(10_009);
+        expect(cameraSpaceRay.origin.x).toBe(0);
+        expect(hit.hit).toBe(true);
+        expect(hit.pickedMesh).toBe(box);
+    });
 });
 
 describe("Scene.pickWithRay", () => {

@@ -30,6 +30,7 @@ import {
     pickMeshesWithRay as litePickWithRay,
     createPickingRay as liteCreatePickingRay,
     resolveCameraViewport,
+    mat4Invert,
 } from "babylon-lite";
 import type {
     SceneContext,
@@ -847,7 +848,18 @@ export class Scene extends AbstractScene {
         const height = this._engine.getRenderHeight();
         const viewport = resolveCameraViewport(cameraToUse._lite, width, height);
         const worldMatrix = world ?? Matrix.Identity();
-        const viewMatrix = cameraViewSpace ? Matrix.Identity() : cameraToUse.getViewMatrix();
+        let viewMatrix = Matrix.Identity();
+        if (!cameraViewSpace) {
+            if (cameraToUse._lite._useFloatingOrigin) {
+                const absoluteView = mat4Invert(cameraToUse._lite.worldMatrix);
+                if (!absoluteView) {
+                    return Ray.Zero();
+                }
+                viewMatrix = Matrix.FromArray(absoluteView);
+            } else {
+                viewMatrix = cameraToUse.getViewMatrix();
+            }
+        }
         const transform = worldMatrix.multiply(viewMatrix).multiply(cameraToUse.getProjectionMatrix());
         const liteRay = liteCreatePickingRay(x / scale - viewport.x, y / scale - viewport.y, transform.m as unknown as Mat4, viewport.width, viewport.height);
         if (!liteRay) {
