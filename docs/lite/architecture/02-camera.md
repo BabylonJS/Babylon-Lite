@@ -94,9 +94,31 @@ export interface ArcRotatePointerMappings {
     secondaryButton?: ArcRotatePointerAction;
 }
 
+/** KeyboardEvent.code mappings. Omitted fields retain the Arrow-key defaults. */
+export interface ArcRotateKeyboardMappings {
+    left?: readonly string[];
+    right?: readonly string[];
+    up?: readonly string[];
+    down?: readonly string[];
+}
+
+/** Optional keyboard configuration. Supplying this object enables keyboard input. */
+export interface ArcRotateKeyboardOptions {
+    /** Key mappings, matched against KeyboardEvent.code. */
+    keys?: ArcRotateKeyboardMappings;
+    /** Rotation divisor. Higher values rotate more slowly. Default: 100. */
+    angularSensitivity?: number;
+    /** Panning divisor. Higher values pan more slowly. Default: 50. */
+    panningSensitivity?: number;
+    /** Zooming divisor. Higher values zoom more slowly. Default: 25. */
+    zoomingSensitivity?: number;
+}
+
 export interface AttachControlOptions {
     /** Non-touch pointer-button mappings. Touch remains one-finger rotate + pinch zoom. */
     pointerMappings?: ArcRotatePointerMappings;
+    /** Opt-in keyboard controls. `true` uses legacy defaults; an object enables and configures them. */
+    keyboard?: boolean | ArcRotateKeyboardOptions;
     shouldHandlePointerDown?: (event: PointerEvent) => boolean;
     isExternalDragActive?: () => boolean;
     isExternalPickPending?: () => boolean;
@@ -117,6 +139,13 @@ fixed for that drag. Both actions use the existing inertial paths and pointer
 capture; wheel input is always zoom and is not remappable. Touch ignores
 `pointerMappings`: one finger rotates and two fingers pinch-zoom exactly as in
 the default controls.
+
+Keyboard input is disabled when `keyboard` is omitted or `false`. Passing
+`keyboard: true` enables the legacy Arrow-key behavior. Passing an object also
+enables keyboard input and may override any direction's `KeyboardEvent.code`
+list independently; an empty list disables that direction. Sensitivities are
+divisors, so the defaults produce angular, panning, and zooming increments of
+`1 / 100`, `1 / 50`, and `1 / 25` per rendered frame respectively.
 
 ### `free-camera.ts`
 
@@ -474,11 +503,36 @@ on touchmove (2 fingers):  dist = distance between fingers
                             camera.radius = max(0.01, camera.radius)
 ```
 
+#### Keyboard (opt-in)
+
+`keydown` records the event's `code` and current modifier state; `keyup`
+removes it. `blur` and cleanup clear all held-key and modifier state.
+Recognized mappings prevent browser Arrow-key scrolling. Events with `metaKey`
+are not recorded, and holding Meta suppresses any already-held mapping. Shift
+does not alter the mapping. Ctrl takes precedence over Alt.
+
+At the start of every `applyInertia()` call, each held mapped key adds one
+legacy-compatible increment:
+
+| Held mapping | No modifier                      | Ctrl                         | Alt without Ctrl                 |
+| ------------ | -------------------------------- | ---------------------------- | -------------------------------- |
+| left         | `inertialAlphaOffset -= 1 / 100` | `inertialPanningX -= 1 / 50` | same as no modifier              |
+| right        | `inertialAlphaOffset += 1 / 100` | `inertialPanningX += 1 / 50` | same as no modifier              |
+| up           | `inertialBetaOffset -= 1 / 100`  | `inertialPanningY += 1 / 50` | `inertialRadiusOffset += 1 / 25` |
+| down         | `inertialBetaOffset += 1 / 100`  | `inertialPanningY -= 1 / 50` | `inertialRadiusOffset -= 1 / 25` |
+
+The configured `angularSensitivity`, `panningSensitivity`, and
+`zoomingSensitivity` replace `100`, `50`, and `25`. Keyboard input feeds the
+same inertial offsets as pointer and wheel input before those offsets are
+integrated and decayed; it does not create another animation loop.
+
 ### Per-Frame Inertia Application (`applyInertia`)
 
-Called each frame via `scene._beforeRender` (or fallback RAF if no scene passed):
+Called each frame via `scene._beforeRender`:
 
 ```
+accumulate held keyboard input into inertial offsets (when enabled)
+
 // Rotation
 alpha += inertialAlphaOffset
 beta  += inertialBetaOffset
@@ -509,13 +563,11 @@ if |offset| < PANNING_EPSILON: offset = 0
 
 When `scene` is provided to `attachControl`:
 
-- `applyInertia` is registered on `(scene as SceneContextInternal)._beforeRender` — single RAF chain.
+- `applyInertia` is registered on `scene._beforeRender` — single RAF chain.
 - Cleanup removes the callback from `_beforeRender`.
 
-When `scene` is omitted (fallback):
-
-- `applyInertia` self-reschedules via `requestAnimationFrame`.
-- Cleanup calls `cancelAnimationFrame`.
+When `scene` is omitted, inputs can accumulate inertial offsets but no
+standalone animation loop is created.
 
 ### Event Registration
 
@@ -526,9 +578,13 @@ When `scene` is omitted (fallback):
 | `pointerup`   | `onPointerUp`   | —                             |
 | `wheel`       | `onWheel`       | `{ passive: false }`          |
 | `contextmenu` | `onContextMenu` | — (prevents right-click menu) |
-| `touchstart`  | `onTouchStart`  | `{ passive: true }`           |
-| `touchmove`   | `onTouchMove`   | `{ passive: true }`           |
+| `touchstart`  | `onTouchStart`  | `{ passive: false }`          |
+| `touchmove`   | `onTouchMove`   | `{ passive: false }`          |
 | `touchend`    | `onTouchEnd`    | —                             |
+| `gesture*`    | `onGesture`     | `{ passive: false }`          |
+| `keydown`     | `onKeyDown`     | — (keyboard enabled only)     |
+| `keyup`       | `onKeyUp`       | — (keyboard enabled only)     |
+| `blur`        | `onBlur`        | — (keyboard enabled only)     |
 
 Pointer capture (`setPointerCapture`/`releasePointerCapture`) keeps drags active outside canvas.
 
@@ -557,6 +613,30 @@ Non-touch pointers include mouse and pen input. Touch pointer events deliberatel
 bypass this mapping so one-finger orbit and two-finger pinch zoom are stable.
 Wheel zoom, external-interaction guards, pointer capture, and cleanup do not
 depend on the mapping.
+
+Keyboard controls are opt-in:
+
+```typescript
+attachControl(camera, canvas, scene, { keyboard: true });
+```
+
+Custom mappings and sensitivities remain local to the attachment:
+
+```typescript
+attachControl(camera, canvas, scene, {
+    keyboard: {
+        keys: {
+            left: ["KeyA"],
+            right: ["KeyD"],
+            up: ["KeyW"],
+            down: ["KeyS"],
+        },
+        angularSensitivity: 200,
+        panningSensitivity: 100,
+        zoomingSensitivity: 50,
+    },
+});
+```
 
 ---
 
@@ -662,6 +742,7 @@ Cleanup removes all 6 event listeners and the `_beforeRender` callback.
 | Animate path `"ortho.halfHeight"`                    | `Animation` on `orthoTop` / `orthoBottom` / …                              |
 | `disableOrthographicCamera(camera)`                  | `camera.mode = Camera.PERSPECTIVE_CAMERA`                                  |
 | `attachControl(camera, canvas, scene)`               | `camera.attachControl(canvas, true)`                                       |
+| `attachControl(..., { keyboard: true })`             | `ArcRotateCameraKeyboardMoveInput`                                         |
 | `angularSensibility = 1000`                          | `camera.inputs.attached.pointers.angularSensibilityX/Y`                    |
 | `panningSensibility = 50`                            | `camera.inputs.attached.pointers.panningSensibility`                       |
 | `wheelPrecision = 3`                                 | `camera.inputs.attached.mousewheel.wheelPrecision`                         |
@@ -707,6 +788,11 @@ Cleanup removes all 6 event listeners and the `_beforeRender` callback.
 | `cleanup removes all listeners + beforeRender` | After cleanup, events and RAF hook removed                                                        |
 | `primary/secondary mappings are independent`   | Either button can select rotate or pan without changing the other button                          |
 | `custom mappings preserve touch`               | One-finger touch still rotates and two-finger pinch still zooms                                   |
+| `keyboard defaults and modifiers`              | Arrow rotation, Ctrl panning, Alt vertical zoom, Ctrl-over-Alt precedence                         |
+| `keyboard lifecycle`                           | Held input repeats per frame; keyup, blur, and cleanup stop further accumulation                  |
+| `keyboard filtering`                           | Meta-modified mappings are ignored; Shift does not alter mappings                                 |
+| `custom keyboard options`                      | Direction code lists and all three sensitivity divisors override independently                    |
+| `keyboard disabled by default`                 | No keyboard listeners or held-key input unless `keyboard` is requested                            |
 | **FreeCamera**                                 |                                                                                                   |
 | `initial yaw/pitch from position→target`       | Verify atan2 computation                                                                          |
 | `WASD movement in local space`                 | W moves along +Z local, A along −X local                                                          |

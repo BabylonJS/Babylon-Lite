@@ -17,6 +17,30 @@ export interface ArcRotatePointerMappings {
     secondaryButton?: ArcRotatePointerAction;
 }
 
+/** Keyboard direction mappings, matched against {@link KeyboardEvent.code}. */
+export interface ArcRotateKeyboardMappings {
+    /** Rotate or pan left. Default: `["ArrowLeft"]`. */
+    left?: readonly string[];
+    /** Rotate or pan right. Default: `["ArrowRight"]`. */
+    right?: readonly string[];
+    /** Rotate up, pan up, or zoom in. Default: `["ArrowUp"]`. */
+    up?: readonly string[];
+    /** Rotate down, pan down, or zoom out. Default: `["ArrowDown"]`. */
+    down?: readonly string[];
+}
+
+/** Configuration for opt-in arc-rotate keyboard controls. */
+export interface ArcRotateKeyboardOptions {
+    /** Direction mappings. Omitted fields retain their Arrow-key defaults. */
+    keys?: ArcRotateKeyboardMappings;
+    /** Rotation divisor; higher values rotate more slowly. Default: `100`. */
+    angularSensitivity?: number;
+    /** Panning divisor; higher values pan more slowly. Default: `50`. */
+    panningSensitivity?: number;
+    /** Zooming divisor; higher values zoom more slowly. Default: `25`. */
+    zoomingSensitivity?: number;
+}
+
 /**
  * Optional hooks that let an {@link attachControl} caller defer pointer
  * gestures to an external interactor (typically a gizmo pointer-drag
@@ -30,6 +54,12 @@ export interface AttachControlOptions {
      * Touch remains one-finger rotate plus two-finger pinch zoom.
      */
     pointerMappings?: ArcRotatePointerMappings;
+    /**
+     * Opt-in keyboard controls. Pass `true` for legacy-compatible Arrow-key
+     * defaults, a configuration object to customize them, or omit/false to
+     * leave keyboard controls disabled.
+     */
+    keyboard?: boolean | ArcRotateKeyboardOptions;
     /** Optional predicate consulted on every pointer-down.  When it returns
      *  false the camera ignores that gesture (no rotate / pan).  Used to defer
      *  to gizmo interaction so pressing or dragging a gizmo doesn't also orbit
@@ -165,10 +195,13 @@ export function setCameraLimits(camera: ArcRotateCamera, limits: ArcRotateCamera
  * - Secondary-button drag: pan (shift target) with momentum by default
  * - Wheel: zoom (radius) with momentum
  * - Pinch: zoom (touch, direct — no inertia)
+ * - Keyboard (opt-in): Arrow-key rotate, Ctrl+Arrow pan, Alt+Up/Down zoom
  *
  * Mouse and pen button actions can be configured independently through
  * {@link AttachControlOptions.pointerMappings}. Touch and wheel behavior are
  * fixed so remapping desktop pointer buttons cannot alter mobile gestures.
+ * Keyboard mappings and sensitivities can be configured through
+ * {@link AttachControlOptions.keyboard}; keyboard input is disabled by default.
  *
  * Input handlers accumulate into the camera's inertial offset properties.
  * Inertia is applied each frame via scene._beforeRender (the engine's render
@@ -182,10 +215,11 @@ export function setCameraLimits(camera: ArcRotateCamera, limits: ArcRotateCamera
  * ### Lifecycle / cleanup (important)
  *
  * The returned function detaches everything this call attached: it removes the
- * canvas DOM listeners (pointer/wheel/contextmenu/touch/gesture) and, when a `scene` was
- * supplied, its `_beforeRender` inertia hook. It is idempotent — calling it more
- * than once is safe (the hook is removed only if still present, and removing a
- * DOM listener twice is a no-op).
+ * canvas DOM listeners (pointer/wheel/contextmenu/touch/gesture and opt-in
+ * keyboard/blur listeners), clears held keyboard state, and, when a `scene` was
+ * supplied, removes its `_beforeRender` inertia hook. It is idempotent — calling
+ * it more than once is safe (the hook is removed only if still present, and
+ * removing a DOM listener twice is a no-op).
  *
  * The controls are **not** automatically tied to the scene's lifetime. Passing a
  * `scene` only enables inertia (it registers the per-frame hook); it does **not**
@@ -229,6 +263,18 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
     let isPanning = false;
     let lastX = 0;
     let lastY = 0;
+
+    const keyboard = options?.keyboard;
+    const keyboardOptions = typeof keyboard === "object" ? keyboard : undefined;
+    const keyboardEnabled = keyboard === true || keyboardOptions !== undefined;
+    const heldKeys = keyboardEnabled ? new Set<string>() : undefined;
+    const keyboardMappings = keyboardOptions?.keys;
+    const angularKeyboardSensitivity = keyboardOptions?.angularSensitivity ?? 100;
+    const panningKeyboardSensitivity = keyboardOptions?.panningSensitivity ?? 50;
+    const zoomingKeyboardSensitivity = keyboardOptions?.zoomingSensitivity ?? 25;
+    let ctrlKey = false;
+    let altKey = false;
+    let metaKey = false;
 
     // Touch state for pinch-zoom
     const activeTouches = new Map<number, { x: number; y: number }>();
@@ -396,8 +442,83 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         e.preventDefault();
     }
 
+    function matchesKeyboardMapping(code: string, mapping: readonly string[] | undefined, fallback: string): boolean {
+        return mapping ? mapping.includes(code) : code === fallback;
+    }
+
+    function isKeyboardDirection(code: string): boolean {
+        return (
+            matchesKeyboardMapping(code, keyboardMappings?.left, "ArrowLeft") ||
+            matchesKeyboardMapping(code, keyboardMappings?.right, "ArrowRight") ||
+            matchesKeyboardMapping(code, keyboardMappings?.up, "ArrowUp") ||
+            matchesKeyboardMapping(code, keyboardMappings?.down, "ArrowDown")
+        );
+    }
+
+    function updateKeyboardModifiers(e: KeyboardEvent): void {
+        ctrlKey = e.ctrlKey;
+        altKey = e.altKey;
+        metaKey = e.metaKey;
+    }
+
+    function onKeyDown(e: KeyboardEvent): void {
+        updateKeyboardModifiers(e);
+        if (!e.metaKey && isKeyboardDirection(e.code)) {
+            heldKeys?.add(e.code);
+            e.preventDefault();
+        }
+    }
+
+    function onKeyUp(e: KeyboardEvent): void {
+        updateKeyboardModifiers(e);
+        heldKeys?.delete(e.code);
+        if (!e.metaKey && isKeyboardDirection(e.code)) {
+            e.preventDefault();
+        }
+    }
+
+    function clearKeyboardState(): void {
+        heldKeys?.clear();
+        ctrlKey = false;
+        altKey = false;
+        metaKey = false;
+    }
+
+    function hasHeldKey(keys: Set<string>, mapping: readonly string[] | undefined, fallback: string): boolean {
+        if (mapping) {
+            return mapping.some((code) => keys.has(code));
+        }
+        return keys.has(fallback);
+    }
+
+    function applyKeyboardInput(): void {
+        if (!heldKeys || metaKey) {
+            return;
+        }
+
+        const left = hasHeldKey(heldKeys, keyboardMappings?.left, "ArrowLeft");
+        const right = hasHeldKey(heldKeys, keyboardMappings?.right, "ArrowRight");
+        const up = hasHeldKey(heldKeys, keyboardMappings?.up, "ArrowUp");
+        const down = hasHeldKey(heldKeys, keyboardMappings?.down, "ArrowDown");
+
+        if (ctrlKey) {
+            camera.inertialPanningX += ((right ? 1 : 0) - (left ? 1 : 0)) / panningKeyboardSensitivity;
+            camera.inertialPanningY += ((up ? 1 : 0) - (down ? 1 : 0)) / panningKeyboardSensitivity;
+            return;
+        }
+
+        camera.inertialAlphaOffset += ((right ? 1 : 0) - (left ? 1 : 0)) / angularKeyboardSensitivity;
+        if (altKey) {
+            camera.inertialRadiusOffset += ((up ? 1 : 0) - (down ? 1 : 0)) / zoomingKeyboardSensitivity;
+        } else {
+            camera.inertialBetaOffset += ((down ? 1 : 0) - (up ? 1 : 0)) / angularKeyboardSensitivity;
+        }
+    }
+
     /** Per-frame: apply inertial offsets to camera properties and decay them. */
     function applyInertia(): void {
+        applyKeyboardInput();
+
         // --- Rotation inertia ---
         if (camera.inertialAlphaOffset !== 0 || camera.inertialBetaOffset !== 0) {
             camera.alpha += camera.inertialAlphaOffset;
@@ -475,6 +596,12 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         ["gesturechange", onGesture as EventListener, { passive: false }],
         ["gestureend", onGesture as EventListener, { passive: false }],
     ];
+    if (keyboardEnabled) {
+        listeners.push(["keydown", onKeyDown as EventListener], ["keyup", onKeyUp as EventListener], ["blur", clearKeyboardState as EventListener]);
+        if (!canvas.hasAttribute("tabindex")) {
+            canvas.tabIndex = 0;
+        }
+    }
     for (const [ev, h, opts] of listeners) {
         canvas.addEventListener(ev, h, opts);
     }
@@ -489,5 +616,6 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         for (const [ev, h] of listeners) {
             canvas.removeEventListener(ev, h);
         }
+        clearKeyboardState();
     };
 }
