@@ -26,6 +26,8 @@ import type { EngineContext, Mesh as LiteMesh } from "babylon-lite";
 import { DirectionalLight, type Light } from "../lights/lights.js";
 import type { AbstractMesh } from "../meshes/meshes.js";
 
+type LiteShadowGenerator = ReturnType<typeof createEsmDirectionalShadowGenerator>;
+
 export class ShadowGenerator {
     private readonly _mapSize: number;
     private readonly _light: Light;
@@ -33,7 +35,7 @@ export class ShadowGenerator {
     private _casterSyncScheduled = false;
     private _casterSyncDirty = false;
     /** @internal The built Lite shadow generator (set in `_build`). Used to wire NME receivers. */
-    public _liteGen: unknown;
+    public _liteGen: LiteShadowGenerator | undefined;
 
     public getClassName(): string {
         return "ShadowGenerator";
