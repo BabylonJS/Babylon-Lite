@@ -88,6 +88,10 @@ describe("Camera projection mode", () => {
         const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero());
 
         expect(camera.mode).toBe(Camera.PERSPECTIVE_CAMERA);
+        expect(camera.orthoLeft).toBeNull();
+        expect(camera.orthoRight).toBeNull();
+        expect(camera.orthoBottom).toBeNull();
+        expect(camera.orthoTop).toBeNull();
         expect(camera.getProjectionMatrix().m[15]).toBe(0);
 
         camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
@@ -101,28 +105,74 @@ describe("Camera projection mode", () => {
         expect(camera.getProjectionMatrix().m[15]).toBe(0);
     });
 
-    it("preserves existing orthographic bounds when the mode is unchanged", () => {
+    it("applies bounds configured before orthographic mode is enabled", () => {
+        const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero());
+        camera.orthoLeft = -8;
+        camera.orthoRight = 8;
+        camera.orthoBottom = -4.5;
+        camera.orthoTop = 4.5;
+
+        camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
+
+        expect(camera._lite.ortho?.left).toBe(-8);
+        expect(camera._lite.ortho?.right).toBe(8);
+        expect(camera._lite.ortho?.bottom).toBe(-4.5);
+        expect(camera._lite.ortho?.top).toBe(4.5);
+    });
+
+    it("forwards active bounds and null through Lite's live accessors", () => {
+        const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero());
+        camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
+        const initialProjection = camera.getProjectionMatrix().clone();
+
+        camera.orthoLeft = -7;
+
+        expect(camera._lite.ortho?.left).toBe(-7);
+        expect(camera.getProjectionMatrix().equals(initialProjection)).toBe(false);
+
+        camera.orthoLeft = null;
+
+        expect(camera._lite.ortho?.left).toBeNull();
+        expect(camera.orthoLeft).toBeNull();
+    });
+
+    it("preserves configured bounds when the mode changes or is reassigned", () => {
         const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero());
         camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
         const bounds = camera._lite.ortho!;
-        bounds.halfHeight = 4;
-        bounds.left = -7;
+        camera.orthoLeft = -7;
 
         camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
 
         expect(camera._lite.ortho).toBe(bounds);
-        expect(camera._lite.ortho?.halfHeight).toBe(4);
+        expect(camera._lite.ortho?.left).toBe(-7);
+
+        camera.mode = Camera.PERSPECTIVE_CAMERA;
+        expect(camera.orthoLeft).toBe(-7);
+
+        camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
         expect(camera._lite.ortho?.left).toBe(-7);
     });
 
-    it("reflects native projection changes on adopted cameras", () => {
+    it("reflects native projection bounds on adopted cameras", () => {
         const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero());
+        enableOrthographicCamera(camera._lite, { halfHeight: 3, left: -6, right: 6, bottom: -3, top: 3 });
         const adopted = ArcRotateCamera._adopt("adopted", camera._lite);
-
-        enableOrthographicCamera(camera._lite, { halfHeight: 3 });
 
         expect(adopted.mode).toBe(Camera.ORTHOGRAPHIC_CAMERA);
         expect(adopted._lite.ortho?.halfHeight).toBe(3);
+        expect(adopted.orthoLeft).toBe(-6);
+        expect(adopted.orthoRight).toBe(6);
+        expect(adopted.orthoBottom).toBe(-3);
+        expect(adopted.orthoTop).toBe(3);
+
+        adopted.mode = Camera.PERSPECTIVE_CAMERA;
+        adopted.mode = Camera.ORTHOGRAPHIC_CAMERA;
+
+        expect(adopted.orthoLeft).toBe(-6);
+        expect(adopted.orthoRight).toBe(6);
+        expect(adopted.orthoBottom).toBe(-3);
+        expect(adopted.orthoTop).toBe(3);
     });
 
     it("rejects unknown projection modes", () => {
