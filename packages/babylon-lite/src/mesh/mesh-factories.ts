@@ -336,7 +336,7 @@ export function updateMeshGeometryCapacity(
     tangents: Float32Array | undefined,
     colors: Float32Array | undefined,
     reserveFactor: number | undefined,
-    ranges: MeshGeometryUpdateRanges
+    ranges?: MeshGeometryUpdateRanges
 ): MeshGeometryCapacityResult;
 export function updateMeshGeometryCapacity(
     engine: EngineContext,
