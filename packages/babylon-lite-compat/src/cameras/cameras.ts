@@ -33,6 +33,7 @@ import type {
 import { unsupported } from "../error.js";
 import { liteBackedVector3, Vector3 } from "../math/vector.js";
 import { Matrix } from "../math/matrix.js";
+import { Viewport } from "../math/size.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
 
@@ -72,6 +73,19 @@ export abstract class Camera extends Node {
         this._lite.farPlane = value;
     }
 
+    public get viewport(): Viewport {
+        const viewport = this._lite.viewport;
+        if (viewport instanceof Viewport) {
+            return viewport;
+        }
+        const compatViewport = viewport ? new Viewport(viewport.x, viewport.y, viewport.width, viewport.height) : new Viewport(0, 0, 1, 1);
+        this._lite.viewport = compatViewport;
+        return compatViewport;
+    }
+    public set viewport(value: Viewport) {
+        this._lite.viewport = value;
+    }
+
     /** World-space position of the camera. */
     public get globalPosition(): Vector3 {
         const p = getCameraPosition(this._lite);
@@ -93,7 +107,8 @@ export abstract class Camera extends Node {
         const canvas = scene?.getEngine().getRenderingCanvas() as { width?: number; height?: number } | undefined;
         const w = canvas?.width ?? 1;
         const h = canvas?.height ?? 1;
-        return h !== 0 ? w / h : 1;
+        const viewport = this._lite.viewport;
+        return h !== 0 && (!viewport || viewport.height !== 0) ? (w / h) * (viewport ? viewport.width / viewport.height : 1) : 1;
     }
 
     public abstract attachControl(canvas: HTMLCanvasElement, noPreventDefault?: boolean): void;
