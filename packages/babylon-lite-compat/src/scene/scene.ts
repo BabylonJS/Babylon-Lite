@@ -31,6 +31,7 @@ import {
     createPickingRay as liteCreatePickingRay,
     resolveCameraViewport,
     mat4Invert,
+    mat4Multiply,
 } from "babylon-lite";
 import type {
     SceneContext,
@@ -847,21 +848,22 @@ export class Scene extends AbstractScene {
         const width = this._engine.getRenderWidth();
         const height = this._engine.getRenderHeight();
         const viewport = resolveCameraViewport(cameraToUse._lite, width, height);
-        const worldMatrix = world ?? Matrix.Identity();
-        let viewMatrix = Matrix.Identity();
-        if (!cameraViewSpace) {
-            if (cameraToUse._lite._useFloatingOrigin) {
-                const absoluteView = mat4Invert(cameraToUse._lite.worldMatrix);
-                if (!absoluteView) {
-                    return Ray.Zero();
-                }
-                viewMatrix = Matrix.FromArray(absoluteView);
-            } else {
-                viewMatrix = cameraToUse.getViewMatrix();
+        const worldMatrix = (world ?? Matrix.Identity()).m as unknown as Mat4;
+        const projectionMatrix = cameraToUse.getProjectionMatrix().m as unknown as Mat4;
+        let viewMatrix = Matrix.Identity().m as unknown as Mat4;
+        if (!cameraViewSpace && cameraToUse._lite._useFloatingOrigin) {
+            const absoluteView = mat4Invert(cameraToUse._lite.worldMatrix);
+            if (!absoluteView) {
+                return Ray.Zero();
             }
+            viewMatrix = absoluteView;
+        } else if (!cameraViewSpace) {
+            viewMatrix = cameraToUse.getViewMatrix().m as unknown as Mat4;
         }
-        const transform = worldMatrix.multiply(viewMatrix).multiply(cameraToUse.getProjectionMatrix());
-        const liteRay = liteCreatePickingRay(x / scale - viewport.x, y / scale - viewport.y, transform.m as unknown as Mat4, viewport.width, viewport.height);
+        // Compat matrices use Babylon.js's row-vector multiplication order, while
+        // Lite's kernel is column-major, so reverse the operands for the same bytes.
+        const transform = mat4Multiply(projectionMatrix, mat4Multiply(viewMatrix, worldMatrix));
+        const liteRay = liteCreatePickingRay(x / scale - viewport.x, y / scale - viewport.y, transform, viewport.width, viewport.height);
         if (!liteRay) {
             return Ray.Zero();
         }

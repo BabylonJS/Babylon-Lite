@@ -1,6 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { addToScene, createBox as createLiteBox, pickMeshesWithRay as litePickMeshesWithRay } from "babylon-lite";
 
+import { _resetMatrixAllocatorForTests, _setHpmAllocator } from "../../babylon-lite/src/math/_matrix-allocator";
+import { allocateF64Mat4 } from "../../babylon-lite/src/math/_mat4-storage-f64";
 import { ArcRotateCamera, LiteCompatError, Matrix, MeshBuilder, NullEngine, Ray, Scene, Vector3, Viewport } from "../src/index";
 
 function createPickScene(): { engine: NullEngine; scene: Scene; box: ReturnType<typeof MeshBuilder.CreateBox> } {
@@ -21,6 +23,8 @@ function createPickScene(): { engine: NullEngine; scene: Scene; box: ReturnType<
 }
 
 describe("Scene.createPickingRay", () => {
+    afterEach(() => _resetMatrixAllocatorForTests());
+
     function createRayScene(): { engine: NullEngine; scene: Scene; camera: ArcRotateCamera } {
         const engine = new NullEngine();
         const canvas = engine.getRenderingCanvas() as { width: number; height: number };
@@ -117,29 +121,24 @@ describe("Scene.createPickingRay", () => {
         expect(camera).toBe(scene.activeCamera);
     });
 
-    it("keeps large-world picking rays in absolute space for transformed meshes", () => {
-        const { engine, scene, box } = createPickScene();
-        const canvas = engine.getRenderingCanvas() as { width: number; height: number };
-        canvas.width = 800;
-        canvas.height = 600;
-        const target = new Vector3(10_000, 0, 0);
-        const camera = new ArcRotateCamera("camera", 0, Math.PI / 2, 10, target, scene);
-
-        // This is the camera/engine state established after useLargeWorldRendering
-        // enables Lite's floating-origin render path.
+    it("preserves HPM precision for absolute and transformed-world picking rays", () => {
+        _setHpmAllocator(allocateF64Mat4);
+        const { engine, scene, camera } = createRayScene();
+        const cameraX = 1_000_000_001;
         engine._lite.useFloatingOrigin = true;
         camera._lite._useFloatingOrigin = true;
-        box.position = target;
-        box.rotation.y = Math.PI / 4;
+        camera.alpha = -Math.PI / 2;
+        camera._lite.target.x = cameraX;
 
-        const ray = scene.createPickingRay(400, 300);
+        expect(camera._lite.worldMatrix).toBeInstanceOf(Float64Array);
+
+        const absoluteRay = scene.createPickingRay(400, 300);
+        const localRay = scene.createPickingRay(400, 300, Matrix.Translation(1_000_000_000, 0, 0));
         const cameraSpaceRay = scene.createPickingRay(400, 300, null, camera, true);
-        const hit = scene.pickWithRay(ray);
 
-        expect(ray.origin.x).toBeGreaterThan(10_009);
+        expect(absoluteRay.origin.x).toBe(cameraX);
+        expect(localRay.origin.x).toBe(1);
         expect(cameraSpaceRay.origin.x).toBe(0);
-        expect(hit.hit).toBe(true);
-        expect(hit.pickedMesh).toBe(box);
     });
 });
 
