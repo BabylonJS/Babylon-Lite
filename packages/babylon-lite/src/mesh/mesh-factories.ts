@@ -45,6 +45,44 @@ export interface MeshGeometryCapacityResult {
     readonly indexCapacity: number;
 }
 
+/** A contiguous range in the complete replacement arrays, in vertices or index elements (not bytes). */
+export interface MeshGeometryRange {
+    readonly offset: number;
+    readonly count: number;
+}
+
+/** Explicit uploads for an in-capacity update. Vertex ranges apply to every present attribute.
+ *  Both lists are required; an empty list uploads nothing for that kind. Include all changed and newly
+ *  added elements. Values outside the ranges must already match the GPU, including after GPU-only edits.
+ *  Arrays still describe the complete active geometry for bounds, picking and recovery. They may be
+ *  mutated in place: no comparison with previously retained array values is performed.
+ *  Capacity growth uploads the complete geometry instead; removed index elements are cleared automatically. */
+export interface MeshGeometryUpdateRanges {
+    readonly vertices: readonly MeshGeometryRange[];
+    readonly indices: readonly MeshGeometryRange[];
+}
+
+function validateGeometryRanges(ranges: readonly MeshGeometryRange[], length: number): void {
+    for (const { offset, count } of ranges) {
+        if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(count) || count < 0 || offset + count > length) {
+            throw new Error("mesh geometry update requires valid ranges within the active geometry");
+        }
+    }
+}
+
+function writeGeometryRanges(queue: GPUQueue, buffer: GPUBuffer, values: Float32Array | Uint32Array, components: number, ranges?: readonly MeshGeometryRange[]): void {
+    if (!ranges) {
+        queue.writeBuffer(buffer, 0, values.buffer as ArrayBuffer, values.byteOffset, values.byteLength);
+        return;
+    }
+    for (const { offset, count } of ranges) {
+        if (count > 0) {
+            const byteOffset = offset * components * 4;
+            queue.writeBuffer(buffer, byteOffset, values.buffer as ArrayBuffer, values.byteOffset + byteOffset, count * components * 4);
+        }
+    }
+}
+
 function retainMeshGeometry(
     engine: EngineContext,
     mesh: Mesh,
@@ -271,8 +309,10 @@ export function updateMeshGeometry(
     _markWorldMatrixDirty(mesh);
 }
 
-/** Update changing triangle-list geometry while retaining grow-only GPU buffer capacity. An internal indexed-
- *  indirect argument keeps the live draw count exact while cached render bundles stay stable. */
+/** Update changing triangle-list geometry while retaining grow-only GPU buffer capacity. Unused index
+ *  capacity is zeroed into degenerate triangles so cached render bundles stay stable.
+ *  Optional explicit ranges limit in-capacity GPU uploads; CPU bounds and retained geometry still use
+ *  the complete supplied arrays. Omit ranges for a full upload. Layout changes require resizeMeshGeometry. */
 export function updateMeshGeometryCapacity(
     engine: EngineContext,
     mesh: Mesh,
@@ -283,12 +323,17 @@ export function updateMeshGeometryCapacity(
     uvs2?: Float32Array,
     tangents?: Float32Array,
     colors?: Float32Array,
-    reserveFactor = 1.25
+    reserveFactor = 1.25,
+    ranges?: MeshGeometryUpdateRanges
 ): MeshGeometryCapacityResult {
     if (!Number.isFinite(reserveFactor) || reserveFactor < 1) {
         throw new Error("updateMeshGeometryCapacity requires reserveFactor >= 1");
     }
     const vertexCount = validateCapacityGeometry(mesh, positions, normals, indices, uvs, uvs2, tangents, colors);
+    if (ranges) {
+        validateGeometryRanges(ranges.vertices, vertexCount);
+        validateGeometryRanges(ranges.indices, indices.length);
+    }
     const oldGpu = mesh._gpu;
     const vertexCapacity = oldGpu._vertexCapacity ?? (mesh._cpuPositions ? mesh._cpuPositions.length / 3 : vertexCount);
     const indexCapacity = oldGpu._indexCapacity ?? oldGpu.indexCount;
@@ -321,24 +366,29 @@ export function updateMeshGeometryCapacity(
 
     oldGpu._vertexCapacity = vertexCapacity;
     oldGpu._indexCapacity = indexCapacity;
+    const previousIndexCount = oldGpu._indexScratch ? (mesh._cpuIndices?.length ?? indexCapacity) : indexCapacity;
     const paddedIndices = oldGpu._indexScratch?.length === indexCapacity ? oldGpu._indexScratch : (oldGpu._indexScratch = new Uint32Array(indexCapacity));
     paddedIndices.fill(0);
     paddedIndices.set(indices);
     const queue = engine._device.queue;
-    queue.writeBuffer(oldGpu.positionBuffer, 0, positions.buffer as ArrayBuffer, positions.byteOffset, positions.byteLength);
-    queue.writeBuffer(oldGpu.normalBuffer, 0, normals.buffer as ArrayBuffer, normals.byteOffset, normals.byteLength);
-    queue.writeBuffer(oldGpu.indexBuffer, 0, paddedIndices.buffer as ArrayBuffer, paddedIndices.byteOffset, paddedIndices.byteLength);
+    writeGeometryRanges(queue, oldGpu.positionBuffer, positions, 3, ranges?.vertices);
+    writeGeometryRanges(queue, oldGpu.normalBuffer, normals, 3, ranges?.vertices);
+    writeGeometryRanges(queue, oldGpu.indexBuffer, paddedIndices, 1, ranges?.indices);
+    if (ranges && indices.length < previousIndexCount) {
+        const byteOffset = indices.length * 4;
+        queue.writeBuffer(oldGpu.indexBuffer, byteOffset, paddedIndices.buffer as ArrayBuffer, byteOffset, (previousIndexCount - indices.length) * 4);
+    }
     if (uvs?.length) {
-        queue.writeBuffer(oldGpu.uvBuffer, 0, uvs.buffer as ArrayBuffer, uvs.byteOffset, uvs.byteLength);
+        writeGeometryRanges(queue, oldGpu.uvBuffer, uvs, 2, ranges?.vertices);
     }
     if (uvs2?.length) {
-        queue.writeBuffer(oldGpu.uv2Buffer!, 0, uvs2.buffer as ArrayBuffer, uvs2.byteOffset, uvs2.byteLength);
+        writeGeometryRanges(queue, oldGpu.uv2Buffer!, uvs2, 2, ranges?.vertices);
     }
     if (tangents?.length) {
-        queue.writeBuffer(oldGpu.tangentBuffer!, 0, tangents.buffer as ArrayBuffer, tangents.byteOffset, tangents.byteLength);
+        writeGeometryRanges(queue, oldGpu.tangentBuffer!, tangents, 4, ranges?.vertices);
     }
     if (colors?.length) {
-        queue.writeBuffer(oldGpu.colorBuffer!, 0, colors.buffer as ArrayBuffer, colors.byteOffset, colors.byteLength);
+        writeGeometryRanges(queue, oldGpu.colorBuffer!, colors, 4, ranges?.vertices);
     }
     retainMeshGeometry(engine, mesh, positions, normals, indices, uvs, uvs2, tangents, colors);
     _markWorldMatrixDirty(mesh);

@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { _rebuildMeshes } from "../../../packages/babylon-lite/src/engine/recovery-rebuild";
+import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { updateMeshGeometry, updateMeshGeometryCapacity } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
+import type { MeshGeometryUpdateRanges } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
 import { setThinInstances } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import { getPickedUV } from "../../../packages/babylon-lite/src/picking/picking-helpers";
 import type { PickingInfo } from "../../../packages/babylon-lite/src/picking/picking-info";
@@ -54,7 +57,9 @@ function makeFixture(overrides: Partial<MeshGPU> = {}) {
         _cpuColors: new Float32Array(12),
         _cpuIndices: new Uint32Array([0, 1, 2]),
     } as unknown as Mesh;
-    const writeBuffer = vi.fn();
+    const writeBuffer = vi.fn((buffer: GPUBuffer, offset: number, data: ArrayBuffer, dataOffset: number, size: number) => {
+        new Uint8Array(buffer.getMappedRange()).set(new Uint8Array(data, dataOffset, size), offset);
+    });
     const createBuffer = vi.fn((descriptor: GPUBufferDescriptor) => fakeBuffer(Number(descriptor.size)));
     const captureMesh = vi.fn();
     const engine = {
@@ -148,6 +153,229 @@ describe("updateMeshGeometry", () => {
 });
 
 describe("updateMeshGeometryCapacity", () => {
+    it("recovers complete geometry after a partial upload, then grows from the recovered capacity", async () => {
+        const { mesh, engine } = makeFixture({ indexCount: 6, _indexCapacity: 6, _vertexCapacity: 5 });
+        const geometry = replacementGeometry();
+        const update = (ranges?: MeshGeometryUpdateRanges) =>
+            updateMeshGeometryCapacity(
+                engine,
+                mesh,
+                geometry.positions,
+                geometry.normals,
+                geometry.indices,
+                geometry.uvs,
+                geometry.uvs2,
+                geometry.tangents,
+                geometry.colors,
+                1.25,
+                ranges
+            );
+        update();
+        geometry.positions[6] = 10;
+        geometry.indices[2] = 1;
+        update({ vertices: [{ offset: 2, count: 1 }], indices: [{ offset: 2, count: 1 }] });
+        await _rebuildMeshes(engine, { meshes: [mesh] } as SceneContext);
+        expect(Array.from(new Float32Array(mesh._gpu.positionBuffer.getMappedRange()))).toEqual([-2, -1, -3, 4, 5, 6, 10, 2, 3]);
+        expect(Array.from(new Uint32Array(mesh._gpu.indexBuffer.getMappedRange()))).toEqual([2, 1, 1]);
+        expect(mesh._gpu.indexCount).toBe(3);
+        expect(mesh._gpu._indexCapacity).toBeUndefined();
+        expect(mesh._gpu._vertexCapacity).toBeUndefined();
+        geometry.indices = new Uint32Array([2, 1, 1, 0, 1, 2]);
+        expect(update({ vertices: [], indices: [{ offset: 3, count: 3 }] }).stable).toBe(false);
+        expect(Array.from(new Uint32Array(mesh._gpu.indexBuffer.getMappedRange(), 0, 9))).toEqual([2, 1, 1, 0, 1, 2, 0, 0, 0]);
+    });
+
+    it("writes explicit ranges with source view offsets and retains the complete geometry", () => {
+        const { buffers, mesh, gpu, engine, writeBuffer, captureMesh } = makeFixture();
+        const geometry = replacementGeometry();
+        const update = (ranges?: MeshGeometryUpdateRanges) =>
+            updateMeshGeometryCapacity(
+                engine,
+                mesh,
+                geometry.positions,
+                geometry.normals,
+                geometry.indices,
+                geometry.uvs,
+                geometry.uvs2,
+                geometry.tangents,
+                geometry.colors,
+                1.25,
+                ranges
+            );
+        update();
+        writeBuffer.mockClear();
+        // Use views with nonzero byte offsets for every attribute and the indices.
+        for (const key of ["positions", "normals", "uvs", "uvs2", "tangents", "colors"] as const) {
+            const backing = new Float32Array(geometry[key].length + 4).fill(999);
+            backing.set(geometry[key], 2);
+            geometry[key] = backing.subarray(2, backing.length - 2);
+        }
+        geometry.indices = new Uint32Array([999, 2, 0, 0, 999]).subarray(1, 4);
+        geometry.positions.set([-9, 8, 7], 3);
+        geometry.normals.set([1, 0, 0], 3);
+        geometry.uvs.set([0.25, 0.5], 2);
+        geometry.uvs2.set([0.5, 0.75], 2);
+        geometry.tangents.set([0, 1, 0, -1], 4);
+        geometry.colors.set([0.5, 0.25, 0.75, 1], 4);
+
+        expect(
+            update({
+                vertices: [
+                    { offset: 1, count: 1 },
+                    { offset: 3, count: 0 },
+                ],
+                indices: [{ offset: 1, count: 1 }],
+            }).stable
+        ).toBe(true);
+
+        expect(mesh._gpu).toBe(gpu);
+        expect(writeBuffer.mock.calls.map(([buffer, offset, , , size]) => [buffer, offset, size])).toEqual([
+            [buffers.position, 12, 12],
+            [buffers.normal, 12, 12],
+            [buffers.index, 4, 4],
+            [buffers.uv, 8, 8],
+            [buffers.uv2, 8, 8],
+            [buffers.tangent, 16, 16],
+            [buffers.color, 16, 16],
+        ]);
+        for (const [buffer, values] of [
+            [buffers.position, geometry.positions],
+            [buffers.normal, geometry.normals],
+            [buffers.uv, geometry.uvs],
+            [buffers.uv2, geometry.uvs2],
+            [buffers.tangent, geometry.tangents],
+            [buffers.color, geometry.colors],
+        ] as const) {
+            expect(Array.from(new Float32Array(buffer.getMappedRange(), 0, values.length))).toEqual(Array.from(values));
+        }
+        expect(Array.from(new Uint32Array(buffers.index.getMappedRange(), 0, 3))).toEqual([2, 0, 0]);
+        expect(mesh.boundMin).toEqual([-9, -1, -3]);
+        expect(mesh.boundMax).toEqual([1, 8, 7]);
+        expect(mesh._cpuPositions).toBe(geometry.positions);
+        expect(mesh._cpuNormals).toBe(geometry.normals);
+        expect(mesh._cpuUvs).toBe(geometry.uvs);
+        expect(mesh._cpuUv2s).toBe(geometry.uvs2);
+        expect(mesh._cpuTangents).toBe(geometry.tangents);
+        expect(mesh._cpuColors).toBe(geometry.colors);
+        expect(mesh._cpuIndices).toBe(geometry.indices);
+        expect(mesh._cpuGpuIndices).toBe(geometry.indices);
+        expect(captureMesh).toHaveBeenLastCalledWith(mesh, geometry.uvs2, geometry.tangents, geometry.colors, geometry.indices, "uint32");
+
+        // The already-retained arrays may be edited in place; uploads do not infer a diff from them.
+        writeBuffer.mockClear();
+        geometry.positions[0] = -12;
+        geometry.positions[6] = 11;
+        geometry.indices[2] = 1;
+        update({
+            vertices: [
+                { offset: 0, count: 1 },
+                { offset: 2, count: 1 },
+            ],
+            indices: [{ offset: 2, count: 1 }],
+        });
+        expect(Array.from(new Float32Array(buffers.position.getMappedRange(), 0, 9))).toEqual([-12, -1, -3, -9, 8, 7, 11, 2, 3]);
+        expect(Array.from(new Uint32Array(buffers.index.getMappedRange(), 0, 3))).toEqual([2, 0, 1]);
+        expect(writeBuffer.mock.calls.reduce((bytes, call) => bytes + call[4], 0)).toBe(148);
+        expect(mesh.boundMin).toEqual([-12, -1, -3]);
+        expect(mesh.boundMax).toEqual([11, 8, 7]);
+    });
+
+    it("clears retired indices on shrink, skips empty ranges, and writes newly active indices on regrowth", () => {
+        const { mesh, gpu, buffers, engine, writeBuffer } = makeFixture({ indexCount: 9, _indexCapacity: 9, _vertexCapacity: 3 });
+        const geometry = replacementGeometry();
+        const update = (indices: Uint32Array, ranges?: MeshGeometryUpdateRanges) =>
+            updateMeshGeometryCapacity(engine, mesh, geometry.positions, geometry.normals, indices, geometry.uvs, geometry.uvs2, geometry.tangents, geometry.colors, 1.25, ranges);
+        update(new Uint32Array([0, 1, 2, 2, 1, 0]));
+        writeBuffer.mockClear();
+        update(new Uint32Array([0, 1, 2]), { vertices: [], indices: [] });
+        expect(writeBuffer.mock.calls.map((call) => [call[0], call[1], call[4]])).toEqual([[buffers.index, 12, 12]]);
+        expect(Array.from(new Uint32Array(buffers.index.getMappedRange(), 0, 9))).toEqual([0, 1, 2, 0, 0, 0, 0, 0, 0]);
+        writeBuffer.mockClear();
+        update(new Uint32Array([0, 1, 2]), { vertices: [], indices: [] });
+        expect(writeBuffer).not.toHaveBeenCalled();
+        update(new Uint32Array([0, 1, 2, 0, 2, 1]), { vertices: [], indices: [{ offset: 3, count: 3 }] });
+        expect(writeBuffer.mock.calls.map((call) => [call[0], call[1], call[4]])).toEqual([[buffers.index, 12, 12]]);
+        expect(Array.from(new Uint32Array(buffers.index.getMappedRange(), 0, 9))).toEqual([0, 1, 2, 0, 2, 1, 0, 0, 0]);
+        expect(mesh._gpu).toBe(gpu);
+        expect(gpu.indexCount).toBe(9);
+    });
+
+    it("clears an existing draw tail on the first ranged capacity update", () => {
+        const { mesh, buffers, engine, writeBuffer } = makeFixture({ indexCount: 6 });
+        new Uint32Array(buffers.index.getMappedRange(), 0, 6).set([2, 1, 0, 1, 1, 1]);
+        const geometry = replacementGeometry();
+        updateMeshGeometryCapacity(engine, mesh, geometry.positions, geometry.normals, geometry.indices, geometry.uvs, geometry.uvs2, geometry.tangents, geometry.colors, 1.25, {
+            vertices: [{ offset: 0, count: 3 }],
+            indices: [],
+        });
+        expect(Array.from(new Uint32Array(buffers.index.getMappedRange(), 0, 6))).toEqual([2, 1, 0, 0, 0, 0]);
+        expect(writeBuffer.mock.calls.filter((call) => call[0] === buffers.index).map((call) => [call[1], call[4]])).toEqual([[12, 12]]);
+    });
+
+    it.each([
+        { offset: -1, count: 1 },
+        { offset: 0.5, count: 1 },
+        { offset: 0, count: -1 },
+        { offset: 0, count: 0.5 },
+        { offset: 3, count: 1 },
+        { offset: 4, count: 0 },
+        { offset: NaN, count: 0 },
+        { offset: 0, count: Infinity },
+    ])("rejects invalid vertex and index ranges before mutation: %j", (invalid) => {
+        const { mesh, gpu, engine, writeBuffer, createBuffer, captureMesh, originalPositions } = makeFixture();
+        const geometry = replacementGeometry();
+        for (const ranges of [
+            { vertices: [invalid], indices: [] },
+            { vertices: [{ offset: 0, count: 1 }], indices: [invalid] },
+        ]) {
+            expect(() =>
+                updateMeshGeometryCapacity(
+                    engine,
+                    mesh,
+                    geometry.positions,
+                    geometry.normals,
+                    geometry.indices,
+                    geometry.uvs,
+                    geometry.uvs2,
+                    geometry.tangents,
+                    geometry.colors,
+                    1.25,
+                    ranges
+                )
+            ).toThrow("valid ranges");
+        }
+        expect(writeBuffer).not.toHaveBeenCalled();
+        expect(createBuffer).not.toHaveBeenCalled();
+        expect(captureMesh).not.toHaveBeenCalled();
+        expect(mesh._cpuPositions).toBe(originalPositions);
+        expect(gpu._indexScratch).toBeUndefined();
+        expect(gpu._indexCapacity).toBeUndefined();
+    });
+
+    it("uploads the complete geometry on growth despite partial ranges, with absent optional attributes", () => {
+        const { mesh, gpu, engine, writeBuffer, createBuffer } = makeFixture({ hasUv: false, hasUv2: false, hasTangent: false, hasColor: false });
+        const positions = new Float32Array([0, 0, 0, 1, 0, 0, 1, 1, 0, -2, 1, 0]);
+        const normals = new Float32Array(12).fill(1);
+        const indices = new Uint32Array([0, 1, 2, 0, 2, 3]);
+        const ranges = { vertices: [{ offset: 3, count: 1 }], indices: [{ offset: 3, count: 3 }] };
+        const update = () => updateMeshGeometryCapacity(engine, mesh, positions, normals, indices, undefined, undefined, undefined, undefined, 1.5, ranges);
+        expect(update()).toEqual({ stable: false, vertexCapacity: 6, indexCapacity: 9 });
+        expect(mesh._gpu).not.toBe(gpu);
+        expect(Array.from(new Float32Array(mesh._gpu.positionBuffer.getMappedRange(), 0, 18))).toEqual([0, 0, 0, 1, 0, 0, 1, 1, 0, -2, 1, 0, 0, 0, 0, 0, 0, 0]);
+        expect(Array.from(new Uint32Array(mesh._gpu.indexBuffer.getMappedRange(), 0, 9))).toEqual([0, 1, 2, 0, 2, 3, 0, 0, 0]);
+        expect(mesh._cpuPositions).toBe(positions);
+        createBuffer.mockClear();
+        writeBuffer.mockClear();
+        positions[9] = -4;
+        indices[5] = 1;
+        expect(update().stable).toBe(true);
+        expect(createBuffer).not.toHaveBeenCalled();
+        expect(writeBuffer).toHaveBeenCalledTimes(3);
+        expect(new Float32Array(mesh._gpu.positionBuffer.getMappedRange())[9]).toBe(-4);
+        expect(new Uint32Array(mesh._gpu.indexBuffer.getMappedRange())[5]).toBe(1);
+        expect(mesh._gpu.hasUv).toBe(false);
+    });
+
     it("keeps geometry buffers stable and zeros the inactive index tail", () => {
         const { buffers, gpu, mesh, writeBuffer, captureMesh, engine } = makeFixture({ indexCount: 6, _vertexCapacity: 5, _indexCapacity: 6 });
         const geometry = {

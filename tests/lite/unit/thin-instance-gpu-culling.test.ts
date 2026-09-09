@@ -5,7 +5,7 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh";
-import { updateMeshGeometry } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
+import { updateMeshGeometry, updateMeshGeometryCapacity } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
 import { tryBind } from "../../../packages/babylon-lite/src/mesh/thin-instance-cull-binding";
 import { createTiCullState, getComputeDispatchBatch, prepareTiCull, publishTiLodBucket } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu-culling";
 import { clearThinInstanceLodPartner, setThinInstanceLodPartner, type ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
@@ -56,7 +56,7 @@ function makeThinInstances(count: number): ThinInstanceData {
 }
 
 describe("thin-instance GPU culling submission", () => {
-    it("queues dispatches and clears only the indirect instance count after initialization", () => {
+    it.each([false, true])("queues dispatches and refreshes culling after a geometry update (ranged: %s)", (ranged) => {
         const buffers: (GPUBuffer & { descriptor: GPUBufferDescriptor })[] = [];
         const writeBuffer = vi.fn();
         const clearBuffer = vi.fn();
@@ -130,7 +130,26 @@ describe("thin-instance GPU culling submission", () => {
         const first = prepareTiCull(engine, state, mesh, gpu, ti, false, context, batch);
         batch.reset();
         const expandedPositions = new Float32Array([-2, -2, -2, 2, 2, 2]);
-        updateMeshGeometry(engine, mesh, expandedPositions, new Float32Array([0, 1, 0, 0, 1, 0]), new Uint32Array([0, 1, 0]));
+        if (ranged) {
+            updateMeshGeometryCapacity(
+                engine,
+                mesh,
+                expandedPositions,
+                new Float32Array([0, 1, 0, 0, 1, 0]),
+                new Uint32Array([0, 1, 0]),
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                1.25,
+                {
+                    vertices: [{ offset: 0, count: 2 }],
+                    indices: [],
+                }
+            );
+        } else {
+            updateMeshGeometry(engine, mesh, expandedPositions, new Float32Array([0, 1, 0, 0, 1, 0]), new Uint32Array([0, 1, 0]));
+        }
         const second = prepareTiCull(engine, state, mesh, gpu, ti, false, context, batch);
 
         expect(first).not.toBeNull();

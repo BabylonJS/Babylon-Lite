@@ -244,7 +244,7 @@ export {
     resizeMeshGeometry,
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
-export type { MeshGeometryCapacityResult } from "./mesh/mesh-factories.js";
+export type { MeshGeometryCapacityResult, MeshGeometryRange, MeshGeometryUpdateRanges } from "./mesh/mesh-factories.js";
 export { createLineSystemData, createLineSystem, createLines, updateLineSystem } from "./mesh/create-line-system.js";
 export type { LineSystemData, LineSystemDataOptions, LineSystemOptions, LinesOptions, LineSystemUpdateOptions } from "./mesh/create-line-system.js";
 export { createDashedLines, updateDashedLines } from "./mesh/create-dashed-lines.js";
