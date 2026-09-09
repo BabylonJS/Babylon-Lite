@@ -7,6 +7,9 @@ import { createStandardMaterial } from "../material/standard/create-standard-mat
 import type { PhysicsBody, PhysicsWorld } from "./havok.js";
 import { getPhysicsBodyDebugGeometry } from "./havok.js";
 import { createPhysicsDebugLineMaterial } from "./physics-debug-line-material.js";
+import { transformCoordinatesToRef } from "../math/mat4-transform.js";
+import { decomposeMat4 } from "../math/decompose-mat4.js";
+import { multiplyQuat } from "../math/multiply-quat.js";
 
 /** Options used when creating a physics debug viewer. */
 export interface PhysicsViewerOptions {
@@ -248,8 +251,15 @@ function updatePhysicsViewer(viewer: PhysicsViewer): void {
 
 function copyBodyTransform(body: PhysicsBody, mesh: Mesh): void {
     const node = body.node;
-    mesh.position.set(node.position.x, node.position.y, node.position.z);
-    mesh.rotationQuaternion.set(node.rotationQuaternion.x, node.rotationQuaternion.y, node.rotationQuaternion.z, node.rotationQuaternion.w);
+    if (node.parent) {
+        transformCoordinatesToRef(node.position.x, node.position.y, node.position.z, node.parent.worldMatrix, mesh.position);
+        const { rotation } = decomposeMat4(node.parent.worldMatrix);
+        const q = multiplyQuat(rotation, node.rotationQuaternion);
+        mesh.rotationQuaternion.set(q.x, q.y, q.z, q.w);
+    } else {
+        mesh.position.set(node.position.x, node.position.y, node.position.z);
+        mesh.rotationQuaternion.set(node.rotationQuaternion.x, node.rotationQuaternion.y, node.rotationQuaternion.z, node.rotationQuaternion.w);
+    }
     mesh.scaling.set(1, 1, 1);
 }
 
