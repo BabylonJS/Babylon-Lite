@@ -145,7 +145,7 @@ export class Matrix {
      * TRS matrix into its scale, rotation (quaternion), and translation parts,
      * writing into any provided out-params. Returns `false` (matching BJS) when a
      * scale axis is zero. The rotation extraction is backed by Lite's
-     * `quatFromRotationMatrix` (via `Quaternion.FromRotationMatrixToRef`); the
+     * `createQuatFromRotationMat4` (via `Quaternion.FromRotationMatrixToRef`); the
      * negative-determinant `scale.y` flip matches Babylon.js exactly.
      */
     public decompose(scale?: Vector3, rotation?: Quaternion, translation?: Vector3): boolean {

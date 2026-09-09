@@ -1,18 +1,18 @@
 import type { Mat4Storage, Vec3 } from "./types.js";
 
 /** Write the camera-to-world matrix for an eye looking at `target` — the inverse of the
- *  `mat4LookAtLH` view matrix, built directly instead of by inverting one.
+ *  `createLookAtMat4LH` view matrix, built directly instead of by inverting one.
  *
  *  Every camera factory needs this, not a view matrix: the engine stores a camera's *world*
  *  matrix (so cameras parent like any other node) and derives the view matrix from it in
- *  `getViewMatrix`. Routing through `mat4LookAtLH` meant, on every camera move, allocating a
+ *  `getViewMatrix`. Routing through `createLookAtMat4LH` meant, on every camera move, allocating a
  *  view matrix, computing a translation column that was immediately discarded, and then
  *  transposing the rotation back out of it. The basis is the same three vectors either way,
  *  so this writes them straight into the caller's storage: columns `[xAxis, yAxis, zAxis, eye]`.
  *
  *  Degenerate input — eye on target, or the view direction parallel to `up` — leaves an
- *  identity rotation with the eye translation, matching `mat4LookAtLH`'s identity fallback. */
-export function mat4LookAtWorldLHToRef(out: Mat4Storage, eye: Vec3, target: Vec3, up: Vec3): void {
+ *  identity rotation with the eye translation, matching `createLookAtMat4LH`'s identity fallback. */
+export function writeLookAtWorldMat4LHIntoBuffer(out: Mat4Storage, eye: Vec3, target: Vec3, up: Vec3): void {
     out[3] = 0;
     out[7] = 0;
     out[11] = 0;

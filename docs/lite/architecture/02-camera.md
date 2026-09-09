@@ -191,7 +191,7 @@ exists, since the factory computes `wm` internally — and only then defines the
 property on the returned camera. Writing `upVector` invalidates the world matrix exactly like
 `position` / `target` do. `up` defaults to world +Y, which makes a banked camera's initial world matrix
 identical to a plain one's. A degenerate up (parallel to the view direction) falls back to identity
-rotation, matching `mat4LookAtWorldLHToRef`.
+rotation, matching `writeLookAtWorldMat4LHIntoBuffer`.
 
 Equivalent to Babylon.js `camera.upVector`, which `TargetCamera._getViewMatrix` feeds to
 `Matrix.LookAtLHToRef`.
@@ -327,7 +327,7 @@ The local world matrix is: transpose(upper 3×3 of view) + eye position.
 
 ### FreeCamera Position & Orientation
 
-The FreeCamera's local world matrix is computed via `mat4LookAtWorldLHToRef(_localMat, position, target, up)` — see **World Matrix (all cameras)** below. `up` is the shared `Vec3Up` constant for `createFreeCamera` and the camera's own `upVector` for `createBankedFreeCamera`; `_createFreeCamera` reads whichever it is handed without branching.
+The FreeCamera's local world matrix is computed via `writeLookAtWorldMat4LHIntoBuffer(_localMat, position, target, up)` — see **World Matrix (all cameras)** below. `up` is the shared `Vec3Up` constant for `createFreeCamera` and the camera's own `upVector` for `createBankedFreeCamera`; `_createFreeCamera` reads whichever it is handed without branching.
 
 Initial yaw/pitch are derived from the position→target direction:
 
@@ -346,11 +346,11 @@ _pitch = atan2(dy, sqrt(dx² + dz²))
 
 ### View Matrix
 
-Both cameras use the same world-matrix-to-view inversion (described above). This is equivalent to `mat4LookAtLH(eye, target, Vec3Up)` for their respective eye/target values.
+Both cameras use the same world-matrix-to-view inversion (described above). This is equivalent to `createLookAtMat4LH(eye, target, Vec3Up)` for their respective eye/target values.
 
 ### World Matrix (all cameras)
 
-A camera's local matrix is its **camera-to-world** matrix — cameras parent like any other node, and `getViewMatrix` inverts it per frame. `mat4LookAtWorldLHToRef(out, eye, target, up)` writes it directly as the columns `[xAxis, yAxis, zAxis, eye]`, where the basis is the same one `mat4LookAtLH` derives:
+A camera's local matrix is its **camera-to-world** matrix — cameras parent like any other node, and `getViewMatrix` inverts it per frame. `writeLookAtWorldMat4LHIntoBuffer(out, eye, target, up)` writes it directly as the columns `[xAxis, yAxis, zAxis, eye]`, where the basis is the same one `createLookAtMat4LH` derives:
 
 ```
 zAxis = normalize(target - eye)          // left-handed: +Z looks at the target
@@ -358,11 +358,11 @@ xAxis = normalize(cross(up, zAxis))
 yAxis = cross(zAxis, xAxis)
 ```
 
-All three factories (`ArcRotate`, `Free`, `Geospatial`) call it. They previously built a **view** matrix with `mat4LookAtLH` and inverted it back by hand — allocating a `Float32Array`, computing a translation column of three dot products that was immediately overwritten with the eye, then transposing the rotation — with the 17-line transpose block copy-pasted into each factory. Degenerate input (eye on target, or the view direction parallel to `up`) leaves an identity rotation with the eye translation, matching `mat4LookAtLH`'s identity fallback exactly.
+All three factories (`ArcRotate`, `Free`, `Geospatial`) call it. They previously built a **view** matrix with `createLookAtMat4LH` and inverted it back by hand — allocating a `Float32Array`, computing a translation column of three dot products that was immediately overwritten with the eye, then transposing the rotation — with the 17-line transpose block copy-pasted into each factory. Degenerate input (eye on target, or the view direction parallel to `up`) leaves an identity rotation with the eye translation, matching `createLookAtMat4LH`'s identity fallback exactly.
 
 ### Projection Matrix
 
-Both cameras: `mat4PerspectiveLH(fov, aspectRatio, nearPlane, farPlane)` — left-handed perspective with reverse-Z zero-to-one depth (`nearPlane` maps to `1`, `farPlane` maps to `0`).
+Both cameras: `createPerspectiveMat4LH(fov, aspectRatio, nearPlane, farPlane)` — left-handed perspective with reverse-Z zero-to-one depth (`nearPlane` maps to `1`, `farPlane` maps to `0`).
 
 ### Projection Change Detection
 
@@ -388,7 +388,7 @@ Polling here rather than installing accessors in every camera factory keeps the 
 
 Cache invalidation for live bound changes is deliberately kept out of the shared path: the bounds setters bump `camera._projRev`. Projection-dependent consumers read `_cameraChangeKey(camera)` in place of `camera.worldMatrixVersion`, which is a substitution rather than an extra comparison, so no per-frame gate grows a slot.
 
-`mat4OrthoOffCenterLHToRef` writes a reverse-Z `OrthoOffCenterLH` matrix so orthographic cameras share the engine's reverse-Z depth state (clear `0`, compare `greater`):
+`writeOrthoOffCenterMat4LHIntoBuffer` writes a reverse-Z `OrthoOffCenterLH` matrix so orthographic cameras share the engine's reverse-Z depth state (clear `0`, compare `greater`):
 
 ```
 m[0]  =  2 / (right - left)      m[12] = (left + right) / (left - right)
@@ -397,7 +397,7 @@ m[10] = -1 / (far - near)        m[14] = far / (far - near)
 m[11] =  0                       m[15] = 1
 ```
 
-`mat4PerspectiveLHToRef` only writes the terms a perspective matrix needs and relies on the rest of a freshly allocated (zeroed) cache. The orthographic writer overwrites **all 16 elements**, so switching perspective → orthographic on the shared cache is safe unconditionally; the reverse is not symmetric, because `m[12]`, `m[13]` and `m[15]` are written only by the orthographic path, so `disableOrthographicCamera` clears exactly those three before handing `_projCache` back. Optional projectors fully overwriting their output is the contract, so a future third projection type cannot be contaminated by whichever ran before it. That cleanup lives in the lazy module so the shared perspective path pays nothing for it.
+`writePerspectiveMat4LHIntoBuffer` only writes the terms a perspective matrix needs and relies on the rest of a freshly allocated (zeroed) cache. The orthographic writer overwrites **all 16 elements**, so switching perspective → orthographic on the shared cache is safe unconditionally; the reverse is not symmetric, because `m[12]`, `m[13]` and `m[15]` are written only by the orthographic path, so `disableOrthographicCamera` clears exactly those three before handing `_projCache` back. Optional projectors fully overwriting their output is the contract, so a future third projection type cannot be contaminated by whichever ran before it. That cleanup lives in the lazy module so the shared perspective path pays nothing for it.
 
 ### Consumers that still assume a perspective projection
 
@@ -414,7 +414,7 @@ Both enable/disable reset the projection state, as does every bounds setter — 
 
 ### View-Projection Matrix
 
-Both cameras: `mat4Multiply(projectionMatrix, viewMatrix)`.
+Both cameras: `multiplyMat4(projectionMatrix, viewMatrix)`.
 
 ---
 
@@ -683,9 +683,9 @@ Cleanup removes all 6 event listeners and the `_beforeRender` callback.
 ## Dependencies
 
 - **`camera.ts` imports**: `Vec3`, `Mat4` from `../math/types.js`.
-- **`arc-rotate.ts` imports**: `Vec3`, `Mat4` from `../math/types.js`; `Vec3Up` from `../math/vec3.js`; `mat4LookAtWorldLHToRef` from `../math/mat4-look-at-world-lh.js`; `IWorldMatrixProvider`, `IParentable` from `../scene/parentable.js`; `createWorldMatrixState` from `../scene/world-matrix-state.js`; `ObservableVec3` from `../math/observable-vec3.js`.
+- **`arc-rotate.ts` imports**: `Vec3`, `Mat4` from `../math/types.js`; `Vec3Up` from `../math/vec3.js`; `writeLookAtWorldMat4LHIntoBuffer` from `../math/write-look-at-world-mat4-lh-into-buffer.js`; `IWorldMatrixProvider`, `IParentable` from `../scene/parentable.js`; `createWorldMatrixState` from `../scene/world-matrix-state.js`; `ObservableVec3` from `../math/observable-vec3.js`.
 - **`arc-rotate-controls.ts` imports**: `ArcRotateCamera` from `./arc-rotate.js`; `SceneContext`, `SceneContextInternal` from `../scene/scene.js`.
-- **`free-camera.ts` imports**: `Camera` from `./camera.js`; `Vec3`, `Mat4` from `../math/types.js`; `Vec3Up` from `../math/vec3.js`; `mat4LookAtWorldLHToRef` from `../math/mat4-look-at-world-lh.js`; `IWorldMatrixProvider`, `IParentable` from `../scene/parentable.js`; `createWorldMatrixState` from `../scene/world-matrix-state.js`; `ObservableVec3` from `../math/observable-vec3.js`.
+- **`free-camera.ts` imports**: `Camera` from `./camera.js`; `Vec3`, `Mat4` from `../math/types.js`; `Vec3Up` from `../math/vec3.js`; `writeLookAtWorldMat4LHIntoBuffer` from `../math/write-look-at-world-mat4-lh-into-buffer.js`; `IWorldMatrixProvider`, `IParentable` from `../scene/parentable.js`; `createWorldMatrixState` from `../scene/world-matrix-state.js`; `ObservableVec3` from `../math/observable-vec3.js`.
 - **`free-camera-controls.ts` imports**: `FreeCamera`, `FreeCameraInternal` from `./free-camera.js`; `SceneContext` from `../scene/scene.js`.
 - **Depended on by**: `scene.ts` (creates camera), render pipeline (reads camera matrices).
 

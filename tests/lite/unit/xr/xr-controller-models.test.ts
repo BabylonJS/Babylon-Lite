@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 
 // Stub the GPU-touching bits (mesh creation + material + scene attach/dispose). The
-// grip-pose placement math (mat4Decompose) and the connect/disconnect bookkeeping
+// grip-pose placement math (decomposeMat4) and the connect/disconnect bookkeeping
 // run for real.
 function fakeMesh() {
     const vec = (x: number, y: number, z: number, w?: number) => ({
@@ -63,7 +63,7 @@ import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/s
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine";
 import type { XrInputManager, XrInputSource } from "../../../../packages/babylon-lite/src/xr/xr-input";
 import { createSceneNode } from "../../../../packages/babylon-lite/src/scene/scene-node";
-import { mat4Compose } from "../../../../packages/babylon-lite/src/math/mat4-compose";
+import { composeMat4 } from "../../../../packages/babylon-lite/src/math/compose-mat4";
 
 const engine = {} as EngineContext;
 const scene = {} as SceneContext;
@@ -203,7 +203,7 @@ describe("controller models", () => {
         enableMirroredMeshes.mockReset();
         enableMirroredMeshes.mockResolvedValue(undefined);
         const q = [0.2, 0.3, 0.1, Math.sqrt(0.86)] as const;
-        const grip = mat4Compose(1, 2, 3, q[0], q[1], q[2], q[3], 1, 1, 1);
+        const grip = composeMat4(1, 2, 3, q[0], q[1], q[2], q[3], 1, 1, 1);
         const root = createSceneNode("controller-root", 0, 0, 0, 0, 0, 0, 1, -1, 1, 1);
         const container = { tag: "controller-model" };
         loadMotionController.mockResolvedValue({ root, container });

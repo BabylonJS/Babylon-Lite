@@ -63,7 +63,7 @@ import type { GeometryClearValue } from "./geometry-types.js";
 import { GEOMETRY_TEXTURE_DESCRIPTIONS, GeometryTextureType } from "./geometry-types.js";
 import { _packSceneUniforms } from "./scene-uniforms-pack.js";
 import { getProjectionMatrix } from "../camera/camera.js";
-import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
+import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import type { Mat4Storage } from "../math/types.js";
 
 // ─── Public API ────────────────────────────────────────────────────────────
@@ -746,7 +746,7 @@ function _forceFoView(data: Float32Array, camera: Camera, aspect: number): void 
     data[29] = 0;
     data[30] = 0;
     const proj = getProjectionMatrix(camera, aspect) as unknown as Mat4Storage;
-    mat4MultiplyInto(data as unknown as Mat4Storage, 0, proj, 0, data as unknown as Mat4Storage, 16);
+    multiplyMat4IntoBuffer(data as unknown as Mat4Storage, 0, proj, 0, data as unknown as Mat4Storage, 16);
 }
 
 // ─── Execute ───────────────────────────────────────────────────────────────

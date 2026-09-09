@@ -6,7 +6,7 @@ import {
     createEngine,
     createSceneContext,
     createTexture2DFromPixels,
-    mat4Compose,
+    composeMat4,
     parseNodeParticleSource,
     registerNodeParticleSet,
     registerScene,
@@ -56,7 +56,7 @@ async function main(): Promise<void> {
     scene.camera = camera;
     attachControl(camera, canvas, scene);
 
-    const emitterMatrix = mat4Compose(0, 0, 0, 0, 0, 0, 1, 1, 1, 1);
+    const emitterMatrix = composeMat4(0, 0, 0, 0, 0, 0, 1, 1, 1, 1);
     const mutableEmitterMatrix = emitterMatrix as unknown as Scene302MutableMatrix;
     const motionStart = performance.now();
     let pose: Scene302EmitterPose = getScene302EmitterPose(0);

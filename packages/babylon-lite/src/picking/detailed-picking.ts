@@ -3,8 +3,8 @@ import type { PickingInfo } from "./picking-info.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { Mat4 } from "../math/types.js";
 import { F32 } from "../engine/typed-arrays.js";
-import { mat4Multiply } from "../math/mat4-multiply.js";
-import { normalizeVec3 } from "../math/normalize-vec3.js";
+import { multiplyMat4 } from "../math/multiply-mat4.js";
+import { normalizeVec3TupleOrUp } from "../math/normalize-vec3-tuple-or-up.js";
 import { BU, TU } from "../engine/gpu-flags.js";
 
 export interface PickDetailTarget {
@@ -88,13 +88,13 @@ export function detailedWorldMatrix(baseWorld: Mat4, mesh: Mesh, thinInstanceInd
     instance[13] = packed[13]!;
     instance[14] = packed[14]!;
     instance[15] = 1;
-    return mat4Multiply(baseWorld, instance as unknown as Mat4);
+    return multiplyMat4(baseWorld, instance as unknown as Mat4);
 }
 
 let _deformedTriangle: Float32Array | null = null;
 
 function transformNormal(world: Mat4, normal: readonly [number, number, number]): [number, number, number] {
-    return normalizeVec3(
+    return normalizeVec3TupleOrUp(
         world[0]! * normal[0] + world[4]! * normal[1] + world[8]! * normal[2],
         world[1]! * normal[0] + world[5]! * normal[1] + world[9]! * normal[2],
         world[2]! * normal[0] + world[6]! * normal[1] + world[10]! * normal[2]
@@ -185,7 +185,7 @@ export function populateDetailedMeshInfo(
 
     if (normals && i0 * 3 + 2 < normals.length && i1 * 3 + 2 < normals.length && i2 * 3 + 2 < normals.length) {
         const bw = 1 - info.bu - info.bv;
-        let localNormal = normalizeVec3(
+        let localNormal = normalizeVec3TupleOrUp(
             info.bu * normals[i0 * 3]! + info.bv * normals[i1 * 3]! + bw * normals[i2 * 3]!,
             info.bu * normals[i0 * 3 + 1]! + info.bv * normals[i1 * 3 + 1]! + bw * normals[i2 * 3 + 1]!,
             info.bu * normals[i0 * 3 + 2]! + info.bv * normals[i1 * 3 + 2]! + bw * normals[i2 * 3 + 2]!
@@ -221,7 +221,7 @@ export function populateDetailedMeshInfo(
         }
     }
 
-    let localFaceNormal = normalizeVec3(fe0y * fe1z - fe0z * fe1y, fe0z * fe1x - fe0x * fe1z, fe0x * fe1y - fe0y * fe1x);
+    let localFaceNormal = normalizeVec3TupleOrUp(fe0y * fe1z - fe0z * fe1y, fe0z * fe1x - fe0x * fe1z, fe0x * fe1y - fe0y * fe1x);
     let worldFaceNormal = transformNormal(world, localFaceNormal);
     if (facesPickRay(worldFaceNormal, info)) {
         localFaceNormal = [-localFaceNormal[0], -localFaceNormal[1], -localFaceNormal[2]];

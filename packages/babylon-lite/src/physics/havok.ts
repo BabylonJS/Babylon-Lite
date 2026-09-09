@@ -16,10 +16,10 @@ import type { SceneNode } from "../scene/scene-node.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { HavokFloatingOriginContext, WorldRegion } from "./havok-floating-origin.js";
-import { mat4Invert } from "../math/mat4-invert.js";
-import { mat4Multiply } from "../math/mat4-multiply.js";
-import { mat4Scale } from "../math/mat4-scale.js";
-import { mat4Decompose } from "../math/mat4-decompose.js";
+import { invertMat4 } from "../math/invert-mat4.js";
+import { multiplyMat4 } from "../math/multiply-mat4.js";
+import { createScalingMat4 } from "../math/create-scaling-mat4.js";
+import { decomposeMat4 } from "../math/decompose-mat4.js";
 
 // ─── Enums ───────────────────────────────────────────────────────────
 
@@ -888,13 +888,13 @@ class MeshAccumulator {
     }
 
     public addNodeMeshes(root: SceneNode, includeChildren: boolean): void {
-        const invRoot = mat4Invert(root.worldMatrix as Mat4);
+        const invRoot = invertMat4(root.worldMatrix as Mat4);
         if (!invRoot) {
             throw new Error("Cannot create physics mesh shape from a singular root transform.");
         }
 
-        const rootScale = mat4Scale(root.scaling.x, root.scaling.y, root.scaling.z);
-        const rootToBody = mat4Multiply(rootScale, invRoot);
+        const rootScale = createScalingMat4(root.scaling.x, root.scaling.y, root.scaling.z);
+        const rootToBody = multiplyMat4(rootScale, invRoot);
         this._addNodeMesh(root, rootToBody);
 
         if (includeChildren) {
@@ -945,7 +945,7 @@ class MeshAccumulator {
             return;
         }
 
-        const meshToBody = mat4Multiply(rootToBody, node.worldMatrix as Mat4);
+        const meshToBody = multiplyMat4(rootToBody, node.worldMatrix as Mat4);
         const indexOffset = this._vertices.length / 3;
         for (let i = 0; i < positions.length; i += 3) {
             transformPositionInto(this._vertices, meshToBody, positions[i]!, positions[i + 1]!, positions[i + 2]!);
@@ -1099,12 +1099,12 @@ export function addPhysicsShapeChild(world: PhysicsWorld, container: PhysicsShap
  * @param childNode - Scene node associated with the child shape.
  */
 export function addPhysicsShapeChildFromParent(world: PhysicsWorld, container: PhysicsShape, parentNode: SceneNode, child: PhysicsShape, childNode: SceneNode): void {
-    const invParent = mat4Invert(parentNode.worldMatrix as Mat4);
+    const invParent = invertMat4(parentNode.worldMatrix as Mat4);
     if (!invParent) {
         throw new Error("Cannot add physics child shape from a singular parent transform.");
     }
-    const childToParent = mat4Multiply(invParent, childNode.worldMatrix as Mat4);
-    const transform = mat4Decompose(childToParent);
+    const childToParent = multiplyMat4(invParent, childNode.worldMatrix as Mat4);
+    const transform = decomposeMat4(childToParent);
     addPhysicsShapeChild(world, container, child, transform.translation, transform.rotation, transform.scale);
 }
 

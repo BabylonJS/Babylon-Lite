@@ -2,7 +2,7 @@ import type { Mat4Storage } from "./types.js";
 
 /** Multiply a[aOff..+16] * b[bOff..+16] into dst[dOff..+16] (fully unrolled, zero allocation).
  *  Parameters accept either F32- or F64-backed storage (`Mat4Storage`). */
-export function mat4MultiplyInto(dst: Mat4Storage, d: number, a: Mat4Storage, i: number, b: Mat4Storage, j: number): void {
+export function multiplyMat4IntoBuffer(dst: Mat4Storage, d: number, a: Mat4Storage, i: number, b: Mat4Storage, j: number): void {
     const a0 = a[i]!,
         a1 = a[i + 1]!,
         a2 = a[i + 2]!,

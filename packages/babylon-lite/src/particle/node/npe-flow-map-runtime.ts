@@ -1,7 +1,7 @@
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Color4, Mat4, Vec2, Vec3 } from "../../math/types.js";
-import { mat4Translation } from "../../math/mat4-translation.js";
+import { createTranslationMat4 } from "../../math/create-translation-mat4.js";
 import { mat4GetTranslationToRef } from "../../math/mat4-transform.js";
 import { createParticleSystem, type ParticleSystem } from "../particle-system.js";
 import { cpuTextureSourceBlock } from "./blocks/cpu-texture-source-block.js";
@@ -64,7 +64,7 @@ export async function buildNodeParticleSetWithFlowMapsRuntime(
             mat4GetTranslationToRef(emitterWorldMatrix, emitter);
         } else {
             const value = options.emitter ?? { x: 0, y: 0, z: 0 };
-            emitterWorldMatrix = mat4Translation(value.x, value.y, value.z);
+            emitterWorldMatrix = createTranslationMat4(value.x, value.y, value.z);
             emitter.x = value.x;
             emitter.y = value.y;
             emitter.z = value.z;

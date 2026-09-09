@@ -1,6 +1,6 @@
 // MatrixCompose (BJS FlowGraphMatrixComposeBlock, glTF op `math/matCompose`).
 // Data block (PULL): composes a Mat4 from position (Vec3), rotationQuaternion
-// (Quaternion), and scaling (Vec3). Uses core mat4Compose (column-major).
+// (Quaternion), and scaling (Vec3). Uses core composeMat4 (column-major).
 
 import type { FgBlockDef } from "../../block-def.js";
 import { FgBlockType } from "../../block-type.js";

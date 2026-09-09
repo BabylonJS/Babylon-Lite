@@ -20,7 +20,7 @@ import { addToScene } from "../scene/scene-core.js";
 import { removeFromScene } from "../scene/scene-remove.js";
 import { createCylinder, createPlane, createTorus } from "../mesh/mesh-factories.js";
 import { setShaderUniform } from "../material/shader/shader-material.js";
-import { mat4Invert } from "../math/mat4-invert.js";
+import { invertMat4 } from "../math/invert-mat4.js";
 import { createGizmoMaterials, setMeshesMaterial, attachFollowTarget, GizmoObservable } from "./gizmo-core.js";
 import type { GizmoMaterialSet } from "./gizmo-core.js";
 import { lookAtQuat, normalizeVec3Obj, quatFromAxisAngle, quatMul, quatNormalize, signedAngleAroundNormal, transformDirectionByWorld, worldRotationToLocal } from "./gizmo-math.js";
@@ -164,7 +164,7 @@ export function createPlaneRotationGizmo(engine: EngineContext, layer: UtilityLa
         // Compute the initial angle in the display plane's local frame so the
         // camembert starts at the correct angle around the centre.
         const planeWorld = rotationDisplayPlane.worldMatrix;
-        const invPlane = mat4Invert(planeWorld);
+        const invPlane = invertMat4(planeWorld);
         if (invPlane) {
             const px = event.dragPlanePoint.x,
                 py = event.dragPlanePoint.y,

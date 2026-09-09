@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import { packMat4IntoF32 } from "../../../packages/babylon-lite/src/math/pack-mat4-into-f32";
-import { mat4Identity } from "../../../packages/babylon-lite/src/math/mat4-identity";
+import { createIdentityMat4 } from "../../../packages/babylon-lite/src/math/create-identity-mat4";
 
 function makeF32Mat4(values: number[]): Mat4 {
     const f = new Float32Array(16);
@@ -73,8 +73,8 @@ describe("packMat4IntoF32", () => {
         expect(result).toBeUndefined();
     });
 
-    it("identity round-trip: mat4Identity packed into a fresh view is byte-identical", () => {
-        const id = mat4Identity();
+    it("identity round-trip: createIdentityMat4 packed into a fresh view is byte-identical", () => {
+        const id = createIdentityMat4();
         const view = new Float32Array(16);
         packMat4IntoF32(view, id);
         const expected = new Float32Array(16);

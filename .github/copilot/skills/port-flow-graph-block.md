@@ -217,9 +217,9 @@ from a module-level `new RichType(...)`.
 
 ### 5. Map the math
 
-Lite core `math/` is **Vec3-centric and minimal** — it has `addVec3`, `subVec3`,
+Lite core `math/` is **Vec3-centric and minimal** — it has `addVec3`, `subtractVec3`,
 `scaleVec3`, `dotVec3`, `crossVec3`, `lengthVec3`, `normalizeVec3`, `lerpVec3`,
-`mat4Multiply`, `mat4Invert`, `mat4Compose`, `mat4Decompose`, `mat4FromQuat`, and
+`multiplyMat4`, `invertMat4`, `composeMat4`, `decomposeMat4`, `createMat4FromQuat`, and
 little else. It has **no Vec2, no general quaternion algebra, no
 transpose/determinant**.
 

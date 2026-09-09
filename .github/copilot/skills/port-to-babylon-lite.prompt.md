@@ -324,10 +324,10 @@ ground.receiveShadows = true;
 | `new BABYLON.Vector3(x, y, z)`                         | `{ x, y, z }` plain object or `[x, y, z]` tuple |
 | `new BABYLON.Color3(r, g, b)`                          | `[r, g, b]` tuple                               |
 | `new BABYLON.Color4(r, g, b, a)`                       | `{ r, g, b, a }` plain object                   |
-| `BABYLON.Matrix.Identity()`                            | `mat4Identity()`                                |
-| `BABYLON.Matrix.Translation(x, y, z)`                  | `mat4Translation(x, y, z)`                      |
-| `BABYLON.Matrix.Scaling(x, y, z)`                      | `mat4Scale(x, y, z)`                            |
-| `BABYLON.Matrix.Compose(scale, rotation, translation)` | `mat4Compose(translation, rotation, scale)`     |
+| `BABYLON.Matrix.Identity()`                            | `createIdentityMat4()`                                |
+| `BABYLON.Matrix.Translation(x, y, z)`                  | `createTranslationMat4(x, y, z)`                      |
+| `BABYLON.Matrix.Scaling(x, y, z)`                      | `createScalingMat4(x, y, z)`                            |
+| `BABYLON.Matrix.Compose(scale, rotation, translation)` | `composeMat4(translation, rotation, scale)`     |
 
 **Note**: Vectors used as directions (light direction) or positions (mesh position, light position)
 are `[x, y, z]` tuples. Camera target uses `{ x, y, z }` object form.

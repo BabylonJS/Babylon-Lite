@@ -327,7 +327,7 @@ When `enabled` is false, the producer is skipped. A configured composite copies 
 ## Dependencies
 
 - `camera/camera.ts` for view and projection matrices.
-- `math/mat4-invert.ts`.
+- `math/invert-mat4.ts`.
 - `engine/render-target.ts`.
 - `frame-graph/task.ts`.
 - `resource/samplers.ts`.

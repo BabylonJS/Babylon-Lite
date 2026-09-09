@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
-import { mat4Identity } from "../../../packages/babylon-lite/src/math/mat4-identity";
+import { createIdentityMat4 } from "../../../packages/babylon-lite/src/math/create-identity-mat4";
 import { buildNodeParticleSet } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import { buildNodeParticleSetWithBlendModes } from "../../../packages/babylon-lite/src/particle/node/npe-blend-modes";
 import { buildNodeParticleSetWithEmitterProvider } from "../../../packages/babylon-lite/src/particle/node/npe-emitter-provider";
@@ -268,7 +268,7 @@ describe("Phase 3C graph plumbing", () => {
 
     it("builds a normalized LocalVariable graph with an emitter provider", async () => {
         const graph = await normalizeNodeParticleGraph(parseNodeParticleSource(localGraph(1, false, true)));
-        const set = await buildNodeParticleSetWithEmitterProvider({} as EngineContext, {} as SceneContext, graph, () => mat4Identity());
+        const set = await buildNodeParticleSetWithEmitterProvider({} as EngineContext, {} as SceneContext, graph, () => createIdentityMat4());
 
         expect(set.systems[0]!.targetStopDuration).toBe(7);
     });

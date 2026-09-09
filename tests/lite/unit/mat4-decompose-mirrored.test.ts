@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { mat4Decompose } from "../../../packages/babylon-lite/src/math/mat4-decompose";
-import { mat4Compose } from "../../../packages/babylon-lite/src/math/mat4-compose";
+import { decomposeMat4 } from "../../../packages/babylon-lite/src/math/decompose-mat4";
+import { composeMat4 } from "../../../packages/babylon-lite/src/math/compose-mat4";
 import { createSceneNode, createSceneNodeFromMatrix } from "../../../packages/babylon-lite/src/scene/scene-node";
 import { setParent } from "../../../packages/babylon-lite/src/scene/set-parent";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
@@ -24,7 +24,7 @@ function quatAxisAngle(x: number, y: number, z: number, angle: number): [number,
 }
 
 /**
- * `mat4Decompose` must preserve reflections. The glTF loader's synthetic `__root__` carries
+ * `decomposeMat4` must preserve reflections. The glTF loader's synthetic `__root__` carries
  * `scaling = (-1, 1, 1)` for the RH→LH conversion, so a decomposition that returns only
  * non-negative scales silently un-mirrors any model reparented with `setParent`.
  *
@@ -32,7 +32,7 @@ function quatAxisAngle(x: number, y: number, z: number, angle: number): [number,
  * matching Babylon.js `Matrix.decompose`), so the contract under test is that recomposing the
  * result reproduces the original matrix — not that the original per-axis signs come back.
  */
-describe("mat4Decompose — mirrored (negative determinant) matrices", () => {
+describe("decomposeMat4 — mirrored (negative determinant) matrices", () => {
     const [qx, qy, qz, qw] = quatAxisAngle(0.3, 1, -0.7, 0.9);
 
     const cases: { name: string; scale: [number, number, number] }[] = [
@@ -46,37 +46,37 @@ describe("mat4Decompose — mirrored (negative determinant) matrices", () => {
 
     for (const { name, scale } of cases) {
         it(`round-trips a matrix with ${name}`, () => {
-            const source = mat4Compose(4, -3, 11, qx, qy, qz, qw, scale[0], scale[1], scale[2]);
+            const source = composeMat4(4, -3, 11, qx, qy, qz, qw, scale[0], scale[1], scale[2]);
             const expected = snapshot(source);
 
-            const { translation, rotation, scale: outScale } = mat4Decompose(source);
+            const { translation, rotation, scale: outScale } = decomposeMat4(source);
 
             // The reflection must survive: an odd number of negative scale components.
             const negatives = [outScale.x, outScale.y, outScale.z].filter((s) => s < 0).length;
             const sourceNegatives = scale.filter((s) => s < 0).length;
             expect(negatives % 2).toBe(sourceNegatives % 2);
 
-            const recomposed = mat4Compose(translation.x, translation.y, translation.z, rotation.x, rotation.y, rotation.z, rotation.w, outScale.x, outScale.y, outScale.z);
+            const recomposed = composeMat4(translation.x, translation.y, translation.z, rotation.x, rotation.y, rotation.z, rotation.w, outScale.x, outScale.y, outScale.z);
             expectMatrixClose(recomposed, expected);
         });
     }
 
     it("folds the reflection onto Y, matching Babylon.js Matrix.decompose", () => {
-        const { scale } = mat4Decompose(mat4Compose(0, 0, 0, 0, 0, 0, 1, -1, 1, 1));
+        const { scale } = decomposeMat4(composeMat4(0, 0, 0, 0, 0, 0, 1, -1, 1, 1));
         expect(scale.x).toBeGreaterThan(0);
         expect(scale.y).toBeLessThan(0);
         expect(scale.z).toBeGreaterThan(0);
     });
 
     it("leaves positive-determinant matrices with non-negative scales", () => {
-        const { scale } = mat4Decompose(mat4Compose(1, 2, 3, qx, qy, qz, qw, 2, 0.5, 3));
+        const { scale } = decomposeMat4(composeMat4(1, 2, 3, qx, qy, qz, qw, 2, 0.5, 3));
         expect(scale.x).toBeCloseTo(2, 5);
         expect(scale.y).toBeCloseTo(0.5, 5);
         expect(scale.z).toBeCloseTo(3, 5);
     });
 
     it("tolerates a degenerate axis: the result stays finite (documented contract)", () => {
-        const { rotation, scale } = mat4Decompose(mat4Compose(0, 0, 0, qx, qy, qz, qw, 1, 0, 1));
+        const { rotation, scale } = decomposeMat4(composeMat4(0, 0, 0, qx, qy, qz, qw, 1, 0, 1));
         expect(Math.abs(scale.y)).toBeLessThan(1e-7);
         for (const c of [rotation.x, rotation.y, rotation.z, rotation.w]) {
             expect(Number.isFinite(c)).toBe(true);

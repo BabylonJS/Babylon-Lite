@@ -57,6 +57,6 @@ export function _quatFromRotationBasis(
  * @param matrix - Column-major 4×4 rotation matrix.
  * @returns A new `{ x, y, z, w }` quaternion.
  */
-export function quatFromRotationMatrix(matrix: Mat4): Quat {
+export function createQuatFromRotationMat4(matrix: Mat4): Quat {
     return _quatFromRotationBasis(matrix[0]!, matrix[4]!, matrix[8]!, matrix[1]!, matrix[5]!, matrix[9]!, matrix[2]!, matrix[6]!, matrix[10]!);
 }

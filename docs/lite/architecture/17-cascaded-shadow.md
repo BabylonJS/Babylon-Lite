@@ -380,7 +380,7 @@ split, transfer helper, or gate.
 `shadow-base` (`buildLightViewMatrix`, `multiply4x4`, `createShadowCamera`,
 `updateShadowCameraBase`, `createShadowParamsUBO`, `casterVersionSum`),
 `pcf-shadow-task-hooks` (`getNoColorView`, `preloadPcfShadowTaskState`),
-`math/mat4-invert`, `camera` (`getViewProjectionMatrix`), `frame-graph/render-task`,
+`math/invert-mat4`, `camera` (`getViewProjectionMatrix`), `frame-graph/render-task`,
 `csm-refit-gate`.
 
 ## Test Specification

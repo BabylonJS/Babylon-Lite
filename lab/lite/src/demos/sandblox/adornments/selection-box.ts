@@ -20,7 +20,7 @@ import {
     createStandardMaterial,
     enableThinInstanceGpuCulling,
     markMaterialUboDirty,
-    mat4Compose,
+    composeMat4,
     setThinInstanceCount,
     setThinInstanceMatrix,
     setThinInstances,
@@ -120,7 +120,7 @@ export class SelectionBox {
         // 12 edges: 4 along X, 4 along Y, 4 along Z (axis-aligned scaled boxes).
         let slot = 0;
         const edge = (px: number, py: number, pz: number, sx: number, sy: number, sz: number): void => {
-            const m = mat4Compose(px, py, pz, 0, 0, 0, 1, sx, sy, sz);
+            const m = composeMat4(px, py, pz, 0, 0, 0, 1, sx, sy, sz);
             setThinInstanceMatrix(this._mesh, slot++, m);
         };
         for (const sy of [minY, maxY]) {

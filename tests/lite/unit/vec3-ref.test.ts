@@ -13,8 +13,8 @@ import {
     normalizeVec3ToRef,
     scaleVec3InPlace,
     scaleVec3ToRef,
-    subVec3InPlace,
-    subVec3ToRef,
+    subtractVec3InPlace,
+    subtractVec3ToRef,
 } from "../../../packages/babylon-lite/src/math/vec3-ref";
 
 describe("Vec3 ref helpers", () => {
@@ -24,7 +24,7 @@ describe("Vec3 ref helpers", () => {
         expect(addVec3ToRef({ x: 1, y: 2, z: 3 }, { x: 4, y: 5, z: 6 }, out)).toBe(out);
         expect(out).toEqual({ x: 5, y: 7, z: 9 });
 
-        subVec3ToRef({ x: 7, y: 8, z: 9 }, { x: 1, y: 2, z: 3 }, out);
+        subtractVec3ToRef({ x: 7, y: 8, z: 9 }, { x: 1, y: 2, z: 3 }, out);
         expect(out).toEqual({ x: 6, y: 6, z: 6 });
 
         scaleVec3ToRef({ x: 1, y: -2, z: 3 }, 3, out);
@@ -51,7 +51,7 @@ describe("Vec3 ref helpers", () => {
         expect(addVec3InPlace(target, { x: 1, y: 1, z: 1 })).toBe(target);
         expect(target).toEqual({ x: 2, y: 3, z: 4 });
 
-        subVec3InPlace(target, { x: 1, y: 2, z: 3 });
+        subtractVec3InPlace(target, { x: 1, y: 2, z: 3 });
         expect(target).toEqual({ x: 1, y: 1, z: 1 });
 
         scaleVec3InPlace(target, 2);

@@ -476,8 +476,8 @@ struct FsOut {
 ## Dependencies
 
 - `../math/types.js` — `Mat4` type
-- `../math/mat4-invert.js` — `mat4Invert`
-- `../math/mat4-multiply.js` — affine base-mesh × thin-instance composition for detailed normals
+- `../math/invert-mat4.js` — `invertMat4`
+- `../math/multiply-mat4.js` — affine base-mesh × thin-instance composition for detailed normals
 - `./pick-contributor.js` — `PickContributor` seam (optional pickable entities register here)
 - `../mesh/mesh.js` — `Mesh` interface (CPU geometry fields)
 - `../scene/scene.js` — `SceneContext` (for camera + mesh list)

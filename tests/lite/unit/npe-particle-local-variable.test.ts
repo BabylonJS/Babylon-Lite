@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
-import { mat4Identity } from "../../../packages/babylon-lite/src/math/mat4-identity";
-import { mat4Translation } from "../../../packages/babylon-lite/src/math/mat4-translation";
+import { createIdentityMat4 } from "../../../packages/babylon-lite/src/math/create-identity-mat4";
+import { createTranslationMat4 } from "../../../packages/babylon-lite/src/math/create-translation-mat4";
 import type { Color4, Vec2, Vec3 } from "../../../packages/babylon-lite/src/math/types";
 import { buildNodeParticleSet, type NpeBuildContext, type NpeBuildState } from "../../../packages/babylon-lite/src/particle/node/npe-build";
 import { withNodeParticleEmitterProvider } from "../../../packages/babylon-lite/src/particle/node/npe-emitter-provider";
@@ -21,7 +21,7 @@ function createBuildState(capacity: number): NpeBuildState {
         buffer: system.buffer,
         capacity,
         emitter: { x: 0, y: 0, z: 0 },
-        emitterWorldMatrix: mat4Identity(),
+        emitterWorldMatrix: createIdentityMat4(),
         isLocal: false,
         scene: {} as SceneContext,
     };
@@ -115,7 +115,7 @@ describe("ParticleLocalVariableBlock", () => {
                 buffer: system.buffer,
                 capacity: system.buffer.capacity,
                 emitter: { x: 0, y: 0, z: 0 },
-                emitterWorldMatrix: mat4Identity(),
+                emitterWorldMatrix: createIdentityMat4(),
                 isLocal: false,
                 scene: {} as SceneContext,
             },
@@ -208,7 +208,7 @@ describe("ParticleLocalVariableBlock", () => {
             {} as EngineContext,
             {} as SceneContext,
             graph,
-            withNodeParticleEmitterProvider(() => mat4Translation(++providerCalls, 0, 0))
+            withNodeParticleEmitterProvider(() => createTranslationMat4(++providerCalls, 0, 0))
         );
         const system = set.systems[0]!;
 
@@ -387,7 +387,7 @@ describe("ParticleLocalVariableBlock", () => {
             {} as EngineContext,
             {} as SceneContext,
             graph,
-            withNodeParticleEmitterProvider(() => mat4Translation(++providerCalls, 0, 0))
+            withNodeParticleEmitterProvider(() => createTranslationMat4(++providerCalls, 0, 0))
         );
         const system = set.systems[0]!;
 
@@ -404,7 +404,7 @@ describe("ParticleLocalVariableBlock", () => {
     it("keeps Loop snapshots independent across systems and builds", async () => {
         let providerCalls = 0;
         const graph = await normalizeNodeParticleGraph(parseNodeParticleSource(loopLifecycleGraph(2)));
-        const options = withNodeParticleEmitterProvider(() => mat4Translation(++providerCalls, 0, 0));
+        const options = withNodeParticleEmitterProvider(() => createTranslationMat4(++providerCalls, 0, 0));
         const firstBuild = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph, options);
         const secondBuild = await buildNodeParticleSet({} as EngineContext, {} as SceneContext, graph, options);
         const systems = [...firstBuild.systems, ...secondBuild.systems];
@@ -425,7 +425,7 @@ describe("ParticleLocalVariableBlock", () => {
             if (shouldThrow) {
                 throw new Error("provider failed");
             }
-            return mat4Translation(providerCalls, 0, 0);
+            return createTranslationMat4(providerCalls, 0, 0);
         });
         const setupEmitter = options._setupEmitter!;
         let buildState: NpeBuildState | undefined;

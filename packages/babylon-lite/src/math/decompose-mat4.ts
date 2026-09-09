@@ -2,10 +2,10 @@
  *  Standalone function for tree-shaking — only bundled when used. */
 
 import type { Mat4, Quat, Vec3 } from "./types.js";
-import { _quatFromRotationBasis } from "./quat-from-rotation-matrix.js";
+import { _quatFromRotationBasis } from "./create-quat-from-rotation-mat4.js";
 import { mat4Determinant3 } from "./mat4-determinant3.js";
 
-/** Result of {@link mat4Decompose}: a TRS triple. */
+/** Result of {@link decomposeMat4}: a TRS triple. */
 export interface DecomposedTransform {
     /** Translation (matrix columns 12/13/14). */
     translation: Vec3;
@@ -40,7 +40,7 @@ export interface DecomposedTransform {
  * @param m - Column-major 4×4 matrix.
  * @returns A new translation/rotation/scale triple.
  */
-export function mat4Decompose(m: Mat4): DecomposedTransform {
+export function decomposeMat4(m: Mat4): DecomposedTransform {
     const sx = Math.hypot(m[0]!, m[1]!, m[2]!);
     const syAbs = Math.hypot(m[4]!, m[5]!, m[6]!);
     const sz = Math.hypot(m[8]!, m[9]!, m[10]!);

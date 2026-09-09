@@ -20,7 +20,7 @@ import {
     createStandardMaterial,
     enableThinInstanceGpuCulling,
     getViewProjectionMatrix,
-    mat4Compose,
+    composeMat4,
     onBeforeRender,
     setThinInstanceCount,
     setThinInstanceMatrix,
@@ -224,7 +224,7 @@ export class Handles {
             for (let a = 0; a < 3; a++) {
                 center[a] = c[a]! + n[a]! * (half[a]! + HANDLE_GAP);
             }
-            const m = mat4Compose(center[0]!, center[1]!, center[2]!, 0, 0, 0, 1, HANDLE_D, HANDLE_D, HANDLE_D);
+            const m = composeMat4(center[0]!, center[1]!, center[2]!, 0, 0, 0, 1, HANDLE_D, HANDLE_D, HANDLE_D);
             setThinInstanceMatrix(this._mesh, i, m);
         }
         setThinInstanceCount(this._mesh, 6);

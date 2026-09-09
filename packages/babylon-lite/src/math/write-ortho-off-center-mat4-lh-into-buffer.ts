@@ -1,11 +1,11 @@
 import type { Mat4Storage } from "./types.js";
 
 /** Write a reverse-Z off-center orthographic projection into `out` without allocating.
- *  WebGPU clip-space depth is [0, 1]; like `mat4PerspectiveLHToRef` this maps
+ *  WebGPU clip-space depth is [0, 1]; like `writePerspectiveMat4LHIntoBuffer` this maps
  *  `near -> 1` and `far -> 0`, so orthographic cameras share the engine's
  *  reverse-Z depth state (clear 0, compare `greater`).
  *
- *  This writer overwrites all 16 elements. `mat4PerspectiveLHToRef` writes only the five
+ *  This writer overwrites all 16 elements. `writePerspectiveMat4LHIntoBuffer` writes only the five
  *  a perspective matrix needs (0, 5, 10, 11, 14) and assumes the rest of its target is
  *  already zero, so the two are not symmetric: switching perspective to orthographic is
  *  safe on a shared cache, while the reverse relies on `disableOrthographicCamera`
@@ -13,7 +13,7 @@ import type { Mat4Storage } from "./types.js";
  *  projectors fully overwrite their output so a future third projection type cannot be
  *  contaminated by whichever one ran before it.
  *  Storage may be F32- or F64-backed. */
-export function mat4OrthoOffCenterLHToRef(out: Mat4Storage, left: number, right: number, bottom: number, top: number, near: number, far: number): void {
+export function writeOrthoOffCenterMat4LHIntoBuffer(out: Mat4Storage, left: number, right: number, bottom: number, top: number, near: number, far: number): void {
     const range = far - near;
     out[0] = 2 / (right - left);
     out[1] = 0;

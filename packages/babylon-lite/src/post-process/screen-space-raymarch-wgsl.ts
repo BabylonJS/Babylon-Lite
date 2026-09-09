@@ -15,7 +15,7 @@
  * `ssUvFromWorld` are exact inverses under this convention:
  *   ndc = vec3(uv.x*2-1, 1-uv.y*2, depth)  -\> uv = vec2(ndc.x*0.5+0.5, 0.5-ndc.y*0.5)
  *
- * Depth is reverse-Z (near -\> 1, far -\> 0; see `math/mat4-perspective-lh-to-ref.ts`), so a
+ * Depth is reverse-Z (near -\> 1, far -\> 0; see `math/write-perspective-mat4-lh-into-buffer.ts`), so a
  * cleared background fragment reads depth \<= 0.
  */
 

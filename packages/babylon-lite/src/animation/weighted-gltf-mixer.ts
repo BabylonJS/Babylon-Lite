@@ -7,8 +7,8 @@ import type { AnimationManager } from "./animation-manager.js";
 import type { NodeRest, SkeletonBinding } from "./types.js";
 import { PATH_ROTATION, PATH_SCALE, PATH_TRANSLATION } from "./types.js";
 import { evaluateSampler } from "./evaluate.js";
-import { mat4ComposeInto } from "../math/mat4-compose-into.js";
-import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
+import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
+import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import type { Mat4Storage } from "../math/types.js";
 import { _boneApplier } from "../skeleton/bone-control-hooks.js";
 import type { BoneOverride } from "../skeleton/bone-control.js";
@@ -436,7 +436,7 @@ function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): vo
         if (node._matrix) {
             localMat.set(node._matrix, nodeIdx * 16);
         } else {
-            mat4ComposeInto(
+            composeMat4IntoBuffer(
                 localMat,
                 nodeIdx * 16,
                 trs[off + T_OFF]!,
@@ -454,9 +454,9 @@ function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): vo
 
         const parentIdx = node.parentIdx;
         if (parentIdx >= 0) {
-            mat4MultiplyInto(worldMat, nodeIdx * 16, worldMat, parentIdx * 16, localMat, nodeIdx * 16);
+            multiplyMat4IntoBuffer(worldMat, nodeIdx * 16, worldMat, parentIdx * 16, localMat, nodeIdx * 16);
         } else {
-            mat4MultiplyInto(worldMat, nodeIdx * 16, RH_TO_LH, 0, localMat, nodeIdx * 16);
+            multiplyMat4IntoBuffer(worldMat, nodeIdx * 16, RH_TO_LH, 0, localMat, nodeIdx * 16);
         }
     }
 
@@ -469,8 +469,8 @@ function uploadTarget(manager: AnimationManager, target: WeightedGltfTarget): vo
         for (let bi = 0; bi < skel.boneCount; bi++) {
             const jointIdx = skel.jointNodes[bi]!;
             const ibmOff = bi * 16;
-            mat4MultiplyInto(_boneTmp, 0, skel.invMeshWorld as unknown as Mat4Storage, 0, worldMat, jointIdx * 16);
-            mat4MultiplyInto(boneData, bi * 16, _boneTmp, 0, skel.inverseBindMatrices, ibmOff);
+            multiplyMat4IntoBuffer(_boneTmp, 0, skel.invMeshWorld as unknown as Mat4Storage, 0, worldMat, jointIdx * 16);
+            multiplyMat4IntoBuffer(boneData, bi * 16, _boneTmp, 0, skel.inverseBindMatrices, ibmOff);
         }
 
         const texWidth = skel.boneCount * 4;
