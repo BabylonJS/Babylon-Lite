@@ -30,8 +30,8 @@ import {
     pickMeshesWithRay as litePickWithRay,
     createPickingRay as liteCreatePickingRay,
     resolveCameraViewport,
-    mat4Invert,
-    mat4Multiply,
+    invertMat4,
+    multiplyMat4,
 } from "babylon-lite";
 import type {
     SceneContext,
@@ -873,7 +873,7 @@ export class Scene extends AbstractScene {
         const projectionMatrix = cameraToUse.getProjectionMatrix().m as unknown as Mat4;
         let viewMatrix = Matrix.Identity().m as unknown as Mat4;
         if (!cameraViewSpace && cameraToUse._lite._useFloatingOrigin) {
-            const absoluteView = mat4Invert(cameraToUse._lite.worldMatrix);
+            const absoluteView = invertMat4(cameraToUse._lite.worldMatrix);
             if (!absoluteView) {
                 return Ray.Zero();
             }
@@ -883,7 +883,7 @@ export class Scene extends AbstractScene {
         }
         // Compat matrices use Babylon.js's row-vector multiplication order, while
         // Lite's kernel is column-major, so reverse the operands for the same bytes.
-        const transform = mat4Multiply(projectionMatrix, mat4Multiply(viewMatrix, worldMatrix));
+        const transform = multiplyMat4(projectionMatrix, multiplyMat4(viewMatrix, worldMatrix));
         const liteRay = liteCreatePickingRay(x / scale - viewport.x, y / scale - viewport.y, transform, viewport.width, viewport.height);
         if (!liteRay) {
             return Ray.Zero();
