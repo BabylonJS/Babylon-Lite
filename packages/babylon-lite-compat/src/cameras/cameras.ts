@@ -13,6 +13,8 @@ import {
     createBankedFreeCamera,
     createFreeCamera,
     createGeospatialCamera,
+    disableOrthographicCamera,
+    enableOrthographicCamera,
     setGeospatialOrientation,
     attachGeospatialControls,
     attachControl as liteAttachControl,
@@ -39,6 +41,9 @@ import type { Scene } from "../scene/scene.js";
 
 /** Babylon.js `Camera` — base class for all cameras (derives from `Node`). */
 export abstract class Camera extends Node {
+    public static readonly PERSPECTIVE_CAMERA = 0;
+    public static readonly ORTHOGRAPHIC_CAMERA = 1;
+
     /** @internal Underlying Babylon Lite camera. */
     public abstract readonly _lite: LiteCamera;
     private _detach: (() => void) | undefined;
@@ -71,6 +76,24 @@ export abstract class Camera extends Node {
     }
     public set maxZ(value: number) {
         this._lite.farPlane = value;
+    }
+
+    public get mode(): number {
+        return this._lite.ortho ? Camera.ORTHOGRAPHIC_CAMERA : Camera.PERSPECTIVE_CAMERA;
+    }
+    public set mode(value: number) {
+        if (value === this.mode) {
+            return;
+        }
+        if (value === Camera.ORTHOGRAPHIC_CAMERA) {
+            enableOrthographicCamera(this._lite);
+            return;
+        }
+        if (value === Camera.PERSPECTIVE_CAMERA) {
+            disableOrthographicCamera(this._lite);
+            return;
+        }
+        unsupported("Camera.mode", `Projection mode ${value} is not supported.`);
     }
 
     public get viewport(): Viewport {
