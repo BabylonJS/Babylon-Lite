@@ -162,6 +162,23 @@ if (!projection.clipped) {
 
 The projection helper itself has no DOM dependency. For `OffscreenCanvas`, pass the visible host canvas's CSS dimensions. Use `projectWorldToScreenToRef` with a reused result object when projecting many points per frame.
 
+Pointer-button behavior can be migrated without adding application-owned orbit
+or pan math. The defaults stay primary-button rotate and secondary-button pan;
+set either mapping independently when the application uses a different
+interaction convention:
+
+```typescript
+attachControl(camera, canvas, scene, {
+    pointerMappings: {
+        primaryButton: "pan",
+        secondaryButton: "rotate",
+    },
+});
+```
+
+This mapping applies to mouse and pen buttons. Touch remains one-finger rotate
+and two-finger pinch zoom, and wheel input remains zoom.
+
 ### 5. Loaders and Scene Registration
 
 `loadEnvironment()` adds its environment data/renderables to the scene internally. `loadGltf()` returns an asset container; pass it to `addToScene()` so transform-node hierarchies, meshes, and animation groups are registered explicitly.

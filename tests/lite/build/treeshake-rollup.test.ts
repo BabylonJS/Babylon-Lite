@@ -190,6 +190,13 @@ describe("@babylonjs/lite has no module-level side effects", () => {
         ).toBe(normalize(SENTINEL));
     }, 180_000);
 
+    it("drops arc-rotate pointer mapping controls when only camera data is used", async () => {
+        const code = await bundleEntry(workDir, `import { createArcRotateCamera } from ${JSON.stringify(SRC_ENTRY)};\nconsole.log(createArcRotateCamera);\n`);
+        expect(code).toContain("createArcRotateCamera");
+        expect(code).not.toContain("pointerMappings");
+        expect(code).not.toContain("gesturestart");
+    }, 120_000);
+
     it("positive control: the harness DOES surface a real module-level side effect", async () => {
         // Guards against the assertions above silently passing because the bundler
         // stopped detecting side effects (config drift). A module that mutates a

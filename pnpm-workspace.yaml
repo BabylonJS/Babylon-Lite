@@ -25,7 +25,7 @@ nodeOptions: '--max-old-space-size=8192'
 # Enforced natively by pnpm >= 10.16 during resolution.
 minimumReleaseAge: 10080
 
-# Narrow, temporary exception: @babylonjs 9.19.0 ships the upstream .pure-split
+# Narrow, temporary exception: @babylonjs 9.25.0 ships the upstream .pure-split
 # back-compat fixes (MeshBuilder legacy statics, glTF InstancedMesh side-effect,
 # WGSL UBO include chunks) that let us drop the per-scene reference workarounds.
 # These are first-party BabylonJS packages we track closely, so we opt them out
