@@ -14,6 +14,7 @@ const backingHeight = surface.canvas.height;
 const view = getViewMatrix(camera);
 const viewProjection = getViewProjectionMatrix(camera, getEffectiveAspectRatio(camera, backingWidth, backingHeight));
 const viewport = resolveCameraViewport(camera, backingWidth, backingHeight);
+const worldOrigin = engine.useFloatingOrigin ? getFloatingOriginOffset(scene) : undefined;
 ```
 
 For a DOM canvas, pass its current canvas-relative CSS dimensions as `cssWidth` and `cssHeight` (normally `clientWidth` / `clientHeight`, or `getBoundingClientRect()` dimensions when CSS transforms must be included). For an `OffscreenCanvas`, the host supplies the visible canvas's CSS dimensions alongside the backing size. Omitting the CSS dimensions makes CSS coordinates equal backing-pixel coordinates.
@@ -27,6 +28,8 @@ export interface ScreenProjectionOptions {
     /** Full canvas backing-store dimensions in device pixels. */
     backingWidth: number;
     backingHeight: number;
+    /** World-space position represented by zero in the supplied matrices. */
+    worldOrigin?: Vec3;
     /** Canvas-relative CSS dimensions. Both must be supplied together. */
     cssWidth?: number;
     cssHeight?: number;
@@ -70,9 +73,17 @@ export function projectWorldToScreen(
 
 `projectWorldToScreenToRef` performs no allocations and returns the exact `result` object supplied by the caller. `projectWorldToScreen` is the convenience form and allocates one result object.
 
+`worldOrigin` identifies the absolute world-space position represented by `(0, 0, 0)` in the supplied matrices. Omit it when `view` and `viewProjection` operate on absolute world coordinates. When Large World Rendering is active, pass `getFloatingOriginOffset(scene)`: Lite's floating-origin matrices are eye-relative while CPU node positions remain absolute. The helper subtracts `worldOrigin` from the input point before applying either matrix, matching the GPU upload rebase without importing camera, scene, or floating-origin runtime code.
+
 ## Projection Contract
 
-Babylon Lite matrices are column-major and cameras are left-handed. For world point `(x, y, z)`, the helper computes:
+Babylon Lite matrices are column-major and cameras are left-handed. For absolute world point `point` and optional `worldOrigin`, the helper first computes:
+
+```text
+(x, y, z) = point - (worldOrigin ?? (0, 0, 0))
+```
+
+It then computes:
 
 ```text
 viewZ = view[2]*x + view[6]*y + view[10]*z + view[14]
@@ -112,11 +123,11 @@ This ratio handles device-pixel ratio, `maxDevicePixelRatio`, explicit backing-s
 - `offscreen` concerns only whether the point can appear in the viewport's 2D rectangle. It is true for behind-camera/non-finite points, negative `clipW`, or `ndcX` / `ndcY` outside `[-1, 1]`. Negative `clipW` is non-displayable even if a separately supplied view matrix reports positive `viewZ`. A point inside the 2D rectangle but clipped only by near/far depth has `offscreen=false` and `clipped=true`.
 - Coordinates are not clamped. Finite points outside the viewport retain their extrapolated backing/CSS coordinates so callers can place edge indicators themselves.
 - When `clipW` is zero or any input calculation is non-finite, `x`, `y`, `z`, `cssX`, and `cssY` are `NaN`; all state flags except `behindCamera` report non-displayable behavior (`clipped=true`, `offscreen=true`).
-- Backing dimensions and viewport width/height must be positive finite numbers, and viewport x/y must be finite. CSS dimensions, when supplied, must both be positive finite numbers. Invalid options throw `RangeError` instead of returning success-shaped coordinates.
+- Backing dimensions and viewport width/height must be positive finite numbers, viewport x/y must be finite, and `worldOrigin`, when supplied, must contain finite components. CSS dimensions, when supplied, must both be positive finite numbers. Invalid options throw `RangeError` instead of returning success-shaped coordinates.
 
 ## Internal Architecture
 
-The module has no mutable module state, caches, DOM imports, or module-level allocations. The `ToRef` function reads scalar matrix elements directly and writes all result fields on every call, so reusing a result cannot leak stale CSS coordinates or flags.
+The module has no mutable module state, caches, DOM imports, or module-level allocations. The `ToRef` function subtracts optional origin components as scalars, reads scalar matrix elements directly, and writes all result fields on every call, so reusing a result cannot leak stale CSS coordinates or flags.
 
 The allocating wrapper constructs one plain result object and delegates to `projectWorldToScreenToRef`; it owns no separate math path.
 
@@ -146,6 +157,8 @@ Both imports are type-only. The module remains a leaf and adds no runtime depend
 | Partial viewport | NDC corners and center include viewport offset/extent |
 | Behind perspective | `behindCamera`, `clipped`, and `offscreen` are true |
 | Behind orthographic | Separate view-space test identifies it despite `clipW=1` |
+| Floating-origin perspective | Rebasing preserves projection and behind-camera classification after a large world translation |
+| Floating-origin orthographic | Rebasing preserves projection and behind-camera classification after a large world translation |
 | XY offscreen | Extrapolated coordinates are retained; both clipped/offscreen true |
 | Negative clip W | Non-displayable even when the separately supplied view matrix reports a point in front |
 | Depth-only clip | Clipped true while offscreen remains false |

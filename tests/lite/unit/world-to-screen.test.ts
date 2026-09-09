@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
 import { getEffectiveAspectRatio, getViewMatrix, getViewProjectionMatrix } from "../../../packages/babylon-lite/src/camera/camera";
+import { createFreeCamera } from "../../../packages/babylon-lite/src/camera/free-camera";
 import { enableOrthographicCamera } from "../../../packages/babylon-lite/src/camera/orthographic";
 import { resolveCameraViewport, type PixelViewport } from "../../../packages/babylon-lite/src/camera/viewport";
+import { allocateF64Mat4 } from "../../../packages/babylon-lite/src/math/_mat4-storage-f64";
+import { _resetMatrixAllocatorForTests, _setHpmAllocator } from "../../../packages/babylon-lite/src/math/_matrix-allocator";
 import { mat4Identity } from "../../../packages/babylon-lite/src/math/mat4-identity";
 import type { Mat4Storage } from "../../../packages/babylon-lite/src/math/types";
 import {
@@ -15,6 +18,7 @@ import {
 
 const BACKING_WIDTH = 800;
 const BACKING_HEIGHT = 600;
+const FAR = 4_637_862.01;
 
 function result(): ScreenProjectionResult {
     return {
@@ -50,6 +54,9 @@ function setup(viewport?: PixelViewport) {
 }
 
 describe("world-to-screen projection", () => {
+    beforeAll(() => _setHpmAllocator(allocateF64Mat4));
+    afterAll(() => _resetMatrixAllocatorForTests());
+
     it("maps a camera-forward point to canvas and CSS center", () => {
         const { project } = setup();
 
@@ -115,6 +122,64 @@ describe("world-to-screen projection", () => {
         });
     });
 
+    it("preserves perspective projection and facing under floating-origin rebasing", () => {
+        const { options } = setup();
+        const worldOrigin = { x: FAR, y: -FAR, z: FAR };
+        const absoluteCamera = createFreeCamera({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 10 });
+        const floatingCamera = createFreeCamera(worldOrigin, { x: FAR, y: -FAR, z: FAR + 10 });
+        floatingCamera._useFloatingOrigin = true;
+        const aspect = BACKING_WIDTH / BACKING_HEIGHT;
+        const floatingView = getViewMatrix(floatingCamera);
+        const floatingViewProjection = getViewProjectionMatrix(floatingCamera, aspect);
+
+        const absoluteFront = projectWorldToScreen({ x: 0, y: 0, z: 10 }, getViewMatrix(absoluteCamera), getViewProjectionMatrix(absoluteCamera, aspect), options);
+        const floatingFront = projectWorldToScreen({ x: FAR, y: -FAR, z: FAR + 10 }, floatingView, floatingViewProjection, {
+            ...options,
+            worldOrigin,
+        });
+        const unrebasedBehind = projectWorldToScreen({ x: FAR, y: -FAR, z: FAR - 10 }, floatingView, floatingViewProjection, options);
+        const floatingBehind = projectWorldToScreen({ x: FAR, y: -FAR, z: FAR - 10 }, floatingView, floatingViewProjection, {
+            ...options,
+            worldOrigin,
+        });
+
+        expect(floatingFront.x).toBeCloseTo(absoluteFront.x);
+        expect(floatingFront.y).toBeCloseTo(absoluteFront.y);
+        expect(floatingFront.z).toBeCloseTo(absoluteFront.z);
+        expect(floatingFront).toMatchObject({ behindCamera: false, clipped: false, offscreen: false });
+        expect(unrebasedBehind.behindCamera).toBe(false);
+        expect(floatingBehind).toMatchObject({ behindCamera: true, clipped: true, offscreen: true });
+    });
+
+    it("preserves orthographic projection and facing under floating-origin rebasing", () => {
+        const { options } = setup();
+        const worldOrigin = { x: FAR, y: -FAR, z: FAR };
+        const absoluteCamera = createFreeCamera({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 10 });
+        const floatingCamera = createFreeCamera(worldOrigin, { x: FAR, y: -FAR, z: FAR + 10 });
+        enableOrthographicCamera(absoluteCamera, { halfHeight: 5 });
+        enableOrthographicCamera(floatingCamera, { halfHeight: 5 });
+        floatingCamera._useFloatingOrigin = true;
+        const aspect = BACKING_WIDTH / BACKING_HEIGHT;
+        const floatingView = getViewMatrix(floatingCamera);
+        const floatingViewProjection = getViewProjectionMatrix(floatingCamera, aspect);
+
+        const absoluteFront = projectWorldToScreen({ x: 2, y: 1, z: 10 }, getViewMatrix(absoluteCamera), getViewProjectionMatrix(absoluteCamera, aspect), options);
+        const floatingFront = projectWorldToScreen({ x: FAR + 2, y: -FAR + 1, z: FAR + 10 }, floatingView, floatingViewProjection, {
+            ...options,
+            worldOrigin,
+        });
+        const floatingBehind = projectWorldToScreen({ x: FAR, y: -FAR, z: FAR - 10 }, floatingView, floatingViewProjection, {
+            ...options,
+            worldOrigin,
+        });
+
+        expect(floatingFront.x).toBeCloseTo(absoluteFront.x);
+        expect(floatingFront.y).toBeCloseTo(absoluteFront.y);
+        expect(floatingFront.z).toBeCloseTo(absoluteFront.z);
+        expect(floatingFront).toMatchObject({ behindCamera: false, clipped: false, offscreen: false });
+        expect(floatingBehind).toMatchObject({ behindCamera: true, clipped: true, offscreen: true });
+    });
+
     it("retains extrapolated coordinates for finite XY-offscreen points", () => {
         const { project } = setup();
         const projected = project({ x: 100, y: 0, z: 0 });
@@ -178,7 +243,13 @@ describe("world-to-screen projection", () => {
         const { camera, options } = setup();
         const target = result();
 
-        const returned = projectWorldToScreenToRef({ x: 0, y: 0, z: 0 }, getViewMatrix(camera), getViewProjectionMatrix(camera, 4 / 3), options, target);
+        const returned = projectWorldToScreenToRef(
+            { x: FAR, y: 0, z: 0 },
+            getViewMatrix(camera),
+            getViewProjectionMatrix(camera, 4 / 3),
+            { ...options, worldOrigin: { x: FAR, y: 0, z: 0 } },
+            target
+        );
 
         expect(returned).toBe(target);
         expect(target).toMatchObject({
@@ -205,6 +276,7 @@ describe("world-to-screen projection", () => {
         expect(() => projectWorldToScreen(point, view, viewProjection, { ...options, viewport: { ...options.viewport, x: Number.NaN } })).toThrow(
             "viewport offsets must be finite"
         );
+        expect(() => projectWorldToScreen(point, view, viewProjection, { ...options, worldOrigin: { x: Number.NaN, y: 0, z: 0 } })).toThrow("world origin must be finite");
         expect(() => projectWorldToScreen(point, view, viewProjection, { ...options, cssHeight: undefined })).toThrow(RangeError);
     });
 });

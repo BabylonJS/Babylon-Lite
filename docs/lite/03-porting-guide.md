@@ -133,6 +133,7 @@ Babylon.js `Vector3.Project` returns render pixels and leaves visibility checks 
 
 ```typescript
 import {
+    getFloatingOriginOffset,
     getEffectiveAspectRatio,
     getViewMatrix,
     getViewProjectionMatrix,
@@ -150,6 +151,7 @@ const projection = projectWorldToScreen(
         viewport: resolveCameraViewport(camera, backingWidth, backingHeight),
         backingWidth,
         backingHeight,
+        worldOrigin: engine.useFloatingOrigin ? getFloatingOriginOffset(scene) : undefined,
         cssWidth: canvas.clientWidth,
         cssHeight: canvas.clientHeight,
     }
@@ -160,7 +162,7 @@ if (!projection.clipped) {
 }
 ```
 
-The projection helper itself has no DOM dependency. For `OffscreenCanvas`, pass the visible host canvas's CSS dimensions. Use `projectWorldToScreenToRef` with a reused result object when projecting many points per frame.
+The projection helper itself has no DOM dependency. For `OffscreenCanvas`, pass the visible host canvas's CSS dimensions. With Large World Rendering, `worldOrigin` rebases absolute CPU positions into the eye-relative frame used by the camera matrices. Use `projectWorldToScreenToRef` with a reused result object when projecting many points per frame.
 
 Pointer-button behavior can be migrated without adding application-owned orbit
 or pan math. The defaults stay primary-button rotate and secondary-button pan;

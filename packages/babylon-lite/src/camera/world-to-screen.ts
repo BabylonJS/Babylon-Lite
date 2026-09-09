@@ -9,6 +9,8 @@ export interface ScreenProjectionOptions {
     backingWidth: number;
     /** Full canvas backing-store height in device pixels. */
     backingHeight: number;
+    /** World-space position represented by zero in the supplied matrices. Omit for absolute-world matrices. */
+    worldOrigin?: Vec3;
     /** Canvas-relative CSS width. Must be supplied together with {@link cssHeight}. */
     cssWidth?: number;
     /** Canvas-relative CSS height. Must be supplied together with {@link cssWidth}. */
@@ -33,7 +35,7 @@ export interface ScreenProjectionResult extends Vec3 {
 }
 
 function validateOptions(options: ScreenProjectionOptions): void {
-    const { viewport, backingWidth, backingHeight, cssWidth, cssHeight } = options;
+    const { viewport, backingWidth, backingHeight, worldOrigin, cssWidth, cssHeight } = options;
     if (
         !Number.isFinite(viewport.x) ||
         !Number.isFinite(viewport.y) ||
@@ -47,6 +49,9 @@ function validateOptions(options: ScreenProjectionOptions): void {
         !Number.isFinite(backingHeight)
     ) {
         throw new RangeError("ScreenProjectionOptions backing dimensions and viewport extents must be positive and finite; viewport offsets must be finite.");
+    }
+    if (worldOrigin && (!Number.isFinite(worldOrigin.x) || !Number.isFinite(worldOrigin.y) || !Number.isFinite(worldOrigin.z))) {
+        throw new RangeError("ScreenProjectionOptions world origin must be finite.");
     }
     if (
         (cssWidth === undefined) !== (cssHeight === undefined) ||
@@ -65,7 +70,9 @@ function validateOptions(options: ScreenProjectionOptions): void {
  * orthographic projections, whose homogeneous W remains 1. Coordinates are not clamped:
  * finite offscreen points keep their extrapolated positions for edge-indicator placement.
  *
- * This function performs no allocations. Derive the matrices and viewport once per frame
+ * This function performs no allocations. When the matrices use a rebased coordinate frame,
+ * set `options.worldOrigin` to the absolute world position represented by their origin.
+ * Derive the matrices and viewport once per frame
  * with `getViewMatrix`, `getViewProjectionMatrix`, `getEffectiveAspectRatio`, and
  * `resolveCameraViewport`, then reuse both `options` and `result` for each projected point.
  */
@@ -74,9 +81,10 @@ export function projectWorldToScreenToRef<T extends ScreenProjectionResult>(poin
 
     const v = view;
     const vp = viewProjection;
-    const x = point.x;
-    const y = point.y;
-    const z = point.z;
+    const origin = options.worldOrigin;
+    const x = point.x - (origin?.x ?? 0);
+    const y = point.y - (origin?.y ?? 0);
+    const z = point.z - (origin?.z ?? 0);
     const viewZ = x * v[2]! + y * v[6]! + z * v[10]! + v[14]!;
     const clipX = x * vp[0]! + y * vp[4]! + z * vp[8]! + vp[12]!;
     const clipY = x * vp[1]! + y * vp[5]! + z * vp[9]! + vp[13]!;
