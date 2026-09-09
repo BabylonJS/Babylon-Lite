@@ -173,7 +173,14 @@ export { Observable } from "./misc/observable.js";
 export { Tools } from "./misc/tools.js";
 export { RandomGUID, GUID } from "./misc/guid.js";
 export { SmartArray, StringDictionary, Tags, PerformanceMonitor, FactorGradient, ColorGradient, Logger, PrecisionDate } from "./misc/misc-utils.js";
-export { ScenePerformancePriority, ShaderLanguage, ImageProcessingConfiguration, Constants } from "./misc/engine-constants.js";
+export {
+    ScenePerformancePriority,
+    ShaderLanguage,
+    ImageProcessingConfiguration,
+    Constants,
+    RegisterImageProcessingConfiguration,
+    RegisterAbstractEngineTextureLoaders,
+} from "./misc/engine-constants.js";
 
 // ─── Actions ─────────────────────────────────────────────────────────
 export {
@@ -307,8 +314,20 @@ export {
     InterpolatingBehavior,
     GeospatialClippingBehavior,
     SceneSerializer,
+    MinTemperatureKelvin,
+    MaxTintMagnitude,
+    TemperatureTintToXyz,
+    GetWhiteBalanceMatrix,
+    FluidRenderingObject,
+    FluidRenderingObjectParticleSystem,
+    FluidRenderingObjectCustomParticles,
+    FluidRenderingTargetRenderer,
+    FluidRenderer,
+    FluidRendererSceneComponent,
+    RegisterFluidRenderer,
 } from "./unsupported/unsupported-apis.js";
 export * as GLTF2 from "./loading/gltf2.js";
+export * as GLTF1 from "./loading/gltf1.js";
 export type {
     IHtmlTextureOptions,
     IHtmlInteractionManagerOptions,

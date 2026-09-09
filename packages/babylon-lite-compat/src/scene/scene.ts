@@ -59,6 +59,8 @@ import type { BaseTexture, CubeTexture, HDRCubeTexture } from "../textures/textu
 import type { WebGPUEngine } from "../engine/engine.js";
 import { AbstractScene } from "./abstract-scene.js";
 import { Logger } from "../misc/misc-utils.js";
+import { ImageProcessingConfiguration } from "../misc/engine-constants.js";
+import type { FluidRenderer } from "../unsupported/unsupported-apis.js";
 import { Matrix } from "../math/matrix.js";
 import { Ray } from "../math/ray.js";
 import { Vector3 } from "../math/vector.js";
@@ -71,6 +73,8 @@ const DEFAULT_SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backg
 const DEFAULT_GROUND_URL = "https://assets.babylonjs.com/core/environments/backgroundGround.png";
 /** Babylon.js `createDefaultEnvironment` IBL fallback when no `environmentTexture` is set. */
 const DEFAULT_ENV_URL = "https://assets.babylonjs.com/environments/environmentSpecular.env";
+const FLUID_RENDERER_UNSUPPORTED =
+    "Fluid rendering requires dedicated depth, thickness, and diffuse passes plus render-target lifecycle and composition policies that Babylon Lite does not define.";
 
 /**
  * Babylon.js resolves the BRDF lookup texture from an embedded Base64 PNG rather than a
@@ -181,6 +185,7 @@ export class Scene extends AbstractScene {
     private _blendManager: AnimationManager | null = null;
     private _ambientColor = new Color3(0, 0, 0);
     private _environmentIntensity = 1;
+    private _imageProcessingConfiguration: ImageProcessingConfiguration | null = null;
     /** @internal Tracks whether at least one frame has ticked (gates `onAfterRenderObservable`). */
     private _renderedAFrame = false;
     /** @internal `NodeMaterial`s whose async parse the engine drives after shadow generators are built. */
@@ -482,10 +487,26 @@ export class Scene extends AbstractScene {
         FreeCamera._adopt("camera", this._lite.camera as LiteFreeCamera, this);
     }
 
-    /** Image-processing exposure proxy (Babylon.js `imageProcessingConfiguration.exposure`). */
-    public get imageProcessingConfiguration(): { exposure: number; contrast: number; toneMappingEnabled: boolean } {
-        return this._lite.imageProcessing;
+    /** Babylon.js image-processing facade over the scene's Lite state. */
+    public get imageProcessingConfiguration(): ImageProcessingConfiguration {
+        this._imageProcessingConfiguration ??= new ImageProcessingConfiguration()._attach(this._lite.imageProcessing);
+        return this._imageProcessingConfiguration;
     }
+
+    public get fluidRenderer(): FluidRenderer | null {
+        return null;
+    }
+    public set fluidRenderer(value: FluidRenderer | null) {
+        if (value !== null) {
+            unsupported("Scene.fluidRenderer", FLUID_RENDERER_UNSUPPORTED);
+        }
+    }
+
+    public enableFluidRenderer(): FluidRenderer | null {
+        return unsupported("Scene.enableFluidRenderer", FLUID_RENDERER_UNSUPPORTED);
+    }
+
+    public disableFluidRenderer(): void {}
 
     /** Babylon.js `scene.performancePriority` — accepted for parity; Babylon Lite tunes its own pipeline. */
     public performancePriority = 0;
