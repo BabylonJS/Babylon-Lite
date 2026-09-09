@@ -7,7 +7,7 @@ import { enableOrthographicCamera } from "../../../packages/babylon-lite/src/cam
 import { resolveCameraViewport, type PixelViewport } from "../../../packages/babylon-lite/src/camera/viewport";
 import { allocateF64Mat4 } from "../../../packages/babylon-lite/src/math/_mat4-storage-f64";
 import { _resetMatrixAllocatorForTests, _setHpmAllocator } from "../../../packages/babylon-lite/src/math/_matrix-allocator";
-import { mat4Identity } from "../../../packages/babylon-lite/src/math/mat4-identity";
+import { createIdentityMat4 } from "../../../packages/babylon-lite/src/math/create-identity-mat4";
 import type { Mat4Storage } from "../../../packages/babylon-lite/src/math/types";
 import {
     projectWorldToScreen,
@@ -195,12 +195,12 @@ describe("world-to-screen projection", () => {
 
     it("marks negative clip W as non-displayable independently of view-space facing", () => {
         const { options } = setup();
-        const viewProjection = mat4Identity();
+        const viewProjection = createIdentityMat4();
         const storage = viewProjection as unknown as Mat4Storage;
         storage[10] = -0.5;
         storage[15] = -1;
 
-        const projected = projectWorldToScreen({ x: 0, y: 0, z: 1 }, mat4Identity(), viewProjection, options);
+        const projected = projectWorldToScreen({ x: 0, y: 0, z: 1 }, createIdentityMat4(), viewProjection, options);
 
         expect(projected).toMatchObject({
             x: 400,
