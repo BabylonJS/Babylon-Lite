@@ -10,8 +10,10 @@ import {
     setEffectFloatArray,
     setEffectFloatArray4,
     setEffectIntArray,
+    setEffectTexture,
     type GLEffect,
 } from "../../../packages/babylon-lite-gl/src/effect";
+import { createRawTexture } from "../../../packages/babylon-lite-gl/src/texture";
 import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockCall, type MockGL } from "./_lite-gl-mock";
 
 function makeEngine() {
@@ -95,6 +97,25 @@ describe("lite-gl effect: extended uniform setters", () => {
         mock.clear();
         setEffectIntArray(engine, eff, "u_iarr", a);
         expect(callsNamed(mock, "uniform1iv")[0]?.args[1]).toBe(a);
+    });
+
+    it("setEffectTexture unbinds a sampler unit when passed null", () => {
+        const { mock, engine } = makeEngine();
+        const eff = createEffect(engine, {
+            name: "texture-setter",
+            vertexSource: "v",
+            fragmentSource: "f",
+            uniformNames: [],
+            samplerNames: ["u_tex"],
+        });
+        isEffectReady(engine, eff);
+        const tex = createRawTexture(engine, new Uint8Array(4), 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        setEffectTexture(engine, eff, "u_tex", tex);
+        mock.clear();
+
+        setEffectTexture(engine, eff, "u_tex", null);
+
+        expect(callsNamed(mock, "bindTexture")[0]?.args).toEqual([engine.gl.TEXTURE_2D, null]);
     });
 
     it("matrix/array setters no-op on a missing uniform", () => {
