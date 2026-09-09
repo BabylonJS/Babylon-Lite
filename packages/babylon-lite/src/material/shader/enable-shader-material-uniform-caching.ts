@@ -1,6 +1,6 @@
 import { F32, I32, U32, U8 } from "../../engine/typed-arrays.js";
 import { getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix, getViewProjectionMatrix } from "../../camera/camera.js";
-import { mat4MultiplyInto } from "../../math/mat4-multiply-into.js";
+import { multiplyMat4IntoBuffer } from "../../math/multiply-mat4-into-buffer.js";
 import type { UboSpec } from "../../shader/fragment-types.js";
 import type { ShaderMaterial, ShaderUniformSlot } from "./shader-material.js";
 import { _isShaderSystemUniform } from "./shader-material.js";
@@ -167,10 +167,10 @@ const writeCachedSystemUniforms: ShaderSystemUniformWriter = (data, spec, materi
                 viewProjection ? data.set(viewProjection, index) : data.fill(0, index, index + 16);
                 break;
             case 4:
-                view ? mat4MultiplyInto(data, index, view, 0, world, 0) : data.fill(0, index, index + 16);
+                view ? multiplyMat4IntoBuffer(data, index, view, 0, world, 0) : data.fill(0, index, index + 16);
                 break;
             case 5:
-                viewProjection ? mat4MultiplyInto(data, index, viewProjection, 0, world, 0) : data.fill(0, index, index + 16);
+                viewProjection ? multiplyMat4IntoBuffer(data, index, viewProjection, 0, world, 0) : data.fill(0, index, index + 16);
                 break;
             case 6:
                 // Zero under floating origin — the eye is the origin of the

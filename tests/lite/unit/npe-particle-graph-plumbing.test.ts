@@ -11,7 +11,7 @@ import { buildNodeParticleSetWithNoiseTextures } from "../../../packages/babylon
 import { parseNodeParticleSetFromSnippet } from "../../../packages/babylon-lite/src/particle/node/node-particle";
 import { parseNodeParticleSource } from "../../../packages/babylon-lite/src/particle/node/npe-parser";
 import { buildNodeParticleSetWithTextureUpdates } from "../../../packages/babylon-lite/src/particle/node/npe-texture-updates";
-import { mat4Identity } from "../../../packages/babylon-lite/src/math/mat4-identity";
+import { createIdentityMat4 } from "../../../packages/babylon-lite/src/math/create-identity-mat4";
 import { normalizeNodeParticleGraph } from "../../../packages/babylon-lite/src/index";
 import type { ParticleSystem } from "../../../packages/babylon-lite/src/particle/particle-system";
 
@@ -575,7 +575,7 @@ describe("NPE graph plumbing", () => {
 
     it("builds one explicitly normalized graph through the emitter-provider builder", async () => {
         const graph = await normalizeNodeParticleGraph(parseNodeParticleSource(scalarRouteSource(true)));
-        const set = await buildNodeParticleSetWithEmitterProvider({} as EngineContext, {} as SceneContext, graph, () => mat4Identity());
+        const set = await buildNodeParticleSetWithEmitterProvider({} as EngineContext, {} as SceneContext, graph, () => createIdentityMat4());
 
         expect(set.systems[0]!.targetStopDuration).toBe(7);
     });

@@ -19,7 +19,7 @@ import { getCameraPosition, getEffectiveAspectRatio, getViewMatrix, getViewProje
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
-import { mat4Invert } from "../math/mat4-invert.js";
+import { invertMat4 } from "../math/invert-mat4.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { createPostProcessTask, type PostProcessTask } from "../frame-graph/post-process-task.js";
 import type { Task } from "../frame-graph/task.js";
@@ -418,7 +418,7 @@ export function createScreenSpaceGlobalIlluminationPostProcessTask(
             const camera = params.camera;
             const aspect = getEffectiveAspectRatio(camera, depthSource._width || 1, depthSource._height || 1);
             const viewProj = getViewProjectionMatrix(camera, aspect);
-            const invViewProj = mat4Invert(viewProj);
+            const invViewProj = invertMat4(viewProj);
             const viewMatrix = getViewMatrix(camera);
             const cameraPos = getCameraPosition(camera);
             const camKey = _cameraChangeKey(camera);

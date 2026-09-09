@@ -13,7 +13,7 @@ import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
 import { addDeferredSceneRenderables } from "../scene/scene-core.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mat4, Mat4Storage, Vec3 } from "../math/types.js";
-import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
+import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } from "../camera/camera.js";
 import type { TextData } from "./text-data.js";
 import { TEXT_INSTANCE_BYTES } from "./text-data.js";
@@ -291,7 +291,7 @@ function updateTextRenderable(r: TextRenderable, engine: EngineContext, gpu: Tex
         if (r._wmDirty || gpu._uploadedCameraVersion !== camVer || gpu._uploadedAspect !== aspect) {
             const vp = getViewProjectionMatrix(camera, aspect) as unknown as Float32Array;
             const wm = r._worldMatrix();
-            mat4MultiplyInto(_mvpScratch, 0, vp, 0, wm as unknown as Mat4Storage, 0);
+            multiplyMat4IntoBuffer(_mvpScratch, 0, vp, 0, wm as unknown as Mat4Storage, 0);
             device.queue.writeBuffer(gpu._textU, 0, _mvpScratch.buffer as ArrayBuffer, _mvpScratch.byteOffset, 64);
             r._wmDirty = false;
             gpu._uploadedCameraVersion = camVer;

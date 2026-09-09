@@ -35,6 +35,7 @@ This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side
 | `scene.createDefaultCamera(true, true, true)`                       | `createDefaultCamera(scene)`                                                                                |
 | `camera.attachControl(canvas, true)`                                | `attachControl(camera, canvas, scene)` _(arc-rotate)_ / `attachFreeControl(camera, canvas, scene)` _(free)_ |
 | `camera.mode = Camera.ORTHOGRAPHIC_CAMERA`                          | `enableOrthographicCamera(camera, { halfHeight })`                                                          |
+| `Vector3.Project(point, world, scene.getTransformMatrix(), viewport)` | `projectWorldToScreen(point, view, viewProjection, options)`                                              |
 | `new HemisphericLight("h", new Vector3(0,1,0), scene)`              | `createHemisphericLight([0,1,0], 1.0)`                                                                      |
 | `new DirectionalLight("d", new Vector3(0,-1,0), scene)`             | `createDirectionalLight([0,-1,0])`                                                                          |
 | `new SpotLight("s", pos, dir, angle, exp, scene)`                   | `createSpotLight(pos, dir, angle, exp)`                                                                     |
@@ -58,7 +59,7 @@ This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side
 | `mesh.thinInstanceSetBuffer("color", data, 4)`                      | `setThinInstanceColors(mesh, data)`                                                                         |
 | `new Vector3(x, y, z)`                                              | `{ x, y, z }` or `[x, y, z]`                                                                                |
 | `new Color3(r, g, b)`                                               | `[r, g, b]`                                                                                                 |
-| `Matrix.Identity()`                                                 | `mat4Identity()`                                                                                            |
+| `Matrix.Identity()`                                                 | `createIdentityMat4()`                                                                                            |
 | `mesh.dispose()`                                                    | `removeFromScene(scene, mesh)`                                                                              |
 | `scene.onBeforeRenderObservable.add(fn)`                            | `onBeforeRender(scene, fn)`                                                                                 |
 
@@ -126,6 +127,60 @@ const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 5, { x: 0, y: 0,
 scene.camera = camera;
 attachControl(camera, canvas, scene);
 ```
+
+#### Projecting a world point to canvas or CSS pixels
+
+Babylon.js `Vector3.Project` returns render pixels and leaves visibility checks and CSS scaling to the caller. Lite's generic helper returns backing pixels, CSS pixels, reverse-Z NDC depth, and explicit behind/clipped/offscreen flags:
+
+```typescript
+import {
+    getFloatingOriginOffset,
+    getEffectiveAspectRatio,
+    getViewMatrix,
+    getViewProjectionMatrix,
+    projectWorldToScreen,
+    resolveCameraViewport,
+} from "@babylonjs/lite";
+
+const backingWidth = canvas.width;
+const backingHeight = canvas.height;
+const projection = projectWorldToScreen(
+    worldPoint,
+    getViewMatrix(camera),
+    getViewProjectionMatrix(camera, getEffectiveAspectRatio(camera, backingWidth, backingHeight)),
+    {
+        viewport: resolveCameraViewport(camera, backingWidth, backingHeight),
+        backingWidth,
+        backingHeight,
+        worldOrigin: engine.useFloatingOrigin ? getFloatingOriginOffset(scene) : undefined,
+        cssWidth: canvas.clientWidth,
+        cssHeight: canvas.clientHeight,
+    }
+);
+
+if (!projection.clipped) {
+    overlay.style.transform = `translate(${projection.cssX}px, ${projection.cssY}px)`;
+}
+```
+
+The projection helper itself has no DOM dependency. For `OffscreenCanvas`, pass the visible host canvas's CSS dimensions. With Large World Rendering, `worldOrigin` rebases absolute CPU positions into the eye-relative frame used by the camera matrices. Use `projectWorldToScreenToRef` with a reused result object when projecting many points per frame.
+
+Pointer-button behavior can be migrated without adding application-owned orbit
+or pan math. The defaults stay primary-button rotate and secondary-button pan;
+set either mapping independently when the application uses a different
+interaction convention:
+
+```typescript
+attachControl(camera, canvas, scene, {
+    pointerMappings: {
+        primaryButton: "pan",
+        secondaryButton: "rotate",
+    },
+});
+```
+
+This mapping applies to mouse and pen buttons. Touch remains one-finger rotate
+and two-finger pinch zoom, and wheel input remains zoom.
 
 ### 5. Loaders and Scene Registration
 
@@ -517,7 +572,7 @@ feature is tree-shakable: scenes that don't use it pay no bundle cost.
 | Morph targets                                 | ✅      | PBR meshes only (not `StandardMaterial`)                                                                                                                                                                               |
 | Skeletal animation (4 or 8 bones)             | ✅      | Driven by `createAnimationController(scene)`                                                                                                                                                                           |
 | Animation blending / weights / additive clips | ✅      | `AnimationManager` with `setAnimationWeight()`, `crossFadeAnimationGroups()`, and `setAnimationAdditive()` (Scenes 155-158)                                                                                            |
-| ShaderMaterial                                | ✅      | WGSL-only `createShaderMaterial()` with typed uniforms, samplers, defines, alpha blend/test (Scenes 159-163)                                                                                                           |
+| ShaderMaterial                                | ✅      | WGSL-only `createShaderMaterial()` with typed uniforms, samplers, defines, alpha blend/test; opt-in `enableShaderMaterialInstanceWorld()` enables shared regular/thin-instance vertex shaders (Scenes 159-163)       |
 | GridMaterial                                  | ✅      | Procedural unlit object-space grid via `createGridMaterial()`: mainColor/lineColor, gridRatio, gridOffset, major/minor units, opacity, antialias, useMaxLine, preMultiplyAlpha, opacityTexture, visibility (Scene 213) |
 | Node Material                                 | ✅      | NME snippet parser covering core, PBR, math, texture, procedural, normal, screen/depth, matrix, loop, and storage blocks (Scenes 60-89)                                                                                |
 | Sprites / billboards                          | ⚡      | 2D layers, depth-hosted sprites, facing/axis-locked/cutout billboards; not the full BJS SpriteManager API (Scenes 50-57)                                                                                               |

@@ -2,7 +2,7 @@
  *  Standalone function for tree-shaking — only bundled when used. */
 
 import type { Vec3, Quat } from "./types.js";
-import { _quatFromRotationBasis } from "./quat-from-rotation-matrix.js";
+import { _quatFromRotationBasis } from "./create-quat-from-rotation-mat4.js";
 
 /**
  * Build a unit quaternion that orients local +Z onto `forward` and local +Y onto
@@ -12,7 +12,7 @@ import { _quatFromRotationBasis } from "./quat-from-rotation-matrix.js";
  * @param up - Desired up direction (should be normalized and not parallel to `forward`).
  * @returns A new `{ x, y, z, w }` quaternion.
  */
-export function quatFromLookDirectionRH(forward: Vec3, up: Vec3): Quat {
+export function createQuatFromLookDirectionRH(forward: Vec3, up: Vec3): Quat {
     // Orthonormalize the basis so the result is a pure rotation even if the inputs
     // are non-unit or slightly non-orthogonal. For valid (unit, orthogonal) inputs
     // this is a no-op and matches Babylon.js exactly.

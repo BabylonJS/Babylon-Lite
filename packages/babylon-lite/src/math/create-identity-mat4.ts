@@ -3,7 +3,7 @@ import { allocateMat4 } from "./_matrix-allocator.js";
 import type { Mat4Storage } from "./types.js";
 
 /** Create a new identity Mat4. */
-export function mat4Identity(): Mat4 {
+export function createIdentityMat4(): Mat4 {
     const m = allocateMat4() as unknown as Mat4Storage;
     m[0] = 1;
     m[5] = 1;

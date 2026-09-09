@@ -1,6 +1,6 @@
 import { F32 } from "../engine/typed-arrays.js";
-import { mat4Invert } from "../math/mat4-invert.js";
-import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
+import { invertMat4 } from "../math/invert-mat4.js";
+import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import type { Mat4, Mat4Storage } from "../math/types.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import type { Mesh } from "./mesh.js";
@@ -78,7 +78,7 @@ export function createHierarchyInstancePool(root: SceneNode, capacity: number): 
         }
 
         const meshWorld = copyMat4(mesh.worldMatrix);
-        const meshWorldInverse = mat4Invert(meshWorld as unknown as Mat4);
+        const meshWorldInverse = invertMat4(meshWorld as unknown as Mat4);
         if (!meshWorldInverse) {
             throw new Error(`createHierarchyInstancePool requires an invertible world matrix for mesh "${mesh.name}"`);
         }
@@ -221,8 +221,8 @@ function copyMat4(src: Mat4): Float32Array {
 // `__root__` RH→LH `(-1, 1, 1)` flip.
 function writeBindingMatrix(pool: HierarchyInstancePool, binding: HierarchyInstancePoolBinding, index: number, rootMatrix: Mat4): void {
     const rootStorage = rootMatrix as unknown as Mat4Storage;
-    mat4MultiplyInto(pool._scratch, 0, rootStorage, 0, binding._meshWorld, 0);
-    mat4MultiplyInto(binding.matrices, index * 16, binding._meshWorldInverse, 0, pool._scratch, 0);
+    multiplyMat4IntoBuffer(pool._scratch, 0, rootStorage, 0, binding._meshWorld, 0);
+    multiplyMat4IntoBuffer(binding.matrices, index * 16, binding._meshWorldInverse, 0, pool._scratch, 0);
 }
 
 function markMatrixDirty(binding: HierarchyInstancePoolBinding, index: number): void {

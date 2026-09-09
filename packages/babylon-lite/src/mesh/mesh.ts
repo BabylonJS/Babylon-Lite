@@ -13,7 +13,7 @@ import type { WorldAabbAcc } from "./mesh-world-bounds.js";
 import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrix } from "../scene/world-matrix-state.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { createEulerProxy } from "../scene/scene-node.js";
-import { eulerToQuat } from "../math/quat-euler.js";
+import { eulerXYZToQuatTuple } from "../math/quat-euler.js";
 
 // ─── Mesh GPU Geometry ───────────────────────────────────────────────
 
@@ -210,7 +210,7 @@ export function initMeshTransform(partialMesh: Partial<Mesh> & { _flatNormal?: b
     const wm = createWorldMatrixState(() => composeTrsLocalMatrix(mesh.position, mesh.rotationQuaternion, mesh.scaling));
     const onWmDirty = () => wm.markLocalDirty();
 
-    const [iqx, iqy, iqz, iqw] = eulerToQuat(rx, ry, rz);
+    const [iqx, iqy, iqz, iqw] = eulerXYZToQuatTuple(rx, ry, rz);
     const rq = new ObservableQuat(iqx, iqy, iqz, iqw, onWmDirty);
     const rotationQuaternion = rq;
     const rotation = createEulerProxy(rq);

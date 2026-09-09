@@ -28,6 +28,10 @@ import {
     enableAnimationBlending,
     updateAnimationManager,
     pickMeshesWithRay as litePickWithRay,
+    createPickingRay as liteCreatePickingRay,
+    resolveCameraViewport,
+    invertMat4,
+    multiplyMat4,
 } from "babylon-lite";
 import type {
     SceneContext,
@@ -37,6 +41,7 @@ import type {
     AnimationManager,
     Mesh as LiteMesh,
     PickingInfo as LitePickingInfo,
+    Mat4,
 } from "babylon-lite";
 
 import { Color3, Color4 } from "../math/color.js";
@@ -54,8 +59,11 @@ import type { BaseTexture, CubeTexture, HDRCubeTexture } from "../textures/textu
 import type { WebGPUEngine } from "../engine/engine.js";
 import { AbstractScene } from "./abstract-scene.js";
 import { Logger } from "../misc/misc-utils.js";
-import type { Ray } from "../math/ray.js";
-import type { Vector3 } from "../math/vector.js";
+import { ImageProcessingConfiguration } from "../misc/engine-constants.js";
+import type { FluidRenderer } from "../unsupported/unsupported-apis.js";
+import { Matrix } from "../math/matrix.js";
+import { Ray } from "../math/ray.js";
+import { Vector3 } from "../math/vector.js";
 import { PickingInfo } from "../culling/picking-info.js";
 import { AbstractMesh, Mesh } from "../meshes/meshes.js";
 import type { TransformNode } from "../meshes/meshes.js";
@@ -65,6 +73,8 @@ const DEFAULT_SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backg
 const DEFAULT_GROUND_URL = "https://assets.babylonjs.com/core/environments/backgroundGround.png";
 /** Babylon.js `createDefaultEnvironment` IBL fallback when no `environmentTexture` is set. */
 const DEFAULT_ENV_URL = "https://assets.babylonjs.com/environments/environmentSpecular.env";
+const FLUID_RENDERER_UNSUPPORTED =
+    "Fluid rendering requires dedicated depth, thickness, and diffuse passes plus render-target lifecycle and composition policies that Babylon Lite does not define.";
 
 /**
  * Babylon.js resolves the BRDF lookup texture from an embedded Base64 PNG rather than a
@@ -144,6 +154,7 @@ export class Scene extends AbstractScene {
 
     private readonly _engine: WebGPUEngine;
     private _activeCamera: Camera | null = null;
+    public cameraToUseForPointers: Camera | null = null;
     private _defaultMaterial: StandardMaterial | null = null;
     private _fogMode = 0;
     private _fogStart = 0;
@@ -174,6 +185,7 @@ export class Scene extends AbstractScene {
     private _blendManager: AnimationManager | null = null;
     private _ambientColor = new Color3(0, 0, 0);
     private _environmentIntensity = 1;
+    private _imageProcessingConfiguration: ImageProcessingConfiguration | null = null;
     /** @internal Tracks whether at least one frame has ticked (gates `onAfterRenderObservable`). */
     private _renderedAFrame = false;
     /** @internal `NodeMaterial`s whose async parse the engine drives after shadow generators are built. */
@@ -475,10 +487,26 @@ export class Scene extends AbstractScene {
         FreeCamera._adopt("camera", this._lite.camera as LiteFreeCamera, this);
     }
 
-    /** Image-processing exposure proxy (Babylon.js `imageProcessingConfiguration.exposure`). */
-    public get imageProcessingConfiguration(): { exposure: number; contrast: number; toneMappingEnabled: boolean } {
-        return this._lite.imageProcessing;
+    /** Babylon.js image-processing facade over the scene's Lite state. */
+    public get imageProcessingConfiguration(): ImageProcessingConfiguration {
+        this._imageProcessingConfiguration ??= new ImageProcessingConfiguration()._attach(this._lite.imageProcessing);
+        return this._imageProcessingConfiguration;
     }
+
+    public get fluidRenderer(): FluidRenderer | null {
+        return null;
+    }
+    public set fluidRenderer(value: FluidRenderer | null) {
+        if (value !== null) {
+            unsupported("Scene.fluidRenderer", FLUID_RENDERER_UNSUPPORTED);
+        }
+    }
+
+    public enableFluidRenderer(): FluidRenderer | null {
+        return unsupported("Scene.enableFluidRenderer", FLUID_RENDERER_UNSUPPORTED);
+    }
+
+    public disableFluidRenderer(): void {}
 
     /** Babylon.js `scene.performancePriority` — accepted for parity; Babylon Lite tunes its own pipeline. */
     public performancePriority = 0;
@@ -825,6 +853,43 @@ export class Scene extends AbstractScene {
             "Scene.pick",
             "Babylon Lite uses asynchronous GPU picking. Use the compat `GPUPicker` class (Babylon.js parity) or the native `createGpuPicker` + `pickAsync` API."
         );
+    }
+
+    /**
+     * Babylon.js `Scene.createPickingRay` — translate CSS coordinates and camera
+     * transforms into Lite's reverse-Z unprojection helper.
+     */
+    public createPickingRay(x: number, y: number, world: Matrix | null = null, camera: Camera | null = null, cameraViewSpace = false): Ray {
+        const cameraToUse = camera ?? this.activeCamera ?? this.cameraToUseForPointers;
+        if (!cameraToUse) {
+            return Ray.Zero();
+        }
+
+        const scale = this._engine.getHardwareScalingLevel();
+        const width = this._engine.getRenderWidth();
+        const height = this._engine.getRenderHeight();
+        const viewport = resolveCameraViewport(cameraToUse._lite, width, height);
+        const worldMatrix = (world ?? Matrix.Identity()).m as unknown as Mat4;
+        const projectionMatrix = cameraToUse.getProjectionMatrix().m as unknown as Mat4;
+        let viewMatrix = Matrix.Identity().m as unknown as Mat4;
+        if (!cameraViewSpace && cameraToUse._lite._useFloatingOrigin) {
+            const absoluteView = invertMat4(cameraToUse._lite.worldMatrix);
+            if (!absoluteView) {
+                return Ray.Zero();
+            }
+            viewMatrix = absoluteView;
+        } else if (!cameraViewSpace) {
+            viewMatrix = cameraToUse.getViewMatrix().m as unknown as Mat4;
+        }
+        // Compat matrices use Babylon.js's row-vector multiplication order, while
+        // Lite's kernel is column-major, so reverse the operands for the same bytes.
+        const transform = multiplyMat4(projectionMatrix, multiplyMat4(viewMatrix, worldMatrix));
+        const liteRay = liteCreatePickingRay(x / scale - viewport.x, y / scale - viewport.y, transform, viewport.width, viewport.height);
+        if (!liteRay) {
+            return Ray.Zero();
+        }
+
+        return new Ray(new Vector3(liteRay.origin[0], liteRay.origin[1], liteRay.origin[2]), new Vector3(liteRay.direction[0], liteRay.direction[1], liteRay.direction[2]));
     }
 
     /** Synchronous CPU ray picking over Babylon Lite's scene-mesh picker. */

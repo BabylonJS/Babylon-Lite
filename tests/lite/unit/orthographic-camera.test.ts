@@ -48,7 +48,7 @@ function makeMockEngine(writeCount: { n: number }): EngineContext {
     return eng;
 }
 import { disableOrthographicCamera, enableOrthographicCamera } from "../../../packages/babylon-lite/src/camera/orthographic";
-import { mat4OrthoOffCenterLHToRef } from "../../../packages/babylon-lite/src/math/mat4-ortho-lh-to-ref";
+import { writeOrthoOffCenterMat4LHIntoBuffer } from "../../../packages/babylon-lite/src/math/write-ortho-off-center-mat4-lh-into-buffer";
 import type { Mat4, Mat4Storage } from "../../../packages/babylon-lite/src/math/types";
 
 /** Minimal `Camera` stand-in — the projection path only reads near/far/fov/`ortho` and the
@@ -84,7 +84,7 @@ describe("orthographic projection", () => {
         // Prefilled with sentinels: the writer must overwrite all 16 elements, so a stale
         // value surviving anywhere is a failure. A zeroed array would hide that.
         const m = new Float32Array(16).fill(-999) as unknown as Mat4Storage;
-        mat4OrthoOffCenterLHToRef(m, -8, 8, -4.5, 4.5, 1, 101);
+        writeOrthoOffCenterMat4LHIntoBuffer(m, -8, 8, -4.5, 4.5, 1, 101);
         const p = m as unknown as Mat4;
 
         expect(
@@ -92,7 +92,7 @@ describe("orthographic projection", () => {
             "every element must be written"
         ).toBe(false);
 
-        // near -> 1, far -> 0 (reverse-Z, matching mat4PerspectiveLHToRef).
+        // near -> 1, far -> 0 (reverse-Z, matching writePerspectiveMat4LHIntoBuffer).
         expect(project(p, 0, 0, 1)[2]).toBeCloseTo(1, 5);
         expect(project(p, 0, 0, 101)[2]).toBeCloseTo(0, 5);
 
@@ -104,7 +104,7 @@ describe("orthographic projection", () => {
 
     it("keeps an off-center volume centred on its own midpoint", () => {
         const m = new Float32Array(16) as unknown as Mat4Storage;
-        mat4OrthoOffCenterLHToRef(m, 2, 10, -1, 3, 1, 11);
+        writeOrthoOffCenterMat4LHIntoBuffer(m, 2, 10, -1, 3, 1, 11);
         const [ndcX, ndcY] = project(m as unknown as Mat4, 6, 1, 5);
         expect(ndcX).toBeCloseTo(0, 5);
         expect(ndcY).toBeCloseTo(0, 5);

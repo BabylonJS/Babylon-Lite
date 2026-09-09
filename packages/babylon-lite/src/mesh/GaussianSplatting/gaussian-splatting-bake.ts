@@ -1,7 +1,7 @@
 import { F32, U8 } from "../../engine/typed-arrays.js";
 import type { GaussianSplattingMesh } from "./gaussian-splatting-mesh.js";
 import type { Mat4 } from "../../math/types.js";
-import { mat4Decompose } from "../../math/mat4-decompose.js";
+import { decomposeMat4 } from "../../math/decompose-mat4.js";
 
 const ROW_LENGTH = 32;
 
@@ -11,10 +11,10 @@ function mat4TransformCoord(m: Float32Array, x: number, y: number, z: number): [
 }
 
 function mat4ToRotationQuat(m: Float32Array): [number, number, number, number] {
-    // Delegates to mat4Decompose: it strips per-axis scale AND folds a mirrored basis (negative
+    // Delegates to decomposeMat4: it strips per-axis scale AND folds a mirrored basis (negative
     // determinant) onto a signed axis. Normalising the columns independently would hand an improper
     // basis to the quaternion conversion, producing a garbage orientation for every splat.
-    const q = mat4Decompose(m as unknown as Mat4).rotation;
+    const q = decomposeMat4(m as unknown as Mat4).rotation;
     return [q.x, q.y, q.z, q.w];
 }
 

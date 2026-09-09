@@ -581,7 +581,7 @@ outlines.
 - `camera/camera.ts` — `getViewProjectionMatrix`,
   `getEffectiveAspectRatio` (TextRenderable per-frame MVP composition).
 - `math/observable-vec3.ts`, `math/observable-quat.ts`,
-  `math/mat4-compose.ts`, `math/mat4-multiply-into.ts`,
+  `math/compose-mat4.ts`, `math/multiply-mat4-into-buffer.ts`,
   `scene/world-matrix-state.ts`, `scene/scene-node.ts` — TRS + world
   matrix plumbing reused from Mesh.
 - `resource/gpu-buffers.ts` — `createEmptyUniformBuffer` for the `TextU`

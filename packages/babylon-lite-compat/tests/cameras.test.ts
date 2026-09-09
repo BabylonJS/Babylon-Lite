@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { NullEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
-import { ArcRotateCamera, FlyCamera, FreeCamera, GeospatialCamera } from "../src/cameras/cameras";
+import { ArcRotateCamera, Camera, FlyCamera, FreeCamera, GeospatialCamera } from "../src/cameras/cameras";
+import { LiteCompatError } from "../src/error";
 import { Vector3 } from "../src/math/vector";
-import type { FreeCamera as LiteFreeCamera, ArcRotateCamera as LiteArcRotateCamera } from "babylon-lite";
+import { enableOrthographicCamera } from "babylon-lite";
+import type { ArcRotateCamera as LiteArcRotateCamera, FreeCamera as LiteFreeCamera } from "babylon-lite";
 
 /**
  * Minimal stand-in for a Lite free camera (the shape `parseBabylonCamera` returns
@@ -73,6 +75,63 @@ describe("Camera adoption (loaded .babylon cameras)", () => {
         scene._lite.camera = fakeLiteCamera();
         scene._surfaceLoadedCamera();
         expect(scene.activeCamera).toBe(first);
+    });
+});
+
+describe("Camera projection mode", () => {
+    it("exposes the Babylon.js projection mode constants", () => {
+        expect(Camera.PERSPECTIVE_CAMERA).toBe(0);
+        expect(Camera.ORTHOGRAPHIC_CAMERA).toBe(1);
+    });
+
+    it("switches between Lite perspective and orthographic projections", () => {
+        const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero());
+
+        expect(camera.mode).toBe(Camera.PERSPECTIVE_CAMERA);
+        expect(camera.getProjectionMatrix().m[15]).toBe(0);
+
+        camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
+        expect(camera.mode).toBe(Camera.ORTHOGRAPHIC_CAMERA);
+        expect(camera._lite.ortho).toBeDefined();
+        expect(camera.getProjectionMatrix().m[15]).toBe(1);
+
+        camera.mode = Camera.PERSPECTIVE_CAMERA;
+        expect(camera.mode).toBe(Camera.PERSPECTIVE_CAMERA);
+        expect(camera._lite.ortho).toBeNull();
+        expect(camera.getProjectionMatrix().m[15]).toBe(0);
+    });
+
+    it("preserves existing orthographic bounds when the mode is unchanged", () => {
+        const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero());
+        camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
+        const bounds = camera._lite.ortho!;
+        bounds.halfHeight = 4;
+        bounds.left = -7;
+
+        camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
+
+        expect(camera._lite.ortho).toBe(bounds);
+        expect(camera._lite.ortho?.halfHeight).toBe(4);
+        expect(camera._lite.ortho?.left).toBe(-7);
+    });
+
+    it("reflects native projection changes on adopted cameras", () => {
+        const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero());
+        const adopted = ArcRotateCamera._adopt("adopted", camera._lite);
+
+        enableOrthographicCamera(camera._lite, { halfHeight: 3 });
+
+        expect(adopted.mode).toBe(Camera.ORTHOGRAPHIC_CAMERA);
+        expect(adopted._lite.ortho?.halfHeight).toBe(3);
+    });
+
+    it("rejects unknown projection modes", () => {
+        const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero());
+
+        expect(() => {
+            camera.mode = 2;
+        }).toThrow(LiteCompatError);
+        expect(camera.mode).toBe(Camera.PERSPECTIVE_CAMERA);
     });
 });
 

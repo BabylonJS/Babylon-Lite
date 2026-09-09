@@ -1,6 +1,6 @@
-import { mat4Compose } from "../math/mat4-compose.js";
-import { mat4ComposeInto } from "../math/mat4-compose-into.js";
-import { _quatFromRotationBasis } from "../math/quat-from-rotation-matrix.js";
+import { composeMat4 } from "../math/compose-mat4.js";
+import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
+import { _quatFromRotationBasis } from "../math/create-quat-from-rotation-mat4.js";
 import type { Quat } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { flushThinInstances } from "../mesh/thin-instance.js";
@@ -93,7 +93,7 @@ export function createHavokThinInstanceContext(world: PhysicsWorld): HavokThinIn
         const position = transform[0];
         const rotation = transform[1];
         for (let i = 0; i < state[1].length; i++) {
-            mat4ComposeInto(matrices, i * 16, position[0]!, position[1]!, position[2]!, rotation[0]!, rotation[1]!, rotation[2]!, rotation[3]!, 1, 1, 1);
+            composeMat4IntoBuffer(matrices, i * 16, position[0]!, position[1]!, position[2]!, rotation[0]!, rotation[1]!, rotation[2]!, rotation[3]!, 1, 1, 1);
         }
         flushThinInstances(mesh);
         return result;
@@ -191,7 +191,7 @@ export function createHavokThinInstanceContext(world: PhysicsWorld): HavokThinIn
                 const nativeTransform = raw.HP_Body_GetQTransform(handles[i])[1];
                 const position = nativeTransform[0];
                 const rotation = nativeTransform[1];
-                mat4ComposeInto(matrices, i * 16, position[0], position[1], position[2], rotation[0], rotation[1], rotation[2], rotation[3], 1, 1, 1);
+                composeMat4IntoBuffer(matrices, i * 16, position[0], position[1], position[2], rotation[0], rotation[1], rotation[2], rotation[3], 1, 1, 1);
             }
             flushThinInstances(mesh);
             return true;
@@ -265,7 +265,7 @@ export function createHavokThinInstanceContext(world: PhysicsWorld): HavokThinIn
             const transform = raw.HP_Body_GetQTransform(nativeBody)[1];
             const p = transform[0];
             const q = transform[1];
-            return mat4Compose(p[0], p[1], p[2], q[0], q[1], q[2], q[3], 1, 1, 1);
+            return composeMat4(p[0], p[1], p[2], q[0], q[1], q[2], q[3], 1, 1, 1);
         },
         impulse(body, impulse) {
             const state = states.get(body._hkBody);

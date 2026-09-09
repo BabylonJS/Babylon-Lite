@@ -1,7 +1,7 @@
 import type { Vec3, Mat4 } from "../math/types.js";
 import type { SceneNode } from "../scene/scene-node.js";
-import { mat4MultiplyInto } from "../math/mat4-multiply-into.js";
-import { mat4PerspectiveLHToRef } from "../math/mat4-perspective-lh-to-ref.js";
+import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
+import { writePerspectiveMat4LHIntoBuffer } from "../math/write-perspective-mat4-lh-into-buffer.js";
 import type { Mat4Storage } from "../math/types.js";
 import type { OrthographicBounds } from "./orthographic.js";
 
@@ -194,7 +194,7 @@ export function getProjectionMatrix(camera: Camera, aspectRatio: number): Mat4 {
     if (_orthoProjector !== null && camera.ortho) {
         _orthoProjector(camera, aspectRatio, p);
     } else {
-        mat4PerspectiveLHToRef(p, camera.fov, aspectRatio, camera.nearPlane, camera.farPlane);
+        writePerspectiveMat4LHIntoBuffer(p, camera.fov, aspectRatio, camera.nearPlane, camera.farPlane);
     }
     camera._projVer = ver;
     camera._projAspect = aspectRatio;
@@ -208,7 +208,7 @@ export function getViewProjectionMatrix(camera: Camera, aspectRatio: number): Ma
         return camera._vpCache as unknown as Mat4;
     }
     const vp = camera._vpCache;
-    mat4MultiplyInto(vp, 0, getProjectionMatrix(camera, aspectRatio) as unknown as Mat4Storage, 0, getViewMatrix(camera) as unknown as Mat4Storage, 0);
+    multiplyMat4IntoBuffer(vp, 0, getProjectionMatrix(camera, aspectRatio) as unknown as Mat4Storage, 0, getViewMatrix(camera) as unknown as Mat4Storage, 0);
     camera._vpVer = ver;
     camera._vpAspect = aspectRatio;
     return vp as unknown as Mat4;

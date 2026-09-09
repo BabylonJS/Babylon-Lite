@@ -137,7 +137,7 @@ for each bone i:
 
 The multiplication is performed in-place using pre-allocated `boneScratch` arrays:
 
-1. `mat4MultiplyInto(boneData, bi*16, invMeshWorld, 0, worldMat, jointIdx*16)` — temp = invMeshWorld × jointWorld
+1. `multiplyMat4IntoBuffer(boneData, bi*16, invMeshWorld, 0, worldMat, jointIdx*16)` — temp = invMeshWorld × jointWorld
 2. Manual 4-column matrix multiply: temp × IBM → boneData[bi*16]
 
 Upload via: `device.queue.writeTexture({ texture: boneTexture }, boneData.buffer, { bytesPerRow: texWidth * 16 }, { width: texWidth, height: 1 })`
@@ -304,7 +304,7 @@ The internal `BoneOverride` map type is kept off the public API surface: public 
 
 - `../animation/types.js` — `GltfAnimationData`, `SkeletonData`, `AnimationClip`, path/interp constants
 - `../animation/evaluate.js` — `evaluateSampler()` for keyframe interpolation
-- `../math/mat4.js` — `mat4ComposeInto`, `mat4MultiplyInto` for matrix computation
+- `../math/mat4.js` — `composeMat4IntoBuffer`, `multiplyMat4IntoBuffer` for matrix computation
 
 ## Test Specification
 

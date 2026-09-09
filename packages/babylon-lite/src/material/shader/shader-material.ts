@@ -532,7 +532,7 @@ export function setShaderVector3(material: ShaderMaterial, name: string, value: 
 
 /** Set a declared `mat4x4<f32>` uniform. Convenience wrapper over `setShaderUniform()`.
  *  Accepts a raw `Float32Array` or the engine's branded `Mat4` (e.g. the result of
- *  `getViewProjectionMatrix()` / `mat4Invert()`), so camera/math matrices can be fed
+ *  `getViewProjectionMatrix()` / `invertMat4()`), so camera/math matrices can be fed
  *  straight into a matrix uniform without laundering through a typed array. */
 export function setShaderMatrix(material: ShaderMaterial, name: string, value: Float32Array | Mat4): void {
     setUniformValue(material, name, value);

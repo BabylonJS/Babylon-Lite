@@ -513,7 +513,7 @@ bloat the core) these helpers live **inside `flow-graph/`** (e.g.
 `flow-graph/fg-math.ts`, `flow-graph/custom-types/`), lazily imported by the
 blocks that use them. Scenes without interactivity pay **zero bytes**. Core
 `math/` is reused where it already suffices (`addVec3`, `dotVec3`, `crossVec3`,
-`mat4Multiply`, `mat4Invert`, `mat4Compose`, `mat4Decompose`, `mat4FromQuat`).
+`multiplyMat4`, `invertMat4`, `composeMat4`, `decomposeMat4`, `createMat4FromQuat`).
 
 ### Custom types (`flow-graph/custom-types/`)
 
@@ -761,7 +761,7 @@ dispose
 ## Dependencies
 
 - **Core math** (`src/math/`): reuse `addVec3`, `dotVec3`, `crossVec3`,
-  `mat4Multiply`, `mat4Invert`, `mat4Compose`, `mat4Decompose`, `mat4FromQuat`.
+  `multiplyMat4`, `invertMat4`, `composeMat4`, `decomposeMat4`, `createMat4FromQuat`.
 - **Animation** (`src/animation/`): `AnimationGroup` handles for animation blocks;
   `ValueInterpolation` reuses the interpolation/easing machinery where possible.
 - **Scene** (`src/scene/`): `onBeforeRender`, `onSceneDispose`, `addToScene`

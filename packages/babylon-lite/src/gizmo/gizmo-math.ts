@@ -9,14 +9,14 @@ import type { SceneNode } from "../scene/scene-node.js";
 import { crossVec3 } from "../math/cross-vec3.js";
 import { dotVec3 } from "../math/dot-vec3.js";
 import { lengthVec3 } from "../math/length-vec3.js";
-import { normalizeVec3 } from "../math/normalize-vec3-object.js";
-import { mat4Invert } from "../math/mat4-invert.js";
-import { mat4Decompose } from "../math/mat4-decompose.js";
+import { normalizeVec3 } from "../math/normalize-vec3.js";
+import { invertMat4 } from "../math/invert-mat4.js";
+import { decomposeMat4 } from "../math/decompose-mat4.js";
 
 /** Re-exported under the gizmo namespace so call sites that already import a
  *  gizmo helper don't have to add a second import for the shared lite math. */
 export { crossVec3, dotVec3, lengthVec3, normalizeVec3 };
-/** @deprecated Use {@link normalizeVec3} from `math/normalize-vec3-object.js`.
+/** @deprecated Use {@link normalizeVec3} from `math/normalize-vec3.js`.
  *  Kept as an alias so existing gizmo modules don't churn on the rename. */
 export const normalizeVec3Obj = normalizeVec3;
 
@@ -167,7 +167,7 @@ export function worldDeltaToLocal(node: SceneNode, dx: number, dy: number, dz: n
     if (!parent || !parent.worldMatrix) {
         return { x: dx, y: dy, z: dz };
     }
-    const inv = mat4Invert(parent.worldMatrix as unknown as Mat4);
+    const inv = invertMat4(parent.worldMatrix as unknown as Mat4);
     if (!inv) {
         return { x: dx, y: dy, z: dz };
     }
@@ -178,12 +178,12 @@ export function worldDeltaToLocal(node: SceneNode, dx: number, dy: number, dz: n
     };
 }
 
-/** Extract a unit rotation quaternion from a 4×4 world matrix. Delegates to `mat4Decompose`,
+/** Extract a unit rotation quaternion from a 4×4 world matrix. Delegates to `decomposeMat4`,
  *  which strips per-axis scale AND folds a mirrored basis (negative determinant) onto a signed
  *  axis — normalising the columns independently would otherwise hand an improper basis to the
  *  quaternion conversion and return garbage for any mirrored node. */
 export function rotationQuatFromMatrix(m: Mat4): [number, number, number, number] {
-    const q = mat4Decompose(m).rotation;
+    const q = decomposeMat4(m).rotation;
     return [q.x, q.y, q.z, q.w];
 }
 

@@ -10,9 +10,9 @@
 import type { Mesh } from "../mesh/mesh.js";
 import type { SceneNode } from "./scene-node.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
-import { mat4Invert } from "../math/mat4-invert.js";
-import { mat4Multiply } from "../math/mat4-multiply.js";
-import { mat4Decompose } from "../math/mat4-decompose.js";
+import { invertMat4 } from "../math/invert-mat4.js";
+import { multiplyMat4 } from "../math/multiply-mat4.js";
+import { decomposeMat4 } from "../math/decompose-mat4.js";
 import type { Mat4 } from "../math/types.js";
 
 /** Scene-graph nodes (mesh, transform node, camera, light) expose a `children`
@@ -29,7 +29,7 @@ function childrenOf(node: IWorldMatrixProvider | null): SceneNode[] | null {
  * arrays consistent: the child is removed from its previous parent's `children`
  * and appended to the new parent's, so traversal helpers see the new hierarchy.
  *
- * The world transform is preserved exactly, mirrors included: `mat4Decompose` keeps a negative
+ * The world transform is preserved exactly, mirrors included: `decomposeMat4` keeps a negative
  * determinant (as a negative Y scale), and a node created from a raw matrix
  * (`createSceneNodeFromMatrix`, used for glTF `matrix` nodes) is switched to TRS so the new local
  * transform actually takes effect.
@@ -76,7 +76,7 @@ export function setParent(child: SceneNode, parent: IWorldMatrixProvider | null)
 
     // 4. Compute new local transform = inverse(parentWorld) * childWorld
     const parentWorld = parent.worldMatrix;
-    const invParent = mat4Invert(parentWorld);
+    const invParent = invertMat4(parentWorld);
     if (!invParent) {
         // Singular parent matrix: no local transform can reproduce the child's world, so this is a
         // best-effort fallback (documented above) rather than true preservation — copy the world
@@ -90,14 +90,14 @@ export function setParent(child: SceneNode, parent: IWorldMatrixProvider | null)
     }
 
     // 5. Decompose newLocal into position/rotation/scaling and apply
-    applyLocal(mat4Multiply(invParent, childWorld), child);
+    applyLocal(multiplyMat4(invParent, childWorld), child);
 }
 
 /** Decompose a local matrix and write it into a node's observable TRS. Writes the
  *  rotation as a quaternion directly (the source of truth) — avoids the lossy
  *  Euler round-trip near gimbal lock. */
 function applyLocal(m: Mat4, node: SceneNode): void {
-    const { translation, rotation, scale } = mat4Decompose(m);
+    const { translation, rotation, scale } = decomposeMat4(m);
     // A glTF `matrix` node reports `_localMatrix` as its local transform and ignores TRS, so the
     // writes below would be dropped. Hand control back to the TRS triple before writing — the
     // decomposition we just computed is exactly the matrix it replaces (glTF requires `matrix` to

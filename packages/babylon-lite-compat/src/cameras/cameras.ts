@@ -13,6 +13,8 @@ import {
     createBankedFreeCamera,
     createFreeCamera,
     createGeospatialCamera,
+    disableOrthographicCamera,
+    enableOrthographicCamera,
     setGeospatialOrientation,
     attachGeospatialControls,
     attachControl as liteAttachControl,
@@ -33,11 +35,15 @@ import type {
 import { unsupported } from "../error.js";
 import { liteBackedVector3, Vector3 } from "../math/vector.js";
 import { Matrix } from "../math/matrix.js";
+import { Viewport } from "../math/size.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
 
 /** Babylon.js `Camera` — base class for all cameras (derives from `Node`). */
 export abstract class Camera extends Node {
+    public static readonly PERSPECTIVE_CAMERA = 0;
+    public static readonly ORTHOGRAPHIC_CAMERA = 1;
+
     /** @internal Underlying Babylon Lite camera. */
     public abstract readonly _lite: LiteCamera;
     private _detach: (() => void) | undefined;
@@ -72,6 +78,37 @@ export abstract class Camera extends Node {
         this._lite.farPlane = value;
     }
 
+    public get mode(): number {
+        return this._lite.ortho ? Camera.ORTHOGRAPHIC_CAMERA : Camera.PERSPECTIVE_CAMERA;
+    }
+    public set mode(value: number) {
+        if (value === this.mode) {
+            return;
+        }
+        if (value === Camera.ORTHOGRAPHIC_CAMERA) {
+            enableOrthographicCamera(this._lite);
+            return;
+        }
+        if (value === Camera.PERSPECTIVE_CAMERA) {
+            disableOrthographicCamera(this._lite);
+            return;
+        }
+        unsupported("Camera.mode", `Projection mode ${value} is not supported.`);
+    }
+
+    public get viewport(): Viewport {
+        const viewport = this._lite.viewport;
+        if (viewport instanceof Viewport) {
+            return viewport;
+        }
+        const compatViewport = viewport ? new Viewport(viewport.x, viewport.y, viewport.width, viewport.height) : new Viewport(0, 0, 1, 1);
+        this._lite.viewport = compatViewport;
+        return compatViewport;
+    }
+    public set viewport(value: Viewport) {
+        this._lite.viewport = value;
+    }
+
     /** World-space position of the camera. */
     public get globalPosition(): Vector3 {
         const p = getCameraPosition(this._lite);
@@ -93,7 +130,8 @@ export abstract class Camera extends Node {
         const canvas = scene?.getEngine().getRenderingCanvas() as { width?: number; height?: number } | undefined;
         const w = canvas?.width ?? 1;
         const h = canvas?.height ?? 1;
-        return h !== 0 ? w / h : 1;
+        const viewport = this._lite.viewport;
+        return h !== 0 && (!viewport || viewport.height !== 0) ? (w / h) * (viewport ? viewport.width / viewport.height : 1) : 1;
     }
 
     public abstract attachControl(canvas: HTMLCanvasElement, noPreventDefault?: boolean): void;

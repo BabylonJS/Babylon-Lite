@@ -22,7 +22,7 @@
  */
 
 import type { Quat, Vec3 } from "../math/types.js";
-import { mat4Invert } from "../math/mat4-invert.js";
+import { invertMat4 } from "../math/invert-mat4.js";
 import type { Mat4 } from "../math/types.js";
 import { createTransformNode } from "../scene/transform-node.js";
 import type { TransformNode } from "../scene/transform-node.js";
@@ -884,7 +884,7 @@ export class PhysicsCharacterController {
                 this._bodyTracking.set(trackingKey, { prev: matToArray(currentWorld), frameId: this._frameId });
             } else {
                 if (tracking.frameId + 1 === this._frameId) {
-                    const inv = mat4Invert(currentWorld);
+                    const inv = invertMat4(currentWorld);
                     if (inv) {
                         const characterLocal = transformCoord(inv, this._position);
                         const characterWorld = transformCoord(tracking.prev, characterLocal);

@@ -5,7 +5,7 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh";
-import { updateMeshGeometry } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
+import { updateMeshGeometry, updateMeshGeometryCapacity } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
 import { setThinInstanceColor, setThinInstanceDrawCount, setThinInstanceMatrix, type ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { ShadowGenerator } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
@@ -40,7 +40,15 @@ function makeThinInstances(): ThinInstanceData {
 }
 
 describe("shadow caster dirty tracking", () => {
-    it("redraws a cached shadow map after count-only and same-buffer geometry updates", () => {
+    it.each([false, true])("redraws a cached shadow map after count-only and same-buffer geometry updates (ranged: %s)", (ranged) => {
+        const updateGeometry: typeof updateMeshGeometry = ranged
+            ? (engine, mesh, positions, normals, indices) => {
+                  updateMeshGeometryCapacity(engine, mesh, positions, normals, indices, undefined, undefined, undefined, undefined, 1.25, {
+                      vertices: [{ offset: 1, count: 2 }],
+                      indices: [{ offset: 1, count: 2 }],
+                  });
+              }
+            : updateMeshGeometry;
         const writeBuffer = vi.fn();
         const engine = {
             _device: { queue: { writeBuffer } },
@@ -121,7 +129,7 @@ describe("shadow caster dirty tracking", () => {
             _cpuNormals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
             _cpuIndices: new Uint32Array([0, 1, 2]),
         });
-        updateMeshGeometry(engine, unrelated, new Float32Array([0, 0, 0, 2, 0, 0, 0, 2, 0]), new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), new Uint32Array([0, 2, 1]));
+        updateGeometry(engine, unrelated, new Float32Array([0, 0, 0, 2, 0, 0, 0, 2, 0]), new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), new Uint32Array([0, 2, 1]));
         expect(renderPcfShadowMap(engine, shadowGenerator, state, computeLightMatrix)).toBe(0);
 
         setThinInstanceDrawCount(mesh, 2);
@@ -139,7 +147,7 @@ describe("shadow caster dirty tracking", () => {
         expect(renderPcfShadowMap(engine, shadowGenerator, state, computeLightMatrix)).toBe(1);
         expect(renderPcfShadowMap(engine, shadowGenerator, state, computeLightMatrix)).toBe(0);
 
-        updateMeshGeometry(engine, mesh, new Float32Array([0, 0, 0, 2, 0, 0, 0, 2, 0]), new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), new Uint32Array([0, 2, 1]));
+        updateGeometry(engine, mesh, new Float32Array([0, 0, 0, 2, 0, 0, 0, 2, 0]), new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), new Uint32Array([0, 2, 1]));
         expect(renderPcfShadowMap(engine, shadowGenerator, state, computeLightMatrix)).toBe(1);
         expect(execute).toHaveBeenCalledTimes(5);
     });

@@ -4,11 +4,11 @@ import type { Mat4Storage, Vec3 } from "./types.js";
  *  Babylon.js Matrix.LookAtLHToRef. Storage may be F32- or F64-backed.
  *
  *  Degenerate input (eye on target, or the view direction parallel to `up`)
- *  writes a pure identity matrix, matching `mat4LookAtLH`'s previous
+ *  writes a pure identity matrix, matching `createLookAtMat4LH`'s previous
  *  identity-fallback behaviour. This writer fully overwrites all 16 elements
  *  on every path — see the "writers fully overwrite" convention noted in
- *  `mat4-ortho-lh-to-ref.ts`. */
-export function mat4LookAtLHToRef(out: Mat4Storage, eye: Vec3, target: Vec3, up: Vec3): void {
+ *  `write-ortho-off-center-mat4-lh-into-buffer.ts`. */
+export function writeLookAtMat4LHIntoBuffer(out: Mat4Storage, eye: Vec3, target: Vec3, up: Vec3): void {
     // Babylon.js uses LEFT-HANDED coordinate system
     const zAxis = { x: target.x - eye.x, y: target.y - eye.y, z: target.z - eye.z };
     const zLen = Math.sqrt(zAxis.x * zAxis.x + zAxis.y * zAxis.y + zAxis.z * zAxis.z);

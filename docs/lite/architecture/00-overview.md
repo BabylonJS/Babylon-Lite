@@ -312,7 +312,7 @@ setEnvironmentRotation(scene: SceneContext, rotation: number): void
 
 // Camera — pure data; controls can register per-frame updates on a scene
 createArcRotateCamera(alpha: number, beta: number, radius: number, target: Vec3): ArcRotateCamera
-attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement, scene?: SceneContext): () => void
+attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement, scene?: SceneContext, options?: AttachControlOptions): () => void
 createFreeCamera(position: Vec3, target: Vec3): FreeCamera
 attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement, scene?: SceneContext): () => void
 
@@ -408,10 +408,10 @@ cloneTransformNode(node: TransformNode, scene: SceneContext): TransformNode
 collectMeshes(node: TransformNode): Mesh[]
 
 // Math
-mat4Translation(x: number, y: number, z: number): Mat4
-mat4Identity(): Mat4
-mat4Scale(sx: number, sy: number, sz: number): Mat4
-mat4Compose(tx,ty,tz, qx,qy,qz,qw, sx,sy,sz): Mat4
+createTranslationMat4(x: number, y: number, z: number): Mat4
+createIdentityMat4(): Mat4
+createScalingMat4(sx: number, sy: number, sz: number): Mat4
+composeMat4(tx,ty,tz, qx,qy,qz,qw, sx,sy,sz): Mat4
 
 // Thin Instances
 addThinInstance(mesh: Mesh, matrix: Mat4): number
@@ -881,14 +881,14 @@ Indices `[col*4+row]` — matches WGSL `mat4x4<f32>` storage.
 
 | Function                                       | Signature        | Notes                                         |
 | ---------------------------------------------- | ---------------- | --------------------------------------------- |
-| `mat4Identity()`                               | `→ Mat4`         | 16-float identity                             |
-| `mat4Multiply(a, b)`                           | `→ Mat4`         | Column-major `a * b`                          |
-| `mat4LookAtLH(eye, target, up)`                | `→ Mat4`         | LH look-at, `zAxis = normalize(target - eye)` |
-| `mat4PerspectiveLH(fov, aspect, near, far)`    | `→ Mat4`         | Zero-to-one depth, `tan = 1/tan(fov/2)`       |
-| `mat4Invert(m)`                                | `→ Mat4 \| null` | Full 4x4 inverse via cofactors                |
-| `mat4Compose(tx,ty,tz, qx,qy,qz,qw, sx,sy,sz)` | `→ Mat4`         | TRS composition                               |
-| `mat4FromQuat(qx,qy,qz,qw)`                    | `→ Mat4`         | Quaternion to rotation matrix                 |
-| `mat4FromQuatInto(out, qx,qy,qz,qw)`           | `→ out`          | Zero-allocation quaternion to rotation matrix |
+| `createIdentityMat4()`                               | `→ Mat4`         | 16-float identity                             |
+| `multiplyMat4(a, b)`                           | `→ Mat4`         | Column-major `a * b`                          |
+| `createLookAtMat4LH(eye, target, up)`                | `→ Mat4`         | LH look-at, `zAxis = normalize(target - eye)` |
+| `createPerspectiveMat4LH(fov, aspect, near, far)`    | `→ Mat4`         | Zero-to-one depth, `tan = 1/tan(fov/2)`       |
+| `invertMat4(m)`                                | `→ Mat4 \| null` | Full 4x4 inverse via cofactors                |
+| `composeMat4(tx,ty,tz, qx,qy,qz,qw, sx,sy,sz)` | `→ Mat4`         | TRS composition                               |
+| `createMat4FromQuat(qx,qy,qz,qw)`                    | `→ Mat4`         | Quaternion to rotation matrix                 |
+| `writeMat4FromQuatIntoBuffer(out, qx,qy,qz,qw)`           | `→ out`          | Zero-allocation quaternion to rotation matrix |
 
 **LookAtLH formula** (matches Babylon.js `Matrix.LookAtLHToRef`):
 
