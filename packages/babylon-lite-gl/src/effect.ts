@@ -539,11 +539,11 @@ export function setEffectIntArray(engine: GLEngineContext, effect: GLEffect, nam
     engine.gl.uniform1iv(loc, array);
 }
 
-/** Bind a texture to the sampler's pre-assigned unit (§4.4). NO `gl.uniform1i`
- *  is issued — that was done exactly once per program lifetime during
+/** Bind a texture to the sampler's pre-assigned unit, or pass `null` to unbind
+ *  that unit (§4.4). NO `gl.uniform1i` is issued — that was done exactly once per program lifetime during
  *  finalization. This is the key win over Babylon's `Effect.setTexture` which
  *  re-issues the sampler binding on every call. */
-export function setEffectTexture(engine: GLEngineContext, effect: GLEffect, samplerName: string, tex: GLTexture): void {
+export function setEffectTexture(engine: GLEngineContext, effect: GLEffect, samplerName: string, tex: GLTexture | null): void {
     if (engine._isLost || !effect.isReady) {
         return;
     }
