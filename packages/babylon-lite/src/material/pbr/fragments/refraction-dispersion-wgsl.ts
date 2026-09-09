@@ -12,7 +12,9 @@
 
 /** Per-RGB chromatic-dispersion refracted-environment sample WGSL, injected into
  *  the refraction fragment when a scene contains a dispersive transmissive material. */
-export const DISPERSION_SAMPLE_WGSL = `let eta=material.refractionParams.y;
+import { wgsl } from "../../../shader/wgsl.js";
+
+export const DISPERSION_SAMPLE_WGSL = wgsl`let eta=material.refractionParams.y;
 let realIOR=1.0/eta;
 let spread=0.04*material.volumeParams.w*(realIOR-1.0);
 let etaR=1.0/(realIOR-spread);

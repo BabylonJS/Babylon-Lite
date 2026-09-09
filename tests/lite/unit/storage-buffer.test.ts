@@ -3,6 +3,7 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import { createShaderMaterial, setShaderStorageBuffer } from "../../../packages/babylon-lite/src/material/shader/shader-material.js";
 import { _rebuildStorageBuffers, createStorageBuffer, disposeStorageBuffer, updateStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
 import type { StorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl.js";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & {
     GPUBufferUsage?: { STORAGE: number; COPY_DST: number };
@@ -68,8 +69,8 @@ describe("StorageBuffer", () => {
         const { engine } = makeEngine();
         const storage = createStorageBuffer(engine, new Float32Array(4));
         const material = createShaderMaterial({
-            vertexSource: "@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }",
-            fragmentSource: "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }",
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
             attributes: ["position"],
             storageBuffers: [{ name: "cells", type: "array<f32>" }],
         });
@@ -90,8 +91,8 @@ describe("StorageBuffer", () => {
     it("rejects raw GPUBuffer values with a clear migration error", () => {
         const { rawBuffer } = makeEngine();
         const material = createShaderMaterial({
-            vertexSource: "@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }",
-            fragmentSource: "@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }",
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
             attributes: ["position"],
             storageBuffers: [{ name: "cells", type: "array<f32>" }],
         });

@@ -26,20 +26,21 @@ import type { EngineContext } from "../engine/engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { Task } from "./task.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** Full mip chain length for a width/height (log2 of the larger side + 1). */
 function mipLevelCount(width: number, height: number): number {
     return Math.floor(Math.log2(Math.max(width, height))) + 1;
 }
 
-const COPY_SHADER = `@group(0)@binding(0)var src:texture_depth_2d;
+const COPY_SHADER = wgsl`@group(0)@binding(0)var src:texture_depth_2d;
 struct V{@builtin(position)p:vec4f};
 @vertex fn vs(@builtin(vertex_index)i:u32)->V{let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3))[i];return V(vec4f(p,0,1));}
 @fragment fn fs(@builtin(position)fc:vec4f)->@location(0)f32{return textureLoad(src,vec2<i32>(fc.xy),0);}`;
 
 /** REDUCE fragment: `op` is `min` or `max` of the four child texels of the previous level. */
 function reduceShader(op: "min" | "max"): string {
-    return `@group(0)@binding(0)var src:texture_2d<f32>;
+    return wgsl`@group(0)@binding(0)var src:texture_2d<f32>;
 struct V{@builtin(position)p:vec4f};
 @vertex fn vs(@builtin(vertex_index)i:u32)->V{let p=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3))[i];return V(vec4f(p,0,1));}
 @fragment fn fs(@builtin(position)fc:vec4f)->@location(0)f32{

@@ -2,6 +2,7 @@
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { StdExt } from "../standard-flags.js";
 import { HAS_CUBE_REFLECTION } from "../standard-flags.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export function createStdCubeReflectionFragment(): ShaderFragment {
     return {
@@ -11,7 +12,7 @@ export function createStdCubeReflectionFragment(): ShaderFragment {
             { _name: "cRS", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: 0x2 },
         ],
         _fragmentSlots: {
-            AD: `{let v=normalize(input.vp-scene.vEyePosition.xyz);reflectionColor=textureSample(cRT,cRS,reflect(v,normalW)).rgb*mat.rLvl;}`,
+            AD: wgsl`{let v=normalize(input.vp-scene.vEyePosition.xyz);reflectionColor=textureSample(cRT,cRS,reflect(v,normalW)).rgb*mat.rLvl;}`,
         },
     };
 }

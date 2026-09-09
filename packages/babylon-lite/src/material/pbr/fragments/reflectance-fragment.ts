@@ -12,6 +12,7 @@ import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/frag
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP, PBR_HAS_USE_ALPHA_ONLY_MR, PBR2_HAS_REFLECTANCE_FACTORS, PBR2_HAS_UV_TRANSFORM } from "../pbr-flag-bits.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 // Reflectance-only features2 bit (reserved in pbr-flag-bits.ts). Defined here,
 // not in the shared flag module, for zero bundle movement on scenes that never
@@ -21,7 +22,7 @@ const PBR2_REFL_UV_TX = 1 << 26;
 // WebGPU shader stage constants
 const STAGE_FRAGMENT = 0x2;
 
-const reflUvExpr = (name: string): string => `(vec2<f32>(dot(material.${name}m.xy, input.uv), dot(material.${name}m.zw, input.uv)) + material.${name}t.xy)`;
+const reflUvExpr = (name: string): string => wgsl`(vec2<f32>(dot(material.${name}m.xy, input.uv), dot(material.${name}m.zw, input.uv)) + material.${name}t.xy)`;
 
 /** Write a 2x2 UV matrix (vec4) + translate (vec4) for a reflectance texture. */
 function writeReflUvTransform(
@@ -120,29 +121,29 @@ export function createReflectanceFragment(
     const mrReflUv = hasUvTx ? reflUvExpr("mrReflUV") : "input.uv";
 
     // Build F0 computation code
-    let f0Code = `var mrFactors = vec4<f32>(material.metallicReflectanceColor, material.metallicF0Factor);
+    let f0Code = wgsl`var mrFactors = vec4<f32>(material.metallicReflectanceColor, material.metallicF0Factor);
 var specularWeight = material.specularWeight;`;
     if (hasReflectanceMap) {
-        f0Code += `
+        f0Code = wgsl`${f0Code}
 { let rSample = textureSample(reflectanceMap, reflectanceMapSampler, ${reflUv});
   let rLinear = pow(rSample.rgb, vec3<f32>(2.2));
   mrFactors = vec4<f32>(mrFactors.rgb * rLinear, mrFactors.a); }`;
     }
     if (hasMetallicReflectanceMap) {
         if (!useAlphaOnlyMR) {
-            f0Code += `
+            f0Code = wgsl`${f0Code}
 { let mrSample = textureSample(metallicReflectanceMap, metallicReflectanceMapSampler, ${mrReflUv});
   let mrLinear = pow(mrSample.rgb, vec3<f32>(2.2));
   mrFactors = vec4<f32>(mrFactors.rgb * mrLinear, mrFactors.a * mrSample.a);
   specularWeight *= mrSample.a; }`;
         } else {
-            f0Code += `
+            f0Code = wgsl`${f0Code}
 { let mrSample = textureSample(metallicReflectanceMap, metallicReflectanceMapSampler, ${mrReflUv});
   mrFactors = vec4<f32>(mrFactors.rgb, mrFactors.a * mrSample.a);
   specularWeight *= mrSample.a; }`;
         }
     }
-    f0Code += `
+    f0Code = wgsl`${f0Code}
 let dielectricF0 = material.reflectance * mrFactors.a;
 let surfaceReflectivityColor = mrFactors.rgb;
 let dielectricColorF0 = vec3<f32>(dielectricF0) * surfaceReflectivityColor;
@@ -177,7 +178,7 @@ let surfaceAlbedo = baseColor * (vec3<f32>(1.0) - vec3<f32>(dielectricF0) * surf
 
         _fragmentSlots: {
             MF: f0Code,
-            AT: `let occlusion = mix(1.0, ${occlusionSample}, material.occlusionStrength);`,
+            AT: wgsl`let occlusion = mix(1.0, ${occlusionSample}, material.occlusionStrength);`,
         },
     };
 }

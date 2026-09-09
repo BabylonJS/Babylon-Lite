@@ -13,8 +13,9 @@
 import type { BlockEmitter, NodeExpr } from "../node-types.js";
 import { NME_LIGHTING_HELPER_KEY, NME_LIGHTING_HELPER_WGSL } from "./_lighting-helper.js";
 import { MAX_LIGHTS } from "../../../light/types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
-const SHADOW_FACTORS_ONE = `array<f32, ${MAX_LIGHTS}>(${/* @__PURE__ */ new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
+const SHADOW_FACTORS_ONE = wgsl`array<f32, ${MAX_LIGHTS}>(${/* @__PURE__ */ new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
 
 function resolveOptional(
     block: Parameters<BlockEmitter["emit"]>[0],
@@ -54,7 +55,7 @@ export const emitter: BlockEmitter = {
             const gp = resolveOptional(block, "glossPower", "1024.0", stage, state, ctx, "f32");
             const sf = state.shadowLights.length > 0 ? `nme_computeShadowFactors(in)` : SHADOW_FACTORS_ONE;
             callVar = `_lt${ctx.temp(state, "light")}`;
-            state.fragment.body.push(`let ${callVar} = nme_computeLighting(${wp}, ${wn}, ${cp}, ${dc}, ${sc}, (${gl}) * (${gp}), ${sf});`);
+            state.fragment.body.push(wgsl`let ${callVar} = nme_computeLighting(${wp}, ${wn}, ${cp}, ${dc}, ${sc}, (${gl}) * (${gp}), ${sf});`);
             state.fragment.memo.set(memoKey, { expr: callVar, type: "vec4f" });
         } else {
             callVar = callExpr.expr;

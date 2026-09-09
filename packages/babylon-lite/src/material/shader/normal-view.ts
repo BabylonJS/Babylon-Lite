@@ -25,6 +25,7 @@
 import { createMaterialView } from "../material-view.js";
 import type { MaterialView } from "../material.js";
 import type { ShaderMaterial } from "./shader-material.js";
+import { wgsl } from "../../shader/wgsl.js";
 
 /** Configuration for {@link createShaderNormalMaterialView}. */
 export interface ShaderNormalViewConfig {
@@ -44,8 +45,8 @@ export interface ShaderNormalViewConfig {
 /** WGSL `mainFragment` that emits the encoded geometric normal (+ optional distance in alpha). */
 function buildNormalFragment(varying: string, location: number, space: "view" | "world", distRange: number | undefined): string {
     const nExpr = space === "world" ? "nW" : "normalize((scene.view * vec4<f32>(nW, 0.0)).xyz)";
-    const aExpr = distRange != null ? `clamp((scene.view * vec4<f32>(input.${varying}, 1.0)).z / ${distRange.toFixed(1)}, 0.0, 1.0)` : "1.0";
-    return `struct CavityNormalIn { @location(${location}) ${varying}: vec3<f32>, };
+    const aExpr = distRange != null ? wgsl`clamp((scene.view * vec4<f32>(input.${varying}, 1.0)).z / ${distRange.toFixed(1)}, 0.0, 1.0)` : "1.0";
+    return wgsl`struct CavityNormalIn { @location(${location}) ${varying}: vec3<f32>, };
 @fragment fn mainFragment(input: CavityNormalIn) -> @location(0) vec4<f32> {
   let nW = normalize(cross(dpdx(input.${varying}), dpdy(input.${varying})));
   let n = ${nExpr};

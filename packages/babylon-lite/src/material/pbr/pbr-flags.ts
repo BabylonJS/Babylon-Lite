@@ -6,6 +6,7 @@ import type { Texture2D } from "../../texture/texture-2d.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
+import type { WgslSource } from "../../shader/wgsl.js";
 
 export * from "./pbr-flag-bits.js";
 
@@ -38,9 +39,9 @@ export interface _PbrFragCtx {
     /** @internal */
     readonly _hasSpecularAA: boolean;
     /** @internal Aniso bent-normal WGSL (IBL only). */
-    readonly _anisoBentNormalCode?: string;
+    readonly _anisoBentNormalCode?: WgslSource;
     /** @internal Pre-baked skybox WGSL (IBL only). */
-    readonly _iblSkyboxCalc?: string;
+    readonly _iblSkyboxCalc?: WgslSource;
 }
 
 /** @internal Bind-group entry build context threaded through `PbrExt.bind`. */
@@ -56,7 +57,7 @@ export interface _PbrBindCtx {
     /** @internal */
     readonly _material: unknown;
     /** @internal Populated for "vertex" phase (skeleton, morph). */
-    readonly _mesh?: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { deltasBuffer: GPUBuffer; weightsBuffer?: GPUBuffer } | null };
+    readonly _mesh?: { skeleton?: { boneTexture: GPUTexture } | null; morphTargets?: { deltasBuffer: GPUBuffer; weightsBuffer?: GPUBuffer } | null } | null;
     /** @internal Scene environment, or an active extension's fallback when the scene has none. */
     readonly _env?: { brdfLutView: GPUTextureView; brdfSampler: GPUSampler; specularCubeView: GPUTextureView; cubeSampler: GPUSampler } | null;
     /** @internal Per-render-task scene-color snapshot for transmissive RTT refraction. */

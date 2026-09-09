@@ -8,8 +8,9 @@
  * Brand-Toolkit palette (red / coral / light) over a dark brand wash.
  */
 import { createEngine, startEngine, stopEngine, createEffectWrapper, createEffectRenderer, registerEffectRenderer, setEffectUniforms } from "babylon-lite";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
-const FRAGMENT_WGSL = /* wgsl */ `
+const FRAGMENT_WGSL = wgsl`
 struct U {
 iResolution : vec2f,
 iTime : f32,

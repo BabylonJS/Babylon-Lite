@@ -13,11 +13,12 @@
 import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const PBR2_HAS_UNLIT = 1 << 8;
 
 export function createUnlitFragment(hasIbl: boolean): ShaderFragment {
-    const assign = `color = baseColor * material.unlitColor;`;
+    const assign = wgsl`color = baseColor * material.unlitColor;`;
     return {
         _id: "unlit",
         _dependencies: hasIbl ? ["ibl"] : undefined,

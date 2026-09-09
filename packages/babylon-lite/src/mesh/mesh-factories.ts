@@ -323,6 +323,31 @@ export function updateMeshGeometryCapacity(
     uvs2?: Float32Array,
     tangents?: Float32Array,
     colors?: Float32Array,
+    reserveFactor?: number
+): MeshGeometryCapacityResult;
+export function updateMeshGeometryCapacity(
+    engine: EngineContext,
+    mesh: Mesh,
+    positions: Float32Array,
+    normals: Float32Array,
+    indices: Uint32Array,
+    uvs: Float32Array | undefined,
+    uvs2: Float32Array | undefined,
+    tangents: Float32Array | undefined,
+    colors: Float32Array | undefined,
+    reserveFactor: number | undefined,
+    ranges?: MeshGeometryUpdateRanges
+): MeshGeometryCapacityResult;
+export function updateMeshGeometryCapacity(
+    engine: EngineContext,
+    mesh: Mesh,
+    positions: Float32Array,
+    normals: Float32Array,
+    indices: Uint32Array,
+    uvs?: Float32Array,
+    uvs2?: Float32Array,
+    tangents?: Float32Array,
+    colors?: Float32Array,
     reserveFactor = 1.25,
     ranges?: MeshGeometryUpdateRanges
 ): MeshGeometryCapacityResult {

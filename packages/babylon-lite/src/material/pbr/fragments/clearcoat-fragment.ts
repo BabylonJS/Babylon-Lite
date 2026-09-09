@@ -21,6 +21,7 @@ import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/frag
 import type { PbrMaterialProps, ClearCoatProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { PBR_HAS_CLEARCOAT, PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP } from "../pbr-flag-bits.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 // Clearcoat-only features2 bits, kept out of the shared flag module.
 const PBR2_CC_INT_MAP = 1 << 0;
@@ -31,7 +32,7 @@ const PBR2_CC_UV_TX = 1 << 25;
 
 const STAGE_FRAGMENT = 0x2;
 
-const CC_HELPERS = `
+const CC_HELPERS = wgsl`
 fn visibility_Kelemen(VdotH_kl: f32) -> f32 {
 return 0.25 / (VdotH_kl * VdotH_kl + 0.0000001);
 }
@@ -48,16 +49,16 @@ return f0 + (1.0 - f0) * (t2 * t2 * t);
 }
 `;
 
-const ccUvExpr = (name: string): string => `(vec2<f32>(dot(material.${name}m.xy, input.uv), dot(material.${name}m.zw, input.uv)) + material.${name}t.xy)`;
-const CC_INT_TEX = (uv: string): string => `material.ccParams.x * textureSample(ccIntensityTexture, ccIntensitySampler_, ${uv}).r`;
+const ccUvExpr = (name: string): string => wgsl`(vec2<f32>(dot(material.${name}m.xy, input.uv), dot(material.${name}m.zw, input.uv)) + material.${name}t.xy)`;
+const CC_INT_TEX = (uv: string): string => wgsl`material.ccParams.x * textureSample(ccIntensityTexture, ccIntensitySampler_, ${uv}).r`;
 const CC_INT_PLAIN = `material.ccParams.x`;
-const CC_ROUGH_TEX = (uv: string): string => `clamp(material.ccParams.y * textureSample(ccRoughnessTexture, ccRoughnessSampler_, ${uv}).g, 0.0, 1.0)`;
+const CC_ROUGH_TEX = (uv: string): string => wgsl`clamp(material.ccParams.y * textureSample(ccRoughnessTexture, ccRoughnessSampler_, ${uv}).g, 0.0, 1.0)`;
 const CC_ROUGH_PLAIN = `material.ccParams.y`;
 
 // WGSL fragment: coat-layer normal. Computes ccN (coat world-space normal)
 // using a locally-derived cotangent frame from world-position and UV derivatives.
 // Emitted in /*AC*/ so ccN is in scope for direct + IBL blocks.
-const CC_NORMAL_COMPUTE = (uv: string): string => `
+const CC_NORMAL_COMPUTE = (uv: string): string => wgsl`
 let cc_dp1 = dpdx(input.worldPos);
 let cc_dp2 = dpdy(input.worldPos);
 let cc_duv1 = dpdx(input.uv);
@@ -75,7 +76,7 @@ var ccN = normalize(cc_frame * normalize(ccNormSampleRaw * vec3<f32>(ccNormScale
 `;
 
 function makeF0Remap(intensityExpr: string): string {
-    return `
+    return wgsl`
 {
 let ccInt_r = ${intensityExpr};
 let remappedF0 = getR0RemappedForClearCoat(colorF0, material.ccRefractionParams.z, material.ccRefractionParams.w);
@@ -86,7 +87,7 @@ colorF0 = mix(colorF0, remappedF0, ccInt_r);
 
 function makeDirectMod(intensityExpr: string, roughnessExpr: string, hasNormalMap: boolean): string {
     const N = hasNormalMap ? "ccN" : "N_geom";
-    return `
+    return wgsl`
 var ccDirectAttenuation = 1.0;
 var ccDirectSpecularTerm = vec3<f32>(0.0);
 {
@@ -111,14 +112,14 @@ ccDirectAttenuation = 1.0 - ccFresnel_dl * ccInt_dl;
 function makeIblMod(intensityExpr: string, roughnessExpr: string, hasNormalMap: boolean, hasSpecularAA: boolean, hasBaseNormalMap: boolean): string {
     const N = hasNormalMap ? "ccN" : "N_geom";
     const alphaG = hasSpecularAA
-        ? `let ccAlphaG_ibl_base = ccRough_ibl * ccRough_ibl + 0.0005;
+        ? wgsl`let ccAlphaG_ibl_base = ccRough_ibl * ccRough_ibl + 0.0005;
 let cc_nDfdx_AA = dpdx(${N});
 let cc_nDfdy_AA = dpdy(${N});
 let cc_slopeSquare_AA = max(dot(cc_nDfdx_AA, cc_nDfdx_AA), dot(cc_nDfdy_AA, cc_nDfdy_AA));
 let ccAlphaG_ibl = ccAlphaG_ibl_base + sqrt(cc_slopeSquare_AA) * 0.75;`
-        : `let ccAlphaG_ibl = ccRough_ibl * ccRough_ibl + 0.0005;`;
-    const ehoLine = hasBaseNormalMap ? `let ccEho_ibl = environmentHorizonOcclusion(-V, ${N}, N_geom);` : `let ccEho_ibl = 1.0;`;
-    return `
+        : wgsl`let ccAlphaG_ibl = ccRough_ibl * ccRough_ibl + 0.0005;`;
+    const ehoLine = hasBaseNormalMap ? wgsl`let ccEho_ibl = environmentHorizonOcclusion(-V, ${N}, N_geom);` : wgsl`let ccEho_ibl = 1.0;`;
+    return wgsl`
 {
 let ccInt_ibl = ${intensityExpr};
 let ccRough_ibl = ${roughnessExpr};
@@ -147,7 +148,7 @@ color = finalIrradiance * ccConservation_ibl
 }
 
 function makeNonIblMod(intensityExpr: string): string {
-    return `
+    return wgsl`
 {
 let ccF0_noIbl = material.ccRefractionParams.x;
 let ccInt_noIbl = ${intensityExpr};
@@ -176,7 +177,7 @@ export function createClearcoatFragment(features: number, features2: number, has
     const slots: Partial<Record<string, string>> = {
         MF: disableF0Remap ? "" : makeF0Remap(intensityExpr),
         AD: makeDirectMod(intensityExpr, roughnessExpr, hasNormalMap),
-        BL: `var ccDirectAttenuation = 1.0;\nvar ccDirectSpecularTerm = vec3<f32>(0.0);`,
+        BL: wgsl`var ccDirectAttenuation = 1.0;\nvar ccDirectSpecularTerm = vec3<f32>(0.0);`,
     };
     if (hasNormalMap) {
         slots.AC = CC_NORMAL_COMPUTE(normUv);

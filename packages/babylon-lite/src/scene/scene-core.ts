@@ -109,6 +109,8 @@ let _lateCleanup: WeakMap<SceneContext, () => 1> | null = null;
 export interface SceneContext extends RenderingContext {
     /** @internal */
     readonly _kind: "scene";
+    /** Optional display name for tooling and diagnostics. */
+    name?: string;
     /** Surface this scene renders into. Set at scene-creation time and immutable
      *  afterwards — the default render task is sized and MSAA-matched to this surface,
      *  and `registerScene` attaches the scene to it. For the engine's primary surface

@@ -1,6 +1,8 @@
 /** Fog calculation helper.
  *  Requires: `scene.vFogInfos` (vec4) in scope. */
-export const WGSL_FOG = `
+import { wgsl } from "./wgsl.js";
+
+export const WGSL_FOG = wgsl`
 const E_FOG: f32 = 2.71828;
 fn calcFogFactor(fogDistance: vec3<f32>) -> f32 {
 var fogCoeff: f32 = 1.0;

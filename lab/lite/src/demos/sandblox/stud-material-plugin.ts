@@ -24,13 +24,14 @@
 import type { MaterialPlugin } from "babylon-lite";
 
 import type { StudTextures } from "./stud-texture.js";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 /**
  * Per-face frames: worldN = T·n.x + B·n.y + N·n.z, uv = (vp·T, vp·B).
  * Top face (+Y) uses T=+X, B=+Z so uv = vp.xz — same orientation the
  * baseplate bump path consumes (green → +Z).
  */
-const FRAGMENT_AC = `
+const FRAGMENT_AC = wgsl`
 var studT = array<vec3<f32>, 6>(vec3<f32>(0.,0.,1.), vec3<f32>(0.,0.,1.), vec3<f32>(1.,0.,0.), vec3<f32>(1.,0.,0.), vec3<f32>(1.,0.,0.), vec3<f32>(1.,0.,0.));
 var studB = array<vec3<f32>, 6>(vec3<f32>(0.,1.,0.), vec3<f32>(0.,1.,0.), vec3<f32>(0.,0.,1.), vec3<f32>(0.,0.,1.), vec3<f32>(0.,1.,0.), vec3<f32>(0.,1.,0.));
 var studN = array<vec3<f32>, 6>(vec3<f32>(1.,0.,0.), vec3<f32>(-1.,0.,0.), vec3<f32>(0.,1.,0.), vec3<f32>(0.,-1.,0.), vec3<f32>(0.,0.,1.), vec3<f32>(0.,0.,-1.));
@@ -48,7 +49,7 @@ let studWorldN = normalize(sT * studTan.x + sB * studTan.y + sN * studTan.z);
 normalW = normalize(mix(normalW, studWorldN, studIsTop));
 `;
 
-const FRAGMENT_AT = `
+const FRAGMENT_AT = wgsl`
 baseColor = baseColor * mix(vec3<f32>(1.0), studTexel.rgb, studIsTop);
 `;
 

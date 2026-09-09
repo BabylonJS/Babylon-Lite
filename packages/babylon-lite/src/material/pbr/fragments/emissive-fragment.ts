@@ -13,6 +13,7 @@ import type { ShaderFragment } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
 import { PBR_HAS_EMISSIVE_COLOR, PBR_HAS_EMISSIVE, PBR2_HAS_UV_TRANSFORM } from "../pbr-flag-bits.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 /**
  * Create an emissive-color fragment.
@@ -30,7 +31,9 @@ export function createEmissiveColorFragment(hasEmissiveTexture: boolean, emissiv
         ],
 
         _fragmentSlots: {
-            AT: hasEmissiveTexture ? `emissive=material.emissiveColor*textureSample(emissiveTexture,emissiveSampler,${emissiveUV}).rgb;` : `emissive=material.emissiveColor;`,
+            AT: hasEmissiveTexture
+                ? wgsl`emissive=material.emissiveColor*textureSample(emissiveTexture,emissiveSampler,${emissiveUV}).rgb;`
+                : wgsl`emissive=material.emissiveColor;`,
         },
     };
 }

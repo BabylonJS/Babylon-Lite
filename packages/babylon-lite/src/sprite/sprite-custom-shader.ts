@@ -38,6 +38,7 @@ import type { EngineContext } from "../engine/engine.js";
 import { makeSpritePrologueWgsl } from "./sprite-pipeline.js";
 import type { SpriteFxHook } from "./sprite-fx-hook.js";
 import { _registerSpriteFxHook } from "./sprite-fx-hook.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** One extra texture bound after the atlas. In WGSL it becomes `<name>Tex` + `<name>Samp`. */
 export type Sprite2DCustomTexture = CustomShaderTexture;
@@ -70,7 +71,7 @@ export interface Sprite2DCustomShader {
 
 function makeCustomSpriteWgsl(hasDepth: boolean, spriteGroupIndex: 0 | 1, extraTextures: readonly Sprite2DCustomTexture[], fragment: string, uvScroll: boolean): string {
     const fxBinding = 3 + extraTextures.length * 2;
-    return `${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
+    return wgsl`${makeSpritePrologueWgsl(hasDepth, spriteGroupIndex, uvScroll)}
 ${makeExtraBindingsWgsl(spriteGroupIndex, 3, extraTextures)}${makeFxStructWgsl(spriteGroupIndex, fxBinding)}
 @fragment
 fn fs(in: O) -> @location(0) vec4f {

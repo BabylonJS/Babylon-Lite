@@ -37,6 +37,7 @@ import {
     type Sprite2DLayer,
     type SpriteRenderer,
 } from "babylon-lite";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 /** Just the slice of the demo's view the cloud field needs. */
 export interface AtmosphereView {
@@ -87,7 +88,7 @@ const SHADOW_ORDER = 38;
  * spliced fragment body). The shadow pass samples the same field shifted toward the
  * down-sun side so it reads as the cloud's shadow on the ground.
  */
-const CLOUD_FRAGMENT = `
+const CLOUD_FRAGMENT = wgsl`
 let wind = vec2<f32>(fx.time * 0.042, fx.time * 0.025);
 var sp = in.tint.xy + in.uv * in.tint.zw + wind;
 let isShadow = fx.params.y > 0.5;
@@ -135,7 +136,7 @@ function buildPass(
     order: number,
     mode: number,
     atlas: ReturnType<typeof createGridSpriteAtlas>,
-    shader: ReturnType<typeof createSprite2DCustomShader>,
+    shader: ReturnType<typeof createSprite2DCustomShader>
 ): CloudPass {
     const layer = createSprite2DLayer(atlas, { capacity: 1, order, pivot: [0.5, 0.5], customShader: shader });
     addSpriteRendererLayer(sr, layer);
@@ -163,16 +164,7 @@ export function createAtmosphere(engine: EngineContext, sr: SpriteRenderer): Atm
     const shadow = buildPass(sr, SHADOW_ORDER, 1, atlas, shader);
     const clouds = buildPass(sr, CLOUD_ORDER, 0, atlas, shader);
 
-    function place(
-        pass: CloudPass,
-        originX: number,
-        originY: number,
-        spanX: number,
-        spanY: number,
-        w: number,
-        h: number,
-        vis: number,
-    ): void {
+    function place(pass: CloudPass, originX: number, originY: number, spanX: number, spanY: number, w: number, h: number, vis: number): void {
         if (vis <= 0) {
             updateSprite2DIndex(pass.layer, pass.sprite, { visible: false });
             return;

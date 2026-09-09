@@ -8,8 +8,9 @@
 //   color.g = fullbright flag (1 = ignore diminishing, e.g. fullbright sprites)
 
 import { createShaderMaterial, setShaderTexture, type ShaderMaterial, type Texture2D } from "babylon-lite";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
-const vertexSource = `struct VertexOutput {
+const vertexSource = wgsl`struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) uv: vec2<f32>,
   @location(1) viewPos: vec3<f32>,
@@ -27,7 +28,7 @@ const vertexSource = `struct VertexOutput {
 // Distance, in Doom map units, that darkens the picture by one colormap band.
 const DIST_PER_BAND = 224.0;
 
-const fragmentSource = `struct VertexOutput {
+const fragmentSource = wgsl`struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) uv: vec2<f32>,
   @location(1) viewPos: vec3<f32>,

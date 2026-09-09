@@ -47,6 +47,7 @@ import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.
 import { getBilinearSampler, getTrilinearSampler } from "../resource/samplers.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** Options used to create a copy-to-texture frame-graph task. Selects the source render target, the target or resolve target, and optional viewport / mip-level settings for blit and copy paths. */
 export interface CopyToTextureTaskConfig {
@@ -134,18 +135,18 @@ interface CopyToTextureTaskInternal extends CopyToTextureTask {
 // row). Since every RT now renders upright (row 0 = top of scene), the same
 // shader handles offscreen↔offscreen, swap↔swap, and the offscreen↔swap blits
 // without any V flip.
-const VERTEX_WGSL = `struct V{@builtin(position)p:vec4f,@location(0)u:vec2f};
+const VERTEX_WGSL = wgsl`struct V{@builtin(position)p:vec4f,@location(0)u:vec2f};
 @vertex fn vs(@builtin(vertex_index)i:u32)->V{
 var pos=array<vec2f,3>(vec2f(-1,-1),vec2f(3,-1),vec2f(-1,3));
 var uv=array<vec2f,3>(vec2f(0,1),vec2f(2,1),vec2f(0,-1));
 return V(vec4f(pos[i],0,1),uv[i]);}`;
 
 function fragmentForSingle(lod: number): string {
-    return `@group(0)@binding(0)var t:texture_2d<f32>;@group(0)@binding(1)var s:sampler;
+    return wgsl`@group(0)@binding(0)var t:texture_2d<f32>;@group(0)@binding(1)var s:sampler;
 @fragment fn fs(v:V)->@location(0)vec4f{return textureSampleLevel(t,s,v.u,${lod.toFixed(1)});}`;
 }
 
-const FRAGMENT_MSAA_WGSL = `@group(0)@binding(0)var t:texture_multisampled_2d<f32>;
+const FRAGMENT_MSAA_WGSL = wgsl`@group(0)@binding(0)var t:texture_multisampled_2d<f32>;
 @fragment fn fs(v:V)->@location(0)vec4f{
 let d=vec2i(textureDimensions(t));
 let q=v.u*vec2f(d)-.5;
@@ -493,7 +494,7 @@ function getOrCreateCopyPipeline(engine: EngineContext, targetFormat: GPUTexture
     let shaderModule = _shaderModules!.get(moduleKey);
     if (!shaderModule) {
         const fragment = multisampledSource ? FRAGMENT_MSAA_WGSL : fragmentForSingle(lodLevel);
-        shaderModule = device.createShaderModule({ code: `${VERTEX_WGSL}\n${fragment}`, label: `copy-to-texture-${moduleKey}` });
+        shaderModule = device.createShaderModule({ code: wgsl`${VERTEX_WGSL}\n${fragment}`, label: `copy-to-texture-${moduleKey}` });
         _shaderModules!.set(moduleKey, shaderModule);
     }
     let bgl: GPUBindGroupLayout;

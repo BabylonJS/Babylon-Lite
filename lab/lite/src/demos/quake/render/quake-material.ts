@@ -4,6 +4,7 @@
 // so the BSP winding (flipped by the Quake→engine axis swap) renders either way.
 
 import { createShaderMaterial, setShaderTexture, type ShaderMaterial, type Texture2D } from "babylon-lite";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 const OVERBRIGHT = 2.5;
 
@@ -20,7 +21,7 @@ const OVERBRIGHT = 2.5;
 // explodes with distance (≈0.5u at z=20 but ≈190u at z=500) and yanks recessed
 // buttons/torches clean through the wall in front of them — the depth bug this fixes.
 // `DEPTH_BIAS` is therefore expressed as `pull · near` (world units × near plane).
-const vertexSource = (depthBias: number) => `struct VertexOutput {
+const vertexSource = (depthBias: number) => wgsl`struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) uv: vec2<f32>,
   @location(1) uv2: vec2<f32>,
@@ -35,7 +36,7 @@ const DEPTH_BIAS: f32 = ${depthBias.toExponential(6)};
   return out;
 }`;
 
-const fragmentSource = `struct VertexOutput {
+const fragmentSource = wgsl`struct VertexOutput {
   @builtin(position) position: vec4<f32>,
   @location(0) uv: vec2<f32>,
   @location(1) uv2: vec2<f32>,

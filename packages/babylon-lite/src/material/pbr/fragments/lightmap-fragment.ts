@@ -21,6 +21,7 @@ import type { PbrExt } from "../pbr-flags.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
 import { PBR2_HAS_REFRACTION, PBR2_HAS_UV2, PBR_HAS_SHEEN, PBR_HAS_SUBSURFACE } from "../pbr-flag-bits.js";
 import { MSH_HAS_UV2 } from "../../mesh-features.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -57,10 +58,16 @@ export function createLightmapFragment(
     finalColorDependencies: readonly string[] = []
 ): ShaderFragment {
     const baseUv = usesUV2 ? `input.uv2` : `input.uv`;
-    const uv = flipV ? `vec2<f32>(${baseUv}.x,1.0-${baseUv}.y)` : baseUv;
-    const raw = `textureSample(lmTexture,lmSampler,${uv}).rgb`;
-    const lm = `${gamma ? `pow(${raw},vec3<f32>(2.2))` : raw}*material.lmLvl`;
-    const blend = shadowmap ? (afterUnlit ? `color=color*(${lm})+emissive;` : `color=(color-emissive)*(${lm})+emissive;`) : afterUnlit ? `color+=${lm}+emissive;` : `color+=${lm};`;
+    const uv = flipV ? wgsl`vec2<f32>(${baseUv}.x,1.0-${baseUv}.y)` : baseUv;
+    const raw = wgsl`textureSample(lmTexture,lmSampler,${uv}).rgb`;
+    const lm = `${gamma ? wgsl`pow(${raw},vec3<f32>(2.2))` : raw}*material.lmLvl`;
+    const blend = shadowmap
+        ? afterUnlit
+            ? wgsl`color=color*(${lm})+emissive;`
+            : wgsl`color=(color-emissive)*(${lm})+emissive;`
+        : afterUnlit
+          ? wgsl`color+=${lm}+emissive;`
+          : wgsl`color+=${lm};`;
     const dependencies = afterUnlit ? [...finalColorDependencies, "unlit"] : finalColorDependencies;
     return {
         _id: "lightmap",

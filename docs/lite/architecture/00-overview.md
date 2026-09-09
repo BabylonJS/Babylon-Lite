@@ -312,7 +312,7 @@ setEnvironmentRotation(scene: SceneContext, rotation: number): void
 
 // Camera — pure data; controls can register per-frame updates on a scene
 createArcRotateCamera(alpha: number, beta: number, radius: number, target: Vec3): ArcRotateCamera
-attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement, scene?: SceneContext): () => void
+attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement, scene?: SceneContext, options?: AttachControlOptions): () => void
 createFreeCamera(position: Vec3, target: Vec3): FreeCamera
 attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement, scene?: SceneContext): () => void
 

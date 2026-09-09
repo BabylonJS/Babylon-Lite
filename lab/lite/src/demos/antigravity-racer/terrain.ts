@@ -23,6 +23,7 @@ import type { EngineContext, MaterialPlugin, Mesh, SceneContext } from "babylon-
 import { addToScene, createGroundFromHeightMap, createStandardMaterial, loadTexture2D } from "babylon-lite";
 
 import { RACER_FOG_END, RACER_FOG_START, TERRAIN_MAX_HEIGHT, TERRAIN_MIN_HEIGHT, TERRAIN_SIZE, TERRAIN_SUBDIVISIONS, TERRAIN_UV_SCALE, TERRAIN_Y } from "./constants.js";
+import { wgsl } from "babylon-lite/shader/wgsl.js";
 
 /** The playground's own height map — the relief the original track flies over. */
 export const HEIGHTMAP_URL = "https://playground.babylonjs.com/textures/heightMap.png";
@@ -40,7 +41,7 @@ export function createTerrainDistanceFade(): MaterialPlugin {
                 return null;
             }
             return {
-                CUSTOM_FRAGMENT_UPDATE_ALPHA: `alpha *= 1.0 - smoothstep(${RACER_FOG_START}.0, ${RACER_FOG_END}.0, distance(scene.vEyePosition.xyz, input.vp));`,
+                CUSTOM_FRAGMENT_UPDATE_ALPHA: wgsl`alpha *= 1.0 - smoothstep(${RACER_FOG_START}.0, ${RACER_FOG_END}.0, distance(scene.vEyePosition.xyz, input.vp));`,
             };
         },
     };

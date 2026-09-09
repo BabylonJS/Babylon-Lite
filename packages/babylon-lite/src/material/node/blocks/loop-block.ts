@@ -1,5 +1,6 @@
 import type { BlockEmitter, NodeBlock, Stage } from "../node-types.js";
 import { WGSL } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 function loopKey(stage: Stage, blockId: number): string {
     return `${stage}|${blockId}`;
@@ -40,14 +41,14 @@ export const emitter: BlockEmitter = {
         const valueVar = ctx.temp(state, "loop");
         const indexVar = ctx.temp(state, "loopIndex");
         const body = stage === "vertex" ? state.vertex.body : state.fragment.body;
-        body.push(`var ${valueVar}: ${WGSL[initial.type]} = ${initial.expr};`);
+        body.push(wgsl`var ${valueVar}: ${WGSL[initial.type]} = ${initial.expr};`);
 
         const iterationsInput = block.inputs.get("iterations");
         const iterations = iterationsInput?.source
             ? `i32(${ctx.cast(ctx.resolve(block, "iterations", stage, state), "f32").expr})`
             : String(Math.max(0, Math.floor((block.serialized["iterations"] as number | undefined) ?? 4)));
 
-        body.push(`for (var ${indexVar} = 0; ${indexVar} < ${iterations}; ${indexVar} = ${indexVar} + 1) {`);
+        body.push(wgsl`for (var ${indexVar} = 0; ${indexVar} < ${iterations}; ${indexVar} = ${indexVar} + 1) {`);
         const key = loopKey(stage, block.id);
         const previous = state.loopVariables.get(key);
         const stageState = stage === "vertex" ? state.vertex : state.fragment;
@@ -56,7 +57,7 @@ export const emitter: BlockEmitter = {
         try {
             for (const write of storageWritesForLoop(block, ctx)) {
                 const value = ctx.cast(ctx.resolve(write, "value", stage, state), initial.type);
-                body.push(`${valueVar} = ${value.expr};`);
+                body.push(wgsl`${valueVar} = ${value.expr};`);
             }
         } finally {
             stageState.memo.clear();

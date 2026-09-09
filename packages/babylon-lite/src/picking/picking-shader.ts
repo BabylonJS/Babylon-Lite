@@ -1,6 +1,7 @@
 /** WGSL shaders for the basic position-only GPU pick path. */
 
 import type { PickingVertexProjectionShader } from "./picking-advanced-shader.js";
+import { wgsl } from "../shader/wgsl.js";
 
 export interface PickingShaderOptions {
     readonly discardWgsl?: string | null;
@@ -9,7 +10,7 @@ export interface PickingShaderOptions {
     readonly _vertexProjection?: PickingVertexProjectionShader | null;
 }
 
-const PICK_INPUT = /* wgsl */ `
+const PICK_INPUT = wgsl`
 struct PickDiscardInput {
 worldPos: vec3f,
 fragmentCoord: vec2f,
@@ -20,7 +21,7 @@ instanceExtras: vec4f,
 };
 `;
 
-const DEFAULT_DISCARD = /* wgsl */ `
+const DEFAULT_DISCARD = wgsl`
 fn shouldDiscardPick(input: PickDiscardInput) -> bool {
 return false;
 }
@@ -28,10 +29,10 @@ return false;
 
 function storageDecls(opts?: PickingShaderOptions): string {
     const storage = opts?.storage;
-    return storage?.length ? storage.map((s, binding) => `@group(2) @binding(${binding}) var<storage, read> ${s.name}: ${s.type};`).join("\n") : "";
+    return storage?.length ? storage.map((s, binding) => wgsl`@group(2) @binding(${binding}) var<storage, read> ${s.name}: ${s.type};`).join("\n") : "";
 }
 
-const SCENE = /* wgsl */ `
+const SCENE = wgsl`
 struct SceneUniforms {
 viewProjection: mat4x4f,
 fragmentCoord: vec2f,
@@ -39,7 +40,7 @@ fragmentCoord: vec2f,
 @group(0) @binding(0) var<uniform> scene: SceneUniforms;
 `;
 
-const FRAGMENT = /* wgsl */ `
+const FRAGMENT = wgsl`
 struct VsOut {
 @builtin(position) p: vec4f,
 @location(0) @interpolate(flat) pickId: u32,
@@ -61,7 +62,7 @@ return FsOut(vec4f(r, g, b, 1.0), input.p.z);
 
 export function pickingShaderSource(opts?: PickingShaderOptions): string {
     const projection = opts?._vertexProjection ?? null;
-    return /* wgsl */ `
+    return wgsl`
 ${SCENE}
 struct MeshUniforms {
 world: mat4x4f,
@@ -75,7 +76,7 @@ ${projection?.regularDeclarations ?? ""}
 ${FRAGMENT}
 @vertex fn vs(@location(0) position: vec3f${projection?.regularInputs ?? ""}) -> VsOut {
 var out: VsOut;
-${projection ? `${projection.regularBody}\nlet wp = projectedWorld;` : "let wp = (mesh.world * vec4f(position, 1.0)).xyz;"}
+${projection ? wgsl`${projection.regularBody}\nlet wp = projectedWorld;` : wgsl`let wp = (mesh.world * vec4f(position, 1.0)).xyz;`}
 out.p = scene.viewProjection * vec4f(wp, 1.0);
 out.pickId = mesh.pickId;
 out.worldPos = wp;

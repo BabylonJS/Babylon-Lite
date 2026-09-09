@@ -14,7 +14,7 @@ import { TEXT_INSTANCE_BYTES } from "./text-data.js";
 import type { CurveSetId } from "./glyph-storage.js";
 import { ensureSharedAtlasGpu } from "./_gpu/text-textures.js";
 import { createStyleBuffer, ensureStyleGpu } from "./_gpu/text-style-gpu.js";
-import { getOrCreateTextPipeline } from "./_gpu/text-pipeline.js";
+import { getOrCreateTextPipeline, getTextPipelineCache } from "./_gpu/text-pipeline.js";
 
 // ─── TextLayer ────────────────────────────────────────────────────────────
 
@@ -138,6 +138,9 @@ interface LayerGpu {
     _styleBuf: GPUBuffer;
     _uploadedStyleVersion: number;
     _pipeline: GPURenderPipeline | null;
+    /** Composed-variant pipeline for the same target signature. Aliases `_pipeline` unless an
+     *  opt-in styling feature is installed, so the record loop needs no null check. */
+    _variantPipeline: GPURenderPipeline | null;
     /** Per-draw-group bind groups; rebuilt when the atlas grows or the curve set at an index
      *  changes. Indexed by draw-group index, which is NOT stable: `data._groups` is spliced
      *  when a group empties and rebuilt in map-insertion order by `applyReset`. Each entry
@@ -208,6 +211,7 @@ function ensureLayerGpu(rr: TextRenderer, layer: TextLayer): LayerGpu {
         _styleBuf: createStyleBuffer(device, 1),
         _uploadedStyleVersion: -1,
         _pipeline: null,
+        _variantPipeline: null,
         _bindGroupCache: [],
         _uploadedDataVersion: -1,
         _uploadedViewportW: 0,
@@ -386,15 +390,16 @@ function textRendererUpdate(rr: TextRenderer): void {
 
     // Pipeline: depth-less, sampleCount=1, swapchain format. The key is identical for every
     // layer, so resolve it once per frame and reuse the pipeline + bind-group layout below.
-    const { _pipeline: pipeline, _cache: cache } = getOrCreateTextPipeline(rr._surface.engine, rr._surface.format, 1, null, false);
+    const { _pipeline: pipeline, _variantPipeline: variantPipeline, _cache: cache } = getOrCreateTextPipeline(rr._surface.engine, rr._surface.format, 1, null, false);
 
     for (const layer of rr._layers) {
         if (!layer.visible) {
             continue;
         }
         const lg = ensureLayerGpu(rr, layer);
-        if (lg._pipeline !== pipeline) {
+        if (lg._pipeline !== pipeline || lg._variantPipeline !== variantPipeline) {
             lg._pipeline = pipeline;
+            lg._variantPipeline = variantPipeline;
             // Pipeline change → bind groups must be rebuilt against new bindGroupLayout.
             lg._bindGroupCache.length = 0;
             // Bundle baked the old pipeline; force a re-record.
@@ -426,8 +431,7 @@ function textRendererRecord(rr: TextRenderer): number {
     });
 
     let drawCalls = 0;
-    const { _cache: cache } = getOrCreateTextPipeline(rr._surface.engine, format, 1, null, false);
-    const quadVertex = cache._quadVertexBuffer;
+    const quadVertex = getTextPipelineCache(eng)._quadVertexBuffer;
 
     const visibleBundles = rr._visibleBundles;
     visibleBundles.length = 0;
@@ -457,15 +461,26 @@ function textRendererRecord(rr: TextRenderer): number {
                 colorFormats: [format],
                 sampleCount: 1,
             });
-            be.setPipeline(lg._pipeline);
+            const base = lg._pipeline;
+            be.setPipeline(base);
             be.setVertexBuffer(0, quadVertex);
             be.setVertexBuffer(1, lg._instanceBuf);
             let groupDraws = 0;
+            // Mixed base/variant layers switch pipeline inside the bundle; a base-only layer
+            // records exactly the commands it always did. Both pipelines were resolved in
+            // `_update`. The bundle's state does not outlive `executeBundles`, so unlike the
+            // `TextRenderable` path there is nothing to restore afterwards.
+            let bound = base;
             for (let i = 0; i < data._groups.length; i++) {
                 const g = data._groups[i]!;
                 const bg = lg._bindGroupCache[i]?._bindGroup;
                 if (g._slotCount === 0 || !bg) {
                     continue;
+                }
+                const p = g._groupKey === g._curveSetId ? base : lg._variantPipeline!;
+                if (p !== bound) {
+                    be.setPipeline(p);
+                    bound = p;
                 }
                 be.setBindGroup(0, bg);
                 be.draw(6, g._slotCount, 0, g._slotStart);

@@ -5,8 +5,9 @@ import type { RenderTarget, RenderTargetSignature } from "../engine/render-targe
 import { buildRenderTarget, disposeRenderTarget, targetSignatureKey } from "../engine/render-target.js";
 import type { Task } from "../frame-graph/task.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import { wgsl } from "../shader/wgsl.js";
 
-const DEFAULT_VERTEX_WGSL = `struct EffectVertexOutput{@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>};
+const DEFAULT_VERTEX_WGSL = wgsl`struct EffectVertexOutput{@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>};
 @vertex fn effectFullscreenVertex(@builtin(vertex_index) vertexIndex:u32)->EffectVertexOutput{var positions=array<vec2<f32>,3>(vec2<f32>(-1.0,-1.0),vec2<f32>(3.0,-1.0),vec2<f32>(-1.0,3.0));let p=positions[vertexIndex];var out:EffectVertexOutput;out.position=vec4<f32>(p,0.0,1.0);out.uv=p*0.5+vec2<f32>(0.5,0.5);return out;}`;
 
 /** Configuration for a lightweight fullscreen effect with exactly one uniform buffer at bind group 0 / binding 0. */
@@ -192,7 +193,7 @@ function getShaderModule(wrapper: UniformEffectWrapperInternal): GPUShaderModule
     if (!wrapper._shader) {
         wrapper._shader = wrapper._engine._device.createShaderModule({
             label: wrapper.name,
-            code: `${wrapper.options.vertexWGSL ?? DEFAULT_VERTEX_WGSL}\n${wrapper.options.fragmentWGSL}`,
+            code: wgsl`${wrapper.options.vertexWGSL ?? DEFAULT_VERTEX_WGSL}\n${wrapper.options.fragmentWGSL}`,
         });
     }
     return wrapper._shader;

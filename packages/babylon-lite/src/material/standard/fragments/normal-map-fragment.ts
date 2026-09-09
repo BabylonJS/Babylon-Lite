@@ -12,6 +12,7 @@ import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { StdExt } from "../standard-flags.js";
 import { HAS_BUMP_TEXTURE } from "../standard-flags.js";
 import { WGSL_PERTURB_NORMAL } from "../../../shader/wgsl-helpers.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -31,7 +32,7 @@ export function createNormalMapFragment(): ShaderFragment {
         _helperFunctions: WGSL_PERTURB_NORMAL,
 
         _fragmentSlots: {
-            AC: `normalW = perturbNormal(input.vn, input.vp, input.vu, mat.bs);`,
+            AC: wgsl`normalW = perturbNormal(input.vn, input.vp, input.vu, mat.bs);`,
         },
     };
 }

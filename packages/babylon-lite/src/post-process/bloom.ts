@@ -6,6 +6,7 @@ import type { Task } from "../frame-graph/task.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { createBlurPostProcessTask, type BlurPostProcessTask } from "./blur.js";
 import { createExtractHighlightsPostProcessTask, type ExtractHighlightsPostProcessTask } from "./extract-highlights.js";
+import { wgsl } from "../shader/wgsl.js";
 
 /** Configuration for `createBloomPostProcessTask`: highlight `threshold`/`exposure`, blur `kernel`, merge `weight`, and `bloomScale`. */
 export interface BloomPostProcessTaskConfig extends PostProcessTaskSettings {
@@ -41,12 +42,12 @@ interface BloomTaskInternal extends BloomPostProcessTask {
     _blurYTarget: RenderTarget;
 }
 
-const BLOOM_MERGE_EXTRA_TEXTURE_WGSL = `@group(0) @binding(2) var bloomBlur:texture_2d<f32>;`;
+const BLOOM_MERGE_EXTRA_TEXTURE_WGSL = wgsl`@group(0) @binding(2) var bloomBlur:texture_2d<f32>;`;
 
-const BLOOM_MERGE_UNIFORM_WGSL = `struct BloomMergeParams{weight:f32,p0:f32,p1:f32,p2:f32}
+const BLOOM_MERGE_UNIFORM_WGSL = wgsl`struct BloomMergeParams{weight:f32,p0:f32,p1:f32,p2:f32}
 @group(0) @binding(3) var<uniform> bloomMergeParams:BloomMergeParams;`;
 
-const BLOOM_MERGE_FRAGMENT_WGSL = `fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{let blurred=textureSampleLevel(bloomBlur,sourceSampler,clamp(uv,vec2f(0),vec2f(1)),0).rgb;return vec4f(color.rgb+blurred*bloomMergeParams.weight,color.a);}`;
+const BLOOM_MERGE_FRAGMENT_WGSL = wgsl`fn applyPostProcess(color:vec4f, uv:vec2f)->vec4f{let blurred=textureSampleLevel(bloomBlur,sourceSampler,clamp(uv,vec2f(0),vec2f(1)),0).rgb;return vec4f(color.rgb+blurred*bloomMergeParams.weight,color.a);}`;
 
 const scaledKernel = (kernel: number, scale: number): number => kernel * scale;
 

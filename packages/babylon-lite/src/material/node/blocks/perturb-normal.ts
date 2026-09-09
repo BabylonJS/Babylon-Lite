@@ -9,9 +9,10 @@
  */
 
 import type { BlockEmitter } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const HELPER_KEY = "nme_perturbNormal";
-const HELPER_WGSL = `
+const HELPER_WGSL = wgsl`
 fn nme_perturbNormal(worldPos: vec3<f32>, worldNormal: vec3<f32>, uv: vec2<f32>, sampled: vec3<f32>, strength: f32) -> vec3<f32> {
     // Construct ad-hoc TBN from screen-space derivatives. WebGPU's UV.y goes top-down
     // (BJS GLSL UV is bottom-up), so dpdy and duv2 both end up with opposite sign vs BJS.

@@ -4,6 +4,7 @@ import type { StandardMaterialProps } from "../standard-material.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { StdExt } from "../standard-flags.js";
 import { HAS_SPECULAR_TEXTURE, SPECULAR_USES_UV2 } from "../standard-flags.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
 
@@ -16,7 +17,7 @@ export function createStdSpecularFragment(usesUV2: boolean): ShaderFragment {
             { _name: "sS", _type: { _kind: "sampler", _samplerType: "sampler" }, _visibility: STAGE_FRAGMENT },
         ],
         _fragmentSlots: {
-            AT: `specularColor = textureSample(sT, sS, ${uv}).rgb;`,
+            AT: wgsl`specularColor = textureSample(sT, sS, ${uv}).rgb;`,
         },
     };
 }

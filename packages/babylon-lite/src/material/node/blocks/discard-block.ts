@@ -16,6 +16,7 @@
  */
 
 import type { BlockEmitter } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 export const emitter: BlockEmitter = {
     className: "DiscardBlock",
@@ -28,7 +29,7 @@ export const emitter: BlockEmitter = {
             const cutoffIn = block.inputs.get("cutoff");
             const value = valueIn?.source ? ctx.cast(ctx.resolve(block, "value", stage, state), "f32") : { expr: "0.0", type: "f32" as const };
             const cutoff = cutoffIn?.source ? ctx.cast(ctx.resolve(block, "cutoff", stage, state), "f32") : { expr: "0.0", type: "f32" as const };
-            state.fragment.body.push(`if (${value.expr} < ${cutoff.expr}) { discard; }`);
+            state.fragment.body.push(wgsl`if (${value.expr} < ${cutoff.expr}) { discard; }`);
             state.fragment.memo.set(memoKey, { expr: "0.0", type: "f32" });
         }
         return { expr: "0.0", type: "f32" };

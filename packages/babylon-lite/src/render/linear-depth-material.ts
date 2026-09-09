@@ -10,8 +10,9 @@
 
 import type { ShaderMaterial } from "../material/shader/shader-material.js";
 import { createShaderMaterial } from "../material/shader/shader-material.js";
+import { wgsl } from "../shader/wgsl.js";
 
-const VERTEX = /* wgsl */ `
+const VERTEX = wgsl`
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) viewZ: f32,
@@ -28,7 +29,7 @@ fn mainVertex(input: VertexInput) -> VertexOutput {
 }
 `;
 
-const FRAGMENT = /* wgsl */ `
+const FRAGMENT = wgsl`
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) viewZ: f32,

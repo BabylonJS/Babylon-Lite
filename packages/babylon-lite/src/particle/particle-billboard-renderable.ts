@@ -20,8 +20,9 @@ import type { BillboardOrientation, BillboardSpriteSystem, BillboardSpriteSystem
 import type { BillboardFxHook } from "../sprite/sprite-fx-hook.js";
 import { _registerBillboardFxHook } from "../sprite/sprite-fx-hook.js";
 import { createParticleBlend } from "./particle-blend.js";
+import { wgsl } from "../shader/wgsl.js";
 
-const MULTIPLY_FRAGMENT_WGSL = `let sampled = textureSample(atlasTex, atlasSamp, in.uv);
+const MULTIPLY_FRAGMENT_WGSL = wgsl`let sampled = textureSample(atlasTex, atlasSamp, in.uv);
 let baseColor = sampled * in.tint * billboards.opacityMul;
 let sourceAlpha = sampled.a * in.tint.a * billboards.opacityMul.a;
 return vec4f(baseColor.rgb * sourceAlpha + vec3f(1.0) * (1.0 - sourceAlpha), baseColor.a);`;
@@ -65,7 +66,7 @@ const PARTICLE_SHADER_HOOK: BillboardFxHook = {
 
 // Keep the vertex stage local: a shared runtime helper changed chunk topology and grew stock billboard bundles.
 function makeMultiplyWgsl(orientation: BillboardOrientation): string {
-    return `${SCENE_UBO_WGSL}
+    return wgsl`${SCENE_UBO_WGSL}
 struct S {
 opacityMul: vec4f,
 axisAndCutoff: vec4f,

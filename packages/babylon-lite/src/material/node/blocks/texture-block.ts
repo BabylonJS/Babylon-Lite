@@ -8,6 +8,7 @@
  */
 
 import type { BlockEmitter, NodeExpr, NodeValueType } from "../node-types.js";
+import { wgsl } from "../../../shader/wgsl.js";
 
 const OUTPUT: Record<string, { swizzle: string; type: NodeValueType }> = {
     rgba: { swizzle: "", type: "vec4f" },
@@ -24,10 +25,10 @@ function applyColorSpace(expr: string, outputName: string, convertToLinear: bool
     }
     const power = convertToLinear ? "2.2" : "0.45454545";
     if (outputName === "rgba") {
-        return `vec4<f32>(pow(max(${expr}.xyz, vec3<f32>(0.0)), vec3<f32>(${power})), ${expr}.w)`;
+        return wgsl`vec4<f32>(pow(max(${expr}.xyz, vec3<f32>(0.0)), vec3<f32>(${power})), ${expr}.w)`;
     }
     if (outputName === "rgb") {
-        return `pow(max(${expr}.xyz, vec3<f32>(0.0)), vec3<f32>(${power}))`;
+        return wgsl`pow(max(${expr}.xyz, vec3<f32>(0.0)), vec3<f32>(${power}))`;
     }
     if (outputName === "r" || outputName === "g" || outputName === "b") {
         return `pow(max(${expr}${OUTPUT[outputName]!.swizzle}, 0.0), ${power})`;
@@ -70,7 +71,7 @@ export const emitter: BlockEmitter = {
         let sampleExpr = stageState.memo.get(memoKey);
         if (!sampleExpr) {
             const sampleVar = `_s${ctx.temp(state, "tex")}`;
-            stageState.body.push(`let ${sampleVar} = textureSample(nodeTex_${bindingName}, nodeSamp_${bindingName}, ${uv.expr});`);
+            stageState.body.push(wgsl`let ${sampleVar} = textureSample(nodeTex_${bindingName}, nodeSamp_${bindingName}, ${uv.expr});`);
             sampleExpr = { expr: sampleVar, type: "vec4f" };
             stageState.memo.set(memoKey, sampleExpr);
         }

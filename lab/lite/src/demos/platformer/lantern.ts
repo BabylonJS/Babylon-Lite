@@ -20,7 +20,9 @@
  * radius, ambient]` (player position normalised 0..1, radius in screen-height units,
  * ambient = brightness far from the light). Drawn with `spriteBlendMultiply`.
  */
-export const LANTERN_FRAGMENT = `
+import { wgsl } from "babylon-lite/shader/wgsl.js";
+
+export const LANTERN_FRAGMENT = wgsl`
 let p = fx.params.xy;
 let radius = max(fx.params.z, 0.001);
 let ambient = fx.params.w;
