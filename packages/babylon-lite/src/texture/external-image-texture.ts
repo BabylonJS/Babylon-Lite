@@ -96,47 +96,32 @@ export async function createTexture2DFromExternalImage(engine: EngineContext, so
     const premultiplyAlpha = options.premultiplyAlpha ?? false;
     let uploadSource = source;
     let resized: ImageBitmap | null = null;
-    let recoveryBitmap: ImageBitmap | null = null;
-
-    if (width !== sourceWidth || height !== sourceHeight) {
-        resized = await createImageBitmap(source, {
-            resizeWidth: width,
-            resizeHeight: height,
-            resizeQuality: "high",
-            premultiplyAlpha: premultiplyAlpha ? "premultiply" : "none",
-            colorSpaceConversion: "none",
-        });
-        uploadSource = resized;
-    }
-
-    const device = engine._device;
-    const format: GPUTextureFormat = options.srgb ? "rgba8unorm-srgb" : "rgba8unorm";
-    const levels = mipMaps ? mipLevelCount(width, height) : 1;
-    const generate = levels > 1 ? (await import("./generate-mipmaps.js")).generateMipmaps : null;
-    const samplerDesc: GPUSamplerDescriptor = {
-        addressModeU: options.addressModeU ?? "repeat",
-        addressModeV: options.addressModeV ?? "repeat",
-        minFilter: options.minFilter ?? "linear",
-        magFilter: options.magFilter ?? "linear",
-        mipmapFilter: mipMaps ? "linear" : "nearest",
-    };
-    samplerDesc.maxAnisotropy = samplerDesc.minFilter === "linear" && samplerDesc.magFilter === "linear" && samplerDesc.mipmapFilter === "linear" ? 4 : 1;
-
-    if (engine._dlr) {
-        if (resized) {
-            recoveryBitmap = resized;
-            resized = null;
-        } else {
-            recoveryBitmap = await createImageBitmap(source, {
+    let texture: GPUTexture | null = null;
+    try {
+        if (width !== sourceWidth || height !== sourceHeight) {
+            resized = await createImageBitmap(source, {
+                resizeWidth: width,
+                resizeHeight: height,
+                resizeQuality: "high",
                 premultiplyAlpha: premultiplyAlpha ? "premultiply" : "none",
                 colorSpaceConversion: "none",
             });
-            uploadSource = recoveryBitmap;
+            uploadSource = resized;
         }
-    }
 
-    let texture: GPUTexture | null = null;
-    try {
+        const device = engine._device;
+        const format: GPUTextureFormat = options.srgb ? "rgba8unorm-srgb" : "rgba8unorm";
+        const levels = mipMaps ? mipLevelCount(width, height) : 1;
+        const generate = levels > 1 ? (await import("./generate-mipmaps.js")).generateMipmaps : null;
+        const samplerDesc: GPUSamplerDescriptor = {
+            addressModeU: options.addressModeU ?? "repeat",
+            addressModeV: options.addressModeV ?? "repeat",
+            minFilter: options.minFilter ?? "linear",
+            magFilter: options.magFilter ?? "linear",
+            mipmapFilter: mipMaps ? "linear" : "nearest",
+        };
+        samplerDesc.maxAnisotropy = samplerDesc.minFilter === "linear" && samplerDesc.magFilter === "linear" && samplerDesc.mipmapFilter === "linear" ? 4 : 1;
+
         device.pushErrorScope("validation");
         device.pushErrorScope("out-of-memory");
         let operationError: unknown;
@@ -172,29 +157,11 @@ export async function createTexture2DFromExternalImage(engine: EngineContext, so
         }
 
         const result: Texture2D = { texture, view: texture.createView(), sampler, width, height };
-        if (recoveryBitmap) {
-            engine._dlr?.t(result, {
-                kind: "external",
-                bitmap: recoveryBitmap,
-                width,
-                height,
-                format,
-                levels,
-                samplerDesc,
-                flipY: options.invertY ?? true,
-                premultipliedAlpha: premultiplyAlpha,
-            });
-            if (result._recoverySource?.kind !== "external") {
-                recoveryBitmap.close();
-            } else {
-                recoveryBitmap = null;
-            }
-        }
+        await engine._dlr?.x(result, uploadSource, width, height, format, levels, samplerDesc, options.invertY ?? true, premultiplyAlpha);
         acquireTexture(result);
         return result;
     } catch (error) {
         texture?.destroy();
-        recoveryBitmap?.close();
         throw error;
     } finally {
         resized?.close();

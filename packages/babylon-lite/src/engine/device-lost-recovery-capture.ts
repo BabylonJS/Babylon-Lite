@@ -5,6 +5,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import type { PixelsTexture2DOptions } from "../texture/pixels-texture.js";
 import type { Texture2D, Texture2DOptions, Texture2DRecoverySource } from "../texture/texture-2d.js";
 import { _setDerivedTexture2DHook } from "../texture/texture-2d.js";
+import { _setTextureReleaseHook } from "../resource/gpu-pool.js";
 
 /** Smallest tracked-texture count worth compacting; below this, scanning costs more than it saves. */
 const TEXTURE_PRUNE_FLOOR = 64;
@@ -65,6 +66,14 @@ function trackDerivedTexture(base: Texture2D, derived: Texture2D): void {
     }
 }
 
+function releaseCapturedTexture(tex: Texture2D): void {
+    const source = tex._recoverySource;
+    if (source?.kind === "external") {
+        source.bitmap?.close();
+        source.bitmap = null;
+    }
+}
+
 function attachRecoveryCapture(engine: EngineContext): void {
     const state = engine._deviceLostRecovery!;
     const owner = new WeakRef(state);
@@ -76,8 +85,31 @@ function attachRecoveryCapture(engine: EngineContext): void {
     // capture and left in place — clearing it when one engine releases capture would stop tracking
     // for any other engine still capturing.
     _setDerivedTexture2DHook(trackDerivedTexture);
+    _setTextureReleaseHook(releaseCapturedTexture);
     engine._dlr = {
         t: stamp,
+        async x(tex, source, width, height, format, levels, samplerDesc, flipY, premultipliedAlpha): Promise<void> {
+            const bitmap = await createImageBitmap(source, {
+                premultiplyAlpha: premultipliedAlpha ? "premultiply" : "none",
+                colorSpaceConversion: "none",
+            });
+            try {
+                stamp(tex, {
+                    kind: "external",
+                    bitmap,
+                    width,
+                    height,
+                    format,
+                    levels,
+                    samplerDesc,
+                    flipY,
+                    premultipliedAlpha,
+                });
+            } catch (error) {
+                bitmap.close();
+                throw error;
+            }
+        },
         d: trackDerivedTexture,
         u(tex: Texture2D, url: string, opts: Texture2DOptions): void {
             stamp(tex, { kind: "url", url, opts: { ...opts } });

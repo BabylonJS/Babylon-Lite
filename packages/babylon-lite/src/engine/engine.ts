@@ -255,6 +255,17 @@ export function getRenderingContextKind(context: RenderingContext): string {
 /** @internal */
 interface DeviceLostRecoveryCapture {
     t(tex: Texture2D, source: Texture2DRecoverySource): void;
+    x(
+        tex: Texture2D,
+        source: GPUCopyExternalImageSource,
+        width: number,
+        height: number,
+        format: GPUTextureFormat,
+        levels: number,
+        samplerDesc: GPUSamplerDescriptor,
+        flipY: boolean,
+        premultipliedAlpha: boolean
+    ): Promise<void>;
     d(base: Texture2D, derived: Texture2D): void;
     u(tex: Texture2D, url: string, opts: Texture2DOptions): void;
     s(tex: Texture2D, r: number, g: number, b: number, a: number): void;

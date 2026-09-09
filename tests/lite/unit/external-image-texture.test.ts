@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createTexture2DFromExternalImage } from "../../../packages/babylon-lite/src/texture/external-image-texture";
 import { releaseTexture } from "../../../packages/babylon-lite/src/resource/gpu-pool";
 import { rebuildTexture2D } from "../../../packages/babylon-lite/src/texture/texture-recovery";
+import { enableDeviceLostSceneRecovery } from "../../../packages/babylon-lite/src/engine/device-lost-scene-recovery";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 
 interface Captured {
@@ -18,6 +19,8 @@ function fakeSource(width = 8, height = 4): ImageBitmap {
 function makeEngine(captured: Captured, options: { copyError?: Error; gpuError?: GPUError; gpuErrors?: GPUError[]; textureMipLevelCount?: number } = {}): EngineContext {
     const errorScopes: Array<{ filter: GPUErrorFilter; error: GPUError | null }> = [];
     const device = {
+        features: new Set<GPUFeatureName>(),
+        lost: new Promise<GPUDeviceLostInfo>(() => undefined),
         pushErrorScope: (filter: GPUErrorFilter) => {
             errorScopes.push({ filter, error: null });
         },
@@ -195,6 +198,29 @@ describe("createTexture2DFromExternalImage", () => {
         }
     });
 
+    it("closes a resized bitmap when asynchronous mipmap preparation rejects", async () => {
+        const captured = newCaptured();
+        const source = fakeSource(100, 50);
+        const resized = fakeSource(10, 5);
+        const failure = new Error("mipmap chunk failed");
+        vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue(resized));
+        vi.doMock("../../../packages/babylon-lite/src/texture/generate-mipmaps", () => {
+            throw failure;
+        });
+        vi.resetModules();
+
+        try {
+            const { createTexture2DFromExternalImage: createFresh } = await import("../../../packages/babylon-lite/src/texture/external-image-texture");
+            await expect(createFresh(makeEngine(captured), source, { maxDimension: 10 })).rejects.toMatchObject({ cause: failure });
+            expect(resized.close).toHaveBeenCalledOnce();
+            expect(captured.createDescs).toHaveLength(0);
+        } finally {
+            vi.doUnmock("../../../packages/babylon-lite/src/texture/generate-mipmaps");
+            vi.resetModules();
+            vi.unstubAllGlobals();
+        }
+    });
+
     it("surfaces scoped WebGPU validation failures and destroys the partial texture", async () => {
         const captured = newCaptured();
         const gpuError = { message: "external source is invalid" } as GPUError;
@@ -226,11 +252,7 @@ describe("createTexture2DFromExternalImage", () => {
         const source = fakeSource(16, 8);
         const owned = fakeSource(16, 8);
         vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue(owned));
-        (engine as unknown as { _dlr: { t: (texture: { _recoverySource?: unknown }, recovery: unknown) => void } })._dlr = {
-            t(texture, recovery): void {
-                texture._recoverySource = recovery;
-            },
-        };
+        const recovery = enableDeviceLostSceneRecovery(engine);
 
         try {
             const texture = await createTexture2DFromExternalImage(engine, source, {
@@ -255,6 +277,7 @@ describe("createTexture2DFromExternalImage", () => {
             expect(releaseTexture(texture)).toBe(true);
             expect(owned.close).toHaveBeenCalledOnce();
         } finally {
+            recovery.disable();
             vi.unstubAllGlobals();
         }
     });

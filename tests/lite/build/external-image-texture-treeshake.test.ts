@@ -16,6 +16,9 @@ describe("external-image texture tree shaking", () => {
         expect(result.significantWarnings).toEqual([]);
         expect(result.code).not.toContain("createTexture2DFromExternalImage");
         expect(result.code).not.toContain("source has no supported positive intrinsic dimensions");
+        expect(result.code).not.toContain("releaseCapturedTexture");
+        expect(result.code).not.toContain("Cannot recover a released external-image texture");
+        expect(result.code).not.toContain("_textureReleaseHook");
     });
 
     it("retains the factory when explicitly imported", async () => {
@@ -29,5 +32,8 @@ describe("external-image texture tree shaking", () => {
         expect(result.significantWarnings).toEqual([]);
         expect(result.code).toContain("createTexture2DFromExternalImage");
         expect(result.code).toContain("source has no supported positive intrinsic dimensions");
+        expect(result.code).not.toContain("releaseCapturedTexture");
+        expect(result.code).not.toContain("Cannot recover a released external-image texture");
+        expect(result.code).not.toContain("_textureReleaseHook");
     });
 });

@@ -183,6 +183,12 @@ the texture's final ownership reference is released. This works in workers
 because `ImageBitmap`, `ImageData`, `OffscreenCanvas`, `VideoFrame`, and
 `createImageBitmap` do not require the document DOM.
 
+The texture factory contains no recovery-specific branches, metadata encoding,
+or ownership rules. It makes one opaque optional capture call after upload.
+The recovery enabler installs that seam and owns copying, metadata capture,
+tracking, rebuilding, and release through its own opaque pool hook. Consumers
+that do not enable recovery retain none of that implementation.
+
 The destination texture and sampler match `loadTexture2D`: RGBA8 linear or
 sRGB format, optional full mip chain, caller-selected filtering/addressing,
 explicit `invertY` (default `true`), and explicit premultiplied-alpha handling.
@@ -488,6 +494,7 @@ loadGltf(engine, url)
 15. **External-image tree shaking** — A consumer that imports another root API retains no `createTexture2DFromExternalImage` implementation code.
 16. **Concurrent external-image uploads** — Concurrent mipmapped calls keep validation and out-of-memory errors associated with the invocation that issued them.
 17. **External-image recovery** — Opt-in device-lost recovery uses a factory-owned decoded image, restores upload and sampler settings, and releases the retained image with the texture.
+18. **Recovery isolation** — External-image consumers that do not enable device-lost recovery retain no capture, recovery-source encoding, or retained-image release implementation.
 
 ---
 
