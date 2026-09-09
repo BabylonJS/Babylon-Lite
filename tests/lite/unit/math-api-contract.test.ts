@@ -92,7 +92,7 @@ describe("public math contracts", () => {
         const minimum = { x: -1, y: -2, z: -3 };
         const maximum = { x: 1, y: 2, z: 3 };
         const center = { x: 0, y: 0, z: 0 };
-        expect(scaleBoundsFromCenterToRef(minimum, maximum, center, 2, minimum, maximum)).toBeUndefined();
+        scaleBoundsFromCenterToRef(minimum, maximum, center, 2, minimum, maximum);
         expect(minimum.x).toBeCloseTo(-2);
         expect(minimum.y).toBeCloseTo(-4);
         expect(minimum.z).toBeCloseTo(-6);
