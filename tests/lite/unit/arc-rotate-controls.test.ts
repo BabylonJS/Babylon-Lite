@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { attachControl, setCameraLimits } from "../../../packages/babylon-lite/src/camera/arc-rotate-controls";
+import { enableArcRotateKeyboardControls } from "../../../packages/babylon-lite/src/camera/arc-rotate-keyboard-controls";
 import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
 import type { ArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
@@ -327,6 +328,10 @@ describe("attachControl — pointer mappings", () => {
 });
 
 describe("attachControl — keyboard controls", () => {
+    beforeEach(() => {
+        enableArcRotateKeyboardControls();
+    });
+
     it.each([
         ["ArrowLeft", "inertialAlphaOffset", -0.01],
         ["ArrowRight", "inertialAlphaOffset", 0.01],
@@ -345,6 +350,23 @@ describe("attachControl — keyboard controls", () => {
         expect(camera[field]).toBeCloseTo(expected, 5);
     });
 
+    it("normalizes diagonal rotation to the single-axis speed", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        camera.inertia = 1;
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, { keyboard: true });
+
+        fire(canvas, "keydown", keyboardEvent("ArrowRight"));
+        fire(canvas, "keydown", keyboardEvent("ArrowUp"));
+        beforeRender(scene);
+
+        const component = Math.SQRT1_2 / 100;
+        expect(camera.inertialAlphaOffset).toBeCloseTo(component, 7);
+        expect(camera.inertialBetaOffset).toBeCloseTo(-component, 7);
+        expect(Math.hypot(camera.inertialAlphaOffset, camera.inertialBetaOffset)).toBeCloseTo(1 / 100, 7);
+    });
+
     it.each([
         ["ArrowLeft", "inertialPanningX", -0.02],
         ["ArrowRight", "inertialPanningX", 0.02],
@@ -361,6 +383,23 @@ describe("attachControl — keyboard controls", () => {
         beforeRender(scene);
 
         expect(camera[field]).toBeCloseTo(expected, 5);
+    });
+
+    it("normalizes diagonal Ctrl-panning to the single-axis speed", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        camera.panningInertia = 1;
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, { keyboard: true });
+
+        fire(canvas, "keydown", keyboardEvent("ArrowRight", { ctrlKey: true }));
+        fire(canvas, "keydown", keyboardEvent("ArrowUp", { ctrlKey: true }));
+        beforeRender(scene);
+
+        const component = Math.SQRT1_2 / 50;
+        expect(camera.inertialPanningX).toBeCloseTo(component, 7);
+        expect(camera.inertialPanningY).toBeCloseTo(component, 7);
+        expect(Math.hypot(camera.inertialPanningX, camera.inertialPanningY)).toBeCloseTo(1 / 50, 7);
     });
 
     it.each([
@@ -505,6 +544,63 @@ describe("attachControl — keyboard controls", () => {
         fire(canvas, "keydown", keyboardEvent("KeyS", { altKey: true }));
         beforeRender(scene);
         expect(camera.inertialRadiusOffset).toBeCloseTo(-0.2, 5);
+    });
+
+    it("normalizes custom-mapped rotation and Ctrl-panning diagonals", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        camera.inertia = 1;
+        camera.panningInertia = 1;
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, {
+            keyboard: {
+                keys: { left: ["KeyA"], right: ["KeyD"], up: ["KeyW"], down: ["KeyS"] },
+                angularSensitivity: 20,
+                panningSensitivity: 10,
+            },
+        });
+
+        fire(canvas, "keydown", keyboardEvent("KeyD"));
+        fire(canvas, "keydown", keyboardEvent("KeyW"));
+        beforeRender(scene);
+
+        expect(Math.hypot(camera.inertialAlphaOffset, camera.inertialBetaOffset)).toBeCloseTo(1 / 20, 7);
+
+        fire(canvas, "keyup", keyboardEvent("KeyD"));
+        fire(canvas, "keyup", keyboardEvent("KeyW"));
+        camera.inertialAlphaOffset = 0;
+        camera.inertialBetaOffset = 0;
+        fire(canvas, "keydown", keyboardEvent("KeyA", { ctrlKey: true }));
+        fire(canvas, "keydown", keyboardEvent("KeyS", { ctrlKey: true }));
+        beforeRender(scene);
+
+        expect(Math.hypot(camera.inertialPanningX, camera.inertialPanningY)).toBeCloseTo(1 / 10, 7);
+    });
+
+    it("cancels opposing rotation and Ctrl-panning directions", () => {
+        const canvas = makeCanvas();
+        const camera = makeCamera();
+        const scene = makeScene();
+        camera.inertia = 1;
+        camera.panningInertia = 1;
+        attachControl(camera, canvas as unknown as HTMLCanvasElement, scene, { keyboard: true });
+
+        for (const code of ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]) {
+            fire(canvas, "keydown", keyboardEvent(code));
+        }
+        beforeRender(scene);
+
+        expect(camera.inertialAlphaOffset).toBe(0);
+        expect(camera.inertialBetaOffset).toBe(0);
+
+        for (const code of ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]) {
+            fire(canvas, "keyup", keyboardEvent(code));
+            fire(canvas, "keydown", keyboardEvent(code, { ctrlKey: true }));
+        }
+        beforeRender(scene);
+
+        expect(camera.inertialPanningX).toBe(0);
+        expect(camera.inertialPanningY).toBe(0);
     });
 
     it("does not register or apply keyboard controls unless requested", () => {

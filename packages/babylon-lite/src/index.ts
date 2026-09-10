@@ -139,14 +139,9 @@ export type { ScreenSpaceGlobalIlluminationPostProcessTask, ScreenSpaceGlobalIll
 // ─── Camera ──────────────────────────────────────────────────────────
 export { createArcRotateCamera } from "./camera/arc-rotate.js";
 export { attachControl, setCameraLimits } from "./camera/arc-rotate-controls.js";
-export type {
-    ArcRotatePointerAction,
-    ArcRotatePointerMappings,
-    ArcRotateKeyboardMappings,
-    ArcRotateKeyboardOptions,
-    AttachControlOptions,
-    ArcRotateCameraLimits,
-} from "./camera/arc-rotate-controls.js";
+export type { ArcRotatePointerAction, ArcRotatePointerMappings, AttachControlOptions, ArcRotateCameraLimits } from "./camera/arc-rotate-controls.js";
+export { enableArcRotateKeyboardControls } from "./camera/arc-rotate-keyboard-controls.js";
+export type { ArcRotateKeyboardMappings, ArcRotateKeyboardOptions } from "./camera/arc-rotate-keyboard-controls.js";
 export { interpolateArcRotateCamera } from "./camera/arc-rotate-interpolate.js";
 export type { ArcRotateInterpolationGoal, ArcRotateInterpolationOptions } from "./camera/arc-rotate-interpolate.js";
 export { createFreeCamera } from "./camera/free-camera.js";
