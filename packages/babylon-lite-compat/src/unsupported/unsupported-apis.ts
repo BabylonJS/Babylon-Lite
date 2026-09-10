@@ -25,6 +25,68 @@ const WHITE_BALANCE_UNSUPPORTED =
     "White balance requires color-temperature math, a shader uniform, material/post-process defines, and pipeline invalidation that Babylon Lite does not expose; adding it needs a cross-cutting Lite subsystem design.";
 const FLUID_RENDERER_UNSUPPORTED =
     "Fluid rendering requires dedicated depth, thickness, and diffuse passes plus render-target lifecycle and composition policies that Babylon Lite does not define.";
+const USD_LOADER_UNSUPPORTED =
+    "OpenUSD loading requires an OpenUSD WebAssembly worker, virtual-file staging, command-buffer extraction, and a USD-to-Lite scene/material materializer; those form a new loader subsystem with unresolved ownership and material-mapping design.";
+
+// ─── OpenUSD loading ─────────────────────────────────────────────────
+export type USDBinaryInput = ArrayBuffer | ArrayBufferView;
+export type USDVirtualFiles = Readonly<Record<string, USDBinaryInput>>;
+
+export interface USDLoadProgress {
+    phase: "initializing" | "staging" | "extracting" | "materializing";
+    message: string;
+}
+
+export interface USDImportTimings {
+    totalMs: number;
+    stageOpenMs: number;
+    stageReadMs: number;
+    preparationMs: number;
+    packingMs: number;
+    heapCopyMs: number;
+    materializeMs: number;
+}
+
+export interface USDImportStatistics {
+    nodes: number;
+    meshes: number;
+    analyticPrimitives: number;
+    instances: number;
+    materials: number;
+    vertices: number;
+    triangles: number;
+    commandBytes: number;
+    dataBytes: number;
+}
+
+export interface USDImportDiagnostics {
+    timings: USDImportTimings;
+    statistics: USDImportStatistics;
+    missingAssets: readonly string[];
+}
+
+export interface USDFileLoaderOptions {
+    rootFileName?: string;
+    files?: USDVirtualFiles;
+    resolveByFileName?: boolean;
+    workerUrl?: string | URL;
+    glueUrl?: string;
+    wasmUrl?: string;
+    dataUrl?: string;
+    onProgress?: (progress: USDLoadProgress) => void;
+    onLog?: (level: "info" | "warning" | "error", message: string) => void;
+    onComplete?: (diagnostics: USDImportDiagnostics) => void;
+}
+
+export class USDFileLoader {
+    public constructor(_options: Partial<USDFileLoaderOptions> = {}) {
+        unsupported("USDFileLoader", USD_LOADER_UNSUPPORTED);
+    }
+}
+
+export function RegisterUSDFileLoader(): never {
+    return unsupported("RegisterUSDFileLoader", USD_LOADER_UNSUPPORTED);
+}
 
 // ─── Math / image processing ─────────────────────────────────────────
 export const MinTemperatureKelvin = 1e6 / 600;
@@ -442,17 +504,10 @@ export class MirrorTexture {
     }
 }
 
-// ─── HTML textures (DOM/CSS overlay interop) ─────────────────────────
-// New in BJS: `Materials/Textures/HTML/*` — uploads a live DOM element into a
-// texture and forwards pointer/raycast interaction onto an overlaid HTML layer.
-// This is a DOM-driven, host-page feature with no Babylon Lite equivalent (Lite
-// is a WebGPU renderer with no HTML overlay / interaction subsystem),
-// so every entry throws.
-
-/** Options accepted by Babylon.js `HtmlTexture` (shape-only stub for type parity). */
-export interface IHtmlTextureOptions {
-    [key: string]: unknown;
-}
+// ─── HTML texture interaction (DOM/CSS overlay interop) ──────────────
+// `HtmlTexture` itself is Lite-backed in textures/textures.ts. These remaining
+// APIs bind arbitrary textures to DOM overlay/raycast and polyfill lifecycles,
+// which Lite's owned HTML-texture surface does not expose.
 
 /** Options accepted by Babylon.js `HtmlInteractionManager` (shape-only stub). */
 export interface IHtmlInteractionManagerOptions {
@@ -472,12 +527,6 @@ export interface IHtmlInCanvasPolyfillModule {
 /** Options accepted by `InstallHtmlInCanvasPolyfill` (shape-only stub). */
 export interface IInstallHtmlInCanvasPolyfillOptions {
     [key: string]: unknown;
-}
-
-export class HtmlTexture {
-    public constructor() {
-        unsupported("HtmlTexture", "Rendering a live DOM element into a texture is a host-page/DOM feature with no Babylon Lite equivalent.");
-    }
 }
 
 export class HtmlInteractionManager {

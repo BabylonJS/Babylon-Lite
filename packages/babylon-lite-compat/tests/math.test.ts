@@ -9,6 +9,7 @@ import { Scalar } from "../src/math/scalar";
 import { Axis, Space } from "../src/math/constants";
 import { Polar } from "../src/math/polar";
 import { Spherical } from "../src/math/spherical";
+import { Viewport } from "../src/math/size";
 
 describe("Vector3", () => {
     it("adds, subtracts, and scales", () => {
@@ -91,6 +92,23 @@ describe("Vector3", () => {
         expect(ref.asArray()).toEqual([1, 2, 3]);
         expect(Vector3.TransformNormalToRef(new Vector3(1, 0, 0), translation, ref)).toBe(ref);
         expect(ref.asArray()).toEqual([1, 0, 0]);
+    });
+
+    it("projects through Lite's world-to-screen helper with Babylon.js viewport coordinates", () => {
+        const viewport = new Viewport(100, 50, 400, 200);
+        const result = new Vector3();
+
+        expect(Vector3.ProjectToRef(Vector3.Zero(), Matrix.Identity(), Matrix.Identity(), viewport, result)).toBe(result);
+        expect(result.asArray()).toEqual([300, 150, 0]);
+        expect(Vector3.Project(new Vector3(1, 1, 0.5), Matrix.Identity(), Matrix.Identity(), viewport).asArray()).toEqual([500, 50, 0.5]);
+        expect(Vector3.Project(Vector3.Zero(), Matrix.Translation(1, 0, 0), Matrix.Scaling(2, 1, 1), new Viewport(0, 0, 100, 100)).asArray()).toEqual([150, 50, 0]);
+        expect(Vector3.Project(Vector3.Zero(), Matrix.Identity(), Matrix.Identity(), new Viewport(7, 9, 0, 0)).asArray()).toEqual([7, 9, 0]);
+    });
+
+    it("sets matrix translation through the Lite helper", () => {
+        const matrix = Matrix.Identity();
+        expect(matrix.setTranslationFromFloats(4, 5, 6)).toBe(matrix);
+        expect([matrix.m[12], matrix.m[13], matrix.m[14]]).toEqual([4, 5, 6]);
     });
 });
 

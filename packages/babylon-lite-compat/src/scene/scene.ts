@@ -32,6 +32,7 @@ import {
     resolveCameraViewport,
     invertMat4,
     multiplyMat4,
+    onPhysicsAfterStep,
 } from "babylon-lite";
 import type {
     SceneContext,
@@ -121,6 +122,8 @@ export class Scene extends AbstractScene {
     public readonly onBeforeAnimationsObservable = new Observable<Scene>();
     /** Fires after each scene render. */
     public readonly onAfterRenderObservable = new Observable<Scene>();
+    /** Fires after each Lite Havok simulation step. */
+    public readonly onAfterPhysicsObservable = new Observable<Scene>();
     /** Fires once when the scene is disposed. */
     public readonly onDisposeObservable = new Observable<Scene>();
     /** @internal Callbacks that must run after Babylon.js-compatible before-render observers. */
@@ -979,6 +982,7 @@ export class Scene extends AbstractScene {
         }
         const g = gravity ?? { x: 0, y: -9.81, z: 0 };
         plugin._attachToLiteScene(this._lite, g);
+        onPhysicsAfterStep(plugin.world!, () => this.onAfterPhysicsObservable.notifyObservers(this));
         this._physicsEngine = new PhysicsEngine(plugin, g);
         return true;
     }

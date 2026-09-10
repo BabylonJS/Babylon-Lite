@@ -165,6 +165,60 @@ void publicEnumValues;
         }
     });
 
+    it("accepts public and mutable matrix representations", () => {
+        const probePath = resolve(BUILD_DIR, "public-matrix-types.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import { createIdentityMat4, setMat4Translation } from "./index.js";
+
+const liteMatrix = createIdentityMat4();
+const float32Matrix = new Float32Array(16);
+const float64Matrix = new Float64Array(16);
+
+const liteResult = setMat4Translation(liteMatrix, 1, 2, 3);
+const float32Result = setMat4Translation(float32Matrix, 1, 2, 3);
+const float64Result = setMat4Translation(float64Matrix, 1, 2, 3);
+
+liteResult satisfies typeof liteMatrix;
+float32Result satisfies Float32Array;
+float64Result satisfies Float64Array;
+`,
+                "utf-8"
+            );
+
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                {
+                    cwd: PACKAGE_DIR,
+                    encoding: "utf-8",
+                }
+            );
+
+            const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+            expect(result.status, output).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("does not reference any external (npm) modules", () => {
         expect(existsSync(DTS_PATH)).toBe(true);
 
