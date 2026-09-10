@@ -61,9 +61,11 @@ export interface CsmRefitGate<M extends CsmRefitCaster> {
     /** Whether the refit returned by the latest `update()` was caused by light drift alone (the angle
      *  epsilon or the wall-time floor): the camera, the caster set, the static partition and the scene
      *  content are exactly what the previous refit rendered, so a consumer may spread that refit's static
-     *  re-render over several frames (`createCsmStaticRefitScheduler`) without any cascade drawing a
-     *  stale partition. False after a frame without refit and after a refit with any other cause,
-     *  including a demotion applied inside the refit. */
+     *  re-render over several frames (`createCsmStaticRefitScheduler`). Until a cascade's turn comes, its
+     *  layer still shows the previous refit's depth under the new transform: the only inconsistency a
+     *  spread introduces is that light drift, bounded by the spread's lag in frames. False after a frame
+     *  without refit and after a refit with any other cause, including a demotion applied inside the
+     *  refit (the demoted caster would otherwise vanish from the cascades not yet re-rendered). */
     lastRefitDriftOnly(): boolean;
     /** One walk over the synced casters: computes the static/dynamic version sums, promotes
      *  churning static casters (via `onPromote`, immediately), counts quiet frames, and decides

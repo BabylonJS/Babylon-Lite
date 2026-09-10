@@ -171,12 +171,17 @@ cache texture, and do not load the cache implementation.
 
 With `options.staticCascadesPerFrame` above zero, a refit whose only cause is light drift
 (`gate.lastRefitDriftOnly()`) re-renders at most that many static cascades per frame, round-robin,
-so the periodic refresh costs a slice of every frame instead of one long frame; the cascade
-cameras and the receiver UBO are still written for every cascade in the refit frame, so a
-cascade re-rendered later draws with the transform the receivers sample, and its layer lags
-by at most `ceil(cascades / budget) - 1` frames of light drift. A refit caused by the camera,
-the scene content, the caster set, a promotion or a demotion re-renders every cascade in its
-own frame, as without the option.
+so the periodic refresh costs a slice of every frame instead of one long frame. The cascade
+cameras and the receiver UBO are written for every cascade in the refit frame; a cascade
+re-rendered later draws with the transform the receivers sample, and until its turn the
+receivers sample its previous layer under the new transform. That inconsistency is bounded by
+the light drift accumulated over at most `ceil(cascades / budget) - 1` frames (about 0.0006 rad
+for three cascades, one per frame, at 35 ms frames and a 360 s day). A refit caused by the
+camera, the scene content, the caster set, a promotion or a demotion re-renders every cascade
+in its own frame, as without the option, and so does a drift refit that lands while a spread is
+still draining — a light turning faster than the drain (a fast game clock crossing the angle
+epsilon every frame) therefore falls back to the single-frame re-render instead of leaving the
+trailing cascades permanently behind.
 
 `createCsmRefitGate` exposes the CPU-only partition/refit state machine for consumers
 that need the same policy without engine or WebGPU dependencies. `createCsmStaticRefitScheduler`

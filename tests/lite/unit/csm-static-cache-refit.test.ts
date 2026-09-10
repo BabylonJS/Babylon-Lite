@@ -224,3 +224,54 @@ describe("renderCsmShadowMapCached spread static refit (staticCascadesPerFrame)"
         expect(h.render()).toBe(0);
     });
 });
+
+describe("renderCsmShadowMapCached spread static refit: a drift refit during the drain", () => {
+    it("re-renders every cascade when a second drift refit lands before the spread drained (no permanent lag)", () => {
+        // A light turning faster than the drain (a fast game clock) crosses the angle epsilon every frame: each
+        // such refit must fall back to the single-frame re-render instead of re-arming a spread that never ends.
+        const staticExecutes = [vi.fn(() => 1), vi.fn(() => 1), vi.fn(() => 1)];
+        const dynamicExecute = vi.fn(() => 1);
+        const scene = { camera: { key: 1 }, _renderableVersion: 7 };
+        const caster = { worldMatrixVersion: 1, thinInstances: null };
+        const gate = createCsmRefitGate<typeof caster>({ refitAngle: 0.05, refitMaxIntervalMs: 0, demoteQuietFrames: 2 });
+        const state = {
+            _scene: scene,
+            _cameras: [{}, {}, {}],
+            _uboData: new Float32Array(80),
+            _casterMeshes: [caster],
+            _staticTasks: staticExecutes.map((execute) => ({ execute })),
+            _tasks: [{ execute: dynamicExecute }, { execute: dynamicExecute }, { execute: dynamicExecute }],
+            _gate: gate,
+            _staticScheduler: createCsmStaticRefitScheduler(3, 1),
+            _onPromote: () => {},
+            _onDemote: () => {},
+            _pendingTransfers: new Set(),
+            _cachedContentVersion: -1,
+            _lastCamVersion: -1,
+            _lastCamAspect: -1,
+        };
+        const engine = { _device: { queue: { writeBuffer: vi.fn() } }, _currentEncoder: { copyTextureToTexture: vi.fn() } };
+        const sg = { _light: { direction: { x: 0, y: -1, z: 0 } }, _shadowUBO: {}, _version: 0, _depthTexture: {} };
+        const cfg = { _numCascades: 3, _mapSize: 4, _bias: 0, _worldSpaceBias: null, _forceRefreshEveryFrame: false };
+        const render = () => renderCsmShadowMapCached(engine as any, sg as any, state as any, cfg as any);
+        const calls = () => staticExecutes.map((fn) => fn.mock.calls.length);
+        render();
+        render();
+        render();
+        scene.camera.key++;
+        render(); // settled: the caster is static, the next refits are drift-only
+        const base = calls();
+        sg._light.direction.x = 0.2; // drift refit #1: spread, cascade 0 only
+        render();
+        expect(calls()).toEqual([base[0]! + 1, base[1]!, base[2]!]);
+        sg._light.direction.x = 0.4; // drift refit #2 while cascades 1 and 2 still wait: everything, this frame
+        render();
+        expect(calls()).toEqual([base[0]! + 2, base[1]! + 1, base[2]! + 1]);
+        expect(render()).toBe(0); // nothing pending, nothing dynamic: the frame does nothing
+        sg._light.direction.x = 0.6; // and with the drain complete, the next drift refit spreads again: ONE cascade
+        render(); // (the round-robin cursor decides which one — it continues after the last cascade taken)
+        const after = calls();
+        expect(after.reduce((sum, n) => sum + n, 0)).toBe(base[0]! + base[1]! + base[2]! + 5); // +1, +3, then +1
+        expect(after.filter((n, i) => n === [base[0]! + 2, base[1]! + 1, base[2]! + 1][i]! + 1)).toHaveLength(1);
+    });
+});

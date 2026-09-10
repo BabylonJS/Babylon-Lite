@@ -357,11 +357,17 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
         cached._lastCamVersion = camVersion;
         cached._lastCamAspect = camAspect;
         cached._cachedContentVersion = cached._scene._renderableVersion;
-        // The cascade cameras and the receiver UBO are written for every cascade right here, so a
-        // cascade whose static layer is re-rendered a few frames later still draws with the transform
-        // the receivers sample. Only a drift-only refit may be spread: after a camera, content or
-        // membership change every cascade re-renders in this frame, as before.
-        scheduler.arm(cached._gate.lastRefitDriftOnly());
+        // The cascade cameras and the receiver UBO are written for every cascade right here. A cascade
+        // whose static layer is re-rendered a few frames later then draws with the transform the receivers
+        // sample; until its turn, the receivers sample its PREVIOUS layer with the NEW transform — an
+        // inconsistency bounded by the light drift accumulated over at most ceil(cascades / budget) - 1
+        // frames (about 0.0006 rad at 35 ms frames and a 360 s day, under the 0.0015 rad epsilon). Two
+        // guards keep that bound: only a drift-only refit may be spread (a camera, content or membership
+        // change re-renders every cascade in this frame, as before), and a drift refit that lands while a
+        // spread is still draining re-renders everything too — otherwise a light turning faster than the
+        // drain (a fast game clock crossing the angle epsilon every frame) would re-arm the spread each
+        // frame and leave the trailing cascades permanently behind the matrices.
+        scheduler.arm(cached._gate.lastRefitDriftOnly() && !scheduler.pending());
     }
     if (scheduler.pending()) {
         for (const cascade of scheduler.take()) {

@@ -200,3 +200,31 @@ describe("CSM refit gate: lastRefitDriftOnly", () => {
         expect(gate.lastRefitDriftOnly()).toBe(false);
     });
 });
+
+describe("CSM refit gate: demotion applied inside a drift refit", () => {
+    it("refuses the spread when a floor refit applies a demotion, even though demotionOverdue is unreachable", () => {
+        // Production regime: the wall-time floor refits every few frames, so framesSinceRefit never reaches
+        // demoteQuietFrames and demotionOverdue can never fire; a caster that went quiet is demoted INSIDE a
+        // drift refit, and that refit must not be spread (the caster would vanish from the cascades not yet
+        // re-rendered). Frames every 30 ms, floor 100 ms, demoteQuietFrames 5.
+        const caster = { worldMatrixVersion: 1 };
+        const gate = createCsmRefitGate<MutableCaster>({ refitAngle: 1, refitMaxIntervalMs: 100, demoteQuietFrames: 5 });
+        gate.syncCasters([caster]);
+        const onDemote = vi.fn();
+        const step = (nowMs: number) => gate.update(0, -1, 0, nowMs, false, false, () => undefined, onDemote);
+        expect(step(0).refit).toBe(true); // first refit: full
+        let demotedAt = -1;
+        for (let t = 30; t <= 600; t += 30) {
+            const r = step(t);
+            if (onDemote.mock.calls.length === 1 && demotedAt < 0) {
+                demotedAt = t;
+                expect(r.refit).toBe(true); // the demotion is applied by a floor refit...
+                expect(gate.lastRefitDriftOnly()).toBe(false); // ...which therefore must not be spread
+            } else if (r.refit) {
+                expect(gate.lastRefitDriftOnly()).toBe(true); // every other floor refit is drift-only
+            }
+        }
+        expect(demotedAt).toBeGreaterThan(0);
+        expect(gate.isDynamic(caster)).toBe(false);
+    });
+});
