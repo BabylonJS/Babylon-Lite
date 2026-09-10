@@ -384,7 +384,29 @@ describe("PhysicsEngine", () => {
             expect(result.hitDistance).toBeCloseTo(Math.sqrt(14));
             expect(result.triangleIndex).toBe(7);
             expect(result.body).toBe(aggregate.body);
+            expect(result.shape).toBe(aggregate.shape);
             expect(result.bodyIndex).toBe(0);
+        });
+
+        it("sets the canonical shape for ordinary hits and clears it when a reused result misses", () => {
+            const hknp = makeAggregateMockHknp();
+            const plugin = new HavokPlugin(true, hknp);
+            plugin._attachToLiteScene(makeScene());
+            const engine = new PhysicsEngine(plugin, Vector3.Zero());
+            const scene = { getPhysicsEngine: () => engine } as unknown as Scene;
+            const aggregate = new PhysicsAggregate(makePhysicsNode(scene), PhysicsShapeType.BOX, { mass: 0 }, scene);
+            const result = new PhysicsRaycastResult();
+
+            engine.raycastToRef(Vector3.Zero(), new Vector3(5, 0, 0), result);
+            expect(result.body).toBe(aggregate.body);
+            expect(result.shape).toBe(aggregate.shape);
+
+            hknp.HP_QueryCollector_GetNumHits.mockReturnValue([0, 0]);
+            engine.raycastToRef(Vector3.Zero(), new Vector3(5, 0, 0), result);
+            expect(result.hasHit).toBe(false);
+            expect(result.body).toBeUndefined();
+            expect(result.shape).toBeUndefined();
+            expect(result.bodyIndex).toBeUndefined();
         });
 
         it("forwards repeated hinge bindings and releases every Lite constraint idempotently", () => {

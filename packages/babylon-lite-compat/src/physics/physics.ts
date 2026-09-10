@@ -1398,6 +1398,7 @@ export class PhysicsEngine {
         result.setHitData(hit.hitNormal, hit.hitPoint, hit.triangleIndex);
         result.setHitDistance(hit.hitDistance);
         result.body = hit.body ? getPhysicsBodyWrappers().get(hit.body) : undefined;
+        result.shape = result.body?.shape ?? undefined;
         result.bodyIndex = hit.bodyIndex;
     }
 

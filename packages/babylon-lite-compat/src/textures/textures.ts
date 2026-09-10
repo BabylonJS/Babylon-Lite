@@ -21,6 +21,7 @@ import {
     requestHtmlTextureUpdate,
     updateHtmlTexture,
     disposeHtmlTexture,
+    whenHtmlTextureReady,
 } from "babylon-lite";
 import type { Texture2D, Texture2DOptions, EngineContext, Texture3D, DynamicTexture2D, HtmlTexture2D } from "babylon-lite";
 
@@ -147,9 +148,12 @@ export interface IHtmlTextureOptions {
 export class HtmlTexture extends BaseTexture {
     public readonly element: HTMLElement;
     public readonly host: HTMLElement | null;
-    public readonly onLoadObservable = new Observable<HtmlTexture>();
+    public readonly onLoadObservable = new Observable<HtmlTexture>(undefined, true);
     private readonly _engine: AbstractEngine | null;
     private readonly _textureMatrix = Matrix.Identity();
+    private readonly _ready: Promise<void>;
+    private _htmlTexture: HtmlTexture2D | undefined;
+    private _disposed = false;
 
     public constructor(name: string, element: HTMLElement, options: IHtmlTextureOptions) {
         super();
@@ -158,13 +162,15 @@ export class HtmlTexture extends BaseTexture {
         this._engine = options.scene?.getEngine() ?? options.engine ?? null;
         this.host = (this._engine?.getRenderingCanvas() as HTMLElement | null | undefined) ?? null;
         if (!this._engine || !element) {
+            this._ready = Promise.reject(new Error("HtmlTexture requires an engine and HTML element."));
+            void this._ready.catch(() => undefined);
             return;
         }
         if (options.format !== undefined && options.format !== 5) {
             unsupported("HtmlTexture.format", "Babylon Lite HTML textures use RGBA8; alternate Babylon.js texture formats require a new native upload/storage contract.");
         }
         const nearest = options.samplingMode === Texture.NEAREST_SAMPLINGMODE || options.samplingMode === Texture.NEAREST_NEAREST;
-        this._lite = createHtmlTexture(this._engine._lite, element, {
+        const htmlTexture = createHtmlTexture(this._engine._lite, element, {
             width: options.width,
             height: options.height,
             mipMaps: options.generateMipMaps ?? false,
@@ -174,7 +180,19 @@ export class HtmlTexture extends BaseTexture {
             magFilter: nearest ? "nearest" : "linear",
             invertY: true,
         });
-        this._notifyReady();
+        this._htmlTexture = htmlTexture;
+        this._ready = whenHtmlTextureReady(htmlTexture).then(() => {
+            if (this._disposed) {
+                throw new Error("HtmlTexture was disposed before its first upload completed.");
+            }
+            this._lite = htmlTexture;
+            try {
+                this.onLoadObservable.notifyObservers(this);
+            } finally {
+                this._notifyReady();
+            }
+        });
+        void this._ready.catch(() => undefined);
     }
 
     public getTextureMatrix(): Matrix {
@@ -182,14 +200,14 @@ export class HtmlTexture extends BaseTexture {
     }
 
     public requestUpdate(): void {
-        if (this._engine && this._lite) {
-            requestHtmlTextureUpdate(this._engine._lite, this._lite as HtmlTexture2D);
+        if (this._engine && this._htmlTexture) {
+            requestHtmlTextureUpdate(this._engine._lite, this._htmlTexture);
         }
     }
 
     public update(invertY = true): void {
-        if (this._engine && this._lite) {
-            updateHtmlTexture(this._engine._lite, this._lite as HtmlTexture2D, invertY);
+        if (this._engine && this._htmlTexture) {
+            updateHtmlTexture(this._engine._lite, this._htmlTexture, invertY);
         }
     }
 
@@ -198,15 +216,18 @@ export class HtmlTexture extends BaseTexture {
     }
 
     public whenReadyAsync(): Promise<void> {
-        return Promise.resolve();
+        return this._ready;
     }
 
     public override dispose(): void {
-        if (this._lite) {
-            disposeHtmlTexture(this._lite as HtmlTexture2D);
-            this._lite = undefined;
+        this._disposed = true;
+        if (this._htmlTexture) {
+            disposeHtmlTexture(this._htmlTexture);
+            this._htmlTexture = undefined;
         }
+        this._lite = undefined;
         this.onLoadObservable.clear();
+        this.onLoadObservable.cleanLastNotifiedState();
     }
 }
 

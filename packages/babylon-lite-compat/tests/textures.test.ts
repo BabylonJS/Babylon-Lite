@@ -14,6 +14,7 @@ const liteMocks = vi.hoisted(() => ({
     requestHtmlTextureUpdate: vi.fn(),
     updateHtmlTexture: vi.fn(),
     disposeHtmlTexture: vi.fn(),
+    whenHtmlTextureReady: vi.fn(),
 }));
 
 vi.mock("babylon-lite", () => liteMocks);
@@ -68,9 +69,11 @@ describe("resolveKtxUrl", () => {
     });
 
     describe("HtmlTexture", () => {
-        it("forwards BJS options and update lifecycle to Lite", () => {
+        it("publishes the Lite handle and notifies readiness after the first upload", async () => {
             const texture = { width: 64, height: 32 };
+            const upload = deferred<void>();
             liteMocks.createHtmlTexture.mockReturnValue(texture);
+            liteMocks.whenHtmlTextureReady.mockReturnValue(upload.promise);
             const host = {} as HTMLCanvasElement;
             const engine = {
                 _lite: {} as EngineContext,
@@ -101,11 +104,67 @@ describe("resolveKtxUrl", () => {
             expect(html.name).toBe("panel");
             expect(html.element).toBe(element);
             expect(html.host).toBe(host);
+            expect(html.getInternalTexture()).toBeNull();
+            const readyListener = vi.fn();
+            const loadListener = vi.fn();
+            html._onReady(readyListener);
+            html.onLoadObservable.add(loadListener);
             html.requestUpdate();
             expect(liteMocks.requestHtmlTextureUpdate).toHaveBeenCalledWith(engine!._lite, texture);
             html.update(false);
             expect(liteMocks.updateHtmlTexture).toHaveBeenCalledWith(engine!._lite, texture, false);
+
+            upload.resolve();
+            await html.whenReadyAsync();
+
+            expect(html.getInternalTexture()).toBe(texture);
+            expect(readyListener).toHaveBeenCalledOnce();
+            expect(loadListener).toHaveBeenCalledOnce();
+            expect(loadListener).toHaveBeenCalledWith(html);
             html.dispose();
+            expect(liteMocks.disposeHtmlTexture).toHaveBeenCalledWith(texture);
+        });
+
+        it("does not publish or notify a handle when the first upload fails", async () => {
+            const texture = { width: 64, height: 32 };
+            const upload = deferred<void>();
+            liteMocks.createHtmlTexture.mockReturnValue(texture);
+            liteMocks.whenHtmlTextureReady.mockReturnValue(upload.promise);
+            const engine = { _lite: {} as EngineContext, getRenderingCanvas: () => null } as unknown as ConstructorParameters<typeof HtmlTexture>[2]["engine"];
+            const html = new HtmlTexture("panel", {} as HTMLElement, { engine });
+            const readyListener = vi.fn();
+            const loadListener = vi.fn();
+            html._onReady(readyListener);
+            html.onLoadObservable.add(loadListener);
+            const failure = new Error("upload failed");
+
+            upload.reject(failure);
+
+            await expect(html.whenReadyAsync()).rejects.toBe(failure);
+            expect(html.getInternalTexture()).toBeNull();
+            expect(readyListener).not.toHaveBeenCalled();
+            expect(loadListener).not.toHaveBeenCalled();
+        });
+
+        it("does not publish or notify a handle when disposed before readiness", async () => {
+            const texture = { width: 64, height: 32 };
+            const upload = deferred<void>();
+            liteMocks.createHtmlTexture.mockReturnValue(texture);
+            liteMocks.whenHtmlTextureReady.mockReturnValue(upload.promise);
+            const engine = { _lite: {} as EngineContext, getRenderingCanvas: () => null } as unknown as ConstructorParameters<typeof HtmlTexture>[2]["engine"];
+            const html = new HtmlTexture("panel", {} as HTMLElement, { engine });
+            const readyListener = vi.fn();
+            const loadListener = vi.fn();
+            html._onReady(readyListener);
+            html.onLoadObservable.add(loadListener);
+
+            html.dispose();
+            upload.resolve();
+
+            await expect(html.whenReadyAsync()).rejects.toThrow(/disposed before its first upload/);
+            expect(html.getInternalTexture()).toBeNull();
+            expect(readyListener).not.toHaveBeenCalled();
+            expect(loadListener).not.toHaveBeenCalled();
             expect(liteMocks.disposeHtmlTexture).toHaveBeenCalledWith(texture);
         });
     });

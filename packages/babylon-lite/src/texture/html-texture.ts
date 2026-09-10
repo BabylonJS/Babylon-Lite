@@ -15,7 +15,7 @@
  *
  * @example
  * ```ts
- * import { createHtmlTexture, disposeHtmlTexture } from "babylon-lite";
+ * import { createHtmlTexture, disposeHtmlTexture, whenHtmlTextureReady } from "babylon-lite";
  * import { createStandardMaterial, setStandardEmissiveTexture } from "babylon-lite";
  *
  * const panel = document.createElement("div");
@@ -23,6 +23,7 @@
  * panel.innerHTML = "<h1>Hello DOM</h1><button>Click me</button>";
  *
  * const tex = createHtmlTexture(engine, panel, { autoUpdate: true });
+ * await whenHtmlTextureReady(tex);
  * const mat = createStandardMaterial();
  * mat.disableLighting = true;
  * setStandardEmissiveTexture(mat, tex);
@@ -122,6 +123,14 @@ export interface HtmlTexture2D extends DynamicTexture2D {
     /** @internal Device that created {@link _flipSrc}; a mismatch (device-lost
      *  recovery) forces the staging texture to be recreated. */
     _flipDevice: GPUDevice | null;
+    /** @internal Resolves after the first successful native or SVG upload. */
+    _ready: Promise<void>;
+    /** @internal Settles {@link _ready} after the first successful upload. */
+    _resolveReady: () => void;
+    /** @internal Settles {@link _ready} after an upload failure or early disposal. */
+    _rejectReady: (reason?: unknown) => void;
+    /** @internal Terminal state for first-upload readiness. */
+    _readyState: "pending" | "ready" | "failed";
 }
 
 /** Options for {@link createHtmlTexture}. */
@@ -177,6 +186,13 @@ export function createHtmlTexture(engine: EngineContext, element: HTMLElement, o
         minFilter: options.minFilter,
         magFilter: options.magFilter,
     }) as HtmlTexture2D;
+    let resolveReady!: () => void;
+    let rejectReady!: (reason?: unknown) => void;
+    const ready = new Promise<void>((resolve, reject) => {
+        resolveReady = resolve;
+        rejectReady = reject;
+    });
+    void ready.catch(() => undefined);
 
     tex._element = element;
     tex._host = host;
@@ -192,6 +208,10 @@ export function createHtmlTexture(engine: EngineContext, element: HTMLElement, o
     tex._disposed = false;
     tex._flipSrc = null;
     tex._flipDevice = null;
+    tex._ready = ready;
+    tex._resolveReady = resolveReady;
+    tex._rejectReady = rejectReady;
+    tex._readyState = "pending";
 
     if (supportsNativeHtmlTexture || tex._useSvgFallback) {
         // Host the element only when an update path exists. `layoutSubtree` opts
@@ -235,9 +255,16 @@ export function createHtmlTexture(engine: EngineContext, element: HTMLElement, o
         // No native support: rasterise a static SVG snapshot now. The upload flips
         // at copy time, so no material-side flip is needed (invertY stays unset).
         updateHtmlTexture(engine, tex);
+    } else {
+        failFirstUpload(tex, new Error("createHtmlTexture: no supported HTML upload path is available."));
     }
 
     return tex;
+}
+
+/** Resolve when the texture's first native or SVG upload succeeds. */
+export function whenHtmlTextureReady(tex: HtmlTexture2D): Promise<void> {
+    return tex._ready;
 }
 
 /**
@@ -257,19 +284,25 @@ export function updateHtmlTexture(engine: EngineContext, tex: HtmlTexture2D, inv
     }
     const queue = engine._device.queue as unknown as Partial<HtmlInCanvasQueue>;
     if (typeof queue.copyElementImageToTexture === "function") {
-        // `copyElementImageToTexture` captures the element top-row-first, which is
-        // upside-down under Lite's Y-up UV convention. When an upright result is
-        // wanted (the default) the capture goes into a staging texture and is
-        // V-flipped into the final texture; otherwise it is copied straight in.
-        if (invertY) {
-            const src = ensureFlipSource(engine, tex);
-            queue.copyElementImageToTexture({ source: tex._element }, { destination: { texture: src }, width: tex.width, height: tex.height });
-            flipVertical(engine, src, tex.texture);
-        } else {
-            queue.copyElementImageToTexture({ source: tex._element }, { destination: { texture: tex.texture }, width: tex.width, height: tex.height });
-        }
-        if (tex.texture.mipLevelCount > 1) {
-            generateMipmaps(engine, tex.texture);
+        try {
+            // `copyElementImageToTexture` captures the element top-row-first, which is
+            // upside-down under Lite's Y-up UV convention. When an upright result is
+            // wanted (the default) the capture goes into a staging texture and is
+            // V-flipped into the final texture; otherwise it is copied straight in.
+            if (invertY) {
+                const src = ensureFlipSource(engine, tex);
+                queue.copyElementImageToTexture({ source: tex._element }, { destination: { texture: src }, width: tex.width, height: tex.height });
+                flipVertical(engine, src, tex.texture);
+            } else {
+                queue.copyElementImageToTexture({ source: tex._element }, { destination: { texture: tex.texture }, width: tex.width, height: tex.height });
+            }
+            if (tex.texture.mipLevelCount > 1) {
+                generateMipmaps(engine, tex.texture);
+            }
+            completeFirstUpload(tex);
+        } catch (error) {
+            failFirstUpload(tex, error);
+            throw error;
         }
         return;
     }
@@ -311,6 +344,7 @@ export function disposeHtmlTexture(tex: HtmlTexture2D): void {
         return;
     }
     tex._disposed = true;
+    failFirstUpload(tex, new Error("HtmlTexture was disposed before its first upload completed."));
 
     if (tex._paint) {
         tex._host.removeEventListener("paint", tex._paint);
@@ -378,9 +412,25 @@ async function uploadSvgFallback(engine: EngineContext, tex: HtmlTexture2D, inve
         const source = await loadSvgSnapshot(tex._element, tex.width, tex.height);
         if (!tex._disposed) {
             updateDynamicTexture(engine, tex, source, { invertY });
+            completeFirstUpload(tex);
         }
-    } catch {
-        // Fallback rasterisation failed; keep whatever was last uploaded.
+    } catch (error) {
+        // Keep any previous pixels, but make first-upload failure observable.
+        failFirstUpload(tex, error);
+    }
+}
+
+function completeFirstUpload(tex: HtmlTexture2D): void {
+    if (!tex._disposed && tex._readyState === "pending") {
+        tex._readyState = "ready";
+        tex._resolveReady();
+    }
+}
+
+function failFirstUpload(tex: HtmlTexture2D, reason: unknown): void {
+    if (tex._readyState === "pending") {
+        tex._readyState = "failed";
+        tex._rejectReady(reason instanceof Error ? reason : new Error("HtmlTexture first upload failed.", { cause: reason }));
     }
 }
 
