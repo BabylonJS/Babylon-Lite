@@ -127,7 +127,7 @@ export interface HtmlTexture2D extends DynamicTexture2D {
     _ready: Promise<void>;
     /** @internal Settles {@link _ready} after the first successful upload. */
     _resolveReady: () => void;
-    /** @internal Settles {@link _ready} after an upload failure or early disposal. */
+    /** @internal Settles {@link _ready} after terminal unavailability or early disposal. */
     _rejectReady: (reason?: unknown) => void;
     /** @internal Terminal state for first-upload readiness. */
     _readyState: "pending" | "ready" | "failed";
@@ -284,26 +284,21 @@ export function updateHtmlTexture(engine: EngineContext, tex: HtmlTexture2D, inv
     }
     const queue = engine._device.queue as unknown as Partial<HtmlInCanvasQueue>;
     if (typeof queue.copyElementImageToTexture === "function") {
-        try {
-            // `copyElementImageToTexture` captures the element top-row-first, which is
-            // upside-down under Lite's Y-up UV convention. When an upright result is
-            // wanted (the default) the capture goes into a staging texture and is
-            // V-flipped into the final texture; otherwise it is copied straight in.
-            if (invertY) {
-                const src = ensureFlipSource(engine, tex);
-                queue.copyElementImageToTexture({ source: tex._element }, { destination: { texture: src }, width: tex.width, height: tex.height });
-                flipVertical(engine, src, tex.texture);
-            } else {
-                queue.copyElementImageToTexture({ source: tex._element }, { destination: { texture: tex.texture }, width: tex.width, height: tex.height });
-            }
-            if (tex.texture.mipLevelCount > 1) {
-                generateMipmaps(engine, tex.texture);
-            }
-            completeFirstUpload(tex);
-        } catch (error) {
-            failFirstUpload(tex, error);
-            throw error;
+        // `copyElementImageToTexture` captures the element top-row-first, which is
+        // upside-down under Lite's Y-up UV convention. When an upright result is
+        // wanted (the default) the capture goes into a staging texture and is
+        // V-flipped into the final texture; otherwise it is copied straight in.
+        if (invertY) {
+            const src = ensureFlipSource(engine, tex);
+            queue.copyElementImageToTexture({ source: tex._element }, { destination: { texture: src }, width: tex.width, height: tex.height });
+            flipVertical(engine, src, tex.texture);
+        } else {
+            queue.copyElementImageToTexture({ source: tex._element }, { destination: { texture: tex.texture }, width: tex.width, height: tex.height });
         }
+        if (tex.texture.mipLevelCount > 1) {
+            generateMipmaps(engine, tex.texture);
+        }
+        completeFirstUpload(tex);
         return;
     }
     if (tex._useSvgFallback) {

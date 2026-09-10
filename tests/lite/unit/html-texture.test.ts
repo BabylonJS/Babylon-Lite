@@ -227,7 +227,7 @@ describe("createHtmlTexture (native path)", () => {
         expect(ready).toBe(true);
     });
 
-    it("rejects readiness permanently after the first native upload fails", async () => {
+    it("keeps readiness pending after a transient native upload failure and resolves after retry", async () => {
         const host = makeHost({ withRequestPaint: false });
         const cap = newCap();
         const engine = makeEngine(host, cap);
@@ -238,15 +238,22 @@ describe("createHtmlTexture (native path)", () => {
         };
         const tex = createHtmlTexture(engine, makeElement(), { invertY: false });
         const ready = whenHtmlTextureReady(tex);
+        let settled = false;
+        void ready.finally(() => {
+            settled = true;
+        });
 
         expect(() => host.dispatchPaint()).toThrow(failure);
-        await expect(ready).rejects.toBe(failure);
+        await Promise.resolve();
+        expect(settled).toBe(false);
 
         queue.copyElementImageToTexture = (): void => {
             cap.copyExternalCalls++;
         };
         host.dispatchPaint();
-        await expect(ready).rejects.toBe(failure);
+        await ready;
+        expect(settled).toBe(true);
+        expect(cap.copyExternalCalls).toBe(1);
     });
 
     it("copies straight into the texture (no flip blit) when invertY:false", () => {
