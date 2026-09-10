@@ -95,6 +95,108 @@ describe("ShadowGenerator caster synchronization", () => {
         expect(setShadowTaskCasterMeshes).not.toHaveBeenCalled();
     });
 
+    it("removes disposed pre-build casters from the initial native caster set", () => {
+        const generator = new ShadowGenerator(1024, new DirectionalLight("directional", new Vector3(0, -1, -1)));
+        const caster = createTestMesh("caster");
+        generator.addShadowCaster(caster);
+
+        caster.dispose();
+
+        expect(generator.getShadowMap().renderList).toEqual([]);
+        generator._build({} as EngineContext);
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledOnce();
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledWith(generator._liteGen, []);
+    });
+
+    it("removes disposed runtime casters synchronously and coalesces native resupply", async () => {
+        const generator = new ShadowGenerator(1024, new DirectionalLight("directional", new Vector3(0, -1, -1)));
+        const first = createTestMesh("first");
+        const second = createTestMesh("second");
+        const remaining = createTestMesh("remaining");
+        generator.addShadowCaster(first);
+        generator.addShadowCaster(second);
+        generator.addShadowCaster(remaining);
+        generator._build({} as EngineContext);
+        vi.clearAllMocks();
+
+        first.dispose();
+        second.dispose();
+
+        expect(generator.getShadowMap().renderList).toEqual([remaining]);
+        expect(setShadowTaskCasterMeshes).not.toHaveBeenCalled();
+        await flushCasterSync();
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledOnce();
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledWith(generator._liteGen, [remaining._lite]);
+    });
+
+    it("removes recursively disposed descendant casters", async () => {
+        const generator = new ShadowGenerator(1024, new DirectionalLight("directional", new Vector3(0, -1, -1)));
+        const root = createTestMesh("root");
+        const child = createTestMesh("child");
+        const transform = new TransformNode("transform");
+        const nested = createTestMesh("nested");
+        child.parent = root;
+        transform.parent = root;
+        nested.parent = transform;
+        generator.addShadowCaster(root);
+        generator._build({} as EngineContext);
+        vi.clearAllMocks();
+
+        root.dispose();
+
+        expect(generator.getShadowMap().renderList).toEqual([]);
+        await flushCasterSync();
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledOnce();
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledWith(generator._liteGen, []);
+    });
+
+    it("removes one disposed caster from every generator independently", async () => {
+        const caster = createTestMesh("caster");
+        const first = new ShadowGenerator(1024, new DirectionalLight("first", new Vector3(0, -1, -1)));
+        const second = new ShadowGenerator(1024, new DirectionalLight("second", new Vector3(0, -1, -1)));
+        first.addShadowCaster(caster);
+        second.addShadowCaster(caster);
+        first._build({} as EngineContext);
+        second._build({} as EngineContext);
+        const firstLiteGenerator = first._liteGen;
+        const secondLiteGenerator = second._liteGen;
+        vi.clearAllMocks();
+
+        caster.dispose();
+
+        expect(first.getShadowMap().renderList).toEqual([]);
+        expect(second.getShadowMap().renderList).toEqual([]);
+        await flushCasterSync();
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledTimes(2);
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledWith(firstLiteGenerator, []);
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledWith(secondLiteGenerator, []);
+    });
+
+    it("tracks disposal subscriptions by the stored Lite mesh identity", async () => {
+        const generator = new ShadowGenerator(1024, new DirectionalLight("directional", new Vector3(0, -1, -1)));
+        const caster = createTestMesh("caster");
+        const duplicateWrapper = new AbstractMesh("duplicate", caster._lite);
+        generator.addShadowCaster(caster);
+        generator._build({} as EngineContext);
+        vi.clearAllMocks();
+
+        generator.addShadowCaster(duplicateWrapper);
+        duplicateWrapper.dispose();
+        await flushCasterSync();
+
+        expect(generator.getShadowMap().renderList).toEqual([caster]);
+        expect(setShadowTaskCasterMeshes).not.toHaveBeenCalled();
+
+        generator.removeShadowCaster(duplicateWrapper, false);
+        await flushCasterSync();
+        expect(caster.onDisposeObservable.hasObservers()).toBe(false);
+        vi.clearAllMocks();
+
+        caster.dispose();
+        await flushCasterSync();
+        expect(setShadowTaskCasterMeshes).not.toHaveBeenCalled();
+    });
+
     it("includes descendant meshes by default and excludes transform-only nodes", async () => {
         const generator = new ShadowGenerator(1024, new DirectionalLight("directional", new Vector3(0, -1, -1)));
         const root = createTestMesh("root");
@@ -216,6 +318,7 @@ describe("ShadowGenerator caster synchronization", () => {
         generator.dispose();
         await flushCasterSync();
 
+        expect(caster.onDisposeObservable.hasObservers()).toBe(false);
         expect(setShadowTaskCasterMeshes).not.toHaveBeenCalled();
     });
 });
@@ -287,5 +390,21 @@ describe("CascadedShadowGenerator", () => {
         expect(generator._liteGen).toBe(liteGenerator);
         expect(setShadowTaskCasterMeshes).toHaveBeenCalledOnce();
         expect(setShadowTaskCasterMeshes).toHaveBeenCalledWith(liteGenerator, [caster._lite]);
+    });
+
+    it("inherits caster disposal cleanup and native resupply", async () => {
+        const generator = new CascadedShadowGenerator(2048, new DirectionalLight("directional", new Vector3(0, -1, -1)));
+        const caster = createTestMesh("caster");
+        generator.addShadowCaster(caster);
+        generator._build({} as EngineContext);
+        const liteGenerator = generator._liteGen;
+        vi.clearAllMocks();
+
+        caster.dispose();
+
+        expect(generator.getShadowMap().renderList).toEqual([]);
+        await flushCasterSync();
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledOnce();
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledWith(liteGenerator, []);
     });
 });

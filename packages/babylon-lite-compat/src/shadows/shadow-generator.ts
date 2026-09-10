@@ -25,13 +25,17 @@ import type { EngineContext, Mesh as LiteMesh } from "babylon-lite";
 
 import { DirectionalLight, type Light } from "../lights/lights.js";
 import type { AbstractMesh } from "../meshes/meshes.js";
+import type { ObserverCallback } from "../misc/observable.js";
+import type { Node } from "../node/node.js";
 
 type LiteShadowGenerator = ReturnType<typeof createEsmDirectionalShadowGenerator>;
+type CasterDisposeSubscription = { caster: AbstractMesh; observer: ObserverCallback<Node> };
 
 export class ShadowGenerator {
     private readonly _mapSize: number;
     private readonly _light: Light;
     private readonly _casters: AbstractMesh[] = [];
+    private readonly _casterDisposeSubscriptions = new Map<LiteMesh, CasterDisposeSubscription>();
     private _casterSyncScheduled = false;
     private _casterSyncDirty = false;
     private readonly _disposeBeforeRenderFlush: (() => void) | undefined = undefined;
@@ -80,8 +84,15 @@ export class ShadowGenerator {
     public addShadowCaster(mesh: AbstractMesh, includeDescendants = true): ShadowGenerator {
         let changed = false;
         for (const caster of this._casterTree(mesh, includeDescendants)) {
-            if (!this._casters.some((existing) => existing._lite === caster._lite)) {
+            const liteCaster = caster._lite as LiteMesh;
+            if (!this._casterDisposeSubscriptions.has(liteCaster)) {
                 this._casters.push(caster);
+                const observer = caster.onDisposeObservable.add(() => {
+                    if (this._removeCaster(liteCaster)) {
+                        this._scheduleCasterSync();
+                    }
+                });
+                this._casterDisposeSubscriptions.set(liteCaster, { caster, observer });
                 changed = true;
             }
         }
@@ -95,11 +106,7 @@ export class ShadowGenerator {
     public removeShadowCaster(mesh: AbstractMesh, includeDescendants = true): ShadowGenerator {
         let changed = false;
         for (const caster of this._casterTree(mesh, includeDescendants)) {
-            const index = this._casters.findIndex((existing) => existing._lite === caster._lite);
-            if (index !== -1) {
-                this._casters.splice(index, 1);
-                changed = true;
-            }
+            changed = this._removeCaster(caster._lite as LiteMesh) || changed;
         }
         if (changed) {
             this._scheduleCasterSync();
@@ -109,6 +116,20 @@ export class ShadowGenerator {
 
     private _casterTree(mesh: AbstractMesh, includeDescendants: boolean): AbstractMesh[] {
         return includeDescendants ? [mesh, ...(mesh.getChildMeshes() as AbstractMesh[])] : [mesh];
+    }
+
+    private _removeCaster(liteCaster: LiteMesh): boolean {
+        const subscription = this._casterDisposeSubscriptions.get(liteCaster);
+        if (!subscription) {
+            return false;
+        }
+        subscription.caster.onDisposeObservable.remove(subscription.observer);
+        this._casterDisposeSubscriptions.delete(liteCaster);
+        const index = this._casters.findIndex((caster) => caster._lite === liteCaster);
+        if (index !== -1) {
+            this._casters.splice(index, 1);
+        }
+        return true;
     }
 
     private _scheduleCasterSync(): void {
@@ -156,6 +177,10 @@ export class ShadowGenerator {
 
     public dispose(): void {
         this._disposeBeforeRenderFlush?.();
+        for (const { caster, observer } of this._casterDisposeSubscriptions.values()) {
+            caster.onDisposeObservable.remove(observer);
+        }
+        this._casterDisposeSubscriptions.clear();
         this._casterSyncScheduled = false;
         this._casterSyncDirty = false;
         this._liteGen = undefined;
