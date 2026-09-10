@@ -1,5 +1,6 @@
 import type { ArcRotateCamera } from "./arc-rotate.js";
 import type { SceneContext } from "../scene/scene.js";
+import type { ArcRotateKeyboardOptions } from "./arc-rotate-keyboard-controls.js";
 
 /** Camera gesture assigned to an arc-rotate pointer button. */
 export type ArcRotatePointerAction = "rotate" | "pan";
@@ -30,6 +31,12 @@ export interface AttachControlOptions {
      * Touch remains one-finger rotate plus two-finger pinch zoom.
      */
     pointerMappings?: ArcRotatePointerMappings;
+    /**
+     * Keyboard controls after {@link enableArcRotateKeyboardControls} installs
+     * the opt-in module. Pass `true` for legacy-compatible Arrow-key defaults,
+     * a configuration object to customize them, or omit/false to disable them.
+     */
+    keyboard?: boolean | ArcRotateKeyboardOptions;
     /** Optional predicate consulted on every pointer-down.  When it returns
      *  false the camera ignores that gesture (no rotate / pan).  Used to defer
      *  to gizmo interaction so pressing or dragging a gizmo doesn't also orbit
@@ -64,6 +71,20 @@ export interface ArcRotateCameraLimits {
     lowerRadiusLimit?: number;
     /** Maximum radius (farthest zoom). */
     upperRadiusLimit?: number;
+}
+
+type ArcRotateKeyboardAttachment = readonly [applyInput: () => void, dispose: () => void];
+type ArcRotateKeyboardFactory = (
+    camera: ArcRotateCamera,
+    canvas: HTMLCanvasElement,
+    keyboard: boolean | ArcRotateKeyboardOptions | undefined
+) => ArcRotateKeyboardAttachment | undefined;
+
+let _arcRotateKeyboardFactory: ArcRotateKeyboardFactory | undefined;
+
+/** @internal Install the optional arc-rotate keyboard input factory. */
+export function _installArcRotateKeyboardControls(factory: ArcRotateKeyboardFactory): void {
+    _arcRotateKeyboardFactory = factory;
 }
 
 /**
@@ -169,6 +190,9 @@ export function setCameraLimits(camera: ArcRotateCamera, limits: ArcRotateCamera
  * Mouse and pen button actions can be configured independently through
  * {@link AttachControlOptions.pointerMappings}. Touch and wheel behavior are
  * fixed so remapping desktop pointer buttons cannot alter mobile gestures.
+ * Keyboard input is a separate opt-in installed by
+ * {@link enableArcRotateKeyboardControls}; mappings and sensitivities are
+ * configured through {@link AttachControlOptions.keyboard}.
  *
  * Input handlers accumulate into the camera's inertial offset properties.
  * Inertia is applied each frame via scene._beforeRender (the engine's render
@@ -182,10 +206,11 @@ export function setCameraLimits(camera: ArcRotateCamera, limits: ArcRotateCamera
  * ### Lifecycle / cleanup (important)
  *
  * The returned function detaches everything this call attached: it removes the
- * canvas DOM listeners (pointer/wheel/contextmenu/touch/gesture) and, when a `scene` was
- * supplied, its `_beforeRender` inertia hook. It is idempotent — calling it more
- * than once is safe (the hook is removed only if still present, and removing a
- * DOM listener twice is a no-op).
+ * canvas DOM listeners (pointer/wheel/contextmenu/touch/gesture plus any
+ * listeners owned by installed input modules) and, when a `scene` was supplied,
+ * removes its `_beforeRender` inertia hook. It is idempotent — calling
+ * it more than once is safe (the hook is removed only if still present, and
+ * removing a DOM listener twice is a no-op).
  *
  * The controls are **not** automatically tied to the scene's lifetime. Passing a
  * `scene` only enables inertia (it registers the per-frame hook); it does **not**
@@ -229,6 +254,8 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
     let isPanning = false;
     let lastX = 0;
     let lastY = 0;
+
+    const keyboardAttachment = _arcRotateKeyboardFactory?.(camera, canvas, options?.keyboard);
 
     // Touch state for pinch-zoom
     const activeTouches = new Map<number, { x: number; y: number }>();
@@ -398,6 +425,8 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
 
     /** Per-frame: apply inertial offsets to camera properties and decay them. */
     function applyInertia(): void {
+        keyboardAttachment?.[0]();
+
         // --- Rotation inertia ---
         if (camera.inertialAlphaOffset !== 0 || camera.inertialBetaOffset !== 0) {
             camera.alpha += camera.inertialAlphaOffset;
@@ -489,5 +518,6 @@ export function attachControl(camera: ArcRotateCamera, canvas: HTMLCanvasElement
         for (const [ev, h] of listeners) {
             canvas.removeEventListener(ev, h);
         }
+        keyboardAttachment?.[1]();
     };
 }
