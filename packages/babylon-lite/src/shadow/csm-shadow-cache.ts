@@ -363,8 +363,10 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
         // membership change every cascade re-renders in this frame, as before.
         scheduler.arm(cached._gate.lastRefitDriftOnly());
     }
-    for (const cascade of scheduler.take()) {
-        draws += cached._staticTasks[cascade]!.execute?.() ?? 0;
+    if (scheduler.pending()) {
+        for (const cascade of scheduler.take()) {
+            draws += cached._staticTasks[cascade]!.execute?.() ?? 0;
+        }
     }
     engine._currentEncoder.copyTextureToTexture(
         { texture: cached._cacheTexture },
