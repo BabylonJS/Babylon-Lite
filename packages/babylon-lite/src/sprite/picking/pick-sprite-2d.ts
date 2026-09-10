@@ -8,7 +8,7 @@
  * applies (pivot + rotation), so it reports the sprite the GPU actually drew under the point.
  */
 import type { Sprite2DLayer } from "../sprite-2d.js";
-import { _getSprite2DYSortHook } from "../sprite-2d-y-sort-hook.js";
+import { _getSprite2DYSortHook } from "../sprite-2d.js";
 
 /** Result of a successful {@link pickSprite2D} hit. */
 export interface SpritePickInfo {
