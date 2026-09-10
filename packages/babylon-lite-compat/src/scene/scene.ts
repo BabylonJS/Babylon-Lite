@@ -123,6 +123,8 @@ export class Scene extends AbstractScene {
     public readonly onAfterRenderObservable = new Observable<Scene>();
     /** Fires once when the scene is disposed. */
     public readonly onDisposeObservable = new Observable<Scene>();
+    /** @internal Callbacks that must run after Babylon.js-compatible before-render observers. */
+    private readonly _beforeRenderFlushCallbacks = new Set<() => void>();
 
     /**
      * Babylon.js `scene.animationGroups` / `scene.animatables`. Loaded glTF /
@@ -248,6 +250,17 @@ export class Scene extends AbstractScene {
         }
         this._renderedAFrame = true;
         this.onBeforeRenderObservable.notifyObservers(this);
+        for (const callback of this._beforeRenderFlushCallbacks) {
+            callback();
+        }
+    }
+
+    /** @internal Register work that must observe all compat before-render mutations before Lite renders. */
+    public _registerBeforeRenderFlush(callback: () => void): () => void {
+        this._beforeRenderFlushCallbacks.add(callback);
+        return () => {
+            this._beforeRenderFlushCallbacks.delete(callback);
+        };
     }
 
     /**
@@ -1049,6 +1062,7 @@ export class Scene extends AbstractScene {
 
     public dispose(): void {
         this.onDisposeObservable.notifyObservers(this);
+        this._beforeRenderFlushCallbacks.clear();
         disposeScene(this._lite);
     }
 }
