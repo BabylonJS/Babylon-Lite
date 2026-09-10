@@ -6,6 +6,7 @@
  */
 
 import { F32 } from "../engine/typed-arrays.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { TU, SS } from "../engine/gpu-flags.js";
 import type { Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
@@ -241,7 +242,8 @@ function createShadowBlurFragmentWGSL(blurKernel: number): string {
     return wgsl`struct BlurParams{delta:vec2<f32>,_pad:vec2<f32>,};@group(0) @binding(0) var<uniform> params:BlurParams;@group(0) @binding(1) var srcTex:texture_2d<f32>;@group(0) @binding(2) var srcSampler:sampler;const OFFSETS=array<f32,${count}>(${offsets.map(wgslFloat).join(",")});const WEIGHTS=array<f32,${count}>(${weights.map(wgslFloat).join(",")});@fragment fn main(@location(0) sampleCenter:vec2<f32>)->@location(0) vec4<f32>{var blend=vec4<f32>(0.0);for(var i=0u;i<${count}u;i=i+1u){blend+=textureSample(srcTex,srcSampler,sampleCenter+params.delta*OFFSETS[i])*WEIGHTS[i];}return blend;}`;
 }
 
-function ensureEsmShadowTaskState(
+/** @internal Exported for the shadow-task lifetime tests; reached at runtime through `sg._ensureShadowTaskState`. */
+export function ensureEsmShadowTaskState(
     engine: EngineContext,
     scene: SceneContext,
     sg: ShadowGenerator,
@@ -253,7 +255,9 @@ function ensureEsmShadowTaskState(
         if (existing._casterMeshes === casterMeshes) {
             return existing;
         }
-        existing._task.dispose();
+        // Same lifetime rule as the PCF and CSM hooks: the frame being recorded may still reference the
+        // old task's buffers, so retire them behind the queue fence instead of destroying them here.
+        retireGpuResources(engine, existing._task.dispose);
     }
     const resources = getEsmShadowTaskResources(sg);
     if (!resources) {
