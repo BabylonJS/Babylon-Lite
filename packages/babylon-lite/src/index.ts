@@ -662,7 +662,7 @@ export type { PcfSpotlightShadowGeneratorConfig } from "./shadow/pcf-spotlight-s
 export type { PcfDirectionalShadowGeneratorConfig } from "./shadow/pcf-directional-shadow-generator.js";
 export type { CsmDirectionalShadowGeneratorConfig } from "./shadow/csm-directional-shadow-generator.js";
 export type { CsmStaticCacheOptions } from "./shadow/enable-csm-static-cache.js";
-export type { CsmRefitCaster, CsmRefitDecision, CsmRefitGate, CsmRefitGateOptions } from "./shadow/csm-refit-gate.js";
+export type { CsmRefitCaster, CsmRefitDecision, CsmRefitGate, CsmRefitGateOptions, CsmStaticRefitScheduler } from "./shadow/csm-refit-gate.js";
 export type { AnimationController } from "./skeleton/skeleton-updater.js";
 export type { AnimationGroup, TargetedAnimation } from "./animation/animation-group.js";
 export type { AnimationManager, AnimationManagerOptions } from "./animation/animation-manager.js";
