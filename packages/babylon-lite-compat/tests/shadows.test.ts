@@ -13,17 +13,19 @@ vi.mock("babylon-lite", async (importOriginal) => ({
     setShadowTaskCasterMeshes,
 }));
 
-import type { EngineContext, Mesh as LiteMesh } from "babylon-lite";
+import type { AssetContainer as LiteAssetContainer, EngineContext, Mesh as LiteMesh } from "babylon-lite";
 
 import { NullEngine } from "../src/engine/engine";
 import { DirectionalLight, SpotLight } from "../src/lights/lights";
 import { Vector3 } from "../src/math/vector";
+import { collectLoadedMeshes, type LoadedMeshRegistry } from "../src/loading/loaded-mesh";
 import { AbstractMesh, TransformNode } from "../src/meshes/meshes";
 import { Scene } from "../src/scene/scene";
 import { CascadedShadowGenerator, ShadowGenerator } from "../src/shadows/shadow-generator";
 
+/** A geometry-backed caster: only Lite meshes carrying `_gpu` reach the native shadow task. */
 function createTestMesh(name: string): AbstractMesh {
-    return new AbstractMesh(name, { name, visible: true, children: [], receiveShadows: false } as unknown as LiteMesh);
+    return new AbstractMesh(name, { name, visible: true, children: [], receiveShadows: false, _gpu: {} } as unknown as LiteMesh);
 }
 
 async function flushCasterSync(): Promise<void> {
@@ -139,6 +141,38 @@ describe("ShadowGenerator caster synchronization", () => {
 
         expect(generator.getShadowMap().renderList).toEqual([]);
         expect(setShadowTaskCasterMeshes).toHaveBeenCalledWith(generator._liteGen, []);
+    });
+
+    it("forwards only geometry-backed Lite meshes of a loaded hierarchy, keeping the full renderList", async () => {
+        // The compat loader wraps the whole hierarchy as `Mesh` wrappers: a transform-only `__root__`, a
+        // transform-only intermediate node, and the geometry-backed leaves (`_gpu`) under them.
+        type FakeLite = { name: string; children: FakeLite[]; visible: boolean; _gpu?: object };
+        const leaf = (name: string): FakeLite => ({ name, children: [], visible: true, _gpu: {} });
+        const body = leaf("body");
+        const wheel = leaf("wheel");
+        const intermediate: FakeLite = { name: "chassis", children: [body, wheel], visible: true };
+        const root: FakeLite = { name: "__root__", children: [intermediate], visible: true };
+        const registry: LoadedMeshRegistry = new Map();
+        const [rootWrapper] = collectLoadedMeshes({ entities: [root] } as unknown as LiteAssetContainer, registry);
+        const generator = new ShadowGenerator(1024, new DirectionalLight("directional", new Vector3(0, -1, -1)));
+
+        generator.addShadowCaster(rootWrapper!, true);
+        // Babylon.js parity: the render list holds every node the caller asked for, geometry or not.
+        expect(generator.getShadowMap().renderList.map((mesh) => mesh.name)).toEqual(["__root__", "chassis", "body", "wheel"]);
+
+        generator._build({} as EngineContext);
+        // Only the geometry-backed leaves enter the native state (and hence directional fitting).
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledOnce();
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledWith({ kind: "esm" }, [body, wheel]);
+
+        // The runtime re-supply path applies the same rule.
+        const spare = leaf("spare");
+        const [spareRoot] = collectLoadedMeshes({ entities: [{ name: "__root__", children: [spare], visible: true }] } as unknown as LiteAssetContainer, new Map());
+        vi.clearAllMocks();
+        generator.addShadowCaster(spareRoot!, true);
+        await flushCasterSync();
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledOnce();
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledWith(generator._liteGen, [body, wheel, spare]);
     });
 
     it("flushes mutations made during before-render callbacks before Lite renders", async () => {
