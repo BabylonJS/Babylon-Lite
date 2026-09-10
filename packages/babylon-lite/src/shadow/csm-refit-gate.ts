@@ -59,9 +59,9 @@ export interface CsmRefitGate<M extends CsmRefitCaster> {
     /** Current classification, for callers that build task membership from a carried gate. */
     isDynamic(caster: M): boolean;
     /** @internal Whether the latest refit was caused by light drift alone. */
-    lastRefitDriftOnly(): boolean;
+    _lastRefitDriftOnly(): boolean;
     /** @internal Whether the dynamic partition changed on the latest update. */
-    lastDynamicChanged(): boolean;
+    _lastDynamicChanged(): boolean;
     /** One walk over the synced casters: computes the static/dynamic version sums, promotes
      *  churning static casters (via `onPromote`, immediately), counts quiet frames, and decides
      *  refit/overlay. Pending demotions are applied (via `onDemote`) only inside a refit; they
@@ -153,10 +153,10 @@ export function createCsmRefitGate<M extends CsmRefitCaster>(options: CsmRefitGa
         isDynamic(caster: M): boolean {
             return slots.get(caster)?._dynamic ?? true;
         },
-        lastRefitDriftOnly(): boolean {
+        _lastRefitDriftOnly(): boolean {
             return lastDriftOnly;
         },
-        lastDynamicChanged(): boolean {
+        _lastDynamicChanged(): boolean {
             return lastDynamicChanged;
         },
         update(

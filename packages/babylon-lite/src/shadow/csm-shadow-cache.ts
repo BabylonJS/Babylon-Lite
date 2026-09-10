@@ -360,7 +360,7 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
         cached._lastCamVersion = camVersion;
         cached._lastCamAspect = camAspect;
         cached._cachedContentVersion = cached._scene._renderableVersion;
-        scheduler.arm(cached._gate.lastRefitDriftOnly() && !scheduler.pending());
+        scheduler.arm(cached._gate._lastRefitDriftOnly() && !scheduler.pending());
     }
     const cascades = scheduler.pending() ? scheduler.take() : null;
     if (cascades) {
@@ -374,7 +374,7 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
     }
     // A dynamic-caster change requires clearing and redrawing every live layer. Otherwise a spread
     // frame touches only the cascades whose static depth and receiver transform were just advanced.
-    if (cached._gate.lastDynamicChanged() || cascades?.length === cfg._numCascades) {
+    if (cached._gate._lastDynamicChanged() || cascades?.length === cfg._numCascades) {
         engine._currentEncoder.copyTextureToTexture(
             { texture: cached._cacheTexture },
             { texture: sg._depthTexture },
