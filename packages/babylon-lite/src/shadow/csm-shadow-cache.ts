@@ -15,7 +15,7 @@ import { _buildBindings, _resolvePendingMeshes, createRenderTask, removeMeshFrom
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
 import { getNoColorView, shadowCasterMaterialChanged, snapshotShadowCasterMaterial } from "./pcf-shadow-task-hooks.js";
-import { createCsmRefitGate, type CsmRefitGate } from "./csm-refit-gate.js";
+import { createCsmRefitGate, createCsmStaticRefitScheduler, type CsmRefitGate, type CsmStaticRefitScheduler } from "./csm-refit-gate.js";
 import {
     _biasViewProjection,
     _computeCsmCascades,
@@ -32,6 +32,8 @@ interface CsmCachedTaskState extends CsmTaskState {
     _staticTasks: RenderTask[];
     _cacheTexture: GPUTexture;
     _gate: CsmRefitGate<Mesh>;
+    /** Spreads a drift-only refit's static re-render over frames (`staticCascadesPerFrame`). */
+    _staticScheduler: CsmStaticRefitScheduler;
     _onPromote: (mesh: Mesh) => void;
     _onDemote: (mesh: Mesh) => void;
     /** Tasks the last gate decision moved meshes INTO, rebuilt once after the decision. */
@@ -295,6 +297,7 @@ export function ensureCsmShadowCacheState(
         _staticTasks: staticTasks,
         _cacheTexture: cacheTexture,
         _gate: gate,
+        _staticScheduler: createCsmStaticRefitScheduler(cascadeCount, cache._staticCascadesPerFrame ?? 0),
         _onPromote: onPromote,
         _onDemote: onDemote,
         _pendingTransfers: pendingTransferTargets,
@@ -342,7 +345,10 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
         }
         cached._pendingTransfers.clear();
     }
-    if (!decision.renderDynamic) {
+    // A cascade still waiting for its spread static re-render keeps the frame alive even when nothing
+    // dynamic changed: its layer must land, and the copy below then carries it to the sampled map.
+    const scheduler = cached._staticScheduler;
+    if (!decision.renderDynamic && !scheduler.pending()) {
         return 0;
     }
     let draws = 0;
@@ -351,9 +357,14 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
         cached._lastCamVersion = camVersion;
         cached._lastCamAspect = camAspect;
         cached._cachedContentVersion = cached._scene._renderableVersion;
-        for (const task of cached._staticTasks) {
-            draws += task.execute?.() ?? 0;
-        }
+        // The cascade cameras and the receiver UBO are written for every cascade right here, so a
+        // cascade whose static layer is re-rendered a few frames later still draws with the transform
+        // the receivers sample. Only a drift-only refit may be spread: after a camera, content or
+        // membership change every cascade re-renders in this frame, as before.
+        scheduler.arm(cached._gate.lastRefitDriftOnly());
+    }
+    for (const cascade of scheduler.take()) {
+        draws += cached._staticTasks[cascade]!.execute?.() ?? 0;
     }
     engine._currentEncoder.copyTextureToTexture(
         { texture: cached._cacheTexture },

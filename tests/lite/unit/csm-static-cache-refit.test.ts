@@ -45,7 +45,7 @@ vi.mock("../../../packages/babylon-lite/src/engine/gpu-resource-retirement.js", 
 }));
 
 const { ensureCsmShadowCacheState, renderCsmShadowMapCached } = await import("../../../packages/babylon-lite/src/shadow/csm-shadow-cache");
-const { createCsmRefitGate } = await import("../../../packages/babylon-lite/src/shadow/csm-refit-gate");
+const { createCsmRefitGate, createCsmStaticRefitScheduler } = await import("../../../packages/babylon-lite/src/shadow/csm-refit-gate");
 
 function makeHarness() {
     const staticExecute = vi.fn(() => 1);
@@ -61,6 +61,7 @@ function makeHarness() {
         _staticTasks: [{ execute: staticExecute }],
         _tasks: [{ execute: dynamicExecute }],
         _gate: gate,
+        _staticScheduler: createCsmStaticRefitScheduler(1, 0),
         _onPromote: () => {},
         _onDemote: () => {},
         _pendingTransfers: new Set(),
@@ -142,5 +143,84 @@ describe("renderCsmShadowMapCached static-layer invalidation", () => {
         h.caster.worldMatrixVersion++;
         h.render();
         expect(h.staticExecute).toHaveBeenCalledTimes(before + 1);
+    });
+});
+
+describe("renderCsmShadowMapCached spread static refit (staticCascadesPerFrame)", () => {
+    function makeSpreadHarness(cascadesPerFrame: number) {
+        const staticExecutes = [vi.fn(() => 1), vi.fn(() => 1), vi.fn(() => 1)];
+        const dynamicExecute = vi.fn(() => 1);
+        const scene = { camera: { key: 1 }, _renderableVersion: 7 };
+        const caster = { worldMatrixVersion: 1, thinInstances: null };
+        const gate = createCsmRefitGate<typeof caster>({ refitAngle: 0.05, refitMaxIntervalMs: 0, demoteQuietFrames: 2 });
+        const state = {
+            _scene: scene,
+            _cameras: [{}, {}, {}],
+            _uboData: new Float32Array(80),
+            _casterMeshes: [caster],
+            _staticTasks: staticExecutes.map((execute) => ({ execute })),
+            _tasks: [{ execute: dynamicExecute }, { execute: dynamicExecute }, { execute: dynamicExecute }],
+            _gate: gate,
+            _staticScheduler: createCsmStaticRefitScheduler(3, cascadesPerFrame),
+            _onPromote: () => {},
+            _onDemote: () => {},
+            _pendingTransfers: new Set(),
+            _cachedContentVersion: -1,
+            _lastCamVersion: -1,
+            _lastCamAspect: -1,
+        };
+        const copy = vi.fn();
+        const engine = {
+            _device: { queue: { writeBuffer: vi.fn() } },
+            _currentEncoder: { copyTextureToTexture: copy },
+        };
+        const sg = { _light: { direction: { x: 0, y: -1, z: 0 } }, _shadowUBO: {}, _version: 0, _depthTexture: {} };
+        const cfg = { _numCascades: 3, _mapSize: 4, _bias: 0, _worldSpaceBias: null, _forceRefreshEveryFrame: false };
+        const render = () => renderCsmShadowMapCached(engine as any, sg as any, state as any, cfg as any);
+        const staticCalls = () => staticExecutes.map((fn) => fn.mock.calls.length);
+        // Settle: first (full) refit, quiet frames, then a camera refit applies the demotion so the caster
+        // sits in the static layer and drift alone drives the next refits.
+        render();
+        render();
+        render();
+        scene.camera.key++;
+        render();
+        expect(gate.isDynamic(caster)).toBe(false);
+        return { render, scene, sg, copy, staticCalls, dynamicExecute };
+    }
+
+    it("re-renders one static cascade per frame after a drift refit, none of them later than maxLagFrames", () => {
+        const h = makeSpreadHarness(1);
+        const base = h.staticCalls();
+        const copies = h.copy.mock.calls.length;
+        h.sg._light.direction.x = 0.2; // angle epsilon crossed: a drift-only refit
+        expect(h.render()).toBeGreaterThan(0);
+        expect(h.staticCalls()).toEqual([base[0]! + 1, base[1]!, base[2]!]); // refit frame: cascade 0 only
+        expect(h.render()).toBeGreaterThan(0); // nothing dynamic changed, yet the pending cascade keeps the frame alive
+        expect(h.staticCalls()).toEqual([base[0]! + 1, base[1]! + 1, base[2]!]);
+        h.render();
+        expect(h.staticCalls()).toEqual([base[0]! + 1, base[1]! + 1, base[2]! + 1]); // lag 2 = maxLagFrames(3, 1)
+        expect(h.copy.mock.calls.length).toBe(copies + 3); // the cache is copied to the sampled map on each of the three frames
+        expect(h.render()).toBe(0); // drained and quiet: the frame does nothing again
+        expect(h.staticCalls()).toEqual([base[0]! + 1, base[1]! + 1, base[2]! + 1]);
+    });
+
+    it("re-renders every cascade in the refit frame when the camera moved, even with drift", () => {
+        const h = makeSpreadHarness(1);
+        const base = h.staticCalls();
+        h.sg._light.direction.x = 0.2;
+        h.scene.camera.key++;
+        h.render();
+        expect(h.staticCalls()).toEqual([base[0]! + 1, base[1]! + 1, base[2]! + 1]);
+        expect(h.render()).toBe(0);
+    });
+
+    it("keeps the single-frame re-render when the budget is 0 (historical behaviour)", () => {
+        const h = makeSpreadHarness(0);
+        const base = h.staticCalls();
+        h.sg._light.direction.x = 0.2;
+        h.render();
+        expect(h.staticCalls()).toEqual([base[0]! + 1, base[1]! + 1, base[2]! + 1]);
+        expect(h.render()).toBe(0);
     });
 });

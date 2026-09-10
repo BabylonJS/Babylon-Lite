@@ -147,3 +147,56 @@ describe("CSM refit gate", () => {
         ).toBe(true);
     });
 });
+
+describe("CSM refit gate: lastRefitDriftOnly", () => {
+    const step = (gate: ReturnType<typeof createCsmRefitGate<MutableCaster>>, x: number, nowMs: number, camera = false) =>
+        gate.update(
+            x,
+            -1,
+            0,
+            nowMs,
+            camera,
+            false,
+            () => undefined,
+            () => undefined
+        );
+
+    it("is true only for a refit caused by the angle epsilon or the wall-time floor", () => {
+        const caster = { worldMatrixVersion: 1 };
+        const gate = createCsmRefitGate<MutableCaster>({ refitAngle: 0.05, refitMaxIntervalMs: 100, demoteQuietFrames: 100 });
+        gate.syncCasters([caster]);
+        expect(step(gate, 0, 0).refit).toBe(true);
+        expect(gate.lastRefitDriftOnly()).toBe(false); // the very first refit is a full render
+        expect(step(gate, 0, 10).refit).toBe(false);
+        expect(gate.lastRefitDriftOnly()).toBe(false); // no refit, no drift-only claim
+        expect(step(gate, 0.2, 20).refit).toBe(true); // angle epsilon crossed
+        expect(gate.lastRefitDriftOnly()).toBe(true);
+        expect(step(gate, 0.2, 130).refit).toBe(true); // wall-time floor, frozen sun
+        expect(gate.lastRefitDriftOnly()).toBe(true);
+        expect(step(gate, 0.2, 140).refit).toBe(false);
+        expect(gate.lastRefitDriftOnly()).toBe(false);
+    });
+
+    it("is false when the camera, a promotion or a demotion took part in the refit, even with drift", () => {
+        const caster = { worldMatrixVersion: 1 };
+        const gate = createCsmRefitGate<MutableCaster>({ refitAngle: 0.05, refitMaxIntervalMs: 0, demoteQuietFrames: 2 });
+        gate.syncCasters([caster]);
+        step(gate, 0, 0); // first refit; the caster starts dynamic
+        step(gate, 0, 1); // quiet frame 1
+        // Quiet frame 2 with drift: the refit is drift-caused, but it APPLIES the pending demotion, so the
+        // static partition changes inside it and the spread is refused.
+        expect(step(gate, 0.2, 2).refit).toBe(true);
+        expect(gate.isDynamic(caster)).toBe(false);
+        expect(gate.lastRefitDriftOnly()).toBe(false);
+        // Drift alone on the settled partition: spreadable.
+        expect(step(gate, 0.4, 3).refit).toBe(true);
+        expect(gate.lastRefitDriftOnly()).toBe(true);
+        // Drift plus a camera change: full.
+        expect(step(gate, 0.6, 4, true).refit).toBe(true);
+        expect(gate.lastRefitDriftOnly()).toBe(false);
+        // Drift plus a promotion (the static caster moved): full.
+        caster.worldMatrixVersion++;
+        expect(step(gate, 0.8, 5).refit).toBe(true);
+        expect(gate.lastRefitDriftOnly()).toBe(false);
+    });
+});

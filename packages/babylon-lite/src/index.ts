@@ -451,7 +451,7 @@ export { createPcfSpotlightShadowGenerator } from "./shadow/pcf-spotlight-shadow
 export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-shadow-generator.js";
 export { createCsmDirectionalShadowGenerator, getCsmReceiverTexture, onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
 export { enableCsmStaticCache } from "./shadow/enable-csm-static-cache.js";
-export { createCsmRefitGate } from "./shadow/csm-refit-gate.js";
+export { createCsmRefitGate, createCsmStaticRefitScheduler } from "./shadow/csm-refit-gate.js";
 export { enableMorphTargetShadows } from "./shadow/enable-morph-target-shadows.js";
 export { enableSkeletonShadows } from "./shadow/enable-skeleton-shadows.js";
 export { setShadowTaskCasterMeshes, setShadowCasterMaxCascade } from "./frame-graph/shadow-inputs.js";
@@ -656,7 +656,7 @@ export type { PcfSpotlightShadowGeneratorConfig } from "./shadow/pcf-spotlight-s
 export type { PcfDirectionalShadowGeneratorConfig } from "./shadow/pcf-directional-shadow-generator.js";
 export type { CsmDirectionalShadowGeneratorConfig } from "./shadow/csm-directional-shadow-generator.js";
 export type { CsmStaticCacheOptions } from "./shadow/enable-csm-static-cache.js";
-export type { CsmRefitCaster, CsmRefitDecision, CsmRefitGate, CsmRefitGateOptions } from "./shadow/csm-refit-gate.js";
+export type { CsmRefitCaster, CsmRefitDecision, CsmRefitGate, CsmRefitGateOptions, CsmStaticRefitScheduler } from "./shadow/csm-refit-gate.js";
 export type { AnimationController } from "./skeleton/skeleton-updater.js";
 export type { AnimationGroup, TargetedAnimation } from "./animation/animation-group.js";
 export type { AnimationManager, AnimationManagerOptions } from "./animation/animation-manager.js";

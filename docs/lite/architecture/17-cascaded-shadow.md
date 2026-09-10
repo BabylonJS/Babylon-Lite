@@ -43,6 +43,7 @@ function createCsmDirectionalShadowGenerator(engine: EngineContext, light: Direc
 interface CsmStaticCacheOptions {
     refitAngle: number;
     refitMaxIntervalMs?: number;
+    staticCascadesPerFrame?: number; // 0 or omitted: every cascade re-renders in the refit frame
 }
 
 function enableCsmStaticCache(engine: EngineContext, shadowGenerator: ShadowGenerator, options: CsmStaticCacheOptions): Promise<void>;
@@ -68,6 +69,15 @@ interface CsmRefitDecision {
     refit: boolean;
     renderDynamic: boolean;
 }
+
+interface CsmStaticRefitScheduler {
+    arm(spread: boolean): void;
+    pending(): boolean;
+    take(): number[];
+    maxLagFrames(): number;
+}
+
+function createCsmStaticRefitScheduler(cascadeCount: number, cascadesPerFrame: number): CsmStaticRefitScheduler;
 
 interface CsmRefitGate<M extends CsmRefitCaster> {
     syncCasters(casters: readonly M[]): void;
@@ -159,8 +169,18 @@ light is paused so GPU-clock-animated static casters continue refreshing. Genera
 that are not explicitly enabled preserve the original single-task path, allocate no
 cache texture, and do not load the cache implementation.
 
+With `options.staticCascadesPerFrame` above zero, a refit whose only cause is light drift
+(`gate.lastRefitDriftOnly()`) re-renders at most that many static cascades per frame, round-robin,
+so the periodic refresh costs a slice of every frame instead of one long frame; the cascade
+cameras and the receiver UBO are still written for every cascade in the refit frame, so a
+cascade re-rendered later draws with the transform the receivers sample, and its layer lags
+by at most `ceil(cascades / budget) - 1` frames of light drift. A refit caused by the camera,
+the scene content, the caster set, a promotion or a demotion re-renders every cascade in its
+own frame, as without the option.
+
 `createCsmRefitGate` exposes the CPU-only partition/refit state machine for consumers
-that need the same policy without engine or WebGPU dependencies. Re-supplying a new
+that need the same policy without engine or WebGPU dependencies. `createCsmStaticRefitScheduler`
+exposes the spread schedule the same way. Re-supplying a new
 array with identical caster membership does not invalidate the cache.
 
 ### Receiver UBO layout (`_shadowUBO`, 320 bytes / 80 f32)
