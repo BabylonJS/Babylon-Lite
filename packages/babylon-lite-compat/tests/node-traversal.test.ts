@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import type { Mesh as LiteMesh } from "babylon-lite";
-import { AbstractMesh, TransformNode } from "../src/meshes/meshes";
+import type { EngineContext, Mesh as LiteMesh, SceneContext } from "babylon-lite";
+import { AbstractMesh, MeshBuilder, TransformNode } from "../src/meshes/meshes";
 import { Node } from "../src/node/node";
+import { NullEngine } from "../src/engine/engine";
+import { Scene } from "../src/scene/scene";
 
 /**
  * GPU-free tests for the `Node` scene-graph traversal API
@@ -25,7 +27,20 @@ class TestNode extends Node {
 
 function createTestMesh(name: string, onChildrenRead?: () => void): AbstractMesh {
     const children: LiteMesh[] = [];
-    const lite = { name, visible: true, children, receiveShadows: false } as unknown as LiteMesh;
+    const buffer = { destroy: vi.fn() };
+    const lite = {
+        name,
+        visible: true,
+        children,
+        receiveShadows: false,
+        material: {},
+        _gpu: {
+            positionBuffer: buffer,
+            normalBuffer: buffer,
+            uvBuffer: buffer,
+            indexBuffer: buffer,
+        },
+    } as unknown as LiteMesh;
     if (onChildrenRead) {
         Object.defineProperty(lite, "children", {
             get: () => {
@@ -35,6 +50,49 @@ function createTestMesh(name: string, onChildrenRead?: () => void): AbstractMesh
         });
     }
     return new AbstractMesh(name, lite);
+}
+
+function bindTestScene(nodes: TransformNode[]): {
+    scene: Scene;
+    registered: TransformNode[];
+    liteMeshes: LiteMesh[];
+    engine: EngineContext;
+} {
+    const registered: TransformNode[] = [];
+    const liteMeshes: LiteMesh[] = [];
+    const engine = {} as EngineContext;
+    const lite = {
+        _frameGraph: { _tasks: [] },
+        _meshDisposables: new Map(),
+        _meshAuxDisposables: new Map(),
+        meshes: liteMeshes,
+        _renderables: [],
+        _renderableVersion: 0,
+        _groups: new Map(),
+        _materialSwapQueue: [],
+        surface: { engine },
+    } as unknown as SceneContext;
+    const scene = {
+        _lite: lite,
+        _registerMesh: (mesh: TransformNode) => registered.push(mesh),
+        _unregisterNode: (mesh: TransformNode) => {
+            const index = registered.indexOf(mesh);
+            if (index !== -1) {
+                registered.splice(index, 1);
+            }
+        },
+    } as unknown as Scene;
+    for (const node of nodes) {
+        node._bindLoadedScene(scene);
+    }
+    return { scene, registered, liteMeshes, engine };
+}
+
+function drainRetirements(engine: EngineContext): void {
+    const retirements = engine._retirements?.splice(0) ?? [];
+    for (const retire of retirements) {
+        retire();
+    }
 }
 
 describe("Node scene-graph traversal", () => {
@@ -93,6 +151,94 @@ describe("Node scene-graph traversal", () => {
         child.dispose();
         expect(root.getChildren()).toEqual([]);
         expect(child.isDisposed()).toBe(true);
+    });
+
+    it("removes every compat descendant when the Lite hierarchy omits them", () => {
+        const root = new TransformNode("root");
+        const parentMesh = createTestMesh("parent");
+        const childMesh = createTestMesh("child");
+        parentMesh.parent = root;
+        childMesh.parent = parentMesh;
+        const { registered, liteMeshes, engine } = bindTestScene([root, parentMesh, childMesh]);
+        liteMeshes.push(parentMesh._lite, childMesh._lite);
+        const disposed = [vi.fn(), vi.fn(), vi.fn()];
+        root.onDisposeObservable.add(disposed[0]!);
+        parentMesh.onDisposeObservable.add(disposed[1]!);
+        childMesh.onDisposeObservable.add(disposed[2]!);
+
+        root.dispose();
+        drainRetirements(engine);
+
+        expect(liteMeshes).toEqual([]);
+        expect(registered).toEqual([]);
+        expect([root.isDisposed(), parentMesh.isDisposed(), childMesh.isDisposed()]).toEqual([true, true, true]);
+        expect([root.parent, parentMesh.parent, childMesh.parent]).toEqual([null, null, null]);
+        for (const observer of disposed) {
+            expect(observer).toHaveBeenCalledOnce();
+        }
+
+        root.dispose();
+        expect(engine._retirements).toHaveLength(0);
+        for (const observer of disposed) {
+            expect(observer).toHaveBeenCalledOnce();
+        }
+    });
+
+    it("keeps descendants registered and undisposed for dispose(true)", () => {
+        const root = createTestMesh("root");
+        const child = createTestMesh("child");
+        child.parent = root;
+        root._lite.children.push(child._lite);
+        child._lite.parent = root._lite;
+        const { registered, liteMeshes, engine } = bindTestScene([root, child]);
+        liteMeshes.push(root._lite, child._lite);
+        const rootDisposed = vi.fn();
+        const childDisposed = vi.fn();
+        root.onDisposeObservable.add(rootDisposed);
+        child.onDisposeObservable.add(childDisposed);
+
+        root.dispose(true);
+        drainRetirements(engine);
+
+        expect(liteMeshes).toEqual([child._lite]);
+        expect(registered).toEqual([child]);
+        expect(root.isDisposed()).toBe(true);
+        expect(child.isDisposed()).toBe(false);
+        expect(child.parent).toBe(root);
+        expect(root._lite.children).toEqual([child._lite]);
+        expect(rootDisposed).toHaveBeenCalledOnce();
+        expect(childDisposed).not.toHaveBeenCalled();
+
+        root.dispose(true);
+        expect(engine._retirements).toHaveLength(0);
+        expect(rootDisposed).toHaveBeenCalledOnce();
+    });
+
+    it("does not add a recursively disposed tree when deferred registration flushes", () => {
+        const engine = new NullEngine();
+        (engine._lite as unknown as { _device: GPUDevice })._device = {
+            createBuffer: ({ size }: GPUBufferDescriptor) => {
+                const mapped = new ArrayBuffer(Number(size));
+                return {
+                    getMappedRange: () => mapped,
+                    unmap: () => undefined,
+                    destroy: () => undefined,
+                } as unknown as GPUBuffer;
+            },
+        } as unknown as GPUDevice;
+        const scene = new Scene(engine);
+        const root = new TransformNode("root", scene);
+        const parentMesh = MeshBuilder.CreateBox("parent", {}, scene);
+        const childMesh = MeshBuilder.CreateBox("child", {}, scene);
+        parentMesh.parent = root;
+        childMesh.parent = parentMesh;
+
+        root.dispose();
+        scene._flushPendingAdds();
+
+        expect(scene.meshes).toEqual([]);
+        expect(scene._lite.meshes).toEqual([]);
+        expect([root.isDisposed(), parentMesh.isDisposed(), childMesh.isDisposed()]).toEqual([true, true, true]);
     });
 });
 

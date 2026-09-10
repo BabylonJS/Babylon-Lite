@@ -284,6 +284,26 @@ export class TransformNode extends Node {
         // preserves world). Mirror that with Babylon Lite's raw parent assignment.
         this._node.parent = liteNodeOf(parent);
     }
+
+    public override dispose(doNotRecurse = false): void {
+        if (this.isDisposed()) {
+            return;
+        }
+        if (this._scene) {
+            // Wrapper recursion follows the authoritative compat `_children` tree.
+            // Hide Lite children only for `dispose(true)` so native removal cannot
+            // cascade through a different hierarchy and dispose retained descendants.
+            const children = doNotRecurse ? this._node.children.splice(0) : undefined;
+            try {
+                removeFromScene(this._scene._lite, this._node);
+            } finally {
+                if (children?.length) {
+                    this._node.children.push(...children);
+                }
+            }
+        }
+        super.dispose(doNotRecurse);
+    }
 }
 
 /**
@@ -692,13 +712,6 @@ export class AbstractMesh extends TransformNode {
     public bakeTransformIntoVertices(transform: Matrix): this {
         this._bakeMatrix(transform);
         return this;
-    }
-
-    public override dispose(): void {
-        if (this._scene) {
-            removeFromScene(this._scene._lite, this._lite);
-        }
-        super.dispose();
     }
 }
 

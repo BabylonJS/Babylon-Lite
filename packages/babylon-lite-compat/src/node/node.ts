@@ -167,14 +167,17 @@ export abstract class Node {
         this._disposeWrapperTree(doNotRecurse);
     }
 
-    /** @internal Dispose compat wrapper state without touching Lite resources. */
+    /**
+     * @internal Dispose compat wrapper state. Descendants go through their public
+     * disposal path so subclass-owned Lite resources are cleaned up as well.
+     */
     public _disposeWrapperTree(doNotRecurse = false): void {
         if (this._disposed) {
             return;
         }
         if (!doNotRecurse) {
             for (const child of [...this._children]) {
-                child._disposeWrapperTree();
+                child.dispose();
             }
         }
         this._disposed = true;
