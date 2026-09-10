@@ -290,6 +290,8 @@ export {
 export type { Texture2DArray, TextureArrayOptions, ArrayLayerUploadOptions, TextureArrayFromUrlsOptions } from "./texture/texture-array.js";
 export { createDynamicTexture, updateDynamicTexture } from "./texture/dynamic-texture.js";
 export type { DynamicTexture2D, DynamicTexture2DOptions, DynamicTextureUpdateOptions } from "./texture/dynamic-texture.js";
+export { createTexture2DFromExternalImage } from "./texture/external-image-texture.js";
+export type { ExternalImageTexture2DOptions } from "./texture/external-image-texture.js";
 export { createHtmlTexture, updateHtmlTexture, requestHtmlTextureUpdate, disposeHtmlTexture, isHtmlInCanvasSupported } from "./texture/html-texture.js";
 export type { HtmlTexture2D, HtmlTexture2DOptions } from "./texture/html-texture.js";
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";

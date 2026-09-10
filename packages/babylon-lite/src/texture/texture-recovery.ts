@@ -216,6 +216,32 @@ async function rebuildFromSource(engine: EngineContext, tex: Texture2D, source: 
         tex.height = source.height;
         return;
     }
+    if (source.kind === "external") {
+        if (!source.bitmap) {
+            throw new Error("Cannot recover a released external-image texture");
+        }
+        const texture = engine._device.createTexture({
+            size: { width: source.width, height: source.height },
+            format: source.format,
+            mipLevelCount: source.levels,
+            usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
+        });
+        engine._device.queue.copyExternalImageToTexture(
+            { source: source.bitmap, flipY: source.flipY },
+            { texture, premultipliedAlpha: source.premultipliedAlpha },
+            { width: source.width, height: source.height }
+        );
+        if (source.levels > 1) {
+            const { generateMipmaps } = await import("./generate-mipmaps.js");
+            generateMipmaps(engine, texture);
+        }
+        tex.texture = texture;
+        tex.view = texture.createView();
+        tex.sampler = getOrCreateSampler(engine, source.samplerDesc);
+        tex.width = source.width;
+        tex.height = source.height;
+        return;
+    }
     const width = source.bitmap?.width ?? 1;
     const height = source.bitmap?.height ?? 1;
     const format: GPUTextureFormat = source.srgb ? "rgba8unorm-srgb" : "rgba8unorm";

@@ -13,6 +13,12 @@ import type { Texture2D } from "../texture/texture-2d.js";
 // ── Texture ref counting ─────────────────────────────────────
 
 let _texRefs: WeakMap<GPUTexture, number> | null = null;
+let _textureReleaseHook: ((tex: Texture2D) => void) | null = null;
+
+/** @internal Install the opaque release seam used by opt-in resource capture. */
+export function _setTextureReleaseHook(hook: (tex: Texture2D) => void): void {
+    _textureReleaseHook = hook;
+}
 
 function texRefs(): WeakMap<GPUTexture, number> {
     if (!_texRefs) {
@@ -37,6 +43,7 @@ export function releaseTexture(tex: Texture2D): boolean {
     const c = (m.get(tex.texture) ?? 1) - 1;
     if (c <= 0) {
         tex.texture.destroy();
+        _textureReleaseHook?.(tex);
         // Zero is kept rather than deleted so a destroyed texture stays distinguishable from one
         // nothing ever took ownership of, which has no entry at all. `_isTextureReleased` reads
         // that difference; the key is weak either way, so the entry retains nothing.

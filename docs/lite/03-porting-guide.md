@@ -48,6 +48,7 @@ This guide shows how to translate a Babylon.js (BJS) scene to Babylon Lite, side
 | `SceneLoader.ImportMeshAsync("", url, file, scene)`                 | `addToScene(scene, await loadGltf(engine, url))`                                                            |
 | `new CubeTexture(url, scene)` + `createDefaultEnvironment()`        | `await loadEnvironment(scene, url, opts)`                                                                   |
 | `new Texture(url, scene)`                                           | `await loadTexture2D(engine, url)`                                                                          |
+| Fresh texture from an already-decoded image                         | `await createTexture2DFromExternalImage(engine, source, options)`                                           |
 | KTX1 compressed 2D texture                                          | `await loadKtxTexture2D(engine, baseUrl, suffixes)`                                                         |
 | glTF KTX2 / `KHR_texture_basisu` texture source                     | `addToScene(scene, await loadGltf(engine, ktx2GltfUrl))` _(auto-detected)_                                  |
 | Basis Universal (.basis) 2D texture                                 | `await loadBasisTexture2D(engine, url)`                                                                     |
@@ -313,18 +314,18 @@ setStandardBumpTexture(mat, await loadTexture2D(engine, "normal.png"));
 setStandardEmissiveTexture(mat, await loadTexture2D(engine, "glow.png"));
 ```
 
-| Babylon.js property        | Babylon Lite setter                                   |
-| -------------------------- | ----------------------------------------------------- |
-| `material.bumpTexture`     | `setStandardBumpTexture(mat, tex)`                    |
-| `material.emissiveTexture` | `setStandardEmissiveTexture(mat, tex)`                |
-| `material.specularTexture` | `setStandardSpecularTexture(mat, tex)`                |
-| `material.ambientTexture`  | `setStandardAmbientTexture(mat, tex)`                 |
-| `material.lightmapTexture` | `setStandardLightmapTexture(mat, tex)`                |
-| `material.opacityTexture`  | `setStandardOpacityTexture(mat, tex)`                 |
-| `material.reflectionTexture` (2D)   | `setStandardReflectionTexture(mat, tex)`     |
+| Babylon.js property                 | Babylon Lite setter                           |
+| ----------------------------------- | --------------------------------------------- |
+| `material.bumpTexture`              | `setStandardBumpTexture(mat, tex)`            |
+| `material.emissiveTexture`          | `setStandardEmissiveTexture(mat, tex)`        |
+| `material.specularTexture`          | `setStandardSpecularTexture(mat, tex)`        |
+| `material.ambientTexture`           | `setStandardAmbientTexture(mat, tex)`         |
+| `material.lightmapTexture`          | `setStandardLightmapTexture(mat, tex)`        |
+| `material.opacityTexture`           | `setStandardOpacityTexture(mat, tex)`         |
+| `material.reflectionTexture` (2D)   | `setStandardReflectionTexture(mat, tex)`      |
 | `material.reflectionTexture` (cube) | `setStandardReflectionCubeTexture(mat, cube)` |
 
-Companion scalars (`bumpLevel`, `lightmapCoordIndex`, `opacityFromRGB`, `reflectionLevel`, …) remain plain assignable properties and may be set in any order relative to the setter — feature detection runs when the renderable is built, not when the setter is called. Setting a texture *after* the material has already been built still requires `rebuildMaterial()`, exactly as before.
+Companion scalars (`bumpLevel`, `lightmapCoordIndex`, `opacityFromRGB`, `reflectionLevel`, …) remain plain assignable properties and may be set in any order relative to the setter — feature detection runs when the renderable is built, not when the setter is called. Setting a texture _after_ the material has already been built still requires `rebuildMaterial()`, exactly as before.
 
 Cube reflection takes a `CubeTexture`, which only `loadCubeTexture()` produces:
 
@@ -434,19 +435,19 @@ await startEngine(engine);
 
 ## Gotchas
 
-| Gotcha                          | Details                                                                                                                                                                                       |
-| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **No auto-add**                 | Meshes, lights, transform nodes, and `loadGltf()` asset containers must be explicitly added with `addToScene()`. `loadEnvironment()` adds its environment data/renderables internally.        |
-| **No `new` keyword**            | Everything is created via factory functions, not constructors.                                                                                                                                |
-| **Assign camera explicitly**    | Either use `createDefaultCamera(scene)` (auto-assigns) or set `scene.camera = myCamera` manually.                                                                                             |
-| **Materials are optional**      | `createStandardMaterial()` / `createPbrMaterial()` return props objects. Assign to `mesh.material`.                                                                                           |
-| **Standard vertex colors**      | Supply four floats (RGBA) per vertex and call `enableStandardVertexColors()` before `registerScene()`. PBR vertex colors remain automatic.                                                   |
+| Gotcha                          | Details                                                                                                                                                                                                                    |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **No auto-add**                 | Meshes, lights, transform nodes, and `loadGltf()` asset containers must be explicitly added with `addToScene()`. `loadEnvironment()` adds its environment data/renderables internally.                                     |
+| **No `new` keyword**            | Everything is created via factory functions, not constructors.                                                                                                                                                             |
+| **Assign camera explicitly**    | Either use `createDefaultCamera(scene)` (auto-assigns) or set `scene.camera = myCamera` manually.                                                                                                                          |
+| **Materials are optional**      | `createStandardMaterial()` / `createPbrMaterial()` return props objects. Assign to `mesh.material`.                                                                                                                        |
+| **Standard vertex colors**      | Supply four floats (RGBA) per vertex and call `enableStandardVertexColors()` before `registerScene()`. PBR vertex colors remain automatic.                                                                                 |
 | **Mirrored meshes**             | Call `await enableMirroredMeshes(scene)` before `registerScene()` when you give a mesh (or an ancestor) a negative scale, so its triangle winding is reversed. glTF negative-scale nodes are already handled at load time. |
-| **WebGPU only**                 | No WebGL fallback. `createEngine()` throws if WebGPU is unavailable.                                                                                                                          |
-| **No `dispose()` on meshes**    | Use `removeFromScene(scene, mesh)` to remove a single mesh and destroy its GPU resources. Use `disposeScene(scene)` + `disposeEngine(engine)` to tear down everything.                        |
-| **Tree-shakable imports**       | Import only what you use. Unused features are stripped from the bundle.                                                                                                                       |
-| **KTX2 is glTF-scoped**         | KTX1 has a direct `loadKtxTexture2D()` helper. KTX2/BasisU texture sources are handled through glTF `KHR_texture_basisu` during `loadGltf()` so non-KTX2 scenes pay zero runtime bundle cost. |
-| **Material property animation** | Mutating material props at runtime requires marking the material dirty. See Material Animation section below.                                                                                 |
+| **WebGPU only**                 | No WebGL fallback. `createEngine()` throws if WebGPU is unavailable.                                                                                                                                                       |
+| **No `dispose()` on meshes**    | Use `removeFromScene(scene, mesh)` to remove a single mesh and destroy its GPU resources. Use `disposeScene(scene)` + `disposeEngine(engine)` to tear down everything.                                                     |
+| **Tree-shakable imports**       | Import only what you use. Unused features are stripped from the bundle.                                                                                                                                                    |
+| **KTX2 is glTF-scoped**         | KTX1 has a direct `loadKtxTexture2D()` helper. KTX2/BasisU texture sources are handled through glTF `KHR_texture_basisu` during `loadGltf()` so non-KTX2 scenes pay zero runtime bundle cost.                              |
+| **Material property animation** | Mutating material props at runtime requires marking the material dirty. See Material Animation section below.                                                                                                              |
 
 ---
 
