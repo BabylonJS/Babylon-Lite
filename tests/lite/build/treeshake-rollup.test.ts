@@ -197,6 +197,24 @@ describe("@babylonjs/lite has no module-level side effects", () => {
         expect(code).not.toContain("gesturestart");
     }, 120_000);
 
+    it("drops arc-rotate keyboard behavior from pointer-only controls", async () => {
+        const code = await bundleEntry(workDir, `import { attachControl } from ${JSON.stringify(SRC_ENTRY)};\nconsole.log(attachControl);\n`);
+        expect(code).toContain("pointerdown");
+        expect(code).not.toContain("ArrowLeft");
+        expect(code).not.toContain("keydown");
+        expect(code).not.toContain("zoomingSensitivity");
+    }, 120_000);
+
+    it("retains arc-rotate keyboard behavior only after the enabler is requested", async () => {
+        const code = await bundleEntry(
+            workDir,
+            `import { attachControl, enableArcRotateKeyboardControls } from ${JSON.stringify(SRC_ENTRY)};\nenableArcRotateKeyboardControls();\nconsole.log(attachControl);\n`
+        );
+        expect(code).toContain("ArrowLeft");
+        expect(code).toContain("keydown");
+        expect(code).toContain("zoomingSensitivity");
+    }, 120_000);
+
     it("positive control: the harness DOES surface a real module-level side effect", async () => {
         // Guards against the assertions above silently passing because the bundler
         // stopped detecting side effects (config drift). A module that mutates a
