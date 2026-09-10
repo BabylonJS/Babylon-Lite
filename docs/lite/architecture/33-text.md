@@ -634,6 +634,7 @@ Unit tests live in `tests/lite/unit/`:
 | `src/text/shaders/slug-shader.ts` | **The single authoritative copy of the Slug WGSL.** Inline TypeScript template + `composeSlugShader(fragment)` — a deterministic builder that interpolates an optional `TextShaderFragment` into the base vertex/fragment source at named slots. Called with `null` for the base variant. |
 | `src/text/shaders/text-shader-fragment.ts` | Type-only module: `TextShaderFragment`, `TextVertexSlot`, `TextFragmentSlot`. Feature-agnostic — no font-weight (or any other feature's) semantics. Erased at build time. |
 | `src/text/set-font-weight-offset.ts` | Opt-in feature entry point: `setFontWeightOffset(data, run, offset)`. Owns the per-run offset map, the interned draw-group keys, and the per-`GPUDevice` composed+compiled variant module pair; validates and resolves the run against its `TextData`, installs the `text-data` styling seam and the `text-pipeline` variant resolver on first effective call, then repacks the data through `updateTextData({ update: "reset" })`. |
+| `src/text/load-font-weight-offset.ts` | Root-exported lazy loader for the exact `set-font-weight-offset.ts` implementation module. Application code can keep the feature behind a dynamic boundary without importing the package barrel as a namespace. |
 | `src/text/shaders/weight-shader-fragment.ts` | The weight-only `TextShaderFragment`: distance-to-quadratic helper, bounded nearest-contour band scan, weight varying, quad inflation, and unsigned-distance coverage expansion. Contains **no** copy of any base Slug logic. Reachable only from `set-font-weight-offset.ts`. |
 
 ---
@@ -819,7 +820,12 @@ pay zero shader bytes and zero shader work.
 
 ```typescript
 export function setFontWeightOffset(data: TextData, run: GlyphRun | number, offset: number): void;
+export function loadFontWeightOffset(): Promise<typeof setFontWeightOffset>;
 ```
+
+`loadFontWeightOffset()` is the application-owned lazy-boundary form. Its implementation
+dynamically imports only `text/set-font-weight-offset`, never the package root namespace,
+so bundlers do not conservatively retain unrelated root exports in the lazy chunk.
 
 | Parameter | Type                | Description                                                                                                                                                                                                       |
 | --------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

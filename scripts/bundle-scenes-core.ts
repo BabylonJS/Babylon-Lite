@@ -15,7 +15,14 @@ import { createHash } from "crypto";
 import { resolve, dirname, join, extname } from "path";
 import { rmSync, readdirSync, readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync } from "fs";
 import { minify as terserMinify, type ECMA, type SourceMapOptions } from "terser";
-import { bytesToRoundedKB, IGNORED_BUNDLE_MODULE_PATTERN, isVendorRuntimeChunkFile, summarizeRuntimeBundle, type RuntimeJsPayload } from "./bundle-size-accounting";
+import {
+    bytesToRoundedKB,
+    ignoredScenePayloadCompatibilityBytes,
+    IGNORED_BUNDLE_MODULE_PATTERN,
+    isVendorRuntimeChunkFile,
+    summarizeRuntimeBundle,
+    type RuntimeJsPayload,
+} from "./bundle-size-accounting";
 import {
     computeSceneHeadroom,
     CRITICAL_HEADROOM_BYTES,
@@ -198,6 +205,53 @@ function resolveLiteAliasDir(): string {
     }
 
     throw new Error(`Missing ${libIndex}.\n` + "Build the package first: `pnpm --filter babylon-lite build:lib` (or `pnpm build`).");
+}
+
+/** Resolve the exact root or lab-only deep module requested through the bundle harness.
+ * Vite 8 no longer consistently applies a directory alias to both forms, so resolve them
+ * before package exports or prefix aliases participate. */
+export function resolveLitePackageSpecifier(source: string, aliasDir: string): string | null {
+    const queryIndex = source.indexOf("?");
+    const specifier = queryIndex === -1 ? source : source.slice(0, queryIndex);
+    const query = queryIndex === -1 ? "" : source.slice(queryIndex);
+    if (specifier !== "babylon-lite" && !specifier.startsWith("babylon-lite/")) {
+        return null;
+    }
+
+    const request = specifier === "babylon-lite" ? "index" : specifier.slice("babylon-lite/".length);
+    if (!request || request.split("/").includes("..")) {
+        return null;
+    }
+
+    const extension = extname(request);
+    const candidates =
+        extension === ".js"
+            ? [request, `${request.slice(0, -3)}.ts`]
+            : extension
+              ? [request]
+              : [`${request}.js`, `${request}.ts`, join(request, "index.js"), join(request, "index.ts")];
+
+    for (const candidate of candidates) {
+        const file = resolve(aliasDir, candidate);
+        if (existsSync(file) && statSync(file).isFile()) {
+            return file + query;
+        }
+    }
+    return null;
+}
+
+/** Vite pre-resolver for the harness-only `babylon-lite` package name. */
+export function litePackageResolverPlugin(aliasDir: string): Plugin {
+    return {
+        name: "resolve-babylon-lite",
+        enforce: "pre",
+        resolveId: {
+            order: "pre",
+            handler(source) {
+                return resolveLitePackageSpecifier(source, aliasDir);
+            },
+        },
+    };
 }
 // Per-scene manifest files under `lab/public/bundle/manifest/` are build output,
 // not tracked source: a single aggregate `manifest.json` is generated from them
@@ -970,19 +1024,17 @@ function writeBundleInfoToDir(scene: string, result: unknown, infoDir: string, s
         const modules: BundleInfoModule[] = [];
         for (const [rawId, m] of Object.entries(it.modules ?? {})) {
             const normalizedId = normalizeModuleId(rawId, sourceRoot);
-            // Prefer source-map-attributed minified bytes. Large pure-data modules (e.g.
-            // checked-in `*-nme.ts` NME payloads) are emitted as object/string literals for
-            // which esbuild produces NO per-token source-map segments, so attribution yields
-            // 0 even though the module contributes real bytes. Fall back to Rollup's
-            // `renderedLength` (the module's rendered size in the chunk) so such modules are
-            // still recorded — otherwise the ignored-module accounting can't subtract them.
-            const bytes = minifiedBytes[normalizedId] || m.renderedLength || 0;
+            // Preserve the Vite 6 pre-minifier accounting stage for checked-in NME/NPE
+            // payloads even though Rolldown reports module lengths after Oxc compaction.
+            // Other modules still prefer post-minify source-map attribution.
+            const renderedExports = Array.isArray(m.renderedExports) ? [...m.renderedExports].sort() : [];
+            const payloadBytes = ignoredScenePayloadCompatibilityBytes(rawId, renderedExports);
+            const bytes = payloadBytes || minifiedBytes[normalizedId] || m.renderedLength || 0;
             if (bytes <= 0) continue;
-            const rawNames = Array.isArray(m.renderedExports) ? [...m.renderedExports].sort() : [];
             // Resolve kinds from the source file on disk (strip any ?query suffix).
             const srcPath = rawId.split("?")[0]!;
             const kinds = srcPath.startsWith("\u0000") ? {} : extractExportKinds(srcPath);
-            const exports: BundleInfoExport[] = rawNames.map((name) => ({
+            const exports: BundleInfoExport[] = renderedExports.map((name) => ({
                 name,
                 kind: kinds[name] ?? "unknown",
             }));
@@ -1180,28 +1232,37 @@ export function isLiteBundleExternal(id: string): boolean {
     return VENDOR_RUNTIMES.some((runtime) => runtime.external(id));
 }
 
-/** Force certain modules into their own chunks so bundle-size accounting can isolate
- *  them cleanly. Currently used to separate `text-shaper` (a 670 KB vendor shaping
- *  library) so the gzip-bytes accounting can exclude it as a self-contained chunk
- *  matching the ignored-module pattern in `bundle-size-accounting.ts`. Matches both the
- *  source form (`node_modules/text-shaper/…`) and the built-package form, where the lib
- *  build has already pre-bundled it into `build/lib/_chunks/vendor/text-shaper-<hash>.js`. */
-function liteManualChunks(id: string): string | undefined {
-    const clean = id.replace(/\\/g, "/").split("?")[0]!;
-    if (/(?:^|\/)text-shaper[-/]/.test(clean)) {
-        return TEXT_SHAPER_CHUNK_NAME;
-    }
-    return undefined;
-}
-
-/** The manual-chunk name {@link liteManualChunks} pins the `text-shaper` vendor
+/** The high-priority code-splitting group pins the `text-shaper` vendor
  *  runtime into. Every scene imports the `babylon-lite` barrel, which re-exports the
  *  default text APIs that pull in `text-shaper`; for the ~200 scenes that use no text,
- *  tree-shaking empties that pinned chunk, so Rollup logs a harmless
+ *  tree-shaking may empty that pinned chunk, so Rolldown can log a harmless
  *  `Generated an empty chunk: "text-shaper"` (`EMPTY_BUNDLE`) — once per scene. The
  *  empty chunk is never referenced or loaded, so {@link liteBundleOnWarn} silences
  *  exactly that warning while leaving every other Rollup warning intact. */
 const TEXT_SHAPER_CHUNK_NAME = "text-shaper";
+const LITE_INITIAL_CHUNK_NAME = "lite-initial";
+
+/** Native Rolldown groups used by every Lite scene build.
+ *
+ * `$initial` coalesces the entry's statically reachable graph so modules shared with
+ * dynamic entries do not become dozens of tiny common chunks. The vendor group remains
+ * separate and higher priority so bundle accounting can exclude text-shaper bytes. */
+export function createLiteCodeSplitting() {
+    return {
+        groups: [
+            {
+                name: TEXT_SHAPER_CHUNK_NAME,
+                test: /(?:^|[\\/])text-shaper[-\\/]/,
+                priority: 100,
+                includeDependenciesRecursively: false,
+            },
+            {
+                name: LITE_INITIAL_CHUNK_NAME,
+                tags: ["$initial" as const],
+            },
+        ],
+    };
+}
 
 /** Suppress the expected empty-`text-shaper`-chunk warning (see
  *  {@link TEXT_SHAPER_CHUNK_NAME}); forward all other Rollup warnings unchanged. */
@@ -1272,7 +1333,7 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
         base: "./",
         publicDir: false,
         logLevel: "warn",
-        plugins: [wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
+        plugins: [litePackageResolverPlugin(sourceSrcDir), wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
         resolve: {
             // Master-comparison bundle-info resolves `babylon-lite` to the TS SOURCE of an
             // arbitrary master worktree (`sourceRoot`), NOT its `build/lib`: that worktree
@@ -1280,19 +1341,16 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
             // "vs master" size delta (the per-scene ceilings remain the real blocker, and
             // they ARE measured against `build/lib`). Sizes here may therefore differ
             // slightly from a real consumer's, which is acceptable for an advisory baseline.
-            alias: {
-                "babylon-lite": sourceSrcDir,
-            },
             dedupe: ["@babylonjs/core"],
         },
         build: {
             outDir: sceneOutDir,
             emptyOutDir: true,
             target: LITE_BUNDLE_TARGET,
-            minify: "esbuild",
+            minify: "oxc",
             sourcemap: "hidden",
             modulePreload: false,
-            rollupOptions: {
+            rolldownOptions: {
                 input: { [scene]: liteSceneEntry(scene, sourceLabDir) },
                 external: isLiteBundleExternal,
                 onwarn: liteBundleOnWarn,
@@ -1301,7 +1359,7 @@ export async function buildLiteSceneBundleInfo(scene: string, sourceRoot: string
                     entryFileNames: "[name].js",
                     chunkFileNames: `${scene}-[name]-[hash].js`,
                     banner: NAME_POLYFILL,
-                    manualChunks: liteManualChunks,
+                    codeSplitting: createLiteCodeSplitting(),
                 },
             },
         },
@@ -1425,7 +1483,9 @@ export async function buildBundleScenes(): Promise<void> {
             base: "./",
             publicDir: false,
             logLevel: "warn",
-            plugins: isBjs ? [bjsSideEffectsFalsePlugin()] : [wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
+            plugins: isBjs
+                ? [bjsSideEffectsFalsePlugin()]
+                : [litePackageResolverPlugin(liteAliasDir), wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
             resolve: {
                 // Resolve `babylon-lite` to the built `build/lib` tree (NOT the TS source)
                 // so the measured bundle reflects exactly what a consumer of the published
@@ -1433,19 +1493,16 @@ export async function buildBundleScenes(): Promise<void> {
                 // lab-only deep imports that are intentionally absent from the public package
                 // export map. `build:lib` must run first unless explicit source fallback is
                 // enabled for legacy baselines.
-                alias: {
-                    "babylon-lite": liteAliasDir,
-                },
                 dedupe: ["@babylonjs/core"],
             },
             build: {
                 outDir: sceneOutDir,
                 emptyOutDir: true,
                 ...(!isBjs && { target: LITE_BUNDLE_TARGET }),
-                minify: "esbuild",
+                minify: isBjs ? "esbuild" : "oxc",
                 sourcemap: "hidden",
                 modulePreload: false,
-                rollupOptions: {
+                rolldownOptions: {
                     input: { [scene]: isBjs ? bjsSceneEntry(scene) : liteSceneEntry(scene) },
                     // Exclude third-party WASM runtimes from Lite bundles so the
                     // bundle-size metric reflects only first-party Lite engine code.
@@ -1455,7 +1512,7 @@ export async function buildBundleScenes(): Promise<void> {
                         entryFileNames: "[name].js",
                         chunkFileNames: `${scene}-[name]-[hash].js`,
                         banner: NAME_POLYFILL,
-                        ...(!isBjs && { manualChunks: liteManualChunks }),
+                        ...(!isBjs && { codeSplitting: createLiteCodeSplitting() }),
                     },
                     ...(isBjs && {
                         treeshake: {

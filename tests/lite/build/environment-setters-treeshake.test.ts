@@ -9,13 +9,31 @@ type BuiltEnvironmentPatch = {
     _apply(fragment: string, kind: "dds" | "hdr"): string;
 };
 
-function readBuiltSkyboxFragment(relativePath: string, variableName: string): string {
-    const code = readFileSync(resolve(dirname(LIB_ENTRY), relativePath), "utf8");
-    const match = code.match(new RegExp(`const ${variableName} = (".*");`));
-    if (!match) {
-        throw new Error(`Built skybox shader ${variableName} was not found in ${relativePath}.`);
+function readBuiltSkyboxFragment(relativePath: string): string {
+    const libDir = dirname(LIB_ENTRY);
+    const pending = [resolve(libDir, relativePath)];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+        const file = pending.pop()!;
+        if (visited.has(file)) {
+            continue;
+        }
+        visited.add(file);
+        const code = readFileSync(file, "utf8");
+        for (const match of code.matchAll(/"(?:\\.|[^"\\])*"/g)) {
+            const value = JSON.parse(match[0]) as string;
+            if (value.includes("@fragment fn main") && value.includes("textureSampleLevel")) {
+                return value;
+            }
+        }
+        for (const match of code.matchAll(/(?:import|export)[^"']*from\s*["']([^"']+)["']/g)) {
+            const specifier = match[1]!;
+            if (specifier.startsWith(".")) {
+                pending.push(resolve(dirname(file), specifier));
+            }
+        }
     }
-    return JSON.parse(match[1]!) as string;
+    throw new Error(`Built skybox fragment was not found from ${relativePath}.`);
 }
 
 afterAll(cleanupTempDirs);
@@ -98,8 +116,8 @@ describe("environment setter tree shaking", () => {
             import(pathToFileURL(resolve(libDir, "material/pbr/fragments/environment-rotation-fragment.js")).href),
             import(pathToFileURL(resolve(libDir, "material/pbr/fragments/environment-blur-fragment.js")).href),
         ])) as [BuiltEnvironmentPatch, BuiltEnvironmentPatch];
-        const dds = readBuiltSkyboxFragment("material/pbr/background-dds-skybox.js", "ddsSkyboxFragSrc");
-        const hdr = readBuiltSkyboxFragment("material/pbr/background-hdr-skybox.js", "skyboxHdrFragSrc");
+        const dds = readBuiltSkyboxFragment("material/pbr/background-dds-skybox.js");
+        const hdr = readBuiltSkyboxFragment("material/pbr/background-hdr-skybox.js");
 
         expect(dds).not.toContain("var dir");
         expect(dds).not.toContain("envCubemap");
