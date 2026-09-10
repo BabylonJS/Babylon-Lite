@@ -57,6 +57,8 @@ export interface ShadowGenerator {
         _refitAngle: number;
         /** @internal */
         _refitMaxIntervalMs: number;
+        /** @internal Static cascades re-rendered per frame after a drift-only refit; 0 = all in one frame. */
+        _staticCascadesPerFrame?: number;
         /** @internal */
         _loaded?: boolean;
     };
