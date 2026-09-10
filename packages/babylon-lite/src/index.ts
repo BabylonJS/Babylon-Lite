@@ -540,6 +540,7 @@ export {
 } from "./math/vec3-ref.js";
 export { writeVec3 } from "./math/write-vec3.js";
 export { createTranslationMat4 } from "./math/create-translation-mat4.js";
+export { setMat4Translation } from "./math/set-mat4-translation.js";
 export { createIdentityMat4 } from "./math/create-identity-mat4.js";
 export { createScalingMat4 } from "./math/create-scaling-mat4.js";
 export { composeMat4 } from "./math/compose-mat4.js";
@@ -611,7 +612,7 @@ export { getViewMatrix, getProjectionMatrix, getViewProjectionMatrix, getCameraP
 export { getEffectiveAspectRatio } from "./camera/camera.js";
 export { resolveCameraViewport } from "./camera/viewport.js";
 export type { PixelViewport } from "./camera/viewport.js";
-export { projectWorldToScreen, projectWorldToScreenToRef } from "./camera/world-to-screen.js";
+export { projectPointToViewportToRef, projectWorldToScreen, projectWorldToScreenToRef } from "./camera/world-to-screen.js";
 export type { ScreenProjectionOptions, ScreenProjectionResult } from "./camera/world-to-screen.js";
 export type { FreeCamera } from "./camera/free-camera.js";
 export type { BankedFreeCamera } from "./camera/banked-free-camera.js";
@@ -939,6 +940,7 @@ export {
     PhysicsConstraintType,
     PhysicsConstraintAxis,
 } from "./physics/havok.js";
+export { enableHavokThinInstancePhysicsSync } from "./physics/enable-havok-thin-instance-physics-sync.js";
 export type {
     PhysicsWorld,
     PhysicsBody,

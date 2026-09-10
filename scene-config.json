@@ -1100,7 +1100,8 @@
         "maxGzipKB": 26,
         "description": "Havok Physics V2 thin-instanced wall + raycast instance picking (port of PG #I6AR8X). A 10×6×3 wall of thin-instanced cylinders with seeded per-instance colors. One STATIC thin-instance BOX aggregate creates 180 native bodies; raycast bodyIndex identifies the hit instance and is matched between Lite and Babylon.js for deterministic rays. A green indicator sphere marks the last hit.",
         "tags": ["std", "procedural", "physics", "thin-instance"],
-        "skipPerf": true
+        "skipPerf": true,
+        "compatParity": true
     },
     {
         "id": 104,

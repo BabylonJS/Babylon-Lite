@@ -30,8 +30,10 @@ import {
     createPhysicsConstraint,
     createPhysicsShape,
     disposePhysics,
+    enableHavokThinInstancePhysicsSync,
     getPhysicsBodyAngularVelocity,
     getPhysicsBodyLinearVelocity,
+    physicsRaycast,
     CharacterSupportedState as LiteCharacterSupportedState,
     PhysicsMotionType as LitePhysicsMotionType,
     PhysicsPrestepType as LitePhysicsPrestepType,
@@ -65,6 +67,7 @@ import type {
     PhysicsShape as LitePhysicsShape,
     PhysicsShapeParameters,
     PhysicsWorld,
+    RaycastQuery,
     SceneContext,
 } from "babylon-lite";
 
@@ -150,6 +153,94 @@ export interface CharacterShapeOptions {
     shape?: PhysicsShape;
     capsuleHeight?: number;
     capsuleRadius?: number;
+}
+
+/** Babylon.js raycast collision-filter options. */
+export interface IRaycastQuery {
+    membership?: number;
+    collideWith?: number;
+    shouldHitTriggers?: boolean;
+    ignoreBody?: PhysicsBody;
+}
+
+/** Base result shared by Babylon.js physics casting queries. */
+export class CastingResult {
+    protected readonly _hitNormal = Vector3.Zero();
+    protected readonly _hitPoint = Vector3.Zero();
+    private _hasHit = false;
+    private _triangleIndex = -1;
+
+    public body?: PhysicsBody;
+    public bodyIndex?: number;
+    public shape?: PhysicsShape;
+
+    public get hitPoint(): Vector3 {
+        return this._hitPoint;
+    }
+    public get hitNormal(): Vector3 {
+        return this._hitNormal;
+    }
+    public get hasHit(): boolean {
+        return this._hasHit;
+    }
+    public get triangleIndex(): number {
+        return this._triangleIndex;
+    }
+
+    public setHitData(hitNormal: Vec3Like, hitPoint: Vec3Like, triangleIndex?: number): void {
+        this._hasHit = true;
+        this._hitNormal.copyFromFloats(hitNormal.x, hitNormal.y, hitNormal.z);
+        this._hitPoint.copyFromFloats(hitPoint.x, hitPoint.y, hitPoint.z);
+        this._triangleIndex = triangleIndex ?? -1;
+    }
+
+    public reset(): void {
+        this._hasHit = false;
+        this._hitNormal.setAll(0);
+        this._hitPoint.setAll(0);
+        this._triangleIndex = -1;
+        this.body = undefined;
+        this.bodyIndex = undefined;
+        this.shape = undefined;
+    }
+}
+
+/** Babylon.js raycast result backed by Lite's native Havok query result. */
+export class PhysicsRaycastResult extends CastingResult {
+    private _hitDistance = 0;
+    private readonly _rayFromWorld = Vector3.Zero();
+    private readonly _rayToWorld = Vector3.Zero();
+
+    public get hitDistance(): number {
+        return this._hitDistance;
+    }
+    public get hitNormalWorld(): Vector3 {
+        return this._hitNormal;
+    }
+    public get hitPointWorld(): Vector3 {
+        return this._hitPoint;
+    }
+    public get rayFromWorld(): Vector3 {
+        return this._rayFromWorld;
+    }
+    public get rayToWorld(): Vector3 {
+        return this._rayToWorld;
+    }
+
+    public setHitDistance(distance: number): void {
+        this._hitDistance = distance;
+    }
+
+    public calculateHitDistance(): void {
+        this._hitDistance = Vector3.Distance(this._rayFromWorld, this._hitPoint);
+    }
+
+    public override reset(from: Vector3 = Vector3.Zero(), to: Vector3 = Vector3.Zero()): void {
+        super.reset();
+        this._rayFromWorld.copyFrom(from);
+        this._rayToWorld.copyFrom(to);
+        this._hitDistance = 0;
+    }
 }
 
 export interface CharacterSurfaceInfo {
@@ -1108,10 +1199,6 @@ function assertPhysicsNodeSupported(transformNode: TransformNode): void {
     if (transformNode.parent || transformNode._node.parent) {
         unsupported("PhysicsBody", "Babylon Lite physics bodies currently consume local transforms, so parented TransformNodes cannot be synchronized in Babylon.js world space.");
     }
-    const mesh = transformNode._node as Partial<LiteMesh>;
-    if (mesh.thinInstances?.count) {
-        unsupported("PhysicsBody", "Babylon Lite exposes one physics body per scene node and has no per-thin-instance body representation.");
-    }
 }
 
 // ─── HavokPlugin ─────────────────────────────────────────────────────
@@ -1227,6 +1314,7 @@ export class HavokPlugin {
             return unsupported("HavokPlugin", "The Havok module is not ready. `await HavokPhysics()` before constructing the plugin.");
         }
         this.world = createHavokWorld(liteScene, this._hknp, gravity);
+        enableHavokThinInstancePhysicsSync(this.world);
         if (!this._useDeltaForWorldStep) {
             setPhysicsTimestep(this.world, this._fixedTimeStep);
         }
@@ -1276,6 +1364,41 @@ export class PhysicsEngine {
     /** Get the fixed timestep. */
     public getTimeStep(): number {
         return this._plugin.getTimeStep();
+    }
+
+    /** Cast a ray through the active Lite Havok world. */
+    public raycast(from: Vector3, to: Vector3, query?: IRaycastQuery): PhysicsRaycastResult {
+        const result = new PhysicsRaycastResult();
+        this.raycastToRef(from, to, result, query);
+        return result;
+    }
+
+    /** Cast a ray through the active Lite Havok world and write into `result`. */
+    public raycastToRef(from: Vector3, to: Vector3, result: PhysicsRaycastResult, query?: IRaycastQuery): void {
+        if (query?.ignoreBody) {
+            return unsupported(
+                "PhysicsEngine.raycast.ignoreBody",
+                "Lite's public raycast query does not accept an ignored body, and adding it would modify the shared Havok query hot path already used by scene bundles."
+            );
+        }
+        const world = this._plugin.world;
+        if (!world) {
+            return unsupported("PhysicsEngine.raycast", "Call `scene.enablePhysics(...)` before issuing physics queries.");
+        }
+        const liteQuery: RaycastQuery = {
+            membership: query?.membership,
+            collideWith: query?.collideWith,
+            shouldHitTriggers: query?.shouldHitTriggers,
+        };
+        const hit = physicsRaycast(world, from, to, liteQuery);
+        result.reset(from, to);
+        if (!hit.hasHit) {
+            return;
+        }
+        result.setHitData(hit.hitNormal, hit.hitPoint, hit.triangleIndex);
+        result.setHitDistance(hit.hitDistance);
+        result.body = hit.body ? getPhysicsBodyWrappers().get(hit.body) : undefined;
+        result.bodyIndex = hit.bodyIndex;
     }
 
     /** Release the underlying physics world. */

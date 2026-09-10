@@ -10,11 +10,15 @@ const liteMocks = vi.hoisted(() => ({
     createTexture3DFromPixels: vi.fn(),
     createDynamicTexture: vi.fn(),
     updateDynamicTexture: vi.fn(),
+    createHtmlTexture: vi.fn(),
+    requestHtmlTextureUpdate: vi.fn(),
+    updateHtmlTexture: vi.fn(),
+    disposeHtmlTexture: vi.fn(),
 }));
 
 vi.mock("babylon-lite", () => liteMocks);
 
-import { resolveKtxUrl, BaseTexture, CubeTexture, HDRCubeTexture, Texture } from "../src/textures/textures";
+import { resolveKtxUrl, BaseTexture, CubeTexture, HDRCubeTexture, HtmlTexture, Texture } from "../src/textures/textures";
 
 type Deferred<T> = {
     promise: Promise<T>;
@@ -61,6 +65,49 @@ describe("resolveKtxUrl", () => {
         expect(resolveKtxUrl("https://h/UVgrid-dxt.ktx")).toEqual({ baseUrl: "https://h/UVgrid.png", suffix: "-dxt.ktx" });
         expect(resolveKtxUrl("https://h/UVgrid-astc.ktx")).toEqual({ baseUrl: "https://h/UVgrid.png", suffix: "-astc.ktx" });
         expect(resolveKtxUrl("https://h/UVgrid-etc2.ktx")).toEqual({ baseUrl: "https://h/UVgrid.png", suffix: "-etc2.ktx" });
+    });
+
+    describe("HtmlTexture", () => {
+        it("forwards BJS options and update lifecycle to Lite", () => {
+            const texture = { width: 64, height: 32 };
+            liteMocks.createHtmlTexture.mockReturnValue(texture);
+            const host = {} as HTMLCanvasElement;
+            const engine = {
+                _lite: {} as EngineContext,
+                getRenderingCanvas: () => host,
+            } as unknown as ConstructorParameters<typeof HtmlTexture>[2]["engine"];
+            const element = {} as HTMLElement;
+
+            const html = new HtmlTexture("panel", element, {
+                engine,
+                width: 64,
+                height: 32,
+                generateMipMaps: true,
+                samplingMode: Texture.NEAREST_SAMPLINGMODE,
+                autoUpdate: false,
+                useSvgFallback: false,
+            });
+
+            expect(liteMocks.createHtmlTexture).toHaveBeenCalledWith(engine!._lite, element, {
+                width: 64,
+                height: 32,
+                mipMaps: true,
+                autoUpdate: false,
+                useSvgFallback: false,
+                minFilter: "nearest",
+                magFilter: "nearest",
+                invertY: true,
+            });
+            expect(html.name).toBe("panel");
+            expect(html.element).toBe(element);
+            expect(html.host).toBe(host);
+            html.requestUpdate();
+            expect(liteMocks.requestHtmlTextureUpdate).toHaveBeenCalledWith(engine!._lite, texture);
+            html.update(false);
+            expect(liteMocks.updateHtmlTexture).toHaveBeenCalledWith(engine!._lite, texture, false);
+            html.dispose();
+            expect(liteMocks.disposeHtmlTexture).toHaveBeenCalledWith(texture);
+        });
     });
 
     it("preserves a query string on the base URL (auth / cache-busting / signed URLs)", () => {

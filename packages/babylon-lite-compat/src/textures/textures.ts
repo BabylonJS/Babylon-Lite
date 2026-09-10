@@ -17,10 +17,16 @@ import {
     createTexture3DFromPixels,
     createDynamicTexture,
     updateDynamicTexture,
+    createHtmlTexture,
+    requestHtmlTextureUpdate,
+    updateHtmlTexture,
+    disposeHtmlTexture,
 } from "babylon-lite";
-import type { Texture2D, Texture2DOptions, EngineContext, Texture3D, DynamicTexture2D } from "babylon-lite";
+import type { Texture2D, Texture2DOptions, EngineContext, Texture3D, DynamicTexture2D, HtmlTexture2D } from "babylon-lite";
 
 import { unsupported } from "../error.js";
+import type { AbstractEngine } from "../engine/engine.js";
+import { Matrix } from "../math/matrix.js";
 import { Observable } from "../misc/observable.js";
 import type { Scene } from "../scene/scene.js";
 
@@ -121,6 +127,86 @@ export abstract class BaseTexture {
     public dispose(): void {
         // Lite texture lifetimes are managed by the GPU resource pool; explicit
         // disposal is a no-op in the compat layer.
+    }
+}
+
+/** Options accepted by Babylon.js `HtmlTexture`. */
+export interface IHtmlTextureOptions {
+    width?: number;
+    height?: number;
+    generateMipMaps?: boolean;
+    samplingMode?: number;
+    format?: number;
+    autoUpdate?: boolean;
+    useSvgFallback?: boolean;
+    engine?: AbstractEngine | null;
+    scene?: Scene | null;
+}
+
+/** Babylon.js `HtmlTexture`, forwarding DOM capture and updates to Babylon Lite. */
+export class HtmlTexture extends BaseTexture {
+    public readonly element: HTMLElement;
+    public readonly host: HTMLElement | null;
+    public readonly onLoadObservable = new Observable<HtmlTexture>();
+    private readonly _engine: AbstractEngine | null;
+    private readonly _textureMatrix = Matrix.Identity();
+
+    public constructor(name: string, element: HTMLElement, options: IHtmlTextureOptions) {
+        super();
+        this.name = name;
+        this.element = element;
+        this._engine = options.scene?.getEngine() ?? options.engine ?? null;
+        this.host = (this._engine?.getRenderingCanvas() as HTMLElement | null | undefined) ?? null;
+        if (!this._engine || !element) {
+            return;
+        }
+        if (options.format !== undefined && options.format !== 5) {
+            unsupported("HtmlTexture.format", "Babylon Lite HTML textures use RGBA8; alternate Babylon.js texture formats require a new native upload/storage contract.");
+        }
+        const nearest = options.samplingMode === Texture.NEAREST_SAMPLINGMODE || options.samplingMode === Texture.NEAREST_NEAREST;
+        this._lite = createHtmlTexture(this._engine._lite, element, {
+            width: options.width,
+            height: options.height,
+            mipMaps: options.generateMipMaps ?? false,
+            autoUpdate: options.autoUpdate ?? true,
+            useSvgFallback: options.useSvgFallback ?? true,
+            minFilter: nearest ? "nearest" : "linear",
+            magFilter: nearest ? "nearest" : "linear",
+            invertY: true,
+        });
+        this._notifyReady();
+    }
+
+    public getTextureMatrix(): Matrix {
+        return this._textureMatrix;
+    }
+
+    public requestUpdate(): void {
+        if (this._engine && this._lite) {
+            requestHtmlTextureUpdate(this._engine._lite, this._lite as HtmlTexture2D);
+        }
+    }
+
+    public update(invertY = true): void {
+        if (this._engine && this._lite) {
+            updateHtmlTexture(this._engine._lite, this._lite as HtmlTexture2D, invertY);
+        }
+    }
+
+    public override getClassName(): string {
+        return "HtmlTexture";
+    }
+
+    public whenReadyAsync(): Promise<void> {
+        return Promise.resolve();
+    }
+
+    public override dispose(): void {
+        if (this._lite) {
+            disposeHtmlTexture(this._lite as HtmlTexture2D);
+            this._lite = undefined;
+        }
+        this.onLoadObservable.clear();
     }
 }
 

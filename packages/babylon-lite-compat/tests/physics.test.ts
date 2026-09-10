@@ -20,6 +20,7 @@ import {
     HingeConstraint,
     PhysicsCharacterController,
     CharacterSupportedState,
+    PhysicsRaycastResult,
 } from "../src/physics/physics";
 import type { TransformNode } from "../src/meshes/meshes";
 import { Vector3 } from "../src/math/vector";
@@ -45,6 +46,7 @@ function makeMockHknp() {
 
 function makeAggregateMockHknp() {
     const filterInfo = new WeakMap<object, [number, number]>();
+    let nextBodyId = 1n;
     return {
         ...makeMockHknp(),
         MotionType: { STATIC: 0, KINEMATIC: 1, DYNAMIC: 2 },
@@ -58,7 +60,7 @@ function makeAggregateMockHknp() {
         HP_Shape_GetFilterInfo: vi.fn((shape: object) => [0, filterInfo.get(shape) ?? [0xffffffff, 0xffffffff]]),
         HP_Shape_SetFilterInfo: vi.fn((shape: object, value: [number, number]) => filterInfo.set(shape, value)),
         HP_Shape_Release: vi.fn(),
-        HP_Body_Create: vi.fn(() => [0, { __body: true }]),
+        HP_Body_Create: vi.fn(() => [0, [nextBodyId++]]),
         HP_Body_SetMotionType: () => undefined,
         HP_Body_SetQTransform: () => undefined,
         HP_Body_SetShape: () => undefined,
@@ -82,6 +84,9 @@ function makeAggregateMockHknp() {
         HP_Constraint_Release: vi.fn(),
         HP_Shape_BuildMassProperties: () => [0, [[0, 0, 0], 1, [1, 1, 1], [0, 0, 0, 1]]],
         HP_QueryCollector_Create: vi.fn(() => [0, { __collector: true }]),
+        HP_QueryCollector_GetNumHits: vi.fn(() => [0, 1]),
+        HP_QueryCollector_GetCastRayResult: vi.fn(() => [0, [0, [[1n], 0, 0, [1, 2, 3], [0, 1, 0], 7]]]),
+        HP_World_CastRayWithCollector: vi.fn(),
         HP_QueryCollector_Release: vi.fn(),
     };
 }
@@ -347,18 +352,39 @@ describe("PhysicsEngine", () => {
             expect(hknp.HP_Constraint_Create).not.toHaveBeenCalled();
         });
 
-        it("fails before allocation for parented nodes and thin instances", () => {
+        it("fails before allocation for parented nodes", () => {
             const hknp = makeAggregateMockHknp();
             const plugin = new HavokPlugin(true, hknp);
             plugin._attachToLiteScene(makeScene());
             const scene = { getPhysicsEngine: () => new PhysicsEngine(plugin, Vector3.Zero()) } as unknown as Scene;
             const parented = makePhysicsNode(scene);
             parented.parent = {} as TransformNode;
-            const thin = makePhysicsNode(scene, { thinInstances: { count: 2 } });
 
             expect(() => new PhysicsBody(parented, PhysicsMotionType.STATIC, false, scene)).toThrow(/parented TransformNodes/);
-            expect(() => new PhysicsBody(thin, PhysicsMotionType.STATIC, false, scene)).toThrow(/per-thin-instance/);
             expect(hknp.HP_Body_Create).not.toHaveBeenCalled();
+        });
+
+        it("forwards thin-instance aggregate creation and raycast results through Lite", () => {
+            const hknp = makeAggregateMockHknp();
+            const plugin = new HavokPlugin(true, hknp);
+            plugin._attachToLiteScene(makeScene());
+            const engine = new PhysicsEngine(plugin, Vector3.Zero());
+            const scene = { getPhysicsEngine: () => engine } as unknown as Scene;
+            const matrices = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 2, 0, 0, 1]);
+            const node = makePhysicsNode(scene, { thinInstances: { count: 2, matrices } });
+
+            const aggregate = new PhysicsAggregate(node, PhysicsShapeType.BOX, { mass: 0 }, scene);
+            const result = engine.raycast(new Vector3(0, 0, 0), new Vector3(5, 0, 0));
+
+            expect(hknp.HP_Body_Create).toHaveBeenCalledTimes(2);
+            expect(result).toBeInstanceOf(PhysicsRaycastResult);
+            expect(result.hasHit).toBe(true);
+            expect(result.hitPointWorld.asArray()).toEqual([1, 2, 3]);
+            expect(result.hitNormalWorld.asArray()).toEqual([0, 1, 0]);
+            expect(result.hitDistance).toBeCloseTo(Math.sqrt(14));
+            expect(result.triangleIndex).toBe(7);
+            expect(result.body).toBe(aggregate.body);
+            expect(result.bodyIndex).toBe(0);
         });
 
         it("forwards repeated hinge bindings and releases every Lite constraint idempotently", () => {

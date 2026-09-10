@@ -34,7 +34,6 @@ import {
     EdgesRenderer,
     OutlineRenderer,
     MirrorTexture,
-    HtmlTexture,
     HtmlInteractionManager,
     HtmlRaycastInteractionManager,
     IsHtmlInCanvasUploadSupported,
@@ -47,6 +46,8 @@ import {
     GaussianSplattingStream,
     AddGaussianSplattingStreamPart,
     AddGaussianSplattingStreamPartAsync,
+    USDFileLoader,
+    RegisterUSDFileLoader,
     Sound,
     PointerDragBehavior,
     BaseSixDofDragBehavior,
@@ -128,7 +129,6 @@ describe("Unsupported API stubs throw on construction", () => {
         ["EdgesRenderer", () => new EdgesRenderer()],
         ["OutlineRenderer", () => new OutlineRenderer()],
         ["MirrorTexture", () => new MirrorTexture()],
-        ["HtmlTexture", () => new HtmlTexture()],
         ["HtmlInteractionManager", () => new HtmlInteractionManager()],
         ["HtmlRaycastInteractionManager", () => new HtmlRaycastInteractionManager()],
         ["Sound", () => new Sound()],
@@ -249,6 +249,14 @@ describe("Gaussian Splatting LOD streaming stubs throw", () => {
     it("GaussianSplattingStream throws on construction", () => {
         expect(() => new GaussianSplattingStream()).toThrow(LiteCompatError);
         expect(() => new GaussianSplattingStream()).toThrow(/GaussianSplattingStream/);
+    });
+
+    describe("OpenUSD loader stubs", () => {
+        it("resolves the new loader symbols and reports the subsystem blocker", () => {
+            expect(() => new USDFileLoader()).toThrow(LiteCompatError);
+            expect(() => new USDFileLoader()).toThrow(/OpenUSD WebAssembly worker/);
+            expect(() => RegisterUSDFileLoader()).toThrow(LiteCompatError);
+        });
     });
 
     it.each([
