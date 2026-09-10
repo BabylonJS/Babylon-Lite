@@ -70,15 +70,6 @@ interface CsmRefitDecision {
     renderDynamic: boolean;
 }
 
-interface CsmStaticRefitScheduler {
-    arm(spread: boolean): void;
-    pending(): boolean;
-    take(): number[];
-    maxLagFrames(): number;
-}
-
-function createCsmStaticRefitScheduler(cascadeCount: number, cascadesPerFrame: number): CsmStaticRefitScheduler;
-
 interface CsmRefitGate<M extends CsmRefitCaster> {
     syncCasters(casters: readonly M[]): void;
     markDynamic(caster: M): void;
@@ -170,23 +161,24 @@ that are not explicitly enabled preserve the original single-task path, allocate
 cache texture, and do not load the cache implementation.
 
 With `options.staticCascadesPerFrame` above zero, a refit whose only cause is light drift
-(`gate.lastRefitDriftOnly()`) re-renders at most that many static cascades per frame, round-robin,
-so the periodic refresh costs a slice of every frame instead of one long frame. The cascade
-cameras and the receiver UBO are written for every cascade in the refit frame; a cascade
-re-rendered later draws with the transform the receivers sample, and until its turn the
-receivers sample its previous layer under the new transform. That inconsistency is bounded by
-the light drift accumulated over at most `ceil(cascades / budget) - 1` frames (about 0.0006 rad
-for three cascades, one per frame, at 35 ms frames and a 360 s day). A refit caused by the
-camera, the scene content, the caster set, a promotion or a demotion re-renders every cascade
-in its own frame, as without the option, and so does a drift refit that lands while a spread is
-still draining — a light turning faster than the drain (a fast game clock crossing the angle
-epsilon every frame) therefore falls back to the single-frame re-render instead of leaving the
-trailing cascades permanently behind.
+re-renders at most that many static cascades per frame, round-robin, so the periodic refresh
+costs a slice of every frame instead of one long frame. Each selected cascade advances
+atomically: its shadow camera and receiver transform are updated together, its static layer is
+rendered, only that array layer is copied to the live shadow map, and only that layer's dynamic
+overlay is rendered. Cascades still waiting retain both their previous depth and previous
+receiver transform, so the sampled data remains coherent throughout the spread.
+
+A refit caused by the camera, scene content, caster set, promotion or demotion updates every
+cascade in its own frame, as without the option. A drift refit that lands while a spread is
+still draining also updates every cascade immediately, preventing a fast-moving light from
+continually replacing the pending generation. If a dynamic caster changes during a spread,
+the cache is copied and the dynamic overlay is redrawn for every cascade, while each static
+layer remains paired with its currently published transform.
 
 `createCsmRefitGate` exposes the CPU-only partition/refit state machine for consumers
-that need the same policy without engine or WebGPU dependencies. `createCsmStaticRefitScheduler`
-exposes the spread schedule the same way. Re-supplying a new
-array with identical caster membership does not invalidate the cache.
+that need the same policy without engine or WebGPU dependencies. The spread scheduler and its
+drift classification are internal cache-orchestration details. Re-supplying a new array with
+identical caster membership does not invalidate the cache.
 
 ### Receiver UBO layout (`_shadowUBO`, 320 bytes / 80 f32)
 

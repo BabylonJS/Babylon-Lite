@@ -11,8 +11,10 @@ describe("CSM static refit scheduler", () => {
 
         scheduler.arm(true);
         expect(scheduler.pending()).toBe(true);
-        expect(scheduler.take()).toEqual([0]); // the refit frame itself renders the first cascade
-        expect(scheduler.take()).toEqual([1]); // lag 1
+        const selection = scheduler.take();
+        expect(selection).toEqual([0]); // the refit frame itself renders the first cascade
+        expect(scheduler.take()).toBe(selection);
+        expect(selection).toEqual([1]); // lag 1; the scheduler reuses its output buffer
         expect(scheduler.take()).toEqual([2]); // lag 2 = maxLagFrames
         expect(scheduler.pending()).toBe(false);
         expect(scheduler.take()).toEqual([]);

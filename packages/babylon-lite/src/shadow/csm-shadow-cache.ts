@@ -23,6 +23,7 @@ import {
     _writeCsmUbo,
     csmCameraAspect,
     csmWorldBiasClipOffset,
+    type CsmCascades,
     type CsmConfig,
     type CsmTaskState,
 } from "./csm-shadow-task-hooks.js";
@@ -34,6 +35,8 @@ interface CsmCachedTaskState extends CsmTaskState {
     _gate: CsmRefitGate<Mesh>;
     /** Spreads a drift-only refit's static re-render over frames (`staticCascadesPerFrame`). */
     _staticScheduler: CsmStaticRefitScheduler;
+    /** Pending cascade generation. Each layer is published only when its matching depth is rendered. */
+    _pendingCascades: CsmCascades | null;
     _onPromote: (mesh: Mesh) => void;
     _onDemote: (mesh: Mesh) => void;
     /** Tasks the last gate decision moved meshes INTO, rebuilt once after the decision. */
@@ -298,6 +301,7 @@ export function ensureCsmShadowCacheState(
         _cacheTexture: cacheTexture,
         _gate: gate,
         _staticScheduler: createCsmStaticRefitScheduler(cascadeCount, cache._staticCascadesPerFrame ?? 0),
+        _pendingCascades: null,
         _onPromote: onPromote,
         _onDemote: onDemote,
         _pendingTransfers: pendingTransferTargets,
@@ -345,49 +349,75 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
         }
         cached._pendingTransfers.clear();
     }
-    // A cascade still waiting for its spread static re-render keeps the frame alive even when nothing
-    // dynamic changed: its layer must land, and the copy below then carries it to the sampled map.
     const scheduler = cached._staticScheduler;
-    if (!decision.renderDynamic && !scheduler.pending()) {
+    const hadPending = scheduler.pending();
+    if (!decision.renderDynamic && !hadPending) {
         return 0;
     }
     let draws = 0;
     if (decision.refit) {
-        applyCsmRefit(engine, sg, cached, cfg, camera);
+        cached._pendingCascades = _computeCsmCascades(cached._scene, camera, sg._light as DirectionalLight, cfg, cached._casterMeshes, cached._cascadeScratch);
         cached._lastCamVersion = camVersion;
         cached._lastCamAspect = camAspect;
         cached._cachedContentVersion = cached._scene._renderableVersion;
-        // The cascade cameras and the receiver UBO are written for every cascade right here. A cascade
-        // whose static layer is re-rendered a few frames later then draws with the transform the receivers
-        // sample; until its turn, the receivers sample its PREVIOUS layer with the NEW transform — an
-        // inconsistency bounded by the light drift accumulated over at most ceil(cascades / budget) - 1
-        // frames (about 0.0006 rad at 35 ms frames and a 360 s day, under the 0.0015 rad epsilon). Two
-        // guards keep that bound: only a drift-only refit may be spread (a camera, content or membership
-        // change re-renders every cascade in this frame, as before), and a drift refit that lands while a
-        // spread is still draining re-renders everything too — otherwise a light turning faster than the
-        // drain (a fast game clock crossing the angle epsilon every frame) would re-arm the spread each
-        // frame and leave the trailing cascades permanently behind the matrices.
         scheduler.arm(cached._gate.lastRefitDriftOnly() && !scheduler.pending());
     }
-    if (scheduler.pending()) {
-        for (const cascade of scheduler.take()) {
+    const cascades = scheduler.pending() ? scheduler.take() : null;
+    if (cascades) {
+        publishCsmCascades(engine, sg, cached, cfg, cached._pendingCascades!, cascades);
+        for (const cascade of cascades) {
             draws += cached._staticTasks[cascade]!.execute?.() ?? 0;
         }
+        if (!scheduler.pending()) {
+            cached._pendingCascades = null;
+        }
     }
-    engine._currentEncoder.copyTextureToTexture(
-        { texture: cached._cacheTexture },
-        { texture: sg._depthTexture },
-        { width: cfg._mapSize, height: cfg._mapSize, depthOrArrayLayers: cfg._numCascades }
-    );
-    for (const task of cached._tasks) {
-        draws += task.execute?.() ?? 0;
+    // A dynamic-caster change requires clearing and redrawing every live layer. Otherwise a spread
+    // frame touches only the cascades whose static depth and receiver transform were just advanced.
+    if (cached._gate.lastDynamicChanged() || cascades?.length === cfg._numCascades) {
+        engine._currentEncoder.copyTextureToTexture(
+            { texture: cached._cacheTexture },
+            { texture: sg._depthTexture },
+            { width: cfg._mapSize, height: cfg._mapSize, depthOrArrayLayers: cfg._numCascades }
+        );
+        for (const task of cached._tasks) {
+            if (task._renderables.length || task._pendingMeshes.length) {
+                draws += task.execute?.() ?? 0;
+            }
+        }
+    } else if (cascades) {
+        for (const cascade of cascades) {
+            engine._currentEncoder.copyTextureToTexture(
+                { texture: cached._cacheTexture, origin: { x: 0, y: 0, z: cascade } },
+                { texture: sg._depthTexture, origin: { x: 0, y: 0, z: cascade } },
+                { width: cfg._mapSize, height: cfg._mapSize, depthOrArrayLayers: 1 }
+            );
+            const task = cached._tasks[cascade]!;
+            if (task._renderables.length || task._pendingMeshes.length) {
+                draws += task.execute?.() ?? 0;
+            }
+        }
     }
     return draws;
 }
 
-function applyCsmRefit(engine: EngineContext, sg: ShadowGenerator, state: CsmTaskState, cfg: CsmConfig, camera: NonNullable<SceneContext["camera"]>): void {
-    const cascades = _computeCsmCascades(state._scene, camera, sg._light as DirectionalLight, cfg, state._casterMeshes, state._cascadeScratch);
-    _writeCsmUbo(state._uboData, cascades, cfg);
+function publishCsmCascades(engine: EngineContext, sg: ShadowGenerator, state: CsmTaskState, cfg: CsmConfig, cascades: CsmCascades, updatedCascades: readonly number[]): void {
+    const fullUpdate = updatedCascades.length === cfg._numCascades;
+    if (fullUpdate) {
+        _writeCsmUbo(state._uboData, cascades, cfg);
+    }
+    state._cameraVersion++;
+    for (const cascade of updatedCascades) {
+        const transform = cascades._transforms[cascade]!;
+        if (!fullUpdate) {
+            state._uboData.set(transform, cascade * 16);
+        }
+        const cascadeCamera = state._cameras[cascade]!;
+        cascadeCamera.fov = 1;
+        const clipBias = cfg._worldSpaceBias === null ? cfg._bias * 0.5 : csmWorldBiasClipOffset(cfg._worldSpaceBias, cascades._near[cascade]!, cascades._far[cascade]!);
+        _biasViewProjection(transform, clipBias);
+        updateShadowCameraBase(cascadeCamera, state._cameraVersion, cascades._near[cascade]!, cascades._far[cascade]!, cascades._views[cascade]!, transform);
+    }
     sg._version++;
     engine._device.queue.writeBuffer(sg._shadowUBO, 0, state._uboData as Float32Array<ArrayBuffer>);
     const receiverCbs = sg._onReceiverData;
@@ -395,14 +425,6 @@ function applyCsmRefit(engine: EngineContext, sg: ShadowGenerator, state: CsmTas
         for (let i = 0; i < receiverCbs.length; i++) {
             receiverCbs[i]!(state._uboData);
         }
-    }
-    state._cameraVersion++;
-    for (let i = 0; i < cascades._transforms.length; i++) {
-        const cascadeCamera = state._cameras[i]!;
-        cascadeCamera.fov = 1;
-        const clipBias = cfg._worldSpaceBias === null ? cfg._bias * 0.5 : csmWorldBiasClipOffset(cfg._worldSpaceBias, cascades._near[i]!, cascades._far[i]!);
-        _biasViewProjection(cascades._transforms[i]!, clipBias);
-        updateShadowCameraBase(cascadeCamera, state._cameraVersion, cascades._near[i]!, cascades._far[i]!, cascades._views[i]!, cascades._transforms[i]!);
     }
 }
 

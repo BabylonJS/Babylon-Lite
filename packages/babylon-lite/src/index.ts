@@ -451,7 +451,7 @@ export { createPcfSpotlightShadowGenerator } from "./shadow/pcf-spotlight-shadow
 export { createPcfDirectionalShadowGenerator } from "./shadow/pcf-directional-shadow-generator.js";
 export { createCsmDirectionalShadowGenerator, getCsmReceiverTexture, onCsmReceiverUpdate } from "./shadow/csm-directional-shadow-generator.js";
 export { enableCsmStaticCache } from "./shadow/enable-csm-static-cache.js";
-export { createCsmRefitGate, createCsmStaticRefitScheduler } from "./shadow/csm-refit-gate.js";
+export { createCsmRefitGate } from "./shadow/csm-refit-gate.js";
 export { enableMorphTargetShadows } from "./shadow/enable-morph-target-shadows.js";
 export { enableSkeletonShadows } from "./shadow/enable-skeleton-shadows.js";
 export { setShadowTaskCasterMeshes, setShadowCasterMaxCascade } from "./frame-graph/shadow-inputs.js";

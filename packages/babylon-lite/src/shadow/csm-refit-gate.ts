@@ -7,7 +7,7 @@
  *
  *  Deliberately free of GPU and engine types so consumers can unit-test the gate with
  *  plain objects. The GPU orchestration (task membership moves, texture copies, camera
- *  updates) lives in `csm-shadow-task-hooks.ts`, which drives this gate through the
+ *  updates) lives in `csm-shadow-cache.ts`, which drives this gate through the
  *  promote/demote callbacks.
  *
  *  Correctness invariant owned by the caller: cascade matrices, the receiver UBO and
@@ -58,15 +58,10 @@ export interface CsmRefitGate<M extends CsmRefitCaster> {
     markDynamic(caster: M): void;
     /** Current classification, for callers that build task membership from a carried gate. */
     isDynamic(caster: M): boolean;
-    /** Whether the refit returned by the latest `update()` was caused by light drift alone (the angle
-     *  epsilon or the wall-time floor): the camera, the caster set, the static partition and the scene
-     *  content are exactly what the previous refit rendered, so a consumer may spread that refit's static
-     *  re-render over several frames (`createCsmStaticRefitScheduler`). Until a cascade's turn comes, its
-     *  layer still shows the previous refit's depth under the new transform: the only inconsistency a
-     *  spread introduces is that light drift, bounded by the spread's lag in frames. False after a frame
-     *  without refit and after a refit with any other cause, including a demotion applied inside the
-     *  refit (the demoted caster would otherwise vanish from the cascades not yet re-rendered). */
+    /** @internal Whether the latest refit was caused by light drift alone. */
     lastRefitDriftOnly(): boolean;
+    /** @internal Whether the dynamic partition changed on the latest update. */
+    lastDynamicChanged(): boolean;
     /** One walk over the synced casters: computes the static/dynamic version sums, promotes
      *  churning static casters (via `onPromote`, immediately), counts quiet frames, and decides
      *  refit/overlay. Pending demotions are applied (via `onDemote`) only inside a refit; they
@@ -119,6 +114,7 @@ export function createCsmRefitGate<M extends CsmRefitCaster>(options: CsmRefitGa
     let lastRefitMs = 0;
     let framesSinceRefit = 0;
     let lastDriftOnly = false;
+    let lastDynamicChanged = false;
 
     return {
         syncCasters(next: readonly M[]): void {
@@ -159,6 +155,9 @@ export function createCsmRefitGate<M extends CsmRefitCaster>(options: CsmRefitGa
         },
         lastRefitDriftOnly(): boolean {
             return lastDriftOnly;
+        },
+        lastDynamicChanged(): boolean {
+            return lastDynamicChanged;
         },
         update(
             lightDirX: number,
@@ -259,7 +258,8 @@ export function createCsmRefitGate<M extends CsmRefitCaster>(options: CsmRefitGa
                 framesSinceRefit = 0;
             }
 
-            const renderDynamic = refit || dynamicChanged || dynamicSum !== lastDynamicSum;
+            lastDynamicChanged = dynamicChanged || dynamicSum !== lastDynamicSum;
+            const renderDynamic = refit || lastDynamicChanged;
             // A demotion applied inside a drift refit moves a caster between the dynamic and static layers,
             // which is a membership change for the static render: it disqualifies the spread as well.
             lastDriftOnly = refit && !membershipCause && demoted === 0;
@@ -270,7 +270,7 @@ export function createCsmRefitGate<M extends CsmRefitCaster>(options: CsmRefitGa
     };
 }
 
-/** Which static cascades to re-render this frame when a refit is spread over several frames. */
+/** @internal Which static cascades to re-render this frame when a refit is spread over several frames. */
 export interface CsmStaticRefitScheduler {
     /** A refit decision landed. `spread` true keeps the per-frame budget (a drift-only refit);
      *  false re-renders every cascade in the very next `take()` (any other refit cause). */
@@ -285,13 +285,14 @@ export interface CsmStaticRefitScheduler {
     maxLagFrames(): number;
 }
 
-/** Create the scheduler for `cascadeCount` cascades and a per-frame budget of `cascadesPerFrame`
+/** @internal Create the scheduler for `cascadeCount` cascades and a per-frame budget of `cascadesPerFrame`
  *  static re-renders. A budget of 0 (or one that covers every cascade) disables the spread: every
  *  refit re-renders all cascades in its own frame, the historical behaviour. */
 export function createCsmStaticRefitScheduler(cascadeCount: number, cascadesPerFrame: number): CsmStaticRefitScheduler {
     const count = Math.max(0, Math.floor(cascadeCount));
     const budget = Number.isFinite(cascadesPerFrame) && cascadesPerFrame > 0 && cascadesPerFrame < count ? Math.floor(cascadesPerFrame) : 0;
     const waiting: boolean[] = new Array<boolean>(count).fill(false);
+    const out: number[] = [];
     let waitingCount = 0;
     let immediate = false;
     let cursor = 0;
@@ -305,7 +306,7 @@ export function createCsmStaticRefitScheduler(cascadeCount: number, cascadesPerF
             return waitingCount > 0;
         },
         take(): number[] {
-            const out: number[] = [];
+            out.length = 0;
             if (waitingCount === 0) {
                 return out;
             }
