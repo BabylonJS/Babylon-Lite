@@ -23,6 +23,8 @@ vi.mock("babylon-lite", async (importActual) => ({
 }));
 
 import type { Mesh as LiteMesh } from "babylon-lite";
+import { DirectionalLight } from "../src/lights/lights";
+import { Vector3 } from "../src/math/vector";
 import { AbstractMesh, Mesh, TransformNode } from "../src/meshes/meshes";
 import { Node } from "../src/node/node";
 import type { Scene } from "../src/scene/scene";
@@ -69,6 +71,7 @@ function createTestScene(): { scene: Scene; registered: Node[]; pendingAdds: Arr
         getEngine: () => ({ _lite: { id: "engine" } }),
         _deferAdd: (add: () => void) => pendingAdds.push(add),
         _registerMesh: (node: Node) => registered.push(node),
+        _registerLight: (node: Node) => registered.push(node),
         _unregisterNode: (node: Node) => {
             const index = registered.indexOf(node);
             if (index !== -1) {
@@ -227,6 +230,19 @@ describe("Node scene-graph traversal", () => {
 
         builtRoot.dispose();
         expect(removeFromSceneMock).toHaveBeenCalledTimes(2);
+    });
+
+    it("removes a descendant light from the Lite scene through recursive disposal", () => {
+        const { scene, registered } = createTestScene();
+        const root = new TransformNode("root", scene);
+        const light = new DirectionalLight("sun", new Vector3(0, -1, 0), scene);
+        light.parent = root;
+
+        root.dispose();
+
+        expect(removeFromSceneMock.mock.calls.map(([, node]) => node)).toEqual([light._lite, root._node]);
+        expect(registered).toEqual([]);
+        expect(light.isDisposed()).toBe(true);
     });
 });
 
