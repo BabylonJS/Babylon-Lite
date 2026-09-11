@@ -18,8 +18,16 @@ import { withBase } from "./base";
 /** Sentinel value for the self-hosted, source-tracking engine build. */
 export const NIGHTLY = "nightly";
 
+/** First published Babylon Lite version supported by Inspector v2's Lite entry point. */
+const MIN_INSPECTOR_VERSION = "1.27.0";
+
 /** URL of the self-hosted nightly engine bundle (served under the app's deploy base). */
 export const NIGHTLY_ENGINE_URL = withBase("engine/dev/index.js");
+
+/** Whether the selected Babylon Lite snapshot satisfies Inspector v2's peer range. */
+export function supportsInspector(version: string): boolean {
+    return version === NIGHTLY || compareSemver(version, MIN_INSPECTOR_VERSION) >= 0;
+}
 
 /**
  * Location of the deployed-versions manifest, always at the origin root so every
