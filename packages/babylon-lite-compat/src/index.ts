@@ -99,7 +99,8 @@ export {
 } from "./materials/materials.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
-export { BaseTexture, Texture, RawTexture, RawTexture3D, DynamicTexture, CubeTexture, HDRCubeTexture, RenderTargetTexture } from "./textures/textures.js";
+export { BaseTexture, Texture, RawTexture, RawTexture3D, DynamicTexture, HtmlTexture, CubeTexture, HDRCubeTexture, RenderTargetTexture } from "./textures/textures.js";
+export type { IHtmlTextureOptions } from "./textures/textures.js";
 export {
     RawTexture2DArray,
     UploadImageToTexture2DArrayLayer,
@@ -288,7 +289,6 @@ export {
     EdgesRenderer,
     OutlineRenderer,
     MirrorTexture,
-    HtmlTexture,
     HtmlInteractionManager,
     HtmlRaycastInteractionManager,
     IsHtmlInCanvasUploadSupported,
@@ -325,11 +325,12 @@ export {
     FluidRenderer,
     FluidRendererSceneComponent,
     RegisterFluidRenderer,
+    USDFileLoader,
+    RegisterUSDFileLoader,
 } from "./unsupported/unsupported-apis.js";
 export * as GLTF2 from "./loading/gltf2.js";
 export * as GLTF1 from "./loading/gltf1.js";
 export type {
-    IHtmlTextureOptions,
     IHtmlInteractionManagerOptions,
     IHtmlRaycastInteractionManagerOptions,
     IHtmlInCanvasPolyfillModule,
@@ -338,6 +339,13 @@ export type {
     IGaussianSplattingStreamOptions,
     ISOGLODMetadata,
     IGaussianSplattingStreamingPart,
+    USDBinaryInput,
+    USDVirtualFiles,
+    USDLoadProgress,
+    USDImportTimings,
+    USDImportStatistics,
+    USDImportDiagnostics,
+    USDFileLoaderOptions,
 } from "./unsupported/unsupported-apis.js";
 export {
     ReflectionProbe,
@@ -399,6 +407,8 @@ export {
     SpringConstraint,
     PhysicsCharacterController,
     CharacterSupportedState,
+    CastingResult,
+    PhysicsRaycastResult,
 } from "./physics/physics.js";
 export type {
     PhysicsAggregateParameters,
@@ -407,6 +417,7 @@ export type {
     CharacterShapeOptions,
     CharacterSurfaceInfo,
     ICharacterControllerCollisionEvent,
+    IRaycastQuery,
     PhysicsConstraintParameters,
 } from "./physics/physics.js";
 
