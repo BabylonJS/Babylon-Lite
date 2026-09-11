@@ -13,7 +13,7 @@
  * and propagate on `.x/.y/.z` writes.
  */
 
-import { addToScene, createHemisphericLight, createDirectionalLight, createPointLight, createSpotLight } from "babylon-lite";
+import { addToScene, createHemisphericLight, createDirectionalLight, createPointLight, createSpotLight, removeFromScene } from "babylon-lite";
 import type {
     HemisphericLight as LiteHemisphericLight,
     DirectionalLight as LiteDirectionalLight,
@@ -122,12 +122,13 @@ export abstract class Light extends Node {
         }
     }
 
-    public override dispose(): void {
-        // Lite removes lights through the scene; without a back-reference the
-        // caller should use `removeFromScene`. Detaching the shadow generator is
-        // the safe, scene-free cleanup we can do here.
-        this._lite.shadowGenerator = undefined;
-        super.dispose();
+    /** @internal Detach Lite-owned state when this node is disposed directly or through an ancestor. */
+    protected override _disposeSelf(_doNotRecurse: boolean): void {
+        if (this._scene) {
+            removeFromScene(this._scene._lite, this._lite);
+        } else {
+            this._lite.shadowGenerator = undefined;
+        }
     }
 }
 
