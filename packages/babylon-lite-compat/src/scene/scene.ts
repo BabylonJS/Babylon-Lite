@@ -67,7 +67,6 @@ import { Ray } from "../math/ray.js";
 import { Vector3 } from "../math/vector.js";
 import { PickingInfo } from "../culling/picking-info.js";
 import { AbstractMesh, Mesh } from "../meshes/meshes.js";
-import type { TransformNode } from "../meshes/meshes.js";
 import { PointerEventTypes, PointerInfo } from "../events/pointer-events.js";
 
 /** Babylon.js EnvironmentHelper default skybox/ground assets (match the Lite ports). */
@@ -915,12 +914,28 @@ export class Scene extends AbstractScene {
         return true;
     }
 
-    /** Synchronous CPU picking — unsupported. Babylon Lite uses async GPU picking. */
-    public pick(): never {
-        return unsupported(
-            "Scene.pick",
-            "Babylon Lite uses asynchronous GPU picking. Use the compat `GPUPicker` class (Babylon.js parity) or the native `createGpuPicker` + `pickAsync` API."
-        );
+    /** Babylon.js synchronous screen-coordinate picking over Lite's CPU ray picker. */
+    public pick(
+        x: number,
+        y: number,
+        predicate?: (mesh: AbstractMesh) => boolean,
+        fastCheck = false,
+        camera: Camera | null = null,
+        trianglePredicate?: (p0: Vector3, p1: Vector3, p2: Vector3, ray: Ray) => boolean
+    ): PickingInfo {
+        if (fastCheck || trianglePredicate) {
+            return unsupported(
+                "Scene.pick",
+                "Babylon Lite's synchronous picker returns the nearest bounding-box hit and does not expose fast-first-hit or per-triangle predicate modes."
+            );
+        }
+
+        const cameraToUse = camera ?? this.activeCamera ?? this.cameraToUseForPointers;
+        if (!cameraToUse) {
+            return new PickingInfo();
+        }
+
+        return this.pickWithRay(this.createPickingRay(x, y, null, cameraToUse), predicate);
     }
 
     /**
@@ -963,7 +978,7 @@ export class Scene extends AbstractScene {
     /** Synchronous CPU ray picking over Babylon Lite's scene-mesh picker. */
     public pickWithRay(
         ray: Ray,
-        predicate?: (mesh: TransformNode) => boolean,
+        predicate?: (mesh: AbstractMesh) => boolean,
         fastCheck = false,
         trianglePredicate?: (p0: Vector3, p1: Vector3, p2: Vector3, ray: Ray) => boolean
     ): PickingInfo {
