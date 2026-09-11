@@ -29,6 +29,13 @@ export function _installShaderFinalWorldResolver(resolve: (material: ShaderMater
     _finalWorldResolver = resolve;
 }
 
+/** Optional ShaderMaterial prelude extension installed only by `enableShaderMaterialFinalColor`. */
+let _finalColorResolver: ((material: ShaderMaterial, hasInstanceColor: boolean) => WgslSource | undefined) | null = null;
+/** @internal Install the opt-in ShaderMaterial final-color helper resolver. */
+export function _installShaderFinalColorResolver(resolve: (material: ShaderMaterial, hasInstanceColor: boolean) => WgslSource | undefined): void {
+    _finalColorResolver = resolve;
+}
+
 export interface ShaderPipelineBindings {
     readonly group1BGL: GPUBindGroupLayout;
     readonly systemSpec: UboSpec;
@@ -135,8 +142,11 @@ export function getOrCreateShaderPipeline(
     let key = `${targetSignatureKey(sig)}${variantKey}`;
     let vertModule: GPUShaderModule | null = null;
     let fragModule: GPUShaderModule | null = null;
+    // Thin-instance matrices add one layout; the optional RGBA stream adds a second.
     if (cache) {
-        const prelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
+        const basePrelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
+        const finalColor = _finalColorResolver?.(material, vertexBuffers.length > bindings.vertexBuffers.length + 1);
+        const prelude = finalColor ? wgsl`${basePrelude}${finalColor}` : basePrelude;
         const vert = cache.getModule(device, `${prelude}\n${material.vertexSource}`, `${material.name ?? "shader"}-vertex`);
         const frag = wantsFragment ? cache.getModule(device, `${prelude}\n${material.fragmentSource}`, `${material.name ?? "shader"}-fragment`) : null;
         key = cache.getPipelineKey(sig, variantKey, vert.id, frag?.id ?? 0, vertexBuffers, material, stencil?._key ?? "");
@@ -148,7 +158,9 @@ export function getOrCreateShaderPipeline(
         return cached;
     }
     if (!vertModule) {
-        const prelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
+        const basePrelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
+        const finalColor = _finalColorResolver?.(material, vertexBuffers.length > bindings.vertexBuffers.length + 1);
+        const prelude = finalColor ? wgsl`${basePrelude}${finalColor}` : basePrelude;
         vertModule = device.createShaderModule({ label: `${material.name ?? "shader"}-vertex`, code: wgsl`${prelude}\n${material.vertexSource}` });
         fragModule = wantsFragment ? device.createShaderModule({ label: `${material.name ?? "shader"}-fragment`, code: wgsl`${prelude}\n${material.fragmentSource}` }) : null;
     }
