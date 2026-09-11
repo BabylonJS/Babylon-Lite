@@ -137,5 +137,9 @@ describe("bundle tooling correctness", () => {
         expect(resolveLitePackageSpecifier("babylon-lite?worker", libDir)).toBe(join(libDir, "index.js") + "?worker");
         expect(resolveLitePackageSpecifier("babylon-lite-other", libDir)).toBeNull();
         expect(resolveLitePackageSpecifier("babylon-lite/../outside.js", libDir)).toBeNull();
+        expect(resolveLitePackageSpecifier("babylon-lite/..\\outside.js", libDir)).toBeNull();
+        expect(resolveLitePackageSpecifier("babylon-lite//outside.js", libDir)).toBeNull();
+        expect(resolveLitePackageSpecifier("babylon-lite/C:\\outside.js", libDir)).toBeNull();
+        expect(resolveLitePackageSpecifier("babylon-lite/C:outside.js", libDir)).toBeNull();
     });
 });

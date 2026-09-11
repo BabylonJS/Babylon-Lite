@@ -2,12 +2,21 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { runInNewContext } from "node:vm";
 
 import { cleanupTempDirs, ensureLibBuilt, LIB_ENTRY, runRollup } from "./bundler-harness";
 
 type BuiltEnvironmentPatch = {
     _apply(fragment: string, kind: "dds" | "hdr"): string;
 };
+
+function decodeJsStringLiteral(literal: string): string {
+    const value: unknown = runInNewContext(literal, Object.create(null), { timeout: 100 });
+    if (typeof value !== "string") {
+        throw new TypeError("Expected a JavaScript string literal.");
+    }
+    return value;
+}
 
 function readBuiltSkyboxFragment(relativePath: string): string {
     const libDir = dirname(LIB_ENTRY);
@@ -21,7 +30,7 @@ function readBuiltSkyboxFragment(relativePath: string): string {
         visited.add(file);
         const code = readFileSync(file, "utf8");
         for (const match of code.matchAll(/"(?:\\.|[^"\\])*"/g)) {
-            const value = JSON.parse(match[0]) as string;
+            const value = decodeJsStringLiteral(match[0]);
             if (value.includes("@fragment fn main") && value.includes("textureSampleLevel")) {
                 return value;
             }
@@ -40,6 +49,10 @@ afterAll(cleanupTempDirs);
 beforeAll(ensureLibBuilt);
 
 describe("environment setter tree shaking", () => {
+    it("decodes JavaScript-only string escapes emitted by minifiers", () => {
+        expect(decodeJsStringLiteral(String.raw`"texture\x53ampleLevel @fragment fn main"`)).toBe("textureSampleLevel @fragment fn main");
+    });
+
     it("keeps rotation UBO update logic out of a non-environment scene consumer", async () => {
         const result = await runRollup({
             entrySource: `import { createSceneContext } from ${JSON.stringify(LIB_ENTRY)};\nconsole.log(createSceneContext);\n`,

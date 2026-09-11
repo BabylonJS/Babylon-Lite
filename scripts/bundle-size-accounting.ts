@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, realpathSync } from "fs";
-import { dirname, resolve } from "path";
+import { dirname, relative, resolve } from "path";
 import { gzipSync } from "zlib";
 import { buildSync } from "esbuild";
 
@@ -71,9 +71,11 @@ export function ignoredScenePayloadCompatibilityBytes(id: string, renderedExport
     if (!existsSync(clean) || exportNames.length === 0) {
         return 0;
     }
+    const relativeSpecifier = relative(dirname(clean), clean).replace(/\\/g, "/");
+    const importSpecifier = relativeSpecifier.startsWith(".") ? relativeSpecifier : `./${relativeSpecifier}`;
     const result = buildSync({
         stdin: {
-            contents: `export { ${exportNames.join(", ")} } from ${JSON.stringify(clean)};`,
+            contents: `export { ${exportNames.join(", ")} } from ${JSON.stringify(importSpecifier)};`,
             loader: "js",
             resolveDir: dirname(clean),
         },

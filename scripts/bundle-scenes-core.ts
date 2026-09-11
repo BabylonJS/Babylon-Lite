@@ -12,7 +12,7 @@
 import { build, type Plugin, type Rollup } from "vite";
 import { execFileSync } from "child_process";
 import { createHash } from "crypto";
-import { resolve, dirname, join, extname } from "path";
+import { resolve, dirname, join, extname, isAbsolute, win32 } from "path";
 import { rmSync, readdirSync, readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, statSync } from "fs";
 import { minify as terserMinify, type ECMA, type SourceMapOptions } from "terser";
 import {
@@ -219,7 +219,7 @@ export function resolveLitePackageSpecifier(source: string, aliasDir: string): s
     }
 
     const request = specifier === "babylon-lite" ? "index" : specifier.slice("babylon-lite/".length);
-    if (!request || request.split("/").includes("..")) {
+    if (!request || request.includes("\\") || isAbsolute(request) || win32.isAbsolute(request) || /^[A-Za-z]:/.test(request) || request.split("/").includes("..")) {
         return null;
     }
 
