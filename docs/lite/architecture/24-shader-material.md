@@ -23,6 +23,7 @@ The design follows the Lite material contract:
 ```typescript
 export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMaterial;
 export function enableShaderMaterialInstanceWorld(material: ShaderMaterial): void;
+export function enableShaderMaterialFinalColor(material: ShaderMaterial): void;
 ```
 
 `createShaderMaterial` is synchronous and accepts already-resolved WGSL source strings.
@@ -137,6 +138,24 @@ or material-tracking implementation.
 The `world` system uniform stays the **mesh** world matrix. The baked `worldViewProjection` / `worldView`
 system uniforms are **not** instance-aware — shared regular/instanced shaders must use `viewProjection` and
 `getFinalWorld(input)`.
+
+Call `enableShaderMaterialFinalColor(material)` before `registerScene()` to opt one material into a generated
+`getFinalColor(input: VertexInput)` helper:
+
+```wgsl
+out.vColor = getFinalColor(input);
+```
+
+The generated implementation returns white when the material declares no color attribute and the pipeline has
+no instance-color stream, `input.color` for vertex color only, `input.instanceColor` for instance color only,
+and `input.color * input.instanceColor` when both are present. `input.color` remains the ordinary mesh
+per-vertex attribute requested through `attributes: ["color"]`; `setThinInstanceColors()` supplies the separate
+instance-rate `input.instanceColor`. A declared mesh color attribute whose buffer is absent retains
+ShaderMaterial's existing zero-filled fallback behavior.
+
+Like `getFinalWorld`, the final-color helper is emitted only for materials that opt in. The instance-color
+specialization is selected from the bound vertex-buffer layout rather than from a pipeline-key naming
+convention or by parsing generated WGSL.
 
 Implementation notes (bundle discipline):
 
@@ -266,7 +285,7 @@ Lite prepends a generated prelude before user source:
 4. Texture/sampler declarations for `options.samplers`.
 5. WGSL const declarations for `options.defines`.
 6. `VertexInput` generated from `options.attributes`.
-7. Opt-in `getFinalWorld(input)`, specialized for the regular or thin-instance pipeline variant.
+7. Opt-in `getFinalWorld(input)` and `getFinalColor(input)` helpers, specialized for the active pipeline variant.
 
 User WGSL must not declare:
 
@@ -290,6 +309,7 @@ Generated names intentionally match the names listed in the options where possib
 packages/babylon-lite/src/material/shader/
   shader-material.ts       Public types, factory, setters, validation.
   enable-shader-material-instance-world.ts  Opt-in regular/thin-instance final-world helper.
+  enable-shader-material-final-color.ts  Opt-in effective vertex/instance color helper.
   shader-group-builder.ts  MeshGroupBuilder entry point and lazy renderable import.
   shader-renderable.ts     Per-scene/per-mesh renderables, UBO writes, bind groups.
   shader-pipeline.ts       Generated prelude, BGL creation, pipeline cache.

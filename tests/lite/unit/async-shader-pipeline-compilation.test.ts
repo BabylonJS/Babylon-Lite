@@ -11,6 +11,7 @@ import {
     prepareShaderMaterialPipeline,
     prepareShaderMaterialPipelineForTask,
 } from "../../../packages/babylon-lite/src/material/shader/enable-async-shader-pipeline-compilation";
+import { enableShaderMaterialFinalColor } from "../../../packages/babylon-lite/src/material/shader/enable-shader-material-final-color";
 import { createShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
 import { clearShaderPipelineCache, enableShaderPipelineCache } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline-cache";
 import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline";
@@ -190,6 +191,22 @@ describe("async ShaderMaterial pipeline compilation", () => {
         getOrCreateShaderPipeline(synchronous.engine, signature, syncMaterial, syncBindings, syncLayout.variantKey, syncLayout.vertexBuffers, syncLayout.instanceAttrs);
 
         expect(prepared.createRenderPipelineAsync.mock.calls[0]![0]).toEqual(synchronous.createRenderPipeline.mock.calls[0]![0]);
+    });
+
+    it("prepares the instance-color getFinalColor specialization", async () => {
+        clearSceneBGLCache();
+        const { engine, createShaderModule } = makeEngine();
+        const material = createShaderMaterial({
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position * getFinalColor(input).rgb, 1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+            attributes: ["position"],
+        });
+        enableShaderMaterialFinalColor(material);
+
+        await prepareShaderMaterialPipeline(engine, material, "thin-instances-color", targetTask(engine));
+
+        const vertexSource = createShaderModule.mock.calls.map((call) => call[0].code).find((code) => code.includes("@vertex fn mainVertex"));
+        expect(vertexSource).toContain("return input.instanceColor;");
     });
 
     it("uses RenderTarget attachment state and the task convenience API", async () => {

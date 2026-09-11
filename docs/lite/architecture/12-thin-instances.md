@@ -433,6 +433,10 @@ helper. A custom vertex shader that declares the `"world"` system uniform can th
 `getFinalWorld(input)` for both regular and thin-instanced meshes; the regular variant returns the mesh world
 matrix without requiring `world0..world3`.
 
+ShaderMaterial can similarly opt into `enableShaderMaterialFinalColor(material)`. The generated
+`getFinalColor(input)` returns white, mesh vertex color, thin-instance color, or their product according to
+the active regular/instanced pipeline layout and the color attributes it binds.
+
 **Instance color passthrough** (varying):
 
 ```wgsl
