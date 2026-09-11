@@ -17,11 +17,13 @@ export type RunnerMessage =
 export class Runner {
     private readonly host: HTMLElement;
     private readonly onMessage: (message: RunnerMessage) => void;
+    private readonly onTeardown: () => void;
     private frame: HTMLIFrameElement | null = null;
 
-    constructor(host: HTMLElement, onMessage: (message: RunnerMessage) => void) {
+    constructor(host: HTMLElement, onMessage: (message: RunnerMessage) => void, onTeardown: () => void) {
         this.host = host;
         this.onMessage = onMessage;
+        this.onTeardown = onTeardown;
         window.addEventListener("message", this.handleMessage);
     }
 
@@ -54,9 +56,7 @@ export class Runner {
         }
         frame.src = withBase(`runner.html${params.size > 0 ? `?${params}` : ""}`);
 
-        if (this.frame) {
-            this.frame.remove();
-        }
+        this.dispose();
         this.frame = frame;
         this.host.appendChild(frame);
 
@@ -77,6 +77,7 @@ export class Runner {
         if (this.frame) {
             this.frame.remove();
             this.frame = null;
+            this.onTeardown();
         }
     }
 
