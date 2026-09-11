@@ -247,9 +247,10 @@ function updatePhysicsViewer(viewer: PhysicsViewer): void {
 }
 
 function copyBodyTransform(body: PhysicsBody, mesh: Mesh): void {
-    const node = body.node;
-    mesh.position.set(node.position.x, node.position.y, node.position.z);
-    mesh.rotationQuaternion.set(node.rotationQuaternion.x, node.rotationQuaternion.y, node.rotationQuaternion.z, node.rotationQuaternion.w);
+    // get body world transform
+    const t = body._world._hknp.HP_Body_GetQTransform(body._hkBody)[1];
+    mesh.position.set(t[0][0]!, t[0][1]!, t[0][2]!);
+    mesh.rotationQuaternion.set(t[1][0]!, t[1][1]!, t[1][2]!, t[1][3]!);
     mesh.scaling.set(1, 1, 1);
 }
 
