@@ -108,6 +108,52 @@ describe("ShadowGenerator caster synchronization", () => {
         expect(setShadowTaskCasterMeshes).not.toHaveBeenCalled();
     });
 
+    it("replaces and cleans up a same-wrapper observer after direct render-list mutations", async () => {
+        const generator = new ShadowGenerator(1024, new DirectionalLight("directional", new Vector3(0, -1, -1)));
+        const caster = createTestMesh("caster");
+        const removeObserver = vi.spyOn(caster.onDisposeObservable, "remove");
+        generator.addShadowCaster(caster);
+        generator._build({} as EngineContext);
+        vi.clearAllMocks();
+
+        generator.getShadowMap().renderList.splice(0);
+        generator.addShadowCaster(caster);
+
+        expect(removeObserver).toHaveBeenCalledOnce();
+        expect(caster.onDisposeObservable.hasObservers()).toBe(true);
+        await flushCasterSync();
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledWith(generator._liteGen, [caster._lite]);
+        vi.clearAllMocks();
+
+        generator.getShadowMap().renderList.splice(0);
+        generator.removeShadowCaster(caster);
+        await flushCasterSync();
+
+        expect(caster.onDisposeObservable.hasObservers()).toBe(false);
+        expect(setShadowTaskCasterMeshes).not.toHaveBeenCalled();
+    });
+
+    it("ignores a stale disposal callback after replacing a wrapper for the same Lite mesh", async () => {
+        const generator = new ShadowGenerator(1024, new DirectionalLight("directional", new Vector3(0, -1, -1)));
+        const first = createTestMesh("first");
+        const replacement = new AbstractMesh("replacement", first._lite);
+        first.onDisposeObservable.add(() => {
+            generator.getShadowMap().renderList.splice(0);
+            generator.addShadowCaster(replacement);
+        });
+        generator.addShadowCaster(first);
+        generator._build({} as EngineContext);
+        vi.clearAllMocks();
+
+        first.dispose();
+
+        expect(generator.getShadowMap().renderList).toEqual([replacement]);
+        expect(replacement.onDisposeObservable.hasObservers()).toBe(true);
+        await flushCasterSync();
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledOnce();
+        expect(setShadowTaskCasterMeshes).toHaveBeenCalledWith(generator._liteGen, [replacement._lite]);
+    });
+
     it("coalesces same-turn caster disposals into one final native caster set", async () => {
         const generator = new ShadowGenerator(1024, new DirectionalLight("directional", new Vector3(0, -1, -1)));
         const first = createTestMesh("first");

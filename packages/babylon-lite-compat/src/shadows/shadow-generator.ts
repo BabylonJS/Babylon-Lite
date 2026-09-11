@@ -85,7 +85,9 @@ export class ShadowGenerator {
         for (const caster of this._casterTree(mesh, includeDescendants)) {
             if (!this._casters.some((existing) => existing._lite === caster._lite)) {
                 this._casters.push(caster);
-                const observer = caster.onDisposeObservable.add(() => this._removeCaster(caster._lite));
+                this._detachCasterDisposeObserver(caster._lite);
+                const observer: ObserverCallback<Node> = () => this._removeCaster(caster._lite, true, observer);
+                caster.onDisposeObservable.add(observer);
                 this._casterDisposeObservers.set(caster._lite, { caster, observer });
                 changed = true;
             }
@@ -112,21 +114,30 @@ export class ShadowGenerator {
         return includeDescendants ? [mesh, ...(mesh.getChildMeshes() as AbstractMesh[])] : [mesh];
     }
 
-    private _removeCaster(liteMesh: LiteMesh, scheduleSync = true): boolean {
-        const index = this._casters.findIndex((existing) => existing._lite === liteMesh);
-        if (index === -1) {
-            return false;
-        }
-        this._casters.splice(index, 1);
+    private _detachCasterDisposeObserver(liteMesh: LiteMesh): void {
         const registration = this._casterDisposeObservers.get(liteMesh);
         if (registration) {
             registration.caster.onDisposeObservable.remove(registration.observer);
             this._casterDisposeObservers.delete(liteMesh);
         }
-        if (scheduleSync) {
+    }
+
+    private _removeCaster(liteMesh: LiteMesh, scheduleSync = true, expectedObserver?: ObserverCallback<Node>): boolean {
+        const registration = this._casterDisposeObservers.get(liteMesh);
+        if (expectedObserver && registration?.observer !== expectedObserver) {
+            return false;
+        }
+
+        const index = this._casters.findIndex((existing) => existing._lite === liteMesh);
+        const changed = index !== -1;
+        if (changed) {
+            this._casters.splice(index, 1);
+        }
+        this._detachCasterDisposeObserver(liteMesh);
+        if (changed && scheduleSync) {
             this._scheduleCasterSync();
         }
-        return true;
+        return changed;
     }
 
     private _scheduleCasterSync(): void {
