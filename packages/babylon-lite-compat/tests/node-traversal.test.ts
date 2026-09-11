@@ -1,8 +1,31 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { addToSceneMock, createMeshFromDataMock, removeFromSceneMock } = vi.hoisted(() => ({
+    addToSceneMock: vi.fn(),
+    createMeshFromDataMock: vi.fn((_: unknown, name: string) => ({
+        name,
+        visible: true,
+        children: [],
+        receiveShadows: false,
+    })),
+    removeFromSceneMock: vi.fn(function removeFromScene(scene: unknown, node: { children?: unknown[] }) {
+        for (const child of [...(node.children ?? [])]) {
+            removeFromSceneMock(scene, child as { children?: unknown[] });
+        }
+    }),
+}));
+
+vi.mock("babylon-lite", async (importActual) => ({
+    ...(await importActual<typeof import("babylon-lite")>()),
+    addToScene: addToSceneMock,
+    createMeshFromData: createMeshFromDataMock,
+    removeFromScene: removeFromSceneMock,
+}));
 
 import type { Mesh as LiteMesh } from "babylon-lite";
-import { AbstractMesh, TransformNode } from "../src/meshes/meshes";
+import { AbstractMesh, Mesh, TransformNode } from "../src/meshes/meshes";
 import { Node } from "../src/node/node";
+import type { Scene } from "../src/scene/scene";
 
 /**
  * GPU-free tests for the `Node` scene-graph traversal API
@@ -23,7 +46,7 @@ class TestNode extends Node {
     }
 }
 
-function createTestMesh(name: string, onChildrenRead?: () => void): AbstractMesh {
+function createTestMesh(name: string, onChildrenRead?: () => void, scene?: Scene): AbstractMesh {
     const children: LiteMesh[] = [];
     const lite = { name, visible: true, children, receiveShadows: false } as unknown as LiteMesh;
     if (onChildrenRead) {
@@ -34,10 +57,35 @@ function createTestMesh(name: string, onChildrenRead?: () => void): AbstractMesh
             },
         });
     }
-    return new AbstractMesh(name, lite);
+    return new AbstractMesh(name, lite, scene);
+}
+
+function createTestScene(): { scene: Scene; registered: Node[]; pendingAdds: Array<() => void> } {
+    const registered: Node[] = [];
+    const pendingAdds: Array<() => void> = [];
+    const scene = {
+        _lite: { id: "scene" },
+        defaultMaterial: null,
+        getEngine: () => ({ _lite: { id: "engine" } }),
+        _deferAdd: (add: () => void) => pendingAdds.push(add),
+        _registerMesh: (node: Node) => registered.push(node),
+        _unregisterNode: (node: Node) => {
+            const index = registered.indexOf(node);
+            if (index !== -1) {
+                registered.splice(index, 1);
+            }
+        },
+    } as unknown as Scene;
+    return { scene, registered, pendingAdds };
 }
 
 describe("Node scene-graph traversal", () => {
+    beforeEach(() => {
+        addToSceneMock.mockClear();
+        createMeshFromDataMock.mockClear();
+        removeFromSceneMock.mockClear();
+    });
+
     it("maintains the child registry as parent links change", () => {
         const root = new TestNode("root");
         const a = new TestNode("a");
@@ -93,6 +141,92 @@ describe("Node scene-graph traversal", () => {
         child.dispose();
         expect(root.getChildren()).toEqual([]);
         expect(child.isDisposed()).toBe(true);
+    });
+
+    it("recursively removes every transform and mesh through the compat hierarchy", () => {
+        const { scene, registered } = createTestScene();
+        const root = new TransformNode("root", scene);
+        const child = createTestMesh("child", undefined, scene);
+        const grandchild = createTestMesh("grandchild", undefined, scene);
+        child.parent = root;
+        grandchild.parent = child;
+        const disposed: string[] = [];
+        for (const node of [root, child, grandchild]) {
+            node.onDisposeObservable.add(({ name }) => disposed.push(name));
+        }
+
+        root.dispose();
+
+        expect(removeFromSceneMock.mock.calls.map(([, node]) => node)).toEqual([grandchild._node, child._node, root._node]);
+        expect(registered).toEqual([]);
+        expect([root, child, grandchild].every((node) => node.isDisposed())).toBe(true);
+        expect(child.parent).toBeNull();
+        expect(grandchild.parent).toBeNull();
+        expect(disposed).toEqual(["grandchild", "child", "root"]);
+
+        root.dispose();
+        expect(removeFromSceneMock).toHaveBeenCalledTimes(3);
+        expect(disposed).toHaveLength(3);
+    });
+
+    it("recursively removes descendants absent from a mesh root's Lite children", () => {
+        const { scene } = createTestScene();
+        const root = createTestMesh("root", undefined, scene);
+        const child = new TransformNode("child", scene);
+        const grandchild = createTestMesh("grandchild", undefined, scene);
+        child.parent = root;
+        grandchild.parent = child;
+
+        expect(root._node.children).toEqual([]);
+        root.dispose();
+
+        expect(removeFromSceneMock.mock.calls.map(([, node]) => node)).toEqual([grandchild._node, child._node, root._node]);
+    });
+
+    it("dispose(true) removes only the root and detaches native and compat descendants", () => {
+        const { scene, registered } = createTestScene();
+        const root = new TransformNode("root", scene);
+        const child = createTestMesh("child", undefined, scene);
+        child.parent = root;
+        root._node.children.push(child._node);
+
+        root.dispose(true);
+
+        expect(removeFromSceneMock).toHaveBeenCalledOnce();
+        expect(removeFromSceneMock).toHaveBeenCalledWith(scene._lite, root._node);
+        expect(root._node.children).toEqual([]);
+        expect(child._node.parent).toBeNull();
+        expect(child.isDisposed()).toBe(false);
+        expect(child.parent).toBeNull();
+        expect(registered).toEqual([child]);
+    });
+
+    it("disposes recursive meshes safely before or after deferred scene registration", () => {
+        const before = createTestScene();
+        const pendingRoot = new Mesh("pending-root", before.scene);
+        const pendingChild = new Mesh("pending-child", before.scene);
+        pendingChild.parent = pendingRoot;
+
+        pendingRoot.dispose();
+        for (const add of before.pendingAdds) {
+            add();
+        }
+        expect(addToSceneMock).not.toHaveBeenCalled();
+        expect(removeFromSceneMock).toHaveBeenCalledTimes(2);
+
+        addToSceneMock.mockClear();
+        removeFromSceneMock.mockClear();
+        const after = createTestScene();
+        const builtRoot = new Mesh("built-root", after.scene);
+        const builtChild = new Mesh("built-child", after.scene);
+        builtChild.parent = builtRoot;
+        for (const add of after.pendingAdds) {
+            add();
+        }
+        expect(addToSceneMock).toHaveBeenCalledTimes(2);
+
+        builtRoot.dispose();
+        expect(removeFromSceneMock).toHaveBeenCalledTimes(2);
     });
 });
 

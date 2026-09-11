@@ -122,12 +122,12 @@ export abstract class Light extends Node {
         }
     }
 
-    public override dispose(): void {
+    /** @internal Detach Lite-owned state when this node is disposed directly or through an ancestor. */
+    protected override _disposeSelf(_doNotRecurse: boolean): void {
         // Lite removes lights through the scene; without a back-reference the
         // caller should use `removeFromScene`. Detaching the shadow generator is
         // the safe, scene-free cleanup we can do here.
         this._lite.shadowGenerator = undefined;
-        super.dispose();
     }
 }
 

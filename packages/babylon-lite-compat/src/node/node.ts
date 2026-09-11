@@ -167,16 +167,26 @@ export abstract class Node {
         this._disposeWrapperTree(doNotRecurse);
     }
 
-    /** @internal Dispose compat wrapper state without touching Lite resources. */
+    /** @internal Dispose this node's subclass-owned resources. */
+    protected _disposeSelf(_doNotRecurse: boolean): void {
+        // Base nodes own no external resources.
+    }
+
+    /** @internal Dispose this compat wrapper tree in post-order. */
     public _disposeWrapperTree(doNotRecurse = false): void {
         if (this._disposed) {
             return;
         }
-        if (!doNotRecurse) {
+        if (doNotRecurse) {
+            for (const child of [...this._children]) {
+                child.parent = null;
+            }
+        } else {
             for (const child of [...this._children]) {
                 child._disposeWrapperTree();
             }
         }
+        this._disposeSelf(doNotRecurse);
         this._disposed = true;
         this.onDisposeObservable.notifyObservers(this);
         this.onDisposeObservable.clear();
