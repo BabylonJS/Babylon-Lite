@@ -268,12 +268,7 @@ describe("Scene pointer observable", () => {
             canvas.dispatchEvent(event);
         }
 
-        expect(seen.map((info) => info.type)).toEqual([
-            PointerEventTypes.POINTERDOWN,
-            PointerEventTypes.POINTERMOVE,
-            PointerEventTypes.POINTERUP,
-            PointerEventTypes.POINTERWHEEL,
-        ]);
+        expect(seen.map((info) => info.type)).toEqual([PointerEventTypes.POINTERDOWN, PointerEventTypes.POINTERMOVE, PointerEventTypes.POINTERUP, PointerEventTypes.POINTERWHEEL]);
         expect(seen.map((info) => info.event)).toEqual(events);
         expect(seen.every((info) => info.pickInfo === null)).toBe(true);
         expect(seen.every((info) => info instanceof PointerInfo)).toBe(true);
