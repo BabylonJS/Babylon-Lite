@@ -21,6 +21,7 @@ import {
 import { getEmbedMode, decodeCodeHash, openInPlaygroundUrl, EmbedHost } from "./embed";
 import { NIGHTLY, NIGHTLY_ENGINE_URL, fetchDeployedVersions } from "./versions";
 import { BASE, stripBase, currentDeployVersion, baseForVersion } from "./base";
+import { getCdn } from "./cdn";
 
 const editorContainer = document.getElementById("editor") as HTMLElement;
 const fileTabsContainer = document.getElementById("fileTabs") as HTMLElement;
@@ -31,6 +32,7 @@ const consoleEl = document.getElementById("console") as HTMLElement;
 const splitEl = document.getElementById("split") as HTMLElement;
 const splitter = document.getElementById("splitter") as HTMLElement;
 const runBtn = document.getElementById("runBtn") as HTMLButtonElement;
+const inspectorBtn = document.getElementById("inspectorBtn") as HTMLButtonElement;
 const newBtn = document.getElementById("newBtn") as HTMLButtonElement;
 const fullscreenBtn = document.getElementById("fullscreenBtn") as HTMLButtonElement;
 const fpsCounter = document.getElementById("fpsCounter") as HTMLElement;
@@ -92,6 +94,14 @@ function setLoading(on: boolean, label?: string): void {
     if (label) {
         previewLoaderText.textContent = label;
     }
+}
+
+function setInspectorState(available: boolean, open = false): void {
+    inspectorBtn.disabled = !available;
+    inspectorBtn.classList.toggle("active", open);
+    inspectorBtn.setAttribute("aria-pressed", String(open));
+    inspectorBtn.setAttribute("aria-label", open ? "Close Inspector" : "Open Inspector");
+    inspectorBtn.title = open ? "Close Inspector" : "Open Inspector";
 }
 
 /** Human-readable byte size, e.g. `48.2 KB`. */
@@ -158,6 +168,12 @@ const runner = new Runner(previewHost, (message: RunnerMessage) => {
             }
             embedHost?.emit({ channel: "babylon-lite-playground", type: "ran" });
             break;
+        case "engine-ready":
+            setInspectorState(true);
+            break;
+        case "inspector":
+            setInspectorState(true, message.open);
+            break;
         default:
             break;
     }
@@ -180,6 +196,7 @@ async function run(): Promise<void> {
     runBtn.disabled = true;
     clearConsole();
     setLoading(true, "Compiling…");
+    setInspectorState(false);
     appendConsole("system", "Compiling…");
     try {
         const compileStart = performance.now();
@@ -191,7 +208,8 @@ async function run(): Promise<void> {
         setLoading(true, "Running…");
         appendConsole("system", "Running…");
         runStartedAt = performance.now();
-        await runner.run(code, NIGHTLY_ENGINE_URL);
+        const inspectorUrl = (await getCdn()).inspectorUrl();
+        await runner.run(code, NIGHTLY_ENGINE_URL, inspectorUrl);
     } catch (err) {
         setLoading(false);
         runStartedAt = null;
@@ -331,6 +349,10 @@ examplesEl.addEventListener("change", () => {
 });
 
 runBtn.addEventListener("click", () => void run());
+inspectorBtn.addEventListener("click", () => {
+    inspectorBtn.disabled = true;
+    runner.toggleInspector();
+});
 
 // --- Mobile chrome: hamburger menu + Code/Scene view toggle ------------------
 // On narrow screens the toolbar actions collapse into a dropdown, and the

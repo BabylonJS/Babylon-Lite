@@ -15,10 +15,16 @@
                 // Default engine path is relative to this runner.html so it resolves
                 // under the app's deploy base (root or a /pr|/v sub-path). The parent
                 // normally passes an explicit, base-resolved URL via `?engine=`.
-                var engine = new URLSearchParams(location.search).get("engine") || "./engine/dev/index.js";
+                var params = new URLSearchParams(location.search);
+                var engine = params.get("engine") || "./engine/dev/index.js";
+                var inspector = params.get("inspector");
                 var map = document.createElement("script");
                 map.type = "importmap";
-                map.textContent = JSON.stringify({ imports: { "@babylonjs/lite": engine } });
+                var imports = { "@babylonjs/lite": engine };
+                if (inspector) {
+                    imports["@babylonjs/inspector/lite"] = inspector;
+                }
+                map.textContent = JSON.stringify({ imports: imports });
                 document.head.appendChild(map);
             })();
         </script>
@@ -78,19 +84,54 @@
                 post({ type: "error", text: format(event.reason) });
             });
 
-            window.addEventListener("message", async (event) => {
-                const message = event.data;
-                if (!message || message.type !== "run") {
+            let engine = null;
+            let inspectorToken = null;
+            window.addEventListener("babylon-lite-playground-engine-created", (event) => {
+                engine = event.detail;
+                post({ type: "engine-ready" });
+            });
+
+            async function toggleInspector() {
+                if (inspectorToken && !inspectorToken.isDisposed) {
+                    await inspectorToken.dispose();
                     return;
                 }
-                const url = URL.createObjectURL(new Blob([message.code], { type: "text/javascript" }));
-                try {
-                    await import(/* @vite-ignore */ url);
-                    post({ type: "ran" });
-                } catch (err) {
-                    post({ type: "error", text: format(err) });
-                } finally {
-                    URL.revokeObjectURL(url);
+                if (!engine) {
+                    throw new Error("Run a scene before opening Inspector.");
+                }
+                const { ShowInspector } = await import("@babylonjs/inspector/lite");
+                inspectorToken = ShowInspector(engine);
+                inspectorToken.onDisposed.add(() => {
+                    inspectorToken = null;
+                    post({ type: "inspector", open: false });
+                });
+                post({ type: "inspector", open: true });
+            }
+
+            window.addEventListener("message", async (event) => {
+                const message = event.data;
+                if (!message) {
+                    return;
+                }
+                if (message.type === "toggle-inspector") {
+                    try {
+                        await toggleInspector();
+                    } catch (err) {
+                        post({ type: "inspector", open: false });
+                        post({ type: "error", text: format(err) });
+                    }
+                    return;
+                }
+                if (message.type === "run") {
+                    const url = URL.createObjectURL(new Blob([message.code], { type: "text/javascript" }));
+                    try {
+                        await import(/* @vite-ignore */ url);
+                        post({ type: "ran" });
+                    } catch (err) {
+                        post({ type: "error", text: format(err) });
+                    } finally {
+                        URL.revokeObjectURL(url);
+                    }
                 }
             });
 
