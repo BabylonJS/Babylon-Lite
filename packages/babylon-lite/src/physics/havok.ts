@@ -20,9 +20,6 @@ import { invertMat4 } from "../math/invert-mat4.js";
 import { multiplyMat4 } from "../math/multiply-mat4.js";
 import { createScalingMat4 } from "../math/create-scaling-mat4.js";
 import { decomposeMat4 } from "../math/decompose-mat4.js";
-import { transformCoordinatesToRef } from "../math/mat4-transform.js";
-import { addVec3 } from "../math/add-vec3.js";
-import { multiplyQuat } from "../math/multiply-quat.js";
 import { havokTransformToNode, nodeToHavokTransform } from "./havok-transform.js";
 
 // ─── Enums ───────────────────────────────────────────────────────────
