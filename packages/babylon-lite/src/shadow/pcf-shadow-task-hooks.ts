@@ -11,6 +11,7 @@ import { createRenderTask, type RenderTask } from "../frame-graph/render-task.js
 import { casterVersionSum, createShadowCamera, createShadowRenderTarget, updateShadowCameraBase, writeShadowUboFields } from "./shadow-base.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 
 export interface PcfLightMatrix {
     /** @internal */
@@ -128,7 +129,10 @@ export function ensurePcfShadowTaskState(
         if (existing._casterMeshes === casterMeshes && !casterMaterialChanged) {
             return existing;
         }
-        existing._task.dispose();
+        // The old task's GPU buffers may still be referenced by the frame command buffer that is being
+        // recorded (a caster re-supply lands mid-frame, or during async pre-first-frame construction),
+        // so retire them only after that frame has submitted and drained. Mirrors the CSM hooks.
+        retireGpuResources(engine, existing._task.dispose);
     }
 
     const materialViews = new Map<Material, MaterialView>();
