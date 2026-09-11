@@ -68,6 +68,7 @@ import { Vector3 } from "../math/vector.js";
 import { PickingInfo } from "../culling/picking-info.js";
 import { AbstractMesh, Mesh } from "../meshes/meshes.js";
 import type { TransformNode } from "../meshes/meshes.js";
+import { PointerEventTypes, PointerInfo } from "../events/pointer-events.js";
 
 /** Babylon.js EnvironmentHelper default skybox/ground assets (match the Lite ports). */
 const DEFAULT_SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
@@ -126,8 +127,14 @@ export class Scene extends AbstractScene {
     public readonly onAfterPhysicsObservable = new Observable<Scene>();
     /** Fires once when the scene is disposed. */
     public readonly onDisposeObservable = new Observable<Scene>();
+    /** Babylon.js scene-level pointer events from the engine rendering canvas. */
+    public readonly onPointerObservable = new Observable<PointerInfo>();
     /** @internal Callbacks that must run after Babylon.js-compatible before-render observers. */
     private readonly _beforeRenderFlushCallbacks = new Set<() => void>();
+    /** @internal Canvas target that owns this scene's pointer listeners. */
+    private _pointerEventTarget: EventTarget | null = null;
+    /** @internal Shared listener registered for each supported DOM pointer event. */
+    private _pointerEventListener: EventListener | null = null;
 
     /**
      * Babylon.js `scene.animationGroups` / `scene.animatables`. Loaded glTF /
@@ -204,6 +211,7 @@ export class Scene extends AbstractScene {
     public constructor(engine: WebGPUEngine) {
         super();
         this._engine = engine;
+        this._attachPointerEvents();
         if (engine._headless) {
             // Headless (`NullEngine`): back the scene with a real Lite context that has
             // NO frame-graph render task (`defaultRenderTask: false`), so no swapchain or
@@ -224,6 +232,50 @@ export class Scene extends AbstractScene {
         // listeners therefore resolve one frame later than they would in BJS.
         onBeforeRender(this._lite, (deltaMs: number) => this._tick(deltaMs));
         engine._registerScene(this);
+    }
+
+    private _attachPointerEvents(): void {
+        const canvas = this._engine.getRenderingCanvas() as Partial<EventTarget>;
+        if (typeof canvas.addEventListener !== "function" || typeof canvas.removeEventListener !== "function") {
+            return;
+        }
+
+        this._pointerEventTarget = canvas as EventTarget;
+        this._pointerEventListener = (event) => {
+            let type: number;
+            switch (event.type) {
+                case "pointerdown":
+                    type = PointerEventTypes.POINTERDOWN;
+                    break;
+                case "pointermove":
+                    type = PointerEventTypes.POINTERMOVE;
+                    break;
+                case "pointerup":
+                    type = PointerEventTypes.POINTERUP;
+                    break;
+                case "wheel":
+                    type = PointerEventTypes.POINTERWHEEL;
+                    break;
+                default:
+                    return;
+            }
+            this.onPointerObservable.notifyObservers(new PointerInfo(type, event as PointerEvent | WheelEvent, null), type);
+        };
+
+        for (const type of ["pointerdown", "pointermove", "pointerup", "wheel"]) {
+            this._pointerEventTarget.addEventListener(type, this._pointerEventListener);
+        }
+    }
+
+    private _detachPointerEvents(): void {
+        if (!this._pointerEventTarget || !this._pointerEventListener) {
+            return;
+        }
+        for (const type of ["pointerdown", "pointermove", "pointerup", "wheel"]) {
+            this._pointerEventTarget.removeEventListener(type, this._pointerEventListener);
+        }
+        this._pointerEventTarget = null;
+        this._pointerEventListener = null;
     }
 
     /**
@@ -1065,7 +1117,9 @@ export class Scene extends AbstractScene {
     }
 
     public dispose(): void {
+        this._detachPointerEvents();
         this.onDisposeObservable.notifyObservers(this);
+        this.onPointerObservable.clear();
         this._beforeRenderFlushCallbacks.clear();
         disposeScene(this._lite);
     }
