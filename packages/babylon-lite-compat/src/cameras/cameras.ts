@@ -14,6 +14,7 @@ import {
     createFreeCamera,
     createGeospatialCamera,
     disableOrthographicCamera,
+    enableArcRotateKeyboardControls,
     enableOrthographicCamera,
     setGeospatialOrientation,
     attachGeospatialControls,
@@ -311,7 +312,8 @@ export class ArcRotateCamera extends Camera {
     }
 
     public attachControl(canvas: HTMLCanvasElement, _noPreventDefault?: boolean): void {
-        const detach = liteAttachControl(this._lite, canvas, this._scene?._lite);
+        enableArcRotateKeyboardControls();
+        const detach = liteAttachControl(this._lite, canvas, this._scene?._lite, { keyboard: true });
         this._setDetach(detach);
     }
 

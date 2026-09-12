@@ -217,6 +217,37 @@ describe("ArcRotateCamera input tuning delegates to the Lite camera", () => {
         expect(cam.angularSensibility).toBe(2000);
         expect(cam.panningSensibility).toBe(25);
     });
+
+    it("attaches Babylon.js-default Arrow-key controls and detaches them", () => {
+        const scene = new Scene(new NullEngine());
+        const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero(), scene);
+        const canvas = Object.assign(new EventTarget(), {
+            tabIndex: -1,
+            hasAttribute: () => false,
+            setPointerCapture: () => undefined,
+            releasePointerCapture: () => undefined,
+        }) as unknown as HTMLCanvasElement;
+        const arrowLeft = Object.assign(new Event("keydown"), { code: "ArrowLeft", ctrlKey: false, altKey: false, metaKey: false });
+        const arrowRight = Object.assign(new Event("keydown"), { code: "ArrowRight", ctrlKey: false, altKey: false, metaKey: false });
+
+        camera.attachControl(canvas);
+        canvas.dispatchEvent(arrowLeft);
+        for (const callback of scene._lite._beforeRender) {
+            callback(16);
+        }
+
+        expect(camera.alpha).toBeLessThan(0);
+        expect(canvas.tabIndex).toBe(0);
+
+        camera.detachControl();
+        const detachedAlpha = camera.alpha;
+        canvas.dispatchEvent(arrowRight);
+        for (const callback of scene._lite._beforeRender) {
+            callback(16);
+        }
+
+        expect(camera.alpha).toBe(detachedAlpha);
+    });
 });
 
 describe("FlyCamera", () => {

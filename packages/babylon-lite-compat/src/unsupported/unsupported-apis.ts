@@ -598,6 +598,9 @@ export function UninstallHtmlInCanvasPolyfill(): never {
 /** Babylon.js `GaussianSplattingStreamDebugLodSource` — LOD debug source selector (shape-only stub for type parity). */
 export type GaussianSplattingStreamDebugLodSource = "optimal" | "current";
 
+/** Babylon.js finest-LOD splat-count resolution state. */
+export type GaussianSplattingStreamLod0SplatCount = Readonly<{ status: "pending" }> | Readonly<{ status: "available"; count: number }> | Readonly<{ status: "unavailable" }>;
+
 /** Babylon.js `IGaussianSplattingStreamOptions` — GS LOD stream options (shape-only stub for type parity). */
 export interface IGaussianSplattingStreamOptions {
     [key: string]: unknown;
