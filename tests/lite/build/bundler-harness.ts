@@ -15,6 +15,8 @@ import { spawnSync } from "child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve } from "path";
+import { rollup, type Plugin as RollupPlugin } from "rollup";
+import { minify as terserMinify } from "terser";
 
 const ROOT = resolve(__dirname, "../../..");
 export const PACKAGE_DIR = resolve(ROOT, "packages/babylon-lite");
@@ -36,13 +38,18 @@ const DECLARED_DEPENDENCIES = Object.keys((JSON.parse(readFileSync(PACKAGE_JSON,
 
 const NODE_BUILTIN = /^(node:)?(module|fs|path|url|os|crypto|worker_threads|util|stream|events|buffer)$/;
 
-/** True for a request the bundler tests treat as external: a bundled vendor chunk, a wasm/`?url`
- *  asset, a bare vendor specifier, or a Node builtin. */
+/** True for a request the bundler tests treat as external: a bundled vendor chunk, a
+ *  Vite-generated inline-worker wrapper, a wasm/`?url` asset, a bare vendor specifier,
+ *  or a Node builtin. Worker wrappers intentionally allocate a Blob at module scope and
+ *  are framework output rather than a hand-written module-side-effect contract. */
 export function isExternalRequest(request: string): boolean {
     if (!request) {
         return false;
     }
     if (/[\\/]_chunks[\\/]vendor[\\/]/.test(request)) {
+        return true;
+    }
+    if (/[\\/]_chunks[\\/][^/\\]*-worker-[^/\\]+\.js$/.test(request)) {
         return true;
     }
     if (/\.wasm(\?|$)/.test(request) || /\?url(&|$)/.test(request) || /\?worker(&|$)/.test(request)) {
@@ -174,6 +181,12 @@ function classify(warnings: string[]): string[] {
     return warnings.filter((w) => !BENIGN_WARNING_RE.test(w));
 }
 
+/** Rolldown annotates bundled modules with source-region comments. Temp entry paths
+ * differ between otherwise identical builds, so normalize only that generated path. */
+function normalizeGeneratedRegions(code: string): string {
+    return code.replace(/^\/\/#region .*[/\\]lite-bundler-[^/\\]+[/\\]entry\.mjs$/gm, "//#region <bundler-entry>");
+}
+
 // ─── Webpack ───────────────────────────────────────────────────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -233,10 +246,7 @@ export function runWebpack(opts: WebpackOpts): Promise<BundleResult> {
     });
 }
 
-// ─── Rollup (via Vite's build API, which wraps Rollup) ─────────────────────
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { build: viteBuild } = require("vite") as typeof import("vite");
+// ─── Rollup ────────────────────────────────────────────────────────────────
 
 export interface RollupOpts {
     entrySource: string;
@@ -247,38 +257,51 @@ export interface RollupOpts {
     forceModuleSideEffects?: boolean;
 }
 
-/** Run a Rollup build (via Vite's `build()`) and return errors + warnings + emitted code. */
+/** Run a real downstream Rollup build and return errors + warnings + emitted code.
+ * Vite 8 uses Rolldown internally, so calling Vite here would no longer test the
+ * Rollup consumer compatibility this project promises. */
 export async function runRollup(opts: RollupOpts): Promise<BundleResult> {
     const entry = makeTempEntry(opts.entrySource);
     const warnings: string[] = [];
     const errors: string[] = [];
     let code = "";
     const chunks: { code: string; isEntry: boolean }[] = [];
+    let bundle: Awaited<ReturnType<typeof rollup>> | null = null;
     try {
-        const result = (await viteBuild({
-            configFile: false,
-            logLevel: "silent",
-            build: {
-                write: false,
-                minify: opts.minify ? "terser" : false,
-                target: "es2020",
-                lib: { entry, formats: [opts.format], fileName: "out" },
-                rollupOptions: {
-                    external: (id: string) => isExternalRequest(id),
-                    treeshake: opts.forceModuleSideEffects ? { moduleSideEffects: (_id: string, external: boolean) => !external, propertyReadSideEffects: false } : undefined,
-                    onwarn: (w: { message: string }) => warnings.push(w.message),
-                },
-            },
-        })) as unknown as { output: { type: string; code?: string; isEntry?: boolean }[] } | { output: { type: string; code?: string; isEntry?: boolean }[] }[];
-        const output = Array.isArray(result) ? result[0]!.output : result.output;
+        const plugins: RollupPlugin[] = opts.minify
+            ? [
+                  {
+                      name: "test-terser-minify",
+                      async renderChunk(chunkCode) {
+                          const result = await terserMinify(chunkCode, { module: opts.format === "es" });
+                          return result.code ? { code: result.code, map: null } : null;
+                      },
+                  },
+              ]
+            : [];
+        bundle = await rollup({
+            input: entry,
+            external: (id: string) => isExternalRequest(id),
+            treeshake: opts.forceModuleSideEffects ? { moduleSideEffects: (_id: string, external: boolean) => !external, propertyReadSideEffects: false } : true,
+            onwarn: (warning) => warnings.push(`[${warning.code}] ${warning.message}`),
+            plugins,
+        });
+        const { output } = await bundle.generate({
+            format: opts.format,
+            entryFileNames: "entry.mjs",
+            chunkFileNames: "[name]-[hash].mjs",
+        });
         for (const chunk of output) {
             if (chunk.type === "chunk" && chunk.code) {
-                code += chunk.code + "\n";
-                chunks.push({ code: chunk.code, isEntry: chunk.isEntry === true });
+                const normalizedCode = normalizeGeneratedRegions(chunk.code);
+                code += normalizedCode + "\n";
+                chunks.push({ code: normalizedCode, isEntry: chunk.isEntry === true });
             }
         }
     } catch (e) {
         errors.push(e instanceof Error ? e.message : String(e));
+    } finally {
+        await bundle?.close();
     }
     return { errors, warnings, significantWarnings: classify(warnings), code, chunks };
 }

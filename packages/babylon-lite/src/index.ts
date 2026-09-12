@@ -891,6 +891,7 @@ export {
     disposeTextRenderer,
 } from "./text/text-renderer.js";
 export { setFontWeightOffset } from "./text/set-font-weight-offset.js";
+export { loadFontWeightOffset } from "./text/load-font-weight-offset.js";
 
 // ─── Physics ─────────────────────────────────────────────────────────
 export {
