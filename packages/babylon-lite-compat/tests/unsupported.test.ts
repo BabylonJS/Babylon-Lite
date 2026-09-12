@@ -79,6 +79,7 @@ import {
     ImageProcessingConfiguration,
     RegisterAbstractEngineTextureLoaders,
     RegisterImageProcessingConfiguration,
+    registerBuiltInLoaders,
     OpenPBRMaterialLoadingAdapter as RootOpenPBRMaterialLoadingAdapter,
     RegisterOpenpbrMaterial as RootRegisterOpenpbrMaterial,
 } from "../src/index";
@@ -341,6 +342,11 @@ describe("image-processing additions", () => {
     it("treats Lite's direct texture loader dispatch as already registered", () => {
         expectTypeOf(RegisterAbstractEngineTextureLoaders).returns.toEqualTypeOf<void>();
         expect(RegisterAbstractEngineTextureLoaders()).toBeUndefined();
+    });
+
+    it("treats compat's direct built-in loader dispatch as already registered", () => {
+        expectTypeOf(registerBuiltInLoaders).returns.toEqualTypeOf<void>();
+        expect(registerBuiltInLoaders()).toBeUndefined();
     });
 });
 

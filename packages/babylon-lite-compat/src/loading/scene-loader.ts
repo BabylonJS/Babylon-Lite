@@ -19,6 +19,13 @@ import type { Mesh, TransformNode } from "../meshes/meshes.js";
 import type { Scene } from "../scene/scene.js";
 import { Skeleton } from "../bones/skeleton.js";
 
+/**
+ * Babylon.js registers built-in loader factories through a global plugin
+ * registry. Compat dispatches its supported formats directly, so registration
+ * is already complete and this compatibility hook is intentionally idempotent.
+ */
+export function registerBuiltInLoaders(): void {}
+
 /** Path portion of a URL, without any query string (`?…`) or hash fragment (`#…`). */
 function urlPath(url: string): string {
     return url.split(/[?#]/)[0]!;

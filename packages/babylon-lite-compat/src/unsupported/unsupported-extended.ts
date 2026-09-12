@@ -10,10 +10,13 @@
  */
 
 import { unsupported } from "../error.js";
+import type { AbstractMesh } from "../meshes/meshes.js";
 
 export { Skeleton, Bone } from "../bones/skeleton.js";
 
 // ─── Probes / Layers / Rendering ─────────────────────────────────────
+export type GeometryRenderingObjectIdProvider = (mesh: AbstractMesh) => number;
+
 export class ReflectionProbe {
     public constructor() {
         unsupported("ReflectionProbe", "Dynamic reflection probes are not implemented in Babylon Lite.");
