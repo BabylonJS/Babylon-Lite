@@ -9,8 +9,8 @@
 // point: it tests an engine's ability to auto-generate a tangent basis at
 // render time (screen-space derivative / cotangent-frame method) rather than
 // relying on precomputed tangents. See docs/lite/architecture/06-pbr-material.md
-// (`_normalMode: "cotangent"` / `PBR_HAS_COTANGENT_NORMAL`) for the cotangent
-// frame math, and scene23 (anisotropy) for another scene whose parity is
+// (`_normalMode: "cotangent"`, derived from PBR_HAS_NORMAL_MAP without
+// MSH_HAS_TANGENTS) for the frame math, and scene23 (anisotropy) whose parity is
 // sensitive to the same dpdx/dpdy cotangent-frame precision.
 import { addToScene, startEngine, createEngine, createSceneContext, createArcRotateCamera, loadEnvironment, loadGltf, attachControl, registerScene } from "babylon-lite";
 

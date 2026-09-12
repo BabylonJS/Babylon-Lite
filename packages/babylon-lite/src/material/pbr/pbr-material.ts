@@ -69,6 +69,10 @@ export interface PbrMaterialProps extends Material {
     _emissiveColor?: [number, number, number];
     /** KHR_materials_pbrSpecularGlossiness: RGB=specular, A=glossiness. */
     specGlossTexture?: Texture2D;
+    /** @internal Linear RGB specular factor and glossiness for the SG workflow.
+     *  The glTF SG extension registers its shader/UBO writer before setting this tuple.
+     *  Diffuse RGBA uses baseColorFactor; an absent SG texture means [1,1,1,1]. */
+    _specularGlossiness?: [number, number, number, number];
     /** Whether material is double-sided (disables back-face culling). */
     doubleSided?: boolean;
     /** Overall material alpha (0=fully transparent, 1=opaque). Default 1.0. */

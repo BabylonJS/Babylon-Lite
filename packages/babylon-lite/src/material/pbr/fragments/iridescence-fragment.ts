@@ -179,7 +179,7 @@ function createIridescenceFragment(features: number, features2: number, meshFeat
     return {
         _id: "iridescence",
         _dependencies:
-            (features & (PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP)) !== 0 || (features2 & PBR2_HAS_REFLECTANCE_FACTORS) !== 0 ? ["reflectance"] : undefined,
+            (features & (PBR_HAS_METALLIC_REFLECTANCE_MAP | PBR_HAS_REFLECTANCE_MAP)) !== 0 || (features2 & PBR2_HAS_REFLECTANCE_FACTORS) !== 0 ? ["base-f0"] : undefined,
         _uboFields: uboFields,
         _bindings: bindings,
         _helperFunctions: IRIDESCENCE_HELPERS,

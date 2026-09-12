@@ -193,7 +193,7 @@ export function createClearcoatFragment(features: number, features2: number, has
         deps.push("ibl");
     }
     if (hasReflectance) {
-        deps.push("reflectance");
+        deps.push("base-f0");
     }
     // Fragment id varies with texture config so shader-composer's fragmentKey
     // (and downstream pipeline cache) distinguishes variants.

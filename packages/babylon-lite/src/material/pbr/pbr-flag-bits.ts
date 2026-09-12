@@ -10,7 +10,8 @@ export const PBR_HAS_FOG = 1 << 5;
 export const PBR_HAS_ALPHA_BLEND = 1 << 6;
 export const PBR_HAS_SPEC_GLOSS = 1 << 7;
 export const PBR_HAS_DOUBLE_SIDED = 1 << 8;
-export const PBR_HAS_COTANGENT_NORMAL = 1 << 9;
+// 1<<9 is spec-gloss-factor-local (fragments/spec-gloss-fragment.ts).
+// Cotangent normal mode is derived from normal-map presence and mesh tangents.
 export const PBR_HAS_METALLIC_REFLECTANCE_MAP = 1 << 10;
 export const PBR_HAS_REFLECTANCE_MAP = 1 << 11;
 export const PBR_HAS_USE_ALPHA_ONLY_MR = 1 << 12;

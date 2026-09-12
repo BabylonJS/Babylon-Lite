@@ -47,13 +47,14 @@ const _features: [Trigger, Loader][] = [
     [M + "anisotropy", () => import("./gltf-ext-anisotropy.js")],
     [M + "diffuse_transmission", () => import("./gltf-ext-diffuse-transmission.js")],
     [M + "unlit", () => import("./gltf-ext-unlit.js")],
-    [M + "pbrSpecularGlossiness", () => import("./gltf-ext-spec-gloss.js")],
     // Dielectric cluster (ior/specular/transmission/volume/dispersion) — any of the five triggers the
     // loader; transmission refraction is wired dynamically by the PBR material path when needed.
     [(j) => ["transmission", "volume", "ior", "specular", "dispersion"].some((e) => j.extensionsUsed?.includes(M + e)), () => import("./gltf-ext-dielectric.js")],
     ["KHR_texture_transform", () => import("./gltf-ext-uv-transform.js")],
     ["KHR_texture_basisu", () => import("./gltf-ext-basisu.js")],
     [needsOrmComposite, () => import("./gltf-ext-orm.js")],
+    // Workflow overrides merge after generic texture-source fallbacks.
+    [M + "pbrSpecularGlossiness", () => import("./gltf-ext-spec-gloss.js")],
     // Per-mesh features (predicates inlined to avoid eager imports)
     [(j) => !!j.skins?.length && anyPrimitive(j, (p) => p.attributes?.JOINTS_0 !== undefined), () => import("./gltf-feature-skeleton.js")],
     [(j) => anyPrimitive(j, (p) => !!p.targets?.length), () => import("./gltf-feature-morph.js")],

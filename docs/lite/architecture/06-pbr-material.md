@@ -52,7 +52,7 @@ pbr-renderable.ts:
 | `PBR_HAS_ALPHA_BLEND`              | `1 << 6`  | Material has alpha blend      | Alpha blend pipeline state                           |
 | `PBR_HAS_SPEC_GLOSS`               | `1 << 7`  | Specular-glossiness workflow  | SpecGloss texture instead of ORM                     |
 | `PBR_HAS_DOUBLE_SIDED`             | `1 << 8`  | Material is double-sided      | `cullMode: 'none'` + front-facing normal flip        |
-| `PBR_HAS_COTANGENT_NORMAL`         | `1 << 9`  | Normal map without tangents   | Cotangent-frame normal perturbation                  |
+| `PBR_HAS_SPEC_GLOSS_FACTORS`       | `1 << 9`  | Internal SG factor tuple      | Reserved by lazy `spec-gloss-fragment.ts`            |
 | `PBR_HAS_METALLIC_REFLECTANCE_MAP` | `1 << 10` | Has metallic reflectance map  | Reflectance texture sampling                         |
 | `PBR_HAS_REFLECTANCE_MAP`          | `1 << 11` | Has reflectance map           | Reflectance map sampling                             |
 | `PBR_HAS_USE_ALPHA_ONLY_MR`        | `1 << 12` | Use alpha-only from MR map    | Alpha-only metallic reflectance                      |
@@ -418,7 +418,7 @@ All fragments live in `src/material/pbr/fragments/` and export factory functions
 
 - **Factory**: `createClearcoatFragment(hasIbl: boolean, hasReflectance?: boolean): ShaderFragment`
 - **ID**: `"clearcoat"`
-- **Dependencies**: `["ibl"]` when `hasIbl`, `["reflectance"]` when `hasReflectance`
+- **Dependencies**: `["ibl"]` when `hasIbl`, `["base-f0"]` when `hasReflectance`
 - **Helper WGSL**: `visibility_Kelemen()`, `getR0RemappedForClearCoat()`
 - **Fragment slots**:
     - `MF` — remaps base F0 using clearcoat IOR/refraction params from `mesh.ccParams` / `mesh.ccRefractionParams`
@@ -442,7 +442,7 @@ All fragments live in `src/material/pbr/fragments/` and export factory functions
 ### `reflectance-fragment.ts` — Metallic Reflectance Extension
 
 - **Factory**: `createReflectanceFragment(hasMetallicReflectanceMap: boolean, hasReflectanceMap: boolean, useAlphaOnlyMR: boolean): ShaderFragment`
-- **ID**: `"reflectance"`
+- **ID**: `"base-f0"`
 - **Bindings**: conditionally `metallicReflectanceMap` + sampler, `reflectanceMap` + sampler
 - **Fragment slots**:
     - `MF` — computes `mrFactors`, dielectric F0, surface reflectivity, `colorF0`/`colorF90`, surface albedo
@@ -726,7 +726,7 @@ metallic  = orm.b
 #### 3. Normal Mapping
 
 - Tangent mode (`PBR_HAS_NORMAL_MAP`): TBN matrix from interpolated tangent/bitangent
-- Cotangent mode (`PBR_HAS_COTANGENT_NORMAL`): cotangent-frame reconstruction from screen-space derivatives
+- Cotangent mode (normal map present, mesh tangents absent; no material feature bit): cotangent-frame reconstruction from screen-space derivatives
 - Neither: `N = normalize(worldNormal)`, with front-face flip if double-sided
 
 #### 4. Emissive

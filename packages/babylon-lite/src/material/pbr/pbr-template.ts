@@ -381,10 +381,10 @@ var alpha=baseColorSample.a${baseColorFactorAlpha};${vertexColorMod}`;
     const specGlossUV = _ext?.uvForSpecGloss ?? "input.uv";
     const roughnessMetallic = _hasSpecGloss
         ? wgsl`let specGloss=textureSample(specGlossTexture,specGlossSampler,${specGlossUV});
-let roughness=clamp(1.0-specGloss.a,0.0,1.0);
-let metallic=0.0;`
-        : wgsl`let roughness=clamp(orm.g*material.roughnessFactor,0.0,1.0);
-let metallic=orm.b*material.metallicFactor;`;
+var roughness=clamp(1.0-specGloss.a,0.0,1.0);
+var metallic=0.0;`
+        : wgsl`var roughness=clamp(orm.g*material.roughnessFactor,0.0,1.0);
+var metallic=orm.b*material.metallicFactor;`;
 
     // Material-view / pass variants can skip extension slots while still compiling the colour path.
     const emissiveUV = _ext?.uvForEmissive ?? "input.uv";
@@ -398,13 +398,13 @@ let metallic=orm.b*material.metallicFactor;`;
         ? ``
         : _hasSpecGloss
           ? wgsl`var colorF0=specGloss.rgb;
-let colorF90=vec3<f32>(1.0);
+var colorF90=vec3<f32>(1.0);
 let maxSpecular=max(colorF0.r,max(colorF0.g,colorF0.b));
-let surfaceAlbedo=baseColor*(1.0-maxSpecular);`
+var surfaceAlbedo=baseColor*(1.0-maxSpecular);`
           : wgsl`let dielectricF0=material.reflectance;
 var colorF0=mix(vec3<f32>(dielectricF0),baseColor,metallic);
-let colorF90=vec3<f32>(1.0);
-let surfaceAlbedo=baseColor*(1.0-dielectricF0)*(1.0-metallic);`;
+var colorF90=vec3<f32>(1.0);
+var surfaceAlbedo=baseColor*(1.0-dielectricF0)*(1.0-metallic);`;
 
     // Specular AA + geometric-curvature roughness factors (BJS getAARoughnessFactors).
     // AA_factor_x is the direct-light roughness floor (matches BJS `computeSheenLighting`

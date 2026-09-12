@@ -149,8 +149,8 @@ let surfaceReflectivityColor = mrFactors.rgb;
 let dielectricColorF0 = vec3<f32>(dielectricF0) * surfaceReflectivityColor;
 let metallicColorF0 = baseColor;
 var colorF0 = mix(dielectricColorF0, metallicColorF0, metallic);
-let colorF90 = vec3<f32>(mix(specularWeight, 1.0, metallic));
-let surfaceAlbedo = baseColor * (vec3<f32>(1.0) - vec3<f32>(dielectricF0) * surfaceReflectivityColor) * (1.0 - metallic);`;
+var colorF90 = vec3<f32>(mix(specularWeight, 1.0, metallic));
+var surfaceAlbedo = baseColor * (vec3<f32>(1.0) - vec3<f32>(dielectricF0) * surfaceReflectivityColor) * (1.0 - metallic);`;
 
     const uboFields: UboField[] = [
         { _name: "occlusionStrength", _type: "f32" },
@@ -170,7 +170,8 @@ let surfaceAlbedo = baseColor * (vec3<f32>(1.0) - vec3<f32>(dielectricF0) * surf
     }
 
     return {
-        _id: hasUvTx ? "reflectance-U" : "reflectance",
+        // Initializers sort before MF modifiers; features2 distinguishes UV layouts.
+        _id: "base-f0",
 
         _uboFields: uboFields,
 
@@ -185,7 +186,7 @@ let surfaceAlbedo = baseColor * (vec3<f32>(1.0) - vec3<f32>(dielectricF0) * surf
 
 /** Create the reflectance PBR extension (group 1, fragment phase). */
 export const pbrExt: PbrExt = {
-    id: "reflectance",
+    id: "base-f0",
     phase: "fragment",
     detect(mat) {
         const m = mat as PbrMaterialProps;

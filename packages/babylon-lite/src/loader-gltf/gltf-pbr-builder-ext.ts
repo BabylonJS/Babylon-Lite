@@ -176,14 +176,6 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
     // normal=4, emissive=8, specGloss=16, occlusion=32). specGloss arrives via extLayers. Occlusion
     // reads `mat._occlusionTexCoord` (set from the glTF material's occlusionTexture.texCoord for
     // every path, including KHR_texture_basisu, since occlusion-on-UV1 always routes through here).
-    const tc1 = (t: unknown): boolean => (t as { _texCoord?: number } | undefined)?._texCoord === 1;
-    const uv2Mask =
-        (tc1(tex.baseColorTexture) ? 1 : 0) |
-        (tc1(tex.ormTexture) ? 2 : 0) |
-        (tc1(tex.normalTexture) ? 4 : 0) |
-        (tc1(tex.emissiveTexture) ? 8 : 0) |
-        (tc1((extLayers as { specGlossTexture?: unknown } | undefined)?.specGlossTexture) ? 16 : 0) |
-        (mat._occlusionTexCoord === 1 ? 32 : 0);
     const props = {
         baseColorTexture: tex.baseColorTexture,
         normalTexture: tex.normalTexture,
@@ -201,10 +193,20 @@ export function assemblePbrPropsExt(mat: GltfMaterialData, tex: PbrTexturesExt, 
         ...(mat._alphaMode === "MASK" ? { alpha: mat._baseColorFactor[3] } : undefined),
         ...(mat._rawMatDef?.name ? { name: mat._rawMatDef.name as string } : undefined),
         ...extLayers,
-        ...(uv2Mask ? { _uv2Mask: uv2Mask } : undefined),
         _buildGroup: getPbrGroupBuilder(),
         _uboVersion: 0,
     } as PbrMaterialProps;
+    const tc1 = (t: unknown): boolean => (t as { _texCoord?: number } | undefined)?._texCoord === 1;
+    const uv2Mask =
+        (tc1(props.baseColorTexture) ? 1 : 0) |
+        (tc1(props.ormTexture) ? 2 : 0) |
+        (tc1(props.normalTexture) ? 4 : 0) |
+        (tc1(props.emissiveTexture) ? 8 : 0) |
+        (tc1(props.specGlossTexture) ? 16 : 0) |
+        (mat._occlusionTexCoord === 1 ? 32 : 0);
+    if (uv2Mask) {
+        props._uv2Mask = uv2Mask;
+    }
     return props;
 }
 

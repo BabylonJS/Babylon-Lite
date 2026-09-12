@@ -69,8 +69,8 @@ export async function loadVariantMaterials(
         let p = pbrCache.get(gltfMat);
         if (!p) {
             p = (async () => {
-                const tex = buildDefaultPbrTexturesExt(engine, gltfMat, sampler, generateMipmaps, getCachedTex, wrapTex);
                 const layers = await runMatExts(gltfMat, exts, extCtx);
+                const tex = buildDefaultPbrTexturesExt(engine, gltfMat, sampler, generateMipmaps, getCachedTex, wrapTex);
                 const props = assemblePbrPropsExt(gltfMat, tex, layers);
                 // UV-transform and emissive are opt-in — see the matching gates in load-gltf.ts.
                 // Order matters: uv-transform registers its ext first, as it did when both lived
