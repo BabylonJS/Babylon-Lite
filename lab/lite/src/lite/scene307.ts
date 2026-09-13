@@ -34,7 +34,7 @@ import {
 
 const PHYSICS_FPS = 60;
 //const OFFSET = 5_000_000;
-const OFFSET = 1000;
+const OFFSET = 5_000_000;
 
 function readCaptureAfterFrames(): number | null {
     const params = new URLSearchParams(window.location.search);
@@ -55,7 +55,7 @@ async function main(): Promise<void> {
     const __initStart = performance.now();
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     // const engine = await createEngine(canvas, { useHighPrecisionMatrix: true, useFloatingOrigin: true });
-    const engine = await createEngine(canvas, { useHighPrecisionMatrix: true, useFloatingOrigin: false });
+    const engine = await createEngine(canvas, { useHighPrecisionMatrix: true, useFloatingOrigin: true });
     const scene = createSceneContext(engine);
     scene.fixedDeltaMs = 1000 / PHYSICS_FPS;
     const captureAfterFrames = readCaptureAfterFrames();
@@ -86,7 +86,7 @@ async function main(): Promise<void> {
     // Havok physics — gravity (0, -9.8, 0)
     const hknp = await HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" });
     const world = createHavokWorld(scene, hknp, { x: 0, y: -9.8, z: 0 });
-    // await enableHavokFloatingOrigin(world);
+    await enableHavokFloatingOrigin(world);
 
     // Static ground
     createPhysicsAggregate(world, ground, PhysicsShapeType.BOX, {

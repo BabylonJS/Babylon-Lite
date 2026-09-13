@@ -5,7 +5,7 @@ import { removeFromScene } from "../scene/scene-remove.js";
 import type { Vec3 } from "../math/types.js";
 import { createStandardMaterial } from "../material/standard/create-standard-material.js";
 import type { PhysicsBody, PhysicsWorld } from "./havok.js";
-import { getPhysicsBodyDebugGeometry } from "./havok.js";
+import { getPhysicsBodyDebugGeometry, getPhysicsBodyTransform } from "./havok.js";
 import { createPhysicsDebugLineMaterial } from "./physics-debug-line-material.js";
 
 /** Options used when creating a physics debug viewer. */
@@ -98,7 +98,7 @@ export function createPhysicsViewer(scene: SceneContext, world: PhysicsWorld, op
         _color: options.color ?? [1, 1, 1, 1],
         _registered: false,
         _update: () => {
-            updatePhysicsViewer(viewer);
+            updatePhysicsViewer(scene, viewer);
         },
     };
     return viewer;
@@ -169,7 +169,7 @@ export function showPhysicsBody(viewer: PhysicsViewer, body: PhysicsBody): Mesh 
     debugMesh.material = createPhysicsDebugLineMaterial(viewer._color);
     debugMesh.pickable = false;
     debugMesh.renderOrder = 1000;
-    copyBodyTransform(body, debugMesh);
+    copyBodyTransform(viewer.scene, body, debugMesh);
 
     viewer._bodies.push(body);
     viewer._meshes.push(debugMesh);
@@ -231,9 +231,9 @@ function unregisterViewerUpdate(viewer: PhysicsViewer): void {
     viewer._registered = false;
 }
 
-function updatePhysicsViewer(viewer: PhysicsViewer): void {
+function updatePhysicsViewer(scene: SceneContext, viewer: PhysicsViewer): void {
     for (let i = 0; i < viewer._bodies.length; i++) {
-        copyBodyTransform(viewer._bodies[i]!, viewer._meshes[i]!);
+        copyBodyTransform(scene, viewer._bodies[i]!, viewer._meshes[i]!);
     }
     for (let i = 0; i < viewer._constraintLines.length; i++) {
         updateConstraintLine(viewer, viewer._constraintLines[i]!);
@@ -246,11 +246,17 @@ function updatePhysicsViewer(viewer: PhysicsViewer): void {
     }
 }
 
-function copyBodyTransform(body: PhysicsBody, mesh: Mesh): void {
+function copyBodyTransform(scene: SceneContext, body: PhysicsBody, mesh: Mesh): void {
     // get body world transform
-    const t = body._world._hknp.HP_Body_GetQTransform(body._hkBody)[1];
-    mesh.position.set(t[0][0]!, t[0][1]!, t[0][2]!);
-    mesh.rotationQuaternion.set(t[1][0]!, t[1][1]!, t[1][2]!, t[1][3]!);
+    const { position: p, rotation: r } = getPhysicsBodyTransform(body._world, body);
+    if (scene?.camera?._useFloatingOrigin) {
+        const camWM = scene.camera?.worldMatrix;
+        const camPos = camWM ? { x: camWM[12]!, y: camWM[13]!, z: camWM[14]! } : { x: 0, y: 0, z: 0 };
+        mesh.position.set(p.x - camPos.x, p.y - camPos.y, p.z - camPos.z);
+    } else {
+        mesh.position.copyFrom(p);
+    }
+    mesh.rotationQuaternion.copyFrom(r);
     mesh.scaling.set(1, 1, 1);
 }
 

@@ -367,30 +367,29 @@ function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
     // Floating-origin worlds run a multi-region step (loaded on demand).
     if (world._fo) {
         world._fo.step(world, dt);
-        return;
-    }
-
-    // Pre-step: sync moved nodes into Havok. A body syncs only when its prestep type is not
-    // DISABLED and it is either ANIMATED (kinematic) or explicitly pre-stepped. TELEPORT snaps the
-    // body to the node; ACTION sets a velocity toward it (so resting bodies are dragged via friction).
-    for (let i = 0; i < bodies.length; i++) {
-        const b = bodies[i]!;
-        if (b._prestepType !== PhysicsPrestepType.DISABLED && (b.motionType === (PhysicsMotionType.ANIMATED as number) || b._preStep)) {
-            if (b._prestepType === PhysicsPrestepType.ACTION) {
-                _syncNodeToBodyTarget(hknp, b);
-            } else {
-                _syncNodeToBody(hknp, b);
+    } else {
+        // Pre-step: sync moved nodes into Havok. A body syncs only when its prestep type is not
+        // DISABLED and it is either ANIMATED (kinematic) or explicitly pre-stepped. TELEPORT snaps the
+        // body to the node; ACTION sets a velocity toward it (so resting bodies are dragged via friction).
+        for (let i = 0; i < bodies.length; i++) {
+            const b = bodies[i]!;
+            if (b._prestepType !== PhysicsPrestepType.DISABLED && (b.motionType === (PhysicsMotionType.ANIMATED as number) || b._preStep)) {
+                if (b._prestepType === PhysicsPrestepType.ACTION) {
+                    _syncNodeToBodyTarget(hknp, b);
+                } else {
+                    _syncNodeToBody(hknp, b);
+                }
             }
         }
-    }
 
-    hknp.HP_World_Step(hkWorld, dt);
+        hknp.HP_World_Step(hkWorld, dt);
 
-    // Post-step: sync DYNAMIC bodies from Havok → node
-    for (let i = 0; i < bodies.length; i++) {
-        const b = bodies[i]!;
-        if (b.motionType === (PhysicsMotionType.DYNAMIC as number)) {
-            _syncBodyToNode(hknp, b);
+        // Post-step: sync DYNAMIC bodies from Havok → node
+        for (let i = 0; i < bodies.length; i++) {
+            const b = bodies[i]!;
+            if (b.motionType === (PhysicsMotionType.DYNAMIC as number)) {
+                _syncBodyToNode(hknp, b);
+            }
         }
     }
 
@@ -1397,6 +1396,19 @@ export function setPhysicsBodyTransform(world: PhysicsWorld, body: PhysicsBody, 
         return;
     }
     havokTransformToNode(t, body.node);
+}
+
+/**
+ * Get a body's current world-space position and orientation.
+ */
+export function getPhysicsBodyTransform(world: PhysicsWorld, body: PhysicsBody): { position: Vec3; rotation: Quat } {
+    if (world._fo) {
+        return world._fo.getBodyTransform(world, body);
+    }
+    const t = world._hknp.HP_Body_GetQTransform(body._hkBody)[1];
+    const position = { x: t[0][0], y: t[0][1], z: t[0][2] };
+    const rotation = { x: t[1][0], y: t[1][1], z: t[1][2], w: t[1][3] };
+    return { position, rotation };
 }
 
 // ─── Removal ─────────────────────────────────────────────────────────
