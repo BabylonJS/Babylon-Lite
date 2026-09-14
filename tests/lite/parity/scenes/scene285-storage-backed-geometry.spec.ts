@@ -1,6 +1,6 @@
 import { test, expect } from "../parity-fixtures";
 import * as path from "path";
-import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
+import { attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(285);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene285-storage-backed-geometry");
@@ -9,9 +9,6 @@ const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 test.skip(!!sceneConfig.skipParity, "Scene 285 skipped via skipParity in scene-config.json");
 
 test("Scene 285 - storage-backed geometry matches Babylon.js reference", async ({ page }, testInfo) => {
-    const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 285, settleMs: 500 });
-
     await page.goto("/scene285.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);
