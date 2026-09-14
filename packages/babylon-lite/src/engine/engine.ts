@@ -523,7 +523,7 @@ export function startEngine(engine: EngineContext): Promise<void> {
             const delta = firstRafFrame ? 0 : lastTime > 0 ? now - lastTime : 16.667;
             lastTime = now;
             resizeEngine(engine);
-            _renderFrame(engine, delta, engine.surfaces);
+            _renderFrame(engine, delta);
             if (firstRafFrame) {
                 firstRafFrame = false;
                 resolve();
@@ -600,7 +600,7 @@ export function renderFrame(engine: EngineContext, delta: number, surfaces = eng
     _renderFrame(engine, delta, surfaces);
 }
 
-function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [SurfaceContext, ...SurfaceContext[]]): void {
+function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [SurfaceContext, ...SurfaceContext[]] = engine._surfaces): void {
     // Skip the encoder allocation if no selected surface has any rendering contexts.
     let total = 0;
     for (let i = surfaces.length; i--;) {
@@ -649,8 +649,7 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
     // never capture keep this to a single short-circuit and ship none of the readback code.
     // Each service records its surface's swapchain copy into this frame's encoder.
     for (let i = 0; i < surfaces.length; i++) {
-        const surface = surfaces[i]!;
-        surface._captureService?.(surface, finalEncoder);
+        surfaces[i]!._captureService?.(surfaces[i]!, finalEncoder);
     }
     // Closing timestamp goes in just before the frame encoder is finished, so it bookends exactly the
     // frame's recorded GPU work (a no-op short-circuit when timing is disabled).
