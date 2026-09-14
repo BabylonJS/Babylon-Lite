@@ -136,4 +136,14 @@ describe("renderFrame targets", () => {
         expect(engine.drawCallCount).toBe(6);
         expectOneSubmission(probe);
     });
+
+    it("rejects a surface belonging to another engine before creating an encoder", () => {
+        const { engine, probe } = makeEngine(["primary"]);
+        const { surfaces: foreignSurfaces } = makeEngine(["foreign"]);
+
+        expect(() => renderFrame(engine, 16, [foreignSurfaces[0]!])).toThrow(/belongs to a different engine/);
+        expect(probe.events).toEqual([]);
+        expect(probe.createCommandEncoder).not.toHaveBeenCalled();
+        expect(probe.submit).not.toHaveBeenCalled();
+    });
 });

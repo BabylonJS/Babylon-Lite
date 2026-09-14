@@ -940,7 +940,8 @@ registerScene runs deferred builders → requestAnimationFrame → resize() → 
 
 - `surfaces` omitted: render every surface in `engine.surfaces`, in registration order
 - a non-empty readonly tuple: render exactly those surfaces in caller order through the same encoder/submission
-- callers must provide registered, unique surfaces belonging to `engine`; cache a singleton tuple to render one surface without per-frame allocation
+- engine ownership is checked in the existing context-count preflight because cross-device rendering would otherwise fail later with a cryptic WebGPU validation error
+- registration and uniqueness remain caller preconditions to avoid hot-path registration scans, duplicate processing, and normalization allocations; cache a singleton tuple to render one surface without per-frame allocation
 
 1. Create command encoder and expose it as `engine._currentEncoder`
 2. For each rendering context on the selected surfaces, run `_update()`:

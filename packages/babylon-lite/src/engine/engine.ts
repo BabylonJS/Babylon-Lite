@@ -584,14 +584,19 @@ export function disposeEngine(engine: EngineContext): void {
  * Render one frame through one shared command encoder and queue submission.
  *
  * Omitting `surfaces` renders every registered engine surface in registration order.
- * Pass a non-empty readonly tuple to render an explicit subset instead; callers must
- * provide registered, unique surfaces belonging to `engine`.
+ * Pass a non-empty readonly tuple to render an explicit subset instead. Engine ownership
+ * is checked because mixing devices would otherwise produce cryptic WebGPU validation
+ * failures; callers must keep the tuple registered and unique.
  */
 export function renderFrame(engine: EngineContext, delta: number, surfaces = engine.surfaces): void {
     // Skip the encoder allocation if no selected surface has any rendering contexts.
     let total = 0;
     for (let i = 0; i < surfaces.length; i++) {
-        total += surfaces[i]!._renderingContexts.length;
+        const surface = surfaces[i]!;
+        if (surface.engine !== engine) {
+            throw new Error("renderFrame: surface belongs to a different engine.");
+        }
+        total += surface._renderingContexts.length;
     }
     if (total === 0) {
         // Nothing left to draw (e.g. the last scene was unregistered). No submit will happen this frame,
