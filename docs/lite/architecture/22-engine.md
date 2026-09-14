@@ -191,9 +191,9 @@ Scenes read `engine._currentDelta` during their `_update()` step. If `scene.fixe
 
 ### Frame Rendering (`renderFrame`)
 
-`renderFrame(engine, delta, surfaces?)` renders every surface in `engine.surfaces` in registration order when `surfaces` is omitted. Passing a non-empty readonly tuple renders exactly that subset in caller order through the same encoder and submission. The preflight verifies that every selected surface belongs to `engine`; callers must provide registered, unique surfaces to avoid per-frame registration scans or deduplication allocations. Cache a singleton tuple when repeatedly rendering one surface to avoid caller-side per-frame allocation.
+`renderFrame(engine, delta, surfaces?)` renders every surface in `engine.surfaces` in registration order when `surfaces` is omitted. The default list is live: if an earlier surface callback disposes a later surface, the remaining frame and capture loops observe the shorter list and skip the disposed surface. Passing a non-empty readonly tuple renders exactly that fixed subset in caller order through the same encoder and submission. Explicit tuple ownership is verified before encoder creation; callers must provide registered, unique surfaces and keep them registered until the call returns to avoid per-frame registration scans or deduplication allocations. Cache a singleton tuple when repeatedly rendering one surface to avoid caller-side per-frame allocation.
 
-`engine.drawCallCount` records the calls emitted by the latest `renderFrame` invocation, summed across only its selected surfaces.
+`engine.drawCallCount` records the calls emitted by the latest completed `renderFrame` invocation, summed across only its selected surfaces. Rendering callbacks continue to observe the previous completed frame's value; a successful no-context invocation publishes zero before returning.
 
 Each invocation consists of:
 

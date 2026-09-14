@@ -523,7 +523,7 @@ export function startEngine(engine: EngineContext): Promise<void> {
             const delta = firstRafFrame ? 0 : lastTime > 0 ? now - lastTime : 16.667;
             lastTime = now;
             resizeEngine(engine);
-            renderFrame(engine, delta);
+            _renderFrame(engine, delta, engine.surfaces);
             if (firstRafFrame) {
                 firstRafFrame = false;
                 resolve();
@@ -586,21 +586,28 @@ export function disposeEngine(engine: EngineContext): void {
  * Omitting `surfaces` renders every registered engine surface in registration order.
  * Pass a non-empty readonly tuple to render an explicit subset instead. Engine ownership
  * is checked because mixing devices would otherwise produce cryptic WebGPU validation
- * failures; callers must keep the tuple registered and unique.
+ * failures; callers must keep the tuple registered through the call and unique.
  */
 export function renderFrame(engine: EngineContext, delta: number, surfaces = engine.surfaces): void {
-    engine.drawCallCount = 0;
-    // Skip the encoder allocation if no selected surface has any rendering contexts.
-    const surfaceCount = surfaces.length;
-    let total = 0;
-    for (let i = surfaceCount; i--;) {
-        const surface = surfaces[i]!;
-        if (surface.engine !== engine) {
-            throw new Error("renderFrame: surface belongs to a different engine.");
+    if (surfaces !== engine.surfaces) {
+        for (let i = surfaces.length; i--;) {
+            if (surfaces[i]!.engine !== engine) {
+                throw new Error("renderFrame: surface belongs to a different engine.");
+            }
         }
-        total += surface._renderingContexts.length;
+    }
+
+    _renderFrame(engine, delta, surfaces);
+}
+
+function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [SurfaceContext, ...SurfaceContext[]]): void {
+    // Skip the encoder allocation if no selected surface has any rendering contexts.
+    let total = 0;
+    for (let i = surfaces.length; i--;) {
+        total += surfaces[i]!._renderingContexts.length;
     }
     if (!total) {
+        engine.drawCallCount = 0;
         // Nothing left to draw (e.g. the last scene was unregistered). No submit will happen this frame,
         // so any retirement queued by that removal has to be drained behind a fence instead of waiting
         // for a `queue.submit` that will never come.
@@ -619,7 +626,7 @@ export function renderFrame(engine: EngineContext, delta: number, surfaces = eng
     engine._gpuTimerBegin?.(encoder);
 
     total = 0;
-    for (let i = 0; i < surfaceCount; i++) {
+    for (let i = 0; i < surfaces.length; i++) {
         const surface = surfaces[i]!;
         // A queued screenshot (`captureScreenshot`) needs this surface's swapchain marked COPY_SRC
         // before its frame texture is acquired — reconfiguring the context EXPIRES the current
@@ -641,7 +648,7 @@ export function renderFrame(engine: EngineContext, delta: number, surfaces = eng
     // `captureScreenshot(surface)` lazily installs it on that surface, so surfaces that
     // never capture keep this to a single short-circuit and ship none of the readback code.
     // Each service records its surface's swapchain copy into this frame's encoder.
-    for (let i = 0; i < surfaceCount; i++) {
+    for (let i = 0; i < surfaces.length; i++) {
         const surface = surfaces[i]!;
         surface._captureService?.(surface, finalEncoder);
     }

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { renderFrame, type EngineContext, type RenderingContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
-import type { SurfaceContext } from "../../../packages/babylon-lite/src/engine/surface";
+import { disposeSurface, type SurfaceContext } from "../../../packages/babylon-lite/src/engine/surface";
 
 interface RenderProbe {
     readonly events: string[];
@@ -43,7 +43,7 @@ function makeEngine(surfaceNames: readonly string[]): { engine: EngineContext; s
             msaaSamples: 1,
             maxDevicePixelRatio: 1,
             _uniqueId: 1,
-            _context: { getCurrentTexture: vi.fn(() => texture) } as unknown as GPUCanvasContext,
+            _context: { getCurrentTexture: vi.fn(() => texture), unconfigure: vi.fn() } as unknown as GPUCanvasContext,
             _configureFormat: "bgra8unorm",
             _alphaMode: "opaque",
             _renderingContexts: [renderingContext],
@@ -137,6 +137,36 @@ describe("renderFrame targets", () => {
         expectOneSubmission(probe);
     });
 
+    it("stops at the live engine surface count when an update disposes a later surface", () => {
+        const { engine, surfaces, probe } = makeEngine(["primary", "aux"]);
+        const aux = surfaces[1]!;
+        vi.mocked(surfaces[0]!._renderingContexts[0]!._update).mockImplementation(() => {
+            probe.events.push("primary:update");
+            disposeSurface(aux);
+        });
+
+        renderFrame(engine, 16);
+
+        expect(probe.events).toEqual(["primary:pre", "primary:update", "primary:record", "primary:capture"]);
+        expect(engine.surfaces).toEqual([engine]);
+        expect(engine.drawCallCount).toBe(3);
+        expectOneSubmission(probe);
+    });
+
+    it("publishes the new draw count only after rendering callbacks complete", () => {
+        const { engine, surfaces } = makeEngine(["primary"]);
+        engine.drawCallCount = 7;
+        let observedDrawCallCount = -1;
+        vi.mocked(surfaces[0]!._renderingContexts[0]!._update).mockImplementation(() => {
+            observedDrawCallCount = engine.drawCallCount;
+        });
+
+        renderFrame(engine, 16);
+
+        expect(observedDrawCallCount).toBe(7);
+        expect(engine.drawCallCount).toBe(3);
+    });
+
     it("reports zero draw calls without submitting when the selected surface has no rendering contexts", () => {
         const { engine, surfaces, probe } = makeEngine(["primary", "aux"]);
 
@@ -161,8 +191,10 @@ describe("renderFrame targets", () => {
     it("rejects a surface belonging to another engine before creating an encoder", () => {
         const { engine, probe } = makeEngine(["primary"]);
         const { surfaces: foreignSurfaces } = makeEngine(["foreign"]);
+        engine.drawCallCount = 7;
 
         expect(() => renderFrame(engine, 16, [foreignSurfaces[0]!])).toThrow(/belongs to a different engine/);
+        expect(engine.drawCallCount).toBe(7);
         expect(probe.events).toEqual([]);
         expect(probe.createCommandEncoder).not.toHaveBeenCalled();
         expect(probe.submit).not.toHaveBeenCalled();
