@@ -43,8 +43,7 @@ export interface ShaderVbSupport {
     _wgslType(material: ShaderMaterial, name: ShaderAttributeName): string;
 }
 
-/** @internal Opt-in ShaderMaterial vertex-format support. */
-export let _shaderVbSupport: ShaderVbSupport | null = null;
+let _shaderVbSupport: ShaderVbSupport | null = null;
 
 /** @internal Install vertex-packing support (called by `mesh-from-storage`). */
 export function _installShaderVbSupport(support: ShaderVbSupport): void {

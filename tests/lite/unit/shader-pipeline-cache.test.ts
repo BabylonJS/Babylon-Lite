@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
@@ -279,5 +282,14 @@ describe("ShaderMaterial pipeline cache", () => {
 
         expect(secondBindings).toBe(firstBindings);
         expect(createBindGroupLayout.mock.calls.length).toBe(callsAfterFirst);
+    });
+
+    it("keys declared formats without importing shader-pipeline at runtime", () => {
+        // A value import of shader-pipeline from this module added ShaderMaterial's pipeline
+        // chunks to Standard and PBR bundles that never use ShaderMaterial (scene267 +281 B).
+        // Type-only imports erase and are fine.
+        const source = readFileSync(join(__dirname, "../../../packages/babylon-lite/src/material/shader/shader-pipeline-cache.ts"), "utf-8");
+        const valueImports = source.split("\n").filter((line) => /^import\s+(?!type\b)/.test(line) && line.includes('"./shader-pipeline.js"'));
+        expect(valueImports).toEqual([]);
     });
 });
