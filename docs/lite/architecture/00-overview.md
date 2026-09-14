@@ -936,13 +936,11 @@ drive the render loop.
 registerScene runs deferred builders → requestAnimationFrame → resize() → renderFrame() → requestAnimationFrame ...
 ```
 
-**`renderFrame(engine, delta, target?)`**:
+**`renderFrame(engine, delta, surfaces?)`**:
 
-- `target` omitted: render every surface in `engine.surfaces`, in registration order
-- one `SurfaceContext`: render only that registered surface, without requiring an array
-- a readonly `SurfaceContext[]`: render that subset in caller order through the same encoder/submission; repeated surfaces render once at their first position
-- every explicit target must still be registered on `engine`; a foreign or disposed surface throws before frame work begins
-- an empty collection is a no-op: it creates no encoder, submits no command buffer, and leaves the previous `drawCallCount` unchanged
+- `surfaces` omitted: render every surface in `engine.surfaces`, in registration order
+- a non-empty readonly tuple: render exactly those surfaces in caller order through the same encoder/submission
+- callers must provide registered, unique surfaces belonging to `engine`; cache a singleton tuple to render one surface without per-frame allocation
 
 1. Create command encoder and expose it as `engine._currentEncoder`
 2. For each rendering context on the selected surfaces, run `_update()`:

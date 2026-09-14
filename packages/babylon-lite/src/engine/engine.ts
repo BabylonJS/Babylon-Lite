@@ -580,57 +580,18 @@ export function disposeEngine(engine: EngineContext): void {
     engine._device.destroy();
 }
 
-function assertFrameSurface(engine: EngineContext, surface: SurfaceContext): void {
-    if (surface.engine !== engine || engine._surfaces.indexOf(surface) < 0) {
-        throw new Error("renderFrame: target surface is not registered on this engine.");
-    }
-}
-
-function isFrameSurfaceList(target: SurfaceContext | readonly SurfaceContext[]): target is readonly SurfaceContext[] {
-    return Array.isArray(target);
-}
-
-function normalizeFrameSurfaces(engine: EngineContext, surfaces: readonly SurfaceContext[]): readonly SurfaceContext[] {
-    let unique: SurfaceContext[] | undefined;
-    for (let i = 0; i < surfaces.length; i++) {
-        const surface = surfaces[i]!;
-        assertFrameSurface(engine, surface);
-        if (surfaces.indexOf(surface) < i) {
-            unique ??= surfaces.slice(0, i);
-        } else {
-            unique?.push(surface);
-        }
-    }
-    return unique ?? surfaces;
-}
-
 /**
  * Render one frame through one shared command encoder and queue submission.
  *
- * Omitting `target` renders every registered surface in registration order. Passing one
- * registered surface renders only that surface without allocating a caller-side array.
- * Passing a readonly array renders exactly that subset in array order; duplicate entries
- * are ignored after their first occurrence. Explicit targets must be registered on
- * `engine`, and an empty array performs no work.
+ * Omitting `surfaces` renders every registered engine surface in registration order.
+ * Pass a non-empty readonly tuple to render an explicit subset instead; callers must
+ * provide registered, unique surfaces belonging to `engine`.
  */
-export function renderFrame(engine: EngineContext, delta: number, target?: SurfaceContext | readonly SurfaceContext[]): void {
-    let surfaces: readonly SurfaceContext[] | undefined;
-    let singleSurface: SurfaceContext | undefined;
-    if (target === undefined) {
-        surfaces = engine.surfaces;
-    } else if (isFrameSurfaceList(target)) {
-        surfaces = normalizeFrameSurfaces(engine, target);
-    } else {
-        assertFrameSurface(engine, target);
-        singleSurface = target;
-    }
-
-    const surfaceCount = singleSurface ? 1 : surfaces!.length;
-    // `engine.surfaces` is typed as a non-empty tuple, but an explicit empty subset
-    // is valid. Skip the encoder allocation when no selected surface has contexts.
+export function renderFrame(engine: EngineContext, delta: number, surfaces = engine.surfaces): void {
+    // Skip the encoder allocation if no selected surface has any rendering contexts.
     let total = 0;
-    for (let i = 0; i < surfaceCount; i++) {
-        total += (singleSurface ?? surfaces![i]!)._renderingContexts.length;
+    for (let i = 0; i < surfaces.length; i++) {
+        total += surfaces[i]!._renderingContexts.length;
     }
     if (total === 0) {
         // Nothing left to draw (e.g. the last scene was unregistered). No submit will happen this frame,
@@ -652,8 +613,8 @@ export function renderFrame(engine: EngineContext, delta: number, target?: Surfa
     engine._gpuTimerBegin?.(encoder);
 
     let drawCalls = 0;
-    for (let i = 0; i < surfaceCount; i++) {
-        const surface = singleSurface ?? surfaces![i]!;
+    for (let i = 0; i < surfaces.length; i++) {
+        const surface = surfaces[i]!;
         // A queued screenshot (`captureScreenshot`) needs this surface's swapchain marked COPY_SRC
         // before its frame texture is acquired — reconfiguring the context EXPIRES the current
         // canvas texture, so it cannot run mid-frame. The hook is installed lazily by
@@ -675,8 +636,8 @@ export function renderFrame(engine: EngineContext, delta: number, target?: Surfa
     // `captureScreenshot(surface)` lazily installs it on that surface, so surfaces that
     // never capture keep this to a single short-circuit and ship none of the readback code.
     // Each service records its surface's swapchain copy into this frame's encoder.
-    for (let i = 0; i < surfaceCount; i++) {
-        const surface = singleSurface ?? surfaces![i]!;
+    for (let i = 0; i < surfaces.length; i++) {
+        const surface = surfaces[i]!;
         surface._captureService?.(surface, finalEncoder);
     }
     // Closing timestamp goes in just before the frame encoder is finished, so it bookends exactly the

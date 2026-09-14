@@ -115,10 +115,11 @@ describe("renderFrame targets", () => {
         expectOneSubmission(probe);
     });
 
-    it("renders one surface without requiring an array", () => {
+    it("renders a cached singleton tuple", () => {
         const { engine, surfaces, probe } = makeEngine(["primary", "aux-a", "aux-b"]);
+        const target: readonly [SurfaceContext] = [surfaces[1]!];
 
-        renderFrame(engine, 8, surfaces[1]);
+        renderFrame(engine, 8, target);
 
         expect(probe.events).toEqual(["aux-a:pre", "aux-a:update", "aux-a:record", "aux-a:capture"]);
         expect(engine.drawCallCount).toBe(3);
@@ -127,46 +128,12 @@ describe("renderFrame targets", () => {
 
     it("renders a readonly subset in caller order through one submission", () => {
         const { engine, surfaces, probe } = makeEngine(["primary", "aux-a", "aux-b"]);
-        const subset: readonly SurfaceContext[] = [surfaces[2]!, surfaces[0]!];
+        const subset: readonly [SurfaceContext, SurfaceContext] = [surfaces[2]!, surfaces[0]!];
 
         renderFrame(engine, 4, subset);
 
         expect(probe.events).toEqual(["aux-b:pre", "aux-b:update", "aux-b:record", "primary:pre", "primary:update", "primary:record", "aux-b:capture", "primary:capture"]);
         expect(engine.drawCallCount).toBe(6);
         expectOneSubmission(probe);
-    });
-
-    it("rejects an invalid target before creating an encoder", () => {
-        const { engine, surfaces, probe } = makeEngine(["primary", "aux"]);
-        const { surfaces: foreignSurfaces } = makeEngine(["foreign"]);
-        const detachedSurface = { ...surfaces[1]!, engine };
-
-        expect(() => renderFrame(engine, 16, [surfaces[1]!, foreignSurfaces[0]!])).toThrow(/not registered on this engine/);
-        expect(() => renderFrame(engine, 16, detachedSurface)).toThrow(/not registered on this engine/);
-        expect(probe.events).toEqual([]);
-        expect(probe.createCommandEncoder).not.toHaveBeenCalled();
-        expect(probe.submit).not.toHaveBeenCalled();
-    });
-
-    it("renders duplicate targets once at their first position", () => {
-        const { engine, surfaces, probe } = makeEngine(["primary", "aux"]);
-
-        renderFrame(engine, 16, [surfaces[1]!, surfaces[0]!, surfaces[1]!, surfaces[0]!]);
-
-        expect(probe.events).toEqual(["aux:pre", "aux:update", "aux:record", "primary:pre", "primary:update", "primary:record", "aux:capture", "primary:capture"]);
-        expect(engine.drawCallCount).toBe(6);
-        expectOneSubmission(probe);
-    });
-
-    it("treats an empty target collection as a no-op", () => {
-        const { engine, probe } = makeEngine(["primary", "aux"]);
-        engine.drawCallCount = 12;
-
-        renderFrame(engine, 16, []);
-
-        expect(probe.events).toEqual([]);
-        expect(probe.createCommandEncoder).not.toHaveBeenCalled();
-        expect(probe.submit).not.toHaveBeenCalled();
-        expect(engine.drawCallCount).toBe(12);
     });
 });
