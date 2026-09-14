@@ -4,7 +4,7 @@
 
 ## Purpose
 
-Provides plain-data light definitions for **hemispheric**, **directional**, **point**, and **spot** light types, plus a shared infrastructure layer (`light-base.ts`, `light-matrix.ts`, `types.ts`) and a scene-owned lights UBO packing system (`render/lights-ubo.ts`, `scene/scene-light-state.ts`). Following Babylon Lite's "pillar 4b" principle, lights are stateless data objects with no scene references.
+Provides plain-data light definitions for **hemispheric**, **directional**, **point**, and **spot** light types, plus a shared infrastructure layer (`light-base.ts`, `types.ts`) and a scene-owned lights UBO packing system (`render/lights-ubo.ts`, `scene/scene-light-state.ts`). Following Babylon Lite's "pillar 4b" principle, lights are stateless data objects with no scene references.
 
 Factory functions create light objects with sensible defaults; callers add them to scenes or pass them to material setup functions. Each light carries:
 
@@ -48,41 +48,25 @@ export const LIGHT_ENTRY_FLOATS = 16; // 4 × vec4 = 64 bytes per light
 ### Light Base (`light-base.ts`)
 
 ```typescript
-/** Create world-matrix state + dirty callback shared by all light types. */
-export function createLightBase(getLocalMatrix: () => Mat4): {
-    wm: WorldMatrixAccessors;
-    onDirty: () => void;
+/** Create the SceneNode transform and version state shared by all light types. */
+export function createLightBase(position: readonly [number, number, number]): {
+    node: SceneNode;
+    lvs: LightVersionState;
 };
 
-/** Mixin world-matrix accessors (parent, worldMatrix, worldMatrixVersion) onto a light object. */
-export function applyWorldMatrixAccessors<R>(target: object, wm: WorldMatrixAccessors): R;
+/** Add light-specific state to a SceneNode and return the same object. */
+export function applyLightBase<R>(node: SceneNode, target: object, lvs?: LightVersionState): R;
 
 export { ObservableVec3 } from "../math/observable-vec3.js";
 ```
 
-### Light Matrix Helper (`light-matrix.ts`)
-
-```typescript
-/** Build a local matrix from a direction vector + optional position.
- *  Column 2 = forward (normalized direction), column 0 = right, column 1 = up. */
-export function localMatrixFromDirection(dx: number, dy: number, dz: number, px?: number, py?: number, pz?: number): Mat4;
-```
-
-**Algorithm:**
-
-1. Normalize direction: `forward = normalize(dx, dy, dz)`
-2. Compute `right = normalize(cross((0,1,0), forward))` (simplified: `right = (-fz, 0, fx)`)
-3. Compute `up = cross(forward, right)`
-4. Build column-major 4×4 matrix: col0=right, col1=up, col2=forward, col3=position
-5. `m[15] = 1`
-
-`setParent` accepts lights directly. It preserves their world-space position and
-direction by rebuilding those light-specific local fields rather than assuming the
-full SceneNode TRS shape. Light children remain outside SceneNode `children` arrays,
-so SceneNode-only traversal and cloning never receive an incompatible light object.
-UBO writers normalize the resulting world direction so parent scale cannot alter
-directional intensity or spotlight cone tests. `_lightVersion` includes the world
-matrix version, so ancestor motion refreshes GPU light data. Shadow builders likewise
+Lights are full SceneNodes, with the same position, rotation, scaling, parent, children,
+and world-matrix behavior as meshes and transform nodes. The local `direction` is transformed
+by that world matrix, so direct quaternion/Euler writes orient the rendered light while
+preserving the existing direction API. `setParent` therefore uses the standard SceneNode path without a
+light-specific runtime branch. UBO writers normalize the world direction so parent scale
+cannot alter directional intensity or spotlight cone tests. `_lightVersion` includes the
+world matrix version, so ancestor motion refreshes GPU light data. Shadow builders likewise
 derive light position/direction from `worldMatrix`.
 
 ### Directional Light (`directional-light.ts`)
@@ -105,14 +89,14 @@ export function createDirectionalLight(
 
 **Default values:**
 
-| Property | Default |
-|------------|----------------|
-| lightType | `'directional'`|
-| direction | _(parameter)_ |
-| position | `(0, 0, 0)` via ObservableVec3 |
-| diffuse | `[1, 1, 1]` |
-| specular | `[1, 1, 1]` |
-| intensity | `1` |
+| Property  | Default                        |
+| --------- | ------------------------------ |
+| lightType | `'directional'`                |
+| direction | _(parameter)_                  |
+| position  | `(0, 0, 0)` via ObservableVec3 |
+| diffuse   | `[1, 1, 1]`                    |
+| specular  | `[1, 1, 1]`                    |
+| intensity | `1`                            |
 
 ### Point Light (`point-light.ts`)
 
@@ -134,14 +118,14 @@ export function createPointLight(
 
 **Default values:**
 
-| Property | Default |
-|------------|----------------------|
-| lightType | `'point'` |
-| position | _(parameter)_ via ObservableVec3 |
-| diffuse | `[1, 1, 1]` |
-| specular | `[1, 1, 1]` |
-| intensity | `1.0` |
-| range | `Number.MAX_VALUE` |
+| Property  | Default                          |
+| --------- | -------------------------------- |
+| lightType | `'point'`                        |
+| position  | _(parameter)_ via ObservableVec3 |
+| diffuse   | `[1, 1, 1]`                      |
+| specular  | `[1, 1, 1]`                      |
+| intensity | `1.0`                            |
+| range     | `Number.MAX_VALUE`               |
 
 **Local matrix:** `createTranslationMat4(position.x, position.y, position.z)` — position only, no orientation.
 
@@ -165,14 +149,14 @@ export function createHemisphericLight(
 
 **Default values:**
 
-| Property | Default |
-|--------------|----------------|
-| lightType | `'hemispheric'`|
-| direction | `(0, 1, 0)` via ObservableVec3 |
-| intensity | `1.0` |
-| diffuseColor | `[1, 1, 1]` |
-| specularColor | `[1, 1, 1]` |
-| groundColor | `[0, 0, 0]` |
+| Property      | Default                        |
+| ------------- | ------------------------------ |
+| lightType     | `'hemispheric'`                |
+| direction     | `(0, 1, 0)` via ObservableVec3 |
+| intensity     | `1.0`                          |
+| diffuseColor  | `[1, 1, 1]`                    |
+| specularColor | `[1, 1, 1]`                    |
+| groundColor   | `[0, 0, 0]`                    |
 
 ### Spot Light (`spot-light.ts`)
 
@@ -202,17 +186,17 @@ export function createSpotLight(
 
 **Default values:**
 
-| Property | Default |
-|------------|----------------------|
-| lightType | `'spot'` |
-| position | _(parameter)_ via ObservableVec3 |
+| Property  | Default                          |
+| --------- | -------------------------------- |
+| lightType | `'spot'`                         |
+| position  | _(parameter)_ via ObservableVec3 |
 | direction | _(parameter)_ via ObservableVec3 |
-| angle | _(parameter)_ |
-| exponent | _(parameter)_ |
-| diffuse | `[1, 1, 1]` |
-| specular | `[1, 1, 1]` |
-| intensity | `1.0` |
-| range | `Number.MAX_VALUE` |
+| angle     | _(parameter)_                    |
+| exponent  | _(parameter)_                    |
+| diffuse   | `[1, 1, 1]`                      |
+| specular  | `[1, 1, 1]`                      |
+| intensity | `1.0`                            |
+| range     | `Number.MAX_VALUE`               |
 
 **Local matrix:** Uses `localMatrixFromDirection(direction, position)` — both orientation and position.
 
@@ -539,7 +523,7 @@ spot.angle = Math.PI / 4;
 5. **Custom intensity** — `createDirectionalLight([1,0,0], 2.5).intensity` should be `2.5`.
 6. **Mutability** — All properties should be directly assignable. ObservableVec3 properties support `.x`, `.y`, `.z` setters and `.set(x,y,z)`.
 7. **Dirty tracking** — Setting `direction.x = 5` should increment `worldMatrixVersion`.
-8. **World matrix** — Directional light's worldMatrix column 2 should match normalized direction.
+8. **World transform** — Directional light's local direction should be normalized after transformation by its world matrix.
 9. **Parent support** — Setting `light.parent` should affect `worldMatrix` computation.
 10. **Light type flags** — `_writeLightUbo` should set w=0 (point), w=1 (directional), w=2 (spot), w=3 (hemispheric).
 11. **Spot UBO packing** — Spot light writes exponent at [11], direction at [12–14], cos(angle/2) at [15].
@@ -547,9 +531,8 @@ spot.angle = Math.PI / 4;
 13. **Light UBO packing** — For point light: `lightData.w = 0`, `lightDiffuse.a = range`.
 14. **Lights UBO size** — `getLightsUboSize() = 272` bytes by default (16 header + 4 × 64).
 15. **fillLightsData count** — With 6 lights, only first 4 with `_writeLightUbo` are packed.
-16. **localMatrixFromDirection** — Verify column 2 = normalized direction, column 0 = right, column 1 = up.
-17. **PBR single-light selection** — One non-shadow light imports `singlelight-wgsl.ts`, not the generic multi-light loop.
-18. **PBR multi-light selection** — Multiple lights or shadow receivers import `multilight-wgsl.ts`.
+16. **PBR single-light selection** — One non-shadow light imports `singlelight-wgsl.ts`, not the generic multi-light loop.
+17. **PBR multi-light selection** — Multiple lights or shadow receivers import `multilight-wgsl.ts`.
 
 ---
 

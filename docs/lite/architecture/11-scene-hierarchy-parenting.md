@@ -56,7 +56,7 @@ reproduces exactly the matrix it replaces, so the node does not move beyond the 
 
 **Parent links come from `addToScene`.** The glTF loader fills `children` arrays but leaves `parent`
 unset; `addToScene` walks the tree and assigns it. `setParent` needs the real parent chain to read a
-node's world transform, so reparent a *nested* loaded node only after its container has been added.
+node's world transform, so reparent a _nested_ loaded node only after its container has been added.
 Reparenting the container's own root beforehand is fine — its parent is null either way.
 
 ### TransformNode (`scene/transform-node.ts`)
@@ -102,19 +102,18 @@ Camera `worldMatrix` is the camera-to-world transform (inverse of view matrix).
 
 ### Lights
 
-`LightBase` extends `IWorldMatrixProvider, IParentable`. All 4 light types
-(point, directional, spot, hemispheric) use `createWorldMatrixState` with
-push-based dirty tracking via `ObservableVec3`. `setParent` accepts lights
-directly and preserves their world-space position/direction without requiring
-SceneNode-only rotation or scaling accessors. Because lights are parentable world
-matrix providers rather than SceneNodes, attaching one does not insert it into a
-SceneNode `children` array. Light UBO and shadow consumers read the world matrix, so
-ancestor motion and scaling affect both paths consistently.
+`LightBase` extends `SceneNode`. All 4 light types (point, directional, spot,
+hemispheric) therefore expose the standard position, quaternion/Euler rotation,
+scaling, parent, children, and world-matrix state. Setting a light's local `direction`
+updates its lighting data, while direct SceneNode rotation writes orient that local
+direction through the world matrix. `setParent` uses the same path for lights and every other SceneNode,
+including normal child-array traversal. Light UBO and shadow consumers read the world
+matrix, so ancestor motion and scaling affect both paths consistently.
 
 UBO writers read world-space values from `worldMatrix` columns:
 
 - Position = column 3: `[w[12], w[13], w[14]]`
-- Direction = column 2: `[w[8], w[9], w[10]]`
+- Direction = normalized `worldMatrix * localDirection` (with `w = 0`)
 
 ---
 

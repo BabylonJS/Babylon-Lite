@@ -3,7 +3,7 @@
  *  Provides position, rotationQuaternion (source of truth), rotation (Euler XYZ proxy),
  *  scaling, parent, worldMatrix, worldMatrixVersion, and children. */
 
-import type { Mat4 } from "../math/types.js";
+import type { Mat4, Quat, Vec3 } from "../math/types.js";
 import type { LiteMetadata } from "../metadata.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
@@ -46,6 +46,8 @@ export interface SceneNode {
     visible?: boolean;
     /** User metadata. glTF loads populate `metadata.gltf.extras` when source extras exist. */
     metadata?: LiteMetadata;
+    /** @internal Creates an independent clone for specialized SceneNode implementations. */
+    _cloneNode?: () => SceneNode;
 }
 
 /** Create a live bidirectional EulerProxy backed by the given ObservableQuat.
@@ -120,8 +122,8 @@ export function createSceneNode(name: string, px = 0, py = 0, pz = 0, qx = 0, qy
     return createSceneNodeCore(name, null, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
 }
 
-export function createSceneNodeFromMatrix(name: string, matrix: Mat4): SceneNode {
-    return createSceneNodeCore(name, matrix);
+export function createSceneNodeFromMatrix(name: string, matrix: Mat4, translation: Vec3, rotation: Quat, scale: Vec3): SceneNode {
+    return createSceneNodeCore(name, matrix, translation.x, translation.y, translation.z, rotation.x, rotation.y, rotation.z, rotation.w, scale.x, scale.y, scale.z);
 }
 
 function createSceneNodeCore(name: string, matrix: Mat4 | null, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1, sx = 1, sy = 1, sz = 1): SceneNode {
@@ -131,9 +133,8 @@ function createSceneNodeCore(name: string, matrix: Mat4 | null, px = 0, py = 0, 
         return node._localMatrix ?? composeTrsLocalMatrix(node.position, node.rotationQuaternion, node.scaling);
     });
     const onWmDirty = () => {
-        if (!node._localMatrix) {
-            wm.markLocalDirty();
-        }
+        node._localMatrix = undefined;
+        wm.markLocalDirty();
     };
 
     const position = new ObservableVec3(px, py, pz, onWmDirty);

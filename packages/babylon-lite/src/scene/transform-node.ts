@@ -5,6 +5,7 @@
 
 import type { Mesh } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
+import type { Mat4, Mat4Storage } from "../math/types.js";
 import { retain } from "../resource/ref-count.js";
 import type { SceneNode } from "./scene-node.js";
 import { createSceneNode, createSceneNodeFromMatrix } from "./scene-node.js";
@@ -20,40 +21,40 @@ export function createTransformNode(name: string, px = 0, py = 0, pz = 0, qx = 0
     return createSceneNode(name, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
 }
 
-/** Deep-clone a SceneNode tree. Meshes are shallow-cloned (shared GPU buffers — see
- *  `cloneMeshNode` and `resource/ref-count.ts` for how disposal safely handles the sharing).
- *  Lights, cameras, and other non-mesh/non-TN children are shallow-cloned. */
+/** Deep-clone a SceneNode tree. Meshes share ref-counted GPU buffers; specialized
+ *  SceneNodes such as lights provide their own independent clone constructor. */
 export function cloneTransformNode(src: SceneNode): SceneNode {
     if ("_gpu" in src) {
         return cloneMeshNode(src as unknown as Mesh);
     }
 
-    const clone = src._localMatrix
-        ? createSceneNodeFromMatrix(src.name + "_clone", src._localMatrix)
-        : createTransformNode(
-              src.name + "_clone",
-              src.position.x,
-              src.position.y,
-              src.position.z,
-              src.rotationQuaternion.x,
-              src.rotationQuaternion.y,
-              src.rotationQuaternion.z,
-              src.rotationQuaternion.w,
-              src.scaling.x,
-              src.scaling.y,
-              src.scaling.z
-          );
+    const clone =
+        src._cloneNode?.() ??
+        (src._localMatrix
+            ? createSceneNodeFromMatrix(
+                  src.name + "_clone",
+                  (src._localMatrix as unknown as Mat4Storage).slice() as unknown as Mat4,
+                  src.position,
+                  src.rotationQuaternion,
+                  src.scaling
+              )
+            : createTransformNode(
+                  src.name + "_clone",
+                  src.position.x,
+                  src.position.y,
+                  src.position.z,
+                  src.rotationQuaternion.x,
+                  src.rotationQuaternion.y,
+                  src.rotationQuaternion.z,
+                  src.rotationQuaternion.w,
+                  src.scaling.x,
+                  src.scaling.y,
+                  src.scaling.z
+              ));
     for (const child of src.children) {
-        if (!("lightType" in child)) {
-            const childClone = cloneTransformNode(child);
-            childClone.parent = clone;
-            clone.children.push(childClone);
-        } else {
-            // Lights, cameras, other node types — shallow clone with fresh children array
-            const childClone = { ...(child as Record<string, unknown>), name: (child as SceneNode).name + "_clone", children: [] } as unknown as SceneNode;
-            childClone.parent = clone;
-            clone.children.push(childClone);
-        }
+        const childClone = cloneTransformNode(child);
+        childClone.parent = clone;
+        clone.children.push(childClone);
     }
     return clone;
 }

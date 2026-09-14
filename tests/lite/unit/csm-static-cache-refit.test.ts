@@ -70,14 +70,15 @@ const { createCsmRefitGate, createCsmStaticRefitScheduler } = await import("../.
 
 function lightWorldMatrix(): Float32Array {
     const world = new Float32Array(16);
-    world[9] = -1;
+    world[0] = 1;
+    world[5] = 1;
+    world[10] = 1;
     world[15] = 1;
     return world;
 }
 
-function setLightDirectionX(light: { direction: { x: number }; worldMatrix: Float32Array }, x: number): void {
+function setLightDirectionX(light: { direction: { x: number } }, x: number): void {
     light.direction.x = x;
-    light.worldMatrix[8] = x;
 }
 
 function makeHarness() {

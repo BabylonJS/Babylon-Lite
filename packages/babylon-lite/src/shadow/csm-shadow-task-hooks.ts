@@ -323,7 +323,7 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
         return 0;
     }
     const casterVersion = casterVersionSum(casterMeshes);
-    const lightVersion = sg._light.worldMatrixVersion;
+    const lightVersion = sg._light._lightVersion;
     const camVersion = _cameraChangeKey(camera);
     // Effective aspect is part of the key: a viewport or surface resize changes the camera
     // frustum the cascades are fit to while every version above stays put.
@@ -518,9 +518,10 @@ export function _computeCsmCascades(
 
     // Light direction (normalized), avoiding a perfectly vertical degenerate case.
     const lightWorld = light.worldMatrix;
-    let dx = lightWorld[8]!;
-    let dy = lightWorld[9]!;
-    let dz = lightWorld[10]!;
+    const direction = light.direction;
+    let dx = lightWorld[0]! * direction.x + lightWorld[4]! * direction.y + lightWorld[8]! * direction.z;
+    let dy = lightWorld[1]! * direction.x + lightWorld[5]! * direction.y + lightWorld[9]! * direction.z;
+    let dz = lightWorld[2]! * direction.x + lightWorld[6]! * direction.y + lightWorld[10]! * direction.z;
     const dl = Math.hypot(dx, dy, dz) || 1;
     dx /= dl;
     dy /= dl;

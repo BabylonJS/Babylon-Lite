@@ -8,14 +8,12 @@
  *  Standalone function for tree-shaking — only bundled when used. */
 
 import type { Mesh } from "../mesh/mesh.js";
-import type { LightBase } from "../light/types.js";
-import type { ObservableVec3 } from "../math/observable-vec3.js";
 import type { SceneNode } from "./scene-node.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
 import { invertMat4 } from "../math/invert-mat4.js";
 import { multiplyMat4 } from "../math/multiply-mat4.js";
 import { decomposeMat4 } from "../math/decompose-mat4.js";
-import type { Mat4 } from "../math/types.js";
+import type { Mat4, Mat4Storage } from "../math/types.js";
 
 /** SceneNodes expose a `children` array that traversal helpers walk. A foreign
  *  IWorldMatrixProvider may not, so probe structurally. */
@@ -43,21 +41,18 @@ function childrenOf(node: IWorldMatrixProvider | null): SceneNode[] | null {
  * `child.parent` links are only established by `addToScene`, so when reparenting a node from inside
  * a freshly loaded asset, add the container first — otherwise the child's "world" matrix is just
  * its local one and the reparent is computed against the wrong space.
- * Lights preserve their world-space position and direction; SceneNodes preserve
- * their complete TRS transform.
- * @param child - The entity to reparent (mesh, transform node, camera, or light).
+ * @param child - The node to reparent (mesh, transform node, camera, light, or any SceneNode).
  * @param parent - The new parent (any world-matrix provider), or `null` to detach to world space.
  */
 export function setParent(child: Mesh, parent: IWorldMatrixProvider | null): void;
 export function setParent(child: SceneNode, parent: IWorldMatrixProvider | null): void;
-export function setParent(child: LightBase, parent: IWorldMatrixProvider | null): void;
-export function setParent(child: SceneNode | LightBase, parent: IWorldMatrixProvider | null): void {
+export function setParent(child: SceneNode, parent: IWorldMatrixProvider | null): void {
     // 1. Snapshot child's current world matrix
     const childWorld: Mat4 = child.worldMatrix;
 
     // 2. Set the parent and keep the `children` arrays in sync (only when the
     //    link actually changes, so we never duplicate or drop entries).
-    if (child.parent !== parent && !isLight(child)) {
+    if (child.parent !== parent) {
         const oldChildren = childrenOf(child.parent);
         if (oldChildren) {
             const i = oldChildren.indexOf(child);
@@ -74,11 +69,7 @@ export function setParent(child: SceneNode | LightBase, parent: IWorldMatrixProv
 
     // 3. If parent is null, the child's local = its old world transform
     if (!parent) {
-        if (isLight(child)) {
-            applyLightLocal(childWorld, child);
-        } else {
-            applyLocal(childWorld, child);
-        }
+        applyLocal((childWorld as unknown as Mat4Storage).slice() as unknown as Mat4, child, true);
         return;
     }
 
@@ -86,10 +77,6 @@ export function setParent(child: SceneNode | LightBase, parent: IWorldMatrixProv
     const parentWorld = parent.worldMatrix;
     const invParent = invertMat4(parentWorld);
     if (!invParent) {
-        if (isLight(child)) {
-            applyLightLocal(childWorld, child);
-            return;
-        }
         // Singular parent matrix: no local transform can reproduce the child's world, so this is a
         // best-effort fallback (documented above) rather than true preservation — copy the world
         // position and leave rotation/scale uncompensated. A matrix-backed node ignores TRS writes,
@@ -101,34 +88,15 @@ export function setParent(child: SceneNode | LightBase, parent: IWorldMatrixProv
         return;
     }
 
-    // 5. Decompose newLocal into the transform fields supported by the child
-    const local = multiplyMat4(invParent, childWorld);
-    if (isLight(child)) {
-        applyLightLocal(local, child);
-    } else {
-        applyLocal(local, child);
-    }
-}
-
-function isLight(node: SceneNode | LightBase): node is LightBase {
-    return "lightType" in node;
-}
-
-/** Lights store only the local position/direction components that affect their
- *  rendered transform. Rebuild those fields instead of assuming SceneNode TRS. */
-function applyLightLocal(m: Mat4, light: LightBase): void {
-    const transform = light as LightBase & { position?: ObservableVec3; direction?: ObservableVec3 };
-    transform.position?.set(m[12]!, m[13]!, m[14]!);
-    if (transform.direction) {
-        const length = Math.hypot(m[8]!, m[9]!, m[10]!) || 1;
-        transform.direction.set(m[8]! / length, m[9]! / length, m[10]! / length);
-    }
+    // 5. Preserve the exact affine local matrix. A rotated non-uniform parent can require
+    //    shear to keep the child's world transform unchanged; TRS alone cannot represent it.
+    applyLocal(multiplyMat4(invParent, childWorld), child, true);
 }
 
 /** Decompose a local matrix and write it into a node's observable TRS. Writes the
  *  rotation as a quaternion directly (the source of truth) — avoids the lossy
  *  Euler round-trip near gimbal lock. */
-function applyLocal(m: Mat4, node: SceneNode): void {
+function applyLocal(m: Mat4, node: SceneNode, preserveMatrix = false): void {
     const { translation, rotation, scale } = decomposeMat4(m);
     // A glTF `matrix` node reports `_localMatrix` as its local transform and ignores TRS, so the
     // writes below would be dropped. Hand control back to the TRS triple before writing — the
@@ -138,4 +106,7 @@ function applyLocal(m: Mat4, node: SceneNode): void {
     node.position.set(translation.x, translation.y, translation.z);
     node.rotationQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
     node.scaling.set(scale.x, scale.y, scale.z);
+    if (preserveMatrix) {
+        node._localMatrix = m;
+    }
 }
