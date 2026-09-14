@@ -88,7 +88,12 @@ export function computeDirectionalLightMatrix(
     offY = 0,
     offZ = 0
 ): { _view: Float32Array; _viewProj: Float32Array; _near: number; _far: number } {
-    const view = buildLightViewMatrix(light.direction.x, light.direction.y, light.direction.z, light.position.x - offX, light.position.y - offY, light.position.z - offZ);
+    const lightWorld = light.worldMatrix;
+    const direction = light.direction;
+    const dx = lightWorld[0]! * direction.x + lightWorld[4]! * direction.y + lightWorld[8]! * direction.z;
+    const dy = lightWorld[1]! * direction.x + lightWorld[5]! * direction.y + lightWorld[9]! * direction.z;
+    const dz = lightWorld[2]! * direction.x + lightWorld[6]! * direction.y + lightWorld[10]! * direction.z;
+    const view = buildLightViewMatrix(dx, dy, dz, lightWorld[12]! - offX, lightWorld[13]! - offY, lightWorld[14]! - offZ);
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
@@ -210,7 +215,7 @@ export function createShadowCamera(sg: Pick<ShadowGenerator, "_light">): Camera 
         },
         get worldMatrixVersion() {
             const state = (this as Camera & { _shadowCameraVersion?: number })._shadowCameraVersion;
-            return state ?? sg._light.worldMatrixVersion;
+            return state ?? sg._light._lightVersion;
         },
     } as Camera;
 }

@@ -101,8 +101,9 @@ describe("shadow caster dirty tracking", () => {
             _casterMatGens: [0],
             _scene: { camera: null } as unknown as SceneContext,
         } satisfies PcfTaskState;
+        const light = { lightType: "directional", worldMatrixVersion: 1, _lightVersion: 1 };
         const shadowGenerator = {
-            _light: { lightType: "directional", worldMatrixVersion: 1 },
+            _light: light,
             _lightMatrix: new Float32Array(16),
             _depthValues: new Float32Array(4),
             _shadowsInfo: new Float32Array(4),
@@ -118,6 +119,10 @@ describe("shadow caster dirty tracking", () => {
         };
         const computeLightMatrix = vi.fn(() => matrix);
 
+        expect(renderPcfShadowMap(engine, shadowGenerator, state, computeLightMatrix)).toBe(1);
+        expect(renderPcfShadowMap(engine, shadowGenerator, state, computeLightMatrix)).toBe(0);
+
+        light._lightVersion++;
         expect(renderPcfShadowMap(engine, shadowGenerator, state, computeLightMatrix)).toBe(1);
         expect(renderPcfShadowMap(engine, shadowGenerator, state, computeLightMatrix)).toBe(0);
 
@@ -149,6 +154,6 @@ describe("shadow caster dirty tracking", () => {
 
         updateGeometry(engine, mesh, new Float32Array([0, 0, 0, 2, 0, 0, 0, 2, 0]), new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), new Uint32Array([0, 2, 1]));
         expect(renderPcfShadowMap(engine, shadowGenerator, state, computeLightMatrix)).toBe(1);
-        expect(execute).toHaveBeenCalledTimes(5);
+        expect(execute).toHaveBeenCalledTimes(6);
     });
 });

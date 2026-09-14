@@ -89,10 +89,6 @@ export function getContainerMeshes(container: AssetContainer): Mesh[] {
         }
     };
     for (const entity of container.entities) {
-        // Lights have no scene-graph children to walk; skip them.
-        if ("lightType" in (entity as object)) {
-            continue;
-        }
         visit(entity as SceneNode);
     }
     return meshes;

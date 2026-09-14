@@ -6,13 +6,10 @@ import type { EngineContext } from "../engine/engine.js";
 import { createMappedBuffer } from "../resource/gpu-buffers.js";
 import type { Material } from "../material/material.js";
 import type { SkeletonData, MorphTargetData, VatData } from "../animation/types.js";
-import { ObservableVec3 } from "../math/observable-vec3.js";
-import { ObservableQuat } from "../math/observable-quat.js";
 import type { ThinInstanceData } from "./thin-instance.js";
 import type { WorldAabbAcc } from "./mesh-world-bounds.js";
-import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrix } from "../scene/world-matrix-state.js";
 import type { SceneNode } from "../scene/scene-node.js";
-import { createEulerProxy } from "../scene/scene-node.js";
+import { initSceneNodeTransform } from "../scene/scene-node.js";
 import { eulerXYZToQuatTuple } from "../math/quat-euler.js";
 
 // ─── Mesh GPU Geometry ───────────────────────────────────────────────
@@ -207,47 +204,9 @@ export interface Mesh extends SceneNode {
 /** Wire ObservableVec3/ObservableQuat TRS and children onto a partially-built mesh object.
  *  Used by all mesh creation paths (factories, loaders). */
 export function initMeshTransform(partialMesh: Partial<Mesh> & { _flatNormal?: boolean }, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): Mesh {
-    const wm = createWorldMatrixState(() => composeTrsLocalMatrix(mesh.position, mesh.rotationQuaternion, mesh.scaling));
-    const onWmDirty = () => wm.markLocalDirty();
-
     const [iqx, iqy, iqz, iqw] = eulerXYZToQuatTuple(rx, ry, rz);
-    const rq = new ObservableQuat(iqx, iqy, iqz, iqw, onWmDirty);
-    const rotationQuaternion = rq;
-    const rotation = createEulerProxy(rq);
-    const position = new ObservableVec3(px, py, pz, onWmDirty);
-    const scaling = new ObservableVec3(sx, sy, sz, onWmDirty);
-
-    const mesh = { ...partialMesh, position, rotationQuaternion, rotation, scaling } as Mesh;
-
-    if (!(mesh as unknown as Record<string, unknown>).children) {
-        (mesh as unknown as Record<string, unknown>).children = [];
-    }
-
-    Object.defineProperty(mesh, "parent", {
-        get() {
-            return wm.parent;
-        },
-        set(v) {
-            wm.parent = v;
-        },
-        configurable: true,
-        enumerable: true,
-    });
-    Object.defineProperty(mesh, "worldMatrix", {
-        get() {
-            return wm.getWorldMatrix();
-        },
-        configurable: true,
-        enumerable: false,
-    });
-    Object.defineProperty(mesh, "worldMatrixVersion", {
-        get() {
-            return wm.getWorldMatrixVersion();
-        },
-        configurable: true,
-        enumerable: false,
-    });
-    attachWorldMatrixState(mesh, wm);
+    const mesh = initSceneNodeTransform({ children: [], ...partialMesh }, px, py, pz, iqx, iqy, iqz, iqw, sx, sy, sz);
+    Object.defineProperties(mesh, { worldMatrix: { enumerable: false }, worldMatrixVersion: { enumerable: false } });
     return mesh;
 }
 
