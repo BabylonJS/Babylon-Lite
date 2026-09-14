@@ -591,19 +591,18 @@ export function disposeEngine(engine: EngineContext): void {
 export function renderFrame(engine: EngineContext, delta: number, surfaces = engine.surfaces): void {
     // Skip the encoder allocation if no selected surface has any rendering contexts.
     let total = 0;
-    for (let i = 0; i < surfaces.length; i++) {
+    for (let i = surfaces.length; i--;) {
         const surface = surfaces[i]!;
         if (surface.engine !== engine) {
             throw new Error("renderFrame: surface belongs to a different engine.");
         }
         total += surface._renderingContexts.length;
     }
-    if (total === 0) {
+    if (!total) {
         // Nothing left to draw (e.g. the last scene was unregistered). No submit will happen this frame,
         // so any retirement queued by that removal has to be drained behind a fence instead of waiting
         // for a `queue.submit` that will never come.
-        flushGpuResourceRetirements(engine);
-        return;
+        return flushGpuResourceRetirements(engine);
     }
 
     const encoder = engine._device.createCommandEncoder({ label: "frame" });
