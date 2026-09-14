@@ -137,6 +137,27 @@ describe("renderFrame targets", () => {
         expectOneSubmission(probe);
     });
 
+    it("reports zero draw calls without submitting when the selected surface has no rendering contexts", () => {
+        const { engine, surfaces, probe } = makeEngine(["primary", "aux"]);
+
+        renderFrame(engine, 16, [surfaces[0]!]);
+        expect(engine.drawCallCount).toBe(3);
+
+        surfaces[1]!._renderingContexts.length = 0;
+        probe.events.length = 0;
+        probe.createCommandEncoder.mockClear();
+        probe.finish.mockClear();
+        probe.submit.mockClear();
+
+        renderFrame(engine, 16, [surfaces[1]!]);
+
+        expect(engine.drawCallCount).toBe(0);
+        expect(probe.events).toEqual([]);
+        expect(probe.createCommandEncoder).not.toHaveBeenCalled();
+        expect(probe.finish).not.toHaveBeenCalled();
+        expect(probe.submit).not.toHaveBeenCalled();
+    });
+
     it("rejects a surface belonging to another engine before creating an encoder", () => {
         const { engine, probe } = makeEngine(["primary"]);
         const { surfaces: foreignSurfaces } = makeEngine(["foreign"]);
