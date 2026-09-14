@@ -517,9 +517,10 @@ export function _computeCsmCascades(
     }
 
     // Light direction (normalized), avoiding a perfectly vertical degenerate case.
-    let dx = light.direction.x;
-    let dy = light.direction.y;
-    let dz = light.direction.z;
+    const lightWorld = light.worldMatrix;
+    let dx = lightWorld[8]!;
+    let dy = lightWorld[9]!;
+    let dz = lightWorld[10]!;
     const dl = Math.hypot(dx, dy, dz) || 1;
     dx /= dl;
     dy /= dl;

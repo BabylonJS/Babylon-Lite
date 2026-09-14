@@ -32,6 +32,15 @@ export function createLightBase(getLocalMatrix: () => Mat4): { wm: WorldMatrixAc
     return { wm, onDirty, lvs };
 }
 
+/** Write a normalized world-space direction from a light matrix. Parent scale
+ *  must not change lighting intensity or spotlight cone tests. */
+export function writeWorldLightDirection(data: Float32Array, offset: number, world: Mat4): void {
+    const invLength = 1 / (Math.hypot(world[8]!, world[9]!, world[10]!) || 1);
+    data[offset] = world[8]! * invLength;
+    data[offset + 1] = world[9]! * invLength;
+    data[offset + 2] = world[10]! * invLength;
+}
+
 /** Mixin world-matrix accessors (parent, worldMatrix, worldMatrixVersion) onto a light object.
  *  Also adds _lightVersion from the LightVersionState. Returns the same object reference
  *  typed as R (defineProperties adds the accessors at runtime). */
@@ -65,7 +74,7 @@ export function applyWorldMatrixAccessors<R>(target: object, wm: WorldMatrixAcce
     if (lvs) {
         Object.defineProperty(target, "_lightVersion", {
             get() {
-                return lvs._lightVersion;
+                return lvs._lightVersion + wm.getWorldMatrixVersion();
             },
             enumerable: false,
             configurable: true,

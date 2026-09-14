@@ -88,7 +88,8 @@ export function computeDirectionalLightMatrix(
     offY = 0,
     offZ = 0
 ): { _view: Float32Array; _viewProj: Float32Array; _near: number; _far: number } {
-    const view = buildLightViewMatrix(light.direction.x, light.direction.y, light.direction.z, light.position.x - offX, light.position.y - offY, light.position.z - offZ);
+    const lightWorld = light.worldMatrix;
+    const view = buildLightViewMatrix(lightWorld[8]!, lightWorld[9]!, lightWorld[10]!, lightWorld[12]! - offX, lightWorld[13]! - offY, lightWorld[14]! - offZ);
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;

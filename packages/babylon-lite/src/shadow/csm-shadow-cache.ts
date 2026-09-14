@@ -332,10 +332,11 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
     // previous geometry until some unrelated refit (a camera move) happens to redraw it.
     const contentChanged = cached._scene._renderableVersion !== cached._cachedContentVersion;
     cached._gate.syncCasters(cached._casterMeshes);
+    const lightWorld = light.worldMatrix;
     const decision = cached._gate.update(
-        light.direction.x,
-        light.direction.y,
-        light.direction.z,
+        lightWorld[8]!,
+        lightWorld[9]!,
+        lightWorld[10]!,
         typeof performance !== "undefined" ? performance.now() : Date.now(),
         cameraChanged,
         cfg._forceRefreshEveryFrame || contentChanged,

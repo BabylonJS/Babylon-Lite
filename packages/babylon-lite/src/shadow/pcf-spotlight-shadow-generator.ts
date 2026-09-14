@@ -42,7 +42,8 @@ export interface PcfSpotlightShadowGeneratorConfig {
  *  (offset subtracted from the spot position) so the returned view/viewProj match the
  *  eye-relative mesh world matrices used by both the caster pass and the receiver shader. */
 export function _computeSpotLightMatrix(light: SpotLight, near: number, far: number, offX = 0, offY = 0, offZ = 0): PcfLightMatrix {
-    const view = buildLightViewMatrix(light.direction.x, light.direction.y, light.direction.z, light.position.x - offX, light.position.y - offY, light.position.z - offZ);
+    const world = light.worldMatrix;
+    const view = buildLightViewMatrix(world[8]!, world[9]!, world[10]!, world[12]! - offX, world[13]! - offY, world[14]! - offZ);
     const f = 1.0 / Math.tan(light.angle * 0.5);
     const proj = new F32(16);
     proj[0] = f;

@@ -4,7 +4,7 @@
 
 import type { LightBase } from "./types.js";
 import type { SceneNode } from "../scene/scene-node.js";
-import { createLightBase, applyWorldMatrixAccessors, ObservableVec3 } from "./light-base.js";
+import { createLightBase, applyWorldMatrixAccessors, ObservableVec3, writeWorldLightDirection } from "./light-base.js";
 import { localMatrixFromDirection } from "./light-matrix.js";
 import type { Mat4 } from "../math/types.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
@@ -72,9 +72,7 @@ export function createSpotLight(position: [number, number, number], direction: [
                 data[o + 10] = light.specular[2] * light.intensity;
                 data[o + 11] = light.exponent;
                 // Direction = worldMatrix column 2
-                data[o + 12] = w[8]!;
-                data[o + 13] = w[9]!;
-                data[o + 14] = w[10]!;
+                writeWorldLightDirection(data, o + 12, w);
                 data[o + 15] = _cosHalfAngle;
             },
         },

@@ -20,18 +20,14 @@ interface GltfLightDef {
     spot?: { innerConeAngle?: number; outerConeAngle?: number };
 }
 
-/** Fold the light's `worldMatrixVersion` (ancestor / animated-node motion) and a bump
- *  counter into its `_lightVersion`. The shared lights-UBO refresh (computeLightsVersion
- *  sums `_lightVersion`) then picks up an animated light NODE (KHR_animation_pointer node
- *  TRS) and direct color/intensity/range pointer writes — with NO change to the core light
- *  or lights-UBO code. All cost lives in this lazy KHR_lights_punctual feature, so scenes
- *  without punctual lights stay byte-identical. Harmless for static lights (constant offset). */
-function bindAnimatedLightVersion(light: LightBase & { worldMatrixVersion?: number }): void {
+/** Fold pointer-driven direct field writes into `_lightVersion`. The core light
+ *  getter already includes worldMatrixVersion for ancestor/node motion. */
+function bindAnimatedLightVersion(light: LightBase): void {
     const baseGet = Object.getOwnPropertyDescriptor(light, "_lightVersion")?.get;
     let extra = 0;
     Object.defineProperty(light, "_lightVersion", {
         get(): number {
-            return (baseGet ? (baseGet.call(light) as number) : 0) + (light.worldMatrixVersion ?? 0) + extra;
+            return (baseGet ? (baseGet.call(light) as number) : 0) + extra;
         },
         enumerable: false,
         configurable: true,

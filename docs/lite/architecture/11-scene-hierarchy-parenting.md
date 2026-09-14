@@ -56,7 +56,7 @@ reproduces exactly the matrix it replaces, so the node does not move beyond the 
 
 **Parent links come from `addToScene`.** The glTF loader fills `children` arrays but leaves `parent`
 unset; `addToScene` walks the tree and assigns it. `setParent` needs the real parent chain to read a
-node's world transform, so reparent a *nested* loaded node only after its container has been added.
+node's world transform, so reparent a _nested_ loaded node only after its container has been added.
 Reparenting the container's own root beforehand is fine — its parent is null either way.
 
 ### TransformNode (`scene/transform-node.ts`)
@@ -104,7 +104,12 @@ Camera `worldMatrix` is the camera-to-world transform (inverse of view matrix).
 
 `LightBase` extends `IWorldMatrixProvider, IParentable`. All 4 light types
 (point, directional, spot, hemispheric) use `createWorldMatrixState` with
-push-based dirty tracking via `ObservableVec3`.
+push-based dirty tracking via `ObservableVec3`. `setParent` accepts lights
+directly and preserves their world-space position/direction without requiring
+SceneNode-only rotation or scaling accessors. Because lights are parentable world
+matrix providers rather than SceneNodes, attaching one does not insert it into a
+SceneNode `children` array. Light UBO and shadow consumers read the world matrix, so
+ancestor motion and scaling affect both paths consistently.
 
 UBO writers read world-space values from `worldMatrix` columns:
 

@@ -76,6 +76,15 @@ export function localMatrixFromDirection(dx: number, dy: number, dz: number, px?
 4. Build column-major 4×4 matrix: col0=right, col1=up, col2=forward, col3=position
 5. `m[15] = 1`
 
+`setParent` accepts lights directly. It preserves their world-space position and
+direction by rebuilding those light-specific local fields rather than assuming the
+full SceneNode TRS shape. Light children remain outside SceneNode `children` arrays,
+so SceneNode-only traversal and cloning never receive an incompatible light object.
+UBO writers normalize the resulting world direction so parent scale cannot alter
+directional intensity or spotlight cone tests. `_lightVersion` includes the world
+matrix version, so ancestor motion refreshes GPU light data. Shadow builders likewise
+derive light position/direction from `worldMatrix`.
+
 ### Directional Light (`directional-light.ts`)
 
 ```typescript
@@ -95,14 +104,15 @@ export function createDirectionalLight(
 ```
 
 **Default values:**
-| Property | Default |
-|------------|----------------|
-| lightType | `'directional'`|
-| direction | _(parameter)_ |
-| position | `(0, 0, 0)` via ObservableVec3 |
-| diffuse | `[1, 1, 1]` |
-| specular | `[1, 1, 1]` |
-| intensity | `1` |
+
+| Property  | Default                        |
+| --------- | ------------------------------ |
+| lightType | `'directional'`                |
+| direction | _(parameter)_                  |
+| position  | `(0, 0, 0)` via ObservableVec3 |
+| diffuse   | `[1, 1, 1]`                    |
+| specular  | `[1, 1, 1]`                    |
+| intensity | `1`                            |
 
 ### Point Light (`point-light.ts`)
 
@@ -123,14 +133,15 @@ export function createPointLight(
 ```
 
 **Default values:**
-| Property | Default |
-|------------|----------------------|
-| lightType | `'point'` |
-| position | _(parameter)_ via ObservableVec3 |
-| diffuse | `[1, 1, 1]` |
-| specular | `[1, 1, 1]` |
-| intensity | `1.0` |
-| range | `Number.MAX_VALUE` |
+
+| Property  | Default                          |
+| --------- | -------------------------------- |
+| lightType | `'point'`                        |
+| position  | _(parameter)_ via ObservableVec3 |
+| diffuse   | `[1, 1, 1]`                      |
+| specular  | `[1, 1, 1]`                      |
+| intensity | `1.0`                            |
+| range     | `Number.MAX_VALUE`               |
 
 **Local matrix:** `createTranslationMat4(position.x, position.y, position.z)` — position only, no orientation.
 
@@ -153,14 +164,15 @@ export function createHemisphericLight(
 ```
 
 **Default values:**
-| Property | Default |
-|--------------|----------------|
-| lightType | `'hemispheric'`|
-| direction | `(0, 1, 0)` via ObservableVec3 |
-| intensity | `1.0` |
-| diffuseColor | `[1, 1, 1]` |
-| specularColor | `[1, 1, 1]` |
-| groundColor | `[0, 0, 0]` |
+
+| Property      | Default                        |
+| ------------- | ------------------------------ |
+| lightType     | `'hemispheric'`                |
+| direction     | `(0, 1, 0)` via ObservableVec3 |
+| intensity     | `1.0`                          |
+| diffuseColor  | `[1, 1, 1]`                    |
+| specularColor | `[1, 1, 1]`                    |
+| groundColor   | `[0, 0, 0]`                    |
 
 ### Spot Light (`spot-light.ts`)
 
@@ -189,17 +201,18 @@ export function createSpotLight(
 ```
 
 **Default values:**
-| Property | Default |
-|------------|----------------------|
-| lightType | `'spot'` |
-| position | _(parameter)_ via ObservableVec3 |
+
+| Property  | Default                          |
+| --------- | -------------------------------- |
+| lightType | `'spot'`                         |
+| position  | _(parameter)_ via ObservableVec3 |
 | direction | _(parameter)_ via ObservableVec3 |
-| angle | _(parameter)_ |
-| exponent | _(parameter)_ |
-| diffuse | `[1, 1, 1]` |
-| specular | `[1, 1, 1]` |
-| intensity | `1.0` |
-| range | `Number.MAX_VALUE` |
+| angle     | _(parameter)_                    |
+| exponent  | _(parameter)_                    |
+| diffuse   | `[1, 1, 1]`                      |
+| specular  | `[1, 1, 1]`                      |
+| intensity | `1.0`                            |
+| range     | `Number.MAX_VALUE`               |
 
 **Local matrix:** Uses `localMatrixFromDirection(direction, position)` — both orientation and position.
 

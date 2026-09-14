@@ -3,7 +3,7 @@
 
 import type { LightBase } from "./types.js";
 import type { SceneNode } from "../scene/scene-node.js";
-import { createLightBase, applyWorldMatrixAccessors, ObservableVec3 } from "./light-base.js";
+import { createLightBase, applyWorldMatrixAccessors, ObservableVec3, writeWorldLightDirection } from "./light-base.js";
 import { localMatrixFromDirection } from "./light-matrix.js";
 import type { Mat4 } from "../math/types.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
@@ -39,9 +39,7 @@ export function createHemisphericLight(direction: [number, number, number] = [0,
                 const o = offset;
                 const w = light.worldMatrix;
                 // Direction = worldMatrix column 2
-                data[o] = w[8]!;
-                data[o + 1] = w[9]!;
-                data[o + 2] = w[10]!;
+                writeWorldLightDirection(data, o, w);
                 data[o + 3] = 3;
                 data[o + 4] = light.diffuseColor[0] * light.intensity;
                 data[o + 5] = light.diffuseColor[1] * light.intensity;
