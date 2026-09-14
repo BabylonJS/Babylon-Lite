@@ -1,15 +1,12 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../parity-fixtures";
 import * as path from "path";
-import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
+import { attachCompareArtifacts, compareImages, getSceneConfig } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(286);
 const REFERENCE_DIR = path.resolve(__dirname, "../../../../reference/lite/scene286-shadermaterial-interleaved");
 const GOLDEN_REF = path.join(REFERENCE_DIR, "babylon-ref-golden.png");
 
 test("Scene 286 - ShaderMaterial on interleaved glTF matches Babylon.js reference", async ({ page }, testInfo) => {
-    const browser = page.context().browser()!;
-    await captureGolden(browser, { sceneId: 286 });
-
     await page.goto("/scene286.html");
     await page.waitForFunction(() => document.querySelector("canvas")?.dataset.ready === "true", { timeout: 20_000 });
     await page.waitForTimeout(500);

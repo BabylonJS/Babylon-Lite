@@ -38,7 +38,8 @@ async function main(): Promise<void> {
     await engine.initAsync();
 
     const scene = new Scene(engine);
-    scene.clearColor = new Color4(0.2, 0.2, 0.3, 1.0);
+    // Exact byte values -- see the Lite scene for why.
+    scene.clearColor = new Color4(51 / 255, 51 / 255, 76 / 255, 1);
 
     const camera = new ArcRotateCamera("camera", Math.PI / 2, Math.PI / 2, 1.3, Vector3.Zero(), scene);
     camera.minZ = 0.01;

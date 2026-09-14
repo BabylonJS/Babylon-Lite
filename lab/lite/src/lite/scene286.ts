@@ -47,7 +47,10 @@ async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
-    scene.clearColor = { r: 0.2, g: 0.2, b: 0.3, a: 1.0 };
+    // Exact byte values, not 0.2/0.2/0.3: 0.3 * 255 = 76.5 is a rounding tie. Chrome rounded it
+    // to 76 on Windows and 77 on CI's macOS browser, and that one channel of background was
+    // most of the MAD 0.195 this scene measured there. Same values scene 285 uses.
+    scene.clearColor = { r: 51 / 255, g: 51 / 255, b: 76 / 255, a: 1 };
 
     scene.camera = createArcRotateCamera(Math.PI / 2, Math.PI / 2, 1.3, { x: 0, y: 0, z: 0 });
     scene.camera.nearPlane = 0.01;
