@@ -6,6 +6,7 @@ import { TU } from "../engine/gpu-flags.js";
 import type { Texture2D } from "./texture-2d.js";
 import type { EngineContext } from "../engine/engine.js";
 import { getBilinearSampler } from "../resource/samplers.js";
+import { acquireTexture } from "../resource/gpu-pool.js";
 
 /** Create a 1×1 solid-color `Texture2D` from straight RGBA components in [0, 1].
  *  @param engine - Engine context.
@@ -29,5 +30,10 @@ export function createSolidTexture2D(engine: EngineContext, r: number, g: number
 
     const tex: Texture2D = { texture, view: texture.createView(), sampler, width: 1, height: 1 };
     engine._dlr?.s(tex, r, g, b, a);
+    // Creation-time ownership ref, as every other texture factory takes. Without it the
+    // ref count starts at 0 instead of 1, so the FIRST `releaseTexture` — a single mesh
+    // leaving the scene — destroys a texture the material still points at, and every
+    // later frame submits the dead texture.
+    acquireTexture(tex);
     return tex;
 }

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { runInNewContext } from "node:vm";
 
 import { cleanupTempDirs, ensureLibBuilt, LIB_ENTRY, runRollup } from "./bundler-harness";
 
@@ -9,19 +10,49 @@ type BuiltEnvironmentPatch = {
     _apply(fragment: string, kind: "dds" | "hdr"): string;
 };
 
-function readBuiltSkyboxFragment(relativePath: string, variableName: string): string {
-    const code = readFileSync(resolve(dirname(LIB_ENTRY), relativePath), "utf8");
-    const match = code.match(new RegExp(`const ${variableName} = (".*");`));
-    if (!match) {
-        throw new Error(`Built skybox shader ${variableName} was not found in ${relativePath}.`);
+function decodeJsStringLiteral(literal: string): string {
+    const value: unknown = runInNewContext(literal, Object.create(null), { timeout: 100 });
+    if (typeof value !== "string") {
+        throw new TypeError("Expected a JavaScript string literal.");
     }
-    return JSON.parse(match[1]!) as string;
+    return value;
+}
+
+function readBuiltSkyboxFragment(relativePath: string): string {
+    const libDir = dirname(LIB_ENTRY);
+    const pending = [resolve(libDir, relativePath)];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+        const file = pending.pop()!;
+        if (visited.has(file)) {
+            continue;
+        }
+        visited.add(file);
+        const code = readFileSync(file, "utf8");
+        for (const match of code.matchAll(/"(?:\\.|[^"\\])*"/g)) {
+            const value = decodeJsStringLiteral(match[0]);
+            if (value.includes("@fragment fn main") && value.includes("textureSampleLevel")) {
+                return value;
+            }
+        }
+        for (const match of code.matchAll(/(?:import|export)[^"']*from\s*["']([^"']+)["']/g)) {
+            const specifier = match[1]!;
+            if (specifier.startsWith(".")) {
+                pending.push(resolve(dirname(file), specifier));
+            }
+        }
+    }
+    throw new Error(`Built skybox fragment was not found from ${relativePath}.`);
 }
 
 afterAll(cleanupTempDirs);
 beforeAll(ensureLibBuilt);
 
 describe("environment setter tree shaking", () => {
+    it("decodes JavaScript-only string escapes emitted by minifiers", () => {
+        expect(decodeJsStringLiteral(String.raw`"texture\x53ampleLevel @fragment fn main"`)).toBe("textureSampleLevel @fragment fn main");
+    });
+
     it("keeps rotation UBO update logic out of a non-environment scene consumer", async () => {
         const result = await runRollup({
             entrySource: `import { createSceneContext } from ${JSON.stringify(LIB_ENTRY)};\nconsole.log(createSceneContext);\n`,
@@ -98,8 +129,8 @@ describe("environment setter tree shaking", () => {
             import(pathToFileURL(resolve(libDir, "material/pbr/fragments/environment-rotation-fragment.js")).href),
             import(pathToFileURL(resolve(libDir, "material/pbr/fragments/environment-blur-fragment.js")).href),
         ])) as [BuiltEnvironmentPatch, BuiltEnvironmentPatch];
-        const dds = readBuiltSkyboxFragment("material/pbr/background-dds-skybox.js", "ddsSkyboxFragSrc");
-        const hdr = readBuiltSkyboxFragment("material/pbr/background-hdr-skybox.js", "skyboxHdrFragSrc");
+        const dds = readBuiltSkyboxFragment("material/pbr/background-dds-skybox.js");
+        const hdr = readBuiltSkyboxFragment("material/pbr/background-hdr-skybox.js");
 
         expect(dds).not.toContain("var dir");
         expect(dds).not.toContain("envCubemap");

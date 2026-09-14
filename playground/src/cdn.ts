@@ -18,14 +18,19 @@ export interface Cdn {
     packageUrl(specifier: string): string;
     /** URL for a published `@babylonjs/lite` release (omit `version` for the latest). */
     engineUrl(version?: string): string;
+    /** URL for the Babylon Lite entry point in Inspector v2. */
+    inspectorUrl(): string;
     /** URL for a raw (non-module) file inside a package, e.g. a `.wasm` binary. */
     rawFileUrl(path: string): string;
 }
+
+const INSPECTOR_VERSION = "9.26.0";
 
 const ESM_SH: Cdn = {
     id: "esm.sh",
     packageUrl: (specifier) => `https://esm.sh/${specifier}`,
     engineUrl: (version) => `https://esm.sh/@babylonjs/lite${version ? `@${version}` : ""}`,
+    inspectorUrl: () => `https://esm.sh/@babylonjs/inspector@${INSPECTOR_VERSION}/lite?external=@babylonjs/lite`,
     rawFileUrl: (path) => `https://esm.sh/${path}`,
 };
 
@@ -33,6 +38,7 @@ const JSDELIVR: Cdn = {
     id: "jsdelivr",
     packageUrl: (specifier) => `https://cdn.jsdelivr.net/npm/${specifier}/+esm`,
     engineUrl: (version) => `https://cdn.jsdelivr.net/npm/@babylonjs/lite${version ? `@${version}` : ""}/+esm`,
+    inspectorUrl: () => `https://cdn.jsdelivr.net/npm/@babylonjs/inspector@${INSPECTOR_VERSION}/lite/+esm`,
     rawFileUrl: (path) => `https://cdn.jsdelivr.net/npm/${path}`,
 };
 
