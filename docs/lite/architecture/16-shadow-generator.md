@@ -268,7 +268,7 @@ function _computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: M
 
 **Algorithm:**
 
-1. Normalize light direction vector: `dir = normalize(light.direction)`
+1. Transform the local direction by the light world matrix and normalize it: `dir = normalize(light.worldMatrix * vec4(light.direction, 0))`
 2. Choose up vector: `(0, 1, 0)` unless `|dirY| > 0.99`, then `(0, 0, 1)`
 3. Build orthonormal basis:
     - `right = normalize(cross(up, dir))`
@@ -280,7 +280,7 @@ function _computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: M
         | rz  uz  dirZ  0 |
         | -dot(r,P) -dot(u,P) -dot(dir,P) 1 |
     ```
-    Where `P = light.position`
+    Where `P = light.worldMatrix[12..14]`
 5. Transform all 8 corners of each caster's local AABB (`mesh.boundMin`/`boundMax`, default unit cube) through `worldMatrix` then through `view` → compute X/Y bounds in light space
 6. Expand bounds by 10% (`shadowOrthoScale = 0.1`): `lMinX -= (lMaxX - lMinX) * 0.1` etc.
 7. Z bounds from `orthoMinZ`/`orthoMaxZ` (camera near/far)
@@ -306,10 +306,10 @@ function _computeSpotLightMatrix(light: SpotLight, near: number, far: number): {
 
 **Algorithm:**
 
-1. Normalize light direction: `dir = normalize(light.direction)`
+1. Transform the local direction by the light world matrix and normalize it: `dir = normalize(light.worldMatrix * vec4(light.direction, 0))`
 2. Choose up vector: `(0, 1, 0)` unless `|dirY| > 0.99`, then `(0, 0, 1)`
 3. Build orthonormal basis (same as ESM): `right = cross(up, dir)`, `up' = cross(dir, right)`
-4. Build view matrix (column-major) from `light.position`
+4. Build view matrix (column-major) from `light.worldMatrix[12..14]`
 5. Build **perspective** projection (column-major, WebGPU z=[0,1]):
     - FOV = `light.angle` (full cone angle in radians)
     - Aspect = 1:1 (square shadow map)
@@ -340,15 +340,17 @@ The spot matrix helper is exported as internal `_computeSpotLightMatrix()` from 
 **Bind group layouts:**
 
 Group 0 — `shadow-depth-scene`:
-| Binding | Visibility | Type | Content |
-|---------|------------|---------|---------------------------------|
-| 0 | VERTEX | uniform | Light view-projection (64 bytes)|
+
+| Binding | Visibility | Type    | Content                          |
+| ------- | ---------- | ------- | -------------------------------- |
+| 0       | VERTEX     | uniform | Light view-projection (64 bytes) |
 
 Group 1 — `shadow-depth-mesh`:
-| Binding | Visibility | Type | Content |
-|---------|------------------|---------|---------------------------------|
-| 0 | VERTEX | uniform | World matrix (64 bytes) |
-| 1 | VERTEX+FRAGMENT | uniform | Shadow params (32 bytes) |
+
+| Binding | Visibility      | Type    | Content                  |
+| ------- | --------------- | ------- | ------------------------ |
+| 0       | VERTEX          | uniform | World matrix (64 bytes)  |
+| 1       | VERTEX+FRAGMENT | uniform | Shadow params (32 bytes) |
 
 **Pipeline state:**
 
@@ -362,11 +364,12 @@ Group 1 — `shadow-depth-mesh`:
 **Vertex buffers:** None (fullscreen triangle from vertex_index)
 
 **Bind group layout** — `shadow-blur`:
-| Binding | Visibility | Type | Content |
-|---------|------------------|-----------|---------------------------|
-| 0 | VERTEX+FRAGMENT | uniform | BlurParams (16 bytes) |
-| 1 | FRAGMENT | texture | Source texture (float) |
-| 2 | FRAGMENT | sampler | Linear filtering sampler |
+
+| Binding | Visibility      | Type    | Content                  |
+| ------- | --------------- | ------- | ------------------------ |
+| 0       | VERTEX+FRAGMENT | uniform | BlurParams (16 bytes)    |
+| 1       | FRAGMENT        | texture | Source texture (float)   |
+| 2       | FRAGMENT        | sampler | Linear filtering sampler |
 
 **Pipeline state:**
 
@@ -399,10 +402,11 @@ PCF depth rendering uses the regular material renderable path with a pass-specif
 Standard, PBR, and Node shadow receiver fragments emit PCF sampling code and bind-group layout directly from the scene's shadow-light list. There is no generator-side PCF shader registration path; the generator only exposes receiver-facing texture/sampler/UBO resources.
 
 **Receiver bind group entries for main pass:**
-| Binding | Type | Content |
-|---------|--------------------|----------------------------------|
-| 0 | `texture_depth_2d` | Shadow depth texture |
-| 1 | `sampler_comparison`| Comparison sampler (compare: `less`, linear filtering) |
+
+| Binding | Type                 | Content                                                |
+| ------- | -------------------- | ------------------------------------------------------ |
+| 0       | `texture_depth_2d`   | Shadow depth texture                                   |
+| 1       | `sampler_comparison` | Comparison sampler (compare: `less`, linear filtering) |
 
 **Receiver shader fragments:**
 

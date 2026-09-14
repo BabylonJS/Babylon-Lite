@@ -337,16 +337,18 @@ export function createLightGizmo(engine: EngineContext, layer: UtilityLayer, opt
         if (!light) {
             return;
         }
-        const pos = (light as unknown as { position?: { x: number; y: number; z: number } }).position;
-        if (pos) {
-            root.position.set(pos.x, pos.y, pos.z);
-        }
+        const world = light.worldMatrix;
+        root.position.set(world[12]!, world[13]!, world[14]!);
         const dir = (light as unknown as { direction?: { x: number; y: number; z: number } }).direction;
         if (dir) {
             // Match BJS `attachedMesh.setDirection(light.direction)` exactly
             // (yaw + pitch, no roll) so roll-asymmetric gizmos like the
             // directional-light arrows orient correctly.
-            const q = directionToQuat({ x: dir.x, y: dir.y, z: dir.z });
+            const q = directionToQuat({
+                x: world[0]! * dir.x + world[4]! * dir.y + world[8]! * dir.z,
+                y: world[1]! * dir.x + world[5]! * dir.y + world[9]! * dir.z,
+                z: world[2]! * dir.x + world[6]! * dir.y + world[10]! * dir.z,
+            });
             root.rotationQuaternion.set(q[0], q[1], q[2], q[3]);
         }
         // Distance-based scaling keeps the widget a roughly constant on-screen
