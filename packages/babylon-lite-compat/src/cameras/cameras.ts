@@ -311,9 +311,9 @@ export class ArcRotateCamera extends Camera {
         this._lite.panningSensibility = value;
     }
 
-    public attachControl(canvas: HTMLCanvasElement, _noPreventDefault?: boolean): void {
+    public attachControl(canvas: HTMLCanvasElement, noPreventDefault = false): void {
         enableArcRotateKeyboardControls();
-        const detach = liteAttachControl(this._lite, canvas, this._scene?._lite, { keyboard: true });
+        const detach = liteAttachControl(this._lite, canvas, this._scene?._lite, { keyboard: { preventDefault: !noPreventDefault } });
         this._setDetach(detach);
     }
 

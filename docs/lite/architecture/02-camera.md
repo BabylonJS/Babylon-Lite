@@ -127,6 +127,8 @@ export interface ArcRotateKeyboardMappings {
 export interface ArcRotateKeyboardOptions {
     /** Key mappings, matched against KeyboardEvent.code. */
     keys?: ArcRotateKeyboardMappings;
+    /** Prevent browser defaults for mapped keydown/keyup events. Default: true. */
+    preventDefault?: boolean;
     /** Rotation divisor. Higher values rotate more slowly. Default: 100. */
     angularSensitivity?: number;
     /** Panning divisor. Higher values pan more slowly. Default: 50. */
@@ -158,7 +160,9 @@ After installing the seam, keyboard input remains disabled when `keyboard` is
 omitted or `false`. Passing `keyboard: true` enables the legacy Arrow-key
 behavior. Passing an object also enables keyboard input and may override any
 direction's `KeyboardEvent.code` list independently; an empty list disables that
-direction. Sensitivities are divisors, so the defaults produce angular,
+direction. Mapped keydown and keyup events prevent browser defaults unless
+`preventDefault` is `false`; input handling and movement remain enabled either
+way. Sensitivities are divisors, so the defaults produce angular,
 panning, and zooming increments of `1 / 100`, `1 / 50`, and `1 / 25` per
 rendered frame respectively.
 

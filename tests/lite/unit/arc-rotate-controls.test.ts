@@ -447,6 +447,25 @@ describe("attachControl — keyboard controls", () => {
         expect(camera.alpha).toBeCloseTo(0.01, 5);
     });
 
+    it.each([
+        [undefined, true],
+        [true, true],
+        [false, false],
+    ] as const)("uses preventDefault=%s for mapped keydown and keyup events", (preventDefault, expected) => {
+        const canvas = makeCanvas();
+        attachControl(makeCamera(), canvas as unknown as HTMLCanvasElement, makeScene(), {
+            keyboard: preventDefault === undefined ? {} : { preventDefault },
+        });
+        const keydown = keyboardEvent("ArrowLeft");
+        const keyup = keyboardEvent("ArrowLeft");
+
+        fire(canvas, "keydown", keydown);
+        fire(canvas, "keyup", keyup);
+
+        expect(keydown.preventDefault).toHaveBeenCalledTimes(expected ? 1 : 0);
+        expect(keyup.preventDefault).toHaveBeenCalledTimes(expected ? 1 : 0);
+    });
+
     it("clears held input when the canvas loses focus", () => {
         const canvas = makeCanvas();
         const camera = makeCamera();
