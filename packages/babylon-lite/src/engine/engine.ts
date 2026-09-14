@@ -154,6 +154,8 @@ export interface EngineContext extends SurfaceContext {
     _flushGpuRetirements?: (engine: EngineContext) => void;
     /** @internal GPU resource disposers waiting for the next frame command buffer to be submitted. */
     _retirements?: Array<() => void> | null;
+    /** @internal Installed only while compute one-shots are armed or reusable. */
+    _computeOneShotSubmitted?: (encoder: GPUCommandEncoder) => void;
     /** @internal Retirement batches whose queue fence has not resolved yet. Kept reachable so engine
      *  teardown and device-lost recovery can still claim and run them synchronously. */
     _retiring?: Set<Array<() => void>> | null;
@@ -323,6 +325,11 @@ export interface RenderTargetSize {
  */
 export interface EngineOptions extends SurfaceOptions {
     /**
+     * WebGPU features that must be enabled on the device.
+     * Engine creation rejects before requesting the device when the selected adapter lacks one.
+     */
+    requiredFeatures?: readonly GPUFeatureName[];
+    /**
      * Extra WebGPU device limits to request when calling `adapter.requestDevice()`.
      * Use to raise per-device caps such as `maxColorAttachmentBytesPerSample` (default 32),
      * which is required when rendering into many MRT attachments. Caller is responsible for
@@ -392,10 +399,17 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
     if (!adapter) {
         throw new Error("WebGPU adapter not available");
     }
-
     // Optional features are requested opportunistically so their public enable functions can activate
     // later without recreating the device. Unsupported adapters keep the corresponding feature inactive.
     const features = _getSupportedDeviceFeatures(adapter);
+    for (const feature of options?.requiredFeatures ?? []) {
+        if (!adapter.features.has(feature)) {
+            throw new Error(`WebGPU adapter does not support required feature "${feature}".`);
+        }
+        if (!features.includes(feature)) {
+            features.push(feature);
+        }
+    }
     const device = await adapter.requestDevice({ requiredFeatures: features, requiredLimits: options?.requiredLimits });
 
     // eslint-disable-next-line no-console
@@ -643,6 +657,7 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
         engine._gpuTimerEnd?.(finalEncoder);
         engine._cbs[0] = finalEncoder.finish();
         engine._device.queue.submit(engine._cbs);
+        engine._computeOneShotSubmitted?.(finalEncoder);
         engine._flushGpuRetirements?.(engine);
         engine.drawCallCount = total;
         // Resolve + read back the timestamp pair asynchronously (its own submit, after the frame's) and

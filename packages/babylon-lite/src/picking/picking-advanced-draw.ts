@@ -4,7 +4,7 @@ import type { EngineContext } from "../engine/engine.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { createMappedBuffer } from "../resource/mapped-buffer.js";
-import { createUniformBuffer } from "../resource/uniform-buffer.js";
+import { createUniformBuffer } from "../resource/uniform-buffer-gpu.js";
 import type { PickDiscardRule, PickIgnore } from "./gpu-picker.js";
 import * as pipelines from "./picking-advanced-pipeline.js";
 

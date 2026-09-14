@@ -1,5 +1,5 @@
 import type { ShaderFragment, Varying } from "../../../shader/fragment-types.js";
-import { createUniformBuffer } from "../../../resource/uniform-buffer.js";
+import { createUniformBuffer } from "../../../resource/uniform-buffer-gpu.js";
 import type { Texture2D } from "../../../texture/texture-2d.js";
 import type { StandardMaterialProps } from "../standard-material.js";
 import {

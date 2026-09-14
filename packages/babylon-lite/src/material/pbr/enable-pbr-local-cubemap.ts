@@ -8,7 +8,7 @@
 
 import { BU, TU } from "../../engine/gpu-flags.js";
 import { createMappedBuffer } from "../../resource/mapped-buffer.js";
-import { createUniformBuffer } from "../../resource/uniform-buffer.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer-gpu.js";
 import { getTrilinearSampler } from "../../resource/samplers.js";
 import type { SceneContext } from "../../scene/scene.js";
 import { _registerPbrExt } from "./pbr-flags.js";

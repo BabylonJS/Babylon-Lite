@@ -8,7 +8,7 @@ import type { EngineContext } from "../../engine/engine.js";
 import type { Renderable } from "../../render/renderable.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import { getBilinearSampler } from "../../resource/samplers.js";
-import { createUniformBuffer } from "../../resource/uniform-buffer.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer-gpu.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import groundVertSrc from "../../../shaders/background.vertex.wgsl?raw";

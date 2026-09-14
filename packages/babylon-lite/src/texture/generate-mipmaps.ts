@@ -72,12 +72,24 @@ export function generateMipmaps(engine: EngineContext, texture: GPUTexture, face
 }
 
 export function recordMipmaps(engine: EngineContext, texture: GPUTexture, encoder: GPUCommandEncoder, face?: number): void {
+    recordPreparedMipmaps(encoder, prepareMipmaps(engine, texture, face));
+}
+
+export interface PreparedMipmapLevel {
+    readonly pipeline: GPURenderPipeline;
+    readonly bindGroup: GPUBindGroup;
+    readonly descriptor: GPURenderPassDescriptor;
+}
+
+/** Prebuild views, bind groups, and render-pass descriptors for repeated mip regeneration. */
+export function prepareMipmaps(engine: EngineContext, texture: GPUTexture, face?: number): PreparedMipmapLevel[] {
     if (texture.mipLevelCount <= 1) {
-        return;
+        return [];
     }
     const device = engine._device;
     const pipeline = getPipeline(engine, texture.format);
     const vp = face != null ? { dimension: "2d" as const, baseArrayLayer: face, arrayLayerCount: 1 } : {};
+    const prepared: PreparedMipmapLevel[] = [];
     for (let mip = 1; mip < texture.mipLevelCount; mip++) {
         const srcView = texture.createView({ baseMipLevel: mip - 1, mipLevelCount: 1, ...vp });
         const dstView = texture.createView({ baseMipLevel: mip, mipLevelCount: 1, ...vp });
@@ -88,11 +100,21 @@ export function recordMipmaps(engine: EngineContext, texture: GPUTexture, encode
                 { binding: 1, resource: linearSampler! },
             ],
         });
-        const pass = encoder.beginRenderPass({
-            colorAttachments: [{ view: dstView, loadOp: "clear", storeOp: "store", clearValue: { r: 0, g: 0, b: 0, a: 0 } }],
+        prepared.push({
+            pipeline,
+            bindGroup,
+            descriptor: { colorAttachments: [{ view: dstView, loadOp: "clear", storeOp: "store", clearValue: { r: 0, g: 0, b: 0, a: 0 } }] },
         });
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, bindGroup);
+    }
+    return prepared;
+}
+
+/** Record a previously prepared mip chain without creating per-frame GPU objects. */
+export function recordPreparedMipmaps(encoder: GPUCommandEncoder, prepared: readonly PreparedMipmapLevel[]): void {
+    for (const level of prepared) {
+        const pass = encoder.beginRenderPass(level.descriptor);
+        pass.setPipeline(level.pipeline);
+        pass.setBindGroup(0, level.bindGroup);
         pass.draw(3);
         pass.end();
     }

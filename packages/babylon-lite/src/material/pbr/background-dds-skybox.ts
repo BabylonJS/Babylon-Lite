@@ -8,7 +8,7 @@ import type { EngineContext } from "../../engine/engine.js";
 import type { Renderable } from "../../render/renderable.js";
 import { getOrCreateSampler } from "../../resource/texture-sampler-pool.js";
 import { createMappedBuffer } from "../../resource/mapped-buffer.js";
-import { createUniformBuffer } from "../../resource/uniform-buffer.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer-gpu.js";
 import { WGSL_DITHER, WGSL_NO_DITHER } from "../../shader/wgsl-helpers.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 import { createCubemapSkyboxMaterial } from "./cubemap-skybox-material.js";

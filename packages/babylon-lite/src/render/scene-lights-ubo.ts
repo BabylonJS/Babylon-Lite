@@ -8,7 +8,7 @@ import { F32, U32 } from "../engine/typed-arrays.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { LightBase } from "../light/types.js";
 import { MAX_LIGHTS, LIGHT_ENTRY_FLOATS } from "../light/types.js";
-import { createUniformBuffer } from "../resource/uniform-buffer.js";
+import { createUniformBuffer } from "../resource/uniform-buffer-gpu.js";
 import type { SceneContext } from "../scene/scene-core.js";
 
 /** Reusable typed-array pair for writing a u32 count as its float32 bit pattern.

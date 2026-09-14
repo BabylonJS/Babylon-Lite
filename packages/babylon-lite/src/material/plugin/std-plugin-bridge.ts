@@ -24,7 +24,7 @@ import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import { enqueueMaterialSwap } from "../../scene/mesh-scene-registry.js";
 import type { ShaderFragment, UboSpec } from "../../shader/fragment-types.js";
-import { createUniformBuffer } from "../../resource/uniform-buffer.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer-gpu.js";
 import type { MaterialPlugin } from "./material-plugin.js";
 import { bindPluginTextures, buildPluginFragment, collectPluginTextures, enabledPlugins, pluginSignature, writePluginUbo } from "./plugin-bridge-shared.js";
 

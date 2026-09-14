@@ -13,7 +13,7 @@ import { getViewProjectionMatrix, getCameraPosition } from "../camera/camera.js"
 import { resolveCameraViewport } from "../camera/viewport.js";
 import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
 import { createMappedBuffer } from "../resource/mapped-buffer.js";
-import { createUniformBuffer } from "../resource/uniform-buffer.js";
+import { createUniformBuffer } from "../resource/uniform-buffer-gpu.js";
 
 /** Existing regular-mesh vertex buffers a pick-discard rule can project into `PickDiscardInput.vertexData`. */
 export type PickVertexDataAttribute = "normal" | "uv" | "uv2" | "tangent" | "color";

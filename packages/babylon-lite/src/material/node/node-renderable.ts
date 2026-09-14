@@ -20,7 +20,7 @@ import { compileNodePipeline } from "./node-pipeline.js";
 import { NODE_ESM_SHADOW_OUTPUT, NODE_NO_COLOR_OUTPUT } from "./node-flags.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 import { createEmptyUniformBuffer } from "../../resource/empty-uniform-buffer.js";
-import { createUniformBuffer } from "../../resource/uniform-buffer.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer-gpu.js";
 
 interface NodePacket {
     readonly _mesh: Mesh;

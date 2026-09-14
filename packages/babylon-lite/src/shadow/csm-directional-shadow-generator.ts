@@ -18,7 +18,7 @@ import type { EngineContext } from "../engine/engine.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import { createShadowParamsUBO } from "./shadow-base.js";
-import { createUniformBuffer } from "../resource/uniform-buffer.js";
+import { createUniformBuffer } from "../resource/uniform-buffer-gpu.js";
 import { acquireTexture } from "../resource/texture-acquire.js";
 import { ensureCsmShadowTaskState, preloadCsmShadowTaskState, renderCsmShadowMap, type CsmConfig, type CsmTaskState } from "./csm-shadow-task-hooks.js";
 import { setCsmStdReceiverFactory, setCsmPbrReceiverFactory } from "./csm-receiver-registry.js";

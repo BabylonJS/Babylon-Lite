@@ -296,7 +296,7 @@ export function disposeRenderTargetTexture(result: RenderTargetTextureResult): v
 export function onRenderTargetTextureResize(result: RenderTargetTextureResult, callback: () => void): () => void;
 ```
 
-Use this when a pass output must be wired into a material before the frame graph is built. It eagerly allocates the render target and exposes the color attachment as `texture`. On a color target, a `dFormat` creates an owned depth-test attachment but no sampled depth facade by default. Pass `withSampledDepthTexture` as the third argument to opt into the additional `depthTexture`. A depth-only fixed or surface target must pass the helper; its `texture` and `depthTexture` then alias one sampled-depth wrapper.
+Use this when a pass output must be wired into a material or compute binding before the frame graph is built. It eagerly allocates the render target and exposes the color attachment as `texture`. On a color target, a `dFormat` creates an owned depth-test attachment but no sampled depth facade by default. Pass `withSampledDepthTexture` as the third argument to opt into the additional `depthTexture`. A depth-only fixed or surface target must pass the helper; its `texture` and `depthTexture` then alias one sampled-depth wrapper.
 
 ```typescript
 const output = createSurfaceRenderTargetTexture(engine, { format: engine.format, dFormat: "depth32float", samples: 1, size: engine }, withSampledDepthTexture);

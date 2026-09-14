@@ -8,7 +8,7 @@ import type { MeshGroupBuildResult, MeshRebuildResources, Renderable, DrawUpdate
 import type { Material } from "../material.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import { createEmptyUniformBuffer } from "../../resource/empty-uniform-buffer.js";
-import { createUniformBuffer } from "../../resource/uniform-buffer.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer-gpu.js";
 import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
 import { getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix, getViewProjectionMatrix, _cameraChangeKey } from "../../camera/camera.js";
