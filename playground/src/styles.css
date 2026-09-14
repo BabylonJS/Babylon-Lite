@@ -172,6 +172,12 @@ body {
     border-color: var(--accent);
 }
 
+.btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
 .btn:disabled {
     opacity: 0.5;
     cursor: default;

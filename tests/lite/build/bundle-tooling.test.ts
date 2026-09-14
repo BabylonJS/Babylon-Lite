@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { build } from "vite";
 
 import { demoOwnsBundleFile } from "../../../scripts/demo-bundle-name";
-import { terserPropertyManglePlugin } from "../../../scripts/bundle-scenes-core";
+import { createLiteCodeSplitting, resolveLitePackageSpecifier, terserPropertyManglePlugin } from "../../../scripts/bundle-scenes-core";
 
 const tempDirs: string[] = [];
 
@@ -73,5 +73,73 @@ describe("bundle tooling correctness", () => {
         expect(demoOwnsBundleFile("landing-bg-oldhash.js", "landing", knownSlugs)).toBe(false);
         expect(demoOwnsBundleFile("landing-oldhash.js", "landing", knownSlugs)).toBe(true);
         expect(demoOwnsBundleFile("landing-oldhash.js", "landing-bg", knownSlugs)).toBe(false);
+    });
+
+    it("coalesces the initial graph while preserving the text-shaper vendor boundary", async () => {
+        const root = mkdtempSync(join(tmpdir(), "lite-rolldown-groups-"));
+        tempDirs.push(root);
+        mkdirSync(join(root, "text-shaper-runtime"));
+        writeFileSync(join(root, "shared.js"), 'export const sharedMarker="shared-marker";');
+        writeFileSync(join(root, "initial.js"), 'import {sharedMarker} from "./shared.js"; export const initialMarker="initial-marker-"+sharedMarker;');
+        writeFileSync(join(root, "text-shaper-runtime/vendor.js"), 'export const vendorMarker="vendor-marker";');
+        writeFileSync(
+            join(root, "feature.js"),
+            'import {sharedMarker} from "./shared.js"; import {vendorMarker} from "./text-shaper-runtime/vendor.js"; export const lazyMarker="lazy-marker-"+sharedMarker+vendorMarker;'
+        );
+        writeFileSync(join(root, "entry.js"), 'import {initialMarker} from "./initial.js"; export const initial=initialMarker; export const load=()=>import("./feature.js");');
+
+        const result = (await build({
+            root,
+            configFile: false,
+            publicDir: false,
+            logLevel: "silent",
+            build: {
+                write: false,
+                minify: "oxc",
+                rolldownOptions: {
+                    input: join(root, "entry.js"),
+                    preserveEntrySignatures: "allow-extension",
+                    output: {
+                        format: "es",
+                        entryFileNames: "entry.js",
+                        chunkFileNames: "[name]-[hash].js",
+                        codeSplitting: createLiteCodeSplitting(),
+                    },
+                },
+            },
+        })) as unknown as { output: { type: string; fileName: string; code?: string; isEntry?: boolean }[] };
+
+        const chunks = result.output.filter((entry) => entry.type === "chunk");
+        const entry = chunks.find((chunk) => chunk.isEntry);
+        const textShaper = chunks.find((chunk) => chunk.fileName.startsWith("text-shaper-"));
+        expect(chunks).toHaveLength(3);
+        expect(entry?.code).toContain("initial-marker-");
+        expect(entry?.code).toContain("shared-marker");
+        expect(entry?.code).not.toContain("vendor-marker");
+        expect(textShaper?.code).toContain("vendor-marker");
+    });
+
+    it("resolves root and deep babylon-lite requests exactly for source and built trees", () => {
+        const root = mkdtempSync(join(tmpdir(), "lite-package-resolver-"));
+        tempDirs.push(root);
+        const sourceDir = join(root, "src");
+        const libDir = join(root, "lib");
+        mkdirSync(join(sourceDir, "shader"), { recursive: true });
+        mkdirSync(join(libDir, "shader"), { recursive: true });
+        writeFileSync(join(sourceDir, "index.ts"), "");
+        writeFileSync(join(sourceDir, "shader/wgsl.ts"), "");
+        writeFileSync(join(libDir, "index.js"), "");
+        writeFileSync(join(libDir, "shader/wgsl.js"), "");
+
+        expect(resolveLitePackageSpecifier("babylon-lite", sourceDir)).toBe(join(sourceDir, "index.ts"));
+        expect(resolveLitePackageSpecifier("babylon-lite/shader/wgsl.js", sourceDir)).toBe(join(sourceDir, "shader/wgsl.ts"));
+        expect(resolveLitePackageSpecifier("babylon-lite/shader/wgsl", libDir)).toBe(join(libDir, "shader/wgsl.js"));
+        expect(resolveLitePackageSpecifier("babylon-lite?worker", libDir)).toBe(join(libDir, "index.js") + "?worker");
+        expect(resolveLitePackageSpecifier("babylon-lite-other", libDir)).toBeNull();
+        expect(resolveLitePackageSpecifier("babylon-lite/../outside.js", libDir)).toBeNull();
+        expect(resolveLitePackageSpecifier("babylon-lite/..\\outside.js", libDir)).toBeNull();
+        expect(resolveLitePackageSpecifier("babylon-lite//outside.js", libDir)).toBeNull();
+        expect(resolveLitePackageSpecifier("babylon-lite/C:\\outside.js", libDir)).toBeNull();
+        expect(resolveLitePackageSpecifier("babylon-lite/C:outside.js", libDir)).toBeNull();
     });
 });

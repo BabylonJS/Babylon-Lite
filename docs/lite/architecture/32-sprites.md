@@ -959,11 +959,14 @@ visibility cannot perturb equal-key neighbors. Layer ordering is unchanged:
 only inside each enabled layer.
 
 The implementation module registers one lazy null hook when the first layer is
-enabled. The always-loaded mutation, upload, and picker modules know only that
-opaque hook contract; all state field names, key semantics, sorting code, and
-typed-array allocations remain in `sprite-2d-y-sort.ts`. Importing or root-
-exporting the enabler without using it creates no state and performs no
-module-level allocation.
+enabled. The neutral hook slot and opaque contract are co-located in
+`sprite-2d.ts`, which is already required by every layer consumer; this avoids
+retaining a separate hook module in Rolldown builds that do not enable Y-sort.
+The always-loaded mutation, upload, and picker modules know only that opaque
+contract; all state field names, key semantics, sorting code, and typed-array
+allocations remain in `sprite-2d-y-sort.ts`. Importing or root-exporting the
+enabler without using it creates no state and performs no module-level
+allocation.
 
 Mutation behavior is exact:
 
@@ -2570,7 +2573,7 @@ Bundle-size ratchets:
 - **Depth-hosted-no-billboard ceiling.** A scene with depth-hosted Sprite2D layers but no billboards must NOT fetch billboard renderables, billboard pipelines, or the GPU picker.
 - **Billboard scene-helper ceiling.** Importing billboard factory functions without queueing a billboard system into a scene must NOT runtime-fetch `billboard-renderable.ts` / `billboard-pipeline.ts`.
 - **Mesh-only no-sprite ceiling.** A scene with no sprites must NOT fetch `sprite-2d.js`, `sprite-renderer.js`, or billboard modules.
-- **Y-sort isolation.** Filtered production builds of Scene303 and Scene50 are compared. Scene303 fetches one `scene303.js` runtime chunk at exactly 20,249 raw bytes (19.8 KB measured) and has a 25 KB initial ceiling. It must retain the Y-sort implementation, SpriteRenderer, and CPU picker while excluding depth-hosted/billboard paths. Scene50 fetches one `scene50.js` chunk at exactly 16,168 raw bytes (15.8 KB measured), must not contain or fetch `sprite-2d-y-sort.ts`, `sprite-2d-y-sort-hook.ts`, `sprite-2d-handle-y-sort.ts`, their state-field tokens, or sort logic, and its committed manifest/runtime bytes must remain byte-identical. No Scene50 manifest or existing ceiling changes are permitted for this feature.
+- **Y-sort isolation.** Filtered production builds of Scene303 and Scene50 are compared. Scene303 must retain the Y-sort implementation, SpriteRenderer, and CPU picker while excluding depth-hosted/billboard paths. Scene50 must not contain or fetch `sprite-2d-y-sort.ts`, `sprite-2d-handle-y-sort.ts`, their state-field tokens, or sort logic. Its neutral null hook lives in the already-required `sprite-2d.ts`, so no separate optional hook module may appear in the runtime graph.
 
 ---
 
@@ -2586,7 +2589,7 @@ packages/babylon-lite/src/
     shared/
       sprite-atlas.ts                            # SpriteAtlas, createGrid/loadSpriteAtlas, internal resolveSpriteFrame
 
-    sprite-2d.ts                                 # createSprite2DLayer + Index API (no anchor code; foundation only)
+    sprite-2d.ts                                 # createSprite2DLayer + Index API + neutral null Y-sort seam (no sorting semantics)
     sprite-blend.ts                              # spriteBlend* descriptor values (alpha/premultiplied/additive/one-one/multiply); tree-shakable
     billboard-blend.ts                           # billboardBlend* descriptor values (alpha/premultiplied/cutout/additive); tree-shakable
     blend-descriptors.ts                         # Shared _ALPHA_BLEND_STATE / _PREMULTIPLIED_BLEND_STATE GPUBlendState constants
@@ -2599,7 +2602,6 @@ packages/babylon-lite/src/
     sprite-renderer.ts                           # createSpriteRenderer / registerSpriteRenderer / unregisterSpriteRenderer / disposeSpriteRenderer + (sampleCount, hasDepth) pipeline cache
 
     sprite-2d-handle.ts                          # Optional stable-id Sprite2D Handle API; lazy maps/hooks, no render code
-    sprite-2d-y-sort-hook.ts                     # Null-by-default opaque mutation/upload/pick seam; no Y-sort semantics
     sprite-2d-y-sort.ts                          # Optional stable Y-sort state, merge sort, packed uploads, Index bias API
     sprite-2d-handle-y-sort.ts                   # Optional stable-handle bias companion; Index-only Y-sort does not import handles
 
@@ -2618,13 +2620,10 @@ packages/babylon-lite/src/
     # Roadmap modules: anchors, and sprite picking.
 ```
 
-The renderer-native Y-sort feature changes exactly 17 tracked files: this
-architecture document; seven package source files (three new optional modules,
-three existing core seams, and the root index); six Scene303/config artifacts
-(source, dev HTML, bundle HTML, scene config, per-scene manifest, and JPEG
-thumbnail); and three test files (focused unit suite, focused browser spec, and
-bundle-size/content assertions). It adds no BJS source, golden reference, PNG,
-subpath export, or existing-scene manifest/ceiling update.
+The renderer-native Y-sort feature adds no BJS source, golden reference, PNG, or
+package subpath export. Its implementation remains isolated in the optional
+Y-sort modules; only the opaque, null-by-default seam is present on the base
+Sprite2D path.
 
 ---
 

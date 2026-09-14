@@ -19,8 +19,9 @@ import {
     type Project,
 } from "./snippets";
 import { getEmbedMode, decodeCodeHash, openInPlaygroundUrl, EmbedHost } from "./embed";
-import { NIGHTLY, NIGHTLY_ENGINE_URL, fetchDeployedVersions } from "./versions";
+import { NIGHTLY, NIGHTLY_ENGINE_URL, fetchDeployedVersions, supportsInspector } from "./versions";
 import { BASE, stripBase, currentDeployVersion, baseForVersion } from "./base";
+import { getCdn } from "./cdn";
 
 const editorContainer = document.getElementById("editor") as HTMLElement;
 const fileTabsContainer = document.getElementById("fileTabs") as HTMLElement;
@@ -31,6 +32,7 @@ const consoleEl = document.getElementById("console") as HTMLElement;
 const splitEl = document.getElementById("split") as HTMLElement;
 const splitter = document.getElementById("splitter") as HTMLElement;
 const runBtn = document.getElementById("runBtn") as HTMLButtonElement;
+const inspectorBtn = document.getElementById("inspectorBtn") as HTMLButtonElement;
 const newBtn = document.getElementById("newBtn") as HTMLButtonElement;
 const fullscreenBtn = document.getElementById("fullscreenBtn") as HTMLButtonElement;
 const fpsCounter = document.getElementById("fpsCounter") as HTMLElement;
@@ -73,6 +75,7 @@ let embedHost: EmbedHost | null = null;
 // snapshot, not by hot-swapping here. Drives the selector's current option and the
 // CDN pin baked into downloaded projects.
 const currentVersion = currentDeployVersion() ?? NIGHTLY;
+const inspectorSupported = supportsInspector(currentVersion);
 
 function appendConsole(level: string, text: string): void {
     const line = document.createElement("div");
@@ -93,6 +96,23 @@ function setLoading(on: boolean, label?: string): void {
         previewLoaderText.textContent = label;
     }
 }
+
+function setInspectorState(available: boolean, open = false): void {
+    inspectorBtn.disabled = !available;
+    inspectorBtn.classList.toggle("active", open);
+    inspectorBtn.setAttribute("aria-pressed", String(open));
+    const label = open
+        ? "Close Inspector"
+        : available
+          ? "Open Inspector"
+          : inspectorSupported
+            ? "Run a scene before opening Inspector"
+            : "Inspector requires Babylon Lite 1.27.0 or newer";
+    inspectorBtn.setAttribute("aria-label", label);
+    inspectorBtn.title = label;
+}
+
+setInspectorState(false);
 
 /** Human-readable byte size, e.g. `48.2 KB`. */
 function formatBytes(bytes: number): string {
@@ -133,35 +153,45 @@ function showToast(text: string, isError = false): void {
     }, 3000);
 }
 
-const runner = new Runner(previewHost, (message: RunnerMessage) => {
-    switch (message.type) {
-        case "console":
-            appendConsole(message.level, message.text);
-            embedHost?.emit({ channel: "babylon-lite-playground", type: "console", level: message.level, text: message.text });
-            break;
-        case "error":
-            setLoading(false);
-            runStartedAt = null;
-            appendConsole("error", message.text);
-            embedHost?.emit({ channel: "babylon-lite-playground", type: "error", text: message.text });
-            break;
-        case "stats":
-            fpsCounter.hidden = false;
-            fpsCounter.textContent = `${Math.round(message.fps)} FPS`;
-            embedHost?.emit({ channel: "babylon-lite-playground", type: "stats", fps: message.fps });
-            break;
-        case "ran":
-            setLoading(false);
-            if (runStartedAt !== null) {
-                appendConsole("system", `Scene ready in ${formatDuration(performance.now() - runStartedAt)}`);
+const runner = new Runner(
+    previewHost,
+    (message: RunnerMessage) => {
+        switch (message.type) {
+            case "console":
+                appendConsole(message.level, message.text);
+                embedHost?.emit({ channel: "babylon-lite-playground", type: "console", level: message.level, text: message.text });
+                break;
+            case "error":
+                setLoading(false);
                 runStartedAt = null;
-            }
-            embedHost?.emit({ channel: "babylon-lite-playground", type: "ran" });
-            break;
-        default:
-            break;
-    }
-});
+                appendConsole("error", message.text);
+                embedHost?.emit({ channel: "babylon-lite-playground", type: "error", text: message.text });
+                break;
+            case "stats":
+                fpsCounter.hidden = false;
+                fpsCounter.textContent = `${Math.round(message.fps)} FPS`;
+                embedHost?.emit({ channel: "babylon-lite-playground", type: "stats", fps: message.fps });
+                break;
+            case "ran":
+                setLoading(false);
+                if (runStartedAt !== null) {
+                    appendConsole("system", `Scene ready in ${formatDuration(performance.now() - runStartedAt)}`);
+                    runStartedAt = null;
+                }
+                embedHost?.emit({ channel: "babylon-lite-playground", type: "ran" });
+                break;
+            case "engine-ready":
+                setInspectorState(inspectorSupported);
+                break;
+            case "inspector":
+                setInspectorState(inspectorSupported, inspectorSupported && message.open);
+                break;
+            default:
+                break;
+        }
+    },
+    () => setInspectorState(false)
+);
 
 let running = false;
 let rerunPending = false;
@@ -191,7 +221,8 @@ async function run(): Promise<void> {
         setLoading(true, "Running…");
         appendConsole("system", "Running…");
         runStartedAt = performance.now();
-        await runner.run(code, NIGHTLY_ENGINE_URL);
+        const inspectorUrl = inspectorSupported ? (await getCdn()).inspectorUrl() : undefined;
+        await runner.run(code, NIGHTLY_ENGINE_URL, inspectorUrl);
     } catch (err) {
         setLoading(false);
         runStartedAt = null;
@@ -331,6 +362,10 @@ examplesEl.addEventListener("change", () => {
 });
 
 runBtn.addEventListener("click", () => void run());
+inspectorBtn.addEventListener("click", () => {
+    inspectorBtn.disabled = true;
+    runner.toggleInspector();
+});
 
 // --- Mobile chrome: hamburger menu + Code/Scene view toggle ------------------
 // On narrow screens the toolbar actions collapse into a dropdown, and the

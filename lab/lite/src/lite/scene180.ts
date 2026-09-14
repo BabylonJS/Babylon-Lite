@@ -11,8 +11,8 @@ import {
     createTextLayer,
     createTextRenderer,
     registerTextRenderer,
+    loadFontWeightOffset,
 } from "babylon-lite";
-import type { setFontWeightOffset } from "babylon-lite";
 
 const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
 const textarea = document.getElementById("textInput") as HTMLTextAreaElement;
@@ -55,14 +55,14 @@ async function run(): Promise<void> {
     });
     registerTextRenderer(tr);
 
-    let weightSetter: typeof setFontWeightOffset | null = null;
+    let weightSetter: Awaited<ReturnType<typeof loadFontWeightOffset>> | null = null;
     const applyWeight = async (): Promise<void> => {
         const offset = +weight.value;
         if (!weightSetter) {
             if (offset === 0) {
                 return;
             }
-            weightSetter = (await import("babylon-lite")).setFontWeightOffset;
+            weightSetter = await loadFontWeightOffset();
         }
         weightSetter(data, 0, offset);
     };
