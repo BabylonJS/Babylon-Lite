@@ -936,12 +936,18 @@ drive the render loop.
 registerScene runs deferred builders → requestAnimationFrame → resize() → renderFrame() → requestAnimationFrame ...
 ```
 
-**`renderFrame()`**:
+**`renderFrame(engine, delta, target?)`**:
+
+- `target` omitted: render every surface in `engine.surfaces`, in registration order
+- one `SurfaceContext`: render only that registered surface, without requiring an array
+- a readonly `SurfaceContext[]`: render that subset in caller order through the same encoder/submission; repeated surfaces render once at their first position
+- every explicit target must still be registered on `engine`; a foreign or disposed surface throws before frame work begins
+- an empty collection is a no-op: it creates no encoder, submits no command buffer, and leaves the previous `drawCallCount` unchanged
 
 1. Create command encoder and expose it as `engine._currentEncoder`
-2. For each registered rendering context, run `_update()`:
+2. For each rendering context on the selected surfaces, run `_update()`:
     - before-render callbacks, material swaps, shadow generators, legacy pre-passes, shared uniform updaters
-3. For each registered rendering context, run `_record()`:
+3. For each rendering context on the selected surfaces, run `_record()`:
     - `scene._frameGraph.execute()` drains its ordered tasks
 
 - each `RenderTask` acquires/patches the swapchain or RTT views, writes its per-pass scene UBO, calls `DrawBinding.update({ targetWidth, targetHeight, _camera })`, and draws bucketed `DrawBinding`s
