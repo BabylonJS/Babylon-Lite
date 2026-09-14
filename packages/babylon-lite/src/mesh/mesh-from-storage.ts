@@ -41,8 +41,10 @@ export interface MeshFromStorageOptions {
     readonly storage: StorageBuffer;
     /** Triangle indices.
      *
-     *  A `Uint32Array` is uploaded into a fresh index buffer owned by this mesh —
-     *  right when the mesh has topology of its own.
+     *  A `Uint16Array`/`Uint32Array` is uploaded into a fresh index buffer owned by this
+     *  mesh — right when the mesh has topology of its own. The array is retained (not
+     *  copied) so a device loss can upload it again; the mesh has no other CPU geometry
+     *  to recover from.
      *
      *  A `StorageBuffer` created with `{ index: true }` is used in place, SHARED with
      *  every other mesh given the same allocation. That is the right form for a slab of
@@ -168,7 +170,7 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
         },
     });
 
-    (_slabSources ??= new WeakMap()).set(mesh._gpu, { _vb: storage, _ib: sharedIndices ? (indices as StorageBuffer) : null });
+    (_slabSources ??= new WeakMap()).set(mesh._gpu, { _vb: storage, _ib: indices });
     (_slabMeshes ??= new Set()).add(new WeakRef(mesh._gpu));
 
     return mesh;
@@ -180,13 +182,15 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
  *  Held through `WeakRef`, matching `device-lost-recovery-capture.ts`: a strong registry
  *  would keep a `MeshGPU` and two `GPUBuffer`s alive for the page's lifetime whenever a
  *  mesh is dropped without going through `disposeMeshGpu`, which is a leak this module
- *  would be introducing. Dead refs are pruned on each rebuild, so nothing has to be
- *  unregistered on the dispose path and no per-disposal scan is needed.
+ *  would be introducing. Dead refs are pruned on each rebuild. Disposal drops the mesh's
+ *  sources from the WeakMap -- one O(1) delete, no registry scan -- so a disposed mesh is
+ *  pruned too rather than being handed a fresh index buffer.
  *
  *  Lazily created -- GUIDANCE.md forbids module-level allocations. */
 interface SlabSources {
     readonly _vb: StorageBuffer;
-    readonly _ib: StorageBuffer | null;
+    /** A shared allocation to re-read, or the mesh's own topology to upload again. */
+    readonly _ib: Uint16Array | Uint32Array | StorageBuffer;
 }
 /** The weak ref must target the MESH's own `_gpu`, which the mesh holds strongly -- a ref
  *  to a wrapper object created here would have no other owner and collect immediately,
@@ -195,8 +199,13 @@ interface SlabSources {
 let _slabMeshes: Set<WeakRef<MeshGPU>> | null = null;
 let _slabSources: WeakMap<MeshGPU, SlabSources> | null = null;
 
-/** Re-point every borrowed handle at its allocation's current buffer. The allocations have
- *  already been rebuilt when this runs; the meshes are still holding the dead handles. */
+/** Re-point every slab-backed handle at its allocation's current buffer, and upload an owned
+ *  topology again. The allocations have already been rebuilt when this runs; the meshes are
+ *  still holding the dead handles.
+ *
+ *  This is the ONLY recovery these meshes get: `_rebuildMeshes` restores geometry from
+ *  retained CPU arrays, and a storage-backed mesh has none, so it is skipped there. Anything
+ *  on `MeshGPU` that pointed at the lost device and is not replaced here stays dead. */
 function refreshSlabMeshes(engine: EngineContext): void {
     for (const ref of _slabMeshes ?? []) {
         const gpu = ref.deref();
@@ -214,17 +223,24 @@ function refreshSlabMeshes(engine: EngineContext): void {
         // `_getStorageBufferHandle` throw, and this runs inside a recovery step -- a throw
         // here aborts the WHOLE device-loss recovery, taking every unrelated scene with it.
         // A mesh borrowing a dead slab is already unusable; skip it rather than fail.
-        if (entry._vb._destroyed || entry._ib?._destroyed) {
+        const ib = entry._ib;
+        const ownedIndices = ArrayBuffer.isView(ib);
+        if (entry._vb._destroyed || (!ownedIndices && ib._destroyed)) {
             continue;
         }
-        const g = gpu as unknown as { positionBuffer: GPUBuffer; normalBuffer: GPUBuffer; uvBuffer: GPUBuffer; indexBuffer: GPUBuffer };
+        const g = gpu as unknown as Record<string, unknown>;
+        // Every stream the slab backs holds the same handle -- position, normal and uv always,
+        // tangent/uv2/color when `attributeOffsets` advertised them -- so re-point by identity
+        // rather than by a field list that can miss one.
+        const dead = g.positionBuffer;
         const vb = _getStorageBufferHandle(engine, entry._vb);
-        g.positionBuffer = vb;
-        g.normalBuffer = vb;
-        g.uvBuffer = vb;
-        if (entry._ib) {
-            g.indexBuffer = _getStorageBufferHandle(engine, entry._ib);
+        for (const key in g) {
+            if (g[key] === dead) {
+                g[key] = vb;
+            }
         }
+        // The lost device took the old index buffer with it, so there is nothing to destroy.
+        g.indexBuffer = ownedIndices ? createMappedBuffer(engine, ib, BU.INDEX) : _getStorageBufferHandle(engine, ib);
     }
 }
 
@@ -256,6 +272,8 @@ function installHooks(): void {
         if (g._ownsIndexBuffer !== false) {
             g.indexBuffer.destroy();
         }
+        // A disposed mesh must not be handed a fresh index buffer by the next recovery.
+        _slabSources?.delete(g);
     });
     _installStorageRebuildObserver(refreshSlabMeshes);
 }
