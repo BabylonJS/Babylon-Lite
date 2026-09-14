@@ -206,8 +206,7 @@ export interface Mesh extends SceneNode {
 export function initMeshTransform(partialMesh: Partial<Mesh> & { _flatNormal?: boolean }, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): Mesh {
     const [iqx, iqy, iqz, iqw] = eulerXYZToQuatTuple(rx, ry, rz);
     const mesh = initSceneNodeTransform({ children: [], ...partialMesh }, px, py, pz, iqx, iqy, iqz, iqw, sx, sy, sz);
-    Object.defineProperty(mesh, "worldMatrix", { enumerable: false });
-    Object.defineProperty(mesh, "worldMatrixVersion", { enumerable: false });
+    Object.defineProperties(mesh, { worldMatrix: { enumerable: false }, worldMatrixVersion: { enumerable: false } });
     return mesh;
 }
 
