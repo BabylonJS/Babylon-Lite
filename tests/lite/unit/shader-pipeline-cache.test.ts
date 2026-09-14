@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
@@ -8,6 +11,7 @@ import { createShaderNormalMaterialView } from "../../../packages/babylon-lite/s
 import { createShaderMaterial, type ShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
 import { clearShaderPipelineCache, enableShaderPipelineCache } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline-cache";
 import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline";
+import { _enableShaderVb, setShaderAttributeFormats } from "../../../packages/babylon-lite/src/material/shader/shader-vb";
 import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/scene-helpers";
 import { wgsl, type WgslSource } from "../../../packages/babylon-lite/src/shader/wgsl";
 
@@ -236,5 +240,56 @@ describe("ShaderMaterial pipeline cache", () => {
             attributes: ["position"],
         });
         expect(() => enableShaderMaterialInstanceWorld(material)).toThrow('enableShaderMaterialInstanceWorld requires the ShaderMaterial to declare the "world" system uniform.');
+    });
+
+    it("keeps materials with different declared attribute formats in separate cached bindings", () => {
+        clearShaderPipelineCache();
+        clearSceneBGLCache();
+        _enableShaderVb();
+        const { engine, createBindGroupLayout } = makeEngine();
+        const first = makeMaterial();
+        const second = makeMaterial();
+        // Identical names/attributes, but "position" is declared with a different
+        // GPUVertexFormat — the two materials must not share a bind group layout, or a
+        // shader compiled for one format's WGSL type would be bound with the other's
+        // buffer layout.
+        setShaderAttributeFormats(first, { position: "float32x3" });
+        setShaderAttributeFormats(second, { position: "sint32x3" });
+        enableShaderPipelineCache(engine, [{ material: first }, { material: second }]);
+
+        const firstBindings = getOrCreateShaderPipelineBindings(engine, first);
+        const callsAfterFirst = createBindGroupLayout.mock.calls.length;
+        const secondBindings = getOrCreateShaderPipelineBindings(engine, second);
+
+        expect(secondBindings).not.toBe(firstBindings);
+        expect(createBindGroupLayout.mock.calls.length).toBeGreaterThan(callsAfterFirst);
+    });
+
+    it("shares cached bindings across materials with identical declared attribute formats", () => {
+        clearShaderPipelineCache();
+        clearSceneBGLCache();
+        _enableShaderVb();
+        const { engine, createBindGroupLayout } = makeEngine();
+        const first = makeMaterial();
+        const second = makeMaterial();
+        setShaderAttributeFormats(first, { position: "sint32x3" });
+        setShaderAttributeFormats(second, { position: "sint32x3" });
+        enableShaderPipelineCache(engine, [{ material: first }, { material: second }]);
+
+        const firstBindings = getOrCreateShaderPipelineBindings(engine, first);
+        const callsAfterFirst = createBindGroupLayout.mock.calls.length;
+        const secondBindings = getOrCreateShaderPipelineBindings(engine, second);
+
+        expect(secondBindings).toBe(firstBindings);
+        expect(createBindGroupLayout.mock.calls.length).toBe(callsAfterFirst);
+    });
+
+    it("keys declared formats without importing shader-pipeline at runtime", () => {
+        // A value import of shader-pipeline from this module added ShaderMaterial's pipeline
+        // chunks to Standard and PBR bundles that never use ShaderMaterial (scene267 +281 B).
+        // Type-only imports erase and are fine.
+        const source = readFileSync(join(__dirname, "../../../packages/babylon-lite/src/material/shader/shader-pipeline-cache.ts"), "utf-8");
+        const valueImports = source.split("\n").filter((line) => /^import\s+(?!type\b)/.test(line) && line.includes('"./shader-pipeline.js"'));
+        expect(valueImports).toEqual([]);
     });
 });

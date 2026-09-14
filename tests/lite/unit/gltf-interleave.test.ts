@@ -1,5 +1,13 @@
-import { describe, it, expect } from "vitest";
-import { accessorIsStrided, buildInterleavedPartial, installLazyCpu, computeAabbStrided } from "../../../packages/babylon-lite/src/loader-gltf/gltf-interleave.js";
+import { describe, it, expect, vi } from "vitest";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
+import {
+    accessorIsStrided,
+    buildInterleavedMesh,
+    buildInterleavedPartial,
+    installLazyCpu,
+    computeAabbStrided,
+} from "../../../packages/babylon-lite/src/loader-gltf/gltf-interleave.js";
+import type { GltfMeshData } from "../../../packages/babylon-lite/src/loader-gltf/load-gltf.js";
 
 const FLOAT = 5126;
 const UNSIGNED_BYTE = 5121;
@@ -160,5 +168,48 @@ describe("gltf-interleave", () => {
         const partial = (await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!;
 
         expect(Array.from(partial._uvs!)).toEqual([0, 0, 0, 0]);
+    });
+
+    it("includes TEXCOORD_1 packing in the pipeline key", () => {
+        const device = {
+            createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => {
+                const mapped = new ArrayBuffer(Number(descriptor.size));
+                return { getMappedRange: () => mapped, unmap: vi.fn(), destroy: vi.fn() } as unknown as GPUBuffer;
+            }),
+            queue: { writeBuffer: vi.fn() },
+        } as unknown as GPUDevice;
+        const engine = { _device: device } as unknown as EngineContext;
+        const matrix = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+        const meshData = (stride: number, offset: number): GltfMeshData => ({
+            _positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+            _normals: new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+            _tangents: null,
+            _uvs: new Float32Array(6),
+            _uv2s: new Float32Array(6),
+            _colors: null,
+            _indices: new Uint16Array([0, 1, 2]),
+            _vertexCount: 3,
+            _indexCount: 3,
+            _worldMatrix: matrix as never,
+            _material: {} as never,
+            _nodeIndex: 0,
+            _primitive: {},
+            _vb: {
+                _u2: {
+                    _bufferView: 0,
+                    _stride: stride,
+                    _offset: offset,
+                    _componentType: FLOAT,
+                    _componentCount: 2,
+                    _count: 3,
+                    _slice: new Uint8Array(stride * 3),
+                },
+            },
+        });
+
+        const first = buildInterleavedMesh(engine, meshData(40, 24), 0, {} as never);
+        const second = buildInterleavedMesh(engine, meshData(48, 28), 1, {} as never);
+
+        expect(first._gpu._vbKey).not.toBe(second._gpu._vbKey);
     });
 });

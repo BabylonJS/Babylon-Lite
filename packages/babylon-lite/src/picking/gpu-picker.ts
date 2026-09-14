@@ -425,7 +425,7 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
                 deformProjection!.bindDeformPickingProjection(engine, pass, set.regularPipeline, mesh, 1, !!discardBG);
             }
             pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
-            pass.drawIndexed(gpu.indexCount);
+            pass.drawIndexed(gpu.indexCount, 1, 0, gpu._baseVertex);
             meshRanges.push({
                 base: nextId++,
                 count: 1,
