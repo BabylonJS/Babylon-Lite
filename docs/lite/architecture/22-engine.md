@@ -38,7 +38,7 @@ export interface EngineContext {
     readonly msaaSamples: number; // 1 or 4
     readonly format: GPUTextureFormat;
 
-    /** GPU draw calls executed in the last rendered frame. */
+    /** GPU draw calls executed by the latest `renderFrame` call, summed across its selected surfaces. */
     drawCallCount: number;
 
     /** GPU time spent on the last measured frame, in milliseconds. 0 until the first measured frame and
@@ -84,6 +84,8 @@ export function resizeEngine(engine: EngineContext): void;
 export function setEngineSize(engine: EngineContext, widthPx: number, heightPx: number): void;
 /** Release all engine-owned GPU resources (render targets, device). */
 export function disposeEngine(engine: EngineContext): void;
+/** Render all engine surfaces, or an explicit non-empty subset, through one encoder and submission. */
+export function renderFrame(engine: EngineContext, delta: number, surfaces?: readonly [SurfaceContext, ...SurfaceContext[]]): void;
 
 /** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain. */
 export async function createEngine(canvas: RenderCanvas, options?: EngineOptions): Promise<EngineContext>;
@@ -189,16 +191,21 @@ Scenes read `engine._currentDelta` during their `_update()` step. If `scene.fixe
 
 ### Frame Rendering (`renderFrame`)
 
-Each frame consists of:
+`renderFrame(engine, delta, surfaces?)` renders every surface in `engine.surfaces` in registration order when `surfaces` is omitted. Passing a non-empty readonly tuple renders exactly that subset in caller order through the same encoder and submission. The preflight verifies that every selected surface belongs to `engine`; callers must provide registered, unique surfaces to avoid per-frame registration scans or deduplication allocations. Cache a singleton tuple when repeatedly rendering one surface to avoid caller-side per-frame allocation.
 
-1. **Create command encoder**: `device.createCommandEncoder({ label: "frame" })` and assign `engine._currentEncoder`.
-2. **Prepare each surface**: run its optional screenshot pre-frame hook, then acquire the surface's current swapchain texture into `surface.scRT`.
-3. **Update/record contexts**: For each surface, call `_update()` then `_record()` on every registered `RenderingContext`.
+`engine.drawCallCount` records the calls emitted by the latest `renderFrame` invocation, summed across only its selected surfaces.
+
+Each invocation consists of:
+
+1. **Preflight selected surfaces**: validate engine ownership and count their rendering contexts. If none exist, flush pending resource retirements and return without allocating or submitting an empty encoder.
+2. **Create command encoder**: `device.createCommandEncoder({ label: "frame" })` and assign `engine._currentEncoder`.
+3. **Prepare each selected surface**: run its optional screenshot pre-frame hook, then acquire the surface's current swapchain texture into `surface.scRT`.
+4. **Update/record contexts**: For each selected surface, call `_update()` then `_record()` on every registered `RenderingContext`.
     - A scene `_update()` runs before-render callbacks, material swaps, shadow maps, legacy pre-passes, and shared uniform updaters.
     - A scene `_record()` delegates to `scene._frameGraph.execute()`.
     - A render task that targets `scene.surface.scRT` re-reads that surface's attachment view immediately before opening the pass. It must not compare against `engine.scRT`, which identifies only the primary canvas and would leave auxiliary scenes submitting an expired build-time swapchain view.
-4. **Record screenshot copies**: each promoted surface with queued requests copies its just-rendered swapchain texture into one staging buffer.
-5. **Submit**: finish the command encoder and submit via the reusable `engine._cbs` array to avoid per-frame array allocation.
+5. **Record screenshot copies**: each selected surface with queued requests copies its just-rendered swapchain texture into one staging buffer.
+6. **Submit**: finish the command encoder and submit via the reusable `engine._cbs` array to avoid per-frame array allocation.
 
 The per-surface attachment refresh is required because `GPUCanvasContext.getCurrentTexture()` returns a new swapchain texture over time. Reusing the auxiliary surface's view captured during frame-graph build produces a WebGPU validation error; because one command buffer contains every surface's work, that invalid auxiliary pass also discards the primary canvas's rendering.
 

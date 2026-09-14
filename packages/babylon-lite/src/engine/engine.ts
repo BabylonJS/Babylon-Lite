@@ -51,7 +51,7 @@ export interface EngineContext extends SurfaceContext {
      *  can splice into it without casting away the public readonly contract. */
     _surfaces: [SurfaceContext, ...SurfaceContext[]];
 
-    /** Number of GPU draw calls in the last rendered frame, summed across all surfaces. */
+    /** Number of GPU draw calls in the latest {@link renderFrame} call, summed across its selected surfaces. */
     drawCallCount: number;
 
     /** GPU time spent on the last measured frame, in milliseconds — 0 until the first measured frame and

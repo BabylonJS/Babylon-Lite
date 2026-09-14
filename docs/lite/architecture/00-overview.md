@@ -436,7 +436,7 @@ getPickedUV(info: PickingInfo): [number, number]
 interface EngineContext {
     readonly canvas: HTMLCanvasElement;
     readonly msaaSamples: number; // always 4
-    drawCallCount: number; // GPU draw calls in last rendered frame
+    drawCallCount: number; // GPU draw calls in latest renderFrame call, across its selected surfaces
 }
 
 // ─── Scene ───────────────────────────────────────────────────────────
