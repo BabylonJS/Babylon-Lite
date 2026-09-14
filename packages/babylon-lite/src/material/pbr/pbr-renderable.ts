@@ -326,13 +326,17 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const _packMeshWorld = engine._makePackMeshWorld?.(s as SceneContext) ?? packMat4IntoF32;
         _packMeshWorld(meshUboData, mesh.worldMatrix, 0, 0);
         writeMeshLightSelection(mesh, s.lights, meshUboData);
+        const disposers: (() => void)[] = [];
+        s._meshDisposables.set(mesh, disposers);
         const meshUBO = createUniformBuffer(engine, meshUboData);
+        disposers.push(() => meshUBO.destroy());
 
         // Material UBO.
         const materialSpec = composed._materialUboSpec!;
         const matInitData = new F32(materialSpec._totalBytes / 4);
         _writeMaterialData(matInitData, mat, materialSpec);
         const materialUBO = createUniformBuffer(engine, matInitData);
+        disposers.push(() => materialUBO.destroy());
 
         const needsTaskRefraction = !!mat._transmissive && (features2 & PBR2_HAS_REFRACTION) !== 0;
         const materialBindGroupStatic = needsTaskRefraction ? null : createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh);
@@ -361,17 +365,11 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         for (const t of boundTextures) {
             acquireTexture(t);
         }
-        s._meshDisposables.set(mesh, [
-            () => {
-                meshUBO.destroy();
-                materialUBO.destroy();
-            },
-            () => {
-                for (const t of boundTextures) {
-                    releaseTexture(t);
-                }
-            },
-        ]);
+        disposers.push(() => {
+            for (const t of boundTextures) {
+                releaseTexture(t);
+            }
+        });
 
         const isTransparent = (features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)) === 0 && (features & PBR_HAS_ALPHA_BLEND) !== 0;
         const order = mesh.renderOrder ?? (isTransparent || needsTaskRefraction ? 150 : 100);

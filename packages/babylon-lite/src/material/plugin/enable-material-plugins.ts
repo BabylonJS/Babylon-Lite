@@ -33,13 +33,12 @@ import { registerStdPlugins } from "./std-plugin-bridge.js";
 /**
  * Enable material-plugin support for `scene`.
  *
- * - Registers the PBR plugin bridge: its `detect` hook encodes a per-signature
- *   index into each PBR material's feature bits during the build, so no mesh
+ * - Registers the PBR plugin bridge: its `detect` hook assigns a stable signature
+ *   identity outside the material's feature bits during the build, so no mesh
  *   walk is needed here.
  * - Registers the Standard plugin bridge and walks `scene.meshes`, pre-baking a
- *   per-signature index into every Standard plugin material's cached
- *   `_renderFeatures` (Standard's feature computation is not ext-extensible, so
- *   the index must be baked in up front). Standard plugin uniforms are delivered
+ *   per-signature identity into every Standard plugin material's `_pi`.
+ *   Only a presence flag enters per-renderable features. Standard plugin uniforms are delivered
  *   through a self-managed uniform buffer built here and bound via the
  *   pre-existing `StdExt._bind` loop.
  */

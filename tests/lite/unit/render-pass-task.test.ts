@@ -12,7 +12,7 @@ import { createSceneContext, registerScene } from "../../../packages/babylon-lit
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { createRenderTarget, type RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { createRenderTask, removeMeshFromTask, type RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
-import { transferMeshBetweenTasks } from "../../../packages/babylon-lite/src/shadow/csm-shadow-cache";
+import { rebuildTransferTarget, transferMeshBetweenTasks } from "../../../packages/babylon-lite/src/shadow/csm-shadow-cache";
 import { enableRenderTaskTransmission, enableSceneTransmission } from "../../../packages/babylon-lite/src/frame-graph/transmission";
 import { getComputeDispatchBatch } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu-culling";
 import { invalidateRenderBundles } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
@@ -291,7 +291,34 @@ describe("RenderPassTask transparent sorting", () => {
         expect(task._renderables).toHaveLength(0);
     });
 
-    it("uses an override builder that is not registered as a scene group", () => {
+    it.each([false, true])("retains pending meshes until their scene-local group is ready (standalone: %s)", (standalone) => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const foreignScene = createSceneContext(makeMockEngine(), { defaultRenderTask: false });
+        const rt = createRenderTarget({ lbl: "pending-group", samples: 1, size: { width: 16, height: 16 } });
+        const task = createRenderTask({ name: "pending-group", rt, autoMirror: false }, engine, scene);
+        const mesh = {} as Mesh;
+        const foreign = vi.fn(() => makeDrawOrderRenderable("foreign", {}, []));
+        const material = { _buildGroup: { _rebuildSingle: foreign, _sceneIndependentRebuild: standalone } } as unknown as Material;
+        foreignScene._groups.set(material._buildGroup, Object.assign([], { r: foreign }));
+        const localGroup = [mesh];
+        scene._groups.set(material._buildGroup, localGroup);
+        task.addMesh(mesh, { material });
+        expect(() => task.record()).toThrow(/initial build in this scene/);
+        expect(foreign).not.toHaveBeenCalled();
+        expect(task._pendingMeshes).toHaveLength(1);
+        expect(task._renderables).toHaveLength(0);
+        const renderable = makeDrawOrderRenderable("local", {}, []);
+        const local = vi.fn(() => renderable);
+        scene._groups.get(material._buildGroup)!.r = local;
+        task.record();
+        expect(local).toHaveBeenCalledWith(scene, mesh, material);
+        expect(task._pendingMeshes).toHaveLength(0);
+        expect(task._renderables).toEqual([renderable]);
+        task.dispose();
+    });
+
+    it("uses an explicitly scene-independent override builder without a scene group", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine, { defaultRenderTask: false });
         const rt = createRenderTarget({
@@ -305,7 +332,7 @@ describe("RenderPassTask transparent sorting", () => {
         const renderable = makeDrawOrderRenderable("override", {}, []);
         const rebuildSingle = vi.fn(() => renderable);
         const material = {
-            _buildGroup: { _rebuildSingle: rebuildSingle },
+            _buildGroup: { _rebuildSingle: rebuildSingle, _sceneIndependentRebuild: true },
         } as unknown as Material;
 
         task.addMesh(mesh, { material });
@@ -347,7 +374,7 @@ describe("RenderPassTask transparent sorting", () => {
             },
         };
         const rebuildSingle = vi.fn(() => renderable);
-        const material = { _buildGroup: { _rebuildSingle: rebuildSingle } } as unknown as Material;
+        const material = { _buildGroup: { _rebuildSingle: rebuildSingle, _sceneIndependentRebuild: true } } as unknown as Material;
 
         from.addMesh(mesh, { material });
         from.record();
@@ -392,7 +419,7 @@ describe("RenderPassTask transparent sorting", () => {
         };
         const renderables = [makeRenderable(0), makeRenderable(1), makeRenderable(2)];
         for (const r of renderables) {
-            const material = { _buildGroup: { _rebuildSingle: () => r } } as unknown as Material;
+            const material = { _buildGroup: { _rebuildSingle: () => r, _sceneIndependentRebuild: true } } as unknown as Material;
             from.addMesh(r.mesh!, { material });
         }
         from.record();
@@ -418,7 +445,7 @@ describe("RenderPassTask transparent sorting", () => {
         expect(binds.length).toBe(0);
         expect(pending.size).toBe(1);
         for (const task of pending) {
-            task.record();
+            rebuildTransferTarget(task);
         }
         expect(binds.length).toBe(3);
         expect(to._renderables).toEqual(renderables);

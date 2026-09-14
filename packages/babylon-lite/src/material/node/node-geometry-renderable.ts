@@ -57,6 +57,7 @@ export function getNodeGeometryGroupBuilder(): MeshGroupBuilder {
         throw new Error("node-geometry view does not support scene group building");
     }) as MeshGroupBuilder;
     builder._materialFamily = "node";
+    builder._sceneIndependentRebuild = true;
     builder._rebuildSingle = (scene: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
         const view = (materialOverride ?? mesh.material) as NodeGeometryMaterialView;
         return buildNodeGeometryRenderable(scene, mesh, view);

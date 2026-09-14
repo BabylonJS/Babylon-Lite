@@ -2,6 +2,7 @@ import type { SceneContext } from "../scene/scene.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { Material } from "./material.js";
 import { getMaterialSource, isMaterialView } from "./material-view.js";
+import { resolveMeshRebuild } from "./resolve-mesh-rebuild.js";
 
 export interface RebuildMaterialOptions {
     /** Rebuild views created from the same source material. Defaults to true. */
@@ -81,7 +82,7 @@ function rebuildSceneMesh(ctx: SceneContext, mesh: Mesh): boolean | Promise<void
             .then(({ B }) => B(ctx, builder, mesh))
             .then(() => ctx._runtimeBuilds?._e(false));
     }
-    const resolved = group ? group.r : builder._rebuildSingle;
+    const resolved = resolveMeshRebuild(ctx, builder);
     if (!resolved) {
         return false;
     }

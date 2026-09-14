@@ -102,7 +102,7 @@ export function tryBind(
         state = createTiCullState();
         cache.set(signature, state);
         const owned = state;
-        scene._meshDisposables.get(mesh)?.push(() => {
+        (renderable._lifetimeDisposers ?? scene._meshDisposables.get(mesh))?.push(() => {
             destroyTiCullState(owned);
         });
     } else {

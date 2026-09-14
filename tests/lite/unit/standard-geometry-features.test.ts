@@ -62,6 +62,26 @@ function makeStdMesh(gpu: object = {}): Mesh {
 
 // ── Blocker 4: the singleton Standard builder must not cross-contaminate scenes ──
 describe("Standard per-scene rebuild context", () => {
+    it("rejects a rebuild in an uninitialized scene rather than using the originating scene's device", () => {
+        const engineA = makeMockEngine();
+        const engineB = makeMockEngine();
+        const sceneA = createSceneContext(engineA, { defaultRenderTask: false });
+        const sceneB = createSceneContext(engineB, { defaultRenderTask: false });
+        const { rebuildSingle } = buildStandardMeshRenderables(sceneA, [], {
+            sceneShader: { _features: STD_SCENE_FOG, _fragments: [createStandardFogFragment()] },
+        });
+        const foreignAllocation = vi.spyOn(engineA._device, "createBuffer");
+        try {
+            expect(() => rebuildSingle(sceneB, makeStdMesh())).toThrow(/initial build in this scene/);
+            expect(foreignAllocation).not.toHaveBeenCalled();
+            buildStandardMeshRenderables(sceneB, [], { sceneShader: null });
+            expect(() => rebuildSingle(sceneB, makeStdMesh())).not.toThrow();
+            expect(foreignAllocation).not.toHaveBeenCalled();
+        } finally {
+            foreignAllocation.mockRestore();
+        }
+    });
+
     it("stores an independent engine/fog rebuild context on each scene and does not let a later build clobber an earlier scene's", () => {
         const engA = makeMockEngine();
         const engB = makeMockEngine();

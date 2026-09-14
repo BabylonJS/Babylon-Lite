@@ -3,6 +3,7 @@ import type { RenderTarget, RenderTargetSignature } from "../../engine/render-ta
 import { targetSignatureKey } from "../../engine/render-target.js";
 import type { RenderTask } from "../../frame-graph/render-task.js";
 import { _resolvePendingMeshes } from "../../frame-graph/render-task.js";
+import { disposeTaskMesh, type TaskMeshEntry } from "../../frame-graph/render-task-transaction.js";
 import type { Renderable } from "../../render/renderable.js";
 import { _getShadowTaskCasterMeshes } from "../../frame-graph/shadow-inputs.js";
 import type { SceneContext } from "../../scene/scene-core.js";
@@ -81,46 +82,64 @@ async function prepareScene(engine: EngineContext, scene: SceneContext, recipes:
 
     const seen = new Set<unknown>();
     const preparations: Promise<void>[] = [];
-    while (tasks.length) {
-        const candidate = tasks.pop();
-        if (!candidate || seen.has(candidate)) {
-            continue;
-        }
-        seen.add(candidate);
-        tasks.push(...nestedTasks(candidate));
-        if (!isRenderTask(candidate)) {
-            continue;
-        }
-        _resolvePendingMeshes(candidate, candidate.scene);
-        const renderables = candidate._renderables.length || candidate._config.autoMirror === false ? candidate._renderables : candidate.scene._renderables;
-        const sceneRenderables = renderables === candidate.scene._renderables ? null : new Set(candidate.scene._renderables);
-        for (const renderable of renderables) {
-            const recipe = recipes.get(renderable) ?? (renderable.mesh && (!sceneRenderables || sceneRenderables.has(renderable)) ? recipes.get(renderable.mesh) : undefined);
-            if (recipe) {
-                const bindings = currentBindings(engine, recipe.material);
-                const resolvedLayout = resolveLayout(recipe.material, bindings, recipe.layout);
-                preparations.push(
-                    prepareShaderPipeline(
-                        engine,
-                        candidate._targetSignature,
-                        recipe.material,
-                        bindings,
-                        resolvedLayout.variantKey,
-                        resolvedLayout.vertexBuffers,
-                        resolvedLayout.instanceAttrs
-                    )
-                );
+    const temporaryEntries: TaskMeshEntry[] = [];
+    try {
+        while (tasks.length) {
+            const candidate = tasks.pop();
+            if (!candidate || seen.has(candidate)) {
+                continue;
+            }
+            seen.add(candidate);
+            tasks.push(...nestedTasks(candidate));
+            if (!isRenderTask(candidate)) {
+                continue;
+            }
+            const staged: RenderTask = {
+                ...candidate,
+                _renderables: candidate._renderables.slice(),
+                _meshEntries: candidate._meshEntries?.slice(),
+                _pendingMeshes: candidate._pendingMeshes.slice(),
+            };
+            try {
+                staged._prepareTaskMeshes?.(staged);
+                _resolvePendingMeshes(staged, staged.scene);
+            } finally {
+                temporaryEntries.push(...(staged._meshEntries ?? []).filter((entry) => !entry.owner));
+            }
+            const renderables = staged._renderables.length || staged._config.autoMirror === false ? staged._renderables : staged.scene._renderables;
+            const sceneRenderables = renderables === candidate.scene._renderables ? null : new Set(candidate.scene._renderables);
+            for (const renderable of renderables) {
+                const recipe = recipes.get(renderable) ?? (renderable.mesh && (!sceneRenderables || sceneRenderables.has(renderable)) ? recipes.get(renderable.mesh) : undefined);
+                if (recipe) {
+                    const bindings = currentBindings(engine, recipe.material);
+                    const resolvedLayout = resolveLayout(recipe.material, bindings, recipe.layout);
+                    preparations.push(
+                        prepareShaderPipeline(
+                            engine,
+                            candidate._targetSignature,
+                            recipe.material,
+                            bindings,
+                            resolvedLayout.variantKey,
+                            resolvedLayout.vertexBuffers,
+                            resolvedLayout.instanceAttrs
+                        )
+                    );
+                }
             }
         }
-    }
-    const failures = new Set<unknown>();
-    for (const result of await Promise.allSettled(preparations)) {
-        if (result.status === "rejected") {
-            failures.add(result.reason);
+    } finally {
+        const failures = new Set<unknown>();
+        for (const result of await Promise.allSettled(preparations)) {
+            if (result.status === "rejected") {
+                failures.add(result.reason);
+            }
         }
-    }
-    for (const failure of failures) {
-        console.error("Async ShaderMaterial pipeline preparation failed; the synchronous first-bind fallback remains available.", failure);
+        for (const failure of failures) {
+            console.error("Async ShaderMaterial pipeline preparation failed; the synchronous first-bind fallback remains available.", failure);
+        }
+        for (const entry of temporaryEntries) {
+            disposeTaskMesh(entry);
+        }
     }
 }
 

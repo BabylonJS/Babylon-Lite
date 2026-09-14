@@ -76,11 +76,16 @@ export interface RenderTarget {
     _width: number;
     /** @internal */
     _height: number;
-    /** True when textures were allocated eagerly (before frame graph build) —
-     *  `buildRenderTarget` becomes a no-op so existing GPUTexture handles
-     *  (e.g. exposed as SampledTexture) stay valid. */
+    /** True when textures were allocated eagerly (before frame graph build).
+     *  Fixed targets make `buildRenderTarget` a no-op; surface-sized sampled
+     *  targets use `_syncEager` to refresh stable Texture2D facades on resize. */
     /** @internal */
     _eager?: boolean;
+    /** @internal Optional in-place eager attachment refresh used by sampled surface-sized targets. */
+    _syncEager?(engine: EngineContext): void;
+    /** @internal Explicit attachment-owner release, independent of eager allocation.
+     *  Externally owned eager wrappers leave this absent. */
+    _disposeAttachments?(): void;
     /** @internal When false, `disposeRenderTarget` will NOT destroy `_depthTexture` — the depth
      *  attachment is BORROWED (owned by something else, e.g. a ShadowGenerator's shared shadow map)
      *  and must outlive this render target. Defaults to owning (destroys on dispose). */
@@ -100,13 +105,13 @@ export function createRenderTarget(descriptor: RenderTargetDescriptor): RenderTa
     };
 }
 
-/** Allocate GPU textures for the render target. Idempotent for eager targets
- *  (`_eager` — e.g. `createRenderTargetTexture` outputs and the engine-owned
- *  `scRT`, whose color texture the engine refreshes per frame). A
+/** Allocate GPU textures for the render target. Idempotent for fixed eager targets;
+ *  surface-sized eager targets may synchronize through `_syncEager`. A
  *  color texture is allocated whenever the descriptor has a `format`; depth
  *  is allocated whenever it has a `depthStencilFormat`. */
 export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void {
     if (rt._eager) {
+        rt._syncEager?.(engine);
         return;
     }
     disposeRenderTarget(rt);
@@ -140,11 +145,17 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void
     }
 }
 
-/** Free GPU textures owned by the render target. No-op for `null`/`undefined` and for
- *  `_eager` targets — the latter (e.g. the engine `scRT` and `GeometryRendererTask`
- *  depth outputs) are owned externally, so callers can pass them unconditionally. */
+/** Free owned attachments, including sampled eager targets with an explicit owner hook.
+ *  Eager wrappers without a hook (swapchain, geometry/shadow outputs) remain externally owned. */
 export function disposeRenderTarget(rt: RenderTarget | null | undefined): void {
-    if (!rt || rt._eager) {
+    if (!rt) {
+        return;
+    }
+    if (rt._disposeAttachments) {
+        rt._disposeAttachments();
+        return;
+    }
+    if (rt._eager) {
         return;
     }
     if (rt._colorTexture) {

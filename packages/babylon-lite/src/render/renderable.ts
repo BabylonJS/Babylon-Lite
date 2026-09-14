@@ -82,6 +82,8 @@ export interface Renderable {
      *  the geometry-renderer path so its owning task can retire per-mesh resources
      *  on re-record/dispose. Idempotent. */
     _geometryDispose?: () => void;
+    /** @internal Owner-provided sink for cached resources that outlive individual bind() generations. */
+    _lifetimeDisposers?: (() => void)[];
     /** @internal Rebuilds this renderable on a replacement device after device loss.
      *
      *  Stamped by whichever builder created the renderable, closing over the arguments it was
@@ -131,8 +133,8 @@ export interface MeshGroupBuildResult {
     _G?: boolean;
     /** Closure used to rebuild a single mesh — captures the per-scene context
      *  (composer, BG caches, lights UBO, …) so material swaps and per-pass overrides
-     *  reuse the same setup. The group builder stores it on itself as
-     *  `_rebuildSingle` after the first run. */
+     *  reuse the same setup. The scene stores it on its material group as `r`;
+     *  a builder-wide `_rebuildSingle` cache does not establish readiness in another scene. */
     rebuildSingle: (scene: SceneContext, mesh: Mesh, materialOverride?: Material) => Renderable;
 }
 
@@ -141,9 +143,9 @@ export interface MeshGroupBuildResult {
  * material type. Each material module exports one. The scene calls it at build
  * time — no pipeline-specific logic in scene.ts.
  *
- *  - `_rebuildSingle` is set by the group builder on first run (same compilation
- *    unit as `buildSingleX`). Used for per-mesh material swaps and per-pass
- *    material overrides (`RenderTask.addMesh`).
+ *  - Scene-dependent rebuilds must resolve through the scene group's `r`.
+ *    `_rebuildSingle` is also cached by builders, but is only a standalone fallback
+ *    for factories explicitly marked `_sceneIndependentRebuild`.
  *
  * @param scene  - The scene context (for engine, camera, env textures, etc.)
  * @param meshes - All meshes that use this builder's material type.
@@ -151,6 +153,8 @@ export interface MeshGroupBuildResult {
 export type MeshGroupBuilder = ((scene: SceneContext, meshes: Mesh[]) => Promise<MeshGroupBuildResult>) & {
     /** @internal */
     _rebuildSingle?: (scene: SceneContext, mesh: Mesh, materialOverride?: Material) => Renderable;
+    /** @internal The standalone rebuild factory derives all context from its arguments, not a prior scene build. */
+    _sceneIndependentRebuild?: boolean;
     /** @internal */
     _materialFamily?: "standard" | "pbr" | "node" | "shader";
     /** @internal Pending opt-in feature preload required before this builder runs. */

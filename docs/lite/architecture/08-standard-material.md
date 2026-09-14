@@ -310,7 +310,7 @@ Standard renderables accept `MaterialOrView`. A plain material computes/stores `
 
 `createStandardNoColorMaterialView(source)` creates a view that ORs `NO_COLOR_OUTPUT` into the source material feature bits. This produces a Standard shader variant that runs discard/alpha-test code and writes no color, useful for passes that should execute the fragment stage without writing color.
 
-The `rebuildSingle` closure returned from `buildStandardMeshRenderables()` is stored on `standardGroupBuilder._rebuildSingle`. It is used by material swaps, `rebuildMaterial()`, and `RenderTask.addMesh(mesh, { material })` per-pass overrides.
+The `rebuildSingle` closure returned from `buildStandardMeshRenderables()` is installed as `r` on the scene-local group and also cached on `standardGroupBuilder._rebuildSingle`. Material swaps, `rebuildMaterial()`, and per-pass overrides resolve through the scene-local group, never another scene's builder cache. Standard rebuilds require the passed scene's initialized `_standardRebuildContext`; they reject a missing context rather than falling back to the closure's original scene.
 
 ### Default Material Values
 

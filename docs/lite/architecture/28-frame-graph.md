@@ -35,6 +35,7 @@ export type { RenderPassExecuteFunc } from "./frame-graph/pass.js";
 
 export type { RenderTask, RenderTaskConfig } from "./frame-graph/render-task.js";
 export { createRenderTask, removeMeshFromTask } from "./frame-graph/render-task.js";
+export { enableRenderTaskMeshRefresh } from "./frame-graph/render-task-mesh-refresh.js";
 export type { OverdrawCostMeasure } from "./engine/gpu-task-timing.js";
 export { measureRenderTaskOverdrawCost } from "./engine/gpu-task-timing.js";
 export type { ImageProcessingSource, ImageProcessingTaskConfig } from "./frame-graph/image-processing-task.js";
@@ -42,7 +43,7 @@ export { createImageProcessingTask } from "./frame-graph/image-processing-task.j
 
 export type { RenderTarget, RenderTargetDescriptor } from "./engine/render-target.js";
 export { createRenderTarget } from "./engine/render-target.js";
-export { createRenderTargetTexture } from "./texture/rtt.js";
+export { createRenderTargetTexture, disposeRenderTargetTexture, onRenderTargetTextureResize } from "./texture/rtt.js";
 ```
 
 ### `FrameGraph`
@@ -254,16 +255,44 @@ Material pipelines are cached by target signature. `_flipY` is derived at task c
 ### Eager RTT Texture
 
 ```typescript
-export function createRenderTargetTexture(engine: EngineContext, descriptor: RenderTargetDescriptor): { rt: RenderTarget; texture: Texture2D };
+export interface RenderTargetTextureResult {
+    readonly rt: RenderTarget;
+    readonly texture: Texture2D;
+    readonly depthTexture: Texture2D | null;
+}
+
+export function createRenderTargetTexture(engine: EngineContext, descriptor: RenderTargetDescriptor): RenderTargetTextureResult;
+export function disposeRenderTargetTexture(result: RenderTargetTextureResult): void;
+export function onRenderTargetTextureResize(result: RenderTargetTextureResult, callback: () => void): () => void;
 ```
 
-Use this when a pass output must be wired into a material before the frame graph is built. It eagerly allocates the render target and exposes the color attachment as a `Texture2D`.
+Use this when a pass output must be wired into a material before the frame graph is built. It eagerly allocates the render target and exposes the color attachment as `texture`. When the descriptor includes a depth attachment, `depthTexture` exposes a depth-only sampled view of the same allocation. For a depth-only target, `texture` and `depthTexture` are the same wrapper.
+
+Every attachment has one render-target ownership reference in addition to references held by sampled
+consumers. Removing the last sampler cannot destroy a live writer's attachment. The owning render task
+releases the target references on disposal; remaining sampled consumers keep the last image alive.
+Targets not handed to an owning task can be released with `disposeRenderTargetTexture`.
+Disposal is idempotent and prevents subsequent rebuilding. `sharedRt` tasks and eager external
+`depth` attachments are borrowers, not additional owners.
+
+Eager allocation and disposal ownership are distinct: sampled targets install an attachment-release
+hook, while engine swapchain and geometry/shadow wrappers retain their existing external owners.
+Resize prepares replacement attachments before publishing them, transfers both writer and sampled
+references, and retires the old allocation after submitted GPU work drains.
+
+RTT-derived `cloneTexture2D` wrappers share an attachment backing record with their source,
+including clones of clones. Replacing its allocation generation updates texture, view, width,
+and height for every wrapper atomically. UV transforms and sampler choices remain wrapper-local.
+Ordinary texture clones retain snapshot semantics. Clone creation does not acquire a reference:
+each sampled owner must still pair `acquireTexture` and `releaseTexture`. Cached bind groups
+still require the existing resize callback to rebuild their captured views.
+
+Fixed-size descriptors retain their original allocation. A surface-sized descriptor reallocates during the frame-graph rebuild when either its dimensions or owning `GPUDevice` changes and mutates the existing `Texture2D` facades. Register `onRenderTargetTextureResize(result, callback)` when consumers cache bind groups; the callback runs after facade replacement so callers can queue their material/renderable rebuild before the resized frame draws.
 
 Constraints:
 
-- `descriptor.size` must be fixed, not `"canvas"`.
 - The render target must own a color texture; `resolveToSwapchain: true` with `sampleCount: 1` is invalid.
-- The target is marked eager, so later `buildRenderTarget()` calls do not reallocate and invalidate already-created bind groups.
+- Fixed-size targets are marked eager and never reallocate. Surface-sized targets rebuild only when their backing-store dimensions change.
 
 ## `RenderTask`
 
@@ -378,11 +407,79 @@ task.addMesh(mesh);
 task.addMesh(mesh, { material: overrideMaterialOrView });
 ```
 
-`addMesh()` accepts a source material or `MaterialView` and resolves through the source material family's `_buildGroup._rebuildSingle` hook. The mesh's material family must already be registered with the scene so the builder has run. Passing a material view lets a pass reuse source material state with pass-specific render feature bits, for example Standard/PBR/Node no-color shadow variants used by PCF shadow render tasks.
+`addMesh()` accepts a source material or `MaterialView`. Rebuild resolution uses the completed
+scene-local material group's `r` closure. An existing group without `r` is not ready: it must never
+fall back to a builder-wide closure cached by another scene. Only builders explicitly marked
+`_sceneIndependentRebuild` (standalone geometry-view factories) may use `_rebuildSingle` without a
+scene group. Ordinary task population, refresh, and explicit material rebuilds share
+`material/resolve-mesh-rebuild.ts`'s `resolveMeshRebuild(scene, builder)` resolver.
+Passing a material view lets a pass reuse source material state with pass-specific render feature
+bits, for example Standard/PBR/Node no-color shadow variants used by PCF shadow render tasks.
 
 Adds made **before** the task's first `record()` are queued and drained at `record()` time. A **runtime** add (after `record()`, once the task is live) resolves the mesh and re-buckets it into that task immediately, so it renders on the next frame without a `frameGraph.build()` — a full rebuild would reallocate the shared scene UBO and every task's render target mid-frame. The task tracks this via its internal `_recorded` flag.
 
 If a task has explicit renderables, it does **not** auto-mirror the scene.
+
+Base and refresh-enabled explicit tasks share `render-task-transaction.ts`. Each auxiliary
+renderable has task-owned lifetime and binding-generation disposer lists. Construction and binding
+temporarily capture both scene disposer maps and restore their exact prior entries, including on
+failure. Main-scene material swaps therefore cannot release an explicit task's UBOs or texture leases.
+`TaskMeshEntry` contains `mesh`, optional `renderable` / committed `owner`, `lifetimeDisposers`,
+and `bindingDisposers`. A new entry has no owner until commit, so rollback can distinguish new
+allocations from an existing entry borrowed for a cross-task transfer.
+
+Pending additions, renderables, binding buckets, update batches, auto-mirror flags, and scene binding
+state are staged in a candidate generation. Only a complete rebuild and bind publishes it and clears
+the pending queue. Failed attempts release candidate resources, preserve the prior task generation,
+and retain pending requests for retry. Rebinding retained renderables replaces only their binding
+generation; cached renderable-lifetime resources survive. Removing a mesh or disposing a task retires
+its owned callbacks after submitted GPU work drains. Scene-mirrored renderables remain borrowed.
+Standard and PBR register UBO releases as each allocation completes, before bind-group creation.
+Standard's optional UV UBO joins the same ownership list. A failed initial uniform upload destroys
+its just-created buffer before propagating the error.
+
+Transfers move the ownership entry together with its renderable. Destination binding is transactional
+across the affected tasks; failure leaves the source ownership and draw lists intact. Batched CSM
+transfers stage all moves and bind each destination once. Async shader preparation uses temporary
+auxiliary renderables without consuming the task's pending requests.
+
+An explicit task normally keeps the renderables resolved by `addMesh()`. Applications that replace
+mesh geometry or change mesh materials at runtime can opt a task into following the corresponding
+scene-renderable rebuilds:
+
+```typescript
+const task = createRenderTask({ name: "dynamic", rt, autoMirror: false }, engine, scene);
+enableRenderTaskMeshRefresh(task);
+task.addMesh(dynamicMesh);
+```
+
+`enableRenderTaskMeshRefresh()` must run before the task is recorded. It tracks only scene-owned
+meshes added without a per-task material override. It builds one auxiliary single-mesh renderable
+per tracked mesh through the registered material-family rebuild hook, so an explicit task never
+inherits untracked siblings from a merged scene renderable. The task claims and owns those auxiliary
+disposers, rebuilds them when `scene._renderableVersion` changes, and retires replaced resources and
+binding-update batches after submitted GPU work drains. The enabler wraps only the selected task;
+applications that do not import it retain the base render-task and material-renderable bundle
+footprint.
+
+Refresh is a build-then-commit transaction. All tracked replacements, their captured main/auxiliary
+disposers, and their draw bindings are prepared before publishing a new generation. If any rebuild
+or binding throws, temporary resources are cleaned up and the previous task lists, bindings,
+ownership, and version remain unchanged for retry. Only a complete replacement retires the
+previous generation. Scene-owned disposer lists are preserved throughout auxiliary construction.
+An unfinished scene-local material build raises a synchronous readiness error. The tracked or
+pending addition remains queued for a later `record()` / refresh retry after that build completes;
+it neither publishes partial bindings nor starts another asynchronous material build.
+Pending material overrides participate in the same transaction, including overrides queued before
+enabling refresh and live `addMesh(mesh, { material })` calls. Failed attempts leave the pending queue
+intact and clean up only newly created resources. Committed overrides remain task-owned until mesh
+removal or task disposal; later binding attempts also stage their additional disposer callbacks.
+
+Each owned renderable separates lifetime disposers from binding-generation disposers. A successful
+rebind of a retained override retires its previous binding generation and keeps only the new one.
+A failed attempt destroys only candidate bindings and restores the prior generation. Renderable
+construction and lazily cached renderable resources remain alive until that renderable is replaced
+or removed; cached culling state uses the explicit lifetime-disposer sink.
 
 ### Buckets and Draw Execution
 

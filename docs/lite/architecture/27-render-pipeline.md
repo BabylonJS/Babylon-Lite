@@ -110,7 +110,7 @@ Important fields:
 | `cs`         | Use canvas dimensions for scene UBO aspect instead of RTT dimensions. Used when an RTT texture must be rendered with canvas aspect.                       |
 | `autoMirror` | Set `false` to keep an empty explicit render list instead of mirroring the scene renderables.                                                             |
 
-`RenderTask.addMesh(mesh, { material })` accepts either a source material or a `MaterialView`. The mesh is resolved at `record()` time through the source material family's `_buildGroup._rebuildSingle` closure, so explicit offscreen tasks can render the same mesh with pass-specific material features without mutating `mesh.material`.
+`RenderTask.addMesh(mesh, { material })` accepts either a source material or a `MaterialView`. The mesh is resolved at `record()` time through the completed scene-local material group's `r` closure, so explicit offscreen tasks can render the same mesh with pass-specific material features without mutating `mesh.material`. Standalone geometry-view factories explicitly opt into `_sceneIndependentRebuild`; only these may fall back to `_buildGroup._rebuildSingle` when no scene group exists.
 
 `RenderTask.enabled` defaults to `true`. Setting it to `false` skips the pass before updates, attachment loads, resolves, or draws.
 
@@ -227,7 +227,7 @@ Material renderables intentionally do not import material-view helpers or unwrap
 
 Materials carry `_buildGroup: MeshGroupBuilder` on their props. `addToScene()` groups meshes by builder, and deferred builders run before rendering to produce renderables.
 
-`MeshGroupBuildResult.rebuildSingle` is also stored on the builder as `_rebuildSingle`, so material swaps and `RenderTask.addMesh(mesh, { material })` can rebuild one mesh with an optional per-pass material override.
+`MeshGroupBuildResult.rebuildSingle` is stored on the scene group as `r` for material swaps and per-pass material overrides. The builder's `_rebuildSingle` cache does not establish readiness for another scene; an existing group without `r` must finish its build before rebuilding a mesh.
 
 ## Babylon.js Equivalence Map
 

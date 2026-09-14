@@ -121,6 +121,10 @@ export interface EngineContext extends SurfaceContext {
     _rebuildStorageBuffers?: () => void;
     /** @internal Installed lazily by the storage-buffer module. */
     _disposeStorageBuffers?: () => void;
+    /** @internal Managed resource disposal callbacks installed behind `_disposeStorageBuffers`. */
+    _managedResourceDisposers?: Array<() => void>;
+    /** @internal Installed only while independent managed resource families are live. */
+    _disposeManagedResources?: () => void;
     /** @internal Shared 1×1 white texture used as the default baseColor / ORM for
      *  factor-only PBR materials (created via `createPbrMaterial` without textures).
      *  A white ORM yields `metallic = metallicFactor`, `roughness = roughnessFactor`,
@@ -541,6 +545,7 @@ export function startEngine(engine: EngineContext): Promise<void> {
 }
 
 /** Resolve when every GPU command submitted before this call has completed.
+ *  This does not wait for deferred resource releases; use `waitForGpuResourceRetirements` for teardown.
  *  This is a synchronization boundary for infrequent lifecycle transitions such as revealing a fully
  *  prepared scene; frame loops should not await it during steady rendering. */
 export function waitForGpuIdle(engine: EngineContext): Promise<void> {
@@ -576,8 +581,12 @@ export function disposeEngine(engine: EngineContext): void {
         s._context.unconfigure();
     }
     surfaces.length = 0;
-    engine._disposeStorageBuffers?.();
-    engine._device.destroy();
+    try {
+        engine._disposeManagedResources?.();
+        engine._disposeStorageBuffers?.();
+    } finally {
+        engine._device.destroy();
+    }
 }
 
 /** Render one frame for every surface registered on the engine. Updates each rendering context, records its GPU work into a shared command encoder, submits the frame, and publishes the total draw-call count. */
@@ -601,52 +610,55 @@ export function renderFrame(engine: EngineContext, delta: number): void {
     const encoder = engine._device.createCommandEncoder({ label: "frame" });
     engine._currentEncoder = encoder;
     engine._currentDelta = delta;
+    try {
+        // Optional GPU timing: write the frame's opening timestamp into the frame encoder. `_gpuTimerBegin`
+        // is undefined unless timing is enabled (its hooks are installed/removed by `setGpuTimingEnabled` from
+        // a dynamic-imported module), so a frame that never enabled timing pays only this short-circuit and
+        // ships none of the timer code. The begin/end pair is written *into* the encoder so the GPU executes
+        // them contiguously around this frame's passes — measuring only the frame's own GPU work.
+        engine._gpuTimerBegin?.(encoder);
 
-    // Optional GPU timing: write the frame's opening timestamp into the frame encoder. `_gpuTimerBegin`
-    // is undefined unless timing is enabled (its hooks are installed/removed by `setGpuTimingEnabled` from
-    // a dynamic-imported module), so a frame that never enabled timing pays only this short-circuit and
-    // ships none of the timer code. The begin/end pair is written *into* the encoder so the GPU executes
-    // them contiguously around this frame's passes — measuring only the frame's own GPU work.
-    engine._gpuTimerBegin?.(encoder);
-
-    let drawCalls = 0;
-    for (let i = 0; i < surfaces.length; i++) {
-        const surface = surfaces[i]!;
-        // A queued screenshot (`captureScreenshot`) needs this surface's swapchain marked COPY_SRC
-        // before its frame texture is acquired — reconfiguring the context EXPIRES the current
-        // canvas texture, so it cannot run mid-frame. The hook is installed lazily by
-        // `captureScreenshot`, so non-capturing surfaces ship none of the reconfigure code and pay
-        // only this short-circuit.
-        surface._capturePreFrame?.(surface);
-        _refreshScRT(surface);
-        const ctxs = surface._renderingContexts;
-        for (let j = 0; j < ctxs.length; j++) {
-            const s = ctxs[j]!;
-            s._update();
-            drawCalls += s._drawCallsPre;
-            drawCalls += s._record();
+        let drawCalls = 0;
+        for (let i = 0; i < surfaces.length; i++) {
+            const surface = surfaces[i]!;
+            // A queued screenshot (`captureScreenshot`) needs this surface's swapchain marked COPY_SRC
+            // before its frame texture is acquired — reconfiguring the context EXPIRES the current
+            // canvas texture, so it cannot run mid-frame. The hook is installed lazily by
+            // `captureScreenshot`, so non-capturing surfaces ship none of the reconfigure code and pay
+            // only this short-circuit.
+            surface._capturePreFrame?.(surface);
+            _refreshScRT(surface);
+            const ctxs = surface._renderingContexts;
+            for (let j = 0; j < ctxs.length; j++) {
+                const s = ctxs[j]!;
+                s._update();
+                drawCalls += s._drawCallsPre;
+                drawCalls += s._record();
+            }
         }
-    }
 
-    const finalEncoder = engine._currentEncoder;
-    // Per-surface screenshot readback hook — undefined (a no-op optional call) until
-    // `captureScreenshot(surface)` lazily installs it on that surface, so surfaces that
-    // never capture keep this to a single short-circuit and ship none of the readback code.
-    // Each service records its surface's swapchain copy into this frame's encoder.
-    for (let i = 0; i < surfaces.length; i++) {
-        const surface = surfaces[i]!;
-        surface._captureService?.(surface, finalEncoder);
+        const finalEncoder = engine._currentEncoder;
+        // Per-surface screenshot readback hook — undefined (a no-op optional call) until
+        // `captureScreenshot(surface)` lazily installs it on that surface, so surfaces that
+        // never capture keep this to a single short-circuit and ship none of the readback code.
+        // Each service records its surface's swapchain copy into this frame's encoder.
+        for (let i = 0; i < surfaces.length; i++) {
+            const surface = surfaces[i]!;
+            surface._captureService?.(surface, finalEncoder);
+        }
+        // Closing timestamp goes in just before the frame encoder is finished, so it bookends exactly the
+        // frame's recorded GPU work (a no-op short-circuit when timing is disabled).
+        engine._gpuTimerEnd?.(finalEncoder);
+        engine._cbs[0] = finalEncoder.finish();
+        engine._device.queue.submit(engine._cbs);
+        flushGpuResourceRetirements(engine);
+        engine.drawCallCount = drawCalls;
+        // Resolve + read back the timestamp pair asynchronously (its own submit, after the frame's) and
+        // publish the latest completed sample to `gpuFrameTimeMs`. Non-blocking — never stalls this frame.
+        engine._gpuTimerResolve?.();
+    } finally {
+        engine._currentEncoder = undefined!;
     }
-    // Closing timestamp goes in just before the frame encoder is finished, so it bookends exactly the
-    // frame's recorded GPU work (a no-op short-circuit when timing is disabled).
-    engine._gpuTimerEnd?.(finalEncoder);
-    engine._cbs[0] = finalEncoder.finish();
-    engine._device.queue.submit(engine._cbs);
-    flushGpuResourceRetirements(engine);
-    engine.drawCallCount = drawCalls;
-    // Resolve + read back the timestamp pair asynchronously (its own submit, after the frame's) and
-    // publish the latest completed sample to `gpuFrameTimeMs`. Non-blocking — never stalls this frame.
-    engine._gpuTimerResolve?.();
 }
 
 /** Whether GPU frame-time measurement is available on this engine's device — i.e. the adapter offered

@@ -76,6 +76,7 @@ export function setRenderTaskGpuTimingEnabled(engine: EngineContext, enabled: bo
 export function startEngine(engine: EngineContext): Promise<void>;
 /** Resolve after all GPU commands submitted before this call have completed. */
 export function waitForGpuIdle(engine: EngineContext): Promise<void>;
+export function waitForGpuResourceRetirements(engine: EngineContext): Promise<void>;
 /** Stop the render loop. */
 export function stopEngine(engine: EngineContext): void;
 /** Resize render targets to match canvas layout size. No-op for an OffscreenCanvas. */
@@ -161,7 +162,17 @@ Everything else (adapter/device acquisition, `getContext("webgpu")`, the rAF ren
 
 `startEngine(engine)` returns a `Promise<void>` that resolves after the first frame has been rendered. Any scene registered before the call participates in the first frame; later registrations join on subsequent frames.
 
-`waitForGpuIdle(engine)` delegates to the WebGPU queue fence and resolves after all commands submitted before the call have completed. It is intended for infrequent lifecycle synchronization, not steady-state frame loops.
+`waitForGpuIdle(engine)` delegates to the WebGPU queue fence and resolves after all commands submitted before the call have completed. It does not wait for deferred resource-release callbacks. It is intended for infrequent lifecycle synchronization, not steady-state frame loops.
+
+`waitForGpuResourceRetirements(engine)` is the separate orderly-teardown boundary. Stop producers and
+dispose scene/render-task consumers first, then await this function before disposing their shared
+resources. It yields past the current synchronous frame, snapshots outstanding retirement batches,
+waits for submitted GPU work, and claims those exact batches synchronously. The ordinary deferred
+fence may also claim a batch, but its callbacks run only once. Retirements queued during the wait or
+by another release callback are drained in subsequent fenced batches. Newly queued batches are never
+released against an earlier fence. GPU-fence failure rejects without releasing unfenced resources;
+callback failures are reported while remaining callbacks are attempted. The drain is tree-shakable
+and introduces no additional steady-frame scheduling.
 
 ```
 registerScene(scene):

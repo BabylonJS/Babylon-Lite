@@ -32,6 +32,7 @@ import {
     MATERIAL_ALPHA_BLEND,
     VERTEX_ALPHA,
     _getStdExtsSorted,
+    _stdMaterialVariantKey,
 } from "./standard-flags.js";
 import type { StdExt } from "./standard-flags.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
@@ -112,7 +113,10 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
     // It reads its engine/device/fog/shadow context from the *passed* scene so a
     // singleton `_rebuildSingle` never cross-contaminates scenes.
     const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
-        const rc = (s as SceneContext & { _standardRebuildContext?: StandardRebuildContext })._standardRebuildContext ?? rebuildContext;
+        const rc = (s as SceneContext & { _standardRebuildContext?: StandardRebuildContext })._standardRebuildContext;
+        if (!rc) {
+            throw new Error("Standard material group has not completed its initial build in this scene.");
+        }
         const engine = rc._engine;
         const device = engine._device;
         const shadowLights = rc._shadowLights;
@@ -152,7 +156,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         for (const ext of sortedExts) {
             features |= ext._meshFeatures?.(meshFeatures, mat) ?? 0;
             if (features & ext._feature) {
-                const f = ext._frag(features, meshFeatures);
+                const f = ext._frag(features, meshFeatures, mat);
                 if (f) {
                     frags.push(f);
                 }
@@ -190,6 +194,9 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             }
         }
         const esmShadowDepthCode = (features & ESM_SHADOW_OUTPUT) !== 0 ? (mat as StandardMaterialProps & { readonly _esmShadowDepthCode: string })._esmShadowDepthCode : "";
+        if (_stdMaterialVariantKey) {
+            shaderKey += _stdMaterialVariantKey(mat);
+        }
         const bindings = getOrCreateStandardBindings(
             engine,
             features,
@@ -207,12 +214,16 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const _packMeshWorld = engine._makePackMeshWorld?.(s as SceneContext) ?? packMat4IntoF32;
         _packMeshWorld(meshUboData, mesh.worldMatrix, 0, 0);
         writeMeshLightSelection(mesh, s.lights, meshUboData);
+        const disposers: (() => void)[] = [];
+        s._meshDisposables.set(mesh, disposers);
         const meshUBO = createUniformBuffer(engine, meshUboData);
+        disposers.push(() => meshUBO.destroy());
         const textureLevel = (features & NEEDS_UV) !== 0 ? 1.0 : 0;
         const matData = new F32(24);
         writeStdMaterialData(matData, mat, textureLevel);
         const materialUBO = createUniformBuffer(engine, matData);
-        const meshBindGroup = createStandardMeshBindGroup(s, bindings, meshUBO, materialUBO, mat, mesh.morphTargets ?? null, mesh);
+        disposers.push(() => materialUBO.destroy());
+        const meshBindGroup = createStandardMeshBindGroup(s, bindings, meshUBO, materialUBO, mat, mesh.morphTargets ?? null, mesh, disposers, isOverride);
 
         // Shadow bind group (group 2) — shared across receiving meshes via shadowBGCache.
         let shadowBindGroup: GPUBindGroup | null = null;
@@ -241,13 +252,11 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         for (const t of boundTextures) {
             acquireTexture(t);
         }
-        s._meshDisposables.set(mesh, [
-            () => {
-                for (const t of boundTextures) {
-                    releaseTexture(t);
-                }
-            },
-        ]);
+        disposers.push(() => {
+            for (const t of boundTextures) {
+                releaseTexture(t);
+            }
+        });
 
         let _lastWorldVersion = mesh.worldMatrixVersion;
         let _lastLightsCount = s.lights.length;

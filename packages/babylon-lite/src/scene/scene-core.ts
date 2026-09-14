@@ -211,6 +211,9 @@ export interface SceneContext extends RenderingContext {
      *  would then replay a destroyed system UBO ("used in submit while destroyed"). Drained only on a real mesh
      *  removal (`removeFromScene`) and scene dispose, exactly like `_meshDisposables` minus the swap path. */
     _meshAuxDisposables: Map<Mesh, (() => void)[]>;
+    /** @internal Resource-usage observer called after add/reassignment and before removal teardown.
+     *  Undefined material detaches a mesh's main-material usage. */
+    _meshMaterialChange?: (mesh: Mesh, material?: Mesh["material"]) => void;
     /** @internal Meshes whose material was changed via setter — drained before each render frame. */
     _materialSwapQueue: Mesh[];
     /** @internal Monotonic counter bumped when the renderable list changes (add/remove/rebuild). */
@@ -489,6 +492,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
                 enqueueMaterialSwap(ctx, mesh);
             }
         }
+        ctx._meshMaterialChange?.(mesh, mesh.material);
     } else if ("lightType" in entity) {
         ctx.lights.push(entity as LightBase);
     }

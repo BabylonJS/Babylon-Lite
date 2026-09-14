@@ -98,6 +98,56 @@ function layoutArgs(layout: "mesh" | "thin-instances" | "thin-instances-color", 
 }
 
 describe("async ShaderMaterial pipeline compilation", () => {
+    it("prepares pending task meshes with temporary ownership without consuming the pending queue", async () => {
+        const { engine, createRenderPipelineAsync } = makeEngine();
+        enableAsyncShaderPipelineCompilation(engine);
+        const mesh = {} as Mesh;
+        const main = [vi.fn()];
+        const aux = [vi.fn()];
+        const release = vi.fn();
+        const scene = {
+            surface: { engine },
+            lights: [],
+            _groups: new Map(),
+            _meshDisposables: new Map([[mesh, main]]),
+            _meshAuxDisposables: new Map([[mesh, aux]]),
+            _renderables: [],
+            _frameGraph: { _tasks: [] },
+        } as unknown as SceneContext;
+        const bind = vi.fn();
+        const renderable = { mesh, order: 0, isTransparent: false, bind } as Renderable;
+        const builder = Object.assign(async () => ({ renderables: [renderable], rebuildSingle: () => renderable }), {
+            _sceneIndependentRebuild: true,
+            _rebuildSingle: () => {
+                scene._meshDisposables.set(mesh, [release]);
+                _registerAsyncShaderPipelineRecipe(scene, material, renderable);
+                return renderable;
+            },
+        });
+        const material = { ...makeMaterial(), _buildGroup: builder };
+        mesh.material = material;
+        const pending = [{ mesh, material }];
+        const task = {
+            scene,
+            engine,
+            _renderables: [],
+            _pendingMeshes: pending,
+            _targetSignature: signature,
+            _config: { autoMirror: false },
+        } as unknown as RenderTask;
+        scene._frameGraph._tasks.push(task);
+        await _prepareAsyncShaderPipelinesForScene(scene);
+        expect(createRenderPipelineAsync).toHaveBeenCalledOnce();
+        expect(task._pendingMeshes).toBe(pending);
+        expect(pending).toHaveLength(1);
+        expect(task._renderables).toHaveLength(0);
+        expect(task._meshEntries).toBeUndefined();
+        expect(scene._meshDisposables.get(mesh)).toBe(main);
+        expect(scene._meshAuxDisposables.get(mesh)).toBe(aux);
+        expect(release).toHaveBeenCalledOnce();
+        expect(bind).not.toHaveBeenCalled();
+    });
+
     it("is inert until enabled and enabling is idempotent", async () => {
         const { engine, createRenderPipelineAsync } = makeEngine();
         const material = makeMaterial();

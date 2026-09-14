@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { renderFrame, waitForGpuIdle, type EngineContext, type RenderingContext } from "../../../packages/babylon-lite/src/engine/engine";
-import { disposeGpuResourceRetirements, retireGpuResources } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
+import { renderFrame, stopEngine, waitForGpuIdle, type EngineContext, type RenderingContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { disposeGpuResourceRetirements, retireGpuResources, waitForGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import { syncThinInstanceGpuData } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu";
 import type { ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
@@ -49,6 +49,102 @@ function makeThinInstances(): ThinInstanceData {
 }
 
 describe("GPU resource retirement", () => {
+    it("claims stopped-engine retirements before resolving even if the original fence callback is delayed", async () => {
+        let finishOriginalFence!: () => void;
+        const originalFence = new Promise<void>((resolve) => {
+            finishOriginalFence = resolve;
+        });
+        const onSubmittedWorkDone = vi.fn(async (): Promise<void> => undefined).mockReturnValueOnce(originalFence);
+        const engine = { _device: { queue: { onSubmittedWorkDone } } } as unknown as EngineContext;
+        const retire = vi.fn();
+        retireGpuResources(engine, retire);
+        stopEngine(engine);
+        await waitForGpuResourceRetirements(engine);
+        expect(retire).toHaveBeenCalledOnce();
+        expect(engine._retiring).toHaveLength(0);
+        finishOriginalFence();
+        await flushMicrotasks();
+        expect(retire).toHaveBeenCalledOnce();
+    });
+
+    it("fences newly queued and nested retirements separately from the captured batch", async () => {
+        const fences: (() => void)[] = [];
+        const onSubmittedWorkDone = vi.fn(() => new Promise<void>((resolve) => fences.push(resolve)));
+        const engine = { _device: { queue: { onSubmittedWorkDone } } } as unknown as EngineContext;
+        const nested = vi.fn();
+        const addedDuringWait = vi.fn();
+        const first = vi.fn(() => retireGpuResources(engine, nested));
+        retireGpuResources(engine, first);
+        const complete = vi.fn();
+        const draining = waitForGpuResourceRetirements(engine).then(complete);
+        await flushMicrotasks();
+        expect(fences).toHaveLength(2);
+        retireGpuResources(engine, addedDuringWait);
+        fences[0]!();
+        await flushMicrotasks();
+        expect(first).toHaveBeenCalledOnce();
+        expect(addedDuringWait).not.toHaveBeenCalled();
+        expect(nested).not.toHaveBeenCalled();
+        expect(complete).not.toHaveBeenCalled();
+        expect(fences).toHaveLength(4);
+        fences[2]!();
+        await draining;
+        expect(addedDuringWait).toHaveBeenCalledOnce();
+        expect(nested).toHaveBeenCalledOnce();
+        fences[1]!();
+        fences[3]!();
+        await flushMicrotasks();
+        expect(first).toHaveBeenCalledOnce();
+        expect(addedDuringWait).toHaveBeenCalledOnce();
+        expect(nested).toHaveBeenCalledOnce();
+    });
+
+    it("waits past the current synchronous submission even without retirement callbacks", async () => {
+        const events: string[] = [];
+        const engine = {
+            _device: {
+                queue: {
+                    onSubmittedWorkDone: vi.fn(async () => {
+                        events.push("fence");
+                    }),
+                },
+            },
+        } as unknown as EngineContext;
+        const draining = waitForGpuResourceRetirements(engine);
+        events.push("submit");
+        await draining;
+        expect(events).toEqual(["submit", "fence"]);
+    });
+
+    it("allows concurrent drains and synchronous teardown to claim each callback only once", async () => {
+        let finishFence!: () => void;
+        const fence = new Promise<void>((resolve) => {
+            finishFence = resolve;
+        });
+        const engine = { _device: { queue: { onSubmittedWorkDone: () => fence } } } as unknown as EngineContext;
+        const retire = vi.fn();
+        retireGpuResources(engine, retire);
+        const first = waitForGpuResourceRetirements(engine);
+        const second = waitForGpuResourceRetirements(engine);
+        await flushMicrotasks();
+        disposeGpuResourceRetirements(engine);
+        expect(retire).toHaveBeenCalledOnce();
+        finishFence();
+        await Promise.all([first, second]);
+        expect(retire).toHaveBeenCalledOnce();
+    });
+
+    it("preserves unfenced callbacks for teardown when the drain fence rejects", async () => {
+        const failure = new Error("queue fence failed");
+        const engine = { _device: { queue: { onSubmittedWorkDone: () => Promise.reject(failure) } } } as unknown as EngineContext;
+        const retire = vi.fn();
+        retireGpuResources(engine, retire);
+        await expect(waitForGpuResourceRetirements(engine)).rejects.toBe(failure);
+        expect(retire).not.toHaveBeenCalled();
+        disposeGpuResourceRetirements(engine);
+        expect(retire).toHaveBeenCalledOnce();
+    });
+
     it("returns the queue fence for all work submitted before the call", () => {
         const submittedWorkDone = Promise.resolve();
         const onSubmittedWorkDone = vi.fn(() => submittedWorkDone);
@@ -148,6 +244,7 @@ describe("GPU resource retirement", () => {
     });
 
     it("continues draining when one retirement throws", () => {
+        const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
         const afterFailure = vi.fn();
         const engine = {
             _retirements: [],
@@ -160,6 +257,8 @@ describe("GPU resource retirement", () => {
         expect(() => disposeGpuResourceRetirements(engine)).not.toThrow();
         expect(afterFailure).toHaveBeenCalledTimes(1);
         expect(engine._retirements).toBeNull();
+        expect(error).toHaveBeenCalledWith("GPU resource retirement failed.", expect.any(Error));
+        error.mockRestore();
     });
 
     it("drains large batches without recursive callback chaining", () => {

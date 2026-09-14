@@ -325,7 +325,9 @@ export function createStandardMeshBindGroup(
     materialUBO: GPUBuffer,
     material: StandardMaterialProps,
     morphTargets: { deltasBuffer: GPUBuffer; weightsBuffer: GPUBuffer } | null = null,
-    mesh?: Mesh
+    mesh?: Mesh,
+    disposers?: (() => void)[],
+    auxiliary = false
 ): GPUBindGroup {
     const engine = scene.surface.engine;
     const device = engine._device;
@@ -355,7 +357,9 @@ export function createStandardMeshBindGroup(
     if (features & NEEDS_UV) {
         const uvData = new F32(4);
         writeStandardUvTransformData(uvData, material, isStandardUvInverted(features, material));
-        entries.push({ binding: nextBinding++, resource: { buffer: createUniformBuffer(engine, uvData) } });
+        const uvBuffer = createUniformBuffer(engine, uvData);
+        disposers?.push(() => uvBuffer.destroy());
+        entries.push({ binding: nextBinding++, resource: { buffer: uvBuffer } });
     }
 
     if (esmShadowOutput) {
@@ -369,7 +373,7 @@ export function createStandardMeshBindGroup(
     // to match composer's fragment sort order.
     for (const ext of _getStdExtsSorted()) {
         if (features & ext._feature && ext._bind) {
-            nextBinding = ext._bind(material, entries, nextBinding, mesh, scene);
+            nextBinding = ext._bind(material, entries, nextBinding, mesh, scene, disposers, auxiliary);
         }
     }
 

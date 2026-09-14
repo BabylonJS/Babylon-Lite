@@ -174,16 +174,16 @@ export function buildPluginFragment(plugins: readonly MaterialPlugin[], index: n
     };
 }
 
-/** Write the enabled plugins' UBO slices into `data` using `offsets`. */
+/** Write a prepared enabled plugin list's UBO slices into `data` using `offsets`. */
 export function writePluginUbo(plugins: readonly MaterialPlugin[], data: Float32Array, offsets: ReadonlyMap<string, number>): void {
-    for (const p of enabledPlugins(plugins)) {
+    for (const p of plugins) {
         p.writeUbo?.(data, offsets);
     }
 }
 
-/** Push the enabled plugins' texture+sampler bind entries starting at `b`. */
+/** Push a prepared enabled plugin list's texture+sampler bind entries starting at `b`. */
 export function bindPluginTextures(plugins: readonly MaterialPlugin[], entries: GPUBindGroupEntry[], b: number): number {
-    for (const p of enabledPlugins(plugins)) {
+    for (const p of plugins) {
         if (!p.bindTextures) {
             continue;
         }

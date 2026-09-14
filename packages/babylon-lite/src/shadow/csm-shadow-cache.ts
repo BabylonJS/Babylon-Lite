@@ -12,6 +12,7 @@ import type { Mesh } from "../mesh/mesh.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { _buildBindings, _resolvePendingMeshes, createRenderTask, removeMeshFromTask, type RenderTask } from "../frame-graph/render-task.js";
+import { transactRenderTasks } from "../frame-graph/render-task-transaction.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
 import { getNoColorView, shadowCasterMaterialChanged, snapshotShadowCasterMaterial } from "./pcf-shadow-task-hooks.js";
@@ -46,14 +47,21 @@ interface CsmCachedTaskState extends CsmTaskState {
     _cachedContentVersion: number;
 }
 
-/** @internal Rebuild one destination task's binding lists after `transferMeshBetweenTasks` moved meshes into it. */
-function rebuildTransferTarget(to: RenderTask): void {
-    if (!to._recorded) {
+interface MeshTransfer {
+    from: RenderTask;
+    mesh: object;
+}
+
+let pendingTransfers: WeakMap<RenderTask, MeshTransfer[]> | null = null;
+
+/** @internal Commit a destination's queued transfers and bindings together. */
+export function rebuildTransferTarget(to: RenderTask): void {
+    const transfers = pendingTransfers?.get(to);
+    if (!transfers?.length) {
         return;
     }
-    _resolvePendingMeshes(to, to.scene as SceneContext);
-    to._af = false;
-    _buildBindings(to, to.engine as EngineContext, to._targetSignature);
+    applyTransfers(to, transfers);
+    pendingTransfers!.delete(to);
 }
 
 /** @internal Move a resolved mesh between same-signature tasks without rebuilding its packet.
@@ -64,42 +72,63 @@ function rebuildTransferTarget(to: RenderTask): void {
  *  case, not a corner. Callers that pass a set rebuild each touched task ONCE after the batch;
  *  omitting it keeps the original eager behaviour for single ad-hoc moves. */
 export function transferMeshBetweenTasks(from: RenderTask, to: RenderTask, mesh: object, pendingTargets?: Set<RenderTask>): void {
-    let moved = false;
-    for (let i = from._pendingMeshes.length - 1; i >= 0; i--) {
-        const pending = from._pendingMeshes[i]!;
-        if (pending.mesh === mesh) {
-            from._pendingMeshes.splice(i, 1);
-            to._pendingMeshes.push(pending);
-            moved = true;
-        }
-    }
-    for (let i = from._renderables.length - 1; i >= 0; i--) {
-        const renderable = from._renderables[i]!;
-        if (renderable.mesh === mesh) {
-            from._renderables.splice(i, 1);
-            if (!to._renderables.includes(renderable)) {
-                to._renderables.push(renderable);
-            }
-            moved = true;
-        }
-    }
-    if (!moved) {
+    if (from === to || (!from._pendingMeshes.some((entry) => entry.mesh === mesh) && !from._renderables.some((renderable) => renderable.mesh === mesh))) {
         return;
     }
-    for (const bindings of [from._opaqueBindings, from._directBindings, from._transparentBindings]) {
-        for (let i = bindings.length - 1; i >= 0; i--) {
-            if (bindings[i]!.renderable.mesh === mesh) {
-                bindings.splice(i, 1);
-            }
-        }
+    if (from.scene !== to.scene || from.engine !== to.engine || from._disposed || to._disposed) {
+        throw new Error("Render-task transfers require live tasks in the same scene.");
     }
-    from._ob.length = 0;
-    from._lastVersion = -1;
     if (pendingTargets) {
+        pendingTransfers ??= new WeakMap();
+        let transfers = pendingTransfers.get(to);
+        if (!transfers) {
+            pendingTransfers.set(to, (transfers = []));
+        }
+        transfers.push({ from, mesh });
         pendingTargets.add(to);
         return;
     }
-    rebuildTransferTarget(to);
+    applyTransfers(to, [{ from, mesh }]);
+}
+
+function applyTransfers(to: RenderTask, transfers: readonly MeshTransfer[]): void {
+    const tasks = [...new Set(transfers.map((transfer) => transfer.from)), to];
+    transactRenderTasks(
+        tasks,
+        (candidates) => {
+            const destination = candidates[candidates.length - 1]!;
+            for (const { from, mesh } of transfers) {
+                const source = candidates[tasks.indexOf(from)]!;
+                destination._pendingMeshes.push(...source._pendingMeshes.filter((entry) => entry.mesh === mesh));
+                source._pendingMeshes = source._pendingMeshes.filter((entry) => entry.mesh !== mesh);
+                for (const renderable of source._renderables) {
+                    if (renderable.mesh === mesh && !destination._renderables.includes(renderable)) {
+                        destination._renderables.push(renderable);
+                    }
+                }
+                source._renderables = source._renderables.filter((renderable) => renderable.mesh !== mesh);
+                for (const entry of source._meshEntries ?? []) {
+                    if (entry.mesh === mesh) {
+                        (destination._meshEntries ??= []).push(entry);
+                    }
+                }
+                source._meshEntries = source._meshEntries?.filter((entry) => entry.mesh !== mesh);
+                source._opaqueBindings = source._opaqueBindings.filter((binding) => binding.renderable.mesh !== mesh);
+                source._directBindings = source._directBindings.filter((binding) => binding.renderable.mesh !== mesh);
+                source._transparentBindings = source._transparentBindings.filter((binding) => binding.renderable.mesh !== mesh);
+                const used = new Set([...source._opaqueBindings, ...source._directBindings, ...source._transparentBindings].flatMap((binding) => binding._updateBatches ?? []));
+                source._updateBatches = source._updateBatches.filter((batch) => used.has(batch));
+                source._ob.length = 0;
+                source._lastVersion = -1;
+            }
+            destination._af = false;
+            if (destination._recorded) {
+                _resolvePendingMeshes(destination, destination.scene);
+            }
+        },
+        (candidate) => _buildBindings(candidate, candidate.engine, candidate._targetSignature),
+        to._recorded ? [to] : []
+    );
 }
 
 /** Build or update the opt-in static-cache CSM task state. */

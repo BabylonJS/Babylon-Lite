@@ -16,6 +16,7 @@ export {
     setGpuTimingEnabled,
     isGpuTimingSupported,
 } from "./engine/engine.js";
+export { waitForGpuResourceRetirements } from "./engine/gpu-resource-retirement.js";
 export { VERSION } from "./engine/version.js";
 export type { EngineContext, EngineOptions, RenderCanvas, RenderingContext } from "./engine/engine.js";
 export { createNullEngine, stepScene, runHeadlessSteps } from "./engine/null-engine.js";
@@ -45,6 +46,7 @@ export {
     registerSceneWithShadowSupport,
     unregisterScene,
 } from "./scene/scene.js";
+export { markMeshRenderableDirty } from "./scene/mesh-scene-registry.js";
 export type { SceneContextOptions } from "./scene/scene.js";
 export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
 export { setEnvironmentBlur } from "./scene/set-environment-blur.js";
@@ -91,7 +93,8 @@ export { GeometryTextureType } from "./frame-graph/geometry-types.js";
 export type { ShadowTask } from "./frame-graph/shadow-task.js";
 export type { RenderTarget, RenderTargetDescriptor } from "./engine/render-target.js";
 export { createRenderTarget } from "./engine/render-target.js";
-export { createRenderTargetTexture } from "./texture/rtt.js";
+export { createRenderTargetTexture, disposeRenderTargetTexture, onRenderTargetTextureResize } from "./texture/rtt.js";
+export type { RenderTargetTextureResult } from "./texture/rtt.js";
 // Pooled GPU samplers (same descriptor → same GPUSampler). Public so consumers building their own
 // sampled-texture wrappers around managed render targets don't have to reach into `engine._device`.
 export { getOrCreateSampler, clearSamplerCache } from "./resource/gpu-pool.js";
@@ -101,6 +104,7 @@ export { getOrCreateSampler, clearSamplerCache } from "./resource/gpu-pool.js";
 export { acquireTexture, releaseTexture } from "./resource/gpu-pool.js";
 export { enableSceneTransmission, enableRenderTaskTransmission } from "./frame-graph/transmission.js";
 export type { TransmissionOptions, SceneColorGrab } from "./frame-graph/transmission.js";
+export { enableRenderTaskMeshRefresh } from "./frame-graph/render-task-mesh-refresh.js";
 
 // ─── Fullscreen Effects ─────────────────────────────────────────────
 export { createEffectWrapper, setEffectUniforms, setEffectTexture, createEffectRenderTask, disposeEffectWrapper } from "./effect/effect-renderer.js";

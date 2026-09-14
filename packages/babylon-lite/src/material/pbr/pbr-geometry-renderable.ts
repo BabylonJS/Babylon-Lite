@@ -59,6 +59,7 @@ export function getPbrGeometryGroupBuilder(): MeshGroupBuilder {
         throw new Error("pbr-geometry view does not support scene group building");
     }) as MeshGroupBuilder;
     builder._materialFamily = "pbr";
+    builder._sceneIndependentRebuild = true;
     builder._rebuildSingle = (scene: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
         const view = (materialOverride ?? mesh.material) as PbrGeometryMaterialView;
         return buildPbrGeometryRenderable(scene, mesh, view);

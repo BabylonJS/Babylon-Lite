@@ -4,7 +4,7 @@ import type { EngineContext } from "../engine/engine.js";
 
 /** Round `n` up to the nearest multiple of `to` (must be a positive integer). */
 export function align(n: number, to: number): number {
-    return (n + to - 1) & ~(to - 1);
+    return Math.ceil(n / to) * to;
 }
 
 /** Create a UNIFORM + COPY_DST buffer and write initial data. Size is aligned to 16 bytes. */
@@ -15,7 +15,12 @@ export function createUniformBuffer(engine: EngineContext, data: ArrayBufferView
         size: align(data.byteLength, 16),
         usage: BU.UNIFORM | BU.COPY_DST,
     });
-    device.queue.writeBuffer(buf, 0, data.buffer as ArrayBuffer, data.byteOffset, data.byteLength);
+    try {
+        device.queue.writeBuffer(buf, 0, data.buffer as ArrayBuffer, data.byteOffset, data.byteLength);
+    } catch (error) {
+        buf.destroy();
+        throw error;
+    }
     return buf;
 }
 

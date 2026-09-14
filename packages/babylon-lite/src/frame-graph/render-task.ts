@@ -37,6 +37,7 @@ import type { Renderable, DrawBinding, DrawUpdateContext, DrawUpdateBatch } from
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Material } from "../material/material.js";
+import { appendTaskMesh, retireTaskBatches, retireTaskCallbacks, retireTaskMesh, transactRenderTask, type TaskMeshEntry } from "./render-task-transaction.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { getViewMatrix, _cameraChangeKey } from "../camera/camera.js";
@@ -146,6 +147,12 @@ export interface RenderTask extends Task {
     /** @internal True once `record()` has run — the task is "live" (GPU target allocated, material batch builders
      *  present). A runtime `addMesh` after this resolves + re-buckets THIS task immediately (no frame-graph rebuild). */
     _recorded: boolean;
+    /** @internal */
+    _disposed?: boolean;
+    /** @internal Explicit task-owned auxiliary renderables; scene-mirrored entries remain borrowed. */
+    _meshEntries?: TaskMeshEntry[];
+    /** @internal Optional task-owned population extension, invoked only within a candidate generation. */
+    _prepareTaskMeshes?(candidate: RenderTask): void;
 
     /** @internal */
     _renderPassDescriptor: GPURenderPassDescriptor;
@@ -175,7 +182,7 @@ export interface RenderTask extends Task {
     _updateBatches: DrawUpdateBatch[];
 
     /** Add a mesh to this task's explicit render list with an optional per-pass material override. Resolved via
-     *  `material._buildGroup._rebuildSingle`, so the mesh's material family must already have been registered with the
+     *  the completed scene-local material group, so the mesh's material family must already have been registered with the
      *  scene (its batch builder has run). BEFORE the first `record()` the add is QUEUED and drained at record() time;
      *  AFTER (a live/runtime add) it is resolved + re-bucketed into THIS task immediately, so the mesh renders on the
      *  next frame without a `frameGraph.build()` (which would re-allocate shared GPU resources across all tasks). */
@@ -247,6 +254,9 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
         _updateBatches: [],
         _pendingMeshes: [],
         addMesh(mesh, opts) {
+            if (task._disposed) {
+                throw new Error("RenderTask has been disposed.");
+            }
             const material = opts?.material ?? mesh.material;
             if (!material) {
                 return;
@@ -256,67 +266,73 @@ export function createRenderTask(config: RenderTaskConfig, engine: EngineContext
                 // Live (post-record) add: resolve + re-bucket THIS task now — buildBindings clears its bundle cache
                 // so it re-records on the next execute. Deliberately NOT a frame-graph rebuild (that re-allocates the
                 // shared scene UBO + every task's render target mid-frame and crashes the in-flight submit).
-                resolvePendingMeshes(task, sc);
-                // A live add makes the render list explicit (mirrors record(), where a pending mesh forces
-                // _af = false). Without this, an auto-mirroring task's next scene-version resync in
-                // prepareRenderTaskPass would clear _renderables and drop the just-added mesh.
-                task._af = false;
-                buildBindings(task, engine, targetSignature);
+                rebindRenderTask(task, true);
             }
         },
         record(): void {
-            if (task._af) {
-                task._renderables.length = 0;
+            if (task._disposed) {
+                throw new Error("RenderTask has been disposed.");
             }
-            resolvePendingMeshes(task, sc);
-            task._af = autoMirror && !task._renderables.length;
-            if (task._af) {
-                task._renderables.push(...sc._renderables);
-            }
-            // Read config.rt dynamically — transmission retargeting swaps it after
-            // the task is created, and the engine scRT must never be rebuilt.
-            const rt = config.rt;
-            // A shared target belongs to another task: (re)building it here would destroy the
-            // textures the owner's recorded pass still references.
-            if (ownsRt) {
-                buildRenderTarget(rt, engine);
-                if (config.rst && (rt._descriptor.samples ?? 1) > 1) {
-                    buildRenderTarget(config.rst, engine);
+            transactRenderTask(
+                task,
+                (candidate) => {
+                    if (candidate._af) {
+                        candidate._renderables.length = 0;
+                    }
+                    candidate._prepareTaskMeshes?.(candidate);
+                    resolvePendingMeshes(candidate, sc);
+                    candidate._af = autoMirror && !candidate._renderables.length;
+                    if (candidate._af) {
+                        candidate._renderables.push(...sc._renderables);
+                    }
+                },
+                (candidate) => {
+                    // Transmission can retarget the task after construction.
+                    const rt = config.rt;
+                    if (ownsRt) {
+                        buildRenderTarget(rt, engine);
+                        if (config.rst && (rt._descriptor.samples ?? 1) > 1) {
+                            buildRenderTarget(config.rst, engine);
+                        }
+                    }
+                    if (config.depth && !config.depth._eager) {
+                        buildRenderTarget(config.depth, engine);
+                    }
+                    refreshTaskSceneBindGroup(candidate, engine);
+                    buildBindings(candidate, engine, targetSignature);
+                    buildRenderPassDescriptor(candidate, rt);
+                    candidate._recorded = true;
                 }
-            }
-            // A non-eager external depth (e.g. the default single-sample scene task's
-            // depth, whose colour rt is the depth-less scRT) is task-managed:
-            // build/rebuild it here. Eager depths (GeometryRendererTask outputs) are
-            // pre-built and skipped by buildRenderTarget.
-            if (config.depth && !config.depth._eager) {
-                buildRenderTarget(config.depth, engine);
-            }
-            updateContext.targetWidth = rt._width;
-            updateContext.targetHeight = rt._height;
-            refreshTaskSceneBindGroup(task, engine);
-            buildBindings(task, engine, targetSignature);
-            buildRenderPassDescriptor(task, rt);
-            task._recorded = true; // task is now live — a subsequent addMesh resolves + re-buckets immediately
+            );
+            updateContext.targetWidth = config.rt._width;
+            updateContext.targetHeight = config.rt._height;
         },
         execute(): number {
             return executePass(task, engine, targetSignature, updateContext);
         },
         dispose(): void {
+            if (task._disposed) {
+                return;
+            }
+            task._disposed = true;
+            for (const entry of task._meshEntries ?? []) {
+                retireTaskMesh(task, entry);
+            }
+            task._meshEntries = undefined;
+            task._pendingMeshes.length = 0;
             task._passes.length = task._opaqueBindings.length = task._directBindings.length = 0;
             task._transparentBindings.length = task._renderables.length = task._ob.length = 0;
-            // disposeRenderTarget no-ops on the engine scRT and on eager
-            // GeometryRendererTask depth outputs (both `_eager`), and on an undefined
-            // rst/depth — so these can be passed unconditionally. A shared target remains
-            // owned by the task that created it.
+            // Sampled eager targets release their writer lease. Swapchain and geometry
+            // wrappers remain externally owned, as do shared targets and eager external depth.
             if (ownsRt) {
                 disposeRenderTarget(config.rt);
                 disposeRenderTarget(config.rst);
             }
-            disposeRenderTarget(config.depth);
-            task._sceneUBO.destroy();
-            for (const batch of task._updateBatches) {
-                batch.destroy();
+            if (!config.depth?._eager) {
+                disposeRenderTarget(config.depth);
             }
+            retireTaskCallbacks(task, [() => task._sceneUBO.destroy()]);
+            retireTaskBatches(task, task._updateBatches);
             task._updateBatches.length = 0;
         },
     };
@@ -330,6 +346,7 @@ export function removeMeshFromTask(task: RenderTask, mesh: object): void {
     if (!task._renderables) {
         return;
     }
+    task._removeMesh?.(mesh);
     let removed = false;
     for (let i = task._pendingMeshes.length - 1; i >= 0; i--) {
         if (task._pendingMeshes[i]!.mesh === mesh) {
@@ -351,7 +368,24 @@ export function removeMeshFromTask(task: RenderTask, mesh: object): void {
             }
         }
     }
+    const entries = task._meshEntries;
+    if (entries) {
+        for (let index = entries.length - 1; index >= 0; index--) {
+            const entry = entries[index]!;
+            if (entry.mesh === mesh) {
+                entries.splice(index, 1);
+                retireTaskMesh(task, entry);
+                removed = true;
+            }
+        }
+    }
     if (removed) {
+        const used = new Set([...task._opaqueBindings, ...task._directBindings, ...task._transparentBindings].flatMap((binding) => binding._updateBatches ?? []));
+        retireTaskBatches(
+            task,
+            task._updateBatches.filter((batch) => !used.has(batch))
+        );
+        task._updateBatches = task._updateBatches.filter((batch) => used.has(batch));
         task._ob.length = 0;
         task._lastVersion = -1;
     }
@@ -359,23 +393,31 @@ export function removeMeshFromTask(task: RenderTask, mesh: object): void {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-function resolvePendingMeshes(task: RenderTask, sc: SceneContext): void {
+function resolvePendingMeshes(task: RenderTask, _sc: SceneContext): void {
     if (!task._pendingMeshes.length) {
         return;
     }
     for (const { mesh, material } of task._pendingMeshes) {
-        const builder = material._buildGroup;
-        const group = sc._groups.get(builder);
-        const rebuild = group ? group.r : builder._rebuildSingle;
-        if (!rebuild) {
-            throw Error();
-        }
-        const renderable = rebuild(sc, mesh, material);
-        if (!task._renderables.includes(renderable)) {
-            task._renderables.push(renderable);
-        }
+        appendTaskMesh(task, mesh, material);
     }
     task._pendingMeshes.length = 0;
+}
+
+function rebindRenderTask(task: RenderTask, explicit = false): void {
+    transactRenderTask(
+        task,
+        (candidate) => {
+            candidate._prepareTaskMeshes?.(candidate);
+            const pending = candidate._pendingMeshes.length > 0;
+            resolvePendingMeshes(candidate, candidate.scene);
+            if (explicit || pending) {
+                candidate._af = false;
+            } else if (candidate._af) {
+                candidate._renderables = candidate.scene._renderables.slice();
+            }
+        },
+        (candidate) => buildBindings(candidate, candidate.engine, candidate._targetSignature)
+    );
 }
 
 function compareTransparentBindings(a: DrawBinding, b: DrawBinding): number {
@@ -406,6 +448,7 @@ function buildBindings(task: RenderTask, eng: EngineContext, targetSignature: Re
     const direct = task._directBindings;
     const transparent = task._transparentBindings;
     opaque.length = direct.length = transparent.length = 0;
+    task._updateBatches.length = 0;
     for (const r of task._renderables) {
         const binding = r.bind(eng, targetSignature);
         for (const batch of binding._updateBatches ?? []) {
@@ -428,7 +471,7 @@ function buildBindings(task: RenderTask, eng: EngineContext, targetSignature: Re
 }
 
 /** @internal Lazy task-transfer support. */
-export { resolvePendingMeshes as _resolvePendingMeshes, buildBindings as _buildBindings };
+export { resolvePendingMeshes as _resolvePendingMeshes, buildBindings as _buildBindings, rebindRenderTask as _rebindRenderTask };
 
 function buildRenderPassDescriptor(task: RenderTask, rt: RenderTarget): void {
     const config = task._config;
@@ -465,9 +508,7 @@ function prepareRenderTaskPass(task: RenderTask, eng: EngineContext, targetSigna
     const sc = task.scene as SceneContext;
     // Auto-resync when the source scene mutates.
     if (task._af && task._lastVersion !== sc._renderableVersion) {
-        task._renderables.length = 0;
-        task._renderables.push(...sc._renderables);
-        buildBindings(task, eng, targetSignature);
+        rebindRenderTask(task);
     }
 
     // Pre-pass work — runs before beginRenderPass. Updates the task-owned scene

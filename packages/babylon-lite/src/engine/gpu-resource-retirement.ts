@@ -10,8 +10,8 @@ function runBatch(batch: GpuResourceRetirement[]): void {
     for (const retire of batch.splice(0)) {
         try {
             retire();
-        } catch {
-            // Best effort — the resource is already gone.
+        } catch (error) {
+            console.error("GPU resource retirement failed.", error);
         }
     }
 }
@@ -57,6 +57,29 @@ export function flushGpuResourceRetirements(engine: EngineContext): void {
             })
             .catch(() => undefined);
     });
+}
+
+/** Wait for submitted GPU work and all outstanding resource-retirement callbacks.
+ *  Stop resource producers and dispose their scene/task consumers before awaiting this teardown
+ *  boundary. Unlike `waitForGpuIdle`, it also drains CPU-side releases, including releases queued by
+ *  another callback. Cleanup attempts every callback and reports failures; a failed GPU fence rejects
+ *  without releasing unfenced resources. Do not await this during steady rendering. */
+export async function waitForGpuResourceRetirements(engine: EngineContext): Promise<void> {
+    // A call inside a synchronous frame must fence after that frame's submission.
+    await Promise.resolve();
+    do {
+        flushGpuResourceRetirements(engine);
+        const inFlight = engine._retiring;
+        const batches = inFlight?.slice();
+        await engine._device.queue.onSubmittedWorkDone();
+        for (const batch of batches ?? []) {
+            const index = inFlight!.indexOf(batch);
+            if (index >= 0) {
+                inFlight!.splice(index, 1);
+            }
+            runBatch(batch);
+        }
+    } while (engine._retirements?.length || engine._retiring?.length);
 }
 
 /** @internal Run every outstanding retirement synchronously — both the batch still accumulating and

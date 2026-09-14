@@ -104,21 +104,30 @@ export type Texture2DRecoverySource =
  *  is referenced with different transforms (e.g. glTF KHR_texture_transform
  *  on different textureInfos pointing at the same source). The caller is
  *  responsible for acquireTexture/release pairing if the wrapper outlives
- *  the base. */
+ *  the base. RTT-derived clones follow replacement attachment generations;
+ *  ordinary clones snapshot the GPU fields. */
 export function cloneTexture2D(
     base: Texture2D,
     transform: Partial<Pick<Texture2D, "uScale" | "vScale" | "uOffset" | "vOffset" | "uAng">> & { _texCoord?: 0 | 1; _hasTx?: true }
 ): Texture2D {
     const derived = { ...base, ...transform } as Texture2D;
+    _sharedTextureCloneHook?.(base, derived);
     _derivedTextureHook?.(base, derived);
     return derived;
+}
+
+let _sharedTextureCloneHook: ((base: Texture2D, derived: Texture2D) => void) | null = null;
+
+/** @internal Install clone backing for replaceable facades, independently of recovery tracking. */
+export function _setSharedTextureCloneHook(hook: (base: Texture2D, derived: Texture2D) => void): void {
+    _sharedTextureCloneHook = hook;
 }
 
 /** Notified when a wrapper is derived from another, so device-lost recovery can track the derived
  *  wrapper and carry a rebuilt texture across to it. Installed by the recovery capture, null
  *  otherwise, so a scene that never enables recovery carries none of the bookkeeping.
  *
- *  A derived wrapper is a plain spread of its base: it inherits `_recoverySource` without ever
+ *  An ordinary derived wrapper starts as a spread of its base: it inherits `_recoverySource` without ever
  *  passing through the capture stamp, so nothing tracks it even though it owns its own `texture`
  *  field. Left untracked it survives recovery still holding the lost device's `GPUTexture` — the
  *  use-after-free tracking exists to prevent, reached one hop later.
