@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { _syncLightGizmoTransform } from "../../../packages/babylon-lite/src/gizmo/light-gizmo";
+import { createDirectionalLight } from "../../../packages/babylon-lite/src/light/directional-light";
+import { createHemisphericLight } from "../../../packages/babylon-lite/src/light/hemispheric";
+import { createPointLight } from "../../../packages/babylon-lite/src/light/point-light";
 import { createSpotLight } from "../../../packages/babylon-lite/src/light/spot-light";
+import type { LightBase } from "../../../packages/babylon-lite/src/light/types";
 import { refreshSceneLightsUBO } from "../../../packages/babylon-lite/src/render/lights-ubo";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { setParent } from "../../../packages/babylon-lite/src/scene/set-parent";
@@ -21,6 +26,24 @@ function expectMatrixClose(actual: Mat4, expected: ArrayLike<number>): void {
 }
 
 describe("light SceneNode parenting", () => {
+    it("parents every light type through the shared SceneNode path", () => {
+        const lights: LightBase[] = [
+            createPointLight([1, 2, 3]),
+            createDirectionalLight([0, -1, 0]),
+            createHemisphericLight([0, 1, 0]),
+            createSpotLight([1, 2, 3], [0, 0, 1], Math.PI / 3, 2),
+        ];
+        const parent = createTransformNode("parent", 4, -2, 7, 0, Math.SQRT1_2, 0, Math.SQRT1_2, 2, 1, 1);
+
+        for (const light of lights) {
+            const before = snapshot(light.worldMatrix);
+            setParent(light, parent);
+            expect(light.parent).toBe(parent);
+            expect(parent.children).toContain(light);
+            expectMatrixClose(light.worldMatrix, before);
+        }
+    });
+
     it("reparents a spotlight without losing its world transform", () => {
         const light = createSpotLight([1, 2, 3], [0, 0, 1], Math.PI / 3, 2);
         const parent = createTransformNode("drone", 4, -2, 7, 0, Math.SQRT1_2, 0, Math.SQRT1_2, 2, 1, 1);
@@ -166,5 +189,25 @@ describe("light SceneNode parenting", () => {
 
         setParent(light, null);
         expectMatrixClose(_computeSpotLightMatrix(light, 0.1, 100)._view as unknown as Mat4, before);
+    });
+
+    it("positions and orients a light gizmo from the parented light world transform", () => {
+        const light = createSpotLight([1, 2, 3], [0, 0, 1], Math.PI / 3, 2);
+        const parent = createTransformNode("drone");
+        const root = createTransformNode("gizmo");
+        const data = new Float32Array(16);
+        setParent(light, parent);
+        parent.position.set(10, 0, 0);
+        parent.rotationQuaternion.set(0, Math.SQRT1_2, 0, Math.SQRT1_2);
+
+        _syncLightGizmoTransform(root, light);
+        light._writeLightUbo!(data, 0);
+
+        expect(root.position.x).toBeCloseTo(light.worldMatrix[12]!);
+        expect(root.position.y).toBeCloseTo(light.worldMatrix[13]!);
+        expect(root.position.z).toBeCloseTo(light.worldMatrix[14]!);
+        expect(root.worldMatrix[8]).toBeCloseTo(data[12]!);
+        expect(root.worldMatrix[9]).toBeCloseTo(data[13]!);
+        expect(root.worldMatrix[10]).toBeCloseTo(data[14]!);
     });
 });
