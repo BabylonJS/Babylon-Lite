@@ -24,6 +24,7 @@ export const shadowAlgorithm: ShadowAlgorithm = {
         }
         return wgsl`
 fn computeShadowPCF${suffix}(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, mapSz: f32, invMapSz: f32) -> f32 {
+if (darkness >= 1.0) { return 1.0; }
 ${projection}
 let depthRef = clamp(clipSpace.z, 0.0, 1.0);
 var tc = uv * mapSz + 0.5;

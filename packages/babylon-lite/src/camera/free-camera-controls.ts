@@ -13,7 +13,18 @@ import type { SceneContext } from "../scene/scene.js";
  * Camera stays plain data — this function reads/writes its properties.
  * Returns a cleanup function to remove all listeners and the beforeRender hook.
  */
-export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement, scene?: SceneContext): () => void {
+export interface FreeCameraControlOptions {
+    /** Vertical-up key codes. Defaults to Space and PageUp. */
+    upKeys?: readonly string[];
+    /** Vertical-down key codes. Defaults to ShiftLeft, ShiftRight, and PageDown. */
+    downKeys?: readonly string[];
+    /** Held key codes that multiply movement speed. */
+    fastKeys?: readonly string[];
+    /** Movement-speed multiplier while a fast key is held. Defaults to 1. */
+    fastMultiplier?: number;
+}
+
+export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement, scene?: SceneContext, options: FreeCameraControlOptions = {}): () => void {
     // ─── Accumulator state (like BJS cameraDirection / cameraRotation) ───
     let cdX = 0,
         cdY = 0,
@@ -25,6 +36,17 @@ export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement,
     let lastPX = 0;
     let lastPY = 0;
     const keys = new Set<string>();
+    const upKeys = options.upKeys ?? ["Space", "PageUp"];
+    const downKeys = options.downKeys ?? ["ShiftLeft", "ShiftRight", "PageDown"];
+    const fastKeys = options.fastKeys ?? [];
+    const hasAny = (codes: readonly string[]): boolean => {
+        for (const code of codes) {
+            if (keys.has(code)) {
+                return true;
+            }
+        }
+        return false;
+    };
 
     // ─── Mouse / pointer ─────────────────────────────────────────────────
     function onPointerDown(e: PointerEvent): void {
@@ -73,7 +95,7 @@ export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement,
         // BJS speed formula: speed * sqrt(deltaTime / (fps * 100))
         // Simplified: fps ≈ 1000/deltaMs, so deltaTime/(fps*100) = deltaMs^2 / 100000
         const dt = Math.max(deltaMs, 1);
-        const moveSpeed = camera.speed * Math.sqrt((dt * dt) / 100000);
+        const moveSpeed = camera.speed * (hasAny(fastKeys) ? (options.fastMultiplier ?? 1) : 1) * Math.sqrt((dt * dt) / 100000);
 
         // Accumulate keyboard input into camera direction (local space)
         if (keys.has("KeyW") || keys.has("ArrowUp")) {
@@ -88,10 +110,10 @@ export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement,
         if (keys.has("KeyD") || keys.has("ArrowRight")) {
             cdX += moveSpeed;
         }
-        if (keys.has("Space") || keys.has("PageUp")) {
+        if (hasAny(upKeys)) {
             cdY += moveSpeed;
         }
-        if (keys.has("ShiftLeft") || keys.has("ShiftRight") || keys.has("PageDown")) {
+        if (hasAny(downKeys)) {
             cdY -= moveSpeed;
         }
 

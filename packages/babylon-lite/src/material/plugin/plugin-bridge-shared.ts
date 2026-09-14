@@ -8,13 +8,14 @@
  * (uboFields → mesh UBO); only the host material routes the fields differently.
  */
 
-import type { BindingDecl, FragmentSlot, ShaderFragment, UboField, UboSpec, VertexSlot, WgslScalarType } from "../../shader/fragment-types.js";
+import type { BindingDecl, FragmentSlot, ShaderFragment, UboField, UboSpec, Varying, VertexSlot, WgslScalarType } from "../../shader/fragment-types.js";
 import { computeUboLayout } from "../../shader/ubo-layout.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { MaterialPlugin, MaterialPluginPoint, PluginTextureBinding } from "./material-plugin.js";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
+const STAGE_VERTEX = 0x1;
 
 /** WGSL variable name of the Standard self-managed plugin uniform buffer. Plugin
  *  custom code reads its uniforms as `pluginUbo.<field>` (Standard); PBR plugin
@@ -28,7 +29,7 @@ const FRAG_POINT_TO_SLOTS: Partial<Record<MaterialPluginPoint, readonly Fragment
     CUSTOM_FRAGMENT_UPDATE_ALPHA: ["AT"],
     CUSTOM_FRAGMENT_UPDATE_DIFFUSE: ["AC"],
     CUSTOM_FRAGMENT_BEFORE_LIGHTS: ["MF"],
-    CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION: ["AI", "NI"],
+    CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION: ["NI"],
     CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR: ["BC"],
 };
 
@@ -54,6 +55,7 @@ export function pluginSignature(plugins: readonly MaterialPlugin[]): string {
             parts.push(JSON.stringify(p.getCustomCode?.("fragment") ?? null));
             parts.push(JSON.stringify(p.getCustomCode?.("vertex") ?? null));
             parts.push(JSON.stringify(p.getUniforms?.() ?? null));
+            parts.push(JSON.stringify(p.getVaryings?.() ?? null));
             parts.push(JSON.stringify(p.getSamplers?.() ?? null));
         }
     }
@@ -76,7 +78,7 @@ export interface BuiltPluginFragment {
  *  @param plugins - The material's attached plugins.
  *  @param index - Per-signature index folded into the fragment id / cache key.
  *  @param forStandard - When true, plugin uniforms are delivered through a dedicated
- *      self-managed uniform buffer (`pluginUbo`) declared as a fragment binding —
+ *      self-managed, stage-visible uniform buffer (`pluginUbo`) —
  *      this keeps ALL shared standard code untouched (the engine routes it through
  *      the pre-existing `_bind` loop). When false (PBR), uniforms are appended to
  *      the host material UBO via `_uboFields` and written by the pre-existing PBR
@@ -93,6 +95,8 @@ export function buildPluginFragment(plugins: readonly MaterialPlugin[], index: n
     const fragmentSlots: Partial<Record<FragmentSlot, WgslSource>> = {};
     const vertexSlots: Partial<Record<VertexSlot, WgslSource>> = {};
     const uboFields: UboField[] = [];
+    let materialUboVertexVisible = false;
+    const varyings: Varying[] = [];
     const bindings: BindingDecl[] = [];
 
     const append = (bucket: Partial<Record<string, WgslSource>>, key: string, code: string): void => {
@@ -133,32 +137,51 @@ export function buildPluginFragment(plugins: readonly MaterialPlugin[], index: n
         if (ubo) {
             for (const f of ubo) {
                 uboFields.push({ _name: f.name, _type: f.type as WgslScalarType });
+                materialUboVertexVisible ||= f.visibility === "vertex" || f.visibility === "vertex-fragment";
+            }
+        }
+        const pluginVaryings = p.getVaryings?.();
+        if (pluginVaryings) {
+            for (const varying of pluginVaryings) {
+                assertFloatVaryingType(varying.type);
+                varyings.push({ _name: varying.name, _type: varying.type });
             }
         }
         const samplers = p.getSamplers?.();
         if (samplers) {
             for (const s of samplers) {
+                const visibility = s.visibility === "vertex" ? STAGE_VERTEX : s.visibility === "vertex-fragment" ? STAGE_VERTEX | STAGE_FRAGMENT : STAGE_FRAGMENT;
                 bindings.push(
-                    { _name: s.texture, _type: { _kind: "texture", _textureType: s.textureType ?? "texture_2d<f32>" }, _visibility: STAGE_FRAGMENT },
-                    { _name: s.sampler, _type: { _kind: "sampler", _samplerType: s.samplerType ?? "sampler" }, _visibility: STAGE_FRAGMENT }
+                    { _name: s.texture, _type: { _kind: "texture", _textureType: s.textureType ?? "texture_2d<f32>" }, _visibility: visibility },
+                    { _name: s.sampler, _type: { _kind: "sampler", _samplerType: s.samplerType ?? "sampler" }, _visibility: visibility }
                 );
             }
         }
     }
 
     // Standard host: deliver plugin uniforms via a dedicated self-managed UBO
-    // (`pluginUbo`) declared as a fragment binding, so NO shared standard code
+    // (`pluginUbo`) with the declared stage visibility, so NO shared standard code
     // changes. PBR keeps `_uboFields` (uniforms ride the material UBO).
     let stdUboSpec: UboSpec | null = null;
     let stdUboFields: readonly UboField[] | undefined = uboFields.length ? uboFields : undefined;
+    let stdVertexHelpers: WgslSource | undefined;
     if (forStandard && uboFields.length) {
         stdUboSpec = computeUboLayout(uboFields);
+        const stdUboStruct = wgsl`struct ${STD_PLUGIN_UBO}Uniforms{\n${stdUboSpec._structBody}\n}\n`;
         // Declare the UBO struct (referenced by the generated `var<uniform>
         // pluginUbo:pluginUboUniforms;`). Module-scope WGSL allows forward refs.
-        helpers = wgsl`struct ${STD_PLUGIN_UBO}Uniforms{\n${stdUboSpec._structBody}\n}\n${helpers}`;
+        helpers = wgsl`${stdUboStruct}${helpers}`;
+        if (materialUboVertexVisible) {
+            stdVertexHelpers = stdUboStruct;
+        }
         // The UBO binding must be declared (and bound) BEFORE the texture entries
         // so it matches the order `StdExt._bind` pushes resources.
-        bindings.unshift({ _name: STD_PLUGIN_UBO, _type: { _kind: "uniform-buffer" }, _group: "mesh", _visibility: STAGE_FRAGMENT });
+        bindings.unshift({
+            _name: STD_PLUGIN_UBO,
+            _type: { _kind: "uniform-buffer" },
+            _group: "mesh",
+            _visibility: materialUboVertexVisible ? STAGE_VERTEX | STAGE_FRAGMENT : STAGE_FRAGMENT,
+        });
         stdUboFields = undefined; // not routed through the host UBO
     }
 
@@ -168,11 +191,20 @@ export function buildPluginFragment(plugins: readonly MaterialPlugin[], index: n
             _helperFunctions: helpers || undefined,
             _fragmentSlots: Object.keys(fragmentSlots).length ? fragmentSlots : undefined,
             _vertexSlots: Object.keys(vertexSlots).length ? vertexSlots : undefined,
+            _vertexHelperFunctions: stdVertexHelpers,
+            _varyings: varyings.length ? varyings : undefined,
             _uboFields: stdUboFields,
+            _materialUboVertexVisible: !forStandard && materialUboVertexVisible,
             _bindings: bindings.length ? bindings : undefined,
         },
         _stdUboSpec: stdUboSpec,
     };
+}
+
+function assertFloatVaryingType(type: string): void {
+    if (type !== "f32" && type !== "vec2f" && type !== "vec3f" && type !== "vec4f" && type !== "vec2<f32>" && type !== "vec3<f32>" && type !== "vec4<f32>") {
+        throw new Error(`Material plugin varying type "${type}" is unsupported; use a floating-point scalar or vector.`);
+    }
 }
 
 /** Write a prepared enabled plugin list's UBO slices into `data` using `offsets`. */

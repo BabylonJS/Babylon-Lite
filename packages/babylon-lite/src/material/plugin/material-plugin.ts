@@ -17,7 +17,7 @@
  *   CUSTOM_FRAGMENT_UPDATE_ALPHA               → AT (alpha-test region)
  *   CUSTOM_FRAGMENT_UPDATE_DIFFUSE (std)        → AC (after normal, before V)
  *   CUSTOM_FRAGMENT_BEFORE_LIGHTS               → MF (after f0, before lights)
- *   CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION→ AI + NI (ibl / non-ibl color)
+ *   CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION→ NI
  *   CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR            → BC (after tonemap+gamma)
  *   CUSTOM_VERTEX_MAIN_BEGIN                    → VR
  *   CUSTOM_VERTEX_UPDATE_WORLDPOS               → VW
@@ -44,6 +44,17 @@ export type MaterialPluginPoint =
 export interface PluginUboField {
     readonly name: string;
     readonly type: string;
+    /** Shader stages that read this field. Defaults to "fragment". */
+    readonly visibility?: "vertex" | "fragment" | "vertex-fragment";
+}
+
+/** A custom vertex-to-fragment varying contributed by a plugin. */
+export type PluginVaryingType = "f32" | "vec2f" | "vec3f" | "vec4f" | "vec2<f32>" | "vec3<f32>" | "vec4<f32>";
+
+/** A custom floating-point vertex-to-fragment varying contributed by a plugin. */
+export interface PluginVaryingDecl {
+    readonly name: string;
+    readonly type: PluginVaryingType;
 }
 
 /** A texture + sampler pair contributed by a plugin. `texture`/`sampler` are the
@@ -53,9 +64,11 @@ export interface PluginSamplerDecl {
     readonly texture: string;
     readonly sampler: string;
     /** Defaults to "texture_2d<f32>". */
-    readonly textureType?: "texture_2d<f32>";
+    readonly textureType?: "texture_2d<f32>" | "texture_depth_2d";
     /** Defaults to "sampler". */
-    readonly samplerType?: "sampler" | "sampler_non_filtering";
+    readonly samplerType?: "sampler" | "sampler_non_filtering" | "sampler_comparison";
+    /** Shader stages that read this pair. Defaults to "fragment". */
+    readonly visibility?: "vertex" | "fragment" | "vertex-fragment";
 }
 
 /** A texture binding emitted by {@link MaterialPlugin.bindTextures}. Public types
@@ -84,6 +97,8 @@ export interface MaterialPlugin {
     getCustomCode?(shaderType: "vertex" | "fragment"): Partial<Record<MaterialPluginPoint, string>> | null;
     /** Declare custom UBO fields appended to the host material's uniform buffer. */
     getUniforms?(): { ubo?: PluginUboField[] };
+    /** Declare custom vertex-to-fragment varyings. */
+    getVaryings?(): PluginVaryingDecl[];
     /** Declare custom texture/sampler bindings. */
     getSamplers?(): PluginSamplerDecl[];
     /** Write this plugin's UBO slice. `offsets` maps field name → byte offset. */

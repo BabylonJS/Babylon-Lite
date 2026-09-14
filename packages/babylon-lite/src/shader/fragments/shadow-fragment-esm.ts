@@ -16,6 +16,7 @@ let mask = smoothstep(1.0 - frustumEdgeFalloff, 1.00000012, clamp(dot(clipSpace,
 return mix(value, 1.0, mask);
 }
 fn computeShadowESM${suffix}(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, depthScale: f32, frustumEdgeFalloff: f32) -> f32 {
+if (darkness >= 1.0) { return 1.0; }
 ${projection}
 let shadowPixelDepth = clamp(depthMetric, 0.0, 1.0);
 let shadowMapSample = textureSampleLevel(shadowTex${suffix}, shadowSamp${suffix}, uv, 0.0).x;

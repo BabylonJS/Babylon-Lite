@@ -179,7 +179,8 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     // Bindings
     const meshBGL: GPUBindGroupLayoutEntry[] = [{ binding: 0, visibility: STAGE_VERTEX | STAGE_FRAGMENT, buffer: { type: "uniform" } }];
     if (hasMaterialUbo) {
-        meshBGL.push({ binding: 1, visibility: STAGE_FRAGMENT, buffer: { type: "uniform" } });
+        const materialVisibility = sorted.some((fragment) => fragment._materialUboVertexVisible) ? STAGE_VERTEX | STAGE_FRAGMENT : STAGE_FRAGMENT;
+        meshBGL.push({ binding: 1, visibility: materialVisibility, buffer: { type: "uniform" } });
     }
     const shadowBGL: GPUBindGroupLayoutEntry[] = [];
     const vDecls: string[] = [];
@@ -262,10 +263,11 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     const materialStruct = _materialUboSpec
         ? wgsl`\nstruct MaterialUniforms{\n${_materialUboSpec._structBody}\n}\n@group(1)@binding(1) var<uniform> material:MaterialUniforms;`
         : "";
+    const vertexMaterialStruct = sorted.some((fragment) => fragment._materialUboVertexVisible) ? materialStruct : "";
 
     let vertexWGSL = replaceSections(template._vertexTemplate, VERTEX_SECTIONS, [
         SCENE_UBO_WGSL,
-        meshStruct,
+        meshStruct + vertexMaterialStruct,
         wgsl`struct VertexInput{\n${vertexInputs}\n}`,
         wgsl`struct VertexOutput{\n${varyBody}\n}`,
         vDecls.join("\n"),

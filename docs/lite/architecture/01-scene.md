@@ -298,7 +298,10 @@ re-registration re-attaches rather than re-builds. What each category costs:
 Baked per renderable at build time: the per-mesh light **index** list, the single- vs multi-light
 shader permutation, whether the mesh receives shadows, and the shadow bind group of the generator
 attached to each light. `rebuildSceneRenderables(scene)` re-runs the group builders so all of it is
-recomputed. `removeFromScene` installs a rebuild hook that `buildScene` runs, so a **removal** is
+recomputed. To temporarily disable an already-attached generator without changing that topology,
+use `setShadowGeneratorEnabled(generator, false)`; it preserves the baked bindings, neutralizes the
+receiver contribution, and pauses map rendering. `removeFromScene` installs a rebuild hook that
+`buildScene` runs, so a **removal** is
 picked up automatically on the scene's next registration and the natural flow works:
 
 ```ts

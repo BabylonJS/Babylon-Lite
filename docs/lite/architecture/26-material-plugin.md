@@ -36,12 +36,18 @@ export type MaterialPluginPoint =
 export interface PluginUboField {
     readonly name: string;
     readonly type: string;
+    readonly visibility?: "vertex" | "fragment" | "vertex-fragment";
 } // WGSL type verbatim
+export interface PluginVaryingDecl {
+    readonly name: string;
+    readonly type: "f32" | "vec2f" | "vec3f" | "vec4f" | "vec2<f32>" | "vec3<f32>" | "vec4<f32>";
+}
 export interface PluginSamplerDecl {
     readonly texture: string;
     readonly sampler: string;
-    readonly textureType?: "texture_2d<f32>";
-    readonly samplerType?: "sampler" | "sampler_non_filtering";
+    readonly textureType?: "texture_2d<f32>" | "texture_depth_2d";
+    readonly samplerType?: "sampler" | "sampler_non_filtering" | "sampler_comparison";
+    readonly visibility?: "vertex" | "fragment" | "vertex-fragment";
 }
 export interface PluginTextureBinding {
     readonly texture: Texture2D;
@@ -55,6 +61,7 @@ export interface MaterialPlugin {
     defines?: Record<string, boolean | number>;
     getCustomCode?(shaderType: "vertex" | "fragment"): Partial<Record<MaterialPluginPoint, string>> | null;
     getUniforms?(): { ubo?: PluginUboField[] };
+    getVaryings?(): PluginVaryingDecl[];
     getSamplers?(): PluginSamplerDecl[];
     writeUbo?(data: Float32Array, offsets: ReadonlyMap<string, number>): void;
     bindTextures?(out: PluginTextureBinding[]): void;
@@ -68,7 +75,7 @@ interface Material {
 ```
 
 Public exports (`index.ts`): `MaterialPlugin`, `MaterialPluginPoint`,
-`PluginUboField`, `PluginSamplerDecl`, `PluginTextureBinding` (all `export type`),
+`PluginUboField`, `PluginVaryingDecl`, `PluginSamplerDecl`, `PluginTextureBinding` (all `export type`),
 plus the runtime functions `enableMaterialPlugins(scene)` and
 `bakeStdPluginMaterial(material, scene)`.
 
@@ -114,7 +121,7 @@ only the generic Standard binding hook carries scene ownership context.
 | CUSTOM_FRAGMENT_UPDATE_ALPHA                 | AT                      | alpha-test region                    |
 | CUSTOM_FRAGMENT_UPDATE_DIFFUSE               | AC                      | Standard diffuse update              |
 | CUSTOM_FRAGMENT_BEFORE_LIGHTS                | MF                      | after f0, before lights              |
-| CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION | AI **and** NI           | ibl + non-ibl color tails            |
+| CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION | NI                      | after the IBL/non-IBL color tail     |
 | CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR             | BC                      | after tonemap+gamma (demo uses this) |
 | CUSTOM_VERTEX_MAIN_BEGIN                     | VR                      |                                      |
 | CUSTOM_VERTEX_UPDATE_WORLDPOS                | VW                      |                                      |
@@ -138,7 +145,7 @@ material.plugins ──► enableMaterialPlugins(scene) ──► {pbr,std}-plug
                                   ├─ pluginSignature(plugins)  → stable cache key string
                                   ├─ buildPluginFragment(plugins, idx, forStandard) → { _fragment, _stdUboSpec }
                                   │     getCustomCode → _fragmentSlots / _vertexSlots / _helperFunctions
-                                  │     getUniforms.ubo → _uboFields (PBR) | self-managed `pluginUbo` binding (Standard)
+                                  │     getUniforms.ubo → _uboFields (PBR) | self-managed stage-visible `pluginUbo` binding (Standard)
                                   │     getSamplers → _bindings (texture+sampler pairs)
                                   ├─ writePluginUbo  → plugin.writeUbo(data, offsets)
                                   └─ bindPluginTextures → plugin.bindTextures → GPU entries

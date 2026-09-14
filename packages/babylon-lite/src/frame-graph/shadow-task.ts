@@ -74,6 +74,9 @@ export function createShadowTask(engine: EngineContext, scene: SceneContext): Sh
                         state._task.record();
                         state._recordedVersion = version;
                     }
+                    if (sg._runtimeEnabled && !sg._runtimeEnabled(engine, state)) {
+                        continue;
+                    }
                     draws += sg._renderShadowMap(engine, state);
                 }
             }

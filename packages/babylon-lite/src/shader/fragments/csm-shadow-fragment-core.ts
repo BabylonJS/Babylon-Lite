@@ -105,6 +105,7 @@ sh = mix(csmInfo${suffix}.shadowsInfo.x, 1.0, sh);
 return computeFallOffCsm${suffix}(sh, clipSpace.xy, csmInfo${suffix}.shadowsInfo.w);
 }
 fn computeShadowCSM${suffix}(worldPos: vec4<f32>, viewZ: f32) -> f32 {
+if (csmInfo${suffix}.shadowsInfo.x >= 1.0) { return 1.0; }
 let nCascades = i32(csmInfo${suffix}.csmParams.x);
 var idx = -1;
 var diff = 0.0;

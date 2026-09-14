@@ -164,6 +164,7 @@ export type { ArcRotateInterpolationGoal, ArcRotateInterpolationOptions } from "
 export { createFreeCamera } from "./camera/free-camera.js";
 export { createBankedFreeCamera } from "./camera/banked-free-camera.js";
 export { attachFreeControl } from "./camera/free-camera-controls.js";
+export type { FreeCameraControlOptions } from "./camera/free-camera-controls.js";
 export { enableOrthographicCamera, disableOrthographicCamera } from "./camera/orthographic.js";
 export type { OrthographicBounds, OrthographicBoundsOptions } from "./camera/orthographic.js";
 
@@ -219,6 +220,8 @@ export type { HemisphericLight } from "./light/hemispheric.js";
 export { createPointLight } from "./light/point-light.js";
 export { createDirectionalLight } from "./light/directional-light.js";
 export { createSpotLight } from "./light/spot-light.js";
+export { setLightIntensity } from "./light/set-light-intensity.js";
+export { setLightDiffuseColor } from "./light/set-light-diffuse-color.js";
 export type {
     ClusteredLightContainer,
     ClusteredLightContainerOptions,
@@ -611,7 +614,15 @@ export type { ToneMapping } from "./material/pbr/tone-mapping.js";
 export { StandardToneMapping } from "./material/pbr/tone-mapping.js";
 export { AcesToneMapping } from "./material/pbr/pbr-aces-wgsl.js";
 export { NeutralToneMapping } from "./material/pbr/pbr-neutral-wgsl.js";
-export type { MaterialPlugin, MaterialPluginPoint, PluginUboField, PluginSamplerDecl, PluginTextureBinding } from "./material/plugin/material-plugin.js";
+export type {
+    MaterialPlugin,
+    MaterialPluginPoint,
+    PluginUboField,
+    PluginVaryingType,
+    PluginVaryingDecl,
+    PluginSamplerDecl,
+    PluginTextureBinding,
+} from "./material/plugin/material-plugin.js";
 export { enableMaterialPlugins, reconcileMaterialPlugins } from "./material/plugin/enable-material-plugins.js";
 export { bakeStdPluginMaterial } from "./material/plugin/std-plugin-bridge.js";
 export { enableMaterialStencil } from "./material/enable-material-stencil.js";
@@ -646,6 +657,8 @@ export type { TransformNode } from "./scene/transform-node.js";
 export type { SceneNode } from "./scene/scene-node.js";
 export { loadBabylon } from "./loader-babylon/load-babylon.js";
 export { loadEnvironment } from "./loader-env/load-env.js";
+export { computeProceduralSkySunColor, loadProceduralSkyEnvironment, updateProceduralSkyEnvironment } from "./loader-env/procedural-sky-environment.js";
+export type { ProceduralSkyEnvironment, ProceduralSkyEnvironmentLoadOptions, ProceduralSkyEnvironmentOptions } from "./loader-env/procedural-sky-environment.js";
 export { loadDdsEnvironment } from "./loader-env/load-dds-env.js";
 export { buildDdsSkyboxRenderable } from "./material/pbr/background-dds-skybox.js";
 export { loadHdrEnvironment } from "./loader-hdr/load-hdr.js";
@@ -677,6 +690,7 @@ export { createCsmRefitGate } from "./shadow/csm-refit-gate.js";
 export { enableMorphTargetShadows } from "./shadow/enable-morph-target-shadows.js";
 export { enableSkeletonShadows } from "./shadow/enable-skeleton-shadows.js";
 export { setShadowTaskCasterMeshes, setShadowCasterMaxCascade } from "./frame-graph/shadow-inputs.js";
+export { setShadowGeneratorEnabled } from "./shadow/shadow-enabled.js";
 export { setShadowCasterMaterial } from "./material/set-shadow-caster-material.js";
 
 // ─── Animation ───────────────────────────────────────────────────────
