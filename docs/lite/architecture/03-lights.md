@@ -105,14 +105,14 @@ export function createDirectionalLight(
 
 **Default values:**
 
-| Property  | Default                        |
-| --------- | ------------------------------ |
-| lightType | `'directional'`                |
-| direction | _(parameter)_                  |
-| position  | `(0, 0, 0)` via ObservableVec3 |
-| diffuse   | `[1, 1, 1]`                    |
-| specular  | `[1, 1, 1]`                    |
-| intensity | `1`                            |
+| Property | Default |
+|------------|----------------|
+| lightType | `'directional'`|
+| direction | _(parameter)_ |
+| position | `(0, 0, 0)` via ObservableVec3 |
+| diffuse | `[1, 1, 1]` |
+| specular | `[1, 1, 1]` |
+| intensity | `1` |
 
 ### Point Light (`point-light.ts`)
 
@@ -134,14 +134,14 @@ export function createPointLight(
 
 **Default values:**
 
-| Property  | Default                          |
-| --------- | -------------------------------- |
-| lightType | `'point'`                        |
-| position  | _(parameter)_ via ObservableVec3 |
-| diffuse   | `[1, 1, 1]`                      |
-| specular  | `[1, 1, 1]`                      |
-| intensity | `1.0`                            |
-| range     | `Number.MAX_VALUE`               |
+| Property | Default |
+|------------|----------------------|
+| lightType | `'point'` |
+| position | _(parameter)_ via ObservableVec3 |
+| diffuse | `[1, 1, 1]` |
+| specular | `[1, 1, 1]` |
+| intensity | `1.0` |
+| range | `Number.MAX_VALUE` |
 
 **Local matrix:** `createTranslationMat4(position.x, position.y, position.z)` — position only, no orientation.
 
@@ -165,14 +165,14 @@ export function createHemisphericLight(
 
 **Default values:**
 
-| Property      | Default                        |
-| ------------- | ------------------------------ |
-| lightType     | `'hemispheric'`                |
-| direction     | `(0, 1, 0)` via ObservableVec3 |
-| intensity     | `1.0`                          |
-| diffuseColor  | `[1, 1, 1]`                    |
-| specularColor | `[1, 1, 1]`                    |
-| groundColor   | `[0, 0, 0]`                    |
+| Property | Default |
+|--------------|----------------|
+| lightType | `'hemispheric'`|
+| direction | `(0, 1, 0)` via ObservableVec3 |
+| intensity | `1.0` |
+| diffuseColor | `[1, 1, 1]` |
+| specularColor | `[1, 1, 1]` |
+| groundColor | `[0, 0, 0]` |
 
 ### Spot Light (`spot-light.ts`)
 
@@ -202,17 +202,17 @@ export function createSpotLight(
 
 **Default values:**
 
-| Property  | Default                          |
-| --------- | -------------------------------- |
-| lightType | `'spot'`                         |
-| position  | _(parameter)_ via ObservableVec3 |
+| Property | Default |
+|------------|----------------------|
+| lightType | `'spot'` |
+| position | _(parameter)_ via ObservableVec3 |
 | direction | _(parameter)_ via ObservableVec3 |
-| angle     | _(parameter)_                    |
-| exponent  | _(parameter)_                    |
-| diffuse   | `[1, 1, 1]`                      |
-| specular  | `[1, 1, 1]`                      |
-| intensity | `1.0`                            |
-| range     | `Number.MAX_VALUE`               |
+| angle | _(parameter)_ |
+| exponent | _(parameter)_ |
+| diffuse | `[1, 1, 1]` |
+| specular | `[1, 1, 1]` |
+| intensity | `1.0` |
+| range | `Number.MAX_VALUE` |
 
 **Local matrix:** Uses `localMatrixFromDirection(direction, position)` — both orientation and position.
 

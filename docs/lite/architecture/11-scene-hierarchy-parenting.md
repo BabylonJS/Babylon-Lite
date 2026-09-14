@@ -56,7 +56,7 @@ reproduces exactly the matrix it replaces, so the node does not move beyond the 
 
 **Parent links come from `addToScene`.** The glTF loader fills `children` arrays but leaves `parent`
 unset; `addToScene` walks the tree and assigns it. `setParent` needs the real parent chain to read a
-node's world transform, so reparent a _nested_ loaded node only after its container has been added.
+node's world transform, so reparent a *nested* loaded node only after its container has been added.
 Reparenting the container's own root beforehand is fine — its parent is null either way.
 
 ### TransformNode (`scene/transform-node.ts`)
