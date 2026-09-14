@@ -31,13 +31,15 @@ export function cloneTransformNode(src: SceneNode): SceneNode {
     const clone =
         src._cloneNode?.() ??
         (src._localMatrix
-            ? createSceneNodeFromMatrix(
-                  src.name + "_clone",
-                  (src._localMatrix as unknown as Mat4Storage).slice() as unknown as Mat4,
-                  src.position,
-                  src.rotationQuaternion,
-                  src.scaling
-              )
+            ? src._localMatrixLocked
+                ? createSceneNodeFromMatrix(src.name + "_clone", (src._localMatrix as unknown as Mat4Storage).slice() as unknown as Mat4)
+                : createSceneNodeFromMatrix(
+                      src.name + "_clone",
+                      (src._localMatrix as unknown as Mat4Storage).slice() as unknown as Mat4,
+                      src.position,
+                      src.rotationQuaternion,
+                      src.scaling
+                  )
             : createTransformNode(
                   src.name + "_clone",
                   src.position.x,
@@ -78,6 +80,8 @@ function cloneMeshNode(mesh: Mesh): Mesh {
             // key in resource/ref-count.ts, so both meshes must point at the exact same instance
             // for `disposeMeshGpu` to know they're co-owners of the underlying GPUBuffers.
             _gpu: mesh._gpu,
+            _localMatrix: undefined,
+            _localMatrixLocked: undefined,
         },
         mesh.position.x,
         mesh.position.y,
@@ -102,6 +106,10 @@ function cloneMeshNode(mesh: Mesh): Mesh {
     // near gimbal lock and would skew the clone. set() marks the world matrix dirty so it recomputes.
     const rq = mesh.rotationQuaternion;
     meshClone.rotationQuaternion.set(rq.x, rq.y, rq.z, rq.w);
+    if (mesh._localMatrix) {
+        meshClone._localMatrix = (mesh._localMatrix as unknown as Mat4Storage).slice() as unknown as Mat4;
+        meshClone._localMatrixLocked = mesh._localMatrixLocked;
+    }
     for (const child of mesh.children) {
         const childClone = cloneTransformNode(child);
         childClone.parent = meshClone;

@@ -103,6 +103,7 @@ function applyLocal(m: Mat4, node: SceneNode, preserveMatrix = false): void {
     // decomposition we just computed is exactly the matrix it replaces (glTF requires `matrix` to
     // be TRS-decomposable), so the node's transform is unchanged apart from the reparent itself.
     node._localMatrix = undefined;
+    node._localMatrixLocked = undefined;
     node.position.set(translation.x, translation.y, translation.z);
     node.rotationQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
     node.scaling.set(scale.x, scale.y, scale.z);

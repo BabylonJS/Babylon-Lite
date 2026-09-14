@@ -2,7 +2,6 @@ import { F32, U32, U16, U8, DV } from "../engine/typed-arrays.js";
 import { BU } from "../engine/gpu-flags.js";
 import type { Mat4 } from "../math/types.js";
 import { computeAabb } from "../math/compute-aabb.js";
-import { decomposeMat4 } from "../math/decompose-mat4.js";
 import { mat4Determinant3 } from "../math/mat4-determinant3.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { TransformNode } from "../scene/transform-node.js";
@@ -332,9 +331,7 @@ function buildNodeHierarchy(json: any, meshes: Mesh[], meshDatas: GltfMeshData[]
         const name = node.name ?? `node_${nodeIdx}`;
         let tn: TransformNode;
         if (node.matrix) {
-            const matrix = node.matrix as Mat4;
-            const { translation, rotation, scale } = decomposeMat4(matrix);
-            tn = createSceneNodeFromMatrix(name, matrix, translation, rotation, scale);
+            tn = createSceneNodeFromMatrix(name, node.matrix as Mat4);
         } else {
             const t = node.translation ?? [0, 0, 0];
             const r = node.rotation ?? [0, 0, 0, 1];

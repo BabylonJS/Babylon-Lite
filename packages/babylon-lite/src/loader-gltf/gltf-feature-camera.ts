@@ -29,7 +29,6 @@ import type { Camera } from "../camera/camera.js";
 import { createFreeCamera } from "../camera/free-camera.js";
 import { createTransformNode } from "../scene/transform-node.js";
 import { createSceneNodeFromMatrix } from "../scene/scene-node.js";
-import { decomposeMat4 } from "../math/decompose-mat4.js";
 import { computeNodeWorldMatrix, findParent } from "./gltf-parser.js";
 import { _registerEnabledGltfFeature } from "./gltf-feature-hooks.js";
 
@@ -109,8 +108,7 @@ const feature: GltfFeature = {
             const name = def.name ?? `camera${camIdx}`;
             const fixupNode = createTransformNode(`${name}_fixup`, 0, 0, 0, 0, 0, 0, 1, -inverseScale, inverseScale, inverseScale);
             // Unreachable nodes are baked once; reachable nodes retain live translation/rotation animation.
-            const { translation, rotation, scale: decomposedScale } = decomposeMat4(restWorld);
-            fixupNode.parent = ctx._nodeMap?.[nodeIdx] ?? createSceneNodeFromMatrix(`${name}_bakedNode`, restWorld, translation, rotation, decomposedScale);
+            fixupNode.parent = ctx._nodeMap?.[nodeIdx] ?? createSceneNodeFromMatrix(`${name}_bakedNode`, restWorld);
 
             // glTF cameras look down their local -Z axis with +Y up. createFreeCamera's lookAt
             // builder reproduces exactly that local orientation for an eye at the origin

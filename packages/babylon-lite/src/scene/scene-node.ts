@@ -41,6 +41,8 @@ export interface SceneNode {
      *  `position`/`rotationQuaternion`/`scaling` are ignored. Clearing it hands control back to the
      *  TRS triple (what `setParent` does so it can move a `matrix`-declared glTF node). */
     _localMatrix?: Mat4;
+    /** @internal Raw glTF matrices ignore TRS writes until `setParent` seeds an editable baseline. */
+    _localMatrixLocked?: boolean;
     /** Self-visibility. Undefined/true = visible; `false` skips render + camera AABB.
      *  Cascade is materialized at write-time by `setSubtreeVisible`. */
     visible?: boolean;
@@ -122,17 +124,44 @@ export function createSceneNode(name: string, px = 0, py = 0, pz = 0, qx = 0, qy
     return createSceneNodeCore(name, null, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
 }
 
-export function createSceneNodeFromMatrix(name: string, matrix: Mat4, translation: Vec3, rotation: Quat, scale: Vec3): SceneNode {
-    return createSceneNodeCore(name, matrix, translation.x, translation.y, translation.z, rotation.x, rotation.y, rotation.z, rotation.w, scale.x, scale.y, scale.z);
+export function createSceneNodeFromMatrix(name: string, matrix: Mat4, translation?: Vec3, rotation?: Quat, scale?: Vec3): SceneNode {
+    const node = createSceneNodeCore(
+        name,
+        matrix,
+        translation?.x,
+        translation?.y,
+        translation?.z,
+        rotation?.x,
+        rotation?.y,
+        rotation?.z,
+        rotation?.w,
+        scale?.x,
+        scale?.y,
+        scale?.z
+    );
+    node._localMatrixLocked = translation ? undefined : true;
+    return node;
 }
 
 function createSceneNodeCore(name: string, matrix: Mat4 | null, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1, sx = 1, sy = 1, sz = 1): SceneNode {
+    const node = initSceneNodeTransform({ name, children: [] }, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
+    if (matrix) {
+        node._localMatrix = matrix;
+    }
+    return node;
+}
+
+/** Add the common SceneNode transform contract to an existing object. */
+export function initSceneNodeTransform<T extends SceneNode>(partialNode: Partial<T>, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1, sx = 1, sy = 1, sz = 1): T {
     // Read the raw matrix off the node, not off a captured local: clearing `_localMatrix`
     // (setParent on a glTF `matrix` node) must switch the node back to TRS-driven.
     const wm = createWorldMatrixState(() => {
         return node._localMatrix ?? composeTrsLocalMatrix(node.position, node.rotationQuaternion, node.scaling);
     });
     const onWmDirty = () => {
+        if (node._localMatrixLocked) {
+            return;
+        }
         node._localMatrix = undefined;
         wm.markLocalDirty();
     };
@@ -142,9 +171,8 @@ function createSceneNodeCore(name: string, matrix: Mat4 | null, px = 0, py = 0, 
     const rotation = createEulerProxy(rq);
     const scaling = new ObservableVec3(sx, sy, sz, onWmDirty);
 
-    const node: SceneNode = {
-        name,
-        children: [],
+    const node = {
+        ...partialNode,
         position,
         rotationQuaternion: rq,
         rotation,
@@ -161,10 +189,7 @@ function createSceneNodeCore(name: string, matrix: Mat4 | null, px = 0, py = 0, 
         get worldMatrixVersion() {
             return wm.getWorldMatrixVersion();
         },
-    };
-    if (matrix) {
-        node._localMatrix = matrix;
-    }
+    } as T;
     attachWorldMatrixState(node, wm);
     return node;
 }

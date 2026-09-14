@@ -4,7 +4,7 @@
 import type { Mat4, Mat4Storage } from "../math/types.js";
 import type { LightBase } from "./types.js";
 import type { SceneNode } from "../scene/scene-node.js";
-import { createSceneNode } from "../scene/scene-node.js";
+import { initSceneNodeTransform } from "../scene/scene-node.js";
 import type { ObservableVec3 } from "../math/observable-vec3.js";
 
 export { ObservableVec3 } from "../math/observable-vec3.js";
@@ -26,7 +26,7 @@ export function createLightBase(position: readonly [number, number, number]): { 
             lvs._lightVersion++;
         },
     };
-    return { node: createSceneNode("", position[0], position[1], position[2]), lvs };
+    return { node: initSceneNodeTransform({ name: "", children: [] }, position[0], position[1], position[2]), lvs };
 }
 
 /** Write a normalized world-space direction from a light matrix. Parent scale

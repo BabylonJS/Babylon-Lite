@@ -27,7 +27,7 @@
         "slug": "scene3-fog",
         "name": "Scene 3 — Fog + Skybox",
         "maxMad": 0.01,
-        "maxRawKB": 53.7,
+        "maxRawKB": 53.6,
         "description": "Exponential² fog, multiple colored boxes, skybox, ground plane.",
         "tags": ["fog", "procedural", "std"],
         "skipPerf": true
@@ -37,7 +37,7 @@
         "slug": "scene4-shadows",
         "name": "Scene 4 — Shadows",
         "maxMad": 0.08,
-        "maxRawKB": 71.8,
+        "maxRawKB": 71.7,
         "description": "DirectionalLight, ESM shadow map with blur, heightmap ground, torus caster.",
         "tags": ["shadow", "procedural", "std"],
         "compatParity": true
@@ -154,7 +154,7 @@
         "slug": "scene15-spotlights",
         "name": "Scene 15 — SpotLights + Ground",
         "maxMad": 0.01,
-        "maxRawKB": 46.5,
+        "maxRawKB": 46.2,
         "description": "Two SpotLights (red + green) with different exponents on a ground plane. Multi-light support.",
         "tags": ["std", "procedural"],
         "skipPerf": true,
