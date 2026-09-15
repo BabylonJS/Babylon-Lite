@@ -59,6 +59,22 @@ interface UpstreamContext {
 
 interface UpstreamParser {
     _animationTargetFps: number;
+    readonly arrays: {
+        types: Array<{ length: number; flowGraphType: "number"; elementType: "number" }>;
+        mappings: Array<{
+            flowGraphMapping: IGLTFToFlowGraphMapping;
+            fullOperationName: string;
+            declaration: {
+                index: number;
+                operation: string;
+                support: "core";
+                source: { op: string };
+            };
+        }>;
+        staticVariables: Array<{ type: "number"; value: number[] }>;
+        events: [];
+        nodes: [];
+    };
     getVariableName(index: number): string;
     serializeToFlowGraph(): {
         executionContexts: UpstreamContext[];
@@ -98,11 +114,17 @@ describe("upstream export coverage", () => {
             _node: UpstreamNode,
             _declaration: { op: string },
             _mapping: UpstreamMapping,
-            _parser: UpstreamParser,
+            parser: UpstreamParser,
             serializedObjects: UpstreamBlock[],
             _context: UpstreamContext,
             _gltf?: UpstreamGltf
-        ): UpstreamBlock[] => serializedObjects;
+        ): UpstreamBlock[] => {
+            expect(parser.arrays.types[0]?.flowGraphType).toBe("number");
+            expect(parser.arrays.mappings[0]?.flowGraphMapping.blocks).toEqual(["test"]);
+            expect(parser.arrays.mappings[0]?.declaration.operation).toBe("math/add");
+            expect(parser.arrays.staticVariables[0]?.value).toEqual([1]);
+            return serializedObjects;
+        };
         const mapping: IGLTFToFlowGraphMapping = {
             blocks: ["test"],
             interBlockConnectors: [{ input: "in", output: "out", inputBlockIndex: 0, outputBlockIndex: 1, isVariable: true }],
@@ -121,6 +143,24 @@ describe("upstream export coverage", () => {
             mapping,
             {
                 _animationTargetFps: 60,
+                arrays: {
+                    types: [{ length: 1, flowGraphType: "number", elementType: "number" }],
+                    mappings: [
+                        {
+                            flowGraphMapping: mapping,
+                            fullOperationName: "math/add",
+                            declaration: {
+                                index: 0,
+                                operation: "math/add",
+                                support: "core",
+                                source: { op: "math/add" },
+                            },
+                        },
+                    ],
+                    staticVariables: [{ type: "number", value: [1] }],
+                    events: [],
+                    nodes: [],
+                },
                 getVariableName: (index) => `staticVariable_${index}`,
                 serializeToFlowGraph: () => ({ executionContexts: [], allBlocks: [] }),
             },

@@ -205,7 +205,22 @@ export function getAllSupportedNativeNodeTypes(): string[] {
     return unsupported("GLTF2.getAllSupportedNativeNodeTypes", KHR_INTERACTIVITY_UNSUPPORTED);
 }
 
-export type KHRInteractivityFlowGraphType = "any" | "string" | "number" | "boolean" | "FlowGraphInteger" | "Vector2" | "Vector3" | "Vector4" | "Matrix" | "Matrix2D" | "Matrix3D";
+export type KHRInteractivityFlowGraphType =
+    | "any"
+    | "string"
+    | "number"
+    | "boolean"
+    | "object"
+    | "FlowGraphInteger"
+    | "Vector2"
+    | "Vector3"
+    | "Vector4"
+    | "Quaternion"
+    | "Matrix"
+    | "Matrix2D"
+    | "Matrix3D"
+    | "Color3"
+    | "Color4";
 
 export interface IKHRInteractivityTypeMapping {
     length: number;
@@ -369,9 +384,13 @@ export class InteractivityGraphToFlowGraphParser {
     }
 
     public get arrays(): {
-        types: unknown[];
-        mappings: unknown[];
-        staticVariables: unknown[];
+        types: IKHRInteractivityTypeMapping[];
+        mappings: Array<{
+            flowGraphMapping: IGLTFToFlowGraphMapping;
+            fullOperationName: string;
+            declaration: IKHRInteractivityDeclarationModel;
+        }>;
+        staticVariables: Array<{ type: KHRInteractivityFlowGraphType; value: any[] }>;
         events: InteractivityEvent[];
         nodes: Array<{ blocks: ISerializedFlowGraphBlock[]; fullOperationName: string }>;
     } {
