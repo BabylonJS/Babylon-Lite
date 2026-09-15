@@ -315,7 +315,7 @@ export interface IKHRInteractivityDeclarationModel {
     index: number;
     operation: string;
     support: KHRInteractivityDeclarationSupport;
-    source: unknown;
+    source: IKHRInteractivityDeclaration;
 }
 
 export interface IKHRInteractivityGraphModel {

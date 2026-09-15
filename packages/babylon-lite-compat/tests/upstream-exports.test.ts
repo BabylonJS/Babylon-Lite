@@ -24,62 +24,11 @@ interface UpstreamGltf {
     nodes?: unknown[];
 }
 
-interface UpstreamMapping {
-    blocks: string[];
-    inputs?: {
-        values?: Record<string, { name: string }>;
-        flows?: Record<string, { name: string }>;
-    };
-}
-
 interface UpstreamConnection {
     uniqueId: string;
     name: string;
     _connectionType: number;
     connectedPointIds: string[];
-}
-
-interface UpstreamBlock {
-    className: string;
-    type: string;
-    config: unknown;
-    uniqueId: string;
-    dataInputs: UpstreamConnection[];
-    dataOutputs: UpstreamConnection[];
-    metadata: unknown;
-    signalInputs: UpstreamConnection[];
-    signalOutputs: UpstreamConnection[];
-}
-
-interface UpstreamContext {
-    uniqueId: string;
-    _userVariables: Record<string, unknown>;
-    _connectionValues: Record<string, unknown>;
-}
-
-interface UpstreamParser {
-    _animationTargetFps: number;
-    readonly arrays: {
-        types: Array<{ length: number; flowGraphType: "number"; elementType: "number" }>;
-        mappings: Array<{
-            flowGraphMapping: IGLTFToFlowGraphMapping;
-            fullOperationName: string;
-            declaration: {
-                index: number;
-                operation: string;
-                support: "core";
-                source: { op: string };
-            };
-        }>;
-        staticVariables: Array<{ type: "number"; value: number[] }>;
-        events: [];
-        nodes: [];
-    };
-    getVariableName(index: number): string;
-    serializeToFlowGraph(): {
-        executionContexts: UpstreamContext[];
-        allBlocks: UpstreamBlock[];
-    };
 }
 
 describe("upstream export coverage", () => {
@@ -110,26 +59,18 @@ describe("upstream export coverage", () => {
             valid: !!node.values && !!graph.types && !!gltf?.nodes,
             error: "invalid",
         });
-        const extraProcessor = (
-            _node: UpstreamNode,
-            _declaration: { op: string },
-            _mapping: UpstreamMapping,
-            parser: UpstreamParser,
-            serializedObjects: UpstreamBlock[],
-            _context: UpstreamContext,
-            _gltf?: UpstreamGltf
-        ): UpstreamBlock[] => {
-            expect(parser.arrays.types[0]?.flowGraphType).toBe("number");
-            expect(parser.arrays.mappings[0]?.flowGraphMapping.blocks).toEqual(["test"]);
-            expect(parser.arrays.mappings[0]?.declaration.operation).toBe("math/add");
-            expect(parser.arrays.staticVariables[0]?.value).toEqual([1]);
-            return serializedObjects;
-        };
         const mapping: IGLTFToFlowGraphMapping = {
             blocks: ["test"],
             interBlockConnectors: [{ input: "in", output: "out", inputBlockIndex: 0, outputBlockIndex: 1, isVariable: true }],
             validation,
-            extraProcessor,
+            extraProcessor: (_node, _declaration, _mapping, parser, serializedObjects) => {
+                expect(parser.arrays.types[0]?.flowGraphType).toBe("number");
+                expect(parser.arrays.mappings[0]?.flowGraphMapping.blocks).toEqual(["test"]);
+                expect(parser.arrays.mappings[0]?.declaration.operation).toBe("math/add");
+                expect(parser.arrays.mappings[0]?.declaration.source.op).toBe("math/add");
+                expect(parser.arrays.staticVariables[0]?.value).toEqual([1]);
+                return serializedObjects;
+            },
         };
         const connection: UpstreamConnection = {
             uniqueId: "connection",
@@ -137,7 +78,7 @@ describe("upstream export coverage", () => {
             _connectionType: 0,
             connectedPointIds: [],
         };
-        const serialized = extraProcessor(
+        const serialized = mapping.extraProcessor!(
             { declaration: 0 },
             { op: "test" },
             mapping,
