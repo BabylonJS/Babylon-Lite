@@ -143,9 +143,15 @@ export abstract class Material {
             this._scene = scene;
             scene._registerMaterial(this);
             if (this._usesMaterialPlugins) {
-                scene._requestMaterialPlugins();
+                scene._requestMaterialPlugins(this._lite);
             }
         }
+    }
+
+    /** @internal Rebuild plugin shader state after a Babylon.js plugin dirties its defines. */
+    public _markPluginDefinesDirty(): void {
+        this._markDirty();
+        this._scene?._requestMaterialPlugins(this._lite);
     }
 
     /**

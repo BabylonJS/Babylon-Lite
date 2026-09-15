@@ -25,8 +25,12 @@
  */
 
 import type { SceneContext } from "../../scene/scene.js";
+import type { Material } from "../material.js";
+import { getMaterialSource } from "../material-view.js";
 import { _registerPbrExt } from "../pbr/pbr-flags.js";
 import { _registerStdExt } from "../standard/standard-flags.js";
+import { enqueueMaterialSwap } from "../../scene/mesh-scene-registry.js";
+import { processMaterialSwaps } from "../../scene/scene-material-swap.js";
 import { registerPbrPlugins } from "./pbr-plugin-bridge.js";
 import { registerStdPlugins } from "./std-plugin-bridge.js";
 
@@ -53,4 +57,25 @@ export function enableMaterialPlugins(scene: SceneContext): void {
         scene._beforeRender.splice(previous, 1);
     }
     scene._beforeRender.push(refresh);
+}
+
+/**
+ * Reconcile a plugin material after its shader-affecting state changes in a live scene.
+ *
+ * The bridge is enabled before the material's renderables are rebuilt. Standard
+ * materials are baked by {@link enableMaterialPlugins}; PBR materials receive their
+ * stable signature index while the queued renderable rebuild runs.
+ */
+export async function reconcileMaterialPlugins(scene: SceneContext, material: Material): Promise<void> {
+    enableMaterialPlugins(scene);
+    const source = getMaterialSource(material);
+    for (const mesh of scene.meshes) {
+        if (mesh.material && getMaterialSource(mesh.material) === source) {
+            enqueueMaterialSwap(scene, mesh);
+        }
+    }
+    const pending = processMaterialSwaps(scene);
+    if (pending) {
+        await pending;
+    }
 }

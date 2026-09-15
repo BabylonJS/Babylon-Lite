@@ -91,6 +91,11 @@ export abstract class AbstractEngine {
     protected _initialized = false;
     private _startupComplete = false;
     private _startPromise: Promise<void> | null = null;
+
+    /** @internal Whether scene registration and the first engine start have completed. */
+    public get _hasStarted(): boolean {
+        return this._startupComplete;
+    }
     /** @internal Active `requestAnimationFrame` id for the scene-less loop, if any. */
     protected _rafId: number | null = null;
 

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
-import { enableMaterialPlugins } from "../../../packages/babylon-lite/src/material/plugin/enable-material-plugins";
+import { enableMaterialPlugins, reconcileMaterialPlugins } from "../../../packages/babylon-lite/src/material/plugin/enable-material-plugins";
 import type { MaterialPlugin } from "../../../packages/babylon-lite/src/material/plugin/material-plugin";
 import { bakeStdPluginMaterial, refreshStdPluginUbos, registerStdPlugins } from "../../../packages/babylon-lite/src/material/plugin/std-plugin-bridge";
 import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material";
@@ -120,6 +120,25 @@ describe("dynamic Standard material plugins", () => {
 
         expect(entries).toHaveLength(1);
         expect(material._renderFeatures?.features).not.toBe(0);
+    });
+
+    it("bakes and rebuilds a plugin material added to a live scene", async () => {
+        const { engine } = makeEngine();
+        const material = createStandardMaterial();
+        const scene = pluginScene(engine, [material]);
+        const targetMesh = scene.meshes[0]!;
+        const rebuild = vi.fn(() => ({ mesh: targetMesh, order: 0, isTransparent: false }) as Renderable);
+        scene._groups.set(material._buildGroup, Object.assign([targetMesh], { r: rebuild }));
+        scene._renderables.push({ mesh: targetMesh, order: 0, isTransparent: false } as Renderable);
+        scene._meshDisposables.set(targetMesh, []);
+        scene._built = true;
+
+        material.plugins = [valuePlugin({ current: 5 }, false)];
+        await reconcileMaterialPlugins(scene, material);
+
+        expect(material._renderFeatures?.features).not.toBe(0);
+        expect(rebuild).toHaveBeenCalledOnce();
+        expect(scene._materialSwapQueue).toEqual([]);
     });
 
     it("bakes a material shared by multiple meshes only once", () => {

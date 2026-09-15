@@ -43,6 +43,7 @@ import type {
     Mesh as LiteMesh,
     PickingInfo as LitePickingInfo,
     Mat4,
+    Material as LiteMaterial,
 } from "babylon-lite";
 
 import { Color3, Color4 } from "../math/color.js";
@@ -431,9 +432,19 @@ export class Scene extends AbstractScene {
         this._pendingMorphBuilds.length = 0;
     }
 
-    /** @internal Request Lite's opt-in material-plugin bridges for this scene. */
-    public _requestMaterialPlugins(): void {
+    /**
+     * @internal Request Lite's opt-in material-plugin bridges for this scene.
+     * Once the engine is live, reconcile the changed material through Lite's
+     * runtime rebuild path rather than leaving the startup-only request stranded.
+     */
+    public _requestMaterialPlugins(material?: LiteMaterial): void {
         this._materialPluginsRequested = true;
+        if (material && this._engine._hasStarted) {
+            this._engine._registerLateWork(async () => {
+                const { reconcileMaterialPlugins } = await import("babylon-lite");
+                await reconcileMaterialPlugins(this._lite, material);
+            });
+        }
     }
 
     /** @internal Enable requested material plugins after meshes are added and before scene registration. */

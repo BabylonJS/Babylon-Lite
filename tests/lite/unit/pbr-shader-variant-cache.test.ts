@@ -129,6 +129,34 @@ describe("PBR shader variant caches", () => {
         expect(fragments.some((code) => code.includes("material.materialAlpha < -2.0"))).toBe(true);
     });
 
+    it("keeps plugin signature identities stable across scenes", async () => {
+        const { engine, createShaderModule } = makeEngine();
+        const makePlugin = (name: string, marker: string): MaterialPlugin => ({
+            name,
+            getCustomCode: (shaderType) => (shaderType === "fragment" ? { CUSTOM_FRAGMENT_UPDATE_ALPHA: marker } : null),
+        });
+        const materialA = createPbrMaterial({ plugins: [makePlugin("scene-a", "if(material.materialAlpha < -5.0){discard;}")] });
+        const sceneA = createSceneContext(engine, { defaultRenderTask: false });
+        const meshA = makeMesh(materialA);
+        sceneA._groups.set(materialA._buildGroup, [meshA]);
+        enableMaterialPlugins(sceneA);
+        const renderableA = (await buildPbrRenderables(sceneA, [meshA], undefined)).renderables[0]!;
+
+        const materialB = createPbrMaterial({ plugins: [makePlugin("scene-b", "if(material.materialAlpha < -6.0){discard;}")] });
+        const sceneB = createSceneContext(engine, { defaultRenderTask: false });
+        const meshB = makeMesh(materialB);
+        sceneB._groups.set(materialB._buildGroup, [meshB]);
+        enableMaterialPlugins(sceneB);
+        const renderableB = (await buildPbrRenderables(sceneB, [meshB], undefined)).renderables[0]!;
+
+        expect(materialA._pi).not.toBe(materialB._pi);
+        renderableA.bind(engine, signature);
+        renderableB.bind(engine, signature);
+        const fragments = fragmentSources(createShaderModule);
+        expect(fragments.some((code) => code.includes("material.materialAlpha < -5.0"))).toBe(true);
+        expect(fragments.some((code) => code.includes("material.materialAlpha < -6.0"))).toBe(true);
+    });
+
     it("normalizes a missing material-plugin index to zero", async () => {
         const { engine } = makeEngine();
         const scene = createSceneContext(engine, { defaultRenderTask: false });

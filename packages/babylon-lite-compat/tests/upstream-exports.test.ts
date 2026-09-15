@@ -8,6 +8,7 @@ import {
     ValidateFlowGraph,
 } from "../src/index";
 import { LiteCompatError } from "../src/error";
+import type { IGLTFToFlowGraphMapping } from "../src/loading/unsupported-khr-interactivity";
 
 describe("upstream export coverage", () => {
     it("exposes the texture-array pure registration shims", () => {
@@ -30,5 +31,17 @@ describe("upstream export coverage", () => {
         expect(() => GLTF2.getMappingForDeclaration({})).toThrow(LiteCompatError);
         expect(() => GLTF2.CreateKHRInteractivityDocument({})).toThrow(LiteCompatError);
         expect(() => GLTF2.CreateKHRInteractivityDocument({})).toThrow(/GLTF2\.CreateKHRInteractivityDocument/);
+    });
+
+    it("preserves the optional KHR_interactivity mapping hooks", () => {
+        const mapping: IGLTFToFlowGraphMapping = {
+            blocks: ["test"],
+            interBlockConnectors: [{ input: "in", output: "out", inputBlockIndex: 0, outputBlockIndex: 1, isVariable: true }],
+            validation: () => ({ valid: false, error: "invalid" }),
+            extraProcessor: (_node, _declaration, _mapping, _parser, serializedObjects) => serializedObjects,
+        };
+
+        expect(mapping.interBlockConnectors?.[0]?.outputBlockIndex).toBe(1);
+        expect(mapping.validation?.({}, {})).toEqual({ valid: false, error: "invalid" });
     });
 });

@@ -1,8 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+const { reconcileMaterialPluginsMock } = vi.hoisted(() => ({
+    reconcileMaterialPluginsMock: vi.fn<() => Promise<void>>(),
+}));
+
+vi.mock("babylon-lite", async (importActual) => {
+    const actual = await importActual<typeof import("babylon-lite")>();
+    return {
+        ...actual,
+        reconcileMaterialPlugins: reconcileMaterialPluginsMock,
+    };
+});
 
 import { MaterialPluginBase } from "../src/materials/material-plugin";
 import { StandardMaterial } from "../src/materials/materials";
 import { ShaderLanguage } from "../src/misc/engine-constants";
+import { Scene } from "../src/scene/scene";
 
 class TestPlugin extends MaterialPluginBase {
     public constructor(material: StandardMaterial) {
@@ -60,10 +73,53 @@ describe("MaterialPluginBase", () => {
         class DefaultPlugin extends MaterialPluginBase {}
 
         const material = new StandardMaterial("material");
-        const plugin = new DefaultPlugin(material, "Default");
+        const plugin = new DefaultPlugin(material, "Default", 500);
 
         expect(plugin.isCompatible(ShaderLanguage.GLSL)).toBe(true);
         expect(plugin.isCompatible(ShaderLanguage.WGSL)).toBe(false);
         expect(material._lite.plugins?.[0]?.getCustomCode?.("fragment")).toBeNull();
+    });
+
+    it("preserves constructor attachment, activation, and dirty-callback semantics", () => {
+        let requests = 0;
+        const scene = {
+            _registerMaterial: () => undefined,
+            _requestMaterialPlugins: () => {
+                requests++;
+            },
+        };
+        const material = new StandardMaterial("material", scene as never);
+
+        const detached = new MaterialPluginBase(material, "Detached", 300, {}, false, true, true);
+        expect(material._lite.plugins).toBeUndefined();
+        expect(detached.resolveIncludes).toBe(true);
+
+        const enabled = new MaterialPluginBase(material, "Enabled", 200, {}, true, true);
+        expect(material._lite.plugins?.[0]).toMatchObject({ name: "Enabled", isEnabled: true });
+        enabled.markAllDefinesAsDirty();
+
+        expect(requests).toBe(2);
+    });
+
+    it("schedules Lite reconciliation when a live scene adopts a plugin material", async () => {
+        let work: (() => Promise<void>) | undefined;
+        const liteScene = {};
+        const liteMaterial = {};
+        const scene = Object.create(Scene.prototype) as Scene;
+        Object.assign(scene, {
+            _lite: liteScene,
+            _engine: {
+                _hasStarted: true,
+                _registerLateWork: (callback: () => Promise<void>) => {
+                    work = callback;
+                },
+            },
+        });
+
+        scene._requestMaterialPlugins(liteMaterial as never);
+        expect(work).toBeTypeOf("function");
+        await work!();
+
+        expect(reconcileMaterialPluginsMock).toHaveBeenCalledWith(liteScene, liteMaterial);
     });
 });

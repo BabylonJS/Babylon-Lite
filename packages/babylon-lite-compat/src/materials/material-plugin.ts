@@ -14,28 +14,32 @@ export type MaterialPluginCustomCode = Partial<Record<MaterialPluginPoint, strin
 export class MaterialPluginBase {
     public readonly name: string;
     public readonly priority: number;
+    public readonly markAllDefinesAsDirty: () => void;
+    public resolveIncludes: boolean;
     protected readonly _material: Material;
 
     /** @internal Plain plugin descriptor attached to the backing Lite material. */
     private readonly _lite: MaterialPlugin;
 
-    public constructor(material: Material, name: string, priority = 500, defines: MaterialPluginDefines = {}) {
+    public constructor(material: Material, name: string, priority: number, defines: MaterialPluginDefines = {}, addToPluginList = true, enable = false, resolveIncludes = false) {
         this._material = material;
         this.name = name;
         this.priority = priority;
+        this.resolveIncludes = resolveIncludes;
+        this.markAllDefinesAsDirty = () => material._markPluginDefinesDirty();
         this._lite = {
             name,
             priority,
             defines,
-            isEnabled: false,
+            isEnabled: enable,
             getCustomCode: (shaderType) => (this.isCompatible(ShaderLanguage.WGSL) ? this.getCustomCode(shaderType, ShaderLanguage.WGSL) : null),
         };
 
-        if (this._attachToLite) {
+        if (addToPluginList && this._attachToLite) {
             const liteMaterial = material._lite as typeof material._lite & { plugins?: MaterialPlugin[] };
             liteMaterial.plugins = [...(liteMaterial.plugins ?? []), this._lite];
             material._usesMaterialPlugins = true;
-            material.getScene()?._requestMaterialPlugins();
+            material.getScene()?._requestMaterialPlugins(material._lite);
         }
     }
 
@@ -46,6 +50,7 @@ export class MaterialPluginBase {
 
     protected _enable(enable: boolean): void {
         this._lite.isEnabled = enable;
+        this.markAllDefinesAsDirty();
     }
 
     public isCompatible(_shaderLanguage: ShaderLanguage): boolean {
@@ -65,6 +70,7 @@ export class MaterialPluginBase {
         if (liteMaterial.plugins) {
             liteMaterial.plugins = liteMaterial.plugins.filter((plugin) => plugin !== this._lite);
             this._material._usesMaterialPlugins = liteMaterial.plugins.length > 0;
+            this._material._markPluginDefinesDirty();
         }
     }
 }

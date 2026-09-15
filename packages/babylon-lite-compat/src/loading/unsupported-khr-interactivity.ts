@@ -53,6 +53,23 @@ export interface IGLTFToFlowGraphMapping {
     };
     configuration?: Record<string, IGLTFToFlowGraphMappingObject>;
     typeToTypeMapping?: Record<string, IGLTFToFlowGraphMappingObject>;
+    interBlockConnectors?: Array<{
+        input: string;
+        output: string;
+        inputBlockIndex: number;
+        outputBlockIndex: number;
+        isVariable?: boolean;
+    }>;
+    validation?: (gltfBlock: Record<string, unknown>, interactivityGraph: Record<string, unknown>, glTFObject?: Record<string, unknown>) => { valid: boolean; error?: string };
+    extraProcessor?: (
+        gltfBlock: Record<string, unknown>,
+        declaration: Record<string, unknown>,
+        mapping: IGLTFToFlowGraphMapping,
+        parser: InteractivityGraphToFlowGraphParser,
+        serializedObjects: Array<Record<string, unknown>>,
+        context: Record<string, unknown>,
+        globalGLTF?: Record<string, unknown>
+    ) => Array<Record<string, unknown>>;
 }
 
 export interface IDebugLogTemplateParseResult {
