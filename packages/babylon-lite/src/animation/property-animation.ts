@@ -180,6 +180,7 @@ function createPointerAnimationGroup(
                 const track = tracks[trackIndex]!;
                 evaluateSampler(track.sampler, ctrl.time, track.stride, track.quaternion, _pointerScratch, 0);
                 track.writer(_pointerScratch, 0);
+                track._afterWrite?.();
             }
         },
     };

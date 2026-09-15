@@ -411,6 +411,8 @@ export { enableMaterialTracking } from "./material/observable-material.js";
 
 // ─── Loaders ─────────────────────────────────────────────────────────
 export { loadGltf } from "./loader-gltf/load-gltf.js";
+export { loadUsd, disposeUsd } from "./loader-usd/load-usd.js";
+export type { LoadUsdOptions, UsdAssetContainer, UsdBinaryInput, UsdDiagnostics, UsdProgress, UsdStatistics, UsdTimings } from "./loader-usd/usd-types.js";
 export { enableGltfCameras } from "./loader-gltf/gltf-feature-camera.js";
 export type { AssetContainer } from "./asset-container.js";
 export { getContainerMeshes } from "./asset-container.js";
