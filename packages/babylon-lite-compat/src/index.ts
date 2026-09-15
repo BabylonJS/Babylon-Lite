@@ -136,6 +136,7 @@ export {
     PlaneDragGizmo,
     AxisScaleGizmo,
 } from "./gizmos/gizmos.js";
+export type { DragEvent, DragStartEndEvent } from "./gizmos/gizmos.js";
 
 // ─── Behaviors ───────────────────────────────────────────────────────
 export { AutoRotationBehavior, BouncingBehavior, FramingBehavior } from "./behaviors/behaviors.js";

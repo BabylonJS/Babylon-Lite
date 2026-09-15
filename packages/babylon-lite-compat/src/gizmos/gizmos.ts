@@ -59,6 +59,10 @@ import type {
     AxisScaleGizmo as LiteAxisScaleGizmo,
     EngineContext,
     SceneNode,
+    PointerDrag,
+    PointerDragStartEvent,
+    PointerDragMoveEvent,
+    PointerDragEndEvent,
 } from "babylon-lite";
 
 import type { Scene } from "../scene/scene.js";
@@ -66,8 +70,76 @@ import type { AbstractMesh, Mesh } from "../meshes/meshes.js";
 import type { Node } from "../node/node.js";
 import type { Light } from "../lights/lights.js";
 import type { Camera } from "../cameras/cameras.js";
-import type { Vector3 } from "../math/vector.js";
+import { Vector3 } from "../math/vector.js";
 import type { Color3 } from "../math/color.js";
+import { PointerEventTypes, PointerInfo } from "../events/pointer-events.js";
+import { Observable } from "../misc/observable.js";
+
+/** Babylon.js drag lifecycle payload shared by drag start and end. */
+export interface DragStartEndEvent {
+    dragPlanePoint: Vector3;
+    pointerId: number;
+    pointerInfo: PointerInfo | null;
+}
+
+/** Babylon.js drag move payload. */
+export interface DragEvent extends DragStartEndEvent {
+    delta: Vector3;
+    dragPlaneNormal: Vector3;
+    dragDistance: number;
+}
+
+interface CompositeDragSource {
+    drag: PointerDrag;
+}
+
+function toVector3(value: { x: number; y: number; z: number }): Vector3 {
+    return new Vector3(value.x, value.y, value.z);
+}
+
+function wireCompositeDragObservables(
+    sources: CompositeDragSource[],
+    onDragStartObservable: Observable<DragStartEndEvent>,
+    onDragObservable: Observable<DragEvent>,
+    onDragEndObservable: Observable<DragStartEndEvent>
+): (() => void)[] {
+    const subscriptions: (() => void)[] = [];
+    for (const source of sources) {
+        let activePointerId = -1;
+        let activePointerInfo: PointerInfo | null = null;
+        subscriptions.push(
+            source.drag.onDragStart.add((event: PointerDragStartEvent) => {
+                activePointerId = event.pointerEvent.pointerId;
+                activePointerInfo = new PointerInfo(PointerEventTypes.POINTERDOWN, event.pointerEvent, null);
+                onDragStartObservable.notifyObservers({
+                    dragPlanePoint: toVector3(event.dragPlanePoint),
+                    pointerId: activePointerId,
+                    pointerInfo: activePointerInfo,
+                });
+            }),
+            source.drag.onDrag.add((event: PointerDragMoveEvent) => {
+                onDragObservable.notifyObservers({
+                    delta: toVector3(event.delta),
+                    dragPlanePoint: toVector3(event.dragPlanePoint),
+                    dragPlaneNormal: toVector3(event.dragPlaneNormal),
+                    dragDistance: event.dragDistance,
+                    pointerId: activePointerId,
+                    pointerInfo: activePointerInfo,
+                });
+            }),
+            source.drag.onDragEnd.add((event: PointerDragEndEvent) => {
+                onDragEndObservable.notifyObservers({
+                    dragPlanePoint: toVector3(event.dragPlanePoint),
+                    pointerId: event.pointerEvent?.pointerId ?? activePointerId,
+                    pointerInfo: activePointerInfo,
+                });
+                activePointerId = -1;
+                activePointerInfo = null;
+            })
+        );
+    }
+    return subscriptions;
+}
 
 /** Babylon.js `UtilityLayerRenderer` — the overlay scene gizmos render into. */
 export class UtilityLayerRenderer {
@@ -126,10 +198,20 @@ export class PositionGizmo extends GizmoBase {
     private _xGizmo: AxisDragGizmo | null = null;
     private _yGizmo: AxisDragGizmo | null = null;
     private _zGizmo: AxisDragGizmo | null = null;
+    private _dragSubscriptions: (() => void)[];
+    public readonly onDragStartObservable = new Observable<DragStartEndEvent>();
+    public readonly onDragObservable = new Observable<DragEvent>();
+    public readonly onDragEndObservable = new Observable<DragStartEndEvent>();
 
     public constructor(layer: UtilityLayerRenderer) {
         super(layer);
         this._lite = createPositionGizmo(layer._engine, layer._lite);
+        this._dragSubscriptions = wireCompositeDragObservables(
+            [this._lite.xGizmo, this._lite.yGizmo, this._lite.zGizmo],
+            this.onDragStartObservable,
+            this.onDragObservable,
+            this.onDragEndObservable
+        );
         // Babylon.js `Gizmo.updateGizmoRotationToMatchAttachedMesh` defaults to true.
         setPositionGizmoLocalCoordinates(this._lite, true);
     }
@@ -169,6 +251,13 @@ export class PositionGizmo extends GizmoBase {
 
     public override dispose(): void {
         disposePositionGizmo(this._lite, this._layer._lite);
+        for (const unsubscribe of this._dragSubscriptions) {
+            unsubscribe();
+        }
+        this._dragSubscriptions = [];
+        this.onDragStartObservable.clear();
+        this.onDragObservable.clear();
+        this.onDragEndObservable.clear();
     }
 }
 
@@ -179,10 +268,20 @@ export class RotationGizmo extends GizmoBase {
     private _xGizmo: PlaneRotationGizmo | null = null;
     private _yGizmo: PlaneRotationGizmo | null = null;
     private _zGizmo: PlaneRotationGizmo | null = null;
+    private _dragSubscriptions: (() => void)[];
+    public readonly onDragStartObservable = new Observable<DragStartEndEvent>();
+    public readonly onDragObservable = new Observable<DragEvent>();
+    public readonly onDragEndObservable = new Observable<DragStartEndEvent>();
 
     public constructor(layer: UtilityLayerRenderer) {
         super(layer);
         this._lite = createRotationGizmo(layer._engine, layer._lite);
+        this._dragSubscriptions = wireCompositeDragObservables(
+            [this._lite.xGizmo, this._lite.yGizmo, this._lite.zGizmo],
+            this.onDragStartObservable,
+            this.onDragObservable,
+            this.onDragEndObservable
+        );
         // Babylon.js `Gizmo.updateGizmoRotationToMatchAttachedMesh` defaults to true.
         setRotationGizmoLocalCoordinates(this._lite, true);
     }
@@ -220,6 +319,13 @@ export class RotationGizmo extends GizmoBase {
 
     public override dispose(): void {
         disposeRotationGizmo(this._lite, this._layer._lite);
+        for (const unsubscribe of this._dragSubscriptions) {
+            unsubscribe();
+        }
+        this._dragSubscriptions = [];
+        this.onDragStartObservable.clear();
+        this.onDragObservable.clear();
+        this.onDragEndObservable.clear();
     }
 }
 
