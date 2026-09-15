@@ -20,6 +20,7 @@ import { invertMat4 } from "../math/invert-mat4.js";
 import { multiplyMat4 } from "../math/multiply-mat4.js";
 import { createScalingMat4 } from "../math/create-scaling-mat4.js";
 import { decomposeMat4 } from "../math/decompose-mat4.js";
+import { havokTransformToNode, nodeToHavokTransform } from "./havok-transform.js";
 
 // ─── Enums ───────────────────────────────────────────────────────────
 
@@ -366,30 +367,29 @@ function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
     // Floating-origin worlds run a multi-region step (loaded on demand).
     if (world._fo) {
         world._fo.step(world, dt);
-        return;
-    }
-
-    // Pre-step: sync moved nodes into Havok. A body syncs only when its prestep type is not
-    // DISABLED and it is either ANIMATED (kinematic) or explicitly pre-stepped. TELEPORT snaps the
-    // body to the node; ACTION sets a velocity toward it (so resting bodies are dragged via friction).
-    for (let i = 0; i < bodies.length; i++) {
-        const b = bodies[i]!;
-        if (b._prestepType !== PhysicsPrestepType.DISABLED && (b.motionType === (PhysicsMotionType.ANIMATED as number) || b._preStep)) {
-            if (b._prestepType === PhysicsPrestepType.ACTION) {
-                _syncNodeToBodyTarget(hknp, b);
-            } else {
-                _syncNodeToBody(hknp, b);
+    } else {
+        // Pre-step: sync moved nodes into Havok. A body syncs only when its prestep type is not
+        // DISABLED and it is either ANIMATED (kinematic) or explicitly pre-stepped. TELEPORT snaps the
+        // body to the node; ACTION sets a velocity toward it (so resting bodies are dragged via friction).
+        for (let i = 0; i < bodies.length; i++) {
+            const b = bodies[i]!;
+            if (b._prestepType !== PhysicsPrestepType.DISABLED && (b.motionType === (PhysicsMotionType.ANIMATED as number) || b._preStep)) {
+                if (b._prestepType === PhysicsPrestepType.ACTION) {
+                    _syncNodeToBodyTarget(hknp, b);
+                } else {
+                    _syncNodeToBody(hknp, b);
+                }
             }
         }
-    }
 
-    hknp.HP_World_Step(hkWorld, dt);
+        hknp.HP_World_Step(hkWorld, dt);
 
-    // Post-step: sync DYNAMIC bodies from Havok → node
-    for (let i = 0; i < bodies.length; i++) {
-        const b = bodies[i]!;
-        if (b.motionType === (PhysicsMotionType.DYNAMIC as number)) {
-            _syncBodyToNode(hknp, b);
+        // Post-step: sync DYNAMIC bodies from Havok → node
+        for (let i = 0; i < bodies.length; i++) {
+            const b = bodies[i]!;
+            if (b.motionType === (PhysicsMotionType.DYNAMIC as number)) {
+                _syncBodyToNode(hknp, b);
+            }
         }
     }
 
@@ -427,11 +427,8 @@ function _syncBodyToNode(hknp: any, body: PhysicsBody): void {
         return;
     }
     const t = hknp.HP_Body_GetQTransform(body._hkBody)[1];
-    const pos = t[0]; // [x, y, z]
-    const rot = t[1]; // [x, y, z, w]
     const node = body.node;
-    node.position.set(pos[0], pos[1], pos[2]);
-    node.rotationQuaternion.set(rot[0], rot[1], rot[2], rot[3]);
+    havokTransformToNode(t, node);
 }
 
 function _syncNodeToBody(hknp: any, body: PhysicsBody): void {
@@ -439,12 +436,7 @@ function _syncNodeToBody(hknp: any, body: PhysicsBody): void {
         return;
     }
     const node = body.node;
-    const p = node.position;
-    const q = node.rotationQuaternion;
-    hknp.HP_Body_SetQTransform(body._hkBody, [
-        [p.x, p.y, p.z],
-        [q.x, q.y, q.z, q.w],
-    ]);
+    hknp.HP_Body_SetQTransform(body._hkBody, nodeToHavokTransform(node));
 }
 
 // ACTION prestep: instead of snapping the body, set its target transform so Havok derives a
@@ -455,12 +447,7 @@ function _syncNodeToBodyTarget(hknp: any, body: PhysicsBody): void {
         return;
     }
     const node = body.node;
-    const p = node.position;
-    const q = node.rotationQuaternion;
-    hknp.HP_Body_SetTargetQTransform(body._hkBody, [
-        [p.x, p.y, p.z],
-        [q.x, q.y, q.z, q.w],
-    ]);
+    hknp.HP_Body_SetTargetQTransform(body._hkBody, nodeToHavokTransform(node));
 }
 
 // ─── Gravity ─────────────────────────────────────────────────────────
@@ -623,13 +610,7 @@ export function createPhysicsBody(world: PhysicsWorld, node: SceneNode, motionTy
     } else {
         // Add to world first, then set transform (Havok resets transform on add)
         hknp.HP_World_AddBody(hkWorld, hkBody, startsAsleep);
-
-        const p = node.position;
-        const q = node.rotationQuaternion;
-        hknp.HP_Body_SetQTransform(hkBody, [
-            [p.x, p.y, p.z],
-            [q.x, q.y, q.z, q.w],
-        ]);
+        hknp.HP_Body_SetQTransform(hkBody, nodeToHavokTransform(node));
     }
 
     world._bodies.push(body);
@@ -1406,15 +1387,28 @@ export function setPhysicsBodyMotionType(world: PhysicsWorld, body: PhysicsBody,
  * reads the node before the next physics step stays consistent.
  */
 export function setPhysicsBodyTransform(world: PhysicsWorld, body: PhysicsBody, position: Vec3, rotation: Quat): void {
-    world._hknp.HP_Body_SetQTransform(body._hkBody, [
+    const t = [
         [position.x, position.y, position.z],
         [rotation.x, rotation.y, rotation.z, rotation.w],
-    ]);
+    ] as const;
+    world._hknp.HP_Body_SetQTransform(body._hkBody, t);
     if (world._thin?.count(body) !== undefined) {
         return;
     }
-    body.node.position.set(position.x, position.y, position.z);
-    body.node.rotationQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+    havokTransformToNode(t, body.node);
+}
+
+/**
+ * Get a body's current world-space position and orientation.
+ */
+export function getPhysicsBodyTransform(world: PhysicsWorld, body: PhysicsBody): { position: Vec3; rotation: Quat } {
+    if (world._fo) {
+        return world._fo.getBodyTransform(world, body);
+    }
+    const t = world._hknp.HP_Body_GetQTransform(body._hkBody)[1];
+    const position = { x: t[0][0], y: t[0][1], z: t[0][2] };
+    const rotation = { x: t[1][0], y: t[1][1], z: t[1][2], w: t[1][3] };
+    return { position, rotation };
 }
 
 // ─── Removal ─────────────────────────────────────────────────────────

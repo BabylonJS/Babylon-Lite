@@ -14,9 +14,10 @@
  * Mirrors Babylon.js's `scene.floatingOriginMode` + Havok plugin `floatingOriginWorldRadius`.
  */
 
-import type { Vec3 } from "../math/types.js";
+import type { Quat, Vec3 } from "../math/types.js";
+import { havokTransformToNode, nodeToHavokTransform } from "./havok-transform.js";
 import type { PhysicsBody, PhysicsWorld } from "./havok.js";
-import { PhysicsMotionType } from "./havok.js";
+import { PhysicsMotionType, PhysicsPrestepType } from "./havok.js";
 
 /**
  * A simulation region: a native Havok world whose bodies are simulated relative to a fixed
@@ -47,6 +48,7 @@ export interface HavokFloatingOriginContext {
     setGravity(world: PhysicsWorld, gravity: number[], worldPosition?: Vec3): void;
     getRegionGravity(world: PhysicsWorld, worldPosition: Vec3): number[];
     setVelocityLimits(world: PhysicsWorld, maxLinear: number, maxAngular: number): void;
+    getBodyTransform(world: PhysicsWorld, body: PhysicsBody): { position: Vec3; rotation: Quat };
     dispose(world: PhysicsWorld): void;
 }
 
@@ -64,6 +66,7 @@ export function createHavokFloatingOriginContext(hkWorld: any, gravity: number[]
         setGravity: _setGravity,
         getRegionGravity: _getRegionGravity,
         setVelocityLimits: _setVelocityLimits,
+        getBodyTransform: _getBodyTransform,
         dispose: _dispose,
     };
 }
@@ -110,15 +113,12 @@ function _getOrCreateRegion(world: PhysicsWorld, pos: Vec3): WorldRegion {
 function _placeBody(world: PhysicsWorld, body: PhysicsBody, startsAsleep: boolean): void {
     const hknp = world._hknp;
     const node = body.node;
-    const region = _getOrCreateRegion(world, node.position);
+    const t = nodeToHavokTransform(node);
+    const p = { x: t[0][0], y: t[0][1], z: t[0][2] };
+    const region = _getOrCreateRegion(world, p);
     hknp.HP_World_AddBody(region._world, body._hkBody, startsAsleep);
-    const p = node.position;
-    const q = node.rotationQuaternion;
     const o = region.origin;
-    hknp.HP_Body_SetQTransform(body._hkBody, [
-        [p.x - o.x, p.y - o.y, p.z - o.z],
-        [q.x, q.y, q.z, q.w],
-    ]);
+    hknp.HP_Body_SetQTransform(body._hkBody, [[p.x - o.x, p.y - o.y, p.z - o.z], t[1]]);
     body._region = region;
 }
 
@@ -132,11 +132,17 @@ function _step(world: PhysicsWorld, dt: number): void {
         _reRegionBody(world, bodies[i]!);
     }
 
-    // Pre-step: sync ANIMATED bodies from node → Havok.
+    // Pre-step: sync moved nodes into Havok. A body syncs only when its prestep type is not
+    // DISABLED and it is either ANIMATED (kinematic) or explicitly pre-stepped. TELEPORT snaps the
+    // body to the node; ACTION sets a velocity toward it (so resting bodies are dragged via friction).
     for (let i = 0; i < bodies.length; i++) {
         const b = bodies[i]!;
-        if (b.motionType === (PhysicsMotionType.ANIMATED as number)) {
-            _syncNodeToBody(hknp, b);
+        if (b._prestepType !== PhysicsPrestepType.DISABLED && (b.motionType === (PhysicsMotionType.ANIMATED as number) || b._preStep)) {
+            if (b._prestepType === PhysicsPrestepType.ACTION) {
+                _syncNodeToBodyTarget(hknp, b);
+            } else {
+                _syncNodeToBody(hknp, b);
+            }
         }
     }
 
@@ -181,6 +187,14 @@ function _setVelocityLimits(world: PhysicsWorld, maxLinear: number, maxAngular: 
     for (const region of world._fo!.regions) {
         world._hknp.HP_World_SetSpeedLimit(region._world, maxLinear, maxAngular);
     }
+}
+
+function _getBodyTransform(world: PhysicsWorld, body: PhysicsBody): { position: Vec3; rotation: Quat } {
+    const t = world._hknp.HP_Body_GetQTransform(body._hkBody)[1];
+    const o = body._region!.origin;
+    const position = { x: t[0][0] + o.x, y: t[0][1] + o.y, z: t[0][2] + o.z };
+    const rotation = { x: t[1][0], y: t[1][1], z: t[1][2], w: t[1][3] };
+    return { position, rotation };
 }
 
 function _dispose(world: PhysicsWorld): void {
@@ -277,17 +291,19 @@ function _syncBodyToNode(hknp: any, body: PhysicsBody): void {
     const rot = t[1]; // [x, y, z, w]
     const o = body._region!.origin;
     const node = body.node;
-    node.position.set(pos[0] + o.x, pos[1] + o.y, pos[2] + o.z);
-    node.rotationQuaternion.set(rot[0], rot[1], rot[2], rot[3]);
+    havokTransformToNode([[pos[0] + o.x, pos[1] + o.y, pos[2] + o.z], rot], node);
 }
 
 function _syncNodeToBody(hknp: any, body: PhysicsBody): void {
     const node = body.node;
-    const p = node.position;
-    const q = node.rotationQuaternion;
+    const t = nodeToHavokTransform(node);
     const o = body._region!.origin;
-    hknp.HP_Body_SetQTransform(body._hkBody, [
-        [p.x - o.x, p.y - o.y, p.z - o.z],
-        [q.x, q.y, q.z, q.w],
-    ]);
+    hknp.HP_Body_SetQTransform(body._hkBody, [[t[0][0] - o.x, t[0][1] - o.y, t[0][2] - o.z], t[1]]);
+}
+
+function _syncNodeToBodyTarget(hknp: any, body: PhysicsBody): void {
+    const node = body.node;
+    const t = nodeToHavokTransform(node);
+    const o = body._region!.origin;
+    hknp.HP_Body_SetTargetQTransform(body._hkBody, [[t[0][0] - o.x, t[0][1] - o.y, t[0][2] - o.z], t[1]]);
 }
