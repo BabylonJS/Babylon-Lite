@@ -336,7 +336,7 @@ export {
     ValidateFlowGraph,
     ValidateFlowGraphWithBlockList,
 } from "./unsupported/unsupported-apis.js";
-export { MaterialPluginBase } from "./materials/material-plugin.js";
+export { MaterialPluginBase, MaterialPluginManager } from "./materials/material-plugin.js";
 export type { MaterialPluginDefines, MaterialPluginCustomCode } from "./materials/material-plugin.js";
 export * as GLTF2 from "./loading/gltf2.js";
 export * as GLTF1 from "./loading/gltf1.js";

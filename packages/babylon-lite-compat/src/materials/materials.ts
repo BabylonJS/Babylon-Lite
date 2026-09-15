@@ -39,6 +39,7 @@ import type {
 import { Color3 } from "../math/color.js";
 import type { Scene } from "../scene/scene.js";
 import type { BaseTexture, CubeTexture, HDRCubeTexture } from "../textures/textures.js";
+import type { MaterialPluginManager } from "./material-plugin.js";
 
 type Tuple3 = [number, number, number];
 type Tuple4 = [number, number, number, number];
@@ -48,6 +49,8 @@ export abstract class Material {
     public name: string;
     /** @internal Whether a compat `MaterialPluginBase` is attached. */
     public _usesMaterialPlugins = false;
+    /** Babylon.js plugin manager, created lazily by the first `MaterialPluginBase`. */
+    public pluginManager: MaterialPluginManager | undefined;
     /** Common transparency mode flag (Babylon.js `Material.transparencyMode`). */
     public transparencyMode: number | null = null;
     /** Back-face culling toggle (Babylon.js `Material.backFaceCulling`). */

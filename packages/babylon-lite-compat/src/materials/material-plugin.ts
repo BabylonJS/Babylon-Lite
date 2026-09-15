@@ -57,6 +57,43 @@ function toLiteDefines(defines: MaterialPluginDefines): Record<string, boolean |
     return translated;
 }
 
+/** Babylon.js-shaped manager for the adapter-visible material plugin list. */
+export class MaterialPluginManager {
+    private readonly _plugins: MaterialPluginBase[] = [];
+
+    public constructor(material: Material) {
+        void material;
+    }
+
+    /** @internal Attach a plugin through Lite's descriptor list. */
+    public _addPlugin(plugin: MaterialPluginBase): boolean {
+        if (this._plugins.some((candidate) => candidate.name === plugin.name)) {
+            return false;
+        }
+        this._plugins.push(plugin);
+        this._plugins.sort((a, b) => a.priority - b.priority);
+        plugin._attachToLiteMaterial();
+        return true;
+    }
+
+    /** @internal Activate a plugin through Lite's descriptor state. */
+    public _activatePlugin(plugin: MaterialPluginBase): void {
+        plugin._setLiteEnabled(true);
+    }
+
+    /** @internal Remove a disposed plugin from the adapter-visible list. */
+    public _removePlugin(plugin: MaterialPluginBase): void {
+        const index = this._plugins.indexOf(plugin);
+        if (index >= 0) {
+            this._plugins.splice(index, 1);
+        }
+    }
+
+    public getPlugin<T = MaterialPluginBase>(name: string): T | null {
+        return (this._plugins.find((plugin) => plugin.name === name) as T | undefined) ?? null;
+    }
+}
+
 /**
  * Babylon.js `MaterialPluginBase` adapter over Lite's opt-in material-plugin
  * bridge. Subclasses keep the Babylon.js override shape while Lite receives a
@@ -70,6 +107,7 @@ export class MaterialPluginBase {
     public registerForExtraEvents = false;
     public doNotSerialize = false;
     protected readonly _material: Material;
+    protected readonly _pluginManager: MaterialPluginManager;
     protected readonly _pluginDefineNames?: MaterialPluginDefines;
 
     /** @internal Plain plugin descriptor attached to the backing Lite material. */
@@ -81,6 +119,7 @@ export class MaterialPluginBase {
         this._priority = priority;
         this.resolveIncludes = resolveIncludes;
         this._pluginDefineNames = defines;
+        this._pluginManager = material.pluginManager ??= new MaterialPluginManager(material);
         this.markAllDefinesAsDirty = () => material._markPluginDefinesDirty();
         this._lite = {
             get name() {
@@ -97,11 +136,8 @@ export class MaterialPluginBase {
             },
         };
 
-        if (addToPluginList && this._attachToLite) {
-            const liteMaterial = material._lite as typeof material._lite & { plugins?: MaterialPlugin[] };
-            liteMaterial.plugins = [...(liteMaterial.plugins ?? []), this._lite];
-            material._usesMaterialPlugins = true;
-            material.getScene()?._requestMaterialPlugins(material._lite);
+        if (addToPluginList) {
+            this._pluginManager._addPlugin(this);
         }
     }
 
@@ -140,6 +176,26 @@ export class MaterialPluginBase {
     }
 
     protected _enable(enable: boolean): void {
+        if (enable) {
+            this._pluginManager._activatePlugin(this);
+        } else {
+            this._setLiteEnabled(false);
+        }
+    }
+
+    /** @internal Attach this adapter's descriptor to the backing Lite material. */
+    public _attachToLiteMaterial(): void {
+        if (!this._attachToLite) {
+            return;
+        }
+        const liteMaterial = this._material._lite as typeof this._material._lite & { plugins?: MaterialPlugin[] };
+        liteMaterial.plugins = [...(liteMaterial.plugins ?? []), this._lite];
+        this._material._usesMaterialPlugins = true;
+        this._material.getScene()?._requestMaterialPlugins(this._material._lite);
+    }
+
+    /** @internal Update this adapter's Lite activation state. */
+    public _setLiteEnabled(enable: boolean): void {
         this._lite.isEnabled = enable;
         this.markAllDefinesAsDirty();
     }
@@ -287,5 +343,6 @@ export class MaterialPluginBase {
             this._material._usesMaterialPlugins = liteMaterial.plugins.length > 0;
             this._material._markPluginDefinesDirty();
         }
+        this._pluginManager._removePlugin(this);
     }
 }

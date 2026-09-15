@@ -12,7 +12,7 @@ vi.mock("babylon-lite", async (importActual) => {
     };
 });
 
-import { MaterialPluginBase } from "../src/materials/material-plugin";
+import { MaterialPluginBase, MaterialPluginManager } from "../src/materials/material-plugin";
 import { StandardMaterial } from "../src/materials/materials";
 import { ShaderLanguage } from "../src/misc/engine-constants";
 import { Scene } from "../src/scene/scene";
@@ -119,6 +119,23 @@ describe("MaterialPluginBase", () => {
         plugin.doNotSerialize = true;
 
         expect(plugin.serialize()).toMatchObject({ name: "Renamed", priority: 150, registerForExtraEvents: true, doNotSerialize: true });
+    });
+
+    it("shares the Babylon.js plugin-manager surface across material plugins", () => {
+        class ManagerAwarePlugin extends MaterialPluginBase {
+            public find(name: string): MaterialPluginBase | null {
+                return this._pluginManager.getPlugin(name);
+            }
+        }
+
+        const material = new StandardMaterial("material");
+        const first = new ManagerAwarePlugin(material, "First", 200);
+        const second = new ManagerAwarePlugin(material, "Second", 100);
+
+        expect(material.pluginManager).toBeInstanceOf(MaterialPluginManager);
+        expect(first.find("Second")).toBe(second);
+        second.dispose();
+        expect(first.find("Second")).toBeNull();
     });
 
     it("rejects unsupported include values through construction, mutation, copying, and parsing", () => {
