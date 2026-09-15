@@ -183,6 +183,8 @@ export {
     Constants,
     RegisterImageProcessingConfiguration,
     RegisterAbstractEngineTextureLoaders,
+    RegisterEnginesExtensionsEngineTexture2DArrayImageSource,
+    RegisterEnginesWebGPUExtensionsEngineTexture2DArrayImageSource,
 } from "./misc/engine-constants.js";
 
 // ─── Actions ─────────────────────────────────────────────────────────
@@ -329,7 +331,13 @@ export {
     RegisterFluidRenderer,
     USDFileLoader,
     RegisterUSDFileLoader,
+    DitheredTileFadeMaterialPlugin,
+    FlowGraphValidationSeverity,
+    ValidateFlowGraph,
+    ValidateFlowGraphWithBlockList,
 } from "./unsupported/unsupported-apis.js";
+export { MaterialPluginBase, MaterialPluginManager } from "./materials/material-plugin.js";
+export type { MaterialPluginDefines, MaterialPluginCustomCode } from "./materials/material-plugin.js";
 export * as GLTF2 from "./loading/gltf2.js";
 export * as GLTF1 from "./loading/gltf1.js";
 export type {
@@ -349,6 +357,11 @@ export type {
     USDImportStatistics,
     USDImportDiagnostics,
     USDFileLoaderOptions,
+    DitheredTileFadeSupportedMaterial,
+    DitheredTileFadeMesh,
+    IDitheredTileFadeBounds,
+    IFlowGraphValidationIssue,
+    IFlowGraphValidationResult,
 } from "./unsupported/unsupported-apis.js";
 export {
     ReflectionProbe,
@@ -379,13 +392,26 @@ export {
     OBJFileLoader,
     STLFileLoader,
     FBXFileLoader,
+    FBXFileLoaderMetadata,
+    FBXConstraintBehavior,
+    FBXConstraintSolver,
     BVHFileLoader,
     SpriteMap,
     SpritePackedManager,
     VirtualJoystick,
     SceneOptimizer,
 } from "./unsupported/unsupported-extended.js";
-export type { GeometryRenderingObjectIdProvider } from "./unsupported/unsupported-extended.js";
+export type {
+    GeometryRenderingObjectIdProvider,
+    FBXNormalMapCoordinateSystem,
+    FBXLoaderWarning,
+    FBXFileLoaderOptions,
+    FBXConstraintType,
+    FBXConstraintTarget,
+    FBXConstraintData,
+    FBXConstraintBehaviorTarget,
+    FBXConstraintBehaviorOptions,
+} from "./unsupported/unsupported-extended.js";
 export { Skeleton, Bone } from "./bones/skeleton.js";
 
 export {

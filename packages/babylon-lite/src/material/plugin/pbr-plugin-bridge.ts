@@ -22,9 +22,8 @@ interface PluginEntry {
     readonly _fragment: ShaderFragment | null;
 }
 
-// Lazy-init module state (no module-level Map — GUIDANCE §4). Signatures remain
-// stable for the process lifetime because materials cache their numeric `_pi`
-// and can be rebuilt after another scene registers the bridge.
+// Lazy-init module state (no module-level Map — GUIDANCE §4). Signature identities
+// remain stable for the runtime because pipeline/binding caches outlive individual scenes.
 let _sigToIndex: Map<string, number> | null = null;
 let _indexToEntry: Map<number, PluginEntry> | null = null;
 let _counter = 0;

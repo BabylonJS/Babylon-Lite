@@ -72,6 +72,7 @@ import {
     FluidRenderer,
     FluidRendererSceneComponent,
     RegisterFluidRenderer,
+    DitheredTileFadeMaterialPlugin,
 } from "../src/unsupported/unsupported-apis";
 import {
     GLTF1,
@@ -85,7 +86,7 @@ import {
 } from "../src/index";
 import { MeshBuilder, CreateTiledBox, CreateTiledPlane } from "../src/meshes/meshes";
 import { SceneLoader } from "../src/loading/scene-loader";
-import { Material, PushMaterial } from "../src/materials/materials";
+import { Material, PushMaterial, StandardMaterial } from "../src/materials/materials";
 import { NullEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
 
@@ -110,6 +111,7 @@ describe("LiteCompatError", () => {
 describe("Unsupported API stubs throw on construction", () => {
     const cases: Array<[string, () => unknown]> = [
         ["MultiMaterial", () => new MultiMaterial()],
+        ["DitheredTileFadeMaterialPlugin", () => new DitheredTileFadeMaterialPlugin(new StandardMaterial("material"))],
         ["ShaderMaterial", () => new ShaderMaterial()],
         ["OpenPBRMaterial", () => new OpenPBRMaterial("openpbr", undefined, true)],
         ["OpenPBRMaterialDefines", () => new OpenPBRMaterialDefines({ CUSTOM: { type: "boolean", default: false } })],

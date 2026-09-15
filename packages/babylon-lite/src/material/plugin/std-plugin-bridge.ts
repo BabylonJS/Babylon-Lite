@@ -189,7 +189,7 @@ const stdPluginExt: StdExt = {
  *  the `_buildGroup` discriminator so their `_renderFeatures` is left untouched
  *  for the PBR build's own `detect`-based feature computation. */
 export function registerStdPlugins(scene: SceneContext, register: (ext: StdExt) => void): (deltaMs: number) => void {
-    register(stdPluginExt);
+    const refresh = registerStdPluginBridge(scene, register);
     const state = _sceneState(scene);
     const materials = new Set<StandardMaterialProps>();
     for (const m of scene.meshes) {
@@ -209,7 +209,15 @@ export function registerStdPlugins(scene: SceneContext, register: (ext: StdExt) 
             bakeStdPluginMaterial(mat, scene);
         }
     }
-    return state._refresh;
+    return refresh;
+}
+
+/** Register the Standard bridge and obtain this scene's refresh callback without
+ * walking or rebaking its materials. Runtime reconciliation uses this before
+ * targeting one changed material. */
+export function registerStdPluginBridge(scene: SceneContext, register: (ext: StdExt) => void): (deltaMs: number) => void {
+    register(stdPluginExt);
+    return _sceneState(scene)._refresh;
 }
 
 /**
