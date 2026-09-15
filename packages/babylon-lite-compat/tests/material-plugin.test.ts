@@ -90,15 +90,63 @@ describe("MaterialPluginBase", () => {
         };
         const material = new StandardMaterial("material", scene as never);
 
-        const detached = new MaterialPluginBase(material, "Detached", 300, {}, false, true, true);
+        const detached = new MaterialPluginBase(material, "Detached", 300, {}, false, true);
         expect(material._lite.plugins).toBeUndefined();
-        expect(detached.resolveIncludes).toBe(true);
+        expect(detached.resolveIncludes).toBe(false);
 
         const enabled = new MaterialPluginBase(material, "Enabled", 200, {}, true, true);
         expect(material._lite.plugins?.[0]).toMatchObject({ name: "Enabled", isEnabled: true });
         enabled.markAllDefinesAsDirty();
 
         expect(requests).toBe(2);
+    });
+
+    it("preserves the Babylon.js subclass hook shape and mutable identity fields", () => {
+        interface Defines {
+            CUSTOM: boolean;
+        }
+        class StructuralPlugin extends MaterialPluginBase {
+            public override prepareDefines(_defines: Defines, _scene: Scene, _mesh: never): void {}
+            public override getUniforms(_shaderLanguage = ShaderLanguage.GLSL): { ubo: Array<{ name: string; type: string }> } {
+                return { ubo: [{ name: "value", type: "float" }] };
+            }
+        }
+
+        const plugin = new StructuralPlugin(new StandardMaterial("material"), "Structural", 100);
+        plugin.name = "Renamed";
+        plugin.priority = 150;
+        plugin.registerForExtraEvents = true;
+        plugin.doNotSerialize = true;
+
+        expect(plugin.serialize()).toMatchObject({ name: "Renamed", priority: 150, registerForExtraEvents: true, doNotSerialize: true });
+    });
+
+    it("rejects unsupported include, regex, and subclass-hook execution explicitly", () => {
+        const material = new StandardMaterial("material");
+        expect(() => new MaterialPluginBase(material, "Includes", 100, {}, true, true, true)).toThrow(/ShaderStore include registry/);
+
+        class RegexPlugin extends MaterialPluginBase {
+            public override isCompatible(): boolean {
+                return true;
+            }
+            public override getCustomCode(): Record<string, string> {
+                return { "!fragmentOutputs": "replacement" };
+            }
+        }
+        const regex = new RegexPlugin(material, "Regex", 100, {}, true, true);
+        expect(() => material._lite.plugins?.at(-1)?.getCustomCode?.("fragment")).toThrow(/composed host shader source/);
+        regex.dispose();
+
+        class UniformPlugin extends MaterialPluginBase {
+            public override isCompatible(): boolean {
+                return true;
+            }
+            public override getUniforms(): { ubo: Array<{ name: string; type: string }> } {
+                return { ubo: [{ name: "value", type: "float" }] };
+            }
+        }
+        new UniformPlugin(material, "Uniform", 100, {}, true, true);
+        expect(() => material._lite.plugins?.at(-1)?.getCustomCode?.("fragment")).toThrow(/uniform-buffer/);
     });
 
     it("schedules Lite reconciliation when a live scene adopts a plugin material", async () => {
@@ -119,6 +167,24 @@ describe("MaterialPluginBase", () => {
         scene._requestMaterialPlugins(liteMaterial as never);
         expect(work).toBeTypeOf("function");
         await work!();
+
+        expect(reconcileMaterialPluginsMock).toHaveBeenCalledWith(liteScene, liteMaterial);
+    });
+
+    it("reconciles a plugin request raised after startup registration but before the first frame completes", async () => {
+        const liteScene = {};
+        const liteMaterial = {};
+        const scene = Object.create(Scene.prototype) as Scene;
+        Object.assign(scene, {
+            _lite: liteScene,
+            _started: true,
+            _materialPluginsRequested: false,
+            _pendingMaterialPluginReconciliations: new Set(),
+            _engine: { _hasStarted: false },
+        });
+
+        scene._requestMaterialPlugins(liteMaterial as never);
+        await scene._reconcilePendingMaterialPlugins();
 
         expect(reconcileMaterialPluginsMock).toHaveBeenCalledWith(liteScene, liteMaterial);
     });

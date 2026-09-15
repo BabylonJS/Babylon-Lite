@@ -141,6 +141,23 @@ describe("dynamic Standard material plugins", () => {
         expect(scene._materialSwapQueue).toEqual([]);
     });
 
+    it("reconciles only the changed Standard material", async () => {
+        const { engine, createBuffer } = makeEngine();
+        const changed = createStandardMaterial();
+        const unrelated = createStandardMaterial();
+        changed.plugins = [valuePlugin({ current: 1 })];
+        unrelated.plugins = [valuePlugin({ current: 2 })];
+        const scene = pluginScene(engine, [changed, unrelated]);
+        enableMaterialPlugins(scene);
+        const unrelatedFeatures = unrelated._renderFeatures;
+        const initialBuffers = createBuffer.mock.calls.length;
+
+        await reconcileMaterialPlugins(scene, changed);
+
+        expect(createBuffer).toHaveBeenCalledTimes(initialBuffers + 1);
+        expect(unrelated._renderFeatures).toBe(unrelatedFeatures);
+    });
+
     it("bakes a material shared by multiple meshes only once", () => {
         const { engine, createBuffer } = makeEngine();
         const material = createStandardMaterial();

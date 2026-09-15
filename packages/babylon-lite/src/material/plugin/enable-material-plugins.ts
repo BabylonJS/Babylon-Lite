@@ -32,7 +32,17 @@ import { _registerStdExt } from "../standard/standard-flags.js";
 import { enqueueMaterialSwap } from "../../scene/mesh-scene-registry.js";
 import { processMaterialSwaps } from "../../scene/scene-material-swap.js";
 import { registerPbrPlugins } from "./pbr-plugin-bridge.js";
-import { registerStdPlugins } from "./std-plugin-bridge.js";
+import { bakeStdPluginMaterial, registerStdPluginBridge, registerStdPlugins } from "./std-plugin-bridge.js";
+
+function installRefresh(scene: SceneContext, refresh: (deltaMs: number) => void): void {
+    // Public onBeforeRender() callbacks use unshift(), so appending keeps the upload
+    // after plugin-value mutations regardless of whether they register before or after us.
+    const previous = scene._beforeRender.indexOf(refresh);
+    if (previous >= 0) {
+        scene._beforeRender.splice(previous, 1);
+    }
+    scene._beforeRender.push(refresh);
+}
 
 /**
  * Enable material-plugin support for `scene`.
@@ -50,13 +60,7 @@ import { registerStdPlugins } from "./std-plugin-bridge.js";
 export function enableMaterialPlugins(scene: SceneContext): void {
     registerPbrPlugins(_registerPbrExt);
     const refresh = registerStdPlugins(scene, _registerStdExt);
-    // Public onBeforeRender() callbacks use unshift(), so appending keeps the upload
-    // after plugin-value mutations regardless of whether they register before or after us.
-    const previous = scene._beforeRender.indexOf(refresh);
-    if (previous >= 0) {
-        scene._beforeRender.splice(previous, 1);
-    }
-    scene._beforeRender.push(refresh);
+    installRefresh(scene, refresh);
 }
 
 /**
@@ -67,8 +71,11 @@ export function enableMaterialPlugins(scene: SceneContext): void {
  * stable signature index while the queued renderable rebuild runs.
  */
 export async function reconcileMaterialPlugins(scene: SceneContext, material: Material): Promise<void> {
-    enableMaterialPlugins(scene);
+    registerPbrPlugins(_registerPbrExt);
+    installRefresh(scene, registerStdPluginBridge(scene, _registerStdExt));
     const source = getMaterialSource(material);
+    source._renderFeatures = undefined;
+    bakeStdPluginMaterial(source, scene);
     for (const mesh of scene.meshes) {
         if (mesh.material && getMaterialSource(mesh.material) === source) {
             enqueueMaterialSwap(scene, mesh);

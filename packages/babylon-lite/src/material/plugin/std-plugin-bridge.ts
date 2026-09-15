@@ -21,6 +21,7 @@ import type { StdExt } from "../standard/standard-flags.js";
 import type { StandardMaterialProps } from "../standard/standard-material.js";
 import { _computeStandardMaterialFeatures, getStandardGroupBuilder } from "../standard/standard-material.js";
 import { getMaterialSource } from "../material-view.js";
+import type { Material } from "../material.js";
 import type { SceneContext } from "../../scene/scene.js";
 import { enqueueMaterialSwap } from "../../scene/mesh-scene-registry.js";
 import type { ShaderFragment, UboSpec } from "../../shader/fragment-types.js";
@@ -189,7 +190,7 @@ const stdPluginExt: StdExt = {
  *  the `_buildGroup` discriminator so their `_renderFeatures` is left untouched
  *  for the PBR build's own `detect`-based feature computation. */
 export function registerStdPlugins(scene: SceneContext, register: (ext: StdExt) => void): (deltaMs: number) => void {
-    register(stdPluginExt);
+    const refresh = registerStdPluginBridge(scene, register);
     const state = _sceneState(scene);
     const materials = new Set<StandardMaterialProps>();
     for (const m of scene.meshes) {
@@ -209,7 +210,15 @@ export function registerStdPlugins(scene: SceneContext, register: (ext: StdExt) 
             bakeStdPluginMaterial(mat, scene);
         }
     }
-    return state._refresh;
+    return refresh;
+}
+
+/** Register the Standard bridge and obtain this scene's refresh callback without
+ * walking or rebaking its materials. Runtime reconciliation uses this before
+ * targeting one changed material. */
+export function registerStdPluginBridge(scene: SceneContext, register: (ext: StdExt) => void): (deltaMs: number) => void {
+    register(stdPluginExt);
+    return _sceneState(scene)._refresh;
 }
 
 /**
@@ -218,10 +227,11 @@ export function registerStdPlugins(scene: SceneContext, register: (ext: StdExt) 
  * Call this after assigning plugins to a Standard material created after
  * {@link registerStdPlugins} has walked the scene, and before its mesh first renders.
  */
-export function bakeStdPluginMaterial(mat: StandardMaterialProps | null | undefined, scene: SceneContext): void {
-    if (!mat || mat._buildGroup !== getStandardGroupBuilder()) {
+export function bakeStdPluginMaterial(material: Material | null | undefined, scene: SceneContext): void {
+    if (!material || material._buildGroup !== getStandardGroupBuilder()) {
         return;
     }
+    const mat = material as StandardMaterialProps;
     const existingSceneState = _sceneStates?.get(scene);
     const old = existingSceneState?._materials.get(mat);
     if (!mat.plugins?.length) {

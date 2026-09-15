@@ -79,7 +79,7 @@ export interface MaterialPlugin {
     dynamic?: boolean;
     /** Static defines folded into the pipeline cache key (and available to the
      *  plugin when it builds its custom code). */
-    defines?: Record<string, boolean | number>;
+    defines?: Record<string, unknown>;
     /** Return WGSL snippets keyed by injection point, or null. */
     getCustomCode?(shaderType: "vertex" | "fragment"): Partial<Record<MaterialPluginPoint, string>> | null;
     /** Declare custom UBO fields appended to the host material's uniform buffer. */

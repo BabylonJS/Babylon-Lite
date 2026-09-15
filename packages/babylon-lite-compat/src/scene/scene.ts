@@ -190,6 +190,7 @@ export class Scene extends AbstractScene {
     private readonly _pendingGroundBakes: Array<() => void> = [];
     private readonly _pendingMorphBuilds: Array<{ mesh: { _lite: unknown }; manager: { _build(mesh: never, engine: import("babylon-lite").EngineContext): void } }> = [];
     private _materialPluginsRequested = false;
+    private readonly _pendingMaterialPluginReconciliations = new Set<LiteMaterial>();
     private readonly _runningAnimatables: Animatable[] = [];
     private readonly _animationGroupCache = new WeakMap<object, AnimationGroup>();
     /** @internal Structural `AnimationGroup`s stepped + weight-blended each frame. */
@@ -444,6 +445,8 @@ export class Scene extends AbstractScene {
                 const { reconcileMaterialPlugins } = await import("babylon-lite");
                 await reconcileMaterialPlugins(this._lite, material);
             });
+        } else if (material && this._started) {
+            this._pendingMaterialPluginReconciliations.add(material);
         }
     }
 
@@ -452,7 +455,20 @@ export class Scene extends AbstractScene {
         if (this._materialPluginsRequested) {
             const { enableMaterialPlugins } = await import("babylon-lite");
             enableMaterialPlugins(this._lite);
+            this._materialPluginsRequested = false;
+            this._pendingMaterialPluginReconciliations.clear();
         }
+    }
+
+    /** @internal Reconcile plugin requests raised by first-frame callbacks before engine startup completes. */
+    public async _reconcilePendingMaterialPlugins(): Promise<void> {
+        while (this._pendingMaterialPluginReconciliations.size > 0) {
+            const materials = [...this._pendingMaterialPluginReconciliations];
+            this._pendingMaterialPluginReconciliations.clear();
+            const { reconcileMaterialPlugins } = await import("babylon-lite");
+            await Promise.all(materials.map((material) => reconcileMaterialPlugins(this._lite, material)));
+        }
+        this._materialPluginsRequested = false;
     }
 
     /** @internal Clustered light containers to register on the Lite scene at engine start. */

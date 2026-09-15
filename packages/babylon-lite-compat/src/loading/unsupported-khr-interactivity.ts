@@ -5,12 +5,56 @@ const KHR_INTERACTIVITY_UNSUPPORTED =
 
 export type KHRInteractivitySignature = "bool" | "float" | "float2" | "float3" | "float4" | "float2x2" | "float3x3" | "float4x4" | "int" | "ref" | "custom";
 
+export interface IKHRInteractivityNode {
+    declaration: number;
+}
+
+export interface IKHRInteractivityGraph {
+    declarations?: IKHRInteractivityDeclaration[];
+    nodes?: IKHRInteractivityNode[];
+}
+
+export interface IKHRInteractivityDeclaration {
+    op: string;
+}
+
+export interface IGLTF {
+    asset: {
+        version: string;
+    };
+}
+
+export interface ISerializedFlowGraphBlock {
+    className: string;
+    type: string;
+    config: unknown;
+    uniqueId: string;
+    dataInputs: unknown[];
+    dataOutputs: unknown[];
+    metadata: unknown;
+    signalInputs: unknown[];
+    signalOutputs: unknown[];
+}
+
+export type ISerializedFlowGraphContext = {
+    uniqueId: string;
+    name?: string;
+    enableLogging?: boolean;
+} & Record<"_userVariables" | "_connectionValues", Record<string, unknown>> &
+    Partial<Record<"_variableTypes", Record<string, string>>> &
+    Partial<Record<"_assetsContext", Record<string, unknown>>>;
+
+type CompatibleCallback<TArgs extends unknown[], TResult> = {
+    bivarianceHack(...args: TArgs): TResult;
+}["bivarianceHack"];
+
 export interface IGLTFToFlowGraphMappingObject {
     name: string;
     compatibilityOnly?: boolean;
     gltfType?: string;
     flowGraphType?: string;
-    dataTransformer?: (data: unknown, parser: InteractivityGraphToFlowGraphParser) => unknown;
+    // Babylon.js intentionally exposes `any` here so explicitly typed transformers remain assignable under strictFunctionTypes.
+    dataTransformer?: (data: any, parser: InteractivityGraphToFlowGraphParser) => any;
     isArray?: boolean;
     inOptions?: boolean;
     isVariable?: boolean;
@@ -60,16 +104,19 @@ export interface IGLTFToFlowGraphMapping {
         outputBlockIndex: number;
         isVariable?: boolean;
     }>;
-    validation?: (gltfBlock: Record<string, unknown>, interactivityGraph: Record<string, unknown>, glTFObject?: Record<string, unknown>) => { valid: boolean; error?: string };
-    extraProcessor?: (
-        gltfBlock: Record<string, unknown>,
-        declaration: Record<string, unknown>,
-        mapping: IGLTFToFlowGraphMapping,
-        parser: InteractivityGraphToFlowGraphParser,
-        serializedObjects: Array<Record<string, unknown>>,
-        context: Record<string, unknown>,
-        globalGLTF?: Record<string, unknown>
-    ) => Array<Record<string, unknown>>;
+    validation?: CompatibleCallback<[gltfBlock: IKHRInteractivityNode, interactivityGraph: IKHRInteractivityGraph, glTFObject?: IGLTF], { valid: boolean; error?: string }>;
+    extraProcessor?: CompatibleCallback<
+        [
+            gltfBlock: IKHRInteractivityNode,
+            declaration: IKHRInteractivityDeclaration,
+            mapping: IGLTFToFlowGraphMapping,
+            parser: InteractivityGraphToFlowGraphParser,
+            serializedObjects: ISerializedFlowGraphBlock[],
+            context: ISerializedFlowGraphContext,
+            globalGLTF?: IGLTF,
+        ],
+        ISerializedFlowGraphBlock[]
+    >;
 }
 
 export interface IDebugLogTemplateParseResult {

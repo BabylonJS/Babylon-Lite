@@ -8,7 +8,16 @@ import {
     ValidateFlowGraph,
 } from "../src/index";
 import { LiteCompatError } from "../src/error";
-import type { IGLTFToFlowGraphMapping } from "../src/loading/unsupported-khr-interactivity";
+import type {
+    IGLTF,
+    IGLTFToFlowGraphMapping,
+    IKHRInteractivityDeclaration,
+    IKHRInteractivityGraph,
+    IKHRInteractivityNode,
+    ISerializedFlowGraphBlock,
+    ISerializedFlowGraphContext,
+    InteractivityGraphToFlowGraphParser,
+} from "../src/loading/unsupported-khr-interactivity";
 
 describe("upstream export coverage", () => {
     it("exposes the texture-array pure registration shims", () => {
@@ -34,14 +43,24 @@ describe("upstream export coverage", () => {
     });
 
     it("preserves the optional KHR_interactivity mapping hooks", () => {
+        const validation = (_node: IKHRInteractivityNode, _graph: IKHRInteractivityGraph, _gltf?: IGLTF) => ({ valid: false, error: "invalid" });
+        const extraProcessor = (
+            _node: IKHRInteractivityNode,
+            _declaration: IKHRInteractivityDeclaration,
+            _mapping: IGLTFToFlowGraphMapping,
+            _parser: InteractivityGraphToFlowGraphParser,
+            serializedObjects: ISerializedFlowGraphBlock[],
+            _context: ISerializedFlowGraphContext,
+            _gltf?: IGLTF
+        ): ISerializedFlowGraphBlock[] => serializedObjects;
         const mapping: IGLTFToFlowGraphMapping = {
             blocks: ["test"],
             interBlockConnectors: [{ input: "in", output: "out", inputBlockIndex: 0, outputBlockIndex: 1, isVariable: true }],
-            validation: () => ({ valid: false, error: "invalid" }),
-            extraProcessor: (_node, _declaration, _mapping, _parser, serializedObjects) => serializedObjects,
+            validation,
+            extraProcessor,
         };
 
         expect(mapping.interBlockConnectors?.[0]?.outputBlockIndex).toBe(1);
-        expect(mapping.validation?.({}, {})).toEqual({ valid: false, error: "invalid" });
+        expect(mapping.validation?.({ declaration: 0 }, {})).toEqual({ valid: false, error: "invalid" });
     });
 });

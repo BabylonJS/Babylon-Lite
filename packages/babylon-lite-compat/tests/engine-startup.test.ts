@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createEngineMock, startEngineMock } = vi.hoisted(() => ({
+const { createEngineMock, enableMirroredMeshesMock, registerSceneMock, startEngineMock } = vi.hoisted(() => ({
     createEngineMock: vi.fn(),
+    enableMirroredMeshesMock: vi.fn<() => Promise<void>>(),
+    registerSceneMock: vi.fn<() => Promise<void>>(),
     startEngineMock: vi.fn<() => Promise<void>>(),
 }));
 
@@ -10,6 +12,8 @@ vi.mock("babylon-lite", async (importActual) => {
     return {
         ...actual,
         createEngine: createEngineMock,
+        enableMirroredMeshes: enableMirroredMeshesMock,
+        registerScene: registerSceneMock,
         startEngine: startEngineMock,
     };
 });
@@ -22,7 +26,7 @@ interface TestEngine {
     _startPromise: Promise<void> | null;
     _startupWork: Array<() => Promise<void>>;
     _lateWork: Array<() => Promise<void>>;
-    _scenes: [];
+    _scenes: Array<Record<string, unknown>>;
     _lite: EngineContext;
     _start(): Promise<void>;
     _registerLateWork(work: () => Promise<void>): void;
@@ -43,6 +47,10 @@ describe("compat engine startup ordering", () => {
     beforeEach(() => {
         createEngineMock.mockReset();
         createEngineMock.mockResolvedValue({});
+        enableMirroredMeshesMock.mockReset();
+        enableMirroredMeshesMock.mockResolvedValue();
+        registerSceneMock.mockReset();
+        registerSceneMock.mockResolvedValue();
         startEngineMock.mockReset();
     });
 
@@ -83,6 +91,36 @@ describe("compat engine startup ordering", () => {
         await engine._start();
 
         expect(order).toEqual(["engine", "utility"]);
+    });
+
+    it("drains first-frame material-plugin requests before startup is marked complete", async () => {
+        const order: string[] = [];
+        startEngineMock.mockImplementation(async () => {
+            order.push("first-frame");
+        });
+        const engine = makeEngine();
+        engine._scenes.push({
+            _buildShadowGenerators: () => undefined,
+            _parseNodeMaterials: () => Promise.resolve(),
+            _awaitPendingTextures: () => Promise.resolve(),
+            _bakeGroundUvs: () => undefined,
+            _flushPendingAdds: () => undefined,
+            _buildMorphTargets: () => undefined,
+            _buildClusteredContainers: () => undefined,
+            _enableMaterialPlugins: () => Promise.resolve(),
+            _loadPendingEnvironment: () => Promise.resolve(),
+            _hasShadows: () => false,
+            _lite: {},
+            _reconcilePendingMaterialPlugins: () => {
+                order.push("plugins");
+                return Promise.resolve();
+            },
+        });
+
+        await engine._start();
+
+        expect(order).toEqual(["first-frame", "plugins"]);
+        expect(engine._startupComplete).toBe(true);
     });
 
     it("runs utility-layer work registered after engine startup", async () => {
