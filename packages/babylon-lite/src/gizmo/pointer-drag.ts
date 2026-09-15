@@ -30,6 +30,8 @@ import type { UtilityLayer } from "./utility-layer.js";
 export interface PointerDragStartEvent {
     /** World-space point where the ray intersected the drag plane on drag start. */
     dragPlanePoint: Vec3;
+    /** Pointer identifier associated with this drag. */
+    pointerId: number;
     /** Browser pointer event that triggered drag start. */
     pointerEvent: PointerEvent;
 }
@@ -44,10 +46,18 @@ export interface PointerDragMoveEvent {
     /** Signed scalar distance projected onto the drag axis since drag start
      *  (axis-drag mode); for plane mode this is `delta.length()`. */
     dragDistance: number;
+    /** World-space normal of the active drag plane. */
+    dragPlaneNormal: Vec3;
+    /** Pointer identifier associated with this drag. */
+    pointerId: number;
 }
 
 /** Event raised when the active pointer drag is released or cancelled. */
 export interface PointerDragEndEvent {
+    /** Last world-space point reported for the drag. */
+    dragPlanePoint: Vec3;
+    /** Pointer identifier associated with this drag. */
+    pointerId: number;
     pointerEvent: PointerEvent | null;
 }
 
@@ -126,8 +136,6 @@ interface ActiveDrag {
     planePoint: Vec3;
     /** Last drag-plane point reported (for delta computation). */
     lastPlanePoint: Vec3;
-    /** Drag-plane point at drag start (for cumulative `dragDistance`). */
-    startPlanePoint: Vec3;
     pointerId: number;
 }
 
@@ -196,9 +204,9 @@ export function registerPointerDrag(layer: UtilityLayer, canvas: HTMLCanvasEleme
         // would keep `state.active` pointing at the now-orphan drag and ignore
         // the next pointer-up because the pointerId no longer matches anything.
         if (state!.active && state!.active.drag === drag) {
-            const pointerId = state!.active.pointerId;
+            const { lastPlanePoint, pointerId } = state!.active;
             drag.dragging = false;
-            drag.onDragEnd.notify({ pointerEvent: null });
+            drag.onDragEnd.notify({ dragPlanePoint: lastPlanePoint, pointerId, pointerEvent: null });
             if ("releasePointerCapture" in state!.canvas) {
                 try {
                     state!.canvas.releasePointerCapture(pointerId);
@@ -388,11 +396,10 @@ async function handlePointerDown(state: DispatcherState, event: PointerEvent): P
         planeNormal,
         planePoint,
         lastPlanePoint: { x: startPoint.x, y: startPoint.y, z: startPoint.z },
-        startPlanePoint: { x: startPoint.x, y: startPoint.y, z: startPoint.z },
         pointerId: event.pointerId,
     };
     drag.dragging = true;
-    drag.onDragStart.notify({ dragPlanePoint: startPoint, pointerEvent: event });
+    drag.onDragStart.notify({ dragPlanePoint: startPoint, pointerId: event.pointerId, pointerEvent: event });
 }
 
 function handlePointerMove(state: DispatcherState, event: PointerEvent): void {
@@ -429,18 +436,19 @@ function handlePointerMove(state: DispatcherState, event: PointerEvent): void {
         // Project the delta onto the drag axis.
         const proj = delta.x * axis.x + delta.y * axis.y + delta.z * axis.z;
         delta = { x: axis.x * proj, y: axis.y * proj, z: axis.z * proj };
-        const totalDelta = {
-            x: hit.x - active.startPlanePoint.x,
-            y: hit.y - active.startPlanePoint.y,
-            z: hit.z - active.startPlanePoint.z,
-        };
-        dragDistance = totalDelta.x * axis.x + totalDelta.y * axis.y + totalDelta.z * axis.z;
+        dragDistance = proj;
     } else {
         dragDistance = Math.hypot(delta.x, delta.y, delta.z);
     }
 
     active.lastPlanePoint = { x: hit.x, y: hit.y, z: hit.z };
-    active.drag.onDrag.notify({ delta, dragPlanePoint: hit, dragDistance });
+    active.drag.onDrag.notify({
+        delta,
+        dragPlanePoint: hit,
+        dragDistance,
+        dragPlaneNormal: active.planeNormal,
+        pointerId: event.pointerId,
+    });
 
     // BJS-faithful: with `updateDragPlane = true` (BJS default), the drag plane
     // is refreshed AFTER the pick using the just-computed hit as the new
@@ -455,7 +463,7 @@ function handlePointerMove(state: DispatcherState, event: PointerEvent): void {
 function handlePointerUp(state: DispatcherState, event: PointerEvent): void {
     const active = state.active!;
     active.drag.dragging = false;
-    active.drag.onDragEnd.notify({ pointerEvent: event });
+    active.drag.onDragEnd.notify({ dragPlanePoint: active.lastPlanePoint, pointerId: event.pointerId, pointerEvent: event });
     state.active = null;
     if ("releasePointerCapture" in state.canvas) {
         try {
