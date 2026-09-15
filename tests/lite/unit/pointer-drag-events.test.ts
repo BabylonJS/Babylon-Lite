@@ -147,7 +147,7 @@ describe("pointer drag event payloads", () => {
         drag._colliders.push(collider);
         const ends: Parameters<typeof drag.onDragEnd.notify>[0][] = [];
         drag.onDragEnd.add((event) => ends.push(event));
-        let unregister = () => undefined;
+        let unregister: () => void = () => undefined;
         drag.onDrag.add(() => unregister());
         unregister = registerPointerDrag(layer, canvas as unknown as HTMLCanvasElement, drag);
 
@@ -166,7 +166,7 @@ describe("pointer drag event payloads", () => {
         const drag = createPointerDrag({ dragAxis: { x: 1, y: 0, z: 0 } });
         drag._colliders.push(collider);
         let endCount = 0;
-        let unregister = () => undefined;
+        let unregister: () => void = () => undefined;
         drag.onDragEnd.add(() => {
             endCount++;
             unregister();
