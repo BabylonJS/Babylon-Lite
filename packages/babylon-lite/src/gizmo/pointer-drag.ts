@@ -20,6 +20,7 @@ import type { Vec3 } from "../math/types.js";
 import { createPickingRay } from "../picking/ray.js";
 import { createGpuPicker, disposePicker, pickAsync } from "../picking/gpu-picker.js";
 import type { GpuPicker } from "../picking/gpu-picker.js";
+import type { PickingInfo } from "../picking/picking-info.js";
 import { getViewProjectionMatrix, getCameraPosition } from "../camera/camera.js";
 import { resolveCameraViewport } from "../camera/viewport.js";
 import { rayPlaneIntersect, normalizeVec3Obj } from "./gizmo-math.js";
@@ -30,8 +31,14 @@ import type { UtilityLayer } from "./utility-layer.js";
 export interface PointerDragStartEvent {
     /** World-space point where the ray intersected the drag plane on drag start. */
     dragPlanePoint: Vec3;
+    /** Browser pointer id that initiated the drag. */
+    pointerId: number;
     /** Browser pointer event that triggered drag start. */
     pointerEvent: PointerEvent;
+    /** Picking result from the pointer-down that initiated the drag. */
+    pickInfo: PickingInfo;
+    /** Collider mesh selected by the pointer-down pick. */
+    pickedMesh: Mesh;
 }
 
 /** Event raised for each pointer move while a drag is active. */
@@ -41,13 +48,23 @@ export interface PointerDragMoveEvent {
     delta: Vec3;
     /** Current world-space point on the drag plane (post-projection). */
     dragPlanePoint: Vec3;
-    /** Signed scalar distance projected onto the drag axis since drag start
+    /** Signed scalar distance projected onto the drag axis since the previous move
      *  (axis-drag mode); for plane mode this is `delta.length()`. */
     dragDistance: number;
+    /** World-space normal of the active drag plane. */
+    dragPlaneNormal: Vec3;
+    /** Browser pointer id for the active drag. */
+    pointerId: number;
+    /** Browser pointer event that triggered this move. */
+    pointerEvent: PointerEvent;
 }
 
 /** Event raised when the active pointer drag is released or cancelled. */
 export interface PointerDragEndEvent {
+    /** Last world-space point reported on the drag plane. */
+    dragPlanePoint: Vec3;
+    /** Browser pointer id for the completed drag. */
+    pointerId: number;
     pointerEvent: PointerEvent | null;
 }
 
@@ -126,8 +143,6 @@ interface ActiveDrag {
     planePoint: Vec3;
     /** Last drag-plane point reported (for delta computation). */
     lastPlanePoint: Vec3;
-    /** Drag-plane point at drag start (for cumulative `dragDistance`). */
-    startPlanePoint: Vec3;
     pointerId: number;
 }
 
@@ -198,7 +213,7 @@ export function registerPointerDrag(layer: UtilityLayer, canvas: HTMLCanvasEleme
         if (state!.active && state!.active.drag === drag) {
             const pointerId = state!.active.pointerId;
             drag.dragging = false;
-            drag.onDragEnd.notify({ pointerEvent: null });
+            drag.onDragEnd.notify({ dragPlanePoint: state!.active.lastPlanePoint, pointerId, pointerEvent: null });
             if ("releasePointerCapture" in state!.canvas) {
                 try {
                     state!.canvas.releasePointerCapture(pointerId);
@@ -315,8 +330,8 @@ async function handleHoverMove(state: DispatcherState, event: PointerEvent): Pro
         if (token !== state.hoverToken || state.active) {
             return;
         }
-        const drag = info.hit && info.pickedMesh ? findDragForMesh(state.drags, info.pickedMesh as Mesh) : null;
-        next = drag && drag.enabled ? drag : null;
+        const match = info.hit && info.pickedMesh ? findDragForMesh(state.drags, info.pickedMesh) : null;
+        next = match?.drag.enabled ? match.drag : null;
     }
     if (next === state.hovered) {
         return;
@@ -344,10 +359,11 @@ async function handlePointerDown(state: DispatcherState, event: PointerEvent): P
         return;
     }
     // Find the drag whose collider list contains the picked mesh.
-    const drag = findDragForMesh(state.drags, info.pickedMesh as Mesh);
-    if (!drag || !drag.enabled) {
+    const match = findDragForMesh(state.drags, info.pickedMesh);
+    if (!match || !match.drag.enabled) {
         return;
     }
+    const { drag, pickedMesh } = match;
 
     if ("setPointerCapture" in state.canvas) {
         try {
@@ -388,11 +404,10 @@ async function handlePointerDown(state: DispatcherState, event: PointerEvent): P
         planeNormal,
         planePoint,
         lastPlanePoint: { x: startPoint.x, y: startPoint.y, z: startPoint.z },
-        startPlanePoint: { x: startPoint.x, y: startPoint.y, z: startPoint.z },
         pointerId: event.pointerId,
     };
     drag.dragging = true;
-    drag.onDragStart.notify({ dragPlanePoint: startPoint, pointerEvent: event });
+    drag.onDragStart.notify({ dragPlanePoint: startPoint, pointerId: event.pointerId, pointerEvent: event, pickInfo: info, pickedMesh });
 }
 
 function handlePointerMove(state: DispatcherState, event: PointerEvent): void {
@@ -429,18 +444,13 @@ function handlePointerMove(state: DispatcherState, event: PointerEvent): void {
         // Project the delta onto the drag axis.
         const proj = delta.x * axis.x + delta.y * axis.y + delta.z * axis.z;
         delta = { x: axis.x * proj, y: axis.y * proj, z: axis.z * proj };
-        const totalDelta = {
-            x: hit.x - active.startPlanePoint.x,
-            y: hit.y - active.startPlanePoint.y,
-            z: hit.z - active.startPlanePoint.z,
-        };
-        dragDistance = totalDelta.x * axis.x + totalDelta.y * axis.y + totalDelta.z * axis.z;
+        dragDistance = proj;
     } else {
         dragDistance = Math.hypot(delta.x, delta.y, delta.z);
     }
 
     active.lastPlanePoint = { x: hit.x, y: hit.y, z: hit.z };
-    active.drag.onDrag.notify({ delta, dragPlanePoint: hit, dragDistance });
+    active.drag.onDrag.notify({ delta, dragPlanePoint: hit, dragDistance, dragPlaneNormal: active.planeNormal, pointerId: event.pointerId, pointerEvent: event });
 
     // BJS-faithful: with `updateDragPlane = true` (BJS default), the drag plane
     // is refreshed AFTER the pick using the just-computed hit as the new
@@ -455,7 +465,7 @@ function handlePointerMove(state: DispatcherState, event: PointerEvent): void {
 function handlePointerUp(state: DispatcherState, event: PointerEvent): void {
     const active = state.active!;
     active.drag.dragging = false;
-    active.drag.onDragEnd.notify({ pointerEvent: event });
+    active.drag.onDragEnd.notify({ dragPlanePoint: active.lastPlanePoint, pointerId: event.pointerId, pointerEvent: event });
     state.active = null;
     if ("releasePointerCapture" in state.canvas) {
         try {
@@ -466,10 +476,12 @@ function handlePointerUp(state: DispatcherState, event: PointerEvent): void {
     }
 }
 
-function findDragForMesh(drags: PointerDrag[], mesh: Mesh): PointerDrag | null {
+function findDragForMesh(drags: PointerDrag[], mesh: unknown): { drag: PointerDrag; pickedMesh: Mesh } | null {
     for (const d of drags) {
-        if (d._colliders.includes(mesh)) {
-            return d;
+        for (const collider of d._colliders) {
+            if (collider === mesh) {
+                return { drag: d, pickedMesh: collider };
+            }
         }
     }
     return null;
