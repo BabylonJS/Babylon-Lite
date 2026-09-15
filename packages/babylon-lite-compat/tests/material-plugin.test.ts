@@ -121,10 +121,27 @@ describe("MaterialPluginBase", () => {
         expect(plugin.serialize()).toMatchObject({ name: "Renamed", priority: 150, registerForExtraEvents: true, doNotSerialize: true });
     });
 
-    it("rejects unsupported include, regex, and subclass-hook execution explicitly", () => {
+    it("rejects unsupported include values through construction, mutation, copying, and parsing", () => {
         const material = new StandardMaterial("material");
         expect(() => new MaterialPluginBase(material, "Includes", 100, {}, true, true, true)).toThrow(/ShaderStore include registry/);
+        const plugin = new MaterialPluginBase(material, "Includes", 100);
+        expect(() => {
+            plugin.resolveIncludes = true;
+        }).toThrow(/ShaderStore include registry/);
+        class SerializedIncludesPlugin extends MaterialPluginBase {
+            public override get resolveIncludes(): boolean {
+                return true;
+            }
 
+            public override set resolveIncludes(_value: boolean) {}
+        }
+        const serialized = new SerializedIncludesPlugin(material, "SerializedIncludes", 100);
+        expect(() => serialized.copyTo(plugin)).toThrow(/ShaderStore include registry/);
+        expect(() => plugin.parse({ resolveIncludes: true }, {} as Scene, "")).toThrow(/ShaderStore include registry/);
+    });
+
+    it("rejects unsupported regex and subclass-hook execution explicitly", () => {
+        const material = new StandardMaterial("material");
         class RegexPlugin extends MaterialPluginBase {
             public override isCompatible(): boolean {
                 return true;

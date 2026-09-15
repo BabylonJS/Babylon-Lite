@@ -7,21 +7,70 @@ export type KHRInteractivitySignature = "bool" | "float" | "float2" | "float3" |
 
 export interface IKHRInteractivityNode {
     declaration: number;
+    values?: Record<string, IKHRInteractivityVariable | IKHRInteractivityOutputSocketReference>;
+    flows?: Record<string, IKHRInteractivityOutputFlow>;
+    configuration?: Record<string, IKHRInteractivityConfiguration>;
 }
 
 export interface IKHRInteractivityGraph {
+    name?: string;
+    types?: IKHRInteractivityType[];
+    variables?: IKHRInteractivityVariable[];
+    events?: IKHRInteractivityEvent[];
     declarations?: IKHRInteractivityDeclaration[];
     nodes?: IKHRInteractivityNode[];
 }
 
 export interface IKHRInteractivityDeclaration {
     op: string;
+    extension?: string;
+    outputValueSockets?: Record<string, { type: number }>;
+    inputValueSockets?: Record<string, { type: number }>;
+}
+
+export interface IKHRInteractivityType {
+    signature: KHRInteractivitySignature;
+}
+
+export interface IKHRInteractivityVariable {
+    value?: Array<boolean | number | string>;
+    type: number;
+}
+
+export interface IKHRInteractivityEvent {
+    id?: string;
+    values?: Record<string, IKHRInteractivityVariable>;
+}
+
+export interface IKHRInteractivityOutputSocketReference {
+    node: number;
+    socket?: string;
+    type?: number;
+}
+
+export interface IKHRInteractivityOutputFlow {
+    node: number;
+    socket?: string;
+}
+
+export interface IKHRInteractivityConfiguration {
+    value?: Array<boolean | number | string>;
 }
 
 export interface IGLTF {
     asset: {
         version: string;
     };
+    nodes?: unknown[];
+}
+
+export interface ISerializedFlowGraphConnection {
+    uniqueId: string;
+    name: string;
+    // eslint-disable-next-line babylon-lite/underscore-requires-internal -- Public Babylon.js field.
+    _connectionType: number;
+    connectedPointIds: string[];
+    defaultValue?: unknown;
 }
 
 export interface ISerializedFlowGraphBlock {
@@ -29,11 +78,11 @@ export interface ISerializedFlowGraphBlock {
     type: string;
     config: unknown;
     uniqueId: string;
-    dataInputs: unknown[];
-    dataOutputs: unknown[];
+    dataInputs: ISerializedFlowGraphConnection[];
+    dataOutputs: ISerializedFlowGraphConnection[];
     metadata: unknown;
-    signalInputs: unknown[];
-    signalOutputs: unknown[];
+    signalInputs: ISerializedFlowGraphConnection[];
+    signalOutputs: ISerializedFlowGraphConnection[];
 }
 
 export type ISerializedFlowGraphContext = {
@@ -43,6 +92,14 @@ export type ISerializedFlowGraphContext = {
 } & Record<"_userVariables" | "_connectionValues", Record<string, unknown>> &
     Partial<Record<"_variableTypes", Record<string, string>>> &
     Partial<Record<"_assetsContext", Record<string, unknown>>>;
+
+export interface ISerializedFlowGraph {
+    name?: string;
+    uniqueId?: string;
+    executionContexts: ISerializedFlowGraphContext[];
+    allBlocks: ISerializedFlowGraphBlock[];
+    rightHanded?: boolean;
+}
 
 type CompatibleCallback<TArgs extends unknown[], TResult> = {
     bivarianceHack(...args: TArgs): TResult;
@@ -311,7 +368,17 @@ export class InteractivityGraphToFlowGraphParser {
         return unsupported("GLTF2.InteractivityGraphToFlowGraphParser.getVariableName", KHR_INTERACTIVITY_UNSUPPORTED);
     }
 
-    public serializeToFlowGraph(): never {
+    public get arrays(): {
+        types: unknown[];
+        mappings: unknown[];
+        staticVariables: unknown[];
+        events: InteractivityEvent[];
+        nodes: Array<{ blocks: ISerializedFlowGraphBlock[]; fullOperationName: string }>;
+    } {
+        return unsupported("GLTF2.InteractivityGraphToFlowGraphParser.arrays", KHR_INTERACTIVITY_UNSUPPORTED);
+    }
+
+    public serializeToFlowGraph(): ISerializedFlowGraph {
         return unsupported("GLTF2.InteractivityGraphToFlowGraphParser.serializeToFlowGraph", KHR_INTERACTIVITY_UNSUPPORTED);
     }
 }

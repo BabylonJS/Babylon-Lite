@@ -26,10 +26,15 @@ interface TestEngine {
     _startPromise: Promise<void> | null;
     _startupWork: Array<() => Promise<void>>;
     _lateWork: Array<() => Promise<void>>;
-    _scenes: Array<Record<string, unknown>>;
+    _scenes: object[];
     _lite: EngineContext;
     _start(): Promise<void>;
     _registerLateWork(work: () => Promise<void>): void;
+}
+
+interface StartupScene {
+    _hasPendingMaterialPluginReconciliations: boolean;
+    _reconcilePendingMaterialPlugins(): Promise<void>;
 }
 
 function makeEngine(): TestEngine {
@@ -115,11 +120,57 @@ describe("compat engine startup ordering", () => {
                 order.push("plugins");
                 return Promise.resolve();
             },
+            _hasPendingMaterialPluginReconciliations: false,
         });
 
         await engine._start();
 
         expect(order).toEqual(["first-frame", "plugins"]);
+        expect(engine._startupComplete).toBe(true);
+    });
+
+    it("keeps draining all scenes until startup plugin requests are globally quiescent", async () => {
+        let finishSceneB!: () => void;
+        const sceneBDrain = new Promise<void>((resolve) => {
+            finishSceneB = resolve;
+        });
+        const startupSceneDefaults = {
+            _buildShadowGenerators: () => undefined,
+            _parseNodeMaterials: () => Promise.resolve(),
+            _awaitPendingTextures: () => Promise.resolve(),
+            _bakeGroundUvs: () => undefined,
+            _flushPendingAdds: () => undefined,
+            _buildMorphTargets: () => undefined,
+            _buildClusteredContainers: () => undefined,
+            _enableMaterialPlugins: () => Promise.resolve(),
+            _loadPendingEnvironment: () => Promise.resolve(),
+            _hasShadows: () => false,
+            _lite: {},
+        };
+        let sceneADrains = 0;
+        const sceneA: StartupScene & typeof startupSceneDefaults = {
+            ...startupSceneDefaults,
+            _hasPendingMaterialPluginReconciliations: false,
+            async _reconcilePendingMaterialPlugins() {
+                sceneADrains++;
+                sceneA._hasPendingMaterialPluginReconciliations = false;
+            },
+        };
+        const sceneB: StartupScene & typeof startupSceneDefaults = {
+            ...startupSceneDefaults,
+            _hasPendingMaterialPluginReconciliations: false,
+            _reconcilePendingMaterialPlugins: () => sceneBDrain,
+        };
+        const engine = makeEngine();
+        engine._scenes.push(sceneA, sceneB);
+
+        const startup = engine._start();
+        await vi.waitFor(() => expect(sceneADrains).toBe(1));
+        sceneA._hasPendingMaterialPluginReconciliations = true;
+        finishSceneB();
+        await startup;
+
+        expect(sceneADrains).toBe(2);
         expect(engine._startupComplete).toBe(true);
     });
 

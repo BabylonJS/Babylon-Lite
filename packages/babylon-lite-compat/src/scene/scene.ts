@@ -471,6 +471,11 @@ export class Scene extends AbstractScene {
         this._materialPluginsRequested = false;
     }
 
+    /** @internal Whether this scene queued plugin changes during the engine startup transition. */
+    public get _hasPendingMaterialPluginReconciliations(): boolean {
+        return this._pendingMaterialPluginReconciliations.size > 0;
+    }
+
     /** @internal Clustered light containers to register on the Lite scene at engine start. */
     private readonly _pendingClusteredContainers: Array<{ _build(): void; isDisposed(): boolean }> = [];
 

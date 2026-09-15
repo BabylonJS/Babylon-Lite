@@ -29,10 +29,15 @@ import type { Material } from "../material.js";
 import { getMaterialSource } from "../material-view.js";
 import { _registerPbrExt } from "../pbr/pbr-flags.js";
 import { _registerStdExt } from "../standard/standard-flags.js";
+import { getStandardGroupBuilder, type StandardMaterialProps } from "../standard/standard-material.js";
 import { enqueueMaterialSwap } from "../../scene/mesh-scene-registry.js";
 import { processMaterialSwaps } from "../../scene/scene-material-swap.js";
 import { registerPbrPlugins } from "./pbr-plugin-bridge.js";
 import { bakeStdPluginMaterial, registerStdPluginBridge, registerStdPlugins } from "./std-plugin-bridge.js";
+
+function isStandardMaterial(material: Material): material is StandardMaterialProps {
+    return material._buildGroup === getStandardGroupBuilder();
+}
 
 function installRefresh(scene: SceneContext, refresh: (deltaMs: number) => void): void {
     // Public onBeforeRender() callbacks use unshift(), so appending keeps the upload
@@ -75,7 +80,9 @@ export async function reconcileMaterialPlugins(scene: SceneContext, material: Ma
     installRefresh(scene, registerStdPluginBridge(scene, _registerStdExt));
     const source = getMaterialSource(material);
     source._renderFeatures = undefined;
-    bakeStdPluginMaterial(source, scene);
+    if (isStandardMaterial(source)) {
+        bakeStdPluginMaterial(source, scene);
+    }
     for (const mesh of scene.meshes) {
         if (mesh.material && getMaterialSource(mesh.material) === source) {
             enqueueMaterialSwap(scene, mesh);

@@ -470,7 +470,9 @@ export abstract class AbstractEngine {
         // layers are overlays and can join on a subsequent frame; awaiting them
         // here would deadlock any registration path that depends on the first frame.
         await startEngine(this._lite);
-        await Promise.all(this._scenes.map((scene) => scene._reconcilePendingMaterialPlugins()));
+        do {
+            await Promise.all(this._scenes.map((scene) => scene._reconcilePendingMaterialPlugins()));
+        } while (this._scenes.some((scene) => scene._hasPendingMaterialPluginReconciliations));
         this._startupComplete = true;
         // Late work now runs after the main render loop has started.
         // Late work is explicitly allowed to fail without taking startup with it: a rejection here

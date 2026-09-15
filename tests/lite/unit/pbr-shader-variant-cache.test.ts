@@ -168,15 +168,23 @@ describe("PBR shader variant caches", () => {
         const material = createPbrMaterial();
         const target = makeMesh(material);
         const seenIndices: number[] = [];
+        const makeRenderable = () => ({
+            mesh: target,
+            order: 0,
+            isTransparent: false,
+            bind: () => {
+                throw new Error("The reconciliation test does not bind renderables.");
+            },
+        });
         const rebuild = vi.fn(() => {
             expect(material._renderFeatures).toBeUndefined();
             material._renderFeatures = _computePbrMaterialFeatures(material);
             seenIndices.push(material._pi ?? 0);
-            return { mesh: target, order: 0, isTransparent: false };
+            return makeRenderable();
         });
         scene.meshes.push(target);
         scene._groups.set(material._buildGroup, Object.assign([target], { r: rebuild }));
-        scene._renderables.push({ mesh: target, order: 0, isTransparent: false });
+        scene._renderables.push(makeRenderable());
         scene._meshDisposables.set(target, []);
         scene._built = true;
         material._renderFeatures = _computePbrMaterialFeatures(material);

@@ -21,7 +21,6 @@ import type { StdExt } from "../standard/standard-flags.js";
 import type { StandardMaterialProps } from "../standard/standard-material.js";
 import { _computeStandardMaterialFeatures, getStandardGroupBuilder } from "../standard/standard-material.js";
 import { getMaterialSource } from "../material-view.js";
-import type { Material } from "../material.js";
 import type { SceneContext } from "../../scene/scene.js";
 import { enqueueMaterialSwap } from "../../scene/mesh-scene-registry.js";
 import type { ShaderFragment, UboSpec } from "../../shader/fragment-types.js";
@@ -227,11 +226,10 @@ export function registerStdPluginBridge(scene: SceneContext, register: (ext: Std
  * Call this after assigning plugins to a Standard material created after
  * {@link registerStdPlugins} has walked the scene, and before its mesh first renders.
  */
-export function bakeStdPluginMaterial(material: Material | null | undefined, scene: SceneContext): void {
-    if (!material || material._buildGroup !== getStandardGroupBuilder()) {
+export function bakeStdPluginMaterial(mat: StandardMaterialProps | null | undefined, scene: SceneContext): void {
+    if (!mat || mat._buildGroup !== getStandardGroupBuilder()) {
         return;
     }
-    const mat = material as StandardMaterialProps;
     const existingSceneState = _sceneStates?.get(scene);
     const old = existingSceneState?._materials.get(mat);
     if (!mat.plugins?.length) {

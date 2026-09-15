@@ -47,6 +47,16 @@ function toLiteCustomCode(code: MaterialPluginCustomCode | null): Partial<Record
     return translated;
 }
 
+function toLiteDefines(defines: MaterialPluginDefines): Record<string, boolean | number> {
+    const translated: Record<string, boolean | number> = {};
+    for (const [name, value] of Object.entries(defines)) {
+        if (typeof value === "boolean" || typeof value === "number") {
+            translated[name] = value;
+        }
+    }
+    return translated;
+}
+
 /**
  * Babylon.js `MaterialPluginBase` adapter over Lite's opt-in material-plugin
  * bridge. Subclasses keep the Babylon.js override shape while Lite receives a
@@ -55,8 +65,8 @@ function toLiteCustomCode(code: MaterialPluginCustomCode | null): Partial<Record
 export class MaterialPluginBase {
     private _name: string;
     private _priority: number;
+    private _resolveIncludes = false;
     public readonly markAllDefinesAsDirty: () => void;
-    public resolveIncludes: boolean;
     public registerForExtraEvents = false;
     public doNotSerialize = false;
     protected readonly _material: Material;
@@ -71,9 +81,6 @@ export class MaterialPluginBase {
         this._priority = priority;
         this.resolveIncludes = resolveIncludes;
         this._pluginDefineNames = defines;
-        if (resolveIncludes) {
-            unsupported("MaterialPluginBase(resolveIncludes)", MATERIAL_PLUGIN_INCLUDES_UNSUPPORTED);
-        }
         this.markAllDefinesAsDirty = () => material._markPluginDefinesDirty();
         this._lite = {
             get name() {
@@ -82,7 +89,7 @@ export class MaterialPluginBase {
             get priority() {
                 return priority;
             },
-            defines,
+            defines: toLiteDefines(defines),
             isEnabled: enable,
             getCustomCode: (shaderType) => {
                 this._assertSupportedExecution();
@@ -116,6 +123,17 @@ export class MaterialPluginBase {
         Object.defineProperty(this._lite, "priority", { configurable: true, enumerable: true, get: () => this._priority });
     }
 
+    public get resolveIncludes(): boolean {
+        return this._resolveIncludes;
+    }
+
+    public set resolveIncludes(value: boolean) {
+        if (value) {
+            unsupported("MaterialPluginBase.resolveIncludes", MATERIAL_PLUGIN_INCLUDES_UNSUPPORTED);
+        }
+        this._resolveIncludes = false;
+    }
+
     /** @internal Unsupported derived stubs override this to avoid mutating Lite state before throwing. */
     protected get _attachToLite(): boolean {
         return true;
@@ -127,6 +145,9 @@ export class MaterialPluginBase {
     }
 
     private _assertSupportedExecution(): void {
+        if (this.resolveIncludes) {
+            unsupported("MaterialPluginBase.resolveIncludes", MATERIAL_PLUGIN_INCLUDES_UNSUPPORTED);
+        }
         const base = MaterialPluginBase.prototype;
         const unsupportedHook =
             this.registerForExtraEvents ||
@@ -242,6 +263,9 @@ export class MaterialPluginBase {
     }
 
     public parse(source: Record<string, unknown>, _scene: Scene, _rootUrl: string): void {
+        if (typeof source.resolveIncludes === "boolean") {
+            this.resolveIncludes = source.resolveIncludes;
+        }
         if (typeof source.name === "string") {
             this.name = source.name;
         }
