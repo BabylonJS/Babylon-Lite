@@ -27,8 +27,8 @@ vi.mock("../../../packages/babylon-lite/src/camera/viewport.js", () => ({
 
 vi.mock("../../../packages/babylon-lite/src/picking/ray.js", () => ({
     createPickingRay: (x: number) => ({
-        origin: [x, 0, 1],
-        direction: [0, 0, -1],
+        origin: [0, 0, 10],
+        direction: [x, 0, -10],
         length: 100,
     }),
 }));
@@ -89,7 +89,7 @@ describe("pointer drag event payloads", () => {
                 pointerEvent: down,
             },
         ]);
-        expect(starts[0]!.pickInfo.ray).toEqual({ origin: [0, 0, 1], direction: [0, 0, -1], length: 100 });
+        expect(starts[0]!.pickInfo.ray).toEqual({ origin: [0, 0, 10], direction: [0, 0, -10], length: 100 });
         expect(moves).toEqual([
             {
                 delta: { x: 1, y: 0, z: 0 },
@@ -115,7 +115,7 @@ describe("pointer drag event payloads", () => {
         expect(ends[1]).toEqual({ dragPlanePoint: { x: 0, y: 0, z: 0 }, pointerId: 8, pointerEvent: null });
     });
 
-    it("publishes a live configured plane normal before each move", async () => {
+    it("intersects the retained plane before publishing the refreshed normal", async () => {
         const collider = {} as Mesh;
         pickResult.pickedMesh = collider;
         const layer = { scene: { camera: {} } as SceneContext } as UtilityLayer;
@@ -130,11 +130,41 @@ describe("pointer drag event payloads", () => {
         canvas.handlers.get("pointerdown")!({ button: 0, pointerId: 9, offsetX: 0, offsetY: 0 } as PointerEvent);
         await flush();
         planeNormal.y = 1;
+        planeNormal.z = 0;
         canvas.handlers.get("pointermove")!({ pointerId: 9, offsetX: 1, offsetY: 0 } as PointerEvent);
 
-        expect(moves[0]!.dragPlaneNormal.x).toBe(0);
-        expect(moves[0]!.dragPlaneNormal.y).toBeCloseTo(Math.SQRT1_2);
-        expect(moves[0]!.dragPlaneNormal.z).toBeCloseTo(Math.SQRT1_2);
+        expect(moves).toHaveLength(1);
+        expect(moves[0]!.dragPlanePoint).toEqual({ x: 1, y: 0, z: 0 });
+        expect(moves[0]!.dragPlaneNormal).toEqual({ x: 0, y: 1, z: 0 });
+        unregister();
+    });
+
+    it("keeps both the plane normal and anchor frozen when updates are disabled", async () => {
+        const collider = {} as Mesh;
+        pickResult.pickedMesh = collider;
+        const layer = { scene: { camera: {} } as SceneContext } as UtilityLayer;
+        const canvas = makeFakeCanvas();
+        const planePoint = { x: 0, y: 0, z: 0 };
+        const getPlanePoint = vi.fn(() => planePoint);
+        const drag = createPointerDrag({
+            dragAxis: { x: 1, y: 0, z: 0 },
+            getPlanePoint,
+            updateDragPlane: false,
+        });
+        drag._colliders.push(collider);
+        const moves: Parameters<typeof drag.onDrag.notify>[0][] = [];
+        drag.onDrag.add((event) => moves.push(event));
+        const unregister = registerPointerDrag(layer, canvas as unknown as HTMLCanvasElement, drag);
+
+        canvas.handlers.get("pointerdown")!({ button: 0, pointerId: 12, offsetX: 1, offsetY: 0 } as PointerEvent);
+        await flush();
+        planePoint.z = 5;
+        canvas.handlers.get("pointermove")!({ pointerId: 12, offsetX: 1, offsetY: 0 } as PointerEvent);
+
+        expect(getPlanePoint).toHaveBeenCalledTimes(1);
+        expect(moves).toHaveLength(1);
+        expect(moves[0]!.dragPlanePoint).toEqual({ x: 1, y: 0, z: 0 });
+        expect(moves[0]!.delta).toEqual({ x: 0, y: 0, z: 0 });
         unregister();
     });
 

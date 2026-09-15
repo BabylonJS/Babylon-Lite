@@ -405,7 +405,7 @@ async function handlePointerDown(state: DispatcherState, event: PointerEvent): P
     state.active = {
         drag,
         planeNormal,
-        planePoint,
+        planePoint: { x: planePoint.x, y: planePoint.y, z: planePoint.z },
         lastPlanePoint: { x: startPoint.x, y: startPoint.y, z: startPoint.z },
         startPlanePoint: { x: startPoint.x, y: startPoint.y, z: startPoint.z },
         pointerId: event.pointerId,
@@ -416,22 +416,6 @@ async function handlePointerDown(state: DispatcherState, event: PointerEvent): P
 
 function handlePointerMove(state: DispatcherState, event: PointerEvent): void {
     const active = state.active!;
-    const configuredPlaneNormal = active.drag.options.dragPlaneNormal;
-    if (active.drag.options.updateDragPlane !== false && configuredPlaneNormal) {
-        active.planeNormal = normalizeVec3Obj(configuredPlaneNormal);
-    }
-    // BJS-faithful: when the drag exposes a `getPlanePoint` callback, refresh
-    // the drag plane's anchor every move so it tracks the attached node as the
-    // gizmo drives it (BJS `_updateDragPlanePosition` overrides plane.position
-    // with `attachedNode.getAbsolutePosition()` per move, default
-    // `updateDragPlane = true`).  Keeps the screen-to-world ratio anchored at
-    // the node's depth — without this, Lite anchored the plane at the picked
-    // surface point (e.g. an off-centre corner), and a deeper picked plane
-    // inflated the per-tick world delta vs. BJS.
-    const livePlanePoint = active.drag.options.getPlanePoint?.();
-    if (livePlanePoint) {
-        active.planePoint = { x: livePlanePoint.x, y: livePlanePoint.y, z: livePlanePoint.z };
-    }
     const ray = canvasRayFromPointer(state.layer.scene, state.canvas, event.offsetX, event.offsetY);
     if (!ray) {
         return;
@@ -462,6 +446,15 @@ function handlePointerMove(state: DispatcherState, event: PointerEvent): void {
         dragDistance = Math.hypot(delta.x, delta.y, delta.z);
     }
 
+    if (active.drag.options.updateDragPlane !== false) {
+        const configuredPlaneNormal = active.drag.options.dragPlaneNormal;
+        active.planeNormal = configuredPlaneNormal ? normalizeVec3Obj(configuredPlaneNormal) : pickDragPlaneNormal(active.drag, state.layer.scene, hit);
+        const livePlanePoint = active.drag.options.getPlanePoint?.();
+        if (livePlanePoint) {
+            active.planePoint = { x: livePlanePoint.x, y: livePlanePoint.y, z: livePlanePoint.z };
+        }
+    }
+
     active.drag.onDrag.notify({
         delta,
         dragPlanePoint: hit,
@@ -470,13 +463,6 @@ function handlePointerMove(state: DispatcherState, event: PointerEvent): void {
         pointerId: event.pointerId,
     });
     active.lastPlanePoint = { x: hit.x, y: hit.y, z: hit.z };
-
-    // With `updateDragPlane = true`, axis mode re-faces the plane after the
-    // pick using the current hit as its next reference point. Plane mode reads
-    // its live configured normal before the next intersection above.
-    if (active.drag.options.updateDragPlane !== false && active.drag.options.dragAxis) {
-        active.planeNormal = pickDragPlaneNormal(active.drag, state.layer.scene, hit);
-    }
 }
 
 function handlePointerUp(state: DispatcherState, event: PointerEvent): void {
