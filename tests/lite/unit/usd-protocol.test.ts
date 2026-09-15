@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { readUsdCommands, UsdOp, usdBytes, usdField, usdFloats, usdString, usdU16, usdUints } from "../../../packages/babylon-lite/src/loader-usd/usd-protocol";
+import { usdMatrix } from "../../../packages/babylon-lite/src/loader-usd/usd-nodes";
 import { usdFixture } from "./usd-fixture";
 
 describe("USD command protocol", () => {
@@ -42,5 +43,16 @@ describe("USD command protocol", () => {
         expect(() => readUsdCommands(trailing.buffer)).toThrow("Unexpected trailing USD commands");
         expect(() => usdFloats(fixture.data, 1, 1)).toThrow("Invalid USD data range");
         expect(() => usdUints(fixture.data, fixture.data.byteLength, 1)).toThrow("Invalid USD data range");
+    });
+
+    it("interprets Gf row-vector row-major bytes as the equivalent Lite column-vector matrix", () => {
+        // Native GfMatrix: 90-degree Z rotation with translation in the last row.
+        // The identical flat sequence is the transposed column-vector matrix Lite needs.
+        const matrix = usdMatrix([0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 4, 5, 6, 1]);
+        expect([matrix[12], matrix[13], matrix[14]]).toEqual([4, 5, 6]);
+        const x = matrix[0]! + matrix[12]!;
+        const y = matrix[1]! + matrix[13]!;
+        const z = matrix[2]! + matrix[14]!;
+        expect([x, y, z]).toEqual([4, 6, 6]);
     });
 });

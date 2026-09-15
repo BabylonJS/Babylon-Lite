@@ -50,6 +50,8 @@ export async function apply(context: UsdContext): Promise<void> {
             if (!rest.every(Number.isFinite) || !bind.every(Number.isFinite)) {
                 throw new Error(`USD skeleton ${id} has a non-finite joint transform`);
             }
+            // Gf row-major row-vector bytes are already the equivalent Lite
+            // column-major column-vector sequence; see usdMatrix().
             if (parent === USD_NONE) {
                 bindMatrices.set(bind, index * 16);
             } else {
@@ -115,6 +117,10 @@ export async function apply(context: UsdContext): Promise<void> {
         }
         const boneMatrices = new Float32Array(rig.joints.length * 16);
         for (let index = 0; index < rig.joints.length; index++) {
+            // The extractor bakes geomBind into vertices and places the mesh
+            // under its Skeleton prim, so joints and mesh vertices share this
+            // object space. A glTF-style inverse(meshWorld) would cancel the
+            // authored Skeleton prim transform.
             multiplyMat4IntoBuffer(scratch, 0, rig.joints[index]!.worldMatrix as unknown as Mat4Storage, 0, rig.inverseBindMatrices, index * 16);
             boneMatrices.set(scratch, index * 16);
         }

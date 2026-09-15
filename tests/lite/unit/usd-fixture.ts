@@ -40,7 +40,19 @@ export function usdTestContainer(extraction: UsdExtraction): UsdAssetContainer {
 }
 
 export function usdFixture(
-    options: { textures?: boolean; skin?: boolean; morph?: boolean; thinInstances?: boolean; analytic?: number; zUp?: boolean; scale?: number; leftHanded?: boolean } = {}
+    options: {
+        textures?: boolean;
+        skin?: boolean;
+        morph?: boolean;
+        duplicateMorph?: boolean;
+        thinInstances?: boolean;
+        analytic?: number;
+        zUp?: boolean;
+        scale?: number;
+        leftHanded?: boolean;
+        zeroFps?: boolean;
+        trsAnimation?: boolean;
+    } = {}
 ): UsdExtraction {
     const raw: number[] = [];
     const records: Array<{ op: number; fields: Array<number | { f: number }> }> = [];
@@ -63,7 +75,7 @@ export function usdFixture(
     shifted[12] = 3;
     const shiftedMatrix = floats(shifted);
     const f = (value: number) => ({ f: value });
-    records.push({ op: 1, fields: [options.zUp ? 1 : 0, f(options.scale ?? 1), f(24)] });
+    records.push({ op: 1, fields: [options.zUp ? 1 : 0, f(options.scale ?? 1), f(options.zeroFps ? 0 : 24)] });
     records.push({ op: 4, fields: [1, none, name, 7, matrix] }, { op: 4, fields: [2, none, name, 7, shiftedMatrix] });
     if (options.textures) {
         const image = append(Uint8Array.from(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=", "base64")));
@@ -93,7 +105,7 @@ export function usdFixture(
                 f(0.6),
                 f(0.7),
                 f(id === 2 ? 0.5 : 0),
-                id === 1 ? 4 : 1,
+                id === 1 ? 4 : 5,
                 options.textures ? 1 : none,
                 none,
                 options.textures ? 2 : none,
@@ -132,7 +144,7 @@ export function usdFixture(
     const subsets = uints([1, 0, 3, 0, 4, 2, 3, 3, 0, 4]);
     records.push({ op: 6, fields: [1, 4, 6, options.skin ? 53 : 5, positions, normals, none, uv, none, joints0, weights0, joints1, weights1, indices, 8] });
     if (options.analytic !== undefined) {
-        records.push({ op: 10, fields: [1, 1, options.analytic, 1, name, 7, 0, 2, f(1), f(2), 12] });
+        records.push({ op: 10, fields: [1, 1, options.analytic, 1, name, 7, options.leftHanded ? 2 : 0, 2, f(1), f(2), 12] });
     } else {
         records.push({ op: 7, fields: [1, 1, 1, none, name, 7, options.leftHanded ? 2 : 0, options.skin ? 1 : none, subsets, 2] });
     }
@@ -141,7 +153,11 @@ export function usdFixture(
         morphId = 1;
         const targetPositions = floats([0, 0, 0, 2, 0, 0, 2, 1, 0, 0, 1, 0]);
         const targetNormals = floats([0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0]);
-        records.push({ op: 12, fields: [morphId, 1, name, 7, 4, targetPositions, targetNormals, f(0.25)] });
+        const morphRecord = { op: 12, fields: [morphId, 1, name, 7, 4, targetPositions, targetNormals, f(0.25)] };
+        records.push(morphRecord);
+        if (options.duplicateMorph) {
+            records.push(morphRecord);
+        }
     }
     if (options.thinInstances) {
         const transforms = floats([...identity, ...shifted]);
@@ -158,6 +174,11 @@ export function usdFixture(
         movedBone[13] = 3;
         const boneValues = floats([...restChild, ...movedBone]);
         records.push({ op: 9, fields: [0, 1, 3, 0, 2, times, values, 16] }, { op: 9, fields: [1, 11, 3, 0, 2, times, boneValues, 16] });
+    }
+    if (options.trsAnimation) {
+        const times = floats([0, 24]);
+        const translations = floats([0, 0, 0, 2, 0, 0]);
+        records.push({ op: 9, fields: [0, 1, 0, 0, 2, times, translations, 3] });
     }
     if (morphId) {
         const times = floats([0, 24]);

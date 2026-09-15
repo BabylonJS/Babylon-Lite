@@ -75,7 +75,8 @@ export async function extractUsd(source: string | UsdBinaryInput, options: LoadU
             worker!.addEventListener("messageerror", () => reject(new Error("Invalid USD worker message")));
             worker!.addEventListener("message", (event: MessageEvent<WorkerResponse>) => {
                 const response = event.data;
-                if (response.requestId !== 1) {
+                if (!response || typeof response !== "object" || response.requestId !== 1) {
+                    reject(new Error("Unexpected USD worker response"));
                     return;
                 }
                 try {
@@ -91,6 +92,9 @@ export async function extractUsd(source: string | UsdBinaryInput, options: LoadU
                             break;
                         case "log":
                             options.onLog?.(response.level >= 2 ? "error" : response.level === 1 ? "warning" : "info", response.message);
+                            break;
+                        default:
+                            reject(new Error("Unknown USD worker response type"));
                             break;
                     }
                 } catch (error) {

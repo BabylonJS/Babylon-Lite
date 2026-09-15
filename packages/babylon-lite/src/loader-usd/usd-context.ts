@@ -18,6 +18,7 @@ export interface UsdRig {
 export interface UsdMorphBinding {
     data: MorphTargetData;
     targetIndex: number;
+    name: string;
 }
 
 /** @internal A source draw and its skin remapping, shared by instance placements. */
@@ -44,4 +45,5 @@ export interface UsdContext {
     morphTargets: Map<number, UsdMorphBinding[]>;
     classicInstanceSources: Set<number>;
     thinInstanceSources: Set<number>;
+    publishAnimation?: () => void;
 }

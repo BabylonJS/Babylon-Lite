@@ -45,8 +45,10 @@ export async function apply(context: UsdContext): Promise<void> {
             });
         }
         context.signal?.throwIfAborted();
-        // Lite builders are LH. Convert to the RH geometry convention used under our stage root.
-        geometry.indices = usdReverseIndices(geometry.indices);
+        // Lite builders are LH. Convert only the protocol's default RH primitives.
+        if (!(flags & 2)) {
+            geometry.indices = usdReverseIndices(geometry.indices);
+        }
         for (const stream of [geometry.positions, geometry.normals]) {
             if (axis !== 1) {
                 for (let i = 0; i < stream.length; i += 3) {

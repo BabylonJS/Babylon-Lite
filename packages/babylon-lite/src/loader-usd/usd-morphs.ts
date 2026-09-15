@@ -1,5 +1,5 @@
 import type { UsdContext, UsdDraw } from "./usd-context.js";
-import { USD_NONE, UsdOp, usdField, usdFloats } from "./usd-protocol.js";
+import { USD_NONE, UsdOp, usdField, usdFloats, usdString } from "./usd-protocol.js";
 
 interface SourceTarget {
     id: number;
@@ -7,6 +7,7 @@ interface SourceTarget {
     positions: Float32Array;
     normals: Float32Array | null;
     influence: number;
+    name: string;
 }
 
 function deltas(target: Float32Array, base: Float32Array, draw: UsdDraw): Float32Array {
@@ -24,6 +25,7 @@ function deltas(target: Float32Array, base: Float32Array, draw: UsdDraw): Float3
 /** @internal Convert absolute protocol targets to Lite delta storage buffers. */
 export async function apply(context: UsdContext): Promise<void> {
     const byMesh = new Map<number, SourceTarget[]>();
+    const targetIds = new Set<number>();
     for (const record of context.records) {
         if (record.op !== UsdOp.MorphTarget) {
             continue;
@@ -32,9 +34,10 @@ export async function apply(context: UsdContext): Promise<void> {
         const meshId = usdField(record, 1);
         const vertexCount = usdField(record, 4);
         const influence = record.payload.getFloat32(28, true);
-        if (context.morphTargets.has(id) || !Number.isFinite(influence)) {
+        if (targetIds.has(id) || !Number.isFinite(influence)) {
             throw new Error(`Invalid or duplicate USD morph target ${id}`);
         }
+        targetIds.add(id);
         const positions = usdFloats(context.data, usdField(record, 5), vertexCount * 3);
         const normalsOffset = usdField(record, 6);
         const normals = normalsOffset === USD_NONE ? null : usdFloats(context.data, normalsOffset, vertexCount * 3);
@@ -42,7 +45,7 @@ export async function apply(context: UsdContext): Promise<void> {
             throw new Error(`USD morph target ${id} contains invalid vertex data`);
         }
         const targets = byMesh.get(meshId) ?? [];
-        targets.push({ id, vertexCount, positions, normals, influence });
+        targets.push({ id, vertexCount, positions, normals, influence, name: usdString(context.data, usdField(record, 2), usdField(record, 3)) });
         byMesh.set(meshId, targets);
     }
     if (!byMesh.size) {
@@ -72,7 +75,7 @@ export async function apply(context: UsdContext): Promise<void> {
             draw.mesh.morphTargets = data;
             targets.forEach((target, targetIndex) => {
                 const bindings = context.morphTargets.get(target.id) ?? [];
-                bindings.push({ data, targetIndex });
+                bindings.push({ data, targetIndex, name: target.name });
                 context.morphTargets.set(target.id, bindings);
             });
         }

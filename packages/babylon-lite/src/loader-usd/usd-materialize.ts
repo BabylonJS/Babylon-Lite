@@ -22,7 +22,7 @@ export async function materializeUsd(engine: EngineContext, extracted: UsdExtrac
     const scene = scenes[0]!;
     const zUp = usdField(scene, 0);
     const scale = scene.payload.getFloat32(4, true);
-    const fps = scene.payload.getFloat32(8, true);
+    const fps = scene.payload.getFloat32(8, true) || 24;
     if (zUp > 1 || !(scale > 0) || !Number.isFinite(scale) || !(fps > 0) || !Number.isFinite(fps)) {
         throw new Error("Invalid USD stage metadata");
     }

@@ -18,6 +18,7 @@ interface WeightedPointerBucket {
     writer: (output: Float32Array, offset: number) => void;
     arity: number;
     quaternion: boolean;
+    afterWrite?: () => void;
     contested: boolean;
     active: boolean;
     hasReference: boolean;
@@ -30,13 +31,14 @@ interface WeightedPointerBucket {
 interface WeightedPointerScratch {
     readonly buckets: WeightedPointerBucket[];
     readonly sample: Float32Array;
+    readonly afterWrites: Set<() => void>;
 }
 
 let scratchByManager: WeakMap<AnimationManager, WeightedPointerScratch> | undefined;
 
 /** Enables weighted property-animation blending on `manager` by registering its category handler. */
 export function enablePropertyAnimationBlending(manager: AnimationManager): void {
-    setAnimationTaskCategoryHandler(manager, ANIMATION_GROUP_TASK_CATEGORY, updateWeightedPointerAnimations);
+    setAnimationTaskCategoryHandler(manager, ANIMATION_GROUP_TASK_CATEGORY, _updateWeightedPointerAnimations);
 }
 
 function getScratch(manager: AnimationManager): WeightedPointerScratch {
@@ -46,15 +48,19 @@ function getScratch(manager: AnimationManager): WeightedPointerScratch {
         scratch = {
             buckets: [],
             sample: new F32(16),
+            afterWrites: new Set(),
         };
         scratchByManager.set(manager, scratch);
     }
     return scratch;
 }
 
-function updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: number): boolean {
+/** @internal Drive property-mixer groups, optionally leaving every other animation-group category member untouched. */
+export function _updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: number, onlyPropertyGroups = false): boolean {
     const scratch = getScratch(manager);
+    scratch.afterWrites.clear();
     let contestedCount = 0;
+    let propertyGroupCount = 0;
 
     for (let bucketIndex = 0; bucketIndex < scratch.buckets.length; bucketIndex++) {
         const bucket = scratch.buckets[bucketIndex]!;
@@ -68,12 +74,19 @@ function updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: num
     for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
         const group = groups[groupIndex]!;
         const mixer = group._propertyMixer;
-        if (group._stopped || group.weight === 1 || !mixer) {
+        if (group._stopped || !mixer) {
+            continue;
+        }
+        propertyGroupCount++;
+        if (!onlyPropertyGroups && group.weight === 1) {
             continue;
         }
         const tracks = mixer[MIX_TRACKS];
         for (let trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
             const track = tracks[trackIndex]!;
+            if (trackMaskedOut(group, track)) {
+                continue;
+            }
             const bucket = getTrackBucket(scratch.buckets, track);
             if (!bucket.contested) {
                 bucket.contested = true;
@@ -83,6 +96,18 @@ function updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: num
     }
 
     if (contestedCount === 0) {
+        if (!onlyPropertyGroups) {
+            return false;
+        }
+        if (onlyPropertyGroups && propertyGroupCount) {
+            for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+                const group = groups[groupIndex]!;
+                if (!group._stopped && group._propertyMixer) {
+                    advancePropertyGroupTime(group, group._propertyMixer, deltaMs);
+                }
+            }
+            return true;
+        }
         return false;
     }
 
@@ -95,7 +120,9 @@ function updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: num
         const mixer = group._propertyMixer;
         const tracks = mixer?.[MIX_TRACKS];
         if (!tracks) {
-            tickAnimationCore(group, deltaMs, manager.engine);
+            if (!onlyPropertyGroups) {
+                tickAnimationCore(group, deltaMs, manager.engine);
+            }
             continue;
         }
 
@@ -107,10 +134,16 @@ function updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: num
 
         for (let trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
             const track = tracks[trackIndex]!;
+            if (trackMaskedOut(group, track)) {
+                continue;
+            }
             evaluateSampler(track.sampler, t, track.stride, track.quaternion, scratch.sample, 0);
             const bucket = getTrackBucket(scratch.buckets, track);
             if (!bucket.contested) {
                 track.writer(scratch.sample, 0);
+                if (track._afterWrite) {
+                    scratch.afterWrites.add(track._afterWrite);
+                }
                 continue;
             }
             if (weight !== 0) {
@@ -128,9 +161,23 @@ function updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: num
             normalizeQuaternion(bucket.values);
         }
         bucket.writer(bucket.values, 0);
+        if (bucket.afterWrite) {
+            scratch.afterWrites.add(bucket.afterWrite);
+        }
+    }
+    for (const publish of scratch.afterWrites) {
+        publish();
     }
 
     return true;
+}
+
+function trackMaskedOut(group: AnimationGroup, track: AnimationPropertyRuntimeTrack): boolean {
+    const mask = group.mask;
+    if (!mask || mask.disabled) {
+        return false;
+    }
+    return (mask.names.indexOf(track._targetName ?? "") !== -1) !== (mask.mode === 0);
 }
 
 function advancePropertyGroupTime(group: AnimationGroup, mixer: AnimationPropertyMixer, deltaMs: number): number {
@@ -166,6 +213,7 @@ function getTrackBucket(buckets: WeightedPointerBucket[], track: AnimationProper
             }
             candidate.writer = track.writer;
             candidate.quaternion = track.quaternion;
+            candidate.afterWrite = track._afterWrite;
             return candidate;
         }
     }
@@ -177,6 +225,7 @@ function getTrackBucket(buckets: WeightedPointerBucket[], track: AnimationProper
         writer: track.writer,
         arity,
         quaternion: track.quaternion,
+        afterWrite: track._afterWrite,
         contested: false,
         active: false,
         hasReference: false,

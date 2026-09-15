@@ -1,32 +1,53 @@
-import type { AnimationChannel, AnimationClip, AnimationSampler } from "../animation/types.js";
+import type { AnimationChannel, AnimationClip, AnimationSampler, NodeRest } from "../animation/types.js";
 import { INTERP_LINEAR, PATH_POINTER } from "../animation/types.js";
+import type { AnimationGroup, AnimationPropertyRuntimeTrack, TargetedAnimation } from "../animation/animation-group.js";
 import { decomposeMat4 } from "../math/decompose-mat4.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import type { Mat4Storage } from "../math/types.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { _markWorldMatrixDirty } from "../scene/world-matrix-state.js";
-import type { UsdContext } from "./usd-context.js";
+import type { MorphTargetData } from "../animation/types.js";
+import type { UsdContext, UsdRig } from "./usd-context.js";
 import { UsdOp, usdField, usdFloats } from "./usd-protocol.js";
 
-interface UsdAnimationTarget {
+interface UsdAnimationTarget extends TargetedAnimation {
     target: object;
-    path: string;
+    targetName: string;
 }
 
-function matrixWriter(target: SceneNode): (values: Float32Array, offset: number) => void {
+interface PendingTrack {
+    sampler: AnimationSampler;
+    writer: (values: Float32Array, offset: number) => void;
+    target: object;
+    targetName: string;
+    path: string;
+    stride: number;
+    quaternion: boolean;
+    targetIndex: number;
+}
+
+function matrixWriter(target: SceneNode, markRigDirty: () => void): (values: Float32Array, offset: number) => void {
     return (values, offset) => {
         const matrix = target._localMatrix as unknown as Mat4Storage;
+        let changed = false;
+        // Gf row-major row-vector bytes are Lite column-major column-vector bytes.
         for (let index = 0; index < 16; index++) {
-            matrix[index] = values[offset + index]!;
+            const value = values[offset + index]!;
+            changed ||= matrix[index] !== value;
+            matrix[index] = value;
         }
-        _markWorldMatrixDirty(target);
+        if (changed) {
+            _markWorldMatrixDirty(target);
+            markRigDirty();
+        }
     };
 }
 
-function vectorWriter(target: SceneNode, property: number): (values: Float32Array, offset: number) => void {
+function vectorWriter(target: SceneNode, property: number, markRigDirty: () => void): (values: Float32Array, offset: number) => void {
     if (target._localMatrix) {
         const { translation, rotation, scale } = decomposeMat4(target._localMatrix);
         target._localMatrix = undefined;
+        target._localMatrixLocked = undefined;
         target.position.set(translation.x, translation.y, translation.z);
         target.rotationQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
         target.scaling.set(scale.x, scale.y, scale.z);
@@ -36,49 +57,106 @@ function vectorWriter(target: SceneNode, property: number): (values: Float32Arra
         const y = values[offset + 1]!;
         const z = values[offset + 2]!;
         if (property === 0) {
-            target.position.set(x, y, z);
+            if (target.position.x !== x || target.position.y !== y || target.position.z !== z) {
+                target.position.set(x, y, z);
+                markRigDirty();
+            }
         } else if (property === 1) {
-            target.rotationQuaternion.set(x, y, z, values[offset + 3]!);
-        } else {
+            const w = values[offset + 3]!;
+            if (target.rotationQuaternion.x !== x || target.rotationQuaternion.y !== y || target.rotationQuaternion.z !== z || target.rotationQuaternion.w !== w) {
+                target.rotationQuaternion.set(x, y, z, w);
+                markRigDirty();
+            }
+        } else if (target.scaling.x !== x || target.scaling.y !== y || target.scaling.z !== z) {
             target.scaling.set(x, y, z);
+            markRigDirty();
         }
     };
 }
 
-function morphWriter(context: UsdContext, targetId: number): ((values: Float32Array, offset: number) => void) | undefined {
-    const bindings = context.morphTargets.get(targetId);
-    if (!bindings?.length) {
-        return undefined;
-    }
+function morphWriter(bindings: readonly { data: MorphTargetData; targetIndex: number }[], dirty: Set<MorphTargetData>): (values: Float32Array, offset: number) => void {
     return (values, offset) => {
         const influence = values[offset]!;
         for (const binding of bindings) {
-            if (binding.data._disposed) {
-                continue;
+            if (!binding.data._disposed && binding.data.weights[binding.targetIndex] !== influence) {
+                binding.data.weights[binding.targetIndex] = influence;
+                dirty.add(binding.data);
             }
-            binding.data.weights[binding.targetIndex] = influence;
-            context.engine._device.queue.writeBuffer(
-                binding.data.weightsBuffer,
-                16 + binding.targetIndex * 4,
-                binding.data.weights.buffer,
-                binding.data.weights.byteOffset + binding.targetIndex * 4,
-                4
-            );
         }
     };
 }
 
-/** @internal Build stopped Lite groups for node, bone, and morph influence tracks. */
+function identityRest(): NodeRest {
+    return { parentIdx: -1, tx: 0, ty: 0, tz: 0, rx: 0, ry: 0, rz: 0, rw: 1, sx: 1, sy: 1, sz: 1 };
+}
+
+/** @internal Build maskable, weight-aware Lite groups for node, bone, and morph tracks. */
 export async function apply(context: UsdContext): Promise<void> {
     const records = context.records.filter((record) => record.op === UsdOp.Animation);
     if (!records.length) {
         return;
     }
-    const { createAnimationGroups } = await import("../animation/animation-group.js");
-    const groups = new Map<number, { samplers: AnimationSampler[]; channels: AnimationChannel[]; targets: UsdAnimationTarget[] }>();
+    const dirtyMorphs = new Set<MorphTargetData>();
+    const dirtyRigs = new Set<UsdRig>();
+    const skinScratch = new Float32Array(16);
+    const publish = (): void => {
+        if (context.container._usdDisposed) {
+            return;
+        }
+        if (dirtyRigs.size) {
+            for (const rig of dirtyRigs) {
+                for (const skin of rig.skins) {
+                    if (skin._disposed) {
+                        continue;
+                    }
+                    for (let joint = 0; joint < rig.joints.length; joint++) {
+                        // geomBind-baked vertices and joints are both in the
+                        // Skeleton prim's object space; mesh world is applied
+                        // later by the vertex shader.
+                        multiplyMat4IntoBuffer(skinScratch, 0, rig.joints[joint]!.worldMatrix as unknown as Mat4Storage, 0, rig.inverseBindMatrices, joint * 16);
+                        skin.boneMatrices.set(skinScratch, joint * 16);
+                    }
+                    const width = rig.joints.length * 4;
+                    context.engine._device.queue.writeTexture({ texture: skin.boneTexture }, skin.boneMatrices.buffer, { bytesPerRow: width * 16 }, { width, height: 1 });
+                }
+            }
+            dirtyRigs.clear();
+        }
+        for (const morph of dirtyMorphs) {
+            if (!morph._disposed) {
+                context.engine._device.queue.writeBuffer(morph.weightsBuffer, 16, morph.weights);
+            }
+        }
+        dirtyMorphs.clear();
+    };
+    context.publishAnimation = publish;
+
+    const targetKeys = new Map<object, number>();
+    const targetNames: string[] = [];
+    const rests: NodeRest[] = [];
+    const targetIndex = (target: object, name: string): number => {
+        const existing = targetKeys.get(target);
+        if (existing !== undefined) {
+            return existing;
+        }
+        const index = rests.length;
+        targetKeys.set(target, index);
+        targetNames.push(name);
+        rests.push(identityRest());
+        return index;
+    };
+    const rigsByBone = new Map<SceneNode, UsdRig[]>();
+    for (const rig of context.rigs.values()) {
+        for (const bone of rig.joints) {
+            const rigs = rigsByBone.get(bone) ?? [];
+            rigs.push(rig);
+            rigsByBone.set(bone, rigs);
+        }
+    }
+    const groups = new Map<number, PendingTrack[]>();
     for (const record of records) {
         const kind = usdField(record, 0);
-        const targetId = usdField(record, 1);
+        const id = usdField(record, 1);
         const property = usdField(record, 2);
         const count = usdField(record, 4);
         const stride = usdField(record, 7);
@@ -86,87 +164,104 @@ export async function apply(context: UsdContext): Promise<void> {
         if (kind > 2 || !count || stride !== expectedStride || (kind === 2) !== (property === 4)) {
             throw new Error("Invalid USD animation target, property, or value stride");
         }
-        const target = kind === 0 ? context.nodes.get(targetId) : kind === 1 ? context.bones.get(targetId) : undefined;
-        const writer = kind === 2 ? morphWriter(context, targetId) : target ? (property === 3 ? matrixWriter(target) : vectorWriter(target, property)) : undefined;
-        if (!writer) {
+        const sceneTarget = kind === 0 ? context.nodes.get(id) : kind === 1 ? context.bones.get(id) : undefined;
+        const morphBindings = kind === 2 ? context.morphTargets.get(id) : undefined;
+        const target = sceneTarget ?? morphBindings;
+        if (!target) {
             continue;
         }
+        const name = sceneTarget?.name ?? morphBindings![0]!.name;
+        const markRigDirty = (): void => {
+            if (sceneTarget) {
+                for (const rig of rigsByBone.get(sceneTarget) ?? []) {
+                    dirtyRigs.add(rig);
+                }
+            }
+        };
+        const writer =
+            kind === 2 ? morphWriter(morphBindings!, dirtyMorphs) : property === 3 ? matrixWriter(sceneTarget!, markRigDirty) : vectorWriter(sceneTarget!, property, markRigDirty);
         const input = usdFloats(context.data, usdField(record, 5), count).map((time) => time / context.timeCodesPerSecond);
         const output = usdFloats(context.data, usdField(record, 6), count * stride);
         if (!output.every(Number.isFinite) || input.some((time, index) => !Number.isFinite(time) || (index > 0 && time <= input[index - 1]!))) {
             throw new Error("Invalid USD animation samples");
         }
         const trackIndex = usdField(record, 3);
-        let group = groups.get(trackIndex);
-        if (!group) {
-            group = { samplers: [], channels: [], targets: [] };
-            groups.set(trackIndex, group);
-        }
-        group.channels.push({
-            path: PATH_POINTER,
-            nodeIdx: -1,
-            samplerIdx: group.samplers.length,
-            pointerWriter: writer,
-            pointerArity: stride,
-            pointerQuaternion: property === 1,
-        });
-        group.samplers.push({ input, output, interpolation: INTERP_LINEAR });
-        group.targets.push({
-            target: kind === 2 ? context.morphTargets.get(targetId)![0]!.data : target!,
+        const tracks = groups.get(trackIndex) ?? [];
+        tracks.push({
+            sampler: { input, output, interpolation: INTERP_LINEAR },
+            writer,
+            target,
+            targetName: name,
             path: ["position", "rotationQuaternion", "scaling", "matrix", "influence"][property]!,
+            stride,
+            quaternion: property === 1,
+            targetIndex: targetIndex(target, name),
         });
+        groups.set(trackIndex, tracks);
     }
-    const clips: AnimationClip[] = [...groups].map(([trackIndex, group]) => ({
+
+    const clips: AnimationClip[] = [...groups].map(([trackIndex, tracks]) => ({
         name: `USD Animation ${trackIndex + 1}`,
-        channels: group.channels,
-        samplers: group.samplers,
-        duration: Math.max(...group.samplers.map((sampler) => sampler.input[sampler.input.length - 1]!)),
+        channels: tracks.map((track, samplerIdx): AnimationChannel => ({
+            path: PATH_POINTER,
+            nodeIdx: track.targetIndex,
+            samplerIdx,
+            pointerWriter: track.writer,
+            pointerArity: track.stride,
+            pointerQuaternion: track.quaternion,
+        })),
+        samplers: tracks.map((track) => track.sampler),
+        duration: Math.max(...tracks.map((track) => track.sampler.input[track.sampler.input.length - 1]!)),
         frameRate: context.timeCodesPerSecond,
     }));
+    const { createAnimationGroups } = await import("../animation/animation-group.js");
+    const [{ _installPropertyMixerHandler }, { _updateWeightedPointerAnimations }] = await Promise.all([
+        import("../animation/weighted-gltf-mixer.js"),
+        import("../animation/weighted-pointer-mixer.js"),
+    ]);
+    _installPropertyMixerHandler(_updateWeightedPointerAnimations);
     const nativeGroups = createAnimationGroups({
         clips,
-        nodes: [],
+        nodes: rests,
         skeletons: [],
         morphBindings: [],
         nodeTargets: [],
         excludedNodeIndices: new Set(),
-        nodeNames: [],
+        nodeNames: targetNames,
     });
-    const scratch = new Float32Array(16);
     context.container.animationGroups = nativeGroups.map((native, index) => {
-        const { _gltfMixer, ...group } = native;
-        void _gltfMixer;
+        const tracks = [...groups.values()][index]!;
+        const runtimeTracks: AnimationPropertyRuntimeTrack[] = tracks.map((track) => ({
+            sampler: track.sampler,
+            stride: track.stride,
+            quaternion: track.quaternion,
+            writer: track.writer,
+            mixTarget: track.target,
+            mixProperty: track.path,
+            _targetName: track.targetName,
+            _afterWrite: publish,
+        }));
+        const group: AnimationGroup = {
+            ...native,
+            isPlaying: false,
+            _stopped: true,
+            targetedAnimations: tracks.map((track): UsdAnimationTarget => ({
+                target: track.target,
+                targetName: track.targetName,
+                nodeIndex: track.targetIndex,
+                path: track.path,
+            })),
+            _gltfMixer: undefined,
+            _propertyMixer: [runtimeTracks, 0, native.duration, native.duration],
+        };
         const controller = group._ctrl!;
         const tick = controller.tick;
         controller.tick = (deltaMs, engine) => {
-            if (context.container._usdDisposed) {
-                return;
-            }
             tick(deltaMs, engine);
-            for (const rig of context.rigs.values()) {
-                for (const skin of rig.skins) {
-                    if (skin._disposed) {
-                        continue;
-                    }
-                    for (let joint = 0; joint < rig.joints.length; joint++) {
-                        multiplyMat4IntoBuffer(scratch, 0, rig.joints[joint]!.worldMatrix as unknown as Mat4Storage, 0, rig.inverseBindMatrices, joint * 16);
-                        skin.boneMatrices.set(scratch, joint * 16);
-                    }
-                    const width = rig.joints.length * 4;
-                    (engine ?? context.engine)._device.queue.writeTexture(
-                        { texture: skin.boneTexture },
-                        skin.boneMatrices.buffer,
-                        { bytesPerRow: width * 16 },
-                        { width, height: 1 }
-                    );
-                }
+            if (deltaMs === 0 || group._animationManager) {
+                publish();
             }
         };
-        return {
-            ...group,
-            isPlaying: false,
-            _stopped: true,
-            targetedAnimations: [...groups.values()][index]!.targets,
-        };
+        return group;
     });
 }

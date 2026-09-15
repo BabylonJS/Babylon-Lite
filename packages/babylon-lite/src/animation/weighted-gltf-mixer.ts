@@ -13,6 +13,14 @@ import type { Mat4Storage } from "../math/types.js";
 import { _boneApplier } from "../skeleton/bone-control-hooks.js";
 import type { BoneOverride } from "../skeleton/bone-control.js";
 
+type PropertyMixerHandler = (manager: AnimationManager, deltaMs: number, onlyPropertyGroups: boolean) => boolean;
+let _propertyMixerHandler: PropertyMixerHandler | null = null;
+
+/** @internal Install opt-in property-track handling for the skeletal blend manager. */
+export function _installPropertyMixerHandler(handler: PropertyMixerHandler): void {
+    _propertyMixerHandler = handler;
+}
+
 const GLTF_CLIP = 0;
 const GLTF_NODES = 1;
 const GLTF_SKELETONS = 2;
@@ -102,6 +110,7 @@ function getScratch(manager: AnimationManager): WeightedGltfScratch {
 }
 
 function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number): boolean {
+    const handledPropertyGroups = _propertyMixerHandler?.(manager, deltaMs, true) ?? false;
     const scratch = getScratch(manager);
     const keys = scratch.keys;
     keys.clear();
@@ -117,7 +126,15 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
     }
 
     if (keys.size === 0) {
-        return false;
+        if (handledPropertyGroups) {
+            for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+                const group = groups[groupIndex]!;
+                if (!group._stopped && !group._propertyMixer) {
+                    tickAnimationCore(group, deltaMs, manager.engine);
+                }
+            }
+        }
+        return handledPropertyGroups;
     }
 
     scratch.targets.forEach(resetWeightedGltfTarget);
@@ -125,6 +142,9 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
     for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
         const group = groups[groupIndex]!;
         if (group._stopped) {
+            continue;
+        }
+        if (group._propertyMixer) {
             continue;
         }
 

@@ -20,6 +20,10 @@ export interface AnimationPropertyRuntimeTrack {
     readonly writer: (output: Float32Array, offset: number) => void;
     readonly mixTarget: object;
     readonly mixProperty: string;
+    /** @internal Target name used by AnimationGroupMask. */
+    readonly _targetName?: string;
+    /** @internal Deduplicated publication step after weighted property writes. */
+    readonly _afterWrite?: () => void;
 }
 export type AnimationPropertyMixer = readonly [readonly AnimationPropertyRuntimeTrack[], number, number, number];
 export type AnimationGltfMixer = readonly [AnimationClip, readonly NodeRest[], readonly SkeletonBinding[]];

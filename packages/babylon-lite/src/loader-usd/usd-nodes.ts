@@ -5,7 +5,10 @@ import { createSceneNodeFromMatrix } from "../scene/scene-node.js";
 import { usdField, usdFloats, usdString, USD_NONE } from "./usd-protocol.js";
 import type { UsdRecord } from "./usd-protocol.js";
 
-/** @internal Convert a protocol matrix through Lite's precision-aware allocator. */
+/** @internal Convert a protocol matrix through Lite's precision-aware allocator.
+ * GfMatrix serializes row-vector matrices row-major, while Lite consumes
+ * column-vector matrices column-major. The same flat sequence is therefore the
+ * required mathematical transpose; reshuffling it would transpose twice. */
 export function usdMatrix(values: ArrayLike<number>): Mat4 {
     const storage = allocateMat4Storage();
     storage.set(values);

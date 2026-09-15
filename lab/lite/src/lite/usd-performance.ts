@@ -29,6 +29,7 @@ async function main(): Promise<void> {
     const loadMs = performance.now() - loadStart;
     addToScene(scene, container);
     const meshes = getContainerMeshes(container);
+    const matrices = meshes[0]?.thinInstances?.matrices;
 
     await registerScene(scene);
     await startEngine(engine);
@@ -36,6 +37,8 @@ async function main(): Promise<void> {
     canvas.dataset.sourceMeshes = String(meshes.length);
     canvas.dataset.thinInstances = String(meshes.reduce((count, mesh) => count + (mesh.thinInstances?.count ?? 0), 0));
     canvas.dataset.triangles = String(meshes.reduce((count, mesh) => count + (mesh._cpuIndices?.length ?? 0) / 3, 0));
+    canvas.dataset.firstInstanceX = String(matrices?.[12]);
+    canvas.dataset.lastInstanceX = String(matrices?.[(container.diagnostics.statistics.instances - 1) * 16 + 12]);
     canvas.dataset.loadMs = String(loadMs);
     canvas.dataset.drawCalls = String(engine.drawCallCount);
     canvas.dataset.initMs = String(performance.now() - initStart);

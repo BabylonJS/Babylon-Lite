@@ -64,6 +64,12 @@ its payload. Unknown versions/opcodes, incorrect payload lengths, truncation,
 trailing bytes, invalid IDs and out-of-range/alignment references reject.
 The missing-reference sentinel is `0xffffffff`. Strings are UTF-8 slices.
 Numbers and matrices reference aligned spans of the raw-data buffer.
+OpenUSD `GfMatrix` uses row vectors and the native writer serializes its rows in
+order. Lite uses column vectors and column-major storage, so the same flat
+16-float sequence is already the required mathematical transpose: translations
+occupy indices 12-14 in both representations. Node, joint, animation and thin
+instance matrices therefore use zero-copy views; rearranging rows and columns
+would transpose them a second time.
 
 | Opcode           | Payload bytes | Contents                                                                                                        |
 | ---------------- | ------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -104,7 +110,9 @@ float4x4 span directly with `setThinInstances`, producing one instanced draw per
 prototype rather than one Lite mesh per point.
 
 Analytic cube, sphere, cylinder and cone records use Lite's geometry builders;
-axis correction is local to the shape, not applied to its children.
+axis correction is local to the shape, not applied to its children. Lite's
+builders are left-handed, so their indices are reversed only for the protocol's
+default right-handed primitive records.
 
 ### Materials and textures
 
@@ -119,7 +127,10 @@ overrides base color, opacity, metallic, roughness, occlusion and emissive
 values before lighting. Normal bindings apply their authored transform in
 Lite's cotangent-frame normal path. Plugin registration occurs only when a
 loaded USD material needs it, so non-USD and untextured USD scenes retain no
-plugin bridge.
+plugin bridge. The process-wide plugin signature table is append-only:
+registering a USD plugin cannot invalidate the cached signature of a material
+already rendered by another scene. A positive opacity cutoff disables alpha
+blending and uses the alpha-test path, matching Babylon.js depth-write behavior.
 
 ### Skinning and animation
 
@@ -129,6 +140,13 @@ the local bind hierarchy before inversion, so inverse bind matrices come from
 the authored bind pose rather than being inferred from the rest pose; mesh skin
 streams are retained through subset remapping.
 
+The extractor applies each skinned mesh's `geomBindTransform` to its vertices
+and changes its placement node to the bound Skeleton prim. Joint world matrices
+are therefore Skeleton-object-space matrices and the shader computes
+`skeletonNodeWorld * (jointObject * inverseBind) * position`. Applying the
+generic glTF `inverse(meshWorld)` term would incorrectly cancel the authored
+Skeleton prim placement.
+
 Morph records contain absolute target positions/normals. The loader remaps them
 through each compact material subset, converts them to Lite deltas and creates
 the existing storage-buffer-backed `MorphTargetData`. There is no fixed target
@@ -136,9 +154,14 @@ count. Classic instances retain the source skeleton and morph buffers; point
 instances retain them on the prototype draw.
 
 Animation modules convert time codes to seconds, preserve target IDs and local
-affine matrices, and return ordinary AnimationGroups. Morph influence tracks
-write individual entries in the shared weights buffer. Groups are not
-automatically played by the loader.
+affine matrices, and return ordinary AnimationGroups. USD channels also expose
+Lite property-mixer tracks with stable target identities and names, so
+`AnimationGroupMask`, zero/partial weights and the existing
+`enableAnimationBlending` manager path apply normally. Track writers update CPU
+state first; a deduplicated post-write publication uploads each affected rig and
+morph buffer once after all groups have been evaluated. Paused groups whose
+sample has not changed perform no GPU upload. Groups are not automatically
+played by the loader.
 
 ## Pipeline configuration and shader logic
 
@@ -178,16 +201,18 @@ package dependency or package subpath export is required.
 Unit tests cover command validation, typed-array bounds, hierarchy/units/up-axis,
 winding, material subsets, independent material channels, shared geometry and
 ownership, analytic shapes, thin instances, bind/rest skeletons, morph targets
-and influence animation, cancellation and virtual file sets. Browser plumbing
-tests use the real shared worker with public synthetic USDA, USDC and USDZ
-fixtures.
+and masked/weighted influence animation, cancellation, malformed worker
+messages and virtual file sets. Browser plumbing tests use the real shared
+worker with public synthetic USDA, USDC and USDZ fixtures.
 
 A paired lab scene loads the same point-instanced USD through Babylon.js and
 Lite. Its machine-readable counters assert semantic parity (source meshes,
-instances and triangles), while the existing Lite-vs-Babylon.js RAF benchmark
-collects initialization time, frame cost, draw calls and JS heap usage for the
-same scene. The comparison is additive: it does not alter existing image
-goldens, MAD thresholds or bundle ceilings. Root-entry build tests prove
+instances, translations and triangles), while the existing Lite-vs-Babylon.js
+RAF benchmark collects initialization time, frame cost, draw calls and JS heap
+usage for the same scene. Paired runtime screenshot tests compare Lite directly
+against Babylon.js for independent Preview Surface texture channels, right/left
+analytic winding, and a posed skinned animation. This equivalent MAD coverage
+does not add or modify committed golden baselines. Root-entry build tests prove
 unrelated imports do not retain the USD loader or external runtime.
 
 ## File manifest

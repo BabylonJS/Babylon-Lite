@@ -1,6 +1,7 @@
 import type { UsdContext } from "./usd-context.js";
 import { UsdOp } from "./usd-protocol.js";
 import { mat4Determinant3 } from "../math/mat4-determinant3.js";
+import { _registerAssetContainerSceneCleanup } from "../loader-gltf/gltf-scene-cleanup.js";
 
 /** @internal Optional command families are resolved only for assets that contain them. */
 export async function applyUsdFeatures(context: UsdContext): Promise<void> {
@@ -20,8 +21,21 @@ export async function applyUsdFeatures(context: UsdContext): Promise<void> {
             await Promise.resolve(feature.apply(context));
         }
     }
-    if (has(UsdOp.Animation) || context.container._usdMeshes.some((mesh) => mat4Determinant3(mesh.worldMatrix) > 0)) {
-        const { installMirroredMeshSupport } = await import("../material/standard/std-mirrored-support.js");
-        context.container._sceneSetup = (scene) => installMirroredMeshSupport(scene);
+    const mirrored = has(UsdOp.Animation) || context.container._usdMeshes.some((mesh) => mat4Determinant3(mesh.worldMatrix) > 0);
+    const installMirroredMeshSupport = mirrored ? (await import("../material/standard/std-mirrored-support.js")).installMirroredMeshSupport : undefined;
+    const publish = context.publishAnimation;
+    if (installMirroredMeshSupport || publish) {
+        context.container._sceneSetup = (scene, container) => {
+            installMirroredMeshSupport?.(scene);
+            if (publish) {
+                scene._beforeRender.push(publish);
+                _registerAssetContainerSceneCleanup(container, scene, () => {
+                    const index = scene._beforeRender.indexOf(publish);
+                    if (index >= 0) {
+                        scene._beforeRender.splice(index, 1);
+                    }
+                });
+            }
+        };
     }
 }

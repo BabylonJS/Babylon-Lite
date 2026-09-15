@@ -40,6 +40,9 @@ async function main(): Promise<void> {
         scene.meshes.reduce((count, mesh) => count + ("thinInstanceCount" in mesh ? (mesh as Mesh).thinInstanceCount : 0), 0)
     );
     canvas.dataset.triangles = String(scene.meshes.reduce((count, mesh) => count + mesh.getTotalIndices() / 3, 0));
+    const matrices = (scene.meshes.find((mesh) => "thinInstanceGetWorldMatrices" in mesh) as Mesh | undefined)?.thinInstanceGetWorldMatrices();
+    canvas.dataset.firstInstanceX = String(matrices?.[0]?.m[12]);
+    canvas.dataset.lastInstanceX = String(matrices?.[matrices.length - 1]?.m[12]);
     canvas.dataset.loadMs = String(loadMs);
     canvas.dataset.initMs = String(performance.now() - initStart);
     canvas.dataset.ready = "true";

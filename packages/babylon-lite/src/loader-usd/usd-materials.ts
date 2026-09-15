@@ -97,7 +97,6 @@ export async function buildUsdMaterials(
             alpha: 1,
             metallicFactor: metallic,
             roughnessFactor: roughness,
-            normalTexture: normalTexture?.source.texture,
             normalTextureScale: normalScale,
             doubleSided: !!(flags & 1),
             alphaBlend: !!(flags & 4),
@@ -109,6 +108,7 @@ export async function buildUsdMaterials(
             hasPlugins = true;
         }
         if (cutoff > 0) {
+            mat.alphaBlend = false;
             (await import("../material/pbr/set-alpha-cutoff.js")).setPbrAlphaCutoff(mat, cutoff);
         }
         if (!emissiveTexture && emissive.some((value) => value !== 0)) {

@@ -130,4 +130,17 @@ describe("USD worker transport", () => {
         expect(MockWorker.instances[0]!.url).toBe(create.mock.results[0]!.value);
         expect(revoke).toHaveBeenCalledWith(create.mock.results[0]!.value);
     });
+
+    it.each([
+        [{ type: "future", requestId: 1 }, "Unknown USD worker response type"],
+        [{ type: "progress", requestId: 2, progress: {} }, "Unexpected USD worker response"],
+        [null, "Unexpected USD worker response"],
+    ])("rejects an unexpected worker response", async (response, message) => {
+        MockWorker.complete = false;
+        const loading = extractUsd(new ArrayBuffer(1), {});
+        const worker = await vi.waitFor(() => expect(MockWorker.instances[0]).toBeDefined()).then(() => MockWorker.instances[0]!);
+        worker.emit("message", { data: response });
+        await expect(loading).rejects.toThrow(message);
+        expect(worker.terminate).toHaveBeenCalledOnce();
+    });
 });

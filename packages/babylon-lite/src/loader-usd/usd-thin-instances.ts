@@ -18,6 +18,8 @@ export function apply(context: UsdContext): void {
             throw new Error(`USD mesh ${sourceId} has duplicate or mixed instances`);
         }
         const count = usdField(record, 2);
+        // Gf row-major row-vector bytes are the equivalent Lite column-major
+        // column-vector sequence, including translation at indices 12-14.
         const matrices = usdFloats(context.data, usdField(record, 1), count * 16);
         if (!matrices.every(Number.isFinite)) {
             throw new Error(`USD thin instances for mesh ${sourceId} contain a non-finite transform`);
