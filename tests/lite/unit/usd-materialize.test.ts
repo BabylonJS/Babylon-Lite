@@ -1,0 +1,189 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { goToFrame } from "../../../packages/babylon-lite/src/animation/animation-group";
+import { disposeUsd } from "../../../packages/babylon-lite/src/loader-usd/load-usd";
+import { materializeUsd } from "../../../packages/babylon-lite/src/loader-usd/usd-materialize";
+import { getContainerMeshes } from "../../../packages/babylon-lite/src/asset-container";
+import type { PbrMaterialProps } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
+import type { MaterialPlugin } from "../../../packages/babylon-lite/src/material/plugin/material-plugin";
+import type { SceneNode } from "../../../packages/babylon-lite/src/scene/scene-node";
+import { readUsdCommands, UsdOp, usdField } from "../../../packages/babylon-lite/src/loader-usd/usd-protocol";
+import { usdFixture, usdTestContainer, usdTestEngine } from "./usd-fixture";
+
+afterEach(() => vi.restoreAllMocks());
+
+describe("USD command materialization", () => {
+    it("creates a hierarchy, compact material subsets and shared instance geometry", async () => {
+        const fixture = usdFixture({ scale: 0.01 });
+        const { engine, buffers } = usdTestEngine();
+        const container = usdTestContainer(fixture);
+
+        await materializeUsd(engine, fixture, container);
+        const meshes = getContainerMeshes(container);
+        expect(meshes).toHaveLength(4);
+        expect(meshes.map((mesh) => mesh.name)).toEqual(["Fixture [0]", "Fixture [1]", "Fixture", "Fixture"]);
+        expect(meshes.map((mesh) => mesh._gpu.indexCount)).toEqual([3, 3, 3, 3]);
+        expect(meshes[2]!._gpu).toBe(meshes[0]!._gpu);
+        expect(meshes[3]!._gpu).toBe(meshes[1]!._gpu);
+        expect(meshes[0]!.worldMatrix[0]).toBeCloseTo(0.01);
+        expect(meshes[2]!.worldMatrix[12]).toBeCloseTo(0.03);
+        expect(meshes[0]!.boundMin).toEqual([0, 0, 0]);
+        expect(meshes[0]!.boundMax).toEqual([1, 1, 0]);
+        expect((meshes[0]!.material as PbrMaterialProps).name).toBe("Fixture");
+        expect((meshes[0]!.material as PbrMaterialProps).metallicFactor).toBeCloseTo(0.4);
+        expect((meshes[1]!.material as PbrMaterialProps).doubleSided).toBe(true);
+
+        disposeUsd(container);
+        expect(buffers.every((buffer) => vi.mocked(buffer.destroy).mock.calls.length === 1)).toBe(true);
+        disposeUsd(container);
+        expect(buffers.every((buffer) => vi.mocked(buffer.destroy).mock.calls.length === 1)).toBe(true);
+    });
+
+    it.each([0, 1, 2, 3])("creates and instances analytic primitive type %s", async (shape) => {
+        const fixture = usdFixture({ analytic: shape, zUp: true });
+        const { engine } = usdTestEngine();
+        const container = usdTestContainer(fixture);
+
+        await materializeUsd(engine, fixture, container);
+        const meshes = getContainerMeshes(container);
+        expect(meshes).toHaveLength(2);
+        expect(meshes[0]!._gpu).toBe(meshes[1]!._gpu);
+        expect(meshes[0]!._gpu.indexCount).toBeGreaterThan(0);
+        expect(meshes[0]!.worldMatrix[5]).toBeCloseTo(0);
+        expect(meshes[0]!.worldMatrix[6]).toBeCloseTo(1);
+        expect(meshes[0]!.worldMatrix[9]).toBeCloseTo(1);
+        disposeUsd(container);
+    });
+
+    it("attaches eight-influence skins and converts USD time codes to stopped animation groups", async () => {
+        const fixture = usdFixture({ skin: true });
+        const { engine } = usdTestEngine();
+        const container = usdTestContainer(fixture);
+
+        await materializeUsd(engine, fixture, container);
+        const meshes = getContainerMeshes(container);
+        expect(meshes).toHaveLength(4);
+        expect(meshes.every((mesh) => mesh.skeleton?.boneCount === 2)).toBe(true);
+        expect(meshes.every((mesh) => mesh.skeleton?.joints1?.length === 12)).toBe(true);
+        expect(meshes[2]!.skeleton).toBe(meshes[0]!.skeleton);
+        expect(container.animationGroups).toHaveLength(1);
+        expect(container.animationGroups![0]!.isPlaying).toBe(false);
+        expect(container.animationGroups![0]!.duration).toBe(1);
+        expect(container.animationGroups![0]!.targetedAnimations.map((track) => track.path)).toEqual(["matrix", "matrix"]);
+        expect(meshes[0]!.skeleton!.boneMatrices[29]).toBeCloseTo(-1);
+
+        goToFrame(container.animationGroups![0]!, 12, engine);
+        expect((container.animationGroups![0]!.targetedAnimations[0]!.target as SceneNode).worldMatrix[12]).toBeCloseTo(1);
+        expect(meshes[0]!.skeleton!.boneMatrices[28]).toBeCloseTo(0);
+        expect(meshes[0]!.skeleton!.boneMatrices[29]).toBeCloseTo(0);
+        expect(engine._device.queue.writeTexture).toHaveBeenCalled();
+        disposeUsd(container);
+    });
+
+    it("preserves independent protocol-v5 texture channels and transforms with a PBR plugin", async () => {
+        const close = vi.fn();
+        vi.stubGlobal(
+            "createImageBitmap",
+            vi.fn(async () => ({ width: 1, height: 1, close }))
+        );
+        const fixture = usdFixture({ textures: true });
+        const { engine, textures } = usdTestEngine();
+        const container = usdTestContainer(fixture);
+
+        await materializeUsd(engine, fixture, container);
+        const materials = getContainerMeshes(container)
+            .slice(0, 2)
+            .map((mesh) => mesh.material as PbrMaterialProps);
+        const first = materials[0]!;
+        expect(first.normalTexture).toBeDefined();
+        expect(first.normalTexture!.uScale).toBe(2);
+        expect(first.normalTexture!.vScale).toBe(3);
+        expect(first.normalTexture!.uAng).toBeCloseTo(Math.PI / 4);
+        expect(first.normalTexture!.uOffset).toBeCloseTo(0.1 - 3 * Math.sin(Math.PI / 4));
+        expect(first.normalTexture!.vOffset).toBeCloseTo(1 - 3 * Math.cos(Math.PI / 4) - 0.2);
+        expect(first.alphaBlend).toBe(true);
+        expect(first.occlusionStrength).toBe(1);
+        expect(first.plugins).toHaveLength(1);
+        const plugin = first.plugins![0] as MaterialPlugin;
+        expect(plugin.getSamplers?.().map((sampler) => sampler.texture)).toEqual([
+            "usdBaseTexture",
+            "usdNormalTexture",
+            "usdMetallicTexture",
+            "usdRoughnessTexture",
+            "usdOcclusionTexture",
+        ]);
+        expect(plugin.getCustomCode?.("fragment")?.CUSTOM_FRAGMENT_UPDATE_ALPHA).toContain("metallic=clamp");
+        expect(plugin.getCustomCode?.("fragment")?.CUSTOM_FRAGMENT_UPDATE_ALPHA).toContain(".b;metallic=clamp");
+        expect(plugin.getCustomCode?.("fragment")?.CUSTOM_FRAGMENT_UPDATE_DIFFUSE).toContain("usdCotangentFrame");
+        const fields = plugin.getUniforms?.().ubo ?? [];
+        const offsets = new Map(fields.map((field, index) => [field.name, index * 16]));
+        const uniformData = new Float32Array(fields.length * 4);
+        plugin.writeUbo?.(uniformData, offsets);
+        expect(uniformData[offsets.get("usdBaseUVm")! / 4]).toBeCloseTo(2 * Math.cos(Math.PI / 4));
+        expect(uniformData[offsets.get("usdBaseUVt")! / 4]).toBeCloseTo(0.1 - 3 * Math.sin(Math.PI / 4));
+        expect(uniformData[offsets.get("usdMetallicScale")! / 4]).toBeCloseTo(0.4);
+        expect(uniformData[offsets.get("usdMetallicBias")! / 4]).toBeCloseTo(0.3);
+        expect(uniformData[offsets.get("usdRoughnessScale")! / 4]).toBeCloseTo(0.3);
+        expect(uniformData[offsets.get("usdOcclusionScale")! / 4]).toBeCloseTo(0.2);
+        expect(container._usdTextures).toHaveLength(3);
+        expect(close).toHaveBeenCalledTimes(3);
+
+        disposeUsd(container);
+        expect(textures.every((texture) => vi.mocked(texture.destroy).mock.calls.length === 1)).toBe(true);
+    });
+
+    it("uses one thin-instance matrix slab per material subset", async () => {
+        const fixture = usdFixture({ thinInstances: true });
+        const { engine } = usdTestEngine();
+        const container = usdTestContainer(fixture);
+
+        await materializeUsd(engine, fixture, container);
+        const meshes = getContainerMeshes(container);
+        expect(meshes).toHaveLength(2);
+        expect(meshes.every((mesh) => mesh.thinInstances?.count === 2)).toBe(true);
+        expect(meshes[0]!.thinInstances!.matrices).toBe(meshes[1]!.thinInstances!.matrices);
+        expect(meshes[0]!.thinInstances!.matrices[28]).toBe(3);
+        disposeUsd(container);
+    });
+
+    it("creates subset-aware morph buffers and animates shared instance influences", async () => {
+        const fixture = usdFixture({ morph: true });
+        const { engine } = usdTestEngine();
+        const container = usdTestContainer(fixture);
+
+        await materializeUsd(engine, fixture, container);
+        const meshes = getContainerMeshes(container);
+        expect(meshes).toHaveLength(4);
+        expect(meshes.every((mesh) => mesh.morphTargets?.count === 1)).toBe(true);
+        expect(meshes[2]!.morphTargets).toBe(meshes[0]!.morphTargets);
+        expect(meshes[3]!.morphTargets).toBe(meshes[1]!.morphTargets);
+        expect(meshes[0]!.morphTargets!.targets[0]!.positions).toEqual(new Float32Array([0, 0, 0, 1, 0, 0, 1, 0, 0]));
+        expect(container.animationGroups![0]!.targetedAnimations.map((track) => track.path)).toEqual(["influence"]);
+
+        goToFrame(container.animationGroups![0]!, 12, engine);
+        expect(meshes[0]!.morphTargets!.weights[0]).toBeCloseTo(0.5);
+        expect(meshes[1]!.morphTargets!.weights[0]).toBeCloseTo(0.5);
+        expect(engine._device.queue.writeBuffer).toHaveBeenCalled();
+        disposeUsd(container);
+    });
+
+    it.each([
+        ["scene", (fixture: ReturnType<typeof usdFixture>) => new DataView(fixture.commands).setFloat32(28, 0, true), "Invalid USD stage metadata"],
+        [
+            "geometry",
+            (fixture: ReturnType<typeof usdFixture>) => {
+                const geometry = readUsdCommands(fixture.commands).find((record) => record.op === UsdOp.Geometry)!;
+                new DataView(fixture.data).setUint32(usdField(geometry, 13), 99, true);
+            },
+            "Invalid USD triangle indices",
+        ],
+    ])("rolls back an invalid %s command", async (_label, mutate, expected) => {
+        const fixture = usdFixture();
+        mutate(fixture);
+        const { engine, buffers } = usdTestEngine();
+        const container = usdTestContainer(fixture);
+        await expect(materializeUsd(engine, fixture, container)).rejects.toThrow(expected);
+        disposeUsd(container);
+        expect(buffers.every((buffer) => vi.mocked(buffer.destroy).mock.calls.length === 1)).toBe(true);
+    });
+});

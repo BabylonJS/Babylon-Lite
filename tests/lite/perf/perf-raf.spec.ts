@@ -44,12 +44,20 @@ interface SceneConfigEntry {
 
 const SCENE_CONFIG: SceneConfigEntry[] = JSON.parse(readFileSync(resolve(__dirname, "../../../scene-config.json"), "utf-8"));
 
-const ALL_SCENES: SceneDef[] = SCENE_CONFIG.map((entry) => ({
-    name: `scene${entry.id}`,
-    label: entry.name,
-}));
+const ALL_SCENES: SceneDef[] = [
+    ...SCENE_CONFIG.map((entry) => ({
+        name: `scene${entry.id}`,
+        label: entry.name,
+    })),
+    { name: "usd-performance", label: "USD Point Instancer - 10K" },
+];
 
-const SELECTED = process.env.PERF_SCENES ? process.env.PERF_SCENES.split(",").map((s) => `scene${s.trim()}`) : null;
+const SELECTED = process.env.PERF_SCENES
+    ? process.env.PERF_SCENES.split(",").map((value) => {
+          const name = value.trim();
+          return /^\d+$/.test(name) ? `scene${name}` : name;
+      })
+    : null;
 
 const SCENES = SELECTED ? ALL_SCENES.filter((s) => SELECTED.includes(s.name)) : ALL_SCENES;
 
@@ -80,6 +88,7 @@ const RAF_INIT_SCRIPT = `
 interface SceneStats {
     fps: number;
     initTime: number;
+    loadTime: number;
     drawCalls: number;
     rafAvgMs: number;
     rafMedianMs: number;
@@ -108,7 +117,7 @@ async function warmupCache(context: BrowserContext, url: string): Promise<void> 
     await page.close();
 }
 
-function computeStats(timings: number[], durationMs: number): Omit<SceneStats, "initTime" | "drawCalls"> {
+function computeStats(timings: number[], durationMs: number): Omit<SceneStats, "initTime" | "loadTime" | "drawCalls"> {
     if (timings.length === 0) {
         return { fps: 0, rafAvgMs: 0, rafMedianMs: 0, rafP95Ms: 0, rafP99Ms: 0, frames: 0, memoryMB: 0 };
     }
@@ -156,6 +165,9 @@ async function measurePageOnce(context: BrowserContext, url: string, durationMs:
     const initMs = await page.evaluate(() => {
         return parseFloat((document.querySelector("canvas") as HTMLCanvasElement).dataset.initMs || "0");
     });
+    const loadMs = await page.evaluate(() => {
+        return parseFloat((document.querySelector("canvas") as HTMLCanvasElement).dataset.loadMs || "0");
+    });
 
     // Warmup — let GPU caches / pipeline compilation settle
     await page.waitForTimeout(WARMUP_MS);
@@ -191,6 +203,7 @@ async function measurePageOnce(context: BrowserContext, url: string, durationMs:
     return {
         ...stats,
         initTime: Math.round(initMs) / 1000,
+        loadTime: Math.round(loadMs) / 1000,
         drawCalls,
         memoryMB,
     };
@@ -218,8 +231,9 @@ test.describe("RAF Performance Benchmark", () => {
         test(`${scene.label}`, async ({ browser }) => {
             const { context, release } = await acquireContext(browser);
 
-            const liteUrl = `/${scene.name}.html`;
-            const bjsUrl = `/babylon-ref-${scene.name}.html`;
+            const nested = scene.name === "usd-performance" ? "/lite/" : "/";
+            const liteUrl = `${nested}${scene.name}.html`;
+            const bjsUrl = `${nested}babylon-ref-${scene.name}.html`;
 
             // Pre-warm HTTP cache — both engines fetch the same external CDN assets
             // (BoomBox.glb, environmentSpecular.env, etc.). Without this, whichever
@@ -245,6 +259,7 @@ test.describe("RAF Performance Benchmark", () => {
                     `RAF ${lite.rafAvgMs}ms / ${bjs.rafAvgMs}ms (${rafRatio}) | ` +
                     `FPS ${lite.fps} / ${bjs.fps} | ` +
                     `Init ${lite.initTime}s / ${bjs.initTime}s | ` +
+                    `Load ${lite.loadTime}s / ${bjs.loadTime}s | ` +
                     `Draw ${lite.drawCalls} / ${bjs.drawCalls} | ` +
                     `Mem ${lite.memoryMB}MB / ${bjs.memoryMB}MB`
             );

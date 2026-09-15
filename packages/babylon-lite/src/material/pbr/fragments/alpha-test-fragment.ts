@@ -13,6 +13,7 @@ export const pbrExt: PbrExt = {
         return ctx._features & PBR_HAS_ALPHA_TEST
             ? {
                   _id: "alpha-test",
+                  _dependencies: ctx._pi ? [`plugin-${ctx._pi}`] : undefined,
                   _uboFields: [{ _name: "alphaCutOff", _type: "f32" }],
                   _fragmentSlots: { AT: wgsl`if(alpha*material.materialAlpha<material.alphaCutOff){discard;}` },
               }
