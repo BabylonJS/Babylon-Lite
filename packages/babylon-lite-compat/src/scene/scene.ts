@@ -188,6 +188,7 @@ export class Scene extends AbstractScene {
     private readonly _pendingTextures: Array<Promise<void>> = [];
     private readonly _pendingGroundBakes: Array<() => void> = [];
     private readonly _pendingMorphBuilds: Array<{ mesh: { _lite: unknown }; manager: { _build(mesh: never, engine: import("babylon-lite").EngineContext): void } }> = [];
+    private _materialPluginsRequested = false;
     private readonly _runningAnimatables: Animatable[] = [];
     private readonly _animationGroupCache = new WeakMap<object, AnimationGroup>();
     /** @internal Structural `AnimationGroup`s stepped + weight-blended each frame. */
@@ -428,6 +429,19 @@ export class Scene extends AbstractScene {
             manager._build(mesh as never, engine);
         }
         this._pendingMorphBuilds.length = 0;
+    }
+
+    /** @internal Request Lite's opt-in material-plugin bridges for this scene. */
+    public _requestMaterialPlugins(): void {
+        this._materialPluginsRequested = true;
+    }
+
+    /** @internal Enable requested material plugins after meshes are added and before scene registration. */
+    public async _enableMaterialPlugins(): Promise<void> {
+        if (this._materialPluginsRequested) {
+            const { enableMaterialPlugins } = await import("babylon-lite");
+            enableMaterialPlugins(this._lite);
+        }
     }
 
     /** @internal Clustered light containers to register on the Lite scene at engine start. */

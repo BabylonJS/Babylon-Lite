@@ -10,7 +10,11 @@
  */
 
 import { unsupported } from "../error.js";
-import type { AbstractMesh } from "../meshes/meshes.js";
+import type { AbstractMesh, TransformNode } from "../meshes/meshes.js";
+import type { Matrix } from "../math/matrix.js";
+import type { Vector3 } from "../math/vector.js";
+import type { Node } from "../node/node.js";
+import type { Scene } from "../scene/scene.js";
 
 export { Skeleton, Bone } from "../bones/skeleton.js";
 
@@ -172,6 +176,9 @@ export class WeightedSound {
 }
 
 // ─── Loaders (formats not present in Babylon Lite) ───────────────────
+const FBX_LOADER_UNSUPPORTED =
+    "FBX support requires a parser, DCC transform/material/animation mapping, geometry and skin materialization, and a scene-scheduled constraint solver. Those form a new loader subsystem with unresolved ownership and mapping policies.";
+
 export class OBJFileLoader {
     public constructor() {
         unsupported("OBJFileLoader", "The OBJ format is not supported by Babylon Lite. Convert to glTF.");
@@ -184,9 +191,174 @@ export class STLFileLoader {
     }
 }
 
+export type FBXNormalMapCoordinateSystem = "y-up" | "y-down";
+
+export interface FBXLoaderWarning {
+    source: "scene" | "model" | "geometry" | "skin" | "rig" | "animation" | "blendShape" | "camera" | "light";
+    message: string;
+    objectName?: string;
+    details?: unknown;
+}
+
+export interface FBXFileLoaderOptions {
+    preset?: "compatible" | "full";
+    normalMapCoordinateSystem?: FBXNormalMapCoordinateSystem;
+    materials?: "auto" | "standard" | "pbr";
+    unitScale?: "preserve" | "meters" | number;
+    shareGeometry?: boolean;
+    onWarning?: (warning: FBXLoaderWarning) => void;
+    nurbsSubdivision?: number;
+    curves?: "lines" | "skip";
+    constraints?: "apply" | "metadata";
+    rebaseAnimations?: boolean;
+    attachCamerasAndLights?: boolean;
+}
+
+export const FBXFileLoaderMetadata = {
+    name: "fbx",
+    extensions: {
+        ".fbx": { isBinary: true },
+    },
+} as const;
+
 export class FBXFileLoader {
-    public constructor() {
-        unsupported("FBXFileLoader", "The FBX format is not supported by Babylon Lite. Convert to glTF.");
+    public constructor(_options: Partial<FBXFileLoaderOptions> = {}) {
+        unsupported("FBXFileLoader", FBX_LOADER_UNSUPPORTED);
+    }
+}
+
+export type FBXConstraintType = "aim" | "parent" | "position" | "rotation" | "scale" | "singleChainIK" | "unknown";
+export type FBXConstraintVector3 = [number, number, number];
+export type FBXConstraintBoolean3 = [boolean, boolean, boolean];
+
+export interface FBXConstraintTarget {
+    modelId: number;
+    weight: number;
+    offsetTranslation: FBXConstraintVector3;
+    offsetRotation: FBXConstraintVector3;
+    offsetScale: FBXConstraintVector3;
+}
+
+export interface FBXConstraintData {
+    id: number;
+    name: string;
+    type: FBXConstraintType;
+    typeName: string;
+    nodeId?: number;
+    targets: FBXConstraintTarget[];
+    weight: number;
+    active: boolean;
+    affectTranslation: FBXConstraintBoolean3;
+    affectRotation: FBXConstraintBoolean3;
+    affectScale: FBXConstraintBoolean3;
+    offsetTranslation: FBXConstraintVector3;
+    offsetRotation: FBXConstraintVector3;
+    offsetScale: FBXConstraintVector3;
+    aimVector: FBXConstraintVector3;
+    upVector: FBXConstraintVector3;
+    worldUpVector: FBXConstraintVector3;
+    worldUpType: number;
+    worldUpNodeId?: number;
+    ikFirstJointId?: number;
+    ikEndJointId?: number;
+    ikEffectorId?: number;
+    ikPoleVector: FBXConstraintVector3;
+}
+
+export interface FBXConstraintBehaviorTarget {
+    node: TransformNode;
+    weight: number;
+    offset: Matrix;
+}
+
+export interface FBXConstraintBehaviorOptions {
+    root: TransformNode;
+    targets: FBXConstraintBehaviorTarget[];
+    upNode: TransformNode | null;
+    sceneUp: Vector3;
+}
+
+export class FBXConstraintSolver {
+    private constructor() {
+        unsupported("FBXConstraintSolver", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public static Get(_scene: Scene): FBXConstraintSolver | undefined {
+        return unsupported("FBXConstraintSolver.Get", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public static GetOrCreate(_scene: Scene): FBXConstraintSolver {
+        return unsupported("FBXConstraintSolver.GetOrCreate", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public get constraints(): readonly FBXConstraintBehavior[] {
+        return unsupported("FBXConstraintSolver.constraints", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public get cyclicConstraints(): readonly FBXConstraintBehavior[] {
+        return unsupported("FBXConstraintSolver.cyclicConstraints", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public register(_behavior: FBXConstraintBehavior): void {
+        unsupported("FBXConstraintSolver.register", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public unregister(_behavior: FBXConstraintBehavior): void {
+        unsupported("FBXConstraintSolver.unregister", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public invalidateOrder(): void {
+        unsupported("FBXConstraintSolver.invalidateOrder", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public beginFrame(): void {
+        unsupported("FBXConstraintSolver.beginFrame", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public solve(): void {
+        unsupported("FBXConstraintSolver.solve", FBX_LOADER_UNSUPPORTED);
+    }
+}
+
+export class FBXConstraintBehavior {
+    public readonly name: string;
+    public attachedNode: TransformNode | null = null;
+    public enabled = true;
+
+    public constructor(
+        public readonly constraint: FBXConstraintData,
+        _options: FBXConstraintBehaviorOptions
+    ) {
+        this.name = `fbxConstraint:${constraint.name}`;
+        unsupported("FBXConstraintBehavior", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public init(): void {
+        unsupported("FBXConstraintBehavior.init", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public attach(_target: TransformNode): void {
+        unsupported("FBXConstraintBehavior.attach", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public detach(): void {
+        unsupported("FBXConstraintBehavior.detach", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public captureBase(): void {
+        unsupported("FBXConstraintBehavior.captureBase", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public restoreBase(): void {
+        unsupported("FBXConstraintBehavior.restoreBase", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public dependencyNodes(): Array<Node | null> {
+        return unsupported("FBXConstraintBehavior.dependencyNodes", FBX_LOADER_UNSUPPORTED);
+    }
+
+    public evaluate(): void {
+        unsupported("FBXConstraintBehavior.evaluate", FBX_LOADER_UNSUPPORTED);
     }
 }
 

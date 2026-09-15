@@ -46,6 +46,8 @@ type Tuple4 = [number, number, number, number];
 /** Babylon.js `Material` — base class for all materials. */
 export abstract class Material {
     public name: string;
+    /** @internal Whether a compat `MaterialPluginBase` is attached. */
+    public _usesMaterialPlugins = false;
     /** Common transparency mode flag (Babylon.js `Material.transparencyMode`). */
     public transparencyMode: number | null = null;
     /** Back-face culling toggle (Babylon.js `Material.backFaceCulling`). */
@@ -140,6 +142,9 @@ export abstract class Material {
         if (!this._scene) {
             this._scene = scene;
             scene._registerMaterial(this);
+            if (this._usesMaterialPlugins) {
+                scene._requestMaterialPlugins();
+            }
         }
     }
 

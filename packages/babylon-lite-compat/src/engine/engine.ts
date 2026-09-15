@@ -447,6 +447,7 @@ export abstract class AbstractEngine {
             scene._flushPendingAdds();
             scene._buildMorphTargets();
             scene._buildClusteredContainers();
+            await scene._enableMaterialPlugins();
             await scene._loadPendingEnvironment();
             // Babylon.js reverses triangle winding for negative-determinant (mirrored) world
             // transforms so a `scaling.x = -1` mesh renders upright rather than inside-out. Enable
