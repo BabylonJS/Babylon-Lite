@@ -137,6 +137,7 @@ export function createAxisDragGizmo(engine: EngineContext, layer: UtilityLayer, 
     const drag = createPointerDrag({
         dragAxis: { x: options.dragAxis.x, y: options.dragAxis.y, z: options.dragAxis.z },
         moveAttached: false,
+        updateDragPlane: false,
         // BJS-faithful drag-plane anchor: pass through the attached node's
         // world position (BJS `_updateDragPlanePosition` overrides
         // `dragPlane.position` with `attachedNode.getAbsolutePosition()`).

@@ -18,9 +18,10 @@ import type { SceneContext } from "../scene/scene-core.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { Vec3 } from "../math/types.js";
 import { createPickingRay } from "../picking/ray.js";
+import type { Ray } from "../picking/ray.js";
+import type { PickingInfo } from "../picking/picking-info.js";
 import { createGpuPicker, disposePicker, pickAsync } from "../picking/gpu-picker.js";
 import type { GpuPicker } from "../picking/gpu-picker.js";
-import type { PickingInfo } from "../picking/picking-info.js";
 import { getViewProjectionMatrix, getCameraPosition } from "../camera/camera.js";
 import { resolveCameraViewport } from "../camera/viewport.js";
 import { rayPlaneIntersect, normalizeVec3Obj } from "./gizmo-math.js";
@@ -31,14 +32,14 @@ import type { UtilityLayer } from "./utility-layer.js";
 export interface PointerDragStartEvent {
     /** World-space point where the ray intersected the drag plane on drag start. */
     dragPlanePoint: Vec3;
-    /** Browser pointer id that initiated the drag. */
+    /** World-space normal used by the drag plane on drag start. */
+    dragPlaneNormal: Vec3;
+    /** GPU pick metadata from the pointer-down that initiated the drag. */
+    pickInfo: PickingInfo;
+    /** Pointer identifier associated with this drag. */
     pointerId: number;
     /** Browser pointer event that triggered drag start. */
     pointerEvent: PointerEvent;
-    /** Picking result from the pointer-down that initiated the drag. */
-    pickInfo: PickingInfo;
-    /** Collider mesh selected by the pointer-down pick. */
-    pickedMesh: Mesh;
 }
 
 /** Event raised for each pointer move while a drag is active. */
@@ -48,22 +49,20 @@ export interface PointerDragMoveEvent {
     delta: Vec3;
     /** Current world-space point on the drag plane (post-projection). */
     dragPlanePoint: Vec3;
-    /** Signed scalar distance projected onto the drag axis since the previous move
+    /** Signed scalar distance projected onto the drag axis since drag start
      *  (axis-drag mode); for plane mode this is `delta.length()`. */
     dragDistance: number;
     /** World-space normal of the active drag plane. */
     dragPlaneNormal: Vec3;
-    /** Browser pointer id for the active drag. */
+    /** Pointer identifier associated with this drag. */
     pointerId: number;
-    /** Browser pointer event that triggered this move. */
-    pointerEvent: PointerEvent;
 }
 
 /** Event raised when the active pointer drag is released or cancelled. */
 export interface PointerDragEndEvent {
-    /** Last world-space point reported on the drag plane. */
+    /** Last world-space point reported for the drag. */
     dragPlanePoint: Vec3;
-    /** Browser pointer id for the completed drag. */
+    /** Pointer identifier associated with this drag. */
     pointerId: number;
     pointerEvent: PointerEvent | null;
 }
@@ -76,6 +75,8 @@ export interface PointerDragOptions {
     /** Drag inside a plane defined by this world-space normal.  Mutually
      *  exclusive with `dragAxis`. */
     dragPlaneNormal?: Vec3;
+    /** Whether to refresh the active drag plane while dragging. Defaults to true. */
+    updateDragPlane?: boolean;
     /** When false, the dispatcher fires events but doesn't move the picked
      *  mesh.  Gizmos always set this to false and apply transforms to their
      *  attached node themselves. */
@@ -143,6 +144,8 @@ interface ActiveDrag {
     planePoint: Vec3;
     /** Last drag-plane point reported (for delta computation). */
     lastPlanePoint: Vec3;
+    /** Drag-plane point at drag start (for cumulative `dragDistance`). */
+    startPlanePoint: Vec3;
     pointerId: number;
 }
 
@@ -211,9 +214,11 @@ export function registerPointerDrag(layer: UtilityLayer, canvas: HTMLCanvasEleme
         // would keep `state.active` pointing at the now-orphan drag and ignore
         // the next pointer-up because the pointerId no longer matches anything.
         if (state!.active && state!.active.drag === drag) {
-            const pointerId = state!.active.pointerId;
+            const { lastPlanePoint, pointerId } = state!.active;
+            state!.active = null;
+            state!.pickPending = false;
             drag.dragging = false;
-            drag.onDragEnd.notify({ dragPlanePoint: state!.active.lastPlanePoint, pointerId, pointerEvent: null });
+            drag.onDragEnd.notify({ dragPlanePoint: lastPlanePoint, pointerId, pointerEvent: null });
             if ("releasePointerCapture" in state!.canvas) {
                 try {
                     state!.canvas.releasePointerCapture(pointerId);
@@ -221,8 +226,6 @@ export function registerPointerDrag(layer: UtilityLayer, canvas: HTMLCanvasEleme
                     // Non-fatal — pointer might already be released.
                 }
             }
-            state!.active = null;
-            state!.pickPending = false;
         }
         if (state!.hovered === drag) {
             drag.hovering = false;
@@ -330,8 +333,8 @@ async function handleHoverMove(state: DispatcherState, event: PointerEvent): Pro
         if (token !== state.hoverToken || state.active) {
             return;
         }
-        const match = info.hit && info.pickedMesh ? findDragForMesh(state.drags, info.pickedMesh) : null;
-        next = match?.drag.enabled ? match.drag : null;
+        const drag = info.hit && info.pickedMesh ? findDragForMesh(state.drags, info.pickedMesh as Mesh) : null;
+        next = drag && drag.enabled ? drag : null;
     }
     if (next === state.hovered) {
         return;
@@ -359,11 +362,10 @@ async function handlePointerDown(state: DispatcherState, event: PointerEvent): P
         return;
     }
     // Find the drag whose collider list contains the picked mesh.
-    const match = findDragForMesh(state.drags, info.pickedMesh);
-    if (!match || !match.drag.enabled) {
+    const drag = findDragForMesh(state.drags, info.pickedMesh as Mesh);
+    if (!drag || !drag.enabled) {
         return;
     }
-    const { drag, pickedMesh } = match;
 
     if ("setPointerCapture" in state.canvas) {
         try {
@@ -375,6 +377,8 @@ async function handlePointerDown(state: DispatcherState, event: PointerEvent): P
 
     const hitPoint = info.pickedPoint ? { x: info.pickedPoint[0], y: info.pickedPoint[1], z: info.pickedPoint[2] } : null;
     const planeNormal = pickDragPlaneNormal(drag, state.layer.scene, hitPoint);
+    const downRay = canvasRayFromPointer(state.layer.scene, state.canvas, event.offsetX, event.offsetY);
+    info.ray = downRay?.ray ?? null;
     // Plane-mode drags may anchor the plane at a caller-supplied point (e.g. the
     // gizmo's world centre) instead of the picked surface point, so the
     // screen→world scale is taken at the correct depth (see `getPlanePoint`).
@@ -387,7 +391,6 @@ async function handlePointerDown(state: DispatcherState, event: PointerEvent): P
     // between the override anchor and the press location (a one-off jump).
     let startPoint = hitPoint ?? planePoint;
     if (overridePoint) {
-        const downRay = canvasRayFromPointer(state.layer.scene, state.canvas, event.offsetX, event.offsetY);
         const hit = downRay ? rayPlaneIntersect(downRay.origin, downRay.dir, planePoint, planeNormal) : null;
         startPoint = hit ?? planePoint;
     }
@@ -402,28 +405,17 @@ async function handlePointerDown(state: DispatcherState, event: PointerEvent): P
     state.active = {
         drag,
         planeNormal,
-        planePoint,
+        planePoint: { x: planePoint.x, y: planePoint.y, z: planePoint.z },
         lastPlanePoint: { x: startPoint.x, y: startPoint.y, z: startPoint.z },
+        startPlanePoint: { x: startPoint.x, y: startPoint.y, z: startPoint.z },
         pointerId: event.pointerId,
     };
     drag.dragging = true;
-    drag.onDragStart.notify({ dragPlanePoint: startPoint, pointerId: event.pointerId, pointerEvent: event, pickInfo: info, pickedMesh });
+    drag.onDragStart.notify({ dragPlanePoint: startPoint, dragPlaneNormal: planeNormal, pickInfo: info, pointerId: event.pointerId, pointerEvent: event });
 }
 
 function handlePointerMove(state: DispatcherState, event: PointerEvent): void {
     const active = state.active!;
-    // BJS-faithful: when the drag exposes a `getPlanePoint` callback, refresh
-    // the drag plane's anchor every move so it tracks the attached node as the
-    // gizmo drives it (BJS `_updateDragPlanePosition` overrides plane.position
-    // with `attachedNode.getAbsolutePosition()` per move, default
-    // `updateDragPlane = true`).  Keeps the screen-to-world ratio anchored at
-    // the node's depth — without this, Lite anchored the plane at the picked
-    // surface point (e.g. an off-centre corner), and a deeper picked plane
-    // inflated the per-tick world delta vs. BJS.
-    const livePlanePoint = active.drag.options.getPlanePoint?.();
-    if (livePlanePoint) {
-        active.planePoint = { x: livePlanePoint.x, y: livePlanePoint.y, z: livePlanePoint.z };
-    }
     const ray = canvasRayFromPointer(state.layer.scene, state.canvas, event.offsetX, event.offsetY);
     if (!ray) {
         return;
@@ -444,29 +436,40 @@ function handlePointerMove(state: DispatcherState, event: PointerEvent): void {
         // Project the delta onto the drag axis.
         const proj = delta.x * axis.x + delta.y * axis.y + delta.z * axis.z;
         delta = { x: axis.x * proj, y: axis.y * proj, z: axis.z * proj };
-        dragDistance = proj;
+        const totalDelta = {
+            x: hit.x - active.startPlanePoint.x,
+            y: hit.y - active.startPlanePoint.y,
+            z: hit.z - active.startPlanePoint.z,
+        };
+        dragDistance = totalDelta.x * axis.x + totalDelta.y * axis.y + totalDelta.z * axis.z;
     } else {
         dragDistance = Math.hypot(delta.x, delta.y, delta.z);
     }
 
-    active.lastPlanePoint = { x: hit.x, y: hit.y, z: hit.z };
-    active.drag.onDrag.notify({ delta, dragPlanePoint: hit, dragDistance, dragPlaneNormal: active.planeNormal, pointerId: event.pointerId, pointerEvent: event });
-
-    // BJS-faithful: with `updateDragPlane = true` (BJS default), the drag plane
-    // is refreshed AFTER the pick using the just-computed hit as the new
-    // reference point for the normal.  For axis mode this re-faces the plane
-    // toward the camera as it / the gizmo moves; for plane mode the normal is
-    // fixed (configured `dragPlaneNormal`) so we leave it alone.
-    if (active.drag.options.dragAxis) {
-        active.planeNormal = pickDragPlaneNormal(active.drag, state.layer.scene, hit);
+    if (active.drag.options.updateDragPlane !== false) {
+        const configuredPlaneNormal = active.drag.options.dragPlaneNormal;
+        active.planeNormal = configuredPlaneNormal ? normalizeVec3Obj(configuredPlaneNormal) : pickDragPlaneNormal(active.drag, state.layer.scene, hit);
+        const livePlanePoint = active.drag.options.getPlanePoint?.();
+        if (livePlanePoint) {
+            active.planePoint = { x: livePlanePoint.x, y: livePlanePoint.y, z: livePlanePoint.z };
+        }
     }
+
+    active.drag.onDrag.notify({
+        delta,
+        dragPlanePoint: hit,
+        dragDistance,
+        dragPlaneNormal: active.planeNormal,
+        pointerId: event.pointerId,
+    });
+    active.lastPlanePoint = { x: hit.x, y: hit.y, z: hit.z };
 }
 
 function handlePointerUp(state: DispatcherState, event: PointerEvent): void {
     const active = state.active!;
+    state.active = null;
     active.drag.dragging = false;
     active.drag.onDragEnd.notify({ dragPlanePoint: active.lastPlanePoint, pointerId: event.pointerId, pointerEvent: event });
-    state.active = null;
     if ("releasePointerCapture" in state.canvas) {
         try {
             state.canvas.releasePointerCapture(event.pointerId);
@@ -476,12 +479,10 @@ function handlePointerUp(state: DispatcherState, event: PointerEvent): void {
     }
 }
 
-function findDragForMesh(drags: PointerDrag[], mesh: unknown): { drag: PointerDrag; pickedMesh: Mesh } | null {
+function findDragForMesh(drags: PointerDrag[], mesh: Mesh): PointerDrag | null {
     for (const d of drags) {
-        for (const collider of d._colliders) {
-            if (collider === mesh) {
-                return { drag: d, pickedMesh: collider };
-            }
+        if (d._colliders.includes(mesh)) {
+            return d;
         }
     }
     return null;
@@ -554,13 +555,8 @@ function pickDragPlaneNormal(drag: PointerDrag, scene: SceneContext, hitPoint: V
     return { x: nx, y: ny, z: nz };
 }
 
-interface CanvasRay {
-    origin: Vec3;
-    dir: Vec3;
-}
-
 /** Build a world-space ray from CSS canvas coordinates against the scene camera. */
-function canvasRayFromPointer(scene: SceneContext, canvas: HTMLCanvasElement, cssX: number, cssY: number): CanvasRay | null {
+function canvasRayFromPointer(scene: SceneContext, canvas: HTMLCanvasElement, cssX: number, cssY: number): { origin: Vec3; dir: Vec3; ray: Ray } | null {
     const cam = scene.camera;
     if (!cam) {
         return null;
@@ -588,5 +584,6 @@ function canvasRayFromPointer(scene: SceneContext, canvas: HTMLCanvasElement, cs
     return {
         origin: { x: ray.origin[0], y: ray.origin[1], z: ray.origin[2] },
         dir: { x: ray.direction[0], y: ray.direction[1], z: ray.direction[2] },
+        ray,
     };
 }

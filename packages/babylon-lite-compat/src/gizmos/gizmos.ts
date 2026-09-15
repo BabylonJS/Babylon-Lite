@@ -63,11 +63,12 @@ import type {
     PointerDragStartEvent,
     PointerDragMoveEvent,
     PointerDragEndEvent,
+    PickingInfo as LitePickingInfo,
+    Mesh as LiteMesh,
 } from "babylon-lite";
 
 import type { Scene } from "../scene/scene.js";
-import type { AbstractMesh } from "../meshes/meshes.js";
-import { Mesh } from "../meshes/meshes.js";
+import { type AbstractMesh, Mesh } from "../meshes/meshes.js";
 import type { Node } from "../node/node.js";
 import type { Light } from "../lights/lights.js";
 import type { Camera } from "../cameras/cameras.js";
@@ -76,8 +77,9 @@ import type { Color3 } from "../math/color.js";
 import { Observable } from "../misc/observable.js";
 import { PointerEventTypes, PointerInfo } from "../events/pointer-events.js";
 import { PickingInfo } from "../culling/picking-info.js";
+import { Ray } from "../math/ray.js";
 
-/** Babylon.js payload emitted while a pointer drag is moving. */
+/** Babylon.js drag move payload. */
 export type DragEvent = {
     delta: Vector3;
     dragPlanePoint: Vector3;
@@ -87,63 +89,78 @@ export type DragEvent = {
     pointerInfo: PointerInfo | null;
 };
 
-/** Babylon.js payload emitted when a pointer drag starts or ends. */
+/** Babylon.js drag start/end payload. */
 export type DragStartEndEvent = Pick<DragEvent, "dragPlanePoint" | "pointerId" | "pointerInfo">;
 
-interface CompositeDragObservables {
-    onDragStartObservable: Observable<DragStartEndEvent>;
-    onDragObservable: Observable<DragEvent>;
-    onDragEndObservable: Observable<DragStartEndEvent>;
-}
-
-function toVector3(value: { x: number; y: number; z: number }): Vector3 {
+function vectorFromLite(value: { x: number; y: number; z: number }): Vector3 {
     return new Vector3(value.x, value.y, value.z);
 }
 
-function wireCompositeDragObservables(target: CompositeDragObservables, drags: readonly PointerDrag[]): Array<() => void> {
-    const disposeSubscriptions: Array<() => void> = [];
+function pickingInfoFromLite(value: LitePickingInfo, pickedMeshes: Map<LiteMesh, Mesh>): PickingInfo {
+    const liteMesh = value.pickedMesh as LiteMesh | null;
+    let pickedMesh = liteMesh ? pickedMeshes.get(liteMesh) : undefined;
+    if (liteMesh && !pickedMesh) {
+        pickedMesh = Mesh._fromLite(liteMesh);
+        pickedMeshes.set(liteMesh, pickedMesh);
+    }
+    const ray = value.ray ? new Ray(Vector3.FromArray(value.ray.origin), Vector3.FromArray(value.ray.direction), value.ray.length) : Ray.Zero();
+    const result = PickingInfo._fromLite(value, pickedMesh ?? null, ray);
+    result.ray = value.ray ? ray : null;
+    return result;
+}
+
+function relayCompositeDragEvents(
+    drags: readonly PointerDrag[],
+    onDragStartObservable: Observable<DragStartEndEvent>,
+    onDragObservable: Observable<DragEvent>,
+    onDragEndObservable: Observable<DragStartEndEvent>
+): (() => void)[] {
+    const subscriptions: (() => void)[] = [];
+    const pointerInfos = new Map<PointerDrag, PointerInfo>();
+    const pickedMeshes = new Map<LiteMesh, Mesh>();
+    const axisPlaneNormals = new Map<PointerDrag, Vector3>();
+    const previousPlaneDragDistances = new Map<PointerDrag, number>();
     for (const drag of drags) {
-        let activePointerInfo: PointerInfo | null = null;
-        disposeSubscriptions.push(
+        subscriptions.push(
             drag.onDragStart.add((event: PointerDragStartEvent) => {
-                const pickedMesh = Mesh._fromLite(event.pickedMesh);
-                activePointerInfo = new PointerInfo(PointerEventTypes.POINTERDOWN, event.pointerEvent, PickingInfo._fromLitePointerDrag(event.pickInfo, pickedMesh));
-                target.onDragStartObservable.notifyObservers({
-                    dragPlanePoint: toVector3(event.dragPlanePoint),
+                const pointerInfo = new PointerInfo(PointerEventTypes.POINTERDOWN, event.pointerEvent, pickingInfoFromLite(event.pickInfo, pickedMeshes));
+                pointerInfos.set(drag, pointerInfo);
+                if (drag.options.dragAxis) {
+                    axisPlaneNormals.set(drag, new Vector3(-event.dragPlaneNormal.x || 0, -event.dragPlaneNormal.y || 0, -event.dragPlaneNormal.z || 0));
+                }
+                onDragStartObservable.notifyObservers({
+                    dragPlanePoint: vectorFromLite(event.dragPlanePoint),
                     pointerId: event.pointerId,
-                    pointerInfo: activePointerInfo,
+                    pointerInfo,
                 });
             }),
             drag.onDrag.add((event: PointerDragMoveEvent) => {
-                target.onDragObservable.notifyObservers({
-                    delta: toVector3(event.delta),
-                    dragPlanePoint: toVector3(event.dragPlanePoint),
-                    dragPlaneNormal: toVector3(event.dragPlaneNormal),
-                    dragDistance: event.dragDistance,
+                const axis = drag.options.dragAxis;
+                const dragDistance = axis ? event.delta.x * axis.x + event.delta.y * axis.y + event.delta.z * axis.z : (previousPlaneDragDistances.get(drag) ?? 0);
+                if (!axis) {
+                    previousPlaneDragDistances.set(drag, Math.hypot(event.delta.x, event.delta.y, event.delta.z));
+                }
+                onDragObservable.notifyObservers({
+                    delta: vectorFromLite(event.delta),
+                    dragPlanePoint: vectorFromLite(event.dragPlanePoint),
+                    dragPlaneNormal: axisPlaneNormals.get(drag)?.clone() ?? vectorFromLite(event.dragPlaneNormal),
+                    dragDistance,
                     pointerId: event.pointerId,
-                    pointerInfo: activePointerInfo,
+                    pointerInfo: pointerInfos.get(drag) ?? null,
                 });
             }),
             drag.onDragEnd.add((event: PointerDragEndEvent) => {
-                target.onDragEndObservable.notifyObservers({
-                    dragPlanePoint: toVector3(event.dragPlanePoint),
+                onDragEndObservable.notifyObservers({
+                    dragPlanePoint: vectorFromLite(event.dragPlanePoint),
                     pointerId: event.pointerId,
-                    pointerInfo: activePointerInfo,
+                    pointerInfo: pointerInfos.get(drag) ?? null,
                 });
-                activePointerInfo = null;
+                pointerInfos.delete(drag);
+                axisPlaneNormals.delete(drag);
             })
         );
     }
-    return disposeSubscriptions;
-}
-
-function disposeCompositeDragObservables(target: CompositeDragObservables, disposeSubscriptions: readonly (() => void)[]): void {
-    for (const disposeSubscription of disposeSubscriptions) {
-        disposeSubscription();
-    }
-    target.onDragStartObservable.clear();
-    target.onDragObservable.clear();
-    target.onDragEndObservable.clear();
+    return subscriptions;
 }
 
 /** Babylon.js `UtilityLayerRenderer` — the overlay scene gizmos render into. */
@@ -203,7 +220,7 @@ export class PositionGizmo extends GizmoBase {
     private _xGizmo: AxisDragGizmo | null = null;
     private _yGizmo: AxisDragGizmo | null = null;
     private _zGizmo: AxisDragGizmo | null = null;
-    private readonly _disposeDragSubscriptions: Array<() => void>;
+    private _dragSubscriptions: (() => void)[];
     public readonly onDragStartObservable = new Observable<DragStartEndEvent>();
     public readonly onDragObservable = new Observable<DragEvent>();
     public readonly onDragEndObservable = new Observable<DragStartEndEvent>();
@@ -211,7 +228,12 @@ export class PositionGizmo extends GizmoBase {
     public constructor(layer: UtilityLayerRenderer) {
         super(layer);
         this._lite = createPositionGizmo(layer._engine, layer._lite);
-        this._disposeDragSubscriptions = wireCompositeDragObservables(this, [this._lite.xGizmo.drag, this._lite.yGizmo.drag, this._lite.zGizmo.drag]);
+        this._dragSubscriptions = relayCompositeDragEvents(
+            [this._lite.xGizmo.drag, this._lite.yGizmo.drag, this._lite.zGizmo.drag],
+            this.onDragStartObservable,
+            this.onDragObservable,
+            this.onDragEndObservable
+        );
         // Babylon.js `Gizmo.updateGizmoRotationToMatchAttachedMesh` defaults to true.
         setPositionGizmoLocalCoordinates(this._lite, true);
     }
@@ -251,7 +273,13 @@ export class PositionGizmo extends GizmoBase {
 
     public override dispose(): void {
         disposePositionGizmo(this._lite, this._layer._lite);
-        disposeCompositeDragObservables(this, this._disposeDragSubscriptions);
+        for (const unsubscribe of this._dragSubscriptions) {
+            unsubscribe();
+        }
+        this._dragSubscriptions.length = 0;
+        this.onDragStartObservable.clear();
+        this.onDragObservable.clear();
+        this.onDragEndObservable.clear();
     }
 }
 
@@ -262,7 +290,7 @@ export class RotationGizmo extends GizmoBase {
     private _xGizmo: PlaneRotationGizmo | null = null;
     private _yGizmo: PlaneRotationGizmo | null = null;
     private _zGizmo: PlaneRotationGizmo | null = null;
-    private readonly _disposeDragSubscriptions: Array<() => void>;
+    private _dragSubscriptions: (() => void)[];
     public readonly onDragStartObservable = new Observable<DragStartEndEvent>();
     public readonly onDragObservable = new Observable<DragEvent>();
     public readonly onDragEndObservable = new Observable<DragStartEndEvent>();
@@ -270,7 +298,12 @@ export class RotationGizmo extends GizmoBase {
     public constructor(layer: UtilityLayerRenderer) {
         super(layer);
         this._lite = createRotationGizmo(layer._engine, layer._lite);
-        this._disposeDragSubscriptions = wireCompositeDragObservables(this, [this._lite.xGizmo.drag, this._lite.yGizmo.drag, this._lite.zGizmo.drag]);
+        this._dragSubscriptions = relayCompositeDragEvents(
+            [this._lite.xGizmo.drag, this._lite.yGizmo.drag, this._lite.zGizmo.drag],
+            this.onDragStartObservable,
+            this.onDragObservable,
+            this.onDragEndObservable
+        );
         // Babylon.js `Gizmo.updateGizmoRotationToMatchAttachedMesh` defaults to true.
         setRotationGizmoLocalCoordinates(this._lite, true);
     }
@@ -308,7 +341,13 @@ export class RotationGizmo extends GizmoBase {
 
     public override dispose(): void {
         disposeRotationGizmo(this._lite, this._layer._lite);
-        disposeCompositeDragObservables(this, this._disposeDragSubscriptions);
+        for (const unsubscribe of this._dragSubscriptions) {
+            unsubscribe();
+        }
+        this._dragSubscriptions.length = 0;
+        this.onDragStartObservable.clear();
+        this.onDragObservable.clear();
+        this.onDragEndObservable.clear();
     }
 }
 

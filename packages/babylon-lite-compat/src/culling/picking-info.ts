@@ -46,24 +46,6 @@ export class PickingInfo {
         return result;
     }
 
-    /** @internal Create a compat result for a Lite gizmo's utility-layer pointer pick. */
-    public static _fromLitePointerDrag(info: LitePickingInfo, pickedMesh: TransformNode): PickingInfo {
-        const result = new PickingInfo();
-        result.hit = info.hit;
-        result.distance = info.distance;
-        result.pickedPoint = info.pickedPoint ? Vector3.FromArray(info.pickedPoint) : null;
-        result.pickedMesh = pickedMesh;
-        result.bu = info.bu;
-        result.bv = info.bv;
-        result.faceId = info.faceId;
-        result.subMeshFaceId = info.faceId;
-        result.subMeshId = info.subMeshId;
-        result.thinInstanceIndex = info.thinInstanceIndex;
-        result._normal = info.pickedNormal ? Vector3.FromArray(info.pickedNormal) : null;
-        result._worldNormal = info.pickedNormalWorld ? Vector3.FromArray(info.pickedNormalWorld) : null;
-        return result;
-    }
-
     public getNormal(useWorldCoordinates = false, _useVerticesNormals = true): Vector3 | null {
         return useWorldCoordinates ? (this._worldNormal?.clone() ?? null) : (this._normal?.clone() ?? null);
     }
