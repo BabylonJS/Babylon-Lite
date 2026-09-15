@@ -16,6 +16,8 @@ import { readUsdCommands, UsdOp, usdField } from "../../../packages/babylon-lite
 import { usdFixture, usdTestContainer, usdTestEngine } from "./usd-fixture";
 import { registerPbrPlugins } from "../../../packages/babylon-lite/src/material/plugin/pbr-plugin-bridge";
 import type { PbrExt } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -200,6 +202,45 @@ describe("USD command materialization", () => {
         expect(extension!.frag!({ _pi: firstIndex } as Parameters<NonNullable<PbrExt["frag"]>>[0])).toBe(firstFragment);
     });
 
+    it("does not retain disposed USD extraction payloads in the PBR signature cache", async () => {
+        vi.stubGlobal(
+            "createImageBitmap",
+            vi.fn(async () => ({ width: 1, height: 1, close: vi.fn() }))
+        );
+        const cached = await (async (): Promise<{ payload: WeakRef<ArrayBuffer>; extension: PbrExt; index: number; fragment: ReturnType<NonNullable<PbrExt["frag"]>> }> => {
+            const fixture = usdFixture({ textures: true });
+            const { engine } = usdTestEngine();
+            const container = usdTestContainer(fixture);
+            await materializeUsd(engine, fixture, container);
+            let extension: PbrExt | undefined;
+            registerPbrPlugins((value) => {
+                extension = value;
+            });
+            const material = getContainerMeshes(container)[0]!.material as PbrMaterialProps;
+            extension!.detect!(material);
+            const index = material._pi!;
+            const fragment = extension!.frag!({ _pi: index } as Parameters<NonNullable<PbrExt["frag"]>>[0]);
+            expect(fragment).not.toBeNull();
+            const weakPayload = new WeakRef(fixture.data);
+            disposeUsd(container);
+            return { payload: weakPayload, extension: extension!, index, fragment };
+        })();
+
+        setFlagsFromString("--expose_gc");
+        const collect = runInNewContext("gc") as () => void;
+        try {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            for (let attempt = 0; attempt < 20; attempt++) {
+                collect();
+                await new Promise<void>((resolve) => setImmediate(resolve));
+            }
+        } finally {
+            setFlagsFromString("--no-expose_gc");
+        }
+        expect(cached.payload.deref()).toBeUndefined();
+        expect(cached.extension.frag!({ _pi: cached.index } as Parameters<NonNullable<PbrExt["frag"]>>[0])).toBe(cached.fragment);
+    });
+
     it("uses one thin-instance matrix slab per material subset", async () => {
         const fixture = usdFixture({ thinInstances: true });
         const { engine } = usdTestEngine();
@@ -258,6 +299,30 @@ describe("USD command materialization", () => {
         updateAnimationManager(manager, 500);
         expect(morph.weights[0]).toBeCloseTo(0.25);
         expect(engine._device.queue.writeBuffer).not.toHaveBeenCalled();
+        disposeUsd(container);
+    });
+
+    it("blends native USD matrices against their authored pose before skin upload", async () => {
+        const fixture = usdFixture({ skin: true });
+        const { engine } = usdTestEngine();
+        const container = usdTestContainer(fixture);
+        await materializeUsd(engine, fixture, container);
+        const group = container.animationGroups![0]!;
+        const target = group.targetedAnimations[0]!.target as SceneNode;
+        const skin = getContainerMeshes(container)[0]!.skeleton!;
+        const manager = createAnimationManager({ engine });
+        addAnimationGroup(manager, group);
+        enableAnimationBlending(manager);
+        setAnimationWeight(group, 0.5);
+        playAnimation(group);
+
+        updateAnimationManager(manager, 500);
+
+        expect(target.worldMatrix[12]).toBeCloseTo(0.5);
+        expect(target.worldMatrix[0]).toBeCloseTo(1);
+        expect(target.worldMatrix[15]).toBeCloseTo(1);
+        expect(skin.boneMatrices[29]).toBeCloseTo(-0.5);
+        expect(skin.boneMatrices[31]).toBeCloseTo(1);
         disposeUsd(container);
     });
 

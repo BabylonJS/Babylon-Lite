@@ -13,6 +13,12 @@ import { _setTickAnimationImpl } from "./animation-tick.js";
 
 const DEFAULT_FRAME_RATE = 60;
 
+/** @internal Custom accumulation for non-scalar property values such as affine matrices. */
+export interface AnimationPropertyMixStrategy {
+    readonly accumulate: (output: Float32Array, sample: Float32Array, weight: number, accumulatedWeight: number) => void;
+    readonly finish: (output: Float32Array, accumulatedWeight: number) => void;
+}
+
 export interface AnimationPropertyRuntimeTrack {
     readonly sampler: AnimationSampler;
     readonly stride: number;
@@ -20,6 +26,8 @@ export interface AnimationPropertyRuntimeTrack {
     readonly writer: (output: Float32Array, offset: number) => void;
     readonly mixTarget: object;
     readonly mixProperty: string;
+    /** @internal Optional transform-aware accumulation in the weighted property mixer. */
+    readonly _mix?: AnimationPropertyMixStrategy;
     /** @internal Target name used by AnimationGroupMask. */
     readonly _targetName?: string;
     /** @internal Deduplicated publication step after weighted property writes. */

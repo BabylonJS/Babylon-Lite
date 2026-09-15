@@ -129,8 +129,11 @@ Lite's cotangent-frame normal path. Plugin registration occurs only when a
 loaded USD material needs it, so non-USD and untextured USD scenes retain no
 plugin bridge. The process-wide plugin signature table is append-only:
 registering a USD plugin cannot invalidate the cached signature of a material
-already rendered by another scene. A positive opacity cutoff disables alpha
-blending and uses the alpha-test path, matching Babylon.js depth-write behavior.
+already rendered by another scene. Cache entries retain only generated shader
+fragments, never material-owned plugin instances or their extraction-buffer
+views, so disposed containers remain collectible while signature indices stay
+reusable. A positive opacity cutoff disables alpha blending and uses the
+alpha-test path, matching Babylon.js depth-write behavior.
 
 ### Skinning and animation
 
@@ -157,11 +160,14 @@ Animation modules convert time codes to seconds, preserve target IDs and local
 affine matrices, and return ordinary AnimationGroups. USD channels also expose
 Lite property-mixer tracks with stable target identities and names, so
 `AnimationGroupMask`, zero/partial weights and the existing
-`enableAnimationBlending` manager path apply normally. Track writers update CPU
-state first; a deduplicated post-write publication uploads each affected rig and
-morph buffer once after all groups have been evaluated. Paused groups whose
-sample has not changed perform no GPU upload. Groups are not automatically
-played by the loader.
+`enableAnimationBlending` manager path apply normally. Native 16-float matrix
+tracks are decomposed and blended as translation, quaternion rotation and scale
+against the authored pose before recomposition; weighting individual matrix
+elements would produce non-affine transforms. Track writers update CPU state
+first; a deduplicated post-write publication uploads each affected rig and morph
+buffer once after all groups have been evaluated. Paused groups whose sample
+has not changed perform no GPU upload. Groups are not automatically played by
+the loader.
 
 ## Pipeline configuration and shader logic
 

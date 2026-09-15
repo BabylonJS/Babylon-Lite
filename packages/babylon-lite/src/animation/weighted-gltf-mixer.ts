@@ -144,7 +144,7 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
         if (group._stopped) {
             continue;
         }
-        if (group._propertyMixer) {
+        if (handledPropertyGroups && group._propertyMixer) {
             continue;
         }
 

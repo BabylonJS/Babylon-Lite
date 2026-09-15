@@ -15,6 +15,29 @@ export interface DecomposedTransform {
     scale: Vec3;
 }
 
+/** @internal Decompose into caller-owned objects for allocation-sensitive animation paths. */
+export function _decomposeMat4Into(m: ArrayLike<number>, translation: Vec3, rotation: Quat, scale: Vec3): void {
+    const sx = Math.hypot(m[0]!, m[1]!, m[2]!);
+    const syAbs = Math.hypot(m[4]!, m[5]!, m[6]!);
+    const sz = Math.hypot(m[8]!, m[9]!, m[10]!);
+    const sy = mat4Determinant3(m) < 0 ? -syAbs : syAbs;
+    const invSx = sx > 1e-8 ? 1 / sx : 0;
+    const invSy = syAbs > 1e-8 ? 1 / sy : 0;
+    const invSz = sz > 1e-8 ? 1 / sz : 0;
+    const q = _quatFromRotationBasis(m[0]! * invSx, m[4]! * invSy, m[8]! * invSz, m[1]! * invSx, m[5]! * invSy, m[9]! * invSz, m[2]! * invSx, m[6]! * invSy, m[10]! * invSz);
+    const invLen = 1 / Math.hypot(q.x, q.y, q.z, q.w);
+    translation.x = m[12]!;
+    translation.y = m[13]!;
+    translation.z = m[14]!;
+    rotation.x = q.x * invLen;
+    rotation.y = q.y * invLen;
+    rotation.z = q.z * invLen;
+    rotation.w = q.w * invLen;
+    scale.x = sx;
+    scale.y = sy;
+    scale.z = sz;
+}
+
 /**
  * Decompose a column-major 4×4 affine matrix into translation, rotation (unit
  * quaternion), and scale. Assumes a shear-free TRS matrix.
@@ -41,25 +64,11 @@ export interface DecomposedTransform {
  * @returns A new translation/rotation/scale triple.
  */
 export function decomposeMat4(m: Mat4): DecomposedTransform {
-    const sx = Math.hypot(m[0]!, m[1]!, m[2]!);
-    const syAbs = Math.hypot(m[4]!, m[5]!, m[6]!);
-    const sz = Math.hypot(m[8]!, m[9]!, m[10]!);
-    // A negative determinant means the basis is mirrored; carrying that sign on one axis keeps the
-    // remaining basis a proper rotation, so the quaternion extraction below stays valid and the
-    // reflection survives recomposition.
-    const sy = mat4Determinant3(m) < 0 ? -syAbs : syAbs;
-    const invSx = sx > 1e-8 ? 1 / sx : 0;
-    // Guard on the magnitude, divide by the signed scale — otherwise a mirrored basis would
-    // fail the epsilon test and zero out the Y column.
-    const invSy = syAbs > 1e-8 ? 1 / sy : 0;
-    const invSz = sz > 1e-8 ? 1 / sz : 0;
-    // Strip scale from the basis columns, then extract the rotation quaternion.
-    const q = _quatFromRotationBasis(m[0]! * invSx, m[4]! * invSy, m[8]! * invSz, m[1]! * invSx, m[5]! * invSy, m[9]! * invSz, m[2]! * invSx, m[6]! * invSy, m[10]! * invSz);
-    // Renormalize — dividing by per-axis scale introduces small drift.
-    const invLen = 1 / Math.hypot(q.x, q.y, q.z, q.w);
-    return {
-        translation: { x: m[12]!, y: m[13]!, z: m[14]! },
-        rotation: { x: q.x * invLen, y: q.y * invLen, z: q.z * invLen, w: q.w * invLen },
-        scale: { x: sx, y: sy, z: sz },
+    const result: DecomposedTransform = {
+        translation: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0, w: 1 },
+        scale: { x: 1, y: 1, z: 1 },
     };
+    _decomposeMat4Into(m, result.translation, result.rotation, result.scale);
+    return result;
 }

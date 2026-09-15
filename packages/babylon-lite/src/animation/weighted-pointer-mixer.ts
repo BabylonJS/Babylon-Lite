@@ -1,6 +1,6 @@
 import { F32 } from "../engine/typed-arrays.js";
 import { tickAnimationCore } from "./animation-group.js";
-import type { AnimationGroup, AnimationPropertyMixer, AnimationPropertyRuntimeTrack } from "./animation-group.js";
+import type { AnimationGroup, AnimationPropertyMixer, AnimationPropertyMixStrategy, AnimationPropertyRuntimeTrack } from "./animation-group.js";
 import { ANIMATION_GROUP_TASK_CATEGORY, getAnimationGroups } from "./animation-group-task.js";
 import { setAnimationTaskCategoryHandler } from "./animation-manager.js";
 import type { AnimationManager } from "./animation-manager.js";
@@ -18,10 +18,12 @@ interface WeightedPointerBucket {
     writer: (output: Float32Array, offset: number) => void;
     arity: number;
     quaternion: boolean;
+    mix?: AnimationPropertyMixStrategy;
     afterWrite?: () => void;
     contested: boolean;
     active: boolean;
     hasReference: boolean;
+    totalWeight: number;
     refX: number;
     refY: number;
     refZ: number;
@@ -67,6 +69,7 @@ export function _updateWeightedPointerAnimations(manager: AnimationManager, delt
         bucket.contested = false;
         bucket.active = false;
         bucket.hasReference = false;
+        bucket.totalWeight = 0;
         bucket.values.fill(0);
     }
 
@@ -160,6 +163,7 @@ export function _updateWeightedPointerAnimations(manager: AnimationManager, delt
         if (bucket.quaternion && bucket.arity === 4) {
             normalizeQuaternion(bucket.values);
         }
+        bucket.mix?.finish(bucket.values, bucket.totalWeight);
         bucket.writer(bucket.values, 0);
         if (bucket.afterWrite) {
             scratch.afterWrites.add(bucket.afterWrite);
@@ -213,6 +217,10 @@ function getTrackBucket(buckets: WeightedPointerBucket[], track: AnimationProper
             }
             candidate.writer = track.writer;
             candidate.quaternion = track.quaternion;
+            if (!!candidate.mix !== !!track._mix) {
+                throw new Error("Weighted animation channels for the same property must use the same mixing strategy");
+            }
+            candidate.mix = track._mix;
             candidate.afterWrite = track._afterWrite;
             return candidate;
         }
@@ -225,10 +233,12 @@ function getTrackBucket(buckets: WeightedPointerBucket[], track: AnimationProper
         writer: track.writer,
         arity,
         quaternion: track.quaternion,
+        mix: track._mix,
         afterWrite: track._afterWrite,
         contested: false,
         active: false,
         hasReference: false,
+        totalWeight: 0,
         refX: 0,
         refY: 0,
         refZ: 0,
@@ -240,6 +250,11 @@ function getTrackBucket(buckets: WeightedPointerBucket[], track: AnimationProper
 
 function accumulateWeightedTrack(bucket: WeightedPointerBucket, track: AnimationPropertyRuntimeTrack, sample: Float32Array, weight: number): void {
     bucket.active = true;
+    if (bucket.mix) {
+        bucket.mix.accumulate(bucket.values, sample, weight, bucket.totalWeight);
+        bucket.totalWeight += weight;
+        return;
+    }
 
     let sign = 1;
     if (bucket.quaternion && track.stride === 4) {
@@ -258,6 +273,7 @@ function accumulateWeightedTrack(bucket: WeightedPointerBucket, track: Animation
     for (let i = 0; i < track.stride; i++) {
         bucket.values[i] = bucket.values[i]! + sample[i]! * weight * sign;
     }
+    bucket.totalWeight += weight;
 }
 
 function normalizeQuaternion(values: Float32Array): void {

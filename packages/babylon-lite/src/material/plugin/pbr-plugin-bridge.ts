@@ -19,7 +19,6 @@ import type { MaterialPlugin } from "./material-plugin.js";
 import { bindPluginTextures, buildPluginFragment, enabledPlugins, pluginSignature, writePluginUbo } from "./plugin-bridge-shared.js";
 
 interface PluginEntry {
-    readonly _plugins: readonly MaterialPlugin[];
     readonly _fragment: ShaderFragment | null;
 }
 
@@ -37,7 +36,7 @@ function _indexFor(plugins: readonly MaterialPlugin[]): number {
     if (idx === undefined) {
         idx = ++_counter;
         map.set(sig, idx);
-        (_indexToEntry ??= new Map()).set(idx, { _plugins: plugins, _fragment: buildPluginFragment(plugins, idx, false)._fragment });
+        (_indexToEntry ??= new Map()).set(idx, { _fragment: buildPluginFragment(plugins, idx, false)._fragment });
     }
     return idx;
 }
