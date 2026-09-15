@@ -29,6 +29,7 @@ vi.mock("../../../packages/babylon-lite/src/picking/ray.js", () => ({
     createPickingRay: (x: number) => ({
         origin: [x, 0, 1],
         direction: [0, 0, -1],
+        length: 100,
     }),
 }));
 
@@ -53,7 +54,7 @@ function makeFakeCanvas() {
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("pointer drag event payloads", () => {
-    it("reports per-move distance and preserves pointer state through release and disposal", async () => {
+    it("preserves native cumulative distance and pointer state through release and disposal", async () => {
         const collider = {} as Mesh;
         pickResult.pickedMesh = collider;
         const scene = { camera: {} } as SceneContext;
@@ -79,7 +80,16 @@ describe("pointer drag event payloads", () => {
         canvas.handlers.get("pointermove")!(secondMove);
         canvas.handlers.get("pointerup")!(up);
 
-        expect(starts).toEqual([{ dragPlanePoint: { x: 0, y: 0, z: 0 }, pointerId: 7, pointerEvent: down }]);
+        expect(starts).toEqual([
+            {
+                dragPlanePoint: { x: 0, y: 0, z: 0 },
+                dragPlaneNormal: { x: 0, y: 0, z: 1 },
+                pickInfo: pickResult,
+                pointerId: 7,
+                pointerEvent: down,
+            },
+        ]);
+        expect(starts[0]!.pickInfo.ray).toEqual({ origin: [0, 0, 1], direction: [0, 0, -1], length: 100 });
         expect(moves).toEqual([
             {
                 delta: { x: 1, y: 0, z: 0 },
@@ -91,7 +101,7 @@ describe("pointer drag event payloads", () => {
             {
                 delta: { x: 1, y: 0, z: 0 },
                 dragPlanePoint: { x: 2, y: 0, z: 0 },
-                dragDistance: 1,
+                dragDistance: 2,
                 dragPlaneNormal: { x: 0, y: 0, z: 1 },
                 pointerId: 7,
             },
@@ -103,5 +113,70 @@ describe("pointer drag event payloads", () => {
         await flush();
         unregister();
         expect(ends[1]).toEqual({ dragPlanePoint: { x: 0, y: 0, z: 0 }, pointerId: 8, pointerEvent: null });
+    });
+
+    it("publishes a live configured plane normal before each move", async () => {
+        const collider = {} as Mesh;
+        pickResult.pickedMesh = collider;
+        const layer = { scene: { camera: {} } as SceneContext } as UtilityLayer;
+        const canvas = makeFakeCanvas();
+        const planeNormal = { x: 0, y: 0, z: 1 };
+        const drag = createPointerDrag({ dragPlaneNormal: planeNormal });
+        drag._colliders.push(collider);
+        const moves: Parameters<typeof drag.onDrag.notify>[0][] = [];
+        drag.onDrag.add((event) => moves.push(event));
+        const unregister = registerPointerDrag(layer, canvas as unknown as HTMLCanvasElement, drag);
+
+        canvas.handlers.get("pointerdown")!({ button: 0, pointerId: 9, offsetX: 0, offsetY: 0 } as PointerEvent);
+        await flush();
+        planeNormal.y = 1;
+        canvas.handlers.get("pointermove")!({ pointerId: 9, offsetX: 1, offsetY: 0 } as PointerEvent);
+
+        expect(moves[0]!.dragPlaneNormal.x).toBe(0);
+        expect(moves[0]!.dragPlaneNormal.y).toBeCloseTo(Math.SQRT1_2);
+        expect(moves[0]!.dragPlaneNormal.z).toBeCloseTo(Math.SQRT1_2);
+        unregister();
+    });
+
+    it("ends at the last fully notified point when disposed during a move", async () => {
+        const collider = {} as Mesh;
+        pickResult.pickedMesh = collider;
+        const layer = { scene: { camera: {} } as SceneContext } as UtilityLayer;
+        const canvas = makeFakeCanvas();
+        const drag = createPointerDrag({ dragAxis: { x: 1, y: 0, z: 0 } });
+        drag._colliders.push(collider);
+        const ends: Parameters<typeof drag.onDragEnd.notify>[0][] = [];
+        drag.onDragEnd.add((event) => ends.push(event));
+        let unregister = () => undefined;
+        drag.onDrag.add(() => unregister());
+        unregister = registerPointerDrag(layer, canvas as unknown as HTMLCanvasElement, drag);
+
+        canvas.handlers.get("pointerdown")!({ button: 0, pointerId: 10, offsetX: 0, offsetY: 0 } as PointerEvent);
+        await flush();
+        canvas.handlers.get("pointermove")!({ pointerId: 10, offsetX: 1, offsetY: 0 } as PointerEvent);
+
+        expect(ends).toEqual([{ dragPlanePoint: { x: 0, y: 0, z: 0 }, pointerId: 10, pointerEvent: null }]);
+    });
+
+    it("does not emit twice when disposed from an end observer", async () => {
+        const collider = {} as Mesh;
+        pickResult.pickedMesh = collider;
+        const layer = { scene: { camera: {} } as SceneContext } as UtilityLayer;
+        const canvas = makeFakeCanvas();
+        const drag = createPointerDrag({ dragAxis: { x: 1, y: 0, z: 0 } });
+        drag._colliders.push(collider);
+        let endCount = 0;
+        let unregister = () => undefined;
+        drag.onDragEnd.add(() => {
+            endCount++;
+            unregister();
+        });
+        unregister = registerPointerDrag(layer, canvas as unknown as HTMLCanvasElement, drag);
+
+        canvas.handlers.get("pointerdown")!({ button: 0, pointerId: 11, offsetX: 0, offsetY: 0 } as PointerEvent);
+        await flush();
+        canvas.handlers.get("pointerup")!({ pointerId: 11 } as PointerEvent);
+
+        expect(endCount).toBe(1);
     });
 });

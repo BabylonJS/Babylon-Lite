@@ -63,10 +63,12 @@ import type {
     PointerDragStartEvent,
     PointerDragMoveEvent,
     PointerDragEndEvent,
+    PickingInfo as LitePickingInfo,
+    Mesh as LiteMesh,
 } from "babylon-lite";
 
 import type { Scene } from "../scene/scene.js";
-import type { AbstractMesh, Mesh } from "../meshes/meshes.js";
+import { type AbstractMesh, Mesh } from "../meshes/meshes.js";
 import type { Node } from "../node/node.js";
 import type { Light } from "../lights/lights.js";
 import type { Camera } from "../cameras/cameras.js";
@@ -74,6 +76,8 @@ import { Vector3 } from "../math/vector.js";
 import type { Color3 } from "../math/color.js";
 import { Observable } from "../misc/observable.js";
 import { PointerEventTypes, PointerInfo } from "../events/pointer-events.js";
+import { PickingInfo } from "../culling/picking-info.js";
+import { Ray } from "../math/ray.js";
 
 /** Babylon.js drag move payload. */
 export type DragEvent = {
@@ -92,6 +96,19 @@ function vectorFromLite(value: { x: number; y: number; z: number }): Vector3 {
     return new Vector3(value.x, value.y, value.z);
 }
 
+function pickingInfoFromLite(value: LitePickingInfo, pickedMeshes: Map<LiteMesh, Mesh>): PickingInfo {
+    const liteMesh = value.pickedMesh as LiteMesh | null;
+    let pickedMesh = liteMesh ? pickedMeshes.get(liteMesh) : undefined;
+    if (liteMesh && !pickedMesh) {
+        pickedMesh = Mesh._fromLite(liteMesh);
+        pickedMeshes.set(liteMesh, pickedMesh);
+    }
+    const ray = value.ray ? new Ray(Vector3.FromArray(value.ray.origin), Vector3.FromArray(value.ray.direction), value.ray.length) : Ray.Zero();
+    const result = PickingInfo._fromLite(value, pickedMesh ?? null, ray);
+    result.ray = value.ray ? ray : null;
+    return result;
+}
+
 function relayCompositeDragEvents(
     drags: readonly PointerDrag[],
     onDragStartObservable: Observable<DragStartEndEvent>,
@@ -100,11 +117,17 @@ function relayCompositeDragEvents(
 ): (() => void)[] {
     const subscriptions: (() => void)[] = [];
     const pointerInfos = new Map<PointerDrag, PointerInfo>();
+    const pickedMeshes = new Map<LiteMesh, Mesh>();
+    const axisPlaneNormals = new Map<PointerDrag, Vector3>();
+    const previousPlaneDragDistances = new Map<PointerDrag, number>();
     for (const drag of drags) {
         subscriptions.push(
             drag.onDragStart.add((event: PointerDragStartEvent) => {
-                const pointerInfo = new PointerInfo(PointerEventTypes.POINTERDOWN, event.pointerEvent, null);
+                const pointerInfo = new PointerInfo(PointerEventTypes.POINTERDOWN, event.pointerEvent, pickingInfoFromLite(event.pickInfo, pickedMeshes));
                 pointerInfos.set(drag, pointerInfo);
+                if (drag.options.dragAxis) {
+                    axisPlaneNormals.set(drag, new Vector3(-event.dragPlaneNormal.x || 0, -event.dragPlaneNormal.y || 0, -event.dragPlaneNormal.z || 0));
+                }
                 onDragStartObservable.notifyObservers({
                     dragPlanePoint: vectorFromLite(event.dragPlanePoint),
                     pointerId: event.pointerId,
@@ -112,11 +135,16 @@ function relayCompositeDragEvents(
                 });
             }),
             drag.onDrag.add((event: PointerDragMoveEvent) => {
+                const axis = drag.options.dragAxis;
+                const dragDistance = axis ? event.delta.x * axis.x + event.delta.y * axis.y + event.delta.z * axis.z : (previousPlaneDragDistances.get(drag) ?? 0);
+                if (!axis) {
+                    previousPlaneDragDistances.set(drag, Math.hypot(event.delta.x, event.delta.y, event.delta.z));
+                }
                 onDragObservable.notifyObservers({
                     delta: vectorFromLite(event.delta),
                     dragPlanePoint: vectorFromLite(event.dragPlanePoint),
-                    dragPlaneNormal: vectorFromLite(event.dragPlaneNormal),
-                    dragDistance: event.dragDistance,
+                    dragPlaneNormal: axisPlaneNormals.get(drag)?.clone() ?? vectorFromLite(event.dragPlaneNormal),
+                    dragDistance,
                     pointerId: event.pointerId,
                     pointerInfo: pointerInfos.get(drag) ?? null,
                 });
@@ -128,6 +156,7 @@ function relayCompositeDragEvents(
                     pointerInfo: pointerInfos.get(drag) ?? null,
                 });
                 pointerInfos.delete(drag);
+                axisPlaneNormals.delete(drag);
             })
         );
     }

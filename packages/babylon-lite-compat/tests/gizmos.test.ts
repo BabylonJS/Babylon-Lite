@@ -28,10 +28,10 @@ vi.mock("babylon-lite", async (importOriginal) => ({
     ...liteMocks,
 }));
 
-import type { PointerDragEndEvent, PointerDragMoveEvent, PointerDragStartEvent } from "babylon-lite";
+import type { PickingInfo as LitePickingInfo, PointerDragEndEvent, PointerDragMoveEvent, PointerDragStartEvent } from "babylon-lite";
 import { AxisDragGizmo, PlaneDragGizmo, PlaneRotationGizmo, AxisScaleGizmo, PositionGizmo, RotationGizmo, ScaleGizmo } from "../src/gizmos/gizmos";
 import type { DragEvent, DragStartEndEvent, UtilityLayerRenderer } from "../src/index";
-import { PointerEventTypes, PointerInfo, Vector3 } from "../src/index";
+import { PointerEventTypes, PointerInfo, Ray, Vector3 } from "../src/index";
 
 type FakeDrag = { drag: { enabled: boolean } };
 
@@ -60,6 +60,7 @@ class FakeObservable<T> {
 }
 
 type FakeCompositeDrag = {
+    options: { dragAxis?: { x: number; y: number; z: number }; dragPlaneNormal?: { x: number; y: number; z: number } };
     onDragStart: FakeObservable<PointerDragStartEvent>;
     onDrag: FakeObservable<PointerDragMoveEvent>;
     onDragEnd: FakeObservable<PointerDragEndEvent>;
@@ -71,15 +72,35 @@ type FakeCompositeLite = {
     zGizmo: { drag: FakeCompositeDrag };
 };
 
-function fakeCompositeLite(): FakeCompositeLite {
+function fakeCompositeLite(axis: boolean): FakeCompositeLite {
     const subGizmo = () => ({
         drag: {
+            options: axis ? { dragAxis: { x: 1, y: 0, z: 0 } } : { dragPlaneNormal: { x: 0, y: 1, z: 0 } },
             onDragStart: new FakeObservable<PointerDragStartEvent>(),
             onDrag: new FakeObservable<PointerDragMoveEvent>(),
             onDragEnd: new FakeObservable<PointerDragEndEvent>(),
         },
     });
     return { xGizmo: subGizmo(), yGizmo: subGizmo(), zGizmo: subGizmo() };
+}
+
+function fakePickInfo(): LitePickingInfo {
+    return {
+        hit: true,
+        distance: 3,
+        pickedPoint: [0, 2, 3],
+        pickedNormal: null,
+        pickedNormalWorld: null,
+        pickedFaceNormal: null,
+        pickedFaceNormalWorld: null,
+        pickedMesh: null,
+        faceId: 4,
+        bu: 0.25,
+        bv: 0.5,
+        subMeshId: 2,
+        thinInstanceIndex: -1,
+        ray: { origin: [1, 2, 3], direction: [0, 0, -1], length: 100 },
+    };
 }
 
 /** Build a single-axis gizmo wrapper over a fake Lite sub-gizmo (no engine). */
@@ -150,7 +171,8 @@ describe("compat composite gizmo drag observables", () => {
         ["PositionGizmo", PositionGizmo, liteMocks.createPositionGizmo, liteMocks.disposePositionGizmo],
         ["RotationGizmo", RotationGizmo, liteMocks.createRotationGizmo, liteMocks.disposeRotationGizmo],
     ] as const)("%s relays every axis with Babylon.js payloads and cleans up on dispose", (_name, Ctor, create, dispose) => {
-        const lite = fakeCompositeLite();
+        const isAxis = _name === "PositionGizmo";
+        const lite = fakeCompositeLite(isAxis);
         create.mockReturnValue(lite);
         const layer = { _engine: {}, _lite: {} } as UtilityLayerRenderer;
         const gizmo = new Ctor(layer);
@@ -169,6 +191,8 @@ describe("compat composite gizmo drag observables", () => {
             downEvents.push(down);
             subGizmo.drag.onDragStart.notify({
                 dragPlanePoint: { x: axisIndex, y: 2, z: 3 },
+                dragPlaneNormal: { x: 0, y: 0, z: 1 },
+                pickInfo: fakePickInfo(),
                 pointerId,
                 pointerEvent: down,
             });
@@ -192,30 +216,36 @@ describe("compat composite gizmo drag observables", () => {
         expect(starts[0]).toEqual({
             dragPlanePoint: new Vector3(0, 2, 3),
             pointerId: 1,
-            pointerInfo: new PointerInfo(PointerEventTypes.POINTERDOWN, downEvents[0]!, null),
+            pointerInfo: expect.any(PointerInfo),
         });
         expect(moves[1]).toEqual({
             delta: new Vector3(1, 0, 0),
             dragPlanePoint: new Vector3(1.5, 2, 3),
-            dragPlaneNormal: new Vector3(0, 1, 0),
-            dragDistance: 0.5,
+            dragPlaneNormal: isAxis ? new Vector3(0, 0, -1) : new Vector3(0, 1, 0),
+            dragDistance: isAxis ? 1 : 0,
             pointerId: 2,
-            pointerInfo: new PointerInfo(PointerEventTypes.POINTERDOWN, downEvents[1]!, null),
+            pointerInfo: expect.any(PointerInfo),
         });
         expect(ends[2]).toEqual({
             dragPlanePoint: new Vector3(2.5, 2, 3),
             pointerId: 3,
-            pointerInfo: new PointerInfo(PointerEventTypes.POINTERDOWN, downEvents[2]!, null),
+            pointerInfo: expect.any(PointerInfo),
         });
         expect(moves[0]!.pointerInfo).toBe(starts[0]!.pointerInfo);
         expect(ends[0]!.pointerInfo).toBe(starts[0]!.pointerInfo);
         expect(starts[0]!.dragPlanePoint).toBeInstanceOf(Vector3);
+        expect(starts[0]!.pointerInfo?.type).toBe(PointerEventTypes.POINTERDOWN);
+        expect(starts[0]!.pointerInfo?.event).toBe(downEvents[0]);
+        expect(starts[0]!.pointerInfo?.pickInfo?.ray).toEqual(new Ray(new Vector3(1, 2, 3), new Vector3(0, 0, -1), 100));
+        expect(starts[0]!.pointerInfo?.pickInfo?.faceId).toBe(4);
         expect(moves[0]!.delta).toBeInstanceOf(Vector3);
         expect(moves[0]!.dragPlaneNormal).toBeInstanceOf(Vector3);
 
         const cancelDown = { pointerId: 4 } as PointerEvent;
         lite.xGizmo.drag.onDragStart.notify({
             dragPlanePoint: { x: 4, y: 2, z: 3 },
+            dragPlaneNormal: { x: 0, y: 0, z: 1 },
+            pickInfo: fakePickInfo(),
             pointerId: 4,
             pointerEvent: cancelDown,
         });
@@ -236,9 +266,45 @@ describe("compat composite gizmo drag observables", () => {
 
         lite.xGizmo.drag.onDragStart.notify({
             dragPlanePoint: { x: 0, y: 0, z: 0 },
+            dragPlaneNormal: { x: 0, y: 0, z: 1 },
+            pickInfo: fakePickInfo(),
             pointerId: 4,
             pointerEvent: { pointerId: 4 } as PointerEvent,
         });
         expect(starts).toHaveLength(4);
+    });
+
+    it("relays Babylon.js plane dragDistance using the preceding delta, including across drags", () => {
+        const lite = fakeCompositeLite(false);
+        liteMocks.createRotationGizmo.mockReturnValue(lite);
+        const gizmo = new RotationGizmo({ _engine: {}, _lite: {} } as UtilityLayerRenderer);
+        const distances: number[] = [];
+        gizmo.onDragObservable.add((event) => distances.push(event.dragDistance));
+        const down = { pointerId: 1 } as PointerEvent;
+        const notifyStart = () =>
+            lite.xGizmo.drag.onDragStart.notify({
+                dragPlanePoint: { x: 0, y: 0, z: 0 },
+                dragPlaneNormal: { x: 0, y: 1, z: 0 },
+                pickInfo: fakePickInfo(),
+                pointerId: 1,
+                pointerEvent: down,
+            });
+        const notifyMove = (x: number, y: number) =>
+            lite.xGizmo.drag.onDrag.notify({
+                delta: { x, y, z: 0 },
+                dragPlanePoint: { x, y, z: 0 },
+                dragPlaneNormal: { x: 0, y: 1, z: 0 },
+                dragDistance: Math.hypot(x, y),
+                pointerId: 1,
+            });
+
+        notifyStart();
+        notifyMove(3, 4);
+        notifyMove(0, 2);
+        lite.xGizmo.drag.onDragEnd.notify({ dragPlanePoint: { x: 0, y: 2, z: 0 }, pointerId: 1, pointerEvent: null });
+        notifyStart();
+        notifyMove(1, 0);
+
+        expect(distances).toEqual([0, 5, 2]);
     });
 });
