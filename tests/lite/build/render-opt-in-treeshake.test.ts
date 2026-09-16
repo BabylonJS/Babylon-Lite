@@ -135,6 +135,8 @@ console.log(createRenderTargetTexture(globalThis.engine, {
         ["createRenderTask, registerScene, enableAsyncShaderPipelineCompilation", "prepareTaskRenderables", true],
         ["createRenderTargetTexture, cloneTexture2D", "_resizeCallbacks", false],
         ["createSurfaceRenderTargetTexture, onRenderTargetTextureResize", "_resizeCallbacks", true],
+        ["createRenderTargetTexture, cloneTexture2D", "RenderTargetTexture resize callbacks failed.", false],
+        ["createSurfaceRenderTargetTexture, onRenderTargetTextureResize", "RenderTargetTexture resize callbacks failed.", true],
     ] as const)("keeps only requested capabilities for %s", async (imports, marker, retained) => {
         const result = await runRollup({
             entrySource: `import { ${imports} } from ${JSON.stringify(LIB_ENTRY)};\nconsole.log(${imports});\n`,

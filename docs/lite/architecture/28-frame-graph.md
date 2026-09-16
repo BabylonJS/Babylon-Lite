@@ -309,7 +309,8 @@ Disposal is idempotent and prevents subsequent rebuilding. `sharedRt` tasks and 
 Eager allocation and disposal ownership are distinct: sampled targets install an attachment-release
 hook, while engine swapchain and geometry/shadow wrappers retain their existing external owners.
 Resize prepares replacement attachments before publishing them, transfers both writer and sampled
-references, and retires the old allocation after submitted GPU work drains.
+references, and retains the old allocation until resize consumers have rebuilt their bindings.
+Only then is the old allocation retired after submitted GPU work drains.
 
 Surface-sized RTT-derived `cloneTexture2D` wrappers share an attachment backing record with their source,
 including clones of clones. Replacing its allocation generation updates texture, view, width,
@@ -327,6 +328,21 @@ The surface factory lives in `texture/rtt-surface.ts`. Its target reallocates du
 rebuild when dimensions or owning `GPUDevice` change, updates shared facades, and retires the old
 allocation. Register `onRenderTargetTextureResize(result, callback)` when consumers cache bind groups;
 the callback runs after facade replacement so callers can rebuild before the resized frame draws.
+
+Resize delivery is synchronous and retryable. Each subscription has an independent pending flag:
+
+- Publishing a replacement marks all current subscriptions pending and attempts every one, even when another throws.
+- Successful subscriptions are acknowledged and are not repeated on an unchanged-size rebuild. Failed subscriptions retry on the next `buildRenderTarget` or frame-graph build even when dimensions and device already match.
+- One failure is rethrown unchanged; multiple failures produce an `AggregateError` containing every thrown value. Callback failures never silently report success.
+- Replaced color and depth allocations stay owned while delivery is pending. A later resize notifies all subscribers of the newest facade generation and keeps all older allocations alive until delivery succeeds. Releases then pass through the GPU retirement fence.
+- Unregistration cancels that subscription's retry. Duplicate subscriptions of the same function remain independent. Registrations added during delivery begin observing subsequent resizes.
+- Disposing the target cancels delivery and fences all held replacements, including when releasing the current attachments throws.
+- An unchanged-size nested target build does not recursively deliver callbacks. A callback attempting another physical resize receives an explicit error and can be retried by a later outer build.
+
+The subscription registry, pending deliveries, and held-replacement list are owned entirely by
+the surface RTT extension. Fixed-size targets and consumers that do not import surface RTT support
+retain none of the callback-delivery machinery.
+
 Callers of the branch's earlier automatic surface-size support must switch to this factory when
 restacking. Fixed targets keep snapshot clone semantics and never retain the surface implementation.
 Calls that used the branch's earlier implicit additional depth facade on a color target must pass

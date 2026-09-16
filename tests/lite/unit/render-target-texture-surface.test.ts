@@ -337,4 +337,307 @@ describe("createSurfaceRenderTargetTexture", () => {
         expect(() => onRenderTargetTextureResize(result, callback)).toThrow(/disposed/);
         expect(() => buildRenderTarget(result.rt, engine)).toThrow(/disposed/);
     });
+
+    it.each(["color", "depth-only", "color-depth"] as const)("attempts every %s consumer and retries failed delivery without reallocating", (kind) => {
+        const engine = makeEngine();
+        const result = createSurfaceRenderTargetTexture(
+            engine,
+            {
+                format: kind === "depth-only" ? undefined : "rgba8unorm",
+                dFormat: kind === "color" ? undefined : "depth32float",
+                samples: 1,
+                size: engine,
+            },
+            kind === "color" ? undefined : withSampledDepthTexture
+        );
+        const oldColor = result.rt._colorTexture;
+        const oldDepth = result.rt._depthTexture;
+        let firstView = result.texture.view;
+        let secondView = firstView;
+        const failure = new Error("binding rebuild failed");
+        const first = vi
+            .fn(() => {
+                firstView = result.texture.view;
+            })
+            .mockImplementationOnce(() => {
+                throw failure;
+            });
+        const second = vi.fn(() => {
+            secondView = result.texture.view;
+        });
+        onRenderTargetTextureResize(result, first);
+        onRenderTargetTextureResize(result, second);
+        engine.canvas.width += 8;
+
+        let reported: unknown;
+        try {
+            buildRenderTarget(result.rt, engine);
+        } catch (error) {
+            reported = error;
+        }
+        expect(reported).toBe(failure);
+        const replacement = result.texture.texture;
+        const allocations = vi.mocked(engine._device.createTexture).mock.calls.length;
+        expect(first).toHaveBeenCalledOnce();
+        expect(second).toHaveBeenCalledOnce();
+        expect(firstView).not.toBe(result.texture.view);
+        expect(secondView).toBe(result.texture.view);
+        disposeGpuResourceRetirements(engine);
+        if (oldColor) {
+            expect(oldColor.destroy).not.toHaveBeenCalled();
+        }
+        if (oldDepth) {
+            expect(oldDepth.destroy).not.toHaveBeenCalled();
+        }
+
+        buildRenderTarget(result.rt, engine);
+
+        expect(first).toHaveBeenCalledTimes(2);
+        expect(second).toHaveBeenCalledOnce();
+        expect(firstView).toBe(result.texture.view);
+        expect(result.texture.texture).toBe(replacement);
+        expect(engine._device.createTexture).toHaveBeenCalledTimes(allocations);
+        if (oldColor) {
+            expect(oldColor.destroy).not.toHaveBeenCalled();
+        }
+        disposeGpuResourceRetirements(engine);
+        if (oldColor) {
+            expect(oldColor.destroy).toHaveBeenCalledOnce();
+        }
+        if (oldDepth) {
+            expect(oldDepth.destroy).toHaveBeenCalledOnce();
+        }
+        expect(replacement.destroy).not.toHaveBeenCalled();
+        buildRenderTarget(result.rt, engine);
+        expect(first).toHaveBeenCalledTimes(2);
+        expect(second).toHaveBeenCalledOnce();
+        disposeRenderTargetTexture(result);
+    });
+
+    it("reports every callback error and retains attachments until every retry succeeds", () => {
+        const engine = makeEngine();
+        const result = createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: engine });
+        const old = result.texture.texture;
+        const failure = new Error("second consumer failed");
+        const first = vi.fn().mockImplementationOnce(() => {
+            throw undefined;
+        });
+        const second = vi
+            .fn()
+            .mockImplementationOnce(() => {
+                throw failure;
+            })
+            .mockImplementationOnce(() => {
+                throw failure;
+            });
+        const third = vi.fn();
+        onRenderTargetTextureResize(result, first);
+        onRenderTargetTextureResize(result, second);
+        onRenderTargetTextureResize(result, third);
+        engine.canvas.width += 8;
+        let thrown: unknown;
+        try {
+            buildRenderTarget(result.rt, engine);
+        } catch (error) {
+            thrown = error;
+        }
+        expect(thrown).toBeInstanceOf(AggregateError);
+        expect(thrown).toMatchObject({ errors: [undefined, failure] });
+        expect(third).toHaveBeenCalledOnce();
+
+        expect(() => buildRenderTarget(result.rt, engine)).toThrow(failure);
+        expect(first).toHaveBeenCalledTimes(2);
+        expect(second).toHaveBeenCalledTimes(2);
+        expect(third).toHaveBeenCalledOnce();
+        disposeGpuResourceRetirements(engine);
+        expect(old.destroy).not.toHaveBeenCalled();
+
+        buildRenderTarget(result.rt, engine);
+        expect(first).toHaveBeenCalledTimes(2);
+        expect(second).toHaveBeenCalledTimes(3);
+        expect(third).toHaveBeenCalledOnce();
+        disposeGpuResourceRetirements(engine);
+        expect(old.destroy).toHaveBeenCalledOnce();
+        disposeRenderTargetTexture(result);
+    });
+
+    it("cancels one failed duplicate registration without removing its successful peer", () => {
+        const engine = makeEngine();
+        const result = createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: engine });
+        const old = result.texture.texture;
+        const callback = vi.fn().mockImplementationOnce(() => {
+            throw new Error("first registration failed");
+        });
+        const unregisterFirst = onRenderTargetTextureResize(result, callback);
+        onRenderTargetTextureResize(result, callback);
+        engine.canvas.width += 8;
+        expect(() => buildRenderTarget(result.rt, engine)).toThrow("first registration failed");
+        expect(callback).toHaveBeenCalledTimes(2);
+        unregisterFirst();
+        unregisterFirst();
+
+        buildRenderTarget(result.rt, engine);
+        expect(callback).toHaveBeenCalledTimes(2);
+        disposeGpuResourceRetirements(engine);
+        expect(old.destroy).toHaveBeenCalledOnce();
+        engine.canvas.width += 8;
+        buildRenderTarget(result.rt, engine);
+        expect(callback).toHaveBeenCalledTimes(3);
+        disposeRenderTargetTexture(result);
+        disposeGpuResourceRetirements(engine);
+    });
+
+    it("handles subscription changes without skipping peers or calling newly registered consumers early", () => {
+        const engine = makeEngine();
+        const result = createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: engine });
+        const second = vi.fn();
+        const third = vi.fn();
+        const added = vi.fn();
+        let addedOnce = false;
+        onRenderTargetTextureResize(result, function (this: unknown) {
+            expect(this).toBeUndefined();
+            unregisterSecond();
+            if (!addedOnce) {
+                addedOnce = true;
+                onRenderTargetTextureResize(result, added);
+            }
+        });
+        const unregisterSecond = onRenderTargetTextureResize(result, second);
+        onRenderTargetTextureResize(result, third);
+        engine.canvas.width += 8;
+
+        buildRenderTarget(result.rt, engine);
+        expect(second).not.toHaveBeenCalled();
+        expect(third).toHaveBeenCalledOnce();
+        expect(added).not.toHaveBeenCalled();
+        engine.canvas.width += 8;
+        buildRenderTarget(result.rt, engine);
+        expect(third).toHaveBeenCalledTimes(2);
+        expect(added).toHaveBeenCalledOnce();
+        disposeRenderTargetTexture(result);
+        disposeGpuResourceRetirements(engine);
+    });
+
+    it("delivers the newest resize and retires every older generation after a pending failure", () => {
+        const engine = makeEngine();
+        const result = createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: engine });
+        const original = result.texture.texture;
+        let boundTexture = original;
+        const first = vi
+            .fn(() => {
+                boundTexture = result.texture.texture;
+            })
+            .mockImplementationOnce(() => {
+                throw new Error("binding failed");
+            });
+        const second = vi.fn();
+        onRenderTargetTextureResize(result, first);
+        onRenderTargetTextureResize(result, second);
+        engine.canvas.width += 8;
+        expect(() => buildRenderTarget(result.rt, engine)).toThrow("binding failed");
+        const intermediate = result.texture.texture;
+        disposeGpuResourceRetirements(engine);
+        expect(original.destroy).not.toHaveBeenCalled();
+        engine.canvas.width += 8;
+
+        buildRenderTarget(result.rt, engine);
+        expect(boundTexture).toBe(result.texture.texture);
+        expect(boundTexture).not.toBe(intermediate);
+        expect(first).toHaveBeenCalledTimes(2);
+        expect(second).toHaveBeenCalledTimes(2);
+        expect(original.destroy).not.toHaveBeenCalled();
+        expect(intermediate.destroy).not.toHaveBeenCalled();
+        disposeGpuResourceRetirements(engine);
+        expect(original.destroy).toHaveBeenCalledOnce();
+        expect(intermediate.destroy).toHaveBeenCalledOnce();
+        expect(boundTexture.destroy).not.toHaveBeenCalled();
+        disposeRenderTargetTexture(result);
+    });
+
+    it.each([false, true])("cancels pending delivery and fences held attachments during disposal (current release fails: %s)", (releaseFails) => {
+        const engine = makeEngine();
+        const result = createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: engine }, withSampledDepthTexture);
+        const old = [result.rt._colorTexture!, result.rt._depthTexture!];
+        const callback = vi.fn(() => {
+            throw new Error("consumer failed");
+        });
+        const unregister = onRenderTargetTextureResize(result, callback);
+        engine.canvas.width += 8;
+        expect(() => buildRenderTarget(result.rt, engine)).toThrow("consumer failed");
+        const current = [result.rt._colorTexture!, result.rt._depthTexture!];
+
+        if (releaseFails) {
+            vi.mocked(current[0]!.destroy).mockImplementationOnce(() => {
+                throw new Error("current attachment release failed");
+            });
+            expect(() => disposeRenderTargetTexture(result)).toThrow("current attachment release failed");
+        } else {
+            disposeRenderTargetTexture(result);
+        }
+        unregister();
+        disposeRenderTargetTexture(result);
+        expect(callback).toHaveBeenCalledOnce();
+        for (const texture of current) {
+            expect(texture.destroy).toHaveBeenCalledOnce();
+        }
+        for (const texture of old) {
+            expect(texture.destroy).not.toHaveBeenCalled();
+        }
+        disposeGpuResourceRetirements(engine);
+        disposeGpuResourceRetirements(engine);
+        for (const texture of old) {
+            expect(texture.destroy).toHaveBeenCalledOnce();
+        }
+        expect(() => buildRenderTarget(result.rt, engine)).toThrow(/disposed/);
+        expect(callback).toHaveBeenCalledOnce();
+    });
+
+    it("allows an unchanged-size nested build without recursively delivering callbacks", () => {
+        const engine = makeEngine();
+        const result = createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: engine });
+        let calls = 0;
+        onRenderTargetTextureResize(result, () => {
+            if (++calls > 1) {
+                throw new Error("callback reentered");
+            }
+            buildRenderTarget(result.rt, engine);
+        });
+        const second = vi.fn();
+        onRenderTargetTextureResize(result, second);
+        engine.canvas.width += 8;
+
+        buildRenderTarget(result.rt, engine);
+        expect(calls).toBe(1);
+        expect(second).toHaveBeenCalledOnce();
+        expect(engine._device.createTexture).toHaveBeenCalledTimes(2);
+        disposeRenderTargetTexture(result);
+        disposeGpuResourceRetirements(engine);
+    });
+
+    it("rejects recursive reallocation and leaves a later explicit build retryable", () => {
+        const engine = makeEngine();
+        const result = createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: engine });
+        let nestedResize = true;
+        const first = vi.fn(() => {
+            if (nestedResize) {
+                nestedResize = false;
+                engine.canvas.width += 8;
+                buildRenderTarget(result.rt, engine);
+            }
+        });
+        const second = vi.fn();
+        onRenderTargetTextureResize(result, first);
+        onRenderTargetTextureResize(result, second);
+        engine.canvas.width += 8;
+
+        expect(() => buildRenderTarget(result.rt, engine)).toThrow(/cannot resize recursively/);
+        expect(second).toHaveBeenCalledOnce();
+        expect(engine._device.createTexture).toHaveBeenCalledTimes(2);
+        buildRenderTarget(result.rt, engine);
+        expect(first).toHaveBeenCalledTimes(2);
+        expect(second).toHaveBeenCalledTimes(2);
+        expect(result.texture.width).toBe(engine.canvas.width);
+        disposeRenderTargetTexture(result);
+        disposeGpuResourceRetirements(engine);
+    });
 });

@@ -33,11 +33,64 @@ export function createSurfaceRenderTargetTexture(
 function installSurfaceResizeSync(engine: EngineContext, surface: SurfaceContext, result: RenderTargetTextureResult): void {
     const { rt, texture, depthTexture } = result;
     const depthFacade = depthTexture;
-    const callbacks = (result._resizeCallbacks ??= []);
+    const callbacks = (result._resizeCallbacks ??= new Set());
+    let notificationPending = false;
+    let notifying = false;
+    let retiredAttachments: (() => void)[] = [];
+    const retireReplacements = (currentEngine: EngineContext): void => {
+        if (retiredAttachments.length) {
+            const retired = retiredAttachments;
+            retireGpuResources(currentEngine, () => runGpuResourceCallbacks(retired));
+            retiredAttachments = [];
+        }
+    };
+    const notifyResize = (currentEngine: EngineContext): void => {
+        if (notifying) {
+            return;
+        }
+        let errors: unknown[] | undefined;
+        if (notificationPending) {
+            notifying = true;
+            try {
+                for (const observer of callbacks) {
+                    if (!observer.pending) {
+                        continue;
+                    }
+                    try {
+                        const callback = observer.callback;
+                        callback();
+                        observer.pending = false;
+                    } catch (error) {
+                        (errors ??= []).push(error);
+                    }
+                }
+            } finally {
+                notifying = false;
+            }
+            notificationPending = false;
+            for (const observer of callbacks) {
+                if (observer.pending) {
+                    notificationPending = true;
+                    break;
+                }
+            }
+        }
+        if (!notificationPending) {
+            retireReplacements(currentEngine);
+        }
+        if (errors) {
+            throw errors.length === 1 ? errors[0] : new AggregateError(errors, "RenderTargetTexture resize callbacks failed.");
+        }
+    };
     const disposeAttachments = rt._disposeAttachments!;
     rt._disposeAttachments = (color, depth): void => {
-        callbacks.length = 0;
-        disposeAttachments.call(rt, color, depth);
+        callbacks.clear();
+        notificationPending = false;
+        try {
+            disposeAttachments.call(rt, color, depth);
+        } finally {
+            retireReplacements(engine);
+        }
     };
     let allocationDevice = engine._device;
     rt._syncEager = (currentEngine): void => {
@@ -46,7 +99,11 @@ function installSurfaceResizeSync(engine: EngineContext, surface: SurfaceContext
         }
         const canvas = surface.canvas;
         if (allocationDevice === currentEngine._device && rt._width === canvas.width && rt._height === canvas.height) {
+            notifyResize(currentEngine);
             return;
+        }
+        if (notifying) {
+            throw new Error("RenderTargetTexture cannot resize recursively from a resize callback.");
         }
         const oldColor = rt._colorTexture;
         const oldDepth = rt._depthTexture;
@@ -77,44 +134,47 @@ function installSurfaceResizeSync(engine: EngineContext, surface: SurfaceContext
         const replacementColor = rt._colorTexture;
         const replacementColorView = rt._colorView;
         if (oldColor && replacementColor && replacementColorView) {
-            replaceTextureFacade(currentEngine, texture, oldColor, replacementColor, replacementColorView, rt._width, rt._height);
+            retiredAttachments.push(replaceTextureFacade(texture, oldColor, replacementColor, replacementColorView, rt._width, rt._height));
         }
         const replacementDepth = rt._depthTexture;
         if (oldDepth && replacementDepth && depthFacade && replacementDepthView) {
-            replaceTextureFacade(currentEngine, depthFacade, oldDepth, replacementDepth, replacementDepthView, rt._width, rt._height);
+            retiredAttachments.push(replaceTextureFacade(depthFacade, oldDepth, replacementDepth, replacementDepthView, rt._width, rt._height));
         } else if (oldDepth && replacementDepth) {
             acquireGPUTexture(replacementDepth);
-            retireGpuResources(currentEngine, () => releaseGPUTexture(oldDepth));
+            retiredAttachments.push(() => releaseGPUTexture(oldDepth));
         }
-        for (const callback of callbacks) {
-            callback();
+        for (const observer of callbacks) {
+            observer.pending = true;
         }
+        notificationPending = true;
+        notifyResize(currentEngine);
     };
 }
 
 /** Invoke `callback` after a surface-sized render-target texture replaces its GPU attachments.
- *  Use it to rebuild material bindings that capture the sampled view. Returns an unregister function. */
+ *  Every registered consumer is attempted even if another throws. Failed callbacks retry on
+ *  the next target build, including unchanged-size builds; successful callbacks are not repeated.
+ *  Old attachments remain alive until delivery completes, then retire behind a GPU fence.
+ *  Returns an unregister function that also cancels a pending retry. */
 export function onRenderTargetTextureResize(result: RenderTargetTextureResult, callback: () => void): () => void {
     if (result.rt._disposed) {
         throw new Error("RenderTargetTexture has been disposed.");
     }
-    const callbacks = (result._resizeCallbacks ??= []);
-    callbacks.push(callback);
+    const callbacks = (result._resizeCallbacks ??= new Set());
+    const observer = { callback, pending: false };
+    callbacks.add(observer);
     return () => {
-        const index = callbacks.indexOf(callback);
-        if (index >= 0) {
-            callbacks.splice(index, 1);
-        }
+        callbacks.delete(observer);
     };
 }
 
-function replaceTextureFacade(engine: EngineContext, facade: Texture2D, oldTexture: GPUTexture, texture: GPUTexture, view: GPUTextureView, width: number, height: number): void {
+function replaceTextureFacade(facade: Texture2D, oldTexture: GPUTexture, texture: GPUTexture, view: GPUTextureView, width: number, height: number): () => void {
     const owners = _textureOwners(facade);
     for (let owner = 0; owner < owners; owner++) {
         acquireGPUTexture(texture);
     }
     _replaceTextureBacking(facade, texture, view, width, height);
-    retireGpuResources(engine, () => {
+    return () => {
         if (owners === 0) {
             oldTexture.destroy();
             return;
@@ -122,5 +182,5 @@ function replaceTextureFacade(engine: EngineContext, facade: Texture2D, oldTextu
         for (let owner = 0; owner < owners; owner++) {
             releaseGPUTexture(oldTexture);
         }
-    });
+    };
 }

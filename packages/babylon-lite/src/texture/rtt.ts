@@ -20,8 +20,8 @@ export interface RenderTargetTextureResult {
     readonly texture: Texture2D;
     /** Sampled depth facade when explicitly requested with `withSampledDepthTexture`. */
     readonly depthTexture: Texture2D | null;
-    /** @internal */
-    _resizeCallbacks?: (() => void)[];
+    /** @internal Independent surface-resize subscriptions and their pending delivery state. */
+    _resizeCallbacks?: Set<{ readonly callback: () => void; pending: boolean }>;
 }
 
 /** Optional RTT depth-facade provider, such as `withSampledDepthTexture`. */
