@@ -22,6 +22,8 @@ interface Captured {
     destroys?: number;
     errorScopes?: GPUErrorFilter[];
     gpuErrors?: (GPUError | null)[];
+    deviceLost?: Promise<GPUDeviceLostInfo>;
+    popErrorScope?: () => Promise<GPUError | null>;
 }
 
 function makeEngine(cap: Captured, features: string[] = [], failWrite = false, limits: { maxTextureDimension2D?: number; maxTextureArrayLayers?: number } = {}): EngineContext {
@@ -31,6 +33,7 @@ function makeEngine(cap: Captured, features: string[] = [], failWrite = false, l
             maxTextureDimension2D: limits.maxTextureDimension2D ?? 8192,
             maxTextureArrayLayers: limits.maxTextureArrayLayers ?? 256,
         },
+        lost: cap.deviceLost ?? new Promise<GPUDeviceLostInfo>(() => undefined),
         createTexture: (desc: GPUTextureDescriptor) => {
             cap.createDesc = desc;
             return {
@@ -43,7 +46,7 @@ function makeEngine(cap: Captured, features: string[] = [], failWrite = false, l
         },
         createSampler: () => ({ _kind: "sampler" }) as unknown as GPUSampler,
         pushErrorScope: (filter: GPUErrorFilter) => (cap.errorScopes ??= []).push(filter),
-        popErrorScope: async () => cap.gpuErrors?.shift() ?? null,
+        popErrorScope: () => cap.popErrorScope?.() ?? Promise.resolve(cap.gpuErrors?.shift() ?? null),
         queue: {
             writeTexture: (dst: GPUTexelCopyTextureInfo, data: ArrayBufferView, layout: GPUTexelCopyBufferLayout, size: GPUExtent3DStrict) => {
                 if (failWrite) {
@@ -278,6 +281,52 @@ describe("uploadKtx2Texture2DArray", () => {
 
         expect(cap.errorScopes).toEqual(["validation", "out-of-memory"]);
         expect(cap.gpuErrors).toEqual([]);
+        expect(cap.destroys).toBe(1);
+    });
+
+    it("rejects and destroys resources when the device is lost while error scopes settle", async () => {
+        decodeResult = fakeDecoded({ width: 4, layers: 2, levels: 1, format: GL_RGBA8 });
+        const cap: Captured = {
+            writes: [],
+            deviceLost: Promise.resolve({ reason: "destroyed", message: "test loss" } as GPUDeviceLostInfo),
+        };
+
+        await expect(uploadKtx2Texture2DArray(makeEngine(cap), new ArrayBuffer(8))).rejects.toThrow(
+            "GPU device was lost or replaced during texture-array upload: test loss"
+        );
+
+        expect(cap.destroys).toBe(1);
+    });
+
+    it("rejects and destroys resources when recovery replaces the device while error scopes settle", async () => {
+        decodeResult = fakeDecoded({ width: 4, layers: 2, levels: 1, format: GL_RGBA8 });
+        let releaseScopes!: () => void;
+        const scopesBlocked = new Promise<void>((resolve) => {
+            releaseScopes = resolve;
+        });
+        let enterScopes!: () => void;
+        const scopesEntered = new Promise<void>((resolve) => {
+            enterScopes = resolve;
+        });
+        let popCount = 0;
+        const cap: Captured = {
+            writes: [],
+            popErrorScope: async () => {
+                if (popCount++ === 0) {
+                    enterScopes();
+                }
+                await scopesBlocked;
+                return null;
+            },
+        };
+        const engine = makeEngine(cap);
+
+        const upload = uploadKtx2Texture2DArray(engine, new ArrayBuffer(8));
+        await scopesEntered;
+        engine._device = makeEngine({ writes: [] })._device;
+        releaseScopes();
+
+        await expect(upload).rejects.toThrow("GPU device was lost or replaced during texture-array upload");
         expect(cap.destroys).toBe(1);
     });
 

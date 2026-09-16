@@ -211,8 +211,10 @@ Image uploads default to a physical Y flip. Codec-decoded KTX2 data is uploaded 
 3. Push validation and out-of-memory error scopes.
 4. Create the texture/view/sampler and upload every layer/mip.
 5. Pop and await both scopes before publishing ownership.
-6. Destroy the created GPU texture and rethrow the original operation, scope, or GPU error on any failure.
-7. Acquire the texture only after synchronous work and asynchronous WebGPU validation both succeed.
+6. Observe device loss once per `GPUDevice` through a lazy weak cache. After both scopes settle, reject and
+   destroy the texture if the captured device was lost or `engine._device` was replaced during the await.
+7. Destroy the created GPU texture and rethrow the original operation, scope, device-loss, or GPU error on failure.
+8. Acquire the texture only after synchronous work, asynchronous WebGPU validation, and device identity checks succeed.
 
 ### Separate-file KTX2
 
@@ -245,7 +247,8 @@ URL loaders own only fetch/status validation and delegate to the corresponding b
 - `texture/mip-count.ts`: full-chain mip count.
 - `texture/texture-2d.ts`: shared texture facade.
 
-The module has no import-time GPU work or mutable global state.
+The module has no import-time GPU work. Its only mutable module state is a lazy `WeakMap` that installs one
+device-loss observer per `GPUDevice`; weak keys do not retain retired devices.
 
 ## Test Specification
 
@@ -258,7 +261,7 @@ The module has no import-time GPU work or mutable global state.
 - malformed layer indices, dimensions, formats, mip counts, and layer counts;
 - separate-buffer normalization, deterministic layer order, and fetch errors;
 - zero-source runtime rejection for untyped callers;
-- cleanup on synchronous upload/view/sampler failures and asynchronous validation/out-of-memory errors;
+- cleanup on synchronous upload/view/sampler failures, asynchronous validation/out-of-memory errors, and device loss/replacement during scope settlement;
 - ownership acquisition only after all error scopes succeed.
 
 `tests/lite/unit/texture-array.test.ts` must cover image and pixel creation/upload, layer bounds, dimension equality, bitmap closure, mip generation, and URL failures.

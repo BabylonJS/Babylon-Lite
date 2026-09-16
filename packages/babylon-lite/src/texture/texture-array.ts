@@ -391,6 +391,26 @@ interface UncompressedKtx2ArrayUploadPlan extends Ktx2ArrayUploadPlanBase {
 
 type Ktx2ArrayUploadPlan = CompressedKtx2ArrayUploadPlan | UncompressedKtx2ArrayUploadPlan;
 
+interface Ktx2DeviceState {
+    lost: GPUDeviceLostInfo | null;
+}
+
+let _ktx2DeviceStates: WeakMap<GPUDevice, Ktx2DeviceState> | null = null;
+
+function observeKtx2Device(device: GPUDevice): Ktx2DeviceState {
+    const states = (_ktx2DeviceStates ??= new WeakMap());
+    let state = states.get(device);
+    if (!state) {
+        const created: Ktx2DeviceState = { lost: null };
+        state = created;
+        states.set(device, created);
+        void device.lost.then((info) => {
+            created.lost = info;
+        });
+    }
+    return state;
+}
+
 function validateKtx2ArrayDimensions(decoded: Ktx2DecodedData, levels: readonly Ktx2DecodedMip[][]): { width: number; height: number } {
     if (!Number.isInteger(decoded.width) || !Number.isInteger(decoded.height) || decoded.width < 1 || decoded.height < 1) {
         throw new Error(`KTX2: decoder reported invalid dimensions ${decoded.width}x${decoded.height}`);
@@ -513,6 +533,7 @@ function createKtx2ArrayTexture(engine: EngineContext, plan: Ktx2ArrayUploadPlan
 
 async function uploadPreparedKtx2Array(engine: EngineContext, plan: Ktx2ArrayUploadPlan): Promise<Texture2DArray> {
     const device = engine._device;
+    const deviceState = observeKtx2Device(device);
     device.pushErrorScope("validation");
     device.pushErrorScope("out-of-memory");
     let tex: Texture2DArray | undefined;
@@ -536,7 +557,7 @@ async function uploadPreparedKtx2Array(engine: EngineContext, plan: Ktx2ArrayUpl
             }
             for (let layer = 0; layer < plan.layers; layer++) {
                 const mip = plan.levels[level]![layer]!;
-                engine._device.queue.writeTexture(
+                device.queue.writeTexture(
                     { texture: tex.texture, mipLevel: level, origin: { x: 0, y: 0, z: layer } },
                     mip.data as Uint8Array<ArrayBuffer>,
                     { bytesPerRow: rowBytes },
@@ -570,6 +591,11 @@ async function uploadPreparedKtx2Array(engine: EngineContext, plan: Ktx2ArrayUpl
             throw new Error(`KTX2: GPU texture-array upload failed: ${gpuError.message}`, { cause: gpuError });
         }
         throw new Error("KTX2: texture-array upload did not produce GPU resources");
+    }
+    if (deviceState.lost || engine._device !== device) {
+        tex.texture.destroy();
+        const detail = deviceState.lost?.message ? `: ${deviceState.lost.message}` : "";
+        throw new Error(`KTX2: GPU device was lost or replaced during texture-array upload${detail}`);
     }
 
     try {
