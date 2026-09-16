@@ -1387,6 +1387,10 @@ export function setPhysicsBodyMotionType(world: PhysicsWorld, body: PhysicsBody,
  * reads the node before the next physics step stays consistent.
  */
 export function setPhysicsBodyTransform(world: PhysicsWorld, body: PhysicsBody, position: Vec3, rotation: Quat): void {
+    if (world._fo) {
+        world._fo.setBodyTransform(world, body, position, rotation);
+        return;
+    }
     const t = [
         [position.x, position.y, position.z],
         [rotation.x, rotation.y, rotation.z, rotation.w],

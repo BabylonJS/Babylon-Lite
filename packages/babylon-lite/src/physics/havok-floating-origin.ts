@@ -48,6 +48,7 @@ export interface HavokFloatingOriginContext {
     setGravity(world: PhysicsWorld, gravity: number[], worldPosition?: Vec3): void;
     getRegionGravity(world: PhysicsWorld, worldPosition: Vec3): number[];
     setVelocityLimits(world: PhysicsWorld, maxLinear: number, maxAngular: number): void;
+    setBodyTransform(world: PhysicsWorld, body: PhysicsBody, position: Vec3, rotation: Quat): void;
     getBodyTransform(world: PhysicsWorld, body: PhysicsBody): { position: Vec3; rotation: Quat };
     dispose(world: PhysicsWorld): void;
 }
@@ -66,6 +67,7 @@ export function createHavokFloatingOriginContext(hkWorld: any, gravity: number[]
         setGravity: _setGravity,
         getRegionGravity: _getRegionGravity,
         setVelocityLimits: _setVelocityLimits,
+        setBodyTransform: _setBodyTransform,
         getBodyTransform: _getBodyTransform,
         dispose: _dispose,
     };
@@ -187,6 +189,18 @@ function _setVelocityLimits(world: PhysicsWorld, maxLinear: number, maxAngular: 
     for (const region of world._fo!.regions) {
         world._hknp.HP_World_SetSpeedLimit(region._world, maxLinear, maxAngular);
     }
+}
+
+function _setBodyTransform(world: PhysicsWorld, body: PhysicsBody, position: Vec3, rotation: Quat): void {
+    const hknp = world._hknp;
+    const region = _getOrCreateRegion(world, position);
+    const o = region.origin;
+    hknp.HP_Body_SetQTransform(body._hkBody, [
+        [position.x - o.x, position.y - o.y, position.z - o.z],
+        [rotation.x, rotation.y, rotation.z, rotation.w],
+    ]);
+    body._region = region;
+    _syncBodyToNode(hknp, body);
 }
 
 function _getBodyTransform(world: PhysicsWorld, body: PhysicsBody): { position: Vec3; rotation: Quat } {
