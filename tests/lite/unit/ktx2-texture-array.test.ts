@@ -291,9 +291,7 @@ describe("uploadKtx2Texture2DArray", () => {
             deviceLost: Promise.resolve({ reason: "destroyed", message: "test loss" } as GPUDeviceLostInfo),
         };
 
-        await expect(uploadKtx2Texture2DArray(makeEngine(cap), new ArrayBuffer(8))).rejects.toThrow(
-            "GPU device was lost or replaced during texture-array upload: test loss"
-        );
+        await expect(uploadKtx2Texture2DArray(makeEngine(cap), new ArrayBuffer(8))).rejects.toThrow("GPU device was lost or replaced during texture-array upload: test loss");
 
         expect(cap.destroys).toBe(1);
     });
