@@ -3,13 +3,14 @@
  *  Provides position, rotationQuaternion (source of truth), rotation (Euler XYZ proxy),
  *  scaling, parent, worldMatrix, worldMatrixVersion, and children. */
 
-import type { Mat4, Quat, Vec3 } from "../math/types.js";
+import type { Mat4, Mat4Storage, Quat, Vec3 } from "../math/types.js";
 import type { LiteMetadata } from "../metadata.js";
 import type { IWorldMatrixProvider } from "./parentable.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";
 import { ObservableQuat } from "../math/observable-quat.js";
-import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrix } from "./world-matrix-state.js";
+import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrixIntoBuffer } from "./world-matrix-state.js";
 import { eulerXYZToQuatTuple, quatToEulerXYZTuple } from "../math/quat-euler.js";
+import { allocateMat4 } from "../math/_matrix-allocator.js";
 
 // ─── EulerProxy ──────────────────────────────────────────────────────
 
@@ -153,10 +154,16 @@ function createSceneNodeCore(name: string, matrix: Mat4 | null, px = 0, py = 0, 
 
 /** Add the common SceneNode transform contract to an existing object. */
 export function initSceneNodeTransform<T extends SceneNode>(partialNode: Partial<T>, px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1, sx = 1, sy = 1, sz = 1): T {
+    let localMatrix: Mat4 | undefined;
     // Read the raw matrix off the node, not off a captured local: clearing `_localMatrix`
     // (setParent on a glTF `matrix` node) must switch the node back to TRS-driven.
     const wm = createWorldMatrixState(() => {
-        return node._localMatrix ?? composeTrsLocalMatrix(node.position, node.rotationQuaternion, node.scaling);
+        if (node._localMatrix) {
+            return node._localMatrix;
+        }
+        localMatrix ??= allocateMat4();
+        composeTrsLocalMatrixIntoBuffer(localMatrix as unknown as Mat4Storage, position, rq, scaling);
+        return localMatrix;
     });
     const onWmDirty = () => {
         if (node._localMatrixLocked) {
