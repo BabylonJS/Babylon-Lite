@@ -780,6 +780,28 @@ describe("RenderPassTask transparent sorting", () => {
         expect(task._targetSignature._depthCompare).toBe("less-equal");
     });
 
+    it("preserves an external depth target compare when transmission retargets a render task", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const color = createRenderTarget({
+            format: "bgra8unorm",
+            samples: 1,
+            size: { width: 16, height: 16 },
+        });
+        const depth = createRenderTarget({
+            dFormat: "depth32float",
+            depthClearValue: 1,
+            depthCompare: "less-equal",
+            samples: 1,
+            size: { width: 16, height: 16 },
+        });
+        const task = createRenderTask({ name: "standard-z-external-depth", rt: color, depth }, engine, scene);
+
+        enableRenderTaskTransmission(task, engine);
+
+        expect(task._targetSignature._depthCompare).toBe("less-equal");
+    });
+
     it("uses world centers refreshed by binding updates before sorting transparent draws", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);

@@ -217,7 +217,13 @@ describe("GeometryRendererTask", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
         const external = {
-            _descriptor: { dFormat: "depth32float" as const, samples: 1 as const, size: { width: 800, height: 600 } as const },
+            _descriptor: {
+                dFormat: "depth32float" as const,
+                depthClearValue: 1,
+                depthCompare: "less-equal" as const,
+                samples: 1 as const,
+                size: { width: 800, height: 600 } as const,
+            },
             _colorTexture: null,
             _colorView: null,
             _depthTexture: null,
@@ -228,6 +234,8 @@ describe("GeometryRendererTask", () => {
         const task = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }], samples: 1, depthTexture: external }, engine, scene);
         // The accessor returns the same object the caller passed in.
         expect(task.geometryDepthTexture).toBe(external);
+        const signature = (task as unknown as { _signature: { _depthCompare?: GPUCompareFunction } })._signature;
+        expect(signature._depthCompare).toBe("less-equal");
     });
 
     it("outputTexture is undefined when targetTexture is not provided", () => {

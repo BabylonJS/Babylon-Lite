@@ -257,7 +257,7 @@ function retargetRenderTaskToLinearOffscreen(task: RenderTaskBase): void {
     };
     sig._colorFormat = "rgba16float";
     sig._depthStencilFormat = cfg.depth?._descriptor.dFormat ?? newRt._descriptor.dFormat;
-    sig._depthCompare = newRt._descriptor.depthCompare;
+    sig._depthCompare = newRt._descriptor.depthCompare ?? cfg.depth?._descriptor.depthCompare;
     sig._sampleCount = sampleCount;
     task._ob.length = 0;
     task._lastVersion = -1;

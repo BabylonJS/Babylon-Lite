@@ -334,7 +334,8 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _colorFormat: sigColorFormats.join(),
         _colorFormats: sigColorFormats,
         _depthStencilFormat: (config.depthTexture ? config.depthTexture._descriptor.dFormat : outputTarget._descriptor.depthStencilFormat) ?? "depth32float",
-        _depthCompare: "greater-equal" as GPUCompareFunction,
+        _depthCompare:
+            config.targetTexture?._descriptor.depthCompare ?? config.depthTexture?._descriptor.depthCompare ?? ("greater-equal" as GPUCompareFunction),
         _sampleCount: samples,
     };
 
