@@ -311,11 +311,12 @@ float64Result satisfies Float64Array;
         expect(external, `build/index.d.ts leaks types from external modules: ${external.join(", ")}`).toEqual([]);
     });
 
-    it("strips the shader-source brand so consumers can pass plain strings", () => {
+    it("exports the WGSL tag while stripping the source brand so consumers can pass plain strings", () => {
         const dts = readFileSync(DTS_PATH, "utf-8");
 
         expect(dts).not.toContain("WgslSource");
         expect(dts).not.toContain("wgslSourceBrand");
+        expect(dts).toContain("declare function wgsl(");
         expect(dts).toContain("readonly vertexSource: string;");
         expect(dts).toContain("readonly fragmentSource: string;");
 
@@ -323,9 +324,9 @@ float64Result satisfies Float64Array;
         try {
             writeFileSync(
                 probePath,
-                `import type { ShaderMaterialOptions } from "./index.js";
+                `import { wgsl, type ShaderMaterialOptions } from "./index.js";
 const options: ShaderMaterialOptions = {
-    vertexSource: "plain consumer vertex WGSL",
+    vertexSource: wgsl\`tagged consumer vertex WGSL\`,
     fragmentSource: "plain consumer fragment WGSL",
     attributes: [],
 };

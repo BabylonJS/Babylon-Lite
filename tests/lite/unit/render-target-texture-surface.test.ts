@@ -332,26 +332,28 @@ describe("createSurfaceRenderTargetTexture", () => {
         const engine = makeEngine();
         const createTexture = vi.mocked(engine._device.createTexture);
         const allocate = createTexture.getMockImplementation()!;
+        const defineProperty = vi.spyOn(Object, "defineProperty");
         createTexture.mockImplementationOnce((descriptor) => {
             const texture = allocate(descriptor);
             vi.mocked(texture.destroy).mockImplementation(() => {
                 throw new Error("cleanup failed");
             });
+            defineProperty.mockImplementationOnce(() => {
+                throw new Error("surface setup failed");
+            });
             return texture;
         });
-        let sizeReads = 0;
         const descriptor = {
             format: "rgba8unorm" as GPUTextureFormat,
             samples: 1,
-            get size() {
-                if (sizeReads++ === 0) {
-                    return engine;
-                }
-                throw new Error("surface setup failed");
-            },
+            size: engine,
         };
-        expect(() => createSurfaceRenderTargetTexture(engine, descriptor)).toThrow("surface setup failed");
-        expect((createTexture.mock.results[0]!.value as GPUTexture).destroy).toHaveBeenCalledOnce();
+        try {
+            expect(() => createSurfaceRenderTargetTexture(engine, descriptor)).toThrow("surface setup failed");
+            expect((createTexture.mock.results[0]!.value as GPUTexture).destroy).toHaveBeenCalledOnce();
+        } finally {
+            defineProperty.mockRestore();
+        }
     });
 
     it("supports callback unregistration and rejects registration after disposal", () => {

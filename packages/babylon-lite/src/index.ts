@@ -372,6 +372,7 @@ export {
     setShaderVector3,
     setShaderMatrix,
 } from "./material/shader/shader-material.js";
+export { wgsl } from "./shader/wgsl.js";
 export { enableShaderUniformRangeUpdates } from "./material/shader/shader-uniform-range.js";
 export { enableShaderMaterialUniformCaching } from "./material/shader/enable-shader-material-uniform-caching.js";
 export { enableShaderMaterialInstanceWorld } from "./material/shader/enable-shader-material-instance-world.js";
