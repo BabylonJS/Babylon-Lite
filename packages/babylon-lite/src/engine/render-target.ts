@@ -129,8 +129,8 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void
         const scale = size.scale;
         const canvas = size.surface.canvas;
         size = {
-            width: (canvas.width * scale) | 0 || 1,
-            height: (canvas.height * scale) | 0 || 1,
+            width: Math.floor(canvas.width * scale) || 1,
+            height: Math.floor(canvas.height * scale) || 1,
         };
     }
     const { width, height } = "canvas" in size ? size.canvas : size;
@@ -193,8 +193,8 @@ export function _resolveRenderTargetSize(desc: RenderTargetDescriptor): { width:
         const scale = size.scale;
         const canvas = size.surface.canvas;
         return {
-            width: (canvas.width * scale) | 0 || 1,
-            height: (canvas.height * scale) | 0 || 1,
+            width: Math.floor(canvas.width * scale) || 1,
+            height: Math.floor(canvas.height * scale) || 1,
         };
     }
     return "canvas" in size ? size.canvas : size;

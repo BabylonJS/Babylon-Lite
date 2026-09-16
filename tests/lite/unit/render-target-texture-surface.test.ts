@@ -86,6 +86,19 @@ describe("createSurfaceRenderTargetTexture", () => {
         disposeRenderTargetTexture(result);
     });
 
+    it("does not wrap scaled dimensions through signed 32-bit integers", () => {
+        const engine = makeEngine();
+        const result = createSurfaceRenderTargetTexture(engine, {
+            format: "rgba8unorm",
+            samples: 1,
+            size: { surface: engine, scale: 67_108_865 },
+        });
+
+        expect(result.texture.width).toBe(4_294_967_360);
+        expect(result.texture.height).toBe(2_147_483_680);
+        disposeRenderTargetTexture(result);
+    });
+
     it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])("rejects invalid surface scale %s before allocating", (scale) => {
         const engine = makeEngine();
         expect(() => createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: { surface: engine, scale } })).toThrow(

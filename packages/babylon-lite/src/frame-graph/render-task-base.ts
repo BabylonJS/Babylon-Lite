@@ -139,7 +139,7 @@ export interface RenderTask extends Task {
     /** @internal Scene version captured before building the active bindings, not when drawing them. */
     _lastVersion: number;
     /** @internal */
-    _lastVis: number;
+    _lastVis?: number;
     /** @internal Optional feature-owned update work for the active generation. */
     _batchState?: DrawBatchState;
     /** @internal */
@@ -207,7 +207,7 @@ export interface RenderTaskBindingGeneration {
     /** @internal */
     _lastVersion: number;
     /** @internal */
-    _lastVis: number;
+    _lastVis?: number;
     /** @internal */
     _batchState?: DrawBatchState;
 }
@@ -232,7 +232,6 @@ function createBindingGeneration(renderables: Renderable[], version: number): Re
         _transparentBindings: [],
         _ob: [],
         _lastVersion: version,
-        _lastVis: 0,
     };
 }
 
@@ -258,7 +257,6 @@ export function _createAutomaticRenderTask(config: RenderTaskConfig, engine: Eng
         _sampleCount: desc.samples,
     };
 
-    const sceneUBO = createEmptyUniformBuffer(engine, SCENE_UBO_BYTES);
     const colorAttachment = { loadOp: "clear", storeOp: "store" } as GPURenderPassColorAttachment;
     const updateContext: MutableDrawUpdateContext = { targetWidth: 0, targetHeight: 0 };
     const task: RenderTaskBase = {
@@ -271,7 +269,7 @@ export function _createAutomaticRenderTask(config: RenderTaskConfig, engine: Eng
         _passes: [],
         _renderPassDescriptor: { colorAttachments: [colorAttachment] },
         _colorAttachment: colorAttachment,
-        _sceneUBO: sceneUBO,
+        _sceneUBO: createEmptyUniformBuffer(engine, SCENE_UBO_BYTES),
         _suData: new F32(SCENE_UBO_BYTES / 4),
         _sceneUboCacheKey: [],
         _targetSignature: targetSignature,
@@ -391,9 +389,8 @@ export function _buildBindings(
     const previousBatchState = task._batchState;
     const generation = createBindingGeneration(renderables, task.scene._renderableVersion);
     if (record) {
-        const ownsTargets = task._ownsTargets;
-        const buildTarget = (target: RenderTarget | undefined, always = false): void => {
-            if (target && (always || ownsTargets || target._eager)) {
+        const buildTarget = (target: RenderTarget | undefined, always?: boolean): void => {
+            if (target && (always || task._ownsTargets || target._eager)) {
                 buildRenderTarget(target, task.engine);
             }
         };
