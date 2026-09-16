@@ -19,6 +19,8 @@ function composeMatrixRotation(m: ArrayLike<number>, qx: number, qy: number, qz:
     iz = iz > 1e-8 ? 1 / iz : 0;
     if (m[0]! * (m[5]! * m[10]! - m[6]! * m[9]!) + m[1]! * (m[6]! * m[8]! - m[4]! * m[10]!) + m[2]! * (m[4]! * m[9]! - m[5]! * m[8]!) < 0) {
         iy = -iy;
+        qx = -qx;
+        qz = -qz;
     }
     const r = _quatFromRotationBasis(m[0]! * ix, m[4]! * iy, m[8]! * iz, m[1]! * ix, m[5]! * iy, m[9]! * iz, m[2]! * ix, m[6]! * iy, m[10]! * iz);
     const invLength = 1 / Math.hypot(r.x, r.y, r.z, r.w);
@@ -41,7 +43,7 @@ export function nodeToHavokTransform(node: SceneNode): [[number, number, number]
         const wm = node.parent.worldMatrix;
         const r = composeMatrixRotation(wm, q.x, q.y, q.z, q.w);
         return [
-            [wm[12]! + p.x, wm[13]! + p.y, wm[14]! + p.z],
+            [p.x * wm[0]! + p.y * wm[4]! + p.z * wm[8]! + wm[12]!, p.x * wm[1]! + p.y * wm[5]! + p.z * wm[9]! + wm[13]!, p.x * wm[2]! + p.y * wm[6]! + p.z * wm[10]! + wm[14]!],
             [r.x, r.y, r.z, r.w],
         ];
     } else {
