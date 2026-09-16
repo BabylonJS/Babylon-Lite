@@ -71,7 +71,7 @@ export function createHtmlElementTexture(
         return [element.width || 1, element.height || 1];
     };
 
-    const upload = (target: GLEngineContext): void => {
+    const upload = (target: GLEngineContext, initializeParameters = true): void => {
         const g = target.gl;
         setUnpackState(target, invertY, false);
         bindTextureForUpload(target, tex.handle);
@@ -79,10 +79,12 @@ export function createHtmlElementTexture(
         const [w, h] = sizeOf();
         tex.width = w;
         tex.height = h;
-        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, minFilter);
-        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, magFilter);
-        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_S, wrapS);
-        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_T, wrapT);
+        if (initializeParameters) {
+            g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, minFilter);
+            g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, magFilter);
+            g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_S, wrapS);
+            g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_T, wrapT);
+        }
         if (generateMipMaps) {
             g.generateMipmap(g.TEXTURE_2D);
         }
@@ -111,7 +113,7 @@ export function updateHtmlElementTexture(engine: GLEngineContext, tex: GLTexture
     if (engine._isLost || engine._disposed || tex._disposed) {
         return;
     }
-    tex._upload(engine);
+    tex._upload(engine, false);
 }
 
 /* ────────────────────────────  internal helpers  ──────────────────────────── */

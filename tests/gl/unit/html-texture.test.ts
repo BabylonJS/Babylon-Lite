@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { createGLEngine } from "../../../packages/babylon-lite-gl/src/index";
 import { GLSamplingMode, createHtmlElementTexture, updateHtmlElementTexture } from "../../../packages/babylon-lite-gl/src/html-texture";
 import { bindTexture } from "../../../packages/babylon-lite-gl/src/texture";
-import { createMockCanvas, createMockGL, type MockGL } from "./_lite-gl-mock";
+import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockGL } from "./_lite-gl-mock";
 
 // The gl-unit project runs in the `node` environment, which has no DOM globals.
 // createHtmlElementTexture uses `instanceof HTMLVideoElement / HTMLImageElement`,
@@ -32,6 +32,8 @@ const GL_LINEAR = 0x2601;
 const GL_LINEAR_MIPMAP_LINEAR = 0x2703;
 const GL_TEXTURE_MAG_FILTER = 0x2800;
 const GL_TEXTURE_MIN_FILTER = 0x2801;
+const GL_TEXTURE_WRAP_S = 0x2802;
+const GL_TEXTURE_WRAP_T = 0x2803;
 
 function sourceElement(width = 4, height = 4): HTMLCanvasElement {
     return { width, height } as unknown as HTMLCanvasElement;
@@ -41,7 +43,7 @@ function makeCtx() {
     const mock = createMockGL();
     const canvas = createMockCanvas(mock);
     const engine = createGLEngine(canvas);
-    return { mock, engine };
+    return { mock, canvas, engine };
 }
 
 /** Last value passed to `gl.texParameteri` for a given parameter name. */
@@ -80,11 +82,14 @@ describe("lite-gl: html-texture samplingMode", () => {
         expect(mock.count("generateMipmap")).toBe(1);
     });
 
-    it("omitting samplingMode keeps the linear GL defaults", () => {
+    it("initializes the default filters and wrapping", () => {
         const { mock, engine } = makeCtx();
         createHtmlElementTexture(engine, sourceElement());
+        expect(mock.count("texParameteri")).toBe(4);
         expect(paramValue(mock, GL_TEXTURE_MIN_FILTER)).toBe(GL_LINEAR);
         expect(paramValue(mock, GL_TEXTURE_MAG_FILTER)).toBe(GL_LINEAR);
+        expect(paramValue(mock, GL_TEXTURE_WRAP_S)).toBe(engine.gl.CLAMP_TO_EDGE);
+        expect(paramValue(mock, GL_TEXTURE_WRAP_T)).toBe(engine.gl.CLAMP_TO_EDGE);
         expect(mock.count("generateMipmap")).toBe(0);
     });
 
@@ -103,12 +108,56 @@ describe("lite-gl: html-texture samplingMode", () => {
 });
 
 describe("lite-gl: updateHtmlElementTexture", () => {
-    it("re-uploads the texture from its source element", () => {
+    it("re-uploads pixels without re-initializing texture parameters", () => {
         const { mock, engine } = makeCtx();
-        const tex = createHtmlElementTexture(engine, sourceElement());
+        const element = sourceElement();
+        const tex = createHtmlElementTexture(engine, element);
+        element.width = 8;
+        element.height = 6;
         mock.clear();
         updateHtmlElementTexture(engine, tex);
         expect(mock.count("texImage2D")).toBe(1);
+        expect(mock.count("texParameteri")).toBe(0);
+        expect(tex.width).toBe(8);
+        expect(tex.height).toBe(6);
+    });
+
+    it("regenerates mipmaps after a dynamic update when enabled", () => {
+        const { mock, engine } = makeCtx();
+        const tex = createHtmlElementTexture(engine, sourceElement(), { generateMipMaps: true });
+        mock.clear();
+        updateHtmlElementTexture(engine, tex);
+        expect(mock.count("texImage2D")).toBe(1);
+        expect(mock.count("generateMipmap")).toBe(1);
+    });
+
+    it("re-initializes texture parameters during context restoration", () => {
+        const { mock, canvas, engine } = makeCtx();
+        createHtmlElementTexture(engine, sourceElement());
+        fireLost(canvas);
+        mock.clear();
+        fireRestored(canvas);
+        expect(mock.count("texImage2D")).toBe(1);
+        expect(mock.count("texParameteri")).toBe(4);
+    });
+
+    it("does not upload while the context, engine, or texture is unavailable", () => {
+        const { mock, engine } = makeCtx();
+        const tex = createHtmlElementTexture(engine, sourceElement());
+        const expectNoUpload = (): void => {
+            mock.clear();
+            updateHtmlElementTexture(engine, tex);
+            expect(mock.count("texImage2D")).toBe(0);
+        };
+
+        engine._isLost = true;
+        expectNoUpload();
+        engine._isLost = false;
+        engine._disposed = true;
+        expectNoUpload();
+        engine._disposed = false;
+        tex._disposed = true;
+        expectNoUpload();
     });
 
     it("forces unit 0 active before re-upload even when another unit is left active (regression)", () => {
