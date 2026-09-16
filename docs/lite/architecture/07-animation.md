@@ -103,6 +103,11 @@ export interface PropertyAnimationTrackOptions {
     readonly interpolation?: PropertyAnimationInterpolation;
     /** Forces quaternion-aware interpolation for vec4 tracks. Inferred for `rotationQuaternion` paths. */
     readonly quaternion?: boolean;
+    /**
+     * Optional segment-local progress transform. Receives the normalized progress
+     * between the selected key pair and returns the progress used for interpolation.
+     */
+    readonly easing?: (gradient: number) => number;
 }
 
 export interface PropertyAnimationClipOptions {
@@ -114,6 +119,7 @@ export interface PropertyAnimationTrack {
     readonly sampler: AnimationSampler;
     readonly stride: number;
     readonly quaternion: boolean;
+    readonly easing?: (gradient: number) => number;
 }
 
 export interface PropertyAnimationClip {
@@ -288,6 +294,29 @@ All animation data uses flat typed arrays for GPU-friendly memory layout:
 
 `evaluateSampler()` clamps `t <= input[0]` to the first key and `t >= input[last]` to the final key before searching. For interior samples, `findKeyframe(input, t)` performs binary search to find index `i` such that `input[i] <= t < input[i+1]`.
 
+### Property Easing
+
+Property-animation easing is a caller-supplied function on each
+`PropertyAnimationTrackOptions`, not a built-in curve registry and not part of
+the generic `AnimationSampler` shape used by glTF. The callback transforms only
+the normalized progress within the selected property-animation segment:
+
+```typescript
+const gradient = (time - startTime) / (endTime - startTime);
+const interpolationGradient = easing ? easing(gradient) : gradient;
+```
+
+The evaluator applies this transform after STEP handling and before scalar/vector
+lerp or quaternion slerp. STEP segments never invoke easing. Samples at or beyond
+the first and final key return those key values directly without invoking easing,
+so custom callbacks cannot move clip endpoints. The returned progress is not
+clamped: overshooting curves may extrapolate scalar/vector values or continue a
+quaternion slerp beyond the segment endpoint.
+
+This seam is property-animation-only. glTF LINEAR, STEP, and CUBICSPLINE samplers
+continue through `evaluateSampler()` unchanged, so caller-authored easing cannot
+silently alter imported asset semantics.
+
 ### Scratch Buffer: `_quat`
 
 A module-level `[0,0,0,1]` array is reused for quaternion slerp output to avoid per-call allocation.
@@ -391,8 +420,14 @@ addAnimationGroups(manager, xbot.animationGroups ?? []);
 for (const group of xbot.animationGroups ?? []) {
     setAnimationWeight(group, 0);
 }
-setAnimationWeight(xbot.animationGroups!.find((group) => group.name === "walk")!, 0.5);
-setAnimationWeight(xbot.animationGroups!.find((group) => group.name === "run")!, 0.5);
+setAnimationWeight(
+    xbot.animationGroups!.find((group) => group.name === "walk")!,
+    0.5
+);
+setAnimationWeight(
+    xbot.animationGroups!.find((group) => group.name === "run")!,
+    0.5
+);
 enableAnimationBlending(manager);
 onBeforeRender(scene, (deltaMs) => updateAnimationManager(manager, deltaMs));
 ```
@@ -431,7 +466,7 @@ playAnimation(walk);
 
 `createAnimationGroups()` creates one `AnimationGroup` per `AnimationClip`. Each group wraps an `AnimationController` (from `skeleton-updater.ts`) with a single-clip slice of the animation data. A direct controller uploads only skeletons containing a joint targeted by that clip, or a joint below a targeted ancestor; otherwise independently playing clips from the same asset would reset one another's rigs to rest pose. All groups auto-play by default (matching BJS behavior).
 
-Manual property clips share sampler evaluation with glTF animation, but they do not masquerade as glTF `AnimationChannel`s. `createPropertyAnimationClip()` stores reusable unresolved property tracks. `createPropertyAnimationGroup()` resolves each track against the target once, builds compact property runtime tracks (`sampler`, `stride`, `quaternion`, `writer`, `mixTarget`, `mixProperty`), and wraps them in an `AnimationGroup`. The hot path remains `evaluateSampler()` plus direct property writers.
+Manual property clips share the packed keyframe representation with glTF animation, but they do not masquerade as glTF `AnimationChannel`s. `createPropertyAnimationClip()` stores reusable unresolved property tracks, including an optional easing callback. `createPropertyAnimationGroup()` resolves each track against the target once, builds compact property runtime tracks (`sampler`, `stride`, `quaternion`, `easing`, `writer`, `mixTarget`, `mixProperty`), and wraps them in an `AnimationGroup`. The property hot path uses the property-only eased sampler plus direct property writers; the glTF evaluator remains unchanged.
 
 ### Property Binding
 
@@ -448,6 +483,9 @@ Bindings are target-specific; `PropertyAnimationClip` is reusable, while the gen
 Manual property weights are optional and live outside the default direct evaluator. Calling `enablePropertyAnimationBlending(manager)` installs a manager-side mixer for manual property tracks that share the same target and property path. `setAnimationWeight()` only changes the group weight, so glTF-only scenes do not load the manual property mixer. The mixer advances group time once, samples each contributing clip with `evaluateSampler()`, then writes one final weighted value per property so multiple groups do not devolve into last-write-wins behavior.
 
 Weights intentionally use Babylon-style weighted sums for this first layer: `final = sum(group.weight * sampledValue)` for the groups targeting the same property. The mixer does not normalize totals and does not blend toward rest pose. `crossFadeAnimationGroups()` builds on the same weights by scheduling deterministic duration-based fade jobs inside the manager.
+
+Each contributing property track is eased and sampled before its group weight is
+applied. Track easing never changes group weights or cross-fade timing.
 
 ### glTF Skeleton Weight Mixing
 
@@ -495,6 +533,7 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `new Animation(name, "position.x", frameRate, FLOAT, CYCLE)`                 | `createPropertyAnimationClip(name, [{ path: "position.x", frameRate, keys }])`                                |
 | `animation.setKeys(keys)`                                                    | keys passed to `createPropertyAnimationClip()`                                                                |
+| `animation.setEasingFunction(easing)`                                        | track option `easing: (gradient) => easing.ease(gradient)`                                                    |
 | `scene.beginDirectAnimation(target, [anim], from, to, loop)`                 | `createPropertyAnimationGroup(manager, target, clip, { fromFrame: from, toFrame: to, loop })`                 |
 | `AnimationGroup`                                                             | `AnimationGroup` interface                                                                                    |
 | `AnimationGroup.play()`                                                      | `playAnimation(group)`                                                                                        |
@@ -513,6 +552,37 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 | `scene.animationGroups`                                                      | `scene.animationGroups`                                                                                       |
 | `Animation.ANIMATIONTYPE_QUATERNION`                                         | `PATH_ROTATION = 1`                                                                                           |
 | `Animation.ANIMATIONTYPE_VECTOR3`                                            | `PATH_TRANSLATION = 0`, `PATH_SCALE = 2`                                                                      |
+
+### Compat Delegation Boundary
+
+`@babylonjs/lite-compat` may translate a Babylon.js-shaped `Animation` into a
+native property clip when every track has semantics the native property system
+can preserve exactly. The prototype supported path requires:
+
+- at least one key on every animation;
+- one shared positive frame rate;
+- finite scalar values, or fixed-size arrays for Vector2, Vector3, or Quaternion;
+- a target path whose existing leaf is writable by the native scalar or
+  `.set(...)` vector/quaternion binding;
+- one interpolation mode for the whole track (all LINEAR or all STEP);
+- cycle loop mode, a forward non-empty play range, and a finite non-negative
+  speed ratio.
+
+For that path, compat creates one native property clip/group and exposes an
+`Animatable` facade that delegates seek, pause, restart, stop, speed, and loop
+state to the native group. Babylon Lite owns frame advancement, segment
+selection, easing, interpolation, property writes, and manager ordering.
+The compiled clip is a snapshot of the keys at `beginDirectAnimation()` time;
+mutating the source `Animation` with `setKeys()` during playback is not part of
+the delegated prototype contract.
+
+Compat temporarily retains its existing CPU evaluator for explicitly unsupported
+cases: mixed per-key STEP/LINEAR segments, matrix/color/custom data shapes,
+relative/constant loop modes, differing track frame rates, unresolved or
+non-native property bindings, reverse ranges/speeds, and empty animations. The
+structural multi-target `AnimationGroup` path also remains compat-owned because
+its rest-pose-weighted mixer and mutable lifecycle do not yet match Lite's
+single-target property group and opt-in mixer semantics.
 
 ## Dependencies
 
@@ -547,6 +617,8 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 17. **Additive skeleton blend**: Verify Xbot additive pose/loop layers match Babylon.js reference
 18. **Independent skeleton clips**: Verify a clip targeting one skeleton does not upload or reset another skeleton from the same asset
 19. **Disposed animated resources**: Verify a surviving animation group can continue evaluating CPU state without uploading to a destroyed bone texture or morph-weight buffer
+20. **Property easing**: Verify scalar/vector/quaternion interpolation uses eased segment progress, STEP bypasses the callback, endpoints remain exact, and overshooting values are not clamped
+21. **Compat native delegation**: Verify a supported Babylon.js-shaped direct animation is advanced and written by a Lite property group, while an unsupported mixed-interpolation track uses the explicit compat fallback
 
 ## File Manifest
 

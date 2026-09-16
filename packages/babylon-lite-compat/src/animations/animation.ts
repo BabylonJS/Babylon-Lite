@@ -2,14 +2,24 @@
  * Babylon.js-compatible `Animation` keyframe model + `AnimationGroup`.
  *
  * `Animation` is a pure-JS keyframe container with CPU evaluation (`evaluate`),
- * the Babylon.js data-type / loop-mode constants, and `setKeys`/`getKeys`. This
- * is fully testable without a GPU. `AnimationGroup` provides the structural
- * grouping/playback-state surface; frame-accurate playback is driven through the
- * native Babylon Lite animation manager when wired to a scene (not modelled here).
+ * the Babylon.js data-type / loop-mode constants, and `setKeys`/`getKeys`. Common
+ * direct-animation tracks are compiled onto Babylon Lite property groups; the CPU
+ * evaluator remains as an explicit fallback for shapes Lite cannot yet preserve.
+ * `AnimationGroup` provides the structural grouping/playback-state surface.
  */
 
-import { goToFrame as liteGoToFrame, playAnimation, pauseAnimation, stopAnimation, setAnimationAdditive } from "babylon-lite";
-import type { AnimationGroup as LiteAnimationGroup, EngineContext } from "babylon-lite";
+import {
+    createPropertyAnimationClip,
+    createPropertyAnimationGroup,
+    goToFrame as liteGoToFrame,
+    playAnimation,
+    pauseAnimation,
+    stopAnimation,
+    setAnimationAdditive,
+} from "babylon-lite";
+import type { AnimationGroup as LiteAnimationGroup, AnimationManager, EngineContext, PropertyAnimationInterpolation, PropertyAnimationTrackOptions } from "babylon-lite";
+
+import type { EasingFunction } from "./easing.js";
 
 export interface IAnimationKey {
     frame: number;
@@ -54,6 +64,7 @@ export class Animation {
     public static readonly ANIMATIONLOOPMODE_CONSTANT = AnimationLoopModes.ANIMATIONLOOPMODE_CONSTANT;
 
     private _keys: IAnimationKey[] = [];
+    private _easingFunction: EasingFunction | null = null;
 
     public constructor(
         public name: string,
@@ -73,6 +84,14 @@ export class Animation {
 
     public getHighestFrame(): number {
         return this._keys.length > 0 ? this._keys[this._keys.length - 1]!.frame : 0;
+    }
+
+    public setEasingFunction(easingFunction: EasingFunction | null): void {
+        this._easingFunction = easingFunction;
+    }
+
+    public getEasingFunction(): EasingFunction | null {
+        return this._easingFunction;
     }
 
     /** Linearly evaluate the animated value at `frame` (clamped to the key range). */
@@ -98,8 +117,8 @@ export class Animation {
                 if (a.interpolation === AnimationKeyInterpolation.STEP) {
                     return a.value;
                 }
-                const t = (frame - a.frame) / (b.frame - a.frame);
-                return lerpValue(a.value, b.value, t);
+                const gradient = (frame - a.frame) / (b.frame - a.frame);
+                return lerpValue(a.value, b.value, this._easingFunction?.ease(gradient) ?? gradient);
             }
         }
         return keys[keys.length - 1]!.value;
@@ -202,13 +221,17 @@ function applyAnimatedValue(target: unknown, path: string, value: number | numbe
 }
 
 /**
- * Babylon.js `Animatable` — a running animation on a target, driven per-frame on
- * the CPU by evaluating each `Animation`'s keyframes and writing the result onto
- * the target's (dotted) property path.
+ * Babylon.js `Animatable` facade. Supported direct-animation tracks delegate to a
+ * native Lite property group; unsupported tracks retain the compat CPU evaluator.
  */
 export class Animatable {
     public masterFrame = 0;
-    public speedRatio: number;
+    /** @internal Lite group backing a natively-delegated property animation. */
+    public readonly _lite?: LiteAnimationGroup;
+    /** @internal Reason this animatable retained the compat CPU evaluator. */
+    public readonly _nativeFallbackReason?: string;
+
+    private _speedRatio: number;
     private _paused = false;
     private _stopped = false;
 
@@ -218,11 +241,109 @@ export class Animatable {
         private readonly _from: number,
         private readonly _to: number,
         private readonly _loop: boolean,
-        speedRatio: number
+        speedRatio: number,
+        nativeGroup?: LiteAnimationGroup,
+        nativeFallbackReason?: string
     ) {
-        this.speedRatio = speedRatio;
+        this._speedRatio = speedRatio;
+        this._lite = nativeGroup;
+        this._nativeFallbackReason = nativeFallbackReason;
         this.masterFrame = _from;
-        this._apply();
+        if (nativeGroup) {
+            liteGoToFrame(nativeGroup, _from);
+            playAnimation(nativeGroup);
+        } else {
+            this._apply();
+        }
+    }
+
+    /** @internal Return why this animation set cannot preserve its semantics on Lite, or undefined when supported. */
+    public static _getNativeFallbackReason(target: unknown, animations: readonly Animation[], from: number, to: number, speedRatio: number): string | undefined {
+        if (animations.length === 0) {
+            return "native property animation requires at least one Animation";
+        }
+        if (!Number.isFinite(from) || !Number.isFinite(to) || !(to > from)) {
+            return "native property animation requires a finite forward play range";
+        }
+        if (!Number.isFinite(speedRatio) || speedRatio < 0) {
+            return "native property animation does not yet delegate reverse or non-finite speed ratios";
+        }
+
+        const frameRate = animations[0]!.framePerSecond;
+        if (!(frameRate > 0) || !Number.isFinite(frameRate)) {
+            return "native property animation requires a finite positive frame rate";
+        }
+
+        for (const animation of animations) {
+            if (animation.framePerSecond !== frameRate) {
+                return "native property animation requires one shared frame rate";
+            }
+            if (animation.loopMode !== AnimationLoopModes.ANIMATIONLOOPMODE_CYCLE) {
+                return "native property animation currently delegates cycle loop mode only";
+            }
+            const stride = supportedStride(animation.dataType);
+            if (stride === 0) {
+                return "native property animation supports float, Vector2, Vector3, and Quaternion tracks only";
+            }
+            const keys = animation.getKeys();
+            if (keys.length === 0) {
+                return `native property animation track "${animation.targetProperty}" requires at least one key`;
+            }
+            let previousFrame = -Infinity;
+            for (const key of keys) {
+                if (!Number.isFinite(key.frame) || key.frame < 0 || key.frame <= previousFrame || !isSupportedKeyValue(key.value, stride)) {
+                    return `native property animation track "${animation.targetProperty}" has an unsupported key frame or value`;
+                }
+                previousFrame = key.frame;
+            }
+            if (!uniformInterpolation(keys)) {
+                return `native property animation track "${animation.targetProperty}" mixes STEP and LINEAR segments`;
+            }
+            if (!supportsNativeBinding(target, animation.targetProperty, stride)) {
+                return `native property animation path "${animation.targetProperty}" is not writable by the native binding`;
+            }
+        }
+        return undefined;
+    }
+
+    /** @internal Create the facade over a native Lite property group after the supported-path predicate succeeds. */
+    public static _createNative(
+        manager: AnimationManager,
+        target: unknown,
+        animations: readonly Animation[],
+        from: number,
+        to: number,
+        loop: boolean,
+        speedRatio: number
+    ): Animatable {
+        const tracks: PropertyAnimationTrackOptions[] = animations.map((animation) => {
+            const easing = animation.getEasingFunction();
+            return {
+                path: animation.targetProperty,
+                frameRate: animation.framePerSecond,
+                interpolation: trackInterpolation(animation.getKeys()),
+                quaternion: animation.dataType === AnimationTypes.ANIMATIONTYPE_QUATERNION,
+                easing: easing ? (gradient) => easing.ease(gradient) : undefined,
+                keys: animation.getKeys().map((key) => ({ frame: key.frame, value: key.value })),
+            };
+        });
+        const clip = createPropertyAnimationClip(animations[0]!.name, tracks, { frameRate: animations[0]!.framePerSecond });
+        const group = createPropertyAnimationGroup(manager, target as object, clip, { fromFrame: from, toFrame: to, loop, speedRatio });
+        return new Animatable(target, animations.slice(), from, to, loop, speedRatio, group);
+    }
+
+    public get speedRatio(): number {
+        return this._speedRatio;
+    }
+
+    public set speedRatio(value: number) {
+        if (this._lite && (!Number.isFinite(value) || value < 0)) {
+            throw new Error("Native compat property animations require a finite non-negative speedRatio");
+        }
+        this._speedRatio = value;
+        if (this._lite) {
+            this._lite.speedRatio = value;
+        }
     }
 
     /** @internal Advance the animation by `deltaMs`, called once per scene frame. */
@@ -230,8 +351,17 @@ export class Animatable {
         if (this._paused || this._stopped) {
             return;
         }
+        if (this._lite) {
+            this.masterFrame = this._lite.currentTime * (this._animations[0]?.framePerSecond ?? 60);
+            if (!this._loop && this.masterFrame >= this._to) {
+                this.masterFrame = this._to;
+                this._stopped = true;
+                pauseAnimation(this._lite);
+            }
+            return;
+        }
         const fps = this._animations[0]?.framePerSecond ?? 60;
-        this.masterFrame += (deltaMs / 1000) * fps * this.speedRatio;
+        this.masterFrame += (deltaMs / 1000) * fps * this._speedRatio;
         if (this.masterFrame > this._to) {
             if (this._loop) {
                 const span = this._to - this._from || 1;
@@ -246,21 +376,39 @@ export class Animatable {
 
     public goToFrame(frame: number): void {
         this.masterFrame = frame;
-        this._apply();
+        if (this._lite) {
+            liteGoToFrame(this._lite, frame);
+            this.masterFrame = this._lite.currentTime * (this._animations[0]?.framePerSecond ?? 60);
+            if (!this._paused && !this._stopped) {
+                playAnimation(this._lite);
+            }
+        } else {
+            this._apply();
+        }
     }
 
     public pause(): void {
         this._paused = true;
+        if (this._lite) {
+            pauseAnimation(this._lite);
+        }
     }
 
     public restart(): void {
         this._paused = false;
         this._stopped = false;
         this.masterFrame = this._from;
+        if (this._lite) {
+            liteGoToFrame(this._lite, this._from);
+            playAnimation(this._lite);
+        }
     }
 
     public stop(): void {
         this._stopped = true;
+        if (this._lite) {
+            stopAnimation(this._lite);
+        }
     }
 
     public get animationStarted(): boolean {
@@ -268,10 +416,82 @@ export class Animatable {
     }
 
     private _apply(): void {
+        if (this._lite) {
+            return;
+        }
         for (const anim of this._animations) {
             applyAnimatedValue(this._target, anim.targetProperty, anim.evaluate(this.masterFrame));
         }
     }
+}
+
+function supportedStride(dataType: number): number {
+    switch (dataType) {
+        case AnimationTypes.ANIMATIONTYPE_FLOAT:
+            return 1;
+        case AnimationTypes.ANIMATIONTYPE_VECTOR2:
+            return 2;
+        case AnimationTypes.ANIMATIONTYPE_VECTOR3:
+            return 3;
+        case AnimationTypes.ANIMATIONTYPE_QUATERNION:
+            return 4;
+        default:
+            return 0;
+    }
+}
+
+function isSupportedKeyValue(value: number | number[], stride: number): boolean {
+    if (stride === 1) {
+        return typeof value === "number" && Number.isFinite(value);
+    }
+    return Array.isArray(value) && value.length === stride && value.every(Number.isFinite);
+}
+
+function uniformInterpolation(keys: readonly IAnimationKey[]): boolean {
+    let mode: number | undefined;
+    for (let i = 0; i < keys.length - 1; i++) {
+        const keyMode = keys[i]!.interpolation === AnimationKeyInterpolation.STEP ? AnimationKeyInterpolation.STEP : AnimationKeyInterpolation.NONE;
+        mode ??= keyMode;
+        if (mode !== keyMode) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function trackInterpolation(keys: readonly IAnimationKey[]): PropertyAnimationInterpolation {
+    return keys.length > 1 && keys[0]!.interpolation === AnimationKeyInterpolation.STEP ? "step" : "linear";
+}
+
+function supportsNativeBinding(target: unknown, path: string, stride: number): boolean {
+    const parts = path.split(".");
+    if (parts.length === 0 || parts.some((part) => part.length === 0)) {
+        return false;
+    }
+    let owner: unknown = target;
+    for (let i = 0; i < parts.length - 1; i++) {
+        if ((typeof owner !== "object" && typeof owner !== "function") || owner === null) {
+            return false;
+        }
+        const record = owner as Record<string, unknown>;
+        const part = parts[i]!;
+        if (!(part in record)) {
+            return false;
+        }
+        owner = record[part];
+    }
+    if ((typeof owner !== "object" && typeof owner !== "function") || owner === null) {
+        return false;
+    }
+    const record = owner as Record<string, unknown>;
+    const property = parts[parts.length - 1]!;
+    if (!(property in record)) {
+        return false;
+    }
+    const value = record[property];
+    return stride === 1
+        ? typeof value === "number"
+        : (typeof value === "object" || typeof value === "function") && value !== null && typeof (value as { set?: unknown }).set === "function";
 }
 
 export type AnimationGroupState = "init" | "playing" | "paused" | "stopped";

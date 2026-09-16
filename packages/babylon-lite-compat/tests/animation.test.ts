@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { Animation, AnimationGroup, AnimationKeyInterpolation } from "../src/animations/animation";
+import { QuadraticEase } from "../src/animations/easing";
 
 describe("Animation", () => {
     it("exposes Babylon.js data-type and loop-mode constants", () => {
@@ -38,6 +39,22 @@ describe("Animation", () => {
             { frame: 10, value: [10, 20, 30] },
         ]);
         expect(anim.evaluate(5)).toEqual([5, 10, 15]);
+    });
+
+    it("stores and applies an animation-level easing function", () => {
+        const anim = new Animation("a", "position.x", 60);
+        const easing = new QuadraticEase();
+        anim.setEasingFunction(easing);
+        anim.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 10, value: 10 },
+        ]);
+
+        expect(anim.getEasingFunction()).toBe(easing);
+        expect(anim.evaluate(5)).toBeCloseTo(2.5);
+        anim.setEasingFunction(null);
+        expect(anim.getEasingFunction()).toBeNull();
+        expect(anim.evaluate(5)).toBeCloseTo(5);
     });
 
     it("builds a one-shot animation via CreateAndStartAnimation", () => {

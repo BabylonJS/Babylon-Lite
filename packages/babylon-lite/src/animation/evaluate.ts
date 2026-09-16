@@ -152,3 +152,91 @@ export function evaluateSampler(sampler: AnimationSampler, t: number, stride: nu
         }
     }
 }
+
+/**
+ * Evaluate a caller-authored property sampler with an optional transform of the
+ * selected segment's normalized progress. Kept separate from {@link evaluateSampler}
+ * so imported glTF samplers retain their unchanged LINEAR/STEP/CUBICSPLINE path.
+ */
+export function evaluatePropertySampler(
+    sampler: AnimationSampler,
+    t: number,
+    stride: number,
+    isQuat: boolean,
+    easing: ((gradient: number) => number) | undefined,
+    dst: Float32Array,
+    dstOffset: number
+): void {
+    const { input, output, interpolation } = sampler;
+    const keyCount = input.length;
+
+    if (keyCount === 0) {
+        return;
+    }
+    if (keyCount === 1 || t <= input[0]!) {
+        const srcOff = interpolation === INTERP_CUBICSPLINE ? stride : 0;
+        for (let c = 0; c < stride; c++) {
+            dst[dstOffset + c] = output[srcOff + c]!;
+        }
+        return;
+    }
+    if (t >= input[keyCount - 1]!) {
+        const srcOff = interpolation === INTERP_CUBICSPLINE ? (keyCount - 1) * stride * 3 + stride : (keyCount - 1) * stride;
+        for (let c = 0; c < stride; c++) {
+            dst[dstOffset + c] = output[srcOff + c]!;
+        }
+        return;
+    }
+
+    const idx = findKeyframe(input, t);
+    if (interpolation === INTERP_STEP) {
+        const srcOff = idx * stride;
+        for (let c = 0; c < stride; c++) {
+            dst[dstOffset + c] = output[srcOff + c]!;
+        }
+        return;
+    }
+
+    const t0 = input[idx]!;
+    const t1 = input[idx + 1]!;
+    const dt = t1 - t0;
+    const linearGradient = dt > 0 ? (t - t0) / dt : 0;
+    const gradient = easing ? easing(linearGradient) : linearGradient;
+
+    if (interpolation === INTERP_CUBICSPLINE) {
+        const gradient2 = gradient * gradient;
+        const gradient3 = gradient2 * gradient;
+        const h00 = 2 * gradient3 - 3 * gradient2 + 1;
+        const h10 = gradient3 - 2 * gradient2 + gradient;
+        const h01 = -2 * gradient3 + 3 * gradient2;
+        const h11 = gradient3 - gradient2;
+        const k0 = idx * stride * 3;
+        const k1 = (idx + 1) * stride * 3;
+        for (let c = 0; c < stride; c++) {
+            const p0 = output[k0 + stride + c]!;
+            const m0 = output[k0 + 2 * stride + c]! * dt;
+            const p1 = output[k1 + stride + c]!;
+            const m1 = output[k1 + c]! * dt;
+            dst[dstOffset + c] = h00 * p0 + h10 * m0 + h01 * p1 + h11 * m1;
+        }
+        if (isQuat) {
+            normalizeQuat4(dst, dstOffset);
+        }
+        return;
+    }
+
+    const s0 = idx * stride;
+    const s1 = (idx + 1) * stride;
+    if (isQuat) {
+        quatSlerp(_quat, output[s0]!, output[s0 + 1]!, output[s0 + 2]!, output[s0 + 3]!, output[s1]!, output[s1 + 1]!, output[s1 + 2]!, output[s1 + 3]!, gradient);
+        dst[dstOffset] = _quat[0]!;
+        dst[dstOffset + 1] = _quat[1]!;
+        dst[dstOffset + 2] = _quat[2]!;
+        dst[dstOffset + 3] = _quat[3]!;
+        return;
+    }
+
+    for (let c = 0; c < stride; c++) {
+        dst[dstOffset + c] = output[s0 + c]! + gradient * (output[s1 + c]! - output[s0 + c]!);
+    }
+}

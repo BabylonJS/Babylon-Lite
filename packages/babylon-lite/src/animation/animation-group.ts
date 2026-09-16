@@ -17,6 +17,7 @@ export interface AnimationPropertyRuntimeTrack {
     readonly sampler: AnimationSampler;
     readonly stride: number;
     readonly quaternion: boolean;
+    readonly easing?: (gradient: number) => number;
     readonly writer: (output: Float32Array, offset: number) => void;
     readonly mixTarget: object;
     readonly mixProperty: string;

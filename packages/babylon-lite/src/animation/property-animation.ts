@@ -5,7 +5,7 @@ import { addAnimationGroup } from "./animation-group-task.js";
 import type { AnimationManager } from "./animation-manager.js";
 import { INTERP_LINEAR, INTERP_STEP } from "./types.js";
 import type { AnimationSampler } from "./types.js";
-import { evaluateSampler } from "./evaluate.js";
+import { evaluatePropertySampler } from "./evaluate.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
 
 const DEFAULT_FRAME_RATE = 60;
@@ -30,6 +30,8 @@ export interface PropertyAnimationTrackOptions {
     readonly frameRate?: number;
     readonly interpolation?: PropertyAnimationInterpolation;
     readonly quaternion?: boolean;
+    /** Optional transform of normalized progress within each non-STEP segment. */
+    readonly easing?: (gradient: number) => number;
 }
 
 /** Options for {@link createPropertyAnimationClip}. */
@@ -43,6 +45,7 @@ export interface PropertyAnimationTrack {
     readonly sampler: AnimationSampler;
     readonly stride: number;
     readonly quaternion: boolean;
+    readonly easing?: (gradient: number) => number;
 }
 
 /** A reusable, target-independent set of compiled property tracks with a total duration. */
@@ -99,6 +102,7 @@ export function createPropertyAnimationClip(name: string, tracks: readonly Prope
             sampler,
             stride: getTrackStride(track),
             quaternion: track.quaternion === true || track.path === "rotationQuaternion" || track.path.endsWith(".rotationQuaternion"),
+            easing: track.easing,
         };
     });
     return { name, tracks: builtTracks, duration, frameRate };
@@ -125,6 +129,7 @@ export function createPropertyAnimationGroup(
             sampler: track.sampler,
             stride: track.stride,
             quaternion: track.quaternion,
+            easing: track.easing,
             writer: binding.writer,
             mixTarget: binding.mixTarget,
             mixProperty: binding.mixProperty,
@@ -178,7 +183,7 @@ function createPointerAnimationGroup(
             }
             for (let trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
                 const track = tracks[trackIndex]!;
-                evaluateSampler(track.sampler, ctrl.time, track.stride, track.quaternion, _pointerScratch, 0);
+                evaluatePropertySampler(track.sampler, ctrl.time, track.stride, track.quaternion, track.easing, _pointerScratch, 0);
                 track.writer(_pointerScratch, 0);
             }
         },

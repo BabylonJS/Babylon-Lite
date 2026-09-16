@@ -7,10 +7,35 @@ import { enablePropertyAnimationBlending } from "../../../packages/babylon-lite/
 import { enableAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-gltf-mixer";
 import { crossFadeAnimationGroups, fadeAnimationWeight } from "../../../packages/babylon-lite/src/animation/animation-weight-fade";
 import { createPropertyAnimationClip, createPropertyAnimationGroup } from "../../../packages/babylon-lite/src/animation/property-animation";
+import { evaluateSampler } from "../../../packages/babylon-lite/src/animation/evaluate";
+import { INTERP_CUBICSPLINE, INTERP_LINEAR, INTERP_STEP } from "../../../packages/babylon-lite/src/animation/types";
 import type { AnimationGroup } from "../../../packages/babylon-lite/src/animation/animation-group";
 import type { AnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
 
 describe("Property animation", () => {
+    it("leaves generic glTF sampler interpolation unchanged", () => {
+        const output = new Float32Array(1);
+        evaluateSampler({ input: new Float32Array([0, 1]), output: new Float32Array([0, 10]), interpolation: INTERP_LINEAR }, 0.25, 1, false, output, 0);
+        expect(output[0]).toBeCloseTo(2.5);
+
+        evaluateSampler({ input: new Float32Array([0, 1]), output: new Float32Array([0, 10]), interpolation: INTERP_STEP }, 0.75, 1, false, output, 0);
+        expect(output[0]).toBe(0);
+
+        evaluateSampler(
+            {
+                input: new Float32Array([0, 1]),
+                output: new Float32Array([0, 0, 0, 0, 1, 0]),
+                interpolation: INTERP_CUBICSPLINE,
+            },
+            0.5,
+            1,
+            false,
+            output,
+            0
+        );
+        expect(output[0]).toBeCloseTo(0.5);
+    });
+
     it("updates a Babylon-style position.x frame animation without a scene or engine", () => {
         const manager = createAnimationManager();
         const target = { position: { x: 2 } };
@@ -102,6 +127,117 @@ describe("Property animation", () => {
         expect(target.position.z).toBeCloseTo(4.5);
     });
 
+    it("applies per-track easing to scalar and vector segment progress", () => {
+        const manager = createAnimationManager();
+        const target = { alpha: 0, position: { x: 0, y: 0, z: 0 } };
+        const clip = createPropertyAnimationClip("eased", [
+            {
+                path: "alpha",
+                easing: (gradient) => gradient * gradient,
+                keys: [
+                    { time: 0, value: 0 },
+                    { time: 1, value: 8 },
+                ],
+            },
+            {
+                path: "position",
+                easing: (gradient) => gradient * gradient,
+                keys: [
+                    { time: 0, value: [0, 0, 0] },
+                    { time: 1, value: [4, 8, 12] },
+                ],
+            },
+        ]);
+
+        createPropertyAnimationGroup(manager, target, clip, { loop: false });
+        updateAnimationManager(manager, 500);
+
+        expect(target.alpha).toBeCloseTo(2);
+        expect(target.position).toEqual({ x: 1, y: 2, z: 3 });
+    });
+
+    it("applies eased progress to quaternion slerp", () => {
+        const manager = createAnimationManager();
+        const target = { rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 } };
+        const clip = createPropertyAnimationClip("easedRotation", [
+            {
+                path: "rotationQuaternion",
+                easing: (gradient) => gradient * gradient,
+                keys: [
+                    { time: 0, value: [0, 0, 0, 1] },
+                    { time: 1, value: [0, 0, 1, 0] },
+                ],
+            },
+        ]);
+
+        createPropertyAnimationGroup(manager, target, clip, { loop: false });
+        updateAnimationManager(manager, 500);
+
+        expect(target.rotationQuaternion.z).toBeCloseTo(Math.sin(Math.PI / 8), 6);
+        expect(target.rotationQuaternion.w).toBeCloseTo(Math.cos(Math.PI / 8), 6);
+    });
+
+    it("bypasses easing for STEP segments and exact clip endpoints", () => {
+        const manager = createAnimationManager();
+        const stepEase = vi.fn(() => 0.75);
+        const endpointEase = vi.fn(() => 0.25);
+        const target = { step: 0, endpoint: -1 };
+        const clip = createPropertyAnimationClip("easingBoundaries", [
+            {
+                path: "step",
+                interpolation: "step",
+                easing: stepEase,
+                keys: [
+                    { time: 0, value: 0 },
+                    { time: 1, value: 10 },
+                ],
+            },
+            {
+                path: "endpoint",
+                easing: endpointEase,
+                keys: [
+                    { time: 0, value: -1 },
+                    { time: 1, value: 1 },
+                ],
+            },
+        ]);
+
+        const group = createPropertyAnimationGroup(manager, target, clip, { loop: false });
+        updateAnimationManager(manager, 0);
+        expect(target).toEqual({ step: 0, endpoint: -1 });
+        expect(endpointEase).not.toHaveBeenCalled();
+
+        updateAnimationManager(manager, 500);
+        expect(target.step).toBe(0);
+        expect(stepEase).not.toHaveBeenCalled();
+        expect(endpointEase).toHaveBeenCalledWith(0.5);
+
+        updateAnimationManager(manager, 500);
+        expect(group.currentTime).toBe(1);
+        expect(target).toEqual({ step: 10, endpoint: 1 });
+        expect(stepEase).not.toHaveBeenCalled();
+        expect(endpointEase).toHaveBeenCalledTimes(1);
+    });
+
+    it("preserves overshooting easing results", () => {
+        const manager = createAnimationManager();
+        const target = { value: 0 };
+        const clip = createPropertyAnimationClip("overshoot", [
+            {
+                path: "value",
+                easing: () => 1.25,
+                keys: [
+                    { time: 0, value: 0 },
+                    { time: 1, value: 10 },
+                ],
+            },
+        ]);
+
+        createPropertyAnimationGroup(manager, target, clip, { loop: false });
+        updateAnimationManager(manager, 500);
+        expect(target.value).toBeCloseTo(12.5);
+    });
+
     it("supports STEP interpolation with second-based keyframes", () => {
         const manager = createAnimationManager();
         const target = { position: { x: -1 } };
@@ -180,6 +316,27 @@ describe("Property animation", () => {
 
         expect(run("positive-first")).toBeCloseTo(-5);
         expect(run("negative-first")).toBeCloseTo(-5);
+    });
+
+    it("samples easing before applying a property-animation weight", () => {
+        const manager = createAnimationManager();
+        const target = { value: 0 };
+        const clip = createPropertyAnimationClip("weightedEase", [
+            {
+                path: "value",
+                easing: (gradient) => gradient * gradient,
+                keys: [
+                    { time: 0, value: 0 },
+                    { time: 1, value: 10 },
+                ],
+            },
+        ]);
+        const group = createPropertyAnimationGroup(manager, target, clip, { loop: false });
+        enablePropertyAnimationBlending(manager);
+        setAnimationWeight(group, 0.5);
+
+        updateAnimationManager(manager, 500);
+        expect(target.value).toBeCloseTo(1.25);
     });
 
     it("rejects invalid animation weights", () => {

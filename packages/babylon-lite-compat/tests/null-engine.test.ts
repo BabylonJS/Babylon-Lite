@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { NullEngine, WebGPUEngine, AbstractEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
 import { Animation } from "../src/animations/animation";
+import { QuadraticEase } from "../src/animations/easing";
 import { Color3, Color4 } from "../src/math/color";
 import { LiteCompatError } from "../src/error";
 import { MeshBuilder } from "../src/meshes/meshes";
@@ -105,7 +106,7 @@ describe("NullEngine (headless)", () => {
         expect(scene._lite.clearColor).toEqual({ r: 0.4, g: 0.5, b: 0.6, a: 0.7 });
     });
 
-    it("evaluates a direct animation onto a plain target each tick", () => {
+    it("delegates a supported direct animation to Lite for timing, easing, sampling, and writes", () => {
         const engine = new NullEngine();
         const scene = new Scene(engine);
         const target = { position: { x: -2 } };
@@ -116,18 +117,44 @@ describe("NullEngine (headless)", () => {
             { frame: 10, value: 2 },
             { frame: 20, value: -2 },
         ]);
+        slide.setEasingFunction(new QuadraticEase());
+        const compatEvaluate = vi.spyOn(slide, "evaluate");
         const animatable = scene.beginDirectAnimation(target, [slide], 0, 20, true);
+        expect(animatable._lite).toBeDefined();
+        expect(animatable._nativeFallbackReason).toBeUndefined();
 
         // Seeking applies the evaluated value synchronously (no render loop needed).
         animatable.goToFrame(5);
-        expect(target.position.x).toBeCloseTo(0, 6);
+        expect(target.position.x).toBeCloseTo(-1, 6);
         animatable.goToFrame(10);
         expect(target.position.x).toBeCloseTo(2, 6);
 
         // A manual tick advances the running animation on the CPU.
         animatable.restart();
         target.position.x = -2;
-        scene._tick(500); // 0.5s @ 10fps = 5 frames → midway to +2
-        expect(target.position.x).toBeCloseTo(0, 6);
+        scene._tick(500); // 0.5s @ 10fps = 5 frames → quadratic ease-in to -1
+        expect(target.position.x).toBeCloseTo(-1, 6);
+        expect(compatEvaluate).not.toHaveBeenCalled();
+    });
+
+    it("uses the explicit compat fallback for mixed per-key interpolation", () => {
+        const engine = new NullEngine();
+        const scene = new Scene(engine);
+        const target = { position: { x: -2 } };
+        const slide = new Animation("mixed", "position.x", 10, Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_CYCLE);
+        slide.setKeys([
+            { frame: 0, value: -2, interpolation: 1 },
+            { frame: 10, value: 2 },
+            { frame: 20, value: -2 },
+        ]);
+        const compatEvaluate = vi.spyOn(slide, "evaluate");
+
+        const animatable = scene.beginAnimation({ animations: [slide], ...target }, 0, 20, true);
+        expect(animatable._lite).toBeUndefined();
+        expect(animatable._nativeFallbackReason).toMatch(/mixes STEP and LINEAR/);
+
+        scene._tick(500);
+        expect(compatEvaluate).toHaveBeenCalled();
+        expect(target.position.x).toBe(-2);
     });
 });

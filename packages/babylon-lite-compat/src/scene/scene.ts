@@ -192,6 +192,8 @@ export class Scene extends AbstractScene {
     private _materialPluginsRequested = false;
     private readonly _pendingMaterialPluginReconciliations = new Set<LiteMaterial>();
     private readonly _runningAnimatables: Animatable[] = [];
+    /** @internal Lite manager that owns supported compat property animations. */
+    private _propertyAnimationManager: AnimationManager | null = null;
     private readonly _animationGroupCache = new WeakMap<object, AnimationGroup>();
     /** @internal Structural `AnimationGroup`s stepped + weight-blended each frame. */
     private readonly _structuralGroups: AnimationGroup[] = [];
@@ -292,6 +294,9 @@ export class Scene extends AbstractScene {
         this.onBeforeAnimationsObservable.notifyObservers(this);
         if (this._blendManager) {
             updateAnimationManager(this._blendManager, deltaMs);
+        }
+        if (this._propertyAnimationManager) {
+            updateAnimationManager(this._propertyAnimationManager, deltaMs);
         }
         for (const a of this._runningAnimatables) {
             a._tick(deltaMs);
@@ -1124,7 +1129,12 @@ export class Scene extends AbstractScene {
      * (dotted) property path. Returns an `Animatable` with `goToFrame`/`pause`/`stop`.
      */
     public beginDirectAnimation(target: unknown, animations: Animation[], from: number, to: number, loop = false, speedRatio = 1): Animatable {
-        const animatable = new Animatable(target, animations, from, to, loop, speedRatio);
+        const fallbackReason = Animatable._getNativeFallbackReason(target, animations, from, to, speedRatio);
+        // Keep the legacy evaluator only for shapes whose semantics the native
+        // property clip cannot preserve yet; supported tracks never tick twice.
+        const animatable = fallbackReason
+            ? new Animatable(target, animations, from, to, loop, speedRatio, undefined, fallbackReason)
+            : Animatable._createNative((this._propertyAnimationManager ??= createAnimationManager()), target, animations, from, to, loop, speedRatio);
         this._runningAnimatables.push(animatable);
         return animatable;
     }
