@@ -281,3 +281,5 @@ The module has no import-time GPU work or mutable global state.
 | `tests/lite/unit/ktx2-texture-array.test.ts` | Native KTX2 array behavior and failure ownership |
 | `tests/lite/unit/engine-device-features.test.ts` | Initial optional-feature selection |
 | `tests/lite/unit/device-lost-recovery.test.ts` | Recovery feature preservation |
+| `tests/lite/build/public-api-types.test.ts` | Published declaration shape and non-empty source invariants |
+| `docs/lite/architecture/54-texture-array.md` | Regenerable module contract |

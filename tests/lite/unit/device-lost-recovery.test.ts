@@ -38,18 +38,40 @@ function engineWith(...contexts: RenderingContext[]): EngineContext {
 }
 
 describe("device-lost recovery context dispatch", () => {
-    it("captures texture-compression-unaligned for replacement-device negotiation", () => {
-        const engine = {
+    it("captures texture-compression-unaligned and requests it from the replacement device", async () => {
+        const engine = engineWith();
+        Object.assign(engine, {
             _device: {
                 features: new Set<GPUFeatureName>(["texture-compression-unaligned" as GPUFeatureName]),
                 lost: new Promise<GPUDeviceLostInfo>(() => undefined),
             },
-        } as unknown as EngineContext;
+            _animFrameId: 0,
+            _renderFn: null,
+            _retirements: null,
+        });
+        const recoveryRegistration = { _kind: "scene", _recover: vi.fn() };
+        const recovery = _enableDeviceLostRecovery(engine, recoveryRegistration);
+        const requestDevice = vi.fn(async () => {
+            throw new Error("replacement request stopped");
+        });
+        vi.stubGlobal("navigator", {
+            gpu: {
+                requestAdapter: vi.fn(async () => ({
+                    features: new Set<GPUFeatureName>(["texture-compression-unaligned" as GPUFeatureName]),
+                    requestDevice,
+                })),
+            },
+        });
 
-        const registration = _enableDeviceLostRecovery(engine, { _kind: "scene", _recover: vi.fn() });
+        await expect(runDeviceLostRecovery(engine, engine._deviceLostRecovery!, [recoveryRegistration])).rejects.toThrow("replacement request stopped");
 
         expect(engine._deviceLostRecovery?._requiredFeatures).toEqual(["texture-compression-unaligned"]);
-        registration.disable();
+        expect(requestDevice).toHaveBeenCalledWith({
+            requiredFeatures: ["texture-compression-unaligned"],
+            requiredLimits: {},
+        });
+        vi.unstubAllGlobals();
+        recovery.disable();
     });
 
     it("keeps a context recovery strategy enabled until every registration is disabled", () => {
