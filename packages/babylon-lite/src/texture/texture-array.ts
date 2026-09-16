@@ -511,9 +511,14 @@ function createKtx2ArrayTexture(engine: EngineContext, plan: Ktx2ArrayUploadPlan
     }
 }
 
-function uploadPreparedKtx2Array(engine: EngineContext, plan: Ktx2ArrayUploadPlan): Texture2DArray {
-    const tex = createKtx2ArrayTexture(engine, plan);
+async function uploadPreparedKtx2Array(engine: EngineContext, plan: Ktx2ArrayUploadPlan): Promise<Texture2DArray> {
+    const device = engine._device;
+    device.pushErrorScope("validation");
+    device.pushErrorScope("out-of-memory");
+    let tex: Texture2DArray | undefined;
+    let operationError: unknown;
     try {
+        tex = createKtx2ArrayTexture(engine, plan);
         for (let level = 0; level < plan.levels.length; level++) {
             const levelWidth = plan.levels[level]![0]!.width;
             const levelHeight = plan.levels[level]![0]!.height;
@@ -539,6 +544,35 @@ function uploadPreparedKtx2Array(engine: EngineContext, plan: Ktx2ArrayUploadPla
                 );
             }
         }
+    } catch (error) {
+        operationError = error;
+    }
+
+    let outOfMemoryError: GPUError | null = null;
+    let validationError: GPUError | null = null;
+    let scopeError: unknown;
+    try {
+        [outOfMemoryError, validationError] = await Promise.all([device.popErrorScope(), device.popErrorScope()]);
+    } catch (error) {
+        scopeError = error;
+    }
+
+    const gpuError = validationError ?? outOfMemoryError;
+    if (operationError || scopeError || gpuError || !tex) {
+        tex?.texture.destroy();
+        if (operationError) {
+            throw operationError;
+        }
+        if (scopeError) {
+            throw scopeError;
+        }
+        if (gpuError) {
+            throw new Error(`KTX2: GPU texture-array upload failed: ${gpuError.message}`, { cause: gpuError });
+        }
+        throw new Error("KTX2: texture-array upload did not produce GPU resources");
+    }
+
+    try {
         acquireTexture(tex);
         return tex;
     } catch (error) {
@@ -547,7 +581,7 @@ function uploadPreparedKtx2Array(engine: EngineContext, plan: Ktx2ArrayUploadPla
     }
 }
 
-function uploadDecodedKtx2Array(engine: EngineContext, decoded: Ktx2DecodedData, sRGB: boolean): Texture2DArray {
+function uploadDecodedKtx2Array(engine: EngineContext, decoded: Ktx2DecodedData, sRGB: boolean): Promise<Texture2DArray> {
     return uploadPreparedKtx2Array(engine, preflightKtx2ArrayUpload(engine, decoded, sRGB));
 }
 

@@ -42,4 +42,6 @@ decode starts. Decoded dimensions, device-format support, compressed block align
 or uncompressed mip payload size are preflighted before GPU allocation. The logical dimensions come from the
 base mip because a decoder may report padded container dimensions for compressed output. Device 2D-dimension
 and array-layer limits plus the legal mip-count bound are checked before `createTexture`. A later view, sampler,
-or upload failure destroys the partially created texture before the error is rethrown.
+or upload failure destroys the partially created texture before the error is rethrown. Validation and
+out-of-memory error scopes are awaited before ownership is acquired, so asynchronously reported WebGPU
+failures also reject and destroy the invalid texture.

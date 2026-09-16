@@ -20,6 +20,8 @@ interface Captured {
     viewDesc?: GPUTextureViewDescriptor;
     writes: WriteCall[];
     destroys?: number;
+    errorScopes?: GPUErrorFilter[];
+    gpuErrors?: (GPUError | null)[];
 }
 
 function makeEngine(cap: Captured, features: string[] = [], failWrite = false, limits: { maxTextureDimension2D?: number; maxTextureArrayLayers?: number } = {}): EngineContext {
@@ -40,6 +42,8 @@ function makeEngine(cap: Captured, features: string[] = [], failWrite = false, l
             } as unknown as GPUTexture;
         },
         createSampler: () => ({ _kind: "sampler" }) as unknown as GPUSampler,
+        pushErrorScope: (filter: GPUErrorFilter) => (cap.errorScopes ??= []).push(filter),
+        popErrorScope: async () => cap.gpuErrors?.shift() ?? null,
         queue: {
             writeTexture: (dst: GPUTexelCopyTextureInfo, data: ArrayBufferView, layout: GPUTexelCopyBufferLayout, size: GPUExtent3DStrict) => {
                 if (failWrite) {
@@ -260,6 +264,20 @@ describe("uploadKtx2Texture2DArray", () => {
         const cap: Captured = { writes: [] };
 
         await expect(uploadKtx2Texture2DArray(makeEngine(cap, [], true), new ArrayBuffer(8))).rejects.toThrow(/write failed/);
+        expect(cap.destroys).toBe(1);
+    });
+
+    it.each([
+        ["validation", [null, { message: "invalid upload" } as GPUError], /GPU texture-array upload failed: invalid upload/],
+        ["out-of-memory", [{ message: "allocation exhausted" } as GPUError, null], /GPU texture-array upload failed: allocation exhausted/],
+    ] as const)("rejects and destroys the GPU texture after an asynchronous %s error", async (_kind, gpuErrors, message) => {
+        decodeResult = fakeDecoded({ width: 2, layers: 2, levels: 1, format: GL_RGBA8 });
+        const cap: Captured = { writes: [], gpuErrors: [...gpuErrors] };
+
+        await expect(uploadKtx2Texture2DArray(makeEngine(cap), new ArrayBuffer(8))).rejects.toThrow(message);
+
+        expect(cap.errorScopes).toEqual(["validation", "out-of-memory"]);
+        expect(cap.gpuErrors).toEqual([]);
         expect(cap.destroys).toBe(1);
     });
 
