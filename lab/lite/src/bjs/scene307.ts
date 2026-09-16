@@ -84,7 +84,6 @@ function readCaptureAfterFrames(): number | null {
     // dynamic cube2 with offset parent
     const parent2 = new TransformNode("parent2", scene);
     parent2.position.set(OFFSET - 4, 3, OFFSET);
-
     parent2.rotationQuaternion = Quaternion.FromEulerAngles(0, (20 * Math.PI) / 180, 0);
     const cube2 = MeshBuilder.CreateBox("cube2", undefined, scene);
     cube2.material = cubeMat;
@@ -112,7 +111,7 @@ function readCaptureAfterFrames(): number | null {
 
     // dynamic cube4 with offset parents and pre-step
     const parent4a = new TransformNode("parent4a", scene);
-    const parent4b = new TransformNode("parent4", scene);
+    const parent4b = new TransformNode("parent4b", scene);
     parent4b.position.set(OFFSET + 2, 3, OFFSET);
     parent4b.parent = parent4a;
     const cube4 = MeshBuilder.CreateBox("cube4", undefined, scene);
@@ -125,7 +124,7 @@ function readCaptureAfterFrames(): number | null {
     });
     agg4.body.disablePreStep = false;
 
-    // dynamic cube4 with offset parents and pre-step
+    // animated cube5 with offset parents
     const parent5a = new TransformNode("parent5a", scene);
     const parent5b = new TransformNode("parent5b", scene);
     parent5b.position.set(OFFSET + 4, 2, OFFSET);
@@ -141,6 +140,19 @@ function readCaptureAfterFrames(): number | null {
     agg5.body.disablePreStep = true;
     agg5.body.setMotionType(PhysicsMotionType.ANIMATED);
     agg5.body.setPrestepType(PhysicsPrestepType.ACTION);
+
+    // dynamic teleported cube6 with offset parent
+    const parent6 = new TransformNode("parent6", scene);
+    parent6.position.set(OFFSET + 6, 3, OFFSET);
+    parent6.rotationQuaternion = Quaternion.FromEulerAngles(0, (40 * Math.PI) / 180, 0);
+    const cube6 = MeshBuilder.CreateBox("cube6", undefined, scene);
+    cube6.material = cubeMat;
+    cube6.parent = parent6;
+    const agg6 = new PhysicsAggregate(cube6, PhysicsShapeType.BOX, {
+        mass: 1,
+        friction: 0.5,
+        restitution: 0.1,
+    });
 
     // physics debug viewer
     const physicsViewer = new PhysicsViewer();
@@ -180,6 +192,9 @@ function readCaptureAfterFrames(): number | null {
             parent4b.rotationQuaternion = Quaternion.FromEulerAngles(0, (simulatedFrames * Math.PI) / 180, 0);
 
             parent5a.position.y = Math.sin((simulatedFrames * Math.PI) / 180);
+
+            // teleport cube6
+            agg6.body.setTargetTransform(new Vector3(OFFSET + 6, 3 + 0.2 * Math.sin((simulatedFrames * Math.PI) / 180), OFFSET), Quaternion.Identity());
         }
     });
     scene.onAfterRenderObservable.add(() => {

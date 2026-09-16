@@ -27,6 +27,7 @@ import {
     setPhysicsBodyMotionType,
     setPhysicsBodyPreStep,
     setPhysicsBodyPrestepType,
+    setPhysicsBodyTransform,
     showPhysicsBody,
     startEngine,
     stopEngine,
@@ -121,7 +122,7 @@ async function main(): Promise<void> {
     root.scaling.x = -1;
     addToScene(scene, root);
     const cube3 = createBox(engine, 1);
-    cube3.position.set(OFFSET - 2, 3, OFFSET);
+    cube3.position.set(2 - OFFSET, 3, OFFSET);
     const rotQ2 = eulerXYZToQuatTuple(0, (40 * Math.PI) / 180, 0);
     cube3.rotationQuaternion.set(rotQ2[0], rotQ2[1], rotQ2[2], rotQ2[3]);
     cube3.material = cubeMat;
@@ -145,6 +146,7 @@ async function main(): Promise<void> {
     const agg4 = createPhysicsAggregate(world, cube4, PhysicsShapeType.BOX, { mass: 1, friction: 0.5, restitution: 0.1 });
     setPhysicsBodyPreStep(agg4.body, true);
 
+    // animated cube5 with offset parents
     const parent5a = createTransformNode("parent5a");
     addToScene(scene, parent5a);
     const parent5b = createTransformNode("parent5b", OFFSET + 4, 2, OFFSET);
@@ -160,6 +162,18 @@ async function main(): Promise<void> {
     setPhysicsBodyPreStep(agg5.body, false);
     setPhysicsBodyPrestepType(agg5.body, PhysicsPrestepType.ACTION);
     setPhysicsBodyMotionType(world, agg5.body, PhysicsMotionType.ANIMATED);
+
+    // dynamic teleported cube6 with offset parent
+    const parent6 = createTransformNode("parent6", OFFSET + 6, 3, OFFSET);
+    const rotQ6 = eulerXYZToQuatTuple(0, (40 * Math.PI) / 180, 0);
+    parent6.rotationQuaternion.set(rotQ6[0], rotQ6[1], rotQ6[2], rotQ6[3]);
+    addToScene(scene, parent6);
+    const cube6 = createBox(engine, 1);
+    cube6.material = cubeMat;
+    cube6.parent = parent6;
+    parent6.children.push(cube6);
+    addToScene(scene, cube6);
+    const agg6 = createPhysicsAggregate(world, cube6, PhysicsShapeType.BOX, { mass: 0, friction: 0.5, restitution: 0.1 });
 
     // physics debug viewer
     const physViewer = createPhysicsViewer(scene, world, { color: [1, 1, 1, 1] });
@@ -188,6 +202,9 @@ async function main(): Promise<void> {
             parent4b.rotationQuaternion.set(rotQ4[0], rotQ4[1], rotQ4[2], rotQ4[3]);
 
             parent5a.position.y = Math.sin((simulatedFrames * Math.PI) / 180);
+
+            // teleport cube6
+            setPhysicsBodyTransform(world, agg6.body, { x: OFFSET + 6, y: 3 + 0.2 * Math.sin((simulatedFrames * Math.PI) / 180), z: OFFSET }, { x: 0, y: 0, z: 0, w: 1 });
         }
     });
 
