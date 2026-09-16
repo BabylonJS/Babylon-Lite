@@ -207,7 +207,16 @@ describe("GeometryRendererTask", () => {
             _width: 0,
             _height: 0,
         } as unknown as import("../../../packages/babylon-lite/src/engine/render-target").RenderTarget;
-        const task = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }], samples: 1, targetTexture: target }, engine, scene);
+        const task = createGeometryRendererTask(
+            {
+                textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }],
+                samples: 1,
+                size: { width: 32, height: 24 },
+                targetTexture: target,
+            },
+            engine,
+            scene
+        );
         const internal = task as unknown as {
             record(): void;
             _mrt: { _depthTexture: GPUTexture | null; _depthView: GPUTextureView | null };
