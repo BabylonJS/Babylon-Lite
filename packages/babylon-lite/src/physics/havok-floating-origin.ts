@@ -129,11 +129,6 @@ function _step(world: PhysicsWorld, dt: number): void {
     const bodies = world._bodies;
     const regions = world._fo!.regions;
 
-    // Re-region bodies that drifted out of their region BEFORE stepping.
-    for (let i = 0; i < bodies.length; i++) {
-        _reRegionBody(world, bodies[i]!);
-    }
-
     // Pre-step: sync moved nodes into Havok. A body syncs only when its prestep type is not
     // DISABLED and it is either ANIMATED (kinematic) or explicitly pre-stepped. TELEPORT snaps the
     // body to the node; ACTION sets a velocity toward it (so resting bodies are dragged via friction).
@@ -146,6 +141,11 @@ function _step(world: PhysicsWorld, dt: number): void {
                 _syncNodeToBody(hknp, b);
             }
         }
+    }
+
+    // Re-region bodies that drifted out of their region BEFORE stepping.
+    for (let i = 0; i < bodies.length; i++) {
+        _reRegionBody(world, bodies[i]!);
     }
 
     // Step every region world.
