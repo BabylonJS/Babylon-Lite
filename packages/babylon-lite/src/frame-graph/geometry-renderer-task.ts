@@ -887,7 +887,7 @@ function createDepthWrapperRenderTarget(
     mrt: RenderTargetMrt,
     sampleCount: number,
     depthClearValue: number | undefined,
-    depthCompare: GPUCompareFunction | undefined,
+    depthCompare: GPUCompareFunction | undefined
 ): RenderTarget {
     const baseDesc = mrt._descriptor;
     const wrapperDesc: RenderTargetDescriptor = {

@@ -254,8 +254,7 @@ function internalTargetKey(source: RenderTarget): string {
     // Surface-backed sources key by stable surface identity rather than current dimensions because
     // the internal target shares their live descriptor. Scaled sources add the scale so retargeting
     // the same surface at another resolution recreates the internal target.
-    const sizeKey =
-        "canvas" in sz ? `surface:${sz._uniqueId}` : "surface" in sz ? `surface:${sz.surface._uniqueId}@${sz.scale}` : `${sz.width}x${sz.height}`;
+    const sizeKey = "canvas" in sz ? `surface:${sz._uniqueId}` : "surface" in sz ? `surface:${sz.surface._uniqueId}@${sz.scale}` : `${sz.width}x${sz.height}`;
     return `${desc.format ?? "-"}|${desc.samples ?? 1}|${sizeKey}`;
 }
 

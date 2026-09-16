@@ -13,6 +13,16 @@ import { _replaceTextureBacking, _shareTextureBacking } from "./texture-backing.
 /** Eagerly allocate a surface-sized render target whose sampled facades follow resize replacements. */
 export function createSurfaceRenderTargetTexture(
     engine: EngineContext,
+    descriptor: RenderTargetDescriptor & { size: SurfaceContext },
+    sampleDepth?: RenderTargetDepthSampler
+): RenderTargetTextureResult;
+export function createSurfaceRenderTargetTexture(
+    engine: EngineContext,
+    descriptor: RenderTargetDescriptor & { size: RenderTargetSurfaceSize },
+    sampleDepth?: RenderTargetDepthSampler
+): RenderTargetTextureResult;
+export function createSurfaceRenderTargetTexture(
+    engine: EngineContext,
     descriptor: RenderTargetDescriptor & { size: SurfaceContext | RenderTargetSurfaceSize },
     sampleDepth?: RenderTargetDepthSampler
 ): RenderTargetTextureResult {
