@@ -38,6 +38,37 @@ function makeEngine(): EngineContext {
 }
 
 describe("createSurfaceRenderTargetTexture", () => {
+    it("tracks scaled live surface dimensions with floor rounding and a one-pixel minimum", () => {
+        const engine = makeEngine();
+        const result = createSurfaceRenderTargetTexture(engine, {
+            format: "rgba8unorm",
+            samples: 1,
+            size: { surface: engine, scale: 0.5 },
+        });
+        expect(result.texture.width).toBe(32);
+        expect(result.texture.height).toBe(16);
+        const resized = vi.fn();
+        onRenderTargetTextureResize(result, resized);
+
+        engine.canvas.width = 65;
+        engine.canvas.height = 3;
+        buildRenderTarget(result.rt, engine);
+
+        expect(result.texture.width).toBe(32);
+        expect(result.texture.height).toBe(1);
+        expect(resized).toHaveBeenCalledOnce();
+        disposeGpuResourceRetirements(engine);
+        disposeRenderTargetTexture(result);
+    });
+
+    it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])("rejects invalid surface scale %s before allocating", (scale) => {
+        const engine = makeEngine();
+        expect(() => createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: { surface: engine, scale } })).toThrow(
+            /scale must be a positive finite number/
+        );
+        expect(engine._device.createTexture).not.toHaveBeenCalled();
+    });
+
     it("rejects depth-only targets without the explicit helper before allocating", () => {
         const engine = makeEngine();
         expect(() => createSurfaceRenderTargetTexture(engine, { dFormat: "depth32float", samples: 1, size: engine })).toThrow(/Depth-only.*withSampledDepthTexture/);

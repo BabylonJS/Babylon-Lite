@@ -220,7 +220,12 @@ export interface RenderTargetDescriptor {
     _depthClearValue?: number;
     _depthCompare?: GPUCompareFunction;
     samples: number;
-    size: SurfaceContext | { width: number; height: number };
+    size: SurfaceContext | RenderTargetSurfaceSize | { width: number; height: number };
+}
+
+export interface RenderTargetSurfaceSize {
+    readonly surface: SurfaceContext;
+    readonly scale: number;
 }
 ```
 
@@ -234,7 +239,15 @@ Render targets are pure-state descriptors plus owned GPU texture handles. `build
 | `_depthClearValue` | Internal clear depth; reverse-Z targets default to `0`, while standard-Z shadow targets use `1`.                                                                  |
 | `_depthCompare`    | Internal pipeline depth compare; defaults to reverse-Z `"greater-equal"` when omitted by pipeline builders.                                                       |
 | `samples`          | Attachment sample count (`1` or `4`).                                                                                                                             |
-| `size`             | A `SurfaceContext` for live surface dimensions, or fixed `{ width, height }` device pixels. Passing `EngineContext` is valid because it extends `SurfaceContext`. |
+| `size`             | A `SurfaceContext` for full live dimensions, `{ surface, scale }` for scaled live dimensions, or fixed `{ width, height }` device pixels. Passing `EngineContext` is valid because it extends `SurfaceContext`. |
+
+A scaled surface size applies a positive finite `scale` to each live canvas dimension, floors the
+result, and clamps each axis to at least one pixel. The scale is fixed by the descriptor while canvas
+dimensions remain live:
+
+```typescript
+const halfResolution = { surface: scene.surface, scale: 0.5 };
+```
 
 The surface owns `scRT`, an eager single-sample color-only wrapper around the current swapchain
 texture. A single-sample default `RenderTask` writes directly to `scRT` and owns a separate depth
@@ -276,7 +289,7 @@ export function withSampledDepthTexture(engine: EngineContext, target: RenderTar
 export function createRenderTargetTexture(engine: EngineContext, descriptor: RenderTargetDescriptor, sampleDepth?: RenderTargetDepthSampler): RenderTargetTextureResult;
 export function createSurfaceRenderTargetTexture(
     engine: EngineContext,
-    descriptor: RenderTargetDescriptor & { size: SurfaceContext },
+    descriptor: RenderTargetDescriptor & { size: SurfaceContext | RenderTargetSurfaceSize },
     sampleDepth?: RenderTargetDepthSampler
 ): RenderTargetTextureResult;
 export function disposeRenderTargetTexture(result: RenderTargetTextureResult): void;
@@ -287,6 +300,11 @@ Use this when a pass output must be wired into a material before the frame graph
 
 ```typescript
 const output = createSurfaceRenderTargetTexture(engine, { format: engine.format, dFormat: "depth32float", samples: 1, size: engine }, withSampledDepthTexture);
+const halfDepth = createSurfaceRenderTargetTexture(
+    engine,
+    { dFormat: "depth32float", samples: 1, size: { surface: engine, scale: 0.5 } },
+    withSampledDepthTexture
+);
 ```
 
 **Breaking migration:** depth-only `createRenderTargetTexture(engine, descriptor)` calls that previously received sampled depth as the primary `texture` must now pass `withSampledDepthTexture` as the third argument. The same requirement applies to `createSurfaceRenderTargetTexture`. Missing helpers are rejected before attachment allocation. Color targets, including color targets with a depth-test attachment, do not retain the depth helper or sampled-depth facade unless explicitly requested. Requesting sampled depth without a depth attachment throws and releases partially constructed attachments.
@@ -325,9 +343,12 @@ require the separate `createSurfaceRenderTargetTexture` import; passing one to t
 an explicit error, not a silently frozen target.
 
 The surface factory lives in `texture/rtt-surface.ts`. Its target reallocates during a frame-graph
-rebuild when dimensions or owning `GPUDevice` change, updates shared facades, and retires the old
-allocation. Register `onRenderTargetTextureResize(result, callback)` when consumers cache bind groups;
-the callback runs after facade replacement so callers can rebuild before the resized frame draws.
+rebuild when resolved dimensions or the owning `GPUDevice` change, updates shared facades, and
+retires the old allocation. Register `onRenderTargetTextureResize(result, callback)` when consumers
+cache bind groups; the callback runs after facade replacement so callers can rebuild before the
+resized frame draws. Shader-material consumers can call `setShaderTexture` again from that callback:
+the setter detects changed views and samplers behind a stable facade without rebuilding on ordinary
+repeated sets.
 
 Resize delivery is synchronous and retryable. Each subscription has an independent pending flag:
 

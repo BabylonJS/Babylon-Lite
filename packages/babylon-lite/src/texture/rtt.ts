@@ -10,7 +10,7 @@ import { getBilinearSampler } from "../resource/samplers.js";
 import { acquireGPUTexture } from "../resource/gpu-texture-acquire.js";
 import { releaseGPUTexture } from "../resource/gpu-texture-release.js";
 import type { RenderTarget, RenderTargetDescriptor } from "../engine/render-target.js";
-import { createRenderTarget, buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
+import { _getRenderTargetSurface, createRenderTarget, buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import type { Texture2D } from "./texture-2d.js";
 
 /** Eager render-target allocation and sampled attachment facades. */
@@ -89,9 +89,9 @@ export function _createRenderTargetTexture(engine: EngineContext, descriptor: Re
 
 /** Eagerly allocate a fixed-size render target and expose sampled attachment facades. */
 export function createRenderTargetTexture(engine: EngineContext, descriptor: RenderTargetDescriptor, sampleDepth?: RenderTargetDepthSampler): RenderTargetTextureResult {
-    if ("canvas" in descriptor.size) {
+    if (_getRenderTargetSurface(descriptor.size)) {
         throw new Error(
-            "createRenderTargetTexture: descriptor.size must be fixed { width, height } pixels, not a SurfaceContext; use createSurfaceRenderTargetTexture for surface-resizing targets."
+            "createRenderTargetTexture: descriptor.size must be fixed { width, height } pixels, not a surface-backed size; use createSurfaceRenderTargetTexture for surface-resizing targets."
         );
     }
     return _createRenderTargetTexture(engine, descriptor, sampleDepth);

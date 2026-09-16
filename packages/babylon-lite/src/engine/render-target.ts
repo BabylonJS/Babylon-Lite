@@ -36,6 +36,14 @@ export interface RenderTargetSignature {
 /** Description of a render target — what to create, not the GPU objects themselves. */
 export const REVERSE_DEPTH_COMPARE = "greater-equal" as GPUCompareFunction;
 
+/** Surface-relative render-target dimensions. The scale is applied to the live
+ *  surface backing size on every build, floored per axis, and clamped to at
+ *  least one pixel. */
+export interface RenderTargetSurfaceSize {
+    readonly surface: SurfaceContext;
+    readonly scale: number;
+}
+
 /** Describes a render target — what attachments to create, not the GPU objects
  *  themselves. GPU textures are allocated later by `buildRenderTarget`. */
 export interface RenderTargetDescriptor {
@@ -51,12 +59,10 @@ export interface RenderTargetDescriptor {
     _depthCompare?: GPUCompareFunction;
     /** MSAA sample count: `1` = single-sample (no multisampling), `4` = 4x MSAA. */
     samples: number;
-    /** A `SurfaceContext` to size to that surface's swapchain (re-resolved each
-     *  `buildRenderTarget`), or explicit `{ width, height }` in device pixels. Pass a
-     *  surface for canvas-sized RTs; the RT then tracks that specific surface in
-     *  multi-surface setups. In the common single-canvas case, pass the engine directly
-     *  (since `EngineContext extends SurfaceContext`). */
-    size: SurfaceContext | { width: number; height: number };
+    /** A `SurfaceContext` for full surface dimensions, `{ surface, scale }` for
+     *  scaled live dimensions, or explicit `{ width, height }` device pixels.
+     *  Surface-backed sizes are re-resolved on every `buildRenderTarget`. */
+    size: SurfaceContext | RenderTargetSurfaceSize | { width: number; height: number };
 }
 
 /** Allocated GPU state for a render target. */
@@ -118,7 +124,7 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void
     disposeRenderTarget(rt);
 
     const desc = rt._descriptor;
-    const { width, height } = resolveSize(desc);
+    const { width, height } = _resolveRenderTargetSize(desc);
     rt._width = width;
     rt._height = height;
 
@@ -171,11 +177,29 @@ export function disposeRenderTarget(rt: RenderTarget | null | undefined): void {
     }
 }
 
-function resolveSize(desc: RenderTargetDescriptor): { width: number; height: number } {
+/** @internal Return the live surface behind a surface-sized descriptor, if any. */
+export function _getRenderTargetSurface(size: RenderTargetDescriptor["size"]): SurfaceContext | null {
+    if ("canvas" in size) {
+        return size;
+    }
+    return "surface" in size ? size.surface : null;
+}
+
+/** @internal Resolve the descriptor's current allocation dimensions. */
+export function _resolveRenderTargetSize(desc: RenderTargetDescriptor): { width: number; height: number } {
     const size = desc.size;
-    // SurfaceContext has a `canvas` field; explicit-pixels uses `width`/`height`.
     if ("canvas" in size) {
         return size.canvas;
+    }
+    if ("surface" in size) {
+        if (!Number.isFinite(size.scale) || size.scale <= 0) {
+            throw new Error(`RenderTargetDescriptor.size.scale must be a positive finite number (got ${size.scale}).`);
+        }
+        const canvas = size.surface.canvas;
+        return {
+            width: Math.max(1, Math.floor((canvas.width || 1) * size.scale)),
+            height: Math.max(1, Math.floor((canvas.height || 1) * size.scale)),
+        };
     }
     return size;
 }

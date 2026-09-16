@@ -171,4 +171,36 @@ describe("ShaderMaterial auxiliary ownership", () => {
         expect(oldTexture.texture.destroy).toHaveBeenCalledOnce();
         expect(newTexture.texture.destroy).not.toHaveBeenCalled();
     });
+
+    it("rebuilds a binding when the same texture facade exposes a replacement view", () => {
+        const { engine, scene, mesh, resources } = createFixture();
+        const material = createShaderMaterial({
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+            attributes: ["position"],
+            samplers: [{ name: "color" }],
+        });
+        mesh.material = material;
+        const facade = texture();
+        setShaderTexture(material, "color", facade);
+        const renderable = buildShaderMaterialRenderables(scene, []).rebuildSingle(scene, mesh, material, resources);
+        const binding = renderable.bind(engine, { _colorFormat: "rgba8unorm", _sampleCount: 1 } as never);
+        const createBindGroup = vi.mocked(engine._device.createBindGroup);
+        const initialCalls = createBindGroup.mock.calls.length;
+        const version = material._resourceVersion;
+
+        setShaderTexture(material, "color", facade);
+        expect(material._resourceVersion).toBe(version);
+
+        const replacementView = {} as GPUTextureView;
+        facade.view = replacementView;
+        setShaderTexture(material, "color", facade);
+        expect(material._resourceVersion).toBe(version + 1);
+        binding.update!({ targetWidth: 1, targetHeight: 1 });
+
+        expect(createBindGroup).toHaveBeenCalledTimes(initialCalls + 1);
+        const descriptor = createBindGroup.mock.calls.at(-1)![0];
+        expect(descriptor.entries.some((entry) => entry.resource === replacementView)).toBe(true);
+        resources._lifetimeDisposers[0]!();
+    });
 });

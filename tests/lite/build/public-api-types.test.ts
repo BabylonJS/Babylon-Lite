@@ -43,7 +43,7 @@ describe("build/index.d.ts", () => {
                 `import {
     createSceneContext, createRenderTask, addMeshToTask, createRenderTargetTexture,
     createSurfaceRenderTargetTexture, onRenderTargetTextureResize, withSampledDepthTexture,
-    type EngineContext, type Mesh,
+    type EngineContext, type Mesh, type RenderTargetSurfaceSize,
 } from "./index.js";
 declare const engine: EngineContext;
 declare const mesh: Mesh;
@@ -59,6 +59,10 @@ const surface = createSurfaceRenderTargetTexture(engine, {
 const surfaceDepth = createSurfaceRenderTargetTexture(engine, {
     dFormat: "depth32float", samples: 1, size: engine,
 }, withSampledDepthTexture);
+const scaledSize: RenderTargetSurfaceSize = { surface: engine, scale: 0.5 };
+createSurfaceRenderTargetTexture(engine, {
+    format: "rgba8unorm", samples: 1, size: scaledSize,
+});
 const task = createRenderTask({ name: "explicit", rt: fixed.rt }, engine, createSceneContext(engine));
 addMeshToTask(task, mesh);
 // @ts-expect-error Task mesh population is a tree-shakable standalone API.
