@@ -1,7 +1,7 @@
 import { TU, SS } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import { _vis } from "../engine/engine.js";
-import { createRenderTarget } from "../engine/render-target.js";
+import { _getRenderTargetSurface, createRenderTarget } from "../engine/render-target.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 import { getTrilinearAnisotropicSampler } from "../resource/trilinear-anisotropic-sampler.js";
 import type { Texture2D } from "../texture/texture-2d.js";
@@ -245,7 +245,7 @@ function retargetRenderTaskToLinearOffscreen(task: RenderTaskBase): void {
         depthClearValue: oldDesc.depthClearValue,
         depthCompare: oldDesc.depthCompare,
         samples: sampleCount,
-        size: surface,
+        size: _getRenderTargetSurface(oldDesc.size) ? oldDesc.size : surface,
     });
     cfg.rt = newRt;
     cfg.rst = undefined;

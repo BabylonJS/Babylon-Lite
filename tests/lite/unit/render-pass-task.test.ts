@@ -802,6 +802,53 @@ describe("RenderPassTask transparent sorting", () => {
         expect(task._targetSignature._depthCompare).toBe("less-equal");
     });
 
+    it("preserves scaled surface sizing when transmission retargets a render task", () => {
+        const engine = makeMockEngine({ msaaSamples: 1 });
+        const scene = createSceneContext(engine);
+        const size = { surface: engine, scale: 0.5 } as const;
+        const color = createRenderTarget({ format: "bgra8unorm", samples: 1, size });
+        const depth = createRenderTarget({ dFormat: "depth32float", samples: 1, size });
+        const task = createRenderTask({ name: "scaled-transmission", rt: color, depth }, engine, scene);
+
+        enableRenderTaskTransmission(task, engine);
+        task.record();
+
+        expect(task._config.rt._descriptor.size).toBe(size);
+        expect(task._config.rt._width).toBe(400);
+        expect(task._config.rt._height).toBe(300);
+        expect(depth._width).toBe(400);
+        expect(depth._height).toBe(300);
+    });
+
+    it("synchronizes sampled eager targets borrowed by a render task", () => {
+        const engine = makeMockEngine({ msaaSamples: 1 });
+        const scene = createSceneContext(engine);
+        const color = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 16, height: 16 } });
+        color._eager = true;
+        color._colorTexture = engine._device.createTexture({
+            size: { width: 16, height: 16 },
+            format: "rgba8unorm",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        color._colorView = color._colorTexture.createView();
+        color._syncEager = vi.fn();
+        const depth = createRenderTarget({ dFormat: "depth32float", samples: 1, size: { width: 16, height: 16 } });
+        depth._eager = true;
+        depth._depthTexture = engine._device.createTexture({
+            size: { width: 16, height: 16 },
+            format: "depth32float",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        depth._depthView = depth._depthTexture.createView();
+        depth._syncEager = vi.fn();
+        const task = createRenderTask({ name: "borrowed-eager", rt: color, depth, sharedRt: true }, engine, scene);
+
+        task.record();
+
+        expect(color._syncEager).toHaveBeenCalledWith(engine);
+        expect(depth._syncEager).toHaveBeenCalledWith(engine);
+    });
+
     it("uses world centers refreshed by binding updates before sorting transparent draws", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);

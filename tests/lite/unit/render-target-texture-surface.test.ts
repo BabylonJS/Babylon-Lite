@@ -61,6 +61,31 @@ describe("createSurfaceRenderTargetTexture", () => {
         disposeRenderTargetTexture(result);
     });
 
+    it("clamps zero-sized scaled surfaces after applying the scale", () => {
+        const engine = makeEngine();
+        engine.canvas.width = 1;
+        engine.canvas.height = 1;
+        const result = createSurfaceRenderTargetTexture(engine, {
+            format: "rgba8unorm",
+            samples: 1,
+            size: { surface: engine, scale: 2 },
+        });
+        const resized = vi.fn();
+        onRenderTargetTextureResize(result, resized);
+        expect(result.texture.width).toBe(2);
+        expect(result.texture.height).toBe(2);
+
+        engine.canvas.width = 0;
+        engine.canvas.height = 0;
+        buildRenderTarget(result.rt, engine);
+
+        expect(result.texture.width).toBe(1);
+        expect(result.texture.height).toBe(1);
+        expect(resized).toHaveBeenCalledOnce();
+        disposeGpuResourceRetirements(engine);
+        disposeRenderTargetTexture(result);
+    });
+
     it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])("rejects invalid surface scale %s before allocating", (scale) => {
         const engine = makeEngine();
         expect(() => createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: { surface: engine, scale } })).toThrow(

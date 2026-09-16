@@ -197,8 +197,8 @@ export function _resolveRenderTargetSize(desc: RenderTargetDescriptor): { width:
         }
         const canvas = size.surface.canvas;
         return {
-            width: Math.max(1, Math.floor((canvas.width || 1) * size.scale)),
-            height: Math.max(1, Math.floor((canvas.height || 1) * size.scale)),
+            width: Math.max(1, Math.floor(canvas.width * size.scale)),
+            height: Math.max(1, Math.floor(canvas.height * size.scale)),
         };
     }
     return size;

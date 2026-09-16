@@ -472,8 +472,11 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
 function recordTask(task: GeometryRendererTaskInternal, config: GeometryRendererTaskConfig, eng: EngineContext, sc: SceneContext): void {
     buildRenderTargetMrt(task._mrt, eng);
 
-    if (config.targetTexture && !config.targetTexture._colorTexture) {
+    if (config.targetTexture && (config.targetTexture._syncEager || !config.targetTexture._colorTexture)) {
         buildRenderTarget(config.targetTexture, eng);
+    }
+    if (config.depthTexture?._syncEager) {
+        buildRenderTarget(config.depthTexture, eng);
     }
 
     const mrt = task._mrt;

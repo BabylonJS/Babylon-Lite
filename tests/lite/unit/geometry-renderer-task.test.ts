@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { createGeometryRendererTask } from "../../../packages/babylon-lite/src/frame-graph/geometry-renderer-task";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
@@ -320,6 +321,45 @@ describe("GeometryRendererTask", () => {
         } as unknown as import("../../../packages/babylon-lite/src/engine/render-target").RenderTarget;
         const task = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }], samples: 1, targetTexture: target }, engine, scene);
         expect(task.outputTexture).toBe(target);
+    });
+
+    it("synchronizes sampled eager color and depth targets before recording", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine) as SceneContext;
+        const target = createRenderTarget({ format: "bgra8unorm", samples: 1, size: { width: 32, height: 24 } });
+        target._eager = true;
+        target._colorTexture = engine._device.createTexture({
+            size: { width: 32, height: 24 },
+            format: "bgra8unorm",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        target._colorView = target._colorTexture.createView();
+        target._syncEager = vi.fn();
+        const depth = createRenderTarget({ dFormat: "depth32float", samples: 1, size: { width: 32, height: 24 } });
+        depth._eager = true;
+        depth._depthTexture = engine._device.createTexture({
+            size: { width: 32, height: 24 },
+            format: "depth32float",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        depth._depthView = depth._depthTexture.createView();
+        depth._syncEager = vi.fn();
+        const task = createGeometryRendererTask(
+            {
+                textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }],
+                samples: 1,
+                size: { width: 32, height: 24 },
+                targetTexture: target,
+                depthTexture: depth,
+            },
+            engine,
+            scene
+        );
+
+        task.record();
+
+        expect(target._syncEager).toHaveBeenCalledWith(engine);
+        expect(depth._syncEager).toHaveBeenCalledWith(engine);
     });
 
     it("throws when targetTexture sampleCount mismatches samples", () => {
