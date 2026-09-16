@@ -255,7 +255,7 @@ export function _createAutomaticRenderTask(config: RenderTaskConfig, engine: Eng
     const targetSignature = {
         _colorFormat: desc.format,
         _depthStencilFormat: config.depth?._descriptor.dFormat ?? desc.dFormat,
-        _depthCompare: desc.depthCompare,
+        _depthCompare: desc.depthCompare ?? config.depth?._descriptor.depthCompare,
         _sampleCount: desc.samples ?? 1,
     };
 

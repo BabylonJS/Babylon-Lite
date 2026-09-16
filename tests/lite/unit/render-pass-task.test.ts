@@ -1067,6 +1067,8 @@ describe("RenderPassTask transparent sorting", () => {
         const externalDepth = createRenderTarget({
             lbl: "external-depth",
             dFormat: "depth32float",
+            depthClearValue: 1,
+            depthCompare: "less-equal",
             samples: 1,
             size: { width: 16, height: 16 },
         });
@@ -1089,11 +1091,13 @@ describe("RenderPassTask transparent sorting", () => {
         const depthAtt = descriptor!.depthStencilAttachment as GPURenderPassDepthStencilAttachment;
         expect(depthAtt.view).toBe(sentinelDepthView);
         expect(depthAtt.depthLoadOp).toBe("load");
+        expect(depthAtt.depthClearValue).toBe(1);
         // Color RT has no depth of its own — verifies depthTexture really did override it.
         expect(colorRt._depthView).toBeNull();
         // The pipeline's signature must reflect the external depth format so
         // beginRenderPass validates against pipelines with depthStencil.format = depth32float.
         expect(task._targetSignature._depthStencilFormat).toBe("depth32float");
+        expect(task._targetSignature._depthCompare).toBe("less-equal");
         // Regression: the cached opaque render-bundle encoder's attachment state
         // must include the overridden depth format too. The colour RT carries no
         // depthStencilFormat of its own, so a bundle built from the RT descriptor
