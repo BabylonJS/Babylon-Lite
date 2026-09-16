@@ -93,6 +93,8 @@ export interface AnimationGroup {
      *  {@link addAnimationGroup}. Type-only import, so it is erased at build — no runtime cycle
      *  and no bundle cost for always-loaded consumers (e.g. scene-core's render-loop tick). */
     _animationManager?: AnimationManager;
+    /** @internal Optional mixer scratch cleanup invoked when this group leaves its manager. */
+    _mixerCleanup?: (manager: AnimationManager) => void;
 }
 
 /** Start playing an animation group. */

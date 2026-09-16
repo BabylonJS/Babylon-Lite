@@ -20,6 +20,7 @@ interface WeightedPointerBucket {
     quaternion: boolean;
     mix?: AnimationPropertyMixStrategy;
     afterWrite?: () => void;
+    retained: boolean;
     contested: boolean;
     active: boolean;
     hasReference: boolean;
@@ -66,6 +67,7 @@ export function _updateWeightedPointerAnimations(manager: AnimationManager, delt
 
     for (let bucketIndex = 0; bucketIndex < scratch.buckets.length; bucketIndex++) {
         const bucket = scratch.buckets[bucketIndex]!;
+        bucket.retained = false;
         bucket.contested = false;
         bucket.active = false;
         bucket.hasReference = false;
@@ -80,6 +82,7 @@ export function _updateWeightedPointerAnimations(manager: AnimationManager, delt
         if (group._stopped || !mixer) {
             continue;
         }
+        group._mixerCleanup = clearManagerScratch;
         propertyGroupCount++;
         if (!onlyPropertyGroups && group.weight === 1) {
             continue;
@@ -95,6 +98,11 @@ export function _updateWeightedPointerAnimations(manager: AnimationManager, delt
                 bucket.contested = true;
                 contestedCount++;
             }
+        }
+    }
+    for (let bucketIndex = scratch.buckets.length - 1; bucketIndex >= 0; bucketIndex--) {
+        if (!scratch.buckets[bucketIndex]!.retained) {
+            scratch.buckets.splice(bucketIndex, 1);
         }
     }
 
@@ -176,6 +184,10 @@ export function _updateWeightedPointerAnimations(manager: AnimationManager, delt
     return true;
 }
 
+function clearManagerScratch(manager: AnimationManager): void {
+    scratchByManager?.delete(manager);
+}
+
 function trackMaskedOut(group: AnimationGroup, track: AnimationPropertyRuntimeTrack): boolean {
     const mask = group.mask;
     if (!mask || mask.disabled) {
@@ -222,6 +234,7 @@ function getTrackBucket(buckets: WeightedPointerBucket[], track: AnimationProper
             }
             candidate.mix = track._mix;
             candidate.afterWrite = track._afterWrite;
+            candidate.retained = true;
             return candidate;
         }
     }
@@ -235,6 +248,7 @@ function getTrackBucket(buckets: WeightedPointerBucket[], track: AnimationProper
         quaternion: track.quaternion,
         mix: track._mix,
         afterWrite: track._afterWrite,
+        retained: true,
         contested: false,
         active: false,
         hasReference: false,

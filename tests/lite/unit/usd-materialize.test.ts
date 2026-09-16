@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { goToFrame, playAnimation, tickAnimationCore } from "../../../packages/babylon-lite/src/animation/animation-group";
 import { AnimationGroupMaskMode, createAnimationGroupMask } from "../../../packages/babylon-lite/src/animation/animation-group-mask";
 import { addAnimationGroup } from "../../../packages/babylon-lite/src/animation/animation-group-task";
-import { createAnimationManager, updateAnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
+import { clearAnimationManager, createAnimationManager, updateAnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
 import { setAnimationWeight } from "../../../packages/babylon-lite/src/animation/animation-weight";
 import { enableAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-gltf-mixer";
 import { disposeUsd } from "../../../packages/babylon-lite/src/loader-usd/load-usd";
@@ -20,6 +20,20 @@ import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 
 afterEach(() => vi.restoreAllMocks());
+
+async function collectGarbage(): Promise<void> {
+    setFlagsFromString("--expose_gc");
+    const collect = runInNewContext("gc") as () => void;
+    try {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        for (let attempt = 0; attempt < 20; attempt++) {
+            collect();
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+    } finally {
+        setFlagsFromString("--no-expose_gc");
+    }
+}
 
 describe("USD command materialization", () => {
     it("creates a hierarchy, compact material subsets and shared instance geometry", async () => {
@@ -226,17 +240,7 @@ describe("USD command materialization", () => {
             return { payload: weakPayload, extension: extension!, index, fragment };
         })();
 
-        setFlagsFromString("--expose_gc");
-        const collect = runInNewContext("gc") as () => void;
-        try {
-            await new Promise<void>((resolve) => setImmediate(resolve));
-            for (let attempt = 0; attempt < 20; attempt++) {
-                collect();
-                await new Promise<void>((resolve) => setImmediate(resolve));
-            }
-        } finally {
-            setFlagsFromString("--no-expose_gc");
-        }
+        await collectGarbage();
         expect(cached.payload.deref()).toBeUndefined();
         expect(cached.extension.frag!({ _pi: cached.index } as Parameters<NonNullable<PbrExt["frag"]>>[0])).toBe(cached.fragment);
     });
@@ -324,6 +328,60 @@ describe("USD command materialization", () => {
         expect(skin.boneMatrices[29]).toBeCloseTo(-0.5);
         expect(skin.boneMatrices[31]).toBeCloseTo(1);
         disposeUsd(container);
+    });
+
+    it.each([
+        [1, 0.5, 1],
+        [0.5, 0.25, 0.5],
+    ])("preserves authored shear when native matrix weight is %s", async (weight, expectedShear, expectedTranslation) => {
+        const fixture = usdFixture({ skin: true, shearedAnimation: true });
+        const { engine } = usdTestEngine();
+        const container = usdTestContainer(fixture);
+        await materializeUsd(engine, fixture, container);
+        const group = container.animationGroups![0]!;
+        const target = group.targetedAnimations[0]!.target as SceneNode;
+        const skin = getContainerMeshes(container)[0]!.skeleton!;
+        const manager = createAnimationManager({ engine });
+        addAnimationGroup(manager, group);
+        enableAnimationBlending(manager);
+        setAnimationWeight(group, weight);
+        group.loopAnimation = false;
+        playAnimation(group);
+
+        updateAnimationManager(manager, 500);
+
+        expect(target.worldMatrix[4]).toBeCloseTo(expectedShear);
+        expect(target.worldMatrix[12]).toBeCloseTo(expectedTranslation);
+        expect(target.worldMatrix[15]).toBe(1);
+        expect(skin.boneMatrices[20]).toBeCloseTo(expectedShear);
+        expect(skin.boneMatrices[31]).toBe(1);
+        clearAnimationManager(manager);
+        disposeUsd(container);
+    });
+
+    it("releases weighted animation scratch after clearing a long-lived manager", async () => {
+        const retained = await (async (): Promise<{ manager: ReturnType<typeof createAnimationManager>; payload: WeakRef<ArrayBuffer> }> => {
+            const fixture = usdFixture({ skin: true });
+            const { engine } = usdTestEngine();
+            const container = usdTestContainer(fixture);
+            await materializeUsd(engine, fixture, container);
+            const group = container.animationGroups![0]!;
+            const manager = createAnimationManager({ engine });
+            addAnimationGroup(manager, group);
+            enableAnimationBlending(manager);
+            setAnimationWeight(group, 0.5);
+            playAnimation(group);
+            updateAnimationManager(manager, 500);
+            const payload = new WeakRef(fixture.data);
+            clearAnimationManager(manager);
+            disposeUsd(container);
+            return { manager, payload };
+        })();
+
+        await collectGarbage();
+
+        expect(retained.manager.animations).toHaveLength(0);
+        expect(retained.payload.deref()).toBeUndefined();
     });
 
     it("rejects duplicate morph target IDs", async () => {

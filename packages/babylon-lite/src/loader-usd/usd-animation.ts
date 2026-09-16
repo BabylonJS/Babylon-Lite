@@ -1,10 +1,9 @@
 import type { AnimationChannel, AnimationClip, AnimationSampler, NodeRest } from "../animation/types.js";
 import { INTERP_LINEAR, PATH_POINTER } from "../animation/types.js";
 import type { AnimationGroup, AnimationPropertyMixStrategy, AnimationPropertyRuntimeTrack, TargetedAnimation } from "../animation/animation-group.js";
-import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
-import { _decomposeMat4Into, decomposeMat4 } from "../math/decompose-mat4.js";
+import { decomposeMat4 } from "../math/decompose-mat4.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
-import type { Mat4Storage, Quat, Vec3 } from "../math/types.js";
+import type { Mat4Storage } from "../math/types.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { _markWorldMatrixDirty } from "../scene/world-matrix-state.js";
 import type { MorphTargetData } from "../animation/types.js";
@@ -28,69 +27,21 @@ interface PendingTrack {
     mix?: AnimationPropertyMixStrategy;
 }
 
-interface MutableTransform {
-    translation: Vec3;
-    rotation: Quat;
-    scale: Vec3;
-}
-
-function mutableTransform(): MutableTransform {
-    return {
-        translation: { x: 0, y: 0, z: 0 },
-        rotation: { x: 0, y: 0, z: 0, w: 1 },
-        scale: { x: 1, y: 1, z: 1 },
-    };
-}
-
 function matrixMixStrategy(reference: ArrayLike<number>): AnimationPropertyMixStrategy {
-    const base = mutableTransform();
-    const sample = mutableTransform();
-    _decomposeMat4Into(reference, base.translation, base.rotation, base.scale);
+    const base = new Float32Array(16);
+    base.set(reference);
     return {
-        accumulate(output, values, weight, accumulatedWeight) {
-            _decomposeMat4Into(values, sample.translation, sample.rotation, sample.scale);
-            output[0] = output[0]! + sample.translation.x * weight;
-            output[1] = output[1]! + sample.translation.y * weight;
-            output[2] = output[2]! + sample.translation.z * weight;
-            const dot =
-                accumulatedWeight > 0 ? output[3]! * sample.rotation.x + output[4]! * sample.rotation.y + output[5]! * sample.rotation.z + output[6]! * sample.rotation.w : 1;
-            const sign = dot < 0 ? -weight : weight;
-            output[3] = output[3]! + sample.rotation.x * sign;
-            output[4] = output[4]! + sample.rotation.y * sign;
-            output[5] = output[5]! + sample.rotation.z * sign;
-            output[6] = output[6]! + sample.rotation.w * sign;
-            output[7] = output[7]! + sample.scale.x * weight;
-            output[8] = output[8]! + sample.scale.y * weight;
-            output[9] = output[9]! + sample.scale.z * weight;
+        accumulate(output, values, weight) {
+            for (let index = 0; index < 16; index++) {
+                output[index] = output[index]! + values[index]! * weight;
+            }
         },
         finish(output, weight) {
             const remainder = Math.max(0, 1 - weight);
-            output[0] = output[0]! + base.translation.x * remainder;
-            output[1] = output[1]! + base.translation.y * remainder;
-            output[2] = output[2]! + base.translation.z * remainder;
-            output[7] = output[7]! + base.scale.x * remainder;
-            output[8] = output[8]! + base.scale.y * remainder;
-            output[9] = output[9]! + base.scale.z * remainder;
-            const baseSign = output[3]! * base.rotation.x + output[4]! * base.rotation.y + output[5]! * base.rotation.z + output[6]! * base.rotation.w < 0 ? -remainder : remainder;
-            output[3] = output[3]! + base.rotation.x * baseSign;
-            output[4] = output[4]! + base.rotation.y * baseSign;
-            output[5] = output[5]! + base.rotation.z * baseSign;
-            output[6] = output[6]! + base.rotation.w * baseSign;
-            const inverseLength = 1 / Math.hypot(output[3]!, output[4]!, output[5]!, output[6]!);
-            composeMat4IntoBuffer(
-                output,
-                0,
-                output[0]!,
-                output[1]!,
-                output[2]!,
-                output[3]! * inverseLength,
-                output[4]! * inverseLength,
-                output[5]! * inverseLength,
-                output[6]! * inverseLength,
-                output[7]!,
-                output[8]!,
-                output[9]!
-            );
+            const normalization = weight > 1 ? 1 / weight : 1;
+            for (let index = 0; index < 16; index++) {
+                output[index] = (output[index]! + base[index]! * remainder) * normalization;
+            }
         },
     };
 }

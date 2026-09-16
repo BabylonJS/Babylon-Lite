@@ -161,13 +161,14 @@ affine matrices, and return ordinary AnimationGroups. USD channels also expose
 Lite property-mixer tracks with stable target identities and names, so
 `AnimationGroupMask`, zero/partial weights and the existing
 `enableAnimationBlending` manager path apply normally. Native 16-float matrix
-tracks are decomposed and blended as translation, quaternion rotation and scale
-against the authored pose before recomposition; weighting individual matrix
-elements would produce non-affine transforms. Track writers update CPU state
+tracks blend all affine components against the authored pose and normalize
+overweight sums. This preserves exact full-weight matrices, including shear,
+while keeping partial-weight matrices affine. Track writers update CPU state
 first; a deduplicated post-write publication uploads each affected rig and morph
-buffer once after all groups have been evaluated. Paused groups whose sample
-has not changed perform no GPU upload. Groups are not automatically played by
-the loader.
+buffer once after all groups have been evaluated. Mixer scratch is released
+when its groups leave the manager, so a cleared long-lived manager does not
+retain a disposed USD context. Paused groups whose sample has not changed
+perform no GPU upload. Groups are not automatically played by the loader.
 
 ## Pipeline configuration and shader logic
 
