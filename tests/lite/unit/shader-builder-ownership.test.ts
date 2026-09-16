@@ -200,7 +200,7 @@ describe("ShaderMaterial auxiliary ownership", () => {
 
         expect(createBindGroup).toHaveBeenCalledTimes(initialCalls + 1);
         const descriptor = createBindGroup.mock.calls.at(-1)![0];
-        expect(descriptor.entries.some((entry) => entry.resource === replacementView)).toBe(true);
+        expect(Array.from(descriptor.entries).some((entry) => entry.resource === replacementView)).toBe(true);
         resources._lifetimeDisposers[0]!();
     });
 });
