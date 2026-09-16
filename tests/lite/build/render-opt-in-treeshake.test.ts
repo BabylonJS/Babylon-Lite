@@ -77,6 +77,16 @@ console.log(createEngine, startEngine, createSpriteRenderer, loadSpriteAtlas);`)
     });
 
     it.each([
+        ["createEngine, startEngine, createSpriteRenderer, loadSpriteAtlas", false],
+        ["getOrCreateSampler", true],
+    ] as const)("loads comparison/LOD sampler normalization only for the general API: %s", async (imports, retained) => {
+        const code = await initialViteCode(`import { ${imports} } from ${JSON.stringify(LIB_ENTRY)}; console.log(${imports});`);
+        expect(code.includes("descriptor.compare")).toBe(retained);
+        expect(code.includes("descriptor.lodMinClamp")).toBe(retained);
+        expect(code.includes("descriptor.lodMaxClamp")).toBe(retained);
+    });
+
+    it.each([
         ["material\\standard\\standard-renderable.js", "buildStandardMeshRenderables", false],
         ["material\\pbr\\pbr-renderable.js", "buildPbrRenderables", false],
         ["shadow\\material-shadow-bindings.js", "createMaterialShadowBindings", true],

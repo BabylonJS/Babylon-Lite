@@ -64,7 +64,8 @@ export function clearSamplerCache(engine: EngineContext): void;
 - `texture-allocation-release.ts` owns the shared decrement/destroy/retained-zero operation and optional facade notification. A hook may retarget a facade without redirecting the captured allocation's retained-zero update.
 - `texture-owner-state.ts` owns the recovery-facing released/owner queries.
 - `texture-reference-store.ts` supplies the one shared, lazily allocated texture-count `WeakMap`.
-- `sampler-pool.ts` independently owns sampler keys and its lazily allocated per-device cache.
+- `texture-sampler-pool.ts` owns the shared device-local cache and typed normal texture-sampling identity.
+- `sampler-pool.ts` is the general public boundary. It adds comparison and LOD identity before using the same cache, so ordinary texture loaders need not retain those unused features.
 
 There are no module-initialization allocations. The texture-count and sampler-cache `WeakMap` instances, and each device's sampler `Map`, are created only on first use.
 
@@ -103,13 +104,25 @@ Two API variants:
 
 Uses `WeakMap<GPUDevice, Map<string, GPUSampler>>` for per-device caching:
 
-- **`_samplerCache`**: Maps device → descriptor-key → sampler
-- Key format: `"minFilter:magFilter:mipmapFilter:addressModeU:addressModeV:addressModeW:maxAnisotropy"`
-    - Example: `"linear:linear:nearest:clamp-to-edge:clamp-to-edge:clamp-to-edge:1"`
-    - Defaults applied: nearest for filters, clamp-to-edge for address modes, 1 for anisotropy
+- **`samplerCaches`**: Maps device → descriptor-key → sampler
+- A typed immutable defaults table covers normal texture-sampling parameters. Key generation visits that fixed table, not caller-supplied property order.
+- Base key format: `":minFilter:magFilter:mipmapFilter:addressModeU:addressModeV:addressModeW:maxAnisotropy"`. The public boundary prefixes `"compare:lodMinClamp:lodMaxClamp"` when any of those parameters differs from WebGPU defaults.
+    - Example default-LOD key: `":linear:linear:nearest:clamp-to-edge:clamp-to-edge:clamp-to-edge:1"`
+    - Example comparison key: `"less:0:32:nearest:nearest:nearest:clamp-to-edge:clamp-to-edge:clamp-to-edge:1"`
+    - Defaults applied: nearest for filters, clamp-to-edge for address modes, 1 for anisotropy, no comparison, LOD minimum 0, and LOD maximum 32
+    - Labels do not affect sampling behavior and are excluded from identity. Comparison and LOD clamps do; a comparison sampler must never alias an ordinary sampler.
 - First call with a new key creates the sampler; subsequent calls return cached instance
 - `getOrCreateSampler(engine, desc)` reads `engine._device`, passes the original descriptor unchanged to `device.createSampler`, and caches the result under the computed key
 - `clearSamplerCache(engine)` removes all cached samplers for `engine._device`
+
+glTF non-mipmap samplers (`lodMaxClamp: 0`) use this same cache; no separate allocation bypass
+is needed now that every sampling parameter participates in identity.
+
+Ordinary texture loaders construct `TextureSamplerDescriptor` values, which forbid comparison
+and LOD overrides even when passed through a broader typed variable. They use the restricted
+two-argument cache entry. Only the general sampler boundary can pass a full descriptor together
+with its normalized extra key. Both boundaries share default-behavior sampler identities and
+device-local eviction; recovery and glTF custom samplers use the complete public boundary.
 
 **WeakMap<GPUDevice>** ensures the cache is automatically invalidated when a device is lost/destroyed without explicit cleanup.
 
@@ -212,21 +225,22 @@ Scene/material-group disposal
 
 ## File Manifest
 
-| File                            | Purpose                                                                 |
-| ------------------------------- | ----------------------------------------------------------------------- |
-| `gpu-pool.ts`                   | Side-effect-free facade preserving all existing exports                 |
-| `texture-reference-store.ts`    | Shared lazily allocated `GPUTexture` reference-count `WeakMap`          |
-| `texture-references.ts`         | Side-effect-free facade for `Texture2D` ownership operations            |
-| `texture-acquire.ts`            | Captured-allocation facade acquisition                                  |
-| `texture-release.ts`            | Captured-allocation facade release                                      |
-| `gpu-texture-references.ts`     | Side-effect-free raw ownership facade                                   |
-| `gpu-texture-acquire.ts`        | Shared allocation reference increment                                   |
-| `gpu-texture-release.ts`        | Raw allocation release without facade notification                      |
-| `texture-allocation-release.ts` | Shared decrement, destruction, notification ordering, and retained zero |
-| `texture-owner-state.ts`        | Released-state and owner-count queries                                  |
-| `sampler-pool.ts`               | Lazy per-device sampler cache, key construction, creation, and clear    |
-| `gpu-buffers.ts`                | Side-effect-free facade for buffer creation utilities                   |
-| `buffer-alignment.ts`           | Generic alignment operation                                             |
-| `empty-uniform-buffer.ts`       | Empty aligned uniform-buffer allocation                                 |
-| `uniform-buffer.ts`             | Initialized uniform-buffer allocation and upload rollback               |
-| `mapped-buffer.ts`              | Mapped-at-creation buffer upload                                        |
+| File                            | Purpose                                                                       |
+| ------------------------------- | ----------------------------------------------------------------------------- |
+| `gpu-pool.ts`                   | Side-effect-free facade preserving all existing exports                       |
+| `texture-reference-store.ts`    | Shared lazily allocated `GPUTexture` reference-count `WeakMap`                |
+| `texture-references.ts`         | Side-effect-free facade for `Texture2D` ownership operations                  |
+| `texture-acquire.ts`            | Captured-allocation facade acquisition                                        |
+| `texture-release.ts`            | Captured-allocation facade release                                            |
+| `gpu-texture-references.ts`     | Side-effect-free raw ownership facade                                         |
+| `gpu-texture-acquire.ts`        | Shared allocation reference increment                                         |
+| `gpu-texture-release.ts`        | Raw allocation release without facade notification                            |
+| `texture-allocation-release.ts` | Shared decrement, destruction, notification ordering, and retained zero       |
+| `texture-owner-state.ts`        | Released-state and owner-count queries                                        |
+| `sampler-pool.ts`               | General sampler boundary including comparison and LOD normalization           |
+| `texture-sampler-pool.ts`       | Shared per-device cache and type-restricted ordinary texture sampler identity |
+| `gpu-buffers.ts`                | Side-effect-free facade for buffer creation utilities                         |
+| `buffer-alignment.ts`           | Generic alignment operation                                                   |
+| `empty-uniform-buffer.ts`       | Empty aligned uniform-buffer allocation                                       |
+| `uniform-buffer.ts`             | Initialized uniform-buffer allocation and upload rollback                     |
+| `mapped-buffer.ts`              | Mapped-at-creation buffer upload                                              |

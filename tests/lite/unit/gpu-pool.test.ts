@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import {
     acquireGPUTexture,
@@ -12,6 +12,7 @@ import {
     _textureOwners,
 } from "../../../packages/babylon-lite/src/resource/gpu-pool";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
+import { getOrCreateSampler as getTextureSampler, type TextureSamplerDescriptor } from "../../../packages/babylon-lite/src/resource/texture-sampler-pool";
 
 afterEach(() => _setTextureReleaseHook(() => undefined));
 
@@ -127,16 +128,76 @@ describe("sampler pool", () => {
         return { _device: device } as EngineContext;
     }
 
-    it("deduplicates the existing key fields without rewriting the creation descriptor", () => {
+    it("shares default-behavior samplers across the texture and general boundaries", () => {
+        const createSampler = vi.fn(() => ({}) as GPUSampler);
+        const owner = engine(createSampler);
+        const textureSampler = getTextureSampler(owner, { minFilter: "linear" });
+        const generalSampler = getOrCreateSampler(owner, { minFilter: "linear", lodMinClamp: 0, lodMaxClamp: 32 });
+        expect(generalSampler).toBe(textureSampler);
+        expect(getOrCreateSampler(owner, { minFilter: "linear", compare: "less" })).not.toBe(textureSampler);
+        expect(getOrCreateSampler(owner, { minFilter: "linear", lodMaxClamp: 0 })).not.toBe(textureSampler);
+        expect(createSampler).toHaveBeenCalledTimes(3);
+        clearSamplerCache(owner);
+        expect(getTextureSampler(owner, { minFilter: "linear" })).not.toBe(textureSampler);
+    });
+
+    it("prevents comparison and LOD overrides from entering the restricted texture boundary", () => {
+        expectTypeOf<{ compare: "less" }>().not.toExtend<TextureSamplerDescriptor>();
+        expectTypeOf<{ lodMinClamp: 0 }>().not.toExtend<TextureSamplerDescriptor>();
+        expectTypeOf<{ lodMaxClamp: 32 }>().not.toExtend<TextureSamplerDescriptor>();
+        expectTypeOf<GPUSamplerDescriptor>().not.toExtend<TextureSamplerDescriptor>();
+    });
+
+    it("deduplicates equivalent descriptors without rewriting the creation descriptor", () => {
         const created = { id: 1 } as unknown as GPUSampler;
         const createSampler = vi.fn(() => created);
         const owner = engine(createSampler);
         const descriptor: GPUSamplerDescriptor = { minFilter: "linear", lodMaxClamp: 3 };
 
         expect(getOrCreateSampler(owner, descriptor)).toBe(created);
-        expect(getOrCreateSampler(owner, { minFilter: "linear", lodMaxClamp: 9 })).toBe(created);
+        expect(getOrCreateSampler(owner, { minFilter: "linear", lodMaxClamp: 3, lodMinClamp: 0 })).toBe(created);
         expect(createSampler).toHaveBeenCalledOnce();
         expect(createSampler).toHaveBeenCalledWith(descriptor);
+    });
+
+    it.each([
+        [{}, { compare: "less" }],
+        [{ compare: "less" }, { compare: "greater" }],
+        [{}, { lodMinClamp: 1 }],
+        [{}, { lodMaxClamp: 0 }],
+        [{ lodMaxClamp: 3 }, { lodMaxClamp: 9 }],
+    ] satisfies [GPUSamplerDescriptor, GPUSamplerDescriptor][])("keeps comparison and LOD behavior separate: %j vs %j", (first, second) => {
+        const createSampler = vi.fn(() => ({}) as GPUSampler);
+        const owner = engine(createSampler);
+        const a = getOrCreateSampler(owner, first);
+        const b = getOrCreateSampler(owner, second);
+
+        expect(a).not.toBe(b);
+        expect(getOrCreateSampler(owner, { ...first })).toBe(a);
+        expect(getOrCreateSampler(owner, { ...second })).toBe(b);
+        expect(createSampler).toHaveBeenCalledTimes(2);
+    });
+
+    it("normalizes omitted WebGPU defaults while ignoring labels", () => {
+        const createSampler = vi.fn(() => ({}) as GPUSampler);
+        const owner = engine(createSampler);
+        const sampler = getOrCreateSampler(owner);
+
+        expect(
+            getOrCreateSampler(owner, {
+                label: "same behavior",
+                minFilter: "nearest",
+                magFilter: "nearest",
+                mipmapFilter: "nearest",
+                addressModeU: "clamp-to-edge",
+                addressModeV: "clamp-to-edge",
+                addressModeW: "clamp-to-edge",
+                lodMinClamp: 0,
+                lodMaxClamp: 32,
+                maxAnisotropy: 1,
+            })
+        ).toBe(sampler);
+        expect(createSampler).toHaveBeenCalledOnce();
     });
 
     it("keeps caches device-local and clearable", () => {

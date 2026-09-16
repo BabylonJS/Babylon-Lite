@@ -291,6 +291,14 @@ const output = createSurfaceRenderTargetTexture(engine, { format: engine.format,
 
 **Breaking migration:** depth-only `createRenderTargetTexture(engine, descriptor)` calls that previously received sampled depth as the primary `texture` must now pass `withSampledDepthTexture` as the third argument. The same requirement applies to `createSurfaceRenderTargetTexture`. Missing helpers are rejected before attachment allocation. Color targets, including color targets with a depth-test attachment, do not retain the depth helper or sampled-depth facade unless explicitly requested. Requesting sampled depth without a depth attachment throws and releases partially constructed attachments.
 
+The sampled-depth helper requires the actual depth allocation to be single-sampled. MSAA depth
+cannot be exposed as `texture_depth_2d`; requesting the helper for multisampled depth throws
+before creating a sampling view or sampler, and both RTT factories release the failed allocation.
+Use a separate single-sample depth target for sampling. Unsampled depth-test attachments may
+remain multisampled.
+Surface resizing also rejects attachment sample-count changes before publication, retaining the
+previous facade generation and releasing the failed replacement.
+
 Every attachment has one render-target ownership reference in addition to references held by sampled
 consumers. Removing the last sampler cannot destroy a live writer's attachment. The owning render task
 releases the target references on disposal; remaining sampled consumers keep the last image alive.

@@ -9,7 +9,7 @@
 
 import { TU } from "../engine/gpu-flags.js";
 import { acquireTexture } from "../resource/texture-acquire.js";
-import { getOrCreateSampler } from "../resource/sampler-pool.js";
+import { getOrCreateSampler } from "../resource/texture-sampler-pool.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { PixelsTexture2DOptions } from "./pixels-texture.js";
 

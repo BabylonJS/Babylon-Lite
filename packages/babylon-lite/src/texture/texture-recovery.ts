@@ -144,9 +144,7 @@ function recoverCapturedSampler(engine: EngineContext, tex: Texture2D): GPUSampl
     if (!desc) {
         return undefined;
     }
-    // `samplerKey` does not include lodMaxClamp, so a clamped sampler would take an unclamped
-    // sampler's slot in the dedupe cache.
-    const sampler = desc.lodMaxClamp === 0 ? engine._device.createSampler(desc) : getOrCreateSampler(engine, desc);
+    const sampler = getOrCreateSampler(engine, desc);
     descriptors!.set(sampler, desc);
     return sampler;
 }

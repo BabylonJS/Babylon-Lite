@@ -54,7 +54,12 @@ function installSurfaceResizeSync(engine: EngineContext, surface: SurfaceContext
         let replacementDepthView: GPUTextureView | null = null;
         try {
             buildRenderTarget(replacement, currentEngine);
-            if (!!replacement._colorTexture !== !!oldColor || !!replacement._depthTexture !== !!oldDepth) {
+            if (
+                !!replacement._colorTexture !== !!oldColor ||
+                !!replacement._depthTexture !== !!oldDepth ||
+                replacement._colorTexture?.sampleCount !== oldColor?.sampleCount ||
+                replacement._depthTexture?.sampleCount !== oldDepth?.sampleCount
+            ) {
                 throw new Error("RenderTargetTexture attachment configuration cannot change during resize.");
             }
             replacementDepthView = depthFacade ? replacement._depthTexture!.createView({ aspect: "depth-only" }) : null;

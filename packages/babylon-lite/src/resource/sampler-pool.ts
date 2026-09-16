@@ -1,30 +1,13 @@
 import type { EngineContext } from "../engine/engine.js";
+import { getOrCreateSampler as getPooledSampler } from "./texture-sampler-pool.js";
 
-let _samplerCache: WeakMap<GPUDevice, Map<string, GPUSampler>> | null = null;
-
-function samplerKey(descriptor: GPUSamplerDescriptor): string {
-    return `${descriptor.minFilter ?? "nearest"}:${descriptor.magFilter ?? "nearest"}:${descriptor.mipmapFilter ?? "nearest"}:${descriptor.addressModeU ?? "clamp-to-edge"}:${descriptor.addressModeV ?? "clamp-to-edge"}:${descriptor.addressModeW ?? "clamp-to-edge"}:${descriptor.maxAnisotropy ?? 1}`;
-}
+export { clearSamplerCache } from "./texture-sampler-pool.js";
 
 /** Get or create a deduplicated sampler. Same pooled config returns the same sampler. */
 export function getOrCreateSampler(engine: EngineContext, descriptor: GPUSamplerDescriptor = {}): GPUSampler {
-    const device = engine._device;
-    const samplerCache = (_samplerCache ??= new WeakMap());
-    let deviceCache = samplerCache.get(device);
-    if (!deviceCache) {
-        deviceCache = new Map();
-        samplerCache.set(device, deviceCache);
-    }
-    const key = samplerKey(descriptor);
-    let sampler = deviceCache.get(key);
-    if (!sampler) {
-        sampler = device.createSampler(descriptor);
-        deviceCache.set(key, sampler);
-    }
-    return sampler;
-}
-
-/** Clear sampler cache for one device. */
-export function clearSamplerCache(engine: EngineContext): void {
-    _samplerCache?.delete(engine._device);
+    const compare = descriptor.compare;
+    const minLod = descriptor.lodMinClamp ?? 0;
+    const maxLod = descriptor.lodMaxClamp ?? 32;
+    const extraKey = compare !== undefined || minLod !== 0 || maxLod !== 32 ? `${compare ?? ""}:${minLod}:${maxLod}` : "";
+    return getPooledSampler(engine, descriptor, extraKey);
 }

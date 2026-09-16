@@ -34,7 +34,7 @@
 
 import { TU } from "../engine/gpu-flags.js";
 import { acquireTexture } from "../resource/texture-acquire.js";
-import { getOrCreateSampler } from "../resource/sampler-pool.js";
+import { getOrCreateSampler, type TextureSamplerDescriptor } from "../resource/texture-sampler-pool.js";
 import { generateMipmaps } from "./generate-mipmaps.js";
 import { mipLevelCount } from "./mip-count.js";
 import type { Texture2D } from "./texture-2d.js";
@@ -116,7 +116,7 @@ export function createDynamicTexture(engine: EngineContext, width: number, heigh
         usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
     });
 
-    const samplerDesc: GPUSamplerDescriptor = {
+    const samplerDesc: TextureSamplerDescriptor = {
         addressModeU: options.addressModeU ?? "clamp-to-edge",
         addressModeV: options.addressModeV ?? "clamp-to-edge",
         minFilter: options.minFilter ?? "linear",

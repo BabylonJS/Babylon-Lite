@@ -7,7 +7,7 @@
 
 import { TU } from "../engine/gpu-flags.js";
 import { acquireTexture } from "../resource/texture-acquire.js";
-import { getOrCreateSampler } from "../resource/sampler-pool.js";
+import { getOrCreateSampler, type TextureSamplerDescriptor } from "../resource/texture-sampler-pool.js";
 import { mipLevelCount } from "./mip-count.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D, Texture2DOptions } from "./texture-2d.js";
@@ -114,7 +114,7 @@ export async function createTexture2DFromExternalImage(engine: EngineContext, so
         const format: GPUTextureFormat = options.srgb ? "rgba8unorm-srgb" : "rgba8unorm";
         const levels = mipMaps ? mipLevelCount(width, height) : 1;
         const generate = levels > 1 ? (await import("./generate-mipmaps.js")).generateMipmaps : null;
-        const samplerDesc: GPUSamplerDescriptor = {
+        const samplerDesc: TextureSamplerDescriptor = {
             addressModeU: options.addressModeU ?? "repeat",
             addressModeV: options.addressModeV ?? "repeat",
             minFilter: options.minFilter ?? "linear",

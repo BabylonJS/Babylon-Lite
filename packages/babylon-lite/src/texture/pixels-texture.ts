@@ -14,7 +14,7 @@ import { TU } from "../engine/gpu-flags.js";
 import type { Texture2D } from "./texture-2d.js";
 import type { EngineContext } from "../engine/engine.js";
 import { acquireTexture } from "../resource/texture-acquire.js";
-import { getOrCreateSampler } from "../resource/sampler-pool.js";
+import { getOrCreateSampler, type TextureSamplerDescriptor } from "../resource/texture-sampler-pool.js";
 
 /** Sampler and format overrides for `createTexture2DFromPixels()`. */
 export interface PixelsTexture2DOptions {
@@ -60,7 +60,7 @@ export function createTexture2DFromPixels(engine: EngineContext, data: Uint8Arra
 
     device.queue.writeTexture({ texture }, data as Uint8Array<ArrayBuffer>, { bytesPerRow: width * 4, rowsPerImage: height }, { width, height });
 
-    const samplerDesc: GPUSamplerDescriptor = {
+    const samplerDesc: TextureSamplerDescriptor = {
         addressModeU: options.addressModeU ?? "clamp-to-edge",
         addressModeV: options.addressModeV ?? "clamp-to-edge",
         minFilter: options.minFilter ?? "nearest",
@@ -120,7 +120,7 @@ export function createRenderTexture2D(engine: EngineContext, width: number, heig
         format,
         usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_DST,
     });
-    const samplerDesc: GPUSamplerDescriptor = {
+    const samplerDesc: TextureSamplerDescriptor = {
         addressModeU: options.addressModeU ?? "clamp-to-edge",
         addressModeV: options.addressModeV ?? "clamp-to-edge",
         minFilter: options.minFilter ?? "linear",

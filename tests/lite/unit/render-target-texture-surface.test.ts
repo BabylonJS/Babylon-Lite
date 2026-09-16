@@ -43,6 +43,20 @@ describe("createSurfaceRenderTargetTexture", () => {
         expect(engine._device.createTexture).not.toHaveBeenCalled();
     });
 
+    it.each([false, true])("rejects sampled multisampled surface depth and releases its attachments (color: %s)", (color) => {
+        const engine = makeEngine();
+        expect(() =>
+            createSurfaceRenderTargetTexture(engine, { format: color ? "rgba8unorm" : undefined, dFormat: "depth32float", samples: 4, size: engine }, withSampledDepthTexture)
+        ).toThrow(/single-sample depth attachment/);
+        const textures = vi.mocked(engine._device.createTexture).mock.results.map((result) => result.value as GPUTexture);
+        expect(textures).toHaveLength(color ? 2 : 1);
+        for (const texture of textures) {
+            expect(texture.destroy).toHaveBeenCalledOnce();
+            expect(texture.createView).toHaveBeenCalledOnce();
+        }
+        expect(engine._device.createSampler).not.toHaveBeenCalled();
+    });
+
     it("replaces and releases unsampled depth without creating a depth facade", () => {
         const engine = makeEngine();
         const result = createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: engine });
@@ -244,6 +258,40 @@ describe("createSurfaceRenderTargetTexture", () => {
         expect(oldDepth.destroy).not.toHaveBeenCalled();
         expect((createTexture.mock.results[2]!.value as GPUTexture).destroy).toHaveBeenCalledOnce();
         buildRenderTarget(result.rt, engine);
+        disposeGpuResourceRetirements(engine);
+        disposeRenderTargetTexture(result);
+    });
+
+    it("preserves a live sampled-depth generation when a resize requests multisampling", () => {
+        const engine = makeEngine();
+        const descriptor = { format: "rgba8unorm" as const, dFormat: "depth32float" as const, samples: 1, size: engine };
+        const result = createSurfaceRenderTargetTexture(engine, descriptor, withSampledDepthTexture);
+        const color = result.rt._colorTexture;
+        const depth = result.depthTexture!.texture;
+        const depthView = result.depthTexture!.view;
+        const resized = vi.fn();
+        onRenderTargetTextureResize(result, resized);
+        descriptor.samples = 4;
+        engine.canvas.width += 8;
+
+        expect(() => buildRenderTarget(result.rt, engine)).toThrow(/attachment configuration cannot change/);
+        expect(result.rt._colorTexture).toBe(color);
+        expect(result.depthTexture!.texture).toBe(depth);
+        expect(result.depthTexture!.view).toBe(depthView);
+        expect(resized).not.toHaveBeenCalled();
+        const replacements = vi
+            .mocked(engine._device.createTexture)
+            .mock.results.slice(2)
+            .map((entry) => entry.value as GPUTexture);
+        expect(replacements).toHaveLength(2);
+        for (const texture of replacements) {
+            expect(texture.destroy).toHaveBeenCalledOnce();
+        }
+        expect(color!.destroy).not.toHaveBeenCalled();
+        expect(depth.destroy).not.toHaveBeenCalled();
+        descriptor.samples = 1;
+        buildRenderTarget(result.rt, engine);
+        expect(resized).toHaveBeenCalledOnce();
         disposeGpuResourceRetirements(engine);
         disposeRenderTargetTexture(result);
     });

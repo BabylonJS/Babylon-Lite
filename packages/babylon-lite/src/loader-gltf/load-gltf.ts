@@ -12,7 +12,7 @@ import type { Texture2D } from "../texture/texture-2d.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import type { Mesh, MeshGPU } from "../mesh/mesh.js";
 import { initMeshTransform } from "../mesh/mesh.js";
-import { getOrCreateSampler } from "../resource/sampler-pool.js";
+import { getOrCreateSampler } from "../resource/texture-sampler-pool.js";
 import { createMappedBuffer } from "../resource/mapped-buffer.js";
 import { resolveAccessor, buildParentMap, computeNodeWorldMatrix, anyPrimitive, needsOrmComposite, TYPE_SIZES } from "./gltf-parser.js";
 import type { AccessorView } from "./gltf-parser.js";

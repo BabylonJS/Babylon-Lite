@@ -146,9 +146,40 @@ describe("createRenderTargetTexture", () => {
                 },
                 withSampledDepthTexture
             )
-        ).toThrow(/requires a render target with a depth attachment/);
+        ).toThrow(/requires a single-sample depth attachment/);
         const texture = vi.mocked(engine._device.createTexture).mock.results[0]!.value as GPUTexture;
         expect(texture.destroy).toHaveBeenCalledOnce();
+    });
+
+    it.each([false, true])("rejects sampled multisampled depth and releases its attachments (color: %s)", (color) => {
+        const engine = makeEngine();
+        expect(() =>
+            createRenderTargetTexture(
+                engine,
+                { format: color ? "rgba8unorm" : undefined, dFormat: "depth32float", samples: 4, size: { width: 8, height: 8 } },
+                withSampledDepthTexture
+            )
+        ).toThrow(/single-sample depth attachment/);
+
+        const textures = vi.mocked(engine._device.createTexture).mock.results.map((result) => result.value as GPUTexture);
+        expect(textures).toHaveLength(color ? 2 : 1);
+        for (const texture of textures) {
+            expect(texture.destroy).toHaveBeenCalledOnce();
+            expect(texture.createView).toHaveBeenCalledOnce();
+        }
+        expect(engine._device.createSampler).not.toHaveBeenCalled();
+    });
+
+    it("checks the depth allocation's sample count rather than the target descriptor", () => {
+        const engine = makeEngine();
+        const rt = createRenderTarget({ dFormat: "depth32float", samples: 1, size: { width: 8, height: 8 } });
+        const texture = engine._device.createTexture({ format: "depth32float", size: [8, 8], sampleCount: 4, usage: GPUTextureUsage.RENDER_ATTACHMENT });
+        rt._depthTexture = texture;
+
+        expect(() => withSampledDepthTexture(engine, rt)).toThrow(/single-sample depth attachment/);
+        expect(texture.createView).not.toHaveBeenCalled();
+        expect(engine._device.createSampler).not.toHaveBeenCalled();
+        disposeRenderTarget(rt);
     });
 
     it("rejects surface-sized descriptors before allocating", () => {
