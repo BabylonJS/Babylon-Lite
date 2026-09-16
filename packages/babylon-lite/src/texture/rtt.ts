@@ -22,6 +22,8 @@ export interface RenderTargetTextureResult {
     readonly depthTexture: Texture2D | null;
     /** @internal Independent surface-resize subscriptions and their pending delivery state. */
     _resizeCallbacks?: Set<{ readonly callback: () => void; pending: boolean }>;
+    /** @internal Surface-owned cancellation settlement; never invokes resize observers. */
+    _settleResizeCallbacks?(): void;
 }
 
 /** Optional RTT depth-facade provider, such as `withSampledDepthTexture`. */

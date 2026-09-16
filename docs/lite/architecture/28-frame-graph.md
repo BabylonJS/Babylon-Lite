@@ -335,13 +335,18 @@ Resize delivery is synchronous and retryable. Each subscription has an independe
 - Successful subscriptions are acknowledged and are not repeated on an unchanged-size rebuild. Failed subscriptions retry on the next `buildRenderTarget` or frame-graph build even when dimensions and device already match.
 - One failure is rethrown unchanged; multiple failures produce an `AggregateError` containing every thrown value. Callback failures never silently report success.
 - Replaced color and depth allocations stay owned while delivery is pending. A later resize notifies all subscribers of the newest facade generation and keeps all older allocations alive until delivery succeeds. Releases then pass through the GPU retirement fence.
-- Unregistration cancels that subscription's retry. Duplicate subscriptions of the same function remain independent. Registrations added during delivery begin observing subsequent resizes.
+- Unregistration cancels that subscription's retry and immediately settles delivery bookkeeping. When no pending observers remain, held generations enter GPU-fenced retirement without another target build or target disposal. Unregistration never invokes another observer; a consumer canceling a pending retry must stop using its superseded views.
+- If cancellation occurs inside a running callback, settlement waits until the current delivery pass returns. Duplicate subscriptions of the same function remain independent. Registrations added during delivery begin observing subsequent resizes.
 - Disposing the target cancels delivery and fences all held replacements, including when releasing the current attachments throws.
 - An unchanged-size nested target build does not recursively deliver callbacks. A callback attempting another physical resize receives an explicit error and can be retried by a later outer build.
 
 The subscription registry, pending deliveries, and held-replacement list are owned entirely by
 the surface RTT extension. Fixed-size targets and consumers that do not import surface RTT support
 retain none of the callback-delivery machinery.
+
+Completed retirement batches start the engine's microtask-delayed GPU fence immediately, so an
+inactive target does not need another frame/build to release obsolete allocations. The microtask
+still runs after the current synchronous frame submission when cancellation occurs inside a frame.
 
 Callers of the branch's earlier automatic surface-size support must switch to this factory when
 restacking. Fixed targets keep snapshot clone semantics and never retain the surface implementation.

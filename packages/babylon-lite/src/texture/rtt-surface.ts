@@ -1,5 +1,5 @@
 import type { EngineContext } from "../engine/engine.js";
-import { retireGpuResources, runGpuResourceCallbacks } from "../engine/gpu-resource-retirement.js";
+import { flushGpuResourceRetirements, retireGpuResources, runGpuResourceCallbacks } from "../engine/gpu-resource-retirement.js";
 import type { RenderTargetDescriptor } from "../engine/render-target.js";
 import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import type { SurfaceContext } from "../engine/surface.js";
@@ -42,8 +42,27 @@ function installSurfaceResizeSync(engine: EngineContext, surface: SurfaceContext
             const retired = retiredAttachments;
             retireGpuResources(currentEngine, () => runGpuResourceCallbacks(retired));
             retiredAttachments = [];
+            flushGpuResourceRetirements(currentEngine);
         }
     };
+    const settleResizeCallbacks = (currentEngine = engine): void => {
+        if (notifying) {
+            return;
+        }
+        if (notificationPending) {
+            notificationPending = false;
+            for (const observer of callbacks) {
+                if (observer.pending) {
+                    notificationPending = true;
+                    break;
+                }
+            }
+        }
+        if (!notificationPending) {
+            retireReplacements(currentEngine);
+        }
+    };
+    result._settleResizeCallbacks = settleResizeCallbacks;
     const notifyResize = (currentEngine: EngineContext): void => {
         if (notifying) {
             return;
@@ -67,17 +86,8 @@ function installSurfaceResizeSync(engine: EngineContext, surface: SurfaceContext
             } finally {
                 notifying = false;
             }
-            notificationPending = false;
-            for (const observer of callbacks) {
-                if (observer.pending) {
-                    notificationPending = true;
-                    break;
-                }
-            }
         }
-        if (!notificationPending) {
-            retireReplacements(currentEngine);
-        }
+        settleResizeCallbacks(currentEngine);
         if (errors) {
             throw errors.length === 1 ? errors[0] : new AggregateError(errors, "RenderTargetTexture resize callbacks failed.");
         }
@@ -155,7 +165,9 @@ function installSurfaceResizeSync(engine: EngineContext, surface: SurfaceContext
  *  Every registered consumer is attempted even if another throws. Failed callbacks retry on
  *  the next target build, including unchanged-size builds; successful callbacks are not repeated.
  *  Old attachments remain alive until delivery completes, then retire behind a GPU fence.
- *  Returns an unregister function that also cancels a pending retry. */
+ *  Returns an unregister function that cancels its retry and starts retirement when delivery
+ *  has no pending observers, without requiring another target build. A consumer canceling a
+ *  pending retry must stop using its superseded views. */
 export function onRenderTargetTextureResize(result: RenderTargetTextureResult, callback: () => void): () => void {
     if (result.rt._disposed) {
         throw new Error("RenderTargetTexture has been disposed.");
@@ -164,7 +176,9 @@ export function onRenderTargetTextureResize(result: RenderTargetTextureResult, c
     const observer = { callback, pending: false };
     callbacks.add(observer);
     return () => {
-        callbacks.delete(observer);
+        if (callbacks.delete(observer)) {
+            result._settleResizeCallbacks?.();
+        }
     };
 }
 
