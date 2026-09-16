@@ -10,6 +10,8 @@
  * without the "draw to an offscreen canvas and read back raw bytes" dance.
  * {@link loadKtx2Texture2DArray} covers the other shape: every layer already
  * packed into one GPU-compressed `.ktx2` container.
+ * {@link loadKtx2Texture2DArrayFromUrls} combines separate single-layer KTX2
+ * files into one array while preserving their authored mip chains.
  *
  * The whole feature is a set of free functions with zero module-level side
  * effects, so an app that never touches texture arrays strips it entirely, and
@@ -348,7 +350,7 @@ function groupArrayMips(decoded: Ktx2DecodedData): { layers: number; levels: Ktx
     if (layers === undefined) {
         throw new Error("KTX2: the decoder does not report layerCount; a decoder with 2D array support is required (see setKtx2DecoderUrl)");
     }
-    if (layers < 1 || mips.length % layers !== 0) {
+    if (!Number.isInteger(layers) || layers < 1 || mips.length < 1 || mips.length % layers !== 0) {
         throw new Error(`KTX2: decoder produced ${mips.length} mips, which is not a whole number of ${layers}-layer levels`);
     }
 
@@ -369,75 +371,230 @@ function groupArrayMips(decoded: Ktx2DecodedData): { layers: number; levels: Ktx
     return { layers, levels };
 }
 
-function createKtx2ArrayTexture(engine: EngineContext, width: number, height: number, layers: number, levelCount: number, format: GPUTextureFormat, sRGB: boolean): Texture2DArray {
+interface Ktx2ArrayUploadPlanBase {
+    layers: number;
+    levels: Ktx2DecodedMip[][];
+    width: number;
+    height: number;
+    gpuFormat: GPUTextureFormat;
+}
+
+interface CompressedKtx2ArrayUploadPlan extends Ktx2ArrayUploadPlanBase {
+    kind: "compressed";
+    info: CompressedFormatInfo;
+}
+
+interface UncompressedKtx2ArrayUploadPlan extends Ktx2ArrayUploadPlanBase {
+    kind: "uncompressed";
+    bytesPerPixel: number;
+}
+
+type Ktx2ArrayUploadPlan = CompressedKtx2ArrayUploadPlan | UncompressedKtx2ArrayUploadPlan;
+
+function validateKtx2ArrayDimensions(decoded: Ktx2DecodedData, levels: readonly Ktx2DecodedMip[][]): { width: number; height: number } {
+    if (!Number.isInteger(decoded.width) || !Number.isInteger(decoded.height) || decoded.width < 1 || decoded.height < 1) {
+        throw new Error(`KTX2: decoder reported invalid dimensions ${decoded.width}x${decoded.height}`);
+    }
+    const width = levels[0]![0]!.width;
+    const height = levels[0]![0]!.height;
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
+        throw new Error(`KTX2: decoder produced invalid base mip dimensions ${width}x${height}`);
+    }
+    for (let level = 0; level < levels.length; level++) {
+        const expectedWidth = Math.max(width >> level, 1);
+        const expectedHeight = Math.max(height >> level, 1);
+        const mip = levels[level]![0]!;
+        if (mip.width !== expectedWidth || mip.height !== expectedHeight) {
+            throw new Error(`KTX2: mip ${level} has size ${mip.width}x${mip.height}, expected ${expectedWidth}x${expectedHeight}`);
+        }
+    }
+    return { width, height };
+}
+
+function preflightKtx2ArrayUpload(engine: EngineContext, decoded: Ktx2DecodedData, sRGB: boolean): Ktx2ArrayUploadPlan {
+    const { layers, levels } = groupArrayMips(decoded);
+    const { width, height } = validateKtx2ArrayDimensions(decoded, levels);
+    const limits = engine._device.limits;
+    if (width > limits.maxTextureDimension2D || height > limits.maxTextureDimension2D) {
+        throw new Error(`KTX2: texture dimensions ${width}x${height} exceed maxTextureDimension2D ${limits.maxTextureDimension2D}`);
+    }
+    if (layers > limits.maxTextureArrayLayers) {
+        throw new Error(`KTX2: array has ${layers} layers, exceeding maxTextureArrayLayers ${limits.maxTextureArrayLayers}`);
+    }
+    const maxMipLevels = Math.floor(Math.log2(Math.max(width, height))) + 1;
+    if (levels.length > maxMipLevels) {
+        throw new Error(`KTX2: texture ${width}x${height} has ${levels.length} mip levels, exceeding the maximum ${maxMipLevels}`);
+    }
+
+    const compressed = getCompressedFormat(decoded.transcodedFormat);
+    if (compressed) {
+        if (!engine._device.features.has(compressed.feature as GPUFeatureName)) {
+            throw new Error(`KTX2: device does not support ${compressed.feature}`);
+        }
+        const blockAligned = width % compressed.blockW === 0 && height % compressed.blockH === 0;
+        if (!blockAligned && !engine._device.features.has("texture-compression-unaligned" as GPUFeatureName)) {
+            throw new Error(
+                `KTX2: compressed dimensions ${width}x${height} are not aligned to ${compressed.blockW}x${compressed.blockH} blocks; texture-compression-unaligned is required`
+            );
+        }
+        for (let level = 0; level < levels.length; level++) {
+            const levelWidth = levels[level]![0]!.width;
+            const levelHeight = levels[level]![0]!.height;
+            const expected = Math.ceil(levelWidth / compressed.blockW) * Math.ceil(levelHeight / compressed.blockH) * compressed.blockBytes;
+            for (let layer = 0; layer < layers; layer++) {
+                const actual = levels[level]![layer]!.data.length;
+                if (actual !== expected) {
+                    throw new Error(`KTX2: compressed mip ${level} layer ${layer} has ${actual} bytes, expected ${expected}`);
+                }
+            }
+        }
+        return {
+            kind: "compressed",
+            layers,
+            levels,
+            width,
+            height,
+            gpuFormat: sRGB ? srgbFormat(compressed.gpuFormat) : compressed.gpuFormat,
+            info: compressed,
+        };
+    }
+
+    const uncompressed = uncompressedInfo(decoded.transcodedFormat);
+    if (uncompressed) {
+        for (let level = 0; level < levels.length; level++) {
+            const levelWidth = levels[level]![0]!.width;
+            const levelHeight = levels[level]![0]!.height;
+            const expected = levelWidth * levelHeight * uncompressed.bytesPerPixel;
+            for (let layer = 0; layer < layers; layer++) {
+                const actual = levels[level]![layer]!.data.length;
+                if (actual !== expected) {
+                    throw new Error(`KTX2: uncompressed mip ${level} layer ${layer} has ${actual} bytes, expected ${expected}`);
+                }
+            }
+        }
+        return {
+            kind: "uncompressed",
+            layers,
+            levels,
+            width,
+            height,
+            gpuFormat: sRGB ? srgbFormat(uncompressed.format) : uncompressed.format,
+            bytesPerPixel: uncompressed.bytesPerPixel,
+        };
+    }
+
+    throw new Error(`KTX2: unsupported transcoded format 0x${decoded.transcodedFormat.toString(16)}`);
+}
+
+function createKtx2ArrayTexture(engine: EngineContext, plan: Ktx2ArrayUploadPlan): Texture2DArray {
     const texture = engine._device.createTexture({
-        size: { width, height, depthOrArrayLayers: layers },
+        size: { width: plan.width, height: plan.height, depthOrArrayLayers: plan.layers },
         dimension: "2d",
-        format: sRGB ? srgbFormat(format) : format,
-        mipLevelCount: levelCount,
+        format: plan.gpuFormat,
+        mipLevelCount: plan.levels.length,
         usage: TU.TEXTURE_BINDING | TU.COPY_DST,
     });
-    // The mip chain comes from the container, so no RENDER_ATTACHMENT / blit pass is needed here (unlike
-    // createTexture2DArray, which regenerates mips after an external-image copy).
-    const tex: Texture2DArray = { texture, view: texture.createView({ dimension: "2d-array" }), sampler: makeSampler(engine, levelCount), width, height, layers, invertY: true };
-    acquireTexture(tex);
-    return tex;
+    try {
+        // The mip chain comes from the container, so no RENDER_ATTACHMENT / blit pass is needed here.
+        return {
+            texture,
+            view: texture.createView({ dimension: "2d-array" }),
+            sampler: makeSampler(engine, plan.levels.length),
+            width: plan.width,
+            height: plan.height,
+            layers: plan.layers,
+            invertY: true,
+        };
+    } catch (error) {
+        texture.destroy();
+        throw error;
+    }
 }
 
-function uploadCompressedKtx2Array(engine: EngineContext, decoded: Ktx2DecodedData, format: CompressedFormatInfo, sRGB: boolean): Texture2DArray {
-    if (!engine._device.features.has(format.feature as GPUFeatureName)) {
-        throw new Error(`KTX2: device does not support ${format.feature}`);
-    }
-    const { layers, levels } = groupArrayMips(decoded);
-    const width = levels[0]![0]!.width;
-    const height = levels[0]![0]!.height;
-    const tex = createKtx2ArrayTexture(engine, width, height, layers, levels.length, format.gpuFormat, sRGB);
-
-    for (let level = 0; level < levels.length; level++) {
-        const blocksPerRow = Math.ceil(levels[level]![0]!.width / format.blockW);
-        const rowBytes = blocksPerRow * format.blockBytes;
-        // Copy extent must be the block-padded (physical) size; tail mips smaller than one block are copied
-        // as a single full block (see ktx-loader.ts).
-        const copyW = blocksPerRow * format.blockW;
-        const copyH = Math.ceil(levels[level]![0]!.height / format.blockH) * format.blockH;
-        for (let layer = 0; layer < layers; layer++) {
-            const mip = levels[level]![layer]!;
-            engine._device.queue.writeTexture(
-                { texture: tex.texture, mipLevel: level, origin: { x: 0, y: 0, z: layer } },
-                mip.data as Uint8Array<ArrayBuffer>,
-                { bytesPerRow: rowBytes },
-                { width: copyW, height: copyH, depthOrArrayLayers: 1 }
-            );
-        }
-    }
-    return tex;
-}
-
-function uploadUncompressedKtx2Array(engine: EngineContext, decoded: Ktx2DecodedData, info: { format: GPUTextureFormat; bytesPerPixel: number }, sRGB: boolean): Texture2DArray {
-    const bytesPerPixel = info.bytesPerPixel;
-    const { layers, levels } = groupArrayMips(decoded);
-    const width = levels[0]![0]!.width;
-    const height = levels[0]![0]!.height;
-    const tex = createKtx2ArrayTexture(engine, width, height, layers, levels.length, info.format, sRGB);
-
-    for (let level = 0; level < levels.length; level++) {
-        const levelWidth = levels[level]![0]!.width;
-        const levelHeight = levels[level]![0]!.height;
-        for (let layer = 0; layer < layers; layer++) {
-            const mip = levels[level]![layer]!;
-            const expected = levelWidth * levelHeight * bytesPerPixel;
-            if (mip.data.length !== expected) {
-                throw new Error(`KTX2: uncompressed mip ${level} layer ${layer} has ${mip.data.length} bytes, expected ${expected}`);
+function uploadPreparedKtx2Array(engine: EngineContext, plan: Ktx2ArrayUploadPlan): Texture2DArray {
+    const tex = createKtx2ArrayTexture(engine, plan);
+    try {
+        for (let level = 0; level < plan.levels.length; level++) {
+            const levelWidth = plan.levels[level]![0]!.width;
+            const levelHeight = plan.levels[level]![0]!.height;
+            let rowBytes: number;
+            let copyWidth: number;
+            let copyHeight: number;
+            if (plan.kind === "compressed") {
+                rowBytes = Math.ceil(levelWidth / plan.info.blockW) * plan.info.blockBytes;
+                copyWidth = Math.ceil(levelWidth / plan.info.blockW) * plan.info.blockW;
+                copyHeight = Math.ceil(levelHeight / plan.info.blockH) * plan.info.blockH;
+            } else {
+                rowBytes = levelWidth * plan.bytesPerPixel;
+                copyWidth = levelWidth;
+                copyHeight = levelHeight;
             }
-            engine._device.queue.writeTexture(
-                { texture: tex.texture, mipLevel: level, origin: { x: 0, y: 0, z: layer } },
-                mip.data as Uint8Array<ArrayBuffer>,
-                { bytesPerRow: levelWidth * bytesPerPixel },
-                { width: levelWidth, height: levelHeight, depthOrArrayLayers: 1 }
-            );
+            for (let layer = 0; layer < plan.layers; layer++) {
+                const mip = plan.levels[level]![layer]!;
+                engine._device.queue.writeTexture(
+                    { texture: tex.texture, mipLevel: level, origin: { x: 0, y: 0, z: layer } },
+                    mip.data as Uint8Array<ArrayBuffer>,
+                    { bytesPerRow: rowBytes },
+                    { width: copyWidth, height: copyHeight, depthOrArrayLayers: 1 }
+                );
+            }
+        }
+        acquireTexture(tex);
+        return tex;
+    } catch (error) {
+        tex.texture.destroy();
+        throw error;
+    }
+}
+
+function uploadDecodedKtx2Array(engine: EngineContext, decoded: Ktx2DecodedData, sRGB: boolean): Texture2DArray {
+    return uploadPreparedKtx2Array(engine, preflightKtx2ArrayUpload(engine, decoded, sRGB));
+}
+
+function exactArrayBuffer(buffer: ArrayBuffer | ArrayBufferView): ArrayBuffer {
+    if (ArrayBuffer.isView(buffer)) {
+        return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength).slice().buffer;
+    }
+    return buffer;
+}
+
+/** Merge decoded single-layer KTX2 files into the level-major ordering expected by the array uploader. */
+function mergeSeparateKtx2Layers(decodedLayers: readonly Ktx2DecodedData[]): Ktx2DecodedData {
+    if (decodedLayers.length < 1) {
+        throw new Error("KTX2: at least one separate layer buffer is required");
+    }
+    const first = decodedLayers[0]!;
+    const levelCount = first.mipmaps.length;
+    const mipmaps: Ktx2DecodedMip[] = [];
+
+    for (let layer = 0; layer < decodedLayers.length; layer++) {
+        const decoded = decodedLayers[layer]!;
+        if (decoded.layerCount !== undefined && decoded.layerCount !== 1) {
+            throw new Error(`KTX2: separate layer ${layer} reports layerCount ${decoded.layerCount}; expected one 2D layer`);
+        }
+        if (decoded.transcodedFormat !== first.transcodedFormat) {
+            throw new Error(`KTX2: separate layer ${layer} has a different transcoded format`);
+        }
+        if (decoded.width !== first.width || decoded.height !== first.height) {
+            throw new Error(`KTX2: separate layer ${layer} has size ${decoded.width}x${decoded.height}, expected ${first.width}x${first.height}`);
+        }
+        if (decoded.mipmaps.length !== levelCount) {
+            throw new Error(`KTX2: separate layer ${layer} has ${decoded.mipmaps.length} mip levels, expected ${levelCount}`);
         }
     }
-    return tex;
+
+    for (let level = 0; level < levelCount; level++) {
+        const expected = first.mipmaps[level]!;
+        for (let layer = 0; layer < decodedLayers.length; layer++) {
+            const mip = decodedLayers[layer]!.mipmaps[level]!;
+            if (mip.width !== expected.width || mip.height !== expected.height) {
+                throw new Error(`KTX2: separate layer ${layer} mip ${level} has size ${mip.width}x${mip.height}, expected ${expected.width}x${expected.height}`);
+            }
+            mipmaps.push({ ...mip, layerIndex: layer });
+        }
+    }
+
+    return { ...first, layerCount: decodedLayers.length, mipmaps };
 }
 
 /**
@@ -455,17 +612,25 @@ export async function uploadKtx2Texture2DArray(engine: EngineContext, buffer: Ar
     // in a GPU-compressed format whenever the device supports one.
     const decoded = await decodeKtx2Async(engine, buffer);
 
-    const compressed = getCompressedFormat(decoded.transcodedFormat);
-    if (compressed) {
-        return uploadCompressedKtx2Array(engine, decoded, compressed, sRGB);
-    }
+    return uploadDecodedKtx2Array(engine, decoded, sRGB);
+}
 
-    const uncompressed = uncompressedInfo(decoded.transcodedFormat);
-    if (uncompressed) {
-        return uploadUncompressedKtx2Array(engine, decoded, uncompressed, sRGB);
+/**
+ * Decode separate single-layer KTX2 files and upload them as one `Texture2DArray`.
+ * Source `buffers[i]` becomes array layer `i`. Every source must transcode to the
+ * same format and expose the same dimensions and authored mip chain.
+ *
+ * @param engine - Engine context.
+ * @param buffers - Ordered single-layer KTX2 buffers.
+ * @param sRGB - Select the `*-srgb` GPU format. Default false.
+ */
+export async function uploadKtx2Texture2DArrayFromBuffers(engine: EngineContext, buffers: readonly (ArrayBuffer | ArrayBufferView)[], sRGB = false): Promise<Texture2DArray> {
+    if (buffers.length < 1) {
+        throw new Error("KTX2: at least one separate layer buffer is required");
     }
-
-    throw new Error(`KTX2: unsupported transcoded format 0x${decoded.transcodedFormat.toString(16)}`);
+    const normalizedBuffers = buffers.map(exactArrayBuffer);
+    const decodedLayers = await Promise.all(normalizedBuffers.map((buffer) => decodeKtx2Async(engine, buffer)));
+    return uploadDecodedKtx2Array(engine, mergeSeparateKtx2Layers(decodedLayers), sRGB);
 }
 
 /**
@@ -493,4 +658,28 @@ export async function loadKtx2Texture2DArray(engine: EngineContext, url: string,
         throw new Error(`KTX2 fetch failed: ${resp.status} for ${url}`);
     }
     return uploadKtx2Texture2DArray(engine, await resp.arrayBuffer(), sRGB);
+}
+
+/**
+ * Fetch separate single-layer KTX2 files and combine them into one `Texture2DArray`.
+ * URL order defines array-layer order.
+ *
+ * @param engine - Engine context.
+ * @param urls - Ordered single-layer KTX2 URLs.
+ * @param sRGB - Select the `*-srgb` GPU format. Default false.
+ */
+export async function loadKtx2Texture2DArrayFromUrls(engine: EngineContext, urls: readonly string[], sRGB = false): Promise<Texture2DArray> {
+    if (urls.length < 1) {
+        throw new Error("KTX2: at least one separate layer URL is required");
+    }
+    const buffers = await Promise.all(
+        urls.map(async (url) => {
+            const resp = await fetch(url);
+            if (!resp.ok) {
+                throw new Error(`KTX2 fetch failed: ${resp.status} for ${url}`);
+            }
+            return resp.arrayBuffer();
+        })
+    );
+    return uploadKtx2Texture2DArrayFromBuffers(engine, buffers, sRGB);
 }

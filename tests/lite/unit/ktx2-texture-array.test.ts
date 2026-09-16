@@ -1,5 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { loadKtx2Texture2DArray, uploadKtx2Texture2DArray } from "../../../packages/babylon-lite/src/texture/texture-array";
+import { runInNewContext } from "node:vm";
+import {
+    loadKtx2Texture2DArray,
+    loadKtx2Texture2DArrayFromUrls,
+    uploadKtx2Texture2DArray,
+    uploadKtx2Texture2DArrayFromBuffers,
+} from "../../../packages/babylon-lite/src/texture/texture-array";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 
 interface WriteCall {
@@ -13,22 +19,32 @@ interface Captured {
     createDesc?: GPUTextureDescriptor;
     viewDesc?: GPUTextureViewDescriptor;
     writes: WriteCall[];
+    destroys?: number;
 }
 
-function makeEngine(cap: Captured, features: string[] = []): EngineContext {
+function makeEngine(cap: Captured, features: string[] = [], failWrite = false, limits: { maxTextureDimension2D?: number; maxTextureArrayLayers?: number } = {}): EngineContext {
     const device = {
         features: { has: (f: string) => features.includes(f) },
+        limits: {
+            maxTextureDimension2D: limits.maxTextureDimension2D ?? 8192,
+            maxTextureArrayLayers: limits.maxTextureArrayLayers ?? 256,
+        },
         createTexture: (desc: GPUTextureDescriptor) => {
             cap.createDesc = desc;
             return {
                 mipLevelCount: desc.mipLevelCount ?? 1,
                 createView: (v?: GPUTextureViewDescriptor) => ((cap.viewDesc = v), { _kind: "view" }),
-                destroy: () => undefined,
+                destroy: () => {
+                    cap.destroys = (cap.destroys ?? 0) + 1;
+                },
             } as unknown as GPUTexture;
         },
         createSampler: () => ({ _kind: "sampler" }) as unknown as GPUSampler,
         queue: {
             writeTexture: (dst: GPUTexelCopyTextureInfo, data: ArrayBufferView, layout: GPUTexelCopyBufferLayout, size: GPUExtent3DStrict) => {
+                if (failWrite) {
+                    throw new Error("write failed");
+                }
                 cap.writes.push({ dst, data, layout, size });
             },
         },
@@ -38,6 +54,7 @@ function makeEngine(cap: Captured, features: string[] = []): EngineContext {
 
 const GL_RGBA8 = 0x8058;
 const GL_BC7 = 0x8e8c;
+const GL_ASTC_4X4 = 0x93b0;
 
 interface FakeMip {
     width: number;
@@ -47,18 +64,30 @@ interface FakeMip {
 }
 
 /** Builds a decoder result: `levels` mip levels, each holding `layers` entries tagged with their layer index. */
-function fakeDecoded(options: { width: number; layers: number; levels: number; format: number; bytesPerPixel?: number; layerCount?: number | undefined; blockBytes?: number }) {
+function fakeDecoded(options: {
+    width: number;
+    height?: number;
+    reportedWidth?: number;
+    reportedHeight?: number;
+    layers: number;
+    levels: number;
+    format: number;
+    bytesPerPixel?: number;
+    layerCount?: number | undefined;
+    blockBytes?: number;
+}) {
     const mipmaps: FakeMip[] = [];
     for (let level = 0; level < options.levels; level++) {
-        const size = Math.max(options.width >> level, 1);
+        const width = Math.max(options.width >> level, 1);
+        const height = Math.max((options.height ?? options.width) >> level, 1);
         for (let layer = 0; layer < options.layers; layer++) {
-            const byteLength = options.blockBytes ? Math.ceil(size / 4) * Math.ceil(size / 4) * options.blockBytes : size * size * (options.bytesPerPixel ?? 4);
-            mipmaps.push({ width: size, height: size, data: new Uint8Array(byteLength).fill(level * 16 + layer + 1), layerIndex: layer });
+            const byteLength = options.blockBytes ? Math.ceil(width / 4) * Math.ceil(height / 4) * options.blockBytes : width * height * (options.bytesPerPixel ?? 4);
+            mipmaps.push({ width, height, data: new Uint8Array(byteLength).fill(level * 16 + layer + 1), layerIndex: layer });
         }
     }
     return {
-        width: options.width,
-        height: options.width,
+        width: options.reportedWidth ?? options.width,
+        height: options.reportedHeight ?? options.height ?? options.width,
         transcodedFormat: options.format,
         isInGammaSpace: false,
         hasAlpha: true,
@@ -69,15 +98,19 @@ function fakeDecoded(options: { width: number; layers: number; levels: number; f
 }
 
 let decodeResult: unknown = null;
+let decodeInputs: number[][] = [];
 
 beforeEach(() => {
+    decodeInputs = [];
     // Stand in for the CDN decoder script that loadKtx2Decoder() injects.
     (globalThis as unknown as { KTX2DECODER?: unknown }).KTX2DECODER = {
         MSCTranscoder: { UseFromWorkerThread: true },
         WASMMemoryManager: { LoadBinariesFromCurrentThread: false },
         KTX2Decoder: class {
-            public async decode() {
-                return decodeResult;
+            public async decode(data: Uint8Array) {
+                decodeInputs.push(Array.from(data));
+                const result = Array.isArray(decodeResult) ? decodeResult.shift() : decodeResult;
+                return typeof result === "function" ? result() : result;
             }
         },
     };
@@ -195,6 +228,20 @@ describe("uploadKtx2Texture2DArray", () => {
         const cap: Captured = { writes: [] };
 
         await expect(uploadKtx2Texture2DArray(makeEngine(cap), new ArrayBuffer(8))).rejects.toThrow(/does not support texture-compression-bc/);
+        expect(cap.createDesc).toBeUndefined();
+    });
+
+    it("rejects a compressed layer whose payload does not match its block dimensions before GPU allocation", async () => {
+        const decoded = fakeDecoded({ width: 8, layers: 2, levels: 1, format: GL_BC7, blockBytes: 16 });
+        decoded.mipmaps[1]!.data = new Uint8Array(16);
+        decodeResult = decoded;
+        const cap: Captured = { writes: [] };
+
+        await expect(uploadKtx2Texture2DArray(makeEngine(cap, ["texture-compression-bc"]), new ArrayBuffer(8))).rejects.toThrow(
+            /compressed mip 0 layer 1 has 16 bytes, expected 64/
+        );
+        expect(cap.createDesc).toBeUndefined();
+        expect(cap.writes).toEqual([]);
     });
 
     it("rejects an uncompressed layer whose size does not match its dimensions", async () => {
@@ -204,6 +251,16 @@ describe("uploadKtx2Texture2DArray", () => {
         const cap: Captured = { writes: [] };
 
         await expect(uploadKtx2Texture2DArray(makeEngine(cap), new ArrayBuffer(8))).rejects.toThrow(/layer 1 has 4 bytes, expected 16/);
+        expect(cap.createDesc).toBeUndefined();
+        expect(cap.writes).toEqual([]);
+    });
+
+    it("destroys the GPU texture when an upload throws", async () => {
+        decodeResult = fakeDecoded({ width: 2, layers: 2, levels: 1, format: GL_RGBA8 });
+        const cap: Captured = { writes: [] };
+
+        await expect(uploadKtx2Texture2DArray(makeEngine(cap, [], true), new ArrayBuffer(8))).rejects.toThrow(/write failed/);
+        expect(cap.destroys).toBe(1);
     });
 
     it("surfaces decoder errors", async () => {
@@ -211,6 +268,14 @@ describe("uploadKtx2Texture2DArray", () => {
         const cap: Captured = { writes: [] };
 
         await expect(uploadKtx2Texture2DArray(makeEngine(cap), new ArrayBuffer(8))).rejects.toThrow(/boom/);
+    });
+
+    it("rejects an unsupported transcoded format before GPU allocation", async () => {
+        decodeResult = fakeDecoded({ width: 2, layers: 1, levels: 1, format: 0xdead });
+        const cap: Captured = { writes: [] };
+
+        await expect(uploadKtx2Texture2DArray(makeEngine(cap), new ArrayBuffer(8))).rejects.toThrow(/unsupported transcoded format 0xdead/);
+        expect(cap.createDesc).toBeUndefined();
     });
 });
 
@@ -237,5 +302,180 @@ describe("loadKtx2Texture2DArray", () => {
         );
 
         await expect(loadKtx2Texture2DArray(makeEngine(cap), "missing.ktx2")).rejects.toThrow(/KTX2 fetch failed: 404/);
+    });
+});
+
+describe("uploadKtx2Texture2DArrayFromBuffers", () => {
+    it("preserves an ArrayBuffer created in another realm", async () => {
+        decodeResult = fakeDecoded({ width: 2, layers: 1, levels: 1, format: GL_RGBA8, layerCount: undefined });
+        const foreignBuffer = runInNewContext("Uint8Array.from([1, 2, 3, 4]).buffer") as ArrayBuffer;
+        const cap: Captured = { writes: [] };
+
+        await uploadKtx2Texture2DArrayFromBuffers(makeEngine(cap), [foreignBuffer]);
+
+        expect(decodeInputs).toEqual([[1, 2, 3, 4]]);
+    });
+
+    it("preserves source order as array-layer order across the authored mip chain", async () => {
+        decodeResult = [
+            fakeDecoded({ width: 4, layers: 1, levels: 3, format: GL_RGBA8, layerCount: undefined }),
+            fakeDecoded({ width: 4, layers: 1, levels: 3, format: GL_RGBA8, layerCount: undefined }),
+        ];
+        (decodeResult as ReturnType<typeof fakeDecoded>[])[1]!.mipmaps.forEach((mip) => mip.data.fill(9));
+        const cap: Captured = { writes: [] };
+
+        const tex = await uploadKtx2Texture2DArrayFromBuffers(makeEngine(cap), [new ArrayBuffer(8), new Uint8Array(new ArrayBuffer(16), 4, 8)]);
+
+        expect(tex.layers).toBe(2);
+        expect(cap.createDesc?.mipLevelCount).toBe(3);
+        expect(cap.writes.map((write) => [write.dst.mipLevel, (write.dst.origin as { z: number }).z])).toEqual([
+            [0, 0],
+            [0, 1],
+            [1, 0],
+            [1, 1],
+            [2, 0],
+            [2, 1],
+        ]);
+        expect((cap.writes[0]!.data as Uint8Array)[0]).toBe(1);
+        expect((cap.writes[1]!.data as Uint8Array)[0]).toBe(9);
+    });
+
+    it("keeps compatible separate layers GPU-compressed", async () => {
+        decodeResult = [
+            fakeDecoded({ width: 8, layers: 1, levels: 2, format: GL_BC7, blockBytes: 16 }),
+            fakeDecoded({ width: 8, layers: 1, levels: 2, format: GL_BC7, blockBytes: 16 }),
+        ];
+        const cap: Captured = { writes: [] };
+
+        await uploadKtx2Texture2DArrayFromBuffers(makeEngine(cap, ["texture-compression-bc"]), [new ArrayBuffer(8), new ArrayBuffer(8)]);
+
+        expect(cap.createDesc?.format).toBe("bc7-rgba-unorm");
+        expect(cap.createDesc?.size).toEqual({ width: 8, height: 8, depthOrArrayLayers: 2 });
+        expect(cap.writes).toHaveLength(4);
+    });
+
+    it("rejects block-unaligned compressed dimensions before GPU allocation", async () => {
+        decodeResult = [
+            fakeDecoded({ width: 5, height: 7, reportedWidth: 8, reportedHeight: 8, layers: 1, levels: 1, format: GL_ASTC_4X4, blockBytes: 16 }),
+            fakeDecoded({ width: 5, height: 7, reportedWidth: 8, reportedHeight: 8, layers: 1, levels: 1, format: GL_ASTC_4X4, blockBytes: 16 }),
+        ];
+        const cap: Captured = { writes: [] };
+
+        await expect(uploadKtx2Texture2DArrayFromBuffers(makeEngine(cap, ["texture-compression-astc"]), [new ArrayBuffer(8), new ArrayBuffer(8)])).rejects.toThrow(
+            /5x7.*4x4.*texture-compression-unaligned/
+        );
+        expect(cap.createDesc).toBeUndefined();
+        expect(cap.writes).toEqual([]);
+    });
+
+    it("uploads block-unaligned compressed dimensions when the device enables that feature", async () => {
+        decodeResult = [
+            fakeDecoded({ width: 5, height: 7, reportedWidth: 8, reportedHeight: 8, layers: 1, levels: 1, format: GL_ASTC_4X4, blockBytes: 16 }),
+            fakeDecoded({ width: 5, height: 7, reportedWidth: 8, reportedHeight: 8, layers: 1, levels: 1, format: GL_ASTC_4X4, blockBytes: 16 }),
+        ];
+        const cap: Captured = { writes: [] };
+
+        await uploadKtx2Texture2DArrayFromBuffers(makeEngine(cap, ["texture-compression-astc", "texture-compression-unaligned"]), [new ArrayBuffer(8), new ArrayBuffer(8)]);
+
+        expect(cap.createDesc?.size).toEqual({ width: 5, height: 7, depthOrArrayLayers: 2 });
+        expect(cap.writes).toHaveLength(2);
+        expect(cap.writes[0]!.data.byteLength).toBe(64);
+        expect(cap.writes[0]!.size).toEqual({ width: 8, height: 8, depthOrArrayLayers: 1 });
+    });
+
+    it("rejects invalid WebGPU descriptor limits before GPU allocation", async () => {
+        for (const [decoded, limits, message] of [
+            [fakeDecoded({ width: 9, height: 1, layers: 1, levels: 1, format: GL_RGBA8 }), { maxTextureDimension2D: 8 }, /dimensions 9x1 exceed/],
+            [fakeDecoded({ width: 2, layers: 3, levels: 1, format: GL_RGBA8 }), { maxTextureArrayLayers: 2 }, /3 layers.*maxTextureArrayLayers 2/],
+            [fakeDecoded({ width: 1, layers: 1, levels: 2, format: GL_RGBA8 }), {}, /1x1 has 2 mip levels.*maximum 1/],
+        ] as const) {
+            decodeResult = decoded;
+            const cap: Captured = { writes: [] };
+
+            await expect(uploadKtx2Texture2DArray(makeEngine(cap, [], false, limits), new ArrayBuffer(8))).rejects.toThrow(message);
+            expect(cap.createDesc).toBeUndefined();
+            expect(cap.writes).toEqual([]);
+        }
+    });
+
+    it("rejects incompatible sources before creating a GPU texture", async () => {
+        const differentFormat = [
+            fakeDecoded({ width: 4, layers: 1, levels: 2, format: GL_RGBA8 }),
+            fakeDecoded({ width: 4, layers: 1, levels: 2, format: GL_BC7, blockBytes: 16 }),
+        ];
+        const differentSize = [fakeDecoded({ width: 4, layers: 1, levels: 2, format: GL_RGBA8 }), fakeDecoded({ width: 8, layers: 1, levels: 2, format: GL_RGBA8 })];
+        const differentMipCount = [fakeDecoded({ width: 4, layers: 1, levels: 2, format: GL_RGBA8 }), fakeDecoded({ width: 4, layers: 1, levels: 1, format: GL_RGBA8 })];
+        const multiLayer = [fakeDecoded({ width: 4, layers: 1, levels: 2, format: GL_RGBA8 }), fakeDecoded({ width: 4, layers: 2, levels: 2, format: GL_RGBA8 })];
+
+        for (const [results, message] of [
+            [differentFormat, /different transcoded format/],
+            [differentSize, /has size 8x8/],
+            [differentMipCount, /has 1 mip levels/],
+            [multiLayer, /reports layerCount 2/],
+        ] as const) {
+            decodeResult = [...results];
+            const cap: Captured = { writes: [] };
+            await expect(uploadKtx2Texture2DArrayFromBuffers(makeEngine(cap), [new ArrayBuffer(8), new ArrayBuffer(8)])).rejects.toThrow(message);
+            expect(cap.createDesc).toBeUndefined();
+        }
+    });
+
+    it("rejects an empty source list without invoking the decoder", async () => {
+        decodeResult = null;
+        const cap: Captured = { writes: [] };
+
+        await expect(uploadKtx2Texture2DArrayFromBuffers(makeEngine(cap), [])).rejects.toThrow(/at least one/);
+        expect(cap.createDesc).toBeUndefined();
+    });
+
+    it("normalizes every source before starting any asynchronous decode", async () => {
+        const backing = new ArrayBuffer(8);
+        const detachedView = new Uint8Array(backing);
+        structuredClone(backing, { transfer: [backing] });
+        decodeResult = () => Promise.reject(new Error("decode must not start"));
+        const cap: Captured = { writes: [] };
+        const unhandled: unknown[] = [];
+        const onUnhandled = (reason: unknown): void => {
+            unhandled.push(reason);
+        };
+        process.on("unhandledRejection", onUnhandled);
+
+        try {
+            await expect(uploadKtx2Texture2DArrayFromBuffers(makeEngine(cap), [new ArrayBuffer(8), detachedView])).rejects.toThrow();
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            expect(decodeInputs).toEqual([]);
+            expect(unhandled).toEqual([]);
+        } finally {
+            process.off("unhandledRejection", onUnhandled);
+        }
+    });
+});
+
+describe("loadKtx2Texture2DArrayFromUrls", () => {
+    it("fetches separate files in order and delegates to the shared array upload", async () => {
+        decodeResult = [fakeDecoded({ width: 2, layers: 1, levels: 1, format: GL_RGBA8 }), fakeDecoded({ width: 2, layers: 1, levels: 1, format: GL_RGBA8 })];
+        const fetchMock = vi.fn(async (_url: string) => ({ ok: true, status: 200, arrayBuffer: async () => new ArrayBuffer(8) }));
+        vi.stubGlobal("fetch", fetchMock);
+        const cap: Captured = { writes: [] };
+
+        const tex = await loadKtx2Texture2DArrayFromUrls(makeEngine(cap), ["a.ktx2", "b.ktx2"]);
+
+        expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(["a.ktx2", "b.ktx2"]);
+        expect(tex.layers).toBe(2);
+    });
+
+    it("surfaces a failed fetch before GPU allocation", async () => {
+        vi.stubGlobal(
+            "fetch",
+            vi.fn(async (url: string) => ({
+                ok: url !== "missing.ktx2",
+                status: url === "missing.ktx2" ? 404 : 200,
+                arrayBuffer: async () => new ArrayBuffer(8),
+            }))
+        );
+        const cap: Captured = { writes: [] };
+
+        await expect(loadKtx2Texture2DArrayFromUrls(makeEngine(cap), ["ok.ktx2", "missing.ktx2"])).rejects.toThrow(/KTX2 fetch failed: 404 for missing\.ktx2/);
+        expect(cap.createDesc).toBeUndefined();
     });
 });
