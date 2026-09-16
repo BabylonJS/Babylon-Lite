@@ -208,7 +208,8 @@ function advancePropertyGroupTime(group: AnimationGroup, mixer: AnimationPropert
     const toTime = mixer[MIX_TO] > fromTime ? Math.min(mixer[MIX_TO], clipEnd) : clipEnd;
     const duration = Math.max(0, toTime - fromTime);
     if (duration <= 0) {
-        return fromTime;
+        group.currentTime = fromTime;
+        return group.currentTime;
     }
 
     if (group.loopAnimation) {

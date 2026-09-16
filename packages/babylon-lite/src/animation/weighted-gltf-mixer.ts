@@ -404,7 +404,8 @@ function advanceGroupTime(group: AnimationGroup, mixer: AnimationGltfMixer, delt
     }
 
     if (clip.duration <= 0) {
-        return startTime;
+        group.currentTime = startTime;
+        return group.currentTime;
     }
 
     if (group.loopAnimation && isPlaying) {

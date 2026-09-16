@@ -160,7 +160,9 @@ Animation modules convert time codes to seconds, preserve target IDs and local
 affine matrices, and return ordinary AnimationGroups. Each group retains its
 authored first and last sample times, including positive nonzero and negative
 ranges; direct and manager-driven playback both start, clamp and loop within
-that interval. `goToFrame` continues to address authored time codes. USD
+that interval. A singleton track has a zero-length interval and evaluates its
+sole sample at the authored start time instead of becoming a no-op.
+`goToFrame` continues to address authored time codes. USD
 channels also expose Lite property-mixer tracks with stable target identities and names, so
 `AnimationGroupMask`, zero/partial weights and the existing
 `enableAnimationBlending` manager path apply normally. Native 16-float matrix

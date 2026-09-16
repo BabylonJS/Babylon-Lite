@@ -261,7 +261,7 @@ export function createAnimationController(
         },
 
         tick:
-            clip.duration <= 0
+            clip.duration <= 0 && clip.channels.length === 0
                 ? noopAnimationTick
                 : (deltaMs: number, engine?: EngineContext): void => {
                       if (engine) {
@@ -273,12 +273,14 @@ export function createAnimationController(
                       }
                       const device = requiresEngine && uploadGpu ? activeEngine!._device : null;
 
-                      if (ctrl.playing) {
+                      if (ctrl.playing && clip.duration > 0) {
                           ctrl.time += (deltaMs / 1000) * ctrl.speedRatio;
                       }
 
                       // Always wrap/clamp — ensures externally-set time (goToFrame) is valid
-                      if (ctrl.loop) {
+                      if (clip.duration <= 0) {
+                          ctrl.time = startTime;
+                      } else if (ctrl.loop) {
                           ctrl.time = startTime + ((ctrl.time - startTime) % clip.duration);
                           if (ctrl.time < startTime) {
                               ctrl.time += clip.duration;
@@ -456,5 +458,5 @@ export function createAnimationController(
 }
 
 function noopAnimationTick(): void {
-    // Empty controller for zero-duration clips.
+    // Empty controller for clips with no samples to evaluate.
 }

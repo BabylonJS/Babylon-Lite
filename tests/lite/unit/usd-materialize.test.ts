@@ -369,6 +369,44 @@ describe("USD command materialization", () => {
     });
 
     it.each([
+        ["positive", 24, 1],
+        ["negative", -24, -1],
+    ])("evaluates a %s singleton animation at its authored time", async (_label, startCode, startTime) => {
+        const fixture = usdFixture({ skin: true, animationStart: startCode, singletonAnimation: true });
+        const { engine } = usdTestEngine();
+        const container = usdTestContainer(fixture);
+        await materializeUsd(engine, fixture, container);
+        const group = container.animationGroups![0]!;
+        const target = group.targetedAnimations[0]!.target as SceneNode;
+        const skin = getContainerMeshes(container)[0]!.skeleton!;
+
+        expect(group.duration).toBe(0);
+        expect(group.currentTime).toBe(startTime);
+        playAnimation(group);
+        tickAnimationCore(group, 500, engine);
+        expect(group.currentTime).toBe(startTime);
+        expect(target.worldMatrix[12]).toBeCloseTo(2);
+
+        goToFrame(group, startCode, engine);
+        expect(group.currentTime).toBe(startTime);
+        expect(target.worldMatrix[12]).toBeCloseTo(2);
+        expect(skin.boneMatrices[29]).toBeCloseTo(1);
+
+        const manager = createAnimationManager({ engine });
+        addAnimationGroup(manager, group);
+        enableAnimationBlending(manager);
+        setAnimationWeight(group, 0.5);
+        playAnimation(group);
+        updateAnimationManager(manager, 500);
+        expect(group.currentTime).toBe(startTime);
+        expect(target.worldMatrix[12]).toBeCloseTo(1);
+        expect(skin.boneMatrices[29]).toBeCloseTo(0);
+
+        clearAnimationManager(manager);
+        disposeUsd(container);
+    });
+
+    it.each([
         [1, 0.5, 1],
         [0.5, 0.25, 0.5],
     ])("preserves authored shear when native matrix weight is %s", async (weight, expectedShear, expectedTranslation) => {

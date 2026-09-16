@@ -54,6 +54,7 @@ export function usdFixture(
         trsAnimation?: boolean;
         shearedAnimation?: boolean;
         animationStart?: number;
+        singletonAnimation?: boolean;
     } = {}
 ): UsdExtraction {
     const raw: number[] = [];
@@ -169,20 +170,21 @@ export function usdFixture(
     }
     if (options.skin) {
         const start = options.animationStart ?? 0;
-        const times = floats([start, start + 24]);
+        const times = floats(options.singletonAnimation ? [start] : [start, start + 24]);
         const moved = [...identity];
         moved[12] = 2;
         if (options.shearedAnimation) {
             moved[4] = 1;
         }
-        const values = floats([...identity, ...moved]);
+        const values = floats(options.singletonAnimation ? moved : [...identity, ...moved]);
         const movedBone = [...restChild];
         movedBone[13] = 3;
         if (options.shearedAnimation) {
             movedBone[4] = 1;
         }
-        const boneValues = floats([...restChild, ...movedBone]);
-        records.push({ op: 9, fields: [0, 1, 3, 0, 2, times, values, 16] }, { op: 9, fields: [1, 11, 3, 0, 2, times, boneValues, 16] });
+        const boneValues = floats(options.singletonAnimation ? movedBone : [...restChild, ...movedBone]);
+        const count = options.singletonAnimation ? 1 : 2;
+        records.push({ op: 9, fields: [0, 1, 3, 0, count, times, values, 16] }, { op: 9, fields: [1, 11, 3, 0, count, times, boneValues, 16] });
     }
     if (options.trsAnimation) {
         const start = options.animationStart ?? 0;
