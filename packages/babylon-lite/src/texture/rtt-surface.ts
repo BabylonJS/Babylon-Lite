@@ -18,7 +18,7 @@ export function createSurfaceRenderTargetTexture(
 ): RenderTargetTextureResult;
 export function createSurfaceRenderTargetTexture(
     engine: EngineContext,
-    descriptor: RenderTargetDescriptor & { size: RenderTargetSurfaceSize },
+    descriptor: RenderTargetDescriptor & { size: SurfaceContext | RenderTargetSurfaceSize },
     sampleDepth?: RenderTargetDepthSampler
 ): RenderTargetTextureResult;
 export function createSurfaceRenderTargetTexture(

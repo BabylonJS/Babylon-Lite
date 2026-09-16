@@ -112,6 +112,11 @@ const scaledSize: RenderTargetSurfaceSize = { surface: engine, scale: 0.5 };
 createSurfaceRenderTargetTexture(engine, {
     format: "rgba8unorm", samples: 1, size: scaledSize,
 });
+const dynamicSize = Math.random() > 0.5 ? engine : scaledSize;
+const forwardedDescriptor: Parameters<typeof createSurfaceRenderTargetTexture>[1] = {
+    format: "rgba8unorm", samples: 1, size: dynamicSize,
+};
+createSurfaceRenderTargetTexture(engine, forwardedDescriptor);
 const task = createRenderTask({ name: "explicit", rt: fixed.rt }, engine, createSceneContext(engine));
 addMeshToTask(task, mesh);
 // @ts-expect-error Task mesh population is a tree-shakable standalone API.
