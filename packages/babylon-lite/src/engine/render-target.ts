@@ -124,7 +124,16 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void
     disposeRenderTarget(rt);
 
     const desc = rt._descriptor;
-    const { width, height } = _resolveRenderTargetSize(desc);
+    let size = desc.size;
+    if ("surface" in size) {
+        const scale = size.scale;
+        const canvas = size.surface.canvas;
+        size = {
+            width: (canvas.width * scale) | 0 || 1,
+            height: (canvas.height * scale) | 0 || 1,
+        };
+    }
+    const { width, height } = "canvas" in size ? size.canvas : size;
     rt._width = width;
     rt._height = height;
 
@@ -177,29 +186,16 @@ export function disposeRenderTarget(rt: RenderTarget | null | undefined): void {
     }
 }
 
-/** @internal Return the live surface behind a surface-sized descriptor, if any. */
-export function _getRenderTargetSurface(size: RenderTargetDescriptor["size"]): SurfaceContext | null {
-    if ("canvas" in size) {
-        return size;
-    }
-    return "surface" in size ? size.surface : null;
-}
-
 /** @internal Resolve the descriptor's current allocation dimensions. */
 export function _resolveRenderTargetSize(desc: RenderTargetDescriptor): { width: number; height: number } {
     const size = desc.size;
-    if ("canvas" in size) {
-        return size.canvas;
-    }
     if ("surface" in size) {
-        if (!Number.isFinite(size.scale) || size.scale <= 0) {
-            throw new Error(`RenderTargetDescriptor.size.scale must be a positive finite number (got ${size.scale}).`);
-        }
+        const scale = size.scale;
         const canvas = size.surface.canvas;
         return {
-            width: Math.max(1, Math.floor(canvas.width * size.scale)),
-            height: Math.max(1, Math.floor(canvas.height * size.scale)),
+            width: (canvas.width * scale) | 0 || 1,
+            height: (canvas.height * scale) | 0 || 1,
         };
     }
-    return size;
+    return "canvas" in size ? size.canvas : size;
 }

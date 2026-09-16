@@ -127,9 +127,9 @@ export interface ShaderTextureSlot {
     readonly decl: ShaderSamplerDecl;
     current: Texture2D | null;
     /** @internal Last resources observed by `setShaderTexture`, including replaceable facade backing. */
-    _view: GPUTextureView | null;
+    _view?: GPUTextureView | null;
     /** @internal */
-    _sampler: GPUSampler | null;
+    _sampler?: GPUSampler | null;
 }
 
 export interface ShaderStorageBufferSlot {
@@ -291,7 +291,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         assertUniqueName(usedNames, "sampler", decl.name);
         assertUniqueName(usedNames, "sampler", `${decl.name}Sampler`);
         samplerDecls.push(decl);
-        textureSlots.set(decl.name, { decl, current: null, _view: null, _sampler: null });
+        textureSlots.set(decl.name, { decl, current: null });
     }
 
     const storageBufferDecls: ShaderStorageBufferDecl[] = [];
@@ -491,7 +491,7 @@ export function setShaderTexture(material: ShaderMaterial, name: string, texture
     // Stable render-target facades replace their view in place on resize. Comparing both the public handle and the
     // resources captured by the bind group keeps repeated ordinary sets free while allowing a resize subscriber to
     // call this setter again and rebuild exactly once for the new attachment generation.
-    if (slot.current !== texture || slot._view !== view || slot._sampler !== sampler) {
+    if (slot.current !== texture || (texture && (slot._view !== view || slot._sampler !== sampler))) {
         slot.current = texture;
         slot._view = view;
         slot._sampler = sampler;

@@ -1,7 +1,7 @@
 import { TU, SS } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import { _vis } from "../engine/engine.js";
-import { _getRenderTargetSurface, createRenderTarget } from "../engine/render-target.js";
+import { createRenderTarget } from "../engine/render-target.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 import { getTrilinearAnisotropicSampler } from "../resource/trilinear-anisotropic-sampler.js";
 import type { Texture2D } from "../texture/texture-2d.js";
@@ -225,6 +225,7 @@ function enableTransmission(task: RenderTaskBase, engine: EngineContext, options
 function retargetRenderTaskToLinearOffscreen(task: RenderTaskBase): void {
     const cfg = task._config;
     const oldDesc = cfg.rt._descriptor;
+    const oldSize = oldDesc.size;
     const surface = task.scene.surface;
     const sampleCount = surface.msaaSamples;
     // The scene render task may target the shared engine scRT (single-sample,
@@ -245,7 +246,7 @@ function retargetRenderTaskToLinearOffscreen(task: RenderTaskBase): void {
         depthClearValue: oldDesc.depthClearValue,
         depthCompare: oldDesc.depthCompare,
         samples: sampleCount,
-        size: _getRenderTargetSurface(oldDesc.size) ? oldDesc.size : surface,
+        size: "canvas" in oldSize || "surface" in oldSize ? oldSize : surface,
     });
     cfg.rt = newRt;
     cfg.rst = undefined;

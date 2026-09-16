@@ -1,7 +1,7 @@
 import type { EngineContext } from "../engine/engine.js";
 import { flushGpuResourceRetirements, retireGpuResources, runGpuResourceCallbacks } from "../engine/gpu-resource-retirement.js";
 import type { RenderTargetDescriptor, RenderTargetSurfaceSize } from "../engine/render-target.js";
-import { _getRenderTargetSurface, _resolveRenderTargetSize, buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
+import { _resolveRenderTargetSize, buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import type { SurfaceContext } from "../engine/surface.js";
 import { acquireGPUTexture } from "../resource/gpu-texture-acquire.js";
 import { releaseGPUTexture } from "../resource/gpu-texture-release.js";
@@ -26,8 +26,12 @@ export function createSurfaceRenderTargetTexture(
     descriptor: RenderTargetDescriptor & { size: SurfaceContext | RenderTargetSurfaceSize },
     sampleDepth?: RenderTargetDepthSampler
 ): RenderTargetTextureResult {
-    if (!_getRenderTargetSurface(descriptor.size)) {
+    const size = descriptor.size;
+    if (!("canvas" in size || "surface" in size)) {
         throw new Error("createSurfaceRenderTargetTexture: descriptor.size must be a SurfaceContext or { surface, scale }.");
+    }
+    if ("surface" in size && (!Number.isFinite(size.scale) || size.scale <= 0)) {
+        throw new Error(`RenderTargetDescriptor.size.scale must be a positive finite number (got ${size.scale}).`);
     }
     const result = _createRenderTargetTexture(engine, descriptor, sampleDepth);
     try {

@@ -4,7 +4,7 @@ import { registerRenderingContext, unregisterRenderingContext } from "../engine/
 import type { EngineContext, RenderingContext } from "../engine/engine.js";
 import type { SurfaceContext } from "../engine/surface.js";
 import type { RenderTarget, RenderTargetSignature } from "../engine/render-target.js";
-import { _getRenderTargetSurface, _resolveRenderTargetSize, buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
+import { _resolveRenderTargetSize, buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { targetSignatureKey } from "../engine/render-target-signature.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Texture2D } from "../texture/texture-2d.js";
@@ -426,11 +426,13 @@ function applyColorAttachmentState(att: GPURenderPassColorAttachment, rt: Render
 }
 
 function ensureRtCanvasSize(rt: RenderTarget): void {
-    const surface = _getRenderTargetSurface(rt._descriptor.size);
+    const descriptor = rt._descriptor;
+    const targetSize = descriptor.size;
+    const surface = "canvas" in targetSize ? targetSize : "surface" in targetSize ? targetSize.surface : null;
     if (!surface) {
         return;
     }
-    const size = _resolveRenderTargetSize(rt._descriptor);
+    const size = _resolveRenderTargetSize(descriptor);
     if (rt._width === size.width && rt._height === size.height) {
         return;
     }
