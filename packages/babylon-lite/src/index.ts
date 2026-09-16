@@ -295,6 +295,8 @@ export {
     createTexture2DArrayFromUrls,
     uploadKtx2Texture2DArray,
     loadKtx2Texture2DArray,
+    uploadKtx2Texture2DArrayFromBuffers,
+    loadKtx2Texture2DArrayFromUrls,
 } from "./texture/texture-array.js";
 export type { Texture2DArray, TextureArrayOptions, ArrayLayerUploadOptions, TextureArrayFromUrlsOptions } from "./texture/texture-array.js";
 export { createDynamicTexture, updateDynamicTexture } from "./texture/dynamic-texture.js";

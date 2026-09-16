@@ -41,8 +41,8 @@ export interface EngineContext {
     /** GPU draw calls executed by the latest `renderFrame` call, summed across its selected surfaces. */
     drawCallCount: number;
 
-    /** GPU time spent on the last measured frame, in milliseconds. 0 until the first measured frame and
-     *  while GPU timing is disabled (the default). Enable with `setGpuTimingEnabled`. */
+    /** Instrumented GPU interval for the last measured frame, in milliseconds. Includes every frame
+     *  command plus the opening and closing marker dispatches. 0 before the first sample and while disabled. */
     gpuFrameTimeMs: number;
 }
 
@@ -50,7 +50,7 @@ export interface EngineContext {
  *  WebGPU `timestamp-query` feature). When false, `setGpuTimingEnabled` is a no-op. */
 export function isGpuTimingSupported(engine: EngineContext): boolean;
 /** Enable or disable per-frame GPU timing (disabled by default). While on, `engine.gpuFrameTimeMs`
- *  updates each frame. Opt-in and zero-cost when unused — see *GPU Frame Timing* below. */
+ *  reports the instrumented frame interval including marker dispatches. Opt-in and zero-cost when unused. */
 export function setGpuTimingEnabled(engine: EngineContext, enabled: boolean): void;
 
 export type RenderTaskGpuTimingStatus = "unsupported" | "disabled" | "pending" | "available" | "error";
@@ -114,7 +114,9 @@ interface EngineContextInternal extends EngineContext {
 ### Initialization Sequence (`createEngine`)
 
 1. **Adapter request**: `navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })` — throws if WebGPU unavailable.
-2. **Device request**: `adapter.requestDevice({ requiredFeatures })` — optionally enables `float32-filterable` if supported.
+2. **Device request**: `adapter.requestDevice({ requiredFeatures })` — opportunistically enables supported
+   float filtering, texture-compression (including unaligned compressed dimensions), timestamp-query,
+   and primitive-index features.
 3. **Canvas context**: `canvas.getContext('webgpu')` — throws if context unavailable.
 4. **Swap chain configure**: `context.configure({ device, format, alphaMode })` where `format = navigator.gpu.getPreferredCanvasFormat()` and `alphaMode = options?.alphaMode ?? "opaque"`.
 5. **MSAA**: Defaults to `msaaSamples = 4`, or `1` when requested.
@@ -252,17 +254,39 @@ Swapchain MSAA/depth attachments are managed by the default scene `RenderTask` t
 
 ### GPU Frame Timing (optional, zero-cost when unused)
 
-`setGpuTimingEnabled(engine, true)` measures how long the **GPU** spends on each frame (distinct from CPU/wall-clock time), publishing a lightly-smoothed value to `engine.gpuFrameTimeMs` (milliseconds). It's a developer/HUD profiling aid, disabled by default.
+`setGpuTimingEnabled(engine, true)` publishes a lightly-smoothed **GPU** interval to
+`engine.gpuFrameTimeMs` (milliseconds). The interval begins at the opening marker pass and ends at the
+closing marker pass, so it includes every command recorded for the frame plus both one-workgroup marker
+dispatches. It is distinct from CPU/wall-clock time and is an instrumented profiling value rather than a
+marker-free sum of render/compute pass durations. The feature is a developer/HUD aid and is disabled by default.
 
 The feature is implemented so that scenes which never enable it pay **zero** for it — the heavy timer code (`src/engine/gpu-timer.ts`) is reachable only through a dynamic `import()` inside `setGpuTimingEnabled`, which is itself tree-shaken away when unused. `renderFrame` carries three frame-timing optional-chain short-circuits plus the independent task-timing resolve short-circuit described below; all are no-ops while their profiler is off. The only other always-bundled cost is requesting the `timestamp-query` device feature opportunistically in `createEngine` (free at runtime) and a one-field initializer — a handful of bytes that remain within the existing scene bundle ceilings.
 
 How it works when enabled:
 
 1. `createEngine` opportunistically requests the `timestamp-query` feature whenever the adapter offers it (alongside the texture-compression features), so timing can be turned on later. `isGpuTimingSupported(engine)` reports whether it was available.
-2. The first `setGpuTimingEnabled(engine, true)` dynamic-imports `gpu-timer.ts`, lazily creates a `GpuFrameTimer` (a 2-slot `timestamp` query set + a recycled MAP_READ readback buffer), and installs three per-frame hooks on the engine (`_gpuTimerBegin` / `_gpuTimerEnd` / `_gpuTimerResolve`).
-3. `renderFrame` writes the opening timestamp into the frame's command encoder right after creating it and the closing timestamp right before finishing it — so both are commands **inside the frame's command buffer**, and the GPU runs them contiguously around exactly that frame's passes. This measures the frame's **GPU work**, independent of how long the CPU took to record it. After the frame is submitted, `_gpuTimerResolve` issues a tiny separate `resolveQuerySet` + buffer copy and maps the result asynchronously, off the render critical path, so the readout (lightly smoothed) lags a frame or two but never stalls the frame.
+2. The first `setGpuTimingEnabled(engine, true)` dynamic-imports `gpu-timer.ts`, lazily creates a `GpuFrameTimer` (a 2-slot `timestamp` query set, one no-binding compute pipeline, and recycled MAP_READ readback buffers), and installs three per-frame hooks on the engine (`_gpuTimerBegin` / `_gpuTimerEnd` / `_gpuTimerResolve`).
+3. Each frame marker records one compute workgroup with an empty shader body (`@compute @workgroup_size(1) fn main() {}`), using the pipeline allocated once with the timer. The opening pass writes query 0 at its beginning; the closing pass writes query 1 at its end. The pipeline stays with the timer across disable/re-enable, has no buffers or bindings, and requires no explicit destroy method. The two marker dispatches are part of the measured interval; their cost must be measured on the target device.
+4. `renderFrame` records the opening marker into its command encoder after creating it and the closing marker before finishing it. After submission, `_gpuTimerResolve` records query resolution and a buffer copy, then maps asynchronously. Valid non-negative intervals under 5 seconds feed the existing exponential smoothing (80% previous value, 20% new value after the first positive sample). Positive timestamps alone do not establish freshness or cross-pass timing accuracy; target-device validation must check raw samples.
 
 Disabling clears the frame begin/end hooks and resets `gpuFrameTimeMs` to 0; the shared resolve hook becomes a no-op unless task timing remains enabled independently. The frame timer's GPU resources are kept and reused if it is re-enabled.
+
+#### Marker-overhead evidence and limits
+
+The retained marker design was measured on Windows 10, Chrome 151, and an NVIDIA Blackwell adapter with
+1,000 interleaved timestamp-query pairs after a warm-up submission:
+
+- baseline: one no-op workgroup inside one compute pass with beginning/end timestamps;
+- instrumented: an opening marker pass, the same payload pass, and a closing marker pass;
+- baseline median / p95 / mean: `0.544 / 0.608 / 0.5392 µs`;
+- instrumented median / p95 / mean: `0.544 / 0.576 / 0.4621 µs`.
+
+The measured median delta was `0.000 µs`; the p95 and mean differences were smaller than timestamp noise
+and must not be interpreted as negative overhead. On this target, the two marker passes therefore added no
+measurable GPU interval, including for the deliberately minimal one-workgroup payload. This is evidence for
+that adapter/driver only, not a universal guarantee: tile-based and other GPU architectures may expose a
+different pass-boundary cost. Callers comparing sub-microsecond workloads across devices must account for
+the documented markers, and exact task/pass attribution should use the separate task timing API.
 
 ### GPU Render-Task Timing (optional, zero-cost when unused)
 
