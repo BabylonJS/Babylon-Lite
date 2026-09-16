@@ -170,7 +170,7 @@ describe("render-task GPU timing public state", () => {
             _gpuTimerResolve: resolveGpuTimers,
             _gpuTaskTimerResolve: taskResolve,
         } as unknown as EngineContext;
-        Object.assign(engine, { surfaces: [engine], _surfaces: [engine] });
+        Object.assign(engine, { engine, surfaces: [engine], _surfaces: [engine] });
 
         renderFrame(engine, 16);
 

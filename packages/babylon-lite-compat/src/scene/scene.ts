@@ -43,6 +43,7 @@ import type {
     Mesh as LiteMesh,
     PickingInfo as LitePickingInfo,
     Mat4,
+    Material as LiteMaterial,
 } from "babylon-lite";
 
 import { Color3, Color4 } from "../math/color.js";
@@ -188,6 +189,8 @@ export class Scene extends AbstractScene {
     private readonly _pendingTextures: Array<Promise<void>> = [];
     private readonly _pendingGroundBakes: Array<() => void> = [];
     private readonly _pendingMorphBuilds: Array<{ mesh: { _lite: unknown }; manager: { _build(mesh: never, engine: import("babylon-lite").EngineContext): void } }> = [];
+    private _materialPluginsRequested = false;
+    private readonly _pendingMaterialPluginReconciliations = new Set<LiteMaterial>();
     private readonly _runningAnimatables: Animatable[] = [];
     private readonly _animationGroupCache = new WeakMap<object, AnimationGroup>();
     /** @internal Structural `AnimationGroup`s stepped + weight-blended each frame. */
@@ -428,6 +431,49 @@ export class Scene extends AbstractScene {
             manager._build(mesh as never, engine);
         }
         this._pendingMorphBuilds.length = 0;
+    }
+
+    /**
+     * @internal Request Lite's opt-in material-plugin bridges for this scene.
+     * Once the engine is live, reconcile the changed material through Lite's
+     * runtime rebuild path rather than leaving the startup-only request stranded.
+     */
+    public _requestMaterialPlugins(material?: LiteMaterial): void {
+        this._materialPluginsRequested = true;
+        if (material && this._engine._hasStarted) {
+            this._engine._registerLateWork(async () => {
+                const { reconcileMaterialPlugins } = await import("babylon-lite");
+                await reconcileMaterialPlugins(this._lite, material);
+            });
+        } else if (material && this._started) {
+            this._pendingMaterialPluginReconciliations.add(material);
+        }
+    }
+
+    /** @internal Enable requested material plugins after meshes are added and before scene registration. */
+    public async _enableMaterialPlugins(): Promise<void> {
+        if (this._materialPluginsRequested) {
+            const { enableMaterialPlugins } = await import("babylon-lite");
+            enableMaterialPlugins(this._lite);
+            this._materialPluginsRequested = false;
+            this._pendingMaterialPluginReconciliations.clear();
+        }
+    }
+
+    /** @internal Reconcile plugin requests raised by first-frame callbacks before engine startup completes. */
+    public async _reconcilePendingMaterialPlugins(): Promise<void> {
+        while (this._pendingMaterialPluginReconciliations.size > 0) {
+            const materials = [...this._pendingMaterialPluginReconciliations];
+            this._pendingMaterialPluginReconciliations.clear();
+            const { reconcileMaterialPlugins } = await import("babylon-lite");
+            await Promise.all(materials.map((material) => reconcileMaterialPlugins(this._lite, material)));
+        }
+        this._materialPluginsRequested = false;
+    }
+
+    /** @internal Whether this scene queued plugin changes during the engine startup transition. */
+    public get _hasPendingMaterialPluginReconciliations(): boolean {
+        return this._pendingMaterialPluginReconciliations.size > 0;
     }
 
     /** @internal Clustered light containers to register on the Lite scene at engine start. */

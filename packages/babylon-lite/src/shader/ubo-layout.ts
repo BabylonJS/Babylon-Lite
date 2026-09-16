@@ -72,7 +72,7 @@ export function computeUboLayout(fields: readonly UboField[]): UboSpec {
     }
 
     // Round total size up to 16-byte boundary (required for uniform buffers)
-    const _totalBytes = fields.length > 0 ? alignUp(cursor, 16) : 0;
+    const _totalBytes = alignUp(cursor, 16);
     const _structBody = lines.join("\n");
 
     return {

@@ -84,6 +84,19 @@ function dynamicTask(execute: () => number) {
     };
 }
 
+function lightWorldMatrix(): Float32Array {
+    const world = new Float32Array(16);
+    world[0] = 1;
+    world[5] = 1;
+    world[10] = 1;
+    world[15] = 1;
+    return world;
+}
+
+function setLightDirectionX(light: { direction: { x: number } }, x: number): void {
+    light.direction.x = x;
+}
+
 function makeHarness() {
     const staticExecute = vi.fn(() => 1);
     const dynamicExecute = vi.fn(() => 1);
@@ -110,7 +123,7 @@ function makeHarness() {
         _device: { queue: { writeBuffer: vi.fn() } },
         _currentEncoder: { copyTextureToTexture: vi.fn() },
     };
-    const sg = { _light: { direction: { x: 0, y: -1, z: 0 } }, _shadowUBO: {}, _version: 0, _depthTexture: {} };
+    const sg = { _light: { direction: { x: 0, y: -1, z: 0 }, worldMatrix: lightWorldMatrix() }, _shadowUBO: {}, _version: 0, _depthTexture: {} };
     const cfg = { _numCascades: 1, _mapSize: 4, _bias: 0, _worldSpaceBias: null, _forceRefreshEveryFrame: false };
 
     const render = () => renderCsmShadowMapCached(engine as any, sg as any, state as any, cfg as any);
@@ -234,7 +247,7 @@ describe("renderCsmShadowMapCached spread static refit (staticCascadesPerFrame)"
             _device: { queue: { writeBuffer: vi.fn() } },
             _currentEncoder: { copyTextureToTexture: copy },
         };
-        const sg = { _light: { direction: { x: 0, y: -1, z: 0 } }, _shadowUBO: {}, _version: 0, _depthTexture: {} };
+        const sg = { _light: { direction: { x: 0, y: -1, z: 0 }, worldMatrix: lightWorldMatrix() }, _shadowUBO: {}, _version: 0, _depthTexture: {} };
         const cfg = { _numCascades: 3, _mapSize: 4, _bias: 0, _worldSpaceBias: null, _forceRefreshEveryFrame: false };
         const render = () => renderCsmShadowMapCached(engine as any, sg as any, state as any, cfg as any);
         const staticCalls = () => staticExecutes.map((fn) => fn.mock.calls.length);
@@ -255,7 +268,7 @@ describe("renderCsmShadowMapCached spread static refit (staticCascadesPerFrame)"
         const base = h.staticCalls();
         const dynamicBase = h.dynamicCalls();
         const copies = h.copy.mock.calls.length;
-        h.sg._light.direction.x = 0.2; // angle epsilon crossed: a drift-only refit
+        setLightDirectionX(h.sg._light, 0.2); // angle epsilon crossed: a drift-only refit
         expect(h.render()).toBeGreaterThan(0);
         expect(h.staticCalls()).toEqual([base[0]! + 1, base[1]!, base[2]!]); // refit frame: cascade 0 only
         expect(h.dynamicCalls()).toEqual([dynamicBase[0]! + 1, dynamicBase[1]!, dynamicBase[2]!]);
@@ -278,7 +291,7 @@ describe("renderCsmShadowMapCached spread static refit (staticCascadesPerFrame)"
         expect(h.state._uboData[16]).toBeCloseTo(2);
         expect(h.state._uboData[32]).toBeCloseTo(3);
 
-        h.sg._light.direction.x = 0.2;
+        setLightDirectionX(h.sg._light, 0.2);
         h.render();
         expect(h.state._uboData[0]).toBeCloseTo(1.2);
         expect(h.state._uboData[16]).toBeCloseTo(2);
@@ -294,7 +307,7 @@ describe("renderCsmShadowMapCached spread static refit (staticCascadesPerFrame)"
         const h = makeSpreadHarness(1);
         const dynamicBase = h.dynamicCalls();
         h.state._tasks[0]!._renderables.length = 0;
-        h.sg._light.direction.x = 0.2;
+        setLightDirectionX(h.sg._light, 0.2);
         h.render();
         expect(h.dynamicCalls()).toEqual(dynamicBase);
     });
@@ -302,7 +315,7 @@ describe("renderCsmShadowMapCached spread static refit (staticCascadesPerFrame)"
     it("re-renders every cascade in the refit frame when the camera moved, even with drift", () => {
         const h = makeSpreadHarness(1);
         const base = h.staticCalls();
-        h.sg._light.direction.x = 0.2;
+        setLightDirectionX(h.sg._light, 0.2);
         h.scene.camera.key++;
         h.render();
         expect(h.staticCalls()).toEqual([base[0]! + 1, base[1]! + 1, base[2]! + 1]);
@@ -312,7 +325,7 @@ describe("renderCsmShadowMapCached spread static refit (staticCascadesPerFrame)"
     it("keeps the single-frame re-render when the budget is 0 (historical behaviour)", () => {
         const h = makeSpreadHarness(0);
         const base = h.staticCalls();
-        h.sg._light.direction.x = 0.2;
+        setLightDirectionX(h.sg._light, 0.2);
         h.render();
         expect(h.staticCalls()).toEqual([base[0]! + 1, base[1]! + 1, base[2]! + 1]);
         expect(h.render()).toBe(0);
@@ -345,7 +358,7 @@ describe("renderCsmShadowMapCached spread static refit: a drift refit during the
             _lastCamAspect: -1,
         };
         const engine = { _device: { queue: { writeBuffer: vi.fn() } }, _currentEncoder: { copyTextureToTexture: vi.fn() } };
-        const sg = { _light: { direction: { x: 0, y: -1, z: 0 } }, _shadowUBO: {}, _version: 0, _depthTexture: {} };
+        const sg = { _light: { direction: { x: 0, y: -1, z: 0 }, worldMatrix: lightWorldMatrix() }, _shadowUBO: {}, _version: 0, _depthTexture: {} };
         const cfg = { _numCascades: 3, _mapSize: 4, _bias: 0, _worldSpaceBias: null, _forceRefreshEveryFrame: false };
         const render = () => renderCsmShadowMapCached(engine as any, sg as any, state as any, cfg as any);
         const calls = () => staticExecutes.map((fn) => fn.mock.calls.length);
@@ -355,14 +368,14 @@ describe("renderCsmShadowMapCached spread static refit: a drift refit during the
         scene.camera.key++;
         render(); // settled: the caster is static, the next refits are drift-only
         const base = calls();
-        sg._light.direction.x = 0.2; // drift refit #1: spread, cascade 0 only
+        setLightDirectionX(sg._light, 0.2); // drift refit #1: spread, cascade 0 only
         render();
         expect(calls()).toEqual([base[0]! + 1, base[1]!, base[2]!]);
-        sg._light.direction.x = 0.4; // drift refit #2 while cascades 1 and 2 still wait: everything, this frame
+        setLightDirectionX(sg._light, 0.4); // drift refit #2 while cascades 1 and 2 still wait: everything, this frame
         render();
         expect(calls()).toEqual([base[0]! + 2, base[1]! + 1, base[2]! + 1]);
         expect(render()).toBe(0); // nothing pending, nothing dynamic: the frame does nothing
-        sg._light.direction.x = 0.6; // and with the drain complete, the next drift refit spreads again: ONE cascade
+        setLightDirectionX(sg._light, 0.6); // and with the drain complete, the next drift refit spreads again: ONE cascade
         render(); // (the round-robin cursor decides which one — it continues after the last cascade taken)
         const after = calls();
         expect(after.reduce((sum, n) => sum + n, 0)).toBe(base[0]! + base[1]! + base[2]! + 5); // +1, +3, then +1

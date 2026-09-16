@@ -301,7 +301,7 @@ function _computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: M
 
 **Algorithm:**
 
-1. Normalize light direction vector: `dir = normalize(light.direction)`
+1. Transform the local direction by the light world matrix and normalize it: `dir = normalize(light.worldMatrix * vec4(light.direction, 0))`
 2. Choose up vector: `(0, 1, 0)` unless `|dirY| > 0.99`, then `(0, 0, 1)`
 3. Build orthonormal basis:
     - `right = normalize(cross(up, dir))`
@@ -313,7 +313,7 @@ function _computeDirectionalLightMatrix(light: DirectionalLight, casterMeshes: M
         | rz  uz  dirZ  0 |
         | -dot(r,P) -dot(u,P) -dot(dir,P) 1 |
     ```
-    Where `P = light.position`
+    Where `P = light.worldMatrix[12..14]`
 5. Transform all 8 corners of each caster's local AABB (`mesh.boundMin`/`boundMax`, default unit cube) through `worldMatrix` then through `view` → compute X/Y bounds in light space
 6. Expand bounds by 10% (`shadowOrthoScale = 0.1`): `lMinX -= (lMaxX - lMinX) * 0.1` etc.
 7. Z bounds from `orthoMinZ`/`orthoMaxZ` (camera near/far)
@@ -339,10 +339,10 @@ function _computeSpotLightMatrix(light: SpotLight, near: number, far: number): {
 
 **Algorithm:**
 
-1. Normalize light direction: `dir = normalize(light.direction)`
+1. Transform the local direction by the light world matrix and normalize it: `dir = normalize(light.worldMatrix * vec4(light.direction, 0))`
 2. Choose up vector: `(0, 1, 0)` unless `|dirY| > 0.99`, then `(0, 0, 1)`
 3. Build orthonormal basis (same as ESM): `right = cross(up, dir)`, `up' = cross(dir, right)`
-4. Build view matrix (column-major) from `light.position`
+4. Build view matrix (column-major) from `light.worldMatrix[12..14]`
 5. Build **perspective** projection (column-major, WebGPU z=[0,1]):
     - FOV = `light.angle` (full cone angle in radians)
     - Aspect = 1:1 (square shadow map)

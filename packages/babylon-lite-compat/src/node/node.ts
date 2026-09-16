@@ -13,6 +13,8 @@
 
 import type { Scene } from "../scene/scene.js";
 import type { WebGPUEngine } from "../engine/engine.js";
+import type { AbstractMesh } from "../meshes/meshes.js";
+import { Vector3 } from "../math/vector.js";
 import { Observable } from "../misc/observable.js";
 
 let _uniqueIdCounter = 0;
@@ -131,6 +133,35 @@ export abstract class Node {
      */
     public getChildMeshes(directDescendantsOnly = false, predicate?: (node: Node) => boolean): Node[] {
         return this.getDescendants(directDescendantsOnly, (node) => node._isMeshNode() && (!predicate || predicate(node)));
+    }
+
+    /**
+     * Babylon.js `node.getHierarchyBoundingVectors(includeDescendants?, predicate?)`
+     * — world-space bounds spanning this mesh and eligible descendant meshes.
+     */
+    public getHierarchyBoundingVectors(includeDescendants = true, predicate: ((mesh: AbstractMesh) => boolean) | null = null): { min: Vector3; max: Vector3 } {
+        const min = new Vector3(Number.MAX_VALUE, Number.MAX_VALUE, Number.MAX_VALUE);
+        const max = new Vector3(-Number.MAX_VALUE, -Number.MAX_VALUE, -Number.MAX_VALUE);
+
+        if (this._isMeshNode()) {
+            const boundingBox = (this as unknown as AbstractMesh).getBoundingInfo().boundingBox;
+            min.copyFrom(boundingBox.minimumWorld);
+            max.copyFrom(boundingBox.maximumWorld);
+        }
+
+        if (includeDescendants) {
+            for (const descendant of this.getDescendants()) {
+                const descendantMesh = descendant as AbstractMesh;
+                if ((predicate && !predicate(descendantMesh)) || !descendant._isMeshNode() || descendantMesh.getTotalVertices() === 0) {
+                    continue;
+                }
+                const boundingBox = descendantMesh.getBoundingInfo().boundingBox;
+                min.minimizeInPlace(boundingBox.minimumWorld);
+                max.maximizeInPlace(boundingBox.maximumWorld);
+            }
+        }
+
+        return { min, max };
     }
 
     public isEnabled(checkAncestors = true): boolean {

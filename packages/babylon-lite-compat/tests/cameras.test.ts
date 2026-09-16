@@ -217,6 +217,47 @@ describe("ArcRotateCamera input tuning delegates to the Lite camera", () => {
         expect(cam.angularSensibility).toBe(2000);
         expect(cam.panningSensibility).toBe(25);
     });
+
+    it.each([
+        ["the default prevention policy", undefined, true],
+        ["noPreventDefault=true", true, false],
+    ] as const)("attaches Arrow-key controls with %s and detaches them", (_description, noPreventDefault, expectedPrevented) => {
+        const scene = new Scene(new NullEngine());
+        const camera = new ArcRotateCamera("camera", 0, 1, 10, Vector3.Zero(), scene);
+        const canvas = Object.assign(new EventTarget(), {
+            tabIndex: -1,
+            hasAttribute: () => false,
+            setPointerCapture: () => undefined,
+            releasePointerCapture: () => undefined,
+        }) as unknown as HTMLCanvasElement;
+        const keyboardEvent = (type: "keydown" | "keyup", code: string): Event =>
+            Object.assign(new Event(type, { cancelable: true }), { code, ctrlKey: false, altKey: false, metaKey: false });
+        const arrowLeftDown = keyboardEvent("keydown", "ArrowLeft");
+        const arrowLeftUp = keyboardEvent("keyup", "ArrowLeft");
+
+        camera.attachControl(canvas, noPreventDefault);
+        canvas.dispatchEvent(arrowLeftDown);
+        for (const callback of scene._lite._beforeRender) {
+            callback(16);
+        }
+        canvas.dispatchEvent(arrowLeftUp);
+
+        expect(camera.alpha).toBeLessThan(0);
+        expect(canvas.tabIndex).toBe(0);
+        expect(arrowLeftDown.defaultPrevented).toBe(expectedPrevented);
+        expect(arrowLeftUp.defaultPrevented).toBe(expectedPrevented);
+
+        camera.detachControl();
+        const detachedAlpha = camera.alpha;
+        const arrowRight = keyboardEvent("keydown", "ArrowRight");
+        canvas.dispatchEvent(arrowRight);
+        for (const callback of scene._lite._beforeRender) {
+            callback(16);
+        }
+
+        expect(camera.alpha).toBe(detachedAlpha);
+        expect(arrowRight.defaultPrevented).toBe(false);
+    });
 });
 
 describe("FlyCamera", () => {

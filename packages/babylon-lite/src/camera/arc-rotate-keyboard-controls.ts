@@ -17,6 +17,8 @@ export interface ArcRotateKeyboardMappings {
 export interface ArcRotateKeyboardOptions {
     /** Direction mappings. Omitted fields retain their Arrow-key defaults. */
     keys?: ArcRotateKeyboardMappings;
+    /** Prevent browser defaults for mapped keydown/keyup events. Default: `true`. */
+    preventDefault?: boolean;
     /** Rotation divisor; higher values rotate more slowly. Default: `100`. */
     angularSensitivity?: number;
     /** Panning divisor; higher values pan more slowly. Default: `50`. */
@@ -48,6 +50,7 @@ function attachKeyboardControls(
 
     const options = typeof keyboard === "object" ? keyboard : undefined;
     const mappings = options?.keys;
+    const preventDefault = options?.preventDefault ?? true;
     const angularSensitivity = options?.angularSensitivity ?? 100;
     const panningSensitivity = options?.panningSensitivity ?? 50;
     const zoomingSensitivity = options?.zoomingSensitivity ?? 25;
@@ -79,14 +82,16 @@ function attachKeyboardControls(
         updateModifiers(e);
         if (!e.metaKey && isDirection(e.code)) {
             heldKeys.add(e.code);
-            e.preventDefault();
+            if (preventDefault) {
+                e.preventDefault();
+            }
         }
     }
 
     function onKeyUp(e: KeyboardEvent): void {
         updateModifiers(e);
         heldKeys.delete(e.code);
-        if (!e.metaKey && isDirection(e.code)) {
+        if (preventDefault && !e.metaKey && isDirection(e.code)) {
             e.preventDefault();
         }
     }

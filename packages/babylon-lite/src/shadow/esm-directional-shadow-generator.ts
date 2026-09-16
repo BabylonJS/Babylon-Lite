@@ -300,7 +300,7 @@ function renderEsmShadowMap(engine: EngineContext, sg: ShadowGenerator, state: E
     }
     const casterMeshes = state._casterMeshes;
     const casterVersion = casterVersionSum(casterMeshes);
-    const lightVersion = sg._light.worldMatrixVersion;
+    const lightVersion = sg._light._lightVersion;
     const foCam = engine.useFloatingOrigin ? state._scene.camera : null;
     const foVersion = foCam ? foCam.worldMatrixVersion : 0;
     const offX = foCam ? foCam.worldMatrix[12]! : 0;

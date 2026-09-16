@@ -204,7 +204,7 @@ export function renderPcfShadowMap(
 ): number {
     const casterMeshes = state._casterMeshes;
     const casterVersion = casterVersionSum(casterMeshes);
-    const lightVersion = sg._light.worldMatrixVersion;
+    const lightVersion = sg._light._lightVersion;
     // Floating-origin offset = active camera world position (mirrors the mesh-world packer
     // and lights UBO). When the camera moves the offset changes, so every eye-relative GPU
     // matrix shifts even if light/casters are static — fold its version into the dirty check.

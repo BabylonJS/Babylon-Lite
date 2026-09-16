@@ -4,10 +4,10 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 import type { MaterialPlugin } from "../../../packages/babylon-lite/src/material/plugin/material-plugin";
-import { enableMaterialPlugins } from "../../../packages/babylon-lite/src/material/plugin/enable-material-plugins";
+import { enableMaterialPlugins, reconcileMaterialPlugins } from "../../../packages/babylon-lite/src/material/plugin/enable-material-plugins";
 import { buildPbrGeometryRenderable } from "../../../packages/babylon-lite/src/material/pbr/pbr-geometry-renderable";
 import { createPbrGeometryMaterialView } from "../../../packages/babylon-lite/src/material/pbr/pbr-geometry-view";
-import { createPbrMaterial } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
+import { _computePbrMaterialFeatures, createPbrMaterial } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
 import { clearPbrPipelineCache } from "../../../packages/babylon-lite/src/material/pbr/pbr-pipeline";
 import { buildPbrRenderables } from "../../../packages/babylon-lite/src/material/pbr/pbr-renderable";
 import type { ToneMapping } from "../../../packages/babylon-lite/src/material/pbr/tone-mapping";
@@ -127,6 +127,81 @@ describe("PBR shader variant caches", () => {
         const fragments = fragmentSources(createShaderModule);
         expect(fragments.some((code) => code.includes("material.materialAlpha < -1.0"))).toBe(true);
         expect(fragments.some((code) => code.includes("material.materialAlpha < -2.0"))).toBe(true);
+    });
+
+    it("keeps plugin signature identities stable across scenes", async () => {
+        const { engine, createShaderModule } = makeEngine();
+        const makePlugin = (name: string, marker: string): MaterialPlugin => ({
+            name,
+            getCustomCode: (shaderType) => (shaderType === "fragment" ? { CUSTOM_FRAGMENT_UPDATE_ALPHA: marker } : null),
+        });
+        const materialA = createPbrMaterial({ plugins: [makePlugin("scene-a", "if(material.materialAlpha < -5.0){discard;}")] });
+        const sceneA = createSceneContext(engine, { defaultRenderTask: false });
+        const meshA = makeMesh(materialA);
+        sceneA._groups.set(materialA._buildGroup, [meshA]);
+        enableMaterialPlugins(sceneA);
+        const renderableA = (await buildPbrRenderables(sceneA, [meshA], undefined)).renderables[0]!;
+
+        const materialB = createPbrMaterial({ plugins: [makePlugin("scene-b", "if(material.materialAlpha < -6.0){discard;}")] });
+        const sceneB = createSceneContext(engine, { defaultRenderTask: false });
+        const meshB = makeMesh(materialB);
+        sceneB._groups.set(materialB._buildGroup, [meshB]);
+        enableMaterialPlugins(sceneB);
+        const renderableB = (await buildPbrRenderables(sceneB, [meshB], undefined)).renderables[0]!;
+
+        expect(materialA._pi).not.toBe(materialB._pi);
+        renderableA.bind(engine, signature);
+        renderableB.bind(engine, signature);
+        const fragments = fragmentSources(createShaderModule);
+        expect(fragments.some((code) => code.includes("material.materialAlpha < -5.0"))).toBe(true);
+        expect(fragments.some((code) => code.includes("material.materialAlpha < -6.0"))).toBe(true);
+    });
+
+    it("recomputes runtime PBR plugin signatures for attachment, toggles, code changes, and disposal", async () => {
+        const { engine } = makeEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        let marker = "a";
+        const plugin: MaterialPlugin = {
+            name: "runtime",
+            getCustomCode: () => ({ CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR: `// ${marker}` }),
+        };
+        const material = createPbrMaterial();
+        const target = makeMesh(material);
+        const seenIndices: number[] = [];
+        const makeRenderable = () => ({
+            mesh: target,
+            order: 0,
+            isTransparent: false,
+            bind: () => {
+                throw new Error("The reconciliation test does not bind renderables.");
+            },
+        });
+        const rebuild = vi.fn(() => {
+            expect(material._renderFeatures).toBeUndefined();
+            material._renderFeatures = _computePbrMaterialFeatures(material);
+            seenIndices.push(material._pi ?? 0);
+            return makeRenderable();
+        });
+        scene.meshes.push(target);
+        scene._groups.set(material._buildGroup, Object.assign([target], { r: rebuild }));
+        scene._renderables.push(makeRenderable());
+        scene._meshDisposables.set(target, []);
+        scene._built = true;
+        material._renderFeatures = _computePbrMaterialFeatures(material);
+
+        material.plugins = [plugin];
+        await reconcileMaterialPlugins(scene, material);
+        plugin.isEnabled = false;
+        await reconcileMaterialPlugins(scene, material);
+        plugin.isEnabled = true;
+        marker = "b";
+        await reconcileMaterialPlugins(scene, material);
+        material.plugins = [];
+        await reconcileMaterialPlugins(scene, material);
+
+        expect(seenIndices[0]).toBeGreaterThan(0);
+        expect(new Set(seenIndices.slice(0, 3)).size).toBe(3);
+        expect(seenIndices[3]).toBe(0);
     });
 
     it("normalizes a missing material-plugin index to zero", async () => {

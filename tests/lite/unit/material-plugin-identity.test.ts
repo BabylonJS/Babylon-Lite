@@ -3,14 +3,21 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
-import { enableMaterialPlugins } from "../../../packages/babylon-lite/src/material/plugin/enable-material-plugins";
+import { enableMaterialPlugins, reconcileMaterialPlugins } from "../../../packages/babylon-lite/src/material/plugin/enable-material-plugins";
 import type { MaterialPlugin } from "../../../packages/babylon-lite/src/material/plugin/material-plugin";
 import { bakeStdPluginMaterial } from "../../../packages/babylon-lite/src/material/plugin/std-plugin-bridge";
 import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material";
 import { createStandardGeometryMaterialView } from "../../../packages/babylon-lite/src/material/standard/geometry-view";
 import { buildStandardGeometryRenderable } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-renderable";
 import { buildStandardMeshRenderables } from "../../../packages/babylon-lite/src/material/standard/standard-renderable";
-import { _registerStdExt, HAS_SKELETON, HAS_SKELETON_8, NO_COLOR_OUTPUT, VERTEX_ALPHA } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
+import {
+    _installStdMaterialVariantKey,
+    _registerStdExt,
+    HAS_SKELETON,
+    HAS_SKELETON_8,
+    NO_COLOR_OUTPUT,
+    VERTEX_ALPHA,
+} from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import { _installStdVertexColorFragment } from "../../../packages/babylon-lite/src/material/standard/standard-pipeline";
 import { stdSkeletonExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-skeleton-fragment";
 import { createStdVertexColorFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/std-vertex-color-fragment";
@@ -206,6 +213,28 @@ describe("Standard plugin identity", () => {
         material.plugins = [plugin("geometryFirst")];
         bakeStdPluginMaterial(material, scene);
         expect(buildStandardGeometryRenderable(scene, mesh, view, owners[3]!).bind(engine, signature).pipeline).toBe(first);
+    });
+
+    it("installs the plugin cache identity when late reconciliation enables the bridge", async () => {
+        const engine = makeEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const material = createStandardMaterial();
+        material.plugins = [plugin("lateFirst")];
+        const mesh = makeMesh(material);
+        addToScene(scene, mesh);
+        _installStdMaterialVariantKey(() => "");
+
+        await reconcileMaterialPlugins(scene, material);
+        const result = buildStandardMeshRenderables(scene, [mesh], {});
+        const first = result.renderables[0]!.bind(engine, signature).pipeline;
+
+        material.plugins = [plugin("lateSecond")];
+        await reconcileMaterialPlugins(scene, material);
+        const second = result.rebuildSingle(scene, mesh).bind(engine, signature).pipeline;
+
+        expect(second).not.toBe(first);
+        expect(shaders(first).fragment).toContain("// lateFirst");
+        expect(shaders(second).fragment).toContain("// lateSecond");
     });
 });
 

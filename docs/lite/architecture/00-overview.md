@@ -436,7 +436,7 @@ getPickedUV(info: PickingInfo): [number, number]
 interface EngineContext {
     readonly canvas: HTMLCanvasElement;
     readonly msaaSamples: number; // always 4
-    drawCallCount: number; // GPU draw calls in last rendered frame
+    drawCallCount: number; // GPU draw calls in latest renderFrame call, across its selected surfaces
 }
 
 // ─── Scene ───────────────────────────────────────────────────────────
@@ -936,12 +936,18 @@ drive the render loop.
 registerScene runs deferred builders → requestAnimationFrame → resize() → renderFrame() → requestAnimationFrame ...
 ```
 
-**`renderFrame()`**:
+**`renderFrame(engine, delta, surfaces?)`**:
+
+- `surfaces` omitted: render every surface in `engine.surfaces`, in registration order
+- a non-empty readonly tuple: render exactly those surfaces in caller order through the same encoder/submission
+- explicit tuple ownership is checked before encoder creation because cross-device rendering would otherwise fail later with a cryptic WebGPU validation error; the default engine-owned list needs no ownership check
+- explicit tuple members must remain registered until the call returns, and registration and uniqueness remain caller preconditions to avoid hot-path registration scans, duplicate processing, and normalization allocations; cache a singleton tuple to render one surface without per-frame allocation
+- the default `engine.surfaces` list is live: if an earlier surface callback disposes a later surface, that later surface is skipped by the remaining frame and capture loops
 
 1. Create command encoder and expose it as `engine._currentEncoder`
-2. For each registered rendering context, run `_update()`:
+2. For each rendering context on the selected surfaces, run `_update()`:
     - before-render callbacks, material swaps, shadow generators, legacy pre-passes, shared uniform updaters
-3. For each registered rendering context, run `_record()`:
+3. For each rendering context on the selected surfaces, run `_record()`:
     - `scene._frameGraph.execute()` drains its ordered tasks
 
 - each `RenderTask` acquires/patches the swapchain or RTT views, writes its per-pass scene UBO, calls `DrawBinding.update({ targetWidth, targetHeight, _camera })`, and draws bucketed `DrawBinding`s

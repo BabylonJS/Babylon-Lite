@@ -72,6 +72,7 @@ import {
     FluidRenderer,
     FluidRendererSceneComponent,
     RegisterFluidRenderer,
+    DitheredTileFadeMaterialPlugin,
 } from "../src/unsupported/unsupported-apis";
 import {
     GLTF1,
@@ -79,12 +80,13 @@ import {
     ImageProcessingConfiguration,
     RegisterAbstractEngineTextureLoaders,
     RegisterImageProcessingConfiguration,
+    registerBuiltInLoaders,
     OpenPBRMaterialLoadingAdapter as RootOpenPBRMaterialLoadingAdapter,
     RegisterOpenpbrMaterial as RootRegisterOpenpbrMaterial,
 } from "../src/index";
 import { MeshBuilder, CreateTiledBox, CreateTiledPlane } from "../src/meshes/meshes";
 import { SceneLoader } from "../src/loading/scene-loader";
-import { Material, PushMaterial } from "../src/materials/materials";
+import { Material, PushMaterial, StandardMaterial } from "../src/materials/materials";
 import { NullEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
 
@@ -109,6 +111,7 @@ describe("LiteCompatError", () => {
 describe("Unsupported API stubs throw on construction", () => {
     const cases: Array<[string, () => unknown]> = [
         ["MultiMaterial", () => new MultiMaterial()],
+        ["DitheredTileFadeMaterialPlugin", () => new DitheredTileFadeMaterialPlugin(new StandardMaterial("material"))],
         ["ShaderMaterial", () => new ShaderMaterial()],
         ["OpenPBRMaterial", () => new OpenPBRMaterial("openpbr", undefined, true)],
         ["OpenPBRMaterialDefines", () => new OpenPBRMaterialDefines({ CUSTOM: { type: "boolean", default: false } })],
@@ -341,6 +344,11 @@ describe("image-processing additions", () => {
     it("treats Lite's direct texture loader dispatch as already registered", () => {
         expectTypeOf(RegisterAbstractEngineTextureLoaders).returns.toEqualTypeOf<void>();
         expect(RegisterAbstractEngineTextureLoaders()).toBeUndefined();
+    });
+
+    it("treats compat's direct built-in loader dispatch as already registered", () => {
+        expectTypeOf(registerBuiltInLoaders).returns.toEqualTypeOf<void>();
+        expect(registerBuiltInLoaders()).toBeUndefined();
     });
 });
 

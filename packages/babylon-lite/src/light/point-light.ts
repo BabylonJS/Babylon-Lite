@@ -3,11 +3,8 @@
  *  Push-based dirty tracking via ObservableVec3. */
 
 import type { LightBase } from "./types.js";
-import type { SceneNode } from "../scene/scene-node.js";
-import { createLightBase, applyWorldMatrixAccessors, ObservableVec3 } from "./light-base.js";
-import type { Mat4 } from "../math/types.js";
-import type { Mat4Storage } from "../math/types.js";
-import { allocateMat4 } from "../math/_matrix-allocator.js";
+import type { ObservableVec3 } from "./light-base.js";
+import { createLightBase, applyLightBase, copyLightBase } from "./light-base.js";
 
 export interface PointLight extends LightBase {
     readonly lightType: "point";
@@ -25,28 +22,23 @@ export interface PointLight extends LightBase {
  * @returns Plain `PointLight` data to be added to a scene via `addToScene`.
  */
 export function createPointLight(position: [number, number, number], intensity = 1.0): PointLight {
-    const m = allocateMat4() as unknown as Mat4Storage;
-    m[0] = 1;
-    m[5] = 1;
-    m[10] = 1;
-    m[15] = 1;
-    const _localMatrix = m as unknown as Mat4;
-    const { wm, onDirty, lvs } = createLightBase(() => {
-        m[12] = light.position.x;
-        m[13] = light.position.y;
-        m[14] = light.position.z;
-        return _localMatrix;
-    });
-
-    const light = applyWorldMatrixAccessors<PointLight>(
+    const { node, lvs } = createLightBase(position);
+    const light = applyLightBase<PointLight>(
+        node,
         {
             lightType: "point" as const,
-            children: [] as SceneNode[],
-            position: new ObservableVec3(position[0], position[1], position[2], onDirty),
             diffuse: [1, 1, 1] as [number, number, number],
             specular: [1, 1, 1] as [number, number, number],
             intensity,
             range: Number.MAX_VALUE,
+            _cloneNode: () => {
+                const clone = createPointLight([light.position.x, light.position.y, light.position.z], light.intensity);
+                clone.diffuse = [...light.diffuse];
+                clone.specular = [...light.specular];
+                clone.range = light.range;
+                copyLightBase(light, clone);
+                return clone;
+            },
 
             _writeLightUbo: (data: Float32Array, offset: number) => {
                 const o = offset;
@@ -64,7 +56,6 @@ export function createPointLight(position: [number, number, number], intensity =
                 data[o + 10] = light.specular[2] * light.intensity;
             },
         },
-        wm,
         lvs
     );
     return light;

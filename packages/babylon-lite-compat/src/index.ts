@@ -112,7 +112,7 @@ export {
 export type { IUploadImageToTexture2DArrayLayerOptions, ICreateTexture2DArrayFromImageUrlsOptions, ICreateTexture2DArrayFromKTX2Options } from "./textures/raw-texture-2d-array.js";
 
 // ─── Loading ─────────────────────────────────────────────────────────
-export { SceneLoader, AssetContainer, ImportMeshAsync, AppendSceneAsync, LoadAssetContainerAsync } from "./loading/scene-loader.js";
+export { SceneLoader, AssetContainer, ImportMeshAsync, AppendSceneAsync, LoadAssetContainerAsync, registerBuiltInLoaders } from "./loading/scene-loader.js";
 export type { ISceneLoaderProgressEvent, ISceneLoaderOptions, ImportMeshOptions, AppendOptions, LoadAssetContainerOptions } from "./loading/scene-loader.js";
 export { AssetsManager, AbstractAssetTask, CustomAssetTask } from "./loading/assets-manager.js";
 export { KHR_materials_variants } from "./loading/material-variants.js";
@@ -136,6 +136,7 @@ export {
     PlaneDragGizmo,
     AxisScaleGizmo,
 } from "./gizmos/gizmos.js";
+export type { DragEvent, DragStartEndEvent } from "./gizmos/gizmos.js";
 
 // ─── Behaviors ───────────────────────────────────────────────────────
 export { AutoRotationBehavior, BouncingBehavior, FramingBehavior } from "./behaviors/behaviors.js";
@@ -182,6 +183,8 @@ export {
     Constants,
     RegisterImageProcessingConfiguration,
     RegisterAbstractEngineTextureLoaders,
+    RegisterEnginesExtensionsEngineTexture2DArrayImageSource,
+    RegisterEnginesWebGPUExtensionsEngineTexture2DArrayImageSource,
 } from "./misc/engine-constants.js";
 
 // ─── Actions ─────────────────────────────────────────────────────────
@@ -328,7 +331,13 @@ export {
     RegisterFluidRenderer,
     USDFileLoader,
     RegisterUSDFileLoader,
+    DitheredTileFadeMaterialPlugin,
+    FlowGraphValidationSeverity,
+    ValidateFlowGraph,
+    ValidateFlowGraphWithBlockList,
 } from "./unsupported/unsupported-apis.js";
+export { MaterialPluginBase, MaterialPluginManager } from "./materials/material-plugin.js";
+export type { MaterialPluginDefines, MaterialPluginCustomCode } from "./materials/material-plugin.js";
 export * as GLTF2 from "./loading/gltf2.js";
 export * as GLTF1 from "./loading/gltf1.js";
 export type {
@@ -337,6 +346,7 @@ export type {
     IHtmlInCanvasPolyfillModule,
     IInstallHtmlInCanvasPolyfillOptions,
     GaussianSplattingStreamDebugLodSource,
+    GaussianSplattingStreamLod0SplatCount,
     IGaussianSplattingStreamOptions,
     ISOGLODMetadata,
     IGaussianSplattingStreamingPart,
@@ -347,6 +357,11 @@ export type {
     USDImportStatistics,
     USDImportDiagnostics,
     USDFileLoaderOptions,
+    DitheredTileFadeSupportedMaterial,
+    DitheredTileFadeMesh,
+    IDitheredTileFadeBounds,
+    IFlowGraphValidationIssue,
+    IFlowGraphValidationResult,
 } from "./unsupported/unsupported-apis.js";
 export {
     ReflectionProbe,
@@ -377,11 +392,25 @@ export {
     OBJFileLoader,
     STLFileLoader,
     FBXFileLoader,
+    FBXFileLoaderMetadata,
+    FBXConstraintBehavior,
+    FBXConstraintSolver,
     BVHFileLoader,
     SpriteMap,
     SpritePackedManager,
     VirtualJoystick,
     SceneOptimizer,
+} from "./unsupported/unsupported-extended.js";
+export type {
+    GeometryRenderingObjectIdProvider,
+    FBXNormalMapCoordinateSystem,
+    FBXLoaderWarning,
+    FBXFileLoaderOptions,
+    FBXConstraintType,
+    FBXConstraintTarget,
+    FBXConstraintData,
+    FBXConstraintBehaviorTarget,
+    FBXConstraintBehaviorOptions,
 } from "./unsupported/unsupported-extended.js";
 export { Skeleton, Bone } from "./bones/skeleton.js";
 
