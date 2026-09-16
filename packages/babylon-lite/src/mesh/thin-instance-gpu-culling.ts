@@ -21,6 +21,7 @@ import type { ThinInstanceDrawBuffers } from "./thin-instance-gpu.js";
 import { bumpVisibilityEpoch } from "../engine/engine.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { wgsl } from "../shader/wgsl.js";
+import { writeMeshIndexedIndirectArgs } from "./mesh-vertex-layout.js";
 
 const WORKGROUP_SIZE = 64;
 const PARAM_BYTES = 192;
@@ -169,9 +170,9 @@ export interface ThinInstanceGpuCullState {
     _localSphereReady: boolean;
     /** @internal CPU geometry reference used to build `_localSphere`. */
     _localPositions?: Float32Array;
-    /** @internal Bounds references used to detect same-buffer geometry updates. */
+    /** @internal Bounds reference for CPU geometry; value snapshot for analytic-only geometry. */
     _localBoundMin?: Mesh["boundMin"];
-    /** @internal Bounds references used to detect same-buffer geometry updates. */
+    /** @internal Bounds reference for CPU geometry; value snapshot for analytic-only geometry. */
     _localBoundMax?: Mesh["boundMax"];
     /** @internal */
     _localSphere: Float32Array;
@@ -188,6 +189,8 @@ export interface ThinInstanceGpuCullState {
     /** @internal */
     _indexCount: number;
     /** @internal */
+    _baseVertex: number;
+    /** @internal */
     _active: boolean;
     /** @internal Whether the current pipeline/bind-group/params target the two-bucket LOD variant. */
     _lodActive: boolean;
@@ -199,6 +202,8 @@ export interface ThinInstanceGpuCullState {
     _lodArgsBuffer: GPUBuffer | null;
     /** @internal Last index count (the partner mesh's) written to `_lodArgsBuffer`. */
     _lodIndexCount: number;
+    /** @internal Last base vertex (the partner mesh's) written to `_lodArgsBuffer`. */
+    _lodBaseVertex: number;
     /** @internal True once the far-bucket args were zeroed for a fallback frame (reset when culling runs). */
     _lodArgsZeroed: boolean;
 }
@@ -302,12 +307,14 @@ export function createTiCullState(): ThinInstanceGpuCullState {
         _argsData: new U32(5),
         _drawBuffers: null,
         _indexCount: -1,
+        _baseVertex: -1,
         _active: false,
         _lodActive: false,
         _lodMatrixBuffer: null,
         _lodColorBuffer: null,
         _lodArgsBuffer: null,
         _lodIndexCount: -1,
+        _lodBaseVertex: -1,
         _lodArgsZeroed: false,
     };
 }
@@ -352,14 +359,20 @@ export function prepareTiCull(
         return cullFallback(engine, state);
     }
     const positions = mesh._cpuPositions;
-    if (!state._localSphereReady || state._localPositions !== positions || state._localBoundMin !== mesh.boundMin || state._localBoundMax !== mesh.boundMax) {
+    const hasPositions = positions && positions.length >= 3;
+    const boundsChanged = hasPositions
+        ? state._localBoundMin !== mesh.boundMin || state._localBoundMax !== mesh.boundMax
+        : !sameBounds(state._localBoundMin, mesh.boundMin) || !sameBounds(state._localBoundMax, mesh.boundMax);
+    if (!state._localSphereReady || state._localPositions !== positions || boundsChanged) {
         if (!computeLocalSphere(mesh as Mesh, state._localSphere)) {
+            state._localSphereReady = false;
             return cullFallback(engine, state);
         }
         state._localSphereReady = true;
+        const reuseBounds = (state._localPositions?.length ?? 0) < 3;
+        state._localBoundMin = !hasPositions ? copyBounds(mesh.boundMin!, state._localBoundMin, reuseBounds) : mesh.boundMin;
+        state._localBoundMax = !hasPositions ? copyBounds(mesh.boundMax!, state._localBoundMax, reuseBounds) : mesh.boundMax;
         state._localPositions = positions;
-        state._localBoundMin = mesh.boundMin;
-        state._localBoundMax = mesh.boundMax;
     }
 
     syncThinInstanceGpuData(engine, ti, hasColor);
@@ -401,7 +414,7 @@ export function prepareTiCull(
 
     const v = camera.viewport;
     const aspect = (context.targetWidth / context.targetHeight) * (v ? v.width / v.height : 1);
-    writeCullParams(engine, state, mesh, gpu.indexCount, ti.count, camera, aspect, lod);
+    writeCullParams(engine, state, mesh, gpu, ti.count, camera, aspect, lod);
 
     const dispatch = {
         pipeline,
@@ -496,6 +509,7 @@ function ensureCullBuffers(engine: EngineContext, state: ThinInstanceGpuCullStat
             state._lodColorBuffer = null;
             state._lodArgsBuffer = null;
             state._lodIndexCount = -1;
+            state._lodBaseVertex = -1;
             state._lodArgsZeroed = false;
         }
         state._lodActive = lod;
@@ -556,6 +570,7 @@ function ensureCullBuffers(engine: EngineContext, state: ThinInstanceGpuCullStat
             usage: BU.INDIRECT | BU.STORAGE | BU.COPY_DST,
         });
         state._lodIndexCount = -1;
+        state._lodBaseVertex = -1;
         state._lodArgsZeroed = false;
     }
     if (!state._argsBuffer) {
@@ -563,6 +578,8 @@ function ensureCullBuffers(engine: EngineContext, state: ThinInstanceGpuCullStat
             size: INDIRECT_ARGS_BYTES,
             usage: BU.INDIRECT | BU.STORAGE | BU.COPY_DST,
         });
+        state._indexCount = -1;
+        state._baseVertex = -1;
     }
     if (!state._paramsBuffer) {
         state._paramsBuffer = device.createBuffer({
@@ -613,7 +630,7 @@ function writeCullParams(
     engine: EngineContext,
     state: ThinInstanceGpuCullState,
     mesh: Mesh,
-    indexCount: number,
+    gpu: MeshGPU,
     instanceCount: number,
     camera: Camera,
     aspect: number,
@@ -636,15 +653,13 @@ function writeCullParams(
         params[LOD_BAND_F32_OFFSET] = mesh.thinInstances?._lodBand ?? 0;
     }
 
-    if (state._indexCount !== indexCount) {
+    const baseVertex = gpu._baseVertex ?? 0;
+    if (state._indexCount !== gpu.indexCount || state._baseVertex !== baseVertex) {
         const args = state._argsData;
-        args[0] = indexCount;
-        args[1] = 0;
-        args[2] = 0;
-        args[3] = 0;
-        args[4] = 0;
+        writeMeshIndexedIndirectArgs(args, gpu, 0);
         engine._device.queue.writeBuffer(state._argsBuffer!, 0, args.buffer, args.byteOffset, args.byteLength);
-        state._indexCount = indexCount;
+        state._indexCount = gpu.indexCount;
+        state._baseVertex = baseVertex;
     } else {
         engine._currentEncoder.clearBuffer(state._argsBuffer!, 4, 4);
     }
@@ -652,15 +667,13 @@ function writeCullParams(
         // Far-bucket args carry the PARTNER mesh's index count; the compute pass fills its instance count.
         const lodGpu = lodMesh._gpu as MeshGPU | undefined;
         const lodIndexCount = lodGpu ? lodGpu.indexCount : 0;
-        if (state._lodIndexCount !== lodIndexCount) {
+        const lodBaseVertex = lodGpu?._baseVertex ?? 0;
+        if (lodGpu && (state._lodIndexCount !== lodIndexCount || state._lodBaseVertex !== lodBaseVertex)) {
             const args = state._argsData;
-            args[0] = lodIndexCount;
-            args[1] = 0;
-            args[2] = 0;
-            args[3] = 0;
-            args[4] = 0;
+            writeMeshIndexedIndirectArgs(args, lodGpu, 0);
             engine._device.queue.writeBuffer(state._lodArgsBuffer!, 0, args.buffer, args.byteOffset, args.byteLength);
             state._lodIndexCount = lodIndexCount;
+            state._lodBaseVertex = lodBaseVertex;
         } else {
             engine._currentEncoder.clearBuffer(state._lodArgsBuffer!, 4, 4);
         }
@@ -693,46 +706,75 @@ function writePlane(out: Float32Array, offset: number, x: number, y: number, z: 
     out[offset + 3] = w * invLen;
 }
 
+function sameBounds(a: Mesh["boundMin"], b: Mesh["boundMin"]): boolean {
+    return a === b || (!!a && !!b && a[0] === b[0] && a[1] === b[1] && a[2] === b[2]);
+}
+
+function copyBounds(source: NonNullable<Mesh["boundMin"]>, previous: Mesh["boundMin"], reuse: boolean): NonNullable<Mesh["boundMin"]> {
+    const copy: NonNullable<Mesh["boundMin"]> = reuse && previous ? previous : [0, 0, 0];
+    copy[0] = source[0];
+    copy[1] = source[1];
+    copy[2] = source[2];
+    return copy;
+}
+
 function computeLocalSphere(mesh: Mesh, out: Float32Array): boolean {
     const positions = mesh._cpuPositions;
-    if (!positions || positions.length < 3) {
-        return false;
-    }
     let minX = Infinity,
         minY = Infinity,
         minZ = Infinity;
     let maxX = -Infinity,
         maxY = -Infinity,
         maxZ = -Infinity;
-    for (let i = 0; i < positions.length; i += 3) {
-        const x = positions[i]!;
-        const y = positions[i + 1]!;
-        const z = positions[i + 2]!;
-        if (x < minX) {
-            minX = x;
+    if (!positions || positions.length < 3) {
+        const min = mesh.boundMin;
+        const max = mesh.boundMax;
+        if (!min || !max) {
+            return false;
         }
-        if (x > maxX) {
-            maxX = x;
-        }
-        if (y < minY) {
-            minY = y;
-        }
-        if (y > maxY) {
-            maxY = y;
-        }
-        if (z < minZ) {
-            minZ = z;
-        }
-        if (z > maxZ) {
-            maxZ = z;
+        [minX, minY, minZ] = min;
+        [maxX, maxY, maxZ] = max;
+    } else {
+        for (let i = 0; i < positions.length; i += 3) {
+            const x = positions[i]!;
+            const y = positions[i + 1]!;
+            const z = positions[i + 2]!;
+            if (x < minX) {
+                minX = x;
+            }
+            if (x > maxX) {
+                maxX = x;
+            }
+            if (y < minY) {
+                minY = y;
+            }
+            if (y > maxY) {
+                maxY = y;
+            }
+            if (z < minZ) {
+                minZ = z;
+            }
+            if (z > maxZ) {
+                maxZ = z;
+            }
         }
     }
-    if (!isFinite(minX)) {
+    if (
+        !Number.isFinite(minX) ||
+        !Number.isFinite(minY) ||
+        !Number.isFinite(minZ) ||
+        !Number.isFinite(maxX) ||
+        !Number.isFinite(maxY) ||
+        !Number.isFinite(maxZ) ||
+        minX > maxX ||
+        minY > maxY ||
+        minZ > maxZ
+    ) {
         return false;
     }
-    const cx = (minX + maxX) * 0.5;
-    const cy = (minY + maxY) * 0.5;
-    const cz = (minZ + maxZ) * 0.5;
+    const cx = minX * 0.5 + maxX * 0.5;
+    const cy = minY * 0.5 + maxY * 0.5;
+    const cz = minZ * 0.5 + maxZ * 0.5;
     const dx = maxX - cx;
     const dy = maxY - cy;
     const dz = maxZ - cz;
@@ -740,5 +782,5 @@ function computeLocalSphere(mesh: Mesh, out: Float32Array): boolean {
     out[1] = cy;
     out[2] = cz;
     out[3] = Math.hypot(dx, dy, dz);
-    return true;
+    return Number.isFinite(out[0]) && Number.isFinite(out[1]) && Number.isFinite(out[2]) && Number.isFinite(out[3]);
 }

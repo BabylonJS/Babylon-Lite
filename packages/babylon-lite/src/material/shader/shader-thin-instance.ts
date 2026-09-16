@@ -23,8 +23,9 @@ import type { UboSpec } from "../../shader/fragment-types.js";
 import type { DrawUpdateContext, MeshGroupBuildResult, MeshRebuildResources, Renderable } from "../../render/renderable.js";
 import type { ShaderAttributeName, ShaderMaterial } from "./shader-material.js";
 import type { ShaderPipelineBindings } from "./shader-pipeline.js";
-import type { ShaderPacket, ShaderRenderPass } from "./shader-renderable.js";
+import type { ShaderPacket, ShaderRenderPass, ShaderVbRenderSupport } from "./shader-renderable.js";
 import { syncThinInstanceBuffers, syncThinInstanceForDraw } from "../../mesh/thin-instance-gpu.js";
+import { applyMeshVertexBufferLayout, drawMeshIndexed } from "../../mesh/mesh-vertex-layout.js";
 import type { UniformCopyBatch } from "../../render/uniform-copy-batch.js";
 import { wgsl } from "../../shader/wgsl.js";
 
@@ -37,6 +38,7 @@ interface ShaderHelpers {
     updatePacket: (scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext, uniformBatch?: UniformCopyBatch) => void;
     updateCustomUbo: (engine: EngineContext, material: ShaderMaterial, uniformBatch?: UniformCopyBatch) => void;
     getAttrBuffer: (engine: EngineContext, mesh: Mesh, name: ShaderAttributeName) => GPUBuffer;
+    getVertexLayout?: ShaderVbRenderSupport["_forMesh"];
     getOrCreateShaderPipeline: (
         engine: EngineContext,
         sig: RenderTargetSignature,
@@ -106,7 +108,6 @@ function createShaderInstancedRenderable(
     const baseLocation = material.attributes.length;
     const instanceLayouts = instanceVertexLayouts(baseLocation, hasColor);
     const instanceAttrs = instancePreludeAttributes(baseLocation, hasColor);
-    const variantKey = "" + +hasColor;
     const wm = mesh.worldMatrix as unknown as ArrayLike<number>;
     const sortCenter: [number, number, number] = [wm[12]!, wm[13]!, wm[14]!];
     let drawArgs: GPUBuffer | null = null;
@@ -119,7 +120,7 @@ function createShaderInstancedRenderable(
         }
         h.updateCustomUbo(scene.surface.engine, material, uniformBatch);
         h.updatePacket(scene, material, packet, context, uniformBatch);
-        drawArgs = syncThinInstanceForDraw(scene.surface.engine, ti, hasColor, mesh._gpu.indexCount);
+        drawArgs = syncThinInstanceForDraw(scene.surface.engine, ti, hasColor, mesh._gpu);
         if (isTransparent) {
             const m = mesh.worldMatrix as unknown as ArrayLike<number>;
             sortCenter[0] = m[12]!;
@@ -143,11 +144,11 @@ function createShaderInstancedRenderable(
         pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
         pass.setBindGroup(1, packet._bindGroup!);
         if (cullBinding) {
-            cullBinding.draw(pass, gpu.indexCount, ti.count);
+            cullBinding.draw(pass, gpu, ti.count);
         } else if (drawArgs) {
             pass.drawIndexedIndirect(drawArgs, 0);
         } else {
-            pass.drawIndexed(gpu.indexCount, ti.count);
+            drawMeshIndexed(pass, gpu, ti.count);
         }
         return 1;
     };
@@ -158,7 +159,9 @@ function createShaderInstancedRenderable(
         _worldCenter: sortCenter,
         bind(eng, sig) {
             const bindings = h.getOrCreateShaderPipelineBindings(eng, material);
-            const vertexBuffers = [...bindings.vertexBuffers, ...instanceLayouts];
+            const layout = h.getVertexLayout?.(material, bindings, mesh);
+            const variantKey = `${+hasColor}${layout?._key ?? mesh._gpu._vbKey ?? ""}`;
+            const vertexBuffers = [...(layout?._vbs ?? applyMeshVertexBufferLayout(bindings.vertexBuffers, material.attributes, mesh._gpu._vbLayout)), ...instanceLayouts];
             const pipeline = h.getOrCreateShaderPipeline(eng, sig, material, bindings, variantKey, vertexBuffers, instanceAttrs);
             const uniformBatch = h.getUniformBatch?.(sig);
             const baseUpdate = (context: DrawUpdateContext): void => update(context, uniformBatch);
@@ -204,7 +207,8 @@ export function buildShaderRenderablesWithInstancing(
     getOrCreateShaderPipeline: ShaderHelpers["getOrCreateShaderPipeline"],
     getOrCreateShaderPipelineBindings: ShaderHelpers["getOrCreateShaderPipelineBindings"],
     getUniformBatch?: ShaderHelpers["getUniformBatch"],
-    cull?: CullModule
+    cull?: CullModule,
+    getVertexLayout?: ShaderHelpers["getVertexLayout"]
 ): MeshGroupBuildResult {
     const h: ShaderHelpers = {
         buildPlain,
@@ -212,6 +216,7 @@ export function buildShaderRenderablesWithInstancing(
         updatePacket,
         updateCustomUbo,
         getAttrBuffer,
+        getVertexLayout,
         getOrCreateShaderPipeline,
         getOrCreateShaderPipelineBindings,
         getUniformBatch,

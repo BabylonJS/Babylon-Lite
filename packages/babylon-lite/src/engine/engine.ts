@@ -124,6 +124,8 @@ export interface EngineContext extends SurfaceContext {
     _managedResourceDisposers?: Array<() => void>;
     /** @internal Installed only while independent managed resource families are live. */
     _disposeManagedResources?: () => void;
+    /** @internal Bumped when a managed resource handle is destroyed or replaced. */
+    _resourceEpoch?: number;
     /** @internal Shared 1×1 white texture used as the default baseColor / ORM for
      *  factor-only PBR materials (created via `createPbrMaterial` without textures).
      *  A white ORM yields `metallic = metallicFactor`, `roughness = roughnessFactor`,

@@ -15,7 +15,7 @@ import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene-core.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { StandardMaterialProps, StandardSceneShaderContext } from "./standard-material.js";
-import type { Mesh } from "../../mesh/mesh.js";
+import type { Mesh, MeshVbLayout } from "../../mesh/mesh.js";
 import type { ResolvedStencil } from "../stencil-state.js";
 import type { StencilState } from "../material.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
@@ -94,7 +94,8 @@ export function composeStandardShader(
     _meshFeatures = 0,
     fragments: ShaderFragment[] = [],
     esmShadowDepthCode = "",
-    sceneShader: StandardSceneShaderContext | null = null
+    sceneShader: StandardSceneShaderContext | null = null,
+    meshVertexLayout?: MeshVbLayout
 ): ComposedShader {
     const has = (bit: number) => !!(features & bit);
     const pc = fragments[0]?._pc;
@@ -111,7 +112,7 @@ export function composeStandardShader(
         },
         esmShadowDepthCode
     );
-    let composed = composeShader(template, sceneShader ? [...fragments, ...sceneShader._fragments] : fragments);
+    let composed = composeShader(template, sceneShader ? [...fragments, ...sceneShader._fragments] : fragments, meshVertexLayout);
     pc && (composed = pc(composed));
     fragments[1]?._pc && (composed = fragments[1]._pc(composed));
     return composed;
@@ -187,7 +188,9 @@ export function getOrCreateStandardBindings(
     shaderKey = "",
     esmShadowDepthCode = "",
     stencil: StencilState | null = null,
-    sceneShader: StandardSceneShaderContext | null = null
+    sceneShader: StandardSceneShaderContext | null = null,
+    meshVertexLayout?: MeshVbLayout,
+    meshVertexKey = ""
 ): StandardShaderBindings {
     ensureDevice(engine);
     // Stencil state is baked into the GPU pipeline (no dynamic stencil ref), so two materials that differ only in
@@ -195,7 +198,7 @@ export function getOrCreateStandardBindings(
     // goes through the opt-in `_stencilResolver` hook, so non-stencil scenes fold this whole block away.
     const resolvedStencil = stencil && _stencilResolver ? _stencilResolver(stencil) : null;
     const sceneFeatures = sceneShader?._features ?? 0;
-    const key = standardFeatureKey(features, meshFeatures, sceneFeatures, shaderKey) + (resolvedStencil ? resolvedStencil._key : "");
+    const key = standardFeatureKey(features, meshFeatures, sceneFeatures, shaderKey) + meshVertexKey + (resolvedStencil ? resolvedStencil._key : "");
     const cached = _bindingsCache.get(key);
     if (cached) {
         return cached;
@@ -204,7 +207,7 @@ export function getOrCreateStandardBindings(
     const cc = getComposedCache();
     let composed = cc.get(key);
     if (!composed) {
-        composed = composeStandardShader(features, meshFeatures, fragments, esmShadowDepthCode, sceneShader);
+        composed = composeStandardShader(features, meshFeatures, fragments, esmShadowDepthCode, sceneShader, meshVertexLayout);
         cc.set(key, composed);
     }
 

@@ -46,6 +46,7 @@ import type { PbrLightMode } from "./pbr-compose.js";
 import type { Material, MaterialRenderFeatures } from "../material.js";
 import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
+import { drawMeshIndexed } from "../../mesh/mesh-vertex-layout.js";
 
 type SingleLightType = "hemispheric" | "directional" | "spot" | "point";
 interface SingleLightWgslModule {
@@ -225,7 +226,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // from the per-frame update() below (which always runs). It is version-gated, so static instances
     // cost nothing, and it never recreates the buffer for a same-capacity update — keeping the cached
     // bundle's setVertexBuffer reference valid.
-    let _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number) => GPUBuffer | null) | null = null;
+    let _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, gpu: Mesh["_gpu"]) => GPUBuffer | null) | null = null;
     if (hasSomeThinInstances) {
         const mod = await import("../../shader/fragments/thin-instance-fragment.js");
         _createThinInstanceFragment = mod.createThinInstanceFragment;
@@ -400,7 +401,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             // _syncThinInstanceForDraw declaration above). This is what makes per-frame animated
             // instance transforms (wind sway) actually reach the GPU despite the cached draw bundle.
             if (hasTI) {
-                thinDrawArgs = syncThinInstanceForDraw!(engine, mesh.thinInstances!, hasTIColor, mesh._gpu.indexCount);
+                thinDrawArgs = syncThinInstanceForDraw!(engine, mesh.thinInstances!, hasTIColor, mesh._gpu);
             }
         };
         // FO-version wrapper applied only when the engine has floating-origin
@@ -459,11 +460,11 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
             pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
             if (cullBinding) {
-                cullBinding.draw(pass, gpu.indexCount, ti!.count);
+                cullBinding.draw(pass, gpu, ti!.count);
             } else if (thinDrawArgs) {
                 pass.drawIndexedIndirect(thinDrawArgs, 0);
             } else {
-                pass.drawIndexed(gpu.indexCount, ti?.count);
+                drawMeshIndexed(pass, gpu, ti?.count);
             }
             return 1;
         };
@@ -535,7 +536,7 @@ export interface _PbrGeometryContext {
     /** @internal */
     readonly _syncThinInstanceBuffers: SyncThinInstanceBuffers | null;
     /** @internal */
-    readonly _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number) => GPUBuffer | null) | null;
+    readonly _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, gpu: Mesh["_gpu"]) => GPUBuffer | null) | null;
 }
 
 function toSingleLightType(type: string): SingleLightType {

@@ -7,6 +7,8 @@ import type { BindingDecl, ComposedShader, FragmentSlot, ShaderFragment, ShaderT
 import { computeUboLayout } from "./ubo-layout.js";
 import { SCENE_UBO_WGSL } from "./scene-uniforms.js";
 import { wgsl } from "./wgsl.js";
+import type { MeshVbLayout } from "../mesh/mesh.js";
+import { applyMeshVertexLayout } from "../mesh/mesh-vertex-layout.js";
 
 const STAGE_VERTEX = 0x1;
 const STAGE_FRAGMENT = 0x2;
@@ -143,7 +145,7 @@ function injectSlots(tpl: string, sorted: readonly ShaderFragment[], key: "_frag
     });
 }
 
-export function composeShader(template: ShaderTemplate, fragments: readonly ShaderFragment[]): ComposedShader {
+export function composeShader(template: ShaderTemplate, fragments: readonly ShaderFragment[], meshVertexLayout?: MeshVbLayout): ComposedShader {
     const sorted = topoSort(fragments);
 
     // Collect fragment data
@@ -171,7 +173,7 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     }
 
     // Vertex attributes + layouts
-    const allAttrs = dedup(template._baseVertexAttributes, fragAttrs);
+    const allAttrs = applyMeshVertexLayout(dedup(template._baseVertexAttributes, fragAttrs), meshVertexLayout);
     const inputLines: string[] = [];
     const _vertexBufferLayouts: GPUVertexBufferLayout[] = [];
     const groups = new Map<string, GPUVertexBufferLayout & { attributes: GPUVertexAttribute[] }>();

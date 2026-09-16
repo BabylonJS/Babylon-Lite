@@ -350,7 +350,7 @@ function buildInterleavedGpu(engine: EngineContext, m: GltfMeshData): MeshGPU {
         indexCount: m._indexCount,
         indexFormat: (m._indices instanceof U32 ? "uint32" : "uint16") as GPUIndexFormat,
         _vbLayout: vbsrc,
-        _vbKey: `vb${k(vbsrc._p)}.${k(vbsrc._n)}.${k(vbsrc._t)}.${k(vbsrc._u)}`,
+        _vbKey: `vb${k(vbsrc._p)}.${k(vbsrc._n)}.${k(vbsrc._t)}.${k(vbsrc._u)}.${k(vbsrc._u2)}.${k(vbsrc._c)}`,
     };
 }
 

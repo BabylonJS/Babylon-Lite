@@ -85,6 +85,19 @@ rebuilds textures, geometry, skeletons, morph targets, environment lighting,
 shadow generators, renderables, scene/light bind groups, frame-graph tasks, and
 render targets.
 
+Meshes created by `createMeshFromStorageBuffer()` borrow their vertex allocation
+instead of retaining CPU geometry. Storage-buffer recovery rebuilds that allocation
+first; the storage-mesh observer then re-points every vertex handle advertised by
+the mesh (`positionBuffer`, `normalBuffer`, `uvBuffer`, and optional
+`tangentBuffer`, `uv2Buffer`, and `colorBuffer`) to the replacement allocation.
+A shared storage-backed index handle is refreshed in the same pass. Optional-stream
+presence metadata and the mesh's `_vbLayout` / `_baseVertex` remain unchanged.
+Owned typed-array indices retain a private copy of their validated draw prefix; the
+observer uploads that copy on the replacement device while preserving count and
+format. Clones share one recovered `MeshGPU`, and disposing its last owner removes
+the recovery source. GPU-generated storage contents still need the application's
+producer to refill them.
+
 Environment recovery supports `loadEnvironment` (`.env`) and
 `loadHdrEnvironment`. Recovery must be enabled before the environment is
 loaded so the URL/settings source is retained. It recreates the specular cube
@@ -145,13 +158,13 @@ that then discards the locals they were built from.
 
 Two capture-based designs were measured first and rejected. Describing
 backgrounds up front — passing the loaders' strategy inputs to one seam and
-re-deriving the rules during recovery — cost ~65 B for *every* environment-loading
+re-deriving the rules during recovery — cost ~65 B for _every_ environment-loading
 scene. Per-background capture (`engine._dlr?.g(...)` inside each builder's `if`
 block) narrowed that to ~21 B, but still only for scenes that build a background.
 Discovery removes the loader seam entirely. Against the pre-feature baseline the
 feature now measures +1,707 B across 73 scenes, of which scene164 — the recovery
 parity scene, and the only one that enables recovery — carries +1,554 B; 56
-scenes are *smaller* than before because the loader capture seam is gone. The 11
+scenes are _smaller_ than before because the loader capture seam is gone. The 11
 background-building scenes pay 16–56 B each for the thunk. The thunk is stamped
 unconditionally rather than gated on capture being enabled; one closure per
 background is cheaper than the branch that would guard it. Choosing thunks over
@@ -319,7 +332,7 @@ threaded as a parameter because the handlers' own walks call `rebuildTexture2D`
 too, and a parameter those call sites did not pass would silently drop the
 ownership of anything they rebuilt first.
 
-Whether a texture has been *released* is asked of every kind, because every kind
+Whether a texture has been _released_ is asked of every kind, because every kind
 can reach that state — `releaseTexture` is public API, and its first call
 destroys a texture whose creator took no reference of its own. Rebuilding a
 destroyed texture hands a live one back to a wrapper the application has

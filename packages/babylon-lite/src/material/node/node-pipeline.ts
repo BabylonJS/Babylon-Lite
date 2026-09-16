@@ -23,6 +23,9 @@ import { MAX_LIGHTS } from "../../light/types.js";
 import type { NodeBuildState, NodeMeshFeatureWriter, NodeVertexFeatureBinder } from "./node-types.js";
 import { wgsl } from "../../shader/wgsl.js";
 import type { NodeShadowEmitter, ShadowBinding } from "./node-shadow-emitter.js";
+import type { MeshGPU } from "../../mesh/mesh.js";
+import { applyMeshVertexBufferLayout } from "../../mesh/mesh-vertex-layout.js";
+import { _vertexDefaults } from "../../mesh/vertex-defaults-hooks.js";
 
 // ─── Shared WGSL preamble ───────────────────────────────────────────
 
@@ -91,6 +94,8 @@ export interface NodeCompileResult {
      *  `null` when the geometry pass does not need it. Only set by the geometry
      *  (`_mrtOutput`) path. */
     readonly _geometryGpBinding: number | null;
+    /** @internal Resolve a pipeline whose vertex layouts honor one mesh's packing. */
+    readonly _pipelineForMesh: (gpu: MeshGPU) => GPURenderPipeline;
 }
 
 // ─── Pipeline cache ─────────────────────────────────────────────────
@@ -474,47 +479,52 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
 
     const shaderModule = device.createShaderModule({ label: "node-material", code: _wgsl });
 
-    const _pipeline = mrt
-        ? mrt._buildPipeline(device, {
-              _shaderModule: shaderModule,
-              _sceneBGL: sceneBGL,
-              _meshBGL,
-              _vertexBuffers,
-              _depthFormat: depthFormat,
-              _depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE,
-              _msaaSamples,
-          })
-        : device.createRenderPipeline(
-              noColorOutput
-                  ? {
-                        label: "node-material-depth",
-                        layout: device.createPipelineLayout({ bindGroupLayouts: [sceneBGL, _meshBGL] }),
-                        vertex: { module: shaderModule, entryPoint: "vs_main", buffers: _vertexBuffers },
-                        fragment: { module: shaderModule, entryPoint: "fs_main", targets: [] },
-                        depthStencil: { format: depthFormat, depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE, depthWriteEnabled: true },
-                        multisample: { count: _msaaSamples },
-                        primitive: { topology: "triangle-list", cullMode: opts._backFaceCulling !== false ? "back" : "none" },
-                    }
-                  : {
-                        ...createDefaultPipelineDescriptor({
-                            _label: "node-material",
-                            _engine,
-                            _bgls: [sceneBGL, _meshBGL],
-                            _vertModule: shaderModule,
-                            _fragModule: shaderModule,
-                            _vertexBuffers,
-                            _format,
-                            _depthStencilFormat: opts._depthStencilFormat,
-                            _depthCompare: opts._depthCompare,
-                            _msaaSamples,
-                            _cullMode: opts._backFaceCulling !== false ? "back" : "none",
-                            _blend: esmShadowOutput ? undefined : blend,
-                            _depthWriteEnabled: esmShadowOutput || depthWriteEnabled,
-                        }),
-                        vertex: { module: shaderModule, entryPoint: "vs_main", buffers: _vertexBuffers },
-                        fragment: { module: shaderModule, entryPoint: "fs_main", targets: [!esmShadowOutput && blend ? { format: _format, blend } : { format: _format }] },
-                    }
-          );
+    const createPipeline = (vertexBuffers: GPUVertexBufferLayout[]): GPURenderPipeline =>
+        mrt
+            ? mrt._buildPipeline(device, {
+                  _shaderModule: shaderModule,
+                  _sceneBGL: sceneBGL,
+                  _meshBGL,
+                  _vertexBuffers: vertexBuffers,
+                  _depthFormat: depthFormat,
+                  _depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE,
+                  _msaaSamples,
+              })
+            : device.createRenderPipeline(
+                  noColorOutput
+                      ? {
+                            label: "node-material-depth",
+                            layout: device.createPipelineLayout({ bindGroupLayouts: [sceneBGL, _meshBGL] }),
+                            vertex: { module: shaderModule, entryPoint: "vs_main", buffers: vertexBuffers },
+                            fragment: { module: shaderModule, entryPoint: "fs_main", targets: [] },
+                            depthStencil: { format: depthFormat, depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE, depthWriteEnabled: true },
+                            multisample: { count: _msaaSamples },
+                            primitive: { topology: "triangle-list", cullMode: opts._backFaceCulling !== false ? "back" : "none" },
+                        }
+                      : {
+                            ...createDefaultPipelineDescriptor({
+                                _label: "node-material",
+                                _engine,
+                                _bgls: [sceneBGL, _meshBGL],
+                                _vertModule: shaderModule,
+                                _fragModule: shaderModule,
+                                _vertexBuffers: vertexBuffers,
+                                _format,
+                                _depthStencilFormat: opts._depthStencilFormat,
+                                _depthCompare: opts._depthCompare,
+                                _msaaSamples,
+                                _cullMode: opts._backFaceCulling !== false ? "back" : "none",
+                                _blend: esmShadowOutput ? undefined : blend,
+                                _depthWriteEnabled: esmShadowOutput || depthWriteEnabled,
+                            }),
+                            vertex: { module: shaderModule, entryPoint: "vs_main", buffers: vertexBuffers },
+                            fragment: { module: shaderModule, entryPoint: "fs_main", targets: [!esmShadowOutput && blend ? { format: _format, blend } : { format: _format }] },
+                        }
+              );
+
+    const _pipeline = createPipeline(_vertexBuffers);
+    let meshPipelines: Map<string, GPURenderPipeline> | null = null;
+    const attributeNames = state.vertexAttributes.map((attribute) => attribute._name);
 
     const result: NodeCompileResult = {
         _wgsl,
@@ -533,6 +543,20 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
         _usesMeshAttributeFlags: state.usesMeshAttributeExists,
         _esmShadowParamsBinding,
         _geometryGpBinding,
+        _pipelineForMesh(gpu) {
+            const key = gpu._vbKey;
+            if (!gpu._vbLayout || !key) {
+                return _pipeline;
+            }
+            const cached = meshPipelines?.get(key);
+            if (cached) {
+                return cached;
+            }
+            const layouts = applyMeshVertexBufferLayout(_vertexBuffers, attributeNames, gpu._vbLayout);
+            const pipeline = createPipeline([...(_vertexDefaults?._layouts(layouts, attributeNames, gpu) ?? layouts)]);
+            (meshPipelines ??= new Map()).set(key, pipeline);
+            return pipeline;
+        },
     };
     cache.set(cacheKey, result);
     return result;

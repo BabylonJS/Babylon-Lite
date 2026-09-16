@@ -1,4 +1,5 @@
 # Module: In-place Mesh Geometry Update
+
 > Package path: `packages/babylon-lite/src/mesh/mesh-factories.ts`
 
 ## Purpose
@@ -9,8 +10,9 @@ cached render and shadow bundles remain valid. CPU geometry, bounds, detailed pi
 device-loss recovery are updated atomically with the GPU contents.
 
 Topology growth or shrinkage may use either `resizeMeshGeometry`, which replaces exact-size buffers and
-invalidates cached bundles safely, or `updateMeshGeometryCapacity`, which reserves grow-only capacity and
-keeps the inactive index tail degenerate so live procedural edits retain stable buffer identities and draw topology.
+invalidates cached bundles safely, `resizeSharedMeshGeometry`, which performs one upload and keeps a
+clone family on one reference-counted geometry object, or `updateMeshGeometryCapacity`, which reserves
+grow-only capacity and keeps the inactive index tail degenerate so live procedural edits retain stable buffer identities and draw topology.
 
 ## Public API Surface
 
@@ -113,7 +115,10 @@ None. Shaders consume the same attributes at the same locations and formats.
 2. Call `updateMeshGeometry` for same-layout edits.
 3. Call `updateMeshGeometryCapacity` for repeated live topology changes with stable attribute presence.
 4. Call `resizeMeshGeometry` for one-shot exact-size topology or optional-attribute layout changes.
-5. Subsequent picking and device-loss recovery observe the latest complete active geometry.
+5. Call `resizeSharedMeshGeometry` when every supplied clone must keep sharing one rebuilt allocation.
+6. Storage-backed/interleaved/borrowed geometry rejects these tightly-packed mutation APIs; update its
+   source `StorageBuffer` instead.
+7. Subsequent picking and device-loss recovery observe the latest complete active geometry.
 
 Validation throws before mutation, so a failed call leaves CPU/GPU state unchanged.
 

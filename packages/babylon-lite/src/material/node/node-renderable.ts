@@ -9,6 +9,8 @@
 import { F32 } from "../../engine/typed-arrays.js";
 import { BU } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
+import { _vertexDefaults } from "../../mesh/vertex-defaults-hooks.js";
+import { drawMeshIndexed } from "../../mesh/mesh-vertex-layout.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { MeshGPU } from "../../mesh/mesh.js";
@@ -194,7 +196,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
             }
             pass.setIndexBuffer(g.indexBuffer, g.indexFormat);
             pass.setBindGroup(1, pkt._meshBG);
-            pass.drawIndexed(g.indexCount);
+            drawMeshIndexed(pass, g);
         };
 
         const isTransparent = !noColorOutput && !esmShadowOutput && material._needsAlphaBlending;
@@ -231,42 +233,56 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                     mesh: pkt._mesh,
                     _worldCenter: sortCenter,
                     bind() {
-                        return { renderable: rTrans, pipeline: compile._pipeline, update, draw };
+                        return { renderable: rTrans, pipeline: compile._pipelineForMesh(pkt._mesh._gpu), update, draw };
                     },
                 };
                 renderables.push(rTrans);
             }
         } else {
-            // Opaque: batch all meshes into one renderable for state efficiency.
-            const _baseUpdate = (): void => {
-                for (const pkt of packets) {
-                    updatePacketUBO(pkt);
+            const createOpaque = (selectedPackets: readonly NodePacket[]): Renderable => {
+                const _baseUpdate = (): void => {
+                    for (const pkt of selectedPackets) {
+                        updatePacketUBO(pkt);
+                    }
+                    updateNodeUBO();
+                };
+                const _invalidate = (): void => {
+                    for (const pkt of selectedPackets) {
+                        pkt._lastWorldVersion = -1;
+                    }
+                };
+                const update = engine._wrapRenderableForFO?.(_baseUpdate, scene as SceneContext, _invalidate) ?? _baseUpdate;
+                const draw = (pass: NodeRenderPass): number => {
+                    let draws = 0;
+                    for (const pkt of selectedPackets) {
+                        drawPacket(pass, pkt);
+                        draws++;
+                    }
+                    return draws;
+                };
+                const rOpaque: Renderable = {
+                    order: 100,
+                    isTransparent: false,
+                    mesh: selectedPackets.length === 1 ? selectedPackets[0]!._mesh : undefined,
+                    bind() {
+                        return { renderable: rOpaque, pipeline: compile._pipelineForMesh(selectedPackets[0]!._mesh._gpu), update, draw };
+                    },
+                };
+                return rOpaque;
+            };
+            const byLayout = new Map<string, NodePacket[]>();
+            for (const packet of packets) {
+                const key = packet._mesh._gpu._vbKey ?? "";
+                const group = byLayout.get(key);
+                if (group) {
+                    group.push(packet);
+                } else {
+                    byLayout.set(key, [packet]);
                 }
-                updateNodeUBO();
-            };
-            const _invalidate = (): void => {
-                for (const pkt of packets) {
-                    pkt._lastWorldVersion = -1;
-                }
-            };
-            const update = engine._wrapRenderableForFO?.(_baseUpdate, scene as SceneContext, _invalidate) ?? _baseUpdate;
-            const draw = (pass: NodeRenderPass): number => {
-                let draws = 0;
-                for (const pkt of packets) {
-                    drawPacket(pass, pkt);
-                    draws++;
-                }
-                return draws;
-            };
-            const rOpaque: Renderable = {
-                order: 100,
-                isTransparent: false,
-                mesh: packets.length === 1 ? packets[0]!._mesh : undefined,
-                bind() {
-                    return { renderable: rOpaque, pipeline: compile._pipeline, update, draw };
-                },
-            };
-            renderables.push(rOpaque);
+            }
+            for (const group of byLayout.values()) {
+                renderables.push(createOpaque(group));
+            }
         }
     }
 
@@ -277,12 +293,14 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
     return { renderables, rebuildSingle };
 }
 
-// Per-gpu-object cached zero buffers for attributes that a NodeMaterial's
-// vertex layout declares but the mesh itself doesn't provide (e.g. vertex
-// color on meshes that don't use VERTEXCOLOR). We allocate one zero buffer
-// lazily per gpu object, sized to its position vertex count × stride.
+// Legacy tightly packed geometry uses per-GPU zero buffers. GPU-produced ranges
+// opt into the shared constant stream before reaching this cache.
 const zeroAttrCache = new WeakMap<object, Map<string, GPUBuffer>>();
 function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): GPUBuffer {
+    const constant = _vertexDefaults?._buffer(engine, gpu);
+    if (constant) {
+        return constant;
+    }
     let cache = zeroAttrCache.get(gpu as unknown as object);
     if (!cache) {
         cache = new Map();

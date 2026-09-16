@@ -41,6 +41,7 @@ import { sanitize, bjsTypeToNodeType, floatCount, extractDefault } from "./node-
 import { getAttrBuffer, writeAttributeFlags } from "./node-renderable.js";
 import type { NodeGeometryMaterialView } from "./node-geometry-view.js";
 import { wgsl } from "../../shader/wgsl.js";
+import { drawMeshIndexed } from "../../mesh/mesh-vertex-layout.js";
 
 /** Lazily-created singleton {@link MeshGroupBuilder} that node geometry views point
  *  at via their overridden `_buildGroup`. The async builder body is unreachable —
@@ -410,10 +411,10 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
                 }
                 pass.setIndexBuffer(g.indexBuffer, g.indexFormat);
                 pass.setBindGroup(1, bindGroup!);
-                pass.drawIndexed(g.indexCount);
+                drawMeshIndexed(pass, g);
                 return 1;
             };
-            return { renderable: r, pipeline: compile._pipeline, update, draw };
+            return { renderable: r, pipeline: compile._pipelineForMesh(mesh._gpu), update, draw };
         },
     };
     r._worldCenter = sortCenter;

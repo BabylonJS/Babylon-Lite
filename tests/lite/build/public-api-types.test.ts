@@ -35,7 +35,7 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
-    it("exposes standalone task population and opt-in RTT factories", () => {
+    it("exposes standalone tasks, opt-in RTTs, and storage-backed geometry", () => {
         const probePath = resolve(BUILD_DIR, "render-task-opt-in.probe.ts");
         try {
             writeFileSync(
@@ -43,7 +43,9 @@ describe("build/index.d.ts", () => {
                 `import {
     createSceneContext, createRenderTask, addMeshToTask, createRenderTargetTexture,
     createSurfaceRenderTargetTexture, onRenderTargetTextureResize, withSampledDepthTexture,
-    type EngineContext, type Mesh,
+    createStorageBuffer, readStorageBuffer, createMeshFromStorageBuffer,
+    createShaderMaterial, setShaderAttributeFormats, resizeSharedMeshGeometry,
+    type EngineContext, type Mesh, type StorageBufferOptions, type MeshFromStorageOptions,
 } from "./index.js";
 declare const engine: EngineContext;
 declare const mesh: Mesh;
@@ -66,6 +68,23 @@ task.addMesh(mesh);
 onRenderTargetTextureResize(surface, () => {})();
 onRenderTargetTextureResize(surfaceDepth, () => {})();
 fixedDepth.texture satisfies typeof fixedDepth.depthTexture;
+const storageOptions: StorageBufferOptions = { writable: true, vertex: true, indirect: true };
+const storage = createStorageBuffer(engine, 1024, storageOptions);
+const indices = createStorageBuffer(engine, new Uint32Array([0, 1, 2]), { index: true });
+const geometryOptions: MeshFromStorageOptions = {
+    storage, indices, indexCount: 3, indexFormat: "uint32",
+    vertexCount: 3, arrayStride: 16, baseVertex: 2,
+    boundMin: [-1, -1, -1], boundMax: [1, 1, 1],
+};
+const storageMesh = createMeshFromStorageBuffer(engine, "storage", geometryOptions);
+const shader = createShaderMaterial({ vertexSource: "", fragmentSource: "", attributes: ["position"] });
+setShaderAttributeFormats(shader, { position: "float32x4" });
+storageMesh.material = shader;
+const readback: Promise<ArrayBuffer> = readStorageBuffer(storage);
+void readback;
+// @ts-expect-error GPU allocation handles remain internal.
+storage._buffer;
+resizeSharedMeshGeometry(engine, [mesh], new Float32Array(9), new Float32Array(9), new Uint32Array([0, 1, 2]));
 `
             );
             const result = spawnSync(

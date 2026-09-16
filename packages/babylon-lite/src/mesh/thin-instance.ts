@@ -71,6 +71,8 @@ export interface ThinInstanceData {
     _drawArgsData?: Uint32Array;
     /** @internal Last index count written to `_drawArgsBuffer`. */
     _drawArgsIndexCount?: number;
+    /** @internal Last base vertex written to `_drawArgsBuffer`. */
+    _drawArgsBaseVertex?: number;
     /** @internal Last instance count observed by a cached direct draw or written to `_drawArgsBuffer`. */
     _drawArgsInstanceCount?: number;
     /** @internal Lazy per-mesh F32 upload scratch. Allocated by thin-instance-gpu.ts only

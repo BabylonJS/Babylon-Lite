@@ -8,6 +8,8 @@ import type { EngineContext } from "../engine/engine.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { bumpVisibilityEpoch } from "../engine/engine.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
+import type { MeshGPU } from "./mesh.js";
+import { writeMeshIndexedIndirectArgs } from "./mesh-vertex-layout.js";
 
 /** @internal Optional replacement buffers used by GPU culling after it compacts visible instances. */
 export interface ThinInstanceDrawBuffers {
@@ -113,7 +115,7 @@ export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceD
 }
 
 /** Sync the stable indirect draw arguments captured by cached thin-instance render bundles. */
-export function syncThinInstanceDrawArgs(engine: EngineContext, ti: ThinInstanceData, indexCount: number): GPUBuffer {
+export function syncThinInstanceDrawArgs(engine: EngineContext, ti: ThinInstanceData, gpu: MeshGPU): GPUBuffer {
     if (!ti._drawArgsBuffer) {
         ti._drawArgsBuffer = engine._device.createBuffer({
             size: 20,
@@ -121,30 +123,29 @@ export function syncThinInstanceDrawArgs(engine: EngineContext, ti: ThinInstance
         });
         ti._drawArgsData = new U32(5);
         ti._drawArgsIndexCount = -1;
+        ti._drawArgsBaseVertex = -1;
         ti._drawArgsInstanceCount = -1;
         bumpVisibilityEpoch();
     }
-    if (ti._drawArgsIndexCount !== indexCount || ti._drawArgsInstanceCount !== ti.count) {
+    const baseVertex = gpu._baseVertex ?? 0;
+    if (ti._drawArgsIndexCount !== gpu.indexCount || ti._drawArgsBaseVertex !== baseVertex || ti._drawArgsInstanceCount !== ti.count) {
         const args = ti._drawArgsData!;
-        args[0] = indexCount;
-        args[1] = ti.count;
-        args[2] = 0;
-        args[3] = 0;
-        args[4] = 0;
+        writeMeshIndexedIndirectArgs(args, gpu, ti.count);
         engine._device.queue.writeBuffer(ti._drawArgsBuffer, 0, args.buffer, args.byteOffset, args.byteLength);
-        ti._drawArgsIndexCount = indexCount;
+        ti._drawArgsIndexCount = gpu.indexCount;
+        ti._drawArgsBaseVertex = baseVertex;
         ti._drawArgsInstanceCount = ti.count;
     }
     return ti._drawArgsBuffer;
 }
 
 /** Sync thin-instance vertex data and return stable indirect args only after a direct draw's count changes. */
-export function syncThinInstanceForDraw(engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number): GPUBuffer | null {
+export function syncThinInstanceForDraw(engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, gpu: MeshGPU): GPUBuffer | null {
     syncThinInstanceGpuData(engine, ti, hasColor);
     if (!ti._drawArgsBuffer && (ti._drawArgsInstanceCount ??= ti.count) === ti.count) {
         return null;
     }
-    return syncThinInstanceDrawArgs(engine, ti, indexCount);
+    return syncThinInstanceDrawArgs(engine, ti, gpu);
 }
 
 /** Sync thin instance matrix + optional color GPU buffers and bind to vertex slots. */

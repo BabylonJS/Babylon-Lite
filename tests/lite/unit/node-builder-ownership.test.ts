@@ -37,8 +37,10 @@ function createFixture(failBindGroup = false): {
         queue: { writeBuffer: vi.fn() },
     } as unknown as GPUDevice;
     const engine = { _device: device } as unknown as EngineContext;
+    const pipeline = {} as GPURenderPipeline;
     const compile = {
-        _pipeline: {} as GPURenderPipeline,
+        _pipeline: pipeline,
+        _pipelineForMesh: vi.fn(() => pipeline),
         _meshBGL: {} as GPUBindGroupLayout,
         _nodeUboBinding: 1,
         _nodeUboSize: 16,
@@ -120,6 +122,27 @@ describe("Node auxiliary ownership", () => {
 
         expect(result.renderables).toHaveLength(1);
         expect(result.renderables[0]!.mesh).toBeUndefined();
+        owned._lifetimeDisposers.forEach((dispose) => dispose());
+    });
+
+    it("splits opaque Node renderables whose meshes require different vertex layouts", () => {
+        const { scene, mesh, material } = createFixture();
+        Object.assign(mesh._gpu, { _vbKey: "first" });
+        const secondMesh = {
+            ...mesh,
+            worldMatrix: new Float32Array(16),
+            _gpu: { ...mesh._gpu, _vbKey: "second" },
+        } as unknown as Mesh;
+        const owned = resources();
+
+        const result = buildNodeMeshRenderables(scene, [mesh, secondMesh], material, owned);
+
+        expect(result.renderables).toHaveLength(2);
+        result.renderables[0]!.bind(scene.surface.engine, {} as RenderTargetSignature);
+        result.renderables[1]!.bind(scene.surface.engine, {} as RenderTargetSignature);
+        const pipelineForMesh = (material._compile as unknown as { _pipelineForMesh: ReturnType<typeof vi.fn> })._pipelineForMesh;
+        expect(pipelineForMesh).toHaveBeenNthCalledWith(1, mesh._gpu);
+        expect(pipelineForMesh).toHaveBeenNthCalledWith(2, secondMesh._gpu);
         owned._lifetimeDisposers.forEach((dispose) => dispose());
     });
 

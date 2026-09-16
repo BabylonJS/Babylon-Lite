@@ -18,9 +18,10 @@ import type { EngineContext } from "../engine/engine.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene.js";
 import type { DrawUpdateContext, Renderable } from "../render/renderable.js";
-import type { Mesh } from "./mesh.js";
+import type { Mesh, MeshGPU } from "./mesh.js";
 import type { ThinInstanceData } from "./thin-instance.js";
 import type { ThinInstanceDrawBuffers } from "./thin-instance-gpu.js";
+import { drawMeshIndexed } from "./mesh-vertex-layout.js";
 import {
     createTiCullState,
     destroyTiCullState,
@@ -44,7 +45,7 @@ export interface TiCullBinding {
     /** @internal Shared task-local compute submission batch. */
     _updateBatch: ComputeDispatchBatch;
     /** Issue the indirect (culled) draw when visible instances were compacted, else a full instanced draw. */
-    draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, indexCount: number, instanceCount: number): void;
+    draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, gpu: MeshGPU, instanceCount: number): void;
 }
 
 /** @internal Renderable augmented with its per-signature cull-state cache (see `tryBind`). */
@@ -125,13 +126,13 @@ export function tryBind(
                 publishTiLodBucket(ti, signature, res);
             }
         },
-        draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, indexCount: number, instanceCount: number): void {
+        draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, gpu: MeshGPU, instanceCount: number): void {
             if (binding._args) {
                 pass.drawIndexedIndirect(binding._args, 0);
             } else if (ti._drawArgsBuffer) {
                 pass.drawIndexedIndirect(ti._drawArgsBuffer, 0);
             } else {
-                pass.drawIndexed(indexCount, instanceCount);
+                drawMeshIndexed(pass, gpu, instanceCount);
             }
         },
     };
@@ -164,7 +165,7 @@ function bindLodPartner(ti: ThinInstanceData, signature: RenderTargetSignature, 
         update(context: DrawUpdateContext): void {
             baseUpdate?.(context);
         },
-        draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, indexCount: number, instanceCount: number): void {
+        draw(pass: GPURenderPassEncoder | GPURenderBundleEncoder, gpu: MeshGPU, instanceCount: number): void {
             const bucket = currentBucket();
             if (bucket) {
                 pass.drawIndexedIndirect(bucket.argsBuffer, 0);
@@ -172,7 +173,7 @@ function bindLodPartner(ti: ThinInstanceData, signature: RenderTargetSignature, 
                 if (ti._drawArgsBuffer) {
                     pass.drawIndexedIndirect(ti._drawArgsBuffer, 0);
                 } else {
-                    pass.drawIndexed(indexCount, instanceCount);
+                    drawMeshIndexed(pass, gpu, instanceCount);
                 }
             }
         },

@@ -64,6 +64,7 @@ import { _getStandardGeometrySkeletonVelocityFactory, _getStandardGeometryThinIn
 import type { StandardGeometryMaterialView } from "./geometry-view.js";
 import type { StandardGeometryContext } from "./standard-renderable.js";
 import { wgsl } from "../../shader/wgsl.js";
+import { drawMeshIndexed } from "../../mesh/mesh-vertex-layout.js";
 
 /** Lazily-created singleton {@link MeshGroupBuilder} that geometry views point at
  *  via their overridden `_buildGroup`. The async builder body is unreachable —
@@ -134,8 +135,8 @@ export function _installStdGeometryWinding(resolve: (meshFeatures: number) => GP
     _geometryWinding = resolve;
 }
 
-function _variantKey(features: number, meshFeatures: number, sceneFeatures: number): string {
-    return `${features}:${meshFeatures}:${sceneFeatures}`;
+function _variantKey(features: number, meshFeatures: number, sceneFeatures: number, meshVertexKey: string): string {
+    return `${features}:${meshFeatures}:${sceneFeatures}${meshVertexKey}`;
 }
 
 /** Build a {@link Renderable} for one mesh drawn through a Standard geometry view.
@@ -166,8 +167,8 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     if (hasVertexColor && mesh.hasVertexAlpha === true) {
         features |= VERTEX_ALPHA | MATERIAL_ALPHA_BLEND;
     }
-    const variantKey = _variantKey(features, meshFeatures, sceneFeatures) + (_stdMaterialVariantKey?.(source) ?? "");
-    const res = _ensureViewResources(view, engine, meshFeatures, features, sceneFeatures, variantKey, standardContext);
+    const variantKey = _variantKey(features, meshFeatures, sceneFeatures, mesh._gpu._vbKey ?? "") + (_stdMaterialVariantKey?.(source) ?? "");
+    const res = _ensureViewResources(view, engine, meshFeatures, features, sceneFeatures, variantKey, standardContext, mesh._gpu._vbLayout);
     _retainViewResources(view, variantKey, res, resources);
 
     // Per-mesh UBOs + bind group.
@@ -296,7 +297,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         }
         const ti = hasThinInstances ? mesh.thinInstances : null;
         if (ti) {
-            thinDrawArgs = tiHelpers!._syncForDraw(engine, ti, hasInstanceColor, mesh._gpu.indexCount);
+            thinDrawArgs = tiHelpers!._syncForDraw(engine, ti, hasInstanceColor, mesh._gpu);
         }
     };
     // Floating-origin: the mesh UBO bakes the active-camera offset into the
@@ -329,7 +330,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
             slot = bindVertexBuffers(mesh, pass, slot);
         }
         if (hasVertexColor) {
-            pass.setVertexBuffer(slot++, g.colorBuffer!, g._vbLayout?._c?._offset);
+            pass.setVertexBuffer(slot++, g.colorBuffer!);
         }
         const ti = hasThinInstances ? mesh.thinInstances : null;
         if (ti) {
@@ -339,7 +340,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         if (ti && thinDrawArgs) {
             pass.drawIndexedIndirect(thinDrawArgs, 0);
         } else {
-            pass.drawIndexed(g.indexCount, ti?.count);
+            drawMeshIndexed(pass, g, ti?.count);
         }
         return 1;
     };
@@ -370,7 +371,8 @@ function _ensureViewResources(
     features: number,
     sceneFeatures: number,
     variantKey: string,
-    standardContext: StandardGeometryContext | undefined
+    standardContext: StandardGeometryContext | undefined,
+    meshVertexLayout?: Mesh["_gpu"]["_vbLayout"]
 ): StandardGeometryViewResources {
     let cache = view._geometry as Map<string, StandardGeometryViewResources> | undefined;
     if (!cache) {
@@ -444,7 +446,16 @@ function _ensureViewResources(
         }
     }
 
-    const composed = composeStandardGeometryShader(features, meshFeatures, frags, view._geometryAttachments, "", view._emitColor, standardContext?.sceneShader ?? null);
+    const composed = composeStandardGeometryShader(
+        features,
+        meshFeatures,
+        frags,
+        view._geometryAttachments,
+        "",
+        view._emitColor,
+        standardContext?.sceneShader ?? null,
+        meshVertexLayout
+    );
     const device = engine._device;
     const meshBGL = device.createBindGroupLayout(composed._meshBGLDescriptor);
     // Pipeline layout: scene BG (group 0) + mesh BG (group 1). Geometry pass

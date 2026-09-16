@@ -11,7 +11,7 @@ import { _installAsyncShaderPipelinePreparation } from "../../scene/scene-core.j
 import { retargetShaderPipelineCache } from "./shader-pipeline-cache.js";
 import { _resolveShaderPipelineVariantKey, getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings, type ShaderPipelineBindings } from "./shader-pipeline.js";
 import type { ShaderMaterial } from "./shader-material.js";
-import { _installAsyncShaderPipelineRegistrar } from "./shader-renderable.js";
+import { _installAsyncShaderPipelineRegistrar, type ShaderAsyncVertexLayout } from "./shader-renderable.js";
 import { wgsl } from "../../shader/wgsl.js";
 
 /** Logical vertex-input layout for a ShaderMaterial pipeline. */
@@ -20,6 +20,7 @@ export type ShaderMaterialPipelineLayout = "mesh" | "thin-instances" | "thin-ins
 interface PrepareRecipe {
     readonly material: ShaderMaterial;
     readonly layout: ShaderMaterialPipelineLayout;
+    readonly vertexLayout?: ShaderAsyncVertexLayout;
 }
 
 let _recipesByEngine: WeakMap<EngineContext, WeakMap<object, PrepareRecipe>> | null = null;
@@ -62,8 +63,14 @@ export function enableAsyncShaderPipelineCompilation(engine: EngineContext): voi
 }
 
 /** @internal Register a logical pipeline recipe from a ShaderMaterial renderable builder. */
-export function _registerAsyncShaderPipelineRecipe(scene: SceneContext, material: ShaderMaterial, key: Renderable | object, layout: ShaderMaterialPipelineLayout = "mesh"): void {
-    _recipesByEngine?.get(scene.surface.engine)?.set(key, { material, layout });
+export function _registerAsyncShaderPipelineRecipe(
+    scene: SceneContext,
+    material: ShaderMaterial,
+    key: Renderable | object,
+    layout: ShaderMaterialPipelineLayout = "mesh",
+    vertexLayout?: ShaderAsyncVertexLayout
+): void {
+    _recipesByEngine?.get(scene.surface.engine)?.set(key, { material, layout, vertexLayout });
 }
 
 /** @internal Run the installed engine's automatic preparation for one scene. */
@@ -109,7 +116,7 @@ async function prepareScene(engine: EngineContext, scene: SceneContext, recipes:
                 const recipe = recipes.get(renderable) ?? (renderable.mesh && (!sceneRenderables || sceneRenderables.has(renderable)) ? recipes.get(renderable.mesh) : undefined);
                 if (recipe) {
                     const bindings = currentBindings(engine, recipe.material);
-                    const resolvedLayout = resolveLayout(recipe.material, bindings, recipe.layout);
+                    const resolvedLayout = resolveLayout(recipe.material, bindings, recipe.layout, recipe.vertexLayout);
                     preparations.push(
                         prepareShaderPipeline(
                             engine,
@@ -238,10 +245,13 @@ async function prepareShaderPipeline(
 function resolveLayout(
     material: ShaderMaterial,
     bindings: ShaderPipelineBindings,
-    layout: ShaderMaterialPipelineLayout
+    layout: ShaderMaterialPipelineLayout,
+    vertexLayout?: ShaderAsyncVertexLayout
 ): { readonly variantKey: string; readonly vertexBuffers: readonly GPUVertexBufferLayout[]; readonly instanceAttrs: string } {
+    const baseVertexBuffers = vertexLayout?._vbs ?? bindings.vertexBuffers;
+    const vertexKey = vertexLayout?._key ?? "";
     if (layout === "mesh") {
-        return { variantKey: "", vertexBuffers: bindings.vertexBuffers, instanceAttrs: "" };
+        return { variantKey: vertexKey, vertexBuffers: baseVertexBuffers, instanceAttrs: "" };
     }
     const hasColor = layout === "thin-instances-color";
     const baseLocation = material.attributes.length;
@@ -271,7 +281,7 @@ function resolveLayout(
         instanceAttrs = wgsl`${instanceAttrs}@location(${baseLocation + 4}) instanceColor: vec4<f32>,
 `;
     }
-    return { variantKey: "" + +hasColor, vertexBuffers: [...bindings.vertexBuffers, ...instanceLayouts], instanceAttrs };
+    return { variantKey: `${+hasColor}${vertexKey}`, vertexBuffers: [...baseVertexBuffers, ...instanceLayouts], instanceAttrs };
 }
 
 function renderTargetSignature(target: RenderTarget): RenderTargetSignature {
