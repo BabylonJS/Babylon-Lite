@@ -157,8 +157,11 @@ count. Classic instances retain the source skeleton and morph buffers; point
 instances retain them on the prototype draw.
 
 Animation modules convert time codes to seconds, preserve target IDs and local
-affine matrices, and return ordinary AnimationGroups. USD channels also expose
-Lite property-mixer tracks with stable target identities and names, so
+affine matrices, and return ordinary AnimationGroups. Each group retains its
+authored first and last sample times, including positive nonzero and negative
+ranges; direct and manager-driven playback both start, clamp and loop within
+that interval. `goToFrame` continues to address authored time codes. USD
+channels also expose Lite property-mixer tracks with stable target identities and names, so
 `AnimationGroupMask`, zero/partial weights and the existing
 `enableAnimationBlending` manager path apply normally. Native 16-float matrix
 tracks blend all affine components against the authored pose and normalize

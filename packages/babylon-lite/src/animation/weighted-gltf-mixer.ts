@@ -396,22 +396,24 @@ function accumulateGroup(manager: AnimationManager, scratch: WeightedGltfScratch
 
 function advanceGroupTime(group: AnimationGroup, mixer: AnimationGltfMixer, deltaMs: number): number {
     const clip = mixer[GLTF_CLIP];
+    const startTime = clip._startTime ?? 0;
+    const endTime = startTime + clip.duration;
     const isPlaying = group.isPlaying;
     if (isPlaying) {
         group.currentTime += (deltaMs / 1000) * group.speedRatio;
     }
 
     if (clip.duration <= 0) {
-        return 0;
+        return startTime;
     }
 
     if (group.loopAnimation && isPlaying) {
-        group.currentTime %= clip.duration;
-        if (group.currentTime < 0) {
+        group.currentTime = startTime + ((group.currentTime - startTime) % clip.duration);
+        if (group.currentTime < startTime) {
             group.currentTime += clip.duration;
         }
     } else {
-        group.currentTime = Math.min(Math.max(group.currentTime, 0), clip.duration);
+        group.currentTime = Math.min(Math.max(group.currentTime, startTime), endTime);
     }
     return group.currentTime;
 }

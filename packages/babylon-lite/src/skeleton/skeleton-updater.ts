@@ -134,6 +134,8 @@ export function createAnimationController(
     boneOverrides?: ReadonlyMap<number, unknown>,
     nodeNames?: readonly (string | undefined)[]
 ): AnimationController {
+    const startTime = clip._startTime ?? 0;
+    const endTime = startTime + clip.duration;
     const numNodes = nodes.length;
     const clipSkeletons = skeletons.filter((skeleton) =>
         skeleton.jointNodes.some((jointNode) =>
@@ -242,7 +244,7 @@ export function createAnimationController(
     };
 
     const ctrl: AnimationController = {
-        time: 0,
+        time: startTime,
         playing: true,
         speedRatio: 1,
         loop: true,
@@ -277,12 +279,12 @@ export function createAnimationController(
 
                       // Always wrap/clamp — ensures externally-set time (goToFrame) is valid
                       if (ctrl.loop) {
-                          ctrl.time %= clip.duration;
-                          if (ctrl.time < 0) {
+                          ctrl.time = startTime + ((ctrl.time - startTime) % clip.duration);
+                          if (ctrl.time < startTime) {
                               ctrl.time += clip.duration;
                           }
                       } else {
-                          ctrl.time = Math.min(Math.max(ctrl.time, 0), clip.duration);
+                          ctrl.time = Math.min(Math.max(ctrl.time, startTime), endTime);
                       }
                       const t = ctrl.time;
 

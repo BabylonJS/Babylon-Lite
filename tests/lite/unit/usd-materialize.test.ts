@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { goToFrame, playAnimation, tickAnimationCore } from "../../../packages/babylon-lite/src/animation/animation-group";
+import { goToFrame, playAnimation, stopAnimation, tickAnimationCore } from "../../../packages/babylon-lite/src/animation/animation-group";
 import { AnimationGroupMaskMode, createAnimationGroupMask } from "../../../packages/babylon-lite/src/animation/animation-group-mask";
 import { addAnimationGroup } from "../../../packages/babylon-lite/src/animation/animation-group-task";
 import { clearAnimationManager, createAnimationManager, updateAnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
@@ -327,6 +327,44 @@ describe("USD command materialization", () => {
         expect(target.worldMatrix[15]).toBeCloseTo(1);
         expect(skin.boneMatrices[29]).toBeCloseTo(-0.5);
         expect(skin.boneMatrices[31]).toBeCloseTo(1);
+        disposeUsd(container);
+    });
+
+    it.each([
+        ["positive", 24, 1],
+        ["negative", -24, -1],
+    ])("preserves a %s authored animation start in direct and manager playback", async (_label, startCode, startTime) => {
+        const fixture = usdFixture({ skin: true, animationStart: startCode });
+        const { engine } = usdTestEngine();
+        const container = usdTestContainer(fixture);
+        await materializeUsd(engine, fixture, container);
+        const group = container.animationGroups![0]!;
+        const target = group.targetedAnimations[0]!.target as SceneNode;
+        group.loopAnimation = false;
+        playAnimation(group);
+
+        expect(group.currentTime).toBe(startTime);
+        expect(group.duration).toBe(1);
+        tickAnimationCore(group, 500, engine);
+        expect(group.currentTime).toBeCloseTo(startTime + 0.5);
+        expect(target.worldMatrix[12]).toBeCloseTo(1);
+        stopAnimation(group);
+        expect(group.currentTime).toBe(startTime);
+        goToFrame(group, startCode + 12, engine);
+        expect(group.currentTime).toBeCloseTo(startTime + 0.5);
+        expect(target.worldMatrix[12]).toBeCloseTo(1);
+
+        group.currentTime = startTime;
+        playAnimation(group);
+        const manager = createAnimationManager({ engine });
+        addAnimationGroup(manager, group);
+        enableAnimationBlending(manager);
+        setAnimationWeight(group, 0.5);
+        updateAnimationManager(manager, 500);
+        expect(group.currentTime).toBeCloseTo(startTime + 0.5);
+        expect(target.worldMatrix[12]).toBeCloseTo(0.5);
+
+        clearAnimationManager(manager);
         disposeUsd(container);
     });
 

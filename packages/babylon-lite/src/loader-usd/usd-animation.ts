@@ -222,20 +222,25 @@ export async function apply(context: UsdContext): Promise<void> {
         groups.set(trackIndex, tracks);
     }
 
-    const clips: AnimationClip[] = [...groups].map(([trackIndex, tracks]) => ({
-        name: `USD Animation ${trackIndex + 1}`,
-        channels: tracks.map((track, samplerIdx): AnimationChannel => ({
-            path: PATH_POINTER,
-            nodeIdx: track.targetIndex,
-            samplerIdx,
-            pointerWriter: track.writer,
-            pointerArity: track.stride,
-            pointerQuaternion: track.quaternion,
-        })),
-        samplers: tracks.map((track) => track.sampler),
-        duration: Math.max(...tracks.map((track) => track.sampler.input[track.sampler.input.length - 1]!)),
-        frameRate: context.timeCodesPerSecond,
-    }));
+    const clips: AnimationClip[] = [...groups].map(([trackIndex, tracks]) => {
+        const startTime = Math.min(...tracks.map((track) => track.sampler.input[0]!));
+        const endTime = Math.max(...tracks.map((track) => track.sampler.input[track.sampler.input.length - 1]!));
+        return {
+            name: `USD Animation ${trackIndex + 1}`,
+            channels: tracks.map((track, samplerIdx): AnimationChannel => ({
+                path: PATH_POINTER,
+                nodeIdx: track.targetIndex,
+                samplerIdx,
+                pointerWriter: track.writer,
+                pointerArity: track.stride,
+                pointerQuaternion: track.quaternion,
+            })),
+            samplers: tracks.map((track) => track.sampler),
+            duration: endTime - startTime,
+            _startTime: startTime,
+            frameRate: context.timeCodesPerSecond,
+        };
+    });
     const { createAnimationGroups } = await import("../animation/animation-group.js");
     const [{ _installPropertyMixerHandler }, { _updateWeightedPointerAnimations }] = await Promise.all([
         import("../animation/weighted-gltf-mixer.js"),
@@ -253,6 +258,8 @@ export async function apply(context: UsdContext): Promise<void> {
     });
     context.container.animationGroups = nativeGroups.map((native, index) => {
         const tracks = [...groups.values()][index]!;
+        const startTime = native._startTime ?? 0;
+        const endTime = startTime + native.duration;
         const runtimeTracks: AnimationPropertyRuntimeTrack[] = tracks.map((track) => ({
             sampler: track.sampler,
             stride: track.stride,
@@ -275,7 +282,7 @@ export async function apply(context: UsdContext): Promise<void> {
                 path: track.path,
             })),
             _gltfMixer: undefined,
-            _propertyMixer: [runtimeTracks, 0, native.duration, native.duration],
+            _propertyMixer: [runtimeTracks, startTime, endTime, native.duration, startTime],
         };
         const controller = group._ctrl!;
         const tick = controller.tick;

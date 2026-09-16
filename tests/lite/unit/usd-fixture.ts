@@ -53,6 +53,7 @@ export function usdFixture(
         zeroFps?: boolean;
         trsAnimation?: boolean;
         shearedAnimation?: boolean;
+        animationStart?: number;
     } = {}
 ): UsdExtraction {
     const raw: number[] = [];
@@ -167,7 +168,8 @@ export function usdFixture(
         records.push({ op: 8, fields: [1, 2, name, 7] });
     }
     if (options.skin) {
-        const times = floats([0, 24]);
+        const start = options.animationStart ?? 0;
+        const times = floats([start, start + 24]);
         const moved = [...identity];
         moved[12] = 2;
         if (options.shearedAnimation) {
@@ -183,12 +185,14 @@ export function usdFixture(
         records.push({ op: 9, fields: [0, 1, 3, 0, 2, times, values, 16] }, { op: 9, fields: [1, 11, 3, 0, 2, times, boneValues, 16] });
     }
     if (options.trsAnimation) {
-        const times = floats([0, 24]);
+        const start = options.animationStart ?? 0;
+        const times = floats([start, start + 24]);
         const translations = floats([0, 0, 0, 2, 0, 0]);
         records.push({ op: 9, fields: [0, 1, 0, 0, 2, times, translations, 3] });
     }
     if (morphId) {
-        const times = floats([0, 24]);
+        const start = options.animationStart ?? 0;
+        const times = floats([start, start + 24]);
         const influences = floats([0.25, 0.75]);
         records.push({ op: 9, fields: [2, morphId, 4, 0, 2, times, influences, 1] });
     }

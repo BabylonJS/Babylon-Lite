@@ -33,7 +33,7 @@ export interface AnimationPropertyRuntimeTrack {
     /** @internal Deduplicated publication step after weighted property writes. */
     readonly _afterWrite?: () => void;
 }
-export type AnimationPropertyMixer = readonly [readonly AnimationPropertyRuntimeTrack[], number, number, number];
+export type AnimationPropertyMixer = readonly [readonly AnimationPropertyRuntimeTrack[], number, number, number, number?];
 export type AnimationGltfMixer = readonly [AnimationClip, readonly NodeRest[], readonly SkeletonBinding[]];
 export interface AnimationAdditiveMixer {
     readonly referenceTime: number;
@@ -63,6 +63,8 @@ export interface AnimationGroup {
     isPlaying: boolean;
     /** Current playback time in seconds. */
     currentTime: number;
+    /** @internal Authored playback start in seconds. */
+    readonly _startTime?: number;
     /** Lightweight list of targets affected by this group. */
     readonly targetedAnimations: readonly TargetedAnimation[];
     /** User metadata bag. */
@@ -108,10 +110,10 @@ export function pauseAnimation(group: AnimationGroup): void {
     group.isPlaying = false;
 }
 
-/** Stop playback and reset to frame 0. */
+/** Stop playback and reset to the first authored frame. */
 export function stopAnimation(group: AnimationGroup): void {
     group.isPlaying = false;
-    group.currentTime = 0;
+    group.currentTime = group._startTime ?? 0;
     group._stopped = true;
 }
 
@@ -181,12 +183,14 @@ export function createAnimationGroups(animData: GltfAnimationData): AnimationGro
     return clips.map((clip, clipIndex) => {
         const ctrl: AnimationController = createAnimationController(clip, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, boneOverrides, nodeNames);
         const started = clipIndex === 0;
+        const startTime = clip._startTime ?? 0;
         const group: AnimationGroup = {
             name: clip.name || `animation_${clipIndex}`,
             duration: clip.duration,
             frameRate: clip.frameRate || DEFAULT_FRAME_RATE,
             isPlaying: started,
-            currentTime: 0,
+            currentTime: startTime,
+            _startTime: startTime || undefined,
             targetedAnimations: clip.channels.map((ch) => {
                 const nodeIndex = ch.nodeIdx >= 0 ? ch.nodeIdx : undefined;
                 return {

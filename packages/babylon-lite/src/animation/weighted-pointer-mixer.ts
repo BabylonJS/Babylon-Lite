@@ -10,6 +10,7 @@ const MIX_TRACKS = 0;
 const MIX_FROM = 1;
 const MIX_TO = 2;
 const MIX_DURATION = 3;
+const MIX_START = 4;
 
 interface WeightedPointerBucket {
     readonly target: object;
@@ -201,8 +202,10 @@ function advancePropertyGroupTime(group: AnimationGroup, mixer: AnimationPropert
         group.currentTime += (deltaMs / 1000) * group.speedRatio;
     }
 
-    const fromTime = Math.max(0, Math.min(mixer[MIX_FROM], mixer[MIX_DURATION]));
-    const toTime = mixer[MIX_TO] > fromTime ? Math.min(mixer[MIX_TO], mixer[MIX_DURATION]) : mixer[MIX_DURATION];
+    const clipStart = mixer[MIX_START] ?? 0;
+    const clipEnd = clipStart + mixer[MIX_DURATION];
+    const fromTime = Math.max(clipStart, Math.min(mixer[MIX_FROM], clipEnd));
+    const toTime = mixer[MIX_TO] > fromTime ? Math.min(mixer[MIX_TO], clipEnd) : clipEnd;
     const duration = Math.max(0, toTime - fromTime);
     if (duration <= 0) {
         return fromTime;

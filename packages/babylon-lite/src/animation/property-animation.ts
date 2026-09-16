@@ -191,6 +191,7 @@ function createPointerAnimationGroup(
         frameRate: frameRate || DEFAULT_FRAME_RATE,
         isPlaying: false,
         currentTime: fromTime,
+        _startTime: fromTime || undefined,
         targetedAnimations: tracks.map((track) => ({ target: track.mixTarget, path: track.mixProperty })),
         speedRatio: options?.speedRatio ?? 1,
         loopAnimation: options?.loop ?? true,
