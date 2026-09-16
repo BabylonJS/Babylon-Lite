@@ -315,7 +315,12 @@ quaternion slerp beyond the segment endpoint.
 
 This seam is property-animation-only. glTF LINEAR, STEP, and CUBICSPLINE samplers
 continue through `evaluateSampler()` unchanged, so caller-authored easing cannot
-silently alter imported asset semantics.
+silently alter imported asset semantics. The evaluators share keyframe search and
+quaternion math, while the property evaluator factors its own packed-value copying
+and LINEAR interpolation path. The generic evaluator intentionally keeps its hot
+path inline so glTF-only bundles remain byte-identical. Property tracks cannot
+produce CUBICSPLINE samplers, so Hermite evaluation remains exclusively in the
+generic glTF path rather than being duplicated in the property evaluator.
 
 ### Scratch Buffer: `_quat`
 
@@ -480,7 +485,7 @@ Bindings are target-specific; `PropertyAnimationClip` is reusable, while the gen
 
 ### Manual Weight Mixing
 
-Manual property weights are optional and live outside the default direct evaluator. Calling `enablePropertyAnimationBlending(manager)` installs a manager-side mixer for manual property tracks that share the same target and property path. `setAnimationWeight()` only changes the group weight, so glTF-only scenes do not load the manual property mixer. The mixer advances group time once, samples each contributing clip with `evaluateSampler()`, then writes one final weighted value per property so multiple groups do not devolve into last-write-wins behavior.
+Manual property weights are optional and live outside the default direct evaluator. Calling `enablePropertyAnimationBlending(manager)` installs a manager-side mixer for manual property tracks that share the same target and property path. `setAnimationWeight()` only changes the group weight, so glTF-only scenes do not load the manual property mixer. The mixer advances group time once, samples each contributing clip with `evaluatePropertySampler()`, then writes one final weighted value per property so multiple groups do not devolve into last-write-wins behavior.
 
 Weights intentionally use Babylon-style weighted sums for this first layer: `final = sum(group.weight * sampledValue)` for the groups targeting the same property. The mixer does not normalize totals and does not blend toward rest pose. `crossFadeAnimationGroups()` builds on the same weights by scheduling deterministic duration-based fade jobs inside the manager.
 

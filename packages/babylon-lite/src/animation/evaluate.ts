@@ -75,6 +75,28 @@ function quatSlerp(out: Float32Array, ax: number, ay: number, az: number, aw: nu
     out[3] = wa * aw + wb * bw;
 }
 
+function copySample(output: Float32Array, srcOffset: number, stride: number, dst: Float32Array, dstOffset: number): void {
+    for (let c = 0; c < stride; c++) {
+        dst[dstOffset + c] = output[srcOffset + c]!;
+    }
+}
+
+function interpolateLinearSample(output: Float32Array, keyIndex: number, stride: number, isQuat: boolean, gradient: number, dst: Float32Array, dstOffset: number): void {
+    const s0 = keyIndex * stride;
+    const s1 = (keyIndex + 1) * stride;
+    if (isQuat) {
+        quatSlerp(_quat, output[s0]!, output[s0 + 1]!, output[s0 + 2]!, output[s0 + 3]!, output[s1]!, output[s1 + 1]!, output[s1 + 2]!, output[s1 + 3]!, gradient);
+        dst[dstOffset] = _quat[0]!;
+        dst[dstOffset + 1] = _quat[1]!;
+        dst[dstOffset + 2] = _quat[2]!;
+        dst[dstOffset + 3] = _quat[3]!;
+        return;
+    }
+    for (let c = 0; c < stride; c++) {
+        dst[dstOffset + c] = output[s0 + c]! + gradient * (output[s1 + c]! - output[s0 + c]!);
+    }
+}
+
 /**
  * Evaluate a sampler at time `t` and write the result into `dst` at `dstOffset`.
  * @param stride - Number of components per value (3 for vec3, 4 for quat).
@@ -174,26 +196,17 @@ export function evaluatePropertySampler(
         return;
     }
     if (keyCount === 1 || t <= input[0]!) {
-        const srcOff = interpolation === INTERP_CUBICSPLINE ? stride : 0;
-        for (let c = 0; c < stride; c++) {
-            dst[dstOffset + c] = output[srcOff + c]!;
-        }
+        copySample(output, 0, stride, dst, dstOffset);
         return;
     }
     if (t >= input[keyCount - 1]!) {
-        const srcOff = interpolation === INTERP_CUBICSPLINE ? (keyCount - 1) * stride * 3 + stride : (keyCount - 1) * stride;
-        for (let c = 0; c < stride; c++) {
-            dst[dstOffset + c] = output[srcOff + c]!;
-        }
+        copySample(output, (keyCount - 1) * stride, stride, dst, dstOffset);
         return;
     }
 
     const idx = findKeyframe(input, t);
     if (interpolation === INTERP_STEP) {
-        const srcOff = idx * stride;
-        for (let c = 0; c < stride; c++) {
-            dst[dstOffset + c] = output[srcOff + c]!;
-        }
+        copySample(output, idx * stride, stride, dst, dstOffset);
         return;
     }
 
@@ -203,40 +216,5 @@ export function evaluatePropertySampler(
     const linearGradient = dt > 0 ? (t - t0) / dt : 0;
     const gradient = easing ? easing(linearGradient) : linearGradient;
 
-    if (interpolation === INTERP_CUBICSPLINE) {
-        const gradient2 = gradient * gradient;
-        const gradient3 = gradient2 * gradient;
-        const h00 = 2 * gradient3 - 3 * gradient2 + 1;
-        const h10 = gradient3 - 2 * gradient2 + gradient;
-        const h01 = -2 * gradient3 + 3 * gradient2;
-        const h11 = gradient3 - gradient2;
-        const k0 = idx * stride * 3;
-        const k1 = (idx + 1) * stride * 3;
-        for (let c = 0; c < stride; c++) {
-            const p0 = output[k0 + stride + c]!;
-            const m0 = output[k0 + 2 * stride + c]! * dt;
-            const p1 = output[k1 + stride + c]!;
-            const m1 = output[k1 + c]! * dt;
-            dst[dstOffset + c] = h00 * p0 + h10 * m0 + h01 * p1 + h11 * m1;
-        }
-        if (isQuat) {
-            normalizeQuat4(dst, dstOffset);
-        }
-        return;
-    }
-
-    const s0 = idx * stride;
-    const s1 = (idx + 1) * stride;
-    if (isQuat) {
-        quatSlerp(_quat, output[s0]!, output[s0 + 1]!, output[s0 + 2]!, output[s0 + 3]!, output[s1]!, output[s1 + 1]!, output[s1 + 2]!, output[s1 + 3]!, gradient);
-        dst[dstOffset] = _quat[0]!;
-        dst[dstOffset + 1] = _quat[1]!;
-        dst[dstOffset + 2] = _quat[2]!;
-        dst[dstOffset + 3] = _quat[3]!;
-        return;
-    }
-
-    for (let c = 0; c < stride; c++) {
-        dst[dstOffset + c] = output[s0 + c]! + gradient * (output[s1 + c]! - output[s0 + c]!);
-    }
+    interpolateLinearSample(output, idx, stride, isQuat, gradient, dst, dstOffset);
 }
