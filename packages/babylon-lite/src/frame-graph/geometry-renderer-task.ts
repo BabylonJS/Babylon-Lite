@@ -282,9 +282,8 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         sampleCount: samples,
         size,
     });
-    const depthCompare =
-        config.targetTexture?._descriptor.depthCompare ?? config.depthTexture?._descriptor.depthCompare ?? ("greater-equal" as GPUCompareFunction);
-    const depthClearValue = config.targetTexture?._descriptor.depthClearValue ?? config.depthTexture?._descriptor.depthClearValue ?? 0;
+    const depthCompare = config.targetTexture?._descriptor.depthCompare ?? config.depthTexture?._descriptor.depthCompare;
+    const depthClearValue = config.targetTexture?._descriptor.depthClearValue ?? config.depthTexture?._descriptor.depthClearValue;
 
     const wrapperTargets: (RenderTarget | null)[] = [];
     const typeAccessors: Record<GeometryTextureType, RenderTarget | null> = {} as Record<GeometryTextureType, RenderTarget | null>;
@@ -337,7 +336,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _colorFormat: sigColorFormats.join(),
         _colorFormats: sigColorFormats,
         _depthStencilFormat: (config.depthTexture ? config.depthTexture._descriptor.dFormat : outputTarget._descriptor.depthStencilFormat) ?? "depth32float",
-        _depthCompare: depthCompare,
+        _depthCompare: depthCompare ?? ("greater-equal" as GPUCompareFunction),
         _sampleCount: samples,
     };
 
@@ -887,8 +886,8 @@ function createWrapperRenderTarget(mrt: RenderTargetMrt, attachment: AttachmentI
 function createDepthWrapperRenderTarget(
     mrt: RenderTargetMrt,
     sampleCount: number,
-    depthClearValue: number,
-    depthCompare: GPUCompareFunction,
+    depthClearValue: number | undefined,
+    depthCompare: GPUCompareFunction | undefined,
 ): RenderTarget {
     const baseDesc = mrt._descriptor;
     const wrapperDesc: RenderTargetDescriptor = {

@@ -192,6 +192,34 @@ describe("GeometryRendererTask", () => {
     it("exposes its owned depth as `geometryDepthTexture` for downstream tasks", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
+        const task = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }], samples: 1, size: { width: 32, height: 24 } }, engine, scene);
+        const internal = task as unknown as {
+            record(): void;
+            _mrt: { _depthTexture: GPUTexture | null; _depthView: GPUTextureView | null };
+            _signature: { _depthCompare?: GPUCompareFunction };
+        };
+
+        const depthRt = task.geometryDepthTexture;
+        expect(depthRt).toBeTruthy();
+        expect(depthRt._descriptor.dFormat).toBe("depth32float");
+        expect(depthRt._descriptor.depthClearValue).toBeUndefined();
+        expect(depthRt._descriptor.depthCompare).toBeUndefined();
+        expect(depthRt._descriptor.samples).toBe(1);
+        expect(depthRt._eager).toBe(true);
+
+        internal.record();
+
+        // After record(): wrapper slots populated from the MRT.
+        expect(depthRt._depthTexture).toBe(internal._mrt._depthTexture);
+        expect(depthRt._depthView).toBe(internal._mrt._depthView);
+        expect(depthRt._width).toBe(32);
+        expect(depthRt._height).toBe(24);
+        expect(internal._signature._depthCompare).toBe("greater-equal");
+    });
+
+    it("propagates an explicit target depth convention to owned geometry depth", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine) as SceneContext;
         const target = {
             _descriptor: {
                 format: "bgra8unorm" as const,
