@@ -192,12 +192,34 @@ describe("GeometryRendererTask", () => {
     it("exposes its owned depth as `geometryDepthTexture` for downstream tasks", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
-        const task = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }], samples: 1, size: { width: 32, height: 24 } }, engine, scene);
-        const internal = task as unknown as { record(): void; _mrt: { _depthTexture: GPUTexture | null; _depthView: GPUTextureView | null } };
+        const target = {
+            _descriptor: {
+                format: "bgra8unorm" as const,
+                depthClearValue: 1,
+                depthCompare: "less-equal" as const,
+                samples: 1 as const,
+                size: { width: 32, height: 24 } as const,
+            },
+            _colorTexture: null,
+            _colorView: null,
+            _depthTexture: null,
+            _depthView: null,
+            _width: 0,
+            _height: 0,
+        } as unknown as import("../../../packages/babylon-lite/src/engine/render-target").RenderTarget;
+        const task = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }], samples: 1, targetTexture: target }, engine, scene);
+        const internal = task as unknown as {
+            record(): void;
+            _mrt: { _depthTexture: GPUTexture | null; _depthView: GPUTextureView | null };
+            _renderPassDescriptor: GPURenderPassDescriptor;
+            _signature: { _depthCompare?: GPUCompareFunction };
+        };
 
         const depthRt = task.geometryDepthTexture;
         expect(depthRt).toBeTruthy();
         expect(depthRt._descriptor.dFormat).toBe("depth32float");
+        expect(depthRt._descriptor.depthClearValue).toBe(1);
+        expect(depthRt._descriptor.depthCompare).toBe("less-equal");
         expect(depthRt._descriptor.samples).toBe(1);
         expect(depthRt._eager).toBe(true);
 
@@ -211,6 +233,8 @@ describe("GeometryRendererTask", () => {
         expect(depthRt._depthView).toBe(internal._mrt._depthView);
         expect(depthRt._width).toBe(32);
         expect(depthRt._height).toBe(24);
+        expect(internal._signature._depthCompare).toBe("less-equal");
+        expect(internal._renderPassDescriptor.depthStencilAttachment?.depthClearValue).toBe(1);
     });
 
     it("returns the externally-supplied depthTexture from `geometryDepthTexture`", () => {

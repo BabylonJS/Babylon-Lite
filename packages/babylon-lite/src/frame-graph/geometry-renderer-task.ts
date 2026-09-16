@@ -282,6 +282,9 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         sampleCount: samples,
         size,
     });
+    const depthCompare =
+        config.targetTexture?._descriptor.depthCompare ?? config.depthTexture?._descriptor.depthCompare ?? ("greater-equal" as GPUCompareFunction);
+    const depthClearValue = config.targetTexture?._descriptor.depthClearValue ?? config.depthTexture?._descriptor.depthClearValue ?? 0;
 
     const wrapperTargets: (RenderTarget | null)[] = [];
     const typeAccessors: Record<GeometryTextureType, RenderTarget | null> = {} as Record<GeometryTextureType, RenderTarget | null>;
@@ -294,7 +297,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         typeAccessors[a._type] = wrapper;
     }
 
-    const ownedDepthWrapper: RenderTarget | null = config.depthTexture ? null : createDepthWrapperRenderTarget(outputTarget, samples);
+    const ownedDepthWrapper: RenderTarget | null = config.depthTexture ? null : createDepthWrapperRenderTarget(outputTarget, samples, depthClearValue, depthCompare);
     const geometryDepthTexture: RenderTarget = config.depthTexture ?? ownedDepthWrapper!;
 
     const sceneUBO = createEmptyUniformBuffer(eng, SCENE_UBO_BYTES);
@@ -334,8 +337,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _colorFormat: sigColorFormats.join(),
         _colorFormats: sigColorFormats,
         _depthStencilFormat: (config.depthTexture ? config.depthTexture._descriptor.dFormat : outputTarget._descriptor.depthStencilFormat) ?? "depth32float",
-        _depthCompare:
-            config.targetTexture?._descriptor.depthCompare ?? config.depthTexture?._descriptor.depthCompare ?? ("greater-equal" as GPUCompareFunction),
+        _depthCompare: depthCompare,
         _sampleCount: samples,
     };
 
@@ -636,11 +638,11 @@ function rebuildRenderPassDescriptor(task: GeometryRendererTaskInternal, config:
     if (config.depthTexture) {
         depthView = config.depthTexture._depthView;
         depthFormat = config.depthTexture._descriptor.dFormat;
-        depthClearValue = config.depthTexture._descriptor.depthClearValue ?? 0;
+        depthClearValue = config.targetTexture?._descriptor.depthClearValue ?? config.depthTexture._descriptor.depthClearValue ?? 0;
     } else {
         depthView = mrt._depthView;
         depthFormat = mrt._descriptor.depthStencilFormat;
-        depthClearValue = 0;
+        depthClearValue = task.geometryDepthTexture._descriptor.depthClearValue ?? 0;
     }
     const depthAttachment: GPURenderPassDepthStencilAttachment | null = depthView
         ? {
@@ -882,11 +884,18 @@ function createWrapperRenderTarget(mrt: RenderTargetMrt, attachment: AttachmentI
     };
 }
 
-function createDepthWrapperRenderTarget(mrt: RenderTargetMrt, sampleCount: number): RenderTarget {
+function createDepthWrapperRenderTarget(
+    mrt: RenderTargetMrt,
+    sampleCount: number,
+    depthClearValue: number,
+    depthCompare: GPUCompareFunction,
+): RenderTarget {
     const baseDesc = mrt._descriptor;
     const wrapperDesc: RenderTargetDescriptor = {
         lbl: `${baseDesc.label ?? "geometry"}.depth`,
         dFormat: baseDesc.depthStencilFormat,
+        depthClearValue,
+        depthCompare,
         samples: sampleCount,
         size: baseDesc.size,
     };
