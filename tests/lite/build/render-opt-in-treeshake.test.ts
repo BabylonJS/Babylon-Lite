@@ -87,11 +87,11 @@ console.log(createEngine, startEngine, createSpriteRenderer, loadSpriteAtlas);`)
     });
 
     it.each([
-        ["material\\standard\\standard-renderable.js", "buildStandardMeshRenderables", false],
-        ["material\\pbr\\pbr-renderable.js", "buildPbrRenderables", false],
-        ["shadow\\material-shadow-bindings.js", "createMaterialShadowBindings", true],
+        [["material", "standard", "standard-renderable.js"], "buildStandardMeshRenderables", false],
+        [["material", "pbr", "pbr-renderable.js"], "buildPbrRenderables", false],
+        [["shadow", "material-shadow-bindings.js"], "createMaterialShadowBindings", true],
     ] as const)("keeps shadow binding construction behind its receiver feature: %s", async (module, symbol, retained) => {
-        const code = await initialViteCode(`import { ${symbol} } from ${JSON.stringify(join(BUILD_LIB_DIR, module))}; console.log(${symbol});`);
+        const code = await initialViteCode(`import { ${symbol} } from ${JSON.stringify(join(BUILD_LIB_DIR, ...module))}; console.log(${symbol});`);
         expect(code.includes("function createMaterialShadowBindings")).toBe(retained);
         if (!retained) {
             expect(code).not.toContain("standardShadowVariantKey");
