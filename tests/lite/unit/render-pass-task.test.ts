@@ -849,6 +849,40 @@ describe("RenderPassTask transparent sorting", () => {
         expect(depth._syncEager).toHaveBeenCalledWith(engine);
     });
 
+    it("synchronizes a borrowed sampled eager resolve target independently of its MSAA target", () => {
+        const engine = makeMockEngine({ msaaSamples: 4 });
+        const scene = createSceneContext(engine);
+        const color = createRenderTarget({ format: "rgba8unorm", samples: 4, size: { width: 500, height: 300 } });
+        color._colorTexture = engine._device.createTexture({
+            size: { width: 500, height: 300 },
+            format: "rgba8unorm",
+            sampleCount: 4,
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        color._colorView = color._colorTexture.createView();
+        color._width = 500;
+        color._height = 300;
+        const resolve = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 500, height: 300 } });
+        resolve._eager = true;
+        resolve._colorTexture = engine._device.createTexture({
+            size: { width: 400, height: 300 },
+            format: "rgba8unorm",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        resolve._colorView = resolve._colorTexture.createView();
+        resolve._width = 400;
+        resolve._height = 300;
+        resolve._syncEager = vi.fn(function (this: RenderTarget): void {
+            this._width = 500;
+        });
+        const task = createRenderTask({ name: "borrowed-resolve", rt: color, rst: resolve, sharedRt: true }, engine, scene);
+
+        task.record();
+
+        expect(resolve._syncEager).toHaveBeenCalledWith(engine);
+        expect(resolve._width).toBe(500);
+    });
+
     it("uses world centers refreshed by binding updates before sorting transparent draws", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine);

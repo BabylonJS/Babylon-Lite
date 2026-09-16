@@ -396,9 +396,9 @@ export function _buildBindings(
     if (record) {
         if (task._ownsTargets || rt._syncEager) {
             buildRenderTarget(rt, task.engine);
-            if (config.rst && (rt._descriptor.samples ?? 1) > 1 && (task._ownsTargets || config.rst._syncEager)) {
-                buildRenderTarget(config.rst, task.engine);
-            }
+        }
+        if (config.rst && (rt._descriptor.samples ?? 1) > 1 && (task._ownsTargets || config.rst._syncEager)) {
+            buildRenderTarget(config.rst, task.engine);
         }
         if (config.depth && (!config.depth._eager || config.depth._syncEager)) {
             buildRenderTarget(config.depth, task.engine);
