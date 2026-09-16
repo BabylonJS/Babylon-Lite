@@ -4,7 +4,7 @@ import { registerRenderingContext, unregisterRenderingContext } from "../engine/
 import type { EngineContext, RenderingContext } from "../engine/engine.js";
 import type { SurfaceContext } from "../engine/surface.js";
 import type { RenderTarget, RenderTargetSignature } from "../engine/render-target.js";
-import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
+import { _getRenderTargetSurface, _resolveRenderTargetSize, buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { targetSignatureKey } from "../engine/render-target-signature.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Texture2D } from "../texture/texture-2d.js";
@@ -426,16 +426,15 @@ function applyColorAttachmentState(att: GPURenderPassColorAttachment, rt: Render
 }
 
 function ensureRtCanvasSize(rt: RenderTarget): void {
-    const size = rt._descriptor.size;
-    if (!("canvas" in size)) {
+    const surface = _getRenderTargetSurface(rt._descriptor.size);
+    if (!surface) {
         return;
     }
-    // Surface-sized RT: rebuild when the surface's canvas backing-store has resized.
-    const canvas = size.canvas;
-    if (rt._width === canvas.width && rt._height === canvas.height) {
+    const size = _resolveRenderTargetSize(rt._descriptor);
+    if (rt._width === size.width && rt._height === size.height) {
         return;
     }
-    buildRenderTarget(rt, size.engine);
+    buildRenderTarget(rt, surface.engine);
 }
 
 function getEffectPipeline(wrapper: EffectWrapperInternal, targetSignature: RenderTargetSignature): GPURenderPipeline {
