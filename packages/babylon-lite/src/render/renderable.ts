@@ -23,6 +23,8 @@ export interface DrawUpdateContext {
 
 /** @internal Feature-owned work collected during binding updates and flushed before the render pass. */
 export interface DrawUpdateBatch {
+    /** @internal Cache generation is unavailable as soon as retirement is scheduled. */
+    _retired?: boolean;
     reset(): void;
     flush(engine: EngineContext): void;
     destroy(): void;
@@ -77,11 +79,8 @@ export interface Renderable {
     _worldCenter?: [number, number, number];
     /** @internal Material reference at build time — for detecting material swaps. */
     _lastMaterial?: any;
-    /** @internal Retire this renderable's owned GPU resources (per-mesh geometry
-     *  UBOs, skeletal-velocity textures, bound-texture releases). Populated only by
-     *  the geometry-renderer path so its owning task can retire per-mesh resources
-     *  on re-record/dispose. Idempotent. */
-    _geometryDispose?: () => void;
+    /** @internal Owner-provided sink for cached resources that outlive individual bind() generations. */
+    _lifetimeDisposers?: (() => void)[];
     /** @internal Rebuilds this renderable on a replacement device after device loss.
      *
      *  Stamped by whichever builder created the renderable, closing over the arguments it was
@@ -123,6 +122,16 @@ export interface SceneUniformUpdater {
     update(engine: EngineContext): void;
 }
 
+/** @internal Explicit ownership for resources created by an auxiliary mesh rebuild. */
+export interface MeshRebuildResources {
+    /** @internal Cached resources released when the renderable is retired. */
+    readonly _lifetimeDisposers: (() => void)[];
+}
+
+/** @internal Build a fresh renderable for one mesh, optionally using task-owned resources.
+ *  Resource caches may be shared; renderable identity and its lifetime sink are unique to each rebuild. */
+export type MeshRebuilder = (scene: SceneContext, mesh: Mesh, materialOverride?: Material, resources?: MeshRebuildResources) => Renderable;
+
 /** Build result from a mesh group builder. */
 export interface MeshGroupBuildResult {
     renderables: Renderable[];
@@ -131,9 +140,9 @@ export interface MeshGroupBuildResult {
     _G?: boolean;
     /** Closure used to rebuild a single mesh — captures the per-scene context
      *  (composer, BG caches, lights UBO, …) so material swaps and per-pass overrides
-     *  reuse the same setup. The group builder stores it on itself as
-     *  `_rebuildSingle` after the first run. */
-    rebuildSingle: (scene: SceneContext, mesh: Mesh, materialOverride?: Material) => Renderable;
+     *  reuse the same setup. The scene stores it on its material group as `r`;
+     *  a builder-wide `_rebuildSingle` cache does not establish readiness in another scene. */
+    rebuildSingle: MeshRebuilder;
 }
 
 /**
@@ -141,16 +150,18 @@ export interface MeshGroupBuildResult {
  * material type. Each material module exports one. The scene calls it at build
  * time — no pipeline-specific logic in scene.ts.
  *
- *  - `_rebuildSingle` is set by the group builder on first run (same compilation
- *    unit as `buildSingleX`). Used for per-mesh material swaps and per-pass
- *    material overrides (`RenderTask.addMesh`).
+ *  - Scene-dependent rebuilds must resolve through the scene group's `r`.
+ *    `_rebuildSingle` is also cached by builders, but is only a standalone fallback
+ *    for factories explicitly marked `_sceneIndependentRebuild`.
  *
  * @param scene  - The scene context (for engine, camera, env textures, etc.)
  * @param meshes - All meshes that use this builder's material type.
  */
 export type MeshGroupBuilder = ((scene: SceneContext, meshes: Mesh[]) => Promise<MeshGroupBuildResult>) & {
     /** @internal */
-    _rebuildSingle?: (scene: SceneContext, mesh: Mesh, materialOverride?: Material) => Renderable;
+    _rebuildSingle?: MeshRebuilder;
+    /** @internal The standalone rebuild factory derives all context from its arguments, not a prior scene build. */
+    _sceneIndependentRebuild?: boolean;
     /** @internal */
     _materialFamily?: "standard" | "pbr" | "node" | "shader";
     /** @internal Pending opt-in feature preload required before this builder runs. */

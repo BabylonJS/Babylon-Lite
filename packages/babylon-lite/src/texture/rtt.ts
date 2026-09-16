@@ -5,50 +5,100 @@
  */
 
 import type { EngineContext } from "../engine/engine.js";
-import { getBilinearSampler, getNearestSampler } from "../resource/samplers.js";
+import { runGpuResourceCallbacks } from "../engine/gpu-resource-retirement.js";
+import { getBilinearSampler } from "../resource/samplers.js";
+import { acquireGPUTexture } from "../resource/gpu-texture-acquire.js";
+import { releaseGPUTexture } from "../resource/gpu-texture-release.js";
 import type { RenderTarget, RenderTargetDescriptor } from "../engine/render-target.js";
-import { createRenderTarget, buildRenderTarget } from "../engine/render-target.js";
+import { createRenderTarget, buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import type { Texture2D } from "./texture-2d.js";
 
-/** Eagerly allocate a render target's GPU textures and return a sampled-texture
- *  view of the color attachment, or the depth attachment for depth-only targets.
- *  Marks the RT so `buildRenderTarget` won't realloc.
- *
- *  The descriptor's size MUST be fixed (not `"canvas"`) because the canvas size
- *  may change before the frame graph builds, which would invalidate the eagerly-
- *  created texture handle that downstream bind groups have already captured. */
-export function createRenderTargetTexture(engine: EngineContext, descriptor: RenderTargetDescriptor): { rt: RenderTarget; texture: Texture2D } {
-    if ("canvas" in descriptor.size) {
-        throw new Error(
-            "createRenderTargetTexture: descriptor.size must be fixed { width, height } pixels, not a SurfaceContext (would invalidate eagerly-allocated textures when the canvas resizes)."
-        );
+/** Eager render-target allocation and sampled attachment facades. */
+export interface RenderTargetTextureResult {
+    readonly rt: RenderTarget;
+    /** Color attachment, or the depth attachment for a depth-only target. */
+    readonly texture: Texture2D;
+    /** Sampled depth facade when explicitly requested with `withSampledDepthTexture`. */
+    readonly depthTexture: Texture2D | null;
+    /** @internal Independent surface-resize subscriptions and their pending delivery state. */
+    _resizeCallbacks?: Set<{ readonly callback: () => void; pending: boolean }>;
+    /** @internal Surface-owned cancellation settlement; never invokes resize observers. */
+    _settleResizeCallbacks?(): void;
+}
+
+/** Optional RTT depth-facade provider, such as `withSampledDepthTexture`. */
+export type RenderTargetDepthSampler = (engine: EngineContext, target: RenderTarget) => Texture2D;
+
+function releaseAttachments(this: RenderTarget, color: GPUTexture | null, depth: GPUTexture | null): void {
+    this._disposed = true;
+    try {
+        if (color) {
+            releaseGPUTexture(color);
+        }
+    } finally {
+        if (depth) {
+            releaseGPUTexture(depth);
+        }
     }
-    const fixedSize = descriptor.size;
+}
+
+function checkTargetOwnership(this: RenderTarget): void {
+    if (this._disposed) {
+        throw new Error("RenderTargetTexture has been disposed.");
+    }
+}
+
+/** @internal Shared eager allocation and attachment ownership for fixed and surface RTT factories. */
+export function _createRenderTargetTexture(engine: EngineContext, descriptor: RenderTargetDescriptor, sampleDepth?: RenderTargetDepthSampler): RenderTargetTextureResult {
+    const hasColor = !!descriptor.format;
+    if (!hasColor && !sampleDepth) {
+        throw new Error("Depth-only render-target textures require withSampledDepthTexture as the third argument.");
+    }
     const rt = createRenderTarget(descriptor);
-    buildRenderTarget(rt, engine);
-    rt._eager = true;
-    if (!rt._colorTexture || !rt._colorView) {
-        if (!rt._depthTexture) {
+    try {
+        buildRenderTarget(rt, engine);
+        const depthTexture = sampleDepth?.(engine, rt) ?? null;
+        const texture: Texture2D | null = hasColor
+            ? {
+                  texture: rt._colorTexture!,
+                  view: rt._colorView!,
+                  sampler: getBilinearSampler(engine),
+                  width: rt._width,
+                  height: rt._height,
+                  invertY: true,
+              }
+            : depthTexture;
+        if (!texture) {
             throw new Error("createRenderTargetTexture: render target has no color or depth texture (no format / depthStencilFormat?).");
         }
-        const texture: Texture2D = {
-            texture: rt._depthTexture,
-            view: rt._depthTexture.createView({ aspect: "depth-only" }),
-            sampler: getNearestSampler(engine),
-            width: fixedSize.width,
-            height: fixedSize.height,
-            invertY: false,
-            _sampleType: "depth",
-        };
-        return { rt, texture };
+        const result: RenderTargetTextureResult = { rt, texture, depthTexture };
+        rt._disposeAttachments = releaseAttachments;
+        rt._syncEager = checkTargetOwnership;
+        for (const attachment of [rt._colorTexture, rt._depthTexture]) {
+            if (attachment) {
+                acquireGPUTexture(attachment);
+            }
+        }
+        rt._eager = true;
+        return result;
+    } catch (error) {
+        runGpuResourceCallbacks([() => disposeRenderTarget(rt)]);
+        throw error;
     }
-    const texture: Texture2D = {
-        texture: rt._colorTexture,
-        view: rt._colorView,
-        sampler: getBilinearSampler(engine),
-        width: fixedSize.width,
-        height: fixedSize.height,
-        invertY: true,
-    };
-    return { rt, texture };
+}
+
+/** Eagerly allocate a fixed-size render target and expose sampled attachment facades. */
+export function createRenderTargetTexture(engine: EngineContext, descriptor: RenderTargetDescriptor, sampleDepth?: RenderTargetDepthSampler): RenderTargetTextureResult {
+    if ("canvas" in descriptor.size) {
+        throw new Error(
+            "createRenderTargetTexture: descriptor.size must be fixed { width, height } pixels, not a SurfaceContext; use createSurfaceRenderTargetTexture for surface-resizing targets."
+        );
+    }
+    return _createRenderTargetTexture(engine, descriptor, sampleDepth);
+}
+
+/** Release the target's attachment ownership. Sampled consumers may retain its last image.
+ *  Owning render tasks call this lifecycle automatically; use it directly for targets without a task owner. */
+export function disposeRenderTargetTexture(result: RenderTargetTextureResult): void {
+    disposeRenderTarget(result.rt);
 }

@@ -59,7 +59,7 @@ export interface CopyToTextureTaskConfig {
      *  directly into `resolveTexture`. */
     targetTexture?: RenderTarget;
     /** When true, this task owns `targetTexture`: it rebuilds the target on every frame-graph build (including
-     *  canvas resize) and disposes it with the task. Leave false for externally owned or eager targets. */
+     *  canvas resize) and disposes it with the task. Leave false for externally owned targets. */
     ownsTargetTexture?: boolean;
     /** Viewport applied to the target before the blit. When undefined (default),
      *  the whole target is overwritten and the encoder-copy fast path becomes

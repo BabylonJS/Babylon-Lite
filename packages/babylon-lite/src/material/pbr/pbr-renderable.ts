@@ -10,13 +10,14 @@ import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
-import { collectPbrBoundTextures } from "./pbr-material.js";
+import { collectPbrBoundTextures } from "./collect-pbr-bound-textures.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 
-import type { Renderable, MeshGroupBuildResult } from "../../render/renderable.js";
+import type { Renderable, MeshGroupBuildResult, MeshRebuildResources } from "../../render/renderable.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
-import { acquireTexture, releaseTexture, clearSamplerCache } from "../../resource/gpu-pool.js";
-import { createUniformBuffer } from "../../resource/gpu-buffers.js";
+import { acquireTexture } from "../../resource/texture-acquire.js";
+import { releaseTexture } from "../../resource/texture-release.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 import { getOrCreatePbrBindings, getOrCreatePbrPipeline, createPbrMeshBindGroup, clearPbrPipelineCache } from "./pbr-pipeline.js";
 import {
     _registerPbrExt,
@@ -35,11 +36,12 @@ import {
 import type { PbrExt } from "./pbr-flags.js";
 import { createPbrComposer } from "./pbr-compose.js";
 import { StandardToneMapping, type ToneMapping } from "./tone-mapping.js";
-import { _computePbrMaterialFeatures } from "./pbr-material.js";
+import { _computePbrMaterialFeatures } from "./pbr-material-features.js";
 import type { ShadowGenerator } from "../../shadow/shadow-generator.js";
+import type { MaterialShadowBindings } from "../../shadow/material-shadow-bindings.js";
 import type { ThinInstanceData } from "../../mesh/thin-instance.js";
 import type { PbrShadowLightSlot } from "./fragments/pbr-shadow-fragment.js";
-import { writeMeshLightSelection } from "../../render/lights-ubo.js";
+import { writeMeshLightSelection } from "../../render/mesh-light-selection.js";
 import type { PbrLightMode } from "./pbr-compose.js";
 import type { Material, MaterialRenderFeatures } from "../material.js";
 import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
@@ -151,6 +153,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
     // Light/shadow helpers stay dynamic so single-light and non-shadow bundles stay lean.
     let _createPbrShadowFragment: ((slots: PbrShadowLightSlot[]) => ShaderFragment) | null = null;
+    let shadowBindings: MaterialShadowBindings | undefined;
     let _singleLightWGSL = "";
     let _getSingleLightBlock: ((type: string) => string) | null = null;
     const singleLightBlocks: Partial<Record<SingleLightType, () => string>> = {};
@@ -171,7 +174,8 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     }
     if (hasAnyAffectedLight && hasSomeShadows) {
         const shadowMod = await import("./fragments/pbr-shadow-fragment.js");
-        _createPbrShadowFragment = shadowMod.createPbrShadowFragment;
+        _createPbrShadowFragment = await shadowMod.preparePbrShadowFragment(shadowLights);
+        shadowBindings = shadowMod.createMaterialShadowBindings(engine, shadowLights);
     }
 
     // ── Per-mesh fragment creators (imported if any mesh needs them) ──
@@ -266,16 +270,13 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     });
 
     const sceneFeatures = (hasEnv ? PBR_HAS_ENV : 0) | (toneMapping ? PBR_HAS_TONEMAP : 0) | (scene.fog ? PBR_HAS_FOG : 0);
-    // Shadow bind group cache — within one scene build, all receiving meshes share the
-    // same shadowLights array, so a BG keyed by shadowBGL alone is correct.
-    const shadowBGCache = new Map<GPUBindGroupLayout, GPUBindGroup>();
     const syncThinInstanceBuffers = _syncThinInstanceBuffers;
     const syncThinInstanceForDraw = _syncThinInstanceForDraw;
 
     // Closure used both for the initial per-mesh build below AND for later
     // material-swap / per-pass-override rebuilds (set on pbrGroupBuilder._rebuildSingle).
     // Captures the per-scene context — no separate WeakMap needed.
-    const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
+    const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material, resources?: MeshRebuildResources): Renderable => {
         const mat = (materialOverride ?? mesh.material) as PbrMaterialProps;
         const renderFeatures = (mat._renderFeatures ??= _computePbrMaterialFeatures(mat)) as MaterialRenderFeatures;
         const isOverride = materialOverride != null;
@@ -326,52 +327,34 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         const _packMeshWorld = engine._makePackMeshWorld?.(s as SceneContext) ?? packMat4IntoF32;
         _packMeshWorld(meshUboData, mesh.worldMatrix, 0, 0);
         writeMeshLightSelection(mesh, s.lights, meshUboData);
+        const disposers = resources?._lifetimeDisposers ?? [];
+        if (!resources) {
+            s._meshDisposables.set(mesh, disposers);
+        }
         const meshUBO = createUniformBuffer(engine, meshUboData);
+        disposers.push(() => meshUBO.destroy());
 
         // Material UBO.
         const materialSpec = composed._materialUboSpec!;
         const matInitData = new F32(materialSpec._totalBytes / 4);
         _writeMaterialData(matInitData, mat, materialSpec);
         const materialUBO = createUniformBuffer(engine, matInitData);
+        disposers.push(() => materialUBO.destroy());
 
         const needsTaskRefraction = !!mat._transmissive && (features2 & PBR2_HAS_REFRACTION) !== 0;
         const materialBindGroupStatic = needsTaskRefraction ? null : createPbrMeshBindGroup(engine, bindings, composed, meshUBO, materialUBO, mat, envTextures ?? null, mesh);
 
-        // Shadow bind group (group 2) — shared across receiving meshes via shadowBGCache.
-        let shadowBindGroup: GPUBindGroup | null = null;
-        const meshShadowLights = receiveShadows ? shadowLights : [];
-        if (meshShadowLights.length > 0 && bindings._shadowBGL) {
-            let cached = shadowBGCache.get(bindings._shadowBGL);
-            if (!cached) {
-                const entries: GPUBindGroupEntry[] = [];
-                let b = 0;
-                for (const sl of meshShadowLights) {
-                    const sg = sl.gen;
-                    entries.push({ binding: b++, resource: sg._depthTexture.createView() });
-                    entries.push({ binding: b++, resource: sg._depthSampler });
-                    entries.push({ binding: b++, resource: { buffer: sg._shadowUBO } });
-                }
-                cached = device.createBindGroup({ layout: bindings._shadowBGL, entries });
-                shadowBGCache.set(bindings._shadowBGL, cached);
-            }
-            shadowBindGroup = cached;
-        }
+        const shadowBindGroup = receiveShadows && bindings._shadowBGL ? shadowBindings!(bindings._shadowBGL) : null;
 
         const boundTextures = collectPbrBoundTextures(mat);
         for (const t of boundTextures) {
             acquireTexture(t);
         }
-        s._meshDisposables.set(mesh, [
-            () => {
-                meshUBO.destroy();
-                materialUBO.destroy();
-            },
-            () => {
-                for (const t of boundTextures) {
-                    releaseTexture(t);
-                }
-            },
-        ]);
+        disposers.push(() => {
+            for (const t of boundTextures) {
+                releaseTexture(t);
+            }
+        });
 
         const isTransparent = (features2 & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)) === 0 && (features & PBR_HAS_ALPHA_BLEND) !== 0;
         const order = mesh.renderOrder ?? (isTransparent || needsTaskRefraction ? 150 : 100);
@@ -529,12 +512,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
         _syncThinInstanceForDraw,
     };
 
-    scene._disposables.push(
-        (engine._pbrCleanup ??= () => {
-            clearPbrPipelineCache();
-            clearSamplerCache(engine);
-        })
-    );
+    scene._disposables.push(clearPbrPipelineCache);
 
     return { renderables, rebuildSingle, _G: hasGammaAlbedo };
 }

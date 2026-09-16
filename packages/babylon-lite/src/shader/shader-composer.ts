@@ -10,37 +10,37 @@ import { wgsl } from "./wgsl.js";
 
 const STAGE_VERTEX = 0x1;
 const STAGE_FRAGMENT = 0x2;
+const VERTEX_SECTIONS = ["/*SU*/", "/*MU*/", "/*VI*/", "/*VO*/", "/*VD*/", "/*VP*/", "/*VH*/"] as const;
+const FRAGMENT_SECTIONS = ["/*SU*/", "/*MU*/", "/*FI*/", "/*HF*/", "/*FB*/"] as const;
+const MATERIAL_BINDING_GROUPS = ["mesh", "shadow"] as const;
+
+function replaceSections(template: string, markers: readonly string[], sections: readonly string[]): string {
+    for (let index = 0; index < markers.length; index++) {
+        template = template.replace(markers[index]!, sections[index]!);
+    }
+    return template;
+}
 
 function topoSort(fragments: readonly ShaderFragment[]): ShaderFragment[] {
-    const byId = new Map<string, ShaderFragment>();
+    const nodes = new Map<string, { _fragment: ShaderFragment; _remaining: number; _dependents: string[] }>();
     for (const f of fragments) {
-        if (byId.has(f._id)) {
+        if (nodes.has(f._id)) {
             throw Error();
         }
-        byId.set(f._id, f);
+        nodes.set(f._id, { _fragment: f, _remaining: f._dependencies?.length ?? 0, _dependents: [] });
     }
-    const inDeg = new Map<string, number>();
-    const deps = new Map<string, string[]>();
     for (const f of fragments) {
-        if (!inDeg.has(f._id)) {
-            inDeg.set(f._id, 0);
-        }
         for (const d of f._dependencies ?? []) {
-            if (!byId.has(d)) {
+            const dependency = nodes.get(d);
+            if (!dependency) {
                 throw Error();
             }
-            inDeg.set(f._id, (inDeg.get(f._id) ?? 0) + 1);
-            let arr = deps.get(d);
-            if (!arr) {
-                arr = [];
-                deps.set(d, arr);
-            }
-            arr.push(f._id);
+            dependency._dependents.push(f._id);
         }
     }
     const q: string[] = [];
-    for (const [id, d] of inDeg) {
-        if (d === 0) {
+    for (const [id, node] of nodes) {
+        if (node._remaining === 0) {
             q.push(id);
         }
     }
@@ -49,11 +49,11 @@ function topoSort(fragments: readonly ShaderFragment[]): ShaderFragment[] {
     let qi = 0;
     while (qi < q.length) {
         const id = q[qi++]!;
-        out.push(byId.get(id)!);
-        for (const d of deps.get(id) ?? []) {
-            const nd = (inDeg.get(d) ?? 1) - 1;
-            inDeg.set(d, nd);
-            if (nd === 0) {
+        const node = nodes.get(id)!;
+        out.push(node._fragment);
+        for (const d of node._dependents) {
+            const dependent = nodes.get(d)!;
+            if (--dependent._remaining === 0) {
                 let i = qi;
                 while (i < q.length && q[i]! < d) {
                     i++;
@@ -71,16 +71,12 @@ function topoSort(fragments: readonly ShaderFragment[]): ShaderFragment[] {
 function dedup<T extends { _name: string }>(base: readonly T[], extra: readonly T[]): T[] {
     const seen = new Set<string>();
     const all: T[] = [];
-    for (const v of base) {
-        if (!seen.has(v._name)) {
-            seen.add(v._name);
-            all.push(v);
-        }
-    }
-    for (const v of extra) {
-        if (!seen.has(v._name)) {
-            seen.add(v._name);
-            all.push(v);
+    for (const list of [base, extra]) {
+        for (const value of list) {
+            if (!seen.has(value._name)) {
+                seen.add(value._name);
+                all.push(value);
+            }
         }
     }
     return all;
@@ -113,16 +109,24 @@ function bglEntry(binding: number, decl: BindingDecl): GPUBindGroupLayoutEntry {
 }
 
 function declWGSL(g: number, b: number, d: BindingDecl): string {
+    let qualifier = "";
+    let type: string;
     switch (d._type._kind) {
         case "uniform-buffer":
-            return wgsl`@group(${g})@binding(${b}) var<uniform> ${d._name}:${d._name}Uniforms;`;
+            qualifier = "<uniform>";
+            type = `${d._name}Uniforms`;
+            break;
         case "texture":
-            return wgsl`@group(${g})@binding(${b}) var ${d._name}:${d._type._textureType};`;
+            type = d._type._textureType;
+            break;
         case "sampler":
-            return wgsl`@group(${g})@binding(${b}) var ${d._name}:${d._type._samplerType === "sampler_non_filtering" ? "sampler" : d._type._samplerType};`;
+            type = d._type._samplerType === "sampler_non_filtering" ? "sampler" : d._type._samplerType;
+            break;
         case "storage-texture":
-            return wgsl`@group(${g})@binding(${b}) var ${d._name}:texture_storage_2d<${d._type._format},${d._type._access}>;`;
+            type = `texture_storage_2d<${d._type._format},${d._type._access}>`;
+            break;
     }
+    return wgsl`@group(${g})@binding(${b}) var${qualifier} ${d._name}:${type};`;
 }
 
 const SLOT_RE = /\/\*([A-Z_0-9]+)\*\//g;
@@ -170,32 +174,27 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     const allAttrs = dedup(template._baseVertexAttributes, fragAttrs);
     const inputLines: string[] = [];
     const _vertexBufferLayouts: GPUVertexBufferLayout[] = [];
-    const groups = new Map<string, { loc: number; off: number; fmt: GPUVertexFormat }[]>();
-    const firstOfGroup = new Map<string, VertexAttribute>();
+    const groups = new Map<string, GPUVertexBufferLayout & { attributes: GPUVertexAttribute[] }>();
     for (let i = 0; i < allAttrs.length; i++) {
         const a = allAttrs[i]!;
         inputLines.push(wgsl`@location(${i}) ${a._name}:${a._type},`);
-        if (a._bufferGroup) {
-            if (!groups.has(a._bufferGroup)) {
-                groups.set(a._bufferGroup, []);
-                firstOfGroup.set(a._bufferGroup, a);
-            }
-            groups.get(a._bufferGroup)!.push({ loc: i, off: a._offset ?? 0, fmt: a._gpuFormat });
-        } else {
-            _vertexBufferLayouts.push({
+        let layout = a._bufferGroup ? groups.get(a._bufferGroup) : undefined;
+        if (!layout) {
+            layout = {
                 arrayStride: a._arrayStride,
                 stepMode: a._stepMode ?? "vertex",
-                attributes: [{ shaderLocation: i, offset: a._offset ?? 0, format: a._gpuFormat }],
-            });
+                attributes: [],
+            };
+            if (a._bufferGroup) {
+                groups.set(a._bufferGroup, layout);
+            } else {
+                _vertexBufferLayouts.push(layout);
+            }
         }
+        layout.attributes.push({ shaderLocation: i, offset: a._offset ?? 0, format: a._gpuFormat });
     }
-    for (const [grp, attrs] of groups) {
-        const f = firstOfGroup.get(grp)!;
-        _vertexBufferLayouts.push({
-            arrayStride: f._arrayStride,
-            stepMode: f._stepMode ?? "vertex",
-            attributes: attrs.map((a) => ({ shaderLocation: a.loc, offset: a.off, format: a.fmt })),
-        });
+    for (const layout of groups.values()) {
+        _vertexBufferLayouts.push(layout);
     }
     let nextLoc = allAttrs.length;
     for (const f of sorted) {
@@ -233,7 +232,7 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     let mb = hasMaterialUbo ? 2 : 1,
         sb = 0;
 
-    function addBinding(d: BindingDecl, _isVertex: boolean) {
+    function addBinding(d: BindingDecl) {
         const isShadow = d._group === "shadow";
         const b = isShadow ? sb++ : mb++;
         const g = isShadow ? 2 : 1;
@@ -248,24 +247,23 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     }
 
     for (const d of template._baseVertexBindings ?? []) {
-        addBinding(d, true);
+        addBinding(d);
     }
     for (const f of sorted) {
         for (const d of f._vertexBindings ?? []) {
-            addBinding(d, true);
+            addBinding(d);
         }
     }
     for (const d of template._baseBindings ?? []) {
-        addBinding(d, false);
+        addBinding(d);
     }
-    for (const f of sorted) {
-        for (const d of (f._bindings ?? []).filter((b) => (b._group ?? "mesh") === "mesh")) {
-            addBinding(d, false);
-        }
-    }
-    for (const f of sorted) {
-        for (const d of (f._bindings ?? []).filter((b) => b._group === "shadow")) {
-            addBinding(d, false);
+    for (const group of MATERIAL_BINDING_GROUPS) {
+        for (const f of sorted) {
+            for (const d of f._bindings ?? []) {
+                if ((d._group ?? "mesh") === group) {
+                    addBinding(d);
+                }
+            }
         }
     }
 
@@ -276,23 +274,25 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
         ? wgsl`\nstruct MaterialUniforms{\n${_materialUboSpec._structBody}\n}\n@group(1)@binding(1) var<uniform> material:MaterialUniforms;`
         : "";
 
-    let vertexWGSL: string = template._vertexTemplate;
-    vertexWGSL = vertexWGSL.replace("/*SU*/", SCENE_UBO_WGSL);
-    vertexWGSL = vertexWGSL.replace("/*MU*/", meshStruct);
-    vertexWGSL = vertexWGSL.replace("/*VI*/", wgsl`struct VertexInput{\n${inputLines.join("\n")}\n}`);
-    vertexWGSL = vertexWGSL.replace("/*VO*/", wgsl`struct VertexOutput{\n${varyBody}\n}`);
-    vertexWGSL = vertexWGSL.replace("/*VD*/", vDecls.join("\n"));
-    vertexWGSL = vertexWGSL.replace("/*VP*/", vParams);
-    vertexWGSL = vertexWGSL.replace("/*VH*/", vHelpers.join("\n"));
+    let vertexWGSL = replaceSections(template._vertexTemplate, VERTEX_SECTIONS, [
+        SCENE_UBO_WGSL,
+        meshStruct,
+        wgsl`struct VertexInput{\n${inputLines.join("\n")}\n}`,
+        wgsl`struct VertexOutput{\n${varyBody}\n}`,
+        vDecls.join("\n"),
+        vParams,
+        vHelpers.join("\n"),
+    ]);
     // These dynamic keys are reserved from Terser property mangling in bundle-scenes-core.ts.
     vertexWGSL = injectSlots(vertexWGSL, sorted, "_vertexSlots");
 
-    let fragmentWGSL: string = template._fragmentTemplate;
-    fragmentWGSL = fragmentWGSL.replace("/*SU*/", SCENE_UBO_WGSL);
-    fragmentWGSL = fragmentWGSL.replace("/*MU*/", meshStruct + materialStruct);
-    fragmentWGSL = fragmentWGSL.replace("/*FI*/", wgsl`struct FragmentInput{\n${varyBody}\n}`);
-    fragmentWGSL = fragmentWGSL.replace("/*HF*/", helpers.join("\n"));
-    fragmentWGSL = fragmentWGSL.replace("/*FB*/", fDecls.join("\n"));
+    let fragmentWGSL = replaceSections(template._fragmentTemplate, FRAGMENT_SECTIONS, [
+        SCENE_UBO_WGSL,
+        meshStruct + materialStruct,
+        wgsl`struct FragmentInput{\n${varyBody}\n}`,
+        helpers.join("\n"),
+        fDecls.join("\n"),
+    ]);
     fragmentWGSL = injectSlots(fragmentWGSL, sorted, "_fragmentSlots");
 
     const _meshBGLDescriptor = { entries: meshBGL };

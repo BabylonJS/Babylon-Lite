@@ -20,7 +20,7 @@ import type { Material } from "../material.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { UboSpec } from "../../shader/fragment-types.js";
-import type { DrawUpdateContext, MeshGroupBuildResult, Renderable } from "../../render/renderable.js";
+import type { DrawUpdateContext, MeshGroupBuildResult, MeshRebuildResources, Renderable } from "../../render/renderable.js";
 import type { ShaderAttributeName, ShaderMaterial } from "./shader-material.js";
 import type { ShaderPipelineBindings } from "./shader-pipeline.js";
 import type { ShaderPacket, ShaderRenderPass } from "./shader-renderable.js";
@@ -33,7 +33,7 @@ type CullModule = typeof import("../../mesh/thin-instance-cull-binding.js");
 /** The shader-renderable helpers handed in positionally by `buildShaderGroup`. */
 interface ShaderHelpers {
     buildPlain: (scene: SceneContext, meshes: Mesh[]) => MeshGroupBuildResult;
-    createPacket: (scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh, aux?: boolean) => ShaderPacket;
+    createPacket: (scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh, resources?: MeshRebuildResources) => ShaderPacket;
     updatePacket: (scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext, uniformBatch?: UniformCopyBatch) => void;
     updateCustomUbo: (engine: EngineContext, material: ShaderMaterial, uniformBatch?: UniformCopyBatch) => void;
     getAttrBuffer: (engine: EngineContext, mesh: Mesh, name: ShaderAttributeName) => GPUBuffer;
@@ -141,7 +141,7 @@ function createShaderInstancedRenderable(
         }
         slot = syncThinInstanceBuffers(engine, ti, pass, slot, hasColor, cullBinding?.cullDrawBufs);
         pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
-        pass.setBindGroup(1, packet._bindGroup);
+        pass.setBindGroup(1, packet._bindGroup!);
         if (cullBinding) {
             cullBinding.draw(pass, gpu.indexCount, ti.count);
         } else if (drawArgs) {
@@ -176,9 +176,17 @@ function createShaderInstancedRenderable(
 }
 
 /** Build one instanced renderable for `mesh` (used by the combined `rebuildSingle`). */
-function buildInstancedSingle(scene: SceneContext, mesh: Mesh, material: ShaderMaterial, isOverride: boolean, h: ShaderHelpers, cull?: CullModule): Renderable {
+function buildInstancedSingle(
+    scene: SceneContext,
+    mesh: Mesh,
+    material: ShaderMaterial,
+    isOverride: boolean,
+    h: ShaderHelpers,
+    cull?: CullModule,
+    resources?: MeshRebuildResources
+): Renderable {
     const bindings = h.getOrCreateShaderPipelineBindings(scene.surface.engine, material);
-    const packet = h.createPacket(scene, material, bindings.systemSpec, mesh, isOverride);
+    const packet = h.createPacket(scene, material, bindings.systemSpec, mesh, resources);
     return createShaderInstancedRenderable(scene, material, packet, isOverride, h, cull);
 }
 
@@ -229,15 +237,15 @@ export function buildShaderRenderablesWithInstancing(
         renderables.push(buildInstancedSingle(scene, mesh, mesh.material as ShaderMaterial, false, h, cull));
     }
 
-    const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
+    const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material, resources?: MeshRebuildResources): Renderable => {
         const material = (materialOverride ?? mesh.material) as ShaderMaterial;
         if (mesh.thinInstances) {
-            return buildInstancedSingle(s, mesh, material, materialOverride != null, h, cull);
+            return buildInstancedSingle(s, mesh, material, materialOverride != null, h, cull, resources);
         }
         if (plainRebuild) {
-            return plainRebuild(s, mesh, materialOverride);
+            return plainRebuild(s, mesh, materialOverride, resources);
         }
-        return buildPlain(s, [mesh]).rebuildSingle(s, mesh, materialOverride);
+        return buildPlain(s, []).rebuildSingle(s, mesh, materialOverride, resources);
     };
 
     return { renderables, rebuildSingle };

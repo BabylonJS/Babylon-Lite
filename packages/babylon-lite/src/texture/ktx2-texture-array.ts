@@ -10,7 +10,7 @@
 
 import { U8 } from "../engine/typed-arrays.js";
 import type { EngineContext } from "../engine/engine.js";
-import { getOrCreateSampler } from "../resource/gpu-pool.js";
+import { getOrCreateSampler } from "../resource/texture-sampler-pool.js";
 import { createTexture2DArrayFromPixels } from "./texture-array.js";
 import type { Texture2DArray } from "./texture-array.js";
 import { loadKtx2Decoder, RGBA_CAPS } from "./ktx2-loader.js";

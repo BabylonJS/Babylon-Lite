@@ -9,6 +9,7 @@ import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { UboSpec } from "../../../packages/babylon-lite/src/shader/fragment-types";
+import type { MeshRebuildResources, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage"> & {
     GPUBufferUsage?: { VERTEX: number; COPY_DST: number; STORAGE: number; INDIRECT: number };
@@ -37,7 +38,7 @@ function makeThinInstances(): ThinInstanceData {
 }
 
 describe("ShaderMaterial thin instances", () => {
-    it("marks material-override packets as auxiliary", () => {
+    it("forwards explicit ownership for material-override packets", () => {
         const engine = {
             _device: {
                 createBuffer: vi.fn(),
@@ -67,15 +68,18 @@ describe("ShaderMaterial thin instances", () => {
             _bindGroup: {} as GPUBindGroup,
             _lastResourceVersion: 0,
             _boundTextures: [],
-            _boundStorageBuffers: [],
         } as ShaderPacket;
-        const createPacket = vi.fn((_scene: SceneContext, _material: ShaderMaterial, _systemSpec: UboSpec, _mesh: Mesh, _aux?: boolean): ShaderPacket => packet);
+        const createPacket = vi.fn((_scene: SceneContext, _material: ShaderMaterial, _systemSpec: UboSpec, _mesh: Mesh, _resources?: MeshRebuildResources): ShaderPacket => packet);
+        const plainRenderable = { order: 100, isTransparent: false } as Renderable;
+        const plainRebuild = vi.fn(() => plainRenderable);
+        const buildPlain = vi.fn((_scene: SceneContext, _meshes: Mesh[]) => ({
+            renderables: [],
+            rebuildSingle: plainRebuild,
+        }));
         const result = buildShaderRenderablesWithInstancing(
             scene,
             [mesh],
-            () => {
-                throw new Error("plain builder should not run");
-            },
+            buildPlain,
             createPacket,
             vi.fn(),
             vi.fn(),
@@ -91,9 +95,16 @@ describe("ShaderMaterial thin instances", () => {
             })
         );
 
-        result.rebuildSingle(scene, mesh, override);
+        const resources: MeshRebuildResources = { _lifetimeDisposers: [] };
+        result.rebuildSingle(scene, mesh, override, resources);
 
-        expect(createPacket).toHaveBeenLastCalledWith(scene, override, systemSpec, mesh, true);
+        expect(createPacket).toHaveBeenLastCalledWith(scene, override, systemSpec, mesh, resources);
+
+        mesh.thinInstances = undefined;
+        const plainResources: MeshRebuildResources = { _lifetimeDisposers: [] };
+        expect(result.rebuildSingle(scene, mesh, override, plainResources)).toBe(plainRenderable);
+        expect(buildPlain).toHaveBeenLastCalledWith(scene, []);
+        expect(plainRebuild).toHaveBeenLastCalledWith(scene, mesh, override, plainResources);
     });
 
     it("lets a color-independent material override share matrices without binding the mesh color stream", () => {
@@ -134,7 +145,6 @@ describe("ShaderMaterial thin instances", () => {
             _bindGroup: {} as GPUBindGroup,
             _lastResourceVersion: 0,
             _boundTextures: [],
-            _boundStorageBuffers: [],
         } as ShaderPacket;
         const getPipeline = vi.fn((..._args: Parameters<Parameters<typeof buildShaderRenderablesWithInstancing>[7]>): GPURenderPipeline => ({}) as GPURenderPipeline);
         const result = buildShaderRenderablesWithInstancing(
@@ -205,7 +215,6 @@ describe("ShaderMaterial thin instances", () => {
             _bindGroup: {} as GPUBindGroup,
             _lastResourceVersion: 0,
             _boundTextures: [],
-            _boundStorageBuffers: [],
         } as ShaderPacket;
         const result = buildShaderRenderablesWithInstancing(
             scene,

@@ -350,45 +350,45 @@ back-reference, so ownership cannot be recovered by mesh identity. Node material
 
 ## Test Specification
 
-| Test                                         | Description                                                               |
-| -------------------------------------------- | ------------------------------------------------------------------------- |
-| `createSceneContext returns valid defaults`  | Verify all fields match documented defaults                               |
-| `addToScene routes mesh`                     | Add Mesh → appears in `meshes`, builder registered in `_deferredBuilders` |
-| `addToScene routes light`                    | Add light → appears in `lights`                                           |
-| `addToScene routes shadow generator`         | Add ShadowGenerator → appears in `shadowGenerators` + `_prePasses`        |
-| `addToScene deduplicates builders`           | Two meshes with same `_buildGroup` → one deferred builder                 |
-| `createDefaultCamera with meshes`            | Provide meshes with known bounds, verify radius = diag\*1.5               |
-| `createDefaultCamera with no meshes`         | radius=1, center=(0,0,0)                                                  |
-| `deferred builders run at buildScene()`      | Register builder → verify called by `buildScene()`                        |
-| `buildScene() awaits async builders`         | Register async builder → verify awaited                                   |
-| `rebuildSceneRenderables no-op pre-build`    | `_built === false` → builders not re-run                                  |
-| `rebuildSceneRenderables preserves features` | Skybox/ground renderables survive; group output replaced                  |
-| `rebuildSceneRenderables regroups meshes`    | Material-swapped mesh rebuilt by its CURRENT family builder               |
-| `rebuild retires old disposers after build`  | Make-before-break ordering; `_meshAuxDisposables` untouched               |
-| `light removal marks topology dirty`         | `_lightListVersion` bumped, rebuild hook installed, teardown deferred     |
-| `addToScene rejects a disposed mesh`         | Remove a sole-owner mesh, re-add it → throws, scene left untouched        |
-| `addToScene rejects a disposed clone`        | Remove a mesh whose clone still owns the geometry, re-add it → throws     |
-| `removeFromScene stays idempotent`           | Remove a clone's source twice → the clone's geometry is never destroyed   |
-| `cloneTransformNode rejects a disposed mesh` | Clone a mesh removed from its last scene → throws instead of pinning it   |
-| `addToScene keeps multi-scene meshes`        | Remove a mesh from one of two scenes holding it → re-add succeeds         |
-| Test                                        | Description                                                               |
-| ------------------------------------------- | ------------------------------------------------------------------------- |
-| `createSceneContext returns valid defaults` | Verify all fields match documented defaults                               |
-| `addToScene routes mesh`                    | Add Mesh → appears in `meshes`, builder registered in `_deferredBuilders` |
-| `addToScene routes light`                   | Add light → appears in `lights`                                           |
-| `addToScene routes shadow generator`        | Add ShadowGenerator → appears in `shadowGenerators` + `_prePasses`        |
-| `addToScene deduplicates builders`          | Two meshes with same `_buildGroup` → one deferred builder                 |
-| `createDefaultCamera with meshes`           | Provide meshes with known bounds, verify radius = diag\*1.5               |
-| `createDefaultCamera with no meshes`        | radius=1, center=(0,0,0)                                                  |
-| `deferred builders run at buildScene()`     | Register builder → verify called by `buildScene()`                        |
-| `buildScene() awaits async builders`        | Register async builder → verify awaited                                   |
-| `rebuildSceneRenderables no-op pre-build`   | `_built === false` → builders not re-run                                  |
-| `rebuildSceneRenderables preserves features`| Skybox/ground renderables survive; group output replaced                   |
-| `rebuildSceneRenderables regroups meshes`   | Material-swapped mesh rebuilt by its CURRENT family builder               |
-| `rebuild retires old disposers after build` | Make-before-break ordering; `_meshAuxDisposables` untouched               |
-| `light removal marks topology dirty`        | `_lightListVersion` bumped, rebuild hook installed, teardown deferred     |
-| `scene272-runtime-mesh-swap`                | Remove a textured mesh + add a clone sharing its material from `onBeforeRender` → no destroyed-resource submit, matches BJS |
-| `scene273-runtime-material-family`          | Add the first PBR mesh to a built StandardMaterial-only scene → the mesh renders instead of being silently dropped |
+| Test                                         | Description                                                                                                                 |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `createSceneContext returns valid defaults`  | Verify all fields match documented defaults                                                                                 |
+| `addToScene routes mesh`                     | Add Mesh → appears in `meshes`, builder registered in `_deferredBuilders`                                                   |
+| `addToScene routes light`                    | Add light → appears in `lights`                                                                                             |
+| `addToScene routes shadow generator`         | Add ShadowGenerator → appears in `shadowGenerators` + `_prePasses`                                                          |
+| `addToScene deduplicates builders`           | Two meshes with same `_buildGroup` → one deferred builder                                                                   |
+| `createDefaultCamera with meshes`            | Provide meshes with known bounds, verify radius = diag\*1.5                                                                 |
+| `createDefaultCamera with no meshes`         | radius=1, center=(0,0,0)                                                                                                    |
+| `deferred builders run at buildScene()`      | Register builder → verify called by `buildScene()`                                                                          |
+| `buildScene() awaits async builders`         | Register async builder → verify awaited                                                                                     |
+| `rebuildSceneRenderables no-op pre-build`    | `_built === false` → builders not re-run                                                                                    |
+| `rebuildSceneRenderables preserves features` | Skybox/ground renderables survive; group output replaced                                                                    |
+| `rebuildSceneRenderables regroups meshes`    | Material-swapped mesh rebuilt by its CURRENT family builder                                                                 |
+| `rebuild retires old disposers after build`  | Make-before-break ordering; task-owned auxiliary resources untouched                                                        |
+| `light removal marks topology dirty`         | `_lightListVersion` bumped, rebuild hook installed, teardown deferred                                                       |
+| `addToScene rejects a disposed mesh`         | Remove a sole-owner mesh, re-add it → throws, scene left untouched                                                          |
+| `addToScene rejects a disposed clone`        | Remove a mesh whose clone still owns the geometry, re-add it → throws                                                       |
+| `removeFromScene stays idempotent`           | Remove a clone's source twice → the clone's geometry is never destroyed                                                     |
+| `cloneTransformNode rejects a disposed mesh` | Clone a mesh removed from its last scene → throws instead of pinning it                                                     |
+| `addToScene keeps multi-scene meshes`        | Remove a mesh from one of two scenes holding it → re-add succeeds                                                           |
+| Test                                         | Description                                                                                                                 |
+| -------------------------------------------  | -------------------------------------------------------------------------                                                   |
+| `createSceneContext returns valid defaults`  | Verify all fields match documented defaults                                                                                 |
+| `addToScene routes mesh`                     | Add Mesh → appears in `meshes`, builder registered in `_deferredBuilders`                                                   |
+| `addToScene routes light`                    | Add light → appears in `lights`                                                                                             |
+| `addToScene routes shadow generator`         | Add ShadowGenerator → appears in `shadowGenerators` + `_prePasses`                                                          |
+| `addToScene deduplicates builders`           | Two meshes with same `_buildGroup` → one deferred builder                                                                   |
+| `createDefaultCamera with meshes`            | Provide meshes with known bounds, verify radius = diag\*1.5                                                                 |
+| `createDefaultCamera with no meshes`         | radius=1, center=(0,0,0)                                                                                                    |
+| `deferred builders run at buildScene()`      | Register builder → verify called by `buildScene()`                                                                          |
+| `buildScene() awaits async builders`         | Register async builder → verify awaited                                                                                     |
+| `rebuildSceneRenderables no-op pre-build`    | `_built === false` → builders not re-run                                                                                    |
+| `rebuildSceneRenderables preserves features` | Skybox/ground renderables survive; group output replaced                                                                    |
+| `rebuildSceneRenderables regroups meshes`    | Material-swapped mesh rebuilt by its CURRENT family builder                                                                 |
+| `rebuild retires old disposers after build`  | Make-before-break ordering; task-owned auxiliary resources untouched                                                        |
+| `light removal marks topology dirty`         | `_lightListVersion` bumped, rebuild hook installed, teardown deferred                                                       |
+| `scene272-runtime-mesh-swap`                 | Remove a textured mesh + add a clone sharing its material from `onBeforeRender` → no destroyed-resource submit, matches BJS |
+| `scene273-runtime-material-family`           | Add the first PBR mesh to a built StandardMaterial-only scene → the mesh renders instead of being silently dropped          |
 
 ## File Manifest
 

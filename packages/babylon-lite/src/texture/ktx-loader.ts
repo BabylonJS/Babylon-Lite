@@ -10,7 +10,8 @@
 
 import { U8, DV } from "../engine/typed-arrays.js";
 import { TU } from "../engine/gpu-flags.js";
-import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
+import { acquireTexture } from "../resource/texture-acquire.js";
+import { getOrCreateSampler } from "../resource/texture-sampler-pool.js";
 import type { EngineContext } from "../engine/engine.js";
 import { loadTexture2D } from "./texture-2d.js";
 import type { Texture2D, Texture2DOptions } from "./texture-2d.js";

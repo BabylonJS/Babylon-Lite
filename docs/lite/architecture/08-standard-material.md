@@ -47,11 +47,7 @@ standard-renderable.ts (buildStandardMeshRenderables):
 The deformation/vertex feature enablers are explicitly named exports from the root package entry:
 
 ```ts
-import {
-    enableStandardSkeleton,
-    enableMaterialUvTransform,
-    enableStandardVertexColors,
-} from "@babylonjs/lite";
+import { enableStandardSkeleton, enableMaterialUvTransform, enableStandardVertexColors } from "@babylonjs/lite";
 ```
 
 Call each enabler before `registerScene()` when the scene creates matching Standard meshes/material state. Enablers are idempotent and have no import-time registration side effects:
@@ -310,35 +306,35 @@ Standard renderables accept `MaterialOrView`. A plain material computes/stores `
 
 `createStandardNoColorMaterialView(source)` creates a view that ORs `NO_COLOR_OUTPUT` into the source material feature bits. This produces a Standard shader variant that runs discard/alpha-test code and writes no color, useful for passes that should execute the fragment stage without writing color.
 
-The `rebuildSingle` closure returned from `buildStandardMeshRenderables()` is stored on `standardGroupBuilder._rebuildSingle`. It is used by material swaps, `rebuildMaterial()`, and `RenderTask.addMesh(mesh, { material })` per-pass overrides.
+The `rebuildSingle` closure returned from `buildStandardMeshRenderables()` is installed as `r` on the scene-local group and also cached on `standardGroupBuilder._rebuildSingle`. Material swaps, `rebuildMaterial()`, and per-pass overrides resolve through the scene-local group, never another scene's builder cache. Standard rebuilds require the passed scene's initialized `_standardRebuildContext`; they reject a missing context rather than falling back to the closure's original scene.
 
 ### Default Material Values
 
-| Property              | Default     |
-| --------------------- | ----------- |
-| `diffuseColor`        | `[1, 1, 1]` |
-| `alpha`               | `1`         |
-| `specularColor`       | `[1, 1, 1]` |
-| `specularPower`       | `64`        |
-| `emissiveColor`       | `[0, 0, 0]` |
-| `ambientColor`        | `[0, 0, 0]` |
-| `diffuseTexture`      | `null`      |
-| `diffuseCoordIndex`   | `0`         |
-| `bumpLevel`           | `1`         |
-| `specularCoordIndex`  | `0`         |
-| `ambientTexLevel`     | `1`         |
-| `ambientCoordIndex`   | `0`         |
-| `lightmapLevel`       | `1`         |
-| `lightmapCoordIndex`  | `1`         |
-| `useLightmapAsShadowmap` | `false`  |
-| `opacityLevel`        | `1`         |
-| `opacityFromRGB`      | `false`     |
-| `alphaCutOff`         | `0`         |
-| `reflectionLevel`     | `1`         |
-| `reflectionCoordMode` | `1`         |
-| `uvScale`             | `[1, 1]`    |
-| `backFaceCulling`     | `true`      |
-| `disableLighting`     | `false`     |
+| Property                 | Default     |
+| ------------------------ | ----------- |
+| `diffuseColor`           | `[1, 1, 1]` |
+| `alpha`                  | `1`         |
+| `specularColor`          | `[1, 1, 1]` |
+| `specularPower`          | `64`        |
+| `emissiveColor`          | `[0, 0, 0]` |
+| `ambientColor`           | `[0, 0, 0]` |
+| `diffuseTexture`         | `null`      |
+| `diffuseCoordIndex`      | `0`         |
+| `bumpLevel`              | `1`         |
+| `specularCoordIndex`     | `0`         |
+| `ambientTexLevel`        | `1`         |
+| `ambientCoordIndex`      | `0`         |
+| `lightmapLevel`          | `1`         |
+| `lightmapCoordIndex`     | `1`         |
+| `useLightmapAsShadowmap` | `false`     |
+| `opacityLevel`           | `1`         |
+| `opacityFromRGB`         | `false`     |
+| `alphaCutOff`            | `0`         |
+| `reflectionLevel`        | `1`         |
+| `reflectionCoordMode`    | `1`         |
+| `uvScale`                | `[1, 1]`    |
+| `backFaceCulling`        | `true`      |
+| `disableLighting`        | `false`     |
 
 The eight optional texture fields have **no default** — they are absent (`undefined`) until the corresponding `setStandardXTexture()` runs. Omitting the `null` initializers is what lets a scene that never imports a setter drop the field, its extension, and its shader fragment entirely.
 
@@ -355,15 +351,15 @@ The eight optional texture fields have **no default** — they are absent (`unde
 
 **Conditional (appended in order, slot numbers shift dynamically):**
 
-| Attribute       | Format         | Stride   | Step Mode  | Shader Location(s)             | When                  |
-| --------------- | -------------- | -------- | ---------- | ------------------------------ | --------------------- |
-| UV              | `float32x2`    | 8 bytes  | `vertex`   | `@location(2)`                 | `NEEDS_UV`            |
-| UV2             | `float32x2`    | 8 bytes  | `vertex`   | `@location(3)`                 | `NEEDS_UV2`           |
-| Vertex color    | `float32x4`    | 16 bytes | `vertex`   | next free location             | Vertex colors enabled and color buffer present |
-| Joints/weights  | `uint32x4` + `float32x4` | 32 bytes across 2 buffers | `vertex` | next 2 locations | `HAS_SKELETON` |
-| Joints1/weights1| `uint32x4` + `float32x4` | 32 bytes across 2 buffers | `vertex` | next 2 locations | `HAS_SKELETON_8` |
-| Instance matrix | 4× `float32x4` | 64 bytes | `instance` | `@location(N)..@location(N+3)` | `THIN_INSTANCES`      |
-| Instance color  | `float32x4`    | 16 bytes | `instance` | `@location(N+4)`               | `THIN_INSTANCE_COLOR` |
+| Attribute        | Format                   | Stride                    | Step Mode  | Shader Location(s)             | When                                           |
+| ---------------- | ------------------------ | ------------------------- | ---------- | ------------------------------ | ---------------------------------------------- |
+| UV               | `float32x2`              | 8 bytes                   | `vertex`   | `@location(2)`                 | `NEEDS_UV`                                     |
+| UV2              | `float32x2`              | 8 bytes                   | `vertex`   | `@location(3)`                 | `NEEDS_UV2`                                    |
+| Vertex color     | `float32x4`              | 16 bytes                  | `vertex`   | next free location             | Vertex colors enabled and color buffer present |
+| Joints/weights   | `uint32x4` + `float32x4` | 32 bytes across 2 buffers | `vertex`   | next 2 locations               | `HAS_SKELETON`                                 |
+| Joints1/weights1 | `uint32x4` + `float32x4` | 32 bytes across 2 buffers | `vertex`   | next 2 locations               | `HAS_SKELETON_8`                               |
+| Instance matrix  | 4× `float32x4`           | 64 bytes                  | `instance` | `@location(N)..@location(N+3)` | `THIN_INSTANCES`                               |
+| Instance color   | `float32x4`              | 16 bytes                  | `instance` | `@location(N+4)`               | `THIN_INSTANCE_COLOR`                          |
 
 ### Pipeline State
 
@@ -397,7 +393,7 @@ The eight optional texture fields have **no default** — they are absent (`unde
 | 3       | FRAGMENT           | sampler               | Diffuse sampler                                                            | HAS_DIFFUSE_TEXTURE                                             |
 | 4       | VERTEX+FRAGMENT    | Uniform buffer        | Shadow UBO (96B) or UV UBO (16B)                                           | RECEIVE_SHADOWS or NEEDS_UV                                     |
 | next    | FRAGMENT           | texture/sampler pairs | Emissive, bump, specular, ambient, lightmap, opacity, reflection resources | Feature-dependent, assigned sequentially by the shader composer |
-| next    | VERTEX             | texture_2d            | Skeleton bone matrix texture                                                | `HAS_SKELETON`                                               |
+| next    | VERTEX             | texture_2d            | Skeleton bone matrix texture                                               | `HAS_SKELETON`                                                  |
 
 **Group 2 — Shadow Map** (only when RECEIVE_SHADOWS):
 
@@ -469,8 +465,8 @@ The eight optional texture fields have **no default** — they are absent (`unde
 
 #### UV UBO (Group 1, Binding 5) — 16 bytes (if NEEDS_UV without shadow)
 
-| Offset (bytes) | Type        | Field                                                      |
-| -------------- | ----------- | ---------------------------------------------------------- |
+| Offset (bytes) | Type        | Field                                                                                                                                                            |
+| -------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0–15           | `vec4<f32>` | `uvScaleOffset` (x=uScale, y=vScale, z=uOffset, w=vOffset); offset defaults to `[0, 0]` even when the opt-in is globally enabled but a material omits `uvOffset` |
 
 ### Shader Template (`standard-template.ts`)
@@ -479,10 +475,10 @@ The eight optional texture fields have **no default** — they are absent (`unde
 
 **Always-present WGSL blocks (embedded in template):**
 
-| Block         | Contents                                                                                                              | Included when          |
-| ------------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| `LIGHTING_FN` | `computeLighting()` — Blinn-Phong over the mesh-selected subset of the scene-wide `MAX_LIGHTS` lights, shadow factors | Not `DISABLE_LIGHTING` |
-| `FOG_FN`      | `calcFogFactor()` — linear/exp/exp2 from dynamically imported Standard fog WGSL                                    | `STD_SCENE_FOG` and a color-producing pass |
+| Block         | Contents                                                                                                              | Included when                              |
+| ------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `LIGHTING_FN` | `computeLighting()` — Blinn-Phong over the mesh-selected subset of the scene-wide `MAX_LIGHTS` lights, shadow factors | Not `DISABLE_LIGHTING`                     |
+| `FOG_FN`      | `calcFogFactor()` — linear/exp/exp2 from dynamically imported Standard fog WGSL                                       | `STD_SCENE_FOG` and a color-producing pass |
 
 **Template slot markers** (injected by `ShaderComposer`):
 
@@ -754,56 +750,56 @@ registerScene(scene)       → runs deferred builders and builds frame graph
 
 ## Test Specification
 
-| Test                              | Description                                                 |
-| --------------------------------- | ----------------------------------------------------------- |
-| `createStandardMaterial defaults` | All properties match documented defaults                    |
-| `pipeline cache hit`              | Same features+format+msaa → same variant object             |
-| `pipeline cache miss on features` | Different features → different variant                      |
-| `simple shader (features=0)`      | No UV attribute, no texture bindings                        |
-| `textured shader (features=1)`    | UV attribute added, diffuse texture bound                   |
-| `shadow shader (features=4)`      | Shadow UBO, shadow map bind group created                   |
-| `full shader (features=7)`        | All bindings present                                        |
-| `mesh grouping`                   | Meshes with same features share pipeline                    |
-| `Blinn-Phong NdotL=0`             | Diffuse = 0, specular = 0                                   |
-| `minimal Standard excludes fog`   | No fog helper or blend WGSL without a scene fog context      |
-| `explicit fog composition`        | Fog helper + blend appear with `STD_SCENE_FOG`               |
-| `fog cache separation`            | Fog/non-fog scenes sharing a device get distinct bindings/WGSL |
-| `default UV offset`               | Global UV-offset opt-in + missing material offset writes zero |
-| `Standard skeleton composition`   | Shared 4/8-bone fragment, bone binding, and vertex layouts    |
-| `Standard vertex-color alpha`     | RGBA modulation precedes alpha-test and geometry mask         |
+| Test                              | Description                                                                         |
+| --------------------------------- | ----------------------------------------------------------------------------------- |
+| `createStandardMaterial defaults` | All properties match documented defaults                                            |
+| `pipeline cache hit`              | Same features+format+msaa → same variant object                                     |
+| `pipeline cache miss on features` | Different features → different variant                                              |
+| `simple shader (features=0)`      | No UV attribute, no texture bindings                                                |
+| `textured shader (features=1)`    | UV attribute added, diffuse texture bound                                           |
+| `shadow shader (features=4)`      | Shadow UBO, shadow map bind group created                                           |
+| `full shader (features=7)`        | All bindings present                                                                |
+| `mesh grouping`                   | Meshes with same features share pipeline                                            |
+| `Blinn-Phong NdotL=0`             | Diffuse = 0, specular = 0                                                           |
+| `minimal Standard excludes fog`   | No fog helper or blend WGSL without a scene fog context                             |
+| `explicit fog composition`        | Fog helper + blend appear with `STD_SCENE_FOG`                                      |
+| `fog cache separation`            | Fog/non-fog scenes sharing a device get distinct bindings/WGSL                      |
+| `default UV offset`               | Global UV-offset opt-in + missing material offset writes zero                       |
+| `Standard skeleton composition`   | Shared 4/8-bone fragment, bone binding, and vertex layouts                          |
+| `Standard vertex-color alpha`     | RGBA modulation precedes alpha-test and geometry mask                               |
 | `geometry deformation`            | Geometry shader/layout/bind/draw variants include morph, skeleton, and vertex color |
-| `root feature exports`            | Root declaration exposes each enabler with no package subpaths |
-| `single rebuild`                  | Material swap rebuilds one mesh without full scene teardown |
-| `fragment composition`            | Bump fragment injects perturbNormal helper + AC slot code   |
-| `shadow fragment ESM`             | ESM shadow factor computation per light                     |
-| `shadow fragment PCF`             | PCF shadow factor computation per light                     |
-| `scene267-standard-vertex-colors`  | Standard RGBA vertex-color interpolation matches BJS exactly |
+| `root feature exports`            | Root declaration exposes each enabler with no package subpaths                      |
+| `single rebuild`                  | Material swap rebuilds one mesh without full scene teardown                         |
+| `fragment composition`            | Bump fragment injects perturbNormal helper + AC slot code                           |
+| `shadow fragment ESM`             | ESM shadow factor computation per light                                             |
+| `shadow fragment PCF`             | PCF shadow factor computation per light                                             |
+| `scene267-standard-vertex-colors` | Standard RGBA vertex-color interpolation matches BJS exactly                        |
 
 ## File Manifest
 
-| File                                                         | Size       | Purpose                                                                                                                                                                                 |
-| ------------------------------------------------------------ | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/material/standard/standard-material.ts`                 | ~299 lines | Types (StandardMaterialProps, FogConfig), factory, collectStdBoundTextures, standardGroupBuilder with dynamic fragment imports                                                          |
-| `src/material/standard/standard-template.ts`                 | — | `StandardTemplateConfig` + `createStandardTemplate()` — builds the minimal Blinn-Phong `ShaderTemplate`; fog is a dynamically loaded fragment |
-| `src/material/standard/standard-pipeline.ts`                 | — | `composeStandardShader()`, full shader-context cache keys, mesh bind groups, UV transform writes, material UBO writes |
-| `src/material/standard/standard-renderable.ts`               | — | `StdFragmentFactories`, effective mesh features, per-scene shader context, composed bindings/pipelines, draw-time deformation buffers |
-| `src/material/standard/enable-standard-vertex-colors.ts`     | — | Canonical process-global opt-in that installs Standard RGBA vertex-color support while preserving byte-identical non-feature bundles |
-| `src/material/standard/enable-standard-mesh-features.ts`     | — | Published idempotent skeleton and UV-offset enablers |
-| `src/material/standard/standard-geometry-feature-hooks.ts`   | — | Scalar lazy-loader hook for opt-in skeletal geometry velocity |
-| `src/material/standard/standard-geometry-skeleton-velocity.ts` | — | Double-buffered previous-bone textures loaded only by skeletal velocity passes |
-| `src/material/standard/fragments/std-skeleton-fragment.ts`   | — | Standard wrapper around the shared skeleton fragment; bone texture + joints/weights binding |
-| `src/material/standard/std-fog-wgsl.ts`                      | — | Dynamically imported Standard fog fragment (varying, helper, and final blend) |
-| `src/shader/fragments/skeleton-fragment.ts`                  | — | Material-agnostic 4/8-bone WGSL shared by PBR and Standard |
-| `src/material/standard/standard-geometry-renderable.ts`      | — | Geometry-pass Standard variant cache, layouts, bindings, updates, and draw buffers including deformation state |
-| `src/material/standard/no-color-view.ts`                     | ~16 lines  | `createStandardNoColorMaterialView()` — pass-specific no-color material view helper                                                                                                     |
-| `src/material/standard/fragments/normal-map-fragment.ts`     | ~33 lines  | Cotangent-frame bump/normal mapping fragment (`AC` slot)                                                                                                                                |
-| `src/material/standard/fragments/std-emissive-fragment.ts`   | ~17 lines  | Emissive texture sampling fragment (`AT` slot)                                                                                                                                          |
-| `src/material/standard/fragments/std-specular-fragment.ts`   | ~18 lines  | Specular texture sampling fragment (`AT` slot, UV/UV2 aware)                                                                                                                            |
-| `src/material/standard/fragments/std-ambient-fragment.ts`    | ~18 lines  | Ambient/AO texture sampling fragment (`AD` slot, UV/UV2 aware)                                                                                                                          |
-| `src/material/standard/fragments/std-lightmap-fragment.ts`   | ~18 lines  | Additive lightmap fragment (`BC` slot, UV/UV2 aware)                                                                                                                                    |
-| `src/material/standard/fragments/std-opacity-fragment.ts`    | ~20 lines  | Opacity texture fragment (`AT` slot, RGB or alpha mode)                                                                                                                                 |
-| `src/material/standard/fragments/std-vertex-color-fragment.ts` | ~20 lines | RGBA vertex attribute/varying and base-color/alpha multiplication (`VB` + `AT` slots)                                                                                                   |
-| `src/material/standard/fragments/std-reflection-fragment.ts` | ~39 lines  | Spherical/planar reflection fragment (`AD` slot)                                                                                                                                        |
-| `src/material/standard/fragments/std-shadow-fragment.ts`     | ~155 lines | ESM/PCF shadow receiving fragment (per-light, `VB` + `AD` slots)                                                                                                                        |
-| `src/mesh/thin-instance-gpu.ts`                              | ~50 lines  | `syncThinInstanceBuffers()` — uploads instance matrix/color vertex buffers                                                                                                              |
-| `src/shader/shader-composer.ts`                              | ~293 lines | `composeShader()` — topological sort, UBO merge, binding assignment, slot injection                                                                                                     |
+| File                                                           | Size       | Purpose                                                                                                                                       |
+| -------------------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/material/standard/standard-material.ts`                   | ~299 lines | Types (StandardMaterialProps, FogConfig), factory, collectStdBoundTextures, standardGroupBuilder with dynamic fragment imports                |
+| `src/material/standard/standard-template.ts`                   | —          | `StandardTemplateConfig` + `createStandardTemplate()` — builds the minimal Blinn-Phong `ShaderTemplate`; fog is a dynamically loaded fragment |
+| `src/material/standard/standard-pipeline.ts`                   | —          | `composeStandardShader()`, full shader-context cache keys, mesh bind groups, UV transform writes, material UBO writes                         |
+| `src/material/standard/standard-renderable.ts`                 | —          | `StdFragmentFactories`, effective mesh features, per-scene shader context, composed bindings/pipelines, draw-time deformation buffers         |
+| `src/material/standard/enable-standard-vertex-colors.ts`       | —          | Canonical process-global opt-in that installs Standard RGBA vertex-color support while preserving byte-identical non-feature bundles          |
+| `src/material/standard/enable-standard-mesh-features.ts`       | —          | Published idempotent skeleton and UV-offset enablers                                                                                          |
+| `src/material/standard/standard-geometry-feature-hooks.ts`     | —          | Scalar lazy-loader hook for opt-in skeletal geometry velocity                                                                                 |
+| `src/material/standard/standard-geometry-skeleton-velocity.ts` | —          | Double-buffered previous-bone textures loaded only by skeletal velocity passes                                                                |
+| `src/material/standard/fragments/std-skeleton-fragment.ts`     | —          | Standard wrapper around the shared skeleton fragment; bone texture + joints/weights binding                                                   |
+| `src/material/standard/std-fog-wgsl.ts`                        | —          | Dynamically imported Standard fog fragment (varying, helper, and final blend)                                                                 |
+| `src/shader/fragments/skeleton-fragment.ts`                    | —          | Material-agnostic 4/8-bone WGSL shared by PBR and Standard                                                                                    |
+| `src/material/standard/standard-geometry-renderable.ts`        | —          | Geometry-pass Standard variant cache, layouts, bindings, updates, and draw buffers including deformation state                                |
+| `src/material/standard/no-color-view.ts`                       | ~16 lines  | `createStandardNoColorMaterialView()` — pass-specific no-color material view helper                                                           |
+| `src/material/standard/fragments/normal-map-fragment.ts`       | ~33 lines  | Cotangent-frame bump/normal mapping fragment (`AC` slot)                                                                                      |
+| `src/material/standard/fragments/std-emissive-fragment.ts`     | ~17 lines  | Emissive texture sampling fragment (`AT` slot)                                                                                                |
+| `src/material/standard/fragments/std-specular-fragment.ts`     | ~18 lines  | Specular texture sampling fragment (`AT` slot, UV/UV2 aware)                                                                                  |
+| `src/material/standard/fragments/std-ambient-fragment.ts`      | ~18 lines  | Ambient/AO texture sampling fragment (`AD` slot, UV/UV2 aware)                                                                                |
+| `src/material/standard/fragments/std-lightmap-fragment.ts`     | ~18 lines  | Additive lightmap fragment (`BC` slot, UV/UV2 aware)                                                                                          |
+| `src/material/standard/fragments/std-opacity-fragment.ts`      | ~20 lines  | Opacity texture fragment (`AT` slot, RGB or alpha mode)                                                                                       |
+| `src/material/standard/fragments/std-vertex-color-fragment.ts` | ~20 lines  | RGBA vertex attribute/varying and base-color/alpha multiplication (`VB` + `AT` slots)                                                         |
+| `src/material/standard/fragments/std-reflection-fragment.ts`   | ~39 lines  | Spherical/planar reflection fragment (`AD` slot)                                                                                              |
+| `src/material/standard/fragments/std-shadow-fragment.ts`       | ~155 lines | ESM/PCF shadow receiving fragment (per-light, `VB` + `AD` slots)                                                                              |
+| `src/mesh/thin-instance-gpu.ts`                                | ~50 lines  | `syncThinInstanceBuffers()` — uploads instance matrix/color vertex buffers                                                                    |
+| `src/shader/shader-composer.ts`                                | ~293 lines | `composeShader()` — topological sort, UBO merge, binding assignment, slot injection                                                           |

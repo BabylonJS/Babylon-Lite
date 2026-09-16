@@ -137,6 +137,24 @@ describe("renderFrame targets", () => {
         expectOneSubmission(probe);
     });
 
+    it("clears the active encoder when a selected surface fails without submitting partial work", () => {
+        const { engine, surfaces, probe } = makeEngine(["primary", "aux"]);
+        const failure = new Error("selected surface failed");
+        engine.drawCallCount = 7;
+        vi.mocked(surfaces[1]!._renderingContexts[0]!._record).mockImplementation(() => {
+            expect(engine._currentEncoder).toBeDefined();
+            throw failure;
+        });
+
+        expect(() => renderFrame(engine, 8, [surfaces[1]!])).toThrow(failure);
+
+        expect(engine._currentEncoder).toBeUndefined();
+        expect(engine.drawCallCount).toBe(7);
+        expect(probe.finish).not.toHaveBeenCalled();
+        expect(probe.submit).not.toHaveBeenCalled();
+        expect(probe.events).toEqual(["aux:pre", "aux:update"]);
+    });
+
     it("stops at the live engine surface count when an update disposes a later surface", () => {
         const { engine, surfaces, probe } = makeEngine(["primary", "aux"]);
         const aux = surfaces[1]!;
@@ -169,15 +187,19 @@ describe("renderFrame targets", () => {
 
     it("reports zero draw calls without submitting when the selected surface has no rendering contexts", () => {
         const { engine, surfaces, probe } = makeEngine(["primary", "aux"]);
+        const flushRetirements = vi.fn();
+        engine._flushGpuRetirements = flushRetirements;
 
         renderFrame(engine, 16, [surfaces[0]!]);
         expect(engine.drawCallCount).toBe(3);
+        expect(flushRetirements).toHaveBeenCalledExactlyOnceWith(engine);
 
         surfaces[1]!._renderingContexts.length = 0;
         probe.events.length = 0;
         probe.createCommandEncoder.mockClear();
         probe.finish.mockClear();
         probe.submit.mockClear();
+        flushRetirements.mockClear();
 
         renderFrame(engine, 16, [surfaces[1]!]);
 
@@ -186,6 +208,7 @@ describe("renderFrame targets", () => {
         expect(probe.createCommandEncoder).not.toHaveBeenCalled();
         expect(probe.finish).not.toHaveBeenCalled();
         expect(probe.submit).not.toHaveBeenCalled();
+        expect(flushRetirements).toHaveBeenCalledExactlyOnceWith(engine);
     });
 
     it("rejects a surface belonging to another engine before creating an encoder", () => {

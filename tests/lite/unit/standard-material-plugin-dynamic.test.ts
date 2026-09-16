@@ -10,7 +10,9 @@ import { MATERIAL_ALPHA_BLEND } from "../../../packages/babylon-lite/src/materia
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { StdExt } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
-import { createSceneContext, disposeScene, onBeforeRender, type RuntimeSceneBuildHooks, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { addToScene, createSceneContext, disposeScene, onBeforeRender, type RuntimeSceneBuildHooks, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-remove";
+import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap";
 import { rebuildSceneRenderables } from "../../../packages/babylon-lite/src/scene/scene-rebuild";
 
@@ -59,12 +61,22 @@ function valuePlugin(value: { current: number }, dynamic = true): MaterialPlugin
 }
 
 function mesh(material: StandardMaterialProps): Mesh {
-    return { material } as unknown as Mesh;
+    return {
+        material,
+        _gpu: {
+            positionBuffer: { destroy: vi.fn() },
+            normalBuffer: { destroy: vi.fn() },
+            uvBuffer: { destroy: vi.fn() },
+            indexBuffer: { destroy: vi.fn() },
+        },
+    } as unknown as Mesh;
 }
 
 function pluginScene(engine: EngineContext, materials: StandardMaterialProps[]): SceneContext {
     const scene = createSceneContext(engine, { defaultRenderTask: false });
-    scene.meshes.push(...materials.map(mesh));
+    for (const material of materials) {
+        addToScene(scene, mesh(material));
+    }
     return scene;
 }
 
@@ -73,6 +85,87 @@ describe("dynamic Standard material plugins", () => {
 
     beforeEach(() => {
         registered = undefined as unknown as StdExt;
+    });
+
+    it.each(["signature", "writer", "allocation", "upload"] as const)("keeps the last committed generation after a %s failure and retries cleanly", (failure) => {
+        const { engine, createBuffer, writeBuffer, uploadedValues, buffers } = makeEngine();
+        const material = createStandardMaterial();
+        material.plugins = [valuePlugin({ current: 1 })];
+        const scene = pluginScene(engine, [material]);
+        registerStdPlugins(scene, (ext) => {
+            registered = ext;
+        });
+        const previousIndex = material._pi;
+        const previousPlugins = material._preparedPlugins;
+        const previousFeatures = material._renderFeatures;
+        const previousBuffer = buffers[0]!;
+        const mesh = scene.meshes[0]!;
+        const previousDisposers: (() => void)[] = [];
+        scene._meshDisposables.set(mesh, previousDisposers);
+        scene._built = true;
+        let failing = true;
+        const proposed: MaterialPlugin[] = [
+            {
+                name: `replacement-${failure}`,
+                dynamic: true,
+                getUniforms() {
+                    if (failing && failure === "signature") {
+                        throw new Error("signature failed");
+                    }
+                    return { ubo: [{ name: "replacementValue", type: "vec4<f32>" }] };
+                },
+                writeUbo(data, offsets) {
+                    if (failing && failure === "writer") {
+                        throw new Error("writer failed");
+                    }
+                    data[offsets.get("replacementValue")! / 4] = 17;
+                },
+            },
+        ];
+        material.plugins = proposed;
+        if (failure === "allocation") {
+            createBuffer.mockImplementationOnce(() => {
+                throw new Error("allocation failed");
+            });
+        }
+        if (failure === "upload") {
+            writeBuffer.mockImplementationOnce(() => {
+                throw new Error("upload failed");
+            });
+        }
+
+        expect(() => bakeStdPluginMaterial(material, scene)).toThrow(`${failure} failed`);
+        expect(material.plugins).toBe(proposed);
+        expect(material._pi).toBe(previousIndex);
+        expect(material._preparedPlugins).toBe(previousPlugins);
+        expect(material._renderFeatures).toBe(previousFeatures);
+        expect(scene._meshDisposables.get(mesh)).toBe(previousDisposers);
+        expect(previousDisposers).toHaveLength(0);
+        expect(scene._materialSwapQueue).toHaveLength(0);
+        expect(engine._retirements).toBeUndefined();
+        expect(previousBuffer.destroy).not.toHaveBeenCalled();
+        if (failure === "upload") {
+            expect(buffers[1]!.destroy).toHaveBeenCalledOnce();
+        }
+        const oldEntries: GPUBindGroupEntry[] = [];
+        registered._bind!(material, oldEntries, 0, mesh, scene);
+        expect((oldEntries[0]!.resource as GPUBufferBinding).buffer).toBe(previousBuffer);
+        uploadedValues.length = 0;
+        refreshStdPluginUbos(scene);
+        expect(uploadedValues).toEqual([1]);
+
+        failing = false;
+        bakeStdPluginMaterial(material, scene);
+        expect(material._pi).not.toBe(previousIndex);
+        expect(material._preparedPlugins).toEqual(proposed);
+        expect(material._renderFeatures).not.toBe(previousFeatures);
+        const newEntries: GPUBindGroupEntry[] = [];
+        registered._bind!(material, newEntries, 0, mesh, scene);
+        expect((newEntries[0]!.resource as GPUBufferBinding).buffer).toBe(buffers.at(-1));
+        expect(scene._materialSwapQueue).toEqual([mesh]);
+        uploadedValues.length = 0;
+        refreshStdPluginUbos(scene);
+        expect(uploadedValues).toEqual([17]);
     });
 
     it("keeps same-signature material values isolated and refreshes dynamic UBOs", () => {
@@ -105,6 +198,41 @@ describe("dynamic Standard material plugins", () => {
         expect(uploadedValues).toEqual([3, 4]);
     });
 
+    it("reuses the prepared plugin order during dynamic UBO refresh", () => {
+        const { engine } = makeEngine();
+        const material = createStandardMaterial();
+        material.plugins = [
+            {
+                name: "later",
+                priority: 600,
+                dynamic: true,
+                getUniforms: () => ({ ubo: [{ name: "laterValue", type: "f32" }] }),
+                writeUbo: (data, offsets) => (data[offsets.get("laterValue")! / 4] = 1),
+            },
+            {
+                name: "earlier",
+                priority: 100,
+                dynamic: true,
+                getUniforms: () => ({ ubo: [{ name: "earlierValue", type: "f32" }] }),
+                writeUbo: (data, offsets) => (data[offsets.get("earlierValue")! / 4] = 2),
+            },
+        ];
+        const scene = pluginScene(engine, [material]);
+        registerStdPlugins(scene, (ext) => {
+            registered = ext;
+        });
+        expect(material._preparedPlugins?.map((plugin) => plugin.name)).toEqual(["earlier", "later"]);
+        const filter = vi.spyOn(Array.prototype, "filter");
+        const sort = vi.spyOn(Array.prototype, "sort");
+
+        refreshStdPluginUbos(scene);
+
+        expect(filter).not.toHaveBeenCalled();
+        expect(sort).not.toHaveBeenCalled();
+        filter.mockRestore();
+        sort.mockRestore();
+    });
+
     it("bakes a Standard material created after initial registration", () => {
         const { engine } = makeEngine();
         const scene = pluginScene(engine, []);
@@ -116,10 +244,12 @@ describe("dynamic Standard material plugins", () => {
 
         bakeStdPluginMaterial(material, scene);
         const entries: GPUBindGroupEntry[] = [];
-        registered._bind!(material, entries, 0, undefined, scene);
+        const disposers: (() => void)[] = [];
+        registered._bind!(material, entries, 0, undefined, scene, disposers, true);
 
         expect(entries).toHaveLength(1);
-        expect(material._renderFeatures?.features).not.toBe(0);
+        expect(material._pi).toBeGreaterThan(0);
+        disposers.forEach((dispose) => dispose());
     });
 
     it("bakes and rebuilds a plugin material added to a live scene", async () => {
@@ -136,7 +266,8 @@ describe("dynamic Standard material plugins", () => {
         material.plugins = [valuePlugin({ current: 5 }, false)];
         await reconcileMaterialPlugins(scene, material);
 
-        expect(material._renderFeatures?.features).not.toBe(0);
+        expect(material._renderFeatures?.features).toBe(0);
+        expect(material._pi).toBeGreaterThan(0);
         expect(rebuild).toHaveBeenCalledOnce();
         expect(scene._materialSwapQueue).toEqual([]);
     });
@@ -222,6 +353,176 @@ describe("dynamic Standard material plugins", () => {
         uploadedValues.length = 0;
         sceneB._beforeRender.forEach((callback) => callback(0));
         expect(uploadedValues).toEqual([4]);
+    });
+
+    it("stops uploading and releases the UBO after the final scene mesh is removed", () => {
+        const { engine, buffers, writeBuffer } = makeEngine();
+        const material = createStandardMaterial();
+        material.plugins = [valuePlugin({ current: 1 })];
+        const scene = pluginScene(engine, [material, material]);
+        enableMaterialPlugins(scene);
+        const [first, second] = scene.meshes;
+        removeFromScene(scene, first!);
+        writeBuffer.mockClear();
+        refreshStdPluginUbos(scene);
+        expect(writeBuffer).toHaveBeenCalledOnce();
+        expect(buffers[0]!.destroy).not.toHaveBeenCalled();
+        removeFromScene(scene, second!);
+        writeBuffer.mockClear();
+        refreshStdPluginUbos(scene);
+        expect(writeBuffer).not.toHaveBeenCalled();
+        expect(buffers[0]!.destroy).toHaveBeenCalledOnce();
+        removeFromScene(scene, second!);
+        expect(buffers[0]!.destroy).toHaveBeenCalledOnce();
+        addToScene(scene, mesh(material));
+        expect(buffers).toHaveLength(2);
+        refreshStdPluginUbos(scene);
+        expect(buffers[1]!.destroy).not.toHaveBeenCalled();
+    });
+
+    it("stops main-material uploads on a swap while pending binding owners retain the old UBO", () => {
+        const { engine, buffers, writeBuffer } = makeEngine();
+        const material = createStandardMaterial();
+        material.plugins = [valuePlugin({ current: 1 })];
+        const scene = pluginScene(engine, [material]);
+        registerStdPlugins(scene, (ext) => {
+            registered = ext;
+        });
+        const target = scene.meshes[0]!;
+        const pending: (() => void)[] = [];
+        registered._bind!(material, [], 0, target, scene, pending);
+        scene._built = true;
+        scene._runtimeBuilds = { w: true, pendingDisposers: () => pending } as unknown as RuntimeSceneBuildHooks;
+        target.material = createStandardMaterial();
+        writeBuffer.mockClear();
+        refreshStdPluginUbos(scene);
+        expect(writeBuffer).not.toHaveBeenCalled();
+        processMaterialSwaps(scene);
+        disposeGpuResourceRetirements(engine);
+        expect(buffers[0]!.destroy).not.toHaveBeenCalled();
+        pending.forEach((dispose) => dispose());
+        disposeGpuResourceRetirements(engine);
+        expect(buffers[0]!.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("keeps auxiliary owners alive across main-material swaps and deduplicates their repeated binds", () => {
+        const { engine, buffers, writeBuffer } = makeEngine();
+        const material = createStandardMaterial();
+        material.plugins = [valuePlugin({ current: 1 })];
+        const scene = pluginScene(engine, [material]);
+        registerStdPlugins(scene, (ext) => {
+            registered = ext;
+        });
+        const target = scene.meshes[0]!;
+        const auxiliary: (() => void)[] = [];
+        registered._bind!(material, [], 0, target, scene, auxiliary, true);
+        registered._bind!(material, [], 0, target, scene, auxiliary, true);
+        expect(auxiliary).toHaveLength(1);
+        target.material = createStandardMaterial();
+        writeBuffer.mockClear();
+        refreshStdPluginUbos(scene);
+        expect(writeBuffer).toHaveBeenCalledOnce();
+        expect(buffers[0]!.destroy).not.toHaveBeenCalled();
+        auxiliary[0]!();
+        auxiliary[0]!();
+        writeBuffer.mockClear();
+        refreshStdPluginUbos(scene);
+        expect(writeBuffer).not.toHaveBeenCalled();
+        expect(buffers[0]!.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("does not allocate an unowned replacement when an override-only material is re-baked", () => {
+        const { engine, buffers, writeBuffer } = makeEngine();
+        const scene = pluginScene(engine, []);
+        registerStdPlugins(scene, (ext) => {
+            registered = ext;
+        });
+        const material = createStandardMaterial();
+        material.plugins = [valuePlugin({ current: 1 })];
+        bakeStdPluginMaterial(material, scene);
+        const originalOwner: (() => void)[] = [];
+        registered._bind!(material, [], 0, undefined, scene, originalOwner, true);
+        expect(buffers).toHaveLength(1);
+        bakeStdPluginMaterial(material, scene);
+        expect(buffers).toHaveLength(1);
+        expect(buffers[0]!.destroy).not.toHaveBeenCalled();
+        writeBuffer.mockClear();
+        refreshStdPluginUbos(scene);
+        expect(writeBuffer).not.toHaveBeenCalled();
+        originalOwner.forEach((dispose) => dispose());
+        expect(buffers[0]!.destroy).toHaveBeenCalledOnce();
+        const replacementOwner: (() => void)[] = [];
+        registered._bind!(material, [], 0, undefined, scene, replacementOwner, true);
+        expect(buffers).toHaveLength(2);
+        replacementOwner.forEach((dispose) => dispose());
+        expect(buffers[1]!.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("isolates membership changes for a mesh and material shared between scenes", () => {
+        const { engine, buffers, writeBuffer } = makeEngine();
+        const material = createStandardMaterial();
+        material.plugins = [valuePlugin({ current: 1 })];
+        const a = pluginScene(engine, [material]);
+        const b = pluginScene(engine, []);
+        const shared = a.meshes[0]!;
+        addToScene(b, shared);
+        enableMaterialPlugins(a);
+        enableMaterialPlugins(b);
+        removeFromScene(a, shared);
+        writeBuffer.mockClear();
+        refreshStdPluginUbos(a);
+        expect(writeBuffer).not.toHaveBeenCalled();
+        refreshStdPluginUbos(b);
+        expect(writeBuffer).toHaveBeenCalledOnce();
+        expect(buffers[0]!.destroy).toHaveBeenCalledOnce();
+        expect(buffers[1]!.destroy).not.toHaveBeenCalled();
+        shared.material = createStandardMaterial();
+        expect(buffers[1]!.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("prepares unattached materials without retaining GPU buffers or per-frame uploads", () => {
+        const { engine, createBuffer, writeBuffer } = makeEngine();
+        const scene = pluginScene(engine, []);
+        enableMaterialPlugins(scene);
+        for (let index = 0; index < 32; index++) {
+            const material = createStandardMaterial();
+            material.plugins = [valuePlugin({ current: index })];
+            bakeStdPluginMaterial(material, scene);
+            expect(material._pi).toBeGreaterThan(0);
+        }
+        refreshStdPluginUbos(scene);
+        expect(createBuffer).not.toHaveBeenCalled();
+        expect(writeBuffer).not.toHaveBeenCalled();
+        const prepared = createStandardMaterial();
+        prepared.plugins = [valuePlugin({ current: 1 })];
+        bakeStdPluginMaterial(prepared, scene);
+        prepared.plugins = [];
+        bakeStdPluginMaterial(prepared, scene);
+        expect(prepared._renderFeatures).toBeUndefined();
+    });
+
+    it("does not accumulate dynamic uploads after repeated material churn or scan meshes during refresh", () => {
+        const { engine, buffers, writeBuffer } = makeEngine();
+        const scene = pluginScene(engine, []);
+        enableMaterialPlugins(scene);
+        for (let index = 0; index < 32; index++) {
+            const material = createStandardMaterial();
+            material.plugins = [valuePlugin({ current: index })];
+            const target = mesh(material);
+            addToScene(scene, target);
+            removeFromScene(scene, target);
+        }
+        const iterateMeshes = vi.spyOn(scene.meshes, Symbol.iterator);
+        writeBuffer.mockClear();
+        refreshStdPluginUbos(scene);
+        expect(iterateMeshes).not.toHaveBeenCalled();
+        expect(writeBuffer).not.toHaveBeenCalled();
+        expect(buffers).toHaveLength(32);
+        for (const buffer of buffers) {
+            expect(buffer.destroy).toHaveBeenCalledOnce();
+        }
+        iterateMeshes.mockRestore();
+        disposeGpuResourceRetirements(engine);
     });
 
     it("binds a shared material to each scene's own UBO and isolates disposal", () => {

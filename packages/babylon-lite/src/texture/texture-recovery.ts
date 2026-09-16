@@ -3,7 +3,9 @@ import { TU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D, Texture2DOptions, Texture2DRecoverySource } from "./texture-2d.js";
 import type { DeviceLostRecoveryState } from "../engine/device-lost-recovery.js";
-import { getOrCreateSampler, acquireTexture, _isTextureReleased, _textureOwners } from "../resource/gpu-pool.js";
+import { getOrCreateSampler } from "../resource/sampler-pool.js";
+import { acquireTexture } from "../resource/texture-acquire.js";
+import { _isTextureReleased, _textureOwners } from "../resource/texture-owner-state.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 
 /** The wrapper that rebuilt each recovery source and the device it rebuilt for, so any other
@@ -142,9 +144,7 @@ function recoverCapturedSampler(engine: EngineContext, tex: Texture2D): GPUSampl
     if (!desc) {
         return undefined;
     }
-    // `samplerKey` does not include lodMaxClamp, so a clamped sampler would take an unclamped
-    // sampler's slot in the dedupe cache.
-    const sampler = desc.lodMaxClamp === 0 ? engine._device.createSampler(desc) : getOrCreateSampler(engine, desc);
+    const sampler = getOrCreateSampler(engine, desc);
     descriptors!.set(sampler, desc);
     return sampler;
 }

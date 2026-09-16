@@ -10,6 +10,7 @@
 
 import type { BindingDecl, FragmentSlot, ShaderFragment, UboField, UboSpec, VertexSlot, WgslScalarType } from "../../shader/fragment-types.js";
 import { computeUboLayout } from "../../shader/ubo-layout.js";
+import type { Texture2D } from "../../texture/texture-2d.js";
 import type { MaterialPlugin, MaterialPluginPoint, PluginTextureBinding } from "./material-plugin.js";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
@@ -174,16 +175,23 @@ export function buildPluginFragment(plugins: readonly MaterialPlugin[], index: n
     };
 }
 
-/** Write the enabled plugins' UBO slices into `data` using `offsets`. */
+/** Write a prepared enabled plugin list's UBO slices into `data` using `offsets`. */
 export function writePluginUbo(plugins: readonly MaterialPlugin[], data: Float32Array, offsets: ReadonlyMap<string, number>): void {
-    for (const p of enabledPlugins(plugins)) {
+    for (const p of plugins) {
         p.writeUbo?.(data, offsets);
     }
 }
 
-/** Push the enabled plugins' texture+sampler bind entries starting at `b`. */
+/** Collect textures owned by a prepared enabled plugin list. */
+export function collectPluginTextures(plugins: readonly MaterialPlugin[], out: Texture2D[]): void {
+    for (const p of plugins) {
+        p.getActiveTextures?.(out);
+    }
+}
+
+/** Push a prepared enabled plugin list's texture+sampler bind entries starting at `b`. */
 export function bindPluginTextures(plugins: readonly MaterialPlugin[], entries: GPUBindGroupEntry[], b: number): number {
-    for (const p of enabledPlugins(plugins)) {
+    for (const p of plugins) {
         if (!p.bindTextures) {
             continue;
         }

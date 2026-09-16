@@ -12,6 +12,7 @@ import { getViewProjectionMatrix } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import type { DrawUpdateBatch, DrawUpdateContext } from "../render/renderable.js";
+import { enableDrawBatchCollection } from "../render/draw-update-batches.js";
 import type { Mat4 } from "../math/types.js";
 import type { Mesh, MeshGPU } from "./mesh.js";
 import type { ThinInstanceData } from "./thin-instance.js";
@@ -232,14 +233,16 @@ let _dispatchBatches: WeakMap<RenderTargetSignature, ComputeDispatchBatch> | nul
 
 /** @internal Return the compute batch associated with one render task. */
 export function getComputeDispatchBatch(signature: RenderTargetSignature): ComputeDispatchBatch {
+    enableDrawBatchCollection(signature);
     _dispatchBatches ??= new WeakMap();
-    let batch = _dispatchBatches.get(signature);
-    if (batch) {
-        return batch;
+    const cached = _dispatchBatches.get(signature);
+    if (cached && !cached._retired) {
+        return cached;
     }
     const dispatches: ComputeDispatch[] = [];
     let count = 0;
-    batch = {
+    const batch: ComputeDispatchBatch = {
+        _retired: false,
         reset(): void {
             count = 0;
         },
@@ -261,9 +264,12 @@ export function getComputeDispatchBatch(signature: RenderTargetSignature): Compu
             pass.end();
         },
         destroy(): void {
+            batch._retired = true;
             dispatches.length = 0;
             count = 0;
-            _dispatchBatches?.delete(signature);
+            if (_dispatchBatches?.get(signature) === batch) {
+                _dispatchBatches.delete(signature);
+            }
         },
         queue(dispatch): void {
             dispatches[count++] = dispatch;

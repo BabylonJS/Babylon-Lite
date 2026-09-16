@@ -4,45 +4,15 @@
  *  Users can create a PbrMaterialProps manually or let loadGltf() build one. */
 
 import type { Texture2D } from "../../texture/texture-2d.js";
-import type { MeshGroupBuilder } from "../../render/renderable.js";
-import type { SceneContext } from "../../scene/scene.js";
 import type { Material, StencilState } from "../material.js";
 import type { MaterialPlugin } from "../plugin/material-plugin.js";
 import { createSolidTexture2D } from "../../texture/solid-texture.js";
 import { _installPbrFallbackResolver } from "./pbr-pipeline.js";
-import {
-    _getPbrExts,
-    PBR2_HAS_BASE_COLOR_FACTOR,
-    PBR2_HAS_UV2,
-    PBR_HAS_ALPHA_BLEND,
-    PBR_HAS_DOUBLE_SIDED,
-    PBR_HAS_EMISSIVE,
-    PBR_HAS_NORMAL_MAP,
-    PBR_HAS_OCCLUSION,
-    PBR_HAS_SPECULAR_AA,
-    PBR_HAS_SPEC_GLOSS,
-} from "./pbr-flags.js";
+import { getPbrGroupBuilder } from "./pbr-group-builder.js";
 
-/** Lazily-created singleton PBR {@link MeshGroupBuilder}. Lazy-imports the PBR
- *  renderable builder and builds the pipeline. Thin instances are handled by the
- *  fragment composer automatically. Lazy-init keeps the module free of top-level
- *  side effects so a scene that uses no PBR material tree-shakes it away. */
-let _pbrGroupBuilder: MeshGroupBuilder | null = null;
-export function getPbrGroupBuilder(): MeshGroupBuilder {
-    if (_pbrGroupBuilder) {
-        return _pbrGroupBuilder;
-    }
-    const builder: MeshGroupBuilder = async (scene, meshes) => {
-        const envTex = (scene as SceneContext)._envTextures;
-        const renderableMod = await import("./pbr-renderable.js");
-        const result = await renderableMod.buildPbrRenderables(scene, meshes, envTex);
-        // Wire the per-mesh rebuild closure used by material swap + per-pass override.
-        builder._rebuildSingle = result.rebuildSingle;
-        return result;
-    };
-    builder._materialFamily = "pbr";
-    return (_pbrGroupBuilder = builder);
-}
+export { getPbrGroupBuilder } from "./pbr-group-builder.js";
+export { _computePbrMaterialFeatures } from "./pbr-material-features.js";
+export { collectPbrBoundTextures } from "./collect-pbr-bound-textures.js";
 
 /** User-facing properties for a physically based (metallic-roughness) material.
  *  Create one manually via `createPbrMaterial()` or let `loadGltf()` build it.
@@ -217,45 +187,6 @@ export interface PbrMaterialProps extends Material {
     /** Optional stencil-test state baked into the main-pass pipeline. Lets this material write the stencil buffer
      *  where it draws (mask) or discard where another material wrote it. Default none. See `StencilState`. */
     stencil?: StencilState;
-}
-
-/** @internal Compute PBR material-only feature bits. Mesh/pass bits are added per renderable. */
-export function _computePbrMaterialFeatures(mat: PbrMaterialProps): { features: number; features2: number } {
-    let features =
-        (mat.emissiveTexture ? PBR_HAS_EMISSIVE : 0) |
-        (mat.normalTexture ? PBR_HAS_NORMAL_MAP : 0) |
-        (mat.alphaBlend === true || ((mat._alphaCutOff ?? 0) <= 0 && mat.alpha! < 1) ? PBR_HAS_ALPHA_BLEND : 0) |
-        (mat.specGlossTexture ? PBR_HAS_SPEC_GLOSS : 0) |
-        (mat.doubleSided ? PBR_HAS_DOUBLE_SIDED : 0);
-    if ((mat.occlusionStrength ?? 1.0) > 0) {
-        features |= PBR_HAS_OCCLUSION;
-    }
-    if (mat.enableSpecularAA) {
-        features |= PBR_HAS_SPECULAR_AA;
-    }
-
-    let features2 = 0;
-    for (const ext of _getPbrExts().values()) {
-        if (ext.detect) {
-            const d = ext.detect(mat);
-            features |= d.f;
-            features2 |= d.f2;
-        }
-    }
-    // Per-channel UV set selection (glTF texCoord). `_uv2Mask` is precomputed once at glTF build
-    // time by the lazy slow-path loader (gltf-pbr-builder-ext) — the only place a texture can carry
-    // texCoord:1 (occlusion included, as bit 32) — so the always-loaded fast path pays just one read
-    // here. This replaces master's `occlusionTexCoord` trigger: occlusion-on-UV1 always routes through
-    // the slow path (any texCoord:1 in the material JSON forces it, incl. KHR_texture_basisu), so its
-    // bit is already folded into `_uv2Mask`. Any channel on UV1 needs the uv2 vertex attribute +
-    // varying threaded through.
-    if ((mat as { _uv2Mask?: number })._uv2Mask) {
-        features2 |= PBR2_HAS_UV2;
-    }
-    if (mat.baseColorFactor) {
-        features2 |= PBR2_HAS_BASE_COLOR_FACTOR;
-    }
-    return { features, features2 };
 }
 
 /** Clearcoat layer properties. Maps to BJS PBRMaterial.clearCoat sub-object. */
@@ -437,18 +368,4 @@ export function createPbrMaterial(props?: Partial<PbrMaterialProps>): PbrMateria
         _buildGroup: getPbrGroupBuilder(),
         _uboVersion: 0,
     } as PbrMaterialProps;
-}
-
-/** Collect all non-null textures referenced by a PBR material (for acquire/release). */
-export function collectPbrBoundTextures(mat: PbrMaterialProps): Texture2D[] {
-    const t: Texture2D[] = [];
-    for (const tex of [mat.baseColorTexture, mat.normalTexture, mat.ormTexture, mat.occlusionTexture, mat.emissiveTexture, mat.specGlossTexture]) {
-        if (tex) {
-            t.push(tex);
-        }
-    }
-    for (const ext of _getPbrExts().values()) {
-        ext.textures?.(mat, t);
-    }
-    return t;
 }

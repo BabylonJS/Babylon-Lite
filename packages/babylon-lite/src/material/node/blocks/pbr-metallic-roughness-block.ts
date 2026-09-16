@@ -1,6 +1,7 @@
 import type { BlockEmitter, NodeBlock, NodeBuildState, NodeEmitContext, Stage } from "../node-types.js";
 import { MAX_LIGHTS } from "../../../light/types.js";
 import { wgsl } from "../../../shader/wgsl.js";
+import { createNodeLightingFeature } from "../node-lighting.js";
 
 const HELPER_KEY_PREFIX = "nme_pbr_mr";
 const SHADOW_FACTORS_ONE = wgsl`array<f32, ${MAX_LIGHTS}>(${/* @__PURE__ */ new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
@@ -51,6 +52,7 @@ export const emitter: BlockEmitter = {
             });
         }
         state.usesLightsUbo = true;
+        state._meshFeature = createNodeLightingFeature;
 
         const memoKey = `_pbrmr_${block.id}_call`;
         let callVar: string;

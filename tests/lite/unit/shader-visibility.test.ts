@@ -54,7 +54,6 @@ function createFixture(): {
         surface: { engine },
         camera: null,
         _meshDisposables: new Map(),
-        _meshAuxDisposables: new Map(),
     } as unknown as SceneContext;
 
     return { engine, scene, meshes: [createMesh("visible"), createMesh("hidden")], drawIndexed };

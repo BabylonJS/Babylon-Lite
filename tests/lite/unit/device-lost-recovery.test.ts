@@ -260,6 +260,7 @@ describe("device-lost recovery context dispatch", () => {
         const textures = buildSampledPbrTextures(engine, material, defaultSampler, vi.fn(), samplerFor, () => texture);
 
         samplerDescriptors.length = 0;
+        engine._device = { ...device };
         await rebuildTexture2D(engine, textures.baseColorTexture);
 
         expect(samplerDescriptors).toContainEqual({

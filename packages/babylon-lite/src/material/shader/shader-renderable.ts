@@ -3,11 +3,13 @@ import { BU } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh, MeshGPU } from "../../mesh/mesh.js";
-import type { MeshGroupBuildResult, Renderable, DrawUpdateContext } from "../../render/renderable.js";
+import type { MeshGroupBuildResult, MeshRebuildResources, Renderable, DrawUpdateContext } from "../../render/renderable.js";
 import type { Material } from "../material.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
-import { createEmptyUniformBuffer } from "../../resource/gpu-buffers.js";
-import { acquireTexture, releaseTexture } from "../../resource/gpu-pool.js";
+import { createEmptyUniformBuffer } from "../../resource/empty-uniform-buffer.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer.js";
+import { acquireTexture } from "../../resource/texture-acquire.js";
+import { releaseTexture } from "../../resource/texture-release.js";
 import { getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix, getViewProjectionMatrix, _cameraChangeKey } from "../../camera/camera.js";
 import type { Camera } from "../../camera/camera.js";
 import { multiplyMat4IntoBuffer } from "../../math/multiply-mat4-into-buffer.js";
@@ -26,14 +28,13 @@ export interface ShaderPacket {
     readonly mesh: Mesh;
     readonly systemUBO: GPUBuffer;
     readonly systemData: Float32Array;
-    /** @internal */
-    _bindGroup: GPUBindGroup;
+    /** @internal Null only while `createPacket` is constructing the packet; a
+     *  packet is never published unless bind-group creation succeeds. */
+    _bindGroup: GPUBindGroup | null;
     /** @internal */
     _lastResourceVersion: number;
     /** @internal */
     _boundTextures: Texture2D[];
-    /** @internal */
-    _boundStorageBuffers: GPUBuffer[];
     /** @internal Set when the owning mesh is removed and this packet's GPU resources are
      *  destroyed. A combined (multi-mesh) renderable keeps every packet in its
      *  closure, so update()/draw() must skip disposed packets to avoid writing to
@@ -114,8 +115,8 @@ export type ShaderRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
 export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh[], getUniformBatch?: UniformBatchFactory): MeshGroupBuildResult {
     const renderables: Renderable[] = [];
 
-    const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable =>
-        buildSingleShaderRenderable(s, mesh, (materialOverride ?? mesh.material) as ShaderMaterial, materialOverride != null, getUniformBatch);
+    const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material, rebuildResources?: MeshRebuildResources): Renderable =>
+        buildSingleShaderRenderable(s, mesh, (materialOverride ?? mesh.material) as ShaderMaterial, materialOverride != null, getUniformBatch, rebuildResources);
 
     const byMaterial = new Map<ShaderMaterial, Mesh[]>();
     for (const mesh of meshes) {
@@ -191,18 +192,29 @@ export function _installAsyncShaderPipelineRegistrar(register: ShaderAsyncPipeli
     _asyncPipelineRegistrar = register;
 }
 
-function buildSingleShaderRenderable(scene: SceneContext, mesh: Mesh, material: ShaderMaterial, isOverride: boolean, getUniformBatch?: UniformBatchFactory): Renderable {
-    return buildMaterialRenderables(scene, material, [mesh], isOverride, getUniformBatch)[0]!;
+function buildSingleShaderRenderable(
+    scene: SceneContext,
+    mesh: Mesh,
+    material: ShaderMaterial,
+    isOverride: boolean,
+    getUniformBatch?: UniformBatchFactory,
+    resources?: MeshRebuildResources
+): Renderable {
+    return buildMaterialRenderables(scene, material, [mesh], isOverride, getUniformBatch, resources)[0]!;
 }
 
-function buildMaterialRenderables(scene: SceneContext, material: ShaderMaterial, meshes: readonly Mesh[], isOverride = false, getUniformBatch?: UniformBatchFactory): Renderable[] {
+function buildMaterialRenderables(
+    scene: SceneContext,
+    material: ShaderMaterial,
+    meshes: readonly Mesh[],
+    isOverride = false,
+    getUniformBatch?: UniformBatchFactory,
+    resources?: MeshRebuildResources
+): Renderable[] {
     const engine = scene.surface.engine;
     const bindings = getOrCreateShaderPipelineBindings(engine, material);
     ensureCustomUbo(engine, material, bindings.customSpec);
-    // `isOverride` marks an AUX view packet (a material-override registered into an explicit task, e.g. a
-    // depth/SSAO no-colour view) — route its disposer to `_meshAuxDisposables` so a MAIN-material swap of this
-    // same mesh does not tear it down out from under that task.
-    const packets = meshes.map((mesh) => createPacket(scene, material, bindings.systemSpec, mesh, isOverride));
+    const packets = meshes.map((mesh) => createPacket(scene, material, bindings.systemSpec, mesh, resources));
     const isTransparent = material.needAlphaBlending;
     if (isTransparent) {
         return packets.map((packet) => createTransparentRenderable(scene, material, packet, isOverride, getUniformBatch));
@@ -210,25 +222,25 @@ function buildMaterialRenderables(scene: SceneContext, material: ShaderMaterial,
     return [createOpaqueRenderable(scene, material, packets, isOverride, getUniformBatch)];
 }
 
-function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh, aux = false): ShaderPacket {
+function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh, resources?: MeshRebuildResources): ShaderPacket {
     const engine = scene.surface.engine;
-    const systemUBO = createEmptyUniformBuffer(engine, systemSpec._totalBytes, "shader-system-ubo");
     const systemData = new F32(systemSpec._totalBytes / 4);
     systemUniformWriter(systemData, systemSpec, material, mesh, scene.camera, engine.canvas.width || 1, engine.canvas.height || 1);
-    engine._device.queue.writeBuffer(systemUBO, 0, systemData);
+    const systemUBO = createUniformBuffer(engine, systemData, "shader-system-ubo");
     const packet: ShaderPacket = {
         mesh,
         systemUBO,
         systemData,
-        _bindGroup: createShaderBindGroup(engine, material, systemUBO),
+        _bindGroup: null,
         _lastResourceVersion: material._resourceVersion,
-        _boundTextures: collectShaderTextures(material),
-        _boundStorageBuffers: collectShaderStorageBuffers(material),
+        _boundTextures: [],
     };
-    for (const tex of packet._boundTextures) {
+    registerMeshTextureDisposer(scene, mesh, packet, resources);
+    packet._bindGroup = createShaderBindGroup(engine, material, systemUBO);
+    for (const tex of collectShaderTextures(material)) {
         acquireTexture(tex);
+        packet._boundTextures.push(tex);
     }
-    registerMeshTextureDisposer(scene, mesh, packet, aux);
     return packet;
 }
 
@@ -387,16 +399,27 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
         // would destroy a GPUTexture that the new bind group still uses. (Releasing first destroys a unique
         // ref-count-1 texture — exposed by a custom material binding a per-material texture nothing else shares.)
         const newTextures = collectShaderTextures(material);
-        for (const tex of newTextures) {
-            acquireTexture(tex);
+        const acquiredTextures: Texture2D[] = [];
+        let bindGroup: GPUBindGroup;
+        try {
+            bindGroup = createShaderBindGroup(engine, material, packet.systemUBO);
+            for (const tex of newTextures) {
+                acquireTexture(tex);
+                acquiredTextures.push(tex);
+            }
+        } catch (error) {
+            for (const tex of acquiredTextures) {
+                releaseTexture(tex);
+            }
+            throw error;
         }
-        for (const tex of packet._boundTextures) {
+        const oldTextures = packet._boundTextures;
+        packet._bindGroup = bindGroup;
+        packet._boundTextures = acquiredTextures;
+        packet._lastResourceVersion = material._resourceVersion;
+        for (const tex of oldTextures) {
             releaseTexture(tex);
         }
-        packet._bindGroup = createShaderBindGroup(engine, material, packet.systemUBO);
-        packet._boundTextures = newTextures;
-        packet._boundStorageBuffers = collectShaderStorageBuffers(material);
-        packet._lastResourceVersion = material._resourceVersion;
     }
 }
 
@@ -406,7 +429,7 @@ function drawPacket(pass: ShaderRenderPass, engine: EngineContext, material: Sha
         pass.setVertexBuffer(i, getAttrBuffer(engine, packet.mesh, material.attributes[i]!));
     }
     pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
-    pass.setBindGroup(1, packet._bindGroup);
+    pass.setBindGroup(1, packet._bindGroup!);
     pass.drawIndexed(gpu.indexCount);
 }
 
@@ -519,46 +542,32 @@ function collectShaderTextures(material: ShaderMaterial): Texture2D[] {
     return textures;
 }
 
-function collectShaderStorageBuffers(material: ShaderMaterial): GPUBuffer[] {
-    const buffers: GPUBuffer[] = [];
-    for (const slot of material._storageBufferSlots.values()) {
-        if (slot.current) {
-            const buffer = slot.current._buffer;
-            if (buffer) {
-                buffers.push(buffer);
+function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: ShaderPacket, resources?: MeshRebuildResources): void {
+    const dispose = Object.assign(
+        () => {
+            packet._disposed = true;
+            if (packet._owner) {
+                const oi = packet._owner.indexOf(packet);
+                if (oi >= 0) {
+                    packet._owner.splice(oi, 1);
+                }
+                packet._owner = undefined;
             }
-        }
-    }
-    return buffers;
-}
-
-function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: ShaderPacket, aux = false): void {
-    // Aux (override) view packets go in `_meshAuxDisposables` so a main-material swap leaves them alone; main
-    // packets stay in `_meshDisposables` (torn down + rebuilt by the swap drain). Both are drained on real removal.
-    const map = aux ? scene._meshAuxDisposables : scene._meshDisposables;
-    const list = map.get(mesh) ?? [];
-    list.push(
-        Object.assign(
-            () => {
-                packet._disposed = true;
-                if (packet._owner) {
-                    const oi = packet._owner.indexOf(packet);
-                    if (oi >= 0) {
-                        packet._owner.splice(oi, 1);
-                    }
-                    packet._owner = undefined;
-                }
-                packet.systemUBO.destroy();
-                for (const tex of packet._boundTextures) {
-                    releaseTexture(tex);
-                }
-                packet._boundTextures = [];
-                packet._boundStorageBuffers = [];
-            },
-            { p: packet }
-        )
+            packet.systemUBO.destroy();
+            for (const tex of packet._boundTextures) {
+                releaseTexture(tex);
+            }
+            packet._boundTextures = [];
+        },
+        { p: packet }
     );
-    map.set(mesh, list);
+    if (resources) {
+        resources._lifetimeDisposers.push(dispose);
+        return;
+    }
+    const list = scene._meshDisposables.get(mesh) ?? [];
+    list.push(dispose);
+    scene._meshDisposables.set(mesh, list);
 }
 
 /** @internal Scratch for the camera-relative mesh world matrix under floating

@@ -29,13 +29,14 @@ import { F32 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { Mesh } from "../../mesh/mesh.js";
-import type { MeshGroupBuilder, Renderable } from "../../render/renderable.js";
-import { writeMeshLightSelection } from "../../render/lights-ubo.js";
+import type { MeshGroupBuilder, MeshRebuildResources, Renderable } from "../../render/renderable.js";
+import { writeMeshLightSelection } from "../../render/mesh-light-selection.js";
 import type { SceneContext } from "../../scene/scene-core.js";
-import { createUniformBuffer } from "../../resource/gpu-buffers.js";
-import { acquireTexture, releaseTexture } from "../../resource/gpu-pool.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer.js";
+import { acquireTexture } from "../../resource/texture-acquire.js";
+import { releaseTexture } from "../../resource/texture-release.js";
 import type { ComposedShader, ShaderFragment } from "../../shader/fragment-types.js";
-import { targetSignatureKey } from "../../engine/render-target.js";
+import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import { GeometryTextureType } from "../../frame-graph/geometry-types.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 
@@ -43,6 +44,7 @@ import type { Material } from "../material.js";
 import type { StandardMaterialProps } from "./standard-material.js";
 import {
     _getStdExtsSorted,
+    _stdMaterialVariantKey,
     DOUBLE_SIDED,
     HAS_DIFFUSE_TEXTURE,
     HAS_OPACITY_TEXTURE,
@@ -65,7 +67,7 @@ import { wgsl } from "../../shader/wgsl.js";
 
 /** Lazily-created singleton {@link MeshGroupBuilder} that geometry views point at
  *  via their overridden `_buildGroup`. The async builder body is unreachable —
- *  geometry views are dispatched per-mesh via {@link RenderTask.addMesh} which calls
+ *  geometry views are dispatched per-mesh via `addMeshToTask`, which calls
  *  `_rebuildSingle` directly. Centralizing the per-mesh factory here means
  *  `resolvePendingMeshes` doesn't need any view-aware branching. Lazy-init keeps the
  *  module free of top-level side effects so an unused geometry path tree-shakes away. */
@@ -78,29 +80,15 @@ export function getStandardGeometryGroupBuilder(): MeshGroupBuilder {
         throw new Error("standard-geometry view does not support scene group building");
     }) as MeshGroupBuilder;
     builder._materialFamily = "standard";
-    builder._rebuildSingle = (scene: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
+    builder._sceneIndependentRebuild = true;
+    builder._rebuildSingle = (scene: SceneContext, mesh: Mesh, materialOverride?: Material, resources?: MeshRebuildResources): Renderable => {
         const view = (materialOverride ?? mesh.material) as StandardGeometryMaterialView;
-        return buildStandardGeometryRenderable(scene, mesh, view);
+        if (!resources) {
+            throw new Error("standard-geometry rebuild requires task-owned resources");
+        }
+        return buildStandardGeometryRenderable(scene, mesh, view, resources);
     };
     return (_standardGeometryGroupBuilder = builder);
-}
-
-/** @internal Retire the shared per-view GPU resources (material + UV-transform
- *  UBOs) cached on `view._geometry`. The composed shaders, pipelines and BGLs are
- *  plain GPU objects reclaimed by GC; only the UBOs need an explicit destroy. The
- *  owning geometry task calls this when it discards a view on re-record/dispose so
- *  the shared UBOs are torn down instead of leaked. Idempotent (the cache is
- *  cleared). */
-export function disposeStandardGeometryViewResources(view: StandardGeometryMaterialView): void {
-    const cache = view._geometry as Map<string, StandardGeometryViewResources> | undefined;
-    if (!cache) {
-        return;
-    }
-    for (const res of cache.values()) {
-        res._matUBO.destroy();
-        res._upUBO?.destroy();
-    }
-    cache.clear();
 }
 
 /** Per-(task, source-material, mesh-variant) shared resources lazily attached
@@ -129,6 +117,8 @@ interface StandardGeometryViewResources {
     _lastUboVersion: number;
     /** Optional UV-transform UBO. Allocated when the view's features include NEEDS_UV. */
     _upUBO: GPUBuffer | null;
+    /** Renderable/task entries currently retaining this cached variant. */
+    _owners: number;
 }
 
 /** Mirrored-mesh front-face resolution for the geometry pass. Installed only by
@@ -150,7 +140,7 @@ function _variantKey(features: number, meshFeatures: number, sceneFeatures: numb
 
 /** Build a {@link Renderable} for one mesh drawn through a Standard geometry view.
  *  Reuses or creates per-(view, mesh-variant) shared resources on `view._geometry`. */
-export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh, view: StandardGeometryMaterialView): Renderable {
+export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh, view: StandardGeometryMaterialView, resources: MeshRebuildResources): Renderable {
     const engine = scene.surface.engine;
     const device = engine._device;
     const source = view.source as StandardMaterialProps;
@@ -162,7 +152,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     for (const ext of sortedExts) {
         features |= ext._meshFeatures?.(meshFeatures, source) ?? 0;
     }
-    const sceneFeatures = standardContext?._sceneShader?._features ?? 0;
+    const sceneFeatures = standardContext?.sceneShader?._features ?? 0;
     // Vertex colour is enabled through the canonical `enableStandardVertexColors()`
     // seam (master #430). RGB is always applied; the vertex-alpha opt-in below is
     // layered on top.
@@ -176,8 +166,9 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     if (hasVertexColor && mesh.hasVertexAlpha === true) {
         features |= VERTEX_ALPHA | MATERIAL_ALPHA_BLEND;
     }
-    const variantKey = _variantKey(features, meshFeatures, sceneFeatures);
+    const variantKey = _variantKey(features, meshFeatures, sceneFeatures) + (_stdMaterialVariantKey?.(source) ?? "");
     const res = _ensureViewResources(view, engine, meshFeatures, features, sceneFeatures, variantKey, standardContext);
+    _retainViewResources(view, variantKey, res, resources);
 
     // Per-mesh UBOs + bind group.
     const meshUboData = new F32(res._composed._meshUboSpec._totalBytes / 4);
@@ -212,41 +203,11 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     if (velocityEnabledOffset !== undefined) {
         meshUboData[velocityEnabledOffset / 4] = 0;
     }
-    const meshUBO = createUniformBuffer(engine, meshUboData);
-
     const skeletonVelocityFactory = res._hasSkeletonVelocity ? _getStandardGeometrySkeletonVelocityFactory() : null;
-    if (res._hasSkeletonVelocity && (!mesh.skeleton || !skeletonVelocityFactory)) {
-        throw new Error("standard-geometry: skeletal velocity feature was not preloaded");
-    }
-    const skeletonVelocity =
-        skeletonVelocityFactory && mesh.skeleton
-            ? skeletonVelocityFactory(engine, mesh.skeleton, (texture) => _createGeometryMeshBindGroup(scene, view, res, mesh, meshUBO, texture))
-            : null;
-    let meshBindGroup = skeletonVelocity?._bindGroup ?? _createGeometryMeshBindGroup(scene, view, res, mesh, meshUBO, null);
-    let velocityReady = false;
-
-    // Acquire all textures the standard shader references so the GPU-pool
-    // doesn't release them while the geometry pass holds bind groups on
-    // them. Mirrors standard-renderable's lifecycle exactly.
-    const boundTextures = collectStdBoundTextures(source);
-    for (const t of boundTextures) {
-        acquireTexture(t);
-    }
-    // Per-mesh geometry resources are an AUX/override packet: the geometry pass
-    // wraps the mesh's material in a `StandardGeometryMaterialView`, so these
-    // resources are NOT owned by the main material. Routing them through
-    // `_meshAuxDisposables` (never `_meshDisposables`) means a MAIN-material
-    // swap — which drains and rebuilds `_meshDisposables` — leaves the live
-    // geometry bind groups' buffers intact (no use-after-free), while a real
-    // `removeFromScene` still frees them. The owning geometry task additionally
-    // retires this closure on re-record/dispose (see `retireGeometryBindings`,
-    // which also removes it from the aux list outside any drain).
-    //
-    // The disposer is idempotent but MUST NOT self-remove from the aux array: the
-    // scene drains (`scene-remove.ts`, `scene-core.ts`) iterate the live array, so
-    // splicing mid-iteration would skip sibling packets. The whole aux entry is
-    // deleted wholesale after a drain, and the owning task detaches this closure on
-    // re-record/dispose — so the list neither grows nor leaks a dead reference.
+    const meshUBO = createUniformBuffer(engine, meshUboData);
+    const bindingDisposers: (() => void)[] = [];
+    let skeletonVelocity: ReturnType<NonNullable<typeof skeletonVelocityFactory>> | null = null;
+    let boundTextures: ReturnType<typeof collectStdBoundTextures> = [];
     let _perMeshDisposed = false;
     const _disposePerMesh = (): void => {
         if (_perMeshDisposed) {
@@ -255,13 +216,31 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         _perMeshDisposed = true;
         meshUBO.destroy();
         skeletonVelocity?._dispose();
+        for (const dispose of bindingDisposers) {
+            dispose();
+        }
         for (const t of boundTextures) {
             releaseTexture(t);
         }
     };
-    const auxList = (scene as SceneContext)._meshAuxDisposables.get(mesh) ?? [];
-    auxList.push(_disposePerMesh);
-    (scene as SceneContext)._meshAuxDisposables.set(mesh, auxList);
+    resources._lifetimeDisposers.push(_disposePerMesh);
+
+    if (res._hasSkeletonVelocity && (!mesh.skeleton || !skeletonVelocityFactory)) {
+        throw new Error("standard-geometry: skeletal velocity feature was not preloaded");
+    }
+    // Acquire all textures the standard shader references so the GPU-pool
+    // doesn't release them while the geometry pass holds bind groups on
+    // them. Mirrors standard-renderable's lifecycle exactly.
+    boundTextures = collectStdBoundTextures(source);
+    for (const t of boundTextures) {
+        acquireTexture(t);
+    }
+    skeletonVelocity =
+        skeletonVelocityFactory && mesh.skeleton
+            ? skeletonVelocityFactory(engine, mesh.skeleton, (texture) => _createGeometryMeshBindGroup(scene, view, res, mesh, meshUBO, texture, bindingDisposers))
+            : null;
+    let meshBindGroup = skeletonVelocity?._bindGroup ?? _createGeometryMeshBindGroup(scene, view, res, mesh, meshUBO, null, bindingDisposers);
+    let velocityReady = false;
 
     let _lastWorldVersion = mesh.worldMatrixVersion;
     let _lastLightsCount = scene.lights.length;
@@ -379,7 +358,6 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         },
     };
     r._worldCenter = sortCenter;
-    r._geometryDispose = _disposePerMesh;
     return r;
 }
 
@@ -414,7 +392,7 @@ function _ensureViewResources(
     // Keep morph first; an active UV-transform extension is the second
     // post-composer. composeStandardShader applies those two reserved slots.
     if ((meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0) {
-        const morphFragment = standardContext?._morphFragment;
+        const morphFragment = standardContext?.morphFragment;
         if (!morphFragment) {
             throw new Error("standard-geometry: morph targets require the scene Standard morph context");
         }
@@ -422,7 +400,7 @@ function _ensureViewResources(
     }
     for (const ext of sortedExts) {
         if (features & ext._feature) {
-            const f = ext._frag(features, meshFeatures);
+            const f = ext._frag(features, meshFeatures, source);
             if (f) {
                 frags.push(f);
                 usedExts.push({ _ext: ext });
@@ -466,7 +444,7 @@ function _ensureViewResources(
         }
     }
 
-    const composed = composeStandardGeometryShader(features, meshFeatures, frags, view._geometryAttachments, "", view._emitColor, standardContext?._sceneShader ?? null);
+    const composed = composeStandardGeometryShader(features, meshFeatures, frags, view._geometryAttachments, "", view._emitColor, standardContext?.sceneShader ?? null);
     const device = engine._device;
     const meshBGL = device.createBindGroupLayout(composed._meshBGLDescriptor);
     // Pipeline layout: scene BG (group 0) + mesh BG (group 1). Geometry pass
@@ -494,10 +472,15 @@ function _ensureViewResources(
 
     // UV transform UBO when the vertex stage emits UV math.
     let upUBO: GPUBuffer | null = null;
-    if ((features & NEEDS_UV) !== 0) {
-        const uvData = new F32(4);
-        writeStandardUvTransformData(uvData, source, isStandardUvInverted(features, source));
-        upUBO = createUniformBuffer(engine, uvData);
+    try {
+        if ((features & NEEDS_UV) !== 0) {
+            const uvData = new F32(4);
+            writeStandardUvTransformData(uvData, source, isStandardUvInverted(features, source));
+            upUBO = createUniformBuffer(engine, uvData);
+        }
+    } catch (error) {
+        matUBO.destroy();
+        throw error;
     }
 
     const needsVelocity = view._geometryAttachments.includes(GeometryTextureType.LINEAR_VELOCITY);
@@ -520,9 +503,35 @@ function _ensureViewResources(
         _matData: matData,
         _lastUboVersion: source._uboVersion,
         _upUBO: upUBO,
+        _owners: 0,
     };
     cache.set(variantKey, res);
     return res;
+}
+
+function _retainViewResources(view: StandardGeometryMaterialView, variantKey: string, res: StandardGeometryViewResources, resources: MeshRebuildResources): void {
+    const cache = view._geometry as Map<string, StandardGeometryViewResources>;
+    res._owners++;
+    let retained = true;
+    resources._lifetimeDisposers.push(() => {
+        if (!retained) {
+            return;
+        }
+        retained = false;
+        res._owners--;
+        _disposeViewResourcesIfUnowned(cache, variantKey, res);
+    });
+}
+
+function _disposeViewResourcesIfUnowned(cache: Map<string, StandardGeometryViewResources>, variantKey: string, res: StandardGeometryViewResources): void {
+    if (res._owners) {
+        return;
+    }
+    res._matUBO.destroy();
+    res._upUBO?.destroy();
+    if (cache.get(variantKey) === res) {
+        cache.delete(variantKey);
+    }
 }
 
 function _createGeometryMeshBindGroup(
@@ -531,7 +540,8 @@ function _createGeometryMeshBindGroup(
     res: StandardGeometryViewResources,
     mesh: Mesh,
     meshUBO: GPUBuffer,
-    previousBoneTexture: GPUTexture | null
+    previousBoneTexture: GPUTexture | null,
+    disposers: (() => void)[]
 ): GPUBindGroup {
     const engine = scene.surface.engine;
     const source = view.source as StandardMaterialProps;
@@ -554,7 +564,7 @@ function _createGeometryMeshBindGroup(
     }
     for (const used of res._extFragments) {
         if (used._ext._bind) {
-            nextBinding = used._ext._bind(source, entries, nextBinding, mesh, scene);
+            nextBinding = used._ext._bind(source, entries, nextBinding, mesh, scene, disposers, true);
         }
     }
     // Geometry-params `gp` UBO is contributed by the geometry composer as the

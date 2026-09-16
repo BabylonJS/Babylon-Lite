@@ -100,7 +100,6 @@ describe("device-lost shadow recovery", () => {
             _renderables: [],
             _uniformUpdaters: [],
             _meshDisposables: new Map(),
-            _meshAuxDisposables: new Map(),
             _renderableVersion: 0,
             _frameGraph: {
                 _tasks: [],

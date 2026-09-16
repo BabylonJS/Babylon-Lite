@@ -20,20 +20,20 @@ import { createDefaultPipelineDescriptor } from "../../render/scene-helpers.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 import { computeUboLayout } from "../../shader/ubo-layout.js";
 import { MAX_LIGHTS } from "../../light/types.js";
-import type { NodeBuildState } from "./node-types.js";
+import type { NodeBuildState, NodeMeshFeatureWriter, NodeVertexFeatureBinder } from "./node-types.js";
 import { wgsl } from "../../shader/wgsl.js";
+import type { NodeShadowEmitter, ShadowBinding } from "./node-shadow-emitter.js";
 
 // ─── Shared WGSL preamble ───────────────────────────────────────────
 
-function buildMeshStruct(): string {
+function buildMeshStruct(fields = "", helpers = ""): string {
     return wgsl`struct MeshU {
     world: mat4x4<f32>,
     receivesShadow: vec4<f32>,
-    lc: u32,
-    li: array<vec4<u32>, ${Math.ceil(MAX_LIGHTS / 4)}>,
+${fields}
 };
 @group(1) @binding(0) var<uniform> meshU: MeshU;
-fn nli(i: u32) -> u32 { return meshU.li[i / 4u][i % 4u]; }`;
+${helpers}`;
 }
 
 /** Sentinels the builder substitutes away before compile. */
@@ -62,8 +62,12 @@ export interface NodeCompileResult {
     readonly _nodeUboBinding: number | null;
     /** @internal Per-texture binding slots assigned by the pipeline builder. */
     readonly _textureBindings: ReadonlyArray<{ readonly _name: string; readonly _texBinding: number; readonly _sampBinding: number }>;
-    /** @internal Slots for the morph-target deltas + weights storage buffers, or `null` when no MorphTargetsBlock is present. */
-    readonly _morphBindings: { readonly _deltasBinding: number; readonly _uboBinding: number } | null;
+    /** @internal Optional per-mesh binder installed by an opt-in vertex block. */
+    readonly _bindVertexFeature?: NodeVertexFeatureBinder;
+    /** @internal Mesh UBO size in floats, including optional feature fields. */
+    readonly _meshUboFloats: number;
+    /** @internal Optional CPU mesh-feature writer. */
+    readonly _writeMeshFeature?: NodeMeshFeatureWriter;
     /** @internal Slot assignments for env IBL bindings within group 1, when state.usesEnv is true. */
     readonly _envBindings: {
         /** @internal */
@@ -76,7 +80,7 @@ export interface NodeCompileResult {
         readonly _brdfSampler: number;
     } | null;
     /** @internal Per shadow-casting light: slot assignments in group 1 for the shadow texture, sampler, and shadowInfo UBO. Empty when the material uses no shadows. */
-    readonly _shadowBindings: readonly import("./node-shadow.js").ShadowBinding[];
+    readonly _shadowBindings: readonly ShadowBinding[];
     /** @internal */
     readonly _usesClipPlanes: boolean;
     /** @internal */
@@ -173,12 +177,10 @@ export interface CompileOpts {
      *  so non-env scenes never bundle the env helpers. */
     /** @internal */
     readonly _envEmitter?: typeof import("./node-env.js").emitEnv;
-    /** When `state.shadowLights` is non-empty, this factory produces shadow
-     *  bindings + WGSL. Loaded via `await import("./node-shadow.js")` from
-     *  `node-material.ts` only when `shadowGenerators` was supplied, so
-     *  non-shadow scenes never bundle the PCF/ESM helpers. */
+    /** Emits shadow bindings and WGSL using algorithms prepared by node-material.ts.
+     *  Neither this compiler nor synchronous rebuilds load sampling implementations. */
     /** @internal */
-    readonly _shadowEmitter?: typeof import("./node-shadow.js").emitShadow;
+    readonly _shadowEmitter?: NodeShadowEmitter;
     /** @internal Geometry-renderer (MRT) output. Supplied by the lazily
      *  dynamic-imported node geometry view, so normal node bundles never
      *  retain this path. When present, the fragment entry point returns a
@@ -263,42 +265,12 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
         textureWgslDecls.push(wgsl`@group(1) @binding(${_sampBinding}) var nodeSamp_${_name}: sampler;`);
     }
 
-    const lightsWgslDecls = state.usesLightsUbo
-        ? wgsl`struct LightEntry { vLightData: vec4<f32>, vLightDiffuse: vec4<f32>, vLightSpecular: vec4<f32>, vLightDirection: vec4<f32> };
-struct lightsUniforms { count: u32, _p0: u32, _p1: u32, _p2: u32, lights: array<LightEntry, ${MAX_LIGHTS}> };
-@group(0) @binding(1) var<uniform> nmeLights: lightsUniforms;`
-        : "";
+    const meshFeature = state._meshFeature?.();
+    const lightsWgslDecls = meshFeature?.[2] ?? "";
 
-    // Morph-target bindings (vertex-only). Two slots: deltas storage buffer + weights storage buffer.
-    let _morphBindings: { _deltasBinding: number; _uboBinding: number } | null = null;
-    const morphWgslDecls: string[] = [];
-    if (state.usesMorphTargets) {
-        const _deltasBinding = nextBinding++;
-        const _uboBinding = nextBinding++;
-        _morphBindings = { _deltasBinding, _uboBinding };
-        morphWgslDecls.push(
-            wgsl`struct morphDeltasUniforms { d: array<f32> };`,
-            wgsl`@group(1) @binding(${_deltasBinding}) var<storage, read> morphDeltas: morphDeltasUniforms;`,
-            wgsl`struct morphUniforms { count: u32, vertexCount: u32, _p0: u32, _p1: u32, weights: array<f32> };`,
-            wgsl`@group(1) @binding(${_uboBinding}) var<storage, read> morph: morphUniforms;`,
-            // Helpers are emitted inline (module-scope) so they can reference `morph` + `morphDeltas`.
-            wgsl`fn nme_morphPosition(base: vec3<f32>, vi: u32) -> vec3<f32> {\n` +
-                wgsl`    var acc = base;\n` +
-                wgsl`    for (var i = 0u; i < morph.count; i = i + 1u) {\n` +
-                wgsl`        let b = (i * morph.vertexCount + vi) * 6u;\n` +
-                wgsl`        acc = acc + morph.weights[i] * vec3<f32>(morphDeltas.d[b], morphDeltas.d[b + 1u], morphDeltas.d[b + 2u]);\n` +
-                wgsl`    }\n` +
-                wgsl`    return acc;\n` +
-                wgsl`}`,
-            wgsl`fn nme_morphNormal(base: vec3<f32>, vi: u32) -> vec3<f32> {\n` +
-                wgsl`    var acc = base;\n` +
-                wgsl`    for (var i = 0u; i < morph.count; i = i + 1u) {\n` +
-                wgsl`        let b = (i * morph.vertexCount + vi) * 6u;\n` +
-                wgsl`        acc = acc + morph.weights[i] * vec3<f32>(morphDeltas.d[b + 3u], morphDeltas.d[b + 4u], morphDeltas.d[b + 5u]);\n` +
-                wgsl`    }\n` +
-                wgsl`    return acc;\n` +
-                wgsl`}`
-        );
+    const vertexFeature = state._vertexFeature?.(nextBinding);
+    if (vertexFeature) {
+        nextBinding += vertexFeature[0];
     }
 
     // Env IBL bindings (specular cube + sampler, BRDF LUT 2D + sampler).
@@ -318,7 +290,7 @@ struct lightsUniforms { count: u32, _p0: u32, _p1: u32, _p2: u32, lights: array<
     }
 
     // Shadow bindings (per shadow-casting light). Emission/WGSL live in the
-    // dynamically-imported `node-shadow.ts` module so scenes without shadows
+    // dynamically-imported `node-shadow-emitter.ts` module so scenes without shadows
     // never bundle the PCF/ESM helper code. `shadowEmitter` is supplied only
     // when `shadowGenerators` was passed to `parseNodeMaterialFromSnippet`.
     const noColorOutput = opts._noColorOutput === true;
@@ -367,7 +339,7 @@ struct lightsUniforms { count: u32, _p0: u32, _p1: u32, _p2: u32, lights: array<
     @builtin(frag_depth) fragDepth: f32,
 };`
             : "";
-    const wgslParts: string[] = ["// Auto-generated by NodeMaterial — DO NOT EDIT", SCENE_UBO_WGSL, buildMeshStruct()];
+    const wgslParts: string[] = ["// Auto-generated by NodeMaterial — DO NOT EDIT", SCENE_UBO_WGSL, buildMeshStruct(meshFeature?.[0], meshFeature?.[1])];
     if (nodeUbo) {
         wgslParts.push(nodeUbo.struct);
     }
@@ -377,8 +349,8 @@ struct lightsUniforms { count: u32, _p0: u32, _p1: u32, _p2: u32, lights: array<
     if (lightsWgslDecls) {
         wgslParts.push(lightsWgslDecls);
     }
-    if (morphWgslDecls.length > 0) {
-        wgslParts.push(morphWgslDecls.join("\n"));
+    if (vertexFeature?.[1]) {
+        wgslParts.push(vertexFeature[1]);
     }
     if (envWgslDecls) {
         wgslParts.push(envWgslDecls);
@@ -409,7 +381,7 @@ struct lightsUniforms { count: u32, _p0: u32, _p1: u32, _p2: u32, lights: array<
         wgslParts.push(src);
     }
 
-    const vsSig = state.usesMorphTargets ? wgsl`(in: VertexIn, @builtin(vertex_index) vertexIndex: u32)` : wgsl`(in: VertexIn)`;
+    const vsSig = wgsl`(in: VertexIn${vertexFeature?.[3] ?? ""})`;
     wgslParts.push(
         wgsl`@vertex\nfn vs_main${vsSig} -> VertexOut {\n` +
             wgsl`    var out: VertexOut;\n` +
@@ -476,17 +448,8 @@ struct lightsUniforms { count: u32, _p0: u32, _p1: u32, _p2: u32, lights: array<
         meshBglEntries.push({ binding: tb._texBinding, visibility: SS.VERTEX | SS.FRAGMENT, texture: { sampleType: "float", viewDimension: "2d" } });
         meshBglEntries.push({ binding: tb._sampBinding, visibility: SS.VERTEX | SS.FRAGMENT, sampler: { type: "filtering" } });
     }
-    if (_morphBindings !== null) {
-        meshBglEntries.push({
-            binding: _morphBindings._deltasBinding,
-            visibility: SS.VERTEX,
-            buffer: { type: "read-only-storage" },
-        });
-        meshBglEntries.push({
-            binding: _morphBindings._uboBinding,
-            visibility: SS.VERTEX,
-            buffer: { type: "read-only-storage" },
-        });
+    if (vertexFeature) {
+        meshBglEntries.push(...vertexFeature[2]);
     }
     if (_envBindings) {
         meshBglEntries.push(...envBglEntries);
@@ -561,7 +524,9 @@ struct lightsUniforms { count: u32, _p0: u32, _p1: u32, _p2: u32, lights: array<
         _nodeUboOffsets,
         _nodeUboBinding,
         _textureBindings,
-        _morphBindings,
+        _bindVertexFeature: vertexFeature?.[4],
+        _meshUboFloats: meshFeature?.[3] ?? 20,
+        _writeMeshFeature: meshFeature?.[4],
         _envBindings,
         _shadowBindings,
         _usesClipPlanes: state.usesClipPlanes,

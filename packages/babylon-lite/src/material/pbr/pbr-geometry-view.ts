@@ -69,10 +69,8 @@ export interface PbrGeometryMaterialView extends MaterialView {
     /** @internal Shared per-view resources cache populated lazily by the renderable
      *  factory. Opaque to callers. PBR's cached per-variant resources are composed
      *  WGSL, bind-group layouts, pipeline layouts, shader modules and pipelines — all
-     *  GC-reclaimed when the owning geometry task drops this view. There are no
-     *  explicitly-destroyable GPU buffers here (the per-mesh mesh/material UBOs are
-     *  freed by the renderable's `_geometryDispose`), so — unlike the Standard and Node
-     *  views — this view intentionally exposes NO `_disposeGeometryResources`. */
+     *  GC-reclaimed when the owning geometry tasks drop this view. Per-mesh
+     *  mesh/material UBOs are retained directly by each task-owned renderable. */
     _geometry?: unknown;
 }
 

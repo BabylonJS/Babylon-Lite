@@ -159,6 +159,38 @@ function makeTemplate(overrides?: Partial<ShaderTemplate>): ShaderTemplate {
 }
 
 describe("composeShader", () => {
+    it("keeps ungrouped layouts before first-seen groups and preserves their first attribute's packing", () => {
+        const result = composeShader(
+            makeTemplate({
+                _baseVertexAttributes: [
+                    { _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 32, _bufferGroup: "mesh" },
+                    { _name: "normal", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 64, _offset: 12, _bufferGroup: "mesh" },
+                    { _name: "uv", _type: "vec2<f32>", _gpuFormat: "float32x2", _arrayStride: 8 },
+                    { _name: "instance", _type: "vec4<f32>", _gpuFormat: "float32x4", _arrayStride: 64, _offset: 16, _bufferGroup: "instances", _stepMode: "instance" },
+                ],
+            }),
+            []
+        );
+        expect(result._vertexBufferLayouts).toEqual([
+            { arrayStride: 8, stepMode: "vertex", attributes: [{ shaderLocation: 2, offset: 0, format: "float32x2" }] },
+            {
+                arrayStride: 32,
+                stepMode: "vertex",
+                attributes: [
+                    { shaderLocation: 0, offset: 0, format: "float32x3" },
+                    { shaderLocation: 1, offset: 12, format: "float32x3" },
+                ],
+            },
+            { arrayStride: 64, stepMode: "instance", attributes: [{ shaderLocation: 3, offset: 16, format: "float32x4" }] },
+        ]);
+    });
+
+    it("keeps lexical ready-queue order with repeated dependency edges", () => {
+        const fragments: ShaderFragment[] = [{ _id: "z" }, { _id: "a", _dependencies: ["b", "b"] }, { _id: "b" }];
+        expect(composeShader(makeTemplate(), fragments)._fragmentKey).toBe("b|a|z");
+        expect(fragments[1]!._dependencies).toEqual(["b", "b"]);
+    });
+
     it("composes with zero fragments", () => {
         const result = composeShader(makeTemplate(), []);
         expect(result._fragmentKey).toBe("");
@@ -351,17 +383,16 @@ describe("composeShader", () => {
         expect(firstEntry.buffer).toEqual({ type: "uniform" });
     });
 
-    it("deduplicates vertex attributes by name", () => {
+    it("deduplicates vertex attributes by name while preserving the base layout", () => {
         const frag: ShaderFragment = {
             _id: "test",
-            _vertexAttributes: [
-                // Same as base "position" — should be deduped
-                { _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
-            ],
+            _vertexAttributes: [{ _name: "position", _type: "vec4<f32>", _gpuFormat: "float32x4", _arrayStride: 16 }],
         };
         const result = composeShader(makeTemplate(), [frag]);
         // Should only have 2 vertex buffer layouts (position + normal), not 3
         expect(result._vertexBufferLayouts.length).toBe(2);
+        expect(result._vertexBufferLayouts[0]!.arrayStride).toBe(12);
+        expect(result._vertexWGSL).toContain("position:vec3<f32>");
     });
 
     it("handles base template bindings before fragment bindings", () => {

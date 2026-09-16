@@ -35,6 +35,66 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes standalone task population and opt-in RTT factories", () => {
+        const probePath = resolve(BUILD_DIR, "render-task-opt-in.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createSceneContext, createRenderTask, addMeshToTask, createRenderTargetTexture,
+    createSurfaceRenderTargetTexture, onRenderTargetTextureResize, withSampledDepthTexture,
+    type EngineContext, type Mesh,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const mesh: Mesh;
+const fixed = createRenderTargetTexture(engine, {
+    format: "rgba8unorm", samples: 1, size: { width: 32, height: 32 },
+});
+const fixedDepth = createRenderTargetTexture(engine, {
+    dFormat: "depth32float", samples: 1, size: { width: 32, height: 32 },
+}, withSampledDepthTexture);
+const surface = createSurfaceRenderTargetTexture(engine, {
+    format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: engine,
+}, withSampledDepthTexture);
+const surfaceDepth = createSurfaceRenderTargetTexture(engine, {
+    dFormat: "depth32float", samples: 1, size: engine,
+}, withSampledDepthTexture);
+const task = createRenderTask({ name: "explicit", rt: fixed.rt }, engine, createSceneContext(engine));
+addMeshToTask(task, mesh);
+// @ts-expect-error Task mesh population is a tree-shakable standalone API.
+task.addMesh(mesh);
+onRenderTargetTextureResize(surface, () => {})();
+onRenderTargetTextureResize(surfaceDepth, () => {})();
+fixedDepth.texture satisfies typeof fixedDepth.depthTexture;
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("type-checks cleanly with no references to internal-only types", () => {
         expect(existsSync(DTS_PATH)).toBe(true);
 

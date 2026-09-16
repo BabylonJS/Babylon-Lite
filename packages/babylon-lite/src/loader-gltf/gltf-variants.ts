@@ -12,7 +12,7 @@ import { assembleMaterial, makeImageFetcher } from "./gltf-material.js";
 import type { GltfFeature, GltfMaterialFeatureRunner } from "./gltf-feature.js";
 import type { MaterialVariantData, VariantMeshEntry } from "./material-variants.js";
 import type { EngineContext } from "../engine/engine.js";
-import { getOrCreateSampler } from "../resource/gpu-pool.js";
+import { getOrCreateSampler } from "../resource/texture-sampler-pool.js";
 import { uploadTex, type GenerateMipmapsFn, type TextureWrapFn, identityTexWrap, applyGltfOptInPbrFeatures } from "./gltf-pbr-builder.js";
 import { buildDefaultPbrTexturesExt, assemblePbrPropsExt, applyGltfUvTransform } from "./gltf-pbr-builder-ext.js";
 

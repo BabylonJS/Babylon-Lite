@@ -18,13 +18,13 @@ import type { StandardMaterialProps, StandardSceneShaderContext } from "./standa
 import type { Mesh } from "../../mesh/mesh.js";
 import type { ResolvedStencil } from "../stencil-state.js";
 import type { StencilState } from "../material.js";
-import { _standardFeatureKey } from "./standard-material.js";
-import { getSceneBindGroupLayout, clearSceneBGLCache } from "../../render/scene-helpers.js";
+import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { createStandardTemplate } from "./standard-template.js";
 import { composeShader } from "../../shader/shader-composer.js";
 import type { ComposedShader, ShaderFragment } from "../../shader/fragment-types.js";
-import { createUniformBuffer } from "../../resource/gpu-buffers.js";
-import { REVERSE_DEPTH_COMPARE, targetSignatureKey } from "../../engine/render-target.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer.js";
+import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
+import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import {
     DIFFUSE_USES_UV2,
     DISABLE_LIGHTING,
@@ -165,7 +165,6 @@ function ensureDevice(engine: EngineContext): void {
     if (_cachedDevice !== engine._device) {
         _bindingsCache.clear();
         _composedCache?.clear();
-        clearSceneBGLCache();
         _cachedDevice = engine._device;
     }
 }
@@ -174,7 +173,6 @@ function ensureDevice(engine: EngineContext): void {
 export function clearStandardPipelineCache(): void {
     _bindingsCache.clear();
     _composedCache?.clear();
-    clearSceneBGLCache();
     _cachedDevice = null;
 }
 
@@ -197,7 +195,7 @@ export function getOrCreateStandardBindings(
     // goes through the opt-in `_stencilResolver` hook, so non-stencil scenes fold this whole block away.
     const resolvedStencil = stencil && _stencilResolver ? _stencilResolver(stencil) : null;
     const sceneFeatures = sceneShader?._features ?? 0;
-    const key = _standardFeatureKey(features, meshFeatures, sceneFeatures, shaderKey) + (resolvedStencil ? resolvedStencil._key : "");
+    const key = standardFeatureKey(features, meshFeatures, sceneFeatures, shaderKey) + (resolvedStencil ? resolvedStencil._key : "");
     const cached = _bindingsCache.get(key);
     if (cached) {
         return cached;
@@ -233,6 +231,10 @@ export function getOrCreateStandardBindings(
     }
     _bindingsCache.set(key, bindings);
     return bindings;
+}
+
+function standardFeatureKey(features: number, meshFeatures: number, sceneFeatures: number, variant: string): string {
+    return variant ? `${features}:${meshFeatures}:${sceneFeatures}:${variant}` : `${features}:${meshFeatures}:${sceneFeatures}`;
 }
 
 /** Get-or-build a sig-specific pipeline on top of a shader bindings. Called at bind() time. */
@@ -325,7 +327,9 @@ export function createStandardMeshBindGroup(
     materialUBO: GPUBuffer,
     material: StandardMaterialProps,
     morphTargets: { deltasBuffer: GPUBuffer; weightsBuffer: GPUBuffer } | null = null,
-    mesh?: Mesh
+    mesh?: Mesh,
+    disposers?: (() => void)[],
+    auxiliary = false
 ): GPUBindGroup {
     const engine = scene.surface.engine;
     const device = engine._device;
@@ -355,7 +359,9 @@ export function createStandardMeshBindGroup(
     if (features & NEEDS_UV) {
         const uvData = new F32(4);
         writeStandardUvTransformData(uvData, material, isStandardUvInverted(features, material));
-        entries.push({ binding: nextBinding++, resource: { buffer: createUniformBuffer(engine, uvData) } });
+        const uvBuffer = createUniformBuffer(engine, uvData);
+        disposers?.push(() => uvBuffer.destroy());
+        entries.push({ binding: nextBinding++, resource: { buffer: uvBuffer } });
     }
 
     if (esmShadowOutput) {
@@ -369,7 +375,7 @@ export function createStandardMeshBindGroup(
     // to match composer's fragment sort order.
     for (const ext of _getStdExtsSorted()) {
         if (features & ext._feature && ext._bind) {
-            nextBinding = ext._bind(material, entries, nextBinding, mesh, scene);
+            nextBinding = ext._bind(material, entries, nextBinding, mesh, scene, disposers, auxiliary);
         }
     }
 

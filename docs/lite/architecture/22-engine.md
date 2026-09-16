@@ -76,6 +76,7 @@ export function setRenderTaskGpuTimingEnabled(engine: EngineContext, enabled: bo
 export function startEngine(engine: EngineContext): Promise<void>;
 /** Resolve after all GPU commands submitted before this call have completed. */
 export function waitForGpuIdle(engine: EngineContext): Promise<void>;
+export function waitForGpuResourceRetirements(engine: EngineContext): Promise<void>;
 /** Stop the render loop. */
 export function stopEngine(engine: EngineContext): void;
 /** Resize render targets to match canvas layout size. No-op for an OffscreenCanvas. */
@@ -127,6 +128,14 @@ interface EngineContextInternal extends EngineContext {
 
 The engine no longer owns per-frame color/depth render targets directly. Render targets are owned by registered rendering contexts, primarily scene frame-graph `RenderTask`s. The engine owns the canvas/swapchain and exposes the current swapchain view once per frame through `_swapchainView`.
 
+Render-target disposal has one shared attachment-detachment path. Ordinary targets destroy their
+owned textures; sampled RTTs install an owner callback that releases texture references instead.
+Both paths clear attachment handles, views, and dimensions even if a release throws. Eager wrappers
+without an owner callback remain borrowed and are not detached or destroyed.
+The RTT factory selects color-versus-depth sampling from the requested format before allocating
+the target. Allocation cannot change that choice, so a depth-only caller does not retain the
+color-facade and bilinear-sampler path merely because GPU allocation receives the descriptor.
+
 ### Resize Logic
 
 `resizeEngine(engine)` is called at the **start of every frame** (inside the rAF callback), not on a resize event. It auto-sizes only a **DOM canvas** from its layout box:
@@ -163,7 +172,28 @@ Everything else (adapter/device acquisition, `getContext("webgpu")`, the rAF ren
 
 `startEngine(engine)` returns a `Promise<void>` that resolves after the first frame has been rendered. Any scene registered before the call participates in the first frame; later registrations join on subsequent frames.
 
-`waitForGpuIdle(engine)` delegates to the WebGPU queue fence and resolves after all commands submitted before the call have completed. It is intended for infrequent lifecycle synchronization, not steady-state frame loops.
+`waitForGpuIdle(engine)` delegates to the WebGPU queue fence and resolves after all commands submitted before the call have completed. It does not wait for deferred resource-release callbacks. It is intended for infrequent lifecycle synchronization, not steady-state frame loops.
+
+`waitForGpuResourceRetirements(engine)` is the separate orderly-teardown boundary. Stop producers and
+dispose scene/render-task consumers first, then await this function before disposing their shared
+resources. It yields past the current synchronous frame, snapshots outstanding retirement batches,
+waits for submitted GPU work, and claims those exact batches synchronously. The ordinary deferred
+fence may also claim a batch, but its callbacks run only once. Retirements queued during the wait or
+by another release callback are drained in subsequent fenced batches. Newly queued batches are never
+released against an earlier fence. GPU-fence failure rejects without releasing unfenced resources;
+callback failures are reported while remaining callbacks are attempted. The drain is tree-shakable
+and introduces no additional steady-frame scheduling.
+
+Retirement users install the engine's optional `_flushGpuRetirements` seam on their first queued
+release. Frame submission and stopping only invoke that seam; engine creation does not import the
+retirement implementation. `disposeEngine` lives in a separate module so its synchronous drain does
+not pull retirement code into the initial Vite chunk of applications that never queue a retirement.
+Outstanding fenced batches are tracked by identity in a `Set`, preserving insertion order for
+teardown while allowing either the fence callback or an explicit drain to remove a batch directly.
+Each batch is claimed by emptying its callback array before running any callback.
+The core queue and its batch helper accept cleanup callbacks only. Feature-specific collections
+of callbacks and objects with `destroy()` use `gpu-resource-disposal.ts`, which is separate so
+ordinary rendering does not retain heterogeneous-disposer dispatch.
 
 ```
 registerScene(scene):
@@ -208,6 +238,11 @@ Each invocation consists of:
 6. **Submit**: finish the command encoder and submit via the reusable `engine._cbs` array to avoid per-frame array allocation.
 
 The per-surface attachment refresh is required because `GPUCanvasContext.getCurrentTexture()` returns a new swapchain texture over time. Reusing the auxiliary surface's view captured during frame-graph build produces a WebGPU validation error; because one command buffer contains every surface's work, that invalid auxiliary pass also discards the primary canvas's rendering.
+
+Both all-surface and explicitly targeted frames use the same retirement seam and encoder lifetime.
+The active encoder is cleared in `finally`, including when a selected surface throws; partially
+recorded work is not submitted and the previous draw count remains published. A selection with no
+rendering contexts still flushes pending retirements through the opt-in seam.
 
 ### Deferred Builder Execution
 
@@ -310,9 +345,11 @@ Disabling task timing destroys its query set, resolve buffer, pooled readbacks, 
 
 ## File Manifest
 
-| File                            | Size       | Purpose                                                                                                |
-| ------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
-| `src/engine/engine.ts`          | ~150 lines | Engine interface, creation, render loop, MSAA targets                                                  |
-| `src/engine/gpu-timer.ts`       | ~110 lines | Optional GPU frame-time measurement (dynamic-imported by `setGpuTimingEnabled`; zero-cost when unused) |
-| `src/engine/gpu-task-timing.ts` | ~120 lines | Thin public per-task timing API; dynamic-imports the profiler implementation only when enabled         |
-| `src/engine/gpu-task-timer.ts`  | ~150 lines | Optional timestamp-query implementation for per-frame-graph-task GPU timings                           |
+| File                                    | Size       | Purpose                                                                                                |
+| --------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
+| `src/engine/engine.ts`                  | ~150 lines | Engine interface, creation, render loop, MSAA targets                                                  |
+| `src/engine/engine-dispose.ts`          | ~25 lines  | Explicit engine teardown and synchronous resource-retirement drain                                     |
+| `src/engine/gpu-resource-retirement.ts` | ~110 lines | Deferred retirement, exactly-once batch ownership, and awaitable teardown                              |
+| `src/engine/gpu-timer.ts`               | ~110 lines | Optional GPU frame-time measurement (dynamic-imported by `setGpuTimingEnabled`; zero-cost when unused) |
+| `src/engine/gpu-task-timing.ts`         | ~120 lines | Thin public per-task timing API; dynamic-imports the profiler implementation only when enabled         |
+| `src/engine/gpu-task-timer.ts`          | ~150 lines | Optional timestamp-query implementation for per-frame-graph-task GPU timings                           |

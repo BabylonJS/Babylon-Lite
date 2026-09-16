@@ -6,15 +6,18 @@ import type { SurfaceContext } from "../../../packages/babylon-lite/src/engine/s
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
-import type { DrawBinding, DrawUpdateContext, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
+import type { DrawBinding, DrawUpdateBatch, DrawUpdateContext, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import { getUniformCopyBatch } from "../../../packages/babylon-lite/src/render/uniform-copy-batch";
 import { createSceneContext, registerScene } from "../../../packages/babylon-lite/src/scene/scene";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { createRenderTarget, type RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
-import { createRenderTask, removeMeshFromTask, type RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
-import { transferMeshBetweenTasks } from "../../../packages/babylon-lite/src/shadow/csm-shadow-cache";
+import { addMeshToTask, createRenderTask, removeMeshFromTask, type RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
+import { _removeMeshFromRenderTask, type RenderTaskBase } from "../../../packages/babylon-lite/src/frame-graph/render-task-base";
+import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
+import { rebuildTransferTarget, transferMeshBetweenTasks } from "../../../packages/babylon-lite/src/shadow/csm-shadow-cache";
 import { enableRenderTaskTransmission, enableSceneTransmission } from "../../../packages/babylon-lite/src/frame-graph/transmission";
 import { getComputeDispatchBatch } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu-culling";
+import { enableDrawBatchCollection } from "../../../packages/babylon-lite/src/render/draw-update-batches";
 import { invalidateRenderBundles } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUShaderStage" | "GPUTextureUsage"> & {
@@ -266,6 +269,212 @@ function makeDrawOrderRenderable(id: string, flags: Partial<Pick<Renderable, "or
 }
 
 describe("RenderPassTask transparent sorting", () => {
+    it("keeps automatic scene rendering independent of explicit mesh ownership", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const task = scene._frameGraph._tasks[0] as RenderTaskBase;
+        expect("addMesh" in task).toBe(false);
+        expect("_pendingMeshes" in task).toBe(false);
+        expect("_prepareRenderables" in task).toBe(false);
+        scene._renderables.push(makeDrawOrderRenderable("first", {}, []));
+        task.record();
+        expect(task.execute!()).toBe(1);
+        scene._renderables.push(makeDrawOrderRenderable("second", {}, []));
+        scene._renderableVersion++;
+        expect(task.execute!()).toBe(2);
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+    });
+
+    it("does not mark scene mutations during binding as already synchronized", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const task = scene._frameGraph._tasks[0] as RenderTaskBase;
+        const first = makeDrawOrderRenderable("first", {}, []);
+        const second = makeDrawOrderRenderable("second", {}, []);
+        const bindFirst = first.bind.bind(first);
+        let changed = false;
+        first.bind = (eng, signature) => {
+            const binding = bindFirst(eng, signature);
+            if (!changed) {
+                changed = true;
+                scene._renderables.push(second);
+                scene._renderableVersion++;
+            }
+            return binding;
+        };
+        scene._renderables.push(first);
+        const sourceVersion = scene._renderableVersion;
+
+        task.record();
+
+        expect(task._renderables).toEqual([first]);
+        expect(task._lastVersion).toBe(sourceVersion);
+        expect(task.execute!()).toBe(2);
+        expect(task._renderables).toEqual([first, second]);
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+    });
+
+    it.each([false, true])("preserves source versions when the scene mutates during automatic rebinding (transmission: %s)", (transmission) => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const task = scene._frameGraph._tasks[0] as RenderTask;
+        const first = makeDrawOrderRenderable("first", {}, []);
+        const second = makeDrawOrderRenderable("second", {}, []);
+        scene._renderables.push(first);
+        if (transmission) {
+            enableRenderTaskTransmission(task, engine, { linear: false, generateMipmaps: false });
+        }
+        task.record();
+        expect(task.execute!()).toBe(1);
+        const bindFirst = first.bind.bind(first);
+        let changed = false;
+        first.bind = (eng, signature) => {
+            const binding = bindFirst(eng, signature);
+            if (!changed) {
+                changed = true;
+                scene._renderables.push(second);
+                scene._renderableVersion++;
+            }
+            return binding;
+        };
+        const sourceVersion = ++scene._renderableVersion;
+
+        expect(task.execute!()).toBe(1);
+        expect(task._lastVersion).toBe(sourceVersion);
+        expect(task.execute!()).toBe(2);
+        expect(task._renderables).toEqual([first, second]);
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+    });
+
+    it.each([false, true])("reuses explicit-task bundles across unrelated scene versions (transmission: %s)", (transmission) => {
+        const bundleDescriptors: GPURenderBundleEncoderDescriptor[] = [];
+        const engine = makeMockEngine({ bundleDescriptors });
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const rt = createRenderTarget({ format: "rgba8unorm", dFormat: "depth24plus-stencil8", samples: 4, size: { width: 32, height: 32 } });
+        const task = createRenderTask({ name: "explicit", rt, autoMirror: false }, engine, scene);
+        task._renderables.push(makeDrawOrderRenderable("first", {}, []));
+        if (transmission) {
+            enableRenderTaskTransmission(task, engine, { linear: false, generateMipmaps: false });
+        }
+        task.record();
+        task.execute!();
+        const bundles = bundleDescriptors.length;
+        scene._renderableVersion++;
+
+        task.execute!();
+        expect(bundleDescriptors).toHaveLength(bundles);
+        invalidateRenderBundles(engine);
+        task.execute!();
+        expect(bundleDescriptors).toHaveLength(bundles + 1);
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+    });
+
+    it("refreshes scene bind groups without invalidating unchanged material bindings", () => {
+        const bundleDescriptors: GPURenderBundleEncoderDescriptor[] = [];
+        const engine = makeMockEngine({ bundleDescriptors });
+        const scene = createSceneContext(engine);
+        const task = scene._frameGraph._tasks[0] as RenderTask;
+        const renderable = makeDrawOrderRenderable("first", {}, []);
+        const bind = vi.spyOn(renderable, "bind");
+        scene._renderables.push(renderable);
+        task.record();
+        task.execute!();
+        const previousSceneGroup = task._sceneBG;
+        scene._lightGpuState!._buffer = engine._device.createBuffer({ size: scene._lightGpuState!._byteSize, usage: GPUBufferUsage.UNIFORM });
+
+        task.execute!();
+        expect(task._sceneBG).not.toBe(previousSceneGroup);
+        task.execute!();
+        expect(bind).toHaveBeenCalledOnce();
+        expect(bundleDescriptors).toHaveLength(2);
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+    });
+
+    it("preserves automatic draw buckets and live batches after a failed scene rebind", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const task = scene._frameGraph._tasks[0] as RenderTaskBase;
+        const currentBatch = { reset: vi.fn(), flush: vi.fn(), destroy: vi.fn() };
+        const candidates: DrawUpdateBatch[] = [];
+        let fail = true;
+        const make = (batch: () => DrawUpdateBatch | undefined): Renderable => {
+            const renderable: Renderable = {
+                order: 0,
+                isTransparent: false,
+                bind: (_engine, signature) => {
+                    enableDrawBatchCollection(signature);
+                    const value = batch();
+                    return { renderable, pipeline: {} as GPURenderPipeline, draw: () => 1, _updateBatches: value ? [value] : undefined };
+                },
+            };
+            return renderable;
+        };
+        scene._renderables.push(make(() => currentBatch));
+        task.record();
+        const renderables = task._renderables;
+        const bindings = task._opaqueBindings;
+        const batches = task._batchState;
+        const version = task._lastVersion;
+        scene._renderables.push(
+            make(() => {
+                const batch = { reset: vi.fn(), flush: vi.fn(), destroy: vi.fn() };
+                candidates.push(batch);
+                return batch;
+            }),
+            make(() => {
+                if (fail) {
+                    throw new Error("automatic binding failed");
+                }
+                return undefined;
+            })
+        );
+        scene._renderableVersion++;
+        expect(() => task.execute!()).toThrow("automatic binding failed");
+        expect(task._renderables).toBe(renderables);
+        expect(task._opaqueBindings).toBe(bindings);
+        expect(task._batchState).toBe(batches);
+        expect(task._lastVersion).toBe(version);
+        expect(currentBatch.destroy).not.toHaveBeenCalled();
+        expect(candidates[0]!.destroy).toHaveBeenCalledOnce();
+        fail = false;
+        expect(task.execute!()).toBe(3);
+        expect(task._renderables).not.toBe(renderables);
+        expect(candidates[1]!.destroy).not.toHaveBeenCalled();
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+        expect(currentBatch.destroy).toHaveBeenCalledOnce();
+        expect(candidates[1]!.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("removes borrowed meshes from automatic passes without claiming scene lifetimes", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const task = scene._frameGraph._tasks[0] as RenderTaskBase;
+        const mesh = {} as Mesh;
+        const release = vi.fn();
+        const renderable: Renderable = {
+            mesh,
+            order: 0,
+            isTransparent: false,
+            bind: () => ({ renderable, pipeline: {} as GPURenderPipeline, draw: () => 1 }),
+        };
+        scene._meshDisposables.set(mesh, [release]);
+        scene._renderables.push(renderable);
+        task.record();
+        _removeMeshFromRenderTask(task, mesh);
+        expect(task._renderables).toHaveLength(0);
+        expect(task._opaqueBindings).toHaveLength(0);
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+        expect(release).not.toHaveBeenCalled();
+        expect(scene._meshDisposables.get(mesh)).toEqual([release]);
+    });
+
     it("drops a mesh removed before first record from pending task inputs", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine, { defaultRenderTask: false });
@@ -282,7 +491,7 @@ describe("RenderPassTask transparent sorting", () => {
             _buildGroup: { _rebuildSingle: rebuildSingle },
         } as unknown as Material;
 
-        task.addMesh(mesh, { material });
+        addMeshToTask(task, mesh, { material });
         removeMeshFromTask(task, mesh);
         task.record();
 
@@ -291,7 +500,34 @@ describe("RenderPassTask transparent sorting", () => {
         expect(task._renderables).toHaveLength(0);
     });
 
-    it("uses an override builder that is not registered as a scene group", () => {
+    it.each([false, true])("retains pending meshes until their scene-local group is ready (standalone: %s)", (standalone) => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const foreignScene = createSceneContext(makeMockEngine(), { defaultRenderTask: false });
+        const rt = createRenderTarget({ lbl: "pending-group", samples: 1, size: { width: 16, height: 16 } });
+        const task = createRenderTask({ name: "pending-group", rt, autoMirror: false }, engine, scene);
+        const mesh = {} as Mesh;
+        const foreign = vi.fn(() => makeDrawOrderRenderable("foreign", {}, []));
+        const material = { _buildGroup: { _rebuildSingle: foreign, _sceneIndependentRebuild: standalone } } as unknown as Material;
+        foreignScene._groups.set(material._buildGroup, Object.assign([], { r: foreign }));
+        const localGroup = [mesh];
+        scene._groups.set(material._buildGroup, localGroup);
+        addMeshToTask(task, mesh, { material });
+        expect(() => task.record()).toThrow(/initial build in this scene/);
+        expect(foreign).not.toHaveBeenCalled();
+        expect(task._pendingMeshes).toHaveLength(1);
+        expect(task._renderables).toHaveLength(0);
+        const renderable = makeDrawOrderRenderable("local", {}, []);
+        const local = vi.fn(() => renderable);
+        scene._groups.get(material._buildGroup)!.r = local;
+        task.record();
+        expect(local).toHaveBeenCalledWith(scene, mesh, material, expect.objectContaining({ _lifetimeDisposers: expect.any(Array) }));
+        expect(task._pendingMeshes).toHaveLength(0);
+        expect(task._renderables).toEqual([renderable]);
+        task.dispose();
+    });
+
+    it("uses an explicitly scene-independent override builder without a scene group", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine, { defaultRenderTask: false });
         const rt = createRenderTarget({
@@ -305,14 +541,45 @@ describe("RenderPassTask transparent sorting", () => {
         const renderable = makeDrawOrderRenderable("override", {}, []);
         const rebuildSingle = vi.fn(() => renderable);
         const material = {
-            _buildGroup: { _rebuildSingle: rebuildSingle },
+            _buildGroup: { _rebuildSingle: rebuildSingle, _sceneIndependentRebuild: true },
         } as unknown as Material;
 
-        task.addMesh(mesh, { material });
+        addMeshToTask(task, mesh, { material });
         task.record();
 
-        expect(rebuildSingle).toHaveBeenCalledWith(scene, mesh, material);
+        expect(rebuildSingle).toHaveBeenCalledWith(scene, mesh, material, expect.objectContaining({ _lifetimeDisposers: expect.any(Array) }));
         expect(task._renderables).toEqual([renderable]);
+    });
+
+    it.each([
+        [false, false],
+        [false, true],
+        [true, false],
+        [true, true],
+    ])("preserves transmission recording across mesh population (transmission first: %s, live task: %s)", (transmissionFirst, live) => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const rt = createRenderTarget({ format: "bgra8unorm", samples: 1, size: { width: 16, height: 16 } });
+        const task = createRenderTask({ name: "transmission-population", rt, autoMirror: false }, engine, scene);
+        const renderable = makeDrawOrderRenderable("override", {}, []);
+        const material = {
+            _buildGroup: { _rebuildSingle: () => renderable, _sceneIndependentRebuild: true },
+        } as unknown as Material;
+        const options = { linear: false, generateMipmaps: false };
+        let grab = transmissionFirst ? enableRenderTaskTransmission(task, engine, options) : undefined;
+        if (live) {
+            task.record();
+        }
+        addMeshToTask(task, {} as Mesh, { material });
+        grab ??= enableRenderTaskTransmission(task, engine, options);
+        task.record();
+        const texture = grab.texture;
+        expect(texture).not.toBeNull();
+        task.record();
+        expect(grab.texture).not.toBe(texture);
+        expect(task._renderables).toEqual([renderable]);
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
     });
 
     it("transfers a resolved mesh between live tasks without rebuilding its renderable", () => {
@@ -347,9 +614,9 @@ describe("RenderPassTask transparent sorting", () => {
             },
         };
         const rebuildSingle = vi.fn(() => renderable);
-        const material = { _buildGroup: { _rebuildSingle: rebuildSingle } } as unknown as Material;
+        const material = { _buildGroup: { _rebuildSingle: rebuildSingle, _sceneIndependentRebuild: true } } as unknown as Material;
 
-        from.addMesh(mesh, { material });
+        addMeshToTask(from, mesh, { material });
         from.record();
         to.record();
         draws.length = 0;
@@ -392,8 +659,8 @@ describe("RenderPassTask transparent sorting", () => {
         };
         const renderables = [makeRenderable(0), makeRenderable(1), makeRenderable(2)];
         for (const r of renderables) {
-            const material = { _buildGroup: { _rebuildSingle: () => r } } as unknown as Material;
-            from.addMesh(r.mesh!, { material });
+            const material = { _buildGroup: { _rebuildSingle: () => r, _sceneIndependentRebuild: true } } as unknown as Material;
+            addMeshToTask(from, r.mesh!, { material });
         }
         from.record();
         to.record();
@@ -418,7 +685,7 @@ describe("RenderPassTask transparent sorting", () => {
         expect(binds.length).toBe(0);
         expect(pending.size).toBe(1);
         for (const task of pending) {
-            task.record();
+            rebuildTransferTarget(task);
         }
         expect(binds.length).toBe(3);
         expect(to._renderables).toEqual(renderables);
@@ -927,9 +1194,11 @@ describe("RenderPassTask transparent sorting", () => {
         const rt = createRenderTarget({ lbl: "explicit", format: "rgba8unorm", samples: 1, size: { width: 16, height: 16 } });
         const task = createRenderTask({ name: "explicit", rt, autoMirror: false }, engine, scene);
 
+        expect(task._pendingMeshes).toBeUndefined();
+        removeMeshFromTask(task, {} as Mesh);
+        expect(task._pendingMeshes).toBeUndefined();
         task.record();
 
-        expect(task._af).toBe(false);
         expect(task._renderables).toHaveLength(0);
     });
 

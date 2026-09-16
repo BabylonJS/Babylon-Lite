@@ -4,7 +4,7 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
-import type { ShadowGenerator } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
+import type { ShadowGenerator, ShadowTaskInternalState } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
 import { setShadowTaskCasterMeshes } from "../../../packages/babylon-lite/src/frame-graph/shadow-inputs";
 import { createShadowTask } from "../../../packages/babylon-lite/src/frame-graph/shadow-task";
 import { getNoColorView, preloadPcfShadowTaskState } from "../../../packages/babylon-lite/src/shadow/pcf-shadow-task-hooks";
@@ -216,5 +216,116 @@ describe("shadow caster preload during scene registration", () => {
         expect(sg._preloadPending).toBe(casters);
         task.record();
         expect(ensureState).not.toHaveBeenCalled();
+    });
+});
+
+describe("shadow task recording cache", () => {
+    async function makeStableScheduler(createRecord?: (scene: SceneContext) => () => void) {
+        const render = vi.fn(() => 1);
+        const scene = { lights: [], _renderableVersion: 1 } as unknown as SceneContext;
+        const createState = () => {
+            const task = {
+                record: vi.fn(createRecord?.(scene) ?? (() => undefined)),
+                dispose: vi.fn(),
+            };
+            return { _task: task, _casterMeshes: [] as readonly Mesh[] };
+        };
+        let state = createState();
+        const sg = {
+            _preloadShadowTask: () => Promise.resolve(),
+            _ensureShadowTaskState: vi.fn(() => {
+                sg._shadowTaskState = state;
+                return state;
+            }),
+            _renderShadowMap: render,
+            _shadowTaskState: undefined,
+        } as unknown as ShadowGenerator;
+        scene.lights = [{ shadowGenerator: sg }] as never;
+        const task = createShadowTask({} as EngineContext, scene);
+        setShadowTaskCasterMeshes(sg, state._casterMeshes);
+        await settle();
+        return {
+            scene,
+            sg,
+            task,
+            record: state._task.record,
+            render,
+            replaceState() {
+                state = createState();
+                return state;
+            },
+        };
+    }
+
+    it("does not record the same state twice between frame-graph record and execute", async () => {
+        const { task, record, render } = await makeStableScheduler();
+
+        task.record();
+        expect(task.execute?.()).toBe(1);
+
+        expect(record).toHaveBeenCalledOnce();
+        expect(render).toHaveBeenCalledOnce();
+    });
+
+    it("records again for a scene-version change or replacement state", async () => {
+        const { scene, task, record, replaceState } = await makeStableScheduler();
+        task.record();
+
+        scene._renderableVersion++;
+        task.execute?.();
+        expect(record).toHaveBeenCalledTimes(2);
+
+        const replacement = replaceState();
+        task.execute?.();
+        expect(replacement._task.record).toHaveBeenCalledOnce();
+    });
+
+    it.each(["default", "cached"] as const)("retries the whole %s composite after a later cascade record fails", async (kind) => {
+        const first = vi.fn();
+        let fail = true;
+        const second = vi.fn(() => {
+            if (fail) {
+                fail = false;
+                throw new Error("cascade record failed");
+            }
+        });
+        const dynamic = vi.fn();
+        const { sg, task, render } = await makeStableScheduler(() => () => {
+            first();
+            second();
+            if (kind === "cached") {
+                dynamic();
+            }
+        });
+
+        expect(() => task.record()).toThrow("cascade record failed");
+        expect((sg._shadowTaskState as ShadowTaskInternalState)._recordedVersion).toBeUndefined();
+        expect(task.execute?.()).toBe(1);
+
+        expect(first).toHaveBeenCalledTimes(2);
+        expect(second).toHaveBeenCalledTimes(2);
+        expect(dynamic).toHaveBeenCalledTimes(kind === "cached" ? 1 : 0);
+        expect(render).toHaveBeenCalledOnce();
+    });
+
+    it("retries after the scene mutates during a successful composite record", async () => {
+        let mutate = true;
+        const { scene, sg, task, record } = await makeStableScheduler((currentScene) => () => {
+            if (mutate) {
+                mutate = false;
+                currentScene._renderableVersion++;
+            }
+        });
+
+        task.record();
+        expect((sg._shadowTaskState as ShadowTaskInternalState)._recordedVersion).toBe(1);
+        expect(scene._renderableVersion).toBe(2);
+
+        task.execute?.();
+        expect(record).toHaveBeenCalledTimes(2);
+        expect((sg._shadowTaskState as ShadowTaskInternalState)._recordedVersion).toBe(2);
+
+        task.execute?.();
+        expect(record).toHaveBeenCalledTimes(2);
     });
 });

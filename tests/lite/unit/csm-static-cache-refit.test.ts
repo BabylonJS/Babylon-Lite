@@ -50,14 +50,16 @@ vi.mock("../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks.js", ()
 }));
 vi.mock("../../../packages/babylon-lite/src/frame-graph/render-task.js", () => ({
     createRenderTask: () => ({
-        addMesh: vi.fn(),
         removeMesh: vi.fn(),
         record: taskMocks.record,
         execute: vi.fn(() => 0),
         dispose: taskMocks.dispose,
         _lastVersion: -1,
+        _ob: [],
     }),
     _buildBindings: vi.fn(),
+    addMeshToTask: vi.fn(),
+    _enableTaskMeshPopulation: vi.fn(),
     _resolvePendingMeshes: vi.fn(),
     removeMeshFromTask: vi.fn(),
 }));
@@ -67,6 +69,20 @@ vi.mock("../../../packages/babylon-lite/src/engine/gpu-resource-retirement.js", 
 
 const { ensureCsmShadowCacheState, renderCsmShadowMapCached } = await import("../../../packages/babylon-lite/src/shadow/csm-shadow-cache");
 const { createCsmRefitGate, createCsmStaticRefitScheduler } = await import("../../../packages/babylon-lite/src/shadow/csm-refit-gate");
+
+function dynamicTask(execute: () => number) {
+    return {
+        execute,
+        _pendingMeshes: [],
+        _renderables: [{}],
+        _opaqueBindings: [],
+        _directBindings: [],
+        _transparentBindings: [],
+        _ob: [],
+        _lastVersion: 0,
+        _lastVis: 0,
+    };
+}
 
 function lightWorldMatrix(): Float32Array {
     const world = new Float32Array(16);
@@ -93,7 +109,7 @@ function makeHarness() {
         _uboData: new Float32Array(80),
         _casterMeshes: [caster],
         _staticTasks: [{ execute: staticExecute }],
-        _tasks: [{ execute: dynamicExecute, _renderables: [{}], _pendingMeshes: [] }],
+        _tasks: [dynamicTask(dynamicExecute)],
         _gate: gate,
         _staticScheduler: createCsmStaticRefitScheduler(1, 0),
         _onPromote: () => {},
@@ -158,6 +174,29 @@ describe("renderCsmShadowMapCached static-layer invalidation", () => {
             expect(foreignDispose).toHaveBeenCalledOnce();
             expect(taskMocks.record).toHaveBeenCalledTimes(2);
         });
+
+        it("clears reused dynamic bundles when a caster-list generation changes", () => {
+            const engine = {
+                _device: {
+                    createTexture: vi.fn(() => ({ createView: vi.fn(), destroy: vi.fn() })),
+                },
+            };
+            const scene = { _renderableVersion: 1, _materialEpoch: 1 };
+            const sg = {
+                _depthTexture: { createView: vi.fn() },
+                _csmCache: { a: 0.1, i: 0 },
+            };
+            const config = { _numCascades: 1, _mapSize: 4 };
+            const firstCasters: never[] = [];
+            const state = ensureCsmShadowCacheState(engine as any, scene as any, sg as any, config as any, firstCasters, null) as any;
+            state._tasks[0]._ob.push({});
+            state._tasks[0]._lastVersion = 1;
+
+            ensureCsmShadowCacheState(engine as any, scene as any, sg as any, config as any, [], state);
+
+            expect(state._tasks[0]._lastVersion).toBe(-1);
+            expect(state._tasks[0]._ob).toHaveLength(0);
+        });
     });
 
     it("redraws the static layer when a caster's GEOMETRY is rebuilt, not only when it moves", () => {
@@ -193,7 +232,7 @@ describe("renderCsmShadowMapCached spread static refit (staticCascadesPerFrame)"
             _uboData: new Float32Array(80),
             _casterMeshes: [caster],
             _staticTasks: staticExecutes.map((execute) => ({ execute })),
-            _tasks: dynamicExecutes.map((execute) => ({ execute, _renderables: [{}], _pendingMeshes: [] })),
+            _tasks: dynamicExecutes.map(dynamicTask),
             _gate: gate,
             _staticScheduler: createCsmStaticRefitScheduler(3, cascadesPerFrame),
             _onPromote: () => {},
@@ -308,11 +347,7 @@ describe("renderCsmShadowMapCached spread static refit: a drift refit during the
             _uboData: new Float32Array(80),
             _casterMeshes: [caster],
             _staticTasks: staticExecutes.map((execute) => ({ execute })),
-            _tasks: [
-                { execute: dynamicExecute, _renderables: [{}], _pendingMeshes: [] },
-                { execute: dynamicExecute, _renderables: [{}], _pendingMeshes: [] },
-                { execute: dynamicExecute, _renderables: [{}], _pendingMeshes: [] },
-            ],
+            _tasks: [dynamicTask(dynamicExecute), dynamicTask(dynamicExecute), dynamicTask(dynamicExecute)],
             _gate: gate,
             _staticScheduler: createCsmStaticRefitScheduler(3, 1),
             _onPromote: () => {},

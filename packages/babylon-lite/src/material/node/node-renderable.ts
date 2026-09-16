@@ -6,47 +6,21 @@
  *  that emits draws in the main pass.
  */
 
-import { F32, U32, U8 } from "../../engine/typed-arrays.js";
+import { F32 } from "../../engine/typed-arrays.js";
 import { BU } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { MeshGPU } from "../../mesh/mesh.js";
-import type { MeshGroupBuildResult, Renderable } from "../../render/renderable.js";
+import type { MeshGroupBuildResult, MeshRebuildResources, Renderable } from "../../render/renderable.js";
 import type { Material } from "../material.js";
 import type { NodeMaterial } from "./node-material.js";
 import { writeNodeUBO } from "./node-material.js";
 import { compileNodePipeline } from "./node-pipeline.js";
 import { NODE_ESM_SHADOW_OUTPUT, NODE_NO_COLOR_OUTPUT } from "./node-flags.js";
-import { writeMeshLightSelection } from "../../render/lights-ubo.js";
-import { MAX_LIGHTS } from "../../light/types.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
-
-// Per-engine cached no-op morph target: an empty deltas storage buffer + a
-// weights buffer whose header has count=0. Meshes without their own morph
-// targets reuse this so materials that contain a MorphTargetsBlock still work
-// (the WGSL loops over `count` and passes through when zero). Lazily initialized
-// to avoid a module-level allocation that defeats tree-shaking (see GUIDANCE §4).
-let emptyMorphByEngine: WeakMap<EngineContext, { deltasBuffer: GPUBuffer; weightsBuffer: GPUBuffer }> | null = null;
-function getEmptyMorph(engine: EngineContext): { deltasBuffer: GPUBuffer; weightsBuffer: GPUBuffer } {
-    const cache = (emptyMorphByEngine ??= new WeakMap());
-    const cached = cache.get(engine);
-    if (cached) {
-        return cached;
-    }
-    // Deltas buffer is never read (count=0); a small zero-filled storage buffer suffices.
-    const deltasBuffer = engine._device.createBuffer({ label: "node-morph-empty-deltas", size: 24, usage: BU.STORAGE | BU.COPY_DST });
-    // Weights buffer: 16-byte header (count=0, vertexCount=1) + one unused weight slot.
-    const header = new ArrayBuffer(20);
-    const u32 = new U32(header, 0, 2);
-    u32[0] = 0; // count
-    u32[1] = 1; // vertexCount
-    const weightsBuffer = engine._device.createBuffer({ label: "node-morph-empty-weights", size: header.byteLength, usage: BU.STORAGE | BU.COPY_DST });
-    engine._device.queue.writeBuffer(weightsBuffer, 0, new U8(header));
-    const entry = { deltasBuffer, weightsBuffer };
-    cache.set(engine, entry);
-    return entry;
-}
+import { createEmptyUniformBuffer } from "../../resource/empty-uniform-buffer.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 
 interface NodePacket {
     readonly _mesh: Mesh;
@@ -61,9 +35,10 @@ interface NodePacket {
 type NodeRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
 
 /** Build NME renderables for a set of meshes that share a NodeMaterial. */
-export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], materialOverride?: Material): MeshGroupBuildResult {
+export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], materialOverride?: Material, resources?: MeshRebuildResources): MeshGroupBuildResult {
     const engine = scene.surface.engine;
     const device = engine._device;
+    const lifetimeDisposers = resources?._lifetimeDisposers ?? scene._disposables;
 
     // All meshes in this group use the same NodeMaterial (scene-core batches by ctor).
     // We deliberately do NOT re-group by material instance: each renderable loops
@@ -108,30 +83,30 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
               })
             : material._compile;
         const meshBGL = compile._meshBGL;
+        const writeMeshFeature = compile._writeMeshFeature;
 
         // Node UBO is per-material (same across all meshes using it).
-        let nodeUBO: GPUBuffer | null = null;
-        if (compile._nodeUboBinding !== null && compile._nodeUboSize > 0) {
-            nodeUBO = device.createBuffer({ label: "node-ubo", size: compile._nodeUboSize, usage: BU.UNIFORM | BU.COPY_DST });
+        const nodeUBO = compile._nodeUboBinding !== null && compile._nodeUboSize > 0 ? createEmptyUniformBuffer(engine, compile._nodeUboSize, "node-ubo") : null;
+        if (nodeUBO) {
+            lifetimeDisposers.push(() => nodeUBO.destroy());
             writeNodeUBO(engine, nodeUBO, material);
-            material._nodeUBO = nodeUBO;
         }
 
         const _packMeshWorld = engine._makePackMeshWorld?.(scene as SceneContext) ?? packMat4IntoF32;
         const packets: NodePacket[] = [];
         for (const _mesh of matMeshes) {
-            // Mesh UBO layout: world (64B) + receivesShadow (vec4, 16B) + lightCount/indices.
-            const meshUboBytes = 96 + 16 * Math.ceil(MAX_LIGHTS / 4);
-            const _meshUBO = device.createBuffer({ label: "node-mesh-ubo", size: (meshUboBytes + 15) & ~15, usage: BU.UNIFORM | BU.COPY_DST });
-            const _meshScratch = new F32(((meshUboBytes + 15) & ~15) / 4);
+            // Base mesh UBO: world + receivesShadow/attribute flags. Optional
+            // mesh features extend and populate the tail.
+            const _meshScratch = new F32(compile._meshUboFloats);
             _packMeshWorld(_meshScratch, _mesh.worldMatrix, 0, 0);
             const recv = _mesh.receiveShadows ? 1 : 0;
             _meshScratch[16] = recv;
             if (compile._usesMeshAttributeFlags) {
                 writeAttributeFlags(_mesh, _meshScratch);
             }
-            writeMeshLightSelection(_mesh, scene.lights, _meshScratch.subarray(4));
-            device.queue.writeBuffer(_meshUBO, 0, _meshScratch);
+            writeMeshFeature?.(_mesh, scene.lights, _meshScratch);
+            const _meshUBO = createUniformBuffer(engine, _meshScratch, "node-mesh-ubo");
+            lifetimeDisposers.push(() => _meshUBO.destroy());
 
             const entries: GPUBindGroupEntry[] = [{ binding: 0, resource: { buffer: _meshUBO } }];
             if (nodeUBO) {
@@ -148,11 +123,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                 entries.push({ binding: tb._texBinding, resource: tex.view });
                 entries.push({ binding: tb._sampBinding, resource: tex.sampler });
             }
-            if (compile._morphBindings !== null) {
-                const mt = (_mesh as { morphTargets?: { deltasBuffer: GPUBuffer; weightsBuffer: GPUBuffer } | null }).morphTargets ?? getEmptyMorph(engine);
-                entries.push({ binding: compile._morphBindings._deltasBinding, resource: { buffer: mt.deltasBuffer } });
-                entries.push({ binding: compile._morphBindings._uboBinding, resource: { buffer: mt.weightsBuffer } });
-            }
+            compile._bindVertexFeature?.(engine, _mesh, entries);
             if (compile._envBindings) {
                 material._envHelpers!.pushEnvBindGroupEntries(scene, compile._envBindings, entries);
             }
@@ -181,7 +152,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                 _meshScratch,
                 _lastWorldVersion: _mesh.worldMatrixVersion,
                 _lastReceivesShadow: recv,
-                _lastLightsCount: scene.lights.length,
+                _lastLightsCount: writeMeshFeature ? scene.lights.length : 0,
             });
         }
 
@@ -193,14 +164,14 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
             const worldVersion = pkt._mesh.worldMatrixVersion;
             const worldChanged = worldVersion !== pkt._lastWorldVersion;
             const recvChanged = recv !== pkt._lastReceivesShadow;
-            const lightsChanged = scene.lights.length !== pkt._lastLightsCount;
+            const lightsChanged = !!writeMeshFeature && scene.lights.length !== pkt._lastLightsCount;
             if (worldChanged || recvChanged || lightsChanged) {
                 _packMeshWorld(pkt._meshScratch, pkt._mesh.worldMatrix, 0, 0);
                 pkt._meshScratch[16] = recv;
                 if (compile._usesMeshAttributeFlags) {
                     writeAttributeFlags(pkt._mesh, pkt._meshScratch);
                 }
-                writeMeshLightSelection(pkt._mesh, scene.lights, pkt._meshScratch.subarray(4));
+                writeMeshFeature?.(pkt._mesh, scene.lights, pkt._meshScratch);
                 device.queue.writeBuffer(pkt._meshUBO, 0, pkt._meshScratch as Float32Array<ArrayBuffer>);
                 pkt._lastWorldVersion = worldVersion;
                 pkt._lastReceivesShadow = recv;
@@ -290,6 +261,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
             const rOpaque: Renderable = {
                 order: 100,
                 isTransparent: false,
+                mesh: packets.length === 1 ? packets[0]!._mesh : undefined,
                 bind() {
                     return { renderable: rOpaque, pipeline: compile._pipeline, update, draw };
                 },
@@ -298,8 +270,8 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
         }
     }
 
-    const rebuildSingle = (s: SceneContext, mesh: Mesh, override?: Material): Renderable => {
-        return buildNodeMeshRenderables(s, [mesh], override).renderables[0]!;
+    const rebuildSingle = (s: SceneContext, mesh: Mesh, override?: Material, rebuildResources?: MeshRebuildResources): Renderable => {
+        return buildNodeMeshRenderables(s, [mesh], override, rebuildResources).renderables[0]!;
     };
 
     return { renderables, rebuildSingle };

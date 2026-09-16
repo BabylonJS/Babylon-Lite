@@ -91,7 +91,6 @@ describe("shadow caster dirty tracking", () => {
         const state = {
             _task: task,
             _camera: camera,
-            _cameraVersion: 0,
             _lastCasterVersion: -1,
             _lastLightVersion: -1,
             _lastFoVersion: -1,

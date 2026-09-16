@@ -77,7 +77,6 @@ function fixture(getUniformBatch?: () => UniformCopyBatch, enabled = true) {
         camera: null,
         _beforeRender: [],
         _meshDisposables: new Map(),
-        _meshAuxDisposables: new Map(),
     } as unknown as SceneContext;
     if (enabled) {
         enableShaderUniformRangeUpdates(scene, material);

@@ -16,7 +16,8 @@ vi.mock("../../../packages/babylon-lite/src/shadow/shadow-base.js", () => ({
 }));
 
 vi.mock("../../../packages/babylon-lite/src/frame-graph/render-task.js", () => ({
-    createRenderTask: () => ({ addMesh: vi.fn(), dispose: vi.fn() }),
+    createRenderTask: () => ({ dispose: vi.fn() }),
+    addMeshToTask: vi.fn(),
 }));
 
 type EnsureState = (engine: EngineContext, scene: SceneContext, sg: ShadowGenerator, casterMeshes: readonly Mesh[], existing: ShadowTaskInternalState | null) => unknown;

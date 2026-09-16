@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { createRenderTarget, targetSignatureKey } from "../../../packages/babylon-lite/src/engine/render-target";
+import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
+import { targetSignatureKey } from "../../../packages/babylon-lite/src/engine/render-target-signature";
 import { createRenderPass, setRenderPassRenderTarget } from "../../../packages/babylon-lite/src/frame-graph/render-pass";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
 import { createPerspectiveMat4LH } from "../../../packages/babylon-lite/src/math/create-perspective-mat4-lh";

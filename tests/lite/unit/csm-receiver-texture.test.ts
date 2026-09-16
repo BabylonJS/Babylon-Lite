@@ -60,7 +60,7 @@ describe("CSM receiver texture", () => {
         const { generator } = fakeShadowGenerator();
         const data = new Float32Array(80);
         data[76] = 4;
-        generator._shadowTaskState = { _uboData: data, _cameraVersion: 1 } as CsmTaskState;
+        generator._shadowTaskState = { _uboData: data } as CsmTaskState;
         const callback = vi.fn();
 
         const dispose = onCsmReceiverUpdate(generator, callback);

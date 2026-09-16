@@ -9,7 +9,7 @@ import { ObservableQuat } from "../math/observable-quat.js";
 import { composeTrsLocalMatrix, createWorldMatrixState } from "../scene/world-matrix-state.js";
 import { createEulerProxy } from "../scene/scene-node.js";
 import type { EulerProxy } from "../scene/scene-node.js";
-import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
+import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
 import { addDeferredSceneRenderables } from "../scene/scene-core.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mat4, Mat4Storage, Vec3 } from "../math/types.js";

@@ -29,6 +29,19 @@ export function enqueueMaterialSwap(scene: SceneContext, mesh: Mesh): void {
     scene._materialSwapQueue.push(mesh);
 }
 
+/** Queue a mesh's renderable for rebuild in every scene that owns it.
+ *  Use after changing renderable-affecting mesh state that is not observable through
+ *  the material setter, such as primitive topology or replaced GPU geometry buffers. */
+export function markMeshRenderableDirty(mesh: Mesh): void {
+    const scenes = _meshScenes?.get(mesh);
+    if (!scenes) {
+        return;
+    }
+    for (const scene of scenes) {
+        enqueueMaterialSwap(scene, mesh);
+    }
+}
+
 /** Install a property setter on `mesh.material` that, on reassignment, enqueues a renderable
  *  rebuild in EVERY scene the mesh currently belongs to. Installed exactly once per mesh. The
  *  setter looks the subscriber set up from `_meshScenes` on each write rather than capturing
@@ -47,6 +60,7 @@ function installMaterialSetter(mesh: Mesh): void {
                 if (scenes) {
                     for (const scene of scenes) {
                         enqueueMaterialSwap(scene, mesh);
+                        scene._meshMaterialChange?.(mesh, v);
                     }
                 }
             }
