@@ -102,7 +102,9 @@ async function main(): Promise<void> {
     const rotQ = eulerXYZToQuatTuple(0, (20 * Math.PI) / 180, 0);
     parent2.rotationQuaternion.set(rotQ[0], rotQ[1], rotQ[2], rotQ[3]);
     addToScene(scene, parent2);
+
     const cube2 = createBox(engine, 1);
+    cube2.position.set(0, 0, 2);
     cube2.material = cubeMat;
     cube2.parent = parent2;
     parent2.children.push(cube2);
@@ -113,9 +115,9 @@ async function main(): Promise<void> {
     const root = createTransformNode("root");
     root.scaling.x = -1;
     addToScene(scene, root);
-    const cube3 = createBox(engine, 1);
-    cube3.position.set(-2, 3, 0);
-    const rotQ2 = eulerXYZToQuatTuple(0, (40 * Math.PI) / 180, 0);
+    const cube3 = createBox(engine, { height: 3 });
+    cube3.position.set(2, 3, 0);
+    const rotQ2 = eulerXYZToQuatTuple((40 * Math.PI) / 180, 0, 0);
     cube3.rotationQuaternion.set(rotQ2[0], rotQ2[1], rotQ2[2], rotQ2[3]);
     cube3.material = cubeMat;
     cube3.parent = root;
@@ -130,7 +132,9 @@ async function main(): Promise<void> {
     parent4b.parent = parent4a;
     parent4a.children.push(parent4b);
     addToScene(scene, parent4b);
+
     const cube4 = createBox(engine, 1);
+    cube4.position.set(0.5, 0, 0);
     cube4.material = cubeMat;
     cube4.parent = parent4b;
     parent4b.children.push(cube4);

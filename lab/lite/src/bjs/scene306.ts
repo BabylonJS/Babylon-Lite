@@ -78,12 +78,13 @@ function readCaptureAfterFrames(): number | null {
         restitution: 0.1,
     });
 
-    // dynamic cube2 with offset parent
+    // dynamic cube2 with translated and rotated parent
     const parent2 = new TransformNode("parent2", scene);
     parent2.position.set(-4, 3, 0);
-
     parent2.rotationQuaternion = Quaternion.FromEulerAngles(0, (20 * Math.PI) / 180, 0);
+
     const cube2 = MeshBuilder.CreateBox("cube2", undefined, scene);
+    cube2.position.set(0, 0, 2);
     cube2.material = cubeMat;
     cube2.parent = parent2;
     new PhysicsAggregate(cube2, PhysicsShapeType.BOX, {
@@ -96,9 +97,9 @@ function readCaptureAfterFrames(): number | null {
     const root = new TransformNode("__root__", scene);
     root.scaling.z = -1;
     root.rotationQuaternion = Quaternion.FromEulerAngles(0, Math.PI, 0);
-    const cube3 = MeshBuilder.CreateBox("cube3", undefined, scene);
+    const cube3 = MeshBuilder.CreateBox("cube3", { height: 3 }, scene);
     cube3.position.set(2, 3, 0);
-    cube3.rotationQuaternion = Quaternion.FromEulerAngles(0, (40 * Math.PI) / 180, 0);
+    cube3.rotationQuaternion = Quaternion.FromEulerAngles((40 * Math.PI) / 180, 0, 0);
     cube3.material = cubeMat;
     cube3.parent = root;
     new PhysicsAggregate(cube3, PhysicsShapeType.BOX, {
@@ -109,10 +110,12 @@ function readCaptureAfterFrames(): number | null {
 
     // dynamic cube4 with offset parents and pre-step
     const parent4a = new TransformNode("parent4a", scene);
-    const parent4b = new TransformNode("parent4", scene);
+    const parent4b = new TransformNode("parent4b", scene);
     parent4b.position.set(2, 3, 0);
     parent4b.parent = parent4a;
+
     const cube4 = MeshBuilder.CreateBox("cube4", undefined, scene);
+    cube4.position.set(0.5, 0, 0);
     cube4.material = cubeMat;
     cube4.parent = parent4b;
     const agg4 = new PhysicsAggregate(cube4, PhysicsShapeType.BOX, {
