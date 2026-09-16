@@ -23,10 +23,10 @@ import { F32 } from "../../engine/typed-arrays.js";
 import { BU, SS } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
-import { targetSignatureKey } from "../../engine/render-target.js";
+import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import type { Mesh } from "../../mesh/mesh.js";
-import type { MeshGroupBuilder, Renderable } from "../../render/renderable.js";
-import { writeMeshLightSelection } from "../../render/lights-ubo.js";
+import type { MeshGroupBuilder, MeshRebuildResources, Renderable } from "../../render/renderable.js";
+import { writeMeshLightSelection } from "../../render/mesh-light-selection.js";
 import { MAX_LIGHTS } from "../../light/types.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 import type { SceneContext } from "../../scene/scene-core.js";
@@ -58,9 +58,12 @@ export function getNodeGeometryGroupBuilder(): MeshGroupBuilder {
     }) as MeshGroupBuilder;
     builder._materialFamily = "node";
     builder._sceneIndependentRebuild = true;
-    builder._rebuildSingle = (scene: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
+    builder._rebuildSingle = (scene: SceneContext, mesh: Mesh, materialOverride?: Material, resources?: MeshRebuildResources): Renderable => {
         const view = (materialOverride ?? mesh.material) as NodeGeometryMaterialView;
-        return buildNodeGeometryRenderable(scene, mesh, view);
+        if (!resources) {
+            throw new Error("node-geometry rebuild requires task-owned resources");
+        }
+        return buildNodeGeometryRenderable(scene, mesh, view, resources);
     };
     return (_nodeGeometryGroupBuilder = builder);
 }
@@ -82,6 +85,8 @@ interface NodeGeometryViewResources {
     /** Shared node UBO (one per material, format-independent). Allocated on first compile. */
     _nodeUBO: GPUBuffer | null;
     _nodeUBOReady: boolean;
+    /** Renderable/task entries currently retaining this view cache. */
+    _owners: number;
 }
 
 const ZERO = (wg: string): string => wgsl`vec4<f32>(0.0, 0.0, 0.0, ${wg})`;
@@ -158,6 +163,9 @@ function ensureGeometryResources(view: NodeGeometryMaterialView): NodeGeometryVi
     if (state.usesMorphTargets || state.usesEnv || state.shadowLights.length > 0) {
         throw new Error("NodeMaterial geometry view: morph / env / shadow inputs are not supported in the geometry pass");
     }
+    if (state.usesLightsUbo && !state._meshFeature) {
+        state._meshFeature = source._state._meshFeature;
+    }
 
     const inputs = state._geometryInputs ?? new Map<GeometryTextureType, NodeExpr>();
     const attachments = view._geometryAttachments;
@@ -181,6 +189,7 @@ function ensureGeometryResources(view: NodeGeometryMaterialView): NodeGeometryVi
         _compileBySig: new Map(),
         _nodeUBO: null,
         _nodeUBOReady: false,
+        _owners: 0,
     };
     Object.defineProperty(view, "_geometry", { value: res, enumerable: false, configurable: true });
     return res;
@@ -324,15 +333,20 @@ function buildGeometryBindGroup(
 }
 
 /** Build a {@link Renderable} for one mesh drawn through a NodeMaterial geometry view. */
-export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, view: NodeGeometryMaterialView): Renderable {
+export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, view: NodeGeometryMaterialView, resources: MeshRebuildResources): Renderable {
     const engine = scene.surface.engine;
     const device = engine._device;
     const source = view.source as NodeMaterial;
     const res = ensureGeometryResources(view);
+    retainGeometryResources(view, res, resources);
 
     // Per-mesh UBO: world (64B) + receivesShadow (vec4) + light count/indices.
     const meshUboBytes = (96 + 16 * Math.ceil(MAX_LIGHTS / 4) + 15) & ~15;
     const meshUBO = device.createBuffer({ label: "node-geom-mesh-ubo", size: meshUboBytes, usage: BU.UNIFORM | BU.COPY_DST });
+    const _disposePerMesh = (): void => {
+        meshUBO.destroy();
+    };
+    resources._lifetimeDisposers.push(_disposePerMesh);
     const meshScratch = new F32(meshUboBytes / 4);
     // Floating-origin: pack world against the EFFECTIVE task camera (a `config.camera`
     // override, else the scene camera) so Node meshes share the same origin as the
@@ -357,21 +371,6 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
     let lastLightsCount = -1;
 
     const sortCenter: [number, number, number] = [mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!];
-
-    // Per-mesh geometry mesh UBO is an AUX/override packet owned by the geometry TASK,
-    // not the mesh's main material. Registering it on `_meshAuxDisposables` (NOT
-    // `_meshDisposables`) means a MAIN-material swap cannot destroy this live buffer
-    // mid-flight; a real `removeFromScene` still frees it, and the owning task retires
-    // the SAME closure on re-record/dispose. Idempotent WITHOUT a guard flag —
-    // `GPUBuffer.destroy()` is a no-op when already destroyed — but MUST NOT self-remove
-    // from the aux array (the scene drains iterate it live). The shared node UBO is
-    // per-VIEW and freed via `disposeNodeGeometryViewResources`.
-    const _disposePerMesh = (): void => {
-        meshUBO.destroy();
-    };
-    const auxList = scene._meshAuxDisposables.get(mesh) ?? [];
-    auxList.push(_disposePerMesh);
-    scene._meshAuxDisposables.set(mesh, auxList);
 
     const r: Renderable = {
         order: mesh.renderOrder ?? 100,
@@ -418,24 +417,29 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
         },
     };
     r._worldCenter = sortCenter;
-    r._geometryDispose = _disposePerMesh;
     return r;
 }
 
-/** @internal Retire a Node geometry view's shared per-view resources cached on
- *  `view._geometry`: the shared node UBO (a GPUBuffer that must be explicitly
- *  destroyed) plus the per-signature compile cache (pipelines/BGLs reclaimed by GC).
- *  Called by the owning geometry task when it discards the view on re-record/dispose.
- *  Idempotent — the cache reference is dropped and the UBO nulled so a double call
- *  (task retirement) is a no-op. */
-export function disposeNodeGeometryViewResources(view: NodeGeometryMaterialView): void {
-    const res = view._geometry as NodeGeometryViewResources | undefined;
-    if (!res) {
-        return;
-    }
+function retainGeometryResources(view: NodeGeometryMaterialView, res: NodeGeometryViewResources, resources: MeshRebuildResources): void {
+    res._owners++;
+    let retained = true;
+    resources._lifetimeDisposers.push(() => {
+        if (!retained) {
+            return;
+        }
+        retained = false;
+        if (--res._owners === 0) {
+            disposeGeometryResources(view, res);
+        }
+    });
+}
+
+function disposeGeometryResources(view: NodeGeometryMaterialView, res: NodeGeometryViewResources): void {
     res._nodeUBO?.destroy();
     res._nodeUBO = null;
     res._nodeUBOReady = false;
     res._compileBySig.clear();
-    Object.defineProperty(view, "_geometry", { value: undefined, enumerable: false, configurable: true });
+    if (view._geometry === res) {
+        Object.defineProperty(view, "_geometry", { value: undefined, enumerable: false, configurable: true });
+    }
 }

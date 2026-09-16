@@ -7,7 +7,12 @@ type GpuResourceRetirement = () => void;
  *  empty batch. Cleanup is best-effort: a throw (device already gone, resource already disposed)
  *  must not stop the remaining retirements. */
 function runBatch(batch: GpuResourceRetirement[]): void {
-    for (const retire of batch.splice(0)) {
+    runGpuResourceCallbacks(batch.splice(0));
+}
+
+/** @internal Attempt every release using the same error reporting for rollback and fenced cleanup. */
+export function runGpuResourceCallbacks(disposers: readonly GpuResourceRetirement[]): void {
+    for (const retire of disposers) {
         try {
             retire();
         } catch (error) {
@@ -18,7 +23,17 @@ function runBatch(batch: GpuResourceRetirement[]): void {
 
 /** @internal Retire GPU resources only after the next frame submission that can reference them has drained. */
 export function retireGpuResources(engine: EngineContext, retirement: GpuResourceRetirement): void {
+    engine._flushGpuRetirements ??= flushGpuResourceRetirements;
     (engine._retirements ??= []).push(retirement);
+}
+
+/** @internal Snapshot a resource generation into the next submission's retirement batch. */
+export function retireGpuResourceBatch(engine: EngineContext, disposers: readonly GpuResourceRetirement[]): void {
+    if (!disposers.length) {
+        return;
+    }
+    const batch = disposers.slice();
+    retireGpuResources(engine, () => runGpuResourceCallbacks(batch));
 }
 
 /** @internal Drain the pending batch behind a queue fence.
@@ -43,16 +58,13 @@ export function flushGpuResourceRetirements(engine: EngineContext): void {
         return;
     }
     engine._retirements = null;
-    const inFlight = (engine._retiring ??= []);
-    inFlight.push(batch);
+    const inFlight = (engine._retiring ??= new Set());
+    inFlight.add(batch);
     queueMicrotask(() => {
         void engine._device.queue
             .onSubmittedWorkDone()
             .then(() => {
-                const index = inFlight.indexOf(batch);
-                if (index >= 0) {
-                    inFlight.splice(index, 1);
-                }
+                inFlight.delete(batch);
                 runBatch(batch);
             })
             .catch(() => undefined);
@@ -70,16 +82,13 @@ export async function waitForGpuResourceRetirements(engine: EngineContext): Prom
     do {
         flushGpuResourceRetirements(engine);
         const inFlight = engine._retiring;
-        const batches = inFlight?.slice();
+        const batches = inFlight ? [...inFlight] : [];
         await engine._device.queue.onSubmittedWorkDone();
-        for (const batch of batches ?? []) {
-            const index = inFlight!.indexOf(batch);
-            if (index >= 0) {
-                inFlight!.splice(index, 1);
-            }
+        for (const batch of batches) {
+            inFlight!.delete(batch);
             runBatch(batch);
         }
-    } while (engine._retirements?.length || engine._retiring?.length);
+    } while (engine._retirements?.length || engine._retiring?.size);
 }
 
 /** @internal Run every outstanding retirement synchronously — both the batch still accumulating and

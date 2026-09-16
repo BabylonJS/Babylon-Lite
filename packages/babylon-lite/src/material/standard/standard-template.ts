@@ -12,7 +12,7 @@
 
 import type { ShaderTemplate, UboField, VertexAttribute, Varying, BindingDecl } from "../../shader/fragment-types.js";
 import { MAX_LIGHTS } from "../../light/types.js";
-import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/lights-ubo.js";
+import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/mesh-light-layout.js";
 import { wgsl } from "../../shader/wgsl.js";
 
 const STAGE_VERTEX = 0x1;

@@ -13,20 +13,20 @@
  *     generic bind hook only carries the owning scene for lifetime-safe lookup.
  */
 
-import type { EngineContext } from "../../engine/engine.js";
 import { retireGpuResources } from "../../engine/gpu-resource-retirement.js";
 import type { StdExt } from "../standard/standard-flags.js";
 import { _installStdMaterialVariantKey } from "../standard/standard-flags.js";
 import type { StandardMaterialProps } from "../standard/standard-material.js";
-import { _computeStandardMaterialFeatures, getStandardGroupBuilder } from "../standard/standard-material.js";
+import { _computeStandardMaterialFeatures } from "../standard/standard-material-features.js";
+import { getStandardGroupBuilder } from "../standard/standard-group-builder.js";
 import { getMaterialSource } from "../material-view.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import { enqueueMaterialSwap } from "../../scene/mesh-scene-registry.js";
 import type { ShaderFragment, UboSpec } from "../../shader/fragment-types.js";
-import { createEmptyUniformBuffer } from "../../resource/gpu-buffers.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 import type { MaterialPlugin } from "./material-plugin.js";
-import { bindPluginTextures, buildPluginFragment, enabledPlugins, pluginSignature, writePluginUbo } from "./plugin-bridge-shared.js";
+import { bindPluginTextures, buildPluginFragment, collectPluginTextures, enabledPlugins, pluginSignature, writePluginUbo } from "./plugin-bridge-shared.js";
 
 const HAS_STD_PLUGINS = 1 << 25;
 
@@ -37,15 +37,12 @@ interface PluginEntry {
 
 interface MaterialPluginState {
     readonly _plugins: readonly MaterialPlugin[];
-    readonly _uboBuffer: GPUBuffer | null;
+    _uboBuffer: GPUBuffer | null;
     readonly _uboSpec: UboSpec | null;
     readonly _dynamic: boolean;
-    readonly _engine: EngineContext;
     _bindings: number;
     _auxBindings: number;
     _owners?: WeakSet<(() => void)[]>;
-    _retired: boolean;
-    _released: boolean;
 }
 
 interface ScenePluginState {
@@ -56,7 +53,7 @@ interface ScenePluginState {
 }
 
 let _sigToIndex: Map<string, number> | null = null;
-let _indexToEntry: Map<number, PluginEntry> | null = null;
+let _indexToEntry: PluginEntry[] | null = null;
 let _sceneStates: WeakMap<SceneContext, ScenePluginState> | null = null;
 let _counter = 0;
 
@@ -67,7 +64,7 @@ function _indexFor(plugins: readonly MaterialPlugin[]): number {
     if (idx === undefined) {
         idx = _counter + 1;
         const built = buildPluginFragment(plugins, idx, true);
-        (_indexToEntry ??= new Map()).set(idx, { _fragment: built._fragment, _uboSpec: built._stdUboSpec });
+        (_indexToEntry ??= [])[idx] = { _fragment: built._fragment, _uboSpec: built._stdUboSpec };
         map.set(sig, idx);
         _counter = idx;
     }
@@ -75,19 +72,15 @@ function _indexFor(plugins: readonly MaterialPlugin[]): number {
 }
 
 function _releaseMaterialState(scene: SceneContext, state: MaterialPluginState): void {
-    state._retired = true;
-    if (state._bindings || state._released) {
+    if (state._bindings || !state._uboBuffer) {
         return;
     }
-    state._released = true;
-    if (!state._uboBuffer) {
-        return;
-    }
+    const buffer = state._uboBuffer;
+    state._uboBuffer = null;
     if (scene._z || !scene._built) {
-        state._uboBuffer.destroy();
+        buffer.destroy();
     } else {
-        const buffer = state._uboBuffer;
-        retireGpuResources(state._engine, () => buffer.destroy());
+        retireGpuResources(scene.surface.engine, () => buffer.destroy());
     }
 }
 
@@ -96,31 +89,27 @@ function _releaseMaterialStateAfterBindings(scene: SceneContext, mat: StandardMa
         _releaseMaterialState(scene, state);
         return;
     }
-    const activeDisposers: (() => void)[][] = [];
+    let remaining = 0;
     for (const mesh of scene.meshes) {
         if (mesh.material && getMaterialSource(mesh.material) === mat) {
             const disposers = scene._runtimeBuilds?.pendingDisposers(mesh) ?? scene._meshDisposables.get(mesh);
             if (disposers) {
-                activeDisposers.push(disposers);
+                remaining++;
+                let completed = false;
+                disposers.push(() => {
+                    if (completed) {
+                        return;
+                    }
+                    completed = true;
+                    if (--remaining === 0) {
+                        _releaseMaterialState(scene, state);
+                    }
+                });
             }
         }
     }
-    if (activeDisposers.length === 0) {
+    if (remaining === 0) {
         _releaseMaterialState(scene, state);
-        return;
-    }
-    let remaining = activeDisposers.length;
-    for (const disposers of activeDisposers) {
-        let completed = false;
-        disposers.push(() => {
-            if (completed) {
-                return;
-            }
-            completed = true;
-            if (--remaining === 0) {
-                _releaseMaterialState(scene, state);
-            }
-        });
     }
 }
 
@@ -134,12 +123,18 @@ function _clearSceneMaterials(scene: SceneContext, state: ScenePluginState): voi
 
 function _dropUnusedState(scene: SceneContext, material: StandardMaterialProps, state: MaterialPluginState): void {
     const sceneState = _sceneStates?.get(scene);
-    if (state._retired || (!sceneState?._users.has(material) && !state._auxBindings)) {
-        if (sceneState?._materials.get(material) === state) {
-            sceneState._materials.delete(material);
-        }
+    if (!sceneState) {
         _releaseMaterialState(scene, state);
+        return;
     }
+    const current = sceneState._materials.get(material);
+    if (current === state) {
+        if (sceneState._users.has(material) || state._auxBindings) {
+            return;
+        }
+        sceneState._materials.delete(material);
+    }
+    _releaseMaterialState(scene, state);
 }
 
 function _trackMeshUsage(scene: SceneContext, state: ScenePluginState, mesh: Mesh, material: Mesh["material"] | undefined, bake: boolean): void {
@@ -222,7 +217,7 @@ const stdPluginExt: StdExt = {
     _feature: HAS_STD_PLUGINS,
     _meshFeatures: (_meshFeatures, mat) => (mat?._pi ? HAS_STD_PLUGINS : 0),
     _frag(_features, _meshFeatures, mat): ShaderFragment {
-        const fragment = mat?._pi ? _indexToEntry?.get(mat._pi)?._fragment : undefined;
+        const fragment = mat?._pi ? _indexToEntry?.[mat._pi]?._fragment : undefined;
         if (!fragment) {
             throw new Error("Standard material plugin signature is not registered.");
         }
@@ -230,8 +225,7 @@ const stdPluginExt: StdExt = {
     },
     _bind(mat: StandardMaterialProps, entries: GPUBindGroupEntry[], b: number, _mesh, scene, disposers, auxiliary): number {
         const source = getMaterialSource(mat) as StandardMaterialProps;
-        const plugins = source.plugins;
-        if (!plugins?.length) {
+        if (!source.plugins?.length) {
             return b;
         }
         // The self-managed UBO is declared first in the plugin fragment's
@@ -278,9 +272,7 @@ const stdPluginExt: StdExt = {
         if (!plugins?.length) {
             return;
         }
-        for (const p of plugins) {
-            p.getActiveTextures?.(out);
-        }
+        collectPluginTextures(plugins, out);
     },
 };
 
@@ -354,7 +346,7 @@ export function bakeStdPluginMaterial(mat: StandardMaterialProps | null | undefi
 }
 
 function _createMaterialState(preparedPlugins: readonly MaterialPlugin[], index: number, scene: SceneContext): MaterialPluginState {
-    const entry = _indexToEntry?.get(index);
+    const entry = _indexToEntry?.[index];
     if (!entry) {
         throw new Error("Standard material plugin signature is not registered.");
     }
@@ -364,24 +356,15 @@ function _createMaterialState(preparedPlugins: readonly MaterialPlugin[], index:
     if (uboSpec && uboSpec._totalBytes > 0) {
         const data = new Float32Array(uboSpec._totalBytes / 4);
         writePluginUbo(preparedPlugins, data, uboSpec._offsets);
-        uboBuffer = createEmptyUniformBuffer(scene.surface.engine, data.byteLength, "plugin-ubo");
-        try {
-            scene.surface.engine._device.queue.writeBuffer(uboBuffer, 0, data.buffer, data.byteOffset, data.byteLength);
-        } catch (error) {
-            uboBuffer.destroy();
-            throw error;
-        }
+        uboBuffer = createUniformBuffer(scene.surface.engine, data, "plugin-ubo");
     }
     return {
         _plugins: preparedPlugins,
         _uboBuffer: uboBuffer,
         _uboSpec: uboSpec,
         _dynamic: dynamic,
-        _engine: scene.surface.engine,
         _bindings: 0,
         _auxBindings: 0,
-        _retired: false,
-        _released: false,
     };
 }
 
@@ -404,6 +387,6 @@ export function refreshStdPluginUbos(scene: SceneContext): void {
             _uboScratch.fill(0, 0, floats);
         }
         writePluginUbo(state._plugins, _uboScratch, state._uboSpec._offsets);
-        state._engine._device.queue.writeBuffer(state._uboBuffer, 0, _uboScratch.buffer, 0, state._uboSpec._totalBytes);
+        scene.surface.engine._device.queue.writeBuffer(state._uboBuffer, 0, _uboScratch.buffer, 0, state._uboSpec._totalBytes);
     }
 }

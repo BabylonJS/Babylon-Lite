@@ -1,5 +1,5 @@
 import type { EngineContext } from "../engine/engine.js";
-import { getOrCreateSampler } from "./gpu-pool.js";
+import { getOrCreateSampler } from "./sampler-pool.js";
 
 // Static descriptors for the canned sampler helpers — declared once at module
 // scope so each call to getXxxSampler reuses the same object (no per-call alloc).

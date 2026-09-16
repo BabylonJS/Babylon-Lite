@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { createRenderTarget, type RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
-import type { RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
+import { addMeshToTask, createRenderTask, type RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
+import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import { setShadowTaskCasterMeshes } from "../../../packages/babylon-lite/src/frame-graph/shadow-inputs";
 import {
     _prepareAsyncShaderPipelinesForScene,
@@ -18,7 +19,8 @@ import { buildShaderRenderablesWithInstancing } from "../../../packages/babylon-
 import type { ShaderPacket } from "../../../packages/babylon-lite/src/material/shader/shader-renderable";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/scene-helpers";
-import type { Renderable } from "../../../packages/babylon-lite/src/render/renderable";
+import type { MeshRebuildResources, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
+import type { Material } from "../../../packages/babylon-lite/src/material/material";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { ShadowGenerator } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
@@ -100,52 +102,56 @@ function layoutArgs(layout: "mesh" | "thin-instances" | "thin-instances-color", 
 describe("async ShaderMaterial pipeline compilation", () => {
     it("prepares pending task meshes with temporary ownership without consuming the pending queue", async () => {
         const { engine, createRenderPipelineAsync } = makeEngine();
+        Object.assign(engine._device, {
+            createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => ({ size: descriptor.size, destroy: vi.fn() })),
+            createBindGroup: vi.fn(() => ({})),
+            queue: { writeBuffer: vi.fn() },
+        });
         enableAsyncShaderPipelineCompilation(engine);
         const mesh = {} as Mesh;
         const main = [vi.fn()];
-        const aux = [vi.fn()];
         const release = vi.fn();
         const scene = {
             surface: { engine },
             lights: [],
             _groups: new Map(),
             _meshDisposables: new Map([[mesh, main]]),
-            _meshAuxDisposables: new Map([[mesh, aux]]),
             _renderables: [],
             _frameGraph: { _tasks: [] },
+            _disposables: [],
         } as unknown as SceneContext;
         const bind = vi.fn();
         const renderable = { mesh, order: 0, isTransparent: false, bind } as Renderable;
         const builder = Object.assign(async () => ({ renderables: [renderable], rebuildSingle: () => renderable }), {
             _sceneIndependentRebuild: true,
-            _rebuildSingle: () => {
-                scene._meshDisposables.set(mesh, [release]);
+            _rebuildSingle: (_scene: SceneContext, _mesh: Mesh, _material?: Material, resources?: MeshRebuildResources) => {
+                if (!resources) throw new Error("Expected task-owned resource lists.");
+                resources._lifetimeDisposers.push(release);
                 _registerAsyncShaderPipelineRecipe(scene, material, renderable);
                 return renderable;
             },
         });
         const material = { ...makeMaterial(), _buildGroup: builder };
         mesh.material = material;
-        const pending = [{ mesh, material }];
-        const task = {
-            scene,
-            engine,
-            _renderables: [],
-            _pendingMeshes: pending,
-            _targetSignature: signature,
-            _config: { autoMirror: false },
-        } as unknown as RenderTask;
+        const rt = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 1, height: 1 } });
+        const task = createRenderTask({ name: "pending", rt, autoMirror: false }, engine, scene);
+        addMeshToTask(task, mesh, { material });
+        const renderables = task._renderables;
+        const pending = task._pendingMeshes;
         scene._frameGraph._tasks.push(task);
         await _prepareAsyncShaderPipelinesForScene(scene);
         expect(createRenderPipelineAsync).toHaveBeenCalledOnce();
         expect(task._pendingMeshes).toBe(pending);
+        expect(task._renderables).toBe(renderables);
         expect(pending).toHaveLength(1);
         expect(task._renderables).toHaveLength(0);
-        expect(task._meshEntries).toBeUndefined();
+        expect(task._config.autoMirror).toBe(false);
         expect(scene._meshDisposables.get(mesh)).toBe(main);
-        expect(scene._meshAuxDisposables.get(mesh)).toBe(aux);
+        expect(main[0]).not.toHaveBeenCalled();
         expect(release).toHaveBeenCalledOnce();
         expect(bind).not.toHaveBeenCalled();
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
     });
 
     it("is inert until enabled and enabling is idempotent", async () => {

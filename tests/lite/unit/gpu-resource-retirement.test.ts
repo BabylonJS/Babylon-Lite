@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { renderFrame, stopEngine, waitForGpuIdle, type EngineContext, type RenderingContext } from "../../../packages/babylon-lite/src/engine/engine";
-import { disposeGpuResourceRetirements, retireGpuResources, waitForGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
+import { disposeEngine } from "../../../packages/babylon-lite/src/engine/engine-dispose";
+import { runGpuResourceDisposers } from "../../../packages/babylon-lite/src/engine/gpu-resource-disposal";
+import {
+    disposeGpuResourceRetirements,
+    retireGpuResourceBatch,
+    retireGpuResources,
+    waitForGpuResourceRetirements,
+} from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import { syncThinInstanceGpuData } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu";
 import type { ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
@@ -49,6 +56,89 @@ function makeThinInstances(): ThinInstanceData {
 }
 
 describe("GPU resource retirement", () => {
+    it("installs one engine lifecycle seam only when retirement work is queued", () => {
+        const engine = {} as EngineContext;
+        const first = vi.fn();
+        const second = vi.fn();
+        expect(engine._flushGpuRetirements).toBeUndefined();
+
+        retireGpuResources(engine, first);
+        const flush = engine._flushGpuRetirements;
+        expect(flush).toBeDefined();
+
+        retireGpuResources(engine, second);
+        expect(engine._flushGpuRetirements).toBe(flush);
+        disposeGpuResourceRetirements(engine);
+        expect(first).toHaveBeenCalledOnce();
+        expect(second).toHaveBeenCalledOnce();
+    });
+
+    it("keeps synchronous engine teardown safe without retaining a disposal seam in ordinary retirement users", async () => {
+        let finishFence!: () => void;
+        const fence = new Promise<void>((resolve) => {
+            finishFence = resolve;
+        });
+        const inFlight = vi.fn();
+        const pending = vi.fn();
+        const destroy = vi.fn();
+        const unconfigure = vi.fn();
+        const surface = {
+            _renderingContexts: [],
+            _context: { unconfigure },
+        };
+        const surfaces = [surface] as unknown as EngineContext["_surfaces"];
+        const engine = {
+            _animFrameId: 0,
+            _renderFn: null,
+            _surfaces: surfaces,
+            _device: { queue: { onSubmittedWorkDone: () => fence }, destroy },
+        } as unknown as EngineContext;
+        retireGpuResources(engine, inFlight);
+        stopEngine(engine);
+        retireGpuResources(engine, pending);
+
+        disposeEngine(engine);
+
+        expect(inFlight).toHaveBeenCalledOnce();
+        expect(pending).toHaveBeenCalledOnce();
+        expect(unconfigure).toHaveBeenCalledOnce();
+        expect(destroy).toHaveBeenCalledOnce();
+        finishFence();
+        await flushMicrotasks();
+        expect(inFlight).toHaveBeenCalledOnce();
+        expect(pending).toHaveBeenCalledOnce();
+    });
+
+    it("snapshots large callback generations without argument spreading or late additions", () => {
+        const engine = {} as EngineContext;
+        const release = vi.fn();
+        const late = vi.fn();
+        const callbacks = Array.from({ length: 200_000 }, () => release);
+        retireGpuResourceBatch(engine, callbacks);
+        callbacks.push(late);
+        expect(release).not.toHaveBeenCalled();
+        disposeGpuResourceRetirements(engine);
+        expect(release).toHaveBeenCalledTimes(200_000);
+        expect(late).not.toHaveBeenCalled();
+        disposeGpuResourceRetirements(engine);
+        expect(release).toHaveBeenCalledTimes(200_000);
+    });
+
+    it("retires destroyable resources through the same best-effort batch path", () => {
+        const engine = {} as EngineContext;
+        const destroyable = {
+            destroyed: false,
+            destroy(): void {
+                this.destroyed = true;
+            },
+        };
+        const destroy = vi.spyOn(destroyable, "destroy");
+        retireGpuResources(engine, () => runGpuResourceDisposers([destroyable]));
+        disposeGpuResourceRetirements(engine);
+        expect(destroy).toHaveBeenCalledOnce();
+        expect(destroyable.destroyed).toBe(true);
+    });
+
     it("claims stopped-engine retirements before resolving even if the original fence callback is delayed", async () => {
         let finishOriginalFence!: () => void;
         const originalFence = new Promise<void>((resolve) => {
@@ -61,7 +151,7 @@ describe("GPU resource retirement", () => {
         stopEngine(engine);
         await waitForGpuResourceRetirements(engine);
         expect(retire).toHaveBeenCalledOnce();
-        expect(engine._retiring).toHaveLength(0);
+        expect(engine._retiring?.size).toBe(0);
         finishOriginalFence();
         await flushMicrotasks();
         expect(retire).toHaveBeenCalledOnce();

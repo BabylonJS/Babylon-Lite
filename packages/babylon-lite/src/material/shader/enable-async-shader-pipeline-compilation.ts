@@ -1,9 +1,9 @@
 import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTarget, RenderTargetSignature } from "../../engine/render-target.js";
-import { targetSignatureKey } from "../../engine/render-target.js";
+import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import type { RenderTask } from "../../frame-graph/render-task.js";
-import { _resolvePendingMeshes } from "../../frame-graph/render-task.js";
-import { disposeTaskMesh, type TaskMeshEntry } from "../../frame-graph/render-task-transaction.js";
+import type { RenderTaskBase } from "../../frame-graph/render-task-base.js";
+import { prepareTaskRenderables } from "../../frame-graph/render-task-transaction.js";
 import type { Renderable } from "../../render/renderable.js";
 import { _getShadowTaskCasterMeshes } from "../../frame-graph/shadow-inputs.js";
 import type { SceneContext } from "../../scene/scene-core.js";
@@ -24,11 +24,15 @@ interface PrepareRecipe {
 
 let _recipesByEngine: WeakMap<EngineContext, WeakMap<object, PrepareRecipe>> | null = null;
 
-function isRenderTask(value: unknown): value is RenderTask {
+function isRenderTask(value: unknown): value is RenderTaskBase {
     if (!value || typeof value !== "object") {
         return false;
     }
     return "_renderables" in value && "_targetSignature" in value;
+}
+
+function isExplicitTask(task: RenderTaskBase): task is RenderTask {
+    return "_pendingMeshes" in task;
 }
 
 function nestedTasks(value: unknown): readonly unknown[] {
@@ -82,7 +86,7 @@ async function prepareScene(engine: EngineContext, scene: SceneContext, recipes:
 
     const seen = new Set<unknown>();
     const preparations: Promise<void>[] = [];
-    const temporaryEntries: TaskMeshEntry[] = [];
+    const preparationsToDispose: (() => void)[] = [];
     try {
         while (tasks.length) {
             const candidate = tasks.pop();
@@ -94,19 +98,12 @@ async function prepareScene(engine: EngineContext, scene: SceneContext, recipes:
             if (!isRenderTask(candidate)) {
                 continue;
             }
-            const staged: RenderTask = {
-                ...candidate,
-                _renderables: candidate._renderables.slice(),
-                _meshEntries: candidate._meshEntries?.slice(),
-                _pendingMeshes: candidate._pendingMeshes.slice(),
-            };
-            try {
-                staged._prepareTaskMeshes?.(staged);
-                _resolvePendingMeshes(staged, staged.scene);
-            } finally {
-                temporaryEntries.push(...(staged._meshEntries ?? []).filter((entry) => !entry.owner));
+            const prepared = isExplicitTask(candidate) ? prepareTaskRenderables(candidate) : undefined;
+            if (prepared) {
+                preparationsToDispose.push(prepared.dispose);
             }
-            const renderables = staged._renderables.length || staged._config.autoMirror === false ? staged._renderables : staged.scene._renderables;
+            const selected = prepared?.renderables ?? candidate._renderables;
+            const renderables = selected.length || candidate._config.autoMirror === false ? selected : candidate.scene._renderables;
             const sceneRenderables = renderables === candidate.scene._renderables ? null : new Set(candidate.scene._renderables);
             for (const renderable of renderables) {
                 const recipe = recipes.get(renderable) ?? (renderable.mesh && (!sceneRenderables || sceneRenderables.has(renderable)) ? recipes.get(renderable.mesh) : undefined);
@@ -137,8 +134,8 @@ async function prepareScene(engine: EngineContext, scene: SceneContext, recipes:
         for (const failure of failures) {
             console.error("Async ShaderMaterial pipeline preparation failed; the synchronous first-bind fallback remains available.", failure);
         }
-        for (const entry of temporaryEntries) {
-            disposeTaskMesh(entry);
+        for (const dispose of preparationsToDispose) {
+            dispose();
         }
     }
 }

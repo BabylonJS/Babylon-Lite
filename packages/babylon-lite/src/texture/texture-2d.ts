@@ -8,7 +8,8 @@
  */
 
 import { TU } from "../engine/gpu-flags.js";
-import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
+import { acquireTexture } from "../resource/texture-acquire.js";
+import { getOrCreateSampler } from "../resource/sampler-pool.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { PixelsTexture2DOptions } from "./pixels-texture.js";
 

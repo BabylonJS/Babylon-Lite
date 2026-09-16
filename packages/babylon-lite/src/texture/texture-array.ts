@@ -49,7 +49,8 @@
  */
 
 import { TU } from "../engine/gpu-flags.js";
-import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
+import { acquireTexture } from "../resource/texture-acquire.js";
+import { getOrCreateSampler } from "../resource/sampler-pool.js";
 import { generateMipmaps, recordMipmaps } from "./generate-mipmaps.js";
 import { decodeKtx2Async, makeSampler, srgbFormat, uncompressedInfo } from "./ktx2-loader.js";
 import type { Ktx2DecodedData, Ktx2DecodedMip } from "./ktx2-loader.js";

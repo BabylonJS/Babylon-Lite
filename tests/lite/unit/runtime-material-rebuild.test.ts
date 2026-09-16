@@ -5,7 +5,7 @@ import type { Material } from "../../../packages/babylon-lite/src/material/mater
 import { rebuildMaterial } from "../../../packages/babylon-lite/src/material/material-rebuild";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { setThinInstances } from "../../../packages/babylon-lite/src/mesh/thin-instance";
-import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
+import type { MeshGroupBuilder, MeshRebuilder, MeshRebuildResources, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import { addToScene, buildScene, type RuntimeSceneBuildHooks, type SceneContext, type SceneMeshGroup } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap";
 import { rebuildScenePbrPipelines } from "../../../packages/babylon-lite/src/scene/scene-rebuild";
@@ -23,7 +23,6 @@ function createScene(engine: EngineContext): SceneContext {
         _uniformUpdaters: [],
         _disposables: [],
         _meshDisposables: new Map(),
-        _meshAuxDisposables: new Map(),
         _materialSwapQueue: [],
         _beforeRender: [],
         _renderableVersion: 0,
@@ -123,11 +122,11 @@ describe("runtime material rebuild ownership", () => {
 
     it("keeps the runtime dispatcher on the scene group instead of the shared builder", async () => {
         const scene = createScene({ _retirements: [] } as unknown as EngineContext);
-        const base = (_target: SceneContext, mesh: Mesh): Renderable => renderable(mesh);
+        const base = vi.fn<MeshRebuilder>((_target, mesh) => renderable(mesh));
+        const specialized = vi.fn<MeshRebuilder>((_target, mesh) => renderable(mesh));
         const builder = (async (_ctx: SceneContext, meshes: Mesh[]) => {
-            const rebuild = (_target: SceneContext, mesh: Mesh): Renderable => renderable(mesh);
-            builder._rebuildSingle = rebuild;
-            return { renderables: meshes.map(renderable), rebuildSingle: rebuild };
+            builder._rebuildSingle = specialized;
+            return { renderables: meshes.map(renderable), rebuildSingle: specialized };
         }) as MeshGroupBuilder;
         builder._materialFamily = "standard";
         builder._rebuildSingle = base;
@@ -145,6 +144,12 @@ describe("runtime material rebuild ownership", () => {
         expect(Object.getOwnPropertyDescriptor(builder, "_rebuildSingle")?.get).toBeUndefined();
         expect(group.r).not.toBe(base);
         expect(mesh._runtimeThinBuild).toBeTypeOf("function");
+        const resources: MeshRebuildResources = { _lifetimeDisposers: [] };
+        group.r!(scene, mesh, material, resources);
+        expect(specialized).toHaveBeenCalledWith(scene, mesh, material, resources);
+        const other = { material } as Mesh;
+        group.r!(scene, other, material, resources);
+        expect(base).toHaveBeenCalledWith(scene, other, material, resources);
     });
 
     it("deduplicates stable cleanup references without dropping distinct closures", async () => {

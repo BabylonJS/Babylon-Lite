@@ -12,7 +12,7 @@
 import type { ShaderTemplate, UboField, VertexAttribute, Varying, BindingDecl } from "../../shader/fragment-types.js";
 import type { PbrTemplateExt } from "./pbr-template-ext.js";
 import type { MeshVbLayout } from "../../mesh/mesh.js";
-import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/lights-ubo.js";
+import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/mesh-light-layout.js";
 import { wgsl } from "../../shader/wgsl.js";
 
 type GammaBaseColorFn = (baseColorFactorRgb: string, baseColorFactorAlpha: string, vertexColorMod: string) => string;

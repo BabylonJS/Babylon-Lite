@@ -6,7 +6,8 @@
  */
 
 import { TU } from "../engine/gpu-flags.js";
-import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
+import { acquireTexture } from "../resource/texture-acquire.js";
+import { getOrCreateSampler } from "../resource/sampler-pool.js";
 import { mipLevelCount } from "./mip-count.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Texture2D, Texture2DOptions } from "./texture-2d.js";

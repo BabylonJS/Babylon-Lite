@@ -44,7 +44,7 @@
 
 import { createDynamicTexture, updateDynamicTexture, type DynamicTexture2D, type DynamicTexture2DOptions } from "./dynamic-texture.js";
 import { isDomCanvas } from "../engine/surface.js";
-import { releaseTexture } from "../resource/gpu-pool.js";
+import { releaseTexture } from "../resource/texture-release.js";
 import { generateMipmaps } from "./generate-mipmaps.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 import { SS, TU } from "../engine/gpu-flags.js";

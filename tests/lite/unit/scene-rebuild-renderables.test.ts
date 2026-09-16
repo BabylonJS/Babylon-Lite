@@ -5,7 +5,8 @@ import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/s
 import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-remove";
 import { disposeScene } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
-import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
+import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
+import type { MeshGroupBuilder, MeshRebuildResources, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 
 function fakeScene(): SceneContext {
     return {
@@ -26,7 +27,6 @@ function fakeScene(): SceneContext {
         _groups: new Map(),
         _builtGroups: new Set(),
         _meshDisposables: new Map(),
-        _meshAuxDisposables: new Map(),
         _lightListVersion: 0,
         _renderableVersion: 0,
         _materialEpoch: 0,
@@ -121,7 +121,7 @@ describe("rebuildSceneRenderables", () => {
         expect(scene._renderables).toHaveLength(2);
     });
 
-    it("retires the old per-mesh disposers only after the rebuild, and never the aux ones", async () => {
+    it("retires scene-owned resources after rebuilding without disposing another task's resources", async () => {
         const scene = fakeScene();
         const builder = fakeBuilder();
         const mesh = { material: { _buildGroup: builder } } as never;
@@ -135,7 +135,16 @@ describe("rebuildSceneRenderables", () => {
             },
         ]);
         let auxDisposed = false;
-        scene._meshAuxDisposables.set(mesh, [() => (auxDisposed = true)]);
+        const resources: MeshRebuildResources = { _lifetimeDisposers: [() => (auxDisposed = true)] };
+        const owner: Task = {
+            name: "auxiliary owner",
+            engine: scene.surface.engine,
+            scene,
+            _passes: [],
+            record: vi.fn(),
+            dispose: () => resources._lifetimeDisposers.forEach((dispose) => dispose()),
+        };
+        scene._frameGraph._tasks.push(owner);
 
         await rebuildSceneRenderables(scene);
         expect(disposedAtCall).toBe(-1); // deferred, not run inline
@@ -143,6 +152,9 @@ describe("rebuildSceneRenderables", () => {
         drainRetirements(scene);
         expect(disposedAtCall).toBe(1); // ran AFTER the new build (make-before-break)
         expect(auxDisposed).toBe(false); // aux disposers belong to other tasks
+        expect(scene._frameGraph._tasks).toContain(owner);
+        owner.dispose();
+        expect(auxDisposed).toBe(true);
     });
 
     it("keeps group-rebuild disposer packets reachable while the async builder is blocked", async () => {

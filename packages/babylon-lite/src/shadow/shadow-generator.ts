@@ -17,6 +17,8 @@ export interface ShadowTaskInternalState {
     };
     /** @internal */
     _casterMeshes: readonly import("../mesh/mesh.js").Mesh[];
+    /** @internal Scene version captured before the last fully successful inner-task recording. */
+    _recordedVersion?: number;
 }
 
 /** Runtime state for a light's shadow generator: shadow technique, map textures, light matrix, and per-frame task hooks. */

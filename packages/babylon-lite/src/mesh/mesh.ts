@@ -3,7 +3,7 @@
 
 import { BU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
-import { createMappedBuffer } from "../resource/gpu-buffers.js";
+import { createMappedBuffer } from "../resource/mapped-buffer.js";
 import type { Material } from "../material/material.js";
 import type { SkeletonData, MorphTargetData, VatData } from "../animation/types.js";
 import { ObservableVec3 } from "../math/observable-vec3.js";

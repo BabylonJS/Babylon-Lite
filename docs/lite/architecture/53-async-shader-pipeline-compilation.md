@@ -18,7 +18,7 @@ function prepareShaderMaterialPipeline(engine: EngineContext, material: ShaderMa
 function prepareShaderMaterialPipelineForTask(task: RenderTask, material: ShaderMaterial, layout: ShaderMaterialPipelineLayout): Promise<void>;
 ```
 
-`enableAsyncShaderPipelineCompilation` is idempotent. It must be called before ShaderMaterial renderables are built when automatic scene-registration preparation is desired. `prepareShaderMaterialPipeline` and `prepareShaderMaterialPipelineForTask` are explicit preparation queries and do not require a renderable or a prior `addMesh`.
+`enableAsyncShaderPipelineCompilation` is idempotent. It must be called before ShaderMaterial renderables are built when automatic scene-registration preparation is desired. `prepareShaderMaterialPipeline` and `prepareShaderMaterialPipelineForTask` are explicit preparation queries and do not require a renderable or a prior `addMeshToTask`.
 
 The layout values mean:
 
@@ -112,7 +112,7 @@ Focused tests must prove:
 3. duplicate recipes and duplicate tasks call `createRenderPipelineAsync` once per final key;
 4. rejection removes the pending entry and a later synchronous bind still creates its pipeline;
 5. registration awaits preparation after task preloads and before `FrameGraph.build()`;
-6. explicit preparation works before any renderable or `addMesh` exists;
+6. explicit preparation works before any renderable or `addMeshToTask` call exists;
 7. RenderTarget and RenderTask target signatures select the intended color, depth, comparison, and sample state;
 8. PCF, ESM, default CSM, and cached CSM internal tasks are traversed, including `_tasks` and `_staticTasks`;
 9. plain registration does not materialize unused shadow states;

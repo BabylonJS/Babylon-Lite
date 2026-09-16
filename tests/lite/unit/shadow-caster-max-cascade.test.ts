@@ -20,11 +20,15 @@ function makeTask(mesh: Mesh): RenderTask {
         _opaqueBindings: [],
         _directBindings: [],
         _transparentBindings: [],
-        _ob: [],
+        _ob: [{} as GPURenderBundle],
         _lastVersion: 0,
-        addMesh: vi.fn((added: Mesh, opts?: { material?: Material }) => {
+        _lastVis: 0,
+        _addMesh: vi.fn((added: Mesh, opts?: { material?: Material }) => {
             task._pendingMeshes.push({ mesh: added, material: opts?.material ?? added.material });
         }),
+        _removeMesh(removed: object) {
+            task._pendingMeshes = task._pendingMeshes.filter((entry) => entry.mesh !== removed);
+        },
     };
     return task as unknown as RenderTask;
 }
@@ -77,17 +81,18 @@ describe("setShadowCasterMaxCascade", () => {
         const result = ensureCsmShadowTaskState({} as EngineContext, scene, {} as ShadowGenerator, {} as CsmConfig, [mesh], state);
 
         expect(result).toBe(state);
-        expect(tasks[0]!.addMesh).toHaveBeenCalledOnce();
-        expect(tasks[1]!.addMesh).not.toHaveBeenCalled();
-        expect(tasks[2]!.addMesh).not.toHaveBeenCalled();
-        expect(tasks[0]!._pendingMeshes.map((entry) => entry.mesh)).toEqual([mesh]);
+        expect(tasks[0]!._addMesh).toHaveBeenCalledOnce();
+        expect(tasks[1]!._addMesh).not.toHaveBeenCalled();
+        expect(tasks[2]!._addMesh).not.toHaveBeenCalled();
+        expect(tasks[0]!._pendingMeshes!.map((entry) => entry.mesh)).toEqual([mesh]);
         expect(tasks[1]!._pendingMeshes).toHaveLength(0);
         expect(tasks[2]!._pendingMeshes).toHaveLength(0);
+        expect(tasks.every((task) => task._lastVersion === -1 && task._ob.length === 0)).toBe(true);
         expect(state._casterMaxCascades.get(mesh)).toBe(0);
 
         ensureCsmShadowTaskState({} as EngineContext, scene, {} as ShadowGenerator, {} as CsmConfig, [], state);
         expect(state._casterMaxCascades.has(mesh)).toBe(false);
         ensureCsmShadowTaskState({} as EngineContext, scene, {} as ShadowGenerator, {} as CsmConfig, [mesh], state);
-        expect(tasks[0]!.addMesh).toHaveBeenCalledTimes(2);
+        expect(tasks[0]!._addMesh).toHaveBeenCalledTimes(2);
     });
 });

@@ -1,6 +1,7 @@
 import { BU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
-import { align, createMappedBuffer } from "./gpu-buffers.js";
+import { align } from "./buffer-alignment.js";
+import { createMappedBuffer } from "./mapped-buffer.js";
 
 declare const storageBufferBrand: unique symbol;
 

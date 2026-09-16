@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { Camera } from "../../../packages/babylon-lite/src/camera/camera";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { waitForGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh";
@@ -9,7 +10,7 @@ import { updateMeshGeometry, updateMeshGeometryCapacity } from "../../../package
 import { tryBind } from "../../../packages/babylon-lite/src/mesh/thin-instance-cull-binding";
 import { createTiCullState, getComputeDispatchBatch, prepareTiCull, publishTiLodBucket } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu-culling";
 import { clearThinInstanceLodPartner, setThinInstanceLodPartner, type ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
-import type { DrawUpdateContext, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
+import type { DrawBinding, DrawUpdateBatch, DrawUpdateContext, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 
 function identity(): Mat4 {
@@ -55,7 +56,80 @@ function makeThinInstances(count: number): ThinInstanceData {
     };
 }
 
+function makeBatchBinding(batch: DrawUpdateBatch): DrawBinding {
+    const binding: DrawBinding = {
+        renderable: { order: 100, isTransparent: false, bind: () => binding },
+        pipeline: {} as GPURenderPipeline,
+        draw: () => 0,
+        _updateBatches: [batch],
+    };
+    return binding;
+}
+
 describe("thin-instance GPU culling submission", () => {
+    it("recreates a retired compute batch before its fence without losing the replacement", async () => {
+        let finishFence!: () => void;
+        const fence = new Promise<void>((resolve) => {
+            finishFence = resolve;
+        });
+        const dispatchWorkgroups = vi.fn();
+        const pass = { setPipeline: vi.fn(), setBindGroup: vi.fn(), dispatchWorkgroups, end: vi.fn() };
+        const engine = {
+            _device: { queue: { onSubmittedWorkDone: vi.fn(() => fence) } },
+            _currentEncoder: { beginComputePass: vi.fn(() => pass) },
+        } as unknown as EngineContext;
+        const signature: RenderTargetSignature = { _sampleCount: 1 };
+        const first = getComputeDispatchBatch(signature);
+        const destroyFirst = vi.spyOn(first, "destroy");
+        const collector = signature._collectBatches!;
+        const firstState = collector(undefined, makeBatchBinding(first))!;
+
+        firstState._release(engine);
+        expect(first._retired).toBe(true);
+        expect(destroyFirst).not.toHaveBeenCalled();
+        engine._flushGpuRetirements!(engine);
+        await Promise.resolve();
+
+        const second = getComputeDispatchBatch(signature);
+        expect(second).not.toBe(first);
+        second.queue({ pipeline: {} as GPUComputePipeline, bindGroup: {} as GPUBindGroup, workgroupsX: 3 });
+
+        finishFence();
+        await waitForGpuResourceRetirements(engine);
+        expect(destroyFirst).toHaveBeenCalledOnce();
+        first.destroy();
+        expect(getComputeDispatchBatch(signature)).toBe(second);
+        expect(signature._collectBatches).toBe(collector);
+        second.flush(engine);
+        expect(dispatchWorkgroups).toHaveBeenCalledExactlyOnceWith(3);
+        second.destroy();
+    });
+
+    it("keeps shared compute batches active until the final batch state is released", () => {
+        const engine = {} as EngineContext;
+        const signature: RenderTargetSignature = { _sampleCount: 1 };
+        const first = getComputeDispatchBatch(signature);
+        const destroyFirst = vi.spyOn(first, "destroy");
+        const binding = makeBatchBinding(first);
+        const original = signature._collectBatches!(undefined, binding)!;
+        const retained = signature._collectBatches!(undefined, binding)!;
+
+        original._release(engine, [retained]);
+        expect(first._retired).toBe(false);
+        expect(destroyFirst).not.toHaveBeenCalled();
+        expect(engine._retirements).toBeUndefined();
+        expect(getComputeDispatchBatch(signature)).toBe(first);
+
+        retained._release();
+        expect(destroyFirst).toHaveBeenCalledOnce();
+        expect(first._retired).toBe(true);
+        const second = getComputeDispatchBatch(signature);
+        expect(second).not.toBe(first);
+        first.destroy();
+        expect(getComputeDispatchBatch(signature)).toBe(second);
+        second.destroy();
+    });
+
     it.each([false, true])("queues dispatches and refreshes culling after a geometry update (ranged: %s)", (ranged) => {
         const buffers: (GPUBuffer & { descriptor: GPUBufferDescriptor })[] = [];
         const writeBuffer = vi.fn();

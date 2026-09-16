@@ -165,11 +165,13 @@ describe("PBR shader variant caches", () => {
             attachments: [GeometryTextureType.WORLD_NORMAL],
             emitColor: false,
         });
-        const pipelineA = buildPbrGeometryRenderable(scene, mesh, view).bind(engine, signature).pipeline;
+        const ownerA = { _lifetimeDisposers: [] as (() => void)[] };
+        const pipelineA = buildPbrGeometryRenderable(scene, mesh, view, ownerA).bind(engine, signature).pipeline;
 
         materialA.plugins = [pluginB];
         materialA._pi = materialB._pi;
-        const pipelineB = buildPbrGeometryRenderable(scene, mesh, view).bind(engine, signature).pipeline;
+        const ownerB = { _lifetimeDisposers: [] as (() => void)[] };
+        const pipelineB = buildPbrGeometryRenderable(scene, mesh, view, ownerB).bind(engine, signature).pipeline;
 
         expect(pipelineB).not.toBe(pipelineA);
         expect((view._geometry as Map<string, unknown>).size).toBe(2);

@@ -16,10 +16,11 @@ import type { RenderTargetSignature } from "../../engine/render-target.js";
 import skyboxVertSrc from "../../../shaders/skybox.vertex.wgsl?raw";
 import skyboxFragSrc from "../../../shaders/skybox.fragment.wgsl?raw";
 import { createDefaultPipelineDescriptor, getSceneBindGroupLayout } from "../../render/scene-helpers.js";
-import { targetSignatureKey } from "../../engine/render-target.js";
+import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import { WGSL_DITHER } from "../../shader/wgsl-helpers.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
-import { createMappedBuffer, createUniformBuffer } from "../../resource/gpu-buffers.js";
+import { createMappedBuffer } from "../../resource/mapped-buffer.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 import { createSingleUniformBGL } from "../../shader/bgl-helpers.js";
 
 const SKY_MESH_UNIFORM_SIZE = 96; // mat4x4 + primaryColor vec3 + pad + skyOutputColor vec3 + pad

@@ -418,14 +418,14 @@ function installRuntimeRebuild(
     if (!runtime) {
         const scenes = new WeakMap<SceneContext, WeakMap<Mesh, RuntimeRebuild>>();
         const bases = new WeakMap<SceneContext, RuntimeRebuild>();
-        const dispatch: RuntimeRebuild = (targetScene, targetMesh, override) => {
+        const dispatch: RuntimeRebuild = (targetScene, targetMesh, override, resources) => {
             const specialized = scenes.get(targetScene)?.get(targetMesh);
             if (specialized) {
-                return specialized(targetScene, targetMesh, override);
+                return specialized(targetScene, targetMesh, override, resources);
             }
             const base = bases.get(targetScene) ?? targetScene._groups.get(builder)?.r;
             if (base) {
-                return base(targetScene, targetMesh, override);
+                return base(targetScene, targetMesh, override, resources);
             }
             throw new Error("Material group has not completed its initial build");
         };

@@ -6,8 +6,8 @@ import { _enableDeviceLostRecovery } from "../engine/device-lost-recovery.js";
 import type { DeviceLostRecoveryHandle } from "../engine/device-lost-recovery-types.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { createRenderTarget } from "../engine/render-target.js";
-import type { RenderTask } from "../frame-graph/render-task.js";
-import { createRenderTask } from "../frame-graph/render-task.js";
+import type { RenderTaskBase } from "../frame-graph/render-task-base.js";
+import { _createAutomaticRenderTask } from "../frame-graph/render-task-base.js";
 import type { NormalizedViewport } from "../camera/camera.js";
 import type { XrCamera } from "./xr-camera.js";
 import { createXrCamera, updateXrCameraForView } from "./xr-camera.js";
@@ -59,7 +59,7 @@ export interface XrSessionOptions {
 interface XrEyeUnit {
     rt: RenderTarget;
     camera: XrCamera;
-    task: RenderTask;
+    task: RenderTaskBase;
     recorded: boolean;
 }
 
@@ -284,7 +284,7 @@ function ensureUnit(ctx: XrSessionContext, index: number, eye: XREye): XrEyeUnit
     // frame graph must neither allocate nor destroy them (disposeRenderTarget no-ops).
     rt._eager = true;
     const camera = createXrCamera(eye);
-    const task = createRenderTask({ name: `xr-eye-${index}`, rt, clr: true, cam: camera }, ctx.engine, ctx.scene);
+    const task = _createAutomaticRenderTask({ name: `xr-eye-${index}`, rt, clr: true, cam: camera }, ctx.engine, ctx.scene);
     const unit: XrEyeUnit = { rt, camera, task, recorded: false };
     ctx._units[index] = unit;
     return unit;

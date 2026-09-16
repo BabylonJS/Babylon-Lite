@@ -21,7 +21,9 @@
  */
 
 import { TU, SS } from "../engine/gpu-flags.js";
-import { acquireTexture, releaseTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
+import { acquireTexture } from "../resource/texture-acquire.js";
+import { releaseTexture } from "../resource/texture-release.js";
+import { getOrCreateSampler } from "../resource/sampler-pool.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Texture2D } from "../texture/texture-2d.js";

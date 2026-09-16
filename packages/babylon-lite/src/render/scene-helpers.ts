@@ -10,32 +10,31 @@ import { REVERSE_DEPTH_COMPARE } from "../engine/render-target.js";
 
 // ── Scene bind group layout (group 0) ────────────────────────────
 
-let _cachedSceneBGL: GPUBindGroupLayout | null = null;
-let _cachedDevice: GPUDevice | null = null;
+let _sceneLayouts: WeakMap<GPUDevice, GPUBindGroupLayout> | null = null;
 
 /** Shared scene bind group layout:
  *  binding 0: per-pass SceneUniforms UBO
  *  binding 1: scene-owned LightsUniforms UBO */
 export function getSceneBindGroupLayout(engine: EngineContext): GPUBindGroupLayout {
     const device = engine._device;
-    if (_cachedSceneBGL && _cachedDevice === device) {
-        return _cachedSceneBGL;
+    const layouts = (_sceneLayouts ??= new WeakMap());
+    let layout = layouts.get(device);
+    if (!layout) {
+        layout = device.createBindGroupLayout({
+            label: "scene",
+            entries: [
+                { binding: 0, visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } },
+                { binding: 1, visibility: SS.FRAGMENT, buffer: { type: "uniform" } },
+            ],
+        });
+        layouts.set(device, layout);
     }
-    _cachedDevice = device;
-    _cachedSceneBGL = device.createBindGroupLayout({
-        label: "scene",
-        entries: [
-            { binding: 0, visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } },
-            { binding: 1, visibility: SS.FRAGMENT, buffer: { type: "uniform" } },
-        ],
-    });
-    return _cachedSceneBGL;
+    return layout;
 }
 
-/** Clear the cached scene BGL (called on disposal / device change). */
+/** Clear all cached scene layouts. Device replacement requires no explicit invalidation. */
 export function clearSceneBGLCache(): void {
-    _cachedSceneBGL = null;
-    _cachedDevice = null;
+    _sceneLayouts = null;
 }
 
 // ── Mesh world-matrix UBO update ─────────────────────────────────

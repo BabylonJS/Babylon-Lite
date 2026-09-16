@@ -1,6 +1,6 @@
 import { TU, SS } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
-import { getOrCreateSampler } from "../resource/gpu-pool.js";
+import { getOrCreateSampler } from "../resource/sampler-pool.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import { _installDepthGrab, type TransmissionDepthGrabState } from "./transmission.js";
 import { wgsl } from "../shader/wgsl.js";

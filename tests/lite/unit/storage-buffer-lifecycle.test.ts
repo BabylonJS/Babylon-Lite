@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
-import { disposeEngine } from "../../../packages/babylon-lite/src/engine/engine.js";
+import { disposeEngine } from "../../../packages/babylon-lite/src/engine/engine-dispose.js";
 import { createShaderMaterial, setShaderStorageBuffer } from "../../../packages/babylon-lite/src/material/shader/shader-material.js";
 import { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/src/material/shader/shader-renderable.js";
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh.js";
@@ -102,12 +102,27 @@ function makeRenderableFixture() {
         surface: { engine },
         camera: null,
         _meshDisposables: new Map(),
-        _meshAuxDisposables: new Map(),
     } as unknown as SceneContext;
     return { buffers, createBindGroup, device, engine, material, mesh, scene };
 }
 
 describe("StorageBuffer lifecycle", () => {
+    it("keeps storage ownership with the allocation when an auxiliary shader packet is disposed", () => {
+        const fixture = makeRenderableFixture();
+        const storage = createStorageBuffer(fixture.engine, new Float32Array(4));
+        const handle = storage._buffer!;
+        setShaderStorageBuffer(fixture.material, "cells", storage);
+        const resources = { _lifetimeDisposers: [] as (() => void)[] };
+        buildShaderMaterialRenderables(fixture.scene, []).rebuildSingle(fixture.scene, fixture.mesh, fixture.material, resources);
+        const descriptor = fixture.createBindGroup.mock.calls.at(-1)![0];
+        expect((Array.from(descriptor.entries).at(-1)!.resource as GPUBufferBinding).buffer).toBe(handle);
+        resources._lifetimeDisposers.forEach((dispose) => dispose());
+        expect(handle.destroy).not.toHaveBeenCalled();
+        expect(fixture.engine._storageBuffers?.has(storage)).toBe(true);
+        disposeStorageBuffer(storage);
+        expect(handle.destroy).toHaveBeenCalledOnce();
+    });
+
     it("rejects binding through a different engine", () => {
         const first = makeEngine();
         const second = makeEngine();

@@ -10,12 +10,12 @@ export {
     renderFrame,
     resizeEngine,
     setEngineSize,
-    disposeEngine,
     getRenderingContextKind,
     getRenderingContexts,
     setGpuTimingEnabled,
     isGpuTimingSupported,
 } from "./engine/engine.js";
+export { disposeEngine } from "./engine/engine-dispose.js";
 export { waitForGpuResourceRetirements } from "./engine/gpu-resource-retirement.js";
 export { VERSION } from "./engine/version.js";
 export type { EngineContext, EngineOptions, RenderCanvas, RenderingContext } from "./engine/engine.js";
@@ -77,7 +77,7 @@ export type { Pass, RenderPassExecuteFunc } from "./frame-graph/pass.js";
 export { addPassDependencies } from "./frame-graph/pass.js";
 export type { RenderPass } from "./frame-graph/render-pass.js";
 export type { RenderTask, RenderTaskConfig } from "./frame-graph/render-task.js";
-export { createRenderTask, removeMeshFromTask } from "./frame-graph/render-task.js";
+export { createRenderTask, addMeshToTask, removeMeshFromTask } from "./frame-graph/render-task.js";
 export type { DepthPyramid, DepthPyramidOptions, DepthPyramidReduce, DepthPyramidTaskOptions } from "./frame-graph/depth-pyramid.js";
 export { createDepthPyramid, createDepthPyramidTask } from "./frame-graph/depth-pyramid.js";
 export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";
@@ -93,15 +93,18 @@ export { GeometryTextureType } from "./frame-graph/geometry-types.js";
 export type { ShadowTask } from "./frame-graph/shadow-task.js";
 export type { RenderTarget, RenderTargetDescriptor } from "./engine/render-target.js";
 export { createRenderTarget } from "./engine/render-target.js";
-export { createRenderTargetTexture, disposeRenderTargetTexture, onRenderTargetTextureResize } from "./texture/rtt.js";
-export type { RenderTargetTextureResult } from "./texture/rtt.js";
+export { createRenderTargetTexture, disposeRenderTargetTexture } from "./texture/rtt.js";
+export { createSurfaceRenderTargetTexture, onRenderTargetTextureResize } from "./texture/rtt-surface.js";
+export { withSampledDepthTexture } from "./texture/rtt-depth.js";
+export type { RenderTargetDepthSampler, RenderTargetTextureResult } from "./texture/rtt.js";
 // Pooled GPU samplers (same descriptor → same GPUSampler). Public so consumers building their own
 // sampled-texture wrappers around managed render targets don't have to reach into `engine._device`.
-export { getOrCreateSampler, clearSamplerCache } from "./resource/gpu-pool.js";
+export { getOrCreateSampler, clearSamplerCache } from "./resource/sampler-pool.js";
 // acquireTexture/releaseTexture let a consumer register the lifetime of its OWN GPU texture in Lite's
 // ref-count pool, so a texture it creates (e.g. a mipped render texture for a Hi-Z pyramid) survives a
 // ShaderMaterial's per-version release/acquire cycle instead of being destroyed at count 0.
-export { acquireTexture, releaseTexture } from "./resource/gpu-pool.js";
+export { acquireTexture } from "./resource/texture-acquire.js";
+export { releaseTexture } from "./resource/texture-release.js";
 export { enableSceneTransmission, enableRenderTaskTransmission } from "./frame-graph/transmission.js";
 export type { TransmissionOptions, SceneColorGrab } from "./frame-graph/transmission.js";
 export { enableRenderTaskMeshRefresh } from "./frame-graph/render-task-mesh-refresh.js";

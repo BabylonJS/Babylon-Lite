@@ -170,6 +170,28 @@ never have to worry about stale caches. The same `record()`-vs-`execute()`
 split is used by `RenderPassTask`, `CopyToTextureTask`, and the post-process
 tasks.
 
+### Resource ownership and failed rebuilds
+
+Every geometry binding owns a `MeshRebuildResources` lifetime sink. The task creates it before
+calling the Standard/PBR/Node geometry rebuilder and stamps it onto the returned renderable
+before binding. Builders require that owner and register releases before later fallible work.
+The candidate list and view cache publish only after every rebuild and bind succeeds; a failure
+synchronously releases all candidate sinks, including the failing entry, without changing the
+previous draw list.
+
+Replaced or disposed live entries retire their detached lifetime batches behind submitted GPU
+work. Shared Standard/Node view resources are retained by each renderable and destroyed only
+when the last owner releases; an old callback cannot evict a replacement cache entry. There is
+no implicit view lease or scene auxiliary-disposer map.
+
+The task's `_removeMesh` hook evicts every matching bound entry and queues its retirement
+immediately, including when rendering is stopped. Its weak exclusion set still rejects removed
+off-scene inputs and allows a mesh to rejoin after it is added back to the scene.
+
+The task creates group 0 during recording, not once in the factory and again during recording.
+Immutable color clear/load/store state is initialized with the attachments; per-record work
+only refreshes changing views, dimensions, and depth attachments.
+
 ### Bundle isolation
 
 `createGeometryRendererTask()` owns its own scene UBO, scene bind group,

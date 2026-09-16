@@ -126,6 +126,14 @@ interface EngineContextInternal extends EngineContext {
 
 The engine no longer owns per-frame color/depth render targets directly. Render targets are owned by registered rendering contexts, primarily scene frame-graph `RenderTask`s. The engine owns the canvas/swapchain and exposes the current swapchain view once per frame through `_swapchainView`.
 
+Render-target disposal has one shared attachment-detachment path. Ordinary targets destroy their
+owned textures; sampled RTTs install an owner callback that releases texture references instead.
+Both paths clear attachment handles, views, and dimensions even if a release throws. Eager wrappers
+without an owner callback remain borrowed and are not detached or destroyed.
+The RTT factory selects color-versus-depth sampling from the requested format before allocating
+the target. Allocation cannot change that choice, so a depth-only caller does not retain the
+color-facade and bilinear-sampler path merely because GPU allocation receives the descriptor.
+
 ### Resize Logic
 
 `resizeEngine(engine)` is called at the **start of every frame** (inside the rAF callback), not on a resize event. It auto-sizes only a **DOM canvas** from its layout box:
@@ -173,6 +181,17 @@ by another release callback are drained in subsequent fenced batches. Newly queu
 released against an earlier fence. GPU-fence failure rejects without releasing unfenced resources;
 callback failures are reported while remaining callbacks are attempted. The drain is tree-shakable
 and introduces no additional steady-frame scheduling.
+
+Retirement users install the engine's optional `_flushGpuRetirements` seam on their first queued
+release. Frame submission and stopping only invoke that seam; engine creation does not import the
+retirement implementation. `disposeEngine` lives in a separate module so its synchronous drain does
+not pull retirement code into the initial Vite chunk of applications that never queue a retirement.
+Outstanding fenced batches are tracked by identity in a `Set`, preserving insertion order for
+teardown while allowing either the fence callback or an explicit drain to remove a batch directly.
+Each batch is claimed by emptying its callback array before running any callback.
+The core queue and its batch helper accept cleanup callbacks only. Feature-specific collections
+of callbacks and objects with `destroy()` use `gpu-resource-disposal.ts`, which is separate so
+ordinary rendering does not retain heterogeneous-disposer dispatch.
 
 ```
 registerScene(scene):
@@ -314,9 +333,11 @@ Disabling task timing destroys its query set, resolve buffer, pooled readbacks, 
 
 ## File Manifest
 
-| File                            | Size       | Purpose                                                                                                |
-| ------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
-| `src/engine/engine.ts`          | ~150 lines | Engine interface, creation, render loop, MSAA targets                                                  |
-| `src/engine/gpu-timer.ts`       | ~110 lines | Optional GPU frame-time measurement (dynamic-imported by `setGpuTimingEnabled`; zero-cost when unused) |
-| `src/engine/gpu-task-timing.ts` | ~120 lines | Thin public per-task timing API; dynamic-imports the profiler implementation only when enabled         |
-| `src/engine/gpu-task-timer.ts`  | ~150 lines | Optional timestamp-query implementation for per-frame-graph-task GPU timings                           |
+| File                                    | Size       | Purpose                                                                                                |
+| --------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
+| `src/engine/engine.ts`                  | ~150 lines | Engine interface, creation, render loop, MSAA targets                                                  |
+| `src/engine/engine-dispose.ts`          | ~25 lines  | Explicit engine teardown and synchronous resource-retirement drain                                     |
+| `src/engine/gpu-resource-retirement.ts` | ~110 lines | Deferred retirement, exactly-once batch ownership, and awaitable teardown                              |
+| `src/engine/gpu-timer.ts`               | ~110 lines | Optional GPU frame-time measurement (dynamic-imported by `setGpuTimingEnabled`; zero-cost when unused) |
+| `src/engine/gpu-task-timing.ts`         | ~120 lines | Thin public per-task timing API; dynamic-imports the profiler implementation only when enabled         |
+| `src/engine/gpu-task-timer.ts`          | ~150 lines | Optional timestamp-query implementation for per-frame-graph-task GPU timings                           |

@@ -1,5 +1,5 @@
 import type { EngineContext } from "../../engine/engine.js";
-import { targetSignatureKey } from "../../engine/render-target.js";
+import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { ShaderMaterial } from "./shader-material.js";
 import type { ShaderPipelineBindings, ShaderPipelineCache } from "./shader-pipeline.js";

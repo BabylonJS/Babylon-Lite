@@ -14,6 +14,8 @@ import { TU } from "./gpu-flags.js";
 import type { EngineContext } from "./engine.js";
 import type { SurfaceContext } from "./surface.js";
 import type { Texture2D } from "../texture/texture-2d.js";
+import type { DrawBatchState } from "../render/draw-update-batches.js";
+import type { DrawBinding } from "../render/renderable.js";
 
 /** Signature of a render target's attachment set — enough to key a GPURenderPipeline. */
 export interface RenderTargetSignature {
@@ -27,6 +29,8 @@ export interface RenderTargetSignature {
     readonly _sampleCount: number;
     /** @internal Internal per-task refraction texture shared by transmissive material bindings. */
     readonly _transmissionTexture?: Texture2D | null;
+    /** @internal Collection and lifecycle behavior installed only by update-batch features. */
+    _collectBatches?: (state: DrawBatchState | undefined, binding: DrawBinding) => DrawBatchState | undefined;
 }
 
 /** Description of a render target — what to create, not the GPU objects themselves. */
@@ -55,11 +59,6 @@ export interface RenderTargetDescriptor {
     size: SurfaceContext | { width: number; height: number };
 }
 
-/** Stringified signature used to key pipelines against a render target's attachment set. */
-export function targetSignatureKey(desc: RenderTargetSignature): string {
-    return `${desc._colorFormat ?? "-"}|${desc._depthStencilFormat ?? "-"}|${desc._depthCompare ?? ""}|${desc._sampleCount}`;
-}
-
 /** Allocated GPU state for a render target. */
 export interface RenderTarget {
     /** @internal */
@@ -82,10 +81,12 @@ export interface RenderTarget {
     /** @internal */
     _eager?: boolean;
     /** @internal Optional in-place eager attachment refresh used by sampled surface-sized targets. */
-    _syncEager?(engine: EngineContext): void;
-    /** @internal Explicit attachment-owner release, independent of eager allocation.
+    _syncEager?(this: RenderTarget, engine: EngineContext): void;
+    /** @internal Release the captured, already-detached attachment-owner references.
      *  Externally owned eager wrappers leave this absent. */
-    _disposeAttachments?(): void;
+    _disposeAttachments?(this: RenderTarget, color: GPUTexture | null, depth: GPUTexture | null): void;
+    /** @internal Sampled-target writer ownership has been released. */
+    _disposed?: boolean;
     /** @internal When false, `disposeRenderTarget` will NOT destroy `_depthTexture` — the depth
      *  attachment is BORROWED (owned by something else, e.g. a ShadowGenerator's shared shadow map)
      *  and must outlive this render target. Defaults to owning (destroys on dispose). */
@@ -148,40 +149,33 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void
 /** Free owned attachments, including sampled eager targets with an explicit owner hook.
  *  Eager wrappers without a hook (swapchain, geometry/shadow outputs) remain externally owned. */
 export function disposeRenderTarget(rt: RenderTarget | null | undefined): void {
-    if (!rt) {
+    if (!rt || (rt._eager && !rt._disposeAttachments)) {
         return;
     }
+    const color = rt._colorTexture;
+    const depth = rt._depthTexture;
+    rt._colorTexture = rt._depthTexture = null;
+    rt._colorView = rt._depthView = null;
+    rt._width = rt._height = 0;
     if (rt._disposeAttachments) {
-        rt._disposeAttachments();
-        return;
-    }
-    if (rt._eager) {
-        return;
-    }
-    if (rt._colorTexture) {
-        rt._colorTexture.destroy();
-        rt._colorTexture = null;
-        rt._colorView = null;
-    }
-    if (rt._depthTexture) {
-        // Only destroy depth we own — borrowed depth (e.g. a ShadowGenerator's shared shadow map,
-        // marked `_ownsDepthTexture: false`) must outlive per-task render targets that render into it.
-        if (rt._ownsDepthTexture !== false) {
-            rt._depthTexture.destroy();
+        rt._disposeAttachments(color, depth);
+    } else {
+        try {
+            color?.destroy();
+        } finally {
+            // A shared shadow map may supply borrowed depth to an otherwise owning target.
+            if (rt._ownsDepthTexture !== false) {
+                depth?.destroy();
+            }
         }
-        rt._depthTexture = null;
-        rt._depthView = null;
     }
-    rt._width = 0;
-    rt._height = 0;
 }
 
 function resolveSize(desc: RenderTargetDescriptor): { width: number; height: number } {
     const size = desc.size;
     // SurfaceContext has a `canvas` field; explicit-pixels uses `width`/`height`.
     if ("canvas" in size) {
-        const canvas = size.canvas;
-        return { width: canvas.width, height: canvas.height };
+        return size.canvas;
     }
     return size;
 }

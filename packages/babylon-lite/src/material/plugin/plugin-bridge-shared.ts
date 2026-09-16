@@ -10,6 +10,7 @@
 
 import type { BindingDecl, FragmentSlot, ShaderFragment, UboField, UboSpec, VertexSlot, WgslScalarType } from "../../shader/fragment-types.js";
 import { computeUboLayout } from "../../shader/ubo-layout.js";
+import type { Texture2D } from "../../texture/texture-2d.js";
 import type { MaterialPlugin, MaterialPluginPoint, PluginTextureBinding } from "./material-plugin.js";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
@@ -178,6 +179,13 @@ export function buildPluginFragment(plugins: readonly MaterialPlugin[], index: n
 export function writePluginUbo(plugins: readonly MaterialPlugin[], data: Float32Array, offsets: ReadonlyMap<string, number>): void {
     for (const p of plugins) {
         p.writeUbo?.(data, offsets);
+    }
+}
+
+/** Collect textures owned by a prepared enabled plugin list. */
+export function collectPluginTextures(plugins: readonly MaterialPlugin[], out: Texture2D[]): void {
+    for (const p of plugins) {
+        p.getActiveTextures?.(out);
     }
 }
 

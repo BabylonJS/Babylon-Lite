@@ -4,6 +4,7 @@ import type { ShaderFragment } from "../../shader/fragment-types.js";
 import { _registerStdExt, STD_SCENE_FOG } from "./standard-flags.js";
 import type { StdExt } from "./standard-flags.js";
 import type { StandardSceneShaderContext } from "./standard-material.js";
+import type * as StdShadow from "./fragments/std-shadow-fragment.js";
 
 // ─── Durable opt-in mesh-feature preload seam ───────────────────────
 //
@@ -50,7 +51,7 @@ export function getStandardGroupBuilder(): MeshGroupBuilder {
         let tiSync: ((engine: EngineContext, ti: any, pass: GPURenderPassEncoder | GPURenderBundleEncoder, slot: number, hasColor: boolean) => number) | undefined;
         let tiUpdate: ((engine: EngineContext, ti: any, hasColor: boolean, indexCount: number) => GPUBuffer | null) | undefined;
         let tiFragment: any;
-        let shadowFragment: any;
+        let shadow: StdShadow.StandardShadowContext | undefined;
         let morphFragment: any;
         let cull: typeof import("../../mesh/thin-instance-cull-binding.js") | undefined;
         let fogFragment: ShaderFragment | null = null;
@@ -78,9 +79,11 @@ export function getStandardGroupBuilder(): MeshGroupBuilder {
         }
         if (hasShadow) {
             imports.push(
-                import("./fragments/std-shadow-fragment.js").then((m) => {
-                    shadowFragment = m.createStdShadowFragment;
-                })
+                import("./fragments/std-shadow-fragment.js")
+                    .then((m) => m.createStandardShadowContext(scene.surface.engine, scene.lights))
+                    .then((context) => {
+                        shadow = context;
+                    })
             );
         }
         if (hasMorph) {
@@ -108,7 +111,7 @@ export function getStandardGroupBuilder(): MeshGroupBuilder {
 
         const renderableMod = await import("./standard-renderable.js");
         const sceneShader: StandardSceneShaderContext | null = scene.fog ? { _features: STD_SCENE_FOG, _fragments: [fogFragment!] } : null;
-        const result = renderableMod.buildStandardMeshRenderables(scene, meshes, { tiSync, tiUpdate, tiFragment, shadowFragment, morphFragment, cull, sceneShader });
+        const result = renderableMod.buildStandardMeshRenderables(scene, meshes, { tiSync, tiUpdate, tiFragment, shadow, morphFragment, cull, sceneShader });
         // Wire the per-mesh rebuild closure used by material swap + per-pass override.
         builder._rebuildSingle = result.rebuildSingle;
         return result;

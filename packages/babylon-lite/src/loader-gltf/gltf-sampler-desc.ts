@@ -1,4 +1,4 @@
-import { getOrCreateSampler } from "../resource/gpu-pool.js";
+import { getOrCreateSampler } from "../resource/sampler-pool.js";
 import { uploadBaseColorFactorTexture, uploadOrmFactorTexture } from "./gltf-pbr-builder.js";
 import type { GenerateMipmapsFn } from "./gltf-pbr-builder.js";
 import type { EngineContext } from "../engine/engine.js";

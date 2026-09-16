@@ -1,15 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
-import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
+import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import { enableRenderTaskMeshRefresh } from "../../../packages/babylon-lite/src/frame-graph/render-task-mesh-refresh";
-import { _buildBindings, _rebindRenderTask, _resolvePendingMeshes, removeMeshFromTask, type RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
-import { retireTaskBatches, retireTaskMesh, transactRenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task-transaction";
+import { addMeshToTask, createRenderTask, removeMeshFromTask, type RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
-import type { DrawUpdateBatch, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
+import type { DrawUpdateBatch, MeshRebuildResources, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { enableDrawBatchCollection } from "../../../packages/babylon-lite/src/render/draw-update-batches";
+import { prepareTaskRenderables } from "../../../packages/babylon-lite/src/frame-graph/render-task-transaction";
+
+function owned(resources?: MeshRebuildResources): MeshRebuildResources {
+    if (!resources) throw new Error("Expected task-owned resource lists.");
+    return resources;
+}
 
 function createRenderable(mesh: Mesh, batch: DrawUpdateBatch, isTransparent = false, direct = false): Renderable {
     const renderable: Renderable = {
@@ -17,65 +23,31 @@ function createRenderable(mesh: Mesh, batch: DrawUpdateBatch, isTransparent = fa
         isTransparent,
         _direct: direct,
         mesh,
-        bind: () => ({
-            renderable,
-            pipeline: {} as GPURenderPipeline,
-            draw: () => 1,
-            _updateBatches: [batch],
-        }),
+        bind: (_engine, signature) => {
+            enableDrawBatchCollection(signature);
+            return {
+                renderable,
+                pipeline: {} as GPURenderPipeline,
+                draw: () => 1,
+                _updateBatches: [batch],
+            };
+        },
     };
     return renderable;
 }
 
 function createTask(engine: EngineContext, scene: SceneContext): RenderTask {
-    const targetSignature: RenderTargetSignature = { _colorFormat: "rgba8unorm", _sampleCount: 1 };
-    const task = {
-        name: "dynamic",
-        engine,
-        scene,
-        _config: { autoMirror: false },
-        _passes: [],
-        _renderables: [],
-        _opaqueBindings: [],
-        _directBindings: [],
-        _transparentBindings: [],
-        _ob: [],
-        _lastVersion: -1,
-        _lastVis: 0,
-        _recorded: false,
-        _targetSignature: targetSignature,
-        _updateBatches: [],
-        _pendingMeshes: [],
-        addMesh(mesh: Mesh, options?: { material?: Material }) {
-            const material = options?.material ?? mesh.material;
-            if (material) {
-                task._pendingMeshes.push({ mesh, material });
-                if (task._recorded) {
-                    _rebindRenderTask(task, true);
-                }
-            }
-        },
-        record() {
-            transactRenderTask(
-                task,
-                (candidate) => {
-                    candidate._prepareTaskMeshes?.(candidate);
-                    _resolvePendingMeshes(candidate, scene);
-                    candidate._recorded = true;
-                },
-                (candidate) => _buildBindings(candidate, engine, targetSignature)
-            );
-        },
-        execute: vi.fn(() => 0),
-        dispose: vi.fn(() => {
-            for (const entry of task._meshEntries ?? []) {
-                retireTaskMesh(task, entry);
-            }
-            task._meshEntries = undefined;
-            retireTaskBatches(task, task._updateBatches);
-            task._updateBatches = [];
-        }),
-    } as unknown as RenderTask;
+    engine._device = {
+        createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => ({ size: descriptor.size, destroy: vi.fn() })),
+        createBindGroupLayout: vi.fn(() => ({})),
+        createBindGroup: vi.fn(() => ({})),
+        createTexture: vi.fn(() => ({ createView: vi.fn(() => ({})), destroy: vi.fn() })),
+        queue: { writeBuffer: vi.fn() },
+    } as unknown as GPUDevice;
+    Object.assign(scene, { lights: [], _disposables: [] });
+    const rt = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 1, height: 1 } });
+    const task = createRenderTask({ name: "dynamic", rt, autoMirror: false }, engine, scene);
+    task.execute = vi.fn(() => 0);
     return task;
 }
 
@@ -83,12 +55,10 @@ function createRefreshScene(engine: EngineContext, mesh: Mesh, renderables: Rend
     const disposed: ReturnType<typeof vi.fn>[] = [];
     let build = 0;
     const builder = Object.assign(async () => ({ renderables: [], rebuildSingle: builder._rebuildSingle! }), {
-        _rebuildSingle: (_scene: SceneContext, selectedMesh: Mesh): Renderable => {
+        _rebuildSingle: (_scene: SceneContext, _selectedMesh: Mesh, _material?: Material, resources?: MeshRebuildResources): Renderable => {
             const dispose = vi.fn();
             disposed.push(dispose);
-            const list = scene._meshAuxDisposables.get(selectedMesh) ?? [];
-            list.push(dispose);
-            scene._meshAuxDisposables.set(selectedMesh, list);
+            owned(resources)._lifetimeDisposers.push(dispose);
             return renderables[Math.min(build++, renderables.length - 1)]!;
         },
     });
@@ -97,7 +67,6 @@ function createRefreshScene(engine: EngineContext, mesh: Mesh, renderables: Rend
         surface: { engine },
         _groups: new Map([[builder, { r: builder._rebuildSingle }]]),
         _meshDisposables: new Map(),
-        _meshAuxDisposables: new Map(),
         _renderables: [],
         _renderableVersion: 1,
     } as unknown as SceneContext;
@@ -111,33 +80,29 @@ function createTransactionFixture() {
     meshes[1]!.material = meshes[0]!.material;
     const builder = meshes[0]!.material!._buildGroup;
     const sceneDisposers = meshes.map(() => [vi.fn()]);
-    const sceneAux = meshes.map(() => [vi.fn()]);
     for (let index = 0; index < meshes.length; index++) {
         scene._meshDisposables.set(meshes[index]!, sceneDisposers[index]!);
-        scene._meshAuxDisposables.set(meshes[index]!, sceneAux[index]!);
     }
     const built: { renderable: Renderable; dispose: ReturnType<typeof vi.fn>; bindDispose: ReturnType<typeof vi.fn>; batch: DrawUpdateBatch }[] = [];
     let failure: "build" | "bind" | undefined;
     let reusedBatch: DrawUpdateBatch | undefined;
-    scene._groups.get(builder)!.r = (_scene, mesh) => {
+    scene._groups.get(builder)!.r = (_scene, mesh, _material, resources) => {
+        const ownership = owned(resources);
         const dispose = vi.fn();
         const bindDispose = vi.fn();
         const batch = mesh === meshes[0] && reusedBatch ? reusedBatch : { reset: vi.fn(), flush: vi.fn(), destroy: vi.fn() };
         const renderable = createRenderable(mesh, batch, mesh === meshes[1]);
         const bind = renderable.bind;
         renderable.bind = (device, signature) => {
-            scene._meshDisposables.get(mesh)!.push(bindDispose);
+            const bindingBatch = { reset() {}, flush() {}, destroy: bindDispose };
             if (failure === "bind" && mesh === meshes[1]) {
+                bindingBatch.destroy();
                 throw new Error("binding failed");
             }
-            return bind(device, signature);
+            return { ...bind(device, signature), _updateBatches: [batch, bindingBatch] };
         };
         built.push({ renderable, dispose, bindDispose, batch });
-        if (mesh === meshes[0]) {
-            scene._meshDisposables.set(mesh, [dispose]);
-        } else {
-            scene._meshAuxDisposables.get(mesh)!.push(dispose);
-        }
+        ownership._lifetimeDisposers.push(dispose);
         if (failure === "build" && mesh === meshes[1]) {
             throw new Error("building failed");
         }
@@ -149,14 +114,13 @@ function createTransactionFixture() {
     task._renderables.push(untracked);
     enableRenderTaskMeshRefresh(task);
     for (const mesh of meshes) {
-        task.addMesh(mesh);
+        addMeshToTask(task, mesh);
     }
     return {
         engine,
         scene,
         meshes,
         sceneDisposers,
-        sceneAux,
         task,
         built,
         untracked,
@@ -176,10 +140,10 @@ function currentGeneration(task: RenderTask) {
         opaque: task._opaqueBindings,
         direct: task._directBindings,
         transparent: task._transparentBindings,
-        batches: task._updateBatches,
+        batchState: task._batchState,
         bundles: task._ob,
         version: task._lastVersion,
-        recorded: task._recorded,
+        sceneBG: task._sceneBG,
     };
 }
 
@@ -188,7 +152,8 @@ function overrideMaterial() {
     const built: { renderable: Renderable; dispose: ReturnType<typeof vi.fn>; bindDisposers: ReturnType<typeof vi.fn>[] }[] = [];
     const builder = Object.assign(async () => ({ renderables: [], rebuildSingle: builder._rebuildSingle }), {
         _sceneIndependentRebuild: true,
-        _rebuildSingle(scene: SceneContext, mesh: Mesh): Renderable {
+        _rebuildSingle(_scene: SceneContext, mesh: Mesh, _material?: Material, resources?: MeshRebuildResources): Renderable {
+            const ownership = owned(resources);
             const dispose = vi.fn();
             const bindDisposers: ReturnType<typeof vi.fn>[] = [];
             const batch = { reset: vi.fn(), flush: vi.fn(), destroy: vi.fn() };
@@ -197,14 +162,15 @@ function overrideMaterial() {
             renderable.bind = (engine, signature) => {
                 const callback = vi.fn();
                 bindDisposers.push(callback);
-                scene._meshAuxDisposables.get(mesh)!.push(callback);
+                const bindingBatch = { reset() {}, flush() {}, destroy: callback };
                 if (failure === "bind") {
+                    bindingBatch.destroy();
                     throw new Error("override binding failed");
                 }
-                return bind(engine, signature);
+                return { ...bind(engine, signature), _updateBatches: [batch, bindingBatch] };
             };
             built.push({ renderable, dispose, bindDisposers });
-            scene._meshDisposables.set(mesh, [dispose]);
+            ownership._lifetimeDisposers.push(dispose);
             if (failure === "build") {
                 throw new Error("override building failed");
             }
@@ -246,7 +212,7 @@ describe("render task mesh refresh", () => {
             task.record();
         }
         const previous = currentGeneration(task);
-        const add = () => task.addMesh(mesh, kind === "override" ? { material: mesh.material! } : undefined);
+        const add = () => addMeshToTask(task, mesh, kind === "override" ? { material: mesh.material! } : undefined);
         if (live) {
             expect(add).toThrow(/initial build in this scene/);
         } else {
@@ -267,7 +233,7 @@ describe("render task mesh refresh", () => {
         } else {
             task.record();
         }
-        expect(localRebuild).toHaveBeenCalledWith(scene, mesh, mesh.material);
+        expect(localRebuild).toHaveBeenCalledWith(scene, mesh, mesh.material, expect.objectContaining({ _lifetimeDisposers: expect.any(Array) }));
         expect(bind).toHaveBeenCalledWith(engine, task._targetSignature);
         expect(task._renderables).toEqual([renderable]);
         expect(task._pendingMeshes).toHaveLength(0);
@@ -284,7 +250,7 @@ describe("render task mesh refresh", () => {
         override.material._buildGroup._sceneIndependentRebuild = false;
         const task = createTask(engine, scene);
         enableRenderTaskMeshRefresh(task);
-        task.addMesh(mesh, { material: override.material });
+        addMeshToTask(task, mesh, { material: override.material });
         expect(() => task.record()).toThrow(/initial build in this scene/);
         expect(task._pendingMeshes).toHaveLength(1);
         expect(override.built).toHaveLength(0);
@@ -302,7 +268,7 @@ describe("render task mesh refresh", () => {
         const override = overrideMaterial();
         const task = createTask(engine, scene);
         enableRenderTaskMeshRefresh(task);
-        task.addMesh(mesh, { material: override.material });
+        addMeshToTask(task, mesh, { material: override.material });
         task.record();
         const lifetime = override.built[0]!;
         for (let generation = 1; generation <= 4; generation++) {
@@ -355,12 +321,11 @@ describe("render task mesh refresh", () => {
             }
             const dispose = vi.fn();
             generationDisposers.push(dispose);
-            scene._meshDisposables.get(mesh)!.push(dispose);
-            return bind(engine, signature);
+            return { ...bind(engine, signature), _updateBatches: [batch, { reset() {}, flush() {}, destroy: dispose }] };
         };
         const builder = Object.assign(async () => ({ renderables: [], rebuildSingle: builder._rebuildSingle }), {
-            _rebuildSingle: () => {
-                scene._meshDisposables.set(mesh, [lifetimeDispose]);
+            _rebuildSingle: (_scene: SceneContext, _mesh: Mesh, _material?: Material, resources?: MeshRebuildResources) => {
+                owned(resources)._lifetimeDisposers.push(lifetimeDispose);
                 return renderable;
             },
         });
@@ -368,7 +333,7 @@ describe("render task mesh refresh", () => {
         const material: Material = { _buildGroup: builder, _uboVersion: 0 };
         const task = createTask(engine, scene);
         enableRenderTaskMeshRefresh(task);
-        task.addMesh(mesh, { material });
+        addMeshToTask(task, mesh, { material });
         task.record();
         scene._renderableVersion++;
         task.execute!();
@@ -384,6 +349,35 @@ describe("render task mesh refresh", () => {
         expect(generationDisposers[1]).toHaveBeenCalledOnce();
     });
 
+    it("never retires live refresh entries from asynchronous preparation", () => {
+        const engine = { _retirements: null } as EngineContext;
+        const mesh = {} as Mesh;
+        const firstBatch = { reset: vi.fn(), flush: vi.fn(), destroy: vi.fn() };
+        const secondBatch = { reset: vi.fn(), flush: vi.fn(), destroy: vi.fn() };
+        const first = createRenderable(mesh, firstBatch);
+        const second = createRenderable(mesh, secondBatch);
+        const { scene, disposed } = createRefreshScene(engine, mesh, [first, second]);
+        const task = createTask(engine, scene);
+
+        enableRenderTaskMeshRefresh(task);
+        addMeshToTask(task, mesh);
+        task.record();
+
+        const preparation = prepareTaskRenderables(task);
+        expect(preparation.renderables).toEqual([second]);
+        expect(disposed[0]).not.toHaveBeenCalled();
+        expect(disposed[1]).not.toHaveBeenCalled();
+
+        preparation.dispose();
+        expect(disposed[0]).not.toHaveBeenCalled();
+        expect(disposed[1]).toHaveBeenCalledOnce();
+
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+        expect(disposed[0]).toHaveBeenCalledOnce();
+        expect(disposed[1]).toHaveBeenCalledOnce();
+    });
+
     it("rebinds rebuilt scene renderables and retires batches after the last tracked mesh is removed", () => {
         const engine = { _retirements: null } as EngineContext;
         const mesh = {} as Mesh;
@@ -395,16 +389,16 @@ describe("render task mesh refresh", () => {
         const task = createTask(engine, scene);
 
         enableRenderTaskMeshRefresh(task);
-        task.addMesh(mesh);
+        addMeshToTask(task, mesh);
         task.record();
         expect(task._renderables).toEqual([first]);
-        expect(task._updateBatches).toEqual([firstBatch]);
+        expect(task._batchState?._batches).toEqual([firstBatch]);
 
         scene._renderables = [second];
         scene._renderableVersion++;
         task.execute!();
         expect(task._renderables).toEqual([second]);
-        expect(task._updateBatches).toEqual([secondBatch]);
+        expect(task._batchState?._batches).toEqual([secondBatch]);
         disposeGpuResourceRetirements(engine);
         expect(firstBatch.destroy).toHaveBeenCalledOnce();
         expect(disposed[0]).toHaveBeenCalledOnce();
@@ -415,7 +409,7 @@ describe("render task mesh refresh", () => {
         disposeGpuResourceRetirements(engine);
         expect(secondBatch.destroy).toHaveBeenCalledOnce();
         expect(disposed[1]).toHaveBeenCalledOnce();
-        expect(task._updateBatches).toEqual([]);
+        expect(task._batchState).toBeUndefined();
     });
 
     it("builds one auxiliary mesh renderable instead of reusing a merged scene renderable", () => {
@@ -435,7 +429,7 @@ describe("render task mesh refresh", () => {
         const task = createTask(engine, scene);
 
         enableRenderTaskMeshRefresh(task);
-        task.addMesh(mesh);
+        addMeshToTask(task, mesh);
         task.record();
 
         expect(task._renderables).toEqual([selected]);
@@ -456,7 +450,7 @@ describe("render task mesh refresh", () => {
         expect(f.task._opaqueBindings).toBe(previous.opaque);
         expect(f.task._directBindings).toBe(previous.direct);
         expect(f.task._transparentBindings).toBe(previous.transparent);
-        expect(f.task._updateBatches).toBe(previous.batches);
+        expect(f.task._batchState).toBe(previous.batchState);
         expect(f.task._ob).toBe(previous.bundles);
         expect(f.execute).not.toHaveBeenCalled();
 
@@ -478,9 +472,7 @@ describe("render task mesh refresh", () => {
         }
         for (let index = 0; index < f.meshes.length; index++) {
             expect(f.scene._meshDisposables.get(f.meshes[index]!)).toBe(f.sceneDisposers[index]);
-            expect(f.scene._meshAuxDisposables.get(f.meshes[index]!)).toBe(f.sceneAux[index]);
             expect(f.sceneDisposers[index]![0]).not.toHaveBeenCalled();
-            expect(f.sceneAux[index]![0]).not.toHaveBeenCalled();
         }
 
         f.fail();
@@ -512,7 +504,7 @@ describe("render task mesh refresh", () => {
         }
         f.fail();
         f.task.record();
-        expect(f.task._recorded).toBe(true);
+        expect(f.task._sceneBG).toBeDefined();
         expect(f.task._renderables).toEqual([f.untracked, ...f.built.slice(2).map((item) => item.renderable)]);
     });
 
@@ -530,15 +522,15 @@ describe("render task mesh refresh", () => {
         f.task.execute!();
         disposeGpuResourceRetirements(f.engine);
         expect(batch.destroy).not.toHaveBeenCalled();
-        expect(f.task._updateBatches).toContain(batch);
+        expect(f.task._batchState?._batches).toContain(batch);
     });
 
     it.each(["build", "bind"] as const)("rolls back mixed tracked/override recording after a later override %s failure", (phase) => {
         const f = createTransactionFixture();
         const first = overrideMaterial();
         const second = overrideMaterial();
-        f.task.addMesh(f.meshes[0]!, { material: first.material });
-        f.task.addMesh(f.meshes[1]!, { material: second.material });
+        addMeshToTask(f.task, f.meshes[0]!, { material: first.material });
+        addMeshToTask(f.task, f.meshes[1]!, { material: second.material });
         second.fail(phase);
         const previous = currentGeneration(f.task);
         const pending = f.task._pendingMeshes;
@@ -556,7 +548,7 @@ describe("render task mesh refresh", () => {
             }
             for (let index = 0; index < f.meshes.length; index++) {
                 expect(f.scene._meshDisposables.get(f.meshes[index]!)).toBe(f.sceneDisposers[index]);
-                expect(f.scene._meshAuxDisposables.get(f.meshes[index]!)).toBe(f.sceneAux[index]);
+                expect(f.sceneDisposers[index]![0]).not.toHaveBeenCalled();
             }
         }
         second.fail();
@@ -579,14 +571,13 @@ describe("render task mesh refresh", () => {
         const { scene } = createRefreshScene(engine, mesh, []);
         const override = overrideMaterial();
         const task = createTask(engine, scene);
-        task.addMesh(mesh, { material: override.material });
+        addMeshToTask(task, mesh, { material: override.material });
         enableRenderTaskMeshRefresh(task);
         override.fail("bind");
         expect(() => task.record()).toThrow("override binding failed");
         expect(task._pendingMeshes).toHaveLength(1);
         expect(override.built[0]!.dispose).toHaveBeenCalledOnce();
         expect(scene._meshDisposables.has(mesh)).toBe(false);
-        expect(scene._meshAuxDisposables.has(mesh)).toBe(false);
         override.fail();
         task.record();
         expect(task._renderables).toEqual([override.built[1]!.renderable]);
@@ -601,13 +592,13 @@ describe("render task mesh refresh", () => {
         const f = createTransactionFixture();
         f.task.record();
         const retained = overrideMaterial();
-        f.task.addMesh(f.meshes[0]!, { material: retained.material });
+        addMeshToTask(f.task, f.meshes[0]!, { material: retained.material });
         const live = retained.built[0]!;
         expect(f.task._renderables).toContain(live.renderable);
         const previous = currentGeneration(f.task);
         const next = overrideMaterial();
         next.fail("bind");
-        expect(() => f.task.addMesh(f.meshes[1]!, { material: next.material })).toThrow("override binding failed");
+        expect(() => addMeshToTask(f.task, f.meshes[1]!, { material: next.material })).toThrow("override binding failed");
         expect(currentGeneration(f.task)).toEqual(previous);
         expect(f.task._pendingMeshes).toHaveLength(1);
         expect(live.dispose).not.toHaveBeenCalled();

@@ -2,12 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
-import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import { acquireTexture, releaseTexture, _textureOwners } from "../../../packages/babylon-lite/src/resource/gpu-pool";
-import { createRenderTargetTexture, disposeRenderTargetTexture, onRenderTargetTextureResize } from "../../../packages/babylon-lite/src/texture/rtt";
+import { createRenderTargetTexture, disposeRenderTargetTexture } from "../../../packages/babylon-lite/src/texture/rtt";
+import { withSampledDepthTexture } from "../../../packages/babylon-lite/src/texture/rtt-depth";
 import { createRenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
 import { createSceneContext, disposeScene } from "../../../packages/babylon-lite/src/scene/scene-core";
-import { cloneTexture2D, type Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
+import { cloneTexture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
 
 const gpuGlobals = globalThis as unknown as Omit<typeof globalThis, "GPUTextureUsage"> & {
     GPUTextureUsage?: Record<string, number>;
@@ -41,109 +41,175 @@ function makeEngine(): EngineContext {
 }
 
 describe("createRenderTargetTexture", () => {
-    it.each(["color", "depth", "depth-only"] as const)("keeps %s clones on the current allocation across repeated resizes", (kind) => {
+    it("shares ownership callbacks without sharing target lifetimes", () => {
         const engine = makeEngine();
-        const result = createRenderTargetTexture(engine, {
-            format: kind === "depth-only" ? undefined : "rgba8unorm",
-            dFormat: "depth32float",
-            samples: 1,
-            size: engine,
-        });
-        const base = kind === "color" ? result.texture : result.depthTexture!;
-        const first = cloneTexture2D(base, { uScale: 2, uOffset: 0.25 });
-        const nested = cloneTexture2D(first, { uScale: 3, vOffset: 0.5 });
-        const unowned = cloneTexture2D(nested, { vScale: 4 });
-        acquireTexture(base);
-        acquireTexture(first);
-        acquireTexture(nested);
-        const resized = vi.fn(() => {
-            for (const clone of [first, nested, unowned]) {
-                expect(clone.texture).toBe(base.texture);
-                expect(clone.view).toBe(base.view);
-                expect(clone.width).toBe(engine.canvas.width);
-                expect(clone.height).toBe(engine.canvas.height);
-            }
-        });
-        onRenderTargetTextureResize(result, resized);
-        for (let index = 0; index < 3; index++) {
-            const old = base.texture;
-            engine.canvas.width += 8;
-            engine.canvas.height += 4;
-            buildRenderTarget(result.rt, engine);
-            expect(_textureOwners(nested)).toBe(index === 0 ? 4 : 3);
-            if (index === 0) {
-                releaseTexture(first);
-            }
-            disposeGpuResourceRetirements(engine);
-            expect(old.destroy).toHaveBeenCalledOnce();
-        }
-        expect(resized).toHaveBeenCalledTimes(3);
-        first.uScale = 5;
-        base.uOffset = 0.75;
-        expect(nested.uScale).toBe(3);
-        expect(nested.uOffset).toBe(0.25);
-        expect(first.uOffset).toBe(0.25);
-        expect(base.uScale).toBeUndefined();
-        expect(unowned.vScale).toBe(4);
-        const current = nested.texture;
-        disposeRenderTargetTexture(result);
-        expect(current.destroy).not.toHaveBeenCalled();
-        releaseTexture(base);
-        releaseTexture(nested);
-        expect(current.destroy).toHaveBeenCalledOnce();
-        expect(_textureOwners(nested)).toBe(0);
+        const descriptor = { format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: { width: 8, height: 8 } } as const;
+        const first = createRenderTargetTexture(engine, descriptor);
+        const second = createRenderTargetTexture(engine, descriptor);
+        expect(first.rt._disposeAttachments).toBe(second.rt._disposeAttachments);
+        expect(first.rt._syncEager).toBe(second.rt._syncEager);
+
+        disposeRenderTargetTexture(first);
+
+        expect(first.rt._disposed).toBe(true);
+        expect(second.rt._disposed).toBeUndefined();
+        expect(() => buildRenderTarget(first.rt, engine)).toThrow(/disposed/);
+        expect(() => buildRenderTarget(second.rt, engine)).not.toThrow();
+        expect(second.texture.texture.destroy).not.toHaveBeenCalled();
+        disposeRenderTargetTexture(second);
     });
 
-    it("keeps all clone generations unchanged when replacement allocation fails", () => {
+    it.each([false, true])("detaches attachments before reentrant disposal (sampled: %s)", (sampled) => {
         const engine = makeEngine();
-        const result = createRenderTargetTexture(engine, { format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: engine });
-        const clone = cloneTexture2D(result.texture, { uScale: 2 });
-        acquireTexture(clone);
-        const old = clone.texture;
-        const view = clone.view;
-        const width = clone.width;
-        vi.mocked(engine._device.createTexture).mockImplementationOnce(() => {
-            throw new Error("allocation failed");
+        const descriptor = { format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: { width: 8, height: 8 } } as const;
+        const rt = sampled ? createRenderTargetTexture(engine, descriptor).rt : createRenderTarget(descriptor);
+        buildRenderTarget(rt, engine);
+        const color = rt._colorTexture!;
+        const depth = rt._depthTexture!;
+        vi.mocked(color.destroy).mockImplementationOnce(() => {
+            expect(rt._colorTexture).toBeNull();
+            expect(rt._depthTexture).toBeNull();
+            disposeRenderTarget(rt);
         });
-        engine.canvas.width += 4;
-        expect(() => buildRenderTarget(result.rt, engine)).toThrow("allocation failed");
-        expect(clone.texture).toBe(old);
-        expect(clone.view).toBe(view);
-        expect(clone.width).toBe(width);
-        expect(_textureOwners(clone)).toBe(2);
-        buildRenderTarget(result.rt, engine);
-        expect(clone.texture).toBe(result.texture.texture);
-        expect(clone.texture).not.toBe(old);
-        disposeGpuResourceRetirements(engine);
-        disposeRenderTargetTexture(result);
-        releaseTexture(clone);
-        expect(old.destroy).toHaveBeenCalledOnce();
+
+        disposeRenderTarget(rt);
+
+        expect(color.destroy).toHaveBeenCalledOnce();
+        expect(depth.destroy).toHaveBeenCalledOnce();
     });
 
-    it("retains snapshot behavior for ordinary texture clones even after RTT support is installed", () => {
+    it.each([false, true])("detaches attachments after a failed release (sampled: %s)", (sampled) => {
         const engine = makeEngine();
-        const rtt = createRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: engine });
-        const gpu = engine._device.createTexture({ size: [4, 4], format: "rgba8unorm", usage: GPUTextureUsage.TEXTURE_BINDING });
-        const base: Texture2D = { texture: gpu, view: gpu.createView(), sampler: engine._device.createSampler(), width: 4, height: 4 };
-        const clone = cloneTexture2D(base, { uScale: 2 });
-        const view = clone.view;
-        base.texture = rtt.texture.texture;
-        base.view = rtt.texture.view;
-        base.width = 64;
-        expect(clone.texture).toBe(gpu);
-        expect(clone.view).toBe(view);
-        expect(clone.width).toBe(4);
-        disposeRenderTargetTexture(rtt);
-        gpu.destroy();
+        const descriptor = { format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: { width: 8, height: 8 } } as const;
+        const rt = sampled ? createRenderTargetTexture(engine, descriptor).rt : createRenderTarget(descriptor);
+        buildRenderTarget(rt, engine);
+        const color = rt._colorTexture!;
+        const depth = rt._depthTexture!;
+        const failure = new Error("release failed");
+        vi.mocked(color.destroy).mockImplementation(() => {
+            throw failure;
+        });
+
+        expect(() => disposeRenderTarget(rt)).toThrow(failure);
+        expect(rt._colorTexture).toBeNull();
+        expect(rt._depthTexture).toBeNull();
+        expect(rt._colorView).toBeNull();
+        expect(rt._depthView).toBeNull();
+        expect(rt._width).toBe(0);
+        expect(rt._height).toBe(0);
+        expect(() => disposeRenderTarget(rt)).not.toThrow();
+        expect(color.destroy).toHaveBeenCalledOnce();
+        expect(depth.destroy).toHaveBeenCalledOnce();
     });
 
-    it("keeps writer attachments alive when the final sampled consumer is released", () => {
+    it("detaches ordinary borrowed depth without destroying its allocation", () => {
+        const engine = makeEngine();
+        const rt = createRenderTarget({ format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: { width: 8, height: 8 } });
+        buildRenderTarget(rt, engine);
+        const color = rt._colorTexture!;
+        const depth = rt._depthTexture!;
+        rt._ownsDepthTexture = false;
+
+        disposeRenderTarget(rt);
+
+        expect(color.destroy).toHaveBeenCalledOnce();
+        expect(depth.destroy).not.toHaveBeenCalled();
+        expect(rt._depthTexture).toBeNull();
+        expect(rt._depthView).toBeNull();
+        expect(rt._width).toBe(0);
+        expect(rt._height).toBe(0);
+    });
+
+    it("owns depth-test attachments without opting into sampled depth", () => {
         const result = createRenderTargetTexture(makeEngine(), {
             format: "rgba8unorm",
             dFormat: "depth32float",
             samples: 1,
             size: { width: 8, height: 8 },
         });
+        const depth = result.rt._depthTexture!;
+        expect(result.depthTexture).toBeNull();
+        expect(depth.createView).toHaveBeenCalledOnce();
+        disposeRenderTargetTexture(result);
+        expect(depth.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("rejects sampled depth without a depth attachment and cleans up its allocation", () => {
+        const engine = makeEngine();
+        expect(() =>
+            createRenderTargetTexture(
+                engine,
+                {
+                    format: "rgba8unorm",
+                    samples: 1,
+                    size: { width: 8, height: 8 },
+                },
+                withSampledDepthTexture
+            )
+        ).toThrow(/requires a render target with a depth attachment/);
+        const texture = vi.mocked(engine._device.createTexture).mock.results[0]!.value as GPUTexture;
+        expect(texture.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("rejects surface-sized descriptors before allocating", () => {
+        const engine = makeEngine();
+        expect(() => createRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: engine })).toThrow(
+            /descriptor\.size must be fixed.*createSurfaceRenderTargetTexture/
+        );
+        expect(engine._device.createTexture).not.toHaveBeenCalled();
+    });
+
+    it("keeps fixed clones as ordinary snapshots", () => {
+        const engine = makeEngine();
+        const result = createRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: { width: 8, height: 8 } });
+        const clone = cloneTexture2D(result.texture, { uScale: 2 });
+        const texture = result.texture.texture;
+        const view = result.texture.view;
+        const replacement = engine._device.createTexture({ size: [16, 16], format: "rgba8unorm", usage: GPUTextureUsage.TEXTURE_BINDING });
+        const replacementView = replacement.createView();
+        expect(Object.getOwnPropertyDescriptor(result.texture, "texture")?.get).toBeUndefined();
+        result.texture.texture = replacement;
+        result.texture.view = replacementView;
+        result.texture.width = 16;
+        expect(clone.texture).toBe(texture);
+        expect(clone.view).toBe(view);
+        expect(clone.width).toBe(8);
+        result.texture.texture = texture;
+        result.texture.view = view;
+        result.texture.width = 8;
+        replacement.destroy();
+        disposeRenderTargetTexture(result);
+    });
+
+    it("cleans partial fixed allocations while preserving the allocation error", () => {
+        const engine = makeEngine();
+        const createTexture = vi.mocked(engine._device.createTexture);
+        const allocate = createTexture.getMockImplementation()!;
+        createTexture.mockImplementationOnce(allocate).mockImplementationOnce(() => {
+            throw new Error("depth allocation failed");
+        });
+        expect(() =>
+            createRenderTargetTexture(engine, {
+                format: "rgba8unorm",
+                dFormat: "depth32float",
+                samples: 1,
+                size: { width: 8, height: 8 },
+            })
+        ).toThrow("depth allocation failed");
+        expect((createTexture.mock.results[0]!.value as GPUTexture).destroy).toHaveBeenCalledOnce();
+    });
+
+    it("keeps writer attachments alive when the final sampled consumer is released", () => {
+        const result = createRenderTargetTexture(
+            makeEngine(),
+            {
+                format: "rgba8unorm",
+                dFormat: "depth32float",
+                samples: 1,
+                size: { width: 8, height: 8 },
+            },
+            withSampledDepthTexture
+        );
         for (const facade of [result.texture, result.depthTexture!]) {
             expect(_textureOwners(facade)).toBe(1);
             acquireTexture(facade);
@@ -161,12 +227,16 @@ describe("createRenderTargetTexture", () => {
     it("releases unsampled color while a depth sampler retains the last image after task disposal", () => {
         const engine = makeEngine();
         const scene = createSceneContext(engine, { defaultRenderTask: false });
-        const result = createRenderTargetTexture(engine, {
-            format: "rgba8unorm",
-            dFormat: "depth32float",
-            samples: 1,
-            size: { width: 8, height: 8 },
-        });
+        const result = createRenderTargetTexture(
+            engine,
+            {
+                format: "rgba8unorm",
+                dFormat: "depth32float",
+                samples: 1,
+                size: { width: 8, height: 8 },
+            },
+            withSampledDepthTexture
+        );
         acquireTexture(result.depthTexture!);
         const task = createRenderTask({ name: "writer", rt: result.rt, autoMirror: false }, engine, scene);
         task.dispose();
@@ -181,12 +251,16 @@ describe("createRenderTargetTexture", () => {
     it("does not dispose shared targets or borrowed eager depth with a borrower task", () => {
         const engine = makeEngine();
         const scene = createSceneContext(engine, { defaultRenderTask: false });
-        const result = createRenderTargetTexture(engine, {
-            format: "rgba8unorm",
-            dFormat: "depth32float",
-            samples: 1,
-            size: { width: 8, height: 8 },
-        });
+        const result = createRenderTargetTexture(
+            engine,
+            {
+                format: "rgba8unorm",
+                dFormat: "depth32float",
+                samples: 1,
+                size: { width: 8, height: 8 },
+            },
+            withSampledDepthTexture
+        );
         createRenderTask({ name: "overlay", rt: result.rt, sharedRt: true }, engine, scene).dispose();
         const color = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 8, height: 8 } });
         createRenderTask({ name: "depth borrower", rt: color, depth: result.rt }, engine, scene).dispose();
@@ -206,12 +280,16 @@ describe("createRenderTargetTexture", () => {
     });
 
     it("exposes color and depth attachments from one eager render target", () => {
-        const result = createRenderTargetTexture(makeEngine(), {
-            format: "rgba8unorm",
-            dFormat: "depth32float",
-            samples: 1,
-            size: { width: 64, height: 32 },
-        });
+        const result = createRenderTargetTexture(
+            makeEngine(),
+            {
+                format: "rgba8unorm",
+                dFormat: "depth32float",
+                samples: 1,
+                size: { width: 64, height: 32 },
+            },
+            withSampledDepthTexture
+        );
 
         expect(result.texture.texture).toBe(result.rt._colorTexture);
         expect(result.depthTexture?.texture).toBe(result.rt._depthTexture);
@@ -219,92 +297,36 @@ describe("createRenderTargetTexture", () => {
         expect(result.depthTexture?.invertY).toBe(false);
     });
 
-    it("returns the depth facade as the primary texture for a depth-only target", () => {
-        const result = createRenderTargetTexture(makeEngine(), {
-            dFormat: "depth32float",
-            samples: 1,
-            size: { width: 16, height: 16 },
-        });
+    it("rejects depth-only targets without the explicit helper before allocating", () => {
+        const engine = makeEngine();
+        expect(() =>
+            createRenderTargetTexture(engine, {
+                dFormat: "depth32float",
+                samples: 1,
+                size: { width: 16, height: 16 },
+            })
+        ).toThrow(/Depth-only.*withSampledDepthTexture/);
+        expect(engine._device.createTexture).not.toHaveBeenCalled();
+    });
+
+    it("returns explicit sampled depth as the primary texture for a depth-only target", () => {
+        const result = createRenderTargetTexture(
+            makeEngine(),
+            {
+                dFormat: "depth32float",
+                samples: 1,
+                size: { width: 16, height: 16 },
+            },
+            withSampledDepthTexture
+        );
 
         expect(result.texture).toBe(result.depthTexture);
-    });
-
-    it("resizes a surface-sized eager target while preserving sampled facade identity", () => {
-        const engine = makeEngine();
-        const result = createRenderTargetTexture(engine, {
-            dFormat: "depth32float",
-            samples: 1,
-            size: engine,
-        });
-        const facade = result.depthTexture!;
-        const oldTexture = facade.texture;
-        const resized = vi.fn();
-        onRenderTargetTextureResize(result, resized);
-        acquireTexture(facade);
-        engine.canvas.width = 128;
-        engine.canvas.height = 96;
-
-        buildRenderTarget(result.rt, engine);
-
-        expect(result.depthTexture).toBe(facade);
-        expect(facade.texture).not.toBe(oldTexture);
-        expect(facade.width).toBe(128);
-        expect(facade.height).toBe(96);
-        expect(resized).toHaveBeenCalledOnce();
-        expect(oldTexture.destroy as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
-        disposeGpuResourceRetirements(engine);
-        expect(oldTexture.destroy as ReturnType<typeof vi.fn>).toHaveBeenCalledOnce();
-
-        const resizedTexture = facade.texture;
-        engine._device = makeEngine()._device;
-        buildRenderTarget(result.rt, engine);
-        expect(facade.texture).not.toBe(resizedTexture);
-        expect(resized).toHaveBeenCalledTimes(2);
-    });
-
-    it("transfers writer and sampler references across repeated resizes and final disposal", () => {
-        const engine = makeEngine();
-        const result = createRenderTargetTexture(engine, { format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: engine });
-        acquireTexture(result.depthTexture!);
-        for (let index = 0; index < 3; index++) {
-            const oldColor = result.texture.texture;
-            const oldDepth = result.depthTexture!.texture;
-            engine.canvas.width += 8;
-            buildRenderTarget(result.rt, engine);
-            expect(_textureOwners(result.texture)).toBe(1);
-            expect(_textureOwners(result.depthTexture!)).toBe(2);
-            disposeGpuResourceRetirements(engine);
-            expect(oldColor.destroy).toHaveBeenCalledOnce();
-            expect(oldDepth.destroy).toHaveBeenCalledOnce();
-        }
-        disposeRenderTarget(result.rt);
-        expect(result.texture.texture.destroy).toHaveBeenCalledOnce();
-        expect(result.depthTexture!.texture.destroy).not.toHaveBeenCalled();
-        releaseTexture(result.depthTexture!);
-        expect(result.depthTexture!.texture.destroy).toHaveBeenCalledOnce();
-    });
-
-    it("preserves the old target and references if replacement allocation fails", () => {
-        const engine = makeEngine();
-        const result = createRenderTargetTexture(engine, { format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: engine });
-        const oldColor = result.texture.texture;
-        const oldDepth = result.depthTexture!.texture;
-        const createTexture = vi.mocked(engine._device.createTexture);
-        const allocate = createTexture.getMockImplementation()!;
-        createTexture.mockImplementationOnce(allocate).mockImplementationOnce(() => {
-            throw new Error("depth allocation failed");
-        });
-        engine.canvas.width += 8;
-        expect(() => buildRenderTarget(result.rt, engine)).toThrow("depth allocation failed");
-        expect(result.rt._colorTexture).toBe(oldColor);
-        expect(result.rt._depthTexture).toBe(oldDepth);
+        expect(result.texture.texture).toBe(result.rt._depthTexture);
+        expect(result.texture._sampleType).toBe("depth");
+        expect(result.texture.invertY).toBe(false);
+        expect(result.rt._depthTexture?.createView).toHaveBeenCalledWith({ aspect: "depth-only" });
         expect(_textureOwners(result.texture)).toBe(1);
-        expect(_textureOwners(result.depthTexture!)).toBe(1);
-        expect(oldColor.destroy).not.toHaveBeenCalled();
-        expect(oldDepth.destroy).not.toHaveBeenCalled();
-        expect((createTexture.mock.results[2]!.value as GPUTexture).destroy).toHaveBeenCalledOnce();
-        buildRenderTarget(result.rt, engine);
-        disposeGpuResourceRetirements(engine);
         disposeRenderTargetTexture(result);
+        expect(result.texture.texture.destroy).toHaveBeenCalledOnce();
     });
 });

@@ -16,16 +16,12 @@ import type { PbrExt } from "../pbr/pbr-flags.js";
 import type { PbrMaterialProps } from "../pbr/pbr-material.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { MaterialPlugin } from "./material-plugin.js";
-import { bindPluginTextures, buildPluginFragment, enabledPlugins, pluginSignature, writePluginUbo } from "./plugin-bridge-shared.js";
-
-interface PluginEntry {
-    readonly _fragment: ShaderFragment;
-}
+import { bindPluginTextures, buildPluginFragment, collectPluginTextures, enabledPlugins, pluginSignature, writePluginUbo } from "./plugin-bridge-shared.js";
 
 // Shader identities outlive scene registration and device changes. Keep only
 // immutable fragment data here, never material instances or their callbacks.
 let _sigToIndex: Map<string, number> | null = null;
-let _indexToEntry: Map<number, PluginEntry> | null = null;
+let _indexToFragment: ShaderFragment[] | null = null;
 let _counter = 0;
 
 function _indexFor(plugins: readonly MaterialPlugin[]): number {
@@ -35,7 +31,7 @@ function _indexFor(plugins: readonly MaterialPlugin[]): number {
     if (idx === undefined) {
         idx = _counter + 1;
         const fragment = buildPluginFragment(plugins, idx, false)._fragment;
-        (_indexToEntry ??= new Map()).set(idx, { _fragment: fragment });
+        (_indexToFragment ??= [])[idx] = fragment;
         map.set(sig, idx);
         _counter = idx;
     }
@@ -57,7 +53,7 @@ const pbrPluginExt: PbrExt = {
         if (!idx) {
             return null;
         }
-        const fragment = _indexToEntry?.get(idx)?._fragment;
+        const fragment = _indexToFragment?.[idx];
         if (!fragment) {
             throw new Error("PBR material plugin signature is not registered.");
         }
@@ -78,9 +74,7 @@ const pbrPluginExt: PbrExt = {
         if (!plugins?.length) {
             return;
         }
-        for (const p of plugins) {
-            p.getActiveTextures?.(out);
-        }
+        collectPluginTextures(plugins, out);
     },
 };
 

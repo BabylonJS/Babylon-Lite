@@ -7,7 +7,7 @@ import type { Material, MaterialView } from "../material/material.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { SpotLight } from "../light/spot-light.js";
-import { createRenderTask, type RenderTask } from "../frame-graph/render-task.js";
+import { addMeshToTask, createRenderTask, type RenderTask } from "../frame-graph/render-task.js";
 import { casterVersionSum, createShadowCamera, createShadowRenderTarget, updateShadowCameraBase, writeShadowUboFields } from "./shadow-base.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
@@ -29,8 +29,6 @@ export interface PcfTaskState extends ShadowTaskInternalState {
     _task: RenderTask;
     /** @internal */
     _camera: Camera;
-    /** @internal */
-    _cameraVersion: number;
     /** @internal */
     _lastCasterVersion: number;
     /** @internal */
@@ -153,7 +151,6 @@ export function ensurePcfShadowTaskState(
             scene
         ),
         _camera: camera,
-        _cameraVersion: 0,
         _lastCasterVersion: -1,
         _lastLightVersion: -1,
         _lastFoVersion: -1,
@@ -170,7 +167,7 @@ export function ensurePcfShadowTaskState(
         casterMaterials.push(terminal);
         casterMatGens.push(terminal?._csmGen ?? 0);
         if (material) {
-            state._task.addMesh(mesh, { material: getNoColorView(material, materialViews) });
+            addMeshToTask(state._task, mesh, { material: getNoColorView(material, materialViews) });
         }
     }
 
@@ -237,9 +234,9 @@ export function renderPcfShadowMap(
 }
 
 function updateShadowCamera(state: PcfTaskState, sg: ShadowGenerator, matrix: PcfLightMatrix): void {
-    state._cameraVersion++;
-    state._camera.fov = sg._light.lightType === "spot" ? (sg._light as SpotLight).angle : 1;
-    updateShadowCameraBase(state._camera, state._cameraVersion, matrix._near, matrix._far, matrix._view, biasViewProjection(matrix._viewProj, sg._config._bias));
+    const camera = state._camera;
+    camera.fov = sg._light.lightType === "spot" ? (sg._light as SpotLight).angle : 1;
+    updateShadowCameraBase(camera, camera.worldMatrixVersion + 1, matrix._near, matrix._far, matrix._view, biasViewProjection(matrix._viewProj, sg._config._bias));
 }
 
 function biasViewProjection(viewProj: Float32Array, bias: number): Float32Array {

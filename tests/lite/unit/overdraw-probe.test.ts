@@ -132,10 +132,15 @@ describe("render-task overdraw probe", () => {
         const task = {
             _config: { rt: colorTarget, depth: depthTarget, cam: camera },
             _targetSignature: { _colorFormat: "rgba8unorm", _depthStencilFormat: "depth32float", _sampleCount: 1 },
+            _renderables: [],
             _opaqueBindings: [far, hidden, near],
             _directBindings: [direct],
             _transparentBindings: [transparent],
+            _ob: [],
+            _lastVersion: 0,
+            _lastVis: 0,
             _sceneBG: {},
+            _updateContext: { targetWidth: 64, targetHeight: 32 },
             scene: { camera: null },
         } as unknown as RenderTask;
 

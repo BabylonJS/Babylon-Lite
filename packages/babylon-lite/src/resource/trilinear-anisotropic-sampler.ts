@@ -1,5 +1,5 @@
 import type { EngineContext } from "../engine/engine.js";
-import { getOrCreateSampler } from "./gpu-pool.js";
+import { getOrCreateSampler } from "./sampler-pool.js";
 
 const _trilinearAnisotropicDesc: GPUSamplerDescriptor = {
     magFilter: "linear",

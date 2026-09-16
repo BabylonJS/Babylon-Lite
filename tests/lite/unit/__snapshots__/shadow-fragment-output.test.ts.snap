@@ -1,0 +1,863 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`PBR shadow fragment exact output > empty 1`] = `
+{
+  "_bindings": [],
+  "_fragmentSlots": undefined,
+  "_helperFunctions": "",
+  "_id": "pbr-shadow",
+  "_varyings": [],
+  "_vertexHelperFunctions": "",
+  "_vertexSlots": {
+    "VB": "",
+  },
+}
+`;
+
+exports[`PBR shadow fragment exact output > esm 1`] = `
+{
+  "_bindings": [
+    {
+      "_group": "shadow",
+      "_name": "shadowTex_0",
+      "_type": {
+        "_kind": "texture",
+        "_textureType": "texture_2d<f32>",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowSamp_0",
+      "_type": {
+        "_kind": "sampler",
+        "_samplerType": "sampler",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowInfo_0",
+      "_type": {
+        "_kind": "uniform-buffer",
+      },
+      "_visibility": 3,
+    },
+  ],
+  "_fragmentSlots": {
+    "AS": "shadowFactors[0] = computeShadowESM_0(input.vPosFromLight_0, input.vDepthMetric_0, shadowInfo_0.shadowsInfo.x, shadowInfo_0.shadowsInfo.z, shadowInfo_0.shadowsInfo.w);",
+  },
+  "_helperFunctions": "struct shadowInfo_0Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };
+
+fn computeFallOff_0(value: f32, clipSpace: vec2<f32>, frustumEdgeFalloff: f32) -> f32 {
+let mask = smoothstep(1.0 - frustumEdgeFalloff, 1.00000012, clamp(dot(clipSpace, clipSpace), 0.0, 1.0));
+return mix(value, 1.0, mask);
+}
+fn computeShadowESM_0(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, depthScale: f32, frustumEdgeFalloff: f32) -> f32 {
+let clipSpace = posFromLight.xyz / posFromLight.w;
+let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
+if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
+let shadowPixelDepth = clamp(depthMetric, 0.0, 1.0);
+let shadowMapSample = textureSampleLevel(shadowTex_0, shadowSamp_0, uv, 0.0).x;
+let esm = 1.0 - clamp(exp(min(87.0, depthScale * shadowPixelDepth)) * shadowMapSample, 0.0, 1.0 - darkness);
+return computeFallOff_0(esm, clipSpace.xy, frustumEdgeFalloff);
+}",
+  "_id": "pbr-shadow",
+  "_varyings": [
+    {
+      "_name": "vPosFromLight_0",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_0",
+      "_type": "f32",
+    },
+  ],
+  "_vertexHelperFunctions": "struct shadowInfo_0Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };",
+  "_vertexSlots": {
+    "VB": "out.vPosFromLight_0 = shadowInfo_0.lightMatrix * worldPos4;
+out.vDepthMetric_0 = (out.vPosFromLight_0.z + shadowInfo_0.depthValues.x) / shadowInfo_0.depthValues.y;",
+  },
+}
+`;
+
+exports[`PBR shadow fragment exact output > mixed 1`] = `
+{
+  "_bindings": [
+    {
+      "_group": "shadow",
+      "_name": "shadowTex_0",
+      "_type": {
+        "_kind": "texture",
+        "_textureType": "texture_2d<f32>",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowSamp_0",
+      "_type": {
+        "_kind": "sampler",
+        "_samplerType": "sampler",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowInfo_0",
+      "_type": {
+        "_kind": "uniform-buffer",
+      },
+      "_visibility": 3,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowTex_1",
+      "_type": {
+        "_kind": "texture",
+        "_sampleType": "depth",
+        "_textureType": "texture_depth_2d",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowComp_1",
+      "_type": {
+        "_kind": "sampler",
+        "_samplerType": "sampler_comparison",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowInfo_1",
+      "_type": {
+        "_kind": "uniform-buffer",
+      },
+      "_visibility": 3,
+    },
+  ],
+  "_fragmentSlots": {
+    "AS": "shadowFactors[0] = computeShadowESM_0(input.vPosFromLight_0, input.vDepthMetric_0, shadowInfo_0.shadowsInfo.x, shadowInfo_0.shadowsInfo.z, shadowInfo_0.shadowsInfo.w);
+shadowFactors[1] = computeShadowPCF_1(input.vPosFromLight_1, input.vDepthMetric_1, shadowInfo_1.shadowsInfo.x, shadowInfo_1.shadowsInfo.y, shadowInfo_1.shadowsInfo.z);",
+  },
+  "_helperFunctions": "struct shadowInfo_0Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };
+
+fn computeFallOff_0(value: f32, clipSpace: vec2<f32>, frustumEdgeFalloff: f32) -> f32 {
+let mask = smoothstep(1.0 - frustumEdgeFalloff, 1.00000012, clamp(dot(clipSpace, clipSpace), 0.0, 1.0));
+return mix(value, 1.0, mask);
+}
+fn computeShadowESM_0(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, depthScale: f32, frustumEdgeFalloff: f32) -> f32 {
+let clipSpace = posFromLight.xyz / posFromLight.w;
+let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
+if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
+let shadowPixelDepth = clamp(depthMetric, 0.0, 1.0);
+let shadowMapSample = textureSampleLevel(shadowTex_0, shadowSamp_0, uv, 0.0).x;
+let esm = 1.0 - clamp(exp(min(87.0, depthScale * shadowPixelDepth)) * shadowMapSample, 0.0, 1.0 - darkness);
+return computeFallOff_0(esm, clipSpace.xy, frustumEdgeFalloff);
+}
+struct shadowInfo_1Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };
+
+fn computeShadowPCF_1(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, mapSz: f32, invMapSz: f32) -> f32 {
+let clipSpace = posFromLight.xyz / posFromLight.w;
+let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
+if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
+let depthRef = clamp(clipSpace.z, 0.0, 1.0);
+var tc = uv * mapSz + 0.5;
+let st = fract(tc);
+let base = (floor(tc) - 0.5) * invMapSz;
+let uvw0 = 4.0 - 3.0 * st;
+let uvw1 = vec2<f32>(7.0);
+let uvw2 = 1.0 + 3.0 * st;
+let u = vec3<f32>((3.0 - 2.0 * st.x) / uvw0.x - 2.0, (3.0 + st.x) / uvw1.x, st.x / uvw2.x + 2.0) * invMapSz;
+let v = vec3<f32>((3.0 - 2.0 * st.y) / uvw0.y - 2.0, (3.0 + st.y) / uvw1.y, st.y / uvw2.y + 2.0) * invMapSz;
+var sh = 0.0;
+sh += uvw0.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[0]), depthRef);
+sh += uvw1.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[0]), depthRef);
+sh += uvw2.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[0]), depthRef);
+sh += uvw0.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[1]), depthRef);
+sh += uvw1.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[1]), depthRef);
+sh += uvw2.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[1]), depthRef);
+sh += uvw0.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[2]), depthRef);
+sh += uvw1.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[2]), depthRef);
+sh += uvw2.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[2]), depthRef);
+sh /= 144.0;
+return mix(darkness, 1.0, sh);
+}",
+  "_id": "pbr-shadow",
+  "_varyings": [
+    {
+      "_name": "vPosFromLight_0",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_0",
+      "_type": "f32",
+    },
+    {
+      "_name": "vPosFromLight_1",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_1",
+      "_type": "f32",
+    },
+  ],
+  "_vertexHelperFunctions": "struct shadowInfo_0Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };
+struct shadowInfo_1Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };",
+  "_vertexSlots": {
+    "VB": "out.vPosFromLight_0 = shadowInfo_0.lightMatrix * worldPos4;
+out.vDepthMetric_0 = (out.vPosFromLight_0.z + shadowInfo_0.depthValues.x) / shadowInfo_0.depthValues.y;
+out.vPosFromLight_1 = shadowInfo_1.lightMatrix * worldPos4;
+out.vDepthMetric_1 = (out.vPosFromLight_1.z + shadowInfo_1.depthValues.x) / shadowInfo_1.depthValues.y;",
+  },
+}
+`;
+
+exports[`PBR shadow fragment exact output > non-contiguous 1`] = `
+{
+  "_bindings": [
+    {
+      "_group": "shadow",
+      "_name": "shadowTex_1",
+      "_type": {
+        "_kind": "texture",
+        "_sampleType": "depth",
+        "_textureType": "texture_depth_2d",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowComp_1",
+      "_type": {
+        "_kind": "sampler",
+        "_samplerType": "sampler_comparison",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowInfo_1",
+      "_type": {
+        "_kind": "uniform-buffer",
+      },
+      "_visibility": 3,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowTex_4",
+      "_type": {
+        "_kind": "texture",
+        "_textureType": "texture_2d<f32>",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowSamp_4",
+      "_type": {
+        "_kind": "sampler",
+        "_samplerType": "sampler",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowInfo_4",
+      "_type": {
+        "_kind": "uniform-buffer",
+      },
+      "_visibility": 3,
+    },
+  ],
+  "_fragmentSlots": {
+    "AS": "shadowFactors[1] = computeShadowPCF_1(input.vPosFromLight_1, input.vDepthMetric_1, shadowInfo_1.shadowsInfo.x, shadowInfo_1.shadowsInfo.y, shadowInfo_1.shadowsInfo.z);
+shadowFactors[4] = computeShadowESM_4(input.vPosFromLight_4, input.vDepthMetric_4, shadowInfo_4.shadowsInfo.x, shadowInfo_4.shadowsInfo.z, shadowInfo_4.shadowsInfo.w);",
+  },
+  "_helperFunctions": "struct shadowInfo_1Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };
+
+fn computeShadowPCF_1(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, mapSz: f32, invMapSz: f32) -> f32 {
+let clipSpace = posFromLight.xyz / posFromLight.w;
+let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
+if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
+let depthRef = clamp(clipSpace.z, 0.0, 1.0);
+var tc = uv * mapSz + 0.5;
+let st = fract(tc);
+let base = (floor(tc) - 0.5) * invMapSz;
+let uvw0 = 4.0 - 3.0 * st;
+let uvw1 = vec2<f32>(7.0);
+let uvw2 = 1.0 + 3.0 * st;
+let u = vec3<f32>((3.0 - 2.0 * st.x) / uvw0.x - 2.0, (3.0 + st.x) / uvw1.x, st.x / uvw2.x + 2.0) * invMapSz;
+let v = vec3<f32>((3.0 - 2.0 * st.y) / uvw0.y - 2.0, (3.0 + st.y) / uvw1.y, st.y / uvw2.y + 2.0) * invMapSz;
+var sh = 0.0;
+sh += uvw0.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[0]), depthRef);
+sh += uvw1.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[0]), depthRef);
+sh += uvw2.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[0]), depthRef);
+sh += uvw0.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[1]), depthRef);
+sh += uvw1.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[1]), depthRef);
+sh += uvw2.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[1]), depthRef);
+sh += uvw0.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[2]), depthRef);
+sh += uvw1.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[2]), depthRef);
+sh += uvw2.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[2]), depthRef);
+sh /= 144.0;
+return mix(darkness, 1.0, sh);
+}
+struct shadowInfo_4Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };
+
+fn computeFallOff_4(value: f32, clipSpace: vec2<f32>, frustumEdgeFalloff: f32) -> f32 {
+let mask = smoothstep(1.0 - frustumEdgeFalloff, 1.00000012, clamp(dot(clipSpace, clipSpace), 0.0, 1.0));
+return mix(value, 1.0, mask);
+}
+fn computeShadowESM_4(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, depthScale: f32, frustumEdgeFalloff: f32) -> f32 {
+let clipSpace = posFromLight.xyz / posFromLight.w;
+let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
+if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
+let shadowPixelDepth = clamp(depthMetric, 0.0, 1.0);
+let shadowMapSample = textureSampleLevel(shadowTex_4, shadowSamp_4, uv, 0.0).x;
+let esm = 1.0 - clamp(exp(min(87.0, depthScale * shadowPixelDepth)) * shadowMapSample, 0.0, 1.0 - darkness);
+return computeFallOff_4(esm, clipSpace.xy, frustumEdgeFalloff);
+}",
+  "_id": "pbr-shadow",
+  "_varyings": [
+    {
+      "_name": "vPosFromLight_1",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_1",
+      "_type": "f32",
+    },
+    {
+      "_name": "vPosFromLight_4",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_4",
+      "_type": "f32",
+    },
+  ],
+  "_vertexHelperFunctions": "struct shadowInfo_1Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };
+struct shadowInfo_4Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };",
+  "_vertexSlots": {
+    "VB": "out.vPosFromLight_1 = shadowInfo_1.lightMatrix * worldPos4;
+out.vDepthMetric_1 = (out.vPosFromLight_1.z + shadowInfo_1.depthValues.x) / shadowInfo_1.depthValues.y;
+out.vPosFromLight_4 = shadowInfo_4.lightMatrix * worldPos4;
+out.vDepthMetric_4 = (out.vPosFromLight_4.z + shadowInfo_4.depthValues.x) / shadowInfo_4.depthValues.y;",
+  },
+}
+`;
+
+exports[`PBR shadow fragment exact output > pcf 1`] = `
+{
+  "_bindings": [
+    {
+      "_group": "shadow",
+      "_name": "shadowTex_0",
+      "_type": {
+        "_kind": "texture",
+        "_sampleType": "depth",
+        "_textureType": "texture_depth_2d",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowComp_0",
+      "_type": {
+        "_kind": "sampler",
+        "_samplerType": "sampler_comparison",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowInfo_0",
+      "_type": {
+        "_kind": "uniform-buffer",
+      },
+      "_visibility": 3,
+    },
+  ],
+  "_fragmentSlots": {
+    "AS": "shadowFactors[0] = computeShadowPCF_0(input.vPosFromLight_0, input.vDepthMetric_0, shadowInfo_0.shadowsInfo.x, shadowInfo_0.shadowsInfo.y, shadowInfo_0.shadowsInfo.z);",
+  },
+  "_helperFunctions": "struct shadowInfo_0Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };
+
+fn computeShadowPCF_0(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, mapSz: f32, invMapSz: f32) -> f32 {
+let clipSpace = posFromLight.xyz / posFromLight.w;
+let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
+if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
+let depthRef = clamp(clipSpace.z, 0.0, 1.0);
+var tc = uv * mapSz + 0.5;
+let st = fract(tc);
+let base = (floor(tc) - 0.5) * invMapSz;
+let uvw0 = 4.0 - 3.0 * st;
+let uvw1 = vec2<f32>(7.0);
+let uvw2 = 1.0 + 3.0 * st;
+let u = vec3<f32>((3.0 - 2.0 * st.x) / uvw0.x - 2.0, (3.0 + st.x) / uvw1.x, st.x / uvw2.x + 2.0) * invMapSz;
+let v = vec3<f32>((3.0 - 2.0 * st.y) / uvw0.y - 2.0, (3.0 + st.y) / uvw1.y, st.y / uvw2.y + 2.0) * invMapSz;
+var sh = 0.0;
+sh += uvw0.x * uvw0.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[0], v[0]), depthRef);
+sh += uvw1.x * uvw0.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[1], v[0]), depthRef);
+sh += uvw2.x * uvw0.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[2], v[0]), depthRef);
+sh += uvw0.x * uvw1.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[0], v[1]), depthRef);
+sh += uvw1.x * uvw1.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[1], v[1]), depthRef);
+sh += uvw2.x * uvw1.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[2], v[1]), depthRef);
+sh += uvw0.x * uvw2.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[0], v[2]), depthRef);
+sh += uvw1.x * uvw2.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[1], v[2]), depthRef);
+sh += uvw2.x * uvw2.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[2], v[2]), depthRef);
+sh /= 144.0;
+return mix(darkness, 1.0, sh);
+}",
+  "_id": "pbr-shadow",
+  "_varyings": [
+    {
+      "_name": "vPosFromLight_0",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_0",
+      "_type": "f32",
+    },
+  ],
+  "_vertexHelperFunctions": "struct shadowInfo_0Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };",
+  "_vertexSlots": {
+    "VB": "out.vPosFromLight_0 = shadowInfo_0.lightMatrix * worldPos4;
+out.vDepthMetric_0 = (out.vPosFromLight_0.z + shadowInfo_0.depthValues.x) / shadowInfo_0.depthValues.y;",
+  },
+}
+`;
+
+exports[`Standard shadow fragment exact output > empty 1`] = `
+{
+  "_bindings": [],
+  "_fragmentSlots": {
+    "AD": "",
+  },
+  "_helperFunctions": "",
+  "_id": "std-shadow",
+  "_varyings": [],
+  "_vertexHelperFunctions": "",
+  "_vertexSlots": {
+    "VB": "",
+  },
+}
+`;
+
+exports[`Standard shadow fragment exact output > esm 1`] = `
+{
+  "_bindings": [
+    {
+      "_group": "shadow",
+      "_name": "shadowTex_0",
+      "_type": {
+        "_kind": "texture",
+        "_textureType": "texture_2d<f32>",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowSamp_0",
+      "_type": {
+        "_kind": "sampler",
+        "_samplerType": "sampler",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowInfo_0",
+      "_type": {
+        "_kind": "uniform-buffer",
+      },
+      "_visibility": 3,
+    },
+  ],
+  "_fragmentSlots": {
+    "AD": "shadowFactors[0] = computeShadowESM_0(input.vPosFromLight_0, input.vDepthMetric_0, shadowInfo_0.shadowsInfo.x, shadowInfo_0.shadowsInfo.z, shadowInfo_0.shadowsInfo.w);",
+  },
+  "_helperFunctions": "struct shadowInfo_0Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };
+
+fn computeFallOff_0(value: f32, clipSpace: vec2<f32>, frustumEdgeFalloff: f32) -> f32 {
+let mask = smoothstep(1.0 - frustumEdgeFalloff, 1.00000012, clamp(dot(clipSpace, clipSpace), 0.0, 1.0));
+return mix(value, 1.0, mask);
+}
+fn computeShadowESM_0(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, depthScale: f32, frustumEdgeFalloff: f32) -> f32 {
+let clipSpace = posFromLight.xyz / posFromLight.w;
+let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
+if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
+let shadowPixelDepth = clamp(depthMetric, 0.0, 1.0);
+let shadowMapSample = textureSampleLevel(shadowTex_0, shadowSamp_0, uv, 0.0).x;
+let esm = 1.0 - clamp(exp(min(87.0, depthScale * shadowPixelDepth)) * shadowMapSample, 0.0, 1.0 - darkness);
+return computeFallOff_0(esm, clipSpace.xy, frustumEdgeFalloff);
+}",
+  "_id": "std-shadow",
+  "_varyings": [
+    {
+      "_name": "vPosFromLight_0",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_0",
+      "_type": "f32",
+    },
+  ],
+  "_vertexHelperFunctions": "struct shadowInfo_0Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };",
+  "_vertexSlots": {
+    "VB": "out.vPosFromLight_0 = shadowInfo_0.lightMatrix * worldPos4;
+out.vDepthMetric_0 = (out.vPosFromLight_0.z + shadowInfo_0.depthValues.x) / shadowInfo_0.depthValues.y;",
+  },
+}
+`;
+
+exports[`Standard shadow fragment exact output > mixed 1`] = `
+{
+  "_bindings": [
+    {
+      "_group": "shadow",
+      "_name": "shadowTex_0",
+      "_type": {
+        "_kind": "texture",
+        "_textureType": "texture_2d<f32>",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowSamp_0",
+      "_type": {
+        "_kind": "sampler",
+        "_samplerType": "sampler",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowInfo_0",
+      "_type": {
+        "_kind": "uniform-buffer",
+      },
+      "_visibility": 3,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowTex_1",
+      "_type": {
+        "_kind": "texture",
+        "_sampleType": "depth",
+        "_textureType": "texture_depth_2d",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowComp_1",
+      "_type": {
+        "_kind": "sampler",
+        "_samplerType": "sampler_comparison",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowInfo_1",
+      "_type": {
+        "_kind": "uniform-buffer",
+      },
+      "_visibility": 3,
+    },
+  ],
+  "_fragmentSlots": {
+    "AD": "shadowFactors[0] = computeShadowESM_0(input.vPosFromLight_0, input.vDepthMetric_0, shadowInfo_0.shadowsInfo.x, shadowInfo_0.shadowsInfo.z, shadowInfo_0.shadowsInfo.w);
+shadowFactors[1] = computeShadowPCF_1(input.vPosFromLight_1, input.vDepthMetric_1, shadowInfo_1.shadowsInfo.x, shadowInfo_1.shadowsInfo.y, shadowInfo_1.shadowsInfo.z);",
+  },
+  "_helperFunctions": "struct shadowInfo_0Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };
+
+fn computeFallOff_0(value: f32, clipSpace: vec2<f32>, frustumEdgeFalloff: f32) -> f32 {
+let mask = smoothstep(1.0 - frustumEdgeFalloff, 1.00000012, clamp(dot(clipSpace, clipSpace), 0.0, 1.0));
+return mix(value, 1.0, mask);
+}
+fn computeShadowESM_0(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, depthScale: f32, frustumEdgeFalloff: f32) -> f32 {
+let clipSpace = posFromLight.xyz / posFromLight.w;
+let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
+if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
+let shadowPixelDepth = clamp(depthMetric, 0.0, 1.0);
+let shadowMapSample = textureSampleLevel(shadowTex_0, shadowSamp_0, uv, 0.0).x;
+let esm = 1.0 - clamp(exp(min(87.0, depthScale * shadowPixelDepth)) * shadowMapSample, 0.0, 1.0 - darkness);
+return computeFallOff_0(esm, clipSpace.xy, frustumEdgeFalloff);
+}
+struct shadowInfo_1Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };
+
+fn computeShadowPCF_1(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, mapSz: f32, invMapSz: f32) -> f32 {
+let clipSpace = posFromLight.xyz / posFromLight.w;
+let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
+if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
+let depthRef = clamp(clipSpace.z, 0.0, 1.0);
+var tc = uv * mapSz + 0.5;
+let st = fract(tc);
+let base = (floor(tc) - 0.5) * invMapSz;
+let uvw0 = 4.0 - 3.0 * st;
+let uvw1 = vec2<f32>(7.0);
+let uvw2 = 1.0 + 3.0 * st;
+let u = vec3<f32>((3.0 - 2.0 * st.x) / uvw0.x - 2.0, (3.0 + st.x) / uvw1.x, st.x / uvw2.x + 2.0) * invMapSz;
+let v = vec3<f32>((3.0 - 2.0 * st.y) / uvw0.y - 2.0, (3.0 + st.y) / uvw1.y, st.y / uvw2.y + 2.0) * invMapSz;
+var sh = 0.0;
+sh += uvw0.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[0]), depthRef);
+sh += uvw1.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[0]), depthRef);
+sh += uvw2.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[0]), depthRef);
+sh += uvw0.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[1]), depthRef);
+sh += uvw1.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[1]), depthRef);
+sh += uvw2.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[1]), depthRef);
+sh += uvw0.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[2]), depthRef);
+sh += uvw1.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[2]), depthRef);
+sh += uvw2.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[2]), depthRef);
+sh /= 144.0;
+return mix(darkness, 1.0, sh);
+}",
+  "_id": "std-shadow",
+  "_varyings": [
+    {
+      "_name": "vPosFromLight_0",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_0",
+      "_type": "f32",
+    },
+    {
+      "_name": "vPosFromLight_1",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_1",
+      "_type": "f32",
+    },
+  ],
+  "_vertexHelperFunctions": "struct shadowInfo_0Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };
+struct shadowInfo_1Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };",
+  "_vertexSlots": {
+    "VB": "out.vPosFromLight_0 = shadowInfo_0.lightMatrix * worldPos4;
+out.vDepthMetric_0 = (out.vPosFromLight_0.z + shadowInfo_0.depthValues.x) / shadowInfo_0.depthValues.y;
+out.vPosFromLight_1 = shadowInfo_1.lightMatrix * worldPos4;
+out.vDepthMetric_1 = (out.vPosFromLight_1.z + shadowInfo_1.depthValues.x) / shadowInfo_1.depthValues.y;",
+  },
+}
+`;
+
+exports[`Standard shadow fragment exact output > non-contiguous 1`] = `
+{
+  "_bindings": [
+    {
+      "_group": "shadow",
+      "_name": "shadowTex_1",
+      "_type": {
+        "_kind": "texture",
+        "_sampleType": "depth",
+        "_textureType": "texture_depth_2d",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowComp_1",
+      "_type": {
+        "_kind": "sampler",
+        "_samplerType": "sampler_comparison",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowInfo_1",
+      "_type": {
+        "_kind": "uniform-buffer",
+      },
+      "_visibility": 3,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowTex_4",
+      "_type": {
+        "_kind": "texture",
+        "_textureType": "texture_2d<f32>",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowSamp_4",
+      "_type": {
+        "_kind": "sampler",
+        "_samplerType": "sampler",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowInfo_4",
+      "_type": {
+        "_kind": "uniform-buffer",
+      },
+      "_visibility": 3,
+    },
+  ],
+  "_fragmentSlots": {
+    "AD": "shadowFactors[1] = computeShadowPCF_1(input.vPosFromLight_1, input.vDepthMetric_1, shadowInfo_1.shadowsInfo.x, shadowInfo_1.shadowsInfo.y, shadowInfo_1.shadowsInfo.z);
+shadowFactors[4] = computeShadowESM_4(input.vPosFromLight_4, input.vDepthMetric_4, shadowInfo_4.shadowsInfo.x, shadowInfo_4.shadowsInfo.z, shadowInfo_4.shadowsInfo.w);",
+  },
+  "_helperFunctions": "struct shadowInfo_1Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };
+
+fn computeShadowPCF_1(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, mapSz: f32, invMapSz: f32) -> f32 {
+let clipSpace = posFromLight.xyz / posFromLight.w;
+let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
+if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
+let depthRef = clamp(clipSpace.z, 0.0, 1.0);
+var tc = uv * mapSz + 0.5;
+let st = fract(tc);
+let base = (floor(tc) - 0.5) * invMapSz;
+let uvw0 = 4.0 - 3.0 * st;
+let uvw1 = vec2<f32>(7.0);
+let uvw2 = 1.0 + 3.0 * st;
+let u = vec3<f32>((3.0 - 2.0 * st.x) / uvw0.x - 2.0, (3.0 + st.x) / uvw1.x, st.x / uvw2.x + 2.0) * invMapSz;
+let v = vec3<f32>((3.0 - 2.0 * st.y) / uvw0.y - 2.0, (3.0 + st.y) / uvw1.y, st.y / uvw2.y + 2.0) * invMapSz;
+var sh = 0.0;
+sh += uvw0.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[0]), depthRef);
+sh += uvw1.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[0]), depthRef);
+sh += uvw2.x * uvw0.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[0]), depthRef);
+sh += uvw0.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[1]), depthRef);
+sh += uvw1.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[1]), depthRef);
+sh += uvw2.x * uvw1.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[1]), depthRef);
+sh += uvw0.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[0], v[2]), depthRef);
+sh += uvw1.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[1], v[2]), depthRef);
+sh += uvw2.x * uvw2.y * textureSampleCompareLevel(shadowTex_1, shadowComp_1, base + vec2<f32>(u[2], v[2]), depthRef);
+sh /= 144.0;
+return mix(darkness, 1.0, sh);
+}
+struct shadowInfo_4Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };
+
+fn computeFallOff_4(value: f32, clipSpace: vec2<f32>, frustumEdgeFalloff: f32) -> f32 {
+let mask = smoothstep(1.0 - frustumEdgeFalloff, 1.00000012, clamp(dot(clipSpace, clipSpace), 0.0, 1.0));
+return mix(value, 1.0, mask);
+}
+fn computeShadowESM_4(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, depthScale: f32, frustumEdgeFalloff: f32) -> f32 {
+let clipSpace = posFromLight.xyz / posFromLight.w;
+let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
+if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
+let shadowPixelDepth = clamp(depthMetric, 0.0, 1.0);
+let shadowMapSample = textureSampleLevel(shadowTex_4, shadowSamp_4, uv, 0.0).x;
+let esm = 1.0 - clamp(exp(min(87.0, depthScale * shadowPixelDepth)) * shadowMapSample, 0.0, 1.0 - darkness);
+return computeFallOff_4(esm, clipSpace.xy, frustumEdgeFalloff);
+}",
+  "_id": "std-shadow",
+  "_varyings": [
+    {
+      "_name": "vPosFromLight_1",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_1",
+      "_type": "f32",
+    },
+    {
+      "_name": "vPosFromLight_4",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_4",
+      "_type": "f32",
+    },
+  ],
+  "_vertexHelperFunctions": "struct shadowInfo_1Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };
+struct shadowInfo_4Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };",
+  "_vertexSlots": {
+    "VB": "out.vPosFromLight_1 = shadowInfo_1.lightMatrix * worldPos4;
+out.vDepthMetric_1 = (out.vPosFromLight_1.z + shadowInfo_1.depthValues.x) / shadowInfo_1.depthValues.y;
+out.vPosFromLight_4 = shadowInfo_4.lightMatrix * worldPos4;
+out.vDepthMetric_4 = (out.vPosFromLight_4.z + shadowInfo_4.depthValues.x) / shadowInfo_4.depthValues.y;",
+  },
+}
+`;
+
+exports[`Standard shadow fragment exact output > pcf 1`] = `
+{
+  "_bindings": [
+    {
+      "_group": "shadow",
+      "_name": "shadowTex_0",
+      "_type": {
+        "_kind": "texture",
+        "_sampleType": "depth",
+        "_textureType": "texture_depth_2d",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowComp_0",
+      "_type": {
+        "_kind": "sampler",
+        "_samplerType": "sampler_comparison",
+      },
+      "_visibility": 2,
+    },
+    {
+      "_group": "shadow",
+      "_name": "shadowInfo_0",
+      "_type": {
+        "_kind": "uniform-buffer",
+      },
+      "_visibility": 3,
+    },
+  ],
+  "_fragmentSlots": {
+    "AD": "shadowFactors[0] = computeShadowPCF_0(input.vPosFromLight_0, input.vDepthMetric_0, shadowInfo_0.shadowsInfo.x, shadowInfo_0.shadowsInfo.y, shadowInfo_0.shadowsInfo.z);",
+  },
+  "_helperFunctions": "struct shadowInfo_0Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };
+
+fn computeShadowPCF_0(posFromLight: vec4<f32>, depthMetric: f32, darkness: f32, mapSz: f32, invMapSz: f32) -> f32 {
+let clipSpace = posFromLight.xyz / posFromLight.w;
+let uv = vec2<f32>(0.5 * clipSpace.x + 0.5, 0.5 - 0.5 * clipSpace.y);
+if (depthMetric < 0.0 || depthMetric > 1.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) { return 1.0; }
+let depthRef = clamp(clipSpace.z, 0.0, 1.0);
+var tc = uv * mapSz + 0.5;
+let st = fract(tc);
+let base = (floor(tc) - 0.5) * invMapSz;
+let uvw0 = 4.0 - 3.0 * st;
+let uvw1 = vec2<f32>(7.0);
+let uvw2 = 1.0 + 3.0 * st;
+let u = vec3<f32>((3.0 - 2.0 * st.x) / uvw0.x - 2.0, (3.0 + st.x) / uvw1.x, st.x / uvw2.x + 2.0) * invMapSz;
+let v = vec3<f32>((3.0 - 2.0 * st.y) / uvw0.y - 2.0, (3.0 + st.y) / uvw1.y, st.y / uvw2.y + 2.0) * invMapSz;
+var sh = 0.0;
+sh += uvw0.x * uvw0.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[0], v[0]), depthRef);
+sh += uvw1.x * uvw0.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[1], v[0]), depthRef);
+sh += uvw2.x * uvw0.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[2], v[0]), depthRef);
+sh += uvw0.x * uvw1.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[0], v[1]), depthRef);
+sh += uvw1.x * uvw1.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[1], v[1]), depthRef);
+sh += uvw2.x * uvw1.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[2], v[1]), depthRef);
+sh += uvw0.x * uvw2.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[0], v[2]), depthRef);
+sh += uvw1.x * uvw2.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[1], v[2]), depthRef);
+sh += uvw2.x * uvw2.y * textureSampleCompareLevel(shadowTex_0, shadowComp_0, base + vec2<f32>(u[2], v[2]), depthRef);
+sh /= 144.0;
+return mix(darkness, 1.0, sh);
+}",
+  "_id": "std-shadow",
+  "_varyings": [
+    {
+      "_name": "vPosFromLight_0",
+      "_type": "vec4<f32>",
+    },
+    {
+      "_name": "vDepthMetric_0",
+      "_type": "f32",
+    },
+  ],
+  "_vertexHelperFunctions": "struct shadowInfo_0Uniforms { lightMatrix: mat4x4<f32>, depthValues: vec4<f32>, shadowsInfo: vec4<f32> };",
+  "_vertexSlots": {
+    "VB": "out.vPosFromLight_0 = shadowInfo_0.lightMatrix * worldPos4;
+out.vDepthMetric_0 = (out.vPosFromLight_0.z + shadowInfo_0.depthValues.x) / shadowInfo_0.depthValues.y;",
+  },
+}
+`;

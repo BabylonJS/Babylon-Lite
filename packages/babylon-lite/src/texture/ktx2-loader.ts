@@ -8,7 +8,8 @@
 import { U8C, U8 } from "../engine/typed-arrays.js";
 import { TU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
-import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
+import { acquireTexture } from "../resource/texture-acquire.js";
+import { getOrCreateSampler } from "../resource/sampler-pool.js";
 import type { Texture2D } from "./texture-2d.js";
 import { getCompressedFormat } from "./compressed-formats.js";
 import type { CompressedFormatInfo } from "./compressed-formats.js";

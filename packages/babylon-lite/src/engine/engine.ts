@@ -11,7 +11,6 @@ import type { GpuTaskTimer } from "./gpu-task-timer.js";
 import type { RenderTaskGpuTimings } from "./gpu-task-timing.js";
 import type { DeviceLostRecoveryState } from "./device-lost-recovery.js";
 import type { SceneContext } from "../scene/scene-core.js";
-import { disposeGpuResourceRetirements, flushGpuResourceRetirements } from "./gpu-resource-retirement.js";
 
 // Module-scoped visibility epoch. setSubtreeVisible (scene/visibility.ts,
 // loaded only by KHR_node_visibility / KHR_animation_pointer features) bumps
@@ -134,10 +133,6 @@ export interface EngineContext extends SurfaceContext {
      *  before rebuilding PBR groups so the resolver recreates it on the replacement
      *  device. */
     _pbrFallbackTex?: Texture2D;
-    /** @internal Stable cache cleanup callbacks used by scene material groups. */
-    _pbrCleanup?: () => void;
-    /** @internal */
-    _standardCleanup?: () => void;
     /** @internal */
     _dlr?: DeviceLostRecoveryCapture;
     /** @internal */
@@ -155,11 +150,13 @@ export interface EngineContext extends SurfaceContext {
     _currentDelta: number;
     /** @internal */
     _cbs: GPUCommandBuffer[];
+    /** @internal Frame-boundary flush installed on the first queued GPU resource retirement. */
+    _flushGpuRetirements?: (engine: EngineContext) => void;
     /** @internal GPU resource disposers waiting for the next frame command buffer to be submitted. */
     _retirements?: Array<() => void> | null;
     /** @internal Retirement batches whose queue fence has not resolved yet. Kept reachable so engine
      *  teardown and device-lost recovery can still claim and run them synchronously. */
-    _retiring?: Array<Array<() => void>> | null;
+    _retiring?: Set<Array<() => void>> | null;
 
     /** @internal Per-renderable update closure wrapper. Set when the engine
      *  was created with `useFloatingOrigin: true`. Wraps a renderable's bare
@@ -561,32 +558,7 @@ export function stopEngine(engine: EngineContext): void {
     engine._renderFn = null;
     // No further frame will submit, so retirements queued by (say) a `removeFromScene` issued right
     // before the stop would otherwise sit pending until `disposeEngine`. Flush them behind a fence.
-    flushGpuResourceRetirements(engine);
-}
-
-/** Release all engine-owned GPU resources (device + every attached surface's swapchain
- *  context). Rendering contexts own their own GPU resources (frame graphs, render
- *  targets) and dispose them separately. */
-export function disposeEngine(engine: EngineContext): void {
-    // Drain BEFORE stopping: teardown at engine disposal must stay synchronous, because the device is
-    // destroyed below. `stopEngine` otherwise takes the retirement list for its fenced flush, which
-    // would defer the teardown past `device.destroy()` — and `onSubmittedWorkDone()` on a destroyed
-    // device never usefully resolves. Draining first leaves that flush a no-op.
-    disposeGpuResourceRetirements(engine);
-    stopEngine(engine);
-    const surfaces = engine._surfaces;
-    for (const s of surfaces) {
-        s._renderingContexts.length = 0;
-        s._ro?.disconnect();
-        s._context.unconfigure();
-    }
-    surfaces.length = 0;
-    try {
-        engine._disposeManagedResources?.();
-        engine._disposeStorageBuffers?.();
-    } finally {
-        engine._device.destroy();
-    }
+    engine._flushGpuRetirements?.(engine);
 }
 
 /** Render one frame for every surface registered on the engine. Updates each rendering context, records its GPU work into a shared command encoder, submits the frame, and publishes the total draw-call count. */
@@ -603,7 +575,7 @@ export function renderFrame(engine: EngineContext, delta: number): void {
         // Nothing left to draw (e.g. the last scene was unregistered). No submit will happen this frame,
         // so any retirement queued by that removal has to be drained behind a fence instead of waiting
         // for a `queue.submit` that will never come.
-        flushGpuResourceRetirements(engine);
+        engine._flushGpuRetirements?.(engine);
         return;
     }
 
@@ -651,7 +623,7 @@ export function renderFrame(engine: EngineContext, delta: number): void {
         engine._gpuTimerEnd?.(finalEncoder);
         engine._cbs[0] = finalEncoder.finish();
         engine._device.queue.submit(engine._cbs);
-        flushGpuResourceRetirements(engine);
+        engine._flushGpuRetirements?.(engine);
         engine.drawCallCount = drawCalls;
         // Resolve + read back the timestamp pair asynchronously (its own submit, after the frame's) and
         // publish the latest completed sample to `gpuFrameTimeMs`. Non-blocking — never stalls this frame.

@@ -3,9 +3,10 @@ import type { EngineContext } from "./engine.js";
 import { isRenderingContextRegistered } from "./engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mesh, MeshGPU } from "../mesh/mesh.js";
-import { createEmptyUniformBuffer, createMappedBuffer } from "../resource/gpu-buffers.js";
-import { clearSceneBGLCache, getSceneBindGroupLayout } from "../render/scene-helpers.js";
-import { ensureSceneLightState } from "../render/lights-ubo.js";
+import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
+import { createMappedBuffer } from "../resource/mapped-buffer.js";
+import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
+import { ensureSceneLightState } from "../render/scene-lights-ubo.js";
 import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { createSkeleton } from "../skeleton/create-skeleton.js";
@@ -27,8 +28,8 @@ interface MutableMorphTargets {
 
 interface RecoverableRenderTask {
     _sceneUBO: GPUBuffer;
-    _sceneBG: GPUBindGroup;
-    _lightsUBO: GPUBuffer;
+    _sceneBG?: GPUBindGroup;
+    _lightsUBO?: GPUBuffer;
     _opaqueBindings: unknown[];
     _directBindings: unknown[];
     _transparentBindings: unknown[];
@@ -47,7 +48,6 @@ interface RecoverableRenderTask {
  * if an actual device loss occurs.
  */
 export async function rebuildRegisteredScenes(engine: EngineContext): Promise<void> {
-    clearSceneBGLCache();
     // Engine-scoped and lazily recreated by the PBR fallback resolver, so it must be cleared once
     // per recovery. Clearing it per scene would orphan the fallback each later scene rebuilt.
     engine._pbrFallbackTex = undefined;
@@ -94,7 +94,6 @@ async function rebuildSceneGpu(engine: EngineContext, scene: SceneContext): Prom
 
     scene._renderables.length = scene._uniformUpdaters.length = 0;
     scene._meshDisposables.clear();
-    scene._meshAuxDisposables.clear();
     if (scene._lightGpuState) {
         scene._lightGpuState = undefined;
     }

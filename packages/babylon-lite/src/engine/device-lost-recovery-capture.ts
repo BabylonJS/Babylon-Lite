@@ -5,7 +5,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import type { PixelsTexture2DOptions } from "../texture/pixels-texture.js";
 import type { Texture2D, Texture2DOptions, Texture2DRecoverySource } from "../texture/texture-2d.js";
 import { _setDerivedTexture2DHook } from "../texture/texture-2d.js";
-import { _setTextureReleaseHook } from "../resource/gpu-pool.js";
+import { _setTextureReleaseHook } from "../resource/texture-allocation-release.js";
 
 /** Smallest tracked-texture count worth compacting; below this, scanning costs more than it saves. */
 const TEXTURE_PRUNE_FLOOR = 64;

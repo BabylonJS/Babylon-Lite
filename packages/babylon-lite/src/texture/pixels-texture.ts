@@ -13,7 +13,8 @@
 import { TU } from "../engine/gpu-flags.js";
 import type { Texture2D } from "./texture-2d.js";
 import type { EngineContext } from "../engine/engine.js";
-import { acquireTexture, getOrCreateSampler } from "../resource/gpu-pool.js";
+import { acquireTexture } from "../resource/texture-acquire.js";
+import { getOrCreateSampler } from "../resource/sampler-pool.js";
 
 /** Sampler and format overrides for `createTexture2DFromPixels()`. */
 export interface PixelsTexture2DOptions {

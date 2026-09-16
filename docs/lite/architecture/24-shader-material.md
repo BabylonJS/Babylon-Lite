@@ -394,7 +394,7 @@ Under LWR (`35-large-world-rendering.md`) the frame the system uniforms describe
 Consequences a shader author sees:
 
 - `world`, `worldView` and `worldViewProjection` all carry the camera-relative translation. They derive from one rebased matrix, so they stay in a single frame.
-- `cameraPosition` is `(0, 0, 0)` — in the frame `world` is expressed in, the camera *is* the origin. This keeps the documented `scene.vEyePosition.xyz` equivalence above, which `_packSceneUniforms` already zeroes under FO. An expression like `cameraPosition - worldPos` therefore still yields the correct eye-relative vector, and now at full precision. **This is a breaking change** for any custom shader that read `cameraPosition` as an absolute world-space position while `useFloatingOrigin` was enabled — see the release notes for the migration path.
+- `cameraPosition` is `(0, 0, 0)` — in the frame `world` is expressed in, the camera _is_ the origin. This keeps the documented `scene.vEyePosition.xyz` equivalence above, which `_packSceneUniforms` already zeroes under FO. An expression like `cameraPosition - worldPos` therefore still yields the correct eye-relative vector, and now at full precision. **This is a breaking change** for any custom shader that read `cameraPosition` as an absolute world-space position while `useFloatingOrigin` was enabled — see the release notes for the migration path.
 - Absolute world coordinates are not recoverable from the UBO. A shader that genuinely needs them should take them as a custom uniform.
 
 With floating origin off, every value above is the plain absolute one and the path is copy-free.
@@ -482,11 +482,22 @@ fn mainFragment(input: VertexOutput) -> @location(0) vec4<f32> {
 4. `registerScene` runs deferred builders; `shaderGroupBuilder` dynamically imports `shader-renderable.ts`.
 5. Renderable builder groups meshes by material instance.
 6. For each material, `shader-pipeline.ts` builds a generated prelude, shader module, group-1 BGL, and render pipeline for the active target signature.
-7. For each mesh, the renderable creates a system UBO and group-1 bind group.
+7. For each mesh, the renderable prepares the CPU system-uniform image, uses `createUniformBuffer` to allocate and upload it transactionally, then registers packet cleanup before creating group 1. The allocation label is preserved, and a failed initial upload destroys the unpublished buffer.
 8. Each frame, `DrawBinding.update(context)` refreshes system UBOs when world/camera/target data changes and custom UBOs when `_uboVersion` changes.
 9. Draw binds vertex buffers in material attribute order, sets index buffer, sets group 1, and calls `drawIndexed`.
 10. If `setShaderTexture` changes a texture, the next update recreates group 1 for affected mesh packets and updates acquired/released texture references.
 11. Material swaps use `shaderGroupBuilder._rebuildSingle`, matching Standard/PBR.
+
+Auxiliary rebuilds receive an explicit `MeshRebuildResources` lifetime sink instead of registering
+their packet in scene-owned disposer maps. Storage-buffer allocations remain owned by their
+`StorageBuffer` and engine registration; packets bind the live validated handle but do not maintain
+a second, unread raw-buffer list. Disposing a shader packet releases its system UBO and texture
+leases without disposing caller-owned storage allocations.
+
+Packet ownership is independent of material-override identity: a supplied resource sink owns an
+auxiliary packet; without one, the packet belongs to the scene's main mesh disposer list. Plain
+and thin-instance builders forward the same sink. The override flag only controls material
+identity guards while updating and drawing, not a second scene-owned auxiliary registry.
 
 ## Babylon.js Equivalence Map
 

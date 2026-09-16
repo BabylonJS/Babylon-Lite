@@ -1,6 +1,7 @@
 import { BU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
-import { createEmptyUniformBuffer, createMappedBuffer } from "../resource/gpu-buffers.js";
+import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
+import { createMappedBuffer } from "../resource/mapped-buffer.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import type { SpriteRenderer } from "./sprite-renderer.js";
 import { _getSpriteFxHook } from "./sprite-fx-hook.js";

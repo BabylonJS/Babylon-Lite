@@ -6,7 +6,8 @@ import type { DrawBinding, DrawUpdateContext, Renderable } from "../render/rende
 import type { Camera } from "../camera/camera.js";
 import { getViewMatrix } from "../camera/camera.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
-import { createEmptyUniformBuffer, createMappedBuffer } from "../resource/gpu-buffers.js";
+import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
+import { createMappedBuffer } from "../resource/mapped-buffer.js";
 import type { SpriteLayerFx } from "./custom-shader-core.js";
 import { _getBillboardFxHook } from "./sprite-fx-hook.js";
 import type { BillboardSpriteSystem } from "./billboard-sprite.js";
