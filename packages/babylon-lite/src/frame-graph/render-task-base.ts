@@ -255,7 +255,7 @@ export function _createAutomaticRenderTask(config: RenderTaskConfig, engine: Eng
     const targetSignature = {
         _colorFormat: desc.format,
         _depthStencilFormat: config.depth?._descriptor.dFormat ?? desc.dFormat,
-        _depthCompare: desc._depthCompare,
+        _depthCompare: desc.depthCompare,
         _sampleCount: desc.samples ?? 1,
     };
 
@@ -455,7 +455,7 @@ function buildRenderPassDescriptor(task: RenderTaskBase, rt: RenderTarget): void
         const loadOp = (config.depth ? depthSrc._eager : config.depthClear === false) ? "load" : "clear";
         depthAttachment = {
             view: depthView,
-            depthClearValue: dd._depthClearValue ?? 0,
+            depthClearValue: dd.depthClearValue ?? 0,
             depthLoadOp: loadOp,
             depthStoreOp: "store",
         };

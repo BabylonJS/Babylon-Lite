@@ -234,8 +234,8 @@ export function ensureCsmShadowTaskState(
             _descriptor: {
                 size: { width: cfg._mapSize, height: cfg._mapSize },
                 dFormat: "depth32float",
-                _depthClearValue: 1,
-                _depthCompare: "less-equal",
+                depthClearValue: 1,
+                depthCompare: "less-equal",
                 samples: 1,
             },
             _colorTexture: null,

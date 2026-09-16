@@ -635,7 +635,7 @@ function rebuildRenderPassDescriptor(task: GeometryRendererTaskInternal, config:
     if (config.depthTexture) {
         depthView = config.depthTexture._depthView;
         depthFormat = config.depthTexture._descriptor.dFormat;
-        depthClearValue = config.depthTexture._descriptor._depthClearValue ?? 0;
+        depthClearValue = config.depthTexture._descriptor.depthClearValue ?? 0;
     } else {
         depthView = mrt._depthView;
         depthFormat = mrt._descriptor.depthStencilFormat;

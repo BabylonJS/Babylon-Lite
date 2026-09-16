@@ -101,7 +101,9 @@ const fixedDepth = createRenderTargetTexture(engine, {
     dFormat: "depth32float", samples: 1, size: { width: 32, height: 32 },
 }, withSampledDepthTexture);
 const surface = createSurfaceRenderTargetTexture(engine, {
-    format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: engine,
+    format: "rgba8unorm", dFormat: "depth32float",
+    depthClearValue: 1, depthCompare: "less-equal",
+    samples: 1, size: engine,
 }, withSampledDepthTexture);
 const surfaceDepth = createSurfaceRenderTargetTexture(engine, {
     dFormat: "depth32float", samples: 1, size: engine,

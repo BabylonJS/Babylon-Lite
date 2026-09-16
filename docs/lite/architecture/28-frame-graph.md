@@ -217,8 +217,8 @@ export interface RenderTargetDescriptor {
     lbl?: string;
     format?: GPUTextureFormat;
     dFormat?: GPUTextureFormat;
-    _depthClearValue?: number;
-    _depthCompare?: GPUCompareFunction;
+    depthClearValue?: number;
+    depthCompare?: GPUCompareFunction;
     samples: number;
     size: SurfaceContext | RenderTargetSurfaceSize | { width: number; height: number };
 }
@@ -236,8 +236,8 @@ Render targets are pure-state descriptors plus owned GPU texture handles. `build
 | `lbl`              | Optional GPU debug label.                                                                                                                                         |
 | `format`           | Optional color format. Omit for a depth-only target.                                                                                                              |
 | `dFormat`          | Optional depth/stencil format. Omit for a color-only target such as the surface swapchain wrapper.                                                                |
-| `_depthClearValue` | Internal clear depth; reverse-Z targets default to `0`, while standard-Z shadow targets use `1`.                                                                  |
-| `_depthCompare`    | Internal pipeline depth compare; defaults to reverse-Z `"greater-equal"` when omitted by pipeline builders.                                                       |
+| `depthClearValue`  | Optional clear depth; reverse-Z targets default to `0`, while standard-Z targets normally use `1`.                                                               |
+| `depthCompare`     | Optional pass-wide pipeline depth compare; defaults to reverse-Z `"greater-equal"` and overrides material defaults when supplied.                                  |
 | `samples`          | Attachment sample count (`1` or `4`).                                                                                                                             |
 | `size`             | A `SurfaceContext` for full live dimensions, `{ surface, scale }` for scaled live dimensions, or fixed `{ width, height }` device pixels. Passing `EngineContext` is valid because it extends `SurfaceContext`. |
 

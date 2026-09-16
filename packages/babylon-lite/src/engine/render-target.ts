@@ -53,10 +53,10 @@ export interface RenderTargetDescriptor {
     format?: GPUTextureFormat;
     /** Depth/stencil attachment format (e.g. `"depth24plus-stencil8"`). Omit for a color-only target (e.g. the swapchain). */
     dFormat?: GPUTextureFormat;
-    /** @internal Depth clear value. Defaults to reverse-Z far depth `0`. Shadow-map targets use standard-Z far depth `1`. */
-    _depthClearValue?: number;
-    /** @internal Depth compare for pipelines targeting this RT. Defaults to reverse-Z `"greater-equal"`. */
-    _depthCompare?: GPUCompareFunction;
+    /** Depth clear value. Defaults to reverse-Z far depth `0`. Standard-Z targets normally use `1`. */
+    depthClearValue?: number;
+    /** Depth compare for pipelines targeting this RT. Defaults to reverse-Z `"greater-equal"`. */
+    depthCompare?: GPUCompareFunction;
     /** MSAA sample count: `1` = single-sample (no multisampling), `4` = 4x MSAA. */
     samples: number;
     /** A `SurfaceContext` for full surface dimensions, `{ surface, scale }` for

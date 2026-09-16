@@ -242,8 +242,8 @@ function retargetRenderTaskToLinearOffscreen(task: RenderTaskBase): void {
         lbl: "transmission-linear",
         format: "rgba16float",
         dFormat: ownsDepth ? (oldDesc.dFormat ?? "depth24plus-stencil8") : undefined,
-        _depthClearValue: oldDesc._depthClearValue,
-        _depthCompare: oldDesc._depthCompare,
+        depthClearValue: oldDesc.depthClearValue,
+        depthCompare: oldDesc.depthCompare,
         samples: sampleCount,
         size: surface,
     });
@@ -257,7 +257,7 @@ function retargetRenderTaskToLinearOffscreen(task: RenderTaskBase): void {
     };
     sig._colorFormat = "rgba16float";
     sig._depthStencilFormat = cfg.depth?._descriptor.dFormat ?? newRt._descriptor.dFormat;
-    sig._depthCompare = newRt._descriptor._depthCompare;
+    sig._depthCompare = newRt._descriptor.depthCompare;
     sig._sampleCount = sampleCount;
     task._ob.length = 0;
     task._lastVersion = -1;

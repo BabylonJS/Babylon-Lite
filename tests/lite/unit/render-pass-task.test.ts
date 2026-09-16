@@ -769,7 +769,7 @@ describe("RenderPassTask transparent sorting", () => {
         const rt = createRenderTarget({
             format: "bgra8unorm",
             dFormat: "depth32float",
-            _depthCompare: "less-equal",
+            depthCompare: "less-equal",
             samples: 1,
             size: { width: 16, height: 16 },
         });
