@@ -38,6 +38,20 @@ function engineWith(...contexts: RenderingContext[]): EngineContext {
 }
 
 describe("device-lost recovery context dispatch", () => {
+    it("captures texture-compression-unaligned for replacement-device negotiation", () => {
+        const engine = {
+            _device: {
+                features: new Set<GPUFeatureName>(["texture-compression-unaligned" as GPUFeatureName]),
+                lost: new Promise<GPUDeviceLostInfo>(() => undefined),
+            },
+        } as unknown as EngineContext;
+
+        const registration = _enableDeviceLostRecovery(engine, { _kind: "scene", _recover: vi.fn() });
+
+        expect(engine._deviceLostRecovery?._requiredFeatures).toEqual(["texture-compression-unaligned"]);
+        registration.disable();
+    });
+
     it("keeps a context recovery strategy enabled until every registration is disabled", () => {
         const enable = vi.fn();
         const disable = vi.fn();

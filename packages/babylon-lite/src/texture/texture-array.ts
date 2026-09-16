@@ -635,6 +635,8 @@ function mergeSeparateKtx2Layers(decodedLayers: readonly Ktx2DecodedData[]): Ktx
  * Decode an in-memory multi-layer KTX2 container and upload every layer of its mip chain to a
  * `Texture2DArray`. The buffer counterpart to {@link loadKtx2Texture2DArray} — use it when the bytes are
  * already in hand (an ArrayBuffer from a zip, an XHR, or a glTF binary chunk).
+ * Unlike the compatibility-oriented `createTexture2DArrayFromKtx2`, this native path preserves the
+ * decoder-selected GPU format and every authored mip instead of forcing RGBA8 and regenerating mips.
  *
  * @param engine - Engine context.
  * @param buffer - Raw `.ktx2` file bytes with `layerCount` \>= 1.
@@ -658,7 +660,11 @@ export async function uploadKtx2Texture2DArray(engine: EngineContext, buffer: Ar
  * @param buffers - Ordered single-layer KTX2 buffers.
  * @param sRGB - Select the `*-srgb` GPU format. Default false.
  */
-export async function uploadKtx2Texture2DArrayFromBuffers(engine: EngineContext, buffers: readonly (ArrayBuffer | ArrayBufferView)[], sRGB = false): Promise<Texture2DArray> {
+export async function uploadKtx2Texture2DArrayFromBuffers(
+    engine: EngineContext,
+    buffers: readonly [ArrayBuffer | ArrayBufferView, ...(ArrayBuffer | ArrayBufferView)[]],
+    sRGB = false
+): Promise<Texture2DArray> {
     if (buffers.length < 1) {
         throw new Error("KTX2: at least one separate layer buffer is required");
     }
@@ -702,7 +708,7 @@ export async function loadKtx2Texture2DArray(engine: EngineContext, url: string,
  * @param urls - Ordered single-layer KTX2 URLs.
  * @param sRGB - Select the `*-srgb` GPU format. Default false.
  */
-export async function loadKtx2Texture2DArrayFromUrls(engine: EngineContext, urls: readonly string[], sRGB = false): Promise<Texture2DArray> {
+export async function loadKtx2Texture2DArrayFromUrls(engine: EngineContext, urls: readonly [string, ...string[]], sRGB = false): Promise<Texture2DArray> {
     if (urls.length < 1) {
         throw new Error("KTX2: at least one separate layer URL is required");
     }
@@ -715,5 +721,5 @@ export async function loadKtx2Texture2DArrayFromUrls(engine: EngineContext, urls
             return resp.arrayBuffer();
         })
     );
-    return uploadKtx2Texture2DArrayFromBuffers(engine, buffers, sRGB);
+    return uploadKtx2Texture2DArrayFromBuffers(engine, buffers as [ArrayBuffer, ...ArrayBuffer[]], sRGB);
 }

@@ -362,6 +362,22 @@ export function _getAdapterOptions(): GPURequestAdapterOptions {
     return _adapterOptionsHook ? _adapterOptionsHook() : {};
 }
 
+const OPTIONAL_DEVICE_FEATURES = [
+    "float32-filterable",
+    "texture-compression-astc",
+    "texture-compression-bc",
+    "texture-compression-etc2",
+    "texture-compression-unaligned" as GPUFeatureName,
+    "timestamp-query",
+    "primitive-index",
+] as const satisfies readonly GPUFeatureName[];
+
+/** @internal Select every optional feature supported by the adapter. The returned list is
+ *  passed unchanged to `requestDevice` and later captured by device-lost recovery. */
+export function _getSupportedDeviceFeatures(adapter: GPUAdapter): GPUFeatureName[] {
+    return OPTIONAL_DEVICE_FEATURES.filter((feature) => adapter.features.has(feature));
+}
+
 /** Create the Babylon Lite engine bound to `canvas`. Acquires the GPU adapter + device,
  *  configures the canvas's WebGPU context, and returns an `EngineContext` that *is also*
  *  the primary `SurfaceContext` — i.e. the returned engine is itself the surface for the
@@ -377,21 +393,9 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
         throw new Error("WebGPU adapter not available");
     }
 
-    const features: GPUFeatureName[] = [];
     // Optional features are requested opportunistically so their public enable functions can activate
     // later without recreating the device. Unsupported adapters keep the corresponding feature inactive.
-    for (const f of [
-        "float32-filterable",
-        "texture-compression-astc",
-        "texture-compression-bc",
-        "texture-compression-etc2",
-        "timestamp-query",
-        "primitive-index",
-    ] as GPUFeatureName[]) {
-        if (adapter.features.has(f)) {
-            features.push(f);
-        }
-    }
+    const features = _getSupportedDeviceFeatures(adapter);
     const device = await adapter.requestDevice({ requiredFeatures: features, requiredLimits: options?.requiredLimits });
 
     // eslint-disable-next-line no-console

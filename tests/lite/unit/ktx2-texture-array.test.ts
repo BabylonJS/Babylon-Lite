@@ -442,7 +442,9 @@ describe("uploadKtx2Texture2DArrayFromBuffers", () => {
         decodeResult = null;
         const cap: Captured = { writes: [] };
 
-        await expect(uploadKtx2Texture2DArrayFromBuffers(makeEngine(cap), [])).rejects.toThrow(/at least one/);
+        await expect(
+            uploadKtx2Texture2DArrayFromBuffers(makeEngine(cap), [] as unknown as readonly [ArrayBuffer | ArrayBufferView, ...(ArrayBuffer | ArrayBufferView)[]])
+        ).rejects.toThrow(/at least one/);
         expect(cap.createDesc).toBeUndefined();
     });
 
