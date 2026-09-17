@@ -193,13 +193,12 @@ function _setVelocityLimits(world: PhysicsWorld, maxLinear: number, maxAngular: 
 
 function _setBodyTransform(world: PhysicsWorld, body: PhysicsBody, position: Vec3, rotation: Quat): void {
     const hknp = world._hknp;
-    const region = _getOrCreateRegion(world, position);
-    const o = region.origin;
+    const o = body._region!.origin;
     hknp.HP_Body_SetQTransform(body._hkBody, [
         [position.x - o.x, position.y - o.y, position.z - o.z],
         [rotation.x, rotation.y, rotation.z, rotation.w],
     ]);
-    body._region = region;
+    _reRegionBody(world, body);
     _syncBodyToNode(hknp, body);
 }
 
