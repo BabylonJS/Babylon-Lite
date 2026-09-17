@@ -1,6 +1,6 @@
 import { expect, test } from "../parity-fixtures";
 import * as path from "path";
-import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
+import { attachCompareArtifacts, captureGolden, compareImages, compareRegion, getSceneConfig } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(313);
 const referenceDir = path.resolve(__dirname, "../../../../reference/lite/scene313-mesh-blending-alpha-cutout");
@@ -16,6 +16,8 @@ test("Scene 313 — alpha-tested mesh tags match Babylon.js", async ({ page }, t
     const actual = path.join(referenceDir, "test-actual.png");
     await page.locator("canvas").screenshot({ path: actual });
     const result = compareImages(actual, goldenRef);
+    const region = compareRegion(actual, goldenRef, [0, 0, 0], 10);
     await attachCompareArtifacts(testInfo, actual, goldenRef, referenceDir);
     expect(result.mad).toBeLessThanOrEqual(sceneConfig.maxMad);
+    expect(region.mad).toBeLessThanOrEqual(sceneConfig.maxRegionMad!);
 });

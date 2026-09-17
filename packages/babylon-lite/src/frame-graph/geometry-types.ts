@@ -87,17 +87,18 @@ export const GEOMETRY_TEXTURE_DESCRIPTIONS: readonly GeometryTextureDescription[
     { name: "MeshBlendTag", defaultFormat: "r8uint", clearValue: ZERO },
 ];
 
-let _meshBlendTagResolver: ((mesh: Mesh) => number) | null = null;
-
-/** @internal Install the mesh-tag resolver when mesh blending is enabled. */
-export function _installGeometryMeshBlendTagResolver(resolve: (mesh: Mesh) => number): void {
-    _meshBlendTagResolver = resolve;
+/** @internal Validate one packed mesh tag without importing the opt-in helper module. */
+export function _validateGeometryMeshBlendTag(tag: number): number {
+    if (!Number.isInteger(tag) || tag < 0 || tag > 0xff) {
+        throw new RangeError("Mesh-blending tag must be an integer between 0 and 255.");
+    }
+    if (tag !== 0 && (tag & 0x3f) === 0) {
+        throw new RangeError("A nonzero mesh-blending tag must contain a group ID between 1 and 63.");
+    }
+    return tag;
 }
 
-/** @internal Resolve one mesh tag or fail when the feature was not enabled. */
+/** @internal Resolve and validate one mesh tag. */
 export function _resolveGeometryMeshBlendTag(mesh: Mesh): number {
-    if (!_meshBlendTagResolver) {
-        throw new Error("Geometry MESH_BLEND_TAG requires createMeshBlendingPostProcessTask to be created before scene registration.");
-    }
-    return _meshBlendTagResolver(mesh);
+    return _validateGeometryMeshBlendTag(mesh.meshBlendingTag ?? 0);
 }

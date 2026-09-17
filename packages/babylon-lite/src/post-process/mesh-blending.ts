@@ -7,10 +7,9 @@ import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../e
 import { F32 } from "../engine/typed-arrays.js";
 import type { PostProcessAlphaMode } from "../frame-graph/post-process-task.js";
 import type { Task } from "../frame-graph/task.js";
-import { _installGeometryMeshBlendTagResolver } from "../frame-graph/geometry-types.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import type { Mat4 } from "../math/types.js";
-import { createDefaultMeshBlendRadiusDefinitions, resolveMeshBlendingTag } from "../mesh/mesh-blending-tag.js";
+import { createDefaultMeshBlendRadiusDefinitions } from "../mesh/mesh-blending-tag.js";
 import type { MeshBlendRadiusDefinition, MeshBlendRadiusDefinitions } from "../mesh/mesh-blending-tag.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { createMeshBlendingBlueNoiseData } from "./mesh-blending-blue-noise.js";
@@ -88,10 +87,18 @@ export interface MeshBlendingPostProcessTask extends Task {
 interface MeshBlendingPostProcessTaskInternal extends MeshBlendingPostProcessTask {
     outputTexture: RenderTarget;
     _internalTarget: RenderTarget | null;
-    _internalTargetKey: string;
+    _internalSource: RenderTarget | null;
+    _internalFormat: GPUTextureFormat | null;
     _device: GPUDevice | null;
-    _variantKey: string;
-    _resourceKey: string;
+    _compiledQuality: MeshBlendQuality | -1;
+    _compiledDepthType: MeshBlendDepthType | -1;
+    _compiledDebugMode: MeshBlendDebugMode | -1;
+    _compiledHasBaseColor: boolean | null;
+    _compiledOutputFormat: GPUTextureFormat | null;
+    _compiledSourceFormat: GPUTextureFormat | null;
+    _compiledDepthFormat: GPUTextureFormat | null;
+    _compiledBaseColorFormat: GPUTextureFormat | null;
+    _compiledAlphaMode: PostProcessAlphaMode | -1;
     _uniformBuffer: GPUBuffer | null;
     _uniformData: Float32Array;
     _blueNoiseData: Uint8Array;
@@ -108,6 +115,15 @@ interface MeshBlendingPostProcessTaskInternal extends MeshBlendingPostProcessTas
     _boundTag: GPUTexture | null;
     _boundDepth: GPUTexture | null;
     _boundBaseColor: GPUTexture | null;
+    _validatedSource: GPUTexture | null;
+    _validatedTag: GPUTexture | null;
+    _validatedDepth: GPUTexture | null;
+    _validatedBaseColor: GPUTexture | null;
+    _validatedOutput: GPUTexture | null;
+    _validatedWidth: number;
+    _validatedHeight: number;
+    _validatedDepthType: MeshBlendDepthType | -1;
+    _validatedAlphaMode: PostProcessAlphaMode | -1;
 }
 
 /** Create one independently mutable, validating radius definition. */
@@ -140,8 +156,6 @@ export function createMeshBlendRadiusDefinition(worldRadius: number, minimumProj
 
 /** Create the task-owned fullscreen mesh-blending pass. */
 export function createMeshBlendingPostProcessTask(config: MeshBlendingPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): MeshBlendingPostProcessTask {
-    _installGeometryMeshBlendTagResolver(resolveMeshBlendingTag);
-    _installMeshBlendingPbrSupport();
     const name = config.name ?? "mesh-blending";
     const initialQuality = validateQuality(config.quality ?? MeshBlendQuality.Medium);
     const initialDepthType = validateDepthType(config.depthType ?? MeshBlendDepthType.View);
@@ -211,10 +225,18 @@ export function createMeshBlendingPostProcessTask(config: MeshBlendingPostProces
         viewport: config.viewport ?? null,
         clear: config.clear ?? true,
         _internalTarget: internalTarget,
-        _internalTargetKey: internalTarget ? internalTargetKey(source) : "",
+        _internalSource: internalTarget ? source : null,
+        _internalFormat: internalTarget ? (source._descriptor.format ?? null) : null,
         _device: null,
-        _variantKey: "",
-        _resourceKey: "",
+        _compiledQuality: -1,
+        _compiledDepthType: -1,
+        _compiledDebugMode: -1,
+        _compiledHasBaseColor: null,
+        _compiledOutputFormat: null,
+        _compiledSourceFormat: null,
+        _compiledDepthFormat: null,
+        _compiledBaseColorFormat: null,
+        _compiledAlphaMode: -1,
         _uniformBuffer: null,
         _uniformData: new F32(60),
         _blueNoiseData: createMeshBlendingBlueNoiseData(),
@@ -231,6 +253,15 @@ export function createMeshBlendingPostProcessTask(config: MeshBlendingPostProces
         _boundTag: null,
         _boundDepth: null,
         _boundBaseColor: null,
+        _validatedSource: null,
+        _validatedTag: null,
+        _validatedDepth: null,
+        _validatedBaseColor: null,
+        _validatedOutput: null,
+        _validatedWidth: -1,
+        _validatedHeight: -1,
+        _validatedDepthType: -1,
+        _validatedAlphaMode: -1,
         record(): void {
             prepareTask(task, true);
         },
@@ -256,8 +287,11 @@ export function createMeshBlendingPostProcessTask(config: MeshBlendingPostProces
             destroyDeviceResources(task);
             disposeRenderTarget(task._internalTarget);
             task._internalTarget = null;
+            task._internalSource = null;
+            task._internalFormat = null;
         },
     };
+    _installMeshBlendingPbrSupport();
     return task;
 }
 
@@ -323,7 +357,8 @@ function prepareTask(task: MeshBlendingPostProcessTaskInternal, recording: boole
         if (task._internalTarget) {
             disposeRenderTarget(task._internalTarget);
             task._internalTarget = null;
-            task._internalTargetKey = "";
+            task._internalSource = null;
+            task._internalFormat = null;
         }
         task._device = task.engine._device;
     }
@@ -331,7 +366,10 @@ function prepareTask(task: MeshBlendingPostProcessTaskInternal, recording: boole
     if (recording || !task.outputTexture._colorView || (deviceChanged && task.outputTexture === task._internalTarget)) {
         buildRenderTarget(task.outputTexture, task.engine);
     }
-    validateTargets(task);
+    if (targetsNeedValidation(task)) {
+        validateTargets(task);
+        cacheValidatedTargets(task);
+    }
     ensureGpuState(task);
 }
 
@@ -340,16 +378,18 @@ function prepareOutputTarget(task: MeshBlendingPostProcessTaskInternal): void {
         if (task._internalTarget) {
             disposeRenderTarget(task._internalTarget);
             task._internalTarget = null;
-            task._internalTargetKey = "";
+            task._internalSource = null;
+            task._internalFormat = null;
         }
         task.outputTexture = task.targetTexture;
         return;
     }
-    const key = internalTargetKey(task.sourceTexture);
-    if (!task._internalTarget || task._internalTargetKey !== key) {
+    const sourceFormat = task.sourceTexture._descriptor.format ?? null;
+    if (!task._internalTarget || task._internalSource !== task.sourceTexture || task._internalFormat !== sourceFormat) {
         disposeRenderTarget(task._internalTarget);
         task._internalTarget = createInternalTarget(task.name, task.sourceTexture);
-        task._internalTargetKey = key;
+        task._internalSource = task.sourceTexture;
+        task._internalFormat = sourceFormat;
     }
     task.outputTexture = task._internalTarget;
 }
@@ -368,13 +408,6 @@ function createInternalTarget(name: string, source: RenderTarget): RenderTarget 
     return createRenderTarget(targetDescriptor);
 }
 
-function internalTargetKey(source: RenderTarget): string {
-    const descriptor = source._descriptor;
-    const size = descriptor.size;
-    const sizeKey = "canvas" in size ? `surface:${size._uniqueId}` : `${size.width}x${size.height}`;
-    return `${descriptor.format ?? "-"}|${sizeKey}`;
-}
-
 function validateTargets(task: MeshBlendingPostProcessTaskInternal): void {
     validateInputColor(task.name, "sourceTexture", task.sourceTexture, isSceneColorFormat);
     validateInputColor(task.name, "meshBlendTagTexture", task.meshBlendTagTexture, isMeshBlendTagFormat);
@@ -383,8 +416,15 @@ function validateTargets(task: MeshBlendingPostProcessTaskInternal): void {
         validateInputColor(task.name, "baseColorTexture", task.baseColorTexture, isSceneColorFormat);
     }
     validateInputColor(task.name, "outputTexture", task.outputTexture, isSceneColorFormat);
-    if (task.sourceTexture === task.outputTexture || task.sourceTexture._colorTexture === task.outputTexture._colorTexture) {
-        throw new Error(`MeshBlendingPostProcessTask "${task.name}": sourceTexture and outputTexture must not alias.`);
+    for (const [label, input] of [
+        ["sourceTexture", task.sourceTexture],
+        ["meshBlendTagTexture", task.meshBlendTagTexture],
+        ["depthTexture", task.depthTexture],
+        ["baseColorTexture", task.baseColorTexture],
+    ] as const) {
+        if (input && (input === task.outputTexture || input._colorTexture === task.outputTexture._colorTexture)) {
+            throw new Error(`MeshBlendingPostProcessTask "${task.name}": ${label} and outputTexture must not alias.`);
+        }
     }
     const width = task.outputTexture._width;
     const height = task.outputTexture._height;
@@ -394,6 +434,35 @@ function validateTargets(task: MeshBlendingPostProcessTaskInternal): void {
     if (task.baseColorTexture) {
         validateDimensions(task.name, "baseColorTexture", task.baseColorTexture, width, height);
     }
+    if (task.alphaMode !== 0 && task.outputTexture._descriptor.format === "rgba32float" && !task.engine._device.features.has("float32-blendable")) {
+        throw new Error(`MeshBlendingPostProcessTask "${task.name}": blended rgba32float output requires the float32-blendable WebGPU feature.`);
+    }
+}
+
+function targetsNeedValidation(task: MeshBlendingPostProcessTaskInternal): boolean {
+    return (
+        task._validatedSource !== task.sourceTexture._colorTexture ||
+        task._validatedTag !== task.meshBlendTagTexture._colorTexture ||
+        task._validatedDepth !== task.depthTexture._colorTexture ||
+        task._validatedBaseColor !== (task.baseColorTexture?._colorTexture ?? null) ||
+        task._validatedOutput !== task.outputTexture._colorTexture ||
+        task._validatedWidth !== task.outputTexture._width ||
+        task._validatedHeight !== task.outputTexture._height ||
+        task._validatedDepthType !== task.depthType ||
+        task._validatedAlphaMode !== task.alphaMode
+    );
+}
+
+function cacheValidatedTargets(task: MeshBlendingPostProcessTaskInternal): void {
+    task._validatedSource = task.sourceTexture._colorTexture;
+    task._validatedTag = task.meshBlendTagTexture._colorTexture;
+    task._validatedDepth = task.depthTexture._colorTexture;
+    task._validatedBaseColor = task.baseColorTexture?._colorTexture ?? null;
+    task._validatedOutput = task.outputTexture._colorTexture;
+    task._validatedWidth = task.outputTexture._width;
+    task._validatedHeight = task.outputTexture._height;
+    task._validatedDepthType = task.depthType;
+    task._validatedAlphaMode = task.alphaMode;
 }
 
 function validateInputColor(name: string, label: string, target: RenderTarget, accepts: (format: GPUTextureFormat) => boolean): void {
@@ -465,11 +534,31 @@ function ensureGpuState(task: MeshBlendingPostProcessTaskInternal): void {
         size: 240,
         usage: BU.UNIFORM | BU.COPY_DST,
     });
-    const variantKey = `${task.quality}|${task.depthType}|${task.debugMode}|${task.baseColorTexture ? 1 : 0}|${task.outputTexture._descriptor.format}|${
-        task.sourceTexture._descriptor.format
-    }|${task.depthTexture._descriptor.format}|${task.baseColorTexture?._descriptor.format ?? "-"}|${task.alphaMode}`;
-    if (variantKey !== task._variantKey) {
-        task._variantKey = variantKey;
+    const hasBaseColor = !!task.baseColorTexture;
+    const outputFormat = task.outputTexture._descriptor.format!;
+    const sourceFormat = task.sourceTexture._descriptor.format!;
+    const depthFormat = task.depthTexture._descriptor.format!;
+    const baseColorFormat = task.baseColorTexture?._descriptor.format ?? null;
+    if (
+        task._compiledQuality !== task.quality ||
+        task._compiledDepthType !== task.depthType ||
+        task._compiledDebugMode !== task.debugMode ||
+        task._compiledHasBaseColor !== hasBaseColor ||
+        task._compiledOutputFormat !== outputFormat ||
+        task._compiledSourceFormat !== sourceFormat ||
+        task._compiledDepthFormat !== depthFormat ||
+        task._compiledBaseColorFormat !== baseColorFormat ||
+        task._compiledAlphaMode !== task.alphaMode
+    ) {
+        task._compiledQuality = task.quality;
+        task._compiledDepthType = task.depthType;
+        task._compiledDebugMode = task.debugMode;
+        task._compiledHasBaseColor = hasBaseColor;
+        task._compiledOutputFormat = outputFormat;
+        task._compiledSourceFormat = sourceFormat;
+        task._compiledDepthFormat = depthFormat;
+        task._compiledBaseColorFormat = baseColorFormat;
+        task._compiledAlphaMode = task.alphaMode;
         task._bindGroup = null;
         task._bindGroupLayout = null;
         task._pipelineLayout = null;
@@ -477,7 +566,7 @@ function ensureGpuState(task: MeshBlendingPostProcessTaskInternal): void {
             quality: task.quality,
             depthType: task.depthType,
             debugMode: task.debugMode,
-            hasBaseColor: !!task.baseColorTexture,
+            hasBaseColor,
         });
         task._shaderModule = task.engine._device.createShaderModule({ label: task.name, code });
         task._bindGroupLayout = createBindGroupLayout(task);
@@ -492,7 +581,7 @@ function ensureGpuState(task: MeshBlendingPostProcessTaskInternal): void {
             fragment: {
                 module: task._shaderModule,
                 entryPoint: "meshBlendFragment",
-                targets: [{ format: task.outputTexture._descriptor.format!, blend: alphaModeToBlend(task.alphaMode) }],
+                targets: [{ format: outputFormat, blend: alphaModeToBlend(task.alphaMode) }],
             },
             primitive: { topology: "triangle-list" },
         });
@@ -503,7 +592,6 @@ function ensureGpuState(task: MeshBlendingPostProcessTaskInternal): void {
         task._boundDepth !== task.depthTexture._colorTexture ||
         task._boundBaseColor !== (task.baseColorTexture?._colorTexture ?? null);
     if (!task._bindGroup || resourceChanged) {
-        task._resourceKey = `${task.sourceTexture._width}x${task.sourceTexture._height}|${task.baseColorTexture ? 1 : 0}`;
         const entries: GPUBindGroupEntry[] = [
             { binding: 0, resource: task.sourceTexture._colorView! },
             { binding: 1, resource: task.meshBlendTagTexture._colorView! },
@@ -574,74 +662,74 @@ function writeUniforms(task: MeshBlendingPostProcessTaskInternal): void {
     const projection = getProjectionMatrix(task.camera, getEffectiveAspectRatio(task.camera, width, height));
     data.fill(0);
     packMat4IntoF32(data, projection, 0);
-    if (!invertMat4IntoF32(data, 16, projection) || !invertMat4IntoF32(data, 32, getViewMatrix(task.camera))) {
+    if (!invertMat4IntoF32(data, 16, projection) || (task.debugMode === MeshBlendDebugMode.WorldPosition && !invertMat4IntoF32(data, 32, getViewMatrix(task.camera)))) {
         throw new Error(`MeshBlendingPostProcessTask "${task.name}": camera projection and view matrices must be invertible.`);
     }
     for (let index = 0; index < 4; index++) {
         const definition = task.radiusClasses[index]!;
-        data[48 + index] = validateRadius(definition.worldRadius, "world radius");
-        data[52 + index] = validateRadius(definition.minimumProjectedRadius, "minimum projected radius");
+        data[48 + index] = definition.worldRadius;
+        data[52 + index] = definition.minimumProjectedRadius;
     }
 
     data[56] = task.camera.ortho ? 1 : 0;
-    data[57] = validateSlopeFactor(task.slopeFactor);
+    data[57] = task.slopeFactor;
     data[58] = task.enabled ? 1 : 0;
     if (task._uniformBuffer) {
         task.engine._device.queue.writeBuffer(task._uniformBuffer, 0, data as Float32Array<ArrayBuffer>);
     }
+}
 
-    function invertMat4IntoF32(out: Float32Array, offset: number, input: Mat4): boolean {
-        const a00 = input[0]!,
-            a01 = input[1]!,
-            a02 = input[2]!,
-            a03 = input[3]!;
-        const a10 = input[4]!,
-            a11 = input[5]!,
-            a12 = input[6]!,
-            a13 = input[7]!;
-        const a20 = input[8]!,
-            a21 = input[9]!,
-            a22 = input[10]!,
-            a23 = input[11]!;
-        const a30 = input[12]!,
-            a31 = input[13]!,
-            a32 = input[14]!,
-            a33 = input[15]!;
-        const b00 = a00 * a11 - a01 * a10;
-        const b01 = a00 * a12 - a02 * a10;
-        const b02 = a00 * a13 - a03 * a10;
-        const b03 = a01 * a12 - a02 * a11;
-        const b04 = a01 * a13 - a03 * a11;
-        const b05 = a02 * a13 - a03 * a12;
-        const b06 = a20 * a31 - a21 * a30;
-        const b07 = a20 * a32 - a22 * a30;
-        const b08 = a20 * a33 - a23 * a30;
-        const b09 = a21 * a32 - a22 * a31;
-        const b10 = a21 * a33 - a23 * a31;
-        const b11 = a22 * a33 - a23 * a32;
-        let determinant = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
-        if (Math.abs(determinant) < 1e-10) {
-            return false;
-        }
-        determinant = 1 / determinant;
-        out[offset] = (a11 * b11 - a12 * b10 + a13 * b09) * determinant;
-        out[offset + 1] = (a02 * b10 - a01 * b11 - a03 * b09) * determinant;
-        out[offset + 2] = (a31 * b05 - a32 * b04 + a33 * b03) * determinant;
-        out[offset + 3] = (a22 * b04 - a21 * b05 - a23 * b03) * determinant;
-        out[offset + 4] = (a12 * b08 - a10 * b11 - a13 * b07) * determinant;
-        out[offset + 5] = (a00 * b11 - a02 * b08 + a03 * b07) * determinant;
-        out[offset + 6] = (a32 * b02 - a30 * b05 - a33 * b01) * determinant;
-        out[offset + 7] = (a20 * b05 - a22 * b02 + a23 * b01) * determinant;
-        out[offset + 8] = (a10 * b10 - a11 * b08 + a13 * b06) * determinant;
-        out[offset + 9] = (a01 * b08 - a00 * b10 - a03 * b06) * determinant;
-        out[offset + 10] = (a30 * b04 - a31 * b02 + a33 * b00) * determinant;
-        out[offset + 11] = (a21 * b02 - a20 * b04 - a23 * b00) * determinant;
-        out[offset + 12] = (a11 * b07 - a10 * b09 - a12 * b06) * determinant;
-        out[offset + 13] = (a00 * b09 - a01 * b07 + a02 * b06) * determinant;
-        out[offset + 14] = (a31 * b01 - a30 * b03 - a32 * b00) * determinant;
-        out[offset + 15] = (a20 * b03 - a21 * b01 + a22 * b00) * determinant;
-        return true;
+function invertMat4IntoF32(out: Float32Array, offset: number, input: Mat4): boolean {
+    const a00 = input[0]!,
+        a01 = input[1]!,
+        a02 = input[2]!,
+        a03 = input[3]!;
+    const a10 = input[4]!,
+        a11 = input[5]!,
+        a12 = input[6]!,
+        a13 = input[7]!;
+    const a20 = input[8]!,
+        a21 = input[9]!,
+        a22 = input[10]!,
+        a23 = input[11]!;
+    const a30 = input[12]!,
+        a31 = input[13]!,
+        a32 = input[14]!,
+        a33 = input[15]!;
+    const b00 = a00 * a11 - a01 * a10;
+    const b01 = a00 * a12 - a02 * a10;
+    const b02 = a00 * a13 - a03 * a10;
+    const b03 = a01 * a12 - a02 * a11;
+    const b04 = a01 * a13 - a03 * a11;
+    const b05 = a02 * a13 - a03 * a12;
+    const b06 = a20 * a31 - a21 * a30;
+    const b07 = a20 * a32 - a22 * a30;
+    const b08 = a20 * a33 - a23 * a30;
+    const b09 = a21 * a32 - a22 * a31;
+    const b10 = a21 * a33 - a23 * a31;
+    const b11 = a22 * a33 - a23 * a32;
+    let determinant = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
+    if (Math.abs(determinant) < 1e-10) {
+        return false;
     }
+    determinant = 1 / determinant;
+    out[offset] = (a11 * b11 - a12 * b10 + a13 * b09) * determinant;
+    out[offset + 1] = (a02 * b10 - a01 * b11 - a03 * b09) * determinant;
+    out[offset + 2] = (a31 * b05 - a32 * b04 + a33 * b03) * determinant;
+    out[offset + 3] = (a22 * b04 - a21 * b05 - a23 * b03) * determinant;
+    out[offset + 4] = (a12 * b08 - a10 * b11 - a13 * b07) * determinant;
+    out[offset + 5] = (a00 * b11 - a02 * b08 + a03 * b07) * determinant;
+    out[offset + 6] = (a32 * b02 - a30 * b05 - a33 * b01) * determinant;
+    out[offset + 7] = (a20 * b05 - a22 * b02 + a23 * b01) * determinant;
+    out[offset + 8] = (a10 * b10 - a11 * b08 + a13 * b06) * determinant;
+    out[offset + 9] = (a01 * b08 - a00 * b10 - a03 * b06) * determinant;
+    out[offset + 10] = (a30 * b04 - a31 * b02 + a33 * b00) * determinant;
+    out[offset + 11] = (a21 * b02 - a20 * b04 - a23 * b00) * determinant;
+    out[offset + 12] = (a11 * b07 - a10 * b09 - a12 * b06) * determinant;
+    out[offset + 13] = (a00 * b09 - a01 * b07 + a02 * b06) * determinant;
+    out[offset + 14] = (a31 * b01 - a30 * b03 - a32 * b00) * determinant;
+    out[offset + 15] = (a20 * b03 - a21 * b01 + a22 * b00) * determinant;
+    return true;
 }
 
 function destroyDeviceResources(task: MeshBlendingPostProcessTaskInternal): void {
@@ -655,12 +743,28 @@ function destroyDeviceResources(task: MeshBlendingPostProcessTaskInternal): void
     task._pipelineLayout = null;
     task._pipeline = null;
     task._bindGroup = null;
-    task._variantKey = "";
-    task._resourceKey = "";
+    task._compiledQuality = -1;
+    task._compiledDepthType = -1;
+    task._compiledDebugMode = -1;
+    task._compiledHasBaseColor = null;
+    task._compiledOutputFormat = null;
+    task._compiledSourceFormat = null;
+    task._compiledDepthFormat = null;
+    task._compiledBaseColorFormat = null;
+    task._compiledAlphaMode = -1;
     task._boundSource = null;
     task._boundTag = null;
     task._boundDepth = null;
     task._boundBaseColor = null;
+    task._validatedSource = null;
+    task._validatedTag = null;
+    task._validatedDepth = null;
+    task._validatedBaseColor = null;
+    task._validatedOutput = null;
+    task._validatedWidth = -1;
+    task._validatedHeight = -1;
+    task._validatedDepthType = -1;
+    task._validatedAlphaMode = -1;
 }
 
 function applyViewport(pass: GPURenderPassEncoder, viewport: NormalizedViewport | null, target: RenderTarget): void {

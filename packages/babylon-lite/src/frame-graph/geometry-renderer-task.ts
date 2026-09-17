@@ -101,6 +101,8 @@ export interface GeometryRendererTaskConfig {
     readonly textureDescriptions: readonly GeometryRendererTextureDescription[];
     /** Flip culling direction. Default false. */
     reverseCulling?: boolean;
+    /** Whether alpha-blended meshes participate. Defaults to true. */
+    renderTransparentMeshes?: boolean;
     /** Optional color render-target that receives the *real* (lit) material
      *  color, written as an additional color attachment alongside the geometry
      *  data attachments. Must have the same `sampleCount` and resolved
@@ -548,12 +550,25 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
             if (!resolved) {
                 continue;
             }
+            if (attachmentTypes.includes(GeometryTextureType.MESH_BLEND_TAG) && resolved._family === "node" && (resolved._mat as NodeMaterial)._needsAlphaBlending) {
+                if (config.renderTransparentMeshes === false) {
+                    continue;
+                }
+                throw new Error(
+                    "GeometryRendererTask: transparent Node materials cannot write MESH_BLEND_TAG because their graph alpha is unavailable to the geometry terminal. Exclude transparent meshes or omit the tag attachment."
+                );
+            }
             const resources: MeshRebuildResources = { _lifetimeDisposers: [] };
             created.push(resources);
             const view = ensureView(task, nextViews, resolved, attachmentTypes, config);
             // Natural dispatch — view._buildGroup is the standard or PBR geometry
             // builder, its _rebuildSingle returns the per-mesh geometry-MRT Renderable.
             const renderable: Renderable = view._buildGroup._rebuildSingle!(sc, mesh, view, resources);
+            if (config.renderTransparentMeshes === false && renderable.isTransparent) {
+                releaseGeometryResources([resources]);
+                created.pop();
+                continue;
+            }
             renderable._lifetimeDisposers = resources._lifetimeDisposers;
             const binding = renderable.bind(eng, task._signature as unknown as RenderTargetSignature);
             nextBound.push({ _mesh: mesh, _binding: binding, _view: view, _lifetimeDisposers: resources._lifetimeDisposers });

@@ -1,4 +1,4 @@
-import { createDefaultMeshBlendRadiusDefinitions, packMeshBlendingTag, unpackMeshBlendingTag } from "babylon-lite";
+import { createDefaultMeshBlendRadiusDefinitions, packMeshBlendingTag, unpackMeshBlendingTag, type MeshBlendingRadiusClass as LiteMeshBlendingRadiusClass } from "babylon-lite";
 
 import { unsupported } from "../error.js";
 
@@ -15,7 +15,7 @@ export interface IMeshBlendingTag {
 }
 
 export function PackMeshBlendingTag(groupId: number, radiusClass: MeshBlendingRadiusClass): number {
-    return packMeshBlendingTag(groupId, radiusClass);
+    return packMeshBlendingTag(groupId, radiusClass as LiteMeshBlendingRadiusClass);
 }
 
 export function UnpackMeshBlendingTag(tag: number): IMeshBlendingTag {
@@ -86,7 +86,7 @@ export function CreateDefaultMeshBlendRadiusDefinitions(): MeshBlendRadiusDefini
 }
 
 const MESH_BLENDING_BLOCKER =
-    "Mesh blending requires a packed integer geometry attachment, reusable depth/albedo textures, specialized shaders, and scene/camera frame-graph composition. Babylon Lite has no corresponding cross-cutting rendering subsystem.";
+    "Babylon Lite supports mesh blending through its native createMeshBlendingPostProcessTask API; the Babylon.js post-process, frame-graph, and node-render-graph wrapper classes are not implemented by the compat layer.";
 
 export class ThinMeshBlendingPostProcess {
     public constructor(..._args: unknown[]) {

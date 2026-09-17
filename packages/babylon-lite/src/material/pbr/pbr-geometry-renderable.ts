@@ -198,7 +198,9 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     _writePbrMaterialData(matInitData, source, materialSpec);
     const meshBlendTagOffset = materialSpec._offsets.get("meshBlendTag");
     let lastMeshBlendTag = 0;
+    let lastRawMeshBlendTag = 0;
     if (meshBlendTagOffset !== undefined) {
+        lastRawMeshBlendTag = mesh.meshBlendingTag ?? 0;
         lastMeshBlendTag = _resolveGeometryMeshBlendTag(mesh);
         matInitData[meshBlendTagOffset / 4] = lastMeshBlendTag;
     }
@@ -256,7 +258,9 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const matScratch = new F32(materialSpec._totalBytes / 4);
 
     const _baseUpdate = (): void => {
-        const meshBlendTag = meshBlendTagOffset !== undefined ? _resolveGeometryMeshBlendTag(mesh) : 0;
+        const rawMeshBlendTag = meshBlendTagOffset !== undefined ? (mesh.meshBlendingTag ?? 0) : 0;
+        const meshBlendTagChanged = rawMeshBlendTag !== lastRawMeshBlendTag;
+        const meshBlendTag = meshBlendTagChanged ? _resolveGeometryMeshBlendTag(mesh) : lastMeshBlendTag;
         if (mesh.worldMatrixVersion !== _lastWorldVersion || scene.lights.length !== _lastLightsCount) {
             sortCenter[0] = mesh.worldMatrix[12]!;
             sortCenter[1] = mesh.worldMatrix[13]!;
@@ -274,6 +278,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
             if (meshBlendTagOffset !== undefined) {
                 matScratch[meshBlendTagOffset / 4] = meshBlendTag;
                 lastMeshBlendTag = meshBlendTag;
+                lastRawMeshBlendTag = rawMeshBlendTag;
             }
             device.queue.writeBuffer(materialUBO, 0, matScratch.buffer, 0, matScratch.byteLength);
         }

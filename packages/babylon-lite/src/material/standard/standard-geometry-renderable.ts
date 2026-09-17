@@ -205,7 +205,9 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         meshUboData[velocityEnabledOffset / 4] = 0;
     }
     let lastMeshBlendTag = 0;
+    let lastRawMeshBlendTag = 0;
     if (meshBlendTagOffset !== undefined) {
+        lastRawMeshBlendTag = mesh.meshBlendingTag ?? 0;
         lastMeshBlendTag = _resolveGeometryMeshBlendTag(mesh);
         meshUboData[meshBlendTagOffset / 4] = lastMeshBlendTag;
     }
@@ -268,7 +270,9 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
 
     const _baseUpdate = (): void => {
         const velocityEnabled = res._needsVelocity && velocityReady && !view._velocityExclusions?.has(mesh);
-        const meshBlendTag = meshBlendTagOffset !== undefined ? _resolveGeometryMeshBlendTag(mesh) : 0;
+        const rawMeshBlendTag = meshBlendTagOffset !== undefined ? (mesh.meshBlendingTag ?? 0) : 0;
+        const meshBlendTagChanged = rawMeshBlendTag !== lastRawMeshBlendTag;
+        const meshBlendTag = meshBlendTagChanged ? _resolveGeometryMeshBlendTag(mesh) : lastMeshBlendTag;
         if (
             mesh.worldMatrixVersion !== _lastWorldVersion ||
             scene.lights.length !== _lastLightsCount ||
@@ -290,6 +294,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
             if (meshBlendTagOffset !== undefined) {
                 meshUboData[meshBlendTagOffset / 4] = meshBlendTag;
                 lastMeshBlendTag = meshBlendTag;
+                lastRawMeshBlendTag = rawMeshBlendTag;
             }
             device.queue.writeBuffer(meshUBO, 0, meshUboData as Float32Array<ArrayBuffer>);
             _lastWorldVersion = mesh.worldMatrixVersion;

@@ -1,6 +1,6 @@
 import { expect, test } from "../parity-fixtures";
 import * as path from "path";
-import { attachCompareArtifacts, captureGolden, compareImages, getSceneConfig } from "../compare-utils";
+import { attachCompareArtifacts, captureGolden, compareImages, compareRegion, getSceneConfig } from "../compare-utils";
 
 const sceneConfig = getSceneConfig(311);
 const referenceDir = path.resolve(__dirname, "../../../../reference/lite/scene311-mesh-blending-shadow-attenuation");
@@ -16,6 +16,8 @@ test("Scene 311 — mesh blending shadow attenuation matches Babylon.js", async 
     const actual = path.join(referenceDir, "test-actual.png");
     await page.locator("canvas").screenshot({ path: actual });
     const result = compareImages(actual, goldenRef);
+    const region = compareRegion(actual, goldenRef, [10, 10, 10], 10);
     await attachCompareArtifacts(testInfo, actual, goldenRef, referenceDir);
     expect(result.mad).toBeLessThanOrEqual(sceneConfig.maxMad);
+    expect(region.mad).toBeLessThanOrEqual(sceneConfig.maxRegionMad!);
 });

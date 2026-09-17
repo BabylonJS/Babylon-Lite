@@ -434,7 +434,7 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
     }
 
     // Blend state for alpha-blended materials.
-    const blend = alphaModeToBlend(alphaMode);
+    const blend = _nodeAlphaModeToBlend(alphaMode);
     const depthWriteEnabled = blend === undefined;
 
     const sceneBGL = getSceneBindGroupLayout(_engine);
@@ -541,7 +541,8 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
 // ─── Alpha mode → blend state ───────────────────────────────────────
 
 /** Map BJS alpha mode to a WebGPU blend state. Returns undefined for opaque (mode 0). */
-function alphaModeToBlend(mode: number): GPUBlendState | undefined {
+/** @internal Map a Babylon.js alpha mode to the corresponding WebGPU blend state. */
+export function _nodeAlphaModeToBlend(mode: number): GPUBlendState | undefined {
     switch (mode) {
         case 1: // ALPHA_ADD
             return {

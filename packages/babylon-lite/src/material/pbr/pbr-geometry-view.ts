@@ -80,6 +80,11 @@ export interface PbrGeometryMaterialView extends MaterialView {
 // the snapshot is set right before that call and cleared after.
 let _activeAttachments: readonly GeometryTextureType[] | undefined;
 
+/** @internal Read the attachment scope of the active synchronous geometry composition. */
+export function _getActivePbrGeometryAttachments(): readonly GeometryTextureType[] | undefined {
+    return _activeAttachments;
+}
+
 /** @internal Used by the geometry renderable to scope attachment access for
  *  the PBR ext during a composePbr call. Returns the previous value so the
  *  caller can restore it (avoids global leakage in nested scenarios). */

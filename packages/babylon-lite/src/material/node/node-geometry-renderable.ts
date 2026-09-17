@@ -33,7 +33,7 @@ import { GeometryTextureType, _resolveGeometryMeshBlendTag } from "../../frame-g
 import type { NodeExpr, NodeBuildState, NodeGraph, NodeMeshFeatureCompile, NodeMeshFeatureWriter } from "./node-types.js";
 import { emitGraph } from "./node-emitter.js";
 import { findBlockByClassName } from "./node-parser.js";
-import { compileNodePipeline, type NodeCompileResult, type MrtOutputOpts } from "./node-pipeline.js";
+import { _nodeAlphaModeToBlend, compileNodePipeline, type NodeCompileResult, type MrtOutputOpts } from "./node-pipeline.js";
 import type { NodeMaterial } from "./node-material.js";
 import { sanitize, bjsTypeToNodeType, floatCount, extractDefault } from "./node-material.js";
 import { getAttrBuffer, writeAttributeFlags } from "./node-renderable.js";
@@ -228,6 +228,8 @@ function ensureGeometryCompile(view: NodeGeometryMaterialView, res: NodeGeometry
         throw new Error("node-geometry: render target has no color attachments");
     }
     const cullMode: GPUCullMode = source._graph.backFaceCulling ? (view._reverseCulling ? "front" : "back") : "none";
+    const alphaMode = source._needsAlphaBlending ? source._graph.alphaMode : 0;
+    const blend = _nodeAlphaModeToBlend(alphaMode);
     // All geometry-specific WGSL object-literals + the MRT pipeline descriptor
     // live here (lazy module). compileNodePipeline only splices strings + calls
     // these callbacks, so non-geometry node scenes bundle none of it.
@@ -235,7 +237,7 @@ function ensureGeometryCompile(view: NodeGeometryMaterialView, res: NodeGeometry
         _struct: res._struct,
         _fsReturnType: " -> FragmentOutput",
         _fsReturn: res._fsReturn,
-        _cacheKey: `3|mrt:${colorFormats.join()}:${cullMode}`,
+        _cacheKey: `3|mrt:${colorFormats.join()}:${cullMode}:${alphaMode}`,
         _needsGpUbo: res._needsGpUbo,
         _buildGeomUbo: (binding) => ({
             _wgsl: wgsl`struct NmeGeomParams { previousViewProjection: mat4x4<f32>, cameraNearFar: vec4<f32> };\n@group(1) @binding(${binding}) var<uniform> nmeGeom: NmeGeomParams;`,
@@ -248,8 +250,12 @@ function ensureGeometryCompile(view: NodeGeometryMaterialView, res: NodeGeometry
                 label: "node-material-geometry",
                 layout: device.createPipelineLayout({ bindGroupLayouts: [a._sceneBGL, a._meshBGL] }),
                 vertex: { module: a._shaderModule, entryPoint: "vs_main", buffers: [...a._vertexBuffers] },
-                fragment: { module: a._shaderModule, entryPoint: "fs_main", targets: colorFormats.map((f) => ({ format: f })) },
-                depthStencil: { format: a._depthFormat, depthCompare: a._depthCompare, depthWriteEnabled: true },
+                fragment: {
+                    module: a._shaderModule,
+                    entryPoint: "fs_main",
+                    targets: colorFormats.map((format) => (blend && format !== "r8uint" ? { format, blend } : { format })),
+                },
+                depthStencil: { format: a._depthFormat, depthCompare: a._depthCompare, depthWriteEnabled: !source._needsAlphaBlending },
                 multisample: { count: a._msaaSamples },
                 primitive: { topology: "triangle-list", cullMode, frontFace: "ccw" },
             }),
@@ -261,7 +267,7 @@ function ensureGeometryCompile(view: NodeGeometryMaterialView, res: NodeGeometry
         _depthCompare: sig._depthCompare ?? "greater-equal",
         _msaaSamples: sig._sampleCount,
         _backFaceCulling: source._graph.backFaceCulling,
-        _alphaMode: 0,
+        _alphaMode: alphaMode,
         _mrtOutput: mrtOutput,
     });
     res._compileBySig.set(key, compile);
@@ -392,6 +398,7 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
     let lastWorldVersion = -1;
     let lastLightsCount = -1;
     let lastMeshBlendTag = -1;
+    let lastRawMeshBlendTag = -1;
 
     const sortCenter: [number, number, number] = [mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!];
     const isTransparent = source._needsAlphaBlending;
@@ -407,7 +414,9 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
             bindGroup = buildGeometryBindGroup(eng as EngineContext, source, compile, meshUBO, nodeUBO, view);
 
             const _baseUpdate = (): void => {
-                const meshBlendTag = res._meshBlendTagOffset >= 0 ? _resolveGeometryMeshBlendTag(mesh) : 0;
+                const rawMeshBlendTag = res._meshBlendTagOffset >= 0 ? (mesh.meshBlendingTag ?? 0) : 0;
+                const meshBlendTagChanged = rawMeshBlendTag !== lastRawMeshBlendTag;
+                const meshBlendTag = meshBlendTagChanged ? _resolveGeometryMeshBlendTag(mesh) : lastMeshBlendTag;
                 if (mesh.worldMatrixVersion !== lastWorldVersion || scene.lights.length !== lastLightsCount || meshBlendTag !== lastMeshBlendTag) {
                     writeMesh();
                     sortCenter[0] = mesh.worldMatrix[12]!;
@@ -416,6 +425,7 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
                     lastWorldVersion = mesh.worldMatrixVersion;
                     lastLightsCount = scene.lights.length;
                     lastMeshBlendTag = meshBlendTag;
+                    lastRawMeshBlendTag = rawMeshBlendTag;
                 }
             };
             // Floating origin bakes the effective-camera offset into the world UBO, so

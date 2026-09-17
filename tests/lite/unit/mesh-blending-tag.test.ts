@@ -1,8 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { Camera } from "../../../packages/babylon-lite/src/camera/camera";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
-import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
+import { buildRenderTarget, createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import {
     MeshBlendingRadiusClass,
@@ -93,6 +93,71 @@ function createTask(overrides: Partial<MeshBlendingPostProcessTaskConfig> = {}) 
         },
         {} as EngineContext
     );
+}
+
+function createMeshBlendingTestContext(features: GPUFeatureName[] = []) {
+    const destroyedTextures: ReturnType<typeof vi.fn>[] = [];
+    const destroyedBuffers: ReturnType<typeof vi.fn>[] = [];
+    const pass = {
+        setPipeline: vi.fn(),
+        setBindGroup: vi.fn(),
+        draw: vi.fn(),
+        end: vi.fn(),
+    };
+    const createBindGroup = vi.fn((descriptor: GPUBindGroupDescriptor) => descriptor as unknown as GPUBindGroup);
+    const device = {
+        features: new Set(features),
+        createBindGroupLayout: vi.fn((descriptor: GPUBindGroupLayoutDescriptor) => descriptor as unknown as GPUBindGroupLayout),
+        createBindGroup,
+        createPipelineLayout: vi.fn((descriptor: GPUPipelineLayoutDescriptor) => descriptor as unknown as GPUPipelineLayout),
+        createRenderPipeline: vi.fn((descriptor: GPURenderPipelineDescriptor) => descriptor as unknown as GPURenderPipeline),
+        createShaderModule: vi.fn((descriptor: GPUShaderModuleDescriptor) => descriptor as unknown as GPUShaderModule),
+        createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => {
+            const destroy = vi.fn();
+            destroyedBuffers.push(destroy);
+            return { descriptor, destroy } as unknown as GPUBuffer;
+        }),
+        createTexture: vi.fn((descriptor: GPUTextureDescriptor) => {
+            const destroy = vi.fn();
+            destroyedTextures.push(destroy);
+            return {
+                descriptor,
+                createView: () => ({ textureDescriptor: descriptor }) as unknown as GPUTextureView,
+                destroy,
+            } as unknown as GPUTexture;
+        }),
+        queue: {
+            writeBuffer: vi.fn(),
+            writeTexture: vi.fn(),
+        },
+    } as unknown as GPUDevice;
+    const engine = {
+        canvas: { width: 64, height: 32 },
+        _device: device,
+        _currentEncoder: { beginRenderPass: vi.fn(() => pass) },
+    } as unknown as EngineContext;
+    const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+    const camera = {
+        worldMatrix: identity,
+        worldMatrixVersion: 1,
+        fov: Math.PI / 3,
+        nearPlane: 0.1,
+        farPlane: 100,
+        _viewCache: new Float32Array(16),
+        _viewVer: -1,
+        _projCache: new Float32Array(16),
+        _projVer: -1,
+        _projAspect: -1,
+        _vpCache: new Float32Array(16),
+        _vpVer: -1,
+        _vpAspect: -1,
+    } as unknown as Camera;
+    const target = (format: GPUTextureFormat) => {
+        const result = createRenderTarget({ format, samples: 1, size: { width: 64, height: 32 } });
+        buildRenderTarget(result, engine);
+        return result;
+    };
+    return { camera, createBindGroup, destroyedBuffers, destroyedTextures, device, engine, pass, target };
 }
 
 describe("mesh-blending configuration and radius math", () => {
@@ -188,6 +253,75 @@ describe("mesh-blending configuration and radius math", () => {
         task.slopeFactor = 1;
         expect(task.slopeFactor).toBe(1);
         task.dispose();
+    });
+
+    it.each(["sourceTexture", "meshBlendTagTexture", "depthTexture", "baseColorTexture"] as const)("rejects %s when it aliases the output GPU texture", (inputName) => {
+        const { camera, engine, target } = createMeshBlendingTestContext();
+        const sourceTexture = target("rgba16float");
+        const meshBlendTagTexture = target("r8uint");
+        const depthTexture = target("r32float");
+        const baseColorTexture = target("rgba8unorm");
+        const outputTexture = target("rgba16float");
+        outputTexture._eager = true;
+        const input = { sourceTexture, meshBlendTagTexture, depthTexture, baseColorTexture }[inputName];
+        input._colorTexture = outputTexture._colorTexture;
+        const task = createMeshBlendingPostProcessTask({ sourceTexture, meshBlendTagTexture, depthTexture, baseColorTexture, targetTexture: outputTexture, camera }, engine);
+
+        expect(() => task.record()).toThrow(new RegExp(`${inputName} and outputTexture must not alias`));
+        task.dispose();
+    });
+
+    it("revalidates rgba32float blend support when alphaMode changes", () => {
+        const { camera, engine, target } = createMeshBlendingTestContext();
+        const task = createMeshBlendingPostProcessTask(
+            {
+                sourceTexture: target("rgba32float"),
+                meshBlendTagTexture: target("r8uint"),
+                depthTexture: target("r32float"),
+                targetTexture: target("rgba32float"),
+                camera,
+            },
+            engine
+        );
+
+        task.record();
+        task.alphaMode = 2;
+        expect(() => task.record()).toThrow(/float32-blendable/);
+        task.dispose();
+    });
+
+    it("records, executes, rebinds replaced inputs, and disposes task-owned GPU resources", () => {
+        const { camera, createBindGroup, destroyedBuffers, destroyedTextures, engine, pass, target } = createMeshBlendingTestContext();
+        const sourceTexture = target("rgba16float");
+        const task = createMeshBlendingPostProcessTask(
+            {
+                sourceTexture,
+                meshBlendTagTexture: target("r8uint"),
+                depthTexture: target("r32float"),
+                camera,
+            },
+            engine
+        );
+
+        task.record();
+        const bindGroupsAfterRecord = createBindGroup.mock.calls.length;
+        task.sourceTexture = target("rgba16float");
+        task.record();
+        expect(createBindGroup.mock.calls.length).toBeGreaterThan(bindGroupsAfterRecord);
+
+        const replacementDevice = createMeshBlendingTestContext();
+        (engine as { _device: GPUDevice })._device = replacementDevice.device;
+        task.record();
+        expect(replacementDevice.device.createRenderPipeline).toHaveBeenCalledOnce();
+        expect(destroyedBuffers.some((destroy) => destroy.mock.calls.length > 0)).toBe(true);
+        expect(destroyedTextures.some((destroy) => destroy.mock.calls.length > 0)).toBe(true);
+
+        expect(task.execute!()).toBe(1);
+        expect(pass.draw).toHaveBeenCalledWith(3);
+
+        task.dispose();
+        expect(replacementDevice.destroyedBuffers.some((destroy) => destroy.mock.calls.length > 0)).toBe(true);
+        expect(replacementDevice.destroyedTextures.some((destroy) => destroy.mock.calls.length > 0)).toBe(true);
     });
 
     it("exposes the exact compile-time quality table", () => {
