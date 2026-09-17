@@ -299,29 +299,22 @@ function groupNodeMeshPackets(packets: readonly NodePacket[]): Iterable<readonly
 
 // Legacy tightly packed geometry uses per-GPU zero buffers. GPU-produced ranges
 // opt into the shared constant stream before reaching this cache.
-let zeroAttrCache: WeakMap<MeshGPU, Map<string, GPUBuffer>> | null = null;
+let zeroAttrCache: WeakMap<MeshGPU, Record<string, GPUBuffer | undefined>> | null = null;
 function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: "uv2" | "tangent" | "color"): GPUBuffer {
     const constant = engine._getVertexDefaultBuffer?.(gpu);
     if (constant) {
         return constant;
     }
-    const buffers = (zeroAttrCache ??= new WeakMap());
-    let cache = buffers.get(gpu);
+    let cache = zeroAttrCache?.get(gpu);
     if (!cache) {
-        cache = new Map();
-        buffers.set(gpu, cache);
+        cache = Object.create(null) as Record<string, GPUBuffer | undefined>;
+        (zeroAttrCache ??= new WeakMap()).set(gpu, cache);
     }
-    const existing = cache.get(name);
-    if (existing) {
-        return existing;
-    }
-    // position buffer size in bytes / 12 (vec3) = vertex count.
-    const vertexCount = gpu.positionBuffer.size / 12;
-    const stride = name === "uv2" ? 8 : 16;
-    const buf = engine._device.createBuffer({ label: `node-zero-${name}`, size: vertexCount * stride, usage: BU.VERTEX | BU.COPY_DST });
-    // Initialize with zeros (buffer starts zeroed when not mappedAtCreation).
-    cache.set(name, buf);
-    return buf;
+    return (cache[name] ??= engine._device.createBuffer({
+        label: `node-zero-${name}`,
+        size: Math.max((gpu._vbLayout?.position?._count ?? Math.floor(gpu.positionBuffer.size / 12)) * (name === "uv2" ? 8 : 16), 4),
+        usage: BU.VERTEX | BU.COPY_DST,
+    }));
 }
 
 export function getAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): GPUBuffer {

@@ -114,6 +114,10 @@ zero-stream allocation remains installed only by storage geometry, as an engine-
 `_getVertexDefaultBuffer` callback. Its closure owns the current device/buffer pair, replaces
 the buffer after a device change, and registers exactly one disposer per live generation.
 Core renderers contain only an optional callback invocation, not a global default-buffer registry.
+Legacy Node/Shader missing-attribute buffers use the interleaved position accessor's element
+count before considering a tightly packed float32x3 buffer-size heuristic. Empty geometry
+keeps a valid four-byte minimum. Storage-backed meshes still take the constant-buffer path
+first and never allocate defaults proportional to the shared slab.
 
 ## Shader Logic
 

@@ -70,6 +70,42 @@ function pipelineLayouts(pipeline: GPURenderPipeline) {
 }
 
 describe("storage-backed missing vertex attributes", () => {
+    it.each(["interleaved", "tight", "empty"] as const)("sizes legacy %s defaults from vertex count rather than shared allocation size", (kind) => {
+        const f = fixture();
+        const count = kind === "empty" ? 0 : 3;
+        const mesh = createMeshFromData(
+            f.engine,
+            "legacy-default",
+            new Float32Array(count * 3),
+            new Float32Array(count * 3),
+            count ? new Uint32Array([0, 1, 2]) : new Uint32Array()
+        );
+        if (kind === "interleaved") {
+            Object.assign(mesh._gpu, {
+                positionBuffer: { size: 4096 } as GPUBuffer,
+                _vbLayout: { position: { _stride: 32, _offset: 0, _count: count } },
+                _vbKey: "interleaved-default",
+            });
+        }
+        const expectedBytes = Math.max(count * 16, 4);
+        const nodeDefault = getNodeAttributeBuffer(f.engine, mesh._gpu, "color");
+        expect(nodeDefault.size).toBe(expectedBytes);
+        expect(getNodeAttributeBuffer(f.engine, mesh._gpu, "color")).toBe(nodeDefault);
+
+        const shader = createShaderMaterial({
+            attributes: ["position", "color"],
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position,1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+        });
+        setShaderAttributeFormats(shader, {});
+        mesh.material = shader;
+        const binding = buildShaderMaterialRenderables(f.scene, [mesh]).renderables[0]!.bind(f.engine, signature);
+        binding.draw(f.pass as unknown as GPURenderPassEncoder, f.engine);
+        const shaderDefault = f.created.find((buffer) => buffer.label === "shader-zero-color")!;
+        expect(shaderDefault.size).toBe(expectedBytes);
+        expect(f.pass.setVertexBuffer).toHaveBeenCalledWith(1, shaderDefault);
+    });
+
     it.each([false, true])("uses a neutral constant white stream for packed final-color inputs (thin=%s)", async (thin) => {
         const f = fixture();
         const shader = createShaderMaterial({

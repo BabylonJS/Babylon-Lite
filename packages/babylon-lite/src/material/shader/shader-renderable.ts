@@ -20,7 +20,7 @@ import type { ShaderPipelineBindings } from "./shader-pipeline.js";
 import { _isShaderSystemUniform } from "./shader-material.js";
 import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "./shader-pipeline.js";
 import type { UniformCopyBatch } from "../../render/uniform-copy-batch.js";
-import { _getShaderVbSupport, type ShaderRenderPass, type ShaderVbLayout } from "./shader-vb-support.js";
+import { _attributeInfo, _getShaderVbSupport, type ShaderRenderPass, type ShaderVbLayout } from "./shader-vb-support.js";
 
 type UniformBatchFactory = (signature: RenderTargetSignature) => UniformCopyBatch;
 
@@ -781,30 +781,23 @@ function writeSystemUniforms(data: Float32Array, spec: UboSpec, material: Shader
     }
 }
 
-let zeroAttrCache: WeakMap<object, Map<string, GPUBuffer>> | null = null;
+let zeroAttrCache: WeakMap<MeshGPU, Record<string, GPUBuffer | undefined>> | null = null;
 
-function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): GPUBuffer {
+function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: ShaderAttributeName): GPUBuffer {
     const constant = engine._getVertexDefaultBuffer?.(gpu);
     if (constant) {
         return constant;
     }
-    if (!zeroAttrCache) {
-        zeroAttrCache = new WeakMap();
-    }
-    let cache = zeroAttrCache.get(gpu as unknown as object);
+    let cache = zeroAttrCache?.get(gpu);
     if (!cache) {
-        cache = new Map();
-        zeroAttrCache.set(gpu as unknown as object, cache);
+        cache = Object.create(null) as Record<string, GPUBuffer | undefined>;
+        (zeroAttrCache ??= new WeakMap()).set(gpu, cache);
     }
-    const existing = cache.get(name);
-    if (existing) {
-        return existing;
-    }
-    const vertexCount = gpu.positionBuffer.size / 12;
-    const stride = name === "uv" || name === "uv2" ? 8 : name === "normal" ? 12 : 16;
-    const buffer = engine._device.createBuffer({ label: `shader-zero-${name}`, size: vertexCount * stride, usage: BU.VERTEX | BU.COPY_DST });
-    cache.set(name, buffer);
-    return buffer;
+    return (cache[name] ??= engine._device.createBuffer({
+        label: `shader-zero-${name}`,
+        size: Math.max((gpu._vbLayout?.position?._count ?? Math.floor(gpu.positionBuffer.size / 12)) * _attributeInfo(name)._stride, 4),
+        usage: BU.VERTEX | BU.COPY_DST,
+    }));
 }
 
 function getAttrBuffer(engine: EngineContext, mesh: Mesh, name: ShaderAttributeName, material: ShaderMaterial): GPUBuffer {
