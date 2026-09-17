@@ -30,9 +30,6 @@ export function createSurfaceRenderTargetTexture(
     if (!("canvas" in size || "surface" in size)) {
         throw new Error("createSurfaceRenderTargetTexture: descriptor.size must be a SurfaceContext or { surface, scale }.");
     }
-    if ("surface" in size && (!Number.isFinite(size.scale) || size.scale <= 0)) {
-        throw new Error(`RenderTargetDescriptor.size.scale must be a positive finite number (got ${size.scale}).`);
-    }
     const result = _createRenderTargetTexture(engine, descriptor, sampleDepth);
     try {
         _shareTextureBacking(result.texture);

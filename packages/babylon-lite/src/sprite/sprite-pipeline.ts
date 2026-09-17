@@ -156,13 +156,14 @@ export function getOrCreateSpritePipeline(
     depthWrite = false,
     depthStencilFormat?: GPUTextureFormat,
     sceneBindGroupLayout?: GPUBindGroupLayout,
-    layer?: Sprite2DLayer
+    layer?: Sprite2DLayer,
+    depthCompare: GPUCompareFunction = "greater-equal"
 ): GPURenderPipeline {
     const deviceCache = getSpritePipelineDeviceCache(engine, cache);
     const resolvedDepthStencilFormat = normalizeDepthStencilFormat(hasDepth, depthStencilFormat);
     const alphaToCoverageResolver = _getAlphaToCoverageResolver();
     const alphaToCoverage = hasDepth && depthWrite && sampleCount > 1 && !!layer && !!alphaToCoverageResolver?.(layer);
-    const key = spritePipelineKey(format, sampleCount, blendMode, hasDepth, depthWrite, resolvedDepthStencilFormat, alphaToCoverage, layer);
+    const key = spritePipelineKey(format, sampleCount, blendMode, hasDepth, depthWrite, resolvedDepthStencilFormat, alphaToCoverage, layer, depthCompare);
     const cached = deviceCache._pipelines.get(key);
     if (cached) {
         return cached;
@@ -179,7 +180,8 @@ export function getOrCreateSpritePipeline(
         resolvedDepthStencilFormat,
         alphaToCoverage,
         sceneBindGroupLayout,
-        layer
+        layer,
+        depthCompare
     );
     deviceCache._pipelines.set(key, pipeline);
     return pipeline;
@@ -240,12 +242,13 @@ function spritePipelineKey(
     depthWrite: boolean,
     depthStencilFormat: GPUTextureFormat | null,
     alphaToCoverage: boolean,
-    layer?: Sprite2DLayer
+    layer?: Sprite2DLayer,
+    depthCompare: GPUCompareFunction = "greater-equal"
 ): string {
     const customKey = layer ? (_getSpriteFxHook()?.pipelineKeyPart(layer) ?? "") : "";
     const uvKey = layer?._uvScrollAttr ? "1" : "0";
     const cgKey = layer ? (_getSpriteCoverageGammaHook()?.pipelineKeyPart(layer) ?? "0") : "0";
-    return `${format}:${sampleCount}:${blendMode._key}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:${alphaToCoverage ? "a" : "n"}:cs${customKey}:uv${uvKey}:cg${cgKey}`;
+    return `${format}:${sampleCount}:${blendMode._key}:${hasDepth ? 1 : 0}:${depthWrite ? 1 : 0}:${depthStencilFormat ?? "-"}:${hasDepth ? depthCompare : "-"}:${alphaToCoverage ? "a" : "n"}:cs${customKey}:uv${uvKey}:cg${cgKey}`;
 }
 
 function getShaderModule(engine: EngineContext, cache: SpritePipelineDeviceCache, hasDepth: boolean, layer?: Sprite2DLayer): GPUShaderModule {
@@ -280,7 +283,8 @@ function buildSpritePipeline(
     depthStencilFormat: GPUTextureFormat | null,
     alphaToCoverage: boolean,
     sceneBindGroupLayout?: GPUBindGroupLayout,
-    layer?: Sprite2DLayer
+    layer?: Sprite2DLayer,
+    depthCompare: GPUCompareFunction = "greater-equal"
 ): GPURenderPipeline {
     const device = engine._device;
     const layoutEntries: GPUBindGroupLayoutEntry[] = [
@@ -343,7 +347,7 @@ function buildSpritePipeline(
     if (hasDepth) {
         descriptor.depthStencil = {
             format: depthStencilFormat!,
-            depthCompare: "greater-equal",
+            depthCompare,
             depthWriteEnabled: depthWrite,
         };
     }

@@ -7,6 +7,8 @@ import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-gr
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { MeshRebuilder } from "../../../packages/babylon-lite/src/render/renderable";
+import { createSurfaceRenderTargetTexture } from "../../../packages/babylon-lite/src/texture/rtt-surface";
+import { disposeRenderTargetTexture } from "../../../packages/babylon-lite/src/texture/rtt";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUShaderStage" | "GPUTextureUsage"> & {
     GPUBufferUsage?: { UNIFORM: number; COPY_DST: number; STORAGE: number };
@@ -36,7 +38,7 @@ function makeMockEngine(): EngineContext {
                 createView: () => ({}) as GPUTextureView,
                 destroy: () => undefined,
             }) as unknown as GPUTexture,
-        queue: { writeBuffer: () => undefined },
+        queue: { writeBuffer: () => undefined, onSubmittedWorkDone: async () => undefined },
     } as unknown as GPUDevice;
     const eng = {
         canvas: { width: 800, height: 600 } as HTMLCanvasElement,
@@ -360,6 +362,37 @@ describe("GeometryRendererTask", () => {
 
         expect(target._syncEager).toHaveBeenCalledWith(engine);
         expect(depth._syncEager).toHaveBeenCalledWith(engine);
+    });
+
+    it("keeps a scaled geometry MRT aligned with its external target across surface resize", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine) as SceneContext;
+        const size = { surface: engine, scale: 0.5 } as const;
+        const target = createSurfaceRenderTargetTexture(engine, { format: "bgra8unorm", samples: 1, size });
+        const task = createGeometryRendererTask(
+            {
+                textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }],
+                samples: 1,
+                size,
+                targetTexture: target.rt,
+            },
+            engine,
+            scene
+        );
+        const internal = task as unknown as { _mrt: { _width: number; _height: number } };
+
+        task.record();
+        expect([internal._mrt._width, internal._mrt._height]).toEqual([400, 300]);
+        expect([target.rt._width, target.rt._height]).toEqual([400, 300]);
+
+        engine.canvas.width = 66;
+        engine.canvas.height = 34;
+        task.record();
+        expect([internal._mrt._width, internal._mrt._height]).toEqual([33, 17]);
+        expect([target.rt._width, target.rt._height]).toEqual([33, 17]);
+
+        task.dispose();
+        disposeRenderTargetTexture(target);
     });
 
     it("throws when targetTexture sampleCount mismatches samples", () => {

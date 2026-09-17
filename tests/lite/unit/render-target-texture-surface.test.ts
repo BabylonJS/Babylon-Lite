@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
-import { buildRenderTarget, disposeRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
+import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { acquireTexture, releaseTexture, _textureOwners } from "../../../packages/babylon-lite/src/resource/gpu-pool";
 import { disposeRenderTargetTexture } from "../../../packages/babylon-lite/src/texture/rtt";
 import { createSurfaceRenderTargetTexture, onRenderTargetTextureResize } from "../../../packages/babylon-lite/src/texture/rtt-surface";
@@ -104,6 +104,12 @@ describe("createSurfaceRenderTargetTexture", () => {
         expect(() => createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", samples: 1, size: { surface: engine, scale } })).toThrow(
             /scale must be a positive finite number/
         );
+        expect(engine._device.createTexture).not.toHaveBeenCalled();
+    });
+
+    it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])("rejects invalid scale %s at the shared render-target boundary", (scale) => {
+        const engine = makeEngine();
+        expect(() => createRenderTarget({ format: "rgba8unorm", samples: 1, size: { surface: engine, scale } })).toThrow(/scale must be a positive finite number/);
         expect(engine._device.createTexture).not.toHaveBeenCalled();
     });
 

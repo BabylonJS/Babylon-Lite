@@ -101,6 +101,7 @@ export interface RenderTarget {
 
 /** Create a render target descriptor (GPU textures allocated by `buildRenderTarget`). */
 export function createRenderTarget(descriptor: RenderTargetDescriptor): RenderTarget {
+    _resolveRenderTargetSize(descriptor);
     return {
         _descriptor: descriptor,
         _colorTexture: null,
@@ -124,16 +125,7 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void
     disposeRenderTarget(rt);
 
     const desc = rt._descriptor;
-    let size = desc.size;
-    if ("surface" in size) {
-        const scale = size.scale;
-        const canvas = size.surface.canvas;
-        size = {
-            width: Math.floor(canvas.width * scale) || 1,
-            height: Math.floor(canvas.height * scale) || 1,
-        };
-    }
-    const { width, height } = "canvas" in size ? size.canvas : size;
+    const { width, height } = _resolveRenderTargetSize(desc);
     rt._width = width;
     rt._height = height;
 
@@ -187,10 +179,13 @@ export function disposeRenderTarget(rt: RenderTarget | null | undefined): void {
 }
 
 /** @internal Resolve the descriptor's current allocation dimensions. */
-export function _resolveRenderTargetSize(desc: RenderTargetDescriptor): { width: number; height: number } {
+export function _resolveRenderTargetSize(desc: Pick<RenderTargetDescriptor, "size">): { width: number; height: number } {
     const size = desc.size;
     if ("surface" in size) {
         const scale = size.scale;
+        if (!Number.isFinite(scale) || scale <= 0) {
+            throw new Error(`RenderTargetDescriptor.size.scale must be a positive finite number (got ${scale}).`);
+        }
         const canvas = size.surface.canvas;
         return {
             width: Math.floor(canvas.width * scale) || 1,

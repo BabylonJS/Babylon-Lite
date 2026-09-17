@@ -37,7 +37,6 @@
 import { F32 } from "../engine/typed-arrays.js";
 import type { Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
-import type { SurfaceContext } from "../engine/surface.js";
 import type { RenderTarget, RenderTargetDescriptor, RenderTargetSignature } from "../engine/render-target.js";
 import { buildRenderTarget } from "../engine/render-target.js";
 import type { RenderTargetMrt } from "../engine/render-target-mrt.js";
@@ -89,8 +88,9 @@ export interface GeometryRendererTaskConfig {
     meshes?: readonly Mesh[];
     /** Per-pass camera override. Defaults to `scene.camera`. */
     camera?: Camera | null;
-    /** Render-target size. Defaults to the scene's `surface`. */
-    size?: SurfaceContext | { width: number; height: number };
+    /** Render-target size. Defaults to the scene's `surface`; accepts live
+     *  `{ surface, scale }` dimensions as well as full surfaces and pixels. */
+    size?: RenderTargetDescriptor["size"];
     /** MSAA sample count. Defaults to 1. */
     samples?: 1 | 4;
     /** Externally-owned depth attachment. When omitted, the task creates its
