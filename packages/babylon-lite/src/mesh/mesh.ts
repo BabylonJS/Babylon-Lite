@@ -27,6 +27,8 @@ export interface MeshVbAttr {
     /** @internal Byte offset within the shared buffer, encoded in the pipeline vertex
      *  layout `attributes[].offset` (the buffer is bound at offset 0). */
     readonly _offset: number;
+    /** @internal Accessor vertex count when this attribute comes from an interleaved bufferView. */
+    readonly _count?: number;
 }
 
 /** Optional per-attribute interleave layout. Only set for meshes that source one
@@ -54,6 +56,8 @@ export interface MeshGPU {
     readonly uvBuffer: GPUBuffer;
     readonly uv2Buffer?: GPUBuffer | null;
     readonly colorBuffer?: GPUBuffer | null;
+    /** @internal Mesh-owned neutral color buffer installed by opt-in material helpers. */
+    _shaderColorFallback?: GPUBuffer;
     readonly hasUv?: boolean;
     readonly hasUv2?: boolean;
     readonly hasTangent?: boolean;
