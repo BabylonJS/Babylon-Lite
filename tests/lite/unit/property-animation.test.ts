@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createAnimationManager, startAnimationManager, stopAnimationManager, updateAnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
-import { goToFrame, playAnimation } from "../../../packages/babylon-lite/src/animation/animation-group";
+import { goToFrame, pauseAnimation, playAnimation } from "../../../packages/babylon-lite/src/animation/animation-group";
 import { setAnimationWeight } from "../../../packages/babylon-lite/src/animation/animation-weight";
 import { enablePropertyAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-pointer-mixer";
 import { enableAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-gltf-mixer";
@@ -140,6 +140,38 @@ describe("Property animation", () => {
         updateAnimationManager(manager, 0);
         expect(group.currentTime).toBeCloseTo(1.5);
         expect(group.isPlaying).toBe(false);
+    });
+
+    it("does not rewrite paused property tracks but still applies explicit seeks", () => {
+        const manager = createAnimationManager();
+        const target = { value: 0 };
+        const clip = createPropertyAnimationClip(
+            "paused",
+            [
+                {
+                    path: "value",
+                    keys: [
+                        { time: 0, value: 0 },
+                        { time: 1, value: 10 },
+                    ],
+                },
+            ],
+            { frameRate: 10 }
+        );
+        const group = createPropertyAnimationGroup(manager, target, clip, { loop: false });
+
+        updateAnimationManager(manager, 500);
+        expect(target.value).toBeCloseTo(5);
+        pauseAnimation(group);
+        target.value = 99;
+        updateAnimationManager(manager, 100);
+        expect(target.value).toBe(99);
+
+        goToFrame(group, 8);
+        expect(target.value).toBeCloseTo(8);
+        target.value = 77;
+        updateAnimationManager(manager, 100);
+        expect(target.value).toBe(77);
     });
 
     it("writes vector tracks through set() bindings", () => {

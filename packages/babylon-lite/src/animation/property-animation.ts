@@ -174,27 +174,24 @@ function createPointerAnimationGroup(
         speedRatio: options?.speedRatio ?? 1,
         loop: options?.loop ?? true,
         tick(deltaMs: number): void {
-            if (ctrl.playing) {
-                ctrl.time += (deltaMs / 1000) * ctrl.speedRatio;
+            if (!ctrl.playing) {
+                return;
             }
+            ctrl.time += (deltaMs / 1000) * ctrl.speedRatio;
             const rangeDuration = Math.max(0, toTime - fromTime);
             if (rangeDuration <= 0) {
                 return;
             }
-            if (ctrl.playing) {
-                if (ctrl.loop) {
-                    ctrl.time = fromTime + ((ctrl.time - fromTime) % rangeDuration);
-                    if (ctrl.time < fromTime) {
-                        ctrl.time += rangeDuration;
-                    }
-                } else {
-                    ctrl.time = Math.min(Math.max(ctrl.time, fromTime), toTime);
+            if (ctrl.loop) {
+                ctrl.time = fromTime + ((ctrl.time - fromTime) % rangeDuration);
+                if (ctrl.time < fromTime) {
+                    ctrl.time += rangeDuration;
                 }
             } else {
-                ctrl.time = Math.min(Math.max(ctrl.time, 0), duration);
+                ctrl.time = Math.min(Math.max(ctrl.time, fromTime), toTime);
             }
             applyAt(ctrl.time);
-            if (!ctrl.loop && ctrl.playing && ctrl.speedRatio >= 0 && ctrl.time >= toTime) {
+            if (!ctrl.loop && ctrl.speedRatio >= 0 && ctrl.time >= toTime) {
                 ctrl.playing = false;
                 group.isPlaying = false;
                 group._stopped = true;
@@ -214,6 +211,10 @@ function createPointerAnimationGroup(
         weight: 1,
         _ctrl: ctrl,
         _stopped: false,
+        _evaluate: () => {
+            ctrl.time = Math.min(Math.max(ctrl.time, 0), duration);
+            applyAt(ctrl.time);
+        },
     };
     return group;
 }

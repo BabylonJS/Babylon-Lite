@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Animation, AnimationGroup, AnimationKeyInterpolation } from "../src/animations/animation";
 import { QuadraticEase } from "../src/animations/easing";
 import type { IEasingFunction } from "../src/index";
+import { Quaternion } from "../src/math/quaternion";
 import { Vector3 } from "../src/math/vector";
 
 describe("Animation", () => {
@@ -228,6 +229,34 @@ describe("AnimationGroup structural weighted blending", () => {
 
         // total weight 0.5 < 1 → 0 * 0.5 (original) + 2 * 0.5 = 1
         expect(box.position.x).toBeCloseTo(1, 6);
+    });
+
+    it("keeps structural vector and quaternion rest poses stable across repeated blends", () => {
+        const host = new TestHost();
+        const target = { position: new Vector3(0, 0, 0), rotationQuaternion: new Quaternion(0, 0, 0, 1) };
+        const position = new Animation("position", "position", 10, Animation.ANIMATIONTYPE_VECTOR3);
+        position.setKeys([
+            { frame: 0, value: new Vector3(0, 0, 0) },
+            { frame: 10, value: new Vector3(10, 0, 0) },
+        ]);
+        const rotation = new Animation("rotation", "rotationQuaternion", 10, Animation.ANIMATIONTYPE_QUATERNION);
+        rotation.setKeys([
+            { frame: 0, value: new Quaternion(0, 0, 0, 1) },
+            { frame: 10, value: new Quaternion(0, 0, 1, 0) },
+        ]);
+        const group = new AnimationGroup("stableRestPose", host);
+        group.addTargetedAnimation(position, target);
+        group.addTargetedAnimation(rotation, target);
+        group.weight = 0.5;
+        group.start(false, 1, 0, 10);
+
+        group.goToFrame(10);
+        expect(target.position.asArray()).toEqual([5, 0, 0]);
+        expect(target.rotationQuaternion.asArray()).toEqual([0, 0, 0.5, 0.5]);
+
+        group.goToFrame(10);
+        expect(target.position.asArray()).toEqual([5, 0, 0]);
+        expect(target.rotationQuaternion.asArray()).toEqual([0, 0, 0.5, 0.5]);
     });
 
     it("uses animation-level easing while evaluating structural groups", () => {

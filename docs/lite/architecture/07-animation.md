@@ -377,8 +377,9 @@ A module-level `[0,0,0,1]` array is reused for quaternion slerp output to avoid 
 ### Frame Timing Model
 
 - `AnimationGroup.currentTime` stores time in **seconds**
-- `goToFrame(frame)` converts frame number to seconds with the group's `frameRate`, immediately evaluates the pose when possible, then pauses
+- `goToFrame(frame)` converts frame number to seconds with the group's `frameRate`, immediately evaluates the pose through an explicit one-shot evaluator when available, then pauses
 - `tickAnimation(group, deltaMs, engine?)` advances `group.currentTime += (deltaMs / 1000) * speedRatio` and syncs the internal controller only for evaluation/upload
+- Paused property groups do not evaluate or rewrite targets during ordinary manager ticks
 - Duration is in seconds (max sampler input timestamp)
 - Looping wraps via modulo within the active range: `time = from + ((time - from) % (to - from))`
 - Non-looping property groups apply the exact final pose once, then stop so a
@@ -633,6 +634,18 @@ seek, pause, restart, stop, speed, looping, and completion while Babylon Lite
 owns frame advancement, segment selection, easing, interpolation, and property
 writes for every delegated track.
 
+The compat facade owns native manager membership: delegated groups are attached
+only while actively playing, detached on pause, stop, or natural completion, and
+reattached on restart. A seek evaluates once without rejoining the per-frame
+manager. Scene disposal clears compat-owned managers. Completion is derived from
+the native group's stopped state together with the fallback subset's per-track
+state rather than reconstructing an endpoint from floating-point time.
+
+Fallback ownership is compared at the resolved leaf object/property pair, not
+only by root target and dotted-path text. This preserves Babylon.js write order
+when different target objects alias the same nested property and when an older
+stopped fallback animation is later restarted.
+
 The native easing adapter reads `Animation.getEasingFunction()` at sample time,
 so replacing or clearing animation-level easing remains live. The compiled clip
 is still a snapshot of key frames at `beginDirectAnimation()` time. This matches
@@ -652,7 +665,9 @@ Assigning a negative or non-finite speed after native playback starts is rejecte
 explicitly rather than silently changing evaluator ownership. The structural
 multi-target `AnimationGroup` path also remains compat-owned because its
 rest-pose-weighted mixer and mutable lifecycle do not yet match Lite's
-single-target property group and opt-in mixer semantics. Babylon.js per-key
+single-target property group and opt-in mixer semantics. Structural rest poses
+are captured by value (including cloned vector/quaternion values), so repeated
+partial-weight blends cannot mutate their own baseline. Babylon.js per-key
 `IAnimationKey.easingFunction` is a separate compatibility feature; this contract
 covers the animation-level easing API requested by the compat tracker.
 

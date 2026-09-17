@@ -315,6 +315,34 @@ describe("NullEngine (headless)", () => {
         expect(target.x).toBeCloseTo(150);
     });
 
+    it("preserves write order for aliased bindings and stopped fallback restarts", () => {
+        const scene = new Scene(new NullEngine());
+        const shared = { x: 0 };
+        const fallbackTarget = { nested: shared };
+        const nativeTarget = shared;
+        const olderFallback = new Animation("olderFallback", "nested.x", 10, Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_CONSTANT);
+        olderFallback.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 10, value: 10 },
+        ]);
+        const newer = new Animation("newer", "x", 10);
+        newer.setKeys([
+            { frame: 0, value: 100 },
+            { frame: 10, value: 200 },
+        ]);
+
+        const older = scene.beginDirectAnimation(fallbackTarget, [olderFallback], 0, 10, false);
+        older.stop();
+        const newerAnimatable = scene.beginDirectAnimation(nativeTarget, [newer], 0, 10, false);
+        expect(newerAnimatable._lite).toBeUndefined();
+        expect(newerAnimatable._nativeFallbackReason).toMatch(/overlaps a compat fallback path/);
+
+        older.restart();
+        scene._tick(500);
+
+        expect(shared.x).toBeCloseTo(150);
+    });
+
     it("keeps a later overlapping track on fallback when an earlier fallback owns the path", () => {
         const scene = new Scene(new NullEngine());
         const target = { x: 0 };
@@ -455,6 +483,106 @@ describe("NullEngine (headless)", () => {
         expect(animatable._lite).toBeDefined();
         expect(target.rotationQuaternion.z).toBeCloseTo(0.018749604459090463, 8);
         expect(target.rotationQuaternion.w).toBeCloseTo(0.9998241662979126, 8);
+    });
+
+    it("detaches paused, stopped, completed, and disposed native groups", () => {
+        const scene = new Scene(new NullEngine());
+        const target = { x: 0 };
+        const animation = new Animation("ownership", "x", 10);
+        animation.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 10, value: 10 },
+        ]);
+        const animatable = scene.beginDirectAnimation(target, [animation], 0, 10, false);
+        const manager = (scene as unknown as { _propertyAnimationManager: { animations: unknown[] } })._propertyAnimationManager;
+        expect(manager.animations).toHaveLength(1);
+
+        scene._tick(500);
+        animatable.pause();
+        expect(manager.animations).toHaveLength(0);
+        target.x = 99;
+        scene._tick(100);
+        expect(target.x).toBe(99);
+
+        animatable.restart();
+        expect(manager.animations).toHaveLength(1);
+        scene._tick(500);
+        expect(animatable.animationStarted).toBe(false);
+        expect(manager.animations).toHaveLength(0);
+
+        animatable.restart();
+        expect(manager.animations).toHaveLength(1);
+        animatable.stop();
+        expect(manager.animations).toHaveLength(0);
+
+        animatable.restart();
+        expect(manager.animations).toHaveLength(1);
+        scene.dispose();
+        expect(manager.animations).toHaveLength(0);
+    });
+
+    it("waits for mixed fallback completion and trusts native completion state", () => {
+        const mixedScene = new Scene(new NullEngine());
+        const mixedTarget = { x: 0, y: 0 };
+        const native = new Animation("native", "x", 10);
+        native.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 10, value: 10 },
+        ]);
+        const fallback = new Animation("fallback", "y", 10, Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_CONSTANT);
+        fallback.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 10, value: 10 },
+        ]);
+        const mixed = mixedScene.beginDirectAnimation(mixedTarget, [native, fallback], 0, 10, false);
+        fallback.framePerSecond = 5;
+
+        mixedScene._tick(1000);
+        expect(mixed.animationStarted).toBe(true);
+        expect(mixedTarget).toEqual({ x: 10, y: 5 });
+        mixedScene._tick(1000);
+        expect(mixed.animationStarted).toBe(false);
+        expect(mixedTarget).toEqual({ x: 10, y: 10 });
+
+        const fractionalScene = new Scene(new NullEngine());
+        const fractionalTarget = { x: 0 };
+        const fractional = new Animation("fractional", "x", 60);
+        fractional.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 123, value: 123 },
+        ]);
+        const fractionalAnimatable = fractionalScene.beginDirectAnimation(fractionalTarget, [fractional], 0, 123, false);
+        fractionalScene._tick(2050);
+        expect(fractionalAnimatable.animationStarted).toBe(false);
+        expect(fractionalTarget.x).toBe(123);
+    });
+
+    it("pauses mixed native and fallback tracks without rewriting external changes", () => {
+        const scene = new Scene(new NullEngine());
+        const target = { x: 0, y: 0 };
+        const native = new Animation("native", "x", 10);
+        native.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 10, value: 10 },
+        ]);
+        const fallback = new Animation("fallback", "y", 10);
+        fallback.setKeys([
+            { frame: 0, value: 0, interpolation: AnimationKeyInterpolation.STEP },
+            { frame: 5, value: 5 },
+            { frame: 10, value: 10 },
+        ]);
+        const animatable = scene.beginDirectAnimation(target, [native, fallback], 0, 10, false);
+        scene._tick(500);
+        expect(target).toEqual({ x: 5, y: 5 });
+
+        animatable.pause();
+        target.x = 100;
+        target.y = 200;
+        scene._tick(100);
+        expect(target).toEqual({ x: 100, y: 200 });
+
+        animatable.goToFrame(7);
+        expect(target).toEqual({ x: 7, y: 7 });
     });
 
     it("preserves nonzero ranges, exact loop boundaries, and non-loop completion", () => {

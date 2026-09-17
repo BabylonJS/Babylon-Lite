@@ -25,6 +25,7 @@ import {
     addToScene,
     createAnimationManager,
     addAnimationGroup,
+    clearAnimationManager,
     enableAnimationBlending,
     updateAnimationManager,
     pickMeshesWithRay as litePickWithRay,
@@ -1137,7 +1138,7 @@ export class Scene extends AbstractScene {
         if (from > to) {
             speedRatio = -speedRatio;
         }
-        const blockedNativePaths = this._runningAnimatables.flatMap((animatable) => animatable._getBlockingFallbackPaths(target));
+        const blockedNativeBindings = this._runningAnimatables.flatMap((animatable) => animatable._getBlockingFallbackBindings());
         const animatable = Animatable._create(
             () => (this._propertyAnimationManager ??= createAnimationManager()),
             target,
@@ -1146,7 +1147,7 @@ export class Scene extends AbstractScene {
             to,
             loop,
             speedRatio,
-            blockedNativePaths
+            blockedNativeBindings
         );
         this._runningAnimatables.push(animatable);
         return animatable;
@@ -1205,6 +1206,13 @@ export class Scene extends AbstractScene {
         this.onDisposeObservable.notifyObservers(this);
         this.onPointerObservable.clear();
         this._beforeRenderFlushCallbacks.clear();
+        if (this._propertyAnimationManager) {
+            clearAnimationManager(this._propertyAnimationManager);
+        }
+        if (this._blendManager) {
+            clearAnimationManager(this._blendManager);
+        }
+        this._runningAnimatables.length = 0;
         disposeScene(this._lite);
     }
 }

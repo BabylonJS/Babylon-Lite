@@ -82,6 +82,8 @@ export interface AnimationGroup {
      *  {@link addAnimationGroup}. Type-only import, so it is erased at build — no runtime cycle
      *  and no bundle cost for always-loaded consumers (e.g. scene-core's render-loop tick). */
     _animationManager?: AnimationManager;
+    /** @internal Applies the current time once without advancing playback. */
+    _evaluate?: (engine?: EngineContext) => void;
 }
 
 /** Start playing an animation group. */
@@ -148,7 +150,10 @@ export function goToFrame(group: AnimationGroup, frame: number, engine?: EngineC
     group.isPlaying = false;
     if (ctrl) {
         syncControllerFromGroup(group, ctrl);
-        if (engine || !group._stopped || !group._gltfMixer) {
+        if (group._evaluate) {
+            group._evaluate(engine);
+            group.currentTime = ctrl.time;
+        } else if (engine || !group._stopped || !group._gltfMixer) {
             ctrl.tick(0, engine);
             group.currentTime = ctrl.time;
         }

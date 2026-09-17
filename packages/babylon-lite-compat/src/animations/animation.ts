@@ -16,6 +16,8 @@ import {
     pauseAnimation,
     stopAnimation,
     setAnimationAdditive,
+    addAnimationGroup,
+    removeAnimationGroup,
 } from "babylon-lite";
 import type { AnimationGroup as LiteAnimationGroup, AnimationManager, EngineContext, PropertyAnimationInterpolation, PropertyAnimationTrackOptions } from "babylon-lite";
 
@@ -282,8 +284,15 @@ function captureOriginal(target: object, path: string): void {
         structuralOriginals.set(target, perTarget);
     }
     if (!perTarget.has(path)) {
-        perTarget.set(path, readPath(target, path));
+        perTarget.set(path, snapshotValue(readPath(target, path)));
     }
+}
+
+function snapshotValue(value: AnimValue): AnimValue {
+    if (typeof value === "number") {
+        return value;
+    }
+    return cloneAnimationValue(value, animationComponents(value));
 }
 
 /** @internal Assign an animated value to `target` following a dotted property path (e.g. `"position.x"`). */
@@ -347,6 +356,7 @@ export class Animatable {
     private readonly _completedFallbackAnimations = new Set<Animation>();
 
     public constructor(
+        private readonly _nativeManager: AnimationManager | undefined,
         private readonly _target: unknown,
         private readonly _animations: Animation[],
         private readonly _from: number,
@@ -381,12 +391,13 @@ export class Animatable {
         to: number,
         loop: boolean,
         speedRatio: number,
-        blockedNativePaths: readonly string[] = []
+        blockedNativeBindings: readonly AnimationBinding[] = []
     ): Animatable {
-        const partition = partitionAnimations(target, animations, from, to, speedRatio, blockedNativePaths);
-        const nativeGroup =
-            partition.nativeAnimations.length > 0 ? createNativeAnimationGroup(getManager(), target, partition.nativeAnimations, from, to, loop, speedRatio) : undefined;
+        const partition = partitionAnimations(target, animations, from, to, speedRatio, blockedNativeBindings);
+        const nativeManager = partition.nativeAnimations.length > 0 ? getManager() : undefined;
+        const nativeGroup = nativeManager ? createNativeAnimationGroup(nativeManager, target, partition.nativeAnimations, from, to, loop, speedRatio) : undefined;
         return new Animatable(
+            nativeManager,
             target,
             animations.slice(),
             from,
@@ -405,9 +416,9 @@ export class Animatable {
         return reasons.length > 0 ? reasons.join("; ") : undefined;
     }
 
-    /** @internal Return active fallback paths that must keep later overlapping writes on the same evaluator. */
-    public _getBlockingFallbackPaths(target: unknown): readonly string[] {
-        return !this._stopped && target === this._target ? this._fallbackAnimations.map((animation) => animation.targetProperty) : [];
+    /** @internal Return fallback bindings that must keep later overlapping writes on the same evaluator, including stopped animatables that may restart. */
+    public _getBlockingFallbackBindings(): readonly AnimationBinding[] {
+        return this._fallbackAnimations.map((animation) => resolveAnimationBinding(this._target, animation.targetProperty)).filter(isAnimationBinding);
     }
 
     public get speedRatio(): number {
@@ -431,10 +442,10 @@ export class Animatable {
         }
         if (this._lite) {
             this.masterFrame = this._lite.currentTime * (this._animations[0]?.framePerSecond ?? 60);
-            this._advanceFallback(deltaMs);
+            const fallbackRunning = this._advanceFallback(deltaMs);
             this._applyFallback();
-            if (!this._loop && this.masterFrame >= this._to) {
-                this.masterFrame = this._to;
+            if (!this._loop && this._lite._stopped && !fallbackRunning) {
+                this._detachLite();
                 this._stopped = true;
             }
             return;
@@ -468,6 +479,7 @@ export class Animatable {
         this._paused = true;
         if (this._lite) {
             pauseAnimation(this._lite);
+            this._detachLite();
         }
     }
 
@@ -486,6 +498,7 @@ export class Animatable {
             if (restartFromBeginning) {
                 liteGoToFrame(this._lite, this._from);
             }
+            this._attachLite();
             playAnimation(this._lite);
         }
         if (restartFromBeginning) {
@@ -498,6 +511,7 @@ export class Animatable {
         this._stopped = true;
         if (this._lite) {
             stopAnimation(this._lite);
+            this._detachLite();
         }
     }
 
@@ -561,6 +575,18 @@ export class Animatable {
         this._fallbackElapsedFrames.set(animation, clampedFrame - from);
         this._fallbackRepeatCounts.set(animation, 0);
     }
+
+    private _attachLite(): void {
+        if (this._nativeManager && this._lite) {
+            addAnimationGroup(this._nativeManager, this._lite);
+        }
+    }
+
+    private _detachLite(): void {
+        if (this._nativeManager && this._lite) {
+            removeAnimationGroup(this._nativeManager, this._lite);
+        }
+    }
 }
 
 interface NativeAnimationPartition {
@@ -575,7 +601,7 @@ function partitionAnimations(
     from: number,
     to: number,
     speedRatio: number,
-    blockedNativePaths: readonly string[]
+    blockedNativeBindings: readonly AnimationBinding[]
 ): NativeAnimationPartition {
     const globalReason = getGlobalNativeFallbackReason(animations, from, to, speedRatio);
     if (globalReason) {
@@ -593,9 +619,21 @@ function partitionAnimations(
     let changed = true;
     while (changed) {
         changed = false;
-        const fallbackPaths = [...blockedNativePaths, ...animations.filter((animation) => reasons.has(animation)).map((animation) => animation.targetProperty)];
+        const fallbackPaths = animations.filter((animation) => reasons.has(animation)).map((animation) => animation.targetProperty);
+        const fallbackBindings = [
+            ...blockedNativeBindings,
+            ...animations
+                .filter((animation) => reasons.has(animation))
+                .map((animation) => resolveAnimationBinding(target, animation.targetProperty))
+                .filter(isAnimationBinding),
+        ];
         for (const animation of animations) {
-            if (!reasons.has(animation) && fallbackPaths.some((path) => pathsOverlap(path, animation.targetProperty))) {
+            const binding = resolveAnimationBinding(target, animation.targetProperty);
+            if (
+                !reasons.has(animation) &&
+                (fallbackPaths.some((path) => pathsOverlap(path, animation.targetProperty)) ||
+                    (binding !== undefined && fallbackBindings.some((fallbackBinding) => bindingsOverlap(binding, fallbackBinding))))
+            ) {
                 reasons.set(animation, `native property animation path "${animation.targetProperty}" overlaps a compat fallback path`);
                 changed = true;
             }
@@ -712,6 +750,34 @@ function toNativeKeyValue(value: AnimationValue, stride: number): number | numbe
 
 function pathsOverlap(a: string, b: string): boolean {
     return a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
+}
+
+interface AnimationBinding {
+    readonly target: object;
+    readonly property: string;
+}
+
+function resolveAnimationBinding(target: unknown, path: string): AnimationBinding | undefined {
+    const parts = path.split(".");
+    if (parts.length === 0 || parts.some((part) => part.length === 0)) {
+        return undefined;
+    }
+    let owner: unknown = target;
+    for (let i = 0; i < parts.length - 1; i++) {
+        if ((typeof owner !== "object" && typeof owner !== "function") || owner === null) {
+            return undefined;
+        }
+        owner = (owner as Record<string, unknown>)[parts[i]!];
+    }
+    return (typeof owner === "object" || typeof owner === "function") && owner !== null ? { target: owner, property: parts[parts.length - 1]! } : undefined;
+}
+
+function bindingsOverlap(a: AnimationBinding, b: AnimationBinding): boolean {
+    return a.target === b.target && a.property === b.property;
+}
+
+function isAnimationBinding(binding: AnimationBinding | undefined): binding is AnimationBinding {
+    return binding !== undefined;
 }
 
 function clampAnimationFrame(animation: Animation | undefined, frame: number): number {
