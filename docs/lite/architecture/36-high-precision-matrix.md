@@ -113,6 +113,7 @@ Every `Mat4` the engine vends must come from `allocateMat4()`. A direct `new F32
 
 - `math/compose-mat4.ts`, `create-mat4-from-quat.ts`, `create-identity-mat4.ts`, `invert-mat4.ts`, `create-look-at-mat4-lh.ts`, `multiply-mat4.ts`, `create-perspective-mat4-lh.ts`, `create-scaling-mat4.ts` — the eight factories that return a fresh matrix
 - `scene/world-matrix-state.ts` — each node's `_ownedWorld`
+- `scene/scene-node.ts` — each TRS node's lazily allocated reusable local matrix
 - `camera/arc-rotate.ts`, `camera/free-camera.ts`, `camera/geospatial-camera.ts` — `_localMat`, `_viewCache`, `_projCache`, `_vpCache`
 - `light/directional-light.ts`, `light/hemispheric.ts`, `light/point-light.ts`, `light/spot-light.ts` — each light's `_localMatrix`
 - `loader-gltf/_loader-scratch.ts` — the three per-load scratch matrices
@@ -122,7 +123,7 @@ Every `Mat4` the engine vends must come from `allocateMat4()`. A direct `new F32
 
 The `*Into` / `*ToRef` kernels (`composeMat4IntoBuffer`, `multiplyMat4IntoBuffer`, `writePerspectiveMat4LHIntoBuffer`, `writeLookAtMat4LHIntoBuffer`, …) do not allocate — they write into storage the caller already owns and inherit its precision. Only the returning factories choose storage, which is why they are the boundary.
 
-**Root nodes make the factories load-bearing.** `createWorldMatrixState` allocates `_ownedWorld` through the allocator, but uses it only when the node has a parent. For a root, `getWorldMatrix()` returns the _local_ matrix unchanged (`_cachedWorld = local`), and that matrix came from `composeTrsLocalMatrix` → `composeMat4` / `createIdentityMat4`. A factory that bypasses the allocator therefore costs every root-level object its F64 world transform under HPM — exactly the case HPM exists for — while parented nodes look correct and mask the fault.
+**Root nodes make local allocation load-bearing.** `createWorldMatrixState` allocates `_ownedWorld` through the allocator, but uses it only when the node has a parent. For a root, `getWorldMatrix()` returns the _local_ matrix unchanged (`_cachedWorld = local`). SceneNode's reusable local storage is lazily allocated through `allocateMat4()` and filled by `composeTrsLocalMatrixIntoBuffer` (identity fill or `composeMat4IntoBuffer`); other providers may return their own allocated local storage or use the fresh `composeTrsLocalMatrix` factory. A local allocation that bypasses the allocator therefore costs root-level objects their F64 world transforms under HPM — exactly the case HPM exists for — while parented nodes look correct and mask the fault. Local/world caching retains the storage precision chosen by the allocator; it does not introduce a downcast.
 
 ## GPU upload boundary inventory
 

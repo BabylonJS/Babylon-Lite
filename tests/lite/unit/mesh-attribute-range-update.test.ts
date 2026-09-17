@@ -1,9 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { updateMeshColors, updateMeshNormals, updateMeshPositions, updateMeshTangents, updateMeshUv2, updateMeshUvs } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
+import { createSceneNode } from "../../../packages/babylon-lite/src/scene/scene-node";
+import * as composition from "../../../packages/babylon-lite/src/math/compose-mat4-into-buffer";
 
 function fixture() {
     const buffers = {
@@ -30,6 +32,27 @@ function fixture() {
 }
 
 describe("mesh attribute range updates", () => {
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("retains local transforms during vertex attribute updates", () => {
+        const { engine, mesh } = fixture();
+        mesh.position.x = 1;
+        const child = createSceneNode("child", 2);
+        child.parent = mesh;
+        expect(child.worldMatrix[12]).toBe(3);
+        const compositions = vi.spyOn(composition, "composeMat4IntoBuffer");
+        const values = new Float32Array(12);
+        for (const update of [updateMeshPositions, updateMeshNormals, updateMeshColors, updateMeshUvs, updateMeshUv2, updateMeshTangents]) {
+            const version = child.worldMatrixVersion;
+            update(engine, mesh, values);
+            expect(child.worldMatrixVersion).toBeGreaterThan(version);
+            expect(child.worldMatrix[12]).toBe(3);
+        }
+        expect(compositions).not.toHaveBeenCalled();
+    });
+
     it("uploads an exact source range without allocating a subarray", () => {
         const { buffers, writeBuffer, engine, mesh } = fixture();
         const positions = new Float32Array(30);
