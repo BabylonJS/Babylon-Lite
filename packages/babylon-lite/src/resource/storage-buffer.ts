@@ -73,7 +73,8 @@ export function createStorageBuffer(engine: EngineContext, source: ArrayBufferVi
     const options: StorageBufferOptions = typeof labelOrOptions === "string" || labelOrOptions === undefined ? { label: labelOrOptions } : labelOrOptions;
     const { label, writable = false, vertex = false, index = false, indirect = false } = options;
 
-    const requested = typeof source === "number" ? source : source.byteLength;
+    const isByteLength = typeof source === "number";
+    const requested = isByteLength ? source : source.byteLength;
     if (!Number.isSafeInteger(requested) || requested < 0) {
         throw new Error(`createStorageBuffer: byte length must be a non-negative safe integer; received ${requested}.`);
     }
@@ -88,11 +89,11 @@ export function createStorageBuffer(engine: EngineContext, source: ArrayBufferVi
 
     // A writable buffer keeps no CPU shadow: the GPU owns its contents.
     const bytes = writable ? null : new Uint8Array(byteLength);
-    if (bytes && typeof source !== "number") {
+    if (bytes && !isByteLength) {
         bytes.set(new Uint8Array(source.buffer, source.byteOffset, source.byteLength));
     }
 
-    const initialData = bytes ?? (typeof source === "number" ? null : source);
+    const initialData = bytes ?? (isByteLength ? null : source);
     const buffer = initialData ? createMappedBuffer(engine, initialData, usage, label) : engine._device.createBuffer({ label, size: byteLength, usage: usage | BU.COPY_DST });
 
     const storage = { byteLength } as StorageBuffer;
@@ -106,17 +107,6 @@ export function createStorageBuffer(engine: EngineContext, source: ArrayBufferVi
         _usage: { value: usage },
     });
     (engine._storageBuffers ??= new Set()).add(storage);
-    if (!engine._storageRequiredLimits) {
-        const limits = engine._device.limits;
-        if (limits) {
-            engine._storageRequiredLimits = {
-                maxBufferSize: limits.maxBufferSize,
-                maxStorageBufferBindingSize: limits.maxStorageBufferBindingSize,
-                maxStorageBuffersPerShaderStage: limits.maxStorageBuffersPerShaderStage,
-            };
-        }
-    }
-    engine._rebuildStorageBuffers ??= () => _rebuildStorageBuffers(engine);
     engine._disposeStorageBuffers ??= () => _disposeStorageBuffers(engine);
     return storage;
 }
@@ -164,9 +154,12 @@ export function updateStorageBuffer(engine: EngineContext, buffer: StorageBuffer
         return;
     }
     engine._device.queue.writeBuffer(buffer._buffer!, byteOffset, data.buffer as ArrayBuffer, data.byteOffset, data.byteLength);
-    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
     // Writable allocations keep no shadow — the GPU copy is authoritative.
-    buffer._data?.set(bytes, byteOffset);
+    const shadow = buffer._data;
+    if (shadow) {
+        const bytes = data instanceof Uint8Array ? data : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+        shadow.set(bytes, byteOffset);
+    }
 }
 
 /** Read a GPU-writable storage allocation through one lazily reused staging buffer.
@@ -201,19 +194,18 @@ export function readStorageBuffer(buffer: StorageBuffer): Promise<ArrayBuffer> {
     const encoder = device.createCommandEncoder({ label: buffer._label ? `${buffer._label}-readback` : "storage-readback" });
     encoder.copyBufferToBuffer(buffer._buffer, 0, staging, 0, buffer.byteLength);
     device.queue.submit([encoder.finish()]);
-    const pending = staging.mapAsync(GPUMapMode.READ).then(
-        () => {
-            const copy = staging.getMappedRange().slice(0);
-            staging.unmap();
-            return copy;
-        },
-        (error) => {
-            throw error;
-        }
-    );
-    buffer._readPending = pending.finally(() => {
-        buffer._readPending = undefined;
-    });
+    buffer._readPending = staging
+        .mapAsync(GPUMapMode.READ)
+        .then(() => {
+            try {
+                return staging.getMappedRange().slice(0);
+            } finally {
+                staging.unmap();
+            }
+        })
+        .finally(() => {
+            buffer._readPending = undefined;
+        });
     return buffer._readPending;
 }
 
@@ -236,41 +228,8 @@ export function disposeStorageBuffer(buffer: StorageBuffer): void {
     buffer._engine._resourceEpoch = ((buffer._engine._resourceEpoch ?? 0) + 1) | 0;
     if (buffer._engine._storageBuffers.size === 0) {
         buffer._engine._storageBuffers = undefined;
-        buffer._engine._storageRequiredLimits = undefined;
-        buffer._engine._rebuildStorageBuffers = undefined;
         buffer._engine._disposeStorageBuffers = undefined;
     }
-}
-
-/** Consumers that cached a `GPUBuffer` handle out of an allocation and must re-read it
- *  after a rebuild. Installed by `mesh-from-storage`; null in any bundle that never
- *  sources geometry from a StorageBuffer. */
-let _afterRebuild: ((engine: EngineContext) => void) | null = null;
-
-/** @internal Register a callback to run once every allocation has been rebuilt. */
-export function _installStorageRebuildObserver(fn: (engine: EngineContext) => void): void {
-    _afterRebuild = fn;
-}
-
-/** @internal Rebuild every live storage allocation after the engine device changes. */
-export function _rebuildStorageBuffers(engine: EngineContext): void {
-    for (const buffer of engine._storageBuffers ?? []) {
-        if (buffer._destroyed) {
-            continue;
-        }
-        const usage = buffer._usage;
-        if (buffer._data) {
-            buffer._buffer = createMappedBuffer(engine, buffer._data, usage, buffer._label);
-        } else {
-            // Writable/compute-produced: no shadow to restore from. Reallocate at the
-            // same size and leave it EMPTY — the owner refills it after device loss.
-            buffer._buffer = engine._device.createBuffer({ label: buffer._label, size: buffer.byteLength, usage: usage | BU.COPY_DST });
-        }
-    }
-    // Every allocation now holds a NEW GPUBuffer. Anything that cached the old handle —
-    // a storage-backed mesh points its vertex and index fields straight at one — is still
-    // holding the dead one and has to be re-pointed before the next draw.
-    _afterRebuild?.(engine);
 }
 
 /** @internal Dispose all live storage allocations before their engine device is destroyed. */

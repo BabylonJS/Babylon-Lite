@@ -1,14 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { createShaderMaterial, setShaderStorageBuffer } from "../../../packages/babylon-lite/src/material/shader/shader-material.js";
-import {
-    _rebuildStorageBuffers,
-    createStorageBuffer,
-    disposeStorageBuffer,
-    readStorageBuffer,
-    updateStorageBuffer,
-} from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
+import { createStorageBuffer, disposeStorageBuffer, readStorageBuffer, updateStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
 import type { StorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
+import { _getStorageRequiredLimits, _rebuildStorageBuffers } from "../../../packages/babylon-lite/src/resource/storage-buffer-recovery.js";
 import { align } from "../../../packages/babylon-lite/src/resource/gpu-buffers.js";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl.js";
 
@@ -68,7 +63,7 @@ describe("StorageBuffer", () => {
         expect(device.createBuffer).not.toHaveBeenCalled();
         expect(device.queue.writeBuffer).not.toHaveBeenCalled();
         expect(engine._storageBuffers).toBeUndefined();
-        expect(engine._storageRequiredLimits).toBeUndefined();
+        expect(_getStorageRequiredLimits(engine)).toBeUndefined();
     });
 
     it.each([
@@ -168,6 +163,70 @@ describe("StorageBuffer", () => {
         expect(() => updateStorageBuffer(engine, storage, update, 12)).toThrow(/exceeds/);
         expect(() => updateStorageBuffer(engine, storage, new Uint8Array(3))).toThrow(/multiple of 4/);
         expect(() => updateStorageBuffer(makeEngine().engine, storage, update)).toThrow(/different engine/);
+    });
+
+    it("does not construct a CPU byte view for updates to GPU-owned storage", () => {
+        const { engine, device } = makeEngine();
+        const storage = createStorageBuffer(engine, 16, { writable: true });
+        const update = new Float32Array([1, 2, 3, 4]);
+        const byteViews = vi.fn();
+        const ByteArray = Uint8Array;
+        vi.stubGlobal(
+            "Uint8Array",
+            new Proxy(ByteArray, {
+                construct(target, args) {
+                    byteViews();
+                    return Reflect.construct(target, args);
+                },
+            })
+        );
+        try {
+            updateStorageBuffer(engine, storage, update);
+        } finally {
+            vi.unstubAllGlobals();
+        }
+        expect(device.queue.writeBuffer).toHaveBeenCalledWith(storage._buffer, 0, update.buffer, update.byteOffset, update.byteLength);
+        expect(byteViews).not.toHaveBeenCalled();
+        expect(storage._data).toBeNull();
+    });
+
+    it("unmaps staging after an extraction failure so the next read can reuse it", async () => {
+        const source = { destroy: vi.fn() } as unknown as GPUBuffer;
+        const data = new Uint32Array([1, 2, 3, 4]);
+        let mapped = false;
+        const staging = {
+            destroy: vi.fn(),
+            mapAsync: vi.fn(async () => {
+                if (mapped) {
+                    throw new Error("staging is already mapped");
+                }
+                mapped = true;
+            }),
+            getMappedRange: vi
+                .fn()
+                .mockImplementationOnce(() => {
+                    throw new Error("mapped range unavailable");
+                })
+                .mockImplementation(() => data.buffer),
+            unmap: vi.fn(() => {
+                mapped = false;
+            }),
+        };
+        const device = {
+            limits: { maxBufferSize: 1024 },
+            createBuffer: vi.fn().mockReturnValueOnce(source).mockReturnValueOnce(staging),
+            createCommandEncoder: vi.fn(() => ({ copyBufferToBuffer: vi.fn(), finish: vi.fn(() => ({})) })),
+            queue: { writeBuffer: vi.fn(), submit: vi.fn() },
+        };
+        const engine = { _device: device } as unknown as EngineContext;
+        const storage = createStorageBuffer(engine, 16, { writable: true });
+
+        await expect(readStorageBuffer(storage)).rejects.toThrow("mapped range unavailable");
+        expect(staging.unmap).toHaveBeenCalledOnce();
+        expect(storage._readPending).toBeUndefined();
+        expect(Array.from(new Uint32Array(await readStorageBuffer(storage)))).toEqual([1, 2, 3, 4]);
+        expect(device.createBuffer).toHaveBeenCalledTimes(2);
+        expect(staging.unmap).toHaveBeenCalledTimes(2);
     });
 
     it("reads writable GPU output through one reused staging allocation", async () => {

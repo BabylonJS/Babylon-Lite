@@ -3,6 +3,7 @@ import { computeUboLayout } from "../../../packages/babylon-lite/src/shader/ubo-
 import { composeShader } from "../../../packages/babylon-lite/src/shader/shader-composer";
 import type { ShaderFragment, ShaderTemplate, UboField } from "../../../packages/babylon-lite/src/shader/fragment-types";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
+import { createMeshVertexLayout } from "../../../packages/babylon-lite/src/mesh/mesh-vertex-layout";
 
 // WebGPU shader stage constants for testing (Node has no GPUShaderStage global)
 const FRAGMENT = 0x2;
@@ -159,6 +160,32 @@ function makeTemplate(overrides?: Partial<ShaderTemplate>): ShaderTemplate {
 }
 
 describe("composeShader", () => {
+    it("applies mesh packing without mutating attributes or overriding instance-rate fragment inputs", () => {
+        const template = makeTemplate();
+        const fragment: ShaderFragment = {
+            _id: "instance-color",
+            _vertexAttributes: [{ _name: "color", _type: "vec4<f32>", _gpuFormat: "float32x4", _arrayStride: 32, _offset: 16, _stepMode: "instance" }],
+        };
+        const original = structuredClone(template._baseVertexAttributes);
+        const result = composeShader(
+            template,
+            [fragment],
+            createMeshVertexLayout({
+                position: { _stride: 48, _offset: 4 },
+                normal: { _stride: 48, _offset: 20 },
+                color: { _stride: 48, _offset: 32 },
+            })
+        );
+        expect(result._vertexBufferLayouts).toEqual([
+            { arrayStride: 48, stepMode: "vertex", attributes: [{ shaderLocation: 0, offset: 4, format: "float32x3" }] },
+            { arrayStride: 48, stepMode: "vertex", attributes: [{ shaderLocation: 1, offset: 20, format: "float32x3" }] },
+            { arrayStride: 32, stepMode: "instance", attributes: [{ shaderLocation: 2, offset: 16, format: "float32x4" }] },
+        ]);
+        expect(template._baseVertexAttributes).toEqual(original);
+        expect(composeShader(template, [])._vertexBufferLayouts[0]!.arrayStride).toBe(12);
+        expect(result._vertexWGSL).toContain("position:vec3<f32>");
+    });
+
     it("keeps ungrouped layouts before first-seen groups and preserves their first attribute's packing", () => {
         const result = composeShader(
             makeTemplate({

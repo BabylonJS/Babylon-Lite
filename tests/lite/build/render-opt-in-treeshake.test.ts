@@ -55,6 +55,33 @@ async function initialViteCode(source: string): Promise<string> {
 }
 
 describe("rendering opt-in boundaries", () => {
+    it.each([false, true])("retains storage reallocation only with device-loss recovery (%s)", async (recovery) => {
+        const imports = `createStorageBuffer, createMeshFromStorageBuffer${recovery ? ", enableDeviceLostSceneRecovery" : ""}`;
+        const result = await runRollup({
+            entrySource: `import { ${imports} } from ${JSON.stringify(LIB_ENTRY)}; console.log(${imports});`,
+            format: "es",
+            minify: false,
+        });
+        expect(result.errors).toEqual([]);
+        expect(result.significantWarnings).toEqual([]);
+        expect(result.code.includes("function _rebuildStorageBuffers")).toBe(recovery);
+        expect(result.code.includes("function _refreshStorageMeshes")).toBe(recovery);
+    });
+
+    it.each([false, true])("keeps Node implementations out of storage-only Shader graphs (%s)", async (node) => {
+        const code = await initialViteCode(`import { createMeshFromStorageBuffer, createShaderMaterial } from ${JSON.stringify(LIB_ENTRY)};
+${
+    node
+        ? `import { compileNodePipeline } from ${JSON.stringify(join(BUILD_LIB_DIR, "material", "node", "node-pipeline.js"))};
+import { buildNodeMeshRenderables } from ${JSON.stringify(join(BUILD_LIB_DIR, "material", "node", "node-renderable.js"))};
+console.log(compileNodePipeline, buildNodeMeshRenderables);`
+        : ""
+}
+console.log(createMeshFromStorageBuffer, createShaderMaterial);`);
+        expect(code.includes("function compileNodePipeline")).toBe(node);
+        expect(code.includes("function groupNodeMeshPackets")).toBe(node);
+    });
+
     it.each([false, true])("keeps retirement out of Vite's initial engine graph unless disposal is requested (%s)", async (dispose) => {
         const initialCode = await initialViteCode(`import { createEngine, startEngine${dispose ? ", disposeEngine" : ""} } from ${JSON.stringify(LIB_ENTRY)};
 console.log(createEngine, startEngine${dispose ? ", disposeEngine" : ""});`);

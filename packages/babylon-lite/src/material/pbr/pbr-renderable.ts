@@ -46,7 +46,6 @@ import type { PbrLightMode } from "./pbr-compose.js";
 import type { Material, MaterialRenderFeatures } from "../material.js";
 import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
-import { drawMeshIndexed } from "../../mesh/mesh-vertex-layout.js";
 
 type SingleLightType = "hemispheric" | "directional" | "spot" | "point";
 interface SingleLightWgslModule {
@@ -464,7 +463,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             } else if (thinDrawArgs) {
                 pass.drawIndexedIndirect(thinDrawArgs, 0);
             } else {
-                drawMeshIndexed(pass, gpu, ti?.count);
+                pass.drawIndexed(gpu.indexCount, ti?.count ?? 1, 0, gpu._baseVertex);
             }
             return 1;
         };

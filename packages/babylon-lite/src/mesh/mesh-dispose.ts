@@ -7,11 +7,22 @@ import { _detachThinInstanceLodMesh } from "./thin-instance.js";
  *  absent from the bundle the setter tree-shakes, the bundler proves this is always null,
  *  and the branch below folds away — so every existing scene stays byte-identical.
  *  (Same idiom as `_stencilResolver` in shader-pipeline.) */
-let _borrowAwareDisposer: ((gpu: MeshGPU) => void) | null = null;
+type VertexBufferDisposer = (gpu: MeshGPU) => void;
+
+let _borrowAwareDisposer: ((gpu: MeshGPU, disposeVertices: VertexBufferDisposer) => void) | null = null;
 
 /** @internal Install the borrow-aware geometry disposer (called by `mesh-from-storage`). */
-export function _installBorrowAwareGeometryDisposer(dispose: (gpu: MeshGPU) => void): void {
+export function _installBorrowAwareGeometryDisposer(dispose: (gpu: MeshGPU, disposeVertices: VertexBufferDisposer) => void): void {
     _borrowAwareDisposer = dispose;
+}
+
+function disposeVertexBuffers(gpu: MeshGPU): void {
+    gpu.positionBuffer.destroy();
+    gpu.normalBuffer.destroy();
+    gpu.uvBuffer.destroy();
+    gpu.tangentBuffer?.destroy();
+    gpu.uv2Buffer?.destroy();
+    gpu.colorBuffer?.destroy();
 }
 
 /** Destroy all GPU resources owned by a mesh (vertex buffers, skeleton, morph targets).
@@ -32,15 +43,10 @@ export function disposeMeshGpu(mesh: Mesh): void {
     const g = mesh._gpu;
     if (release(g)) {
         if (_borrowAwareDisposer) {
-            _borrowAwareDisposer(g);
+            _borrowAwareDisposer(g, disposeVertexBuffers);
         } else {
-            g.positionBuffer.destroy();
-            g.normalBuffer.destroy();
-            g.uvBuffer.destroy();
+            disposeVertexBuffers(g);
             g.indexBuffer.destroy();
-            g.tangentBuffer?.destroy();
-            g.uv2Buffer?.destroy();
-            g.colorBuffer?.destroy();
         }
     }
     const ti = mesh.thinInstances;

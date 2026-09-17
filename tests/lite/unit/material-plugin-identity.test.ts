@@ -118,16 +118,16 @@ describe("Standard mesh vertex-layout identity", () => {
         meshA._gpu = {
             ...meshA._gpu,
             _vbLayout: {
-                _p: { _stride: 32, _offset: 0 },
-                _n: { _stride: 32, _offset: 12 },
+                position: { _stride: 32, _offset: 0 },
+                normal: { _stride: 32, _offset: 12 },
             },
             _vbKey: ":storage-a",
         };
         meshB._gpu = {
             ...meshB._gpu,
             _vbLayout: {
-                _p: { _stride: 40, _offset: 4 },
-                _n: { _stride: 40, _offset: 20 },
+                position: { _stride: 40, _offset: 4 },
+                normal: { _stride: 40, _offset: 20 },
             },
             _vbKey: ":storage-b",
         };

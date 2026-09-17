@@ -47,7 +47,24 @@ export function updateMeshGeometryCapacity(
     colors?: Float32Array,
     reserveFactor?: number
 ): MeshGeometryCapacityResult;
+
+export function resizeSharedMeshGeometry(
+    engine: EngineContext,
+    meshes: readonly Mesh[],
+    positions: Float32Array,
+    normals: Float32Array,
+    indices: Uint32Array,
+    uvs?: Float32Array,
+    uvs2?: Float32Array,
+    tangents?: Float32Array,
+    colors?: Float32Array
+): void;
 ```
+
+`resizeSharedMeshGeometry` requires a nonempty, dense list of distinct, live meshes sharing
+one owned, tightly-packed GPU geometry. It rejects duplicate, disposed, missing, or
+different-geometry entries before allocating buffers or changing reference counts.
+The list may select only part of a clone family; omitted owners keep the old allocation.
 
 The existing single-attribute update helpers also accept optional source/destination vertex ranges:
 
@@ -138,6 +155,8 @@ refreshing bounding information, without changing the mesh or submesh draw topol
 - Reject changed vertex or index counts.
 - Reject optional-attribute presence/length changes.
 - Reject interleaved or shared-clone geometry.
+- Reject duplicate, disposed, or missing shared-resize owners before any upload or ownership change.
+- Confirm a shared-resize subset leaves omitted clone owners on their original live allocation.
 - Reject invalid capacity factors and changing optional-attribute presence on the capacity path.
 - Confirm same-size updates keep every GPU buffer identity unchanged.
 - Confirm shrink/growth within capacity keeps every GPU buffer identity and the GPU draw index capacity unchanged.

@@ -21,7 +21,6 @@ import type { DrawUpdateContext, Renderable } from "../render/renderable.js";
 import type { Mesh, MeshGPU } from "./mesh.js";
 import type { ThinInstanceData } from "./thin-instance.js";
 import type { ThinInstanceDrawBuffers } from "./thin-instance-gpu.js";
-import { drawMeshIndexed } from "./mesh-vertex-layout.js";
 import {
     createTiCullState,
     destroyTiCullState,
@@ -132,7 +131,7 @@ export function tryBind(
             } else if (ti._drawArgsBuffer) {
                 pass.drawIndexedIndirect(ti._drawArgsBuffer, 0);
             } else {
-                drawMeshIndexed(pass, gpu, instanceCount);
+                pass.drawIndexed(gpu.indexCount, instanceCount, 0, gpu._baseVertex);
             }
         },
     };
@@ -173,7 +172,7 @@ function bindLodPartner(ti: ThinInstanceData, signature: RenderTargetSignature, 
                 if (ti._drawArgsBuffer) {
                     pass.drawIndexedIndirect(ti._drawArgsBuffer, 0);
                 } else {
-                    drawMeshIndexed(pass, gpu, instanceCount);
+                    pass.drawIndexed(gpu.indexCount, instanceCount, 0, gpu._baseVertex);
                 }
             }
         },

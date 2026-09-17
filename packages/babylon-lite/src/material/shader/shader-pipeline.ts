@@ -6,12 +6,13 @@ import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 import { computeUboLayout } from "../../shader/ubo-layout.js";
 import type { UboField, UboSpec } from "../../shader/fragment-types.js";
-import type { ShaderAttributeName, ShaderMaterial, ShaderSamplerDecl, ShaderUniformDecl } from "./shader-material.js";
+import type { ShaderMaterial, ShaderSamplerDecl } from "./shader-material.js";
 import { _isShaderSystemUniform } from "./shader-material.js";
 import type { ResolvedStencil } from "../stencil-state.js";
 import type { StencilState } from "../material.js";
 import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
+import { _attributeInfo, _attributeLayout, _getShaderVbSupport } from "./shader-vb-support.js";
 
 /** Stencil resolver, installed only by `enableMaterialStencil`. Module-local with a single exported setter:
  *  when `enableMaterialStencil` is absent from the bundle the setter tree-shakes, the bundler proves this is
@@ -34,28 +35,6 @@ let _finalColorResolver: ((material: ShaderMaterial, hasInstanceColor: boolean) 
 /** @internal Install the opt-in ShaderMaterial final-color helper resolver. */
 export function _installShaderFinalColorResolver(resolve: (material: ShaderMaterial, hasInstanceColor: boolean) => WgslSource | undefined): void {
     _finalColorResolver = resolve;
-}
-
-/** Vertex-packing support for geometry that is not tightly packed — an interleaved slab
- *  produced on the GPU, or a caller-declared attribute format. Same idiom as the stencil
- *  resolver above: module-local, one exported setter, installed only by
- *  `mesh-from-storage`. Absent that factory the setter tree-shakes, the bundler proves
- *  this is always null, and both branches below fold to the canonical expression — so a
- *  ShaderMaterial scene that never sources geometry from a StorageBuffer stays
- *  byte-identical. */
-export interface ShaderVbSupport {
-    /** @internal Per-attribute layouts for the material's own (mesh-independent) default. */
-    _layouts(material: ShaderMaterial): readonly GPUVertexBufferLayout[];
-    /** @internal WGSL type of one attribute, honouring `setShaderAttributeFormats`. */
-    _wgslType(material: ShaderMaterial, name: ShaderAttributeName): string;
-}
-
-/** @internal Opt-in ShaderMaterial vertex-format support. */
-export let _shaderVbSupport: ShaderVbSupport | null = null;
-
-/** @internal Install vertex-packing support (called by `mesh-from-storage`). */
-export function _installShaderVbSupport(support: ShaderVbSupport): void {
-    _shaderVbSupport = support;
 }
 
 export interface ShaderPipelineBindings {
@@ -108,19 +87,23 @@ export function getOrCreateShaderPipelineBindings(engine: EngineContext, materia
 
     let bindings = cache?.getBindings(material);
     if (!bindings) {
-        const systemFields = material.uniformDecls.filter((u) => _isShaderSystemUniform(u.name)).map(toUboField);
-        const customFields = material.uniformDecls.filter((u) => !_isShaderSystemUniform(u.name)).map(toUboField);
+        const systemFields: UboField[] = [];
+        const customFields: UboField[] = [];
+        for (const uniform of material.uniformDecls) {
+            (_isShaderSystemUniform(uniform.name) ? systemFields : customFields).push({ _name: uniform.name, _type: uniform.type });
+        }
         const systemSpec = computeUboLayout(systemFields.length > 0 ? systemFields : [{ _name: "_pad", _type: "vec4<f32>" }]);
         const customSpec = customFields.length > 0 ? computeUboLayout(customFields) : null;
         const group1BGL = engine._device.createBindGroupLayout({
             label: "shader-material-group1",
             entries: buildBindGroupLayoutEntries(material.samplerDecls, material.storageBufferDecls, customSpec !== null),
         });
+        const vbSupport = _getShaderVbSupport();
         bindings = {
             group1BGL,
             systemSpec,
             customSpec,
-            vertexBuffers: _shaderVbSupport ? _shaderVbSupport._layouts(material) : material.attributes.map(_attributeLayout),
+            vertexBuffers: vbSupport ? vbSupport._layouts(material) : material.attributes.map(_attributeLayout),
             pipelines: new Map(),
             _pipelineLayout: engine._device.createPipelineLayout({ bindGroupLayouts: [getSceneBindGroupLayout(engine), group1BGL] }),
         };
@@ -162,53 +145,46 @@ export function getOrCreateShaderPipeline(
     const cache = (material as ShaderMaterialPipelineState)._shaderPipelineCache;
     const wantsFragment = !!sig._colorFormat || material.depthOnlyFragment;
     let key = `${targetSignatureKey(sig)}${variantKey}`;
-    let vertModule: GPUShaderModule | null = null;
-    let fragModule: GPUShaderModule | null = null;
+    if (!cache) {
+        const cached = bindings.pipelines.get(key);
+        if (cached) {
+            return cached;
+        }
+    }
     // Thin-instance matrices add one layout; the optional RGBA stream adds a second.
+    const basePrelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
+    const finalColor = _finalColorResolver?.(material, vertexBuffers.length > bindings.vertexBuffers.length + 1);
+    const prelude = finalColor ? wgsl`${basePrelude}${finalColor}` : basePrelude;
+    let vertModule: GPUShaderModule;
+    let fragModule: GPUShaderModule | null;
     if (cache) {
-        const basePrelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
-        const finalColor = _finalColorResolver?.(material, vertexBuffers.length > bindings.vertexBuffers.length + 1);
-        const prelude = finalColor ? wgsl`${basePrelude}${finalColor}` : basePrelude;
         const vert = cache.getModule(device, `${prelude}\n${material.vertexSource}`, `${material.name ?? "shader"}-vertex`);
         const frag = wantsFragment ? cache.getModule(device, `${prelude}\n${material.fragmentSource}`, `${material.name ?? "shader"}-fragment`) : null;
         key = cache.getPipelineKey(sig, variantKey, vert.id, frag?.id ?? 0, vertexBuffers, material, stencil?._key ?? "");
+        const cached = bindings.pipelines.get(key);
+        if (cached) {
+            return cached;
+        }
         vertModule = vert.module;
         fragModule = frag?.module ?? null;
-    }
-    const cached = bindings.pipelines.get(key);
-    if (cached) {
-        return cached;
-    }
-    if (!vertModule) {
-        const basePrelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
-        const finalColor = _finalColorResolver?.(material, vertexBuffers.length > bindings.vertexBuffers.length + 1);
-        const prelude = finalColor ? wgsl`${basePrelude}${finalColor}` : basePrelude;
+    } else {
         vertModule = device.createShaderModule({ label: `${material.name ?? "shader"}-vertex`, code: wgsl`${prelude}\n${material.vertexSource}` });
         fragModule = wantsFragment ? device.createShaderModule({ label: `${material.name ?? "shader"}-fragment`, code: wgsl`${prelude}\n${material.fragmentSource}` }) : null;
     }
-    const colorTarget: GPUColorTargetState | null = sig._colorFormat
-        ? {
-              format: sig._colorFormat,
-              // An explicit material.blend REPLACES the needAlphaBlending-derived state entirely
-              // (see ShaderMaterialOptions.blend).
-              ...(material.blend
-                  ? { blend: material.blend }
-                  : material.needAlphaBlending
-                    ? {
-                          blend:
-                              material.blendMode === "additive"
-                                  ? ({
-                                        color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
-                                        alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
-                                    } satisfies GPUBlendState)
-                                  : ({
-                                        color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
-                                        alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-                                    } satisfies GPUBlendState),
-                      }
-                    : {}),
-          }
-        : null;
+    let colorTarget: GPUColorTargetState | null = null;
+    if (sig._colorFormat) {
+        colorTarget = { format: sig._colorFormat };
+        // Explicit blending replaces the default state, including for otherwise opaque materials.
+        if (material.blend) {
+            colorTarget.blend = material.blend;
+        } else if (material.needAlphaBlending) {
+            const dstFactor: GPUBlendFactor = material.blendMode === "additive" ? "one" : "one-minus-src-alpha";
+            colorTarget.blend = {
+                color: { srcFactor: "src-alpha", dstFactor, operation: "add" },
+                alpha: { srcFactor: "one", dstFactor, operation: "add" },
+            };
+        }
+    }
 
     const pipeline = device.createRenderPipeline({
         label: `${material.name ?? "shader"}-pipeline`,
@@ -251,10 +227,6 @@ export function _resolveShaderPipelineVariantKey(sig: RenderTargetSignature, mat
     return sig._sampleCount > 1 && !!alphaToCoverageResolver?.(material) ? `${variantKey}:a2c` : variantKey;
 }
 
-function toUboField(decl: ShaderUniformDecl): UboField {
-    return { _name: decl.name, _type: decl.type };
-}
-
 function buildBindGroupLayoutEntries(
     samplers: readonly ShaderSamplerDecl[],
     storageBuffers: readonly { name: string; type: string }[],
@@ -295,26 +267,6 @@ function buildBindGroupLayoutEntries(
     return entries;
 }
 
-/** @internal Canonical tight layout for one attribute. */
-export function _attributeLayout(name: ShaderAttributeName, shaderLocation: number): { arrayStride: number; attributes: [GPUVertexAttribute] } {
-    switch (name) {
-        case "position":
-        case "normal":
-            return { arrayStride: 12, attributes: [{ shaderLocation, offset: 0, format: "float32x3" }] };
-        case "uv":
-        case "uv2":
-            return { arrayStride: 8, attributes: [{ shaderLocation, offset: 0, format: "float32x2" }] };
-        case "tangent":
-        case "color":
-        case "weights":
-        case "weights1":
-            return { arrayStride: 16, attributes: [{ shaderLocation, offset: 0, format: "float32x4" }] };
-        case "joints":
-        case "joints1":
-            return { arrayStride: 16, attributes: [{ shaderLocation, offset: 0, format: "uint32x4" }] };
-    }
-}
-
 function buildShaderPrelude(material: ShaderMaterial, systemSpec: UboSpec, customSpec: UboSpec | null, instanceAttrs = ""): string {
     let source = wgsl`${SCENE_UBO_WGSL}
 struct ShaderSystemUniforms {
@@ -349,9 +301,10 @@ ${customSpec._structBody}
     }
     source = wgsl`${source}struct VertexInput {
 `;
+    const vbSupport = _getShaderVbSupport();
     for (let i = 0; i < material.attributes.length; i++) {
         const attr = material.attributes[i]!;
-        source = wgsl`${source}@location(${i}) ${attr}: ${_shaderVbSupport ? _shaderVbSupport._wgslType(material, attr) : _attributeWgslType(attr)},
+        source = wgsl`${source}@location(${i}) ${attr}: ${vbSupport?._wgslType(material, attr) ?? _attributeInfo(attr)._type},
 `;
     }
     source = wgsl`${source}${instanceAttrs}`;
@@ -372,24 +325,4 @@ function formatDefineValue(value: boolean | number): string {
         return `${value}.0`;
     }
     return String(value);
-}
-
-/** @internal Canonical WGSL type for one attribute. */
-export function _attributeWgslType(name: ShaderAttributeName): string {
-    switch (name) {
-        case "position":
-        case "normal":
-            return "vec3<f32>";
-        case "uv":
-        case "uv2":
-            return "vec2<f32>";
-        case "tangent":
-        case "color":
-        case "weights":
-        case "weights1":
-            return "vec4<f32>";
-        case "joints":
-        case "joints1":
-            return "vec4<u32>";
-    }
 }

@@ -4,7 +4,8 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import { createMeshFromStorageBuffer } from "../../../packages/babylon-lite/src/mesh/mesh-from-storage";
 import { disposeMeshGpu } from "../../../packages/babylon-lite/src/mesh/mesh-dispose";
 import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh";
-import { createStorageBuffer, _rebuildStorageBuffers } from "../../../packages/babylon-lite/src/resource/storage-buffer";
+import { createStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer";
+import { _rebuildStorageBuffers } from "../../../packages/babylon-lite/src/resource/storage-buffer-recovery";
 import { cloneTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
 
 const BU = globalThis.GPUBufferUsage;

@@ -43,7 +43,7 @@ function createFixture(failBindGroup = false): {
         _pipelineForMesh: vi.fn(() => pipeline),
         _meshBGL: {} as GPUBindGroupLayout,
         _nodeUboBinding: 1,
-        _nodeUboSize: 16,
+        _nodeUboSpec: { _totalBytes: 16, _offsets: new Map(), _structBody: "" },
         _textureBindings: [],
         _envBindings: null,
         _shadowBindings: [],
@@ -122,6 +122,22 @@ describe("Node auxiliary ownership", () => {
 
         expect(result.renderables).toHaveLength(1);
         expect(result.renderables[0]!.mesh).toBeUndefined();
+        owned._lifetimeDisposers.forEach((dispose) => dispose());
+    });
+
+    it("reports the submitted packet count and preserves each native draw's base vertex", () => {
+        const { scene, mesh, material } = createFixture();
+        Object.assign(mesh._gpu, { _baseVertex: 24 });
+        const secondMesh = { ...mesh, _gpu: { ...mesh._gpu, _baseVertex: 48 } } as Mesh;
+        const owned = resources();
+        const built = buildNodeMeshRenderables(scene, [mesh, secondMesh], material, owned);
+        const pass = { setVertexBuffer: vi.fn(), setIndexBuffer: vi.fn(), setBindGroup: vi.fn(), drawIndexed: vi.fn() };
+        const binding = built.renderables[0]!.bind(scene.surface.engine, {} as RenderTargetSignature);
+        expect(binding.draw(pass as unknown as GPURenderPassEncoder, scene.surface.engine)).toBe(2);
+        expect(pass.drawIndexed.mock.calls).toEqual([
+            [3, 1, 0, 24],
+            [3, 1, 0, 48],
+        ]);
         owned._lifetimeDisposers.forEach((dispose) => dispose());
     });
 

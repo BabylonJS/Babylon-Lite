@@ -9,8 +9,6 @@
 import { F32 } from "../../engine/typed-arrays.js";
 import { BU } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
-import { _vertexDefaults } from "../../mesh/vertex-defaults-hooks.js";
-import { drawMeshIndexed } from "../../mesh/mesh-vertex-layout.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { MeshGPU } from "../../mesh/mesh.js";
@@ -88,7 +86,8 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
         const writeMeshFeature = compile._writeMeshFeature;
 
         // Node UBO is per-material (same across all meshes using it).
-        const nodeUBO = compile._nodeUboBinding !== null && compile._nodeUboSize > 0 ? createEmptyUniformBuffer(engine, compile._nodeUboSize, "node-ubo") : null;
+        const nodeSpec = compile._nodeUboSpec;
+        const nodeUBO = nodeSpec && nodeSpec._totalBytes > 0 ? createEmptyUniformBuffer(engine, nodeSpec._totalBytes, "node-ubo") : null;
         if (nodeUBO) {
             lifetimeDisposers.push(() => nodeUBO.destroy());
             writeNodeUBO(engine, nodeUBO, material);
@@ -196,7 +195,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
             }
             pass.setIndexBuffer(g.indexBuffer, g.indexFormat);
             pass.setBindGroup(1, pkt._meshBG);
-            drawMeshIndexed(pass, g);
+            pass.drawIndexed(g.indexCount, 1, 0, g._baseVertex);
         };
 
         const isTransparent = !noColorOutput && !esmShadowOutput && material._needsAlphaBlending;
@@ -239,7 +238,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                 renderables.push(rTrans);
             }
         } else {
-            const createOpaque = (selectedPackets: readonly NodePacket[]): Renderable => {
+            for (const selectedPackets of groupNodeMeshPackets(packets)) {
                 const _baseUpdate = (): void => {
                     for (const pkt of selectedPackets) {
                         updatePacketUBO(pkt);
@@ -253,12 +252,10 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                 };
                 const update = engine._wrapRenderableForFO?.(_baseUpdate, scene as SceneContext, _invalidate) ?? _baseUpdate;
                 const draw = (pass: NodeRenderPass): number => {
-                    let draws = 0;
                     for (const pkt of selectedPackets) {
                         drawPacket(pass, pkt);
-                        draws++;
                     }
-                    return draws;
+                    return selectedPackets.length;
                 };
                 const rOpaque: Renderable = {
                     order: 100,
@@ -268,20 +265,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                         return { renderable: rOpaque, pipeline: compile._pipelineForMesh(selectedPackets[0]!._mesh._gpu), update, draw };
                     },
                 };
-                return rOpaque;
-            };
-            const byLayout = new Map<string, NodePacket[]>();
-            for (const packet of packets) {
-                const key = packet._mesh._gpu._vbKey ?? "";
-                const group = byLayout.get(key);
-                if (group) {
-                    group.push(packet);
-                } else {
-                    byLayout.set(key, [packet]);
-                }
-            }
-            for (const group of byLayout.values()) {
-                renderables.push(createOpaque(group));
+                renderables.push(rOpaque);
             }
         }
     }
@@ -293,18 +277,39 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
     return { renderables, rebuildSingle };
 }
 
+function groupNodeMeshPackets(packets: readonly NodePacket[]): Iterable<readonly NodePacket[]> {
+    const first = packets[0]?._mesh._gpu._vbKey ?? "";
+    for (const packet of packets) {
+        if ((packet._mesh._gpu._vbKey ?? "") !== first) {
+            const groups = new Map<string, NodePacket[]>();
+            for (const groupedPacket of packets) {
+                const key = groupedPacket._mesh._gpu._vbKey ?? "";
+                const group = groups.get(key);
+                if (group) {
+                    group.push(groupedPacket);
+                } else {
+                    groups.set(key, [groupedPacket]);
+                }
+            }
+            return groups.values();
+        }
+    }
+    return [packets];
+}
+
 // Legacy tightly packed geometry uses per-GPU zero buffers. GPU-produced ranges
 // opt into the shared constant stream before reaching this cache.
-const zeroAttrCache = new WeakMap<object, Map<string, GPUBuffer>>();
-function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): GPUBuffer {
-    const constant = _vertexDefaults?._buffer(engine, gpu);
+let zeroAttrCache: WeakMap<MeshGPU, Map<string, GPUBuffer>> | null = null;
+function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: "uv2" | "tangent" | "color"): GPUBuffer {
+    const constant = engine._getVertexDefaultBuffer?.(gpu);
     if (constant) {
         return constant;
     }
-    let cache = zeroAttrCache.get(gpu as unknown as object);
+    const buffers = (zeroAttrCache ??= new WeakMap());
+    let cache = buffers.get(gpu);
     if (!cache) {
         cache = new Map();
-        zeroAttrCache.set(gpu as unknown as object, cache);
+        buffers.set(gpu, cache);
     }
     const existing = cache.get(name);
     if (existing) {
@@ -312,7 +317,7 @@ function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): G
     }
     // position buffer size in bytes / 12 (vec3) = vertex count.
     const vertexCount = gpu.positionBuffer.size / 12;
-    const stride = name === "uv" || name === "uv2" ? 8 : name === "normal" ? 12 : name === "tangent" || name === "color" ? 16 : 16;
+    const stride = name === "uv2" ? 8 : 16;
     const buf = engine._device.createBuffer({ label: `node-zero-${name}`, size: vertexCount * stride, usage: BU.VERTEX | BU.COPY_DST });
     // Initialize with zeros (buffer starts zeroed when not mappedAtCreation).
     cache.set(name, buf);
@@ -320,6 +325,7 @@ function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): G
 }
 
 export function getAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): GPUBuffer {
+    let buffer: GPUBuffer | null | undefined;
     switch (name) {
         case "position":
             return gpu.positionBuffer;
@@ -328,14 +334,18 @@ export function getAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string)
         case "uv":
             return gpu.uvBuffer;
         case "uv2":
-            return gpu.uv2Buffer ?? getZeroAttrBuffer(engine, gpu, "uv2");
+            buffer = gpu.uv2Buffer;
+            break;
         case "tangent":
-            return gpu.tangentBuffer ?? getZeroAttrBuffer(engine, gpu, "tangent");
+            buffer = gpu.tangentBuffer;
+            break;
         case "color":
-            return gpu.colorBuffer ?? getZeroAttrBuffer(engine, gpu, "color");
+            buffer = gpu.colorBuffer;
+            break;
         default:
             throw new Error(`NodeMaterial: unsupported attribute "${name}"`);
     }
+    return buffer ?? getZeroAttrBuffer(engine, gpu, name);
 }
 
 export function writeAttributeFlags(mesh: Mesh, scratch: Float32Array): void {

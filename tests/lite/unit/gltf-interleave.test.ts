@@ -1,5 +1,14 @@
-import { describe, it, expect } from "vitest";
-import { accessorIsStrided, buildInterleavedPartial, installLazyCpu, computeAabbStrided } from "../../../packages/babylon-lite/src/loader-gltf/gltf-interleave.js";
+import { describe, it, expect, vi } from "vitest";
+import {
+    accessorIsStrided,
+    buildInterleavedMesh,
+    buildInterleavedPartial,
+    installLazyCpu,
+    computeAabbStrided,
+} from "../../../packages/babylon-lite/src/loader-gltf/gltf-interleave.js";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
+import { createPbrMaterial } from "../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
+import { assembleMaterial } from "../../../packages/babylon-lite/src/loader-gltf/gltf-material.js";
 
 const FLOAT = 5126;
 const UNSIGNED_BYTE = 5121;
@@ -43,6 +52,34 @@ function makeInterleavedAsset() {
 }
 
 describe("gltf-interleave", () => {
+    it("publishes GPU packing by attribute name while preserving the CPU accessor records", async () => {
+        const { json, binChunk, primitive } = makeInterleavedAsset();
+        const source = {
+            ...(await buildInterleavedPartial(json, binChunk, primitive, new Float32Array(16) as never, 0))!,
+            _material: await assembleMaterial(json, binChunk, 0, "", []),
+        };
+        const engine = {
+            _device: {
+                createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => ({
+                    label: descriptor.label,
+                    size: descriptor.size,
+                    getMappedRange: () => new ArrayBuffer(Number(descriptor.size)),
+                    unmap: vi.fn(),
+                    destroy: vi.fn(),
+                })),
+            },
+        } as unknown as EngineContext;
+        const mesh = buildInterleavedMesh(engine, source, 0, createPbrMaterial());
+        expect(Object.getPrototypeOf(mesh._gpu._vbLayout)).toBeNull();
+        expect(mesh._gpu._vbLayout!.position).toBe(source._vb!._p);
+        expect(mesh._gpu._vbLayout!.normal).toBe(source._vb!._n);
+        expect(mesh._gpu._vbLayout!.uv).toBeUndefined();
+        expect(mesh._gpu.positionBuffer).toBe(mesh._gpu.normalBuffer);
+        expect(mesh._gpu.uvBuffer).not.toBe(mesh._gpu.positionBuffer);
+        expect(source._vb!._p!._stride).toBe(24);
+        expect(source._vb!._n!._offset).toBe(12);
+    });
+
     it("accessorIsStrided detects interleaved vs tight bufferViews", () => {
         const { json } = makeInterleavedAsset();
         expect(accessorIsStrided(json, 0)).toBe(true); // POSITION (stride 24 ≠ 12)

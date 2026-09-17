@@ -9,7 +9,7 @@ import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { bumpVisibilityEpoch } from "../engine/engine.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import type { MeshGPU } from "./mesh.js";
-import { writeMeshIndexedIndirectArgs } from "./mesh-vertex-layout.js";
+import { writeMeshIndexedIndirectArgs } from "./mesh-indexed-indirect.js";
 
 /** @internal Optional replacement buffers used by GPU culling after it compacts visible instances. */
 export interface ThinInstanceDrawBuffers {

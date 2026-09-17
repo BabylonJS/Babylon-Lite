@@ -45,6 +45,7 @@ describe("build/index.d.ts", () => {
     createSurfaceRenderTargetTexture, onRenderTargetTextureResize, withSampledDepthTexture,
     createStorageBuffer, readStorageBuffer, createMeshFromStorageBuffer,
     createShaderMaterial, setShaderAttributeFormats, resizeSharedMeshGeometry,
+    prepareShaderMaterialPipeline, prepareShaderMaterialPipelineForTask,
     type EngineContext, type Mesh, type StorageBufferOptions, type MeshFromStorageOptions,
 } from "./index.js";
 declare const engine: EngineContext;
@@ -77,9 +78,16 @@ const geometryOptions: MeshFromStorageOptions = {
     boundMin: [-1, -1, -1], boundMax: [1, 1, 1],
 };
 const storageMesh = createMeshFromStorageBuffer(engine, "storage", geometryOptions);
+// @ts-expect-error Storage-backed attribute offsets do not support skinning streams.
+const unsupportedOffsets: NonNullable<MeshFromStorageOptions["attributeOffsets"]> = { joints: 0 };
+void unsupportedOffsets;
 const shader = createShaderMaterial({ vertexSource: "", fragmentSource: "", attributes: ["position"] });
 setShaderAttributeFormats(shader, { position: "float32x4" });
 storageMesh.material = shader;
+const prepared: Promise<void> = prepareShaderMaterialPipeline(engine, shader, "mesh", task, storageMesh);
+const preparedForTask: Promise<void> = prepareShaderMaterialPipelineForTask(task, shader, "mesh", storageMesh);
+void prepared;
+void preparedForTask;
 const readback: Promise<ArrayBuffer> = readStorageBuffer(storage);
 void readback;
 // @ts-expect-error GPU allocation handles remain internal.

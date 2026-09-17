@@ -102,6 +102,39 @@ function layoutArgs(layout: "mesh" | "thin-instances" | "thin-instances-color", 
 }
 
 describe("async ShaderMaterial pipeline compilation", () => {
+    it.each(["mesh", "thin-instances", "thin-instances-color"] as const)("explicitly prepares the exact packed %s layout through both public helpers", async (layout) => {
+        for (const taskHelper of [false, true]) {
+            clearSceneBGLCache();
+            _enableShaderVb();
+            const { engine, createRenderPipeline, createRenderPipelineAsync } = makeEngine();
+            const material = makeMaterial();
+            const mesh = {
+                material,
+                _gpu: {
+                    positionBuffer: {} as GPUBuffer,
+                    _vbLayout: { position: { _stride: 20, _offset: 4 } },
+                    _vbKey: "packed-position",
+                },
+            } as unknown as Mesh;
+            const task = targetTask(engine);
+            if (taskHelper) {
+                await prepareShaderMaterialPipelineForTask(task, material, layout, mesh);
+            } else {
+                await prepareShaderMaterialPipeline(engine, material, layout, task, mesh);
+            }
+            const bindings = getOrCreateShaderPipelineBindings(engine, material);
+            const expected = layoutArgs(layout, bindings);
+            expected.vertexBuffers = [
+                { ...expected.vertexBuffers[0]!, arrayStride: 20, attributes: [{ shaderLocation: 0, offset: 4, format: "float32x3" }] },
+                ...expected.vertexBuffers.slice(1),
+            ];
+            getOrCreateShaderPipeline(engine, signature, material, bindings, `${expected.variantKey}packed-position`, expected.vertexBuffers, expected.instanceAttrs);
+            expect(createRenderPipeline).not.toHaveBeenCalled();
+            expect(createRenderPipelineAsync).toHaveBeenCalledOnce();
+            expect(createRenderPipelineAsync.mock.calls[0]![0].vertex.buffers).toEqual(expected.vertexBuffers);
+        }
+    });
+
     it("prepares pending task meshes with temporary ownership without consuming the pending queue", async () => {
         const { engine, createRenderPipelineAsync } = makeEngine();
         Object.assign(engine._device, {
@@ -272,7 +305,7 @@ describe("async ShaderMaterial pipeline compilation", () => {
                 indexBuffer: {} as GPUBuffer,
                 indexCount: 3,
                 indexFormat: "uint32",
-                _vbLayout: { _p: { _stride: 20, _offset: 4 } },
+                _vbLayout: { position: { _stride: 20, _offset: 4 } },
                 _vbKey: "packed-position",
             },
         } as unknown as Mesh;

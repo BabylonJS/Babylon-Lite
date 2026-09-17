@@ -64,7 +64,6 @@ import { _getStandardGeometrySkeletonVelocityFactory, _getStandardGeometryThinIn
 import type { StandardGeometryMaterialView } from "./geometry-view.js";
 import type { StandardGeometryContext } from "./standard-renderable.js";
 import { wgsl } from "../../shader/wgsl.js";
-import { drawMeshIndexed } from "../../mesh/mesh-vertex-layout.js";
 
 /** Lazily-created singleton {@link MeshGroupBuilder} that geometry views point at
  *  via their overridden `_buildGroup`. The async builder body is unreachable —
@@ -340,7 +339,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         if (ti && thinDrawArgs) {
             pass.drawIndexedIndirect(thinDrawArgs, 0);
         } else {
-            drawMeshIndexed(pass, g, ti?.count);
+            pass.drawIndexed(g.indexCount, ti?.count ?? 1, 0, g._baseVertex);
         }
         return 1;
     };

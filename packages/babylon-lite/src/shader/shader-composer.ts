@@ -8,7 +8,6 @@ import { computeUboLayout } from "./ubo-layout.js";
 import { SCENE_UBO_WGSL } from "./scene-uniforms.js";
 import { wgsl } from "./wgsl.js";
 import type { MeshVbLayout } from "../mesh/mesh.js";
-import { applyMeshVertexLayout } from "../mesh/mesh-vertex-layout.js";
 
 const STAGE_VERTEX = 0x1;
 const STAGE_FRAGMENT = 0x2;
@@ -86,25 +85,26 @@ function dedup<T extends { _name: string }>(base: readonly T[], extra: readonly 
 
 function bglEntry(binding: number, decl: BindingDecl): GPUBindGroupLayoutEntry {
     const e: GPUBindGroupLayoutEntry = { binding, visibility: decl._visibility };
-    switch (decl._type._kind) {
+    const type = decl._type;
+    switch (type._kind) {
         case "uniform-buffer":
             e.buffer = { type: "uniform" };
             break;
         case "texture": {
-            const def = decl._type._textureType === "texture_depth_2d" ? "depth" : decl._type._textureType === "texture_2d<u32>" ? "uint" : "float";
+            const def = type._textureType === "texture_depth_2d" ? "depth" : type._textureType === "texture_2d<u32>" ? "uint" : "float";
             e.texture = {
-                sampleType: (decl._type._sampleType ?? def) as GPUTextureSampleType,
-                viewDimension: decl._type._textureType.includes("array") ? "2d-array" : decl._type._textureType.includes("cube") ? "cube" : "2d",
+                sampleType: (type._sampleType ?? def) as GPUTextureSampleType,
+                viewDimension: type._textureType.includes("array") ? "2d-array" : type._textureType.includes("cube") ? "cube" : "2d",
             };
             break;
         }
         case "sampler":
             e.sampler = {
-                type: decl._type._samplerType === "sampler_comparison" ? "comparison" : decl._type._samplerType === "sampler_non_filtering" ? "non-filtering" : "filtering",
+                type: type._samplerType === "sampler_comparison" ? "comparison" : type._samplerType === "sampler_non_filtering" ? "non-filtering" : "filtering",
             };
             break;
         case "storage-texture":
-            e.storageTexture = { access: decl._type._access as GPUStorageTextureAccess, format: decl._type._format as GPUTextureFormat };
+            e.storageTexture = { access: type._access as GPUStorageTextureAccess, format: type._format as GPUTextureFormat };
             break;
     }
     return e;
@@ -113,19 +113,20 @@ function bglEntry(binding: number, decl: BindingDecl): GPUBindGroupLayoutEntry {
 function declWGSL(g: number, b: number, d: BindingDecl): string {
     let qualifier = "";
     let type: string;
-    switch (d._type._kind) {
+    const bindingType = d._type;
+    switch (bindingType._kind) {
         case "uniform-buffer":
             qualifier = "<uniform>";
             type = `${d._name}Uniforms`;
             break;
         case "texture":
-            type = d._type._textureType;
+            type = bindingType._textureType;
             break;
         case "sampler":
-            type = d._type._samplerType === "sampler_non_filtering" ? "sampler" : d._type._samplerType;
+            type = bindingType._samplerType === "sampler_non_filtering" ? "sampler" : bindingType._samplerType;
             break;
         case "storage-texture":
-            type = `texture_storage_2d<${d._type._format},${d._type._access}>`;
+            type = `texture_storage_2d<${bindingType._format},${bindingType._access}>`;
             break;
     }
     return wgsl`@group(${g})@binding(${b}) var${qualifier} ${d._name}:${type};`;
@@ -173,17 +174,18 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     }
 
     // Vertex attributes + layouts
-    const allAttrs = applyMeshVertexLayout(dedup(template._baseVertexAttributes, fragAttrs), meshVertexLayout);
+    const allAttrs = dedup(template._baseVertexAttributes, fragAttrs);
     const inputLines: string[] = [];
     const _vertexBufferLayouts: GPUVertexBufferLayout[] = [];
     const groups = new Map<string, GPUVertexBufferLayout & { attributes: GPUVertexAttribute[] }>();
     for (let i = 0; i < allAttrs.length; i++) {
         const a = allAttrs[i]!;
+        const meshLayout = a._stepMode !== "instance" ? meshVertexLayout?.[a._name] : undefined;
         inputLines.push(wgsl`@location(${i}) ${a._name}:${a._type},`);
         let layout = a._bufferGroup ? groups.get(a._bufferGroup) : undefined;
         if (!layout) {
             layout = {
-                arrayStride: a._arrayStride,
+                arrayStride: meshLayout?._stride ?? a._arrayStride,
                 stepMode: a._stepMode ?? "vertex",
                 attributes: [],
             };
@@ -193,7 +195,7 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
                 _vertexBufferLayouts.push(layout);
             }
         }
-        layout.attributes.push({ shaderLocation: i, offset: a._offset ?? 0, format: a._gpuFormat });
+        layout.attributes.push({ shaderLocation: i, offset: meshLayout?._offset ?? a._offset ?? 0, format: a._gpuFormat });
     }
     for (const layout of groups.values()) {
         _vertexBufferLayouts.push(layout);

@@ -23,11 +23,11 @@ import type { UboSpec } from "../../shader/fragment-types.js";
 import type { DrawUpdateContext, MeshGroupBuildResult, MeshRebuildResources, Renderable } from "../../render/renderable.js";
 import type { ShaderAttributeName, ShaderMaterial } from "./shader-material.js";
 import type { ShaderPipelineBindings } from "./shader-pipeline.js";
-import type { ShaderPacket, ShaderRenderPass, ShaderVbRenderSupport } from "./shader-renderable.js";
+import type { ShaderPacket } from "./shader-renderable.js";
+import type { ShaderRenderPass, ShaderVbLayout } from "./shader-vb-support.js";
 import { syncThinInstanceBuffers, syncThinInstanceForDraw } from "../../mesh/thin-instance-gpu.js";
-import { applyMeshVertexBufferLayout, drawMeshIndexed } from "../../mesh/mesh-vertex-layout.js";
 import type { UniformCopyBatch } from "../../render/uniform-copy-batch.js";
-import { wgsl } from "../../shader/wgsl.js";
+import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
 type CullModule = typeof import("../../mesh/thin-instance-cull-binding.js");
 
@@ -38,7 +38,8 @@ interface ShaderHelpers {
     updatePacket: (scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext, uniformBatch?: UniformCopyBatch) => void;
     updateCustomUbo: (engine: EngineContext, material: ShaderMaterial, uniformBatch?: UniformCopyBatch) => void;
     getAttrBuffer: (engine: EngineContext, mesh: Mesh, name: ShaderAttributeName) => GPUBuffer;
-    getVertexLayout?: ShaderVbRenderSupport["_forMesh"];
+    getVertexLayout?: (material: ShaderMaterial, bindings: ShaderPipelineBindings, mesh?: Mesh) => ShaderVbLayout | null;
+    registerPipeline?: (mesh: Mesh, material: ShaderMaterial, hasColor: boolean, vertexLayout?: ShaderVbLayout) => void;
     getOrCreateShaderPipeline: (
         engine: EngineContext,
         sig: RenderTargetSignature,
@@ -52,39 +53,23 @@ interface ShaderHelpers {
     getUniformBatch?: (signature: RenderTargetSignature) => UniformCopyBatch;
 }
 
-/** Instance vertex buffer layouts. `baseLocation` is the first free shader
- *  location after the material's own attributes. */
-function instanceVertexLayouts(baseLocation: number, hasColor: boolean): GPUVertexBufferLayout[] {
-    const layouts: GPUVertexBufferLayout[] = [
-        {
-            arrayStride: 64,
-            stepMode: "instance",
-            attributes: [
-                { shaderLocation: baseLocation, offset: 0, format: "float32x4" },
-                { shaderLocation: baseLocation + 1, offset: 16, format: "float32x4" },
-                { shaderLocation: baseLocation + 2, offset: 32, format: "float32x4" },
-                { shaderLocation: baseLocation + 3, offset: 48, format: "float32x4" },
-            ],
-        },
-    ];
+/** Append matching GPU layouts and WGSL inputs from the same matrix-row locations. */
+function appendInstanceInputs(layouts: GPUVertexBufferLayout[], baseLocation: number, hasColor: boolean): WgslSource {
+    const attributes: GPUVertexAttribute[] = [];
+    let source = wgsl``;
+    for (let row = 0; row < 4; row++) {
+        const shaderLocation = baseLocation + row;
+        attributes.push({ shaderLocation, offset: row * 16, format: "float32x4" });
+        source = wgsl`${source}@location(${shaderLocation}) world${row}: vec4<f32>,
+`;
+    }
+    layouts.push({ arrayStride: 64, stepMode: "instance", attributes });
     if (hasColor) {
         layouts.push({
             arrayStride: 16,
             stepMode: "instance",
             attributes: [{ shaderLocation: baseLocation + 4, offset: 0, format: "float32x4" }],
         });
-    }
-    return layouts;
-}
-
-/** WGSL lines appended inside `VertexInput` for instanced variants. */
-function instancePreludeAttributes(baseLocation: number, hasColor: boolean): string {
-    let source = wgsl`@location(${baseLocation}) world0: vec4<f32>,
-@location(${baseLocation + 1}) world1: vec4<f32>,
-@location(${baseLocation + 2}) world2: vec4<f32>,
-@location(${baseLocation + 3}) world3: vec4<f32>,
-`;
-    if (hasColor) {
         source = wgsl`${source}@location(${baseLocation + 4}) instanceColor: vec4<f32>,
 `;
     }
@@ -96,9 +81,11 @@ function createShaderInstancedRenderable(
     scene: SceneContext,
     material: ShaderMaterial,
     packet: ShaderPacket,
+    bindings: ShaderPipelineBindings,
     isOverride: boolean,
     h: ShaderHelpers,
-    cull?: CullModule
+    cull?: CullModule,
+    vertexLayout?: ShaderVbLayout
 ): Renderable {
     const isTransparent = material.needAlphaBlending;
     const mesh = packet.mesh;
@@ -106,8 +93,22 @@ function createShaderInstancedRenderable(
     // `_tic` is undefined by default; loose comparison maps only the explicit `false` opt-out to zero.
     const hasColor = !!ti.colors && material._tic != 0;
     const baseLocation = material.attributes.length;
-    const instanceLayouts = instanceVertexLayouts(baseLocation, hasColor);
-    const instanceAttrs = instancePreludeAttributes(baseLocation, hasColor);
+    const variantKey = `${+hasColor}${vertexLayout?._key ?? mesh._gpu._vbKey ?? ""}`;
+    const vertexBuffers = [...(vertexLayout?._vbs ?? bindings.vertexBuffers)];
+    const instanceAttrs = appendInstanceInputs(vertexBuffers, baseLocation, hasColor);
+    if (!vertexLayout && mesh._gpu._vbLayout) {
+        for (let index = 0; index < material.attributes.length; index++) {
+            const packing = mesh._gpu._vbLayout[material.attributes[index]!];
+            if (packing) {
+                const canonical = vertexBuffers[index]!;
+                vertexBuffers[index] = {
+                    ...canonical,
+                    arrayStride: packing._stride,
+                    attributes: [{ ...canonical.attributes[0]!, offset: packing._offset }],
+                };
+            }
+        }
+    }
     const wm = mesh.worldMatrix as unknown as ArrayLike<number>;
     const sortCenter: [number, number, number] = [wm[12]!, wm[13]!, wm[14]!];
     let drawArgs: GPUBuffer | null = null;
@@ -148,7 +149,7 @@ function createShaderInstancedRenderable(
         } else if (drawArgs) {
             pass.drawIndexedIndirect(drawArgs, 0);
         } else {
-            drawMeshIndexed(pass, gpu, ti.count);
+            pass.drawIndexed(gpu.indexCount, ti.count, 0, gpu._baseVertex);
         }
         return 1;
     };
@@ -159,9 +160,6 @@ function createShaderInstancedRenderable(
         _worldCenter: sortCenter,
         bind(eng, sig) {
             const bindings = h.getOrCreateShaderPipelineBindings(eng, material);
-            const layout = h.getVertexLayout?.(material, bindings, mesh);
-            const variantKey = `${+hasColor}${layout?._key ?? mesh._gpu._vbKey ?? ""}`;
-            const vertexBuffers = [...(layout?._vbs ?? applyMeshVertexBufferLayout(bindings.vertexBuffers, material.attributes, mesh._gpu._vbLayout)), ...instanceLayouts];
             const pipeline = h.getOrCreateShaderPipeline(eng, sig, material, bindings, variantKey, vertexBuffers, instanceAttrs);
             const uniformBatch = h.getUniformBatch?.(sig);
             const baseUpdate = (context: DrawUpdateContext): void => update(context, uniformBatch);
@@ -175,6 +173,12 @@ function createShaderInstancedRenderable(
             };
         },
     };
+    h.registerPipeline?.(
+        mesh,
+        material,
+        hasColor,
+        vertexLayout ?? (mesh._gpu._vbLayout ? { _key: mesh._gpu._vbKey ?? "", _vbs: vertexBuffers.slice(0, baseLocation) } : undefined)
+    );
     return r;
 }
 
@@ -189,8 +193,9 @@ function buildInstancedSingle(
     resources?: MeshRebuildResources
 ): Renderable {
     const bindings = h.getOrCreateShaderPipelineBindings(scene.surface.engine, material);
+    const vertexLayout = h.getVertexLayout?.(material, bindings, mesh) ?? undefined;
     const packet = h.createPacket(scene, material, bindings.systemSpec, mesh, resources);
-    return createShaderInstancedRenderable(scene, material, packet, isOverride, h, cull);
+    return createShaderInstancedRenderable(scene, material, packet, bindings, isOverride, h, cull, vertexLayout);
 }
 
 /** Group entry point used whenever a ShaderMaterial scene has at least one
@@ -208,7 +213,8 @@ export function buildShaderRenderablesWithInstancing(
     getOrCreateShaderPipelineBindings: ShaderHelpers["getOrCreateShaderPipelineBindings"],
     getUniformBatch?: ShaderHelpers["getUniformBatch"],
     cull?: CullModule,
-    getVertexLayout?: ShaderHelpers["getVertexLayout"]
+    getVertexLayout?: ShaderHelpers["getVertexLayout"],
+    registerPipeline?: ShaderHelpers["registerPipeline"]
 ): MeshGroupBuildResult {
     const h: ShaderHelpers = {
         buildPlain,
@@ -217,6 +223,7 @@ export function buildShaderRenderablesWithInstancing(
         updateCustomUbo,
         getAttrBuffer,
         getVertexLayout,
+        registerPipeline,
         getOrCreateShaderPipeline,
         getOrCreateShaderPipelineBindings,
         getUniformBatch,

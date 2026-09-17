@@ -87,13 +87,13 @@ render targets.
 
 Meshes created by `createMeshFromStorageBuffer()` borrow their vertex allocation
 instead of retaining CPU geometry. Storage-buffer recovery rebuilds that allocation
-first; the storage-mesh observer then re-points every vertex handle advertised by
+first in the opt-in `storage-buffer-recovery.ts` module; the recovery pass then re-points every vertex handle advertised by
 the mesh (`positionBuffer`, `normalBuffer`, `uvBuffer`, and optional
 `tangentBuffer`, `uv2Buffer`, and `colorBuffer`) to the replacement allocation.
 A shared storage-backed index handle is refreshed in the same pass. Optional-stream
 presence metadata and the mesh's `_vbLayout` / `_baseVertex` remain unchanged.
 Owned typed-array indices retain a private copy of their validated draw prefix; the
-observer uploads that copy on the replacement device while preserving count and
+recovery pass uploads that copy on the replacement device while preserving count and
 format. Clones share one recovered `MeshGPU`, and disposing its last owner removes
 the recovery source. GPU-generated storage contents still need the application's
 producer to refill them.

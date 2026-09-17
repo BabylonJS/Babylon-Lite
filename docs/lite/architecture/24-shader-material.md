@@ -102,12 +102,37 @@ export type ShaderAttributeFormats = Partial<Record<ShaderAttributeName, GPUVert
 
 The order in `options.attributes` is the vertex buffer binding order and the WGSL `@location` order. Unsupported names throw during material creation. Missing optional mesh buffers use zero-filled buffers, matching NodeMaterial behavior. `position` is required for normal mesh rendering.
 
-`setShaderAttributeFormats` changes the material-owned vertex signature before first draw: the declared
+`setShaderAttributeFormats` changes the material-owned vertex signature before registration or pipeline preparation: the declared
 `GPUVertexFormat` selects both the generated WGSL input type and the tight default stride. Mesh-owned
-`MeshGPU._vbLayout` supplies per-attribute stride/offset packing independently, so the same material can
-draw ordinary tight geometry and storage-backed interleaved slabs. Packed variants participate in sync,
+`MeshGPU._vbLayout` supplies per-attribute stride/offset packing independently. The same material can
+draw ordinary tight geometry and storage-backed slabs only when their physical formats are compatible.
+Canonical CPU/glTF geometry retains its canonical encodings (for example, XYZ positions use
+`float32x3`); declaring `float32x4` does not repack those buffers. Such mismatches are rejected during
+renderable construction. Noncanonical formats are supported on matching storage-backed streams;
+their offset alignment and byte extent must fit the declared stride. Format declarations are
+snapshotted by the setter, and storage-backed constant-zero streams remain valid for all supported formats.
+Packed variants participate in sync,
 async, cross-material, depth/normal-view, and thin-instance pipeline keys. Storage-backed draws preserve
 the mesh's `_baseVertex`, and absent optional slab streams use the shared zero-stride default buffer.
+Mesh-specific layouts reuse the binding's resolved formats and change only stride/offset, rather
+than rebuilding the material signature for every mesh.
+
+The storage/format opt-in installs one synchronous support record in `shader-vb-support.ts`. That small
+module owns shared canonical format/type/stride metadata and the attribute layout helper, while
+the renderable passes its authored-stream lookup to the optional support callbacks. Importing
+`setShaderAttributeFormats` or constructing storage geometry therefore does not
+statically pull the full lazy `shader-pipeline.ts` / `shader-renderable.ts` implementation into the entry
+module. Direct draws pass `baseVertex` to WebGPU without a forwarding wrapper. Thin-instance paths
+resolve their combined vertex layouts once during construction and share them across binding and
+async preparation; indirect argument encoding remains in `mesh-indexed-indirect.ts`.
+Vertex-format support is needed only when preparing layouts and grouping packets; renderable draw
+closures do not retain it. Missing-buffer allocation calls the engine-owned seam directly.
+Validation computes each mesh's missing-stream mask once before packet allocation. Packets retain
+that mask for grouping and layout resolution, avoiding repeated stream scans. Opaque and transparent
+renderables share target-binding construction, while retaining their distinct ordering and update behavior.
+Default GPU picking supports compatible float32 components only. A material's incompatible position
+or requested discard-data format produces an explicit picking error; callers may exclude that mesh
+with `mesh.pickable = false`, a filter, or an ignore entry.
 
 ### Thin instances and GPU culling
 
@@ -327,6 +352,8 @@ packages/babylon-lite/src/material/shader/
   shader-group-builder.ts  MeshGroupBuilder entry point and lazy renderable import.
   shader-renderable.ts     Per-scene/per-mesh renderables, UBO writes, bind groups.
   shader-pipeline.ts       Generated prelude, BGL creation, pipeline cache.
+  shader-vb-support.ts     Tiny opt-in seam and canonical attribute layouts.
+  shader-vb.ts             Declared formats, per-mesh packing, grouping, bounded defaults.
 ```
 
 ### Group builder

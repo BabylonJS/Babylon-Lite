@@ -29,6 +29,7 @@ import { createMappedBuffer } from "../resource/mapped-buffer.js";
 import { resolveAccessor, TYPE_SIZES } from "./gltf-parser.js";
 import { computeSmoothNormals } from "./gltf-normals.js";
 import type { GltfMeshData } from "./load-gltf.js";
+import { createMeshVertexLayout } from "../mesh/mesh-vertex-layout.js";
 
 const FLOAT = 5126;
 const UNSIGNED_SHORT = 5123;
@@ -349,7 +350,7 @@ function buildInterleavedGpu(engine: EngineContext, m: GltfMeshData): MeshGPU {
         indexBuffer: createMappedBuffer(engine, m._indices, BU.INDEX),
         indexCount: m._indexCount,
         indexFormat: (m._indices instanceof U32 ? "uint32" : "uint16") as GPUIndexFormat,
-        _vbLayout: vbsrc,
+        _vbLayout: createMeshVertexLayout({ position: vbsrc._p, normal: vbsrc._n, tangent: vbsrc._t, uv: vbsrc._u, uv2: vbsrc._u2, color: vbsrc._c }),
         _vbKey: `vb${k(vbsrc._p)}.${k(vbsrc._n)}.${k(vbsrc._t)}.${k(vbsrc._u)}.${k(vbsrc._u2)}.${k(vbsrc._c)}`,
     };
 }

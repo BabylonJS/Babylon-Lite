@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh";
-import { drawMeshIndexed, writeMeshIndexedIndirectArgs } from "../../../packages/babylon-lite/src/mesh/mesh-vertex-layout";
+import { writeMeshIndexedIndirectArgs } from "../../../packages/babylon-lite/src/mesh/mesh-indexed-indirect";
 import { syncThinInstanceDrawArgs } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu";
 import type { ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 
@@ -18,19 +18,11 @@ const DIRECT_SITES = [
 ];
 
 describe("baseVertex reaches every indexed draw path", () => {
-    it.each(DIRECT_SITES)("%s delegates direct mesh draws to the shared or opt-in helper", async (file) => {
+    it.each(DIRECT_SITES)("%s passes mesh baseVertex directly to WebGPU", async (file) => {
         const { readFileSync } = await import("node:fs");
         const { resolve } = await import("node:path");
         const source = readFileSync(resolve(process.cwd(), file), "utf8");
-        const expected = file.endsWith("shader/shader-renderable.ts") ? "_vbRender._draw(pass, gpu)" : "drawMeshIndexed(";
-        expect(source).toContain(expected);
-    });
-
-    it("passes baseVertex in the fourth direct-draw argument", () => {
-        const gpu = { indexCount: 3, _baseVertex: 8 } as unknown as MeshGPU;
-        const drawIndexed = vi.fn();
-        drawMeshIndexed({ drawIndexed } as unknown as GPURenderPassEncoder, gpu, 4);
-        expect(drawIndexed).toHaveBeenCalledWith(3, 4, 0, 8);
+        expect(source).toMatch(/pass\.drawIndexed\([^;\n]*,\s*0,\s*(?:g|gpu)\._baseVertex\)/);
     });
 
     it("writes baseVertex into indexed-indirect word 3", () => {

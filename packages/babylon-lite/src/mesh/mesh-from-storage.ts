@@ -19,23 +19,25 @@
  *  - The PACKING is described here, by `arrayStride` + `attributeOffsets`, and is carried
  *    on the mesh as `MeshGPU._vbLayout` — the same record the glTF interleave path
  *    produces. The material only declares the FORMAT its shader reads
- *    (`ShaderMaterialOptions.attributeFormats`), so one material can draw both these
- *    meshes and ordinary tightly-packed ones.
+ *    (`setShaderAttributeFormats`), so one material can draw meshes with matching
+ *    formats even when their byte packing differs.
  *  - Bounds are the caller's responsibility: the CPU never sees these vertices, so
  *    `boundMin`/`boundMax` must be supplied (analytically, or from a known envelope)
  *    for frustum culling to stay correct.
  *  - CPU-side picking (`_cpuPositions`) is unavailable by construction.
  */
 import type { EngineContext } from "../engine/engine.js";
-import type { Mesh, MeshGPU, MeshVbLayout } from "./mesh.js";
+import type { Mesh, MeshGPU, MeshVbAttr, MeshVbLayout } from "./mesh.js";
 import { initMeshTransform } from "./mesh.js";
 import { BU } from "../engine/gpu-flags.js";
 import { createMappedBuffer } from "../resource/mapped-buffer.js";
-import { _getStorageBufferHandle, _installStorageRebuildObserver, type StorageBuffer } from "../resource/storage-buffer.js";
-import type { ShaderAttributeName } from "../material/shader/shader-material.js";
+import { _getStorageBufferHandle, type StorageBuffer } from "../resource/storage-buffer.js";
 import { _enableShaderVb } from "../material/shader/shader-vb.js";
 import { _installBorrowAwareGeometryDisposer } from "./mesh-dispose.js";
 import { _enableVertexDefaults } from "./vertex-defaults.js";
+import { createMeshVertexLayout } from "./mesh-vertex-layout.js";
+
+const ZERO_LAYOUT: MeshVbAttr = { _stride: 0, _offset: 0 };
 
 /** Describes a mesh whose vertices are produced on the GPU. */
 export interface MeshFromStorageOptions {
@@ -67,14 +69,15 @@ export interface MeshFromStorageOptions {
     readonly indexCount?: number;
     /** Logical vertex count in this mesh's slot, used for range validation and missing-stream defaults. */
     readonly vertexCount: number;
-    /** Byte stride of one vertex inside `storage`. Must match the packing whatever wrote it used. */
+    /** Byte stride of one vertex inside `storage`. A positive multiple of four within the device's vertex-stride limit. */
     readonly arrayStride: number;
-    /** Byte offset of each attribute inside one vertex. Omitted attributes sit at offset 0,
+    /** Own-property byte offsets inside one vertex. Values must be non-negative integers smaller than `arrayStride`.
+     *  Omitted position, normal, and UV attributes sit at offset 0,
      *  which is the right default when a single `float32x4` position is the whole vertex.
      *
      *  Only the six streams `MeshVbLayout` describes can be offset (position, normal,
      *  tangent, uv, uv2, color); skinning attributes are not supported from a slab. */
-    readonly attributeOffsets?: Partial<Record<ShaderAttributeName, number>>;
+    readonly attributeOffsets?: Partial<Record<"position" | "normal" | "tangent" | "uv" | "uv2" | "color", number>>;
     /** First vertex of this mesh within a shared allocation.
      *
      *  This is how many meshes share ONE slab: each takes a slot and addresses it
@@ -89,43 +92,54 @@ export interface MeshFromStorageOptions {
 
 /** Create a mesh that draws straight from a GPU storage allocation. */
 export function createMeshFromStorageBuffer(engine: EngineContext, name: string, options: MeshFromStorageOptions): Mesh {
-    const { storage, indices, vertexCount, arrayStride, baseVertex = 0 } = options;
+    const { storage, indices, vertexCount, arrayStride, attributeOffsets, baseVertex = 0 } = options;
 
     if ((storage._usage & BU.VERTEX) === 0) {
         throw new Error("createMeshFromStorageBuffer: storage must be created with { vertex: true } so it carries GPUBufferUsage.VERTEX.");
     }
-    if (arrayStride !== (arrayStride | 0) || arrayStride <= 0 || arrayStride % 4 !== 0) {
-        throw new Error(`createMeshFromStorageBuffer: arrayStride must be a positive multiple of 4, received ${arrayStride}.`);
+    if (arrayStride !== (arrayStride | 0) || arrayStride <= 0 || arrayStride % 4 !== 0 || arrayStride > engine._device.limits.maxVertexBufferArrayStride) {
+        throw new Error(`createMeshFromStorageBuffer: arrayStride must be a positive multiple of 4 within maxVertexBufferArrayStride, received ${arrayStride}.`);
     }
     const required = (baseVertex + vertexCount) * arrayStride;
     if (vertexCount !== (vertexCount | 0) || vertexCount <= 0 || baseVertex !== (baseVertex | 0) || baseVertex < 0 || required > storage.byteLength) {
         throw new Error(`createMeshFromStorageBuffer: invalid vertex range (${vertexCount} vertices at baseVertex ${baseVertex}) for a ${storage.byteLength}-byte allocation.`);
     }
 
+    const defaultSlabLayout: MeshVbAttr = { _stride: arrayStride, _offset: 0 };
+    const streams = createMeshVertexLayout({
+        position: defaultSlabLayout,
+        normal: defaultSlabLayout,
+        uv: defaultSlabLayout,
+        tangent: ZERO_LAYOUT,
+        uv2: ZERO_LAYOUT,
+        color: ZERO_LAYOUT,
+    });
+    if (attributeOffsets) {
+        for (const name of Object.keys(attributeOffsets)) {
+            if (!(streams as MeshVbLayout)[name]) {
+                throw new Error(`createMeshFromStorageBuffer: unsupported attribute offset "${name}".`);
+            }
+            const key = name as keyof typeof streams;
+            const offset = attributeOffsets[key];
+            if (offset === undefined) {
+                continue;
+            }
+            if (!Number.isInteger(offset) || offset < 0 || offset >= arrayStride) {
+                throw new Error(`createMeshFromStorageBuffer: offset for "${name}" must be a non-negative integer smaller than arrayStride.`);
+            }
+            streams[key] = { _stride: arrayStride, _offset: offset };
+        }
+    }
+    const slabTangent = streams.tangent._stride !== 0;
+    const slabUv2 = streams.uv2._stride !== 0;
+    const slabColor = streams.color._stride !== 0;
+
     const indexSource = validateIndexSource(indices, options.indexFormat, options.indexCount, vertexCount);
     const vertexBuffer = _getStorageBufferHandle(engine, storage);
-    const indexLabel = `${name}-indices`;
-    const indexBuffer = resolveIndexBuffer(engine, indexSource.data, indexLabel);
+    const ownsIndexBuffer = ArrayBuffer.isView(indexSource.data);
+    const indexBuffer = ownsIndexBuffer ? createMappedBuffer(engine, indexSource.data, BU.INDEX, `${name}-indices`) : _getStorageBufferHandle(engine, indexSource.data);
 
-    const offsets = options.attributeOffsets;
-    // Only streams that actually READ from the slab get a layout entry. Recording one for
-    // an attribute whose buffer is a tiny zero fallback hands the pipeline the slab's
-    // stride against a buffer far too small for it: wrong reads at best, a buffer-size
-    // validation failure at worst. position/normal/uv always point at the slab, so they
-    // are always described; the optional three are described only when the caller asked
-    // for them, which is also when they are wired up below.
-    const slabTangent = offsets?.tangent !== undefined;
-    const slabUv2 = offsets?.uv2 !== undefined;
-    const slabColor = offsets?.color !== undefined;
-    const vbLayout: MeshVbLayout = {
-        _p: { _stride: arrayStride, _offset: offsets?.position ?? 0 },
-        _n: { _stride: arrayStride, _offset: offsets?.normal ?? 0 },
-        _u: { _stride: arrayStride, _offset: offsets?.uv ?? 0 },
-        ...(slabTangent ? { _t: { _stride: arrayStride, _offset: offsets!.tangent! } } : {}),
-        ...(slabUv2 ? { _u2: { _stride: arrayStride, _offset: offsets!.uv2! } } : {}),
-        ...(slabColor ? { _c: { _stride: arrayStride, _offset: offsets!.color! } } : {}),
-    };
-
+    _enableVertexDefaults(engine);
     installHooks();
 
     const mesh = initMeshTransform({
@@ -153,25 +167,24 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
             indexFormat: indexSource.format,
             _baseVertex: baseVertex,
             _vertexCount: vertexCount,
-            _vbLayout: vbLayout,
+            _vbLayout: streams,
             // Distinct from the loader's `vb…` keys, so a slab mesh and an interleaved glTF
             // mesh can never collide on one material's pipeline cache.
-            _vbKey: `sb${arrayStride}.${vbLayout._p!._offset}.${vbLayout._n!._offset}.${vbLayout._u!._offset}.${vbLayout._t?._offset ?? "-"}.${vbLayout._u2?._offset ?? "-"}.${vbLayout._c?._offset ?? "-"}`,
+            _vbKey: `sb${arrayStride}.${streams.position._offset}.${streams.normal._offset}.${streams.uv._offset}.${slabTangent ? streams.tangent._offset : "-"}.${slabUv2 ? streams.uv2._offset : "-"}.${slabColor ? streams.color._offset : "-"}`,
             // The slab belongs to whoever created it and is shared with every other
             // mesh holding a slot; this mesh only borrows it.
             _ownsVertexBuffers: false,
-            _ownsIndexBuffer: ArrayBuffer.isView(indexSource.data),
+            _ownsIndexBuffer: ownsIndexBuffer,
         },
     });
 
-    const source: SlabSources = {
+    const source: StorageMeshSource = {
         _vb: storage,
         _indices: indexSource,
-        _indexLabel: indexLabel,
         _device: engine._device,
         _registration: new WeakRef(mesh._gpu),
     };
-    (_slabSources ??= new WeakMap()).set(mesh._gpu, source);
+    mesh._gpu._storageSource = source;
     (_slabMeshes ??= new Set()).add(source._registration);
 
     return mesh;
@@ -187,11 +200,15 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
  *  abandoned dead refs are also pruned on rebuild.
  *
  *  Lazily created -- GUIDANCE.md forbids module-level allocations. */
-interface SlabSources {
+/** @internal Retained by the geometry itself, not by a parallel ownership map. */
+export interface StorageMeshSource {
+    /** @internal */
     readonly _vb: StorageBuffer;
+    /** @internal */
     readonly _indices: SlabIndexSource;
-    readonly _indexLabel: string;
+    /** @internal */
     readonly _registration: WeakRef<MeshGPU>;
+    /** @internal */
     _device: GPUDevice;
 }
 
@@ -224,7 +241,7 @@ function validateIndexSource(indices: MeshFromStorageOptions["indices"], format:
     if (count === undefined || !Number.isInteger(count) || count <= 0 || count > 0xffffffff) {
         throw new Error("createMeshFromStorageBuffer: indexCount must be a positive unsigned 32-bit integer.");
     }
-    const capacity = typed ? indices.length : Math.floor(indices.byteLength / (format === "uint16" ? 2 : 4));
+    const capacity = typed ? indices.length : indices.byteLength / (format === "uint16" ? 2 : 4);
     if (count > capacity) {
         throw new Error(`createMeshFromStorageBuffer: indexCount ${count} exceeds the index source capacity of ${capacity}.`);
     }
@@ -238,22 +255,18 @@ function validateIndexSource(indices: MeshFromStorageOptions["indices"], format:
     return { data: typed ? indices.slice(0, count) : indices, count, format };
 }
 
-function resolveIndexBuffer(engine: EngineContext, data: SlabIndexSource["data"], label: string): GPUBuffer {
-    return ArrayBuffer.isView(data) ? createMappedBuffer(engine, data, BU.INDEX, label) : _getStorageBufferHandle(engine, data);
-}
 /** The weak ref must target the MESH's own `_gpu`, which the mesh holds strongly -- a ref
  *  to a wrapper object created here would have no other owner and collect immediately,
- *  leaving the registry silently empty. The allocations hang off a WeakMap so they do not
- *  keep the geometry alive either. */
+ *  leaving the registry silently empty. Source data belongs to the geometry, so the
+ *  registry never keeps abandoned geometry or its allocations alive. */
 let _slabMeshes: Set<WeakRef<MeshGPU>> | null = null;
-let _slabSources: WeakMap<MeshGPU, SlabSources> | null = null;
 
-/** Re-point every borrowed handle at its allocation's current buffer. The allocations have
+/** @internal Re-point every borrowed handle at its allocation's current buffer. The allocations have
  *  already been rebuilt when this runs; the meshes are still holding the dead handles. */
-function refreshSlabMeshes(engine: EngineContext): void {
+export function _refreshStorageMeshes(engine: EngineContext): void {
     for (const ref of _slabMeshes ?? []) {
         const gpu = ref.deref();
-        const entry = gpu ? _slabSources?.get(gpu) : undefined;
+        const entry = gpu?._storageSource;
         if (!gpu || !entry) {
             _slabMeshes!.delete(ref);
             continue;
@@ -274,10 +287,14 @@ function refreshSlabMeshes(engine: EngineContext): void {
         }
         const g = gpu as unknown as Record<"positionBuffer" | "normalBuffer" | "tangentBuffer" | "uvBuffer" | "uv2Buffer" | "colorBuffer" | "indexBuffer", GPUBuffer | null>;
         const vb = _getStorageBufferHandle(engine, entry._vb);
-        const replaceIndex = !ownedIndices || entry._device !== engine._device;
-        const indexBuffer = replaceIndex ? resolveIndexBuffer(engine, indexData, entry._indexLabel) : gpu.indexBuffer;
-        if (ownedIndices && replaceIndex) {
-            gpu.indexBuffer.destroy();
+        let indexBuffer = gpu.indexBuffer;
+        if (ownedIndices) {
+            if (entry._device !== engine._device) {
+                indexBuffer = createMappedBuffer(engine, indexData, BU.INDEX, gpu.indexBuffer.label);
+                gpu.indexBuffer.destroy();
+            }
+        } else {
+            indexBuffer = _getStorageBufferHandle(engine, indexData);
         }
         g.positionBuffer = vb;
         g.normalBuffer = vb;
@@ -303,29 +320,22 @@ function installHooks(): void {
         return;
     }
     _hooksInstalled = true;
-    _enableVertexDefaults();
     _enableShaderVb();
-    _installBorrowAwareGeometryDisposer((g) => {
-        const source = _slabSources?.get(g);
+    _installBorrowAwareGeometryDisposer((g, disposeVertices) => {
+        const source = g._storageSource;
         if (source) {
             _slabMeshes?.delete(source._registration);
+            g._storageSource = undefined;
         }
-        _slabSources?.delete(g);
         // Buffers may be BORROWED rather than owned. A mesh whose vertices live in a shared
         // GPU-resident slab points every vertex-side field at that one allocation, so
         // destroying them here would tear the slab out from under every other mesh holding a
         // slot in it — and the same for a shared index topology.
         if (g._ownsVertexBuffers !== false) {
-            g.positionBuffer.destroy();
-            g.normalBuffer.destroy();
-            g.uvBuffer.destroy();
-            g.tangentBuffer?.destroy();
-            g.uv2Buffer?.destroy();
-            g.colorBuffer?.destroy();
+            disposeVertices(g);
         }
         if (g._ownsIndexBuffer !== false) {
             g.indexBuffer.destroy();
         }
     });
-    _installStorageRebuildObserver(refreshSlabMeshes);
 }

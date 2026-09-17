@@ -73,6 +73,11 @@ export async function prepareAdvancedDraw(
         detailedNormals: Map<Mesh, Float32Array> | null
     ): { readonly nextId: number; readonly ranges: AdvancedMeshRange[] };
 }> {
+    for (const { mesh } of candidates) {
+        if (!mesh.thinInstances || (mesh.thinInstances.count > 0 && mesh.thinInstances._gpuBuffer)) {
+            pipelines.validatePickingVertexFormat(mesh, "position");
+        }
+    }
     const vat = candidates.some((candidate) => !!candidate.mesh.vat) ? await import("./vat-picking-pipeline.js") : null;
     // VAT owns the single projection slot, so a VAT mesh never needs the skeleton/morph projection.
     const deform = candidates.some((candidate) => !candidate.mesh.vat && (candidate.mesh.morphTargets || candidate.mesh.skeleton))
@@ -113,7 +118,7 @@ export async function prepareAdvancedDraw(
                     _u32[18] = ignoredCount;
                     const ubo = createUniformBuffer(engine, _view, "pick-thin-instance-ubo");
                     temporary.push(ubo);
-                    const interleave = gpu._vbLayout?._p;
+                    const interleave = gpu._vbLayout?.position;
                     const pipeline = pipelines.getPickingThinInstancePipeline(engine, set, activeRule, interleave);
                     pass.setPipeline(pipeline);
                     pass.setBindGroup(0, sceneBG);
@@ -154,7 +159,7 @@ export async function prepareAdvancedDraw(
                 const ubo = createUniformBuffer(engine, _view, "pick-mesh-ubo");
                 temporary.push(ubo);
                 const vertexData = activeRule?.vertexData ? pipelines.getPickVertexDataBinding(mesh, activeRule.vertexData) : null;
-                const interleave = gpu._vbLayout?._p;
+                const interleave = gpu._vbLayout?.position;
                 const pipeline = pipelines.getPickingRegularPipeline(
                     engine,
                     set,

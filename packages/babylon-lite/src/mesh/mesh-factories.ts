@@ -464,7 +464,8 @@ export function resizeMeshGeometry(
 }
 
 /** Replace one shared geometry allocation and keep every mesh in `meshes` sharing the replacement.
- *  All meshes must currently reference the same owned, tightly-packed MeshGPU object. */
+ *  Supply distinct, live meshes referencing the same owned, tightly-packed MeshGPU object.
+ *  Owners omitted from the list keep their original geometry. */
 export function resizeSharedMeshGeometry(
     engine: EngineContext,
     meshes: readonly Mesh[],
@@ -481,8 +482,15 @@ export function resizeSharedMeshGeometry(
         throw new Error("resizeSharedMeshGeometry requires at least one mesh");
     }
     const old = first._gpu;
-    if (old._vbLayout || old._ownsVertexBuffers === false || meshes.some((mesh) => mesh._gpu !== old)) {
+    if (old._vbLayout || old._ownsVertexBuffers === false) {
         throw new Error("resizeSharedMeshGeometry requires meshes sharing one owned, tightly-packed geometry");
+    }
+    const owners = new Set<Mesh>();
+    for (const mesh of meshes) {
+        if (!mesh || mesh._disposed || mesh._gpu !== old || owners.has(mesh)) {
+            throw new Error("resizeSharedMeshGeometry requires distinct, live meshes sharing one geometry");
+        }
+        owners.add(mesh);
     }
     resizeMeshGeometry(engine, first, positions, normals, indices, uvs, uvs2, tangents, colors);
     const replacement = first._gpu;

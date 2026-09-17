@@ -292,7 +292,7 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
             if (mesh.pickable !== false && (!pickFilter || pickFilter(mesh))) {
                 candidates.push({ mesh, ignore: null });
                 needsDeformation ||= !!(mesh.morphTargets || mesh.skeleton);
-                needsAdvancedPipeline ||= !!mesh.vat || !!mesh.thinInstances || !!mesh._gpu._vbLayout?._p;
+                needsAdvancedPipeline ||= !!mesh.vat || !!mesh.thinInstances || !!mesh._gpu._vbLayout?.position || !!mesh.material?._attributeFormats;
             }
         }
     }

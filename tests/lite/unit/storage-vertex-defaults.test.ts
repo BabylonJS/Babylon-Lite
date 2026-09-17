@@ -6,6 +6,7 @@ import { buildShaderGroup, buildShaderMaterialRenderables } from "../../../packa
 import { setShaderAttributeFormats } from "../../../packages/babylon-lite/src/material/shader/shader-vb";
 import { createMeshFromStorageBuffer } from "../../../packages/babylon-lite/src/mesh/mesh-from-storage";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
+import { createMeshFromData } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
 import { setThinInstances } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import { createStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
@@ -67,6 +68,240 @@ function pipelineLayouts(pipeline: GPURenderPipeline) {
 }
 
 describe("storage-backed missing vertex attributes", () => {
+    it("prevalidates every mesh before allocating a group and preserves the minimum opaque render order", () => {
+        const f = fixture();
+        const shader = createShaderMaterial({
+            attributes: ["position"],
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position,1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+        });
+        const meshes = [10, -5, 20].map((renderOrder) => {
+            const mesh = createMeshFromStorageBuffer(f.engine, "ordered", {
+                storage: createStorageBuffer(f.engine, 48, { vertex: true }),
+                indices: new Uint16Array([0, 1, 2]),
+                vertexCount: 3,
+                arrayStride: 16,
+            });
+            mesh.material = shader;
+            mesh.renderOrder = renderOrder;
+            return mesh;
+        });
+        expect(buildShaderMaterialRenderables(f.scene, meshes).renderables[0]!.order).toBe(-5);
+        const incompatibleShader = createShaderMaterial({
+            attributes: ["position"],
+            vertexSource: shader.vertexSource,
+            fragmentSource: shader.fragmentSource,
+        });
+        setShaderAttributeFormats(incompatibleShader, { position: "float32x4" });
+        meshes[0]!.material = incompatibleShader;
+        const incompatible = createMeshFromData(f.engine, "cpu", new Float32Array(9), new Float32Array(9), new Uint32Array([0, 1, 2]));
+        incompatible.material = incompatibleShader;
+        const created = f.created.length;
+        expect(() => buildShaderMaterialRenderables(f.scene, [meshes[0]!, incompatible])).toThrow(/incompatible with canonical/);
+        expect(f.created).toHaveLength(created);
+    });
+
+    it.each(["position", "uv2"] as const)("rejects noncanonical %s on CPU geometry, including missing canonical streams", (attribute) => {
+        const f = fixture();
+        const shader = createShaderMaterial({
+            attributes: ["position", "uv2"],
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(0,0,0,1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+        });
+        setShaderAttributeFormats(shader, { [attribute]: "float32x4" });
+        const mesh = createMeshFromData(f.engine, "cpu", new Float32Array(9), new Float32Array(9), new Uint32Array([0, 1, 2]));
+        mesh.material = shader;
+        const created = f.created.length;
+        expect(() => buildShaderMaterialRenderables(f.scene, [mesh])).toThrow(/float32x4.*incompatible.*cpu/);
+        expect(f.created).toHaveLength(created);
+    });
+
+    it("allows one material to share compatible formats across CPU and differently packed storage geometry", () => {
+        const f = fixture();
+        const shader = createShaderMaterial({
+            attributes: ["position"],
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position,1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+        });
+        setShaderAttributeFormats(shader, { position: "float32x3" });
+        const cpu = createMeshFromData(f.engine, "cpu", new Float32Array(9), new Float32Array(9), new Uint32Array([0, 1, 2]));
+        const storage = createStorageBuffer(f.engine, 60, { vertex: true });
+        const packed = createMeshFromStorageBuffer(f.engine, "packed", {
+            storage,
+            indices: new Uint16Array([0, 1, 2]),
+            vertexCount: 3,
+            arrayStride: 20,
+            attributeOffsets: { position: 4 },
+        });
+        cpu.material = packed.material = shader;
+        const built = buildShaderMaterialRenderables(f.scene, [cpu, packed]);
+        expect(built.renderables).toHaveLength(2);
+        const layouts = built.renderables.map((renderable) => pipelineLayouts(renderable.bind(f.engine, signature).pipeline)[0]!);
+        expect(layouts.map((layout) => layout.arrayStride)).toEqual([12, 20]);
+        expect(layouts.map((layout) => layout.attributes[0]!.offset)).toEqual([0, 4]);
+        expect(layouts.map((layout) => layout.attributes[0]!.format)).toEqual(["float32x3", "float32x3"]);
+    });
+
+    it.each([
+        ["float32x4", 12, 0],
+        ["float32x3", 16, 2],
+    ] as const)("rejects format/layout mismatch %s at stride %s offset %s", (format, arrayStride, offset) => {
+        const f = fixture();
+        const shader = createShaderMaterial({
+            attributes: ["position"],
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(0,0,0,1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+        });
+        setShaderAttributeFormats(shader, { position: format });
+        const mesh = createMeshFromStorageBuffer(f.engine, "misaligned", {
+            storage: createStorageBuffer(f.engine, arrayStride * 3, { vertex: true }),
+            indices: new Uint16Array([0, 1, 2]),
+            vertexCount: 3,
+            arrayStride,
+            attributeOffsets: { position: offset },
+        });
+        mesh.material = shader;
+        const created = f.created.length;
+        expect(() => buildShaderMaterialRenderables(f.scene, [mesh])).toThrow(/does not fit the aligned vertex layout/);
+        expect(f.created).toHaveLength(created);
+    });
+
+    it("accepts narrow integer fields with their actual two-byte alignment and snapshots format declarations", () => {
+        const f = fixture();
+        const shader = createShaderMaterial({
+            attributes: ["position"],
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(0,0,0,1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+        });
+        const formats: { position: GPUVertexFormat } = { position: "uint8x2" };
+        setShaderAttributeFormats(shader, formats);
+        formats.position = "float32x4";
+        const mesh = createMeshFromStorageBuffer(f.engine, "narrow", {
+            storage: createStorageBuffer(f.engine, 12, { vertex: true }),
+            indices: new Uint16Array([0, 1, 2]),
+            vertexCount: 3,
+            arrayStride: 4,
+            attributeOffsets: { position: 2 },
+        });
+        mesh.material = shader;
+        const pipeline = buildShaderMaterialRenderables(f.scene, [mesh]).renderables[0]!.bind(f.engine, signature).pipeline;
+        expect(pipelineLayouts(pipeline)[0]).toEqual({
+            arrayStride: 4,
+            attributes: [{ shaderLocation: 0, offset: 2, format: "uint8x2" }],
+        });
+    });
+
+    it.each([
+        [0, undefined, undefined],
+        [1, "src-alpha", "one"],
+        [2, "src-alpha", "one-minus-src-alpha"],
+        [7, "one", "one-minus-src-alpha"],
+        [9, undefined, undefined],
+    ] as const)("preserves Node blend, depth and entry points in canonical and packed variants (mode %s)", (mode, srcFactor, dstFactor) => {
+        const f = fixture();
+        const mesh = createMeshFromStorageBuffer(f.engine, "node-state", {
+            storage: createStorageBuffer(f.engine, 64, { vertex: true }),
+            indices: new Uint16Array([0, 1, 2]),
+            vertexCount: 3,
+            arrayStride: 16,
+        });
+        const state = createBuildState();
+        state.vertexAttributes.push({ _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 });
+        state.nodeUboFields.push({ _name: "tint", _type: "vec4<f32>" });
+        const compiled = compileNodePipeline(state, "out.position = vec4<f32>(in.position, 1.0);", "_NME_FRAG_OUTPUT_ = vec4<f32>(1.0);", {
+            _engine: f.engine,
+            _format: "rgba8unorm",
+            _msaaSamples: 4,
+            _alphaMode: mode,
+            _depthStencilFormat: "depth32float",
+            _depthCompare: "less-equal",
+            _backFaceCulling: false,
+        });
+        const target: GPUColorTargetState = { format: "rgba8unorm" };
+        if (srcFactor && dstFactor) {
+            target.blend = {
+                color: { srcFactor, dstFactor, operation: "add" },
+                alpha: { srcFactor: "one", dstFactor, operation: "add" },
+            };
+        }
+        for (const pipeline of [compiled._pipeline, compiled._pipelineForMesh(mesh._gpu)]) {
+            const descriptor = pipeline as unknown as GPURenderPipelineDescriptor;
+            expect(descriptor.layout).toBe((compiled._pipeline as unknown as GPURenderPipelineDescriptor).layout);
+            expect(descriptor.vertex.entryPoint).toBe("vs_main");
+            expect(descriptor.fragment!.entryPoint).toBe("fs_main");
+            expect(descriptor.fragment!.targets).toEqual([target]);
+            expect(descriptor.multisample).toEqual({ count: 4 });
+            expect(descriptor.primitive?.cullMode).toBe("none");
+            expect(descriptor.depthStencil).toEqual({ format: "depth32float", depthCompare: "less-equal", depthWriteEnabled: !srcFactor });
+        }
+        expect(compiled._wgsl).toContain("    tint: vec4<f32>,");
+        expect(compiled._nodeUboSpec!._offsets.get("tint")).toBe(0);
+        expect(compiled._nodeUboSpec!._totalBytes).toBe(16);
+    });
+
+    it("owns defaults per engine, replaces them after recovery, and releases the current generation", () => {
+        const first = fixture();
+        const second = fixture();
+        const meshFor = (engine: EngineContext) =>
+            createMeshFromStorageBuffer(engine, "defaults", {
+                storage: createStorageBuffer(engine, 64, { vertex: true }),
+                indices: new Uint16Array([0, 1, 2]),
+                vertexCount: 3,
+                arrayStride: 16,
+            });
+        const mesh = meshFor(first.engine);
+        const otherMesh = meshFor(second.engine);
+        const original = getNodeAttributeBuffer(first.engine, mesh._gpu, "color");
+        expect(getNodeAttributeBuffer(first.engine, mesh._gpu, "tangent")).toBe(original);
+        const other = getNodeAttributeBuffer(second.engine, otherMesh._gpu, "color");
+        expect(other).not.toBe(original);
+        Object.assign(first.engine, { _device: fixture().engine._device });
+        const recovered = getNodeAttributeBuffer(first.engine, mesh._gpu, "color");
+        expect(recovered).not.toBe(original);
+        expect(original.destroy).toHaveBeenCalledOnce();
+        expect(other.destroy).not.toHaveBeenCalled();
+        first.engine._disposeManagedResources!();
+        expect(recovered.destroy).toHaveBeenCalledOnce();
+        expect(original.destroy).toHaveBeenCalledOnce();
+        const replacement = getNodeAttributeBuffer(first.engine, mesh._gpu, "color");
+        expect(replacement).not.toBe(recovered);
+        first.engine._disposeManagedResources!();
+        expect(replacement.destroy).toHaveBeenCalledOnce();
+        second.engine._disposeManagedResources!();
+        expect(other.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("resolves Node layouts enabled after material compilation and keeps variants device-local", async () => {
+        vi.resetModules();
+        const [{ compileNodePipeline: compile }, { createMeshFromStorageBuffer: createMesh }, { createStorageBuffer: createStorage }] = await Promise.all([
+            import("../../../packages/babylon-lite/src/material/node/node-pipeline"),
+            import("../../../packages/babylon-lite/src/mesh/mesh-from-storage"),
+            import("../../../packages/babylon-lite/src/resource/storage-buffer"),
+        ]);
+        const first = fixture();
+        const second = fixture();
+        const state = createBuildState();
+        state.vertexAttributes.push({ _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 });
+        const compileFor = (engine: EngineContext) =>
+            compile(state, "out.position = vec4<f32>(in.position, 1.0);", "_NME_FRAG_OUTPUT_ = vec4<f32>(1.0);", {
+                _engine: engine,
+                _format: "rgba8unorm",
+                _msaaSamples: 1,
+            });
+        const compiled = compileFor(first.engine);
+        expect(compiled._nodeUboSpec).toBeNull();
+        expect(compiled._nodeUboBinding).toBeNull();
+        const storage = createStorage(first.engine, 64, { vertex: true });
+        const mesh = createMesh(first.engine, "late-node", { storage, indices: new Uint16Array([0, 1, 2]), vertexCount: 3, arrayStride: 16 });
+        const pipeline = compiled._pipelineForMesh(mesh._gpu);
+        expect(pipeline).not.toBe(compiled._pipeline);
+        expect(pipelineLayouts(pipeline)[0]!.arrayStride).toBe(16);
+        expect(compiled._pipelineForMesh(mesh._gpu)).toBe(pipeline);
+        const other = compileFor(second.engine)._pipelineForMesh(mesh._gpu);
+        expect(other).not.toBe(pipeline);
+        expect(pipelineLayouts(other)).toEqual(pipelineLayouts(pipeline));
+    });
+
     it.each([4, 8, 16, 64])("uses one tiny default buffer for large slab slots with stride %s", (arrayStride) => {
         const f = fixture();
         const storage = createStorageBuffer(f.engine, 64 * 1024 * 1024, { writable: true, vertex: true });
@@ -118,6 +353,7 @@ describe("storage-backed missing vertex attributes", () => {
         const f = fixture();
         const storage = createStorageBuffer(f.engine, 64, { writable: true, vertex: true });
         const shader = material();
+        setShaderAttributeFormats(shader, { position: "float32", color: "unorm8x4", joints: "uint32x4" });
         const meshes = [0, 1].map(() => {
             const mesh = createMeshFromStorageBuffer(f.engine, "skin", { storage, indices: new Uint16Array([0, 1, 2]), vertexCount: 3, arrayStride: 4 });
             mesh.material = shader;
@@ -130,7 +366,7 @@ describe("storage-backed missing vertex attributes", () => {
         const present = built.renderables[1]!.bind(f.engine, signature).pipeline;
         expect(present).not.toBe(missing);
         expect(pipelineLayouts(missing)[4]!.arrayStride).toBe(0);
-        expect(pipelineLayouts(present)[4]!.arrayStride).toBe(8);
+        expect(pipelineLayouts(present)[4]!.arrayStride).toBe(16);
         expect(pipelineLayouts(present)[5]!.arrayStride).toBe(16);
     });
 

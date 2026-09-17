@@ -34,7 +34,6 @@ import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_TANGENTS, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
 import type { Material } from "../material.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
-import { drawMeshIndexed } from "../../mesh/mesh-vertex-layout.js";
 
 import type { PbrMaterialProps } from "./pbr-material.js";
 import { collectPbrBoundTextures } from "./collect-pbr-bound-textures.js";
@@ -321,7 +320,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
         if (ti && thinDrawArgs) {
             pass.drawIndexedIndirect(thinDrawArgs, 0);
         } else {
-            drawMeshIndexed(pass, gpu, ti?.count);
+            pass.drawIndexed(gpu.indexCount, ti?.count ?? 1, 0, gpu._baseVertex);
         }
         return 1;
     };

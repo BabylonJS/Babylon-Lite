@@ -60,14 +60,57 @@ be refilled by their producer. `COPY_DST` is added on both allocation paths. Sto
 refresh their borrowed handles before scene renderables and bind groups are rebuilt. Bind-group creation rechecks
 resource liveness and engine ownership. Engine disposal destroys all remaining live storage buffers, marks
 their wrappers disposed, releases retained CPU bytes, and clears the lazy registry.
-When the first storage buffer is created, the engine also retains its current storage-related WebGPU limits
-(`maxBufferSize`, `maxStorageBufferBindingSize`, and `maxStorageBuffersPerShaderStage`) and requests them
-again during device recovery. Those values are merged with any limits originally supplied to
+Before replacing a lost device, recovery reads its immutable storage-related WebGPU limits
+(`maxBufferSize`, `maxStorageBufferBindingSize`, and `maxStorageBuffersPerShaderStage`) when live
+storage allocations exist, and requests them again. Those values are merged with any limits originally supplied to
 `createEngine(..., { requiredLimits })`.
+
+Reallocation lives in `storage-buffer-recovery.ts`, imported only by the opt-in device-loss
+runner. Creating a storage buffer installs disposal, not a recovery callback. The recovery
+runner rebuilds allocations and then refreshes every live weakly registered storage mesh;
+the registry also covers meshes created before recovery was enabled or before joining a scene.
 
 ## Pipeline Configuration
 
 The module creates no pipelines. Shader-material storage declarations continue to create read-only-storage bind-group-layout entries. Rebinding the same resource is a no-op, while binding a different resource increments the material resource version once.
+
+### Storage-backed mesh layout boundaries
+
+Storage meshes and interleaved glTF meshes publish a null-prototype layout dictionary keyed
+by attribute name (`position`, `normal`, `uv`, `uv2`, `tangent`, `color`). Materials read
+packing directly while emitting GPU layouts; no global activation or name-to-slot
+translation is needed. Unknown names cannot resolve through `Object.prototype`.
+Material attributes and WGSL types are unchanged; instance-rate attributes retain their
+material-defined packing. The glTF decoder's CPU accessor records keep their own representation.
+
+Node emits canonical and packed GPU layouts through the same attribute loop. Resolution
+happens when binding, not when the material is parsed, so a material compiled before its
+first storage mesh still acquires the correct variant. Variants belong to their compile
+result and never cross devices. Opaque Node grouping checks for heterogeneous layout keys
+before allocating a partition map; geometry creation never imports or installs a Node backend.
+Packing variants reuse the base descriptor's pipeline layout, shader modules, and fragment
+state; only their vertex-buffer layouts change. This also applies to geometry MRT output.
+The compile result retains its original `UboSpec` rather than parallel size/offset metadata;
+graphs without node uniforms retain no empty layout map.
+
+The mesh's layout includes zero-stride entries for absent tangent, UV2, and color streams.
+Those entries describe the constant fallback buffer, not the slab. Their cache-key slots
+remain `-`, distinct from an authored slab attribute at offset zero. Materials therefore
+need no second layout rewrite to support missing streams.
+
+`MeshFromStorageOptions.attributeOffsets` accepts only own properties for position, normal,
+UV, UV2, tangent, and color. Unknown names (including skinning streams), non-integer or negative
+offsets, offsets outside the vertex stride, and strides above the device limit are rejected
+before index-buffer allocation. Material preparation additionally validates each consumed
+format's byte extent and alignment; a material declaration never repacks canonical CPU geometry.
+
+Direct draws pass `baseVertex` to WebGPU without a forwarding wrapper. The five-word
+indirect ABI is shared in `mesh-indexed-indirect.ts`, loaded only by indirect consumers.
+Drawing a mesh must not import attribute conversion or default-stream allocation. Shared
+zero-stream allocation remains installed only by storage geometry, as an engine-owned
+`_getVertexDefaultBuffer` callback. Its closure owns the current device/buffer pair, replaces
+the buffer after a device change, and registers exactly one disposer per live generation.
+Core renderers contain only an optional callback invocation, not a global default-buffer registry.
 
 ## Shader Logic
 
@@ -84,6 +127,8 @@ must never overtake compute writes already recorded into that frame.
 Only writable allocations support readback. Concurrent reads share the pending promise and reuse a
 lazy staging buffer; each completed read returns an independent `ArrayBuffer` copy. A device change
 is rejected while a read is pending, and later reads replace staging allocated on an older device.
+If mapped-range extraction or copying fails, staging is still unmapped before reuse and the
+read promise preserves the failure. Updates to writable buffers create no CPU shadow views.
 
 ## Babylon.js Equivalence Map
 
@@ -103,5 +148,6 @@ host allocations. The shared alignment helper is exercised at those boundaries t
 ## File Manifest
 
 - `packages/babylon-lite/src/resource/storage-buffer.ts`
+- `packages/babylon-lite/src/resource/storage-buffer-recovery.ts`
 - `tests/lite/unit/storage-buffer.test.ts`
 - `docs/lite/architecture/47-storage-buffer.md`

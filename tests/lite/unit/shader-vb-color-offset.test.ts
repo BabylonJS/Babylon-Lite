@@ -19,7 +19,7 @@ const signature = { _colorFormat: "rgba8unorm", _sampleCount: 1 } as RenderTarge
  * Scene 286 exercises COLOR_0 from a genuinely interleaved glTF bufferView, but the loader
  * (`gltf-interleave.ts`'s `resolveColorVec4`) always materializes COLOR_0 into its own tight
  * buffer before the ShaderMaterial pipeline ever sees it — so no real loader path currently
- * produces a non-zero `MeshGPU._vbLayout._c._offset`. This test exercises the vertex-layout
+ * produces a non-zero `MeshGPU._vbLayout.color._offset`. This test exercises the vertex-layout
  * resolution directly against a synthetic `_vbLayout` to prove `_forMesh` genuinely honours a
  * non-zero per-attribute color offset, independent of whether any loader happens to produce one.
  */
@@ -61,7 +61,7 @@ describe("ShaderMaterial vertex layout — synthetic non-zero COLOR_0 offset", (
                 indexBuffer: {} as GPUBuffer,
                 indexCount: 3,
                 indexFormat: "uint32",
-                _vbLayout: { _c: { _stride: 40, _offset: 24 } },
+                _vbLayout: { color: { _stride: 40, _offset: 24 } },
                 _vbKey: "synthetic-color-offset",
             },
         });
@@ -78,7 +78,7 @@ describe("ShaderMaterial vertex layout — synthetic non-zero COLOR_0 offset", (
             children: [],
             _gpu: {
                 ...mesh._gpu,
-                _vbLayout: { _c: { _stride: 48, _offset: 28 } },
+                _vbLayout: { color: { _stride: 48, _offset: 28 } },
                 _vbKey: "synthetic-color-offset-2",
             },
         });

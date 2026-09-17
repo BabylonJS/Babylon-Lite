@@ -21,7 +21,7 @@ import type { ThinInstanceDrawBuffers } from "./thin-instance-gpu.js";
 import { bumpVisibilityEpoch } from "../engine/engine.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { wgsl } from "../shader/wgsl.js";
-import { writeMeshIndexedIndirectArgs } from "./mesh-vertex-layout.js";
+import { writeMeshIndexedIndirectArgs } from "./mesh-indexed-indirect.js";
 
 const WORKGROUP_SIZE = 64;
 const PARAM_BYTES = 192;

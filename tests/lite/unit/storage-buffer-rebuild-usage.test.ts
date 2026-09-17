@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { BU } from "../../../packages/babylon-lite/src/engine/gpu-flags.js";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
-import { _rebuildStorageBuffers, createStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
+import { createStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
+import { _rebuildStorageBuffers } from "../../../packages/babylon-lite/src/resource/storage-buffer-recovery.js";
 
 /** Build an engine whose `device.createBuffer` records every descriptor it was given,
  *  so a test can compare the usage flags used on first creation against the flags used
