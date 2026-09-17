@@ -12,6 +12,13 @@ export interface RebuildMaterialOptions {
     rebuildFrameGraph?: boolean;
 }
 
+interface DetachablePacket {
+    _disposed?: boolean;
+    _owner?: DetachablePacket[];
+}
+
+type DetachableDisposer = (() => void) & { p?: DetachablePacket };
+
 /** Rebuild renderables whose pipeline/bind-group feature state depends on a material.
  *  Use after texture, sampler, bind-group layout, culling, or feature changes.
  *  UBO-only scalar/vector changes should use markMaterialUboDirty instead. */
@@ -90,6 +97,20 @@ function rebuildSceneMesh(ctx: SceneContext, mesh: Mesh): boolean | Promise<void
     const old = ctx._meshDisposables.get(mesh);
     if (old) {
         ctx._meshDisposables.delete(mesh);
+        for (const dispose of old) {
+            const packet = (dispose as DetachableDisposer).p;
+            if (packet) {
+                packet._disposed = true;
+                const owner = packet._owner;
+                if (owner) {
+                    const index = owner.indexOf(packet);
+                    if (index >= 0) {
+                        owner.splice(index, 1);
+                    }
+                    packet._owner = undefined;
+                }
+            }
+        }
         retireGpuResources(ctx.surface.engine, () => old.forEach((fn) => fn()));
     }
     for (let i = ctx._renderables.length - 1; i >= 0; i--) {

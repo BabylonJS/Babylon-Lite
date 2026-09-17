@@ -298,6 +298,48 @@ describe("runtime material rebuild ownership", () => {
         expect(oldDispose).toHaveBeenCalledOnce();
     });
 
+    it("detaches rebuilt ShaderMaterial packets from their merged renderable before GPU retirement", () => {
+        const engine = { _retirements: [] } as unknown as EngineContext;
+        const scene = createScene(engine);
+        const material = {} as Material;
+        const meshA = { material } as Mesh;
+        const meshB = { material } as Mesh;
+        type Packet = { _disposed?: boolean; _owner?: Packet[] };
+        const packetA: Packet = {};
+        const packetB: Packet = {};
+        const owner = [packetA, packetB];
+        packetA._owner = owner;
+        packetB._owner = owner;
+        const oldDisposeA = Object.assign(vi.fn(), { p: packetA });
+        const oldDisposeB = Object.assign(vi.fn(), { p: packetB });
+        const rebuiltA = renderable(meshA);
+        const rebuiltB = renderable(meshB);
+        const rebuild = vi.fn((_target: SceneContext, mesh: Mesh) => (mesh === meshA ? rebuiltA : rebuiltB));
+        const builder = Object.assign(vi.fn(), { _materialFamily: "shader", _rebuildSingle: rebuild }) as unknown as MeshGroupBuilder;
+        material._buildGroup = builder;
+        scene.meshes.push(meshA, meshB);
+        scene._groups.set(builder, Object.assign([meshA, meshB], { r: rebuild }));
+        const merged = { order: 100, isTransparent: false } as Renderable;
+        scene._renderables.push(merged);
+        scene._meshDisposables.set(meshA, [oldDisposeA]);
+        scene._meshDisposables.set(meshB, [oldDisposeB]);
+
+        rebuildMaterial(scene, material);
+
+        expect(packetA._disposed).toBe(true);
+        expect(packetB._disposed).toBe(true);
+        expect(packetA._owner).toBeUndefined();
+        expect(packetB._owner).toBeUndefined();
+        expect(owner).toEqual([]);
+        expect(oldDisposeA).not.toHaveBeenCalled();
+        expect(oldDisposeB).not.toHaveBeenCalled();
+        expect(engine._retirements).toHaveLength(2);
+        expect(scene._renderables).toEqual([merged, rebuiltA, rebuiltB]);
+        engine._retirements!.splice(0).forEach((retire) => retire());
+        expect(oldDisposeA).toHaveBeenCalledOnce();
+        expect(oldDisposeB).toHaveBeenCalledOnce();
+    });
+
     it("routes a PBR material swap that gains gamma albedo through the asynchronous scene rebuild", async () => {
         const scene = createScene({ _retirements: [] } as unknown as EngineContext);
         scene._built = true;
