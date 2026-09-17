@@ -129,7 +129,7 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
         if (handledPropertyGroups) {
             for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
                 const group = groups[groupIndex]!;
-                if (!group._stopped && !group._propertyMixer) {
+                if (!group._stopped && !group._propertyMixerHandled) {
                     tickAnimationCore(group, deltaMs, manager.engine);
                 }
             }
@@ -144,7 +144,7 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
         if (group._stopped) {
             continue;
         }
-        if (handledPropertyGroups && group._propertyMixer) {
+        if (handledPropertyGroups && group._propertyMixerHandled) {
             continue;
         }
 

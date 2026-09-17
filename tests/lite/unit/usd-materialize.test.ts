@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { goToFrame, playAnimation, stopAnimation, tickAnimationCore } from "../../../packages/babylon-lite/src/animation/animation-group";
+import type { AnimationGroup } from "../../../packages/babylon-lite/src/animation/animation-group";
 import { AnimationGroupMaskMode, createAnimationGroupMask } from "../../../packages/babylon-lite/src/animation/animation-group-mask";
 import { addAnimationGroup } from "../../../packages/babylon-lite/src/animation/animation-group-task";
 import { clearAnimationManager, createAnimationManager, updateAnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
@@ -511,6 +512,107 @@ describe("USD command materialization", () => {
         disposeUsd(container);
 
         runOrdinaryGroups();
+    });
+
+    it("includes a full-weight track when a fractional track contests the same property", async () => {
+        const fixture = usdFixture({ morph: true });
+        const { engine } = usdTestEngine();
+        const container = usdTestContainer(fixture);
+        await materializeUsd(engine, fixture, container);
+        disposeUsd(container);
+
+        const manager = createAnimationManager();
+        const target = { value: 0 };
+        const full = createPropertyAnimationGroup(
+            manager,
+            target,
+            createPropertyAnimationClip("full", [
+                {
+                    path: "value",
+                    keys: [
+                        { time: 0, value: 10 },
+                        { time: 1, value: 10 },
+                    ],
+                },
+            ])
+        );
+        const fractional = createPropertyAnimationGroup(
+            manager,
+            target,
+            createPropertyAnimationClip("fractional", [
+                {
+                    path: "value",
+                    keys: [
+                        { time: 0, value: 0 },
+                        { time: 1, value: 0 },
+                    ],
+                },
+            ])
+        );
+        enableAnimationBlending(manager);
+        setAnimationWeight(full, 0.999);
+        setAnimationWeight(fractional, 0.001);
+        updateAnimationManager(manager, 0);
+        expect(target.value).toBeCloseTo(9.99);
+
+        setAnimationWeight(full, 1);
+        updateAnimationManager(manager, 0);
+        expect(target.value).toBeCloseTo(10);
+        clearAnimationManager(manager);
+    });
+
+    it("preserves registration order between direct glTF and property groups after USD loads", async () => {
+        const fixture = usdFixture({ morph: true });
+        const { engine } = usdTestEngine();
+        const container = usdTestContainer(fixture);
+        await materializeUsd(engine, fixture, container);
+        disposeUsd(container);
+
+        const manager = createAnimationManager();
+        const target = { value: 0 };
+        const gltf: AnimationGroup = {
+            name: "gltf",
+            duration: 1,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [],
+            speedRatio: 1,
+            loopAnimation: false,
+            weight: 1,
+            _stopped: false,
+            _ctrl: {
+                time: 0,
+                playing: false,
+                speedRatio: 1,
+                loop: false,
+                tick: () => {
+                    target.value = 5;
+                },
+            },
+            _gltfMixer: [{ name: "gltf", channels: [], samplers: [], duration: 1 }, [], []],
+        };
+        addAnimationGroup(manager, gltf);
+        const property = createPropertyAnimationGroup(
+            manager,
+            target,
+            createPropertyAnimationClip("property", [
+                {
+                    path: "value",
+                    keys: [
+                        { time: 0, value: 0 },
+                        { time: 1, value: 10 },
+                    ],
+                },
+            ])
+        );
+        goToFrame(property, 60);
+        enableAnimationBlending(manager);
+
+        updateAnimationManager(manager, 16);
+
+        expect(property.currentTime).toBe(1);
+        expect(target.value).toBe(10);
+        clearAnimationManager(manager);
     });
 
     it("rejects duplicate morph target IDs", async () => {

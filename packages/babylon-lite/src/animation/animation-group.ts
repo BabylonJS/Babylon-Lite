@@ -85,6 +85,8 @@ export interface AnimationGroup {
     readonly _ctrl?: AnimationController;
     /** @internal Manual property animation metadata used by the optional weighted mixer. */
     _propertyMixer?: AnimationPropertyMixer;
+    /** @internal True only for the current manager tick when the property mixer consumed this group. */
+    _propertyMixerHandled?: boolean;
     /** @internal glTF skeleton metadata used by the optional weighted mixer. */
     _gltfMixer?: AnimationGltfMixer;
     /** @internal Additive animation metadata used by the optional blending mixer. */

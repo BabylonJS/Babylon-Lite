@@ -175,7 +175,10 @@ when its groups leave the manager, so a cleared long-lived manager does not
 retain a disposed USD context. Paused groups whose sample has not changed
 perform no GPU upload. Installing USD's weighted-property integration does not
 change ordinary full-weight property groups: they retain direct controller
-evaluation, paused-frame behavior and last-write ordering. Groups are not
+evaluation, paused-frame behavior and registration-order last-write semantics
+relative to glTF groups. A full-weight track joins weighted accumulation only
+when a fractional track genuinely contests the same target property, preventing
+the fractional bucket from overwriting its contribution. Groups are not
 automatically played by the loader.
 
 ## Pipeline configuration and shader logic
