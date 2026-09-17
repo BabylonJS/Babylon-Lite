@@ -37,10 +37,11 @@
 import { F32 } from "../engine/typed-arrays.js";
 import type { Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
-import type { RenderTarget, RenderTargetDescriptor, RenderTargetSignature } from "../engine/render-target.js";
+import type { RenderTarget, RenderTargetDescriptor, RenderTargetSignature, RenderTargetSurfaceSize } from "../engine/render-target.js";
 import { buildRenderTarget } from "../engine/render-target.js";
 import type { RenderTargetMrt } from "../engine/render-target-mrt.js";
 import { buildRenderTargetMrt, createRenderTargetMrt, disposeRenderTargetMrt, getSampledColorTexture, getSampledColorView } from "../engine/render-target-mrt.js";
+import type { SurfaceContext } from "../engine/surface.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { Material, MaterialRenderFeatures } from "../material/material.js";
 import { getMaterialSource } from "../material/material-view.js";
@@ -90,7 +91,13 @@ export interface GeometryRendererTaskConfig {
     camera?: Camera | null;
     /** Render-target size. Defaults to the scene's `surface`; accepts live
      *  `{ surface, scale }` dimensions as well as full surfaces and pixels. */
-    size?: RenderTargetDescriptor["size"];
+    size?:
+        | SurfaceContext
+        | RenderTargetSurfaceSize
+        | {
+              width: number;
+              height: number;
+          };
     /** MSAA sample count. Defaults to 1. */
     samples?: 1 | 4;
     /** Externally-owned depth attachment. When omitted, the task creates its
