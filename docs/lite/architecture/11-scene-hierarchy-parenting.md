@@ -146,10 +146,11 @@ motion and reparenting do not change the node's local transform. Neither travers
 may stop at an already-dirty node: a consumer may read only a leaf version while
 intermediate nodes remain unread across successive ancestor moves.
 
-`_markWorldMatrixDirty(host)` conservatively calls `markLocalDirty()`. Its callers
-include the banked camera's mutable up vector, which changes the local look-at basis
-without writing position/rotation/scaling. Treating this hook as world-only would
-incorrectly retain that basis.
+`_markWorldMatrixDirty(host)` is world-only: geometry updates need fresh world
+versions without recomposing unchanged local transforms. `_markLocalMatrixDirty(host)`
+calls `markLocalDirty()` for mutable local inputs outside the usual TRS callbacks.
+The banked camera uses the latter for its up vector, which changes the local look-at
+basis without writing position/rotation/scaling.
 
 ### SceneNode local storage (`scene/scene-node.ts`)
 

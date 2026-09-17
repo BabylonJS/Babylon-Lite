@@ -67,8 +67,13 @@ function peekWorldMatrixState(p: IWorldMatrixProvider | null): WorldMatrixAccess
     return (s as WorldMatrixAccessors | undefined) ?? null;
 }
 
-/** @internal Invalidate an engine object's local transform and its subtree's world matrices. */
+/** @internal Invalidate subtree world matrices/versions without discarding local transforms. */
 export function _markWorldMatrixDirty(host: IWorldMatrixProvider): void {
+    peekWorldMatrixState(host)?._invalidate();
+}
+
+/** @internal Invalidate a changed local transform and its subtree's world matrices. */
+export function _markLocalMatrixDirty(host: IWorldMatrixProvider): void {
     peekWorldMatrixState(host)?.markLocalDirty();
 }
 

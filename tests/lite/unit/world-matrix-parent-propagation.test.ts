@@ -2,7 +2,13 @@ import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 
 import { createSceneNode, createSceneNodeFromMatrix } from "../../../packages/babylon-lite/src/scene/scene-node";
 import { createFreeCamera } from "../../../packages/babylon-lite/src/camera/free-camera";
-import { _markWorldMatrixDirty, attachWorldMatrixState, composeTrsLocalMatrix, createWorldMatrixState } from "../../../packages/babylon-lite/src/scene/world-matrix-state";
+import {
+    _markLocalMatrixDirty,
+    _markWorldMatrixDirty,
+    attachWorldMatrixState,
+    composeTrsLocalMatrix,
+    createWorldMatrixState,
+} from "../../../packages/babylon-lite/src/scene/world-matrix-state";
 import { setParent } from "../../../packages/babylon-lite/src/scene/set-parent";
 import * as allocator from "../../../packages/babylon-lite/src/math/_matrix-allocator";
 import * as composition from "../../../packages/babylon-lite/src/math/compose-mat4-into-buffer";
@@ -156,7 +162,7 @@ describe("world matrix parent propagation", () => {
                 expect(child.worldMatrix[12]).toBe(3);
                 const version = child.worldMatrixVersion;
                 x = 10;
-                _markWorldMatrixDirty(host);
+                _markLocalMatrixDirty(host);
                 expect(child.worldMatrixVersion).toBeGreaterThan(version);
                 expect(child.worldMatrix[12]).toBe(12);
             });
@@ -204,6 +210,30 @@ describe("world matrix parent propagation", () => {
         });
 
         describe("optimization assertions", () => {
+            it("retains local transforms during world-only host invalidation", () => {
+                const local = vi.fn(() => composeMat4(3, 0, 0, 0, 0, 0, 1, 1, 1, 1));
+                const state = createWorldMatrixState(local);
+                const host: IWorldMatrixProvider = {
+                    get worldMatrix() {
+                        return state.getWorldMatrix();
+                    },
+                    get worldMatrixVersion() {
+                        return state.getWorldMatrixVersion();
+                    },
+                };
+                attachWorldMatrixState(host, state);
+                const child = createSceneNode("child", 2);
+                child.parent = host;
+                expect(child.worldMatrix[12]).toBe(5);
+                for (let i = 0; i < 2; i++) {
+                    const version = child.worldMatrixVersion;
+                    _markWorldMatrixDirty(host);
+                    expect(child.worldMatrixVersion).toBeGreaterThan(version);
+                }
+                expect(child.worldMatrix[12]).toBe(5);
+                expect(local).toHaveBeenCalledTimes(1);
+            });
+
             it("calls a local factory only on local changes, not parent movement or reparenting", () => {
                 const local = vi.fn(() => composeMat4(3, 0, 0, 0, 0, 0, 1, 1, 1, 1));
                 const state = createWorldMatrixState(local);
