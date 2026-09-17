@@ -6,8 +6,7 @@ import { createMockCanvas, createMockGL, type MockGL } from "./_lite-gl-mock";
 
 // The gl-unit project runs in the `node` environment, which has no DOM globals.
 // createHtmlElementTexture uses `instanceof HTMLVideoElement / HTMLImageElement`,
-// so we stub those constructors; the source element is a plain canvas-like object
-// (not an instance of either), which routes through the canvas size branch.
+// so we stub those constructors.
 beforeAll(() => {
     const g = globalThis as Record<string, unknown>;
     if (g.HTMLVideoElement === undefined) {
@@ -34,7 +33,7 @@ const GL_TEXTURE_MAG_FILTER = 0x2800;
 const GL_TEXTURE_MIN_FILTER = 0x2801;
 
 function sourceElement(width = 4, height = 4): HTMLCanvasElement {
-    return { width, height } as unknown as HTMLCanvasElement;
+    return Object.assign(new HTMLCanvasElement(), { width, height });
 }
 
 function makeCtx() {
@@ -54,6 +53,27 @@ function paramValue(mock: MockGL, pname: number): number | undefined {
     }
     return undefined;
 }
+
+function expectSourceUpload(mock: MockGL, gl: WebGL2RenderingContext, element: HTMLCanvasElement | HTMLImageElement | HTMLVideoElement): void {
+    const call = mock.log.find((entry) => entry.name === "texImage2D");
+    expect(call?.args).toEqual([gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, element]);
+}
+
+describe("lite-gl: html-texture source uploads", () => {
+    it.each([
+        { source: "canvas", element: () => sourceElement(7, 5), width: 7, height: 5 },
+        { source: "video", element: () => Object.assign(new HTMLVideoElement(), { videoWidth: 11, videoHeight: 6 }), width: 11, height: 6 },
+        { source: "image", element: () => Object.assign(new HTMLImageElement(), { naturalWidth: 13, naturalHeight: 9 }), width: 13, height: 9 },
+    ])("uploads a $source with RGBA8 and preserves its dimensions", ({ element: createElement, width, height }) => {
+        const { mock, engine } = makeCtx();
+        const element = createElement();
+        const tex = createHtmlElementTexture(engine, element);
+
+        expectSourceUpload(mock, engine.gl, element);
+        expect(tex.width).toBe(width);
+        expect(tex.height).toBe(height);
+    });
+});
 
 describe("lite-gl: html-texture samplingMode", () => {
     it("NEAREST sets nearest min + mag, no mipmaps", () => {
@@ -105,10 +125,11 @@ describe("lite-gl: html-texture samplingMode", () => {
 describe("lite-gl: updateHtmlElementTexture", () => {
     it("re-uploads the texture from its source element", () => {
         const { mock, engine } = makeCtx();
-        const tex = createHtmlElementTexture(engine, sourceElement());
+        const element = sourceElement();
+        const tex = createHtmlElementTexture(engine, element);
         mock.clear();
         updateHtmlElementTexture(engine, tex);
-        expect(mock.count("texImage2D")).toBe(1);
+        expectSourceUpload(mock, engine.gl, element);
     });
 
     it("forces unit 0 active before re-upload even when another unit is left active (regression)", () => {

@@ -75,7 +75,7 @@ export function createHtmlElementTexture(
         const g = target.gl;
         setUnpackState(target, invertY, false);
         bindTextureForUpload(target, tex.handle);
-        g.texImage2D(g.TEXTURE_2D, 0, g.RGBA, g.RGBA, g.UNSIGNED_BYTE, element);
+        g.texImage2D(g.TEXTURE_2D, 0, g.RGBA8, g.RGBA, g.UNSIGNED_BYTE, element);
         const [w, h] = sizeOf();
         tex.width = w;
         tex.height = h;
