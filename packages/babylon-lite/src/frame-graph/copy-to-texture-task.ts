@@ -232,6 +232,9 @@ export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine:
             if (source === eng.scRT) {
                 throw new Error(`CopyToTextureTask "${task.name}": sourceTexture cannot be the engine scRT because its GPU texture changes every frame.`);
             }
+            if (source._syncEager) {
+                buildRenderTarget(source, eng);
+            }
             if (!source._colorTexture) {
                 throw new Error(`CopyToTextureTask "${task.name}": sourceTexture has no color texture. The source must be built before this task records.`);
             }
@@ -241,7 +244,7 @@ export function createCopyToTextureTask(config: CopyToTextureTaskConfig, engine:
             // Already-built RTs are no-ops in `buildRenderTarget`. Keeps copy-only chains
             // (e.g. an SS staging texture between an MSAA resolve and the final swap blit)
             // from requiring the caller to pre-build them.
-            const needsBuild = (rt: RenderTarget) => !rt._colorTexture;
+            const needsBuild = (rt: RenderTarget) => !!rt._syncEager || !rt._colorTexture;
             if (task._ownedTarget && (!task.ownsTargetTexture || task._ownedTarget !== task.targetTexture)) {
                 disposeRenderTarget(task._ownedTarget);
                 task._ownedTarget = null;

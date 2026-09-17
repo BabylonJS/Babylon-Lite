@@ -279,7 +279,7 @@ function renderTargetSignature(target: RenderTarget): RenderTargetSignature {
     return {
         _colorFormat: descriptor.format,
         _depthStencilFormat: descriptor.dFormat,
-        _depthCompare: descriptor._depthCompare,
+        _depthCompare: descriptor.depthCompare,
         _sampleCount: descriptor.samples,
     };
 }

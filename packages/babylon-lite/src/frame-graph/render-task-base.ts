@@ -139,7 +139,7 @@ export interface RenderTask extends Task {
     /** @internal Scene version captured before building the active bindings, not when drawing them. */
     _lastVersion: number;
     /** @internal */
-    _lastVis: number;
+    _lastVis?: number;
     /** @internal Optional feature-owned update work for the active generation. */
     _batchState?: DrawBatchState;
     /** @internal */
@@ -207,7 +207,7 @@ export interface RenderTaskBindingGeneration {
     /** @internal */
     _lastVersion: number;
     /** @internal */
-    _lastVis: number;
+    _lastVis?: number;
     /** @internal */
     _batchState?: DrawBatchState;
 }
@@ -232,8 +232,6 @@ function createBindingGeneration(renderables: Renderable[], version: number): Re
         _transparentBindings: [],
         _ob: [],
         _lastVersion: version,
-        _lastVis: 0,
-        _batchState: undefined,
     };
 }
 
@@ -246,20 +244,19 @@ export type RenderTaskBase = Omit<RenderTask, "_pendingMeshes" | "_prepareTaskMe
  *  Swapchain-targeted tasks acquire the swap view per-frame at execute time.
  *  @internal Automatic tasks borrow renderables and do not expose explicit mesh population. */
 export function _createAutomaticRenderTask(config: RenderTaskConfig, engine: EngineContext, scene: SceneContext): RenderTaskBase {
-    const sc = scene as SceneContext;
     config.clr ??= true;
     const desc = config.rt._descriptor;
+    const depthDesc = config.depth?._descriptor;
     // Render upright: row 0 of the GPU texture is the top of the scene. Every
     // RT (offscreen or swapchain) renders without a projection Y-flip; pipelines
     // use the default ccw front face; downstream samplers see upright pixels.
     const targetSignature = {
         _colorFormat: desc.format,
-        _depthStencilFormat: config.depth?._descriptor.dFormat ?? desc.dFormat,
-        _depthCompare: desc._depthCompare,
-        _sampleCount: desc.samples ?? 1,
+        _depthStencilFormat: depthDesc?.dFormat ?? desc.dFormat,
+        _depthCompare: desc.depthCompare ?? depthDesc?.depthCompare,
+        _sampleCount: desc.samples,
     };
 
-    const sceneUBO = createEmptyUniformBuffer(engine, SCENE_UBO_BYTES);
     const colorAttachment = { loadOp: "clear", storeOp: "store" } as GPURenderPassColorAttachment;
     const updateContext: MutableDrawUpdateContext = { targetWidth: 0, targetHeight: 0 };
     const task: RenderTaskBase = {
@@ -268,13 +265,11 @@ export function _createAutomaticRenderTask(config: RenderTaskConfig, engine: Eng
         _config: config,
         _ownsTargets: !config.sharedRt,
         engine: engine,
-        scene: sc,
+        scene,
         _passes: [],
         _renderPassDescriptor: { colorAttachments: [colorAttachment] },
         _colorAttachment: colorAttachment,
-        _sceneUBO: sceneUBO,
-        _sceneBG: undefined,
-        _lightsUBO: undefined,
+        _sceneUBO: createEmptyUniformBuffer(engine, SCENE_UBO_BYTES),
         _suData: new F32(SCENE_UBO_BYTES / 4),
         _sceneUboCacheKey: [],
         _targetSignature: targetSignature,
@@ -286,7 +281,7 @@ export function _createAutomaticRenderTask(config: RenderTaskConfig, engine: Eng
             if (task._recordExplicit) {
                 task._recordExplicit(task, true);
             } else {
-                _buildBindings(task, config.autoMirror !== false ? sc._renderables.slice() : task._renderables, true);
+                _buildBindings(task, config.autoMirror !== false ? scene._renderables.slice() : task._renderables, true);
             }
         },
         execute(): number {
@@ -394,15 +389,16 @@ export function _buildBindings(
     const previousBatchState = task._batchState;
     const generation = createBindingGeneration(renderables, task.scene._renderableVersion);
     if (record) {
-        if (task._ownsTargets) {
-            buildRenderTarget(rt, task.engine);
-            if (config.rst && (rt._descriptor.samples ?? 1) > 1) {
-                buildRenderTarget(config.rst, task.engine);
+        const buildTarget = (target: RenderTarget | undefined, always?: boolean): void => {
+            if (target && (always || task._ownsTargets || target._eager)) {
+                buildRenderTarget(target, task.engine);
             }
+        };
+        buildTarget(rt);
+        if (rt._descriptor.samples > 1) {
+            buildTarget(config.rst);
         }
-        if (config.depth && !config.depth._eager) {
-            buildRenderTarget(config.depth, task.engine);
-        }
+        buildTarget(config.depth, true);
     }
     const { _opaqueBindings: opaque, _directBindings: direct, _transparentBindings: transparent } = generation;
     try {
@@ -455,7 +451,7 @@ function buildRenderPassDescriptor(task: RenderTaskBase, rt: RenderTarget): void
         const loadOp = (config.depth ? depthSrc._eager : config.depthClear === false) ? "load" : "clear";
         depthAttachment = {
             view: depthView,
-            depthClearValue: dd._depthClearValue ?? 0,
+            depthClearValue: dd.depthClearValue ?? 0,
             depthLoadOp: loadOp,
             depthStoreOp: "store",
         };
@@ -576,7 +572,7 @@ function executePassBody(task: RenderTaskBase, pass: GPURenderPassEncoder): numb
             // carries no depthStencilFormat of its own. The bundle encoder's
             // attachment state must match those pipelines exactly.
             depthStencilFormat: task._targetSignature._depthStencilFormat,
-            sampleCount: desc.samples ?? 1,
+            sampleCount: desc.samples,
         });
         be.setBindGroup(0, sceneBG);
         drawList(be, opaqueBindings, eng);

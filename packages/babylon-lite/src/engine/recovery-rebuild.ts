@@ -144,7 +144,7 @@ async function runRecoveryStep<T>(description: string, action: () => Promise<T>)
 
 function resetFrameGraphTasks(engine: EngineContext, scene: SceneContext): void {
     for (const task of scene._frameGraph._tasks) {
-        if (!("_sceneUBO" in task && "_sceneBG" in task && "_opaqueBindings" in task)) {
+        if (!("_sceneUBO" in task && "_targetSignature" in task && "_opaqueBindings" in task)) {
             continue;
         }
         const rt = task as unknown as RecoverableRenderTask;

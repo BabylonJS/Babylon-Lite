@@ -225,6 +225,7 @@ function enableTransmission(task: RenderTaskBase, engine: EngineContext, options
 function retargetRenderTaskToLinearOffscreen(task: RenderTaskBase): void {
     const cfg = task._config;
     const oldDesc = cfg.rt._descriptor;
+    const oldSize = oldDesc.size;
     const surface = task.scene.surface;
     const sampleCount = surface.msaaSamples;
     // The scene render task may target the shared engine scRT (single-sample,
@@ -242,10 +243,10 @@ function retargetRenderTaskToLinearOffscreen(task: RenderTaskBase): void {
         lbl: "transmission-linear",
         format: "rgba16float",
         dFormat: ownsDepth ? (oldDesc.dFormat ?? "depth24plus-stencil8") : undefined,
-        _depthClearValue: oldDesc._depthClearValue,
-        _depthCompare: oldDesc._depthCompare,
+        depthClearValue: oldDesc.depthClearValue,
+        depthCompare: oldDesc.depthCompare,
         samples: sampleCount,
-        size: surface,
+        size: "canvas" in oldSize || "surface" in oldSize ? oldSize : surface,
     });
     cfg.rt = newRt;
     cfg.rst = undefined;
@@ -257,7 +258,7 @@ function retargetRenderTaskToLinearOffscreen(task: RenderTaskBase): void {
     };
     sig._colorFormat = "rgba16float";
     sig._depthStencilFormat = cfg.depth?._descriptor.dFormat ?? newRt._descriptor.dFormat;
-    sig._depthCompare = newRt._descriptor._depthCompare;
+    sig._depthCompare = newRt._descriptor.depthCompare ?? cfg.depth?._descriptor.depthCompare;
     sig._sampleCount = sampleCount;
     task._ob.length = 0;
     task._lastVersion = -1;

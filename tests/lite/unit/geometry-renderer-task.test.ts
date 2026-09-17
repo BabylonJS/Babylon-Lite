@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
-import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
-import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
+import { createRenderTarget, type RenderTarget, type RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
 import { createGeometryRendererTask } from "../../../packages/babylon-lite/src/frame-graph/geometry-renderer-task";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 import { buildNodeGeometryRenderable } from "../../../packages/babylon-lite/src/material/node/node-geometry-renderable";
@@ -20,6 +19,8 @@ import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { MeshRebuilder, MeshRebuildResources } from "../../../packages/babylon-lite/src/render/renderable";
+import { createSurfaceRenderTargetTexture } from "../../../packages/babylon-lite/src/texture/rtt-surface";
+import { disposeRenderTargetTexture } from "../../../packages/babylon-lite/src/texture/rtt";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUShaderStage" | "GPUTextureUsage"> & {
     GPUBufferUsage?: { UNIFORM: number; COPY_DST: number; STORAGE: number };
@@ -48,7 +49,7 @@ function makeMockEngine(): EngineContext {
                 createView: () => ({}) as GPUTextureView,
                 destroy: () => undefined,
             }) as unknown as GPUTexture,
-        queue: { writeBuffer: () => undefined },
+        queue: { writeBuffer: () => undefined, onSubmittedWorkDone: async () => undefined },
     } as unknown as GPUDevice;
     const eng = {
         canvas: { width: 800, height: 600 } as HTMLCanvasElement,
@@ -251,11 +252,70 @@ describe("GeometryRendererTask", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
         const task = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }], samples: 1, size: { width: 32, height: 24 } }, engine, scene);
-        const internal = task as unknown as { record(): void; _mrt: { _depthTexture: GPUTexture | null; _depthView: GPUTextureView | null } };
+        const internal = task as unknown as {
+            record(): void;
+            _mrt: { _depthTexture: GPUTexture | null; _depthView: GPUTextureView | null };
+            _signature: { _depthCompare?: GPUCompareFunction };
+        };
 
         const depthRt = task.geometryDepthTexture;
         expect(depthRt).toBeTruthy();
         expect(depthRt._descriptor.dFormat).toBe("depth32float");
+        expect(depthRt._descriptor.depthClearValue).toBeUndefined();
+        expect(depthRt._descriptor.depthCompare).toBeUndefined();
+        expect(depthRt._descriptor.samples).toBe(1);
+        expect(depthRt._eager).toBe(true);
+
+        internal.record();
+
+        // After record(): wrapper slots populated from the MRT.
+        expect(depthRt._depthTexture).toBe(internal._mrt._depthTexture);
+        expect(depthRt._depthView).toBe(internal._mrt._depthView);
+        expect(depthRt._width).toBe(32);
+        expect(depthRt._height).toBe(24);
+        expect(internal._signature._depthCompare).toBe("greater-equal");
+    });
+
+    it("propagates an explicit target depth convention to owned geometry depth", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine) as SceneContext;
+        const target = {
+            _descriptor: {
+                format: "bgra8unorm" as const,
+                depthClearValue: 1,
+                depthCompare: "less-equal" as const,
+                samples: 1 as const,
+                size: { width: 32, height: 24 } as const,
+            },
+            _colorTexture: null,
+            _colorView: null,
+            _depthTexture: null,
+            _depthView: null,
+            _width: 0,
+            _height: 0,
+        } as unknown as import("../../../packages/babylon-lite/src/engine/render-target").RenderTarget;
+        const task = createGeometryRendererTask(
+            {
+                textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }],
+                samples: 1,
+                size: { width: 32, height: 24 },
+                targetTexture: target,
+            },
+            engine,
+            scene
+        );
+        const internal = task as unknown as {
+            record(): void;
+            _mrt: { _depthTexture: GPUTexture | null; _depthView: GPUTextureView | null };
+            _renderPassDescriptor: GPURenderPassDescriptor;
+            _signature: { _depthCompare?: GPUCompareFunction };
+        };
+
+        const depthRt = task.geometryDepthTexture;
+        expect(depthRt).toBeTruthy();
+        expect(depthRt._descriptor.dFormat).toBe("depth32float");
+        expect(depthRt._descriptor.depthClearValue).toBe(1);
+        expect(depthRt._descriptor.depthCompare).toBe("less-equal");
         expect(depthRt._descriptor.samples).toBe(1);
         expect(depthRt._eager).toBe(true);
 
@@ -269,13 +329,21 @@ describe("GeometryRendererTask", () => {
         expect(depthRt._depthView).toBe(internal._mrt._depthView);
         expect(depthRt._width).toBe(32);
         expect(depthRt._height).toBe(24);
+        expect(internal._signature._depthCompare).toBe("less-equal");
+        expect(internal._renderPassDescriptor.depthStencilAttachment?.depthClearValue).toBe(1);
     });
 
     it("returns the externally-supplied depthTexture from `geometryDepthTexture`", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
         const external = {
-            _descriptor: { dFormat: "depth32float" as const, samples: 1 as const, size: { width: 800, height: 600 } as const },
+            _descriptor: {
+                dFormat: "depth32float" as const,
+                depthClearValue: 1,
+                depthCompare: "less-equal" as const,
+                samples: 1 as const,
+                size: { width: 800, height: 600 } as const,
+            },
             _colorTexture: null,
             _colorView: null,
             _depthTexture: null,
@@ -286,6 +354,8 @@ describe("GeometryRendererTask", () => {
         const task = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }], samples: 1, depthTexture: external }, engine, scene);
         // The accessor returns the same object the caller passed in.
         expect(task.geometryDepthTexture).toBe(external);
+        const signature = (task as unknown as { _signature: { _depthCompare?: GPUCompareFunction } })._signature;
+        expect(signature._depthCompare).toBe("less-equal");
     });
 
     it("outputTexture is undefined when targetTexture is not provided", () => {
@@ -309,6 +379,76 @@ describe("GeometryRendererTask", () => {
         } as unknown as import("../../../packages/babylon-lite/src/engine/render-target").RenderTarget;
         const task = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }], samples: 1, targetTexture: target }, engine, scene);
         expect(task.outputTexture).toBe(target);
+    });
+
+    it("synchronizes sampled eager color and depth targets before recording", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine) as SceneContext;
+        const target = createRenderTarget({ format: "bgra8unorm", samples: 1, size: { width: 32, height: 24 } });
+        target._eager = true;
+        target._colorTexture = engine._device.createTexture({
+            size: { width: 32, height: 24 },
+            format: "bgra8unorm",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        target._colorView = target._colorTexture.createView();
+        target._syncEager = vi.fn();
+        const depth = createRenderTarget({ dFormat: "depth32float", samples: 1, size: { width: 32, height: 24 } });
+        depth._eager = true;
+        depth._depthTexture = engine._device.createTexture({
+            size: { width: 32, height: 24 },
+            format: "depth32float",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        depth._depthView = depth._depthTexture.createView();
+        depth._syncEager = vi.fn();
+        const task = createGeometryRendererTask(
+            {
+                textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }],
+                samples: 1,
+                size: { width: 32, height: 24 },
+                targetTexture: target,
+                depthTexture: depth,
+            },
+            engine,
+            scene
+        );
+
+        task.record();
+
+        expect(target._syncEager).toHaveBeenCalledWith(engine);
+        expect(depth._syncEager).toHaveBeenCalledWith(engine);
+    });
+
+    it("keeps a scaled geometry MRT aligned with its external target across surface resize", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine) as SceneContext;
+        const size = { surface: engine, scale: 0.5 } as const;
+        const target = createSurfaceRenderTargetTexture(engine, { format: "bgra8unorm", samples: 1, size });
+        const task = createGeometryRendererTask(
+            {
+                textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }],
+                samples: 1,
+                size,
+                targetTexture: target.rt,
+            },
+            engine,
+            scene
+        );
+        const internal = task as unknown as { _mrt: { _width: number; _height: number } };
+
+        task.record();
+        expect([internal._mrt._width, internal._mrt._height]).toEqual([400, 300]);
+        expect([target.rt._width, target.rt._height]).toEqual([400, 300]);
+
+        engine.canvas.width = 66;
+        engine.canvas.height = 34;
+        task.record();
+        expect([internal._mrt._width, internal._mrt._height]).toEqual([33, 17]);
+        expect([target.rt._width, target.rt._height]).toEqual([33, 17]);
+
+        task.dispose();
+        disposeRenderTargetTexture(target);
     });
 
     it("throws when targetTexture sampleCount mismatches samples", () => {

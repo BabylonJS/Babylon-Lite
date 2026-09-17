@@ -128,6 +128,10 @@ export interface ShaderUniformSlot {
 export interface ShaderTextureSlot {
     readonly decl: ShaderSamplerDecl;
     current: Texture2D | null;
+    /** @internal Last resources observed by `setShaderTexture`, including replaceable facade backing. */
+    _view?: GPUTextureView | null;
+    /** @internal */
+    _sampler?: GPUSampler | null;
 }
 
 export interface ShaderStorageBufferSlot {
@@ -486,15 +490,15 @@ export function setShaderTexture(material: ShaderMaterial, name: string, texture
             throw new Error(`ShaderMaterial: sampler "${name}" cannot use a depth Texture2D.`);
         }
     }
-    // Only invalidate the cached bind groups when the bound texture HANDLE actually changes. The bind group
-    // references the texture's view + sampler (see createShaderBindGroup), so re-binding the SAME Texture2D (the
-    // common "keep my shadow map / scene-depth bound every frame" pattern) leaves those identical. Bumping the
-    // resource version unconditionally therefore forced a BRAND-NEW bind group every frame (per material, for every
-    // packet using it), churning the D3D12 descriptor heap until it OOMed on content-heavy scenes (e.g. reloading
-    // a big save). A texture's CONTENTS can change freely without a new bind group (the bound view is live), so
-    // identity comparison is correct.
-    if (slot.current !== texture) {
+    const view = texture?.view ?? null;
+    const sampler = texture?.sampler ?? null;
+    // Stable render-target facades replace their view in place on resize. Comparing both the public handle and the
+    // resources captured by the bind group keeps repeated ordinary sets free while allowing a resize subscriber to
+    // call this setter again and rebuild exactly once for the new attachment generation.
+    if (slot.current !== texture || (texture && (slot._view !== view || slot._sampler !== sampler))) {
         slot.current = texture;
+        slot._view = view;
+        slot._sampler = sampler;
         material._resourceVersion++;
         bumpVisibilityEpoch();
     }

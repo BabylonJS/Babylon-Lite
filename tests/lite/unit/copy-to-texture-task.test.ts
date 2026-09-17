@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { createRenderTarget, type RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
@@ -150,6 +150,26 @@ describe("CopyToTextureTask", () => {
         expect(capture.copies[0]!.size).toEqual({ width: 64, height: 32 });
         expect(capture.descriptors).toHaveLength(0);
         expect(capture.draws).toBe(0);
+    });
+
+    it("synchronizes sampled eager source and target textures before recording", () => {
+        const capture: BeginPassCapture = { descriptors: [], viewports: [], scissors: [], draws: 0, copies: [], pipelines: [] };
+        const engine = makeMockEngine(capture);
+        const scene = createSceneContext(engine) as SceneContext;
+        const source = makeOffscreenRT("rgba8unorm", 64, 32);
+        const target = makeOffscreenRT("rgba8unorm", 64, 32);
+        buildColor(source, engine);
+        buildColor(target, engine);
+        source._eager = true;
+        target._eager = true;
+        source._syncEager = vi.fn();
+        target._syncEager = vi.fn();
+        const task = createCopyToTextureTask({ sourceTexture: source, targetTexture: target }, engine, scene);
+
+        task.record();
+
+        expect(source._syncEager).toHaveBeenCalledWith(engine);
+        expect(target._syncEager).toHaveBeenCalledWith(engine);
     });
 
     it("falls back to the blit path when the target was not created as a copy destination", () => {
