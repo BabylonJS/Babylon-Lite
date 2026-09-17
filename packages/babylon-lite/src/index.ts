@@ -62,6 +62,8 @@ export { enableErrorDecoding, decodeError } from "./enable-error-decoding.js";
 // Subtree visibility toggle (used to hide a node before deferring its disposal,
 // e.g. streaming voxel chunks). Standalone module — bundled only when used.
 export { setSubtreeVisible } from "./scene/visibility.js";
+export { packMeshBlendingTag, unpackMeshBlendingTag, createDefaultMeshBlendRadiusDefinitions } from "./mesh/mesh-blending-tag.js";
+export type { MeshBlendingTag, MeshBlendRadiusDefinition, MeshBlendRadiusDefinitions } from "./mesh/mesh-blending-tag.js";
 
 // ─── Frame graph ─────────────────────────────────────────────────────
 // Scene-owned ordered list of tasks. The default scene pass is a
