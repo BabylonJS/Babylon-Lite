@@ -125,6 +125,12 @@ statically pull the full lazy `shader-pipeline.ts` / `shader-renderable.ts` impl
 module. Direct draws pass `baseVertex` to WebGPU without a forwarding wrapper. Thin-instance paths
 resolve their combined vertex layouts once during construction and share them across binding and
 async preparation; indirect argument encoding remains in `mesh-indexed-indirect.ts`.
+
+The interleaved glTF loader installs the same resolver when it creates a strided mesh.
+PBR, Standard, and picking consume that mesh packing directly; installing the resolver
+also makes plain and thin-instance ShaderMaterial draws use the recorded stride and
+per-attribute offsets. The loader's normalized COLOR_0 stream remains a separate tight
+float32x4 buffer, while attributes that stay interleaved retain their authored packing.
 Vertex-format support is needed only when preparing layouts and grouping packets; renderable draw
 closures do not retain it. Missing-buffer allocation calls the engine-owned seam directly.
 With the final-color helper enabled, missing storage-backed color inputs use one mesh-owned

@@ -29,6 +29,7 @@ import { createMappedBuffer } from "../resource/mapped-buffer.js";
 import { resolveAccessor, TYPE_SIZES } from "./gltf-parser.js";
 import { computeSmoothNormals } from "./gltf-normals.js";
 import type { GltfMeshData } from "./load-gltf.js";
+import { _enableShaderVb } from "../material/shader/shader-vb.js";
 
 const FLOAT = 5126;
 const UNSIGNED_SHORT = 5123;
@@ -363,6 +364,9 @@ function buildInterleavedGpu(engine: EngineContext, m: GltfMeshData): MeshGPU {
  *  doesn't use it. */
 export function buildInterleavedMesh(engine: EngineContext, m: GltfMeshData, index: number, material: PbrMaterialProps, name?: string, source?: Mesh): Mesh {
     const gpu = source?._gpu ?? buildInterleavedGpu(engine, m);
+    // PBR, Standard and picking consume packing directly. Install the optional ShaderMaterial
+    // resolver here too, so both plain and thin draws honor this glTF mesh's stride and offsets.
+    _enableShaderVb();
 
     // Object-local AABB (see `Mesh.boundMin`): fold strided positions straight from the slice; tight positions
     // normally. `_worldMatrix` is deliberately NOT applied — the mesh hangs off its glTF node, whose transform
