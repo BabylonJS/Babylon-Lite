@@ -216,10 +216,8 @@ function slerpQuaternion(a: readonly number[], b: readonly number[], gradient: n
         bw = -bw;
         dot = -dot;
     }
-    if (dot > 0.9995) {
-        const values = [a[0]! + gradient * (bx - a[0]!), a[1]! + gradient * (by - a[1]!), a[2]! + gradient * (bz - a[2]!), a[3]! + gradient * (bw - a[3]!)];
-        const inverseLength = 1 / Math.hypot(values[0]!, values[1]!, values[2]!, values[3]!);
-        return values.map((value) => value * inverseLength);
+    if (dot > 0.999999) {
+        return [(1 - gradient) * a[0]! + gradient * bx, (1 - gradient) * a[1]! + gradient * by, (1 - gradient) * a[2]! + gradient * bz, (1 - gradient) * a[3]! + gradient * bw];
     }
     const angle = Math.acos(Math.min(dot, 1));
     const sine = Math.sin(angle);
@@ -339,6 +337,8 @@ export class Animatable {
     private _paused = false;
     private _stopped = false;
     private readonly _fallbackAnimations: readonly Animation[];
+    private readonly _fallbackFrames = new Map<Animation, number>();
+    private readonly _completedFallbackAnimations = new Set<Animation>();
 
     public constructor(
         private readonly _target: unknown,
@@ -356,6 +356,9 @@ export class Animatable {
         this._fallbackAnimations = fallbackAnimations;
         this._nativeFallbackReason = nativeFallbackReason;
         this.masterFrame = _from;
+        for (const animation of fallbackAnimations) {
+            this._fallbackFrames.set(animation, _from);
+        }
         if (nativeGroup) {
             liteGoToFrame(nativeGroup, _from);
             playAnimation(nativeGroup);
@@ -429,22 +432,44 @@ export class Animatable {
             }
             return;
         }
-        const fps = this._animations[0]?.framePerSecond ?? 60;
-        this.masterFrame += (deltaMs / 1000) * fps * this._speedRatio;
-        if (this.masterFrame >= this._to) {
-            if (this._loop) {
-                const span = this._to - this._from || 1;
-                this.masterFrame = this._from + ((this.masterFrame - this._from) % span);
-            } else {
-                this.masterFrame = this._to;
-                this._stopped = true;
+        let anyFallbackRunning = false;
+        for (const animation of this._fallbackAnimations) {
+            if (this._completedFallbackAnimations.has(animation)) {
+                continue;
             }
+            const direction = this._to >= this._from ? 1 : -1;
+            const span = Math.abs(this._to - this._from);
+            let frame = this._fallbackFrames.get(animation) ?? this._from;
+            frame += (deltaMs / 1000) * animation.framePerSecond * this._speedRatio;
+            const reachedEnd = direction > 0 ? frame >= this._to : frame <= this._to;
+            if (reachedEnd) {
+                if (this._loop) {
+                    const distance = direction > 0 ? frame - this._from : this._from - frame;
+                    const wrappedDistance = span > 0 ? ((distance % span) + span) % span : 0;
+                    frame = direction > 0 ? this._from + wrappedDistance : this._from - wrappedDistance;
+                    anyFallbackRunning = true;
+                } else {
+                    frame = this._to;
+                    this._completedFallbackAnimations.add(animation);
+                }
+            } else {
+                anyFallbackRunning = true;
+            }
+            this._fallbackFrames.set(animation, frame);
         }
+        this.masterFrame = this._fallbackFrames.get(this._animations[0]!) ?? this._from;
         this._applyFallback();
+        if (!this._loop && !anyFallbackRunning) {
+            this._stopped = true;
+        }
     }
 
     public goToFrame(frame: number): void {
         this.masterFrame = clampAnimationFrame(this._animations[0], frame);
+        this._completedFallbackAnimations.clear();
+        for (const animation of this._fallbackAnimations) {
+            this._fallbackFrames.set(animation, clampAnimationFrame(animation, frame));
+        }
         if (this._lite) {
             liteGoToFrame(this._lite, this.masterFrame);
             if (!this._paused && !this._stopped) {
@@ -467,6 +492,10 @@ export class Animatable {
         this._stopped = false;
         if (restartFromBeginning) {
             this.masterFrame = this._from;
+            this._completedFallbackAnimations.clear();
+            for (const animation of this._fallbackAnimations) {
+                this._fallbackFrames.set(animation, this._from);
+            }
         }
         if (this._lite) {
             if (restartFromBeginning) {
@@ -493,7 +522,7 @@ export class Animatable {
 
     private _applyFallback(): void {
         for (const anim of this._fallbackAnimations) {
-            applyAnimatedValue(this._target, anim.targetProperty, anim.evaluate(this.masterFrame));
+            applyAnimatedValue(this._target, anim.targetProperty, anim.evaluate(this._lite ? this.masterFrame : (this._fallbackFrames.get(anim) ?? this.masterFrame)));
         }
     }
 }

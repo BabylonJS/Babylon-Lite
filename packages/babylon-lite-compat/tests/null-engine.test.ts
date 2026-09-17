@@ -314,22 +314,93 @@ describe("NullEngine (headless)", () => {
         expect(target.x).toBeCloseTo(150);
     });
 
-    it("routes initial reverse and negative-speed playback through explicit fallback", () => {
-        const scene = new Scene(new NullEngine());
-        const target = { x: 0 };
+    it("plays reverse ranges and negative speed through explicit fallback", () => {
         const animation = new Animation("reverse", "x", 10);
         animation.setKeys([
             { frame: 0, value: 0 },
             { frame: 10, value: 10 },
         ]);
 
-        const reverseRange = scene.beginDirectAnimation(target, [animation], 10, 0, false);
-        const negativeSpeed = scene.beginDirectAnimation(target, [animation], 0, 10, false, -1);
-
+        const reverseScene = new Scene(new NullEngine());
+        const reverseTarget = { x: 0 };
+        const reverseRange = reverseScene.beginDirectAnimation(reverseTarget, [animation], 10, 0, false);
         expect(reverseRange._lite).toBeUndefined();
         expect(reverseRange._nativeFallbackReason).toMatch(/forward play range/);
+        expect(reverseTarget.x).toBe(10);
+        reverseScene._tick(500);
+        expect(reverseRange.masterFrame).toBe(5);
+        expect(reverseTarget.x).toBe(5);
+        reverseScene._tick(500);
+        expect(reverseRange.masterFrame).toBe(0);
+        expect(reverseTarget.x).toBe(0);
+        expect(reverseRange.animationStarted).toBe(false);
+
+        const negativeScene = new Scene(new NullEngine());
+        const negativeTarget = { x: 0, animations: [animation] };
+        const negativeSpeed = negativeScene.beginAnimation(negativeTarget, 0, 10, false, -1);
         expect(negativeSpeed._lite).toBeUndefined();
-        expect(negativeSpeed._nativeFallbackReason).toMatch(/reverse or non-finite speed ratios/);
+        expect(negativeTarget.x).toBe(10);
+        negativeScene._tick(500);
+        expect(negativeSpeed.masterFrame).toBe(5);
+        expect(negativeTarget.x).toBe(5);
+
+        const loopingScene = new Scene(new NullEngine());
+        const loopingTarget = { x: 0 };
+        const loopingReverse = loopingScene.beginDirectAnimation(loopingTarget, [animation], 10, 0, true);
+        loopingScene._tick(1000);
+        expect(loopingReverse.masterFrame).toBe(10);
+        expect(loopingTarget.x).toBe(10);
+        expect(loopingReverse.animationStarted).toBe(true);
+        loopingScene._tick(500);
+        expect(loopingReverse.masterFrame).toBe(5);
+        expect(loopingTarget.x).toBe(5);
+    });
+
+    it("evaluates mixed-FPS fallback tracks on their own clocks", () => {
+        const scene = new Scene(new NullEngine());
+        const target = { x: 0, y: 0 };
+        const fast = new Animation("fast", "x", 20);
+        fast.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 20, value: 20 },
+        ]);
+        const slow = new Animation("slow", "y", 10);
+        slow.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 20, value: 20 },
+        ]);
+
+        const animatable = scene.beginDirectAnimation(target, [fast, slow], 0, 20, false);
+        expect(animatable._lite).toBeUndefined();
+        expect(animatable._nativeFallbackReason).toMatch(/shared frame rate/);
+        scene._tick(500);
+        expect(animatable.masterFrame).toBe(10);
+        expect(target).toEqual({ x: 10, y: 5 });
+        scene._tick(500);
+        expect(animatable.masterFrame).toBe(20);
+        expect(target).toEqual({ x: 20, y: 10 });
+        expect(animatable.animationStarted).toBe(true);
+        scene._tick(1000);
+        expect(target).toEqual({ x: 20, y: 20 });
+        expect(animatable.animationStarted).toBe(false);
+    });
+
+    it("matches Babylon.js near-parallel quaternion slerp on native playback", () => {
+        const scene = new Scene(new NullEngine());
+        const target = { rotationQuaternion: new Quaternion() };
+        const animation = new Animation("nearParallel", "rotationQuaternion", 10, Animation.ANIMATIONTYPE_QUATERNION);
+        animation.setEasingFunction({ ease: () => 1.25 });
+        animation.setKeys([
+            { frame: 0, value: new Quaternion(0, 0, 0, 1) },
+            { frame: 10, value: new Quaternion(0, 0, 0.015, Math.sqrt(1 - 0.015 * 0.015)) },
+        ]);
+
+        const animatable = scene.beginDirectAnimation(target, [animation], 0, 10, false);
+        scene._tick(500);
+
+        expect(animatable._lite).toBeDefined();
+        expect(target.rotationQuaternion.z).toBeCloseTo(0.018749604459090463, 8);
+        expect(target.rotationQuaternion.w).toBeCloseTo(0.9998241662979126, 8);
     });
 
     it("preserves nonzero ranges, exact loop boundaries, and non-loop completion", () => {

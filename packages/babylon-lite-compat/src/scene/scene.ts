@@ -1130,6 +1130,13 @@ export class Scene extends AbstractScene {
      * coordinating both subsets.
      */
     public beginDirectAnimation(target: unknown, animations: Animation[], from: number, to: number, loop = false, speedRatio = 1): Animatable {
+        if (speedRatio < 0) {
+            [from, to] = [to, from];
+            speedRatio = -speedRatio;
+        }
+        if (from > to) {
+            speedRatio = -speedRatio;
+        }
         const blockedNativePaths = this._runningAnimatables.flatMap((animatable) => animatable._getBlockingFallbackPaths(target));
         const animatable = Animatable._create(
             () => (this._propertyAnimationManager ??= createAnimationManager()),

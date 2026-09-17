@@ -78,6 +78,19 @@ describe("Animation", () => {
         expect(easing.ease).toHaveBeenCalledOnce();
     });
 
+    it("matches Babylon.js quaternion slerp for near-parallel overshoot", () => {
+        const anim = new Animation("a", "rotationQuaternion", 60, Animation.ANIMATIONTYPE_QUATERNION);
+        anim.setEasingFunction({ ease: () => 1.25 });
+        anim.setKeys([
+            { frame: 0, value: [0, 0, 0, 1] },
+            { frame: 10, value: [0, 0, 0.015, Math.sqrt(1 - 0.015 * 0.015)] },
+        ]);
+
+        const value = anim.evaluate(5) as number[];
+        expect(value[2]).toBeCloseTo(0.018749604459090463, 12);
+        expect(value[3]).toBeCloseTo(0.9998242107153774, 12);
+    });
+
     it("bypasses easing for STEP segments", () => {
         const anim = new Animation("a", "position.x", 10);
         const easing = { ease: vi.fn(() => 0.75) };

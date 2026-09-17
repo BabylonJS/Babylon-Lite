@@ -245,6 +245,27 @@ describe("Property animation", () => {
         expect(target.rotationQuaternion.w).toBeCloseTo(Math.cos(Math.PI / 8), 6);
     });
 
+    it("uses Babylon.js quaternion slerp rules for near-parallel property keys", () => {
+        const manager = createAnimationManager();
+        const target = { rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 } };
+        const clip = createPropertyAnimationClip("nearParallelRotation", [
+            {
+                path: "rotationQuaternion",
+                easing: () => 1.25,
+                keys: [
+                    { time: 0, value: [0, 0, 0, 1] },
+                    { time: 1, value: [0, 0, 0.015, Math.sqrt(1 - 0.015 * 0.015)] },
+                ],
+            },
+        ]);
+
+        createPropertyAnimationGroup(manager, target, clip, { loop: false });
+        updateAnimationManager(manager, 500);
+
+        expect(target.rotationQuaternion.z).toBeCloseTo(0.018749604459090463, 8);
+        expect(target.rotationQuaternion.w).toBeCloseTo(0.9998241662979126, 8);
+    });
+
     it("bypasses easing for STEP segments and exact clip endpoints", () => {
         const manager = createAnimationManager();
         const stepEase = vi.fn(() => 0.75);

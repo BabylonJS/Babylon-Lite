@@ -76,6 +76,30 @@ function quatSlerp(out: Float32Array, ax: number, ay: number, az: number, aw: nu
     out[3] = wa * aw + wb * bw;
 }
 
+/** Babylon.js-compatible quaternion interpolation for caller-authored property animation. */
+function propertyQuatSlerp(out: Float32Array, ax: number, ay: number, az: number, aw: number, bx: number, by: number, bz: number, bw: number, t: number): void {
+    let dot = ax * bx + ay * by + az * bz + aw * bw;
+    let endWeight: number;
+    let startWeight: number;
+    const negateEnd = dot < 0;
+    if (negateEnd) {
+        dot = -dot;
+    }
+    if (dot > 0.999999) {
+        startWeight = 1 - t;
+        endWeight = negateEnd ? -t : t;
+    } else {
+        const angle = Math.acos(dot);
+        const inverseSine = 1 / Math.sin(angle);
+        startWeight = Math.sin((1 - t) * angle) * inverseSine;
+        endWeight = (negateEnd ? -1 : 1) * Math.sin(t * angle) * inverseSine;
+    }
+    out[0] = startWeight * ax + endWeight * bx;
+    out[1] = startWeight * ay + endWeight * by;
+    out[2] = startWeight * az + endWeight * bz;
+    out[3] = startWeight * aw + endWeight * bw;
+}
+
 function copySample(output: Float32Array, srcOffset: number, stride: number, dst: Float32Array, dstOffset: number): void {
     for (let c = 0; c < stride; c++) {
         dst[dstOffset + c] = output[srcOffset + c]!;
@@ -86,7 +110,7 @@ function interpolateLinearSample(output: Float32Array, keyIndex: number, stride:
     const s0 = keyIndex * stride;
     const s1 = (keyIndex + 1) * stride;
     if (isQuat) {
-        quatSlerp(_quat, output[s0]!, output[s0 + 1]!, output[s0 + 2]!, output[s0 + 3]!, output[s1]!, output[s1 + 1]!, output[s1 + 2]!, output[s1 + 3]!, gradient);
+        propertyQuatSlerp(_quat, output[s0]!, output[s0 + 1]!, output[s0 + 2]!, output[s0 + 3]!, output[s1]!, output[s1 + 1]!, output[s1 + 2]!, output[s1 + 3]!, gradient);
         dst[dstOffset] = _quat[0]!;
         dst[dstOffset + 1] = _quat[1]!;
         dst[dstOffset + 2] = _quat[2]!;

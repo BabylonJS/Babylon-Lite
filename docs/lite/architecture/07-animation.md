@@ -313,6 +313,10 @@ so custom callbacks cannot move clip endpoints. The returned progress is not
 clamped: overshooting curves may extrapolate scalar/vector values or continue a
 quaternion slerp beyond the segment endpoint.
 
+Property quaternion interpolation follows Babylon.js `Quaternion.SlerpToRef`
+near-parallel behavior. The generic glTF sampler retains its existing glTF
+quaternion interpolation path.
+
 The callback is retained on the compiled property track rather than baked into
 sample data. A compatibility adapter may therefore close over mutable API state
 and consult the currently assigned easing function on every interior sample.
@@ -642,14 +646,15 @@ relative/constant loop modes, unresolved or non-native property bindings, and
 tracks whose key domain cannot represent the requested forward play range.
 Calls with differing track frame rates, reverse ranges/speeds, non-finite timing,
 or no animations retain the existing whole-call fallback because they do not
-share one native facade clock. Assigning a negative or non-finite speed after
-native playback starts is rejected explicitly rather than silently changing
-evaluator ownership. The structural multi-target `AnimationGroup` path also
-remains compat-owned because its rest-pose-weighted mixer and mutable lifecycle
-do not yet match Lite's single-target property group and opt-in mixer semantics.
-Babylon.js per-key `IAnimationKey.easingFunction` is a separate compatibility
-feature; this contract covers the animation-level easing API requested by the
-compat tracker.
+share one native facade clock. Compat normalizes reverse ranges/speeds using
+Babylon.js rules and advances each fallback animation with its own frame rate.
+Assigning a negative or non-finite speed after native playback starts is rejected
+explicitly rather than silently changing evaluator ownership. The structural
+multi-target `AnimationGroup` path also remains compat-owned because its
+rest-pose-weighted mixer and mutable lifecycle do not yet match Lite's
+single-target property group and opt-in mixer semantics. Babylon.js per-key
+`IAnimationKey.easingFunction` is a separate compatibility feature; this contract
+covers the animation-level easing API requested by the compat tracker.
 
 ## Dependencies
 
