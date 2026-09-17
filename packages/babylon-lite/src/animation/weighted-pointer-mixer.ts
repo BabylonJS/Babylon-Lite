@@ -85,7 +85,7 @@ export function _updateWeightedPointerAnimations(manager: AnimationManager, delt
         }
         group._mixerCleanup = clearManagerScratch;
         propertyGroupCount++;
-        if (!onlyPropertyGroups && group.weight === 1) {
+        if (group.weight === 1) {
             continue;
         }
         const tracks = mixer[MIX_TRACKS];
@@ -115,7 +115,11 @@ export function _updateWeightedPointerAnimations(manager: AnimationManager, delt
             for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
                 const group = groups[groupIndex]!;
                 if (!group._stopped && group._propertyMixer) {
-                    advancePropertyGroupTime(group, group._propertyMixer, deltaMs);
+                    if (group.weight === 1) {
+                        tickAnimationCore(group, deltaMs, manager.engine);
+                    } else {
+                        advancePropertyGroupTime(group, group._propertyMixer, deltaMs);
+                    }
                 }
             }
             return true;
@@ -135,6 +139,10 @@ export function _updateWeightedPointerAnimations(manager: AnimationManager, delt
             if (!onlyPropertyGroups) {
                 tickAnimationCore(group, deltaMs, manager.engine);
             }
+            continue;
+        }
+        if (onlyPropertyGroups && group.weight === 1) {
+            tickAnimationCore(group, deltaMs, manager.engine);
             continue;
         }
 

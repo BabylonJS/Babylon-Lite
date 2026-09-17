@@ -17,7 +17,7 @@ type PropertyMixerHandler = (manager: AnimationManager, deltaMs: number, onlyPro
 let _propertyMixerHandler: PropertyMixerHandler | null = null;
 
 /** @internal Install opt-in property-track handling for the skeletal blend manager. */
-export function _installPropertyMixerHandler(handler: PropertyMixerHandler): void {
+export function _installPropertyMixerHandler(handler: PropertyMixerHandler | null): void {
     _propertyMixerHandler = handler;
 }
 

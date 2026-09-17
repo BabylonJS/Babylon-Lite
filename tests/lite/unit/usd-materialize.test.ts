@@ -5,7 +5,8 @@ import { AnimationGroupMaskMode, createAnimationGroupMask } from "../../../packa
 import { addAnimationGroup } from "../../../packages/babylon-lite/src/animation/animation-group-task";
 import { clearAnimationManager, createAnimationManager, updateAnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
 import { setAnimationWeight } from "../../../packages/babylon-lite/src/animation/animation-weight";
-import { enableAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-gltf-mixer";
+import { _installPropertyMixerHandler, enableAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-gltf-mixer";
+import { createPropertyAnimationClip, createPropertyAnimationGroup } from "../../../packages/babylon-lite/src/animation/property-animation";
 import { disposeUsd } from "../../../packages/babylon-lite/src/loader-usd/load-usd";
 import { materializeUsd } from "../../../packages/babylon-lite/src/loader-usd/usd-materialize";
 import { getContainerMeshes } from "../../../packages/babylon-lite/src/asset-container";
@@ -458,6 +459,58 @@ describe("USD command materialization", () => {
 
         expect(retained.manager.animations).toHaveLength(0);
         expect(retained.payload.deref()).toBeUndefined();
+    });
+
+    it("preserves ordinary full-weight property playback after USD installs its mixer", async () => {
+        const runOrdinaryGroups = (): void => {
+            const manager = createAnimationManager();
+            const target = { value: 0 };
+            const first = createPropertyAnimationGroup(
+                manager,
+                target,
+                createPropertyAnimationClip("first", [
+                    {
+                        path: "value",
+                        keys: [
+                            { time: 0, value: 0 },
+                            { time: 1, value: 5 },
+                        ],
+                    },
+                ])
+            );
+            const second = createPropertyAnimationGroup(
+                manager,
+                target,
+                createPropertyAnimationClip("second", [
+                    {
+                        path: "value",
+                        keys: [
+                            { time: 0, value: 0 },
+                            { time: 1, value: 10 },
+                        ],
+                    },
+                ])
+            );
+            goToFrame(first, 60);
+            goToFrame(second, 60);
+            enableAnimationBlending(manager);
+            updateAnimationManager(manager, 16);
+            expect(first.currentTime).toBe(1);
+            expect(second.currentTime).toBe(1);
+            expect(target.value).toBe(10);
+            clearAnimationManager(manager);
+        };
+
+        _installPropertyMixerHandler(null);
+        runOrdinaryGroups();
+
+        const fixture = usdFixture({ morph: true });
+        const { engine } = usdTestEngine();
+        const container = usdTestContainer(fixture);
+        await materializeUsd(engine, fixture, container);
+        disposeUsd(container);
+
+        runOrdinaryGroups();
     });
 
     it("rejects duplicate morph target IDs", async () => {
