@@ -1,6 +1,7 @@
 import type { SceneContext } from "../scene/scene.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { Material } from "./material.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { getMaterialSource, isMaterialView } from "./material-view.js";
 import { resolveMeshRebuild } from "./resolve-mesh-rebuild.js";
 
@@ -10,6 +11,13 @@ export interface RebuildMaterialOptions {
     /** Rebuild the frame graph after material renderables are refreshed. Defaults to false so callers can batch updates. */
     rebuildFrameGraph?: boolean;
 }
+
+interface DetachablePacket {
+    _disposed?: boolean;
+    _owner?: DetachablePacket[];
+}
+
+type DetachableDisposer = (() => void) & { p?: DetachablePacket };
 
 /** Rebuild renderables whose pipeline/bind-group feature state depends on a material.
  *  Use after texture, sampler, bind-group layout, culling, or feature changes.
@@ -88,10 +96,22 @@ function rebuildSceneMesh(ctx: SceneContext, mesh: Mesh): boolean | Promise<void
     }
     const old = ctx._meshDisposables.get(mesh);
     if (old) {
-        for (const fn of old) {
-            fn();
-        }
         ctx._meshDisposables.delete(mesh);
+        for (const dispose of old) {
+            const packet = (dispose as DetachableDisposer).p;
+            if (packet) {
+                packet._disposed = true;
+                const owner = packet._owner;
+                if (owner) {
+                    const index = owner.indexOf(packet);
+                    if (index >= 0) {
+                        owner.splice(index, 1);
+                    }
+                    packet._owner = undefined;
+                }
+            }
+        }
+        retireGpuResources(ctx.surface.engine, () => old.forEach((fn) => fn()));
     }
     for (let i = ctx._renderables.length - 1; i >= 0; i--) {
         if (ctx._renderables[i]!.mesh === mesh) {

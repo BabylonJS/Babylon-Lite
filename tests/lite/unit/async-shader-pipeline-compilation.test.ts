@@ -360,7 +360,7 @@ describe("async ShaderMaterial pipeline compilation", () => {
         const target = createRenderTarget({
             format: "rgba16float",
             dFormat: "depth32float",
-            _depthCompare: "less-equal",
+            depthCompare: "less-equal",
             samples: 4,
             size: { width: 64, height: 64 },
         });

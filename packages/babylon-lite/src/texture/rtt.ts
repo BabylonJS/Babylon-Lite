@@ -89,9 +89,9 @@ export function _createRenderTargetTexture(engine: EngineContext, descriptor: Re
 
 /** Eagerly allocate a fixed-size render target and expose sampled attachment facades. */
 export function createRenderTargetTexture(engine: EngineContext, descriptor: RenderTargetDescriptor, sampleDepth?: RenderTargetDepthSampler): RenderTargetTextureResult {
-    if ("canvas" in descriptor.size) {
+    if ("canvas" in descriptor.size || "surface" in descriptor.size) {
         throw new Error(
-            "createRenderTargetTexture: descriptor.size must be fixed { width, height } pixels, not a SurfaceContext; use createSurfaceRenderTargetTexture for surface-resizing targets."
+            "createRenderTargetTexture: descriptor.size must be fixed { width, height } pixels, not a surface-backed size; use createSurfaceRenderTargetTexture for surface-resizing targets."
         );
     }
     return _createRenderTargetTexture(engine, descriptor, sampleDepth);

@@ -769,7 +769,7 @@ describe("RenderPassTask transparent sorting", () => {
         const rt = createRenderTarget({
             format: "bgra8unorm",
             dFormat: "depth32float",
-            _depthCompare: "less-equal",
+            depthCompare: "less-equal",
             samples: 1,
             size: { width: 16, height: 16 },
         });
@@ -778,6 +778,109 @@ describe("RenderPassTask transparent sorting", () => {
         enableRenderTaskTransmission(task, engine);
 
         expect(task._targetSignature._depthCompare).toBe("less-equal");
+    });
+
+    it("preserves an external depth target compare when transmission retargets a render task", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine);
+        const color = createRenderTarget({
+            format: "bgra8unorm",
+            samples: 1,
+            size: { width: 16, height: 16 },
+        });
+        const depth = createRenderTarget({
+            dFormat: "depth32float",
+            depthClearValue: 1,
+            depthCompare: "less-equal",
+            samples: 1,
+            size: { width: 16, height: 16 },
+        });
+        const task = createRenderTask({ name: "standard-z-external-depth", rt: color, depth }, engine, scene);
+
+        enableRenderTaskTransmission(task, engine);
+
+        expect(task._targetSignature._depthCompare).toBe("less-equal");
+    });
+
+    it("preserves scaled surface sizing when transmission retargets a render task", () => {
+        const engine = makeMockEngine({ msaaSamples: 1 });
+        const scene = createSceneContext(engine);
+        const size = { surface: engine, scale: 0.5 } as const;
+        const color = createRenderTarget({ format: "bgra8unorm", samples: 1, size });
+        const depth = createRenderTarget({ dFormat: "depth32float", samples: 1, size });
+        const task = createRenderTask({ name: "scaled-transmission", rt: color, depth }, engine, scene);
+
+        enableRenderTaskTransmission(task, engine);
+        task.record();
+
+        expect(task._config.rt._descriptor.size).toBe(size);
+        expect(task._config.rt._width).toBe(400);
+        expect(task._config.rt._height).toBe(300);
+        expect(depth._width).toBe(400);
+        expect(depth._height).toBe(300);
+    });
+
+    it("synchronizes sampled eager targets borrowed by a render task", () => {
+        const engine = makeMockEngine({ msaaSamples: 1 });
+        const scene = createSceneContext(engine);
+        const color = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 16, height: 16 } });
+        color._eager = true;
+        color._colorTexture = engine._device.createTexture({
+            size: { width: 16, height: 16 },
+            format: "rgba8unorm",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        color._colorView = color._colorTexture.createView();
+        color._syncEager = vi.fn();
+        const depth = createRenderTarget({ dFormat: "depth32float", samples: 1, size: { width: 16, height: 16 } });
+        depth._eager = true;
+        depth._depthTexture = engine._device.createTexture({
+            size: { width: 16, height: 16 },
+            format: "depth32float",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        depth._depthView = depth._depthTexture.createView();
+        depth._syncEager = vi.fn();
+        const task = createRenderTask({ name: "borrowed-eager", rt: color, depth, sharedRt: true }, engine, scene);
+
+        task.record();
+
+        expect(color._syncEager).toHaveBeenCalledWith(engine);
+        expect(depth._syncEager).toHaveBeenCalledWith(engine);
+    });
+
+    it("synchronizes a borrowed sampled eager resolve target independently of its MSAA target", () => {
+        const engine = makeMockEngine({ msaaSamples: 4 });
+        const scene = createSceneContext(engine);
+        const color = createRenderTarget({ format: "rgba8unorm", samples: 4, size: { width: 500, height: 300 } });
+        color._colorTexture = engine._device.createTexture({
+            size: { width: 500, height: 300 },
+            format: "rgba8unorm",
+            sampleCount: 4,
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        color._colorView = color._colorTexture.createView();
+        color._width = 500;
+        color._height = 300;
+        const resolve = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 500, height: 300 } });
+        resolve._eager = true;
+        resolve._colorTexture = engine._device.createTexture({
+            size: { width: 400, height: 300 },
+            format: "rgba8unorm",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        resolve._colorView = resolve._colorTexture.createView();
+        resolve._width = 400;
+        resolve._height = 300;
+        resolve._syncEager = vi.fn(function (this: RenderTarget): void {
+            this._width = 500;
+        });
+        const task = createRenderTask({ name: "borrowed-resolve", rt: color, rst: resolve, sharedRt: true }, engine, scene);
+
+        task.record();
+
+        expect(resolve._syncEager).toHaveBeenCalledWith(engine);
+        expect(resolve._width).toBe(500);
     });
 
     it("uses world centers refreshed by binding updates before sorting transparent draws", async () => {
@@ -1067,6 +1170,8 @@ describe("RenderPassTask transparent sorting", () => {
         const externalDepth = createRenderTarget({
             lbl: "external-depth",
             dFormat: "depth32float",
+            depthClearValue: 1,
+            depthCompare: "less-equal",
             samples: 1,
             size: { width: 16, height: 16 },
         });
@@ -1089,11 +1194,13 @@ describe("RenderPassTask transparent sorting", () => {
         const depthAtt = descriptor!.depthStencilAttachment as GPURenderPassDepthStencilAttachment;
         expect(depthAtt.view).toBe(sentinelDepthView);
         expect(depthAtt.depthLoadOp).toBe("load");
+        expect(depthAtt.depthClearValue).toBe(1);
         // Color RT has no depth of its own — verifies depthTexture really did override it.
         expect(colorRt._depthView).toBeNull();
         // The pipeline's signature must reflect the external depth format so
         // beginRenderPass validates against pipelines with depthStencil.format = depth32float.
         expect(task._targetSignature._depthStencilFormat).toBe("depth32float");
+        expect(task._targetSignature._depthCompare).toBe("less-equal");
         // Regression: the cached opaque render-bundle encoder's attachment state
         // must include the overridden depth format too. The colour RT carries no
         // depthStencilFormat of its own, so a bundle built from the RT descriptor
