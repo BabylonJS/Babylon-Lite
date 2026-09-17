@@ -160,6 +160,13 @@ function createPointerAnimationGroup(
     toTime: number,
     options?: CreatePropertyAnimationGroupOptions
 ): AnimationGroup {
+    const applyAt = (time: number): void => {
+        for (let trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
+            const track = tracks[trackIndex]!;
+            evaluatePropertySampler(track.sampler, time, track.stride, track.quaternion, track.easing, _pointerScratch, 0);
+            track.writer(_pointerScratch, 0);
+        }
+    };
     const ctrl: AnimationController = {
         time: fromTime,
         playing: false,
@@ -169,27 +176,32 @@ function createPointerAnimationGroup(
             if (ctrl.playing) {
                 ctrl.time += (deltaMs / 1000) * ctrl.speedRatio;
             }
-            const duration = Math.max(0, toTime - fromTime);
-            if (duration <= 0) {
+            const rangeDuration = Math.max(0, toTime - fromTime);
+            if (rangeDuration <= 0) {
                 return;
             }
-            if (ctrl.loop && ctrl.playing) {
-                ctrl.time = fromTime + ((ctrl.time - fromTime) % duration);
-                if (ctrl.time < fromTime) {
-                    ctrl.time += duration;
+            if (ctrl.playing) {
+                if (ctrl.loop) {
+                    ctrl.time = fromTime + ((ctrl.time - fromTime) % rangeDuration);
+                    if (ctrl.time < fromTime) {
+                        ctrl.time += rangeDuration;
+                    }
+                } else {
+                    ctrl.time = Math.min(Math.max(ctrl.time, fromTime), toTime);
                 }
             } else {
-                ctrl.time = Math.min(Math.max(ctrl.time, fromTime), toTime);
+                ctrl.time = Math.min(Math.max(ctrl.time, 0), duration);
             }
-            for (let trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
-                const track = tracks[trackIndex]!;
-                evaluatePropertySampler(track.sampler, ctrl.time, track.stride, track.quaternion, track.easing, _pointerScratch, 0);
-                track.writer(_pointerScratch, 0);
+            applyAt(ctrl.time);
+            if (!ctrl.loop && ctrl.playing && ctrl.speedRatio >= 0 && ctrl.time >= toTime) {
+                ctrl.playing = false;
+                group.isPlaying = false;
+                group._stopped = true;
             }
         },
     };
     _installTickAnimation();
-    return {
+    const group: AnimationGroup = {
         name,
         duration,
         frameRate: frameRate || DEFAULT_FRAME_RATE,
@@ -202,6 +214,7 @@ function createPointerAnimationGroup(
         _ctrl: ctrl,
         _stopped: false,
     };
+    return group;
 }
 
 const _pointerScratch = new F32(16);

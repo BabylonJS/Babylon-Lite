@@ -313,6 +313,12 @@ so custom callbacks cannot move clip endpoints. The returned progress is not
 clamped: overshooting curves may extrapolate scalar/vector values or continue a
 quaternion slerp beyond the segment endpoint.
 
+The callback is retained on the compiled property track rather than baked into
+sample data. A compatibility adapter may therefore close over mutable API state
+and consult the currently assigned easing function on every interior sample.
+Changing or clearing `Animation.setEasingFunction()` during playback takes effect
+without recompiling the native clip.
+
 This seam is property-animation-only. glTF LINEAR, STEP, and CUBICSPLINE samplers
 continue through `evaluateSampler()` unchanged, so caller-authored easing cannot
 silently alter imported asset semantics. The evaluators share keyframe search and
@@ -333,6 +339,8 @@ A module-level `[0,0,0,1]` array is reused for quaternion slerp output to avoid 
 - `tickAnimation(group, deltaMs, engine?)` advances `group.currentTime += (deltaMs / 1000) * speedRatio` and syncs the internal controller only for evaluation/upload
 - Duration is in seconds (max sampler input timestamp)
 - Looping wraps via modulo within the active range: `time = from + ((time - from) % (to - from))`
+- Non-looping property groups apply the exact final pose once, then stop so a
+  completed group cannot overwrite a later animation on subsequent manager ticks
 - glTF groups default to 60fps; property groups inherit the `PropertyAnimationClip.frameRate`
 - Babylon-style frame ranges are converted once with the clip `frameRate`
 
@@ -529,7 +537,7 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 - **STOPPED**: `group.isPlaying = false`, `group.currentTime = 0`, `group._stopped = true`. `tickAnimation()` returns immediately.
 - **PLAYING**: `group.isPlaying = true`. Each `tickAnimation()` advances time, evaluates samplers, uploads GPU data.
 - **PAUSED**: `group.isPlaying = false`. `tickAnimation()` still evaluates (ensures pose is current) but doesn't advance time.
-- **goToFrame(f)**: Sets `group.currentTime = f / group.frameRate`, evaluates the pose immediately for manual property clips (or engine-backed clips when an engine is provided), then pauses.
+- **goToFrame(f)**: Sets `group.currentTime = f / group.frameRate`, evaluates the pose immediately for manual property clips (or engine-backed clips when an engine is provided), then pauses. Property clips clamp seeks to the compiled key domain, not the active play range; each sampler still clamps to its own first/last key.
 - **Removed animated meshes**: `disposeMeshGpu()` marks the last-owner `SkeletonData` or `MorphTargetData` as disposed before destroying its GPU resources. Animation groups may outlive their mesh, so all controller, pose, and weighted-mixer upload paths skip disposed runtime resources. Direct skeleton/morph update APIs reject disposed targets explicitly.
 
 ## Babylon.js Equivalence Map
@@ -560,34 +568,50 @@ N/A — No shaders in this module. Skinning WGSL is in `shader/fragments/skeleto
 
 ### Compat Delegation Boundary
 
-`@babylonjs/lite-compat` may translate a Babylon.js-shaped `Animation` into a
-native property clip when every track has semantics the native property system
-can preserve exactly. The prototype supported path requires:
+`@babylonjs/lite-compat` translates each Babylon.js-shaped `Animation` whose
+semantics the native property system can preserve into a native property clip.
+The supported path requires:
 
 - at least one key on every animation;
 - one shared positive frame rate;
-- finite scalar values, or fixed-size arrays for Vector2, Vector3, or Quaternion;
+- finite scalar values, fixed-size arrays, or Babylon.js-shaped Vector2,
+  Vector3, or Quaternion values;
 - a target path whose existing leaf is writable by the native scalar or
   `.set(...)` vector/quaternion binding;
 - one interpolation mode for the whole track (all LINEAR or all STEP);
 - cycle loop mode, a forward non-empty play range, and a finite non-negative
   speed ratio.
 
-For that path, compat creates one native property clip/group and exposes an
-`Animatable` facade that delegates seek, pause, restart, stop, speed, and loop
-state to the native group. Babylon Lite owns frame advancement, segment
-selection, easing, interpolation, property writes, and manager ordering.
-The compiled clip is a snapshot of the keys at `beginDirectAnimation()` time;
-mutating the source `Animation` with `setKeys()` during playback is not part of
-the delegated prototype contract.
+Compat partitions a direct-animation call into a native subset and an explicit
+fallback subset. Supported tracks remain native even when another independent
+track in the same call is unsupported. Tracks whose dotted property paths
+overlap (for example `position` and `position.x`) stay on the same evaluator so
+write ordering cannot change. The returned composite `Animatable` coordinates
+seek, pause, restart, stop, speed, looping, and completion while Babylon Lite
+owns frame advancement, segment selection, easing, interpolation, and property
+writes for every delegated track.
+
+The native easing adapter reads `Animation.getEasingFunction()` at sample time,
+so replacing or clearing animation-level easing remains live. The compiled clip
+is still a snapshot of key frames at `beginDirectAnimation()` time. This matches
+Babylon.js for later `setKeys()` replacement (existing runtime animations retain
+their key array), but unlike Babylon.js it does not observe in-place mutation of
+key objects already compiled into packed native buffers.
 
 Compat temporarily retains its existing CPU evaluator for explicitly unsupported
-cases: mixed per-key STEP/LINEAR segments, matrix/color/custom data shapes,
-relative/constant loop modes, differing track frame rates, unresolved or
-non-native property bindings, reverse ranges/speeds, and empty animations. The
-structural multi-target `AnimationGroup` path also remains compat-owned because
-its rest-pose-weighted mixer and mutable lifecycle do not yet match Lite's
-single-target property group and opt-in mixer semantics.
+tracks: mixed per-key STEP/LINEAR segments, matrix/color/custom data shapes,
+relative/constant loop modes, unresolved or non-native property bindings, and
+tracks whose key domain cannot represent the requested forward play range.
+Calls with differing track frame rates, reverse ranges/speeds, non-finite timing,
+or no animations retain the existing whole-call fallback because they do not
+share one native facade clock. Assigning a negative or non-finite speed after
+native playback starts is rejected explicitly rather than silently changing
+evaluator ownership. The structural multi-target `AnimationGroup` path also
+remains compat-owned because its rest-pose-weighted mixer and mutable lifecycle
+do not yet match Lite's single-target property group and opt-in mixer semantics.
+Babylon.js per-key `IAnimationKey.easingFunction` is a separate compatibility
+feature; this contract covers the animation-level easing API requested by the
+compat tracker.
 
 ## Dependencies
 
@@ -623,7 +647,9 @@ single-target property group and opt-in mixer semantics.
 18. **Independent skeleton clips**: Verify a clip targeting one skeleton does not upload or reset another skeleton from the same asset
 19. **Disposed animated resources**: Verify a surviving animation group can continue evaluating CPU state without uploading to a destroyed bone texture or morph-weight buffer
 20. **Property easing**: Verify scalar/vector/quaternion interpolation uses eased segment progress, STEP bypasses the callback, endpoints remain exact, and overshooting values are not clamped
-21. **Compat native delegation**: Verify a supported Babylon.js-shaped direct animation is advanced and written by a Lite property group, while an unsupported mixed-interpolation track uses the explicit compat fallback
+21. **Compat native delegation**: Verify supported Babylon.js-shaped direct and attached animations are advanced and written by a Lite property group, while unsupported independent tracks use the explicit compat fallback
+22. **Compat easing facade**: Verify `IEasingFunction | null`, live replacement/clearing, direct and structural evaluation, and native scalar/vector/quaternion playback
+23. **Compat lifecycle**: Verify nonzero ranges, exact loop boundaries, completion, pause/restart/stop, full-key-domain seeking, positive speed changes, and overlapping write order
 
 ## File Manifest
 

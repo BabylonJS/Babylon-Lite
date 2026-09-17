@@ -145,13 +145,21 @@ function advancePropertyGroupTime(group: AnimationGroup, mixer: AnimationPropert
         return fromTime;
     }
 
-    if (group.loopAnimation) {
-        group.currentTime = fromTime + ((group.currentTime - fromTime) % duration);
-        if (group.currentTime < fromTime) {
-            group.currentTime += duration;
+    if (group.isPlaying) {
+        if (group.loopAnimation) {
+            group.currentTime = fromTime + ((group.currentTime - fromTime) % duration);
+            if (group.currentTime < fromTime) {
+                group.currentTime += duration;
+            }
+        } else {
+            group.currentTime = Math.min(Math.max(group.currentTime, fromTime), toTime);
+            if (group.speedRatio >= 0 && group.currentTime >= toTime) {
+                group.isPlaying = false;
+                group._stopped = true;
+            }
         }
     } else {
-        group.currentTime = Math.min(Math.max(group.currentTime, fromTime), toTime);
+        group.currentTime = Math.min(Math.max(group.currentTime, 0), mixer[MIX_DURATION]);
     }
     return group.currentTime;
 }

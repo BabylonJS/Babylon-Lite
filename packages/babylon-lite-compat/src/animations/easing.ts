@@ -9,7 +9,21 @@ export const EASINGMODE_EASEIN = 0;
 export const EASINGMODE_EASEOUT = 1;
 export const EASINGMODE_EASEINOUT = 2;
 
-export abstract class EasingFunction {
+/**
+ * Contract implemented by Babylon.js easing functions.
+ *
+ * Custom easing objects only need to transform a normalized segment gradient.
+ */
+export interface IEasingFunction {
+    /**
+     * Transform a segment-local gradient.
+     * @param gradient - Linear progress through the current keyframe segment.
+     * @returns The progress used for interpolation. Values are not clamped.
+     */
+    ease(gradient: number): number;
+}
+
+export abstract class EasingFunction implements IEasingFunction {
     public static readonly EASINGMODE_EASEIN = EASINGMODE_EASEIN;
     public static readonly EASINGMODE_EASEOUT = EASINGMODE_EASEOUT;
     public static readonly EASINGMODE_EASEINOUT = EASINGMODE_EASEINOUT;

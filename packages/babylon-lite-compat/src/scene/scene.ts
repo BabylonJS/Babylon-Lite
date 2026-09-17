@@ -140,8 +140,8 @@ export class Scene extends AbstractScene {
      * Babylon.js `scene.animationGroups` / `scene.animatables`. Loaded glTF /
      * `.babylon` animation clips live on the Lite scene; `animationGroups` returns
      * BJS-shaped `AnimationGroup`s over them (so scenes can `goToFrame`/`pause`/`stop`
-     * to freeze a model at a deterministic frame). `animatables` surfaces the running
-     * CPU `Animatable`s started via `beginDirectAnimation`.
+     * to freeze a model at a deterministic frame). `animatables` surfaces the
+     * native-backed and fallback `Animatable`s started through the scene.
      */
     public get animationGroups(): AnimationGroup[] {
         const liteGroups = this._lite.animationGroups ?? [];
@@ -1125,16 +1125,22 @@ export class Scene extends AbstractScene {
 
     /**
      * Babylon.js `scene.beginDirectAnimation(target, animations, from, to, loop, speedRatio?)`.
-     * Drives the given `Animation`s on the CPU each frame, writing onto the target's
-     * (dotted) property path. Returns an `Animatable` with `goToFrame`/`pause`/`stop`.
+     * Delegates supported tracks to Babylon Lite property animation and retains
+     * explicit compat evaluation only for unsupported tracks. Returns one facade
+     * coordinating both subsets.
      */
     public beginDirectAnimation(target: unknown, animations: Animation[], from: number, to: number, loop = false, speedRatio = 1): Animatable {
-        const fallbackReason = Animatable._getNativeFallbackReason(target, animations, from, to, speedRatio);
-        // Keep the legacy evaluator only for shapes whose semantics the native
-        // property clip cannot preserve yet; supported tracks never tick twice.
-        const animatable = fallbackReason
-            ? new Animatable(target, animations, from, to, loop, speedRatio, undefined, fallbackReason)
-            : Animatable._createNative((this._propertyAnimationManager ??= createAnimationManager()), target, animations, from, to, loop, speedRatio);
+        const blockedNativePaths = this._runningAnimatables.flatMap((animatable) => animatable._getBlockingFallbackPaths(target));
+        const animatable = Animatable._create(
+            () => (this._propertyAnimationManager ??= createAnimationManager()),
+            target,
+            animations,
+            from,
+            to,
+            loop,
+            speedRatio,
+            blockedNativePaths
+        );
         this._runningAnimatables.push(animatable);
         return animatable;
     }

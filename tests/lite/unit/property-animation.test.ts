@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createAnimationManager, startAnimationManager, stopAnimationManager, updateAnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
-import { goToFrame } from "../../../packages/babylon-lite/src/animation/animation-group";
+import { goToFrame, playAnimation } from "../../../packages/babylon-lite/src/animation/animation-group";
 import { setAnimationWeight } from "../../../packages/babylon-lite/src/animation/animation-weight";
 import { enablePropertyAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-pointer-mixer";
 import { enableAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-gltf-mixer";
@@ -72,6 +72,73 @@ describe("Property animation", () => {
 
         updateAnimationManager(manager, 1000);
         expect(target.position.x).toBe(2);
+    });
+
+    it("wraps exactly at a nonzero loop boundary and completes non-looping ranges", () => {
+        const loopingManager = createAnimationManager();
+        const loopingTarget = { value: 0 };
+        const clip = createPropertyAnimationClip("range", [
+            {
+                path: "value",
+                frameRate: 10,
+                keys: [
+                    { frame: 0, value: 0 },
+                    { frame: 20, value: 20 },
+                ],
+            },
+        ]);
+        const looping = createPropertyAnimationGroup(loopingManager, loopingTarget, clip, { fromFrame: 5, toFrame: 15, loop: true });
+        updateAnimationManager(loopingManager, 1000);
+        expect(looping.currentTime).toBeCloseTo(0.5);
+        expect(loopingTarget.value).toBeCloseTo(5);
+
+        const finiteManager = createAnimationManager();
+        const finiteTarget = { value: 0 };
+        const finite = createPropertyAnimationGroup(finiteManager, finiteTarget, clip, { fromFrame: 5, toFrame: 15, loop: false });
+        updateAnimationManager(finiteManager, 1000);
+        expect(finite.currentTime).toBeCloseTo(1.5);
+        expect(finiteTarget.value).toBeCloseTo(15);
+        expect(finite.isPlaying).toBe(false);
+        expect(finite._stopped).toBe(true);
+        finiteTarget.value = 99;
+        updateAnimationManager(finiteManager, 100);
+        expect(finiteTarget.value).toBe(99);
+    });
+
+    it("seeks property clips across the full key domain instead of the active play range", () => {
+        const manager = createAnimationManager();
+        const target = { value: 0 };
+        const clip = createPropertyAnimationClip("seek", [
+            {
+                path: "value",
+                frameRate: 10,
+                keys: [
+                    { frame: 0, value: 0 },
+                    { frame: 20, value: 20 },
+                ],
+            },
+        ]);
+        const group = createPropertyAnimationGroup(manager, target, clip, { fromFrame: 5, toFrame: 15, loop: false });
+
+        goToFrame(group, 2);
+        expect(group.currentTime).toBeCloseTo(0.2);
+        expect(target.value).toBeCloseTo(2);
+        goToFrame(group, -5);
+        expect(group.currentTime).toBe(0);
+        expect(target.value).toBe(0);
+        goToFrame(group, 25);
+        expect(group.currentTime).toBe(2);
+        expect(target.value).toBe(20);
+
+        setAnimationWeight(group, 0.5);
+        enablePropertyAnimationBlending(manager);
+        updateAnimationManager(manager, 0);
+        expect(group.currentTime).toBe(2);
+
+        playAnimation(group);
+        updateAnimationManager(manager, 0);
+        expect(group.currentTime).toBeCloseTo(1.5);
+        expect(group.isPlaying).toBe(false);
     });
 
     it("writes vector tracks through set() bindings", () => {

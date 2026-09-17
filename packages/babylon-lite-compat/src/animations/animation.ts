@@ -19,11 +19,23 @@ import {
 } from "babylon-lite";
 import type { AnimationGroup as LiteAnimationGroup, AnimationManager, EngineContext, PropertyAnimationInterpolation, PropertyAnimationTrackOptions } from "babylon-lite";
 
-import type { EasingFunction } from "./easing.js";
+import type { IEasingFunction } from "./easing.js";
+
+/** Structural vector/quaternion value accepted by Babylon.js animation keys. */
+export interface IAnimationVectorValue {
+    readonly x: number;
+    readonly y: number;
+    readonly z?: number;
+    readonly w?: number;
+    clone(): IAnimationVectorValue;
+    asArray(): number[];
+}
+
+export type AnimationValue = number | number[] | IAnimationVectorValue;
 
 export interface IAnimationKey {
     frame: number;
-    value: number | number[];
+    value: AnimationValue;
     /** Babylon.js per-key interpolation hint (`AnimationKeyInterpolation`). */
     interpolation?: number;
 }
@@ -59,12 +71,14 @@ export class Animation {
     public static readonly ANIMATIONTYPE_QUATERNION = AnimationTypes.ANIMATIONTYPE_QUATERNION;
     public static readonly ANIMATIONTYPE_MATRIX = AnimationTypes.ANIMATIONTYPE_MATRIX;
     public static readonly ANIMATIONTYPE_COLOR3 = AnimationTypes.ANIMATIONTYPE_COLOR3;
+    public static readonly ANIMATIONTYPE_VECTOR2 = AnimationTypes.ANIMATIONTYPE_VECTOR2;
+    public static readonly ANIMATIONTYPE_COLOR4 = AnimationTypes.ANIMATIONTYPE_COLOR4;
     public static readonly ANIMATIONLOOPMODE_RELATIVE = AnimationLoopModes.ANIMATIONLOOPMODE_RELATIVE;
     public static readonly ANIMATIONLOOPMODE_CYCLE = AnimationLoopModes.ANIMATIONLOOPMODE_CYCLE;
     public static readonly ANIMATIONLOOPMODE_CONSTANT = AnimationLoopModes.ANIMATIONLOOPMODE_CONSTANT;
 
     private _keys: IAnimationKey[] = [];
-    private _easingFunction: EasingFunction | null = null;
+    private _easingFunction: IEasingFunction | null = null;
 
     public constructor(
         public name: string,
@@ -86,16 +100,24 @@ export class Animation {
         return this._keys.length > 0 ? this._keys[this._keys.length - 1]!.frame : 0;
     }
 
-    public setEasingFunction(easingFunction: EasingFunction | null): void {
+    /**
+     * Assigns the easing function used to transform each non-STEP segment's normalized progress.
+     * @param easingFunction - A Babylon.js-shaped easing object, or `null` to restore linear progress.
+     */
+    public setEasingFunction(easingFunction: IEasingFunction | null): void {
         this._easingFunction = easingFunction;
     }
 
-    public getEasingFunction(): EasingFunction | null {
+    /**
+     * Gets the easing function currently assigned to this animation.
+     * @returns The assigned easing object, or `null` when interpolation uses linear progress.
+     */
+    public getEasingFunction(): IEasingFunction | null {
         return this._easingFunction;
     }
 
-    /** Linearly evaluate the animated value at `frame` (clamped to the key range). */
-    public evaluate(frame: number): number | number[] {
+    /** Evaluate the animated value at `frame`, clamped to the key range. */
+    public evaluate(frame: number): AnimationValue {
         const keys = this._keys;
         if (keys.length === 0) {
             return 0;
@@ -118,7 +140,7 @@ export class Animation {
                     return a.value;
                 }
                 const gradient = (frame - a.frame) / (b.frame - a.frame);
-                return lerpValue(a.value, b.value, this._easingFunction?.ease(gradient) ?? gradient);
+                return interpolateValue(a.value, b.value, this._easingFunction?.ease(gradient) ?? gradient, this.dataType);
             }
         }
         return keys[keys.length - 1]!.value;
@@ -135,32 +157,98 @@ export class Animation {
     }
 }
 
-function lerpValue(a: number | number[], b: number | number[], t: number): number | number[] {
+function interpolateValue(a: AnimationValue, b: AnimationValue, t: number, dataType: number): AnimationValue {
     if (typeof a === "number" && typeof b === "number") {
         return a + (b - a) * t;
     }
-    const av = a as number[];
-    const bv = b as number[];
-    return av.map((value, i) => value + ((bv[i] ?? value) - value) * t);
+    if (typeof a === "number" || typeof b === "number") {
+        return a;
+    }
+    const stride = supportedStride(dataType) || animationComponents(a).length;
+    const av = readAnimationComponents(a, stride);
+    const bv = readAnimationComponents(b, stride);
+    if (!av || !bv) {
+        return a;
+    }
+    const values = dataType === AnimationTypes.ANIMATIONTYPE_QUATERNION ? slerpQuaternion(av, bv, t) : av.map((value, i) => value + (bv[i]! - value) * t);
+    return cloneAnimationValue(a, values);
 }
 
-type AnimValue = number | number[];
+function readAnimationComponents(value: AnimationValue, stride: number): number[] | undefined {
+    if (typeof value === "number") {
+        return stride === 1 && Number.isFinite(value) ? [value] : undefined;
+    }
+    const components = Array.isArray(value) ? value : value.asArray();
+    return components.length === stride && components.every(Number.isFinite) ? components.slice() : undefined;
+}
+
+function animationComponents(value: AnimationValue): number[] {
+    return typeof value === "number" ? [value] : Array.isArray(value) ? value : value.asArray();
+}
+
+function cloneAnimationValue(template: Exclude<AnimationValue, number>, components: number[]): AnimationValue {
+    if (Array.isArray(template)) {
+        return components;
+    }
+    const clone = template.clone();
+    const writable = clone as { x: number; y: number; z?: number; w?: number };
+    writable.x = components[0]!;
+    writable.y = components[1]!;
+    if (components.length > 2) {
+        writable.z = components[2]!;
+    }
+    if (components.length > 3) {
+        writable.w = components[3]!;
+    }
+    return clone;
+}
+
+function slerpQuaternion(a: readonly number[], b: readonly number[], gradient: number): number[] {
+    let bx = b[0]!;
+    let by = b[1]!;
+    let bz = b[2]!;
+    let bw = b[3]!;
+    let dot = a[0]! * bx + a[1]! * by + a[2]! * bz + a[3]! * bw;
+    if (dot < 0) {
+        bx = -bx;
+        by = -by;
+        bz = -bz;
+        bw = -bw;
+        dot = -dot;
+    }
+    if (dot > 0.9995) {
+        const values = [a[0]! + gradient * (bx - a[0]!), a[1]! + gradient * (by - a[1]!), a[2]! + gradient * (bz - a[2]!), a[3]! + gradient * (bw - a[3]!)];
+        const inverseLength = 1 / Math.hypot(values[0]!, values[1]!, values[2]!, values[3]!);
+        return values.map((value) => value * inverseLength);
+    }
+    const angle = Math.acos(Math.min(dot, 1));
+    const sine = Math.sin(angle);
+    const startWeight = Math.sin((1 - gradient) * angle) / sine;
+    const endWeight = Math.sin(gradient * angle) / sine;
+    return [startWeight * a[0]! + endWeight * bx, startWeight * a[1]! + endWeight * by, startWeight * a[2]! + endWeight * bz, startWeight * a[3]! + endWeight * bw];
+}
+
+type AnimValue = AnimationValue;
 
 function scaleValue(value: AnimValue, scale: number): AnimValue {
-    return typeof value === "number" ? value * scale : value.map((v) => v * scale);
+    if (typeof value === "number") {
+        return value * scale;
+    }
+    const components = animationComponents(value);
+    return components.map((component) => component * scale);
 }
 
 function addValue(acc: AnimValue, value: AnimValue): AnimValue {
     if (typeof acc === "number" && typeof value === "number") {
         return acc + value;
     }
-    const a = acc as number[];
-    const v = value as number[];
-    return a.map((x, i) => x + (v[i] ?? 0));
+    const a = animationComponents(acc);
+    const v = animationComponents(value);
+    return a.map((component, i) => component + (v[i] ?? 0));
 }
 
 function zeroLike(value: AnimValue): AnimValue {
-    return typeof value === "number" ? 0 : (value as number[]).map(() => 0);
+    return typeof value === "number" ? 0 : animationComponents(value).map(() => 0);
 }
 
 /**
@@ -182,7 +270,7 @@ function readPath(target: object, path: string): AnimValue {
         obj = next as Record<string, unknown>;
     }
     const leaf = obj[parts[parts.length - 1]!];
-    return typeof leaf === "number" ? leaf : 0;
+    return isAnimationValue(leaf) ? leaf : 0;
 }
 
 function captureOriginal(target: object, path: string): void {
@@ -197,7 +285,7 @@ function captureOriginal(target: object, path: string): void {
 }
 
 /** @internal Assign an animated value to `target` following a dotted property path (e.g. `"position.x"`). */
-function applyAnimatedValue(target: unknown, path: string, value: number | number[]): void {
+function applyAnimatedValue(target: unknown, path: string, value: AnimationValue): void {
     const parts = path.split(".");
     let obj = target as Record<string, unknown>;
     for (let i = 0; i < parts.length - 1; i++) {
@@ -208,16 +296,32 @@ function applyAnimatedValue(target: unknown, path: string, value: number | numbe
         obj = next as Record<string, unknown>;
     }
     const leaf = parts[parts.length - 1]!;
-    if (Array.isArray(value)) {
+    if (typeof value !== "number") {
+        const components = animationComponents(value);
         const slot = obj[leaf] as { set?: (...n: number[]) => void } | undefined;
         if (slot && typeof slot.set === "function") {
-            slot.set(...value);
+            slot.set(...components);
         } else {
             obj[leaf] = value;
         }
     } else {
         obj[leaf] = value;
     }
+}
+
+function isAnimationValue(value: unknown): value is AnimationValue {
+    return typeof value === "number" || Array.isArray(value) || isAnimationVectorValue(value);
+}
+
+function isAnimationVectorValue(value: unknown): value is IAnimationVectorValue {
+    return (
+        (typeof value === "object" || typeof value === "function") &&
+        value !== null &&
+        typeof (value as { x?: unknown }).x === "number" &&
+        typeof (value as { y?: unknown }).y === "number" &&
+        typeof (value as { clone?: unknown }).clone === "function" &&
+        typeof (value as { asArray?: unknown }).asArray === "function"
+    );
 }
 
 /**
@@ -228,12 +332,13 @@ export class Animatable {
     public masterFrame = 0;
     /** @internal Lite group backing a natively-delegated property animation. */
     public readonly _lite?: LiteAnimationGroup;
-    /** @internal Reason this animatable retained the compat CPU evaluator. */
+    /** @internal Reason all or part of this animatable retained the compat CPU evaluator. */
     public readonly _nativeFallbackReason?: string;
 
     private _speedRatio: number;
     private _paused = false;
     private _stopped = false;
+    private readonly _fallbackAnimations: readonly Animation[];
 
     public constructor(
         private readonly _target: unknown,
@@ -243,93 +348,57 @@ export class Animatable {
         private readonly _loop: boolean,
         speedRatio: number,
         nativeGroup?: LiteAnimationGroup,
+        fallbackAnimations: readonly Animation[] = _animations,
         nativeFallbackReason?: string
     ) {
         this._speedRatio = speedRatio;
         this._lite = nativeGroup;
+        this._fallbackAnimations = fallbackAnimations;
         this._nativeFallbackReason = nativeFallbackReason;
         this.masterFrame = _from;
         if (nativeGroup) {
             liteGoToFrame(nativeGroup, _from);
             playAnimation(nativeGroup);
-        } else {
-            this._apply();
         }
+        this._applyFallback();
     }
 
-    /** @internal Return why this animation set cannot preserve its semantics on Lite, or undefined when supported. */
-    public static _getNativeFallbackReason(target: unknown, animations: readonly Animation[], from: number, to: number, speedRatio: number): string | undefined {
-        if (animations.length === 0) {
-            return "native property animation requires at least one Animation";
-        }
-        if (!Number.isFinite(from) || !Number.isFinite(to) || !(to > from)) {
-            return "native property animation requires a finite forward play range";
-        }
-        if (!Number.isFinite(speedRatio) || speedRatio < 0) {
-            return "native property animation does not yet delegate reverse or non-finite speed ratios";
-        }
-
-        const frameRate = animations[0]!.framePerSecond;
-        if (!(frameRate > 0) || !Number.isFinite(frameRate)) {
-            return "native property animation requires a finite positive frame rate";
-        }
-
-        for (const animation of animations) {
-            if (animation.framePerSecond !== frameRate) {
-                return "native property animation requires one shared frame rate";
-            }
-            if (animation.loopMode !== AnimationLoopModes.ANIMATIONLOOPMODE_CYCLE) {
-                return "native property animation currently delegates cycle loop mode only";
-            }
-            const stride = supportedStride(animation.dataType);
-            if (stride === 0) {
-                return "native property animation supports float, Vector2, Vector3, and Quaternion tracks only";
-            }
-            const keys = animation.getKeys();
-            if (keys.length === 0) {
-                return `native property animation track "${animation.targetProperty}" requires at least one key`;
-            }
-            let previousFrame = -Infinity;
-            for (const key of keys) {
-                if (!Number.isFinite(key.frame) || key.frame < 0 || key.frame <= previousFrame || !isSupportedKeyValue(key.value, stride)) {
-                    return `native property animation track "${animation.targetProperty}" has an unsupported key frame or value`;
-                }
-                previousFrame = key.frame;
-            }
-            if (!uniformInterpolation(keys)) {
-                return `native property animation track "${animation.targetProperty}" mixes STEP and LINEAR segments`;
-            }
-            if (!supportsNativeBinding(target, animation.targetProperty, stride)) {
-                return `native property animation path "${animation.targetProperty}" is not writable by the native binding`;
-            }
-        }
-        return undefined;
-    }
-
-    /** @internal Create the facade over a native Lite property group after the supported-path predicate succeeds. */
-    public static _createNative(
-        manager: AnimationManager,
+    /** @internal Create one facade over the native-supported and explicit fallback subsets. */
+    public static _create(
+        getManager: () => AnimationManager,
         target: unknown,
         animations: readonly Animation[],
         from: number,
         to: number,
         loop: boolean,
-        speedRatio: number
+        speedRatio: number,
+        blockedNativePaths: readonly string[] = []
     ): Animatable {
-        const tracks: PropertyAnimationTrackOptions[] = animations.map((animation) => {
-            const easing = animation.getEasingFunction();
-            return {
-                path: animation.targetProperty,
-                frameRate: animation.framePerSecond,
-                interpolation: trackInterpolation(animation.getKeys()),
-                quaternion: animation.dataType === AnimationTypes.ANIMATIONTYPE_QUATERNION,
-                easing: easing ? (gradient) => easing.ease(gradient) : undefined,
-                keys: animation.getKeys().map((key) => ({ frame: key.frame, value: key.value })),
-            };
-        });
-        const clip = createPropertyAnimationClip(animations[0]!.name, tracks, { frameRate: animations[0]!.framePerSecond });
-        const group = createPropertyAnimationGroup(manager, target as object, clip, { fromFrame: from, toFrame: to, loop, speedRatio });
-        return new Animatable(target, animations.slice(), from, to, loop, speedRatio, group);
+        const partition = partitionAnimations(target, animations, from, to, speedRatio, blockedNativePaths);
+        const nativeGroup =
+            partition.nativeAnimations.length > 0 ? createNativeAnimationGroup(getManager(), target, partition.nativeAnimations, from, to, loop, speedRatio) : undefined;
+        return new Animatable(
+            target,
+            animations.slice(),
+            from,
+            to,
+            loop,
+            speedRatio,
+            nativeGroup,
+            partition.fallbackAnimations,
+            partition.fallbackReasons.length > 0 ? partition.fallbackReasons.join("; ") : undefined
+        );
+    }
+
+    /** @internal Return why any track cannot preserve its semantics on Lite, or undefined when all are supported. */
+    public static _getNativeFallbackReason(target: unknown, animations: readonly Animation[], from: number, to: number, speedRatio: number): string | undefined {
+        const reasons = partitionAnimations(target, animations, from, to, speedRatio, []).fallbackReasons;
+        return reasons.length > 0 ? reasons.join("; ") : undefined;
+    }
+
+    /** @internal Return active fallback paths that must keep later overlapping writes on the same evaluator. */
+    public _getBlockingFallbackPaths(target: unknown): readonly string[] {
+        return !this._stopped && target === this._target ? this._fallbackAnimations.map((animation) => animation.targetProperty) : [];
     }
 
     public get speedRatio(): number {
@@ -353,16 +422,16 @@ export class Animatable {
         }
         if (this._lite) {
             this.masterFrame = this._lite.currentTime * (this._animations[0]?.framePerSecond ?? 60);
+            this._applyFallback();
             if (!this._loop && this.masterFrame >= this._to) {
                 this.masterFrame = this._to;
                 this._stopped = true;
-                pauseAnimation(this._lite);
             }
             return;
         }
         const fps = this._animations[0]?.framePerSecond ?? 60;
         this.masterFrame += (deltaMs / 1000) * fps * this._speedRatio;
-        if (this.masterFrame > this._to) {
+        if (this.masterFrame >= this._to) {
             if (this._loop) {
                 const span = this._to - this._from || 1;
                 this.masterFrame = this._from + ((this.masterFrame - this._from) % span);
@@ -371,20 +440,18 @@ export class Animatable {
                 this._stopped = true;
             }
         }
-        this._apply();
+        this._applyFallback();
     }
 
     public goToFrame(frame: number): void {
-        this.masterFrame = frame;
+        this.masterFrame = clampAnimationFrame(this._animations[0], frame);
         if (this._lite) {
-            liteGoToFrame(this._lite, frame);
-            this.masterFrame = this._lite.currentTime * (this._animations[0]?.framePerSecond ?? 60);
+            liteGoToFrame(this._lite, this.masterFrame);
             if (!this._paused && !this._stopped) {
                 playAnimation(this._lite);
             }
-        } else {
-            this._apply();
         }
+        this._applyFallback();
     }
 
     public pause(): void {
@@ -395,16 +462,25 @@ export class Animatable {
     }
 
     public restart(): void {
+        const restartFromBeginning = this._stopped;
         this._paused = false;
         this._stopped = false;
-        this.masterFrame = this._from;
+        if (restartFromBeginning) {
+            this.masterFrame = this._from;
+        }
         if (this._lite) {
-            liteGoToFrame(this._lite, this._from);
+            if (restartFromBeginning) {
+                liteGoToFrame(this._lite, this._from);
+            }
             playAnimation(this._lite);
+        }
+        if (restartFromBeginning) {
+            this._applyFallback();
         }
     }
 
     public stop(): void {
+        this._paused = false;
         this._stopped = true;
         if (this._lite) {
             stopAnimation(this._lite);
@@ -412,17 +488,135 @@ export class Animatable {
     }
 
     public get animationStarted(): boolean {
-        return !this._stopped;
+        return !this._paused && !this._stopped;
     }
 
-    private _apply(): void {
-        if (this._lite) {
-            return;
-        }
-        for (const anim of this._animations) {
+    private _applyFallback(): void {
+        for (const anim of this._fallbackAnimations) {
             applyAnimatedValue(this._target, anim.targetProperty, anim.evaluate(this.masterFrame));
         }
     }
+}
+
+interface NativeAnimationPartition {
+    readonly nativeAnimations: readonly Animation[];
+    readonly fallbackAnimations: readonly Animation[];
+    readonly fallbackReasons: readonly string[];
+}
+
+function partitionAnimations(
+    target: unknown,
+    animations: readonly Animation[],
+    from: number,
+    to: number,
+    speedRatio: number,
+    blockedNativePaths: readonly string[]
+): NativeAnimationPartition {
+    const globalReason = getGlobalNativeFallbackReason(animations, from, to, speedRatio);
+    if (globalReason) {
+        return { nativeAnimations: [], fallbackAnimations: animations.slice(), fallbackReasons: [globalReason] };
+    }
+
+    const reasons = new Map<Animation, string>();
+    for (const animation of animations) {
+        const reason = getTrackNativeFallbackReason(target, animation, from, to);
+        if (reason) {
+            reasons.set(animation, reason);
+        }
+    }
+
+    let changed = true;
+    while (changed) {
+        changed = false;
+        const fallbackPaths = [...blockedNativePaths, ...animations.filter((animation) => reasons.has(animation)).map((animation) => animation.targetProperty)];
+        for (const animation of animations) {
+            if (!reasons.has(animation) && fallbackPaths.some((path) => pathsOverlap(path, animation.targetProperty))) {
+                reasons.set(animation, `native property animation path "${animation.targetProperty}" overlaps a compat fallback path`);
+                changed = true;
+            }
+        }
+    }
+
+    return {
+        nativeAnimations: animations.filter((animation) => !reasons.has(animation)),
+        fallbackAnimations: animations.filter((animation) => reasons.has(animation)),
+        fallbackReasons: [...new Set(reasons.values())],
+    };
+}
+
+function getGlobalNativeFallbackReason(animations: readonly Animation[], from: number, to: number, speedRatio: number): string | undefined {
+    if (animations.length === 0) {
+        return "native property animation requires at least one Animation";
+    }
+    if (!Number.isFinite(from) || !Number.isFinite(to) || !(to > from)) {
+        return "native property animation requires a finite forward play range";
+    }
+    if (!Number.isFinite(speedRatio) || speedRatio < 0) {
+        return "native property animation does not delegate reverse or non-finite speed ratios";
+    }
+    const frameRate = animations[0]!.framePerSecond;
+    if (!(frameRate > 0) || !Number.isFinite(frameRate)) {
+        return "native property animation requires a finite positive frame rate";
+    }
+    if (animations.some((animation) => animation.framePerSecond !== frameRate)) {
+        return "native property animation requires one shared frame rate";
+    }
+    return undefined;
+}
+
+function getTrackNativeFallbackReason(target: unknown, animation: Animation, from: number, to: number): string | undefined {
+    if (animation.loopMode !== AnimationLoopModes.ANIMATIONLOOPMODE_CYCLE) {
+        return `native property animation track "${animation.targetProperty}" requires cycle loop mode`;
+    }
+    const stride = supportedStride(animation.dataType);
+    if (stride === 0) {
+        return `native property animation track "${animation.targetProperty}" has an unsupported data type`;
+    }
+    const keys = animation.getKeys();
+    if (keys.length === 0) {
+        return `native property animation track "${animation.targetProperty}" requires at least one key`;
+    }
+    let previousFrame = -Infinity;
+    for (const key of keys) {
+        if (!Number.isFinite(key.frame) || key.frame < 0 || key.frame <= previousFrame || !isSupportedKeyValue(key.value, stride)) {
+            return `native property animation track "${animation.targetProperty}" has an unsupported key frame or value`;
+        }
+        previousFrame = key.frame;
+    }
+    if (from < keys[0]!.frame || to > keys[keys.length - 1]!.frame) {
+        return `native property animation track "${animation.targetProperty}" does not cover the requested play range`;
+    }
+    if (!uniformInterpolation(keys)) {
+        return `native property animation track "${animation.targetProperty}" mixes STEP and LINEAR segments`;
+    }
+    if (!supportsNativeBinding(target, animation.targetProperty, stride)) {
+        return `native property animation path "${animation.targetProperty}" is not writable by the native binding`;
+    }
+    return undefined;
+}
+
+function createNativeAnimationGroup(
+    manager: AnimationManager,
+    target: unknown,
+    animations: readonly Animation[],
+    from: number,
+    to: number,
+    loop: boolean,
+    speedRatio: number
+): LiteAnimationGroup {
+    const tracks: PropertyAnimationTrackOptions[] = animations.map((animation) => {
+        const stride = supportedStride(animation.dataType);
+        return {
+            path: animation.targetProperty,
+            frameRate: animation.framePerSecond,
+            interpolation: trackInterpolation(animation.getKeys()),
+            quaternion: animation.dataType === AnimationTypes.ANIMATIONTYPE_QUATERNION,
+            easing: (gradient) => animation.getEasingFunction()?.ease(gradient) ?? gradient,
+            keys: animation.getKeys().map((key) => ({ frame: key.frame, value: toNativeKeyValue(key.value, stride) })),
+        };
+    });
+    const clip = createPropertyAnimationClip(animations[0]!.name, tracks, { frameRate: animations[0]!.framePerSecond });
+    return createPropertyAnimationGroup(manager, target as object, clip, { fromFrame: from, toFrame: to, loop, speedRatio });
 }
 
 function supportedStride(dataType: number): number {
@@ -440,11 +634,27 @@ function supportedStride(dataType: number): number {
     }
 }
 
-function isSupportedKeyValue(value: number | number[], stride: number): boolean {
-    if (stride === 1) {
-        return typeof value === "number" && Number.isFinite(value);
+function isSupportedKeyValue(value: AnimationValue, stride: number): boolean {
+    return readAnimationComponents(value, stride) !== undefined;
+}
+
+function toNativeKeyValue(value: AnimationValue, stride: number): number | number[] {
+    if (typeof value === "number") {
+        return value;
     }
-    return Array.isArray(value) && value.length === stride && value.every(Number.isFinite);
+    return readAnimationComponents(value, stride)!;
+}
+
+function pathsOverlap(a: string, b: string): boolean {
+    return a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
+}
+
+function clampAnimationFrame(animation: Animation | undefined, frame: number): number {
+    const keys = animation?.getKeys();
+    if (!keys || keys.length === 0) {
+        return frame;
+    }
+    return Math.min(Math.max(frame, keys[0]!.frame), keys[keys.length - 1]!.frame);
 }
 
 function uniformInterpolation(keys: readonly IAnimationKey[]): boolean {
