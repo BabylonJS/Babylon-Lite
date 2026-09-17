@@ -54,7 +54,7 @@ function createTaggedPlane(scene: Scene, width: number, x: number, renderedColor
 
 (async function () {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-    const engine = new WebGPUEngine(canvas, { antialias: false, adaptToDeviceRatio: true });
+    const engine = new WebGPUEngine(canvas, { antialias: false, adaptToDeviceRatio: false });
     await engine.initAsync();
     engine.useReverseDepthBuffer = true;
     const scene = new Scene(engine);

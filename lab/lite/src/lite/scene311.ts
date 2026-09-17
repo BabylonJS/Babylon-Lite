@@ -54,7 +54,7 @@ async function waitFrames(count: number): Promise<void> {
 
 async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
-    const engine = await createEngine(canvas);
+    const engine = await createEngine(canvas, { maxDevicePixelRatio: 1 });
     const scene = createSceneContext(engine, { defaultRenderTask: false });
     scene.clearColor = { r: 0.015, g: 0.015, b: 0.02, a: 1 };
 
