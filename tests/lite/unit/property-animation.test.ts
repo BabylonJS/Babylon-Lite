@@ -7,6 +7,7 @@ import { enablePropertyAnimationBlending } from "../../../packages/babylon-lite/
 import { enableAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-gltf-mixer";
 import { crossFadeAnimationGroups, fadeAnimationWeight } from "../../../packages/babylon-lite/src/animation/animation-weight-fade";
 import { createPropertyAnimationClip, createPropertyAnimationGroup } from "../../../packages/babylon-lite/src/animation/property-animation";
+import { quadraticEase } from "../../../packages/babylon-lite/src/animation/easing";
 import { evaluateSampler } from "../../../packages/babylon-lite/src/animation/evaluate";
 import { INTERP_CUBICSPLINE, INTERP_LINEAR, INTERP_STEP } from "../../../packages/babylon-lite/src/animation/types";
 import type { AnimationGroup } from "../../../packages/babylon-lite/src/animation/animation-group";
@@ -200,7 +201,7 @@ describe("Property animation", () => {
         const clip = createPropertyAnimationClip("eased", [
             {
                 path: "alpha",
-                easing: (gradient) => gradient * gradient,
+                easing: quadraticEase,
                 keys: [
                     { time: 0, value: 0 },
                     { time: 1, value: 8 },

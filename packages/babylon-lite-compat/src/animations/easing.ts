@@ -1,9 +1,24 @@
 /**
- * Babylon.js-compatible easing functions (pure, no Babylon Lite dependency).
+ * Babylon.js-compatible easing functions over Babylon Lite's functional curves.
  *
- * These mirror Babylon.js's `EasingFunction` hierarchy and easing modes for use
- * with property animations. They are fully unit-testable.
+ * These retain Babylon.js's class hierarchy and easing modes for porting while
+ * delegating curve math to tree-shakable native Lite functions.
  */
+
+import {
+    backEase,
+    bezierCurveEase,
+    bounceEase,
+    circleEase,
+    cubicEase,
+    elasticEase,
+    exponentialEase,
+    powerEase,
+    quadraticEase,
+    quarticEase,
+    quinticEase,
+    sineEase,
+} from "babylon-lite";
 
 export const EASINGMODE_EASEIN = 0;
 export const EASINGMODE_EASEOUT = 1;
@@ -55,107 +70,113 @@ export abstract class EasingFunction implements IEasingFunction {
 
 export class CircleEase extends EasingFunction {
     public easeInCore(gradient: number): number {
-        const g = Math.max(0, Math.min(1, gradient));
-        return 1 - Math.sqrt(1 - g * g);
+        return circleEase(gradient);
     }
 }
 
 export class QuadraticEase extends EasingFunction {
     public easeInCore(gradient: number): number {
-        return gradient * gradient;
+        return quadraticEase(gradient);
     }
 }
 
 export class CubicEase extends EasingFunction {
     public easeInCore(gradient: number): number {
-        return gradient * gradient * gradient;
+        return cubicEase(gradient);
     }
 }
 
 export class QuarticEase extends EasingFunction {
     public easeInCore(gradient: number): number {
-        return gradient * gradient * gradient * gradient;
+        return quarticEase(gradient);
     }
 }
 
 export class QuinticEase extends EasingFunction {
     public easeInCore(gradient: number): number {
-        return gradient * gradient * gradient * gradient * gradient;
+        return quinticEase(gradient);
     }
 }
 
 export class SineEase extends EasingFunction {
     public easeInCore(gradient: number): number {
-        return 1 - Math.sin((Math.PI / 2) * (1 - gradient));
+        return sineEase(gradient);
     }
 }
 
 export class ExponentialEase extends EasingFunction {
-    public constructor(private readonly exponent: number = 2) {
+    public constructor(public exponent: number = 2) {
         super();
     }
 
     public easeInCore(gradient: number): number {
-        if (this.exponent <= 0) {
-            return gradient;
-        }
-        return (Math.exp(this.exponent * gradient) - 1) / (Math.exp(this.exponent) - 1);
+        return exponentialEase(gradient, this.exponent);
     }
 }
 
 export class BackEase extends EasingFunction {
-    public constructor(private readonly amplitude: number = 1) {
+    public constructor(public amplitude: number = 1) {
         super();
     }
 
     public easeInCore(gradient: number): number {
-        const num = Math.max(0, this.amplitude);
-        return Math.pow(gradient, 3) - gradient * num * Math.sin(Math.PI * gradient);
+        return backEase(gradient, this.amplitude);
     }
 }
 
 export class ElasticEase extends EasingFunction {
     public constructor(
-        private readonly oscillations: number = 3,
-        private readonly springiness: number = 3
+        public oscillations: number = 3,
+        public springiness: number = 3
     ) {
         super();
     }
 
     public easeInCore(gradient: number): number {
-        const num2 = Math.max(0, this.oscillations);
-        const num3 = Math.max(0, this.springiness);
-        const num = num3 === 0 ? gradient : (Math.exp(num3 * gradient) - 1) / (Math.exp(num3) - 1);
-        return num * Math.sin((2 * Math.PI * num2 + Math.PI / 2) * gradient);
+        return elasticEase(gradient, this.oscillations, this.springiness);
     }
 }
 
 export class BounceEase extends EasingFunction {
     public constructor(
-        private readonly bounces: number = 3,
-        private readonly bounciness: number = 2
+        public bounces: number = 3,
+        public bounciness: number = 2
     ) {
         super();
     }
 
     public easeInCore(gradient: number): number {
-        const num = Math.max(0, this.bounces);
-        let bounciness = this.bounciness;
-        if (bounciness <= 1) {
-            bounciness = 1.001;
-        }
-        const num2 = Math.pow(bounciness, num);
-        const num3 = 1 - bounciness;
-        const num4 = (1 - num2) / num3 + num2 * 0.5;
-        const num5 = gradient * num4;
-        const num6 = Math.log(-num5 * (1 - bounciness) + 1) / Math.log(bounciness);
-        const num7 = Math.floor(num6);
-        const num8 = num7 + 1;
-        const num9 = (1 - Math.pow(bounciness, num7)) / (num3 * num4);
-        const num10 = (1 - Math.pow(bounciness, num8)) / (num3 * num4);
-        const num11 = (num9 + num10) * 0.5;
-        const num12 = gradient - num11;
-        const num13 = num11 - num9;
-        return (-Math.pow(1 / bounciness, num - num7) / (num13 * num13)) * (num12 - num13) * (num12 + num13);
+        return bounceEase(gradient, this.bounces, this.bounciness);
+    }
+}
+
+/**
+ * Babylon.js-compatible power easing class.
+ */
+export class PowerEase extends EasingFunction {
+    public constructor(public power: number = 2) {
+        super();
+    }
+
+    public easeInCore(gradient: number): number {
+        return powerEase(gradient, this.power);
+    }
+}
+
+/**
+ * Babylon.js-compatible cubic Bezier easing class.
+ */
+export class BezierCurveEase extends EasingFunction {
+    public constructor(
+        public x1: number = 0,
+        public y1: number = 0,
+        public x2: number = 1,
+        public y2: number = 1
+    ) {
+        super();
+    }
+
+    public easeInCore(gradient: number): number {
+        return bezierCurveEase(gradient, this.x1, this.y1, this.x2, this.y2);
     }
 }

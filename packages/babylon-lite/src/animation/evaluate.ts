@@ -2,6 +2,7 @@
 // Pure functions, zero allocation in the hot path.
 
 import { F32 } from "../engine/typed-arrays.js";
+import type { AnimationEasing } from "./easing.js";
 import type { AnimationSampler } from "./types.js";
 import { INTERP_STEP, INTERP_CUBICSPLINE } from "./types.js";
 
@@ -185,7 +186,7 @@ export function evaluatePropertySampler(
     t: number,
     stride: number,
     isQuat: boolean,
-    easing: ((gradient: number) => number) | undefined,
+    easing: AnimationEasing | undefined,
     dst: Float32Array,
     dstOffset: number
 ): void {

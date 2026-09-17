@@ -107,7 +107,7 @@ export interface PropertyAnimationTrackOptions {
      * Optional segment-local progress transform. Receives the normalized progress
      * between the selected key pair and returns the progress used for interpolation.
      */
-    readonly easing?: (gradient: number) => number;
+    readonly easing?: AnimationEasing;
 }
 
 export interface PropertyAnimationClipOptions {
@@ -119,7 +119,7 @@ export interface PropertyAnimationTrack {
     readonly sampler: AnimationSampler;
     readonly stride: number;
     readonly quaternion: boolean;
-    readonly easing?: (gradient: number) => number;
+    readonly easing?: AnimationEasing;
 }
 
 export interface PropertyAnimationClip {
@@ -327,6 +327,44 @@ and LINEAR interpolation path. The generic evaluator intentionally keeps its hot
 path inline so glTF-only bundles remain byte-identical. Property tracks cannot
 produce CUBICSPLINE samplers, so Hermite evaluation remains exclusively in the
 generic glTF path rather than being duplicated in the property evaluator.
+
+### Native Easing Curves
+
+Lite exports pure ease-in functions that match the curve math used by the compat
+layer:
+
+```typescript
+circleEase(gradient);
+quadraticEase(gradient);
+cubicEase(gradient);
+quarticEase(gradient);
+quinticEase(gradient);
+sineEase(gradient);
+powerEase(gradient, power);
+exponentialEase(gradient, exponent);
+backEase(gradient, amplitude);
+elasticEase(gradient, oscillations, springiness);
+bounceEase(gradient, bounces, bounciness);
+bezierCurveEase(gradient, x1, y1, x2, y2);
+```
+
+Fixed curves can be passed directly as `PropertyAnimationTrackOptions.easing`.
+Parameterized curves also provide `createPowerEase`, `createExponentialEase`,
+`createBackEase`, `createElasticEase`, `createBounceEase`, and
+`createBezierCurveEase`, which capture parameters and return an
+`AnimationEasing` callback. These are named standalone exports rather than a
+registry or class hierarchy, so importing one curve does not retain unused
+curves. Calling a factory is the only operation that allocates.
+
+The functions expose raw ease-in curves. Babylon.js easing modes remain a compat
+facade concern: `EasingFunction.ease()` remaps the input/output for ease-out and
+ease-in-out, then delegates the raw curve calculation to Lite.
+
+Per-key easing remains outside this track-wide contract. Supporting
+`IAnimationKey.easingFunction` cleanly would require property-track compilation
+to retain an optional easing callback per segment and
+`evaluatePropertySampler()` to select it with the start-key index. Generic glTF
+`AnimationSampler` data would remain unchanged.
 
 ### Scratch Buffer: `_quat`
 

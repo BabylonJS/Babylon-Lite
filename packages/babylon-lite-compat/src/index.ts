@@ -166,6 +166,8 @@ export {
     BackEase,
     ElasticEase,
     BounceEase,
+    PowerEase,
+    BezierCurveEase,
     EASINGMODE_EASEIN,
     EASINGMODE_EASEOUT,
     EASINGMODE_EASEINOUT,

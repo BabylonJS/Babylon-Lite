@@ -6,6 +6,7 @@ import type { AnimationManager } from "./animation-manager.js";
 import { INTERP_LINEAR, INTERP_STEP } from "./types.js";
 import type { AnimationSampler } from "./types.js";
 import { evaluatePropertySampler } from "./evaluate.js";
+import type { AnimationEasing } from "./easing.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
 
 const DEFAULT_FRAME_RATE = 60;
@@ -31,7 +32,7 @@ export interface PropertyAnimationTrackOptions {
     readonly interpolation?: PropertyAnimationInterpolation;
     readonly quaternion?: boolean;
     /** Optional transform of normalized progress within each non-STEP segment. */
-    readonly easing?: (gradient: number) => number;
+    readonly easing?: AnimationEasing;
 }
 
 /** Options for {@link createPropertyAnimationClip}. */
@@ -45,7 +46,7 @@ export interface PropertyAnimationTrack {
     readonly sampler: AnimationSampler;
     readonly stride: number;
     readonly quaternion: boolean;
-    readonly easing?: (gradient: number) => number;
+    readonly easing?: AnimationEasing;
 }
 
 /** A reusable, target-independent set of compiled property tracks with a total duration. */
