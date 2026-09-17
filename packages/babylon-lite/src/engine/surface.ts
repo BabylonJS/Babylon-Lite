@@ -1,6 +1,6 @@
 import type { EngineContext, RenderCanvas, RenderingContext } from "./engine.js";
 import type { RenderTarget } from "./render-target.js";
-import { createRenderTarget } from "./render-target.js";
+import { _createDirectRenderTarget } from "./render-target.js";
 import { _ENGINE_TAG } from "./version.js";
 
 /** @internal Type guard: true for a DOM canvas (has layout + attributes). */
@@ -212,7 +212,7 @@ export function _buildSurface(engine: EngineContext, canvas: RenderCanvas, optio
     // Surface-owned swapchain target — a color-only, single-sample RT that wraps the
     // canvas texture. `_eager` so `buildRenderTarget` skips it; the surface refreshes
     // its textures each frame from `context.getCurrentTexture()`.
-    const scRT = createRenderTarget({ lbl: "swapchain", format: renderFormat, samples: 1, size: { width: 0, height: 0 } });
+    const scRT = _createDirectRenderTarget({ lbl: "swapchain", format: renderFormat, samples: 1, size: { width: 0, height: 0 } });
     scRT._eager = true;
     return {
         engine,

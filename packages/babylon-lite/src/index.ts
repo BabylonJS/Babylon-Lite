@@ -62,6 +62,8 @@ export { enableErrorDecoding, decodeError } from "./enable-error-decoding.js";
 // Subtree visibility toggle (used to hide a node before deferring its disposal,
 // e.g. streaming voxel chunks). Standalone module — bundled only when used.
 export { setSubtreeVisible } from "./scene/visibility.js";
+export { packMeshBlendingTag, unpackMeshBlendingTag, createDefaultMeshBlendRadiusDefinitions } from "./mesh/mesh-blending-tag.js";
+export type { MeshBlendingTag, MeshBlendRadiusDefinition, MeshBlendRadiusDefinitions } from "./mesh/mesh-blending-tag.js";
 
 // ─── Frame graph ─────────────────────────────────────────────────────
 // Scene-owned ordered list of tasks. The default scene pass is a
@@ -91,7 +93,7 @@ export { createGeometryRendererTask } from "./frame-graph/geometry-renderer-task
 export type { GeometryRendererTask, GeometryRendererTaskConfig, GeometryRendererTextureDescription } from "./frame-graph/geometry-renderer-task.js";
 export { GeometryTextureType } from "./frame-graph/geometry-types.js";
 export type { ShadowTask } from "./frame-graph/shadow-task.js";
-export type { RenderTarget, RenderTargetDescriptor } from "./engine/render-target.js";
+export type { RenderTarget, RenderTargetDescriptor, RenderTargetSurfaceSize } from "./engine/render-target.js";
 export { createRenderTarget } from "./engine/render-target.js";
 export { createRenderTargetTexture, disposeRenderTargetTexture } from "./texture/rtt.js";
 export { createSurfaceRenderTargetTexture, onRenderTargetTextureResize } from "./texture/rtt-surface.js";
@@ -374,6 +376,7 @@ export {
     setShaderVector3,
     setShaderMatrix,
 } from "./material/shader/shader-material.js";
+export { wgsl } from "./shader/wgsl.js";
 export { enableShaderUniformRangeUpdates } from "./material/shader/shader-uniform-range.js";
 export { enableShaderMaterialUniformCaching } from "./material/shader/enable-shader-material-uniform-caching.js";
 export { enableShaderMaterialInstanceWorld } from "./material/shader/enable-shader-material-instance-world.js";

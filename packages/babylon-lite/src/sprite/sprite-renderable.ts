@@ -161,7 +161,8 @@ function bindLayer(r: SpriteRenderableInternal, engine: EngineContext, target: R
         depthWrite,
         target._depthStencilFormat,
         getSceneBindGroupLayout(engine),
-        r._layer
+        r._layer,
+        target._depthCompare ?? "greater-equal"
     );
     let bindGroup = r._bindGroups.get(pipeline);
     if (!bindGroup) {

@@ -93,7 +93,7 @@ export interface ShaderMaterial extends Material {
 export type ShaderAttributeName = "position" | "normal" | "uv" | "uv2" | "tangent" | "color";
 ```
 
-The order in `options.attributes` is the vertex buffer binding order and the WGSL `@location` order. Unsupported names throw during material creation. Missing optional mesh buffers use zero-filled buffers, matching NodeMaterial behavior. `position` is required for normal mesh rendering.
+The order in `options.attributes` is the vertex buffer binding order and the WGSL `@location` order. Unsupported names throw during material creation. Missing optional mesh buffers use zero-filled buffers. When `enableShaderMaterialFinalColor()` is enabled, its missing `color` fallback is instead white so color multiplication does not black out meshes without vertex colors. `position` is required for normal mesh rendering.
 
 ### Thin instances and GPU culling
 
@@ -150,8 +150,9 @@ The generated implementation returns white when the material declares no color a
 no instance-color stream, `input.color` for vertex color only, `input.instanceColor` for instance color only,
 and `input.color * input.instanceColor` when both are present. `input.color` remains the ordinary mesh
 per-vertex attribute requested through `attributes: ["color"]`; `setThinInstanceColors()` supplies the separate
-instance-rate `input.instanceColor`. A declared mesh color attribute whose buffer is absent retains
-ShaderMaterial's existing zero-filled fallback behavior.
+instance-rate `input.instanceColor`. When a material declares `color` but a mesh has no vertex-color buffer,
+`input.color` uses a mesh-owned neutral white fallback, so an available instance color passes through
+unchanged. The fallback participates in normal shared-geometry disposal, resize retirement, and device recovery.
 
 Like `getFinalWorld`, the final-color helper is emitted only for materials that opt in. The instance-color
 specialization is selected from the bound vertex-buffer layout rather than from a pipeline-key naming
@@ -251,7 +252,11 @@ Enabling is idempotent per scene, and the same material may be registered with m
 Materials that do not opt in keep the original renderable-owned whole-buffer path and pull in zero range-update
 implementation bytes.
 
-`setShaderTexture` validates that the sampler exists, stores the `Texture2D | null`, and increments `_resourceVersion`. The renderable rebuilds the group-1 bind group when the resource version changes.
+`setShaderTexture` validates that the sampler exists and tracks both the `Texture2D | null` identity
+and the view/sampler captured by the bind group. It increments `_resourceVersion` when either the
+facade or those resources change. This keeps ordinary repeated sets allocation-free while allowing a
+surface RTT resize callback to pass the same stable facade again and rebuild against its replacement
+attachment. The renderable rebuilds the group-1 bind group when the resource version changes.
 
 Convenience wrappers may be added if they stay small and tree-shakable:
 

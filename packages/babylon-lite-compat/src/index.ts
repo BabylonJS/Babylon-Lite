@@ -84,6 +84,28 @@ export { MeshoptCompression } from "./meshes/compression.js";
 export { MorphTarget, MorphTargetManager } from "./morph/morph.js";
 export { GaussianSplattingMesh } from "./meshes/gaussian-splatting.js";
 export type { ISafeOrbitCameraLimits } from "./meshes/gaussian-splatting.js";
+export {
+    MeshBlendingRadiusClass,
+    PackMeshBlendingTag,
+    UnpackMeshBlendingTag,
+    MeshBlendQuality,
+    MeshBlendDebugMode,
+    MeshBlendDepthType,
+    CreateDefaultMeshBlendRadiusDefinitions,
+    ThinMeshBlendingPostProcess,
+    MeshBlendingPostProcess,
+    FrameGraphMeshBlendingTask,
+    NodeRenderGraphMeshBlendingPostProcessBlock,
+    RegisterMeshBlendingPostProcessBlock,
+} from "./meshes/mesh-blending.js";
+export type {
+    IMeshBlendingTag,
+    IMeshBlendRadiusDefinition,
+    MeshBlendRadiusDefinitions,
+    IMeshBlendConfiguration,
+    IThinMeshBlendingPostProcessOptions,
+    IMeshBlendingPostProcessOptions,
+} from "./meshes/mesh-blending.js";
 
 // ─── Materials ───────────────────────────────────────────────────────
 export {

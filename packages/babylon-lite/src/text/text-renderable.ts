@@ -76,7 +76,7 @@ const TEXT_UBO_BYTES = 64 /* mvp */ + 16 /* viewport */ + 16; /* color */
 const _mvpScratch = new Float32Array(16);
 
 function targetSig(target: RenderTargetSignature): string {
-    return (target._colorFormat ?? "-") + ":" + (target._sampleCount ?? 1) + ":" + (target._depthStencilFormat ?? "-");
+    return (target._colorFormat ?? "-") + ":" + (target._sampleCount ?? 1) + ":" + (target._depthStencilFormat ?? "-") + ":" + (target._depthCompare ?? "greater-equal");
 }
 
 /** Create a scene renderable that draws the supplied `TextData` through the normal renderable pipeline.
@@ -126,10 +126,11 @@ function ensureGpu(
     colorFormat: GPUTextureFormat,
     sampleCount: 1 | 4,
     depthFormat: GPUTextureFormat | null,
-    depthWrite: boolean
+    depthWrite: boolean,
+    depthCompare: GPUCompareFunction
 ): TextRenderableGpu {
     const device = engine._device;
-    const { _pipeline: pipeline, _variantPipeline: variantPipeline } = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite, r);
+    const { _pipeline: pipeline, _variantPipeline: variantPipeline } = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite, r, depthCompare);
     const key = targetSig(target);
     let gpu = r._gpu;
     if (gpu && gpu._device !== device) {
@@ -207,8 +208,9 @@ function bindTextRenderable(r: TextRenderable, engine: EngineContext, target: Re
     // same target signature, same depth-write, same alpha-to-coverage owner.
     const sampleCount = target._sampleCount === 1 ? 1 : 4;
     const depthFormat = target._depthStencilFormat ?? null;
+    const depthCompare = target._depthCompare ?? "greater-equal";
     const depthWrite = !r.ignoreDepth;
-    const gpu = ensureGpu(r, engine, target, colorFormat, sampleCount, depthFormat, depthWrite);
+    const gpu = ensureGpu(r, engine, target, colorFormat, sampleCount, depthFormat, depthWrite, depthCompare);
     const cache = getTextPipelineCache(engine);
     const quadVertex = cache._quadVertexBuffer;
     const bindGroupLayout = cache._bindGroupLayout;
@@ -223,7 +225,7 @@ function bindTextRenderable(r: TextRenderable, engine: EngineContext, target: Re
             // binding. The aliasing test costs a base consumer one identity comparison per
             // frame and stops matching after the single refresh, so no key is ever rebuilt.
             if (gpu._variantPipeline === gpu._pipeline && _textVariantResolver) {
-                gpu._variantPipeline = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite, r)._variantPipeline;
+                gpu._variantPipeline = getOrCreateTextPipeline(engine, colorFormat, sampleCount, depthFormat, depthWrite, r, depthCompare)._variantPipeline;
             }
             updateTextRenderable(r, engine, gpu, bindGroupLayout, context);
         },
