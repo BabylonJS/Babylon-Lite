@@ -271,8 +271,8 @@ function _reRegionBody(world: PhysicsWorld, body: PhysicsBody): void {
 
     hknp.HP_World_RemoveBody(current._world, body._hkBody);
     const o = next.origin;
-    hknp.HP_Body_SetQTransform(body._hkBody, [[wx - o.x, wy - o.y, wz - o.z], orientation]);
     hknp.HP_World_AddBody(next._world, body._hkBody, false);
+    hknp.HP_Body_SetQTransform(body._hkBody, [[wx - o.x, wy - o.y, wz - o.z], orientation]);
     hknp.HP_Body_SetLinearVelocity(body._hkBody, linVel);
     hknp.HP_Body_SetAngularVelocity(body._hkBody, angVel);
     body._region = next;
