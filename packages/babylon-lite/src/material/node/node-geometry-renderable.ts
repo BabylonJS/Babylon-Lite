@@ -29,7 +29,7 @@ import type { MeshGroupBuilder, MeshRebuildResources, Renderable } from "../../r
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 import type { SceneContext } from "../../scene/scene-core.js";
 import type { Material } from "../material.js";
-import { GeometryTextureType, _resolveGeometryMeshBlendTag } from "../../frame-graph/geometry-types.js";
+import { GeometryTextureType, _geometryColorTarget, _resolveGeometryMeshBlendTag } from "../../frame-graph/geometry-types.js";
 import type { NodeExpr, NodeBuildState, NodeGraph, NodeMeshFeatureCompile, NodeMeshFeatureWriter } from "./node-types.js";
 import { emitGraph } from "./node-emitter.js";
 import { findBlockByClassName } from "./node-parser.js";
@@ -253,7 +253,7 @@ function ensureGeometryCompile(view: NodeGeometryMaterialView, res: NodeGeometry
                 fragment: {
                     module: a._shaderModule,
                     entryPoint: "fs_main",
-                    targets: colorFormats.map((format) => (blend && format !== "r8uint" ? { format, blend } : { format })),
+                    targets: colorFormats.map((format) => _geometryColorTarget(format, blend, device)),
                 },
                 depthStencil: { format: a._depthFormat, depthCompare: a._depthCompare, depthWriteEnabled: !source._needsAlphaBlending },
                 multisample: { count: a._msaaSamples },

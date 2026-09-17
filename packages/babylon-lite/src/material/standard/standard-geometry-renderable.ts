@@ -37,7 +37,7 @@ import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
 import type { ComposedShader, ShaderFragment } from "../../shader/fragment-types.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
-import { GeometryTextureType, _resolveGeometryMeshBlendTag } from "../../frame-graph/geometry-types.js";
+import { GeometryTextureType, _geometryColorTarget, _resolveGeometryMeshBlendTag } from "../../frame-graph/geometry-types.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 
 import type { Material } from "../material.js";
@@ -637,7 +637,7 @@ function _getOrCreateGeometryPipeline(
               alpha: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
           }
         : undefined;
-    const colorTargets: GPUColorTargetState[] = formats.map((fmt) => (blendState && fmt !== "r8uint" ? { format: fmt, blend: blendState } : { format: fmt }));
+    const colorTargets: GPUColorTargetState[] = formats.map((format) => _geometryColorTarget(format, blendState, device));
     const cullMode = (res._features & DOUBLE_SIDED) !== 0 ? "none" : view._reverseCulling ? "front" : "back";
     const pipeline = device.createRenderPipeline({
         layout: res._pipelineLayout,

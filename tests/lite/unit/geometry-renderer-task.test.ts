@@ -33,6 +33,7 @@ gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 } as unknown as GPUSh
 gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4, COPY_SRC: 0x1, COPY_DST: 0x2 } as unknown as GPUTextureUsage;
 function makeMockEngine(): EngineContext {
     const device = {
+        features: new Set<GPUFeatureName>(),
         createBindGroupLayout: (d: GPUBindGroupLayoutDescriptor) => d as unknown as GPUBindGroupLayout,
         createBindGroup: (d: GPUBindGroupDescriptor) => d as unknown as GPUBindGroup,
         createPipelineLayout: (d: GPUPipelineLayoutDescriptor) => d as unknown as GPUPipelineLayout,
@@ -1048,21 +1049,22 @@ describe("Mesh-blending geometry shader contracts", () => {
         (material._graph as { alphaMode: number }).alphaMode = 2;
 
         const transparentView = createNodeGeometryMaterialView(material, {
-            attachments: [GeometryTextureType.ALBEDO],
+            attachments: [GeometryTextureType.VIEW_DEPTH, GeometryTextureType.ALBEDO],
             emitColor: false,
         });
         const transparentResources: MeshRebuildResources = { _lifetimeDisposers: [] };
         const transparentRenderable = buildNodeGeometryRenderable(scene, mesh, transparentView, transparentResources);
         const createPipeline = vi.spyOn(engine._device, "createRenderPipeline");
         transparentRenderable.bind(engine, {
-            _colorFormat: "rgba8unorm",
-            _colorFormats: ["rgba8unorm"],
+            _colorFormat: "r32float",
+            _colorFormats: ["r32float", "rgba8unorm"],
             _depthStencilFormat: "depth32float",
             _depthCompare: "greater-equal",
             _sampleCount: 1,
         } as unknown as RenderTargetSignature);
         const transparentPipeline = createPipeline.mock.calls.at(-1)![0];
-        expect(transparentPipeline.fragment!.targets[0]).toMatchObject({ format: "rgba8unorm", blend: expect.any(Object) });
+        expect(transparentPipeline.fragment!.targets[0]).toEqual({ format: "r32float" });
+        expect(transparentPipeline.fragment!.targets[1]).toMatchObject({ format: "rgba8unorm", blend: expect.any(Object) });
         expect(transparentPipeline.depthStencil!.depthWriteEnabled).toBe(false);
         transparentResources._lifetimeDisposers.forEach((dispose) => dispose());
 

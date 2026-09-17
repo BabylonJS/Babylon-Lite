@@ -102,3 +102,11 @@ export function _validateGeometryMeshBlendTag(tag: number): number {
 export function _resolveGeometryMeshBlendTag(mesh: Mesh): number {
     return _validateGeometryMeshBlendTag(mesh.meshBlendingTag ?? 0);
 }
+
+/** @internal Create a geometry MRT color target without requesting unsupported integer or float32 blending. */
+export function _geometryColorTarget(format: GPUTextureFormat, blend: GPUBlendState | undefined, device: GPUDevice): GPUColorTargetState {
+    if (!blend || format.endsWith("uint") || format.endsWith("sint") || (format.endsWith("32float") && !device.features.has("float32-blendable"))) {
+        return { format };
+    }
+    return { format, blend };
+}

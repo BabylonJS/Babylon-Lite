@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { Camera } from "../../../packages/babylon-lite/src/camera/camera";
+import { enableOrthographicCamera } from "../../../packages/babylon-lite/src/camera/orthographic";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { buildRenderTarget, createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
@@ -287,6 +288,26 @@ describe("mesh-blending configuration and radius math", () => {
         task.record();
         task.alphaMode = 2;
         expect(() => task.record()).toThrow(/float32-blendable/);
+        task.dispose();
+    });
+
+    it("inverts valid large-scale orthographic projections", () => {
+        const { camera, engine, target } = createMeshBlendingTestContext();
+        camera.nearPlane = 0.1;
+        camera.farPlane = 10_000;
+        enableOrthographicCamera(camera, { halfHeight: 1_000 });
+        const task = createMeshBlendingPostProcessTask(
+            {
+                sourceTexture: target("rgba16float"),
+                meshBlendTagTexture: target("r8uint"),
+                depthTexture: target("r32float"),
+                camera,
+            },
+            engine
+        );
+
+        task.record();
+        expect(() => task.updateUniforms()).not.toThrow();
         task.dispose();
     });
 

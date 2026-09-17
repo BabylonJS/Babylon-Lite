@@ -717,7 +717,25 @@ function invertMat4IntoF32(out: Float32Array, offset: number, input: Mat4): bool
     const b10 = a21 * a33 - a23 * a31;
     const b11 = a22 * a33 - a23 * a32;
     let determinant = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
-    if (Math.abs(determinant) < 1e-10) {
+    const maxMagnitude = Math.max(
+        Math.abs(a00),
+        Math.abs(a01),
+        Math.abs(a02),
+        Math.abs(a03),
+        Math.abs(a10),
+        Math.abs(a11),
+        Math.abs(a12),
+        Math.abs(a13),
+        Math.abs(a20),
+        Math.abs(a21),
+        Math.abs(a22),
+        Math.abs(a23),
+        Math.abs(a30),
+        Math.abs(a31),
+        Math.abs(a32),
+        Math.abs(a33)
+    );
+    if (!Number.isFinite(determinant) || determinant === 0 || Math.abs(determinant) <= Number.EPSILON * maxMagnitude ** 4 * 16) {
         return false;
     }
     determinant = 1 / determinant;

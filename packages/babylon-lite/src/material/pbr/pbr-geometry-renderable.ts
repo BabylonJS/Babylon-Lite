@@ -31,7 +31,7 @@ import type { ComposedShader } from "../../shader/fragment-types.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
-import { _resolveGeometryMeshBlendTag } from "../../frame-graph/geometry-types.js";
+import { _geometryColorTarget, _resolveGeometryMeshBlendTag } from "../../frame-graph/geometry-types.js";
 import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_TANGENTS, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
 import type { Material } from "../material.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
@@ -487,7 +487,7 @@ function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSi
               alpha: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
           }
         : undefined;
-    const colorTargets: GPUColorTargetState[] = formats.map((fmt) => (blendState && fmt !== "r8uint" ? { format: fmt, blend: blendState } : { format: fmt }));
+    const colorTargets: GPUColorTargetState[] = formats.map((format) => _geometryColorTarget(format, blendState, device));
     const sourceFeatures = (view.source as PbrMaterialProps)._renderFeatures?.features ?? 0;
     const hasDoubleSided = (sourceFeatures & PBR_HAS_DOUBLE_SIDED) !== 0;
     // Match the forward pass: `topology`/`frontFace` left to their WebGPU defaults ("triangle-list",
