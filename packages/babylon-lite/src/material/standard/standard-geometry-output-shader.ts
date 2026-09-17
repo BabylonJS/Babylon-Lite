@@ -60,6 +60,10 @@ function needsLocalPos(attachments: readonly GeometryTextureType[]): boolean {
     return attachments.includes(GeometryTextureType.LOCAL_POSITION);
 }
 
+function needsMeshBlendTag(attachments: readonly GeometryTextureType[]): boolean {
+    return attachments.includes(GeometryTextureType.MESH_BLEND_TAG);
+}
+
 /** Per-attachment WGSL output expression. `alpha` is the in-scope standard
  *  fragment alpha (mat.dc.a × opacityTex × …). `wg` is `writeGeomInfo` — a
  *  binary 0/1 gate matching BJS `default.fragment.fx` PREPASS
@@ -120,6 +124,8 @@ function attachmentExpr(type: GeometryTextureType, wg: string, hasSpecular: bool
             const prev = `(input.vPreviousClip.xy / input.vPreviousClip.w)`;
             return wgsl`vec4<f32>(0.5 * (${prev} - ${cur}), 0.0, ${wg})`;
         }
+        case GeometryTextureType.MESH_BLEND_TAG:
+            throw new Error("MESH_BLEND_TAG uses a typed integer output.");
     }
 }
 
@@ -132,6 +138,7 @@ function createGeometryParamsFragment(
     needsParamsUbo: boolean,
     needsVelocityVaryings: boolean,
     needsLocalPosVarying: boolean,
+    needsMeshBlendTagField: boolean,
     features: number,
     meshFeatures: number
 ): ShaderFragment {
@@ -178,14 +185,16 @@ out.vPreviousClip = select(out.vCurrentClip, trackedPreviousClip, mesh.velocityE
         vbParts.push(wgsl`out.vLocalPos = ${(meshFeatures & MSH_HAS_MORPH_TARGETS) !== 0 ? "morphedPos" : "position"};`);
     }
     const slots: ShaderFragment["_vertexSlots"] = vbParts.length > 0 ? { VB: wgsl`${vbParts.join("\n")}` } : {};
+    const uboFields: NonNullable<ShaderFragment["_uboFields"]>[number][] = [];
+    if (needsVelocityVaryings) {
+        uboFields.push({ _name: "previousWorld", _type: "mat4x4<f32>" }, { _name: "velocityEnabled", _type: "f32" });
+    }
+    if (needsMeshBlendTagField) {
+        uboFields.push({ _name: "meshBlendTag", _type: "f32" });
+    }
     return {
         _id: "~geometry-params",
-        _uboFields: needsVelocityVaryings
-            ? [
-                  { _name: "previousWorld", _type: "mat4x4<f32>" },
-                  { _name: "velocityEnabled", _type: "f32" },
-              ]
-            : [],
+        _uboFields: uboFields,
         _bindings: bindings,
         _helperFunctions: helpers,
         // gp UBO is also visible to the vertex stage when present, so the
@@ -230,7 +239,8 @@ export function composeStandardGeometryShader(
     attachments: readonly GeometryTextureType[],
     esmShadowDepthCode = "",
     emitColor = false,
-    sceneShader: StandardSceneShaderContext | null = null
+    sceneShader: StandardSceneShaderContext | null = null,
+    hasAlphaTestPath = false
 ): ComposedShader {
     // Strip MATERIAL_ALPHA_BLEND so the standard fragment does NOT emit
     // ALPHA_COMBINE blend in its color output — we drive blending per
@@ -239,9 +249,10 @@ export function composeStandardGeometryShader(
     const wantsGp = needsGpUbo(attachments);
     const wantsVelocity = needsVelocity(attachments);
     const wantsLocalPos = needsLocalPos(attachments);
+    const wantsMeshBlendTag = needsMeshBlendTag(attachments);
     const fragments =
-        wantsGp || wantsVelocity || wantsLocalPos
-            ? [...extFragments, createGeometryParamsFragment(wantsGp, wantsVelocity, wantsLocalPos, stdFeatures, meshFeatures)]
+        wantsGp || wantsVelocity || wantsLocalPos || wantsMeshBlendTag
+            ? [...extFragments, createGeometryParamsFragment(wantsGp, wantsVelocity, wantsLocalPos, wantsMeshBlendTag, stdFeatures, meshFeatures)]
             : extFragments;
     const base = composeStandardShader(stdFeatures, meshFeatures, fragments, esmShadowDepthCode, sceneShader);
 
@@ -267,7 +278,9 @@ export function composeStandardGeometryShader(
     const colorSlot = attachments.length;
     const extraColorLine = emitColor ? wgsl`\n@location(${colorSlot}) color: vec4<f32>,` : wgsl``;
     const outputStruct = wgsl`struct FragmentOutput {
-${attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`).join("\n")}${extraColorLine}
+${attachments
+    .map((type, i) => (type === GeometryTextureType.MESH_BLEND_TAG ? wgsl`@location(${i}) meshBlendTag${i}: u32,` : wgsl`@location(${i}) f${i}: vec4<f32>,`))
+    .join("\n")}${extraColorLine}
 };
 `;
     frag = frag.replace("@fragment fn main", wgsl`${outputStruct}@fragment fn main`);
@@ -278,7 +291,17 @@ ${attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`).join("\n")}
     //    materials get a correct binary mask under the per-attachment
     //    ALPHA_COMBINE blend pipeline state.
     const wg = `select(0.0, 1.0, alpha > 0.4)`;
-    const writes = wgsl`${attachments.map((type, i) => wgsl`out.f${i} = ${attachmentExpr(type, wg, hasSpecular, specularUv)};`).join("\n")}`;
+    const writes = wgsl`${attachments
+        .map((type, i) =>
+            type === GeometryTextureType.MESH_BLEND_TAG
+                ? wgsl`out.meshBlendTag${i} = ${
+                      hasAlphaTestPath
+                          ? "select(select(0u, u32(mesh.meshBlendTag), alpha > 0.4), u32(mesh.meshBlendTag), mat.aCut > 0.0)"
+                          : "select(0u, u32(mesh.meshBlendTag), alpha > 0.4)"
+                  };`
+                : wgsl`out.f${i} = ${attachmentExpr(type, wg, hasSpecular, specularUv)};`
+        )
+        .join("\n")}`;
     const extraColorWrite = emitColor ? wgsl`\nout.color = color;` : wgsl``;
     const replacement = wgsl`var out: FragmentOutput;
 ${writes}${extraColorWrite}

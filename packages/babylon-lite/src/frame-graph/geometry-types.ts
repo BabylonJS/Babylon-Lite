@@ -21,6 +21,8 @@
  * existing scenes never import it.
  */
 
+import type { Mesh } from "../mesh/mesh.js";
+
 /** Identifies a single geometry texture supported by `createGeometryRendererTask`. */
 export enum GeometryTextureType {
     /** Half-float RGBA — diffuse irradiance accumulated at the surface. */
@@ -45,6 +47,8 @@ export enum GeometryTextureType {
     ALBEDO = 9,
     /** Half-float RGBA — per-pixel linear world-space velocity in units / frame. */
     LINEAR_VELOCITY = 10,
+    /** Unsigned byte R — packed mesh-blending group/radius tag. */
+    MESH_BLEND_TAG = 11,
 }
 
 /** Clear behaviour applied to a geometry attachment at the start of a geometry pass. */
@@ -80,4 +84,20 @@ export const GEOMETRY_TEXTURE_DESCRIPTIONS: readonly GeometryTextureDescription[
     { name: "WorldNormal", defaultFormat: "rgba16float", clearValue: ZERO },
     { name: "Albedo", defaultFormat: "rgba8unorm", clearValue: ZERO },
     { name: "LinearVelocity", defaultFormat: "rgba16float", clearValue: ZERO },
+    { name: "MeshBlendTag", defaultFormat: "r8uint", clearValue: ZERO },
 ];
+
+let _meshBlendTagResolver: ((mesh: Mesh) => number) | null = null;
+
+/** @internal Install the mesh-tag resolver when mesh blending is enabled. */
+export function _installGeometryMeshBlendTagResolver(resolve: (mesh: Mesh) => number): void {
+    _meshBlendTagResolver = resolve;
+}
+
+/** @internal Resolve one mesh tag or fail when the feature was not enabled. */
+export function _resolveGeometryMeshBlendTag(mesh: Mesh): number {
+    if (!_meshBlendTagResolver) {
+        throw new Error("Geometry MESH_BLEND_TAG requires createMeshBlendingPostProcessTask to be created before scene registration.");
+    }
+    return _meshBlendTagResolver(mesh);
+}

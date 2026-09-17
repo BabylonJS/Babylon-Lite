@@ -37,7 +37,7 @@ import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
 import type { ComposedShader, ShaderFragment } from "../../shader/fragment-types.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
-import { GeometryTextureType } from "../../frame-graph/geometry-types.js";
+import { GeometryTextureType, _resolveGeometryMeshBlendTag } from "../../frame-graph/geometry-types.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 
 import type { Material } from "../material.js";
@@ -185,6 +185,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     writeMeshLightSelection(mesh, scene.lights, meshUboData);
     const previousWorldOffset = res._composed._meshUboSpec._offsets.get("previousWorld");
     const velocityEnabledOffset = res._composed._meshUboSpec._offsets.get("velocityEnabled");
+    const meshBlendTagOffset = res._composed._meshUboSpec._offsets.get("meshBlendTag");
     // Previous-world tracks the mesh world matrix relative to the origin that
     // was current when it was captured (the same offset applied to the current
     // world above). In floating-origin mode `gp.previousViewProjection` is
@@ -202,6 +203,11 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     }
     if (velocityEnabledOffset !== undefined) {
         meshUboData[velocityEnabledOffset / 4] = 0;
+    }
+    let lastMeshBlendTag = 0;
+    if (meshBlendTagOffset !== undefined) {
+        lastMeshBlendTag = _resolveGeometryMeshBlendTag(mesh);
+        meshUboData[meshBlendTagOffset / 4] = lastMeshBlendTag;
     }
     const skeletonVelocityFactory = res._hasSkeletonVelocity ? _getStandardGeometrySkeletonVelocityFactory() : null;
     const meshUBO = createUniformBuffer(engine, meshUboData);
@@ -262,7 +268,14 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
 
     const _baseUpdate = (): void => {
         const velocityEnabled = res._needsVelocity && velocityReady && !view._velocityExclusions?.has(mesh);
-        if (mesh.worldMatrixVersion !== _lastWorldVersion || scene.lights.length !== _lastLightsCount || previousWorldOffset !== undefined || velocityEnabledOffset !== undefined) {
+        const meshBlendTag = meshBlendTagOffset !== undefined ? _resolveGeometryMeshBlendTag(mesh) : 0;
+        if (
+            mesh.worldMatrixVersion !== _lastWorldVersion ||
+            scene.lights.length !== _lastLightsCount ||
+            previousWorldOffset !== undefined ||
+            velocityEnabledOffset !== undefined ||
+            meshBlendTag !== lastMeshBlendTag
+        ) {
             sortCenter[0] = mesh.worldMatrix[12]!;
             sortCenter[1] = mesh.worldMatrix[13]!;
             sortCenter[2] = mesh.worldMatrix[14]!;
@@ -273,6 +286,10 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
             }
             if (velocityEnabledOffset !== undefined) {
                 meshUboData[velocityEnabledOffset / 4] = velocityEnabled ? 1 : 0;
+            }
+            if (meshBlendTagOffset !== undefined) {
+                meshUboData[meshBlendTagOffset / 4] = meshBlendTag;
+                lastMeshBlendTag = meshBlendTag;
             }
             device.queue.writeBuffer(meshUBO, 0, meshUboData as Float32Array<ArrayBuffer>);
             _lastWorldVersion = mesh.worldMatrixVersion;
@@ -444,7 +461,17 @@ function _ensureViewResources(
         }
     }
 
-    const composed = composeStandardGeometryShader(features, meshFeatures, frags, view._geometryAttachments, "", view._emitColor, standardContext?.sceneShader ?? null);
+    const hasAlphaTestPath = (features & (HAS_DIFFUSE_TEXTURE | VERTEX_ALPHA)) !== 0;
+    const composed = composeStandardGeometryShader(
+        features,
+        meshFeatures,
+        frags,
+        view._geometryAttachments,
+        "",
+        view._emitColor,
+        standardContext?.sceneShader ?? null,
+        hasAlphaTestPath
+    );
     const device = engine._device;
     const meshBGL = device.createBindGroupLayout(composed._meshBGLDescriptor);
     // Pipeline layout: scene BG (group 0) + mesh BG (group 1). Geometry pass
@@ -605,7 +632,7 @@ function _getOrCreateGeometryPipeline(
               alpha: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
           }
         : undefined;
-    const colorTargets: GPUColorTargetState[] = formats.map((fmt) => (blendState ? { format: fmt, blend: blendState } : { format: fmt }));
+    const colorTargets: GPUColorTargetState[] = formats.map((fmt) => (blendState && fmt !== "r8uint" ? { format: fmt, blend: blendState } : { format: fmt }));
     const cullMode = (res._features & DOUBLE_SIDED) !== 0 ? "none" : view._reverseCulling ? "front" : "back";
     const pipeline = device.createRenderPipeline({
         layout: res._pipelineLayout,

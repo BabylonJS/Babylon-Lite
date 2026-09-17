@@ -27,7 +27,7 @@
 
 import type { ComposedShader, ShaderFragment, Varying } from "../../shader/fragment-types.js";
 import { GeometryTextureType } from "../../frame-graph/geometry-types.js";
-import { PBR_HAS_ALPHA_BLEND, PBR_HAS_ENV, _registerPbrExt, type _PbrBindCtx, type _PbrFragCtx, type PbrExt } from "./pbr-flags.js";
+import { PBR_HAS_ALPHA_BLEND, PBR_HAS_ALPHA_TEST, PBR_HAS_ENV, _registerPbrExt, type _PbrBindCtx, type _PbrFragCtx, type PbrExt } from "./pbr-flags.js";
 import type { createPbrComposer, PbrLightMode } from "./pbr-compose.js";
 import type { MeshVbLayout } from "../../mesh/mesh.js";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
@@ -55,9 +55,13 @@ function needsLocalPos(attachments: readonly GeometryTextureType[]): boolean {
     return attachments.includes(GeometryTextureType.LOCAL_POSITION);
 }
 
+function needsMeshBlendTag(attachments: readonly GeometryTextureType[]): boolean {
+    return attachments.includes(GeometryTextureType.MESH_BLEND_TAG);
+}
+
 /** ShaderFragment contributing the `gp` UBO + (optionally) velocity / local-pos varyings.
  *  PBR-specific: world-position varying is `out.worldPos`. */
-function createPbrGeometryParamsFragment(needsParamsUbo: boolean, needsVelocityVaryings: boolean, needsLocalPosVarying: boolean): ShaderFragment {
+function createPbrGeometryParamsFragment(needsParamsUbo: boolean, needsVelocityVaryings: boolean, needsLocalPosVarying: boolean, needsMeshBlendTagField: boolean): ShaderFragment {
     const bindings = needsParamsUbo ? [{ _name: "gp", _type: { _kind: "uniform-buffer" as const }, _visibility: STAGE_FRAGMENT | STAGE_VERTEX }] : [];
     const helpers = needsParamsUbo ? wgsl`struct gpUniforms { previousViewProjection: mat4x4<f32>, cameraNearFar: vec4<f32>, };` : wgsl``;
     const varyings: Varying[] = [];
@@ -78,6 +82,7 @@ function createPbrGeometryParamsFragment(needsParamsUbo: boolean, needsVelocityV
     const slots: ShaderFragment["_vertexSlots"] = vbParts.length > 0 ? { VB: wgsl`${vbParts.join("\n")}` } : {};
     return {
         _id: "pbr-geometry-params",
+        _uboFields: needsMeshBlendTagField ? [{ _name: "meshBlendTag", _type: "f32" }] : [],
         _bindings: bindings,
         _helperFunctions: helpers,
         _vertexHelperFunctions: helpers,
@@ -110,10 +115,11 @@ export function _ensurePbrGeometryExt(getAttachments: () => readonly GeometryTex
             const wantsGp = needsGpUbo(att);
             const wantsVelocity = needsVelocity(att);
             const wantsLocalPos = needsLocalPos(att);
-            if (!wantsGp && !wantsVelocity && !wantsLocalPos) {
+            const wantsMeshBlendTag = needsMeshBlendTag(att);
+            if (!wantsGp && !wantsVelocity && !wantsLocalPos && !wantsMeshBlendTag) {
                 return null;
             }
-            return createPbrGeometryParamsFragment(wantsGp, wantsVelocity, wantsLocalPos);
+            return createPbrGeometryParamsFragment(wantsGp, wantsVelocity, wantsLocalPos, wantsMeshBlendTag);
         },
         bind(ctx: _PbrBindCtx, entries: GPUBindGroupEntry[], b: number): number {
             if ((ctx._features2 & PBR2_GEOMETRY_OUTPUT) === 0) {
@@ -171,6 +177,8 @@ function attachmentExpr(type: GeometryTextureType, wg: string, hasIbl: boolean):
             const prev = `(input.vPreviousClip.xy / input.vPreviousClip.w)`;
             return wgsl`vec4<f32>(0.5 * (${prev} - ${cur}), 0.0, ${wg})`;
         }
+        case GeometryTextureType.MESH_BLEND_TAG:
+            throw new Error("MESH_BLEND_TAG uses a typed integer output.");
     }
 }
 
@@ -238,7 +246,9 @@ export function composePbrGeometryShader(
     const colorSlot = attachments.length;
     const extraColorLine = emitColor ? wgsl`\n@location(${colorSlot}) color: vec4<f32>,` : wgsl``;
     const outputStruct = wgsl`struct FragmentOutput {
-${attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`).join("\n")}${extraColorLine}
+${attachments
+    .map((type, i) => (type === GeometryTextureType.MESH_BLEND_TAG ? wgsl`@location(${i}) meshBlendTag${i}: u32,` : wgsl`@location(${i}) f${i}: vec4<f32>,`))
+    .join("\n")}${extraColorLine}
 };
 `;
     frag = frag.replace("@fragment fn main", wgsl`${outputStruct}@fragment fn main`);
@@ -246,7 +256,14 @@ ${attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`).join("\n")}
     // 3) Replace the alpha-block return with MRT writes. With ALPHA_BLEND
     //    stripped, the template emits the simpler return form.
     const wg = `select(0.0, 1.0, alpha > 0.4)`;
-    const writes = wgsl`${attachments.map((type, i) => wgsl`out.f${i} = ${attachmentExpr(type, wg, hasIbl)};`).join("\n")}`;
+    const alphaTested = (features & PBR_HAS_ALPHA_TEST) !== 0;
+    const writes = wgsl`${attachments
+        .map((type, i) =>
+            type === GeometryTextureType.MESH_BLEND_TAG
+                ? wgsl`out.meshBlendTag${i} = ${alphaTested ? "u32(material.meshBlendTag)" : "select(0u, u32(material.meshBlendTag), alpha * material.materialAlpha > 0.4)"};`
+                : wgsl`out.f${i} = ${attachmentExpr(type, wg, hasIbl)};`
+        )
+        .join("\n")}`;
     const extraColorWrite = emitColor ? wgsl`\nout.color = vec4<f32>(color, alpha * material.materialAlpha);` : wgsl``;
     const replacement = wgsl`var out: FragmentOutput;
 ${writes}${extraColorWrite}

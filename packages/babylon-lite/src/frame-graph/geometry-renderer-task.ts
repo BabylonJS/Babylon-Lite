@@ -147,6 +147,7 @@ export interface GeometryRendererTask extends Task {
     readonly geometryWorldNormalTexture: RenderTarget | null;
     readonly geometryAlbedoTexture: RenderTarget | null;
     readonly geometryLinearVelocityTexture: RenderTarget | null;
+    readonly geometryMeshBlendTagTexture: RenderTarget | null;
     /** Skip a mesh from the velocity attachment's previous-world tracking. */
     excludeFromVelocity(mesh: Mesh): void;
     /** Re-include a mesh in velocity tracking. */
@@ -236,8 +237,8 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
     if (config.textureDescriptions.length === 0) {
         throw new Error("GeometryRendererTask: textureDescriptions must contain at least one entry.");
     }
-    if (config.textureDescriptions.length > 8) {
-        throw new Error(`GeometryRendererTask: textureDescriptions length ${config.textureDescriptions.length} exceeds the WebGPU max of 8 color attachments.`);
+    if (config.textureDescriptions.length + (config.targetTexture ? 1 : 0) > 8) {
+        throw new Error("GeometryRendererTask: geometry attachments plus targetTexture exceed the WebGPU max of 8 color attachments.");
     }
 
     const attachments: AttachmentInfo[] = config.textureDescriptions.map((d, i) => {
@@ -245,17 +246,29 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         if (!desc) {
             throw new Error(`GeometryRendererTask: unknown texture type ${d.type as number}.`);
         }
+        const format = d.format ?? desc.defaultFormat;
+        if (d.type === GeometryTextureType.MESH_BLEND_TAG) {
+            if (format !== "r8uint") {
+                throw new Error(`GeometryRendererTask: MESH_BLEND_TAG format must be r8uint, received ${format}.`);
+            }
+            if (d.clearValue !== undefined && !isZeroColor(d.clearValue)) {
+                throw new Error("GeometryRendererTask: MESH_BLEND_TAG clearValue must be unsigned integer zero.");
+            }
+        }
         return {
             _type: d.type,
             _index: i,
-            _format: d.format ?? desc.defaultFormat,
-            _clearValue: d.clearValue ?? desc.clearValue,
+            _format: format,
+            _clearValue: d.type === GeometryTextureType.MESH_BLEND_TAG ? desc.clearValue : (d.clearValue ?? desc.clearValue),
         };
     });
     const needsVelocity = attachments.some((a) => a._type === GeometryTextureType.LINEAR_VELOCITY);
     const needsParams = needsVelocity || attachments.some((a) => a._type === GeometryTextureType.NORMALIZED_VIEW_DEPTH);
     const samples = config.samples ?? 1;
     const size = config.size ?? sc.surface;
+    if (samples !== 1 && attachments.some((a) => a._type === GeometryTextureType.MESH_BLEND_TAG)) {
+        throw new Error("GeometryRendererTask: MESH_BLEND_TAG requires samples: 1.");
+    }
 
     if (config.depthTexture) {
         const ds = config.depthTexture._descriptor.samples ?? 1;
@@ -357,6 +370,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         geometryWorldNormalTexture: typeAccessors[GeometryTextureType.WORLD_NORMAL],
         geometryAlbedoTexture: typeAccessors[GeometryTextureType.ALBEDO],
         geometryLinearVelocityTexture: typeAccessors[GeometryTextureType.LINEAR_VELOCITY],
+        geometryMeshBlendTagTexture: typeAccessors[GeometryTextureType.MESH_BLEND_TAG],
         excludeFromVelocity(mesh) {
             task._excludedFromVelocity.add(mesh);
         },
@@ -899,4 +913,13 @@ function createDepthWrapperRenderTarget(mrt: RenderTargetMrt, sampleCount: numbe
         _height: 0,
         _eager: true,
     };
+}
+
+function isZeroColor(value: GPUColor): boolean {
+    if (Symbol.iterator in Object(value)) {
+        const components = Array.from(value as Iterable<number>);
+        return components.length === 4 && components.every((component) => component === 0);
+    }
+    const color = value as { r: number; g: number; b: number; a: number };
+    return color.r === 0 && color.g === 0 && color.b === 0 && color.a === 0;
 }

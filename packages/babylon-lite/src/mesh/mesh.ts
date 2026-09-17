@@ -151,6 +151,11 @@ export interface Mesh extends SceneNode {
     /** When `false`, the GPU picker skips this mesh.  Defaults to `true`
      *  (undefined behaves as pickable).  Mirrors BJS `AbstractMesh.isPickable`. */
     pickable?: boolean;
+    /**
+     * Packed mesh-blending tag. Undefined is equivalent to zero/disabled.
+     * Bits 0..5 are the group and bits 6..7 are the radius class.
+     */
+    meshBlendingTag?: number;
     // name, children, position, rotation, rotationQuaternion, scaling,
     // parent, worldMatrix, worldMatrixVersion — all inherited from SceneNode
 

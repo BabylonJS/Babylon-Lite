@@ -26,13 +26,11 @@ import type { RenderTargetSignature } from "../../engine/render-target.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { MeshGroupBuilder, MeshRebuildResources, Renderable } from "../../render/renderable.js";
-import { writeMeshLightSelection } from "../../render/mesh-light-selection.js";
-import { MAX_LIGHTS } from "../../light/types.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 import type { SceneContext } from "../../scene/scene-core.js";
 import type { Material } from "../material.js";
-import { GeometryTextureType } from "../../frame-graph/geometry-types.js";
-import type { NodeExpr, NodeBuildState, NodeGraph } from "./node-types.js";
+import { GeometryTextureType, _resolveGeometryMeshBlendTag } from "../../frame-graph/geometry-types.js";
+import type { NodeExpr, NodeBuildState, NodeGraph, NodeMeshFeatureCompile, NodeMeshFeatureWriter } from "./node-types.js";
 import { emitGraph } from "./node-emitter.js";
 import { findBlockByClassName } from "./node-parser.js";
 import { compileNodePipeline, type NodeCompileResult, type MrtOutputOpts } from "./node-pipeline.js";
@@ -80,6 +78,9 @@ interface NodeGeometryViewResources {
     readonly _fsReturn: string;
     readonly _needsGpUbo: boolean;
     readonly _attrNames: readonly string[];
+    readonly _meshUboFloats: number;
+    readonly _writeMeshFeature: NodeMeshFeatureWriter | undefined;
+    readonly _meshBlendTagOffset: number;
     /** Per-target-signature compile (pipeline + BGL). */
     readonly _compileBySig: Map<string, NodeCompileResult>;
     /** Shared node UBO (one per material, format-independent). Allocated on first compile. */
@@ -132,6 +133,8 @@ function geomWrite(type: GeometryTextureType, inputs: Map<GeometryTextureType, N
         case GeometryTextureType.LINEAR_VELOCITY:
             // Stored as vec3 — node materials do not compute velocity, default 0.
             return v ? wgsl`vec4<f32>(${v.expr}, ${wg})` : ZERO(wg);
+        case GeometryTextureType.MESH_BLEND_TAG:
+            return wgsl`u32(meshU.meshBlendTag)`;
     }
 }
 
@@ -169,10 +172,24 @@ function ensureGeometryResources(view: NodeGeometryMaterialView): NodeGeometryVi
 
     const inputs = state._geometryInputs ?? new Map<GeometryTextureType, NodeExpr>();
     const attachments = view._geometryAttachments;
+    const wantsMeshBlendTag = attachments.includes(GeometryTextureType.MESH_BLEND_TAG);
+    const baseMeshFeature = state._meshFeature?.();
+    const meshBlendTagOffset = wantsMeshBlendTag ? (baseMeshFeature?.[3] ?? 20) : -1;
+    let meshFeature = baseMeshFeature;
+    if (wantsMeshBlendTag) {
+        const meshFields = baseMeshFeature?.[0] ? wgsl`${baseMeshFeature[0]}\n    meshBlendTag: f32,` : wgsl`    meshBlendTag: f32,`;
+        const writeMesh: NodeMeshFeatureWriter = baseMeshFeature?.[4] ?? (() => {});
+        meshFeature = [meshFields, baseMeshFeature?.[1] ?? "", baseMeshFeature?.[2] ?? "", meshBlendTagOffset + 4, writeMesh] satisfies NodeMeshFeatureCompile;
+        state._meshFeature = () => meshFeature!;
+    }
     const gpRef = { needsGp: false };
-    const structLines = attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`);
+    const structLines = attachments.map((type, i) =>
+        type === GeometryTextureType.MESH_BLEND_TAG ? wgsl`@location(${i}) meshBlendTag${i}: u32,` : wgsl`@location(${i}) f${i}: vec4<f32>,`
+    );
     const struct = wgsl`struct FragmentOutput {\n${structLines.join("\n")}\n};`;
-    const writeLines = attachments.map((type, i) => wgsl`out.f${i} = ${geomWrite(type, inputs, gpRef)};`);
+    const writeLines = attachments.map((type, i) =>
+        type === GeometryTextureType.MESH_BLEND_TAG ? wgsl`out.meshBlendTag${i} = ${geomWrite(type, inputs, gpRef)};` : wgsl`out.f${i} = ${geomWrite(type, inputs, gpRef)};`
+    );
     // Pre-indent the full return body here (one level + trailing newline) so the
     // node pipeline just splices the string — no geometry WGSL assembly in the
     // always-loaded compileNodePipeline.
@@ -186,6 +203,9 @@ function ensureGeometryResources(view: NodeGeometryMaterialView): NodeGeometryVi
         _fsReturn: fsReturn,
         _needsGpUbo: gpRef.needsGp,
         _attrNames: state.vertexAttributes.map((a) => a._name),
+        _meshUboFloats: meshFeature?.[3] ?? 20,
+        _writeMeshFeature: meshFeature?.[4],
+        _meshBlendTagOffset: meshBlendTagOffset,
         _compileBySig: new Map(),
         _nodeUBO: null,
         _nodeUBOReady: false,
@@ -340,8 +360,7 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
     const res = ensureGeometryResources(view);
     retainGeometryResources(view, res, resources);
 
-    // Per-mesh UBO: world (64B) + receivesShadow (vec4) + light count/indices.
-    const meshUboBytes = (96 + 16 * Math.ceil(MAX_LIGHTS / 4) + 15) & ~15;
+    const meshUboBytes = res._meshUboFloats * 4;
     const meshUBO = device.createBuffer({ label: "node-geom-mesh-ubo", size: meshUboBytes, usage: BU.UNIFORM | BU.COPY_DST });
     const _disposePerMesh = (): void => {
         meshUBO.destroy();
@@ -362,19 +381,24 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
         if (needsAttrFlags) {
             writeAttributeFlags(mesh, meshScratch);
         }
-        writeMeshLightSelection(mesh, scene.lights, meshScratch.subarray(4));
+        res._writeMeshFeature?.(mesh, scene.lights, meshScratch);
+        if (res._meshBlendTagOffset >= 0) {
+            meshScratch[res._meshBlendTagOffset] = _resolveGeometryMeshBlendTag(mesh);
+        }
         device.queue.writeBuffer(meshUBO, 0, meshScratch as Float32Array<ArrayBuffer>);
     };
 
     let bindGroup: GPUBindGroup | null = null;
     let lastWorldVersion = -1;
     let lastLightsCount = -1;
+    let lastMeshBlendTag = -1;
 
     const sortCenter: [number, number, number] = [mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!];
+    const isTransparent = source._needsAlphaBlending;
 
     const r: Renderable = {
-        order: mesh.renderOrder ?? 100,
-        isTransparent: false,
+        order: mesh.renderOrder ?? (isTransparent ? 200 : 100),
+        isTransparent,
         mesh,
         bind(eng: EngineContext, sig: RenderTargetSignature) {
             const compile = ensureGeometryCompile(view, res, eng as EngineContext, sig);
@@ -383,13 +407,15 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
             bindGroup = buildGeometryBindGroup(eng as EngineContext, source, compile, meshUBO, nodeUBO, view);
 
             const _baseUpdate = (): void => {
-                if (mesh.worldMatrixVersion !== lastWorldVersion || scene.lights.length !== lastLightsCount) {
+                const meshBlendTag = res._meshBlendTagOffset >= 0 ? _resolveGeometryMeshBlendTag(mesh) : 0;
+                if (mesh.worldMatrixVersion !== lastWorldVersion || scene.lights.length !== lastLightsCount || meshBlendTag !== lastMeshBlendTag) {
                     writeMesh();
                     sortCenter[0] = mesh.worldMatrix[12]!;
                     sortCenter[1] = mesh.worldMatrix[13]!;
                     sortCenter[2] = mesh.worldMatrix[14]!;
                     lastWorldVersion = mesh.worldMatrixVersion;
                     lastLightsCount = scene.lights.length;
+                    lastMeshBlendTag = meshBlendTag;
                 }
             };
             // Floating origin bakes the effective-camera offset into the world UBO, so

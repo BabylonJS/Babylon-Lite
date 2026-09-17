@@ -40,6 +40,7 @@ export const enum GeometryTextureType {
     WORLD_NORMAL = 8,
     ALBEDO = 9,
     LINEAR_VELOCITY = 10,
+    MESH_BLEND_TAG = 11,
 }
 
 export type GeometryClearValue = GPUColor;
@@ -66,6 +67,7 @@ export interface GeometryRendererTaskConfig {
     depthTexture?: RenderTarget | null;
     readonly textureDescriptions: readonly GeometryRendererTextureDescription[];
     reverseCulling?: boolean;
+    renderTransparentMeshes?: boolean;
 }
 
 export interface GeometryRendererTask extends Task {
@@ -82,6 +84,7 @@ export interface GeometryRendererTask extends Task {
     readonly geometryWorldNormalTexture: RenderTarget | null;
     readonly geometryAlbedoTexture: RenderTarget | null;
     readonly geometryLinearVelocityTexture: RenderTarget | null;
+    readonly geometryMeshBlendTagTexture: RenderTarget | null;
     excludeFromVelocity(mesh: Mesh): void;
     includeInVelocity(mesh: Mesh): void;
 }
@@ -142,6 +145,19 @@ The task accepts up to 8 attachments (the WebGPU max). Each
 `GeometryRendererTextureDescription.format` defaults to the entry in
 `GEOMETRY_TEXTURE_DESCRIPTIONS[type].defaultFormat` and can be overridden per
 attachment.
+
+`MESH_BLEND_TAG` is the exception to the general format override rule: it is
+always single-sample `r8uint`, clears to unsigned integer zero, and rejects any
+other format or nonzero clear. Standard, PBR, and Node geometry views emit a
+typed `u32` `FragmentOutput` member for its MRT slot while all other slots
+remain `vec4<f32>`. Integer targets omit blend state. The uploaded tag is the
+validated source-mesh tag, so source-backed clones/regular instances and thin
+instances use their source draw's tag.
+
+`renderTransparentMeshes` defaults to `true`, matching Babylon.js geometry
+rendering. Setting it to `false` excludes alpha-blended renderables from the
+geometry pass; alpha-tested materials remain because their existing material
+shader discards rejected fragments before any geometry output is written.
 
 When more than two HDR (`rgba16float`) attachments are stacked the request can
 exceed WebGPU's default `maxColorAttachmentBytesPerSample` cap of 32 bytes.

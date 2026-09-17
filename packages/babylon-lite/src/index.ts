@@ -83,6 +83,15 @@ export { createDepthPyramid, createDepthPyramidTask } from "./frame-graph/depth-
 export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";
 export type { ImageProcessingSource, ImageProcessingTaskConfig } from "./frame-graph/image-processing-task.js";
 export type { PostProcessTask, PostProcessTaskSettings, PostProcessAlphaMode, PostProcessSamplingMode } from "./frame-graph/post-process-task.js";
+export {
+    createDefaultMeshBlendRadiusDefinitions,
+    createMeshBlendRadiusDefinition,
+    createMeshBlendingPostProcessTask,
+    MeshBlendDebugMode,
+    MeshBlendDepthType,
+    MeshBlendQuality,
+} from "./post-process/mesh-blending.js";
+export type { MeshBlendRadiusDefinition, MeshBlendRadiusDefinitions, MeshBlendingPostProcessTask, MeshBlendingPostProcessTaskConfig } from "./post-process/mesh-blending.js";
 export { createCopyToTextureTask } from "./frame-graph/copy-to-texture-task.js";
 export type { CopyToTextureTask, CopyToTextureTaskConfig } from "./frame-graph/copy-to-texture-task.js";
 export { createDepthResolveTask } from "./frame-graph/depth-resolve-task.js";
@@ -627,6 +636,8 @@ export type { ScreenProjectionOptions, ScreenProjectionResult } from "./camera/w
 export type { FreeCamera } from "./camera/free-camera.js";
 export type { BankedFreeCamera } from "./camera/banked-free-camera.js";
 export type { Mesh, MeshGPU } from "./mesh/mesh.js";
+export { MeshBlendingRadiusClass, packMeshBlendingTag, resolveMeshBlendingTag, unpackMeshBlendingTag, validatePackedMeshBlendingTag } from "./mesh/mesh-blending-tag.js";
+export type { MeshBlendingTag } from "./mesh/mesh-blending-tag.js";
 export { disposeMeshGpu } from "./mesh/mesh-dispose.js";
 export { computeMaxExtents } from "./mesh/compute-max-extents.js";
 export type { MeshExtent } from "./mesh/compute-max-extents.js";

@@ -1,11 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
+import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { createGeometryRendererTask } from "../../../packages/babylon-lite/src/frame-graph/geometry-renderer-task";
-import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
+import { GeometryTextureType, _installGeometryMeshBlendTagResolver } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
+import { buildNodeGeometryRenderable } from "../../../packages/babylon-lite/src/material/node/node-geometry-renderable";
+import { loadNodeBlockEmitterWithGeometry } from "../../../packages/babylon-lite/src/material/node/node-geometry-block-loader";
+import { createNodeGeometryMaterialView } from "../../../packages/babylon-lite/src/material/node/node-geometry-view";
+import { parseNodeMaterialFromSnippet } from "../../../packages/babylon-lite/src/material/node/node-material";
+import { createPbrComposer } from "../../../packages/babylon-lite/src/material/pbr/pbr-compose";
+import { PBR_HAS_ALPHA_TEST } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags";
+import { composePbrGeometryShader } from "../../../packages/babylon-lite/src/material/pbr/pbr-geometry-output-shader";
+import { _setActivePbrGeometryAttachments, createPbrGeometryMaterialView } from "../../../packages/babylon-lite/src/material/pbr/pbr-geometry-view";
+import { composeStandardGeometryShader } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-output-shader";
+import { buildStandardGeometryRenderable } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-renderable";
+import { createStandardGeometryMaterialView } from "../../../packages/babylon-lite/src/material/standard/geometry-view";
+import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
+import { resolveMeshBlendingTag } from "../../../packages/babylon-lite/src/mesh/mesh-blending-tag";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
-import type { MeshRebuilder } from "../../../packages/babylon-lite/src/render/renderable";
+import type { MeshRebuilder, MeshRebuildResources } from "../../../packages/babylon-lite/src/render/renderable";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUShaderStage" | "GPUTextureUsage"> & {
     GPUBufferUsage?: { UNIFORM: number; COPY_DST: number; STORAGE: number };
@@ -16,6 +31,7 @@ const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPU
 gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8, STORAGE: 0x80 } as unknown as GPUBufferUsage;
 gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 } as unknown as GPUShaderStage;
 gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4, COPY_SRC: 0x1, COPY_DST: 0x2 } as unknown as GPUTextureUsage;
+_installGeometryMeshBlendTagResolver(resolveMeshBlendingTag);
 
 function makeMockEngine(): EngineContext {
     const device = {
@@ -81,7 +97,18 @@ describe("GeometryRendererTask", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
         const tooMany = Array.from({ length: 9 }, () => ({ type: GeometryTextureType.VIEW_NORMAL }));
-        expect(() => createGeometryRendererTask({ textureDescriptions: tooMany }, engine, scene)).toThrow(/exceeds the WebGPU max of 8/);
+        expect(() => createGeometryRendererTask({ textureDescriptions: tooMany }, engine, scene)).toThrow(/exceed the WebGPU max of 8/);
+    });
+
+    it("counts targetTexture against the 8-color-attachment limit", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine) as SceneContext;
+        const eight = Array.from({ length: 8 }, () => ({ type: GeometryTextureType.VIEW_NORMAL }));
+        const target = {
+            _descriptor: { format: "bgra8unorm" as const, samples: 1 as const, size: { width: 800, height: 600 } as const },
+        } as unknown as import("../../../packages/babylon-lite/src/engine/render-target").RenderTarget;
+
+        expect(() => createGeometryRendererTask({ textureDescriptions: eight, targetTexture: target }, engine, scene)).toThrow(/exceed the WebGPU max of 8/);
     });
 
     it("exposes per-type accessors only for requested types", () => {
@@ -157,6 +184,40 @@ describe("GeometryRendererTask", () => {
         expect(wrapper._descriptor.format).toBe("rgba16float");
         expect(wrapper._descriptor.samples).toBe(1);
         expect(wrapper._eager).toBe(true);
+    });
+
+    it("exposes an exact r8uint mesh-tag attachment with an unsigned-zero clear in any MRT slot", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine) as SceneContext;
+        const task = createGeometryRendererTask(
+            {
+                textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }, { type: GeometryTextureType.MESH_BLEND_TAG }, { type: GeometryTextureType.ALBEDO }],
+            },
+            engine,
+            scene
+        ) as unknown as {
+            geometryMeshBlendTagTexture: RenderTarget;
+            _mrt: { _descriptor: { colorFormats: GPUTextureFormat[] } };
+            _colorAttachments: GPURenderPassColorAttachment[];
+        };
+
+        expect(task.geometryMeshBlendTagTexture._descriptor.format).toBe("r8uint");
+        expect(task.geometryMeshBlendTagTexture._descriptor.samples).toBe(1);
+        expect(task._mrt._descriptor.colorFormats).toEqual(["rgba16float", "r8uint", "rgba8unorm"]);
+        expect(task._colorAttachments[1]!.clearValue).toEqual({ r: 0, g: 0, b: 0, a: 0 });
+    });
+
+    it("rejects multisampled, reformatted, or nonzero-cleared mesh-tag attachments", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine) as SceneContext;
+
+        expect(() => createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.MESH_BLEND_TAG }], samples: 4 }, engine, scene)).toThrow(/requires samples: 1/);
+        expect(() => createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.MESH_BLEND_TAG, format: "r8unorm" }] }, engine, scene)).toThrow(
+            /format must be r8uint/
+        );
+        expect(() =>
+            createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.MESH_BLEND_TAG, clearValue: { r: 1, g: 0, b: 0, a: 0 } }] }, engine, scene)
+        ).toThrow(/clearValue must be unsigned integer zero/);
     });
 
     it("excludeFromVelocity and includeInVelocity toggle membership", () => {
@@ -529,8 +590,10 @@ describe("GeometryRendererTask", () => {
         type M = import("../../../packages/babylon-lite/src/mesh/mesh").Mesh;
         const meshes: M[] = [];
         for (let i = 0; i < meshCount; i++) {
+            const material = createStandardMaterial();
+            material.alpha = 1;
             meshes.push({
-                material: createStandardMaterial(),
+                material,
                 worldMatrix: makeWorld(i),
                 worldMatrixVersion: 1,
                 hasVertexAlpha: false,
@@ -568,9 +631,9 @@ describe("GeometryRendererTask", () => {
         return { scene, internal, meshes, drawnIndexCounts, engine, createStandardMaterial };
     }
 
-    const idxCount = (m: import("../../../packages/babylon-lite/src/mesh/mesh").Mesh): number => (m as unknown as { _gpu: { indexCount: number } })._gpu.indexCount;
+    const idxCount = (m: Mesh): number => (m as unknown as { _gpu: { indexCount: number } })._gpu.indexCount;
 
-    function simulateMeshRemoval(scene: SceneContext, task: { _removeMesh(mesh: object): void }, mesh: import("../../../packages/babylon-lite/src/mesh/mesh").Mesh): void {
+    function simulateMeshRemoval(scene: SceneContext, task: { _removeMesh(mesh: object): void }, mesh: Mesh): void {
         // Simulate removeFromScene: evict task-owned geometry resources first, then
         // drop the mesh from the scene and bump the mutation version.
         task._removeMesh(mesh);
@@ -690,5 +753,201 @@ describe("GeometryRendererTask", () => {
         } finally {
             buildGroup._rebuildSingle = originalRebuild;
         }
+    });
+});
+
+describe("Mesh-blending geometry shader contracts", () => {
+    it("emits a u32 Standard tag output after the existing alpha/discard path", () => {
+        const composed = composeStandardGeometryShader(0, 0, [], [GeometryTextureType.VIEW_NORMAL, GeometryTextureType.MESH_BLEND_TAG], "", false, null, true);
+
+        expect(composed._fragmentWGSL).toContain("@location(0) f0: vec4<f32>,");
+        expect(composed._fragmentWGSL).toContain("@location(1) meshBlendTag1: u32,");
+        expect(composed._fragmentWGSL).toContain("out.meshBlendTag1 = select(select(0u, u32(mesh.meshBlendTag), alpha > 0.4), u32(mesh.meshBlendTag), mat.aCut > 0.0);");
+        expect(composed._meshUboSpec._offsets.has("meshBlendTag")).toBe(true);
+    });
+
+    it("validates the resolved raw Standard mesh tag before its geometry UBO upload", async () => {
+        const { createStandardMaterial } = await import("../../../packages/babylon-lite/src/material/standard/create-standard-material");
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        const material = createStandardMaterial();
+        const view = createStandardGeometryMaterialView(material, {
+            attachments: [GeometryTextureType.MESH_BLEND_TAG],
+            emitColor: false,
+        });
+        const clone = {
+            material,
+            meshBlendingTag: 64,
+            worldMatrix: new Float32Array(16),
+            worldMatrixVersion: 1,
+            hasVertexAlpha: false,
+            skeleton: null,
+            thinInstances: null,
+            morphTargets: null,
+            visible: true,
+            _gpu: {
+                positionBuffer: {} as GPUBuffer,
+                normalBuffer: {} as GPUBuffer,
+                indexBuffer: {} as GPUBuffer,
+                indexCount: 3,
+                indexFormat: "uint32",
+            },
+        } as unknown as Mesh;
+        const resources: MeshRebuildResources = { _lifetimeDisposers: [] };
+
+        expect(() => buildStandardGeometryRenderable(scene, clone, view, resources)).toThrow(/group ID/);
+        resources._lifetimeDisposers.forEach((dispose) => dispose());
+    });
+
+    it("emits a u32 PBR tag output and preserves the alpha-tested raw-tag contract", () => {
+        const attachments = [GeometryTextureType.ALBEDO, GeometryTextureType.MESH_BLEND_TAG] as const;
+        const source = { _renderFeatures: { features: PBR_HAS_ALPHA_TEST, features2: 0 } };
+        const view = createPbrGeometryMaterialView(source as never, { attachments, emitColor: false });
+        const composePbr = createPbrComposer({
+            _singleLightWGSL: "",
+            _getSingleLightBlock: null,
+            _multiLightWGSL: "",
+            _multiLightLoop: "",
+            _tm: undefined,
+            _fogHelper: "",
+            _fogBlock: "",
+            _createPbrTemplateExt: null,
+            _flatNormalWgsl: "",
+            _createPbrShadowFragment: null,
+            _shadowLights: [],
+            _createThinInstanceFragment: null,
+        });
+        const previousAttachments = _setActivePbrGeometryAttachments(attachments);
+        const composed = (() => {
+            try {
+                return composePbrGeometryShader(composePbr, view._renderFeatures.features, view._renderFeatures.features2 ?? 0, 0, 0, 0, "", "", undefined, "", attachments, false);
+            } finally {
+                _setActivePbrGeometryAttachments(previousAttachments);
+            }
+        })();
+
+        expect(composed._fragmentWGSL).toContain("@location(0) f0: vec4<f32>,");
+        expect(composed._fragmentWGSL).toContain("@location(1) meshBlendTag1: u32,");
+        expect(composed._fragmentWGSL).toContain("out.meshBlendTag1 = u32(material.meshBlendTag);");
+        expect(composed._materialUboSpec!._offsets.has("meshBlendTag")).toBe(true);
+    });
+
+    it("re-emits a Node geometry graph with an engine-owned u32 mesh-tag slot", async () => {
+        const engine = makeMockEngine();
+        const graph = {
+            blocks: [
+                { customType: "BABYLON.InputBlock", id: 1, name: "position", mode: 1, type: 0x8, inputs: [], outputs: [{ name: "output" }] },
+                { customType: "BABYLON.InputBlock", id: 2, name: "wvp", mode: 0, type: 0x80, inputs: [], outputs: [{ name: "output" }] },
+                {
+                    customType: "BABYLON.TransformBlock",
+                    id: 3,
+                    name: "transform",
+                    complementW: 1,
+                    inputs: [
+                        { name: "vector", targetBlockId: 1, targetConnectionName: "output" },
+                        { name: "transform", targetBlockId: 2, targetConnectionName: "output" },
+                    ],
+                    outputs: [{ name: "output" }],
+                },
+                {
+                    customType: "BABYLON.VertexOutputBlock",
+                    id: 4,
+                    name: "vertexOutput",
+                    inputs: [{ name: "vector", targetBlockId: 3, targetConnectionName: "output" }],
+                    outputs: [],
+                },
+                { customType: "BABYLON.InputBlock", id: 5, name: "color", mode: 0, type: 0x8, value: [1, 1, 1], inputs: [], outputs: [{ name: "output" }] },
+                {
+                    customType: "BABYLON.FragmentOutputBlock",
+                    id: 6,
+                    name: "fragmentOutput",
+                    inputs: [{ name: "rgb", targetBlockId: 5, targetConnectionName: "output" }],
+                    outputs: [],
+                },
+                { customType: "BABYLON.GeometryTextureOutputBlock", id: 7, name: "geometryOutput", inputs: [], outputs: [] },
+            ],
+            outputNodes: [4, 6, 7],
+        };
+        const material = await parseNodeMaterialFromSnippet(engine, "", { json: graph, blockLoader: loadNodeBlockEmitterWithGeometry });
+        const view = createNodeGeometryMaterialView(material, {
+            attachments: [GeometryTextureType.WORLD_NORMAL, GeometryTextureType.MESH_BLEND_TAG],
+            emitColor: false,
+        });
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        const mesh = {
+            material,
+            worldMatrix: new Float32Array(16),
+            worldMatrixVersion: 1,
+            receiveShadows: false,
+            visible: true,
+            children: [],
+            _gpu: {
+                positionBuffer: {} as GPUBuffer,
+                indexBuffer: {} as GPUBuffer,
+                indexCount: 3,
+                indexFormat: "uint32",
+            },
+        } as unknown as Mesh;
+        const resources: MeshRebuildResources = { _lifetimeDisposers: [] };
+
+        buildNodeGeometryRenderable(scene, mesh, view, resources);
+        const geometry = view._geometry as {
+            _struct: string;
+            _fsReturn: string;
+            _meshBlendTagOffset: number;
+            _meshUboFloats: number;
+        };
+        expect(geometry._struct).toContain("@location(0) f0: vec4<f32>,");
+        expect(geometry._struct).toContain("@location(1) meshBlendTag1: u32,");
+        expect(geometry._fsReturn).toContain("out.meshBlendTag1 = u32(meshU.meshBlendTag);");
+        expect(geometry._meshBlendTagOffset).toBeGreaterThanOrEqual(20);
+        expect(geometry._meshUboFloats).toBe(geometry._meshBlendTagOffset + 4);
+        resources._lifetimeDisposers.forEach((dispose) => dispose());
+    });
+
+    it("omits blend state only from the r8uint target in a transparent Standard MRT pipeline", async () => {
+        const { createStandardMaterial } = await import("../../../packages/babylon-lite/src/material/standard/create-standard-material");
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        const material = createStandardMaterial();
+        material.alpha = 0.5;
+        const view = createStandardGeometryMaterialView(material, {
+            attachments: [GeometryTextureType.MESH_BLEND_TAG, GeometryTextureType.ALBEDO],
+            emitColor: false,
+        });
+        const mesh = {
+            material,
+            worldMatrix: new Float32Array(16),
+            worldMatrixVersion: 1,
+            hasVertexAlpha: false,
+            skeleton: null,
+            thinInstances: null,
+            morphTargets: null,
+            visible: true,
+            _gpu: {
+                positionBuffer: {} as GPUBuffer,
+                normalBuffer: {} as GPUBuffer,
+                indexBuffer: {} as GPUBuffer,
+                indexCount: 3,
+                indexFormat: "uint32",
+            },
+        } as unknown as Mesh;
+        const resources: MeshRebuildResources = { _lifetimeDisposers: [] };
+        const renderable = buildStandardGeometryRenderable(scene, mesh, view, resources);
+        const createPipeline = vi.spyOn(engine._device, "createRenderPipeline");
+
+        renderable.bind(engine, {
+            _colorFormat: "r8uint",
+            _colorFormats: ["r8uint", "rgba8unorm"],
+            _depthStencilFormat: "depth32float",
+            _depthCompare: "greater-equal",
+            _sampleCount: 1,
+        } as unknown as RenderTargetSignature);
+
+        const descriptor = createPipeline.mock.calls.at(-1)![0];
+        const targets = descriptor.fragment!.targets as GPUColorTargetState[];
+        expect(targets[0]).toEqual({ format: "r8uint" });
+        expect(targets[1]).toMatchObject({ format: "rgba8unorm", blend: expect.any(Object) });
+        resources._lifetimeDisposers.forEach((dispose) => dispose());
     });
 });

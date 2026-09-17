@@ -31,6 +31,7 @@ import type { ComposedShader } from "../../shader/fragment-types.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
+import { _resolveGeometryMeshBlendTag } from "../../frame-graph/geometry-types.js";
 import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_TANGENTS, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
 import type { Material } from "../material.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
@@ -195,6 +196,12 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const matInitData = new F32(materialSpec._totalBytes / 4);
     // Use the per-scene writer captured on the geometry context.
     _writePbrMaterialData(matInitData, source, materialSpec);
+    const meshBlendTagOffset = materialSpec._offsets.get("meshBlendTag");
+    let lastMeshBlendTag = 0;
+    if (meshBlendTagOffset !== undefined) {
+        lastMeshBlendTag = _resolveGeometryMeshBlendTag(mesh);
+        matInitData[meshBlendTagOffset / 4] = lastMeshBlendTag;
+    }
     materialUBO = createUniformBuffer(engine, matInitData);
 
     // ── Mesh bind group (group 1). Pass the VIEW as the "material" so the
@@ -249,6 +256,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const matScratch = new F32(materialSpec._totalBytes / 4);
 
     const _baseUpdate = (): void => {
+        const meshBlendTag = meshBlendTagOffset !== undefined ? _resolveGeometryMeshBlendTag(mesh) : 0;
         if (mesh.worldMatrixVersion !== _lastWorldVersion || scene.lights.length !== _lastLightsCount) {
             sortCenter[0] = mesh.worldMatrix[12]!;
             sortCenter[1] = mesh.worldMatrix[13]!;
@@ -259,10 +267,14 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
             _lastWorldVersion = mesh.worldMatrixVersion;
             _lastLightsCount = scene.lights.length;
         }
-        if (source._uboVersion !== _lastUboVersion) {
+        if (source._uboVersion !== _lastUboVersion || meshBlendTag !== lastMeshBlendTag) {
             _lastUboVersion = source._uboVersion;
             matScratch.fill(0);
             _writePbrMaterialData(matScratch, source, materialSpec);
+            if (meshBlendTagOffset !== undefined) {
+                matScratch[meshBlendTagOffset / 4] = meshBlendTag;
+                lastMeshBlendTag = meshBlendTag;
+            }
             device.queue.writeBuffer(materialUBO, 0, matScratch.buffer, 0, matScratch.byteLength);
         }
         const ti = hasTI ? mesh.thinInstances : null;
@@ -470,7 +482,7 @@ function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSi
               alpha: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
           }
         : undefined;
-    const colorTargets: GPUColorTargetState[] = formats.map((fmt) => (blendState ? { format: fmt, blend: blendState } : { format: fmt }));
+    const colorTargets: GPUColorTargetState[] = formats.map((fmt) => (blendState && fmt !== "r8uint" ? { format: fmt, blend: blendState } : { format: fmt }));
     const sourceFeatures = (view.source as PbrMaterialProps)._renderFeatures?.features ?? 0;
     const hasDoubleSided = (sourceFeatures & PBR_HAS_DOUBLE_SIDED) !== 0;
     // Match the forward pass: `topology`/`frontFace` left to their WebGPU defaults ("triangle-list",
