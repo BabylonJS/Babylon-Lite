@@ -268,6 +268,36 @@ describe("runtime material rebuild ownership", () => {
         expect(material._renderFeatures).toBeUndefined();
     });
 
+    it("retires synchronous Standard rebuild resources after the in-flight frame", () => {
+        const engine = { _retirements: [] } as unknown as EngineContext;
+        const scene = createScene(engine);
+        const oldDispose = vi.fn();
+        const newDispose = vi.fn();
+        const material = {} as Material;
+        const mesh = { material } as Mesh;
+        const previous = renderable(mesh);
+        const rebuilt = { ...renderable(mesh), order: 50 };
+        const rebuild = vi.fn((target: SceneContext, targetMesh: Mesh): Renderable => {
+            target._meshDisposables.set(targetMesh, [newDispose]);
+            return rebuilt;
+        });
+        const builder = Object.assign(vi.fn(), { _materialFamily: "standard", _rebuildSingle: rebuild }) as unknown as MeshGroupBuilder;
+        material._buildGroup = builder;
+        scene.meshes.push(mesh);
+        scene._groups.set(builder, Object.assign([mesh], { r: rebuild }));
+        scene._renderables.push(previous);
+        scene._meshDisposables.set(mesh, [oldDispose]);
+
+        rebuildMaterial(scene, material);
+
+        expect(oldDispose).not.toHaveBeenCalled();
+        expect(engine._retirements).toHaveLength(1);
+        expect(scene._meshDisposables.get(mesh)).toEqual([newDispose]);
+        expect(scene._renderables).toEqual([rebuilt]);
+        engine._retirements!.splice(0).forEach((retire) => retire());
+        expect(oldDispose).toHaveBeenCalledOnce();
+    });
+
     it("routes a PBR material swap that gains gamma albedo through the asynchronous scene rebuild", async () => {
         const scene = createScene({ _retirements: [] } as unknown as EngineContext);
         scene._built = true;

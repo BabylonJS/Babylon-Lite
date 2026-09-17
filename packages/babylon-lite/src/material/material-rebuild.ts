@@ -1,6 +1,7 @@
 import type { SceneContext } from "../scene/scene.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { Material } from "./material.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { getMaterialSource, isMaterialView } from "./material-view.js";
 import { resolveMeshRebuild } from "./resolve-mesh-rebuild.js";
 
@@ -88,10 +89,8 @@ function rebuildSceneMesh(ctx: SceneContext, mesh: Mesh): boolean | Promise<void
     }
     const old = ctx._meshDisposables.get(mesh);
     if (old) {
-        for (const fn of old) {
-            fn();
-        }
         ctx._meshDisposables.delete(mesh);
+        retireGpuResources(ctx.surface.engine, () => old.forEach((fn) => fn()));
     }
     for (let i = ctx._renderables.length - 1; i >= 0; i--) {
         if (ctx._renderables[i]!.mesh === mesh) {
