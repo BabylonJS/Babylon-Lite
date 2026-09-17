@@ -5,6 +5,7 @@ import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/e
 import { enableShaderMaterialFinalColor } from "../../../packages/babylon-lite/src/material/shader/enable-shader-material-final-color";
 import { createShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
 import { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/src/material/shader/shader-renderable";
+import { createMeshFromData } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
 import { disposeMeshGpu } from "../../../packages/babylon-lite/src/mesh/mesh-dispose";
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
@@ -196,5 +197,51 @@ describe("ShaderMaterial visibility", () => {
         binding.draw(pass, engine);
 
         expect(createBuffer).toHaveBeenCalledWith(expect.objectContaining({ label: "shader-final-color-white", size: 48 }));
+    });
+
+    it("uses a valid minimum fallback size for zero-vertex tight geometry", () => {
+        const mappedData = new Map<GPUBuffer, ArrayBuffer>();
+        const createBuffer = vi.fn((descriptor: GPUBufferDescriptor) => {
+            const data = new ArrayBuffer(Math.max(Number(descriptor.size), 4));
+            const buffer = {
+                size: descriptor.size,
+                getMappedRange: vi.fn(() => data),
+                unmap: vi.fn(),
+                destroy: vi.fn(),
+            } as unknown as GPUBuffer;
+            mappedData.set(buffer, data);
+            return buffer;
+        });
+        const device = {
+            createBuffer,
+            createBindGroupLayout: vi.fn((descriptor: GPUBindGroupLayoutDescriptor) => descriptor as unknown as GPUBindGroupLayout),
+            createPipelineLayout: vi.fn((descriptor: GPUPipelineLayoutDescriptor) => descriptor as unknown as GPUPipelineLayout),
+            createBindGroup: vi.fn((descriptor: GPUBindGroupDescriptor) => descriptor as unknown as GPUBindGroup),
+            createShaderModule: vi.fn((descriptor: GPUShaderModuleDescriptor) => descriptor as unknown as GPUShaderModule),
+            createRenderPipeline: vi.fn((descriptor: GPURenderPipelineDescriptor) => descriptor as unknown as GPURenderPipeline),
+            queue: { writeBuffer: vi.fn() },
+        } as unknown as GPUDevice;
+        const engine = { _device: device, canvas: { width: 64, height: 64 } } as unknown as EngineContext;
+        const material = createShaderMaterial({
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+            attributes: ["position", "color"],
+        });
+        enableShaderMaterialFinalColor(material);
+        const mesh = createMeshFromData(engine, "empty", new Float32Array(), new Float32Array(), new Uint32Array());
+        mesh.material = material;
+        const scene = { surface: { engine }, camera: null, _meshDisposables: new Map() } as unknown as SceneContext;
+        const binding = buildShaderMaterialRenderables(scene, [mesh]).renderables[0]!.bind(engine, { _colorFormat: "rgba8unorm", _sampleCount: 1 } as RenderTargetSignature);
+        const pass = {
+            setVertexBuffer: vi.fn(),
+            setIndexBuffer: vi.fn(),
+            setBindGroup: vi.fn(),
+            drawIndexed: vi.fn(),
+        } as unknown as GPURenderPassEncoder;
+
+        binding.draw(pass, engine);
+
+        expect(createBuffer).toHaveBeenCalledWith(expect.objectContaining({ label: "shader-final-color-white", size: 4 }));
+        expect(Array.from(new Float32Array(mappedData.get(mesh._gpu._shaderColorFallback!)!))).toEqual([1]);
     });
 });
