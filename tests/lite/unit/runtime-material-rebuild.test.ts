@@ -282,7 +282,7 @@ describe("runtime material rebuild ownership", () => {
             return rebuilt;
         });
         const builder = Object.assign(vi.fn(), { _materialFamily: "standard", _rebuildSingle: rebuild }) as unknown as MeshGroupBuilder;
-        material._buildGroup = builder;
+        Object.assign(material, { _buildGroup: builder });
         scene.meshes.push(mesh);
         scene._groups.set(builder, Object.assign([mesh], { r: rebuild }));
         scene._renderables.push(previous);
@@ -316,7 +316,7 @@ describe("runtime material rebuild ownership", () => {
         const rebuiltB = renderable(meshB);
         const rebuild = vi.fn((_target: SceneContext, mesh: Mesh) => (mesh === meshA ? rebuiltA : rebuiltB));
         const builder = Object.assign(vi.fn(), { _materialFamily: "shader", _rebuildSingle: rebuild }) as unknown as MeshGroupBuilder;
-        material._buildGroup = builder;
+        Object.assign(material, { _buildGroup: builder });
         scene.meshes.push(meshA, meshB);
         scene._groups.set(builder, Object.assign([meshA, meshB], { r: rebuild }));
         const merged = { order: 100, isTransparent: false } as Renderable;
