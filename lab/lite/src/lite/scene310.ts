@@ -1,9 +1,9 @@
 import {
     addTask,
     addToScene,
+    createArcRotateCamera,
     createBox,
     createEngine,
-    createFreeCamera,
     createGeometryRendererTask,
     createHemisphericLight,
     createMeshBlendingPostProcessTask,
@@ -38,7 +38,7 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine, { defaultRenderTask: false });
     scene.clearColor = { r: 0.025, g: 0.035, b: 0.055, a: 1 };
 
-    const camera = createFreeCamera({ x: 0, y: -0.1, z: -9.5 }, { x: 0, y: -0.1, z: 0 });
+    const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 9.5, { x: 0, y: -0.1, z: 0 });
     camera.nearPlane = 0.1;
     camera.farPlane = 100;
     scene.camera = camera;
