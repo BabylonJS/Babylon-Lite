@@ -1,12 +1,13 @@
 import {
     addTask,
     addToScene,
-    createArcRotateCamera,
     createBox,
     createEngine,
+    createFreeCamera,
     createGeometryRendererTask,
     createHemisphericLight,
     createMeshBlendingPostProcessTask,
+    createPbrMaterial,
     createRenderTarget,
     createSceneContext,
     createSphere,
@@ -37,7 +38,7 @@ async function main(): Promise<void> {
     const scene = createSceneContext(engine, { defaultRenderTask: false });
     scene.clearColor = { r: 0.025, g: 0.035, b: 0.055, a: 1 };
 
-    const camera = createArcRotateCamera(-Math.PI / 2, Math.PI / 2, 9.5, { x: 0, y: -0.1, z: 0 });
+    const camera = createFreeCamera({ x: 0, y: -0.1, z: -9.5 }, { x: 0, y: -0.1, z: 0 });
     camera.nearPlane = 0.1;
     camera.farPlane = 100;
     scene.camera = camera;
@@ -58,10 +59,11 @@ async function main(): Promise<void> {
         const box = createBox(engine, 2.35);
         box.position.set(xs[i]! + 0.48, 1.05, 0.1);
         box.rotation.y = 0.25;
-        const boxMaterial = createStandardMaterial();
-        boxMaterial.diffuseColor = COLORS[(i + 1) % COLORS.length]!;
-        boxMaterial.specularColor = [0.08, 0.08, 0.08];
-        box.material = boxMaterial;
+        box.material = createPbrMaterial({
+            baseColorFactor: [COLORS[(i + 1) % COLORS.length]![0], COLORS[(i + 1) % COLORS.length]![1], COLORS[(i + 1) % COLORS.length]![2], 1],
+            metallicFactor: 0.15,
+            roughnessFactor: 0.72,
+        });
         box.meshBlendingTag = packMeshBlendingTag(2 + i * 2, i as MeshBlendingRadiusClass);
         addToScene(scene, box);
     }
@@ -78,10 +80,7 @@ async function main(): Promise<void> {
     const sameGroupBox = createBox(engine, 2.55);
     sameGroupBox.position.set(0.6, -1.55, 0.1);
     sameGroupBox.rotation.z = 0.2;
-    const sameBoxMaterial = createStandardMaterial();
-    sameBoxMaterial.diffuseColor = [0.1, 0.9, 0.85];
-    sameBoxMaterial.specularColor = [0.05, 0.05, 0.05];
-    sameGroupBox.material = sameBoxMaterial;
+    sameGroupBox.material = createPbrMaterial({ baseColorFactor: [0.1, 0.9, 0.85, 1], metallicFactor: 0.05, roughnessFactor: 0.8 });
     sameGroupBox.meshBlendingTag = packMeshBlendingTag(20, MeshBlendingRadiusClass.Small);
     addToScene(scene, sameGroupBox);
 

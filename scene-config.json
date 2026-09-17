@@ -2673,8 +2673,8 @@
         "maxMad": 1.5,
         "maxRegionMad": 5,
         "maxRawKB": 135,
-        "description": "HDR-capable single-sample SceneColor with Standard intersections across all four radius classes, default Medium/view-depth mesh blending, and a same-group pair that intentionally retains a hard seam. Real-asset PBR coverage lives in scene 315.",
-        "tags": ["frame-graph", "geometry-renderer", "post-process", "mesh-blending", "standard", "hdr"],
+        "description": "HDR-capable single-sample SceneColor with Standard/PBR intersections across all four radius classes, default Medium/view-depth mesh blending, and a same-group pair that intentionally retains a hard seam.",
+        "tags": ["frame-graph", "geometry-renderer", "post-process", "mesh-blending", "standard", "pbr", "hdr"],
         "skipPerf": true
     },
     {
