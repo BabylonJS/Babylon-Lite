@@ -9,7 +9,6 @@ import { FrameGraphObjectRendererTask } from "@babylonjs/core/FrameGraph/Tasks/R
 import { FrameGraphCopyToBackbufferColorTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/copyToBackbufferColorTask";
 import { FrameGraphClearTextureTask } from "@babylonjs/core/FrameGraph/Tasks/Texture/clearTextureTask";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
-import { PBRMetallicRoughnessMaterial } from "@babylonjs/core/Materials/PBR/pbrMetallicRoughnessMaterial";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -46,11 +45,10 @@ const COLORS = [new Color3(1.15, 0.18, 0.08), new Color3(0.08, 0.55, 1.1), new C
         const box = MeshBuilder.CreateBox(`box-${i}`, { size: 2.35 }, scene);
         box.position.set(xs[i]! + 0.48, 1.05, 0.1);
         box.rotation.y = 0.25;
-        const pbr = new PBRMetallicRoughnessMaterial(`pbr-${i}`, scene);
-        pbr.baseColor = COLORS[(i + 1) % COLORS.length]!;
-        pbr.metallic = 0.15;
-        pbr.roughness = 0.72;
-        box.material = pbr;
+        const boxMaterial = new StandardMaterial(`box-standard-${i}`, scene);
+        boxMaterial.diffuseColor = COLORS[(i + 1) % COLORS.length]!;
+        boxMaterial.specularColor = new Color3(0.08, 0.08, 0.08);
+        box.material = boxMaterial;
         box.meshBlendingTag = PackMeshBlendingTag(2 + i * 2, i as MeshBlendingRadiusClass);
     }
 
@@ -65,11 +63,10 @@ const COLORS = [new Color3(1.15, 0.18, 0.08), new Color3(0.08, 0.55, 1.1), new C
     const sameGroupBox = MeshBuilder.CreateBox("same-group-box", { size: 2.55 }, scene);
     sameGroupBox.position.set(0.6, -1.55, 0.1);
     sameGroupBox.rotation.z = 0.2;
-    const samePbr = new PBRMetallicRoughnessMaterial("same-pbr", scene);
-    samePbr.baseColor = new Color3(0.1, 0.9, 0.85);
-    samePbr.metallic = 0.05;
-    samePbr.roughness = 0.8;
-    sameGroupBox.material = samePbr;
+    const sameBoxMaterial = new StandardMaterial("same-box-standard", scene);
+    sameBoxMaterial.diffuseColor = new Color3(0.1, 0.9, 0.85);
+    sameBoxMaterial.specularColor = new Color3(0.05, 0.05, 0.05);
+    sameGroupBox.material = sameBoxMaterial;
     sameGroupBox.meshBlendingTag = PackMeshBlendingTag(20, MeshBlendingRadiusClass.Small);
 
     const frameGraph = new FrameGraph(scene, true);

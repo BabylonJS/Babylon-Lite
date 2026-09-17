@@ -1025,7 +1025,7 @@ IDs `310..315` contain six focused scenes. Scene 315 is the user-approved except
 
 |  ID | Coverage                                                                                                         |
 | --: | ---------------------------------------------------------------------------------------------------------------- |
-| 310 | Core Standard/PBR intersections, default Medium/view-depth behavior, packed radius classes, and same-group seam  |
+| 310 | Core Standard intersections, default Medium/view-depth behavior, packed radius classes, and same-group seam      |
 | 311 | Three large ShadowAttenuation seams comparing no albedo on the left with linear albedo on the right              |
 | 312 | Nearly full-frame orthographic panels using reverse-Z screen depth, High quality, and custom radius/slope values |
 | 313 | Alpha-tested Standard/PBR materials proving discarded fragments write no tag                                     |
