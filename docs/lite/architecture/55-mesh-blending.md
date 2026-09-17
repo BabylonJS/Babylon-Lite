@@ -291,10 +291,18 @@ The concrete task contains:
 ```ts
 interface MeshBlendingPostProcessTaskInternal extends MeshBlendingPostProcessTask {
     _internalTarget: RenderTarget | null;
-    _internalTargetKey: string;
+    _internalSource: RenderTarget | null;
+    _internalFormat: GPUTextureFormat | null;
     _device: GPUDevice | null;
-    _variantKey: string;
-    _resourceKey: string;
+    _compiledQuality: MeshBlendQuality | -1;
+    _compiledDepthType: MeshBlendDepthType | -1;
+    _compiledDebugMode: MeshBlendDebugMode | -1;
+    _compiledHasBaseColor: boolean | null;
+    _compiledOutputFormat: GPUTextureFormat | null;
+    _compiledSourceFormat: GPUTextureFormat | null;
+    _compiledDepthFormat: GPUTextureFormat | null;
+    _compiledBaseColorFormat: GPUTextureFormat | null;
+    _compiledAlphaMode: PostProcessAlphaMode | -1;
     _uniformBuffer: GPUBuffer | null;
     _uniformData: Float32Array;
     _blueNoiseTexture: GPUTexture | null;
@@ -306,6 +314,19 @@ interface MeshBlendingPostProcessTaskInternal extends MeshBlendingPostProcessTas
     _bindGroup: GPUBindGroup | null;
     _renderPassDescriptor: GPURenderPassDescriptor;
     _colorAttachment: GPURenderPassColorAttachment;
+    _boundSource: GPUTexture | null;
+    _boundTag: GPUTexture | null;
+    _boundDepth: GPUTexture | null;
+    _boundBaseColor: GPUTexture | null;
+    _validatedSource: GPUTexture | null;
+    _validatedTag: GPUTexture | null;
+    _validatedDepth: GPUTexture | null;
+    _validatedBaseColor: GPUTexture | null;
+    _validatedOutput: GPUTexture | null;
+    _validatedWidth: number;
+    _validatedHeight: number;
+    _validatedDepthType: MeshBlendDepthType | -1;
+    _validatedAlphaMode: PostProcessAlphaMode | -1;
 }
 ```
 
@@ -335,7 +356,7 @@ One 240-byte uniform buffer is written as 60 `f32` values:
 | `58`        | `enabled`, `1` or `0`                     |
 | `59`        | reserved zero                             |
 
-Projection and inverse projection are computed from the task camera and the output dimensions. `inverseView` is updated for all variants for a stable layout, but only referenced by the WorldPosition debug variant. Orthographic state is `camera.ortho ? 1 : 0`.
+Projection and inverse projection are computed from the task camera and the output dimensions. The `inverseView` range remains zero for ordinary variants and is computed and written only for the WorldPosition debug variant. Orthographic state is `camera.ortho ? 1 : 0`.
 
 ### Blue noise
 

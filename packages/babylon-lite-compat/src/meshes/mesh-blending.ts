@@ -1,4 +1,4 @@
-import { createDefaultMeshBlendRadiusDefinitions, packMeshBlendingTag, unpackMeshBlendingTag, type MeshBlendingRadiusClass as LiteMeshBlendingRadiusClass } from "babylon-lite";
+import { createDefaultMeshBlendRadiusDefinitions, packMeshBlendingTag, unpackMeshBlendingTag } from "babylon-lite";
 
 import { unsupported } from "../error.js";
 
@@ -15,7 +15,7 @@ export interface IMeshBlendingTag {
 }
 
 export function PackMeshBlendingTag(groupId: number, radiusClass: MeshBlendingRadiusClass): number {
-    return packMeshBlendingTag(groupId, radiusClass as LiteMeshBlendingRadiusClass);
+    return packMeshBlendingTag(groupId, radiusClass);
 }
 
 export function UnpackMeshBlendingTag(tag: number): IMeshBlendingTag {

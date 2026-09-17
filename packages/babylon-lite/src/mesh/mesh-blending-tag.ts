@@ -11,8 +11,8 @@ export enum MeshBlendingRadiusClass {
 
 /** Decoded mesh-blending tag. */
 export interface MeshBlendingTag {
-    readonly groupId: number;
-    readonly radiusClass: MeshBlendingRadiusClass;
+    groupId: number;
+    radiusClass: number;
 }
 
 /** Radius values associated with one mesh-blending radius class. */
@@ -25,7 +25,7 @@ export interface MeshBlendRadiusDefinition {
 export type MeshBlendRadiusDefinitions = readonly [MeshBlendRadiusDefinition, MeshBlendRadiusDefinition, MeshBlendRadiusDefinition, MeshBlendRadiusDefinition];
 
 /** Pack a logical group and radius class into the geometry renderer's one-byte tag. */
-export function packMeshBlendingTag(groupId: number, radiusClass: MeshBlendingRadiusClass): number {
+export function packMeshBlendingTag(groupId: number, radiusClass: number): number {
     if (!Number.isInteger(groupId) || groupId < 0 || groupId > 63) {
         throw new RangeError("Mesh-blending group ID must be an integer between 0 and 63.");
     }
@@ -46,7 +46,7 @@ export function validatePackedMeshBlendingTag(tag: number): number {
 /** Decode a validated packed mesh-blending tag. */
 export function unpackMeshBlendingTag(tag: number): MeshBlendingTag {
     const packed = validatePackedMeshBlendingTag(tag);
-    return { groupId: packed & 0x3f, radiusClass: (packed >> 6) as MeshBlendingRadiusClass };
+    return { groupId: packed & 0x3f, radiusClass: packed >> 6 };
 }
 
 function radiusDefinition(worldRadius: number, minimumProjectedRadius: number): MeshBlendRadiusDefinition {
