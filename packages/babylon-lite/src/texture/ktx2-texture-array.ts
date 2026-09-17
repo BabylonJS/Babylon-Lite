@@ -35,6 +35,9 @@ export interface Ktx2TextureArrayOptions {
  * Decode a single KTX2 file that stores several array layers (`layerCount` \> 1) and
  * upload it as one `Texture2DArray`. The single-file counterpart to
  * {@link createTexture2DArrayFromUrls}: the whole array travels in one container.
+ * This compatibility path exposes sampler and regenerated-mipmap options. Use
+ * `uploadKtx2Texture2DArray` when preserving the device-selected compressed format
+ * and the container's complete authored mip chain is preferred.
  *
  * The data is transcoded to uncompressed RGBA8 (`forceRGBA`), so the GPU cost matches
  * a plain RGBA array texture. Only the base mip level from the file is uploaded; when

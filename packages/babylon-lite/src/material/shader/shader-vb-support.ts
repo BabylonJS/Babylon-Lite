@@ -89,6 +89,11 @@ export function _attributeLayout(name: ShaderAttributeName, shaderLocation: numb
 }
 
 /** @internal One layout shape for both canonical and explicitly declared formats. */
-export function _createAttributeLayout(format: GPUVertexFormat, arrayStride: number, shaderLocation: number): { arrayStride: number; attributes: [GPUVertexAttribute] } {
-    return { arrayStride, attributes: [{ shaderLocation, offset: 0, format }] };
+export function _createAttributeLayout(
+    format: GPUVertexFormat,
+    arrayStride: number,
+    shaderLocation: number,
+    offset = 0
+): { arrayStride: number; attributes: [GPUVertexAttribute] } {
+    return { arrayStride, attributes: [{ shaderLocation, offset, format }] };
 }

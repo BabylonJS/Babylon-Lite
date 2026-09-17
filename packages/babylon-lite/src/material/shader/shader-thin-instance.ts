@@ -37,7 +37,7 @@ interface ShaderHelpers {
     createPacket: (scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh, resources?: MeshRebuildResources) => ShaderPacket;
     updatePacket: (scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext, uniformBatch?: UniformCopyBatch) => void;
     updateCustomUbo: (engine: EngineContext, material: ShaderMaterial, uniformBatch?: UniformCopyBatch) => void;
-    getAttrBuffer: (engine: EngineContext, mesh: Mesh, name: ShaderAttributeName) => GPUBuffer;
+    getAttrBuffer: (engine: EngineContext, mesh: Mesh, name: ShaderAttributeName, material: ShaderMaterial) => GPUBuffer;
     getVertexLayout?: (material: ShaderMaterial, bindings: ShaderPipelineBindings, mesh?: Mesh) => ShaderVbLayout | null;
     registerPipeline?: (mesh: Mesh, material: ShaderMaterial, hasColor: boolean, vertexLayout?: ShaderVbLayout) => void;
     getOrCreateShaderPipeline: (
@@ -139,7 +139,7 @@ function createShaderInstancedRenderable(
         const gpu = mesh._gpu;
         let slot = 0;
         for (let i = 0; i < material.attributes.length; i++) {
-            pass.setVertexBuffer(slot++, h.getAttrBuffer(engine, mesh, material.attributes[i]!));
+            pass.setVertexBuffer(slot++, h.getAttrBuffer(engine, mesh, material.attributes[i]!, material));
         }
         slot = syncThinInstanceBuffers(engine, ti, pass, slot, hasColor, cullBinding?.cullDrawBufs);
         pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
@@ -240,7 +240,7 @@ export function buildShaderRenderablesWithInstancing(
 
     const renderables: Renderable[] = [];
     let plainRebuild: MeshGroupBuildResult["rebuildSingle"] | undefined;
-    if (plain.length > 0) {
+    if (plain.length) {
         const plainResult = buildPlain(scene, plain);
         renderables.push(...plainResult.renderables);
         plainRebuild = plainResult.rebuildSingle;
@@ -252,7 +252,7 @@ export function buildShaderRenderablesWithInstancing(
     const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material, resources?: MeshRebuildResources): Renderable => {
         const material = (materialOverride ?? mesh.material) as ShaderMaterial;
         if (mesh.thinInstances) {
-            return buildInstancedSingle(s, mesh, material, materialOverride != null, h, cull, resources);
+            return buildInstancedSingle(s, mesh, material, !!materialOverride, h, cull, resources);
         }
         if (plainRebuild) {
             return plainRebuild(s, mesh, materialOverride, resources);

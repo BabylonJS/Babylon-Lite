@@ -4,9 +4,11 @@ import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/e
 import { createShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
 import { buildShaderGroup, buildShaderMaterialRenderables } from "../../../packages/babylon-lite/src/material/shader/shader-renderable";
 import { setShaderAttributeFormats } from "../../../packages/babylon-lite/src/material/shader/shader-vb";
+import { enableShaderMaterialFinalColor } from "../../../packages/babylon-lite/src/material/shader/enable-shader-material-final-color";
 import { createMeshFromStorageBuffer } from "../../../packages/babylon-lite/src/mesh/mesh-from-storage";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { createMeshFromData } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
+import { disposeMeshGpu } from "../../../packages/babylon-lite/src/mesh/mesh-dispose";
 import { setThinInstances } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import { createStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
@@ -68,6 +70,49 @@ function pipelineLayouts(pipeline: GPURenderPipeline) {
 }
 
 describe("storage-backed missing vertex attributes", () => {
+    it.each([false, true])("uses a neutral constant white stream for packed final-color inputs (thin=%s)", async (thin) => {
+        const f = fixture();
+        const shader = createShaderMaterial({
+            attributes: ["position", "color"],
+            vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f {
+return vec4f(input.position.xyz * getFinalColor(input).rgb, 1);
+}`,
+            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+        });
+        setShaderAttributeFormats(shader, { position: "float32x4", color: "unorm8x4" });
+        enableShaderMaterialFinalColor(shader);
+        const storage = createStorageBuffer(f.engine, 160048, { vertex: true });
+        const mesh = createMeshFromStorageBuffer(f.engine, "white-slot", {
+            storage,
+            indices: new Uint16Array([0, 1, 2]),
+            vertexCount: 3,
+            arrayStride: 16,
+            baseVertex: 10000,
+        });
+        mesh.material = shader;
+        if (thin) {
+            setThinInstances(mesh, new Float32Array(16), 1);
+        }
+        const built = thin ? await buildShaderGroup(f.scene, [mesh]) : buildShaderMaterialRenderables(f.scene, [mesh]);
+        const binding = built.renderables[0]!.bind(f.engine, signature);
+        binding.update?.({ targetWidth: 64, targetHeight: 64 });
+        binding.draw(f.pass as unknown as GPURenderPassEncoder, f.engine);
+        const colorLayout = pipelineLayouts(binding.pipeline)[1]!;
+        expect(colorLayout.arrayStride).toBe(0);
+        expect(colorLayout.attributes[0]!.format).toBe("float32x4");
+        const white = mesh._gpu._shaderColorFallback!;
+        expect(white.size).toBe(16);
+        expect(Array.from(new Float32Array(white.getMappedRange()))).toEqual([1, 1, 1, 1]);
+        expect(f.pass.setVertexBuffer).toHaveBeenCalledWith(1, white);
+
+        const clone = cloneTransformNode(mesh) as Mesh;
+        disposeMeshGpu(mesh);
+        expect(white.destroy).not.toHaveBeenCalled();
+        disposeMeshGpu(clone);
+        expect(white.destroy).toHaveBeenCalledOnce();
+        expect(storage._buffer!.destroy).not.toHaveBeenCalled();
+    });
+
     it("prevalidates every mesh before allocating a group and preserves the minimum opaque render order", () => {
         const f = fixture();
         const shader = createShaderMaterial({

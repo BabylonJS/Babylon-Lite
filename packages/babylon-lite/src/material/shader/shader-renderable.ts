@@ -120,7 +120,7 @@ export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh
     const renderables: Renderable[] = [];
 
     const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material, rebuildResources?: MeshRebuildResources): Renderable =>
-        buildSingleShaderRenderable(s, mesh, (materialOverride ?? mesh.material) as ShaderMaterial, materialOverride != null, getUniformBatch, rebuildResources);
+        buildSingleShaderRenderable(s, mesh, (materialOverride ?? mesh.material) as ShaderMaterial, !!materialOverride, getUniformBatch, rebuildResources);
 
     const byMaterial = new Map<ShaderMaterial, Mesh[]>();
     for (const mesh of meshes) {
@@ -155,16 +155,16 @@ export async function buildShaderGroup(scene: SceneContext, meshes: Mesh[]): Pro
         getUniformBatch = getUniformCopyBatch;
     }
     const firstMaterial = meshes[0]?.material;
-    if (firstMaterial && meshes.some((mesh) => mesh.material !== firstMaterial)) {
+    if (meshes.some((mesh) => mesh.material !== firstMaterial)) {
         const { enableShaderPipelineCache } = await import("./shader-pipeline-cache.js");
         enableShaderPipelineCache(scene.surface.engine, meshes);
     }
     const buildPlain = (s: SceneContext, plainMeshes: Mesh[]): MeshGroupBuildResult => buildShaderMaterialRenderables(s, plainMeshes, getUniformBatch);
-    if (!meshes.some((m) => !!m.thinInstances)) {
+    if (!meshes.some((m) => m.thinInstances)) {
         return buildPlain(scene, meshes);
     }
     const mod = await import("./shader-thin-instance.js");
-    const cull = meshes.some((m) => !!m.thinInstances?._gpuCullingEnabled) ? await import("../../mesh/thin-instance-cull-binding.js") : undefined;
+    const cull = meshes.some((m) => m.thinInstances?._gpuCullingEnabled) ? await import("../../mesh/thin-instance-cull-binding.js") : undefined;
     return mod.buildShaderRenderablesWithInstancing(
         scene,
         meshes,
@@ -504,7 +504,7 @@ function drawPacket(pass: ShaderRenderPass, engine: EngineContext, material: Sha
     const gpu = packet.mesh._gpu;
     const attributes = material.attributes;
     for (let i = 0; i < attributes.length; i++) {
-        pass.setVertexBuffer(i, getAttrBuffer(engine, packet.mesh, attributes[i]!));
+        pass.setVertexBuffer(i, getAttrBuffer(engine, packet.mesh, attributes[i]!, material));
     }
     pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
     pass.setBindGroup(1, packet._bindGroup!);
@@ -807,6 +807,6 @@ function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): G
     return buffer;
 }
 
-function getAttrBuffer(engine: EngineContext, mesh: Mesh, name: ShaderAttributeName): GPUBuffer {
-    return _getShaderAttributeBuffer(mesh, name) ?? getZeroAttrBuffer(engine, mesh._gpu, name);
+function getAttrBuffer(engine: EngineContext, mesh: Mesh, name: ShaderAttributeName, material: ShaderMaterial): GPUBuffer {
+    return _getShaderAttributeBuffer(mesh, name) ?? (name === "color" ? material._colorFallback?.(engine, mesh._gpu) : undefined) ?? getZeroAttrBuffer(engine, mesh._gpu, name);
 }

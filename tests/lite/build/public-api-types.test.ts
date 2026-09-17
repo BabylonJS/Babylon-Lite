@@ -35,6 +35,53 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("requires at least one source for separate-file KTX2 arrays", () => {
+        const probePath = resolve(BUILD_DIR, "ktx2-array-sources.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    loadKtx2Texture2DArrayFromUrls,
+    uploadKtx2Texture2DArrayFromBuffers,
+    type EngineContext,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const buffer: ArrayBuffer;
+uploadKtx2Texture2DArrayFromBuffers(engine, [buffer]);
+loadKtx2Texture2DArrayFromUrls(engine, ["layer.ktx2"]);
+// @ts-expect-error Separate-file KTX2 arrays require at least one buffer.
+uploadKtx2Texture2DArrayFromBuffers(engine, []);
+// @ts-expect-error Separate-file KTX2 arrays require at least one URL.
+loadKtx2Texture2DArrayFromUrls(engine, []);
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes standalone tasks, opt-in RTTs, and storage-backed geometry", () => {
         const probePath = resolve(BUILD_DIR, "render-task-opt-in.probe.ts");
         try {

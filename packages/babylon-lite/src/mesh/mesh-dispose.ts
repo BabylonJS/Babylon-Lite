@@ -48,6 +48,7 @@ export function disposeMeshGpu(mesh: Mesh): void {
             disposeVertexBuffers(g);
             g.indexBuffer.destroy();
         }
+        g._shaderColorFallback?.destroy();
     }
     const ti = mesh.thinInstances;
     if (ti && release(ti)) {

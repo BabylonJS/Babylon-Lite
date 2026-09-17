@@ -156,8 +156,15 @@ const support: ShaderVbSupport = {
         }
         const attributes = material.attributes;
         const vbs = bindings.vertexBuffers.map((canonical, i) => {
-            const packing = missing & (1 << i) ? ZERO_LAYOUT : layout?.[attributes[i]!];
-            return packing ? { ...canonical, arrayStride: packing._stride, attributes: [{ ...canonical.attributes[0]!, offset: packing._offset }] } : canonical;
+            const isMissing = missing & (1 << i);
+            const name = attributes[i]!;
+            const packing = isMissing ? ZERO_LAYOUT : layout?.[name];
+            if (!packing) {
+                return canonical;
+            }
+            const attribute = canonical.attributes[0]!;
+            const format = isMissing && name === "color" && material._colorFallback ? "float32x4" : attribute.format;
+            return _createAttributeLayout(format, packing._stride, i, packing._offset);
         });
         return { _vbs: vbs, _key: vertexKey(mesh, missing) };
     },

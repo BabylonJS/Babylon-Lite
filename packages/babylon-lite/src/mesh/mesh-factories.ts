@@ -515,6 +515,7 @@ function retireMeshGeometryBuffers(engine: EngineContext, gpu: Mesh["_gpu"]): vo
         gpu.uv2Buffer?.destroy();
         gpu.tangentBuffer?.destroy();
         gpu.colorBuffer?.destroy();
+        gpu._shaderColorFallback?.destroy();
     });
 }
 

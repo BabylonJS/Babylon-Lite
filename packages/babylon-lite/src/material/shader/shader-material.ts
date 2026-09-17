@@ -4,6 +4,8 @@ import type { Texture2D } from "../../texture/texture-2d.js";
 import type { StorageBuffer } from "../../resource/storage-buffer.js";
 import type { Mat4 } from "../../math/types.js";
 import type { WgslSource } from "../../shader/wgsl.js";
+import type { EngineContext } from "../../engine/engine.js";
+import type { MeshGPU } from "../../mesh/mesh.js";
 import { getShaderGroupBuilder } from "./shader-group-builder.js";
 import { bumpVisibilityEpoch } from "../../engine/engine.js";
 
@@ -160,6 +162,8 @@ export interface ShaderMaterial extends Material {
     readonly defines: readonly ShaderDefine[];
     /** @internal Explicit thin-instance color preference; numeric zero is reserved for compact runtime checks. */
     readonly _tic?: boolean | 0;
+    /** @internal Optional neutral buffer provider installed by the final-color helper. */
+    _colorFallback?: (engine: EngineContext, gpu: MeshGPU) => GPUBuffer;
     readonly needAlphaBlending: boolean;
     readonly blendMode: "alpha" | "additive";
     /** Explicit blend-state override (see `ShaderMaterialOptions.blend`). */

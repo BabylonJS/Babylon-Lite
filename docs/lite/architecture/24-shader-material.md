@@ -100,7 +100,7 @@ export type ShaderAttributeName = "position" | "normal" | "uv" | "uv2" | "tangen
 export type ShaderAttributeFormats = Partial<Record<ShaderAttributeName, GPUVertexFormat>>;
 ```
 
-The order in `options.attributes` is the vertex buffer binding order and the WGSL `@location` order. Unsupported names throw during material creation. Missing optional mesh buffers use zero-filled buffers, matching NodeMaterial behavior. `position` is required for normal mesh rendering.
+The order in `options.attributes` is the vertex buffer binding order and the WGSL `@location` order. Unsupported names throw during material creation. Missing optional mesh buffers use zero-filled buffers. When `enableShaderMaterialFinalColor()` is enabled, its missing `color` fallback is instead white so color multiplication does not black out meshes without vertex colors. `position` is required for normal mesh rendering.
 
 `setShaderAttributeFormats` changes the material-owned vertex signature before registration or pipeline preparation: the declared
 `GPUVertexFormat` selects both the generated WGSL input type and the tight default stride. Mesh-owned
@@ -127,6 +127,11 @@ resolve their combined vertex layouts once during construction and share them ac
 async preparation; indirect argument encoding remains in `mesh-indexed-indirect.ts`.
 Vertex-format support is needed only when preparing layouts and grouping packets; renderable draw
 closures do not retain it. Missing-buffer allocation calls the engine-owned seam directly.
+With the final-color helper enabled, missing storage-backed color inputs use one mesh-owned
+white float32 RGBA record with zero stride. Its physical fallback format is canonical float32x4,
+including when the authored color declaration uses a normalized format, so the neutral value
+remains white. The buffer is released with the last geometry owner; ordinary missing streams
+still use their existing zero defaults.
 Validation computes each mesh's missing-stream mask once before packet allocation. Packets retain
 that mask for grouping and layout resolution, avoiding repeated stream scans. Opaque and transparent
 renderables share target-binding construction, while retaining their distinct ordering and update behavior.
@@ -189,8 +194,9 @@ The generated implementation returns white when the material declares no color a
 no instance-color stream, `input.color` for vertex color only, `input.instanceColor` for instance color only,
 and `input.color * input.instanceColor` when both are present. `input.color` remains the ordinary mesh
 per-vertex attribute requested through `attributes: ["color"]`; `setThinInstanceColors()` supplies the separate
-instance-rate `input.instanceColor`. A declared mesh color attribute whose buffer is absent retains
-ShaderMaterial's existing zero-filled fallback behavior.
+instance-rate `input.instanceColor`. When a material declares `color` but a mesh has no vertex-color buffer,
+`input.color` uses a mesh-owned neutral white fallback, so an available instance color passes through
+unchanged. The fallback participates in normal shared-geometry disposal, resize retirement, and device recovery.
 
 Like `getFinalWorld`, the final-color helper is emitted only for materials that opt in. The instance-color
 specialization is selected from the bound vertex-buffer layout rather than from a pipeline-key naming
