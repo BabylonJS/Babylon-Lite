@@ -224,6 +224,7 @@ describe("Mesh.clone", () => {
         (parent as unknown as { _children: Mesh[] })._children.push(src);
         src.id = "custom-id";
         src.metadata = { tag: "metadata" };
+        src.meshBlendingTag = 145;
         Object.assign(src as unknown as Record<string, unknown>, { _enabled: false, _visible: false });
 
         const clone = src.clone("copy");
@@ -231,6 +232,7 @@ describe("Mesh.clone", () => {
         expect(clone.parent).toBe(parent);
         expect(clone.id).toBe("copy.custom-id");
         expect(clone.metadata).toBe(src.metadata);
+        expect(clone.meshBlendingTag).toBe(145);
         expect(clone.isEnabled(false)).toBe(false);
         expect(clone.isVisible).toBe(false);
     });

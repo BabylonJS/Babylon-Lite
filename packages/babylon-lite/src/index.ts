@@ -62,6 +62,15 @@ export { enableErrorDecoding, decodeError } from "./enable-error-decoding.js";
 // Subtree visibility toggle (used to hide a node before deferring its disposal,
 // e.g. streaming voxel chunks). Standalone module — bundled only when used.
 export { setSubtreeVisible } from "./scene/visibility.js";
+export {
+    MeshBlendingRadiusClass,
+    createDefaultMeshBlendRadiusDefinitions,
+    packMeshBlendingTag,
+    resolveMeshBlendingTag,
+    unpackMeshBlendingTag,
+    validatePackedMeshBlendingTag,
+} from "./mesh/mesh-blending-tag.js";
+export type { MeshBlendingTag, MeshBlendRadiusDefinition, MeshBlendRadiusDefinitions } from "./mesh/mesh-blending-tag.js";
 
 // ─── Frame graph ─────────────────────────────────────────────────────
 // Scene-owned ordered list of tasks. The default scene pass is a
@@ -83,15 +92,8 @@ export { createDepthPyramid, createDepthPyramidTask } from "./frame-graph/depth-
 export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";
 export type { ImageProcessingSource, ImageProcessingTaskConfig } from "./frame-graph/image-processing-task.js";
 export type { PostProcessTask, PostProcessTaskSettings, PostProcessAlphaMode, PostProcessSamplingMode } from "./frame-graph/post-process-task.js";
-export {
-    createDefaultMeshBlendRadiusDefinitions,
-    createMeshBlendRadiusDefinition,
-    createMeshBlendingPostProcessTask,
-    MeshBlendDebugMode,
-    MeshBlendDepthType,
-    MeshBlendQuality,
-} from "./post-process/mesh-blending.js";
-export type { MeshBlendRadiusDefinition, MeshBlendRadiusDefinitions, MeshBlendingPostProcessTask, MeshBlendingPostProcessTaskConfig } from "./post-process/mesh-blending.js";
+export { createMeshBlendRadiusDefinition, createMeshBlendingPostProcessTask, MeshBlendDebugMode, MeshBlendDepthType, MeshBlendQuality } from "./post-process/mesh-blending.js";
+export type { MeshBlendingPostProcessTask, MeshBlendingPostProcessTaskConfig } from "./post-process/mesh-blending.js";
 export { createCopyToTextureTask } from "./frame-graph/copy-to-texture-task.js";
 export type { CopyToTextureTask, CopyToTextureTaskConfig } from "./frame-graph/copy-to-texture-task.js";
 export { createDepthResolveTask } from "./frame-graph/depth-resolve-task.js";
@@ -304,6 +306,8 @@ export {
     createTexture2DArrayFromUrls,
     uploadKtx2Texture2DArray,
     loadKtx2Texture2DArray,
+    uploadKtx2Texture2DArrayFromBuffers,
+    loadKtx2Texture2DArrayFromUrls,
 } from "./texture/texture-array.js";
 export type { Texture2DArray, TextureArrayOptions, ArrayLayerUploadOptions, TextureArrayFromUrlsOptions } from "./texture/texture-array.js";
 export { createDynamicTexture, updateDynamicTexture } from "./texture/dynamic-texture.js";
@@ -636,8 +640,6 @@ export type { ScreenProjectionOptions, ScreenProjectionResult } from "./camera/w
 export type { FreeCamera } from "./camera/free-camera.js";
 export type { BankedFreeCamera } from "./camera/banked-free-camera.js";
 export type { Mesh, MeshGPU } from "./mesh/mesh.js";
-export { MeshBlendingRadiusClass, packMeshBlendingTag, resolveMeshBlendingTag, unpackMeshBlendingTag, validatePackedMeshBlendingTag } from "./mesh/mesh-blending-tag.js";
-export type { MeshBlendingTag } from "./mesh/mesh-blending-tag.js";
 export { disposeMeshGpu } from "./mesh/mesh-dispose.js";
 export { computeMaxExtents } from "./mesh/compute-max-extents.js";
 export type { MeshExtent } from "./mesh/compute-max-extents.js";

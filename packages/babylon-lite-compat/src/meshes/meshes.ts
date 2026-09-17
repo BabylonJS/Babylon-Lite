@@ -312,6 +312,7 @@ export class AbstractMesh extends TransformNode {
     public readonly _lite: LiteMesh;
 
     private _material: CompatMaterial | null = null;
+    private _meshBlendingTag = 0;
     protected _visible = true;
 
     public constructor(name: string, lite: LiteMesh, scene?: Scene) {
@@ -385,6 +386,16 @@ export class AbstractMesh extends TransformNode {
     }
     public set receiveShadows(value: boolean) {
         this._lite.receiveShadows = value;
+    }
+
+    public get meshBlendingTag(): number {
+        return this._meshBlendingTag ?? 0;
+    }
+    public set meshBlendingTag(value: number) {
+        if (!Number.isInteger(value) || value < 0 || value > 0xff || (value !== 0 && (value & 0x3f) === 0)) {
+            throw new RangeError("Mesh-blending tag must be 0 or contain a group ID between 1 and 63.");
+        }
+        this._meshBlendingTag = value;
     }
 
     protected override _onEffectiveEnabledStateChanged(enabled: boolean): void {
@@ -906,6 +917,7 @@ export class Mesh extends AbstractMesh {
             if (wrapper instanceof Mesh && source instanceof Mesh) {
                 wrapper.material = source.material;
                 wrapper.isVisible = source.isVisible;
+                wrapper.meshBlendingTag = source.meshBlendingTag;
             }
         }
         if (!skipChildren) {

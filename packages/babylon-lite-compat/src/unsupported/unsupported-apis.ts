@@ -742,6 +742,13 @@ export class GaussianSplattingStream {
             "Gaussian-Splatting LOD streaming is a whole GPU subsystem (SOG-octree LOD residency + work-buffer decode into render-target atlases) with no Babylon Lite equivalent. Load the full cloud with `GaussianSplattingMesh` / `loadSplat` instead."
         );
     }
+
+    public get minimumResidentSplats(): never {
+        return unsupported(
+            "GaussianSplattingStream.minimumResidentSplats",
+            "The value is owned by Babylon.js's SOG streaming residency controller; Babylon Lite has no LOD residency subsystem from which to derive it."
+        );
+    }
 }
 
 /** Babylon.js `AddGaussianSplattingStreamPart` — appends a streamed LOD part to a GS compound mesh. */

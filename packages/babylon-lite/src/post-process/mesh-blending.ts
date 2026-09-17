@@ -10,7 +10,8 @@ import type { Task } from "../frame-graph/task.js";
 import { _installGeometryMeshBlendTagResolver } from "../frame-graph/geometry-types.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import type { Mat4 } from "../math/types.js";
-import { resolveMeshBlendingTag } from "../mesh/mesh-blending-tag.js";
+import { createDefaultMeshBlendRadiusDefinitions, resolveMeshBlendingTag } from "../mesh/mesh-blending-tag.js";
+import type { MeshBlendRadiusDefinition, MeshBlendRadiusDefinitions } from "../mesh/mesh-blending-tag.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { createMeshBlendingBlueNoiseData } from "./mesh-blending-blue-noise.js";
 import { _installMeshBlendingPbrSupport } from "./mesh-blending-pbr-support.js";
@@ -43,13 +44,6 @@ export enum MeshBlendDebugMode {
     ColorInterpolation = 11,
     WorldPosition = 12,
 }
-
-export interface MeshBlendRadiusDefinition {
-    worldRadius: number;
-    minimumProjectedRadius: number;
-}
-
-export type MeshBlendRadiusDefinitions = readonly [MeshBlendRadiusDefinition, MeshBlendRadiusDefinition, MeshBlendRadiusDefinition, MeshBlendRadiusDefinition];
 
 export interface MeshBlendingPostProcessTaskConfig {
     name?: string;
@@ -142,16 +136,6 @@ export function createMeshBlendRadiusDefinition(worldRadius: number, minimumProj
         },
     });
     return definition;
-}
-
-/** Create Babylon-compatible defaults for all four packed radius classes. */
-export function createDefaultMeshBlendRadiusDefinitions(): MeshBlendRadiusDefinitions {
-    return Object.freeze([
-        createMeshBlendRadiusDefinition(0.06, 1.5),
-        createMeshBlendRadiusDefinition(0.1, 3),
-        createMeshBlendRadiusDefinition(0.2, 3),
-        createMeshBlendRadiusDefinition(0.3, 5),
-    ]) as MeshBlendRadiusDefinitions;
 }
 
 /** Create the task-owned fullscreen mesh-blending pass. */

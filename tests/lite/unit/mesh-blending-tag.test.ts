@@ -6,6 +6,7 @@ import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/re
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import {
     MeshBlendingRadiusClass,
+    createDefaultMeshBlendRadiusDefinitions,
     packMeshBlendingTag,
     resolveMeshBlendingTag,
     unpackMeshBlendingTag,
@@ -15,7 +16,6 @@ import {
     MeshBlendDebugMode,
     MeshBlendDepthType,
     MeshBlendQuality,
-    createDefaultMeshBlendRadiusDefinitions,
     createMeshBlendRadiusDefinition,
     createMeshBlendingPostProcessTask,
 } from "../../../packages/babylon-lite/src/post-process/mesh-blending";

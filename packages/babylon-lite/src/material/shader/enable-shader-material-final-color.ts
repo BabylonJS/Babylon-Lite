@@ -9,6 +9,10 @@ import type { ShaderMaterial } from "./shader-material.js";
 import { _installShaderFinalColorResolver } from "./shader-pipeline.js";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 import { getMaterialSource } from "../material-view.js";
+import type { EngineContext } from "../../engine/engine.js";
+import type { MeshGPU } from "../../mesh/mesh.js";
+import { BU } from "../../engine/gpu-flags.js";
+import { F32 } from "../../engine/typed-arrays.js";
 
 let enabledMaterials: WeakSet<ShaderMaterial> | null = null;
 
@@ -41,11 +45,29 @@ return vec4<f32>(1.0);
 `;
 }
 
+function whiteColorBuffer(engine: EngineContext, gpu: MeshGPU): GPUBuffer {
+    if (gpu._shaderColorFallback) {
+        return gpu._shaderColorFallback;
+    }
+    const positionBytes = gpu.positionBuffer.size;
+    const vertexCount = gpu._vbLayout?._p?._count ?? (positionBytes === 4 ? 0 : positionBytes / 12);
+    const buffer = engine._device.createBuffer({
+        label: "shader-final-color-white",
+        size: Math.max(vertexCount * 16, 4),
+        usage: BU.VERTEX,
+        mappedAtCreation: true,
+    });
+    new F32(buffer.getMappedRange()).fill(1);
+    buffer.unmap();
+    return (gpu._shaderColorFallback = buffer);
+}
+
 /**
  * Add a pipeline-specialized `getFinalColor(input)` helper to one ShaderMaterial.
  * Call before `registerScene()`.
  */
 export function enableShaderMaterialFinalColor(material: ShaderMaterial): void {
     (enabledMaterials ??= new WeakSet()).add(material);
+    material._colorFallback = whiteColorBuffer;
     _installShaderFinalColorResolver(finalColorWgsl);
 }

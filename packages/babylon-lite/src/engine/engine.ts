@@ -53,10 +53,10 @@ export interface EngineContext extends SurfaceContext {
     /** Number of GPU draw calls in the latest {@link renderFrame} call, summed across its selected surfaces. */
     drawCallCount: number;
 
-    /** GPU time spent on the last measured frame, in milliseconds — 0 until the first measured frame and
-     *  while GPU timing is disabled (the default). Enable with {@link setGpuTimingEnabled}; query device
-     *  capability with {@link isGpuTimingSupported}. Updates a frame or two behind, since the timestamp
-     *  readback is async and off the render critical path, so reading it does not perturb the value. */
+    /** Instrumented GPU interval for the last measured frame, in milliseconds — from the beginning of
+     *  the opening marker dispatch through the end of the closing marker dispatch, including every command
+     *  recorded for the frame and the two marker dispatches themselves. It is 0 until the first measured
+     *  frame and while timing is disabled. Readback is asynchronous and does not stall rendering. */
     gpuFrameTimeMs: number;
     /** @internal GPU frame timer, lazily created the first time GPU timing is enabled (null when the
      *  device is unsupported, undefined until the first {@link setGpuTimingEnabled} call dynamic-imports
@@ -67,7 +67,7 @@ export interface EngineContext extends SurfaceContext {
      *  the resolve hook may remain assigned to task timing independently. {@link renderFrame} only optional-chains them, so none of the timer code is statically
      *  reachable from the always-bundled engine — scenes that never enable timing ship zero bytes of it
      *  (mirrors the screenshot `_captureService` hook). The timestamps are written *into the frame's command
-     *  encoder* (begin first, end last) so the GPU executes them contiguously around just that frame's work;
+     *  encoder* (begin first, end last) so the GPU executes them contiguously around that frame's work;
      *  `_gpuTimerResolve` runs after the frame's submit to read the pair back asynchronously. */
     _gpuTimerBegin?: (encoder: GPUCommandEncoder) => void;
     /** @internal See `_gpuTimerBegin`. */
@@ -362,6 +362,22 @@ export function _getAdapterOptions(): GPURequestAdapterOptions {
     return _adapterOptionsHook ? _adapterOptionsHook() : {};
 }
 
+const OPTIONAL_DEVICE_FEATURES = [
+    "float32-filterable",
+    "texture-compression-astc",
+    "texture-compression-bc",
+    "texture-compression-etc2",
+    "texture-compression-unaligned" as GPUFeatureName,
+    "timestamp-query",
+    "primitive-index",
+] as const satisfies readonly GPUFeatureName[];
+
+/** @internal Select every optional feature supported by the adapter. The returned list is
+ *  passed unchanged to `requestDevice` and later captured by device-lost recovery. */
+export function _getSupportedDeviceFeatures(adapter: GPUAdapter): GPUFeatureName[] {
+    return OPTIONAL_DEVICE_FEATURES.filter((feature) => adapter.features.has(feature));
+}
+
 /** Create the Babylon Lite engine bound to `canvas`. Acquires the GPU adapter + device,
  *  configures the canvas's WebGPU context, and returns an `EngineContext` that *is also*
  *  the primary `SurfaceContext` — i.e. the returned engine is itself the surface for the
@@ -377,21 +393,9 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
         throw new Error("WebGPU adapter not available");
     }
 
-    const features: GPUFeatureName[] = [];
     // Optional features are requested opportunistically so their public enable functions can activate
     // later without recreating the device. Unsupported adapters keep the corresponding feature inactive.
-    for (const f of [
-        "float32-filterable",
-        "texture-compression-astc",
-        "texture-compression-bc",
-        "texture-compression-etc2",
-        "timestamp-query",
-        "primitive-index",
-    ] as GPUFeatureName[]) {
-        if (adapter.features.has(f)) {
-            features.push(f);
-        }
-    }
+    const features = _getSupportedDeviceFeatures(adapter);
     const device = await adapter.requestDevice({ requiredFeatures: features, requiredLimits: options?.requiredLimits });
 
     // eslint-disable-next-line no-console
@@ -603,7 +607,8 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
         // is undefined unless timing is enabled (its hooks are installed/removed by `setGpuTimingEnabled` from
         // a dynamic-imported module), so a frame that never enabled timing pays only this short-circuit and
         // ships none of the timer code. The begin/end pair is written *into* the encoder so the GPU executes
-        // them contiguously around this frame's passes — measuring only the frame's own GPU work.
+        // them contiguously around this frame's passes. The published interval also includes both marker
+        // dispatches; see `setGpuTimingEnabled` for the public contract.
         engine._gpuTimerBegin?.(encoder);
 
         total = 0;
@@ -656,15 +661,16 @@ export function isGpuTimingSupported(engine: EngineContext): boolean {
 }
 
 /** Enable or disable per-frame GPU timing. Disabled by default and a no-op on devices where
- *  {@link isGpuTimingSupported} is false. While on, {@link EngineContext.gpuFrameTimeMs} is updated each
- *  frame with the measured GPU time — the time the GPU spends on that frame's work, not CPU/wall-clock
- *  time — a frame or two behind via an async, non-blocking readback.
+ *  {@link isGpuTimingSupported} is false. While on, {@link EngineContext.gpuFrameTimeMs} is updated
+ *  a frame or two behind via asynchronous readback. The value is an instrumented GPU interval: it
+ *  includes every command recorded for the frame plus the opening and closing one-workgroup marker
+ *  dispatches. It is not CPU/wall-clock time and should not be treated as a marker-free pass duration.
  *
  *  Implementation: the timer module is dynamic-imported on the first enable, so engines that never call
  *  this ship none of it. Once loaded, three tiny per-frame hooks are installed on the engine; while timing
  *  is off they are undefined and {@link renderFrame} only optional-chains them (a no-op short-circuit), so
  *  scenes that never enable timing pay effectively nothing. The opening/closing timestamps are written into
- *  the frame's command encoder so the GPU runs them contiguously around just that frame's passes. The first
+ *  the frame's command encoder so the GPU runs them contiguously around that frame's passes. The first
  *  enable takes effect a microtask later (the GPU resources are created lazily, then reused); subsequent
  *  toggles are synchronous. */
 export function setGpuTimingEnabled(engine: EngineContext, enabled: boolean): void {
