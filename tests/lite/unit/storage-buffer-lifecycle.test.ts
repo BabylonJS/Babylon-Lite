@@ -6,9 +6,9 @@ import { createShaderMaterial, setShaderStorageBuffer } from "../../../packages/
 import { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/src/material/shader/shader-renderable.js";
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import { _getStorageBufferHandle, createStorageBuffer, disposeStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
+import { getCpuStorageRecoveryLimits, rebuildCpuStorageBuffers } from "../../../packages/babylon-lite/src/resource/storage-buffer-recovery.js";
 import { updateStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
 import type { StorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
-import { _getStorageRequiredLimits, _rebuildStorageBuffers } from "../../../packages/babylon-lite/src/resource/storage-buffer-recovery.js";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl.js";
 
@@ -161,14 +161,14 @@ describe("StorageBuffer lifecycle", () => {
         expect(storage._destroyed).toBe(true);
         expect(storage._data).toBeNull();
         expect(engine._storageBuffers).toBeUndefined();
-        expect(_getStorageRequiredLimits(engine)).toBeUndefined();
+        expect(getCpuStorageRecoveryLimits(engine)).toBeUndefined();
     });
 
     it("builds ShaderMaterial bind groups with the live recovered handle", () => {
         const fixture = makeRenderableFixture();
         const storage = createStorageBuffer(fixture.engine, new Float32Array(4));
         const initialHandle = storage._buffer;
-        expect(_getStorageRequiredLimits(fixture.engine)).toEqual({
+        expect(getCpuStorageRecoveryLimits(fixture.engine)).toEqual({
             maxBufferSize: 1024,
             maxStorageBufferBindingSize: 512,
             maxStorageBuffersPerShaderStage: 8,
@@ -181,7 +181,7 @@ describe("StorageBuffer lifecycle", () => {
 
         const replacement = makeRenderableFixture();
         fixture.engine._device = replacement.device;
-        _rebuildStorageBuffers(fixture.engine);
+        rebuildCpuStorageBuffers(fixture.engine);
         buildShaderMaterialRenderables(fixture.scene, [fixture.mesh]);
         const recoveredDescriptor = replacement.createBindGroup.mock.calls.at(-1)![0];
         expect((Array.from(recoveredDescriptor.entries).at(-1)!.resource as GPUBufferBinding).buffer).toBe(storage._buffer);

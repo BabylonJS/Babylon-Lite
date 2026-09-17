@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { createShaderMaterial, setShaderStorageBuffer } from "../../../packages/babylon-lite/src/material/shader/shader-material.js";
 import { createStorageBuffer, disposeStorageBuffer, readStorageBuffer, updateStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
+import { getCpuStorageRecoveryLimits, rebuildCpuStorageBuffers } from "../../../packages/babylon-lite/src/resource/storage-buffer-recovery.js";
 import type { StorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
-import { _getStorageRequiredLimits, _rebuildStorageBuffers } from "../../../packages/babylon-lite/src/resource/storage-buffer-recovery.js";
 import { align } from "../../../packages/babylon-lite/src/resource/gpu-buffers.js";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl.js";
 
@@ -31,6 +31,22 @@ function makeEngine(maxBufferSize = 256 * 1024 * 1024) {
 }
 
 describe("StorageBuffer", () => {
+    it.each(["vertex", "index", "indirect"] as const)("initializes %s storage without retaining recovery-only CPU data", (role) => {
+        const { engine, device, rawBuffer } = makeEngine();
+        const source = new Uint32Array([1, 2, 3]);
+        const storage = createStorageBuffer(engine, source, { [role]: true });
+        expect(Array.from(new Uint32Array(rawBuffer.getMappedRange(), 0, 3))).toEqual([1, 2, 3]);
+        expect(storage._data).toBeNull();
+        expect(getCpuStorageRecoveryLimits(engine)).toBeUndefined();
+        const update = new Uint32Array([9]);
+        updateStorageBuffer(engine, storage, update, 4);
+        expect(device.queue.writeBuffer).toHaveBeenCalledWith(storage._buffer, 4, update.buffer, 0, 4);
+        expect(storage._data).toBeNull();
+        device.createBuffer.mockClear();
+        rebuildCpuStorageBuffers(engine);
+        expect(device.createBuffer).not.toHaveBeenCalled();
+    });
+
     it.each([0, 1, 3, 5, 8])("initializes %s writable bytes through an aligned mapped allocation without a CPU shadow", (length) => {
         const { engine, device, rawBuffer } = makeEngine();
         const source = new Uint8Array(12).fill(99);
@@ -42,6 +58,7 @@ describe("StorageBuffer", () => {
         const capacity = Math.ceil(Math.max(length, 4) / 4) * 4;
         expect(storage.byteLength).toBe(capacity);
         expect(storage._data).toBeNull();
+        expect(getCpuStorageRecoveryLimits(engine)).toBeUndefined();
         expect(device.queue.writeBuffer).not.toHaveBeenCalled();
         expect(device.createBuffer).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -63,7 +80,7 @@ describe("StorageBuffer", () => {
         expect(device.createBuffer).not.toHaveBeenCalled();
         expect(device.queue.writeBuffer).not.toHaveBeenCalled();
         expect(engine._storageBuffers).toBeUndefined();
-        expect(_getStorageRequiredLimits(engine)).toBeUndefined();
+        expect(getCpuStorageRecoveryLimits(engine)).toBeUndefined();
     });
 
     it.each([
@@ -344,7 +361,7 @@ describe("StorageBuffer", () => {
             createBuffer: vi.fn(() => secondBuffer),
             queue: { writeBuffer: vi.fn() },
         } as unknown as GPUDevice;
-        _rebuildStorageBuffers(engine);
+        rebuildCpuStorageBuffers(engine);
 
         expect(storage._buffer).toBe(secondBuffer);
         expect(Array.from(new Float32Array(secondMapped))).toEqual([1, 9]);

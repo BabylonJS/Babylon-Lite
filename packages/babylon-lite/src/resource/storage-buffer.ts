@@ -15,7 +15,7 @@ export interface StorageBuffer {
     _buffer: GPUBuffer | null;
     /** @internal */
     _destroyed: boolean;
-    /** @internal */
+    /** @internal CPU shadow for plain read-only storage; absent for GPU-role allocations. */
     _data: Uint8Array | null;
     /** @internal */
     readonly _engine: EngineContext;
@@ -23,7 +23,7 @@ export interface StorageBuffer {
     readonly _label?: string;
     /** @internal Bound as `var<storage, read_write>` and usable as a compute target. */
     readonly _writable?: boolean;
-    /** @internal Creation-time role flags retained for device-loss recovery.
+    /** @internal Creation-time role flags used for capability checks and allocation.
      *  Every allocation additionally carries COPY_DST through its allocation path. */
     readonly _usage: GPUBufferUsageFlags;
     /** @internal Lazily allocated staging buffer for throttled diagnostics/readback. */
@@ -34,16 +34,16 @@ export interface StorageBuffer {
     _readPending?: Promise<ArrayBuffer>;
 }
 
-/** Options for {@link createStorageBuffer}. */
+/** Options for {@link createStorageBuffer}.
+ *  Writable/vertex/index/indirect allocations keep no CPU mirror and require recreation after device loss. */
 export interface StorageBufferOptions {
     readonly label?: string;
     /** Bind as `var<storage, read_write>` so shaders — including compute — can write it.
      *
      *  A writable allocation keeps NO CPU shadow copy: its contents are produced on the
      *  GPU, so there is nothing meaningful to mirror, and shadowing a large slab would
-     *  double its memory. The consequence is that it cannot be rebuilt automatically
-     *  after device loss — `_rebuildStorageBuffers` reallocates it EMPTY and the owner
-     *  must refill it (see `enableDeviceLostSceneRecovery` for the established pattern). */
+     *  double its memory. Automatic recovery of writable allocations is deferred;
+     *  recreate the allocation and its consumers after device loss. */
     readonly writable?: boolean;
     /** Also mark the allocation `GPUBufferUsage.VERTEX` so a mesh can draw straight from
      *  it — letting a compute pass produce geometry with no readback and no copy. */
@@ -87,8 +87,8 @@ export function createStorageBuffer(engine: EngineContext, source: ArrayBufferVi
     // for debugging, capture tooling, and staging into other resources.
     const usage = BU.STORAGE | (vertex ? BU.VERTEX : 0) | (index ? BU.INDEX : 0) | (indirect ? BU.INDIRECT : 0) | (writable ? BU.COPY_SRC : 0);
 
-    // A writable buffer keeps no CPU shadow: the GPU owns its contents.
-    const bytes = writable ? null : new Uint8Array(byteLength);
+    // Only the pre-existing plain read-only resource participates in CPU-backed recovery.
+    const bytes = usage === BU.STORAGE ? new Uint8Array(byteLength) : null;
     if (bytes && !isByteLength) {
         bytes.set(new Uint8Array(source.buffer, source.byteOffset, source.byteLength));
     }
@@ -113,7 +113,7 @@ export function createStorageBuffer(engine: EngineContext, source: ArrayBufferVi
 
 /** @internal Resolve a live handle for one engine while building a bind group. */
 export function _getStorageBufferHandle(engine: EngineContext, buffer: StorageBuffer): GPUBuffer {
-    // A writable allocation intentionally has no `_data` shadow, so liveness is
+    // GPU-role allocations intentionally have no `_data` shadow, so liveness is
     // decided by `_buffer` rather than by the mirror.
     if (buffer._destroyed || !buffer._buffer) {
         throw new Error("StorageBuffer has been disposed.");
@@ -154,7 +154,7 @@ export function updateStorageBuffer(engine: EngineContext, buffer: StorageBuffer
         return;
     }
     engine._device.queue.writeBuffer(buffer._buffer!, byteOffset, data.buffer as ArrayBuffer, data.byteOffset, data.byteLength);
-    // Writable allocations keep no shadow — the GPU copy is authoritative.
+    // GPU-role allocations keep no shadow — the GPU copy is authoritative.
     const shadow = buffer._data;
     if (shadow) {
         const bytes = data instanceof Uint8Array ? data : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);

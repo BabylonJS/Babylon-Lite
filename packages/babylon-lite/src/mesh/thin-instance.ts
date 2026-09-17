@@ -40,8 +40,6 @@ export interface ThinInstanceData {
     _version: number;
     /** @internal GPU buffer — created and managed by render system, not user. */
     _gpuBuffer: GPUBuffer | null;
-    /** @internal Whether the current matrix GPU buffer was created with STORAGE usage. */
-    _gpuBufferStorage: boolean;
     /** @internal Last version uploaded to GPU. */
     _gpuVersion: number;
 
@@ -69,11 +67,7 @@ export interface ThinInstanceData {
     _drawArgsBuffer?: GPUBuffer | null;
     /** @internal CPU mirror for the indirect args buffer. */
     _drawArgsData?: Uint32Array;
-    /** @internal Last index count written to `_drawArgsBuffer`. */
-    _drawArgsIndexCount?: number;
-    /** @internal Last base vertex written to `_drawArgsBuffer`. */
-    _drawArgsBaseVertex?: number;
-    /** @internal Last instance count observed by a cached direct draw or written to `_drawArgsBuffer`. */
+    /** @internal Instance count captured by a direct draw or uploaded indirect arguments; -1 forces upload. */
     _drawArgsInstanceCount?: number;
     /** @internal Lazy per-mesh F32 upload scratch. Allocated by thin-instance-gpu.ts only
      *  when `matrices` is F64-backed (HPM-on); F32-backed input takes a direct
@@ -113,7 +107,6 @@ export function setThinInstances(mesh: Mesh, matrices: Float32Array | Float64Arr
             _capacity: count,
             _version: 1,
             _gpuBuffer: null,
-            _gpuBufferStorage: false,
             _gpuVersion: 0,
             _dirtyMin: 0,
             _dirtyMax: count,
@@ -204,7 +197,6 @@ export function addThinInstance(mesh: Mesh, matrix: Mat4): number {
             _capacity: capacity,
             _version: 1,
             _gpuBuffer: null,
-            _gpuBufferStorage: false,
             _gpuVersion: 0,
             _dirtyMin: 0,
             _dirtyMax: 1,

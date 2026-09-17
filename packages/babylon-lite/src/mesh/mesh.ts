@@ -11,7 +11,6 @@ import type { WorldAabbAcc } from "./mesh-world-bounds.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import { initSceneNodeTransform } from "../scene/scene-node.js";
 import { eulerXYZToQuatTuple } from "../math/quat-euler.js";
-import type { StorageMeshSource } from "./mesh-from-storage.js";
 
 // ─── Mesh GPU Geometry ───────────────────────────────────────────────
 
@@ -66,8 +65,6 @@ export interface MeshGPU {
     /** @internal When false, disposing the mesh does NOT destroy `indexBuffer` — the topology
      *  is shared across meshes and owned by the caller. Defaults to owning. */
     readonly _ownsIndexBuffer?: boolean;
-    /** @internal Source data owned by storage geometry, released with its final mesh owner. */
-    _storageSource?: StorageMeshSource;
     /** @internal Reserved vertex capacity for grow-only procedural geometry. */
     _vertexCapacity?: number;
     /** @internal Reserved index capacity for grow-only procedural geometry. */

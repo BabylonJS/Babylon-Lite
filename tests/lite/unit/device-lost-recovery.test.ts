@@ -16,6 +16,7 @@ import { acquireTexture, releaseTexture, _isTextureReleased } from "../../../pac
 import type { Texture2D, Texture2DOptions } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { cloneTexture2D } from "../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { rebuildTexture2D } from "../../../packages/babylon-lite/src/texture/texture-recovery.js";
+import { createStorageBuffer, type StorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
 
 function context(kind: string): RenderingContext {
     return {
@@ -370,6 +371,45 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
             _retirements: null,
         } as unknown as EngineContext;
     }
+
+    it.each(["before", "during"] as const)("restores CPU-backed storage registered %s the replacement-device request", async (timing) => {
+        const engine = trackingEngine();
+        const createBuffer = (descriptor: GPUBufferDescriptor): GPUBuffer => {
+            const bytes = new ArrayBuffer(Number(descriptor.size));
+            return { getMappedRange: () => bytes, unmap: vi.fn(), destroy: vi.fn() } as unknown as GPUBuffer;
+        };
+        const limits = { maxBufferSize: 1024, maxStorageBufferBindingSize: 1024, maxStorageBuffersPerShaderStage: 8 };
+        Object.assign(engine._device, { limits, createBuffer: vi.fn(createBuffer) });
+        const replacement = device();
+        Object.assign(replacement, { limits, createBuffer: vi.fn(createBuffer) });
+        const recovery = enableDeviceLostSpriteRecovery(engine);
+        let storage: StorageBuffer | undefined;
+        const addStorage = (): void => {
+            storage = createStorageBuffer(engine, new Uint32Array([7, 11]), "cpu-storage");
+        };
+        if (timing === "before") {
+            addStorage();
+        }
+        const requestDevice = vi.fn(async () => {
+            if (timing === "during") {
+                addStorage();
+            }
+            return replacement;
+        });
+        vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice })) } });
+        try {
+            await runDeviceLostRecovery(engine, engine._deviceLostRecovery!, []);
+            expect(replacement.createBuffer).toHaveBeenCalledOnce();
+            expect(Array.from(new Uint32Array(storage!._buffer!.getMappedRange()))).toEqual([7, 11]);
+            expect(requestDevice).toHaveBeenCalledWith({
+                requiredFeatures: [],
+                requiredLimits: timing === "before" ? limits : {},
+            });
+        } finally {
+            vi.unstubAllGlobals();
+            recovery.disable();
+        }
+    });
 
     /** Stands in for a texture from `createTexture2DFromPixels`, which takes an ownership reference
      *  on what it returns — recovery reads that reference to tell a live texture from a released

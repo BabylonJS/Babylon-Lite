@@ -27,7 +27,7 @@
  *  - CPU-side picking (`_cpuPositions`) is unavailable by construction.
  */
 import type { EngineContext } from "../engine/engine.js";
-import type { Mesh, MeshGPU, MeshVbAttr, MeshVbLayout } from "./mesh.js";
+import type { Mesh, MeshVbAttr, MeshVbLayout } from "./mesh.js";
 import { initMeshTransform } from "./mesh.js";
 import { BU } from "../engine/gpu-flags.js";
 import { createMappedBuffer } from "../resource/mapped-buffer.js";
@@ -46,7 +46,7 @@ export interface MeshFromStorageOptions {
     /** Triangle indices.
      *
      *  A `Uint16Array` or `Uint32Array` is snapshotted and uploaded into a fresh index
-     *  buffer owned by this mesh. The used prefix is retained for device recovery;
+     *  buffer owned by this mesh. The used prefix is validated for the initial upload;
      *  later changes to the caller's array do not change the uploaded topology.
      *
      *  A `StorageBuffer` created with `{ index: true }` is used in place, SHARED with
@@ -178,38 +178,7 @@ export function createMeshFromStorageBuffer(engine: EngineContext, name: string,
         },
     });
 
-    const source: StorageMeshSource = {
-        _vb: storage,
-        _indices: indexSource,
-        _device: engine._device,
-        _registration: new WeakRef(mesh._gpu),
-    };
-    mesh._gpu._storageSource = source;
-    (_slabMeshes ??= new Set()).add(source._registration);
-
     return mesh;
-}
-
-/** Meshes that borrow a slab, so their cached `GPUBuffer` handles can be re-pointed after
- *  a device-loss rebuild replaces the underlying allocations.
- *
- *  Held through `WeakRef`, matching `device-lost-recovery-capture.ts`: a strong registry
- *  would keep a `MeshGPU` and two `GPUBuffer`s alive for the page's lifetime whenever a
- *  mesh is dropped without going through `disposeMeshGpu`, which is a leak this module
- *  would be introducing. Final release removes its exact registration token in O(1);
- *  abandoned dead refs are also pruned on rebuild.
- *
- *  Lazily created -- GUIDANCE.md forbids module-level allocations. */
-/** @internal Retained by the geometry itself, not by a parallel ownership map. */
-export interface StorageMeshSource {
-    /** @internal */
-    readonly _vb: StorageBuffer;
-    /** @internal */
-    readonly _indices: SlabIndexSource;
-    /** @internal */
-    readonly _registration: WeakRef<MeshGPU>;
-    /** @internal */
-    _device: GPUDevice;
 }
 
 interface SlabIndexSource {
@@ -255,60 +224,6 @@ function validateIndexSource(indices: MeshFromStorageOptions["indices"], format:
     return { data: typed ? indices.slice(0, count) : indices, count, format };
 }
 
-/** The weak ref must target the MESH's own `_gpu`, which the mesh holds strongly -- a ref
- *  to a wrapper object created here would have no other owner and collect immediately,
- *  leaving the registry silently empty. Source data belongs to the geometry, so the
- *  registry never keeps abandoned geometry or its allocations alive. */
-let _slabMeshes: Set<WeakRef<MeshGPU>> | null = null;
-
-/** @internal Re-point every borrowed handle at its allocation's current buffer. The allocations have
- *  already been rebuilt when this runs; the meshes are still holding the dead handles. */
-export function _refreshStorageMeshes(engine: EngineContext): void {
-    for (const ref of _slabMeshes ?? []) {
-        const gpu = ref.deref();
-        const entry = gpu?._storageSource;
-        if (!gpu || !entry) {
-            _slabMeshes!.delete(ref);
-            continue;
-        }
-        // The registry is module-global but a page may run several engines; only this
-        // engine's allocations have been rebuilt, and resolving another's would throw.
-        if (entry._vb._engine !== engine) {
-            continue;
-        }
-        // An allocation disposed while a borrowing mesh is still alive would make
-        // `_getStorageBufferHandle` throw, and this runs inside a recovery step -- a throw
-        // here aborts the WHOLE device-loss recovery, taking every unrelated scene with it.
-        // A mesh borrowing a dead slab is already unusable; skip it rather than fail.
-        const indexData = entry._indices.data;
-        const ownedIndices = ArrayBuffer.isView(indexData);
-        if (entry._vb._destroyed || (!ownedIndices && indexData._destroyed)) {
-            continue;
-        }
-        const g = gpu as unknown as Record<"positionBuffer" | "normalBuffer" | "tangentBuffer" | "uvBuffer" | "uv2Buffer" | "colorBuffer" | "indexBuffer", GPUBuffer | null>;
-        const vb = _getStorageBufferHandle(engine, entry._vb);
-        let indexBuffer = gpu.indexBuffer;
-        if (ownedIndices) {
-            if (entry._device !== engine._device) {
-                indexBuffer = createMappedBuffer(engine, indexData, BU.INDEX, gpu.indexBuffer.label);
-                gpu.indexBuffer.destroy();
-            }
-        } else {
-            indexBuffer = _getStorageBufferHandle(engine, indexData);
-        }
-        g.positionBuffer = vb;
-        g.normalBuffer = vb;
-        g.uvBuffer = vb;
-        for (const stream of ["tangentBuffer", "uv2Buffer", "colorBuffer"] as const) {
-            if (g[stream]) {
-                g[stream] = vb;
-            }
-        }
-        g.indexBuffer = indexBuffer;
-        entry._device = engine._device;
-    }
-}
-
 let _hooksInstalled = false;
 
 /** Teach the shared mesh and ShaderMaterial paths about GPU-resident geometry: declared
@@ -322,11 +237,6 @@ function installHooks(): void {
     _hooksInstalled = true;
     _enableShaderVb();
     _installBorrowAwareGeometryDisposer((g, disposeVertices) => {
-        const source = g._storageSource;
-        if (source) {
-            _slabMeshes?.delete(source._registration);
-            g._storageSource = undefined;
-        }
         // Buffers may be BORROWED rather than owned. A mesh whose vertices live in a shared
         // GPU-resident slab points every vertex-side field at that one allocation, so
         // destroying them here would tear the slab out from under every other mesh holding a

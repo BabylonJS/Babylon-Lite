@@ -55,19 +55,6 @@ async function initialViteCode(source: string): Promise<string> {
 }
 
 describe("rendering opt-in boundaries", () => {
-    it.each([false, true])("retains storage reallocation only with device-loss recovery (%s)", async (recovery) => {
-        const imports = `createStorageBuffer, createMeshFromStorageBuffer${recovery ? ", enableDeviceLostSceneRecovery" : ""}`;
-        const result = await runRollup({
-            entrySource: `import { ${imports} } from ${JSON.stringify(LIB_ENTRY)}; console.log(${imports});`,
-            format: "es",
-            minify: false,
-        });
-        expect(result.errors).toEqual([]);
-        expect(result.significantWarnings).toEqual([]);
-        expect(result.code.includes("function _rebuildStorageBuffers")).toBe(recovery);
-        expect(result.code.includes("function _refreshStorageMeshes")).toBe(recovery);
-    });
-
     it.each([false, true])("keeps Node implementations out of storage-only Shader graphs (%s)", async (node) => {
         const code = await initialViteCode(`import { createMeshFromStorageBuffer, createShaderMaterial } from ${JSON.stringify(LIB_ENTRY)};
 ${

@@ -24,10 +24,10 @@ export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceD
     let retiredMatrix: GPUBuffer | null = null;
     let retiredColor: GPUBuffer | null = null;
     let recreated = false;
-    if (ti._version !== ti._gpuVersion || ti._gpuBufferStorage !== needsStorage) {
+    if (ti._version !== ti._gpuVersion) {
         const byteSize = ti.count * 64;
         let bufferRecreated = false;
-        if (!ti._gpuBuffer || ti._gpuBuffer.size < byteSize || ti._gpuBufferStorage !== needsStorage) {
+        if (!ti._gpuBuffer || ti._gpuBuffer.size < byteSize) {
             if (ti._gpuBuffer) {
                 retiredMatrix = ti._gpuBuffer;
             }
@@ -40,7 +40,6 @@ export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceD
                 // (otherwise the whole pick pass is invalidated → nothing is pickable).
                 usage: BU.VERTEX | BU.COPY_DST | BU.STORAGE,
             });
-            ti._gpuBufferStorage = needsStorage;
             bufferRecreated = true;
             recreated = true;
         }
@@ -114,7 +113,7 @@ export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceD
     return recreated;
 }
 
-/** Sync the stable indirect draw arguments captured by cached thin-instance render bundles. */
+/** Sync stable indirect arguments, using their CPU words for geometry and the count as upload acknowledgement. */
 export function syncThinInstanceDrawArgs(engine: EngineContext, ti: ThinInstanceData, gpu: MeshGPU): GPUBuffer {
     if (!ti._drawArgsBuffer) {
         ti._drawArgsBuffer = engine._device.createBuffer({
@@ -122,18 +121,16 @@ export function syncThinInstanceDrawArgs(engine: EngineContext, ti: ThinInstance
             usage: BU.INDIRECT | BU.COPY_DST,
         });
         ti._drawArgsData = new U32(5);
-        ti._drawArgsIndexCount = -1;
-        ti._drawArgsBaseVertex = -1;
         ti._drawArgsInstanceCount = -1;
         bumpVisibilityEpoch();
     }
+    const args = ti._drawArgsData!;
     const baseVertex = gpu._baseVertex ?? 0;
-    if (ti._drawArgsIndexCount !== gpu.indexCount || ti._drawArgsBaseVertex !== baseVertex || ti._drawArgsInstanceCount !== ti.count) {
-        const args = ti._drawArgsData!;
+    if (args[0] !== gpu.indexCount || (args[3]! | 0) !== baseVertex || ti._drawArgsInstanceCount !== ti.count) {
         writeMeshIndexedIndirectArgs(args, gpu, ti.count);
+        // A failed upload must retry even though the CPU words already contain the requested geometry.
+        ti._drawArgsInstanceCount = -1;
         engine._device.queue.writeBuffer(ti._drawArgsBuffer, 0, args.buffer, args.byteOffset, args.byteLength);
-        ti._drawArgsIndexCount = gpu.indexCount;
-        ti._drawArgsBaseVertex = baseVertex;
         ti._drawArgsInstanceCount = ti.count;
     }
     return ti._drawArgsBuffer;

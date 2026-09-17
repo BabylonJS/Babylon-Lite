@@ -85,18 +85,11 @@ rebuilds textures, geometry, skeletons, morph targets, environment lighting,
 shadow generators, renderables, scene/light bind groups, frame-graph tasks, and
 render targets.
 
-Meshes created by `createMeshFromStorageBuffer()` borrow their vertex allocation
-instead of retaining CPU geometry. Storage-buffer recovery rebuilds that allocation
-first in the opt-in `storage-buffer-recovery.ts` module; the recovery pass then re-points every vertex handle advertised by
-the mesh (`positionBuffer`, `normalBuffer`, `uvBuffer`, and optional
-`tangentBuffer`, `uv2Buffer`, and `colorBuffer`) to the replacement allocation.
-A shared storage-backed index handle is refreshed in the same pass. Optional-stream
-presence metadata and the mesh's `_vbLayout` / `_baseVertex` remain unchanged.
-Owned typed-array indices retain a private copy of their validated draw prefix; the
-recovery pass uploads that copy on the replacement device while preserving count and
-format. Clones share one recovered `MeshGPU`, and disposing its last owner removes
-the recovery source. GPU-generated storage contents still need the application's
-producer to refill them.
+Automatic reconstruction of storage-backed meshes and writable/vertex/index/indirect storage is not part
+of this integration. Their recovery-specific registry, retained sources, and handle-refresh
+pass have been removed pending the recovery redesign. The existing CPU-backed storage
+buffer hook remains for plain read-only allocations. Applications must recreate affected
+GPU-role allocations and meshes.
 
 Environment recovery supports `loadEnvironment` (`.env`) and
 `loadHdrEnvironment`. Recovery must be enabled before the environment is

@@ -42,33 +42,36 @@ For typed views, the view's byte length and offset apply, not the full backing b
 
 ## Internal Architecture
 
-`StorageBuffer` is nominally branded plain state containing a public aligned byte capacity, retained CPU bytes,
-and an internal `GPUBuffer`. Read-only creation uses a mapped-at-creation `STORAGE | COPY_DST` allocation.
-Writable allocations retain no CPU shadow and add `COPY_SRC`; numeric writable sources allocate
-directly on the GPU. Typed writable sources use mapped-at-creation initialization, copying just the
+`StorageBuffer` is nominally branded plain state containing a public aligned byte capacity and an
+internal `GPUBuffer`. Plain read-only storage retains a CPU shadow and uses a mapped-at-creation
+`STORAGE | COPY_DST` allocation. Writable, vertex, index, and indirect allocations retain no CPU
+shadow; writable allocations also add `COPY_SRC`. Numeric GPU-role sources allocate directly on
+the GPU. Typed GPU-role sources use mapped-at-creation initialization, copying just the
 view's bytes into the padded, zero-initialized allocation. Odd byte counts therefore do not reach
 `queue.writeBuffer`, whose upload length must be a multiple of four.
-Optional vertex/index/indirect usage flags are retained for recovery. Updates use
+Optional vertex/index/indirect usage flags describe the allocation's capabilities. Updates use
 `queue.writeBuffer` and require four-byte-aligned offsets and lengths. The shader material stores the resource
 object; the renderable unwraps the internal handle only while building a bind group.
 Internal identity/lifecycle fields are non-enumerable, and every mutating/binding path verifies that the exact
 wrapper remains registered with its owning engine; shallow copies cannot impersonate a live allocation.
 
-The engine owns a lazy set of live storage buffers. Device-loss recovery recreates read-only handles from
-their retained CPU bytes; writable allocations are recreated empty with the same role flags and must
-be refilled by their producer. `COPY_DST` is added on both allocation paths. Storage-backed meshes
-refresh their borrowed handles before scene renderables and bind groups are rebuilt. Bind-group creation rechecks
-resource liveness and engine ownership. Engine disposal destroys all remaining live storage buffers, marks
-their wrappers disposed, releases retained CPU bytes, and clears the lazy registry.
-Before replacing a lost device, recovery reads its immutable storage-related WebGPU limits
-(`maxBufferSize`, `maxStorageBufferBindingSize`, and `maxStorageBuffersPerShaderStage`) when live
-storage allocations exist, and requests them again. Those values are merged with any limits originally supplied to
-`createEngine(..., { requiredLimits })`.
+The engine owns a lazy set of live storage buffers. Its pre-existing CPU-backed storage
+rebuild restores plain read-only `STORAGE | COPY_DST` allocations from retained bytes.
+The old device's storage limits are requested again for that path. The limit collection and
+rebuild routine stay in the recovery-only module so ordinary storage users do not load
+restoration code or create recovery callbacks.
+Recovery loads this module only when storage allocations exist. It checks again after the
+replacement-device request so an allocation added during that await is not missed.
+Bind-group creation rechecks resource liveness and engine ownership. Engine disposal destroys
+all remaining live storage buffers, releases CPU bytes, and clears the registry.
 
-Reallocation lives in `storage-buffer-recovery.ts`, imported only by the opt-in device-loss
-runner. Creating a storage buffer installs disposal, not a recovery callback. The recovery
-runner rebuilds allocations and then refreshes every live weakly registered storage mesh;
-the registry also covers meshes created before recovery was enabled or before joining a scene.
+Automatic recovery of GPU-role storage allocations and storage-backed meshes is deliberately deferred
+to the upcoming recovery redesign. These allocations have no CPU mirror and are not
+reallocated or refilled by the existing hook. Storage meshes retain no reconstruction source
+or weak registration, and their borrowed handles and privately owned index buffers are not
+rebound or recreated after device loss. Applications using these features must recreate the
+affected allocations and meshes before rendering resumes. The legacy plain-storage rebuild
+does not cover these newer roles or repair an existing storage mesh.
 
 ## Pipeline Configuration
 
@@ -148,6 +151,6 @@ host allocations. The shared alignment helper is exercised at those boundaries t
 ## File Manifest
 
 - `packages/babylon-lite/src/resource/storage-buffer.ts`
-- `packages/babylon-lite/src/resource/storage-buffer-recovery.ts`
+- `packages/babylon-lite/src/resource/storage-buffer-recovery.ts`: pre-existing plain-storage restoration only.
 - `tests/lite/unit/storage-buffer.test.ts`
 - `docs/lite/architecture/47-storage-buffer.md`

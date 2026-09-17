@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { computeUboLayout } from "../../../packages/babylon-lite/src/shader/ubo-layout";
 import { composeShader } from "../../../packages/babylon-lite/src/shader/shader-composer";
-import type { ShaderFragment, ShaderTemplate, UboField } from "../../../packages/babylon-lite/src/shader/fragment-types";
+import type { BindingDecl, ShaderFragment, ShaderTemplate, UboField } from "../../../packages/babylon-lite/src/shader/fragment-types";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 import { createMeshVertexLayout } from "../../../packages/babylon-lite/src/mesh/mesh-vertex-layout";
 
@@ -160,6 +160,31 @@ function makeTemplate(overrides?: Partial<ShaderTemplate>): ShaderTemplate {
 }
 
 describe("composeShader", () => {
+    it.each([
+        ["uniform", { _kind: "uniform-buffer" }, { buffer: { type: "uniform" } }, "var<uniform> resource:resourceUniforms;"],
+        ["depth", { _kind: "texture", _textureType: "texture_depth_2d" }, { texture: { sampleType: "depth", viewDimension: "2d" } }, "var resource:texture_depth_2d;"],
+        ["uint", { _kind: "texture", _textureType: "texture_2d<u32>" }, { texture: { sampleType: "uint", viewDimension: "2d" } }, "var resource:texture_2d<u32>;"],
+        [
+            "array",
+            { _kind: "texture", _textureType: "texture_depth_2d_array", _sampleType: "depth" },
+            { texture: { sampleType: "depth", viewDimension: "2d-array" } },
+            "var resource:texture_depth_2d_array;",
+        ],
+        ["cube", { _kind: "texture", _textureType: "texture_cube<f32>" }, { texture: { sampleType: "float", viewDimension: "cube" } }, "var resource:texture_cube<f32>;"],
+        ["filtering", { _kind: "sampler", _samplerType: "sampler" }, { sampler: { type: "filtering" } }, "var resource:sampler;"],
+        ["non-filtering", { _kind: "sampler", _samplerType: "sampler_non_filtering" }, { sampler: { type: "non-filtering" } }, "var resource:sampler;"],
+        ["comparison", { _kind: "sampler", _samplerType: "sampler_comparison" }, { sampler: { type: "comparison" } }, "var resource:sampler_comparison;"],
+    ] satisfies Array<[string, BindingDecl["_type"], Partial<GPUBindGroupLayoutEntry>, string]>)(
+        "emits matching GPU and WGSL %s bindings for both stages",
+        (_name, type, layout, declaration) => {
+            const fragment: ShaderFragment = { _id: "binding", _bindings: [{ _name: "resource", _type: type, _visibility: 3 }] };
+            const result = composeShader(makeTemplate(), [fragment]);
+            expect(Array.from(result._meshBGLDescriptor.entries)[1]).toEqual({ binding: 1, visibility: 3, ...layout });
+            expect(result._vertexWGSL).toContain(`@group(1)@binding(1) ${declaration}`);
+            expect(result._fragmentWGSL).toContain(`@group(1)@binding(1) ${declaration}`);
+        }
+    );
+
     it("applies mesh packing without mutating attributes or overriding instance-rate fragment inputs", () => {
         const template = makeTemplate();
         const fragment: ShaderFragment = {
