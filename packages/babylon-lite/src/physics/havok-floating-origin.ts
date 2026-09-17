@@ -17,7 +17,7 @@
 import type { Quat, Vec3 } from "../math/types.js";
 import { havokTransformToNode, nodeToHavokTransform } from "./havok-transform.js";
 import type { PhysicsBody, PhysicsWorld } from "./havok.js";
-import { PhysicsMotionType, PhysicsPrestepType } from "./havok.js";
+import { _syncDynamicBodiesParentFirst, PhysicsMotionType, PhysicsPrestepType } from "./havok.js";
 
 /**
  * A simulation region: a native Havok world whose bodies are simulated relative to a fixed
@@ -153,13 +153,8 @@ function _step(world: PhysicsWorld, dt: number): void {
         hknp.HP_World_Step(regions[i]!._world, dt);
     }
 
-    // Post-step: sync DYNAMIC bodies from Havok → node.
-    for (let i = 0; i < bodies.length; i++) {
-        const b = bodies[i]!;
-        if (b.motionType === (PhysicsMotionType.DYNAMIC as number)) {
-            _syncBodyToNode(hknp, b);
-        }
-    }
+    // Post-step: sync DYNAMIC bodies from Havok → node, with ancestors first.
+    _syncDynamicBodiesParentFirst(world, hknp, _syncBodyToNode);
 
     // Reclaim regions emptied by migration.
     _gcRegions(world);
