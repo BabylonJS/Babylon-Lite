@@ -529,8 +529,8 @@ function createLayerTarget(texture: GPUTexture, cascade: number, mapSize: number
         _descriptor: {
             size: { width: mapSize, height: mapSize },
             dFormat: "depth32float",
-            _depthClearValue: 1,
-            _depthCompare: "less-equal",
+            depthClearValue: 1,
+            depthCompare: "less-equal",
             samples: 1,
         },
         _colorTexture: null,

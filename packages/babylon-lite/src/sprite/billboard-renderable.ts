@@ -127,7 +127,8 @@ function bindSystem(renderable: BillboardRenderableInternal, engine: EngineConte
         sampleCount,
         renderable._system,
         target._depthStencilFormat,
-        getSceneBindGroupLayout(engine)
+        getSceneBindGroupLayout(engine),
+        target._depthCompare ?? "greater-equal"
     );
     let bindGroup = renderable._bindGroups.get(pipeline);
     if (!bindGroup) {

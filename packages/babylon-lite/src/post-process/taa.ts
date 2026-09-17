@@ -30,7 +30,7 @@ import { F32 } from "../engine/typed-arrays.js";
 import { _cameraChangeKey } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
-import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
+import { _resolveRenderTargetSize, buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { createPostProcessTask, type PostProcessTask, type PostProcessTaskSettings } from "../frame-graph/post-process-task.js";
 import type { RenderTask } from "../frame-graph/render-task.js";
 import type { Task } from "../frame-graph/task.js";
@@ -267,11 +267,7 @@ function resolveSourceSize(source: RenderTarget): { width: number; height: numbe
     if (source._width > 0 && source._height > 0) {
         return { width: source._width, height: source._height };
     }
-    const size = source._descriptor.size;
-    if ("canvas" in size) {
-        return { width: size.canvas.width, height: size.canvas.height };
-    }
-    return { width: size.width, height: size.height };
+    return _resolveRenderTargetSize(source._descriptor);
 }
 
 /** Generate `samples` 2D Halton offsets (base 2 / base 3) centered on [-0.5, 0.5). */

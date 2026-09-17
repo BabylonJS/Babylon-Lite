@@ -252,7 +252,11 @@ Enabling is idempotent per scene, and the same material may be registered with m
 Materials that do not opt in keep the original renderable-owned whole-buffer path and pull in zero range-update
 implementation bytes.
 
-`setShaderTexture` validates that the sampler exists, stores the `Texture2D | null`, and increments `_resourceVersion`. The renderable rebuilds the group-1 bind group when the resource version changes.
+`setShaderTexture` validates that the sampler exists and tracks both the `Texture2D | null` identity
+and the view/sampler captured by the bind group. It increments `_resourceVersion` when either the
+facade or those resources change. This keeps ordinary repeated sets allocation-free while allowing a
+surface RTT resize callback to pass the same stable facade again and rebuild against its replacement
+attachment. The renderable rebuilds the group-1 bind group when the resource version changes.
 
 Convenience wrappers may be added if they stay small and tree-shakable:
 

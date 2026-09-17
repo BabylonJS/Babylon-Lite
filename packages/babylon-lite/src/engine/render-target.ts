@@ -36,6 +36,14 @@ export interface RenderTargetSignature {
 /** Description of a render target — what to create, not the GPU objects themselves. */
 export const REVERSE_DEPTH_COMPARE = "greater-equal" as GPUCompareFunction;
 
+/** Surface-relative render-target dimensions. The scale is applied to the live
+ *  surface backing size on every build, floored per axis, and clamped to at
+ *  least one pixel. */
+export interface RenderTargetSurfaceSize {
+    readonly surface: SurfaceContext;
+    readonly scale: number;
+}
+
 /** Describes a render target — what attachments to create, not the GPU objects
  *  themselves. GPU textures are allocated later by `buildRenderTarget`. */
 export interface RenderTargetDescriptor {
@@ -45,24 +53,29 @@ export interface RenderTargetDescriptor {
     format?: GPUTextureFormat;
     /** Depth/stencil attachment format (e.g. `"depth24plus-stencil8"`). Omit for a color-only target (e.g. the swapchain). */
     dFormat?: GPUTextureFormat;
-    /** @internal Depth clear value. Defaults to reverse-Z far depth `0`. Shadow-map targets use standard-Z far depth `1`. */
-    _depthClearValue?: number;
-    /** @internal Depth compare for pipelines targeting this RT. Defaults to reverse-Z `"greater-equal"`. */
-    _depthCompare?: GPUCompareFunction;
+    /** Depth clear value. Defaults to reverse-Z far depth `0`. Standard-Z targets normally use `1`. */
+    depthClearValue?: number;
+    /** Depth compare for pipelines targeting this RT. Defaults to reverse-Z `"greater-equal"`. */
+    depthCompare?: GPUCompareFunction;
     /** MSAA sample count: `1` = single-sample (no multisampling), `4` = 4x MSAA. */
     samples: number;
-    /** A `SurfaceContext` to size to that surface's swapchain (re-resolved each
-     *  `buildRenderTarget`), or explicit `{ width, height }` in device pixels. Pass a
-     *  surface for canvas-sized RTs; the RT then tracks that specific surface in
-     *  multi-surface setups. In the common single-canvas case, pass the engine directly
-     *  (since `EngineContext extends SurfaceContext`). */
-    size: SurfaceContext | { width: number; height: number };
+    /** A `SurfaceContext` for full surface dimensions, `{ surface, scale }` for
+     *  scaled live dimensions, or explicit `{ width, height }` device pixels.
+     *  Surface-backed sizes are re-resolved on every `buildRenderTarget`. */
+    size: SurfaceContext | RenderTargetSurfaceSize | { width: number; height: number };
 }
+
+type ResolvedRenderTargetSize = { width: number; height: number };
+type DirectRenderTargetDescriptor = Omit<RenderTargetDescriptor, "size"> & {
+    size: Exclude<RenderTargetDescriptor["size"], RenderTargetSurfaceSize>;
+};
 
 /** Allocated GPU state for a render target. */
 export interface RenderTarget {
     /** @internal */
     readonly _descriptor: RenderTargetDescriptor;
+    /** @internal Resolve the descriptor's current allocation dimensions. */
+    _resolveSize?(descriptor: Pick<RenderTargetDescriptor, "size">): ResolvedRenderTargetSize;
     /** @internal */
     _colorTexture: GPUTexture | null;
     /** @internal */
@@ -93,10 +106,16 @@ export interface RenderTarget {
     _ownsDepthTexture?: boolean;
 }
 
-/** Create a render target descriptor (GPU textures allocated by `buildRenderTarget`). */
-export function createRenderTarget(descriptor: RenderTargetDescriptor): RenderTarget {
+function resolveDirectRenderTargetSize(descriptor: Pick<RenderTargetDescriptor, "size">): ResolvedRenderTargetSize {
+    const size = descriptor.size;
+    return "canvas" in size ? size.canvas : (size as ResolvedRenderTargetSize);
+}
+
+/** @internal Construct a render target whose size is known not to use a scaled surface descriptor. */
+export function _createDirectRenderTarget(descriptor: DirectRenderTargetDescriptor): RenderTarget {
     return {
         _descriptor: descriptor,
+        _resolveSize: resolveDirectRenderTargetSize,
         _colorTexture: null,
         _colorView: null,
         _depthTexture: null,
@@ -104,6 +123,16 @@ export function createRenderTarget(descriptor: RenderTargetDescriptor): RenderTa
         _width: 0,
         _height: 0,
     };
+}
+
+/** Create a render target descriptor (GPU textures allocated by `buildRenderTarget`). */
+export function createRenderTarget(descriptor: RenderTargetDescriptor): RenderTarget {
+    const rt = _createDirectRenderTarget(descriptor as DirectRenderTargetDescriptor);
+    if ("surface" in descriptor.size) {
+        _resolveRenderTargetSize(descriptor);
+        rt._resolveSize = _resolveRenderTargetSize;
+    }
+    return rt;
 }
 
 /** Allocate GPU textures for the render target. Idempotent for fixed eager targets;
@@ -118,7 +147,7 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void
     disposeRenderTarget(rt);
 
     const desc = rt._descriptor;
-    const { width, height } = resolveSize(desc);
+    const { width, height } = (rt._resolveSize ?? resolveDirectRenderTargetSize)(desc);
     rt._width = width;
     rt._height = height;
 
@@ -171,11 +200,19 @@ export function disposeRenderTarget(rt: RenderTarget | null | undefined): void {
     }
 }
 
-function resolveSize(desc: RenderTargetDescriptor): { width: number; height: number } {
+/** @internal Resolve the descriptor's current allocation dimensions. */
+export function _resolveRenderTargetSize(desc: Pick<RenderTargetDescriptor, "size">): { width: number; height: number } {
     const size = desc.size;
-    // SurfaceContext has a `canvas` field; explicit-pixels uses `width`/`height`.
-    if ("canvas" in size) {
-        return size.canvas;
+    if ("surface" in size) {
+        const scale = size.scale;
+        if (!Number.isFinite(scale) || scale <= 0) {
+            throw new Error(`RenderTargetDescriptor.size.scale must be a positive finite number (got ${scale}).`);
+        }
+        const canvas = size.surface.canvas;
+        return {
+            width: Math.floor(canvas.width * scale) || 1,
+            height: Math.floor(canvas.height * scale) || 1,
+        };
     }
-    return size;
+    return "canvas" in size ? size.canvas : size;
 }

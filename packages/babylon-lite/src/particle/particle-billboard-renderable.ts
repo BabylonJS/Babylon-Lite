@@ -181,7 +181,8 @@ export function buildParticleBlendBillboardRenderable(
             sampleCount,
             addSystem,
             target._depthStencilFormat,
-            getSceneBindGroupLayout(bindEngine)
+            getSceneBindGroupLayout(bindEngine),
+            target._depthCompare ?? "greater-equal"
         );
         let addBindGroup = bindGroups.get(addPipeline);
         if (!addBindGroup) {

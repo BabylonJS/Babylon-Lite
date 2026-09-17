@@ -19,7 +19,7 @@ import type { EnvironmentRecoverySource } from "../loader-env/environment-recove
 import type { FrameGraph } from "../frame-graph/frame-graph.js";
 import { createFrameGraph, _appendTask } from "../frame-graph/frame-graph.js";
 import { _createAutomaticRenderTask } from "../frame-graph/render-task-base.js";
-import { createRenderTarget } from "../engine/render-target.js";
+import { _createDirectRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
 import type { SceneLightGpuState } from "../render/scene-lights-ubo.js";
 import type { ClusteredLightContainer } from "../light/clustered.js";
@@ -358,9 +358,9 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
         // All three reads (format / msaaSamples / scRT) come from the bound `surface`.
         const msaa = surface.msaaSamples > 1;
         const rt = msaa
-            ? createRenderTarget({ lbl: "scene-color", format: surface.format, dFormat: "depth24plus-stencil8", samples: surface.msaaSamples, size: surface })
+            ? _createDirectRenderTarget({ lbl: "scene-color", format: surface.format, dFormat: "depth24plus-stencil8", samples: surface.msaaSamples, size: surface })
             : surface.scRT;
-        const depth = msaa ? undefined : createRenderTarget({ lbl: "scene-depth", dFormat: "depth24plus-stencil8", samples: 1, size: surface });
+        const depth = msaa ? undefined : _createDirectRenderTarget({ lbl: "scene-depth", dFormat: "depth24plus-stencil8", samples: 1, size: surface });
         _appendTask(fg, _createAutomaticRenderTask({ name: "scene", rt, rst: msaa ? surface.scRT : undefined, depth }, eng, ctx));
     }
     ctx._disposables.push(() => fg.dispose());

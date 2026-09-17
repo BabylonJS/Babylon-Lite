@@ -90,7 +90,7 @@ loadKtx2Texture2DArrayFromUrls(engine, []);
                 `import {
     createSceneContext, createRenderTask, addMeshToTask, createRenderTargetTexture,
     createSurfaceRenderTargetTexture, onRenderTargetTextureResize, withSampledDepthTexture,
-    type EngineContext, type Mesh,
+    type EngineContext, type Mesh, type RenderTargetSurfaceSize,
 } from "./index.js";
 declare const engine: EngineContext;
 declare const mesh: Mesh;
@@ -101,11 +101,22 @@ const fixedDepth = createRenderTargetTexture(engine, {
     dFormat: "depth32float", samples: 1, size: { width: 32, height: 32 },
 }, withSampledDepthTexture);
 const surface = createSurfaceRenderTargetTexture(engine, {
-    format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: engine,
+    format: "rgba8unorm", dFormat: "depth32float",
+    depthClearValue: 1, depthCompare: "less-equal",
+    samples: 1, size: engine,
 }, withSampledDepthTexture);
 const surfaceDepth = createSurfaceRenderTargetTexture(engine, {
     dFormat: "depth32float", samples: 1, size: engine,
 }, withSampledDepthTexture);
+const scaledSize: RenderTargetSurfaceSize = { surface: engine, scale: 0.5 };
+createSurfaceRenderTargetTexture(engine, {
+    format: "rgba8unorm", samples: 1, size: scaledSize,
+});
+const dynamicSize = Math.random() > 0.5 ? engine : scaledSize;
+const forwardedDescriptor: Parameters<typeof createSurfaceRenderTargetTexture>[1] = {
+    format: "rgba8unorm", samples: 1, size: dynamicSize,
+};
+createSurfaceRenderTargetTexture(engine, forwardedDescriptor);
 const task = createRenderTask({ name: "explicit", rt: fixed.rt }, engine, createSceneContext(engine));
 addMeshToTask(task, mesh);
 // @ts-expect-error Task mesh population is a tree-shakable standalone API.
@@ -354,11 +365,12 @@ float64Result satisfies Float64Array;
         expect(external, `build/index.d.ts leaks types from external modules: ${external.join(", ")}`).toEqual([]);
     });
 
-    it("strips the shader-source brand so consumers can pass plain strings", () => {
+    it("exports the WGSL tag while stripping the source brand so consumers can pass plain strings", () => {
         const dts = readFileSync(DTS_PATH, "utf-8");
 
         expect(dts).not.toContain("WgslSource");
         expect(dts).not.toContain("wgslSourceBrand");
+        expect(dts).toContain("declare function wgsl(");
         expect(dts).toContain("readonly vertexSource: string;");
         expect(dts).toContain("readonly fragmentSource: string;");
 
@@ -366,9 +378,9 @@ float64Result satisfies Float64Array;
         try {
             writeFileSync(
                 probePath,
-                `import type { ShaderMaterialOptions } from "./index.js";
+                `import { wgsl, type ShaderMaterialOptions } from "./index.js";
 const options: ShaderMaterialOptions = {
-    vertexSource: "plain consumer vertex WGSL",
+    vertexSource: wgsl\`tagged consumer vertex WGSL\`,
     fragmentSource: "plain consumer fragment WGSL",
     attributes: [],
 };
