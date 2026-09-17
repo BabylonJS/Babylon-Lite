@@ -26,6 +26,7 @@ export function disposeMeshGpu(mesh: Mesh): void {
         g.tangentBuffer?.destroy();
         g.uv2Buffer?.destroy();
         g.colorBuffer?.destroy();
+        g._shaderColorFallback?.destroy();
     }
     const ti = mesh.thinInstances;
     if (ti && release(ti)) {
