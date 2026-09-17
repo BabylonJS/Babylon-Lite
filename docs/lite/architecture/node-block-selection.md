@@ -20,8 +20,11 @@ const material = await parseNodeMaterialFromSnippet(engine, "", { json, blockLoa
 is stripped from public declarations. Each callback dynamically imports one
 existing emitter; importing the package root does not eagerly execute all block
 implementations. There are no module-level registries or registration side effects.
-The factory creates a private map per invocation, rejects duplicate classes, and
-returns the existing asynchronous `ParseNodeMaterialOptions.blockLoader` contract.
+The factory creates a private map per invocation, rejects malformed descriptors
+and duplicate classes, and returns the existing asynchronous
+`ParseNodeMaterialOptions.blockLoader` contract. Use the exported descriptor
+values: constructing an object with only `className` does not provide a loader
+and is rejected immediately.
 An unselected class rejects explicitly; it never falls back to the full registry.
 
 `nodePbrMetallicRoughnessBlock` is the core implementation.
@@ -36,7 +39,10 @@ remain with the existing parser, emitter, pipeline and renderable implementation
 
 `scripts/generate-node-block-catalog.ts` reads the existing base/extension
 registries with the TypeScript AST and generates `node-blocks.ts` and the named
-root exports. Run it after adding a registry entry; `--check` detects drift.
+root exports. Grouped cases inherit the shared lazy import, including imports
+returned by named helper functions. Generation fails if any registry case lacks
+an implementation rather than silently omitting a supported block. Run it after
+adding a registry entry; `--check` detects drift.
 
 Generate a graph loader from JSON:
 
@@ -60,7 +66,9 @@ ending in `-nme.ts` or `-npe.ts`.
 
 `node-block-loader.test.ts` compares every selection with its existing registry
 implementation, compares emitted shader/state for texture, full NME, PBR, loop
-and geometry graphs, and covers duplicate/missing selections and core/full PBR.
+and geometry graphs, and covers malformed/duplicate/missing selections and
+core/full PBR. It independently enumerates default-registry cases to check catalog
+completeness and generates loaders for all four shared matrix block cases.
 Published-declaration coverage ensures callers use only root exports and cannot
 access `_load`. Default-loader controls remain part of the scoped bundle campaign.
 

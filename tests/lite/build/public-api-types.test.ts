@@ -41,10 +41,10 @@ describe("build/index.d.ts", () => {
             writeFileSync(
                 probePath,
                 `import {
-    createNodeMaterialBlockLoader, nodeInputBlock, nodeTextureBlock,
+    createNodeMaterialBlockLoader, nodeInputBlock, nodeTextureBlock, nodeMatrixBuilder,
     nodePbrMetallicRoughnessBlockFull, type ParseNodeMaterialOptions, type NodeMaterialBlock,
 } from "./index.js";
-const blocks: readonly NodeMaterialBlock[] = [nodeInputBlock, nodeTextureBlock];
+const blocks: readonly NodeMaterialBlock[] = [nodeInputBlock, nodeTextureBlock, nodeMatrixBuilder];
 const options: ParseNodeMaterialOptions = { blockLoader: createNodeMaterialBlockLoader(blocks) };
 createNodeMaterialBlockLoader([nodePbrMetallicRoughnessBlockFull]);
 // @ts-expect-error Implementation callbacks are internal, not public GPU/compiler API.

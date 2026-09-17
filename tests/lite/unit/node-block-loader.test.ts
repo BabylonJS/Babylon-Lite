@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { createNodeMaterialBlockLoader } from "../../../packages/babylon-lite/src/material/node/node-block-loader";
 import * as catalog from "../../../packages/babylon-lite/src/material/node/node-blocks";
@@ -44,6 +46,21 @@ async function generatedSelection(source: unknown) {
 }
 
 describe("Static Node Material block selections", () => {
+    it("covers every class routed by the default registry", () => {
+        const path = fileURLToPath(new URL("../../../packages/babylon-lite/src/material/node/node-registry.ts", import.meta.url));
+        const ast = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true);
+        const keys = new Set(["GeometryTextureOutputBlock"]);
+        const visit = (node: ts.Node): void => {
+            if (ts.isCaseClause(node) && ts.isStringLiteral(node.expression)) {
+                keys.add(node.expression.text);
+            }
+            ts.forEachChild(node, visit);
+        };
+        visit(ast);
+        const selected = Object.entries(catalog).map(([name, block]) => (name.endsWith("Full") ? `${block.className}__full` : block.className));
+        expect(selected.sort()).toEqual([...keys].sort());
+    });
+
     it.each(Object.entries(catalog))("matches the existing %s implementation", async (name, block) => {
         const key = name.endsWith("Full") ? `${block.className}__full` : block.className;
         const expected = key === "GeometryTextureOutputBlock" ? await loadNodeBlockEmitterWithGeometry(key) : await loadBlockEmitter(key);
@@ -56,6 +73,23 @@ describe("Static Node Material block selections", () => {
         const loader = createNodeMaterialBlockLoader([catalog.nodeInputBlock]);
         await expect(loader("TextureBlock")).rejects.toThrow('no emitter selected for block "TextureBlock"');
         await expect(loader("constructor")).rejects.toThrow('no emitter selected for block "constructor"');
+    });
+
+    it("rejects a public-shaped descriptor without its internal loader at construction", () => {
+        // @ts-expect-error The published interface omits this internal requirement.
+        expect(() => createNodeMaterialBlockLoader([{ className: "TextureBlock" }])).toThrow('invalid block selection "TextureBlock"');
+    });
+
+    it.each([undefined, null, 42, "loader"])("rejects a non-callable internal loader (%s) at construction", (load) => {
+        // @ts-expect-error JavaScript callers can supply malformed internal fields.
+        expect(() => createNodeMaterialBlockLoader([{ className: "TextureBlock", _load: load }])).toThrow('invalid block selection "TextureBlock"');
+    });
+
+    it.each(["MatrixBuilder", "MatrixSplitterBlock", "MatrixTransposeBlock", "MatrixDeterminantBlock"])("generates a loader for %s", async (className) => {
+        const source = { blocks: [{ id: 1, name: "matrix", customType: `BABYLON.${className}`, inputs: [], outputs: [] }] };
+        const { names, loader } = await generatedSelection(source);
+        expect(names).toEqual([`node${className}`]);
+        expect(await loader(className)).toBe(await loadBlockEmitter(className));
     });
 
     it("generates the same shader and metadata for representative fixed graphs", async () => {

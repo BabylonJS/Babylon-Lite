@@ -16,21 +16,21 @@ continues to support arbitrary graphs without a new opt-in requirement.
 
 | Scene | Raw before | Raw after | Gzip before | Gzip after | Gzip saved |
 | ----- | ---------: | --------: | ----------: | ---------: | ---------: |
-| 1     |     89,208 |    89,022 |      38,485 |     38,435 |         50 |
+| 1     |     89,208 |    89,022 |      38,485 |     38,437 |         48 |
 | 2     |     45,480 |    45,341 |      18,985 |     18,976 |          9 |
-| 7     |    106,169 |   105,981 |      46,302 |     46,264 |         38 |
+| 7     |    106,169 |   105,981 |      46,302 |     46,262 |         40 |
 | 28    |     87,397 |    87,209 |      36,994 |     36,942 |         52 |
-| 29    |     91,267 |    91,083 |      39,165 |     39,112 |         53 |
-| 62    |     57,805 |    52,375 |      25,278 |     23,662 |      1,616 |
-| 66    |     88,908 |    85,874 |      43,550 |     42,666 |        884 |
+| 29    |     91,267 |    91,083 |      39,165 |     39,116 |         49 |
+| 62    |     57,805 |    52,419 |      25,278 |     23,673 |      1,605 |
+| 66    |     88,908 |    85,918 |      43,550 |     42,674 |        876 |
 | 72    |    108,413 |   108,219 |      45,921 |     45,867 |         54 |
-| 88    |     57,818 |    50,788 |      26,709 |     24,350 |      2,359 |
-| 140   |     91,907 |    91,243 |      45,030 |     44,831 |        199 |
-| 141   |    114,458 |   113,660 |      50,865 |     50,699 |        166 |
-| 149   |    102,288 |    96,703 |      43,652 |     41,992 |      1,660 |
-| 231   |     52,232 |    52,089 |      21,431 |     21,428 |          3 |
+| 88    |     57,818 |    50,832 |      26,709 |     24,361 |      2,348 |
+| 140   |     91,907 |    91,243 |      45,030 |     44,827 |        203 |
+| 141   |    114,458 |   113,660 |      50,865 |     50,695 |        170 |
+| 149   |    102,288 |    96,742 |      43,652 |     42,000 |      1,652 |
+| 231   |     52,232 |    52,089 |      21,431 |     21,427 |          4 |
 
-The four converted graphs save **884-2,359 gzip bytes** and **3,034-7,030 raw
+The four converted graphs save **876-2,348 gzip bytes** and **2,990-6,986 raw
 bytes**, including their generated loader code. These are per-scene results, not
 additive application-wide savings. The simple graph exceeds the 1 KiB gzip keep
 target. The remaining changes are small; their value also includes removing
@@ -40,13 +40,17 @@ An independent library/bundle rebuild matches fetched bodies, manifests, module
 attribution and exact accounting. The generated loader modules are present in
 counted runtime chunks, while the general registry is absent from the four
 converted scenes. All ceilings, payload exclusions and goldens are unchanged.
-The combined scoped run covers 292 unit cases, package/test types, source/test
+The initial combined run covered 292 unit cases, package/test types, source/test
 lint, generator freshness and three published-API/root-export assertions.
+The review follow-up covers 131 targeted unit cases, including catalog
+completeness, all four shared matrix loaders and immediate rejection of malformed
+descriptors; ten regression cases fail on the original implementation.
 No performance or visual tests were run for this bundle campaign.
 
 Evidence: session `3eaf8721-c709-45e3-acc3-1c52e502f504`,
-`files/bundle-pr/report.json`, with `baseline/`, `candidate/`, `reproduced/`,
-the retained patch and paired logs. The following sections preserve the earlier
+`files/bundle-pr/report-review-candidate.json`, with `baseline/`,
+`review-candidate/`, `review-reproduced/`, the retained/review patches and paired
+logs. The original `report.json` remains archived. The following sections preserve the earlier
 incremental experiments and their original baselines; do not add those deltas
 to the final combined table above.
 

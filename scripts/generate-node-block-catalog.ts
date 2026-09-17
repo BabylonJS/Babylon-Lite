@@ -7,29 +7,77 @@ import { format, resolveConfig } from "prettier";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const nodeDirectory = resolve(root, "packages/babylon-lite/src/material/node");
 const entries = new Map<string, string>();
+const registryKeys = new Set<string>();
 for (const name of ["node-registry", "node-registry-extra-math", "node-registry-extra-procedural", "node-registry-extra-advanced", "node-registry-extra-compat"]) {
     const file = resolve(nodeDirectory, name + ".ts");
     const source = ts.createSourceFile(file, readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
+    const helpers = new Map<string, ts.Block>();
+    for (const statement of source.statements) {
+        if (ts.isFunctionDeclaration(statement) && statement.name && statement.body) {
+            helpers.set(statement.name.text, statement.body);
+        }
+    }
     const visit = (node: ts.Node): void => {
-        if (ts.isCaseClause(node) && ts.isStringLiteral(node.expression)) {
-            const key = node.expression.text;
-            const findImport = (child: ts.Node): void => {
-                if (ts.isCallExpression(child) && child.expression.kind === ts.SyntaxKind.ImportKeyword) {
-                    const specifier = child.arguments[0];
-                    if (specifier && ts.isStringLiteral(specifier) && specifier.text.startsWith("./blocks/")) {
+        if (ts.isCaseBlock(node)) {
+            let keys: string[] = [];
+            for (const clause of node.clauses) {
+                if (ts.isCaseClause(clause)) {
+                    if (!ts.isStringLiteral(clause.expression)) {
+                        throw new Error(`Non-literal node registry case in ${file}`);
+                    }
+                    keys.push(clause.expression.text);
+                    registryKeys.add(clause.expression.text);
+                }
+                if (!keys.length || !clause.statements.length) {
+                    continue;
+                }
+                const imports = new Set<string>();
+                const resolving = new Set<string>();
+                const findImport = (child: ts.Node): void => {
+                    if (ts.isCallExpression(child) && child.expression.kind === ts.SyntaxKind.ImportKeyword) {
+                        const specifier = child.arguments[0];
+                        if (specifier && ts.isStringLiteral(specifier)) {
+                            imports.add(specifier.text);
+                        }
+                    }
+                    if (ts.isReturnStatement(child) && child.expression && ts.isIdentifier(child.expression)) {
+                        const name = child.expression.text;
+                        const helper = helpers.get(name);
+                        if (!helper || resolving.has(name)) {
+                            throw new Error(`Unresolvable node registry helper "${name}" in ${file}`);
+                        }
+                        resolving.add(name);
+                        findImport(helper);
+                        resolving.delete(name);
+                    }
+                    ts.forEachChild(child, findImport);
+                };
+                clause.statements.forEach(findImport);
+                if (imports.size !== 1) {
+                    throw new Error(`Expected one lazy import for ${keys.join(", ")} in ${file}`);
+                }
+                const specifier = [...imports][0]!;
+                if (specifier.startsWith("./blocks/")) {
+                    for (const key of keys) {
                         if (entries.has(key)) {
                             throw new Error(`Duplicate node registry entry: ${key}`);
                         }
-                        entries.set(key, specifier.text);
+                        entries.set(key, specifier);
                     }
+                } else if (!specifier.startsWith("./node-registry-extra-")) {
+                    throw new Error(`Unsupported node registry import "${specifier}" in ${file}`);
                 }
-                ts.forEachChild(child, findImport);
-            };
-            node.statements.forEach(findImport);
+                keys = [];
+            }
         }
         ts.forEachChild(node, visit);
     };
     visit(source);
+}
+for (const key of registryKeys) {
+    if (!entries.has(key)) {
+        throw new Error(`Missing node block implementation for registry case "${key}"`);
+    }
 }
 entries.set("GeometryTextureOutputBlock", "./blocks/geometry-texture-output.js");
 

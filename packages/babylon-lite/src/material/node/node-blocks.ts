@@ -91,6 +91,14 @@ export const nodeLightBlock: NodeMaterialBlock = { className: "LightBlock", _loa
 export const nodeLightInformationBlock: NodeMaterialBlock = { className: "LightInformationBlock", _load: async () => (await import("./blocks/light-information.js")).emitter };
 /** Lazily loaded LoopBlock implementation. */
 export const nodeLoopBlock: NodeMaterialBlock = { className: "LoopBlock", _load: async () => (await import("./blocks/loop-block.js")).emitter };
+/** Lazily loaded MatrixBuilder implementation. */
+export const nodeMatrixBuilder: NodeMaterialBlock = { className: "MatrixBuilder", _load: async () => (await import("./blocks/matrix-blocks.js")).emitter };
+/** Lazily loaded MatrixDeterminantBlock implementation. */
+export const nodeMatrixDeterminantBlock: NodeMaterialBlock = { className: "MatrixDeterminantBlock", _load: async () => (await import("./blocks/matrix-blocks.js")).emitter };
+/** Lazily loaded MatrixSplitterBlock implementation. */
+export const nodeMatrixSplitterBlock: NodeMaterialBlock = { className: "MatrixSplitterBlock", _load: async () => (await import("./blocks/matrix-blocks.js")).emitter };
+/** Lazily loaded MatrixTransposeBlock implementation. */
+export const nodeMatrixTransposeBlock: NodeMaterialBlock = { className: "MatrixTransposeBlock", _load: async () => (await import("./blocks/matrix-blocks.js")).emitter };
 /** Lazily loaded MaxBlock implementation. */
 export const nodeMaxBlock: NodeMaterialBlock = { className: "MaxBlock", _load: async () => (await import("./blocks/max-block.js")).emitter };
 /** Lazily loaded MeshAttributeExistsBlock implementation. */
