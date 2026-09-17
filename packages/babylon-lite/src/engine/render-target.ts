@@ -65,10 +65,17 @@ export interface RenderTargetDescriptor {
     size: SurfaceContext | RenderTargetSurfaceSize | { width: number; height: number };
 }
 
+type ResolvedRenderTargetSize = { width: number; height: number };
+type DirectRenderTargetDescriptor = Omit<RenderTargetDescriptor, "size"> & {
+    size: Exclude<RenderTargetDescriptor["size"], RenderTargetSurfaceSize>;
+};
+
 /** Allocated GPU state for a render target. */
 export interface RenderTarget {
     /** @internal */
     readonly _descriptor: RenderTargetDescriptor;
+    /** @internal Resolve the descriptor's current allocation dimensions. */
+    _resolveSize?(descriptor: Pick<RenderTargetDescriptor, "size">): ResolvedRenderTargetSize;
     /** @internal */
     _colorTexture: GPUTexture | null;
     /** @internal */
@@ -99,11 +106,16 @@ export interface RenderTarget {
     _ownsDepthTexture?: boolean;
 }
 
-/** Create a render target descriptor (GPU textures allocated by `buildRenderTarget`). */
-export function createRenderTarget(descriptor: RenderTargetDescriptor): RenderTarget {
-    _resolveRenderTargetSize(descriptor);
+function resolveDirectRenderTargetSize(descriptor: Pick<RenderTargetDescriptor, "size">): ResolvedRenderTargetSize {
+    const size = descriptor.size;
+    return "canvas" in size ? size.canvas : (size as ResolvedRenderTargetSize);
+}
+
+/** @internal Construct a render target whose size is known not to use a scaled surface descriptor. */
+export function _createDirectRenderTarget(descriptor: DirectRenderTargetDescriptor): RenderTarget {
     return {
         _descriptor: descriptor,
+        _resolveSize: resolveDirectRenderTargetSize,
         _colorTexture: null,
         _colorView: null,
         _depthTexture: null,
@@ -111,6 +123,16 @@ export function createRenderTarget(descriptor: RenderTargetDescriptor): RenderTa
         _width: 0,
         _height: 0,
     };
+}
+
+/** Create a render target descriptor (GPU textures allocated by `buildRenderTarget`). */
+export function createRenderTarget(descriptor: RenderTargetDescriptor): RenderTarget {
+    const rt = _createDirectRenderTarget(descriptor as DirectRenderTargetDescriptor);
+    if ("surface" in descriptor.size) {
+        _resolveRenderTargetSize(descriptor);
+        rt._resolveSize = _resolveRenderTargetSize;
+    }
+    return rt;
 }
 
 /** Allocate GPU textures for the render target. Idempotent for fixed eager targets;
@@ -125,7 +147,7 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void
     disposeRenderTarget(rt);
 
     const desc = rt._descriptor;
-    const { width, height } = _resolveRenderTargetSize(desc);
+    const { width, height } = (rt._resolveSize ?? resolveDirectRenderTargetSize)(desc);
     rt._width = width;
     rt._height = height;
 
