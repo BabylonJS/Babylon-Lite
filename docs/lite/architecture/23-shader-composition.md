@@ -229,11 +229,15 @@ Binding assignment order:
 4. Each sorted fragment's `bindings` where `group === "mesh"` or default
 5. Each sorted fragment's `bindings` where `group === "shadow"`
 
-Each binding gets:
+The composer's `addBinding()` handles each `BindingKind` once, producing both its
+`GPUBindGroupLayoutEntry` and WGSL declaration before routing the declaration to
+the vertex and/or fragment stage according to `visibility`. Binding order and
+the independent mesh/shadow counters remain unchanged.
 
-- A `GPUBindGroupLayoutEntry` via `bglEntry()` (maps BindingKind → WebGPU descriptor)
-- A WGSL declaration via `declWGSL()` (e.g., `@group(1) @binding(3) var normalTex: texture_2d<f32>;`)
-- Assignment to vertex and/or fragment declaration lists based on `visibility`
+Storage-texture declarations retain WGSL access spellings (`read`, `write`,
+`read_write`), while their WebGPU descriptors use the corresponding `read-only`,
+`write-only`, and `read-write` values. Non-filtering samplers likewise use
+`non-filtering` in the descriptor but plain `sampler` in WGSL.
 
 ### Vertex Buffer Layout Construction
 

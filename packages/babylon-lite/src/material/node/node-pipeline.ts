@@ -16,7 +16,6 @@ import { SS } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
 import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
-import { createDefaultPipelineDescriptor } from "../../render/scene-helpers.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 import { computeUboLayout } from "../../shader/ubo-layout.js";
 import { MAX_LIGHTS } from "../../light/types.js";
@@ -484,37 +483,23 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
               _depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE,
               _msaaSamples,
           })
-        : device.createRenderPipeline(
-              noColorOutput
-                  ? {
-                        label: "node-material-depth",
-                        layout: device.createPipelineLayout({ bindGroupLayouts: [sceneBGL, _meshBGL] }),
-                        vertex: { module: shaderModule, entryPoint: "vs_main", buffers: _vertexBuffers },
-                        fragment: { module: shaderModule, entryPoint: "fs_main", targets: [] },
-                        depthStencil: { format: depthFormat, depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE, depthWriteEnabled: true },
-                        multisample: { count: _msaaSamples },
-                        primitive: { topology: "triangle-list", cullMode: opts._backFaceCulling !== false ? "back" : "none" },
-                    }
-                  : {
-                        ...createDefaultPipelineDescriptor({
-                            _label: "node-material",
-                            _engine,
-                            _bgls: [sceneBGL, _meshBGL],
-                            _vertModule: shaderModule,
-                            _fragModule: shaderModule,
-                            _vertexBuffers,
-                            _format,
-                            _depthStencilFormat: opts._depthStencilFormat,
-                            _depthCompare: opts._depthCompare,
-                            _msaaSamples,
-                            _cullMode: opts._backFaceCulling !== false ? "back" : "none",
-                            _blend: esmShadowOutput ? undefined : blend,
-                            _depthWriteEnabled: esmShadowOutput || depthWriteEnabled,
-                        }),
-                        vertex: { module: shaderModule, entryPoint: "vs_main", buffers: _vertexBuffers },
-                        fragment: { module: shaderModule, entryPoint: "fs_main", targets: [!esmShadowOutput && blend ? { format: _format, blend } : { format: _format }] },
-                    }
-          );
+        : device.createRenderPipeline({
+              label: noColorOutput ? "node-material-depth" : "node-material",
+              layout: device.createPipelineLayout({ bindGroupLayouts: [sceneBGL, _meshBGL] }),
+              vertex: { module: shaderModule, entryPoint: "vs_main", buffers: _vertexBuffers },
+              fragment: {
+                  module: shaderModule,
+                  entryPoint: "fs_main",
+                  targets: noColorOutput ? [] : [!esmShadowOutput && blend ? { format: _format, blend } : { format: _format }],
+              },
+              depthStencil: {
+                  format: depthFormat,
+                  depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE,
+                  depthWriteEnabled: shadowOutput || depthWriteEnabled,
+              },
+              multisample: { count: _msaaSamples },
+              primitive: { topology: "triangle-list", cullMode: opts._backFaceCulling !== false ? "back" : "none", frontFace: noColorOutput ? undefined : "ccw" },
+          });
 
     const result: NodeCompileResult = {
         _wgsl,
