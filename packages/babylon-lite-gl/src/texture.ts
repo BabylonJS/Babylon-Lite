@@ -62,7 +62,7 @@ export interface GLTexture {
      * the upload completes the texture is ready iff `_isReadyAfterUpload`.
      * @internal
      */
-    _upload: (engine: GLEngineContext) => void;
+    _upload: (engine: GLEngineContext, initializeParameters?: boolean) => void;
     /**
      * Snapshot of `isReady` captured on `webglcontextlost` so the restore
      * handler knows whether to flip it back on after `_upload`. Textures
