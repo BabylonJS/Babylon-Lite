@@ -245,6 +245,10 @@ function addValue(acc: AnimValue, value: AnimValue): AnimValue {
     return a.map((component, i) => component + (v[i] ?? 0));
 }
 
+function subtractValue(value: AnimValue, base: AnimValue): AnimValue {
+    return addValue(value, scaleValue(base, -1));
+}
+
 function zeroLike(value: AnimValue): AnimValue {
     return typeof value === "number" ? 0 : animationComponents(value).map(() => 0);
 }
@@ -338,6 +342,8 @@ export class Animatable {
     private _stopped = false;
     private readonly _fallbackAnimations: readonly Animation[];
     private readonly _fallbackFrames = new Map<Animation, number>();
+    private readonly _fallbackElapsedFrames = new Map<Animation, number>();
+    private readonly _fallbackRepeatCounts = new Map<Animation, number>();
     private readonly _completedFallbackAnimations = new Set<Animation>();
 
     public constructor(
@@ -357,7 +363,7 @@ export class Animatable {
         this._nativeFallbackReason = nativeFallbackReason;
         this.masterFrame = _from;
         for (const animation of fallbackAnimations) {
-            this._fallbackFrames.set(animation, _from);
+            this._resetFallbackAnimation(animation, _from);
         }
         if (nativeGroup) {
             liteGoToFrame(nativeGroup, _from);
@@ -425,6 +431,7 @@ export class Animatable {
         }
         if (this._lite) {
             this.masterFrame = this._lite.currentTime * (this._animations[0]?.framePerSecond ?? 60);
+            this._advanceFallback(deltaMs);
             this._applyFallback();
             if (!this._loop && this.masterFrame >= this._to) {
                 this.masterFrame = this._to;
@@ -432,31 +439,7 @@ export class Animatable {
             }
             return;
         }
-        let anyFallbackRunning = false;
-        for (const animation of this._fallbackAnimations) {
-            if (this._completedFallbackAnimations.has(animation)) {
-                continue;
-            }
-            const direction = this._to >= this._from ? 1 : -1;
-            const span = Math.abs(this._to - this._from);
-            let frame = this._fallbackFrames.get(animation) ?? this._from;
-            frame += (deltaMs / 1000) * animation.framePerSecond * this._speedRatio;
-            const reachedEnd = direction > 0 ? frame >= this._to : frame <= this._to;
-            if (reachedEnd) {
-                if (this._loop) {
-                    const distance = direction > 0 ? frame - this._from : this._from - frame;
-                    const wrappedDistance = span > 0 ? ((distance % span) + span) % span : 0;
-                    frame = direction > 0 ? this._from + wrappedDistance : this._from - wrappedDistance;
-                    anyFallbackRunning = true;
-                } else {
-                    frame = this._to;
-                    this._completedFallbackAnimations.add(animation);
-                }
-            } else {
-                anyFallbackRunning = true;
-            }
-            this._fallbackFrames.set(animation, frame);
-        }
+        const anyFallbackRunning = this._advanceFallback(deltaMs);
         this.masterFrame = this._fallbackFrames.get(this._animations[0]!) ?? this._from;
         this._applyFallback();
         if (!this._loop && !anyFallbackRunning) {
@@ -465,16 +448,18 @@ export class Animatable {
     }
 
     public goToFrame(frame: number): void {
-        this.masterFrame = clampAnimationFrame(this._animations[0], frame);
         this._completedFallbackAnimations.clear();
         for (const animation of this._fallbackAnimations) {
-            this._fallbackFrames.set(animation, clampAnimationFrame(animation, frame));
+            this._resetFallbackAnimation(animation, frame);
         }
         if (this._lite) {
-            liteGoToFrame(this._lite, this.masterFrame);
+            liteGoToFrame(this._lite, frame);
+            this.masterFrame = this._lite.currentTime * (this._lite.frameRate ?? 60);
             if (!this._paused && !this._stopped) {
                 playAnimation(this._lite);
             }
+        } else {
+            this.masterFrame = clampAnimationFrame(this._animations[0], frame);
         }
         this._applyFallback();
     }
@@ -494,7 +479,7 @@ export class Animatable {
             this.masterFrame = this._from;
             this._completedFallbackAnimations.clear();
             for (const animation of this._fallbackAnimations) {
-                this._fallbackFrames.set(animation, this._from);
+                this._resetFallbackAnimation(animation, this._from);
             }
         }
         if (this._lite) {
@@ -522,8 +507,59 @@ export class Animatable {
 
     private _applyFallback(): void {
         for (const anim of this._fallbackAnimations) {
-            applyAnimatedValue(this._target, anim.targetProperty, anim.evaluate(this._lite ? this.masterFrame : (this._fallbackFrames.get(anim) ?? this.masterFrame)));
+            const frame = this._fallbackFrames.get(anim) ?? this.masterFrame;
+            let value = anim.evaluate(frame);
+            if (this._loop) {
+                const repeatCount = this._fallbackRepeatCounts.get(anim) ?? 0;
+                const [, to] = animationPlaybackRange(anim, this._from, this._to);
+                if (anim.loopMode === AnimationLoopModes.ANIMATIONLOOPMODE_CONSTANT && repeatCount > 0) {
+                    value = anim.evaluate(to);
+                } else if (anim.loopMode === AnimationLoopModes.ANIMATIONLOOPMODE_RELATIVE && repeatCount > 0) {
+                    const [from] = animationPlaybackRange(anim, this._from, this._to);
+                    value = addValue(value, scaleValue(subtractValue(anim.evaluate(to), anim.evaluate(from)), repeatCount));
+                }
+            }
+            applyAnimatedValue(this._target, anim.targetProperty, value);
         }
+    }
+
+    private _advanceFallback(deltaMs: number): boolean {
+        let anyRunning = false;
+        for (const animation of this._fallbackAnimations) {
+            if (this._completedFallbackAnimations.has(animation)) {
+                continue;
+            }
+            const [from, to] = animationPlaybackRange(animation, this._from, this._to);
+            const frameRange = to - from;
+            let elapsedFrames = (this._fallbackElapsedFrames.get(animation) ?? 0) + (deltaMs / 1000) * animation.framePerSecond * this._speedRatio;
+            const reachedEnd = frameRange >= 0 ? elapsedFrames >= frameRange : elapsedFrames <= frameRange;
+            let repeatCount = 0;
+            let frame: number;
+            if (this._loop) {
+                repeatCount = frameRange === 0 ? 0 : Math.max(0, Math.trunc(elapsedFrames / frameRange));
+                frame = frameRange === 0 ? to : from + (elapsedFrames % frameRange);
+                anyRunning = true;
+            } else if (reachedEnd) {
+                elapsedFrames = frameRange;
+                frame = to;
+                this._completedFallbackAnimations.add(animation);
+            } else {
+                frame = from + elapsedFrames;
+                anyRunning = true;
+            }
+            this._fallbackElapsedFrames.set(animation, elapsedFrames);
+            this._fallbackRepeatCounts.set(animation, repeatCount);
+            this._fallbackFrames.set(animation, frame);
+        }
+        return anyRunning;
+    }
+
+    private _resetFallbackAnimation(animation: Animation, frame: number): void {
+        const [from] = animationPlaybackRange(animation, this._from, this._to);
+        const clampedFrame = clampAnimationFrame(animation, frame);
+        this._fallbackFrames.set(animation, clampedFrame);
+        this._fallbackElapsedFrames.set(animation, clampedFrame - from);
+        this._fallbackRepeatCounts.set(animation, 0);
     }
 }
 
@@ -684,6 +720,16 @@ function clampAnimationFrame(animation: Animation | undefined, frame: number): n
         return frame;
     }
     return Math.min(Math.max(frame, keys[0]!.frame), keys[keys.length - 1]!.frame);
+}
+
+function animationPlaybackRange(animation: Animation, from: number, to: number): readonly [number, number] {
+    const keys = animation.getKeys();
+    if (keys.length === 0) {
+        return [from, to];
+    }
+    const min = keys[0]!.frame;
+    const max = keys[keys.length - 1]!.frame;
+    return [from < min || from > max ? min : from, to < min || to > max ? max : to];
 }
 
 function uniformInterpolation(keys: readonly IAnimationKey[]): boolean {

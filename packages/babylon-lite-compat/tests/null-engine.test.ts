@@ -270,6 +270,30 @@ describe("NullEngine (headless)", () => {
         expect(target).toEqual({ x: 5, y: 0 });
     });
 
+    it("seeks native and fallback tracks within their own key domains", () => {
+        const scene = new Scene(new NullEngine());
+        const target = { x: 0, y: 0 };
+        const fallback = new Animation("shortFallback", "x", 10);
+        fallback.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 10, value: 10 },
+        ]);
+        const native = new Animation("longNative", "y", 10);
+        native.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 20, value: 20 },
+        ]);
+
+        const animatable = scene.beginDirectAnimation(target, [fallback, native], 0, 20, false);
+        expect(animatable._lite).toBeDefined();
+        expect(animatable._nativeFallbackReason).toMatch(/does not cover/);
+
+        animatable.goToFrame(15);
+
+        expect(animatable.masterFrame).toBe(15);
+        expect(target).toEqual({ x: 10, y: 15 });
+    });
+
     it("preserves supported track order for overlapping native writes", () => {
         const scene = new Scene(new NullEngine());
         const target = { x: 0 };
@@ -383,6 +407,36 @@ describe("NullEngine (headless)", () => {
         scene._tick(1000);
         expect(target).toEqual({ x: 20, y: 20 });
         expect(animatable.animationStarted).toBe(false);
+    });
+
+    it("preserves constant and relative loop modes on fallback tracks", () => {
+        const scene = new Scene(new NullEngine());
+        const target = { constant: 0, relative: 0, native: 0 };
+        const constant = new Animation("constant", "constant", 10, Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_CONSTANT);
+        constant.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 10, value: 10 },
+        ]);
+        const relative = new Animation("relative", "relative", 10, Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_RELATIVE);
+        relative.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 10, value: 10 },
+        ]);
+        const native = new Animation("native", "native", 10);
+        native.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 10, value: 10 },
+        ]);
+        const animatable = scene.beginDirectAnimation(target, [constant, relative, native], 0, 10, true);
+        expect(animatable._lite).toBeDefined();
+
+        scene._tick(1000);
+        expect(animatable.animationStarted).toBe(true);
+        expect(target).toEqual({ constant: 10, relative: 10, native: 0 });
+        scene._tick(500);
+        expect(target).toEqual({ constant: 10, relative: 15, native: 5 });
+        scene._tick(1000);
+        expect(target).toEqual({ constant: 10, relative: 25, native: 5 });
     });
 
     it("matches Babylon.js near-parallel quaternion slerp on native playback", () => {
