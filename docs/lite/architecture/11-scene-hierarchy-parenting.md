@@ -230,9 +230,9 @@ get worldMatrix():
 | Root changes, N descendants | O(N) version push; lazy world products, only root local composition |
 | Single leaf changes         | O(1) invalidation; one local composition/product against cached parent |
 
-These structural costs are not measured performance evidence. Experiment A remains
-`PENDING_EVIDENCE` until CPU timing, runtime-byte gates, affected-scene parity and
-independent review pass under the strict campaign.
+These structural costs are not universal performance measurements. The CPU benefit
+depends on hierarchy shape, local versus ancestor movement, and matrix precision.
+Required world products and unconditional descendant version propagation remain.
 
 ### Focused Test Specification
 
