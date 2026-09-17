@@ -234,9 +234,9 @@ Both constructors share ONE factory — `_createFreeCamera(position, target, up:
 branches on the up vector's origin and never defines an `upVector` property. `createFreeCamera` passes
 the shared `Vec3Up` constant, so scenes that never import the banked constructor are byte-identical to
 before this feature existed. `createBankedFreeCamera` does all of the opt-in work itself: it builds its
-own `ObservableVec3` up vector — deferring its dirty callback to `_markWorldMatrixDirty(cam)` once `cam`
+own `ObservableVec3` up vector — deferring its dirty callback to `_markLocalMatrixDirty(cam)` once `cam`
 exists, since the factory computes `wm` internally — and only then defines the public `upVector`
-property on the returned camera. Writing `upVector` invalidates the world matrix exactly like
+property on the returned camera. Writing `upVector` invalidates both local and world matrix caches exactly like
 `position` / `target` do. `up` defaults to world +Y, which makes a banked camera's initial world matrix
 identical to a plain one's. A degenerate up (parallel to the view direction) falls back to identity
 rotation, matching `writeLookAtWorldMat4LHIntoBuffer`.
@@ -390,7 +390,7 @@ _pitch = atan2(dy, sqrt(dx² + dz²))
 
 ### FreeCamera Dirty Tracking
 
-`position` and `target` are `ObservableVec3` instances. `_yaw` and `_pitch` use `Object.defineProperty`. All mutations call `wm.markLocalDirty()`. A `BankedFreeCamera` adds `upVector`, its own `ObservableVec3` (constructed and defined entirely in `banked-free-camera.ts`) whose dirty callback invalidates the camera's world matrix via the shared `_markWorldMatrixDirty()` seam.
+`position` and `target` are `ObservableVec3` instances. `_yaw` and `_pitch` use `Object.defineProperty`. All mutations call `wm.markLocalDirty()`. A `BankedFreeCamera` adds `upVector`, its own `ObservableVec3` (constructed and defined entirely in `banked-free-camera.ts`) whose dirty callback invalidates both the camera's local and world matrix caches via the shared `_markLocalMatrixDirty()` seam.
 
 ### View Matrix
 
