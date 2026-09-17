@@ -317,6 +317,15 @@ describe("mesh-blending configuration and radius math", () => {
         expect(publishedOutput._height).toBe(40);
         expect(createBindGroup.mock.calls.length).toBeGreaterThan(bindGroupsAfterRecord);
 
+        task.sourceTexture._descriptor.size = { width: 96, height: 48 };
+        buildRenderTarget(task.sourceTexture, engine);
+        task.meshBlendTagTexture = target("r8uint", { width: 96, height: 48 });
+        task.depthTexture = target("r32float", { width: 96, height: 48 });
+        task.record();
+        expect(task.outputTexture).toBe(publishedOutput);
+        expect(publishedOutput._width).toBe(96);
+        expect(publishedOutput._height).toBe(48);
+
         const replacementDevice = createMeshBlendingTestContext();
         (engine as { _device: GPUDevice })._device = replacementDevice.device;
         task.record();

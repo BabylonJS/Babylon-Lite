@@ -291,8 +291,7 @@ The concrete task contains:
 ```ts
 interface MeshBlendingPostProcessTaskInternal extends MeshBlendingPostProcessTask {
     _internalTarget: RenderTarget | null;
-    _internalSource: RenderTarget | null;
-    _internalFormat: GPUTextureFormat | null;
+    _internalTargetKey: string;
     _device: GPUDevice | null;
     _compiledQuality: MeshBlendQuality | -1;
     _compiledDepthType: MeshBlendDepthType | -1;

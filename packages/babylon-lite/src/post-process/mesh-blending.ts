@@ -87,8 +87,7 @@ export interface MeshBlendingPostProcessTask extends Task {
 interface MeshBlendingPostProcessTaskInternal extends MeshBlendingPostProcessTask {
     outputTexture: RenderTarget;
     _internalTarget: RenderTarget | null;
-    _internalSource: RenderTarget | null;
-    _internalFormat: GPUTextureFormat | null;
+    _internalTargetKey: string;
     _device: GPUDevice | null;
     _compiledQuality: MeshBlendQuality | -1;
     _compiledDepthType: MeshBlendDepthType | -1;
@@ -225,8 +224,7 @@ export function createMeshBlendingPostProcessTask(config: MeshBlendingPostProces
         viewport: config.viewport ?? null,
         clear: config.clear ?? true,
         _internalTarget: internalTarget,
-        _internalSource: internalTarget ? source : null,
-        _internalFormat: internalTarget ? (source._descriptor.format ?? null) : null,
+        _internalTargetKey: internalTarget ? internalTargetKey(source) : "",
         _device: null,
         _compiledQuality: -1,
         _compiledDepthType: -1,
@@ -287,8 +285,7 @@ export function createMeshBlendingPostProcessTask(config: MeshBlendingPostProces
             destroyDeviceResources(task);
             disposeRenderTarget(task._internalTarget);
             task._internalTarget = null;
-            task._internalSource = null;
-            task._internalFormat = null;
+            task._internalTargetKey = "";
         },
     };
     _installMeshBlendingPbrSupport();
@@ -378,15 +375,14 @@ function prepareOutputTarget(task: MeshBlendingPostProcessTaskInternal): void {
         task.outputTexture = task.targetTexture;
         return;
     }
-    const sourceFormat = task.sourceTexture._descriptor.format ?? null;
+    const key = internalTargetKey(task.sourceTexture);
     if (!task._internalTarget) {
         task._internalTarget = createInternalTarget(task.name, task.sourceTexture);
-    } else if (task._internalSource !== task.sourceTexture || task._internalFormat !== sourceFormat) {
+    } else if (task._internalTargetKey !== key) {
         disposeRenderTarget(task._internalTarget);
         configureInternalTarget(task._internalTarget, task.name, task.sourceTexture);
     }
-    task._internalSource = task.sourceTexture;
-    task._internalFormat = sourceFormat;
+    task._internalTargetKey = key;
     task.outputTexture = task._internalTarget;
 }
 
@@ -411,6 +407,13 @@ function configureInternalTarget(target: RenderTarget, name: string, source: Ren
     target._descriptor.samples = configured._descriptor.samples;
     target._descriptor.size = configured._descriptor.size;
     target._resolveSize = configured._resolveSize;
+}
+
+function internalTargetKey(source: RenderTarget): string {
+    const descriptor = source._descriptor;
+    const size = descriptor.size;
+    const sizeKey = "canvas" in size ? `surface:${size._uniqueId}` : "surface" in size ? `surface:${size.surface._uniqueId}@${size.scale}` : `${size.width}x${size.height}`;
+    return `${descriptor.format ?? "-"}|${descriptor.samples ?? 1}|${sizeKey}`;
 }
 
 function validateTargets(task: MeshBlendingPostProcessTaskInternal): void {
