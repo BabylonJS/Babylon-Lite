@@ -295,6 +295,7 @@ describe("mesh-blending configuration and radius math", () => {
         const { camera, engine, target } = createMeshBlendingTestContext();
         camera.nearPlane = 0.1;
         camera.farPlane = 10_000;
+        (camera.worldMatrix as unknown as Float32Array)[12] = 4_096;
         enableOrthographicCamera(camera, { halfHeight: 1_000 });
         const task = createMeshBlendingPostProcessTask(
             {
@@ -302,6 +303,7 @@ describe("mesh-blending configuration and radius math", () => {
                 meshBlendTagTexture: target("r8uint"),
                 depthTexture: target("r32float"),
                 camera,
+                debugMode: MeshBlendDebugMode.WorldPosition,
             },
             engine
         );

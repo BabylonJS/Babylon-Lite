@@ -105,8 +105,14 @@ export function _resolveGeometryMeshBlendTag(mesh: Mesh): number {
 
 /** @internal Create a geometry MRT color target without requesting unsupported integer or float32 blending. */
 export function _geometryColorTarget(format: GPUTextureFormat, blend: GPUBlendState | undefined, device: GPUDevice): GPUColorTargetState {
-    if (!blend || format.endsWith("uint") || format.endsWith("sint") || (format.endsWith("32float") && !device.features.has("float32-blendable"))) {
+    if (!blend || format === "r8uint") {
         return { format };
+    }
+    if (format.endsWith("uint") || format.endsWith("sint")) {
+        throw new Error(`Transparent geometry output cannot blend integer format "${format}".`);
+    }
+    if (format.endsWith("32float") && !device.features.has("float32-blendable")) {
+        throw new Error(`Transparent geometry output format "${format}" requires the float32-blendable WebGPU feature or a blendable format override.`);
     }
     return { format, blend };
 }

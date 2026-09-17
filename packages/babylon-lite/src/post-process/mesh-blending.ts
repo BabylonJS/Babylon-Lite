@@ -670,7 +670,7 @@ function writeUniforms(task: MeshBlendingPostProcessTaskInternal): void {
     const projection = getProjectionMatrix(task.camera, getEffectiveAspectRatio(task.camera, width, height));
     data.fill(0);
     packMat4IntoF32(data, projection, 0);
-    if (!invertMat4IntoF32(data, 16, projection) || (task.debugMode === MeshBlendDebugMode.WorldPosition && !invertMat4IntoF32(data, 32, getViewMatrix(task.camera)))) {
+    if (!invertMat4IntoF32(data, 16, projection) || (task.debugMode === MeshBlendDebugMode.WorldPosition && !invertMat4IntoF32(data, 32, getViewMatrix(task.camera), true))) {
         throw new Error(`MeshBlendingPostProcessTask "${task.name}": camera projection and view matrices must be invertible.`);
     }
     for (let index = 0; index < 4; index++) {
@@ -687,7 +687,7 @@ function writeUniforms(task: MeshBlendingPostProcessTaskInternal): void {
     }
 }
 
-function invertMat4IntoF32(out: Float32Array, offset: number, input: Mat4): boolean {
+function invertMat4IntoF32(out: Float32Array, offset: number, input: Mat4, affine = false): boolean {
     const a00 = input[0]!,
         a01 = input[1]!,
         a02 = input[2]!,
@@ -717,25 +717,12 @@ function invertMat4IntoF32(out: Float32Array, offset: number, input: Mat4): bool
     const b10 = a21 * a33 - a23 * a31;
     const b11 = a22 * a33 - a23 * a32;
     let determinant = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
-    const maxMagnitude = Math.max(
-        Math.abs(a00),
-        Math.abs(a01),
-        Math.abs(a02),
-        Math.abs(a03),
-        Math.abs(a10),
-        Math.abs(a11),
-        Math.abs(a12),
-        Math.abs(a13),
-        Math.abs(a20),
-        Math.abs(a21),
-        Math.abs(a22),
-        Math.abs(a23),
-        Math.abs(a30),
-        Math.abs(a31),
-        Math.abs(a32),
-        Math.abs(a33)
-    );
-    if (!Number.isFinite(determinant) || determinant === 0 || Math.abs(determinant) <= Number.EPSILON * maxMagnitude ** 4 * 16) {
+    const linearMagnitude = Math.max(Math.abs(a00), Math.abs(a01), Math.abs(a02), Math.abs(a10), Math.abs(a11), Math.abs(a12), Math.abs(a20), Math.abs(a21), Math.abs(a22));
+    const maxMagnitude = affine
+        ? linearMagnitude
+        : Math.max(linearMagnitude, Math.abs(a03), Math.abs(a13), Math.abs(a23), Math.abs(a30), Math.abs(a31), Math.abs(a32), Math.abs(a33));
+    const determinantScale = affine ? maxMagnitude ** 3 : maxMagnitude ** 4;
+    if (!Number.isFinite(determinant) || determinant === 0 || Math.abs(determinant) <= Number.EPSILON * determinantScale * 16) {
         return false;
     }
     determinant = 1 / determinant;

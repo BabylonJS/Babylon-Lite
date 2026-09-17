@@ -1055,15 +1055,25 @@ describe("Mesh-blending geometry shader contracts", () => {
         const transparentResources: MeshRebuildResources = { _lifetimeDisposers: [] };
         const transparentRenderable = buildNodeGeometryRenderable(scene, mesh, transparentView, transparentResources);
         const createPipeline = vi.spyOn(engine._device, "createRenderPipeline");
+        expect(() =>
+            transparentRenderable.bind(engine, {
+                _colorFormat: "r32float",
+                _colorFormats: ["r32float", "rgba8unorm"],
+                _depthStencilFormat: "depth32float",
+                _depthCompare: "greater-equal",
+                _sampleCount: 1,
+            } as unknown as RenderTargetSignature)
+        ).toThrow(/float32-blendable/);
+
         transparentRenderable.bind(engine, {
-            _colorFormat: "r32float",
-            _colorFormats: ["r32float", "rgba8unorm"],
+            _colorFormat: "r16float",
+            _colorFormats: ["r16float", "rgba8unorm"],
             _depthStencilFormat: "depth32float",
             _depthCompare: "greater-equal",
             _sampleCount: 1,
         } as unknown as RenderTargetSignature);
         const transparentPipeline = createPipeline.mock.calls.at(-1)![0];
-        expect(transparentPipeline.fragment!.targets[0]).toEqual({ format: "r32float" });
+        expect(transparentPipeline.fragment!.targets[0]).toMatchObject({ format: "r16float", blend: expect.any(Object) });
         expect(transparentPipeline.fragment!.targets[1]).toMatchObject({ format: "rgba8unorm", blend: expect.any(Object) });
         expect(transparentPipeline.depthStencil!.depthWriteEnabled).toBe(false);
         transparentResources._lifetimeDisposers.forEach((dispose) => dispose());
