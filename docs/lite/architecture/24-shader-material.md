@@ -93,7 +93,7 @@ export interface ShaderMaterial extends Material {
 export type ShaderAttributeName = "position" | "normal" | "uv" | "uv2" | "tangent" | "color";
 ```
 
-The order in `options.attributes` is the vertex buffer binding order and the WGSL `@location` order. Unsupported names throw during material creation. Missing optional mesh buffers use zero-filled buffers except `color`, whose neutral fallback is white so color multiplication does not black out meshes without vertex colors. `position` is required for normal mesh rendering.
+The order in `options.attributes` is the vertex buffer binding order and the WGSL `@location` order. Unsupported names throw during material creation. Missing optional mesh buffers use zero-filled buffers. When `enableShaderMaterialFinalColor()` is enabled, its missing `color` fallback is instead white so color multiplication does not black out meshes without vertex colors. `position` is required for normal mesh rendering.
 
 ### Thin instances and GPU culling
 
@@ -151,7 +151,8 @@ no instance-color stream, `input.color` for vertex color only, `input.instanceCo
 and `input.color * input.instanceColor` when both are present. `input.color` remains the ordinary mesh
 per-vertex attribute requested through `attributes: ["color"]`; `setThinInstanceColors()` supplies the separate
 instance-rate `input.instanceColor`. When a material declares `color` but a mesh has no vertex-color buffer,
-`input.color` uses the neutral white fallback, so an available instance color passes through unchanged.
+`input.color` uses a mesh-owned neutral white fallback, so an available instance color passes through
+unchanged. The fallback participates in normal shared-geometry disposal, resize retirement, and device recovery.
 
 Like `getFinalWorld`, the final-color helper is emitted only for materials that opt in. The instance-color
 specialization is selected from the bound vertex-buffer layout rather than from a pipeline-key naming

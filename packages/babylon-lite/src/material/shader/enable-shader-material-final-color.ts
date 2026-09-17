@@ -15,7 +15,6 @@ import { BU } from "../../engine/gpu-flags.js";
 import { F32 } from "../../engine/typed-arrays.js";
 
 let enabledMaterials: WeakSet<ShaderMaterial> | null = null;
-let whiteBuffers: WeakMap<MeshGPU, { device: GPUDevice; buffer: GPUBuffer }> | null = null;
 
 function finalColorWgsl(material: ShaderMaterial, hasInstanceColor: boolean): WgslSource | undefined {
     if (!enabledMaterials?.has(getMaterialSource(material) as ShaderMaterial)) {
@@ -47,20 +46,19 @@ return vec4<f32>(1.0);
 }
 
 function whiteColorBuffer(engine: EngineContext, gpu: MeshGPU): GPUBuffer {
-    const cached = whiteBuffers?.get(gpu);
-    if (cached?.device === engine._device) {
-        return cached.buffer;
+    if (gpu._shaderColorFallback) {
+        return gpu._shaderColorFallback;
     }
+    const vertexCount = gpu._vbLayout?._p?._count ?? gpu.positionBuffer.size / 12;
     const buffer = engine._device.createBuffer({
         label: "shader-final-color-white",
-        size: (gpu.positionBuffer.size / 12) * 16,
-        usage: BU.VERTEX | BU.COPY_DST,
+        size: vertexCount * 16,
+        usage: BU.VERTEX,
         mappedAtCreation: true,
     });
     new F32(buffer.getMappedRange()).fill(1);
     buffer.unmap();
-    (whiteBuffers ??= new WeakMap()).set(gpu, { device: engine._device, buffer });
-    return buffer;
+    return (gpu._shaderColorFallback = buffer);
 }
 
 /**

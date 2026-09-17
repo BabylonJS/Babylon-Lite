@@ -464,6 +464,7 @@ export function resizeMeshGeometry(
             old.uv2Buffer?.destroy();
             old.tangentBuffer?.destroy();
             old.colorBuffer?.destroy();
+            old._shaderColorFallback?.destroy();
         });
     }
 }
