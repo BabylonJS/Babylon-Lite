@@ -192,9 +192,7 @@ export function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixA
             return _worldVersion;
         },
 
-        _invalidate(): void {
-            invalidate();
-        },
+        _invalidate: invalidate,
 
         _addChild(child: WorldMatrixAccessors): void {
             _children.push(child);
