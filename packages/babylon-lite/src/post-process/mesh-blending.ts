@@ -356,9 +356,6 @@ function prepareTask(task: MeshBlendingPostProcessTaskInternal, recording: boole
         destroyDeviceResources(task);
         if (task._internalTarget) {
             disposeRenderTarget(task._internalTarget);
-            task._internalTarget = null;
-            task._internalSource = null;
-            task._internalFormat = null;
         }
         task._device = task.engine._device;
     }
@@ -375,22 +372,21 @@ function prepareTask(task: MeshBlendingPostProcessTaskInternal, recording: boole
 
 function prepareOutputTarget(task: MeshBlendingPostProcessTaskInternal): void {
     if (task.targetTexture) {
-        if (task._internalTarget) {
+        if (task._internalTarget && task.outputTexture === task._internalTarget) {
             disposeRenderTarget(task._internalTarget);
-            task._internalTarget = null;
-            task._internalSource = null;
-            task._internalFormat = null;
         }
         task.outputTexture = task.targetTexture;
         return;
     }
     const sourceFormat = task.sourceTexture._descriptor.format ?? null;
-    if (!task._internalTarget || task._internalSource !== task.sourceTexture || task._internalFormat !== sourceFormat) {
-        disposeRenderTarget(task._internalTarget);
+    if (!task._internalTarget) {
         task._internalTarget = createInternalTarget(task.name, task.sourceTexture);
-        task._internalSource = task.sourceTexture;
-        task._internalFormat = sourceFormat;
+    } else if (task._internalSource !== task.sourceTexture || task._internalFormat !== sourceFormat) {
+        disposeRenderTarget(task._internalTarget);
+        configureInternalTarget(task._internalTarget, task.name, task.sourceTexture);
     }
+    task._internalSource = task.sourceTexture;
+    task._internalFormat = sourceFormat;
     task.outputTexture = task._internalTarget;
 }
 
@@ -406,6 +402,15 @@ function createInternalTarget(name: string, source: RenderTarget): RenderTarget 
         size: descriptor.size,
     };
     return createRenderTarget(targetDescriptor);
+}
+
+function configureInternalTarget(target: RenderTarget, name: string, source: RenderTarget): void {
+    const configured = createInternalTarget(name, source);
+    target._descriptor.lbl = configured._descriptor.lbl;
+    target._descriptor.format = configured._descriptor.format;
+    target._descriptor.samples = configured._descriptor.samples;
+    target._descriptor.size = configured._descriptor.size;
+    target._resolveSize = configured._resolveSize;
 }
 
 function validateTargets(task: MeshBlendingPostProcessTaskInternal): void {

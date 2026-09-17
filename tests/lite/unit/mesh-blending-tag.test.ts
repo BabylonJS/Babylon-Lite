@@ -152,8 +152,8 @@ function createMeshBlendingTestContext(features: GPUFeatureName[] = []) {
         _vpVer: -1,
         _vpAspect: -1,
     } as unknown as Camera;
-    const target = (format: GPUTextureFormat) => {
-        const result = createRenderTarget({ format, samples: 1, size: { width: 64, height: 32 } });
+    const target = (format: GPUTextureFormat, size = { width: 64, height: 32 }) => {
+        const result = createRenderTarget({ format, samples: 1, size });
         buildRenderTarget(result, engine);
         return result;
     };
@@ -302,16 +302,26 @@ describe("mesh-blending configuration and radius math", () => {
             },
             engine
         );
+        const publishedOutput = task.outputTexture;
 
         task.record();
+        expect(task.outputTexture).toBe(publishedOutput);
+        expect(publishedOutput._colorTexture).not.toBeNull();
         const bindGroupsAfterRecord = createBindGroup.mock.calls.length;
-        task.sourceTexture = target("rgba16float");
+        task.sourceTexture = target("rgba16float", { width: 80, height: 40 });
+        task.meshBlendTagTexture = target("r8uint", { width: 80, height: 40 });
+        task.depthTexture = target("r32float", { width: 80, height: 40 });
         task.record();
+        expect(task.outputTexture).toBe(publishedOutput);
+        expect(publishedOutput._width).toBe(80);
+        expect(publishedOutput._height).toBe(40);
         expect(createBindGroup.mock.calls.length).toBeGreaterThan(bindGroupsAfterRecord);
 
         const replacementDevice = createMeshBlendingTestContext();
         (engine as { _device: GPUDevice })._device = replacementDevice.device;
         task.record();
+        expect(task.outputTexture).toBe(publishedOutput);
+        expect(publishedOutput._colorTexture).not.toBeNull();
         expect(replacementDevice.device.createRenderPipeline).toHaveBeenCalledOnce();
         expect(destroyedBuffers.some((destroy) => destroy.mock.calls.length > 0)).toBe(true);
         expect(destroyedTextures.some((destroy) => destroy.mock.calls.length > 0)).toBe(true);

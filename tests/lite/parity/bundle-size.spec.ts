@@ -325,7 +325,7 @@ for (const scene of SCENES) {
         // only `enableOrthographicCamera` installs, so the branch folds away for every perspective-only
         // scene. Guard both directions — no other scene may pull the module in, and the
         // explicitly orthographic scenes must.
-        const ORTHO_SCENE_IDS = new Set([187, 268, 312]);
+        const ORTHO_SCENE_IDS = new Set([187, 268, 311, 312]);
         if (ORTHO_SCENE_IDS.has(scene.id)) {
             expect(
                 runtimeModules.some((id) => /\/camera\/orthographic\.[jt]s$/.test(id)),

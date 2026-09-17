@@ -932,8 +932,8 @@ Generic debug background is `(0.04,0.04,0.04,1)`. With debug Off, every invalid/
 
 1. Build current source/input/output render targets.
 2. Resolve physical dimensions and validate format/sample/dimension contracts.
-3. Recreate the internal target if the source format/size identity changed.
-4. Detect device replacement and clear stale GPU state.
+3. Reconfigure and rebuild the task-owned internal target in place if the source format/size identity changed, preserving the published `outputTexture` object used by downstream tasks.
+4. Detect device replacement, clear stale GPU state, and rebuild the same published internal output target for the new device.
 5. Upload blue noise if absent for the current device.
 6. Generate the selected WGSL variant.
 7. Create shader module, bind-group layout, pipeline layout, pipeline, uniform buffer, and bind group.
