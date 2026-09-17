@@ -34,6 +34,7 @@ describe("mesh-blending WGSL bindings and coordinates", () => {
         expect(code).toContain("fn po(d:vec2f,x:f32)->vec2i{return vec2i(round(vec2f(d.x,-d.y)*x));}");
         expect(code).toContain("let noisePixel=ap(pixel,renderSize)");
         expect(code).toContain("let random=ln(pixel,size)");
+        expect(code).toContain("fn sd(angle:f32)->vec2f{return round(vec2f(cos(angle),sin(angle))*65536.0)/65536.0;}");
         expect(code).toContain("let sampled=lt(pixel+po(d,x),size)");
         expect(code).toContain("let oppositePixel=cp(pixel-po(result.k.d,1.0),size)");
     });

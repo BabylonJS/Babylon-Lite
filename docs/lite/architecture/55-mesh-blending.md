@@ -518,6 +518,8 @@ pixelOffset = round(vec2<f32>(direction.x, -direction.y) * distancePixels);
 
 Blue noise is indexed with `algorithmPixel`. Candidate directions, refinement angles, and debug direction colors remain unchanged from Babylon.js; every search, continuation, target-color, and opposite-direction texture offset uses `pixelOffset`. Without both conversions, the same displayed pixel would read another blue-noise row and probe vertically mirrored candidates.
 
+WGSL `sin`/`cos` precision varies between GPU implementations. Direction vectors are therefore rounded to `1 / 65536` immediately after trigonometric evaluation. At supported render-target extents this is below the half-pixel threshold used by `pixelOffset`, preserving Babylon.js texel choices while preventing binary debug classifications from drifting across GPUs.
+
 ### Compile-time quality constants
 
 | Quality   | Directions | Radial samples | Direction samples | Direction steps | Exact edge | Radius scale | Rotation         | Jitter | Fallback | Tiny object | Secondary | Interpolation |

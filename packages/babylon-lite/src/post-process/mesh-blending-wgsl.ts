@@ -290,7 +290,8 @@ fn ss(oppositeFacing:f32)->f32{if(uniforms.flags.y<=1.0){return 1.0;}return MIN_
 fn ap(pixel:vec2i,size:vec2i)->vec2i{return vec2i(pixel.x,size.y-1-pixel.y);}
 fn po(d:vec2f,x:f32)->vec2i{return vec2i(round(vec2f(d.x,-d.y)*x));}
 fn ln(pixel:vec2i,renderSize:vec2i)->vec2f{let noiseSize=vec2i(textureDimensions(blueNoiseTexture,0));let noisePixel=ap(pixel,renderSize);let wrapped=vec2i(noisePixel.x%noiseSize.x,noisePixel.y%noiseSize.y);return textureLoad(blueNoiseTexture,wrapped,0).rg;}
-fn da(index:i32,rotation:f32,sector:f32,direction0:vec2f,direction1:vec2f,direction2:vec2f)->vec2f{if(DIRECTION_COUNT==3){if(index==0){return direction0;}if(index==1){return direction1;}return direction2;}let angle=rotation+sector*f32(index);return vec2f(cos(angle),sin(angle));}
+fn sd(angle:f32)->vec2f{return round(vec2f(cos(angle),sin(angle))*65536.0)/65536.0;}
+fn da(index:i32,rotation:f32,sector:f32,direction0:vec2f,direction1:vec2f,direction2:vec2f)->vec2f{if(DIRECTION_COUNT==3){if(index==0){return direction0;}if(index==1){return direction1;}return direction2;}return sd(rotation+sector*f32(index));}
 fn ic()->C{return C(0u,0u,vec2f(0),0,0,-1.0,false);}
 fn ir()->R{return R(ic(),vec2i(0),vec2i(0),vec3f(0),0,0,1.0,REJECTION_NO_CANDIDATE,1,false,false,false,false);}
 fn fc(pixel:vec2i,size:vec2i,current:T,currentRadius:f32,viewDepth:f32,ignoredGroup:u32,random:vec2f,rotation:f32,sector:f32,direction0:vec2f,direction1:vec2f,direction2:vec2f)->C{
@@ -313,7 +314,7 @@ var k=input;if(k.x<=2.0){return k;}
 let center=atan2(k.d.y,k.d.x);let halfWidth=(TWO_PI/f32(DIRECTION_COUNT))*REFINEMENT_SECTOR_SCALE;
 let stepSize=max(1.0,k.x/f32(REFINEMENT_STEP_COUNT+1));
 for(var sample=0;sample<REFINEMENT_SAMPLE_COUNT;sample++){
-let sampleRandom=fract(random.y+random.x*0.754877666+f32(sample)*0.618033989);let angle=center+mix(-halfWidth,halfWidth,sampleRandom);let d=vec2f(cos(angle),sin(angle));
+let sampleRandom=fract(random.y+random.x*0.754877666+f32(sample)*0.618033989);let angle=center+mix(-halfWidth,halfWidth,sampleRandom);let d=sd(angle);
 var x=k.x-stepSize;
 for(var step=0;step<REFINEMENT_STEP_COUNT;step++){if(x<=0.0){break;}if(lt(pixel+po(d,x),size).g!=k.t){break;}k.d=d;k.x=x;x-=stepSize;}
 }
@@ -414,7 +415,7 @@ if(current.g==0u){if(DEBUG_MODE==3){return vec4f(0,0,0,1);}return select(source,
 let sizingPosition=rv(pixel,size,ld(pixel,size));if(!vp(sizingPosition)){if(DEBUG_MODE==4){return vec4f(jc(REJECTION_INVALID_DEPTH,0),1);}if(DEBUG_MODE==5){return vec4f(0.45,0.1,0.1,1);}return select(source,vec4f(0.04,0.04,0.04,1),DEBUG_MODE!=0);}
 let currentRadius=rf(current.c,abs(sizingPosition.z),f32(size.y));if(currentRadius<1.0){if(DEBUG_MODE==3){return vec4f(rc(current.c)*0.25,1);}if(DEBUG_MODE==4){return vec4f(jc(REJECTION_PHYSICAL_SPAN,0),1);}if(DEBUG_MODE==5){return vec4f(0.2,0.2,0.65,1);}return select(source,vec4f(0.04,0.04,0.04,1),DEBUG_MODE!=0);}
 let random=ln(pixel,size);let sector=TWO_PI/f32(DIRECTION_COUNT);let rotation=select(floor(random.x*8.0)*0.125*sector,random.x*sector,FULL_RANDOM_ROTATION);
-let direction0=vec2f(cos(rotation),sin(rotation));let direction1=vec2f(cos(rotation+sector),sin(rotation+sector));let direction2=vec2f(cos(rotation+sector*2.0),sin(rotation+sector*2.0));
+let direction0=sd(rotation);let direction1=sd(rotation+sector);let direction2=sd(rotation+sector*2.0);
 let primary=eb(pixel,size,current,currentRadius,abs(sizingPosition.z),0u,random,rotation,sector,direction0,direction1,direction2);${secondarySearch}
 if(DEBUG_MODE==2){if(!primary.k.v){return vec4f(0.04,0.04,0.04,1);}return vec4f(primary.k.d*0.5+0.5,1.0-clamp(primary.k.x/max(primary.k.r,EPSILON),0.0,1.0),1);}
 if(DEBUG_MODE==6){if(!primary.k.v){return vec4f(0.04,0.04,0.04,1);}if(primary.j==REJECTION_NO_CONTINUATION){return vec4f(0.85,0.05,0.7,1);}if(primary.u){return vec4f(1,0.75,0.05,1);}return vec4f(0.1,0.9,0.25,1);}
