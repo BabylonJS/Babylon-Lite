@@ -114,7 +114,7 @@ describe("ShaderMaterial visibility", () => {
             material,
             receiveShadows: false,
             _gpu: {
-                positionBuffer: { size: 24 } as GPUBuffer,
+                positionBuffer: { size: 24, destroy: vi.fn() } as unknown as GPUBuffer,
                 normalBuffer: { destroy: vi.fn() } as unknown as GPUBuffer,
                 uvBuffer: { destroy: vi.fn() } as unknown as GPUBuffer,
                 indexBuffer: { destroy: vi.fn() } as unknown as GPUBuffer,
