@@ -9,6 +9,7 @@ import {
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine.js";
 import { createPbrMaterial } from "../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
 import { assembleMaterial } from "../../../packages/babylon-lite/src/loader-gltf/gltf-material.js";
+import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl.js";
 
 const FLOAT = 5126;
 const UNSIGNED_BYTE = 5121;
@@ -71,7 +72,11 @@ describe("gltf-interleave", () => {
             bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: interleaved.byteLength, byteStride: 28 }],
         };
         const primitive = { attributes: { POSITION: 0, COLOR_0: 1 } };
-        const source = (await buildPartial(json, new DataView(interleaved.buffer), primitive, new Float32Array(16) as never, 0))!;
+        const material = createPbr();
+        const source = {
+            ...(await buildPartial(json, new DataView(interleaved.buffer), primitive, new Float32Array(16) as never, 0))!,
+            _material: await assembleMaterial(json, new DataView(interleaved.buffer), 0, "", []),
+        };
         const device = {
             createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => ({
                 size: Number(descriptor.size),
@@ -87,11 +92,11 @@ describe("gltf-interleave", () => {
             queue: { writeBuffer: vi.fn() },
         } as unknown as GPUDevice;
         const engine = { _device: device, canvas: { width: 1, height: 1 } } as unknown as EngineContext;
-        const mesh = buildMesh(engine, source, 0, createPbr());
+        const mesh = buildMesh(engine, source, 0, material);
         mesh.material = createShaderMaterial({
             attributes: ["position", "color"],
-            vertexSource: " @vertex fn mainVertex(input:VertexInput)->@builtin(position) vec4f{return vec4f(input.position,1);}",
-            fragmentSource: "@fragment fn mainFragment()->@location(0) vec4f{return vec4f(1);}",
+            vertexSource: wgsl`@vertex fn mainVertex(input:VertexInput)->@builtin(position) vec4f{return vec4f(input.position,1);}`,
+            fragmentSource: wgsl`@fragment fn mainFragment()->@location(0) vec4f{return vec4f(1);}`,
         });
         const scene = { surface: { engine }, camera: null, _meshDisposables: new Map() } as never;
         const signature = { _colorFormat: "rgba8unorm", _sampleCount: 1 } as const;
