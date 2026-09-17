@@ -77,9 +77,10 @@ describe("mesh attribute range updates", () => {
     });
 
     it("rejects updates to clone-shared geometry", () => {
-        const { engine, mesh } = fixture();
+        const { engine, mesh, writeBuffer } = fixture();
         mesh._gpu._refCount = 2;
 
-        expect(() => updateMeshPositions(engine, mesh, new Float32Array(3))).toThrow("unshared geometry");
+        expect(() => updateMeshPositions(engine, mesh, new Float32Array(3))).toThrow("unshared, tightly-packed geometry");
+        expect(writeBuffer).not.toHaveBeenCalled();
     });
 });
