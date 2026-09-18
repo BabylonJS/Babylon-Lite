@@ -363,10 +363,10 @@ var alpha=baseColorSample.a${baseColorFactorAlpha};${vertexColorMod}`;
     const specGlossUV = _ext?.uvForSpecGloss ?? "input.uv";
     const roughnessMetallic = _hasSpecGloss
         ? wgsl`let specGloss=textureSample(specGlossTexture,specGlossSampler,${specGlossUV});
-let roughness=clamp(1.0-specGloss.a,0.0,1.0);
-let metallic=0.0;`
-        : wgsl`let roughness=clamp(orm.g*material.roughnessFactor,0.0,1.0);
-let metallic=orm.b*material.metallicFactor;`;
+var roughness=clamp(1.0-specGloss.a,0.0,1.0);
+var metallic=0.0;`
+        : wgsl`var roughness=clamp(orm.g*material.roughnessFactor,0.0,1.0);
+var metallic=orm.b*material.metallicFactor;`;
 
     // Material-view / pass variants can skip extension slots while still compiling the colour path.
     const emissiveUV = _ext?.uvForEmissive ?? "input.uv";
@@ -374,7 +374,7 @@ let metallic=orm.b*material.metallicFactor;`;
         _hasEmissiveColor || !_hasEmissiveTexture ? wgsl`var emissive:vec3f;` : wgsl`let emissive=textureSample(emissiveTexture,emissiveSampler,${emissiveUV}).rgb;`;
 
     // Occlusion default (overridden by reflectance fragment's AT slot or ext occlusion override)
-    const occlusionDefault = _hasReflectanceExt ? `` : _ext?.occlusionOverride ? _ext.occlusionOverride : _hasOcclusion ? wgsl`let occlusion=orm.r;` : wgsl`let occlusion=1.0;`;
+    const occlusionDefault = _hasReflectanceExt ? `` : _ext?.occlusionOverride ? _ext.occlusionOverride : _hasOcclusion ? wgsl`var occlusion=orm.r;` : wgsl`var occlusion=1.0;`;
     // F0 computation (overridden by reflectance fragment's MF slot)
     const f0Default = _hasReflectanceExt
         ? ``

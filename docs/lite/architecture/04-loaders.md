@@ -1,4 +1,4 @@
-# Module: Loaders (glTF + .env + HDR + .babylon + Skybox + Splats)
+# Module: Loaders (glTF + OpenUSD + .env + HDR + .babylon + Skybox + Splats)
 
 > Package paths:
 >
@@ -11,6 +11,7 @@
 > - `packages/babylon-lite/src/loader-gltf/gltf-feature-extras.ts` — `ExtrasAsMetadata` feature module
 > - `packages/babylon-lite/src/loader-gltf/gltf-interleave.ts` — dynamic native interleaved-vertex-buffer support (de-strided CPU copies built lazily on demand)
 > - `packages/babylon-lite/src/loader-gltf/gltf-share.ts` — duplicate-primitive CPU/GPU geometry sharing
+> - `packages/babylon-lite/src/loader-usd/` — OpenUSD command-buffer loader (see [loader-usd.md](loader-usd.md))
 > - `packages/babylon-lite/src/loader-env/load-env.ts` — Babylon .env environment loader
 > - `packages/babylon-lite/src/loader-env/load-dds-env.ts` — DDS cubemap environment loader
 > - `packages/babylon-lite/src/loader-env/env-helpers.ts` — Shared environment assembly helpers
@@ -40,6 +41,8 @@ The Loaders module provides asset loading pipelines plus dynamic glTF feature mo
 6. **Skybox Loader** — Loads 6-face cube texture skyboxes for StandardMaterial scenes. Registers a deferred builder that creates the pipeline at engine start time.
 
 7. **Gaussian Splat Loaders** — Load `.ply`, `.splat`, `.sog`, and `.spz` splat assets into `GaussianSplattingMesh` instances. SOG handles ZIP-packed WebP payloads; SPZ handles gzip-wrapped binary streams. Transform baking helpers and material shader fragments are exposed separately so non-splat scenes pay zero runtime cost.
+
+8. **OpenUSD Loader** — Loads composed `.usd`, `.usda`, `.usdc`, and `.usdz` stages through the same protocol-v5 OpenUSD WebAssembly extractor used by Babylon.js. The worker returns command/data buffers that are validated and materialized directly into Lite scene nodes, PBR materials, shared geometry, thin instances, skeletons, morph targets, and animation groups. See the dedicated [USD loader architecture](loader-usd.md) for the virtual-file and ownership contracts.
 
 ## Public API Surface
 
