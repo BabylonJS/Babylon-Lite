@@ -7,7 +7,7 @@ import type { EnvironmentTextures } from "./load-env.js";
 import { polynomialToPreScaledHarmonics } from "./load-env.js";
 import { assembleEnvironmentTextures, loadBrdfImage } from "./env-helpers.js";
 import { mipLevelCount } from "../texture/mip-count.js";
-import { prepareMipmaps, recordPreparedMipmaps, type PreparedMipmapLevel } from "../texture/generate-mipmaps.js";
+import { prepareMipmaps, recordPreparedMipmaps, type PreparedMipmapLevel } from "../texture/mipmap-preparation.js";
 import { _invalidateSceneUboCaches, registerEnvSceneUniforms } from "../scene/scene-ubo-extras.js";
 import { wgsl } from "../shader/wgsl.js";
 

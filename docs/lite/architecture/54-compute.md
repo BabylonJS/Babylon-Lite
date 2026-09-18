@@ -804,7 +804,7 @@ Integration coverage:
 - `packages/babylon-lite/src/compute/compute-dynamic-offset.ts`
 - `packages/babylon-lite/src/compute/compute-indirect-dispatch.ts`
 - `packages/babylon-lite/src/compute/compute-immediates.ts`
-- `packages/babylon-lite/src/compute/compute-mipmap-preparation.ts`
+- `packages/babylon-lite/src/texture/mipmap-preparation.ts`
 - `packages/babylon-lite/src/compute/compute-pipeline-variant.ts`
 - `packages/babylon-lite/src/compute/compute-sampler-binding.ts`
 - `packages/babylon-lite/src/compute/compute-sampler-resource.ts`

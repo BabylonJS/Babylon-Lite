@@ -131,6 +131,7 @@ export function createPointLight(
 ```
 
 **Default values:**
+
 | Property  | Default                          |
 | --------- | -------------------------------- |
 | lightType | `'point'`                        |
