@@ -1,5 +1,8 @@
-import type { SceneNode } from "../scene/scene-node.js";
+import type { Mat4Storage } from "../math/types.js";
+import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
 import { _quatFromRotationBasis } from "../math/create-quat-from-rotation-mat4.js";
+import type { SceneNode } from "../scene/scene-node.js";
+import { _markWorldMatrixDirty } from "../scene/world-matrix-state.js";
 
 /**
  * Extract the rotation from a possibly scaled affine matrix and pre-multiply it
@@ -37,20 +40,45 @@ function composeMatrixRotation(m: ArrayLike<number>, qx: number, qy: number, qz:
 }
 
 export function nodeToHavokTransform(node: SceneNode): [[number, number, number], [number, number, number, number]] {
-    const q = node.rotationQuaternion;
-    const p = node.position;
+    let { x: qx, y: qy, z: qz, w: qw } = node.rotationQuaternion;
+    let { x: px, y: py, z: pz } = node.position;
+    if (node._localMatrix) {
+        const m = node._localMatrix;
+        px = m[12]!;
+        py = m[13]!;
+        pz = m[14]!;
+        ({ x: qx, y: qy, z: qz, w: qw } = composeMatrixRotation(m, 0, 0, 0, 1));
+    }
+
     if (node.parent) {
         const wm = node.parent.worldMatrix;
-        const r = composeMatrixRotation(wm, q.x, q.y, q.z, q.w);
+        const r = composeMatrixRotation(wm, qx, qy, qz, qw);
         return [
-            [p.x * wm[0]! + p.y * wm[4]! + p.z * wm[8]! + wm[12]!, p.x * wm[1]! + p.y * wm[5]! + p.z * wm[9]! + wm[13]!, p.x * wm[2]! + p.y * wm[6]! + p.z * wm[10]! + wm[14]!],
+            [px * wm[0]! + py * wm[4]! + pz * wm[8]! + wm[12]!, px * wm[1]! + py * wm[5]! + pz * wm[9]! + wm[13]!, px * wm[2]! + py * wm[6]! + pz * wm[10]! + wm[14]!],
             [r.x, r.y, r.z, r.w],
         ];
     } else {
         return [
-            [p.x, p.y, p.z],
-            [q.x, q.y, q.z, q.w],
+            [px, py, pz],
+            [qx, qy, qz, qw],
         ];
+    }
+}
+
+function applyLocalTransform(node: SceneNode, px: number, py: number, pz: number, qx: number, qy: number, qz: number, qw: number): void {
+    const m = node._localMatrix;
+    if (m) {
+        const sx = Math.hypot(m[0]!, m[1]!, m[2]!);
+        let sy = Math.hypot(m[4]!, m[5]!, m[6]!);
+        const sz = Math.hypot(m[8]!, m[9]!, m[10]!);
+        if (m[0]! * (m[5]! * m[10]! - m[6]! * m[9]!) + m[1]! * (m[6]! * m[8]! - m[4]! * m[10]!) + m[2]! * (m[4]! * m[9]! - m[5]! * m[8]!) < 0) {
+            sy = -sy;
+        }
+        composeMat4IntoBuffer(m as unknown as Mat4Storage, 0, px, py, pz, qx, qy, qz, qw, sx, sy, sz);
+        _markWorldMatrixDirty(node);
+    } else {
+        node.position.set(px, py, pz);
+        node.rotationQuaternion.set(qx, qy, qz, qw);
     }
 }
 
@@ -78,14 +106,17 @@ export function havokTransformToNode(transform: readonly [readonly [number, numb
         const i10 = (wm[0]! * wm[5]! - wm[1]! * wm[4]!) * invDet;
         const iwm = [i0, i1, i2, 0, i4, i5, i6, 0, i8, i9, i10];
         const r = composeMatrixRotation(iwm, rot[0], rot[1], rot[2], rot[3]);
-        node.position.set(
+        applyLocalTransform(
+            node,
             pos[0] * i0 + pos[1] * i4 + pos[2] * i8 - wm[12]! * i0 - wm[13]! * i4 - wm[14]! * i8,
             pos[0] * i1 + pos[1] * i5 + pos[2] * i9 - wm[12]! * i1 - wm[13]! * i5 - wm[14]! * i9,
-            pos[0] * i2 + pos[1] * i6 + pos[2] * i10 - wm[12]! * i2 - wm[13]! * i6 - wm[14]! * i10
+            pos[0] * i2 + pos[1] * i6 + pos[2] * i10 - wm[12]! * i2 - wm[13]! * i6 - wm[14]! * i10,
+            r.x,
+            r.y,
+            r.z,
+            r.w
         );
-        node.rotationQuaternion.set(r.x, r.y, r.z, r.w);
     } else {
-        node.position.set(pos[0], pos[1], pos[2]);
-        node.rotationQuaternion.set(rot[0], rot[1], rot[2], rot[3]);
+        applyLocalTransform(node, pos[0], pos[1], pos[2], rot[0], rot[1], rot[2], rot[3]);
     }
 }

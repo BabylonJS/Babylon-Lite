@@ -9,13 +9,19 @@ import {
     createGround,
     createHavokWorld,
     createHemisphericLight,
+    createIdentityMat4,
+    createMat4FromQuat,
     createPhysicsAggregate,
+    createPhysicsBody,
+    createPhysicsShape,
     createPhysicsViewer,
     createSceneContext,
     createStandardMaterial,
     createTransformNode,
+    createTranslationMat4,
     enableMirroredMeshes,
     eulerXYZToQuatTuple,
+    multiplyMat4,
     onBeforeRender,
     onPhysicsAfterStep,
     PhysicsBody,
@@ -23,13 +29,18 @@ import {
     PhysicsPrestepType,
     PhysicsShapeType,
     registerScene,
+    setPhysicsBodyMass,
     setPhysicsBodyMotionType,
     setPhysicsBodyPreStep,
     setPhysicsBodyPrestepType,
+    setPhysicsBodyShape,
+    setPhysicsShapeMaterial,
     showPhysicsBody,
     startEngine,
     stopEngine,
+    vec3,
 } from "babylon-lite";
+import { createSceneNodeFromMatrix } from "babylon-lite/scene/scene-node";
 
 const PHYSICS_FPS = 60;
 
@@ -142,6 +153,7 @@ async function main(): Promise<void> {
     const agg4 = createPhysicsAggregate(world, cube4, PhysicsShapeType.BOX, { mass: 1, friction: 0.5, restitution: 0.1 });
     setPhysicsBodyPreStep(agg4.body, true);
 
+    // animated cube5 with offset parents
     const parent5a = createTransformNode("parent5a");
     addToScene(scene, parent5a);
     const parent5b = createTransformNode("parent5b", 4, 2, 0);
@@ -157,6 +169,26 @@ async function main(): Promise<void> {
     setPhysicsBodyPreStep(agg5.body, false);
     setPhysicsBodyPrestepType(agg5.body, PhysicsPrestepType.ACTION);
     setPhysicsBodyMotionType(world, agg5.body, PhysicsMotionType.ANIMATED);
+
+    // dynamic matrix backed matNode6a with cube6 child
+    const mat6aPos = createTranslationMat4(6, 3, 0);
+    const rotQ6 = eulerXYZToQuatTuple(0, (20 * Math.PI) / 180, 0);
+    const mat6aRot = createMat4FromQuat(rotQ6[0], rotQ6[1], rotQ6[2], rotQ6[3]);
+    const mat6a = multiplyMat4(mat6aPos, mat6aRot);
+    const matNode6a = createSceneNodeFromMatrix("matNode6a", mat6a);
+    const cube6 = createBox(engine, 1);
+    cube6.parent = matNode6a;
+    matNode6a.children.push(cube6);
+    cube6.material = cubeMat;
+    addToScene(scene, cube6);
+    const body6a = createPhysicsBody(world, matNode6a, PhysicsMotionType.DYNAMIC);
+    setPhysicsBodyMass(world, body6a, 1);
+    const shape6a = createPhysicsShape(world, {
+        type: PhysicsShapeType.BOX,
+        parameters: { extents: vec3(1, 1, 1) },
+    });
+    setPhysicsShapeMaterial(world, shape6a, 0.5, 0.1);
+    setPhysicsBodyShape(world, body6a, shape6a);
 
     // physics debug viewer
     const physViewer = createPhysicsViewer(scene, world, { color: [1, 1, 1, 1] });

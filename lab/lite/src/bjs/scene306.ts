@@ -6,7 +6,7 @@ import { WebGPUEngine } from "@babylonjs/core/Engines/webgpuEngine";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import "@babylonjs/core/Materials/standardMaterial";
 import { Color4 } from "@babylonjs/core/Maths/math.color";
-import { Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import { HavokPlugin } from "@babylonjs/core/Physics/v2/Plugins/havokPlugin";
@@ -16,6 +16,7 @@ import "@babylonjs/core/Physics/joinedPhysicsEngineComponent";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { PhysicsViewer } from "@babylonjs/core/Debug/physicsViewer";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.pure";
+import { PhysicsShape, PhysicsShapeBox } from "@babylonjs/core/Physics/v2/physicsShape";
 
 const PHYSICS_FPS = 60;
 
@@ -125,7 +126,7 @@ function readCaptureAfterFrames(): number | null {
     });
     agg4.body.disablePreStep = false;
 
-    // dynamic cube4 with offset parents and pre-step
+    // animated cube5 with offset parents
     const parent5a = new TransformNode("parent5a", scene);
     const parent5b = new TransformNode("parent5b", scene);
     parent5b.position.set(4, 2, 0);
@@ -142,6 +143,25 @@ function readCaptureAfterFrames(): number | null {
     agg5.body.setMotionType(PhysicsMotionType.ANIMATED);
     agg5.body.setPrestepType(PhysicsPrestepType.ACTION);
 
+    // dynamic matrix backed matNode6 with cube6 child
+    const mat6aPos = Matrix.Translation(6, 3, 0);
+    const mat6aRot = Matrix.RotationY((20 * Math.PI) / 180);
+    const mat6a = mat6aRot.multiply(mat6aPos);
+    const matNode6a = new TransformNode("matNode6a", scene);
+    matNode6a.setPreTransformMatrix(mat6a);
+    const cube6 = MeshBuilder.CreateBox("cube6", undefined, scene);
+
+    //NOTE: workaround for physics not handling preTransformMatrix properly.
+    cube6.setPreTransformMatrix(mat6a.invert());
+
+    cube6.parent = matNode6a;
+    cube6.material = cubeMat;
+    const body6a = new PhysicsAggregate(matNode6a, new PhysicsShapeBox(Vector3.Zero(), Quaternion.Identity(), new Vector3(1, 1, 1), scene), {
+        mass: 1,
+        friction: 0.5,
+        restitution: 0.1,
+    });
+
     // physics debug viewer
     const physicsViewer = new PhysicsViewer();
     for (const mesh of scene.meshes) {
@@ -149,6 +169,7 @@ function readCaptureAfterFrames(): number | null {
             physicsViewer.showBody(mesh.physicsBody);
         }
     }
+    physicsViewer.showBody(body6a.body);
 
     // Render live. In parity capture mode, freeze after the requested number of
     // 60 Hz physics frames so Playwright screenshots a stable 2s simulation frame.
