@@ -10,13 +10,6 @@ interface ShaderModuleEntry {
     readonly module: GPUShaderModule;
 }
 
-interface ShaderModulePair {
-    readonly vertId: number;
-    readonly fragId: number;
-    readonly vertModule: GPUShaderModule;
-    readonly fragModule: GPUShaderModule | null;
-}
-
 interface DeviceCache extends ShaderPipelineCache {
     readonly bindings: Map<string, ShaderPipelineBindings>;
     readonly modules: Map<string, ShaderModuleEntry>;
@@ -26,6 +19,7 @@ interface DeviceCache extends ShaderPipelineCache {
 
 interface CacheMaterial extends ShaderMaterial {
     _shaderPipelineCache?: ShaderPipelineCache;
+    _shaderModuleMemo?: readonly [ShaderMaterial, ShaderPipelineBindings, Map<string, readonly [ShaderModuleEntry, ShaderModuleEntry | null]>];
 }
 
 let _deviceCaches: WeakMap<GPUDevice, DeviceCache> | null = null;
@@ -61,7 +55,6 @@ function getDeviceCache(device: GPUDevice): DeviceCache {
     }
     const bindings = new Map<string, ShaderPipelineBindings>();
     const modules = new Map<string, ShaderModuleEntry>();
-    const materialModules = new WeakMap<ShaderMaterial, { bindings: ShaderPipelineBindings; entries: Map<string, ShaderModulePair> }>();
     cache = {
         bindings,
         modules,
@@ -87,20 +80,19 @@ function getDeviceCache(device: GPUDevice): DeviceCache {
             }
             return entry;
         },
-        getModules(gpu, material, currentBindings, key, createCodes): ShaderModulePair {
-            let memo = materialModules.get(material);
-            if (!memo || memo.bindings !== currentBindings) {
-                memo = { bindings: currentBindings, entries: new Map() };
-                materialModules.set(material, memo);
+        _getModules(gpu, material, currentBindings, key, label, createCodes) {
+            const state = material as CacheMaterial;
+            let memo = state._shaderModuleMemo;
+            if (!memo || memo[0] !== material || memo[1] !== currentBindings) {
+                state._shaderModuleMemo = memo = [material, currentBindings, new Map()];
             }
-            let resolved = memo.entries.get(key);
+            let resolved = memo[2].get(key);
             if (!resolved) {
                 const [vertexCode, fragmentCode] = createCodes();
-                const label = material.name ?? "shader";
                 const vert = cache!.getModule(gpu, vertexCode, `${label}-vertex`);
                 const frag = fragmentCode === null ? null : cache!.getModule(gpu, fragmentCode, `${label}-fragment`);
-                resolved = { vertId: vert.id, fragId: frag?.id ?? 0, vertModule: vert.module, fragModule: frag?.module ?? null };
-                memo.entries.set(key, resolved);
+                resolved = [vert, frag];
+                memo[2].set(key, resolved);
             }
             return resolved;
         },

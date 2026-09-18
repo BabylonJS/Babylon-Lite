@@ -56,13 +56,15 @@ export interface ShaderPipelineCache {
     getBindings(material: ShaderMaterial): ShaderPipelineBindings | undefined;
     setBindings(material: ShaderMaterial, bindings: ShaderPipelineBindings): void;
     getModule(device: GPUDevice, code: string, label: string): { readonly id: number; readonly module: GPUShaderModule };
-    getModules(
+    /** @internal */
+    _getModules(
         device: GPUDevice,
         material: ShaderMaterial,
         bindings: ShaderPipelineBindings,
         key: string,
+        label: string,
         createCodes: () => readonly [vertex: string, fragment: string | null]
-    ): { readonly vertId: number; readonly fragId: number; readonly vertModule: GPUShaderModule; readonly fragModule: GPUShaderModule | null };
+    ): readonly [{ readonly id: number; readonly module: GPUShaderModule }, { readonly id: number; readonly module: GPUShaderModule } | null];
     getPipelineKey(
         sig: RenderTargetSignature,
         variantKey: string,
@@ -115,17 +117,15 @@ export function getOrCreateShaderPipelineBindings(engine: EngineContext, materia
         cache?.setBindings(material, bindings);
     }
 
-    if (state.source && state._shaderCustomUbo && state._shaderCustomUbo !== state.source._shaderCustomUbo) {
-        const buffer = state._shaderCustomUbo;
+    const buffer = state._shaderCustomUbo;
+    if (state.source && buffer && buffer !== state.source._shaderCustomUbo) {
         retireGpuResources(state._shaderCustomEngine ?? engine, () => buffer.destroy());
     }
     state._shaderDevice = engine._device;
     state._shaderCacheGeneration = cache?.generation;
     state._shaderBindings = bindings;
     state._shaderCustomSpec = bindings.customSpec;
-    state._shaderCustomUbo = null;
-    state._shaderCustomData = null;
-    state._shaderCustomBytes = null;
+    state._shaderCustomUbo = state._shaderCustomData = state._shaderCustomBytes = null;
     state._shaderCustomVersion = -1;
     state._shaderCustomEngine = undefined;
     return bindings;
@@ -154,6 +154,7 @@ export function getOrCreateShaderPipeline(
     const device = engine._device;
     const cache = (material as ShaderMaterialPipelineState)._shaderPipelineCache;
     const wantsFragment = !!sig._colorFormat || material.depthOnlyFragment;
+    const label = material.name ?? "shader";
     let key = `${targetSignatureKey(sig)}${variantKey}`;
     if (!cache) {
         const cached = bindings.pipelines.get(key);
@@ -168,25 +169,25 @@ export function getOrCreateShaderPipeline(
         const withInstanceColor = vertexBuffers.length > bindings.vertexBuffers.length + 1;
         // Separator-safe key: each component is JSON-encoded so a "|" inside a variant or attribute list cannot collide.
         const memoKey = JSON.stringify([variantKey, instanceAttrs, withInstanceColor, wantsFragment]);
-        const resolved = cache.getModules(device, material, bindings, memoKey, () => {
+        const resolved = cache._getModules(device, material, bindings, memoKey, label, () => {
             const basePrelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
             const finalColor = _finalColorResolver?.(material, withInstanceColor);
             const prelude = finalColor ? wgsl`${basePrelude}${finalColor}` : basePrelude;
             return [`${prelude}\n${material.vertexSource}`, wantsFragment ? `${prelude}\n${material.fragmentSource}` : null];
         });
-        key = cache.getPipelineKey(sig, variantKey, resolved.vertId, resolved.fragId, vertexBuffers, material, stencil?._key ?? "");
+        key = cache.getPipelineKey(sig, variantKey, resolved[0].id, resolved[1]?.id ?? 0, vertexBuffers, material, stencil?._key ?? "");
         const cached = bindings.pipelines.get(key);
         if (cached) {
             return cached;
         }
-        vertModule = resolved.vertModule;
-        fragModule = resolved.fragModule;
+        vertModule = resolved[0].module;
+        fragModule = resolved[1]?.module ?? null;
     } else {
         const basePrelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
         const finalColor = _finalColorResolver?.(material, vertexBuffers.length > bindings.vertexBuffers.length + 1);
         const prelude = finalColor ? wgsl`${basePrelude}${finalColor}` : basePrelude;
-        vertModule = device.createShaderModule({ label: `${material.name ?? "shader"}-vertex`, code: wgsl`${prelude}\n${material.vertexSource}` });
-        fragModule = wantsFragment ? device.createShaderModule({ label: `${material.name ?? "shader"}-fragment`, code: wgsl`${prelude}\n${material.fragmentSource}` }) : null;
+        vertModule = device.createShaderModule({ label: `${label}-vertex`, code: wgsl`${prelude}\n${material.vertexSource}` });
+        fragModule = wantsFragment ? device.createShaderModule({ label: `${label}-fragment`, code: wgsl`${prelude}\n${material.fragmentSource}` }) : null;
     }
     let colorTarget: GPUColorTargetState | null = null;
     if (sig._colorFormat) {
@@ -204,7 +205,7 @@ export function getOrCreateShaderPipeline(
     }
 
     const pipeline = device.createRenderPipeline({
-        label: `${material.name ?? "shader"}-pipeline`,
+        label: `${label}-pipeline`,
         layout: bindings._pipelineLayout,
         vertex: { module: vertModule, entryPoint: "mainVertex", buffers: vertexBuffers as GPUVertexBufferLayout[] },
         ...(fragModule ? { fragment: { module: fragModule, entryPoint: "mainFragment", targets: colorTarget ? [colorTarget] : [] } } : {}),
