@@ -549,7 +549,6 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
 
 // ─── Alpha mode → blend state ───────────────────────────────────────
 
-/** Map BJS alpha mode to a WebGPU blend state. Returns undefined for opaque (mode 0). */
 /** @internal Map a Babylon.js alpha mode to the corresponding WebGPU blend state. */
 export function _nodeAlphaModeToBlend(mode: number): GPUBlendState | undefined {
     switch (mode) {

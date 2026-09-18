@@ -78,19 +78,15 @@ export interface PbrGeometryMaterialView extends MaterialView {
 // PBR geometry extension can read them from `frag(ctx)`. The extension is
 // invoked synchronously during composePbr inside `buildPbrGeometryRenderable`;
 // the snapshot is set right before that call and cleared after.
-let _activeAttachments: readonly GeometryTextureType[] | undefined;
-
-/** @internal Read the attachment scope of the active synchronous geometry composition. */
-export function _getActivePbrGeometryAttachments(): readonly GeometryTextureType[] | undefined {
-    return _activeAttachments;
-}
+/** @internal Attachment scope of the active synchronous geometry composition. */
+export let _activePbrGeometryAttachments: readonly GeometryTextureType[] | undefined;
 
 /** @internal Used by the geometry renderable to scope attachment access for
  *  the PBR ext during a composePbr call. Returns the previous value so the
  *  caller can restore it (avoids global leakage in nested scenarios). */
 export function _setActivePbrGeometryAttachments(att: readonly GeometryTextureType[] | undefined): readonly GeometryTextureType[] | undefined {
-    const prev = _activeAttachments;
-    _activeAttachments = att;
+    const prev = _activePbrGeometryAttachments;
+    _activePbrGeometryAttachments = att;
     return prev;
 }
 
@@ -106,7 +102,7 @@ export function _setActivePbrGeometryAttachments(att: readonly GeometryTextureTy
  *    composePbr calls pick up the `gp` UBO + geometry varyings when
  *    `PBR2_GEOMETRY_OUTPUT` is set. */
 export function createPbrGeometryMaterialView(source: PbrMaterialProps, config: PbrGeometryViewConfig): PbrGeometryMaterialView {
-    _ensurePbrGeometryExt(() => _activeAttachments);
+    _ensurePbrGeometryExt(() => _activePbrGeometryAttachments);
     const baseFeatures = source._renderFeatures?.features ?? 0;
     const baseFeatures2 = source._renderFeatures?.features2 ?? 0;
     const view = createMaterialView(source, {

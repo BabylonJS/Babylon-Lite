@@ -67,7 +67,6 @@ export interface GeometryRendererTaskConfig {
     depthTexture?: RenderTarget | null;
     readonly textureDescriptions: readonly GeometryRendererTextureDescription[];
     reverseCulling?: boolean;
-    renderTransparentMeshes?: boolean;
 }
 
 export interface GeometryRendererTask extends Task {
@@ -154,9 +153,13 @@ remain `vec4<f32>`. Integer targets omit blend state. The uploaded tag is the
 validated source-mesh tag, so source-backed clones/regular instances and thin
 instances use their source draw's tag.
 
-`renderTransparentMeshes` defaults to `true`, matching Babylon.js geometry
-rendering. Setting it to `false` excludes alpha-blended renderables from the
-geometry pass; alpha-tested materials remain because their existing material
+`createMeshBlendingPostProcessTask` installs this opt-in output support. The
+geometry task may be created first, but the post-process task must exist before
+the frame graph preloads its tasks.
+
+Alpha-blended meshes participate by default, matching Babylon.js geometry
+rendering. Callers that need an opaque-only pass provide a filtered `meshes`
+array. Alpha-tested materials remain supported because their existing material
 shader discards rejected fragments before any geometry output is written.
 
 When more than two HDR (`rgba16float`) attachments are stacked the request can

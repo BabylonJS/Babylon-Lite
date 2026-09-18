@@ -1,4 +1,3 @@
-import { _validateGeometryMeshBlendTag } from "../frame-graph/geometry-types.js";
 import type { Mesh } from "./mesh.js";
 
 /** Radius class encoded in the high two bits of a mesh-blending tag. */
@@ -40,7 +39,13 @@ export function packMeshBlendingTag(groupId: number, radiusClass: number): numbe
 
 /** Validate and return a packed mesh-blending tag. */
 export function validatePackedMeshBlendingTag(tag: number): number {
-    return _validateGeometryMeshBlendTag(tag);
+    if (!Number.isInteger(tag) || tag < 0 || tag > 0xff) {
+        throw new RangeError("Mesh-blending tag must be an integer between 0 and 255.");
+    }
+    if (tag !== 0 && (tag & 0x3f) === 0) {
+        throw new RangeError("A nonzero mesh-blending tag must contain a group ID between 1 and 63.");
+    }
+    return tag;
 }
 
 /** Decode a validated packed mesh-blending tag. */

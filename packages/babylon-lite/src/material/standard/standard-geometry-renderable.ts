@@ -25,7 +25,7 @@
  *  — scenes that do not use the geometry renderer task pay zero bytes for it.
  */
 
-import { F32 } from "../../engine/typed-arrays.js";
+import { F32, U32 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { Mesh } from "../../mesh/mesh.js";
@@ -37,7 +37,7 @@ import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
 import type { ComposedShader, ShaderFragment } from "../../shader/fragment-types.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
-import { GeometryTextureType, _geometryColorTarget, _resolveGeometryMeshBlendTag } from "../../frame-graph/geometry-types.js";
+import { GeometryTextureType, _geometryOutputExtension } from "../../frame-graph/geometry-types.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 
 import type { Material } from "../material.js";
@@ -171,7 +171,9 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     _retainViewResources(view, variantKey, res, resources);
 
     // Per-mesh UBOs + bind group.
+    const extension = _geometryOutputExtension && view._geometryAttachments.includes(_geometryOutputExtension.type) ? _geometryOutputExtension : null;
     const meshUboData = new F32(res._composed._meshUboSpec._totalBytes / 4);
+    const meshUboU32 = extension ? new U32(meshUboData.buffer) : null;
     // Floating-origin offset + invalidation must key off the EFFECTIVE task camera:
     // a geometry task can render with a `config.camera` override whose origin (and
     // view-projection) differs from `scene.camera`. Packing the world/previous-world
@@ -185,7 +187,6 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     writeMeshLightSelection(mesh, scene.lights, meshUboData);
     const previousWorldOffset = res._composed._meshUboSpec._offsets.get("previousWorld");
     const velocityEnabledOffset = res._composed._meshUboSpec._offsets.get("velocityEnabled");
-    const meshBlendTagOffset = res._composed._meshUboSpec._offsets.get("meshBlendTag");
     // Previous-world tracks the mesh world matrix relative to the origin that
     // was current when it was captured (the same offset applied to the current
     // world above). In floating-origin mode `gp.previousViewProjection` is
@@ -204,12 +205,10 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     if (velocityEnabledOffset !== undefined) {
         meshUboData[velocityEnabledOffset / 4] = 0;
     }
-    let lastMeshBlendTag = 0;
-    let lastRawMeshBlendTag = 0;
-    if (meshBlendTagOffset !== undefined) {
-        lastRawMeshBlendTag = mesh.meshBlendingTag ?? 0;
-        lastMeshBlendTag = _resolveGeometryMeshBlendTag(mesh);
-        meshUboData[meshBlendTagOffset / 4] = lastMeshBlendTag;
+    let extensionValue = 0;
+    if (extension) {
+        extensionValue = extension.value(mesh);
+        meshUboU32![16] |= extensionValue << 8;
     }
     const skeletonVelocityFactory = res._hasSkeletonVelocity ? _getStandardGeometrySkeletonVelocityFactory() : null;
     const meshUBO = createUniformBuffer(engine, meshUboData);
@@ -270,15 +269,13 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
 
     const _baseUpdate = (): void => {
         const velocityEnabled = res._needsVelocity && velocityReady && !view._velocityExclusions?.has(mesh);
-        const rawMeshBlendTag = meshBlendTagOffset !== undefined ? (mesh.meshBlendingTag ?? 0) : 0;
-        const meshBlendTagChanged = rawMeshBlendTag !== lastRawMeshBlendTag;
-        const meshBlendTag = meshBlendTagChanged ? _resolveGeometryMeshBlendTag(mesh) : lastMeshBlendTag;
+        const nextExtensionValue = extension ? extension.value(mesh) : extensionValue;
         if (
             mesh.worldMatrixVersion !== _lastWorldVersion ||
             scene.lights.length !== _lastLightsCount ||
             previousWorldOffset !== undefined ||
             velocityEnabledOffset !== undefined ||
-            meshBlendTag !== lastMeshBlendTag
+            nextExtensionValue !== extensionValue
         ) {
             sortCenter[0] = mesh.worldMatrix[12]!;
             sortCenter[1] = mesh.worldMatrix[13]!;
@@ -291,10 +288,9 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
             if (velocityEnabledOffset !== undefined) {
                 meshUboData[velocityEnabledOffset / 4] = velocityEnabled ? 1 : 0;
             }
-            if (meshBlendTagOffset !== undefined) {
-                meshUboData[meshBlendTagOffset / 4] = meshBlendTag;
-                lastMeshBlendTag = meshBlendTag;
-                lastRawMeshBlendTag = rawMeshBlendTag;
+            if (extension) {
+                meshUboU32![16] |= nextExtensionValue << 8;
+                extensionValue = nextExtensionValue;
             }
             device.queue.writeBuffer(meshUBO, 0, meshUboData as Float32Array<ArrayBuffer>);
             _lastWorldVersion = mesh.worldMatrixVersion;
@@ -467,7 +463,6 @@ function _ensureViewResources(
         }
     }
 
-    const hasAlphaTestPath = (features & (HAS_DIFFUSE_TEXTURE | VERTEX_ALPHA)) !== 0;
     const composed = composeStandardGeometryShader(
         features,
         meshFeatures,
@@ -476,7 +471,6 @@ function _ensureViewResources(
         "",
         view._emitColor,
         standardContext?.sceneShader ?? null,
-        hasAlphaTestPath,
         meshVertexLayout
     );
     const device = engine._device;
@@ -639,7 +633,10 @@ function _getOrCreateGeometryPipeline(
               alpha: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
           }
         : undefined;
-    const colorTargets: GPUColorTargetState[] = formats.map((format) => _geometryColorTarget(format, blendState, device));
+    const extension = _geometryOutputExtension && view._geometryAttachments.includes(_geometryOutputExtension.type) ? _geometryOutputExtension : null;
+    const colorTargets: GPUColorTargetState[] = formats.map((format) =>
+        extension ? extension.colorTarget(format, blendState, device) : blendState ? { format, blend: blendState } : { format }
+    );
     const cullMode = (res._features & DOUBLE_SIDED) !== 0 ? "none" : view._reverseCulling ? "front" : "back";
     const pipeline = device.createRenderPipeline({
         layout: res._pipelineLayout,

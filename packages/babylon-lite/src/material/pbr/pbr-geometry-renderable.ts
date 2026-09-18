@@ -17,7 +17,7 @@
  *  PBR scenes that don't use the geometry renderer task pay zero bytes for
  *  it. */
 
-import { F32 } from "../../engine/typed-arrays.js";
+import { F32, U32 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { Mesh } from "../../mesh/mesh.js";
@@ -31,7 +31,7 @@ import type { ComposedShader } from "../../shader/fragment-types.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
-import { _geometryColorTarget, _resolveGeometryMeshBlendTag } from "../../frame-graph/geometry-types.js";
+import { _geometryOutputExtension } from "../../frame-graph/geometry-types.js";
 import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_TANGENTS, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
 import type { Material } from "../material.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
@@ -162,7 +162,9 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const composed = res._composed;
 
     // ── Mesh UBO ───────────────────────────────────────────────────────
+    const extension = _geometryOutputExtension && view._geometryAttachments.includes(_geometryOutputExtension.type) ? _geometryOutputExtension : null;
     const meshUboData = new F32(composed._meshUboSpec._totalBytes / 4);
+    const meshUboU32 = extension ? new U32(meshUboData.buffer) : null;
     // Floating-origin offset + invalidation key off the EFFECTIVE task camera: a
     // geometry task can render with a `config.camera` override whose origin (and
     // view-projection) differ from `scene.camera`. Packing world against
@@ -173,6 +175,11 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const _packMeshWorld = engine._makePackMeshWorld?.(foScene) ?? packMat4IntoF32;
     _packMeshWorld(meshUboData, mesh.worldMatrix, 0, 0);
     writeMeshLightSelection(mesh, scene.lights, meshUboData);
+    let extensionValue = 0;
+    if (extension) {
+        extensionValue = extension.value(mesh);
+        meshUboU32![16] |= extensionValue << 8;
+    }
     const meshUBO = createUniformBuffer(engine, meshUboData);
     let materialUBO: GPUBuffer | null = null;
     let boundTextures: ReturnType<typeof collectPbrBoundTextures> = [];
@@ -196,14 +203,6 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const matInitData = new F32(materialSpec._totalBytes / 4);
     // Use the per-scene writer captured on the geometry context.
     _writePbrMaterialData(matInitData, source, materialSpec);
-    const meshBlendTagOffset = materialSpec._offsets.get("meshBlendTag");
-    let lastMeshBlendTag = 0;
-    let lastRawMeshBlendTag = 0;
-    if (meshBlendTagOffset !== undefined) {
-        lastRawMeshBlendTag = mesh.meshBlendingTag ?? 0;
-        lastMeshBlendTag = _resolveGeometryMeshBlendTag(mesh);
-        matInitData[meshBlendTagOffset / 4] = lastMeshBlendTag;
-    }
     materialUBO = createUniformBuffer(engine, matInitData);
 
     // ── Mesh bind group (group 1). Pass the VIEW as the "material" so the
@@ -258,28 +257,25 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const matScratch = new F32(materialSpec._totalBytes / 4);
 
     const _baseUpdate = (): void => {
-        const rawMeshBlendTag = meshBlendTagOffset !== undefined ? (mesh.meshBlendingTag ?? 0) : 0;
-        const meshBlendTagChanged = rawMeshBlendTag !== lastRawMeshBlendTag;
-        const meshBlendTag = meshBlendTagChanged ? _resolveGeometryMeshBlendTag(mesh) : lastMeshBlendTag;
-        if (mesh.worldMatrixVersion !== _lastWorldVersion || scene.lights.length !== _lastLightsCount) {
+        const nextExtensionValue = extension ? extension.value(mesh) : extensionValue;
+        if (mesh.worldMatrixVersion !== _lastWorldVersion || scene.lights.length !== _lastLightsCount || nextExtensionValue !== extensionValue) {
             sortCenter[0] = mesh.worldMatrix[12]!;
             sortCenter[1] = mesh.worldMatrix[13]!;
             sortCenter[2] = mesh.worldMatrix[14]!;
             _packMeshWorld(meshUboData, mesh.worldMatrix, 0, 0);
             writeMeshLightSelection(mesh, scene.lights, meshUboData);
+            if (extension) {
+                meshUboU32![16] |= nextExtensionValue << 8;
+                extensionValue = nextExtensionValue;
+            }
             device.queue.writeBuffer(meshUBO, 0, meshUboData as Float32Array<ArrayBuffer>);
             _lastWorldVersion = mesh.worldMatrixVersion;
             _lastLightsCount = scene.lights.length;
         }
-        if (source._uboVersion !== _lastUboVersion || meshBlendTag !== lastMeshBlendTag) {
+        if (source._uboVersion !== _lastUboVersion) {
             _lastUboVersion = source._uboVersion;
             matScratch.fill(0);
             _writePbrMaterialData(matScratch, source, materialSpec);
-            if (meshBlendTagOffset !== undefined) {
-                matScratch[meshBlendTagOffset / 4] = meshBlendTag;
-                lastMeshBlendTag = meshBlendTag;
-                lastRawMeshBlendTag = rawMeshBlendTag;
-            }
             device.queue.writeBuffer(materialUBO, 0, matScratch.buffer, 0, matScratch.byteLength);
         }
         const ti = hasTI ? mesh.thinInstances : null;
@@ -487,7 +483,10 @@ function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSi
               alpha: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
           }
         : undefined;
-    const colorTargets: GPUColorTargetState[] = formats.map((format) => _geometryColorTarget(format, blendState, device));
+    const extension = _geometryOutputExtension && view._geometryAttachments.includes(_geometryOutputExtension.type) ? _geometryOutputExtension : null;
+    const colorTargets: GPUColorTargetState[] = formats.map((format) =>
+        extension ? extension.colorTarget(format, blendState, device) : blendState ? { format, blend: blendState } : { format }
+    );
     const sourceFeatures = (view.source as PbrMaterialProps)._renderFeatures?.features ?? 0;
     const hasDoubleSided = (sourceFeatures & PBR_HAS_DOUBLE_SIDED) !== 0;
     // Match the forward pass: `topology`/`frontFace` left to their WebGPU defaults ("triangle-list",

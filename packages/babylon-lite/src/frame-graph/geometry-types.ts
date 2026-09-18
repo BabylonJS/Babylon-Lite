@@ -22,6 +22,7 @@
  */
 
 import type { Mesh } from "../mesh/mesh.js";
+import type { WgslSource } from "../shader/wgsl.js";
 
 /** Identifies a single geometry texture supported by `createGeometryRendererTask`. */
 export enum GeometryTextureType {
@@ -87,32 +88,23 @@ export const GEOMETRY_TEXTURE_DESCRIPTIONS: readonly GeometryTextureDescription[
     { name: "MeshBlendTag", defaultFormat: "r8uint", clearValue: ZERO },
 ];
 
-/** @internal Validate one packed mesh tag without importing the opt-in helper module. */
-export function _validateGeometryMeshBlendTag(tag: number): number {
-    if (!Number.isInteger(tag) || tag < 0 || tag > 0xff) {
-        throw new RangeError("Mesh-blending tag must be an integer between 0 and 255.");
-    }
-    if (tag !== 0 && (tag & 0x3f) === 0) {
-        throw new RangeError("A nonzero mesh-blending tag must contain a group ID between 1 and 63.");
-    }
-    return tag;
+/** Optional typed geometry-output support installed only by an opt-in attachment. */
+export interface GeometryOutputExtension {
+    readonly type: GeometryTextureType;
+    field(index: number): WgslSource;
+    standardWrite(index: number, features: number): WgslSource;
+    pbrWrite(index: number, features: number): WgslSource;
+    nodeWrite(index: number): WgslSource;
+    value(mesh: Mesh): number;
+    colorTarget(format: GPUTextureFormat, blend: GPUBlendState | undefined, device: GPUDevice): GPUColorTargetState;
+    validateAttachment(format: GPUTextureFormat, clearValue: GPUColor, samples: number): void;
+    validateNode(material: { readonly _needsAlphaBlending: boolean }): void;
 }
 
-/** @internal Resolve and validate one mesh tag. */
-export function _resolveGeometryMeshBlendTag(mesh: Mesh): number {
-    return _validateGeometryMeshBlendTag(mesh.meshBlendingTag ?? 0);
-}
+/** @internal Optional typed geometry-output extension. */
+export let _geometryOutputExtension: GeometryOutputExtension | null = null;
 
-/** @internal Create a geometry MRT color target without requesting unsupported integer or float32 blending. */
-export function _geometryColorTarget(format: GPUTextureFormat, blend: GPUBlendState | undefined, device: GPUDevice): GPUColorTargetState {
-    if (!blend || format === "r8uint") {
-        return { format };
-    }
-    if (format.endsWith("uint") || format.endsWith("sint")) {
-        throw new Error(`Transparent geometry output cannot blend integer format "${format}".`);
-    }
-    if (format.endsWith("32float") && !device.features.has("float32-blendable")) {
-        throw new Error(`Transparent geometry output format "${format}" requires the float32-blendable WebGPU feature or a blendable format override.`);
-    }
-    return { format, blend };
+/** @internal Install typed geometry output without retaining its implementation in ordinary geometry bundles. */
+export function _installGeometryOutputExtension(extension: GeometryOutputExtension): void {
+    _geometryOutputExtension = extension;
 }

@@ -60,7 +60,7 @@ import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
 import type { GeometryClearValue } from "./geometry-types.js";
-import { GEOMETRY_TEXTURE_DESCRIPTIONS, GeometryTextureType } from "./geometry-types.js";
+import { GEOMETRY_TEXTURE_DESCRIPTIONS, GeometryTextureType, _geometryOutputExtension } from "./geometry-types.js";
 import { _packSceneUniforms } from "./scene-uniforms-pack.js";
 import { getProjectionMatrix } from "../camera/camera.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
@@ -108,8 +108,6 @@ export interface GeometryRendererTaskConfig {
     readonly textureDescriptions: readonly GeometryRendererTextureDescription[];
     /** Flip culling direction. Default false. */
     reverseCulling?: boolean;
-    /** Whether alpha-blended meshes participate. Defaults to true. */
-    renderTransparentMeshes?: boolean;
     /** Optional color render-target that receives the *real* (lit) material
      *  color, written as an additional color attachment alongside the geometry
      *  data attachments. Must have the same `sampleCount` and resolved
@@ -247,37 +245,26 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         throw new Error("GeometryRendererTask: textureDescriptions must contain at least one entry.");
     }
     if (config.textureDescriptions.length + (config.targetTexture ? 1 : 0) > 8) {
-        throw new Error("GeometryRendererTask: geometry attachments plus targetTexture exceed the WebGPU max of 8 color attachments.");
+        throw new Error("GeometryRendererTask: too many color attachments.");
     }
 
+    const samples = config.samples ?? 1;
     const attachments: AttachmentInfo[] = config.textureDescriptions.map((d, i) => {
         const desc = GEOMETRY_TEXTURE_DESCRIPTIONS[d.type];
         if (!desc) {
             throw new Error(`GeometryRendererTask: unknown texture type ${d.type as number}.`);
         }
         const format = d.format ?? desc.defaultFormat;
-        if (d.type === GeometryTextureType.MESH_BLEND_TAG) {
-            if (format !== "r8uint") {
-                throw new Error(`GeometryRendererTask: MESH_BLEND_TAG format must be r8uint, received ${format}.`);
-            }
-            if (d.clearValue !== undefined && !isZeroColor(d.clearValue)) {
-                throw new Error("GeometryRendererTask: MESH_BLEND_TAG clearValue must be unsigned integer zero.");
-            }
-        }
         return {
             _type: d.type,
             _index: i,
             _format: format,
-            _clearValue: d.type === GeometryTextureType.MESH_BLEND_TAG ? desc.clearValue : (d.clearValue ?? desc.clearValue),
+            _clearValue: d.clearValue ?? desc.clearValue,
         };
     });
     const needsVelocity = attachments.some((a) => a._type === GeometryTextureType.LINEAR_VELOCITY);
     const needsParams = needsVelocity || attachments.some((a) => a._type === GeometryTextureType.NORMALIZED_VIEW_DEPTH);
-    const samples = config.samples ?? 1;
     const size = config.size ?? sc.surface;
-    if (samples !== 1 && attachments.some((a) => a._type === GeometryTextureType.MESH_BLEND_TAG)) {
-        throw new Error("GeometryRendererTask: MESH_BLEND_TAG requires samples: 1.");
-    }
 
     if (config.depthTexture) {
         const ds = config.depthTexture._descriptor.samples ?? 1;
@@ -307,16 +294,8 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
     const depthCompare = config.targetTexture?._descriptor.depthCompare ?? config.depthTexture?._descriptor.depthCompare;
     const depthClearValue = config.targetTexture?._descriptor.depthClearValue ?? config.depthTexture?._descriptor.depthClearValue;
 
-    const wrapperTargets: (RenderTarget | null)[] = [];
-    const typeAccessors: Record<GeometryTextureType, RenderTarget | null> = {} as Record<GeometryTextureType, RenderTarget | null>;
-    for (let t = 0; t < GEOMETRY_TEXTURE_DESCRIPTIONS.length; t++) {
-        typeAccessors[t as GeometryTextureType] = null;
-    }
-    for (const a of attachments) {
-        const wrapper = createWrapperRenderTarget(outputTarget, a);
-        wrapperTargets.push(wrapper);
-        typeAccessors[a._type] = wrapper;
-    }
+    const typeAccessors = new Array<RenderTarget | null>(GEOMETRY_TEXTURE_DESCRIPTIONS.length).fill(null) as Record<GeometryTextureType, RenderTarget | null>;
+    const wrapperTargets = attachments.map((a) => (typeAccessors[a._type] = createWrapperRenderTarget(outputTarget, a)));
 
     const ownedDepthWrapper: RenderTarget | null = config.depthTexture ? null : createDepthWrapperRenderTarget(outputTarget, samples, depthClearValue, depthCompare);
     const geometryDepthTexture: RenderTarget = config.depthTexture ?? ownedDepthWrapper!;
@@ -362,7 +341,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _sampleCount: samples,
     };
 
-    const task: GeometryRendererTaskInternal = {
+    const task = {
         name: config.name ?? "geometry-renderer",
         engine: eng,
         scene: sc,
@@ -370,18 +349,6 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _mrt: outputTarget,
         outputTexture: config.targetTexture,
         geometryDepthTexture,
-        geometryIrradianceTexture: typeAccessors[GeometryTextureType.IRRADIANCE],
-        geometryWorldPositionTexture: typeAccessors[GeometryTextureType.WORLD_POSITION],
-        geometryLocalPositionTexture: typeAccessors[GeometryTextureType.LOCAL_POSITION],
-        geometryReflectivityTexture: typeAccessors[GeometryTextureType.REFLECTIVITY],
-        geometryViewDepthTexture: typeAccessors[GeometryTextureType.VIEW_DEPTH],
-        geometryNormalizedViewDepthTexture: typeAccessors[GeometryTextureType.NORMALIZED_VIEW_DEPTH],
-        geometryScreenspaceDepthTexture: typeAccessors[GeometryTextureType.SCREENSPACE_DEPTH],
-        geometryViewNormalTexture: typeAccessors[GeometryTextureType.VIEW_NORMAL],
-        geometryWorldNormalTexture: typeAccessors[GeometryTextureType.WORLD_NORMAL],
-        geometryAlbedoTexture: typeAccessors[GeometryTextureType.ALBEDO],
-        geometryLinearVelocityTexture: typeAccessors[GeometryTextureType.LINEAR_VELOCITY],
-        geometryMeshBlendTagTexture: typeAccessors[GeometryTextureType.MESH_BLEND_TAG],
         excludeFromVelocity(mesh) {
             task._excludedFromVelocity.add(mesh);
         },
@@ -444,6 +411,17 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
                 }
             }
             const loads: Promise<void>[] = [];
+            if (task.geometryMeshBlendTagTexture) {
+                const extension = _geometryOutputExtension;
+                if (!extension || extension.type !== GeometryTextureType.MESH_BLEND_TAG) {
+                    throw new Error("GeometryRendererTask: MESH_BLEND_TAG is not enabled.");
+                }
+                for (const attachment of task._attachments) {
+                    if (attachment._type === extension.type) {
+                        extension.validateAttachment(attachment._format, attachment._clearValue, samples);
+                    }
+                }
+            }
             if (hasStandard) {
                 loads.push(
                     (async () => {
@@ -486,7 +464,10 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         dispose(): void {
             disposeTask(task, eng);
         },
-    };
+    } as GeometryRendererTaskInternal;
+    for (let type = 0; type < GEOMETRY_TEXTURE_DESCRIPTIONS.length; type++) {
+        (task as unknown as Record<string, RenderTarget | null>)["geometry" + GEOMETRY_TEXTURE_DESCRIPTIONS[type]!.name + "Texture"] = typeAccessors[type as GeometryTextureType];
+    }
     return task;
 }
 
@@ -562,25 +543,12 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
             if (!resolved) {
                 continue;
             }
-            if (attachmentTypes.includes(GeometryTextureType.MESH_BLEND_TAG) && resolved._family === "node" && (resolved._mat as NodeMaterial)._needsAlphaBlending) {
-                if (config.renderTransparentMeshes === false) {
-                    continue;
-                }
-                throw new Error(
-                    "GeometryRendererTask: transparent Node materials cannot write MESH_BLEND_TAG because their graph alpha is unavailable to the geometry terminal. Exclude transparent meshes or omit the tag attachment."
-                );
-            }
             const resources: MeshRebuildResources = { _lifetimeDisposers: [] };
             created.push(resources);
             const view = ensureView(task, nextViews, resolved, attachmentTypes, config);
             // Natural dispatch — view._buildGroup is the standard or PBR geometry
             // builder, its _rebuildSingle returns the per-mesh geometry-MRT Renderable.
             const renderable: Renderable = view._buildGroup._rebuildSingle!(sc, mesh, view, resources);
-            if (config.renderTransparentMeshes === false && renderable.isTransparent) {
-                releaseGeometryResources([resources]);
-                created.pop();
-                continue;
-            }
             renderable._lifetimeDisposers = resources._lifetimeDisposers;
             const binding = renderable.bind(eng, task._signature as unknown as RenderTargetSignature);
             nextBound.push({ _mesh: mesh, _binding: binding, _view: view, _lifetimeDisposers: resources._lifetimeDisposers });
@@ -947,13 +915,4 @@ function createDepthWrapperRenderTarget(
         _height: 0,
         _eager: true,
     };
-}
-
-function isZeroColor(value: GPUColor): boolean {
-    if (Symbol.iterator in Object(value)) {
-        const components = Array.from(value as Iterable<number>);
-        return components.length === 4 && components.every((component) => component === 0);
-    }
-    const color = value as { r: number; g: number; b: number; a: number };
-    return color.r === 0 && color.g === 0 && color.b === 0 && color.a === 0;
 }

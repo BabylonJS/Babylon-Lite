@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { createRenderTarget, type RenderTarget, type RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
+import { _installMeshBlendingGeometrySupport } from "../../../packages/babylon-lite/src/frame-graph/geometry-mesh-blending";
 import { createGeometryRendererTask } from "../../../packages/babylon-lite/src/frame-graph/geometry-renderer-task";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 import { buildNodeGeometryRenderable } from "../../../packages/babylon-lite/src/material/node/node-geometry-renderable";
@@ -15,6 +16,7 @@ import { _setActivePbrGeometryAttachments, createPbrGeometryMaterialView } from 
 import { composeStandardGeometryShader } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-output-shader";
 import { buildStandardGeometryRenderable } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-renderable";
 import { createStandardGeometryMaterialView } from "../../../packages/babylon-lite/src/material/standard/geometry-view";
+import { HAS_DIFFUSE_TEXTURE } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
@@ -31,6 +33,7 @@ const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPU
 gpuGlobals.GPUBufferUsage ??= { UNIFORM: 0x40, COPY_DST: 0x8, STORAGE: 0x80 } as unknown as GPUBufferUsage;
 gpuGlobals.GPUShaderStage ??= { VERTEX: 0x1, FRAGMENT: 0x2 } as unknown as GPUShaderStage;
 gpuGlobals.GPUTextureUsage ??= { RENDER_ATTACHMENT: 0x10, TEXTURE_BINDING: 0x4, COPY_SRC: 0x1, COPY_DST: 0x2 } as unknown as GPUTextureUsage;
+_installMeshBlendingGeometrySupport();
 function makeMockEngine(): EngineContext {
     const device = {
         features: new Set<GPUFeatureName>(),
@@ -96,7 +99,7 @@ describe("GeometryRendererTask", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
         const tooMany = Array.from({ length: 9 }, () => ({ type: GeometryTextureType.VIEW_NORMAL }));
-        expect(() => createGeometryRendererTask({ textureDescriptions: tooMany }, engine, scene)).toThrow(/exceed the WebGPU max of 8/);
+        expect(() => createGeometryRendererTask({ textureDescriptions: tooMany }, engine, scene)).toThrow(/too many color attachments/);
     });
 
     it("counts targetTexture against the 8-color-attachment limit", () => {
@@ -107,7 +110,7 @@ describe("GeometryRendererTask", () => {
             _descriptor: { format: "bgra8unorm" as const, samples: 1 as const, size: { width: 800, height: 600 } as const },
         } as unknown as import("../../../packages/babylon-lite/src/engine/render-target").RenderTarget;
 
-        expect(() => createGeometryRendererTask({ textureDescriptions: eight, targetTexture: target }, engine, scene)).toThrow(/exceed the WebGPU max of 8/);
+        expect(() => createGeometryRendererTask({ textureDescriptions: eight, targetTexture: target }, engine, scene)).toThrow(/too many color attachments/);
     });
 
     it("exposes per-type accessors only for requested types", () => {
@@ -206,17 +209,19 @@ describe("GeometryRendererTask", () => {
         expect(task._colorAttachments[1]!.clearValue).toEqual({ r: 0, g: 0, b: 0, a: 0 });
     });
 
-    it("rejects multisampled, reformatted, or nonzero-cleared mesh-tag attachments", () => {
+    it("rejects multisampled, reformatted, or nonzero-cleared mesh-tag attachments during preload", async () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
+        const preload = (textureDescription: { type: GeometryTextureType; format?: GPUTextureFormat; clearValue?: GPUColor }, samples?: 1 | 4) =>
+            (
+                createGeometryRendererTask({ textureDescriptions: [textureDescription], samples }, engine, scene) as unknown as {
+                    _preload(): Promise<void>;
+                }
+            )._preload();
 
-        expect(() => createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.MESH_BLEND_TAG }], samples: 4 }, engine, scene)).toThrow(/requires samples: 1/);
-        expect(() => createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.MESH_BLEND_TAG, format: "r8unorm" }] }, engine, scene)).toThrow(
-            /format must be r8uint/
-        );
-        expect(() =>
-            createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.MESH_BLEND_TAG, clearValue: { r: 1, g: 0, b: 0, a: 0 } }] }, engine, scene)
-        ).toThrow(/clearValue must be unsigned integer zero/);
+        await expect(preload({ type: GeometryTextureType.MESH_BLEND_TAG }, 4)).rejects.toThrow(/requires samples: 1/);
+        await expect(preload({ type: GeometryTextureType.MESH_BLEND_TAG, format: "r8unorm" })).rejects.toThrow(/format must be r8uint/);
+        await expect(preload({ type: GeometryTextureType.MESH_BLEND_TAG, clearValue: { r: 1, g: 0, b: 0, a: 0 } })).rejects.toThrow(/clearValue must be unsigned integer zero/);
     });
 
     it("excludeFromVelocity and includeInVelocity toggle membership", () => {
@@ -896,7 +901,7 @@ describe("GeometryRendererTask", () => {
 
 describe("Mesh-blending geometry shader contracts", () => {
     it("emits a u32 Standard tag output after the existing alpha/discard path", () => {
-        const composed = composeStandardGeometryShader(0, 0, [], [GeometryTextureType.VIEW_NORMAL, GeometryTextureType.MESH_BLEND_TAG], "", false, null, true);
+        const composed = composeStandardGeometryShader(HAS_DIFFUSE_TEXTURE, 0, [], [GeometryTextureType.VIEW_NORMAL, GeometryTextureType.MESH_BLEND_TAG]);
 
         expect(composed._fragmentWGSL).toContain("@location(0) f0: vec4<f32>,");
         expect(composed._fragmentWGSL).toContain("@location(1) meshBlendTag1: u32,");
@@ -1035,14 +1040,10 @@ describe("Mesh-blending geometry shader contracts", () => {
         const geometry = view._geometry as {
             _struct: string;
             _fsReturn: string;
-            _meshBlendTagOffset: number;
-            _meshUboFloats: number;
         };
         expect(geometry._struct).toContain("@location(0) f0: vec4<f32>,");
         expect(geometry._struct).toContain("@location(1) meshBlendTag1: u32,");
-        expect(geometry._fsReturn).toContain("out.meshBlendTag1 = u32(meshU.meshBlendTag);");
-        expect(geometry._meshBlendTagOffset).toBeGreaterThanOrEqual(20);
-        expect(geometry._meshUboFloats).toBe(geometry._meshBlendTagOffset + 4);
+        expect(geometry._fsReturn).toContain("out.meshBlendTag1 = u32(meshU.receivesShadow.x);");
         resources._lifetimeDisposers.forEach((dispose) => dispose());
 
         (material as NodeMaterial & { _needsAlphaBlending: boolean })._needsAlphaBlending = true;
@@ -1086,21 +1087,6 @@ describe("Mesh-blending geometry shader contracts", () => {
         await taggedTask._preload();
         expect(() => taggedTask.record()).toThrow(/transparent Node materials cannot write MESH_BLEND_TAG/);
         taggedTask.dispose();
-
-        const filteredTask = createGeometryRendererTask(
-            { textureDescriptions: [{ type: GeometryTextureType.MESH_BLEND_TAG }], meshes: [mesh], renderTransparentMeshes: false },
-            engine,
-            scene
-        ) as unknown as {
-            _preload(): Promise<void>;
-            record(): void;
-            dispose(): void;
-            _bound: unknown[];
-        };
-        await filteredTask._preload();
-        filteredTask.record();
-        expect(filteredTask._bound).toHaveLength(0);
-        filteredTask.dispose();
     });
 
     it("omits blend state only from the r8uint target in a transparent Standard MRT pipeline", async () => {

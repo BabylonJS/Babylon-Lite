@@ -105,9 +105,9 @@ Geometry tag invariants:
 - its clear is exact unsigned integer zero;
 - its pipeline target has no blend state;
 - all other attachments retain their existing blend behavior;
-- transparent meshes are included by default; callers can set `renderTransparentMeshes: false` or pass a filtered `meshes` array for opaque-only tags;
+- transparent meshes are included by default; callers can pass a filtered `meshes` array for opaque-only tags;
 - Standard and PBR alpha-tested geometry preserves discard coverage, but blended transparent tags remain order-dependent and can overwrite an underlying tag with zero;
-- alpha-blended geometry attachments must use a blendable format; 32-bit float attachments require `float32-blendable`, so callers without that feature should override `VIEW_DEPTH` to `r16float` or filter transparent meshes;
+- alpha-blended geometry attachments must use a blendable format; 32-bit float attachments require `float32-blendable`, so callers without that feature should override `VIEW_DEPTH` to `r16float` or pass a filtered mesh list;
 - transparent Node materials are rejected when `MESH_BLEND_TAG` is requested because the graph's fragment alpha is not available to the geometry terminal; callers must filter them out;
 - overlapping transparent layers remain caller-controlled and are not made order-independent by mesh blending.
 
@@ -252,6 +252,7 @@ Runtime changes:
 
 ```text
 packages/babylon-lite/src/mesh/mesh-blending-tag.ts
+packages/babylon-lite/src/frame-graph/geometry-mesh-blending.ts
 packages/babylon-lite/src/post-process/mesh-blending-blue-noise.ts
 packages/babylon-lite/src/post-process/mesh-blending-wgsl.ts
 packages/babylon-lite/src/post-process/mesh-blending.ts
@@ -280,10 +281,10 @@ packages/babylon-lite/src/index.ts
 - The task owns its blue-noise `GPUTexture`, view, uniform buffer, shader module, bind-group layout, bind group, pipeline layout, pipeline, and optional internal output target.
 - The task stores no GPU handle in its public interface.
 - Shader source generation returns a string and contains no GPU state.
-- Creating a mesh-blending task installs a shader fragment for Babylon.js-compatible non-uniform normal handling. The fragment is inert outside PBR geometry compositions that request `MESH_BLEND_TAG`, so forward PBR rendering and unrelated geometry tasks remain unchanged. Registration happens only after the factory has validated and constructed the task, and the inverse-matrix WGSL plus extra tangent-frame varying live in `mesh-blending-pbr-support.ts`.
-- Standard, PBR, and Node geometry renderables validate raw mesh tags through the tiny `geometry-types.ts` helper and do not statically import `mesh-blending-tag.ts`.
+- Creating a mesh-blending task installs the typed geometry-output extension and the Babylon.js-compatible PBR non-uniform-normal fragment. The extension is inert outside geometry compositions that request `MESH_BLEND_TAG`, so forward rendering and unrelated geometry tasks remain unchanged. Registration happens after the post-process task has been constructed and before frame-graph preload; the implementation lives in `geometry-mesh-blending.ts`.
+- Standard, PBR, and Node geometry renderables resolve and validate raw mesh tags through that opt-in extension and do not statically import `mesh-blending-tag.ts`.
 - The geometry renderer already lazy-loads Standard, PBR, and Node material-family bridges and passes the requested attachment list to their geometry views.
-- A representative ordinary PBR/glTF scene remains byte-identical to the public-master bundle baseline. Geometry-renderer bundles retain only the reusable typed-`r8uint` attachment/output capability; the post-process, tag helpers, blue noise, search shader, and non-uniform PBR correction remain absent until the mesh-blending task factory is imported.
+- Ordinary geometry bundles retain only small nullable extension seams; the tag helpers, typed output implementation, blue noise, search shader, and non-uniform PBR correction remain absent until mesh blending is enabled. Bundle scenes 145-149 are verified no larger than their exact public-master baselines.
 
 ### Task internal state
 
@@ -387,9 +388,13 @@ The shader wraps integer pixel coordinates manually and uses no temporal/frame i
 
 ### Per-mesh data
 
-When a geometry view requests `MESH_BLEND_TAG`, its per-renderable uniform layout gains one scalar `meshBlendTag` field. Standard and Node place it in their mesh UBO; PBR places it in the geometry renderable's task-owned material UBO because PBR extension fields compose into that layout. Each PBR geometry renderable owns a distinct material UBO, so the value remains per mesh even when several meshes share one source material. The CPU upload writes `resolveMeshBlendingTag(mesh)` as an exactly representable `f32` in `[0,255]`; WGSL converts it to `u32`.
-
-This field is geometry-view-only. Forward Standard/PBR/Node renderables are unchanged.
+When a geometry view requests `MESH_BLEND_TAG`, the CPU resolves and validates
+the source mesh's packed byte without growing the existing UBO layouts.
+Standard and PBR store the tag in bits 8-15 of the existing unsigned light-count
+word; lighting masks the low eight count bits, while the geometry output reads
+`mesh.lc >> 8u`. Node geometry stores the tag in `meshU.receivesShadow.x`,
+which is otherwise unused by this shadow-input-free geometry path. Forward
+renderables remain unchanged.
 
 ### Standard material geometry output
 
@@ -419,7 +424,7 @@ struct FragmentOutput {
 For alpha-tested variants, all fragments reaching the return site survived the existing discard, so the tag write is the raw source tag. For non-alpha-tested variants:
 
 ```wgsl
-out.meshBlendTagM = select(0u, u32(mesh.meshBlendTag), alpha > 0.4);
+out.meshBlendTagM = select(0u, mesh.lc >> 8u, alpha > 0.4);
 ```
 
 Every existing float attachment write remains unchanged.
@@ -443,7 +448,7 @@ The Node geometry view continues to re-emit the graph from `GeometryTextureOutpu
 
 - emits `u32` only for `MESH_BLEND_TAG`;
 - emits `vec4<f32>` for all existing geometry attachment types;
-- appends the geometry-only mesh uniform scalar;
+- reuses the geometry pass's `meshU.receivesShadow.x` slot without growing the mesh UBO;
 - writes the validated source-mesh tag for surviving fragments.
 
 The tag is engine-controlled and is not exposed as a `GeometryTextureOutputBlock` graph input.

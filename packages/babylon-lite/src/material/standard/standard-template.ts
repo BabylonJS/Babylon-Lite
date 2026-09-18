@@ -237,7 +237,7 @@ var specularBase = vec3<f32>(0.0);
 var shadowFactors = array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")});
 var baseAmbientColor = vec3<f32>(1.0, 1.0, 1.0);
 var reflectionColor = vec3<f32>(0.0);
-let lc = min(mesh.lc, ${MAX_LIGHTS}u);
+let lc = min(mesh.lc & 255u, ${MAX_LIGHTS}u);
 /*AD*/
 for (var li = 0u; li < lc; li++) {
 let lightIndex = mli(li);
