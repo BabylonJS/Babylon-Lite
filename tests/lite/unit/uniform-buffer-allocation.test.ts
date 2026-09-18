@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
-import { createUniformBuffer } from "../../../packages/babylon-lite/src/resource/uniform-buffer";
+import { createUniformBuffer } from "../../../packages/babylon-lite/src/compute/compute-uniform-buffer";
 import { createComputeTask } from "../../../packages/babylon-lite/src/compute/compute-task";
 import { createComputeUniformArena } from "../../../packages/babylon-lite/src/compute/compute-uniform-arena";
 

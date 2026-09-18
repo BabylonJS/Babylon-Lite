@@ -5,6 +5,7 @@ import { createComputeBindingSet } from "../../../packages/babylon-lite/src/comp
 import { createComputeDispatch } from "../../../packages/babylon-lite/src/compute/compute-dispatch";
 import { setComputeDispatchDynamicOffset } from "../../../packages/babylon-lite/src/compute/compute-dynamic-offset";
 import { createComputeIndirectDispatch, setComputeIndirectDispatch } from "../../../packages/babylon-lite/src/compute/compute-indirect-dispatch";
+import { createComputeImmediateShader, isComputeImmediatesSupported, setComputeDispatchImmediates } from "../../../packages/babylon-lite/src/compute/compute-immediates";
 import { createComputePipelineVariant, createComputeVariantDispatch } from "../../../packages/babylon-lite/src/compute/compute-pipeline-variant";
 import { addComputeDispatch, createComputeTask, submitComputeTasks } from "../../../packages/babylon-lite/src/compute/compute-task";
 import { createComputeUniformArena, getComputeUniformSlotOffset, updateComputeUniformSlot } from "../../../packages/babylon-lite/src/compute/compute-uniform-arena";
@@ -26,6 +27,7 @@ function makeEngine() {
         bindGroups: [number, GPUBindGroup, readonly number[] | undefined][];
         direct: [number, number, number][];
         indirect: [GPUBuffer, number][];
+        immediates: GPUAllowSharedBufferSource[];
     }[] = [];
     const writes: [GPUBuffer, number, AllowSharedBufferSource, number | undefined, number | undefined][] = [];
     const bindGroups: GPUBindGroupDescriptor[] = [];
@@ -35,6 +37,7 @@ function makeEngine() {
             minUniformBufferOffsetAlignment: 256,
             minStorageBufferOffsetAlignment: 256,
             maxComputeWorkgroupsPerDimension: 65535,
+            maxImmediateSize: 64,
         },
         createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => {
             const mapped = new ArrayBuffer(Number(descriptor.size));
@@ -69,6 +72,7 @@ function makeEngine() {
                     bindGroups: [] as [number, GPUBindGroup, readonly number[] | undefined][],
                     direct: [] as [number, number, number][],
                     indirect: [] as [GPUBuffer, number][],
+                    immediates: [] as GPUAllowSharedBufferSource[],
                 };
                 computePasses.push(record);
                 return {
@@ -77,6 +81,7 @@ function makeEngine() {
                         record.bindGroups.push([group, bindings, offsets ? [...offsets] : undefined]),
                     dispatchWorkgroups: (x: number, y: number, z: number) => record.direct.push([x, y, z]),
                     dispatchWorkgroupsIndirect: (buffer: GPUBuffer, offset: number) => record.indirect.push([buffer, offset]),
+                    setImmediates: (_offset: number, data: GPUAllowSharedBufferSource) => record.immediates.push(data),
                     end: vi.fn(),
                 } as unknown as GPUComputePassEncoder;
             },
@@ -145,6 +150,67 @@ describe("scheduled compute dispatch", () => {
 
     it("rejects invalid storage-buffer access modes", () => {
         expect(() => computeStorageBufferBinding("bad", { group: 0, binding: 0, access: "write" as "read" })).toThrow(/access must be/);
+    });
+
+    it("requires declared resources to be own properties", () => {
+        const { engine } = makeEngine();
+        const shader = createComputeShader(engine, {
+            computeSource: SOURCE,
+            bindings: [computeStorageBufferBinding("constructor", { group: 0, binding: 0 })],
+        });
+
+        it("records a complete retained immediate image before direct dispatch", () => {
+            vi.stubGlobal("navigator", { gpu: { wgslLanguageFeatures: new Set(["immediate_address_space"]) } });
+            try {
+                const { engine, computePasses, device } = makeEngine();
+                expect(isComputeImmediatesSupported()).toBe(true);
+                const shader = createComputeImmediateShader(engine, {
+                    computeSource: `requires immediate_address_space; var<immediate> params: vec4f; @compute @workgroup_size(1) fn main() {}`,
+                    immediateByteLength: 16,
+                });
+                const dispatch = createComputeDispatch(shader, createComputeBindingSet(shader, {}), { size: { x: 1 } });
+                const data = new Float32Array([1, 2, 3, 4]);
+                setComputeDispatchImmediates(dispatch, data);
+                const task = createComputeTask(engine);
+                addComputeDispatch(task, dispatch);
+
+                task.record();
+                task._passes[0]!._execute();
+
+                expect(device.createPipelineLayout).toHaveBeenCalledWith(expect.objectContaining({ immediateSize: 16 }));
+                expect(computePasses[0]!.immediates).toEqual([data]);
+            } finally {
+                vi.unstubAllGlobals();
+            }
+        });
+
+        it("rejects unsupported or incomplete immediate data", () => {
+            vi.stubGlobal("navigator", { gpu: { wgslLanguageFeatures: new Set<string>() } });
+            const { engine } = makeEngine();
+            expect(() =>
+                createComputeImmediateShader(engine, {
+                    computeSource: `@compute @workgroup_size(1) fn main() {}`,
+                    immediateByteLength: 16,
+                })
+            ).toThrow(/immediate_address_space/);
+            vi.stubGlobal("navigator", { gpu: { wgslLanguageFeatures: new Set(["immediate_address_space"]) } });
+            try {
+                const shader = createComputeImmediateShader(engine, {
+                    computeSource: `requires immediate_address_space; var<immediate> params: vec4f; @compute @workgroup_size(1) fn main() {}`,
+                    immediateByteLength: 16,
+                });
+                const dispatch = createComputeDispatch(shader, createComputeBindingSet(shader, {}), { size: { x: 1 } });
+                expect(() => setComputeDispatchImmediates(dispatch, new Uint32Array(3))).toThrow(/exactly 16 bytes/);
+                const task = createComputeTask(engine);
+                addComputeDispatch(task, dispatch);
+                task.record();
+                expect(() => task._passes[0]!._execute()).toThrow(/initialize all 16 bytes/);
+            } finally {
+                vi.unstubAllGlobals();
+            }
+        });
+
+        expect(() => createComputeBindingSet(shader, {})).toThrow('binding "constructor" has no resource');
     });
 
     it("records differently parameterized dispatches into one pass with one uniform upload", () => {

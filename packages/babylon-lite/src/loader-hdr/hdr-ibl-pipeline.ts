@@ -10,7 +10,7 @@ import { TU } from "../engine/gpu-flags.js";
 import type { HdrImage } from "./hdr-parser.js";
 import type { EngineContext } from "../engine/engine.js";
 import { getBilinearSampler } from "../resource/samplers.js";
-import { createUniformBuffer } from "../resource/uniform-buffer-gpu.js";
+import { createUniformBuffer } from "../resource/uniform-buffer.js";
 import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
 import equirectToCubeWGSL from "../../shaders/hdr-equirect-to-cube.compute.wgsl?raw";
 import prefilterCubeWGSL from "../../shaders/hdr-prefilter-cube.compute.wgsl?raw";

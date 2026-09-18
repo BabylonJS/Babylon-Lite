@@ -3,6 +3,9 @@ import type { ComputeShader } from "./compute-shader.js";
 import { _assertComputeShaderLive } from "./compute-shader.js";
 import type { StorageBuffer } from "../resource/storage-buffer.js";
 
+/** Complete byte image for a WebGPU immediate-data range. */
+export type ComputeImmediateData = ArrayBuffer | ArrayBufferView<ArrayBuffer>;
+
 /** Direct workgroup dimensions. Zero is a valid no-op. */
 export interface ComputeDirectDispatch {
     readonly x: number;
@@ -42,6 +45,8 @@ export interface ComputeDispatch {
     _y: number;
     /** @internal */
     _z: number;
+    /** @internal Retained immediate bytes installed by the opt-in immediate-data module. */
+    _immediates?: ComputeImmediateData;
 }
 
 function validateDimension(name: string, value: number, max: number, size: ComputeDirectDispatch): void {

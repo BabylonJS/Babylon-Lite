@@ -35,6 +35,8 @@ export interface ComputeShader {
     readonly _slots: Map<string, ComputeBindingSlot>;
     /** @internal Dynamic binding count per group. */
     readonly _dynamicCounts: readonly number[];
+    /** @internal Immediate-data capacity installed only by the opt-in immediate shader factory. */
+    _immediateByteLength?: number;
     /** @internal */
     _device: GPUDevice | null;
     /** @internal */
@@ -49,6 +51,14 @@ export interface ComputeShader {
     _pending: Promise<GPUComputePipeline> | null;
     /** @internal */
     _destroyed: boolean;
+}
+
+type ComputePipelineLayoutDescriptorExtension = (shader: ComputeShader) => Pick<GPUPipelineLayoutDescriptor, "immediateSize"> | undefined;
+let _pipelineLayoutDescriptorExtension: ComputePipelineLayoutDescriptorExtension | null = null;
+
+/** @internal Install optional compute pipeline-layout fields. */
+export function _installComputePipelineLayoutDescriptorExtension(extension: ComputePipelineLayoutDescriptorExtension): void {
+    _pipelineLayoutDescriptorExtension = extension;
 }
 
 function assertName(kind: string, name: string): void {
@@ -202,7 +212,11 @@ export function _getComputeGroupLayouts(shader: ComputeShader): readonly GPUBind
         layouts.push(shader._engine._device.createBindGroupLayout({ label: `${shader.name}-group${group}`, entries }));
     }
     shader._layouts = layouts;
-    shader._pipelineLayout = shader._engine._device.createPipelineLayout({ label: `${shader.name}-layout`, bindGroupLayouts: layouts });
+    shader._pipelineLayout = shader._engine._device.createPipelineLayout({
+        label: `${shader.name}-layout`,
+        bindGroupLayouts: layouts,
+        ..._pipelineLayoutDescriptorExtension?.(shader),
+    });
     return layouts;
 }
 

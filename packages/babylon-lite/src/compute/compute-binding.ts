@@ -72,9 +72,9 @@ export function _createComputeBindingDecl(
     layout: Omit<GPUBindGroupLayoutEntry, "binding" | "visibility">,
     data?: unknown
 ): ComputeBindingDecl {
-    const buffer = layout.buffer;
-    if (buffer) {
-        Object.freeze(buffer);
+    const resourceLayout = layout.buffer ?? layout.sampler ?? layout.texture ?? layout.storageTexture ?? layout.externalTexture;
+    if (resourceLayout) {
+        Object.freeze(resourceLayout);
     }
     Object.freeze(layout);
     if (data && typeof data === "object") {

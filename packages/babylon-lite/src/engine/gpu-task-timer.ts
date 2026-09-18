@@ -2,6 +2,7 @@ import type { EngineContext, RenderingContext } from "./engine.js";
 import type { FrameGraph } from "../frame-graph/frame-graph.js";
 import type { Task } from "../frame-graph/task.js";
 import type { SurfaceContext } from "./surface.js";
+import { addFramePostSubmitHook } from "./frame-post-submit.js";
 import { makeTimingSnapshot, type RenderTaskGpuTiming, type RenderTaskGpuTimings } from "./gpu-task-timing.js";
 
 const INITIAL_TASK_CAPACITY = 64;
@@ -94,10 +95,9 @@ export function installGpuTaskTimer(timer: GpuTaskTimer, engine: EngineContext, 
         patchSurface(timer, surface);
     }
     const resolveTaskTiming = () => finishTaskTimingFrame(timer, publish);
-    engine._gpuTaskTimerResolve = resolveTaskTiming;
-    engine._gpuTimerResolve ??= resolveTaskTiming;
+    const removePostSubmit = addFramePostSubmitHook(engine, resolveTaskTiming);
     return () => {
-        restoreWrappedFrameGraphs(timer, engine, resolveTaskTiming);
+        restoreWrappedFrameGraphs(timer, removePostSubmit);
         disposeGpuTaskTimer(timer);
     };
 }
@@ -162,7 +162,7 @@ function wrapFrameGraph(timer: GpuTaskTimer, graph: FrameGraph): void {
     timer.wrappedGraphs.push({ graph, execute: original });
 }
 
-function restoreWrappedFrameGraphs(timer: GpuTaskTimer, engine: EngineContext, resolveTaskTiming: () => void): void {
+function restoreWrappedFrameGraphs(timer: GpuTaskTimer, removePostSubmit: () => void): void {
     for (const patched of timer.patchedSurfaceLists) {
         patched.list.push = patched.push;
     }
@@ -176,12 +176,7 @@ function restoreWrappedFrameGraphs(timer: GpuTaskTimer, engine: EngineContext, r
     }
     timer.wrappedGraphs.length = 0;
     timer.currentEncoder = null;
-    if (engine._gpuTaskTimerResolve === resolveTaskTiming) {
-        engine._gpuTaskTimerResolve = undefined;
-    }
-    if (engine._gpuTimerResolve === resolveTaskTiming) {
-        engine._gpuTimerResolve = undefined;
-    }
+    removePostSubmit();
 }
 
 function getFrameGraphFromContext(context: RenderingContext): FrameGraph | null {
@@ -197,9 +192,6 @@ function isFrameGraph(value: unknown): value is FrameGraph {
 function executeTimedFrameGraph(timer: GpuTaskTimer, graph: FrameGraph): number {
     let drawCalls = 0;
     for (const task of graph._tasks) {
-        if (task.executionEnabled === false) {
-            continue;
-        }
         drawCalls += gpuTaskTimerExecute(timer, task);
     }
     return drawCalls;

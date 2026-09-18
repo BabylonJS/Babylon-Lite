@@ -1,6 +1,6 @@
 # Module: Compute
 
-> Package paths: `packages/babylon-lite/src/compute/`, `packages/babylon-lite/src/frame-graph/compute-pass.ts`, `packages/babylon-lite/src/resource/uniform-buffer.ts`
+> Package paths: `packages/babylon-lite/src/compute/`, `packages/babylon-lite/src/frame-graph/compute-pass.ts`
 
 ## Purpose
 
@@ -40,22 +40,16 @@ consume the same mesh-owned vertex-layout and draw-origin metadata:
   format; an explicit format must match, and every index in the used prefix must be less than
   `vertexCount`. Shared GPU-produced index contents remain the producer's responsibility.
 - The mandatory UV stream publishes `hasUv: true`. `hasUv2`, `hasTangent`, and `hasColor` describe
-  the optional streams, so material feature detection and recovery do not infer presence from
-  stale handles.
+  the optional streams, so material feature detection does not infer presence from stale handles.
 - Standard, PBR, and Node layout rewriting plus direct/indirect indexed-draw argument population
   share `mesh/mesh-vertex-layout.ts`. ShaderMaterial keeps the equivalent logic in its existing
   opt-in `shader-vb.ts` hook, so scenes that use only that material family do not fetch the other
   material families' layout adapter.
 
-Because slab allocations are caller-owned, device-loss recovery re-resolves the shared
-storage handle and re-points every advertised vertex stream (including tangent, UV2, and
-color), plus a shared index allocation when present. Typed-array indices are instead snapshotted
-at construction (only the used prefix). The same source descriptor supplies their count, format,
-and upload data during construction and device replacement. Recovery uploads a new owned index
-buffer once per shared MeshGPU and device without requiring CPU vertex arrays. Releasing the
-last mesh owner removes that descriptor and its exact weak registration token, so disposed chunks
-neither accumulate recovery entries nor get resurrected. Dead-reference compaction during recovery
-remains a fallback for meshes abandoned without explicit disposal.
+Storage meshes and writable/vertex/index/indirect storage allocations retain no reconstruction
+state. After device loss, applications must recreate those allocations, refill GPU-produced data,
+recreate the dependent meshes and compute graph, and only then resume rendering. Plain read-only
+CPU-backed storage keeps its existing isolated recovery path.
 
 Thin-instance GPU culling uses CPU positions when available, otherwise a conservative sphere
 around finite, ordered object-local `boundMin`/`boundMax`. Analytic bounds are cached by value so
@@ -177,6 +171,26 @@ sizes/counts and their aligned-stride product before calling this constructor. A
 
 Raw byte-range updates remain the base resource API. Task-owned typed uniform writers are an optional compute module layered on uniform arenas; they do not attach methods to `UniformBuffer` or move ownership into `ComputeShader`.
 
+### Immediate data
+
+```ts
+export interface ComputeImmediateShaderOptions extends ComputeShaderOptions {
+    readonly immediateByteLength: number;
+}
+
+export type ComputeImmediateData = ArrayBuffer | ArrayBufferView<ArrayBuffer>;
+
+export function isComputeImmediatesSupported(): boolean;
+export function createComputeImmediateShader(engine: EngineContext, options: ComputeImmediateShaderOptions): ComputeShader;
+export function setComputeDispatchImmediates(dispatch: ComputeDispatch, data: ComputeImmediateData): void;
+```
+
+The opt-in immediate module exposes WebGPU's `var<immediate>` address space without adding a binding or buffer. The browser must advertise `immediate_address_space` through `navigator.gpu.wgslLanguageFeatures`. `immediateByteLength` is a positive multiple of four within `device.limits.maxImmediateSize` (normally 64 bytes) and is baked into the shader's explicit pipeline layout.
+
+Each dispatch retains one complete immediate-data view. The view may be mutated between executions without rebuilding the dispatch, but its byte length must exactly match the shader's declared range. Recording calls `setImmediates(0, data)` before every direct, indirect, or pipeline-variant dispatch because a new pass resets immediate data and WebGPU requires the entire used range to be initialized.
+
+WGSL-native capabilities that need no engine resource model—workgroup memory, barriers, atomics, subgroup operations, and subgroup-size control—remain authored directly in `computeSource`. Device-gated shader features are enabled through the opt-in `createEngineWithFeatures`. Scheduled compute tasks are included automatically in the existing per-frame-graph-task GPU timing API; immediate standalone submissions intentionally remain outside that frame profiler.
+
 ### Texture resources
 
 ```ts
@@ -273,6 +287,7 @@ export interface ComputeStorageTextureOptions {
 
 export function createComputeStorageTexture(engine: EngineContext, options: ComputeStorageTextureOptions): Promise<ComputeStorageTexture>;
 export function disposeComputeStorageTexture(resource: ComputeStorageTexture): void;
+export function createComputeStorageTextureMipmapsTask(name: string, resources: readonly ComputeStorageTexture[]): Task;
 export function computeStorageTextureViewBinding(
     name: string,
     options: {
@@ -285,7 +300,7 @@ export function computeStorageTextureViewBinding(
 ): ComputeBindingDecl;
 ```
 
-`createComputeTextureResource` validates an existing 2D `Texture2D` through a temporary WebGPU validation error scope, so wrong-device views are rejected without adding ownership metadata to ordinary texture wrappers. It derives float/depth/integer sample compatibility from the real GPU format. Full or stencil-only depth-stencil views are rejected, while a wrapper explicitly exposing a depth-only view is accepted and validated by WebGPU. Array and 3D views use the dedicated advanced helper. `invalidateComputeTextureResource` is required only when an application replaces that wrapper's `view` on the same device.
+`createComputeTextureResource` validates an existing 2D `Texture2D` through a temporary WebGPU validation error scope, so wrong-device views are rejected without adding ownership metadata to ordinary texture wrappers. It derives float/depth/integer sample compatibility from the real GPU format. Full or stencil-only depth-stencil views are rejected, while a wrapper explicitly exposing a depth-only view is accepted and validated by WebGPU. Array and 3D views use the dedicated advanced helper. Stable facades that replace their underlying texture allocation automatically invalidate cached compute bind groups. `invalidateComputeTextureResource` is required only when an application replaces a wrapper's `view` while retaining the same GPU texture.
 
 `createComputeTextureViewResource` and `computeTextureViewBinding` are the advanced opt-in path for `1d`, `2d-array`, `cube`, `cube-array`, and `3d` views. The ordinary 2D helpers do not import them. The resource helper validates the caller-selected view dimension and multisampling through a temporary bind group; Babylon Lite never exposes the underlying GPU view.
 
@@ -295,13 +310,13 @@ Color and depth attachments returned by `createRenderTargetTexture` may be adapt
 
 `ComputeStorageTexture2D` owns an empty `STORAGE_BINDING | TEXTURE_BINDING | COPY_SRC | COPY_DST` texture, compute texture/sampler resources, and a stable render-facing `Texture2D` facade. A compute pass binds the resource itself for storage writes; later compute passes use `computeTexture` plus `computeSampler`, while render materials use `sampledTexture`.
 
-`createComputeStorageTexture2D` remains the compact synchronous path for write-only, sampleable 2D output. The advanced asynchronous `createComputeStorageTexture` validates arbitrary storage-capable formats, `1d` / `2d` / `2d-array` / `3d` dimensions, and every requested `write-only` / `read-only` / `read-write` access mode through WebGPU error scopes. Its optional sampler descriptor configures both the render-facing sampled facade and the compute sampler while preserving one stable sampler identity. The separate `computeStorageTextureViewBinding` module opts a shader into those advanced declarations. Formats or access modes gated by WebGPU features must be requested before engine creation through `EngineOptions.requiredFeatures` (for example `bgra8unorm-storage`, `texture-formats-tier1`, or `texture-formats-tier2`). Unsupported features reject during engine creation; unsupported format, dimension, or access combinations reject during resource creation rather than failing later during dispatch.
+`createComputeStorageTexture2D` remains the compact synchronous path for write-only, sampleable 2D output. The advanced asynchronous `createComputeStorageTexture` validates arbitrary storage-capable formats, `1d` / `2d` / `2d-array` / `3d` dimensions, and every requested `write-only` / `read-only` / `read-write` access mode through WebGPU error scopes. Its optional sampler descriptor configures both the render-facing sampled facade and the compute sampler while preserving one stable sampler identity. The separate `computeStorageTextureViewBinding` module opts a shader into those advanced declarations. Formats or access modes gated by WebGPU features must be requested before engine creation through `createEngineWithFeatures` (for example `bgra8unorm-storage`, `texture-formats-tier1`, or `texture-formats-tier2`). Unsupported features reject during engine creation; unsupported format, dimension, or access combinations reject during resource creation rather than failing later during dispatch.
 
 `mipMaps: true` allocates the complete legal mip chain for 2D, array, and 3D textures.
 The combination with `viewDimension: "1d"` is rejected before allocation, including width one.
 Mip allocation does not imply render-target usage: `RENDER_ATTACHMENT` is added only for
 sampled 2D `rgba8unorm` and `rgba16float` outputs, plus `rgba8snorm` when the device has
-`texture-formats-tier1`. Callers request that feature explicitly through `requiredFeatures`;
+`texture-formats-tier1`. Callers request that feature explicitly through `createEngineWithFeatures`;
 it is not enabled opportunistically. Other formats/dimensions, or a missing required feature,
 retain their mip chains without render-attachment usage, and the render mip task rejects them
 deterministically.
@@ -335,7 +350,7 @@ export interface ComputeBufferRange<T> {
 
 export type ComputeStorageBufferRange = ComputeBufferRange<StorageBuffer>;
 export type ComputeUniformBufferRange = ComputeBufferRange<UniformBuffer>;
-export function readStorageBuffer(buffer: StorageBuffer): Promise<ArrayBuffer>;
+export function readStorageBuffer(buffer: StorageBuffer, byteOffset?: number, byteLength?: number): Promise<ArrayBuffer>;
 export type ComputeBindingResources = Readonly<Record<string, unknown>>;
 
 export interface ComputeBindingSet {
@@ -361,8 +376,10 @@ Each resource family owns its declaration creation, validation, and live-handle 
 
 `readStorageBuffer` is the explicit opt-in readback path for writable storage allocations. It
 submits one copy into a lazily allocated reusable staging buffer and resolves with a detached
-`ArrayBuffer`. Concurrent reads of the same allocation share the pending operation. Ordinary
-storage users retain no readback code unless they import this helper.
+`ArrayBuffer`. Optional four-byte-aligned offset/length parameters avoid copying an entire GPU
+slab for counters or diagnostics. Identical concurrent ranges share the pending operation; a
+different range waits for the active read to finish. Ordinary storage users retain no readback
+code unless they import this helper.
 
 ### Dispatches
 
@@ -417,7 +434,7 @@ export interface ComputePipelineVariant {
 
 export function createComputePipelineVariant(shader: ComputeShader, constants: ComputePipelineConstants): ComputePipelineVariant;
 export function prepareComputePipelineVariant(variant: ComputePipelineVariant): Promise<void>;
-export function createComputeVariantDispatch(variant: ComputePipelineVariant, bindings: ComputeBindingSet, options: ComputeDispatchOptions): ComputeDispatch;
+export function createComputeVariantDispatch(variant: ComputePipelineVariant, bindings: ComputeBindingSet, options: ComputeVariantDispatchOptions): ComputeDispatch;
 ```
 
 Pipeline constants and their caches belong to the opt-in variant object. Keys may be symbolic WGSL override names or canonical decimal identifiers from `0` through `65535` for overrides declared with `@id(...)`. Symbolic names are passed unchanged to WebGPU, which performs the authoritative WGSL-version-specific validation during pipeline creation. The default `ComputeShader` stores only one pipeline and one pending preparation promise.
@@ -427,6 +444,7 @@ Pipeline constants and their caches belong to the opt-in variant object. Keys ma
 ```ts
 export interface ComputeTask extends Task {
     readonly dispatches: readonly ComputeDispatch[];
+    executionEnabled: boolean;
 }
 
 export function createComputeTask(engine: EngineContext, name?: string): ComputeTask;
@@ -440,11 +458,12 @@ export function submitComputeTasks(tasks: readonly ComputeTask[]): void;
 
 Adding a dispatch whose pipeline variant has not been prepared after registration requires `prepareComputeTask(task)` before it is enabled. Startup registration calls the task's `_preload()` automatically.
 
-`submitComputeTasks` executes already-recorded same-engine tasks immediately in one command buffer
+`submitComputeTasks` executes already-recorded, execution-enabled same-engine tasks immediately in one command buffer
 without acquiring or rendering to a swapchain texture. It is intended for deterministic offscreen
 warmup and explicit compute-only work between registered frames; task order is preserved. Calling it
 from a frame callback while the engine is recording that frame throws, because a separate immediate
 submission could otherwise execute ahead of commands already encoded into the unfinished frame.
+When every supplied task has `executionEnabled === false`, no command encoder or submission is created.
 
 One-shot completion is command-encoder scoped. Recording associates the armed generation with the
 current encoder, and only successful submission of that same encoder can disable and resolve it.
@@ -458,6 +477,7 @@ The optional `compute-one-shot` module provides startup-only execution without a
 ```ts
 export interface ComputeOneShot {
     readonly task: ComputeTask;
+    completion: Promise<void>;
 }
 
 export function createComputeOneShot(task: ComputeTask): ComputeOneShot;
@@ -534,12 +554,12 @@ Binary16 is explicitly opt-in because WebGPU features must be requested before d
 if (!(await isComputeF16Supported())) {
     throw new Error("This application requires shader-f16.");
 }
-const engine = await createEngine(canvas, { requiredFeatures: ["shader-f16"] });
+const engine = await createEngineWithFeatures(canvas, { requiredFeatures: ["shader-f16"] });
 ```
 
-Calling `isComputeF16Supported()` before engine creation queries the adapter selected with the same adapter options as `createEngine`. Passing an existing engine checks whether its device actually enabled the feature. Request `shader-f16` per engine through `createEngine(canvas, { requiredFeatures: ["shader-f16"] })`; engine creation validates the requested feature in case adapter availability changes between the capability query and creation.
+Calling `isComputeF16Supported()` before engine creation queries the adapter selected with the same adapter options as `createEngine`. Passing an existing engine checks whether its device actually enabled the feature. Request `shader-f16` per engine through `createEngineWithFeatures(canvas, { requiredFeatures: ["shader-f16"] })`; engine creation validates the requested feature in case adapter availability changes between the capability query and creation.
 
-The `compute-uniform-f16` module owns the capability query, conversion code, and retained scratch `DataView`. Layouts containing f16 fields use `createComputeUniformF16Writer`. Scenes that never import these APIs retain none of the conversion implementation; device feature selection remains the generic per-engine `requiredFeatures` path.
+The `compute-uniform-f16` module owns the capability query, conversion code, and retained scratch `DataView`. Layouts containing f16 fields use `createComputeUniformF16Writer`. Scenes that never import these APIs retain none of the conversion implementation; explicit device feature selection remains behind the opt-in engine factory.
 
 ## Internal Architecture
 
@@ -692,6 +712,14 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 
 Automatic reconstruction of compute state is intentionally out of scope. GPU-produced buffers, indirect arguments, storage textures, simulation state, and temporal data may have no authoritative CPU copy, so recreating handles cannot transparently restore correct contents. If the engine device changes, compute shaders and variants fail explicitly. The application decides whether to reload or recreate its engine, resources, tasks, and domain state.
 
+## Intentional Non-Features
+
+- Shader-store registration, URL/DOM source loading, textual include preprocessing, and serialization remain application responsibilities. Lite accepts complete WGSL and keeps the package free of global registries and import-time side effects.
+- Mutable shader-owned bindings and a correctness-sensitive `fastMode` switch are unnecessary. Reusable immutable binding sets and resource-epoch invalidation provide the same performance without disabling validation.
+- Raw `GPUBuffer`, `GPUTextureView`, `GPUSampler`, and engine-internal buffer/texture wrappers are never public binding inputs.
+- `GPUExternalTexture` / `texture_external` is not exposed for compute. Babylon Lite's video and external-image APIs copy into ordinary `Texture2D` allocations that are valid compute inputs and portable across WebGPU implementations.
+- Per-dispatch timestamp queries are not exposed inside a multi-dispatch task because standard WebGPU timestamp writes bracket passes, not individual commands. Use separate named compute tasks at meaningful profiling/ordering boundaries and the existing task GPU profiler.
+
 ## Hot-Path Requirements
 
 After preparation, one frame must allocate no:
@@ -714,6 +742,8 @@ Compute modules are reachable only through explicitly imported public factories.
 The shared core changes are the concrete `ComputePass` support already anticipated by `Pass` and one optional post-submit short-circuit used only while compute one-shots install its hook. They must not retain compute implementation code in scenes that do not import compute.
 
 All caches are object-owned or lazily initialized. There are no module-level `Map`, `Set`, or `WeakMap` allocations.
+
+The immediate-data hooks are installed only when `createComputeImmediateShader` or `setComputeDispatchImmediates` is called. Compute scenes that do not import that opt-in module retain no immediate-data implementation.
 
 ## Error Handling
 
@@ -752,7 +782,9 @@ Focused unit coverage must prove:
 11. compute/render/compute task ordering;
 12. task disposal does not dispose shared shader/bindings/resources;
 13. mixed storage-buffer, UBO, sampled-texture, sampler, and storage-texture groups;
-14. texture sample-type, multisampling, sampler-type, format, dimension, ownership, and disposal validation.
+14. texture sample-type, multisampling, sampler-type, format, dimension, ownership, and disposal validation;
+15. immediate-data capability, size, full-initialization, pipeline-layout, and dispatch recording validation;
+16. aligned ranged storage readback, staging growth/reuse, same-range coalescing, and different-range serialization.
 
 Integration coverage:
 
@@ -771,6 +803,8 @@ Integration coverage:
 - `packages/babylon-lite/src/compute/compute-dispatch.ts`
 - `packages/babylon-lite/src/compute/compute-dynamic-offset.ts`
 - `packages/babylon-lite/src/compute/compute-indirect-dispatch.ts`
+- `packages/babylon-lite/src/compute/compute-immediates.ts`
+- `packages/babylon-lite/src/compute/compute-mipmap-preparation.ts`
 - `packages/babylon-lite/src/compute/compute-pipeline-variant.ts`
 - `packages/babylon-lite/src/compute/compute-sampler-binding.ts`
 - `packages/babylon-lite/src/compute/compute-sampler-resource.ts`
@@ -786,12 +820,13 @@ Integration coverage:
 - `packages/babylon-lite/src/compute/compute-uniform-arena.ts`
 - `packages/babylon-lite/src/compute/compute-uniform-buffer-binding.ts`
 - `packages/babylon-lite/src/compute/compute-uniform-f16.ts`
+- `packages/babylon-lite/src/compute/compute-engine-features.ts`
 - `packages/babylon-lite/src/frame-graph/compute-pass.ts`
 - `packages/babylon-lite/src/frame-graph/pass.ts`
 - `packages/babylon-lite/src/frame-graph/frame-graph-actions.ts`
 - `packages/babylon-lite/src/mesh/mesh-from-storage.ts`
 - `packages/babylon-lite/src/mesh/mesh-vertex-layout.ts`
-- `packages/babylon-lite/src/resource/uniform-buffer.ts`
+- `packages/babylon-lite/src/compute/compute-uniform-buffer.ts`
 - `packages/babylon-lite/src/resource/storage-buffer.ts`
 - `packages/babylon-lite/src/resource/compute-storage-texture.ts`
 - `packages/babylon-lite/src/resource/compute-storage-texture-view.ts`

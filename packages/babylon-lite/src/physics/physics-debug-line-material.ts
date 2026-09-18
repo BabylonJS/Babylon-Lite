@@ -7,7 +7,7 @@ import type { Material } from "../material/material.js";
 import type { MeshGroupBuildResult, MeshGroupBuilder, MeshRebuilder, MeshRebuildResources, Renderable } from "../render/renderable.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
-import { createUniformBuffer } from "../resource/uniform-buffer-gpu.js";
+import { createUniformBuffer } from "../resource/uniform-buffer.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { SS } from "../engine/gpu-flags.js";
 import { wgsl } from "../shader/wgsl.js";

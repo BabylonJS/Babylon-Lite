@@ -1,10 +1,3 @@
-/**
- * GPU mipmap generation via render-pass blit.
- * WebGPU has no built-in generateMipmaps() — we render a fullscreen triangle
- * from mip N-1 → mip N for each level. For sRGB textures, the GPU automatically
- * converts sRGB→linear on read and linear→sRGB on write, so filtering is correct.
- */
-
 import { SS } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import { getBilinearSampler } from "../resource/samplers.js";
@@ -21,19 +14,21 @@ let linearSampler: GPUSampler | null = null;
 let bindGroupLayout: GPUBindGroupLayout | null = null;
 let cachedDevice: GPUDevice | null = null;
 
-function clearCache(): void {
-    pipelineCache?.clear();
-    pipelineCache = null;
-    shaderModule = null;
-    linearSampler = null;
-    bindGroupLayout = null;
-    cachedDevice = null;
+/** Prepared state for one storage-texture mip level. */
+export interface ComputePreparedMipmapLevel {
+    readonly pipeline: GPURenderPipeline;
+    readonly bindGroup: GPUBindGroup;
+    readonly descriptor: GPURenderPassDescriptor;
 }
 
 function ensureResources(engine: EngineContext): void {
     const device = engine._device;
     if (device !== cachedDevice) {
-        clearCache();
+        pipelineCache?.clear();
+        pipelineCache = null;
+        shaderModule = null;
+        linearSampler = null;
+        bindGroupLayout = null;
         cachedDevice = device;
     }
     shaderModule ??= device.createShaderModule({ code: BLIT_SHADER });
@@ -47,52 +42,62 @@ function ensureResources(engine: EngineContext): void {
 }
 
 function getPipeline(engine: EngineContext, format: GPUTextureFormat): GPURenderPipeline {
-    const device = engine._device;
     ensureResources(engine);
-    pipelineCache ??= new Map();
-    let pipeline = pipelineCache.get(format);
+    const cache = (pipelineCache ??= new Map());
+    let pipeline = cache.get(format);
     if (!pipeline) {
+        const device = engine._device;
         pipeline = device.createRenderPipeline({
             layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout!] }),
             vertex: { module: shaderModule!, entryPoint: "vs" },
             fragment: { module: shaderModule!, entryPoint: "fs", targets: [{ format }] },
             primitive: { topology: "triangle-list" },
         });
-        pipelineCache.set(format, pipeline);
+        cache.set(format, pipeline);
     }
     return pipeline;
 }
 
-/** Generate mip chain for a 2D texture via GPU blit. Works for cube faces via optional `face` layer index. */
-export function generateMipmaps(engine: EngineContext, texture: GPUTexture, face?: number): void {
-    const device = engine._device;
-    const encoder = device.createCommandEncoder();
-    recordMipmaps(engine, texture, encoder, face);
-    device.queue.submit([encoder.finish()]);
-}
-
-export function recordMipmaps(engine: EngineContext, texture: GPUTexture, encoder: GPUCommandEncoder, face?: number): void {
+/** Prebuild views, bind groups, and render-pass descriptors for repeated compute-output mip regeneration. */
+export function prepareComputeMipmaps(engine: EngineContext, texture: GPUTexture): ComputePreparedMipmapLevel[] {
     if (texture.mipLevelCount <= 1) {
-        return;
+        return [];
     }
     const device = engine._device;
     const pipeline = getPipeline(engine, texture.format);
-    const vp = face != null ? { dimension: "2d" as const, baseArrayLayer: face, arrayLayerCount: 1 } : {};
+    const prepared: ComputePreparedMipmapLevel[] = [];
     for (let mip = 1; mip < texture.mipLevelCount; mip++) {
-        const srcView = texture.createView({ baseMipLevel: mip - 1, mipLevelCount: 1, ...vp });
-        const dstView = texture.createView({ baseMipLevel: mip, mipLevelCount: 1, ...vp });
         const bindGroup = device.createBindGroup({
             layout: bindGroupLayout!,
             entries: [
-                { binding: 0, resource: srcView },
+                { binding: 0, resource: texture.createView({ baseMipLevel: mip - 1, mipLevelCount: 1 }) },
                 { binding: 1, resource: linearSampler! },
             ],
         });
-        const pass = encoder.beginRenderPass({
-            colorAttachments: [{ view: dstView, loadOp: "clear", storeOp: "store", clearValue: { r: 0, g: 0, b: 0, a: 0 } }],
+        prepared.push({
+            pipeline,
+            bindGroup,
+            descriptor: {
+                colorAttachments: [
+                    {
+                        view: texture.createView({ baseMipLevel: mip, mipLevelCount: 1 }),
+                        loadOp: "clear",
+                        storeOp: "store",
+                        clearValue: { r: 0, g: 0, b: 0, a: 0 },
+                    },
+                ],
+            },
         });
-        pass.setPipeline(pipeline);
-        pass.setBindGroup(0, bindGroup);
+    }
+    return prepared;
+}
+
+/** Record a prepared compute-output mip chain without per-frame GPU object creation. */
+export function recordPreparedComputeMipmaps(encoder: GPUCommandEncoder, prepared: readonly ComputePreparedMipmapLevel[]): void {
+    for (const level of prepared) {
+        const pass = encoder.beginRenderPass(level.descriptor);
+        pass.setPipeline(level.pipeline);
+        pass.setBindGroup(0, level.bindGroup);
         pass.draw(3);
         pass.end();
     }

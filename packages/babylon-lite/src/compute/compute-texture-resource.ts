@@ -138,6 +138,7 @@ export function _validateComputeTextureResource(resource: ComputeTextureResource
     if (resource._handle !== resource.texture.texture) {
         resource._handle = resource.texture.texture;
         resource._destroyed = false;
+        resource._engine._resourceEpoch = ((resource._engine._resourceEpoch ?? 0) + 1) | 0;
     }
     if (_isTextureReleased(resource.texture)) {
         resource._destroyed = true;

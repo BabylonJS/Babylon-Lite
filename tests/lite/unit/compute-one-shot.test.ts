@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { armComputeOneShot, createComputeOneShot } from "../../../packages/babylon-lite/src/compute/compute-one-shot";
-import { createComputeTask, type ComputeTask } from "../../../packages/babylon-lite/src/compute/compute-task";
+import { createComputeTask, submitComputeTasks, type ComputeTask } from "../../../packages/babylon-lite/src/compute/compute-task";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 
 function makeTask(): ComputeTask {
     const device = {
+        createCommandEncoder: vi.fn(),
         queue: { onSubmittedWorkDone: vi.fn(async () => undefined) },
     } as unknown as GPUDevice;
     const engine = { _device: device } as EngineContext;
@@ -104,5 +105,29 @@ describe("compute one-shot scheduling", () => {
         await oneShot.completion;
         expect(oneShot._armed).toBe(false);
         expect(task.executionEnabled).toBe(false);
+    });
+
+    it("completes frame-recorded work through the existing post-submit resolver", async () => {
+        const task = makeTask();
+        const oneShot = createComputeOneShot(task);
+        const encoder = {} as GPUCommandEncoder;
+        task.engine._currentEncoder = encoder;
+        task._oneShotRecorded!(encoder);
+
+        task.engine._gpuTimerResolve!();
+        await oneShot.completion;
+
+        expect(task.executionEnabled).toBe(false);
+    });
+
+    it("does not execute or submit a completed one-shot through direct task submission", () => {
+        const task = createComputeTask(makeTask().engine);
+        task.record();
+        task.executionEnabled = false;
+        const createCommandEncoder = vi.spyOn(task.engine._device, "createCommandEncoder");
+
+        submitComputeTasks([task]);
+
+        expect(createCommandEncoder).not.toHaveBeenCalled();
     });
 });

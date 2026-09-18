@@ -22,7 +22,7 @@ import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { createStandardTemplate } from "./standard-template.js";
 import { composeShader } from "../../shader/shader-composer.js";
 import type { ComposedShader, ShaderFragment } from "../../shader/fragment-types.js";
-import { createUniformBuffer } from "../../resource/uniform-buffer-gpu.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import {

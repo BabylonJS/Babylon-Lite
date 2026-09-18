@@ -14,7 +14,7 @@ import type { StandardMaterialProps, StandardSceneShaderContext } from "./standa
 import { _computeStandardMaterialFeatures } from "./standard-material-features.js";
 import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
-import { createUniformBuffer } from "../../resource/uniform-buffer-gpu.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 import {
     getOrCreateStandardBindings,
     getOrCreateStandardPipeline,

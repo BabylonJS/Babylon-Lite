@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { isComputeF16Supported } from "../../../packages/babylon-lite/src/compute/compute-uniform-f16";
-import { createEngine, disposeEngine, type EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { createEngine, type EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { createEngineWithFeatures } from "../../../packages/babylon-lite/src/compute/compute-engine-features";
+import { disposeEngine } from "../../../packages/babylon-lite/src/engine/engine-dispose";
 
 afterEach(() => {
     vi.unstubAllGlobals();
@@ -62,11 +64,11 @@ describe("compute f16 engine opt-in", () => {
             },
         });
 
-        const engine = await createEngine(canvas, { requiredFeatures: ["texture-formats-tier1"] });
+        const engine = await createEngineWithFeatures(canvas, { requiredFeatures: ["texture-formats-tier1"] });
         expect(requestDevice).toHaveBeenCalledWith(expect.objectContaining({ requiredFeatures: ["texture-formats-tier1"] }));
         disposeEngine(engine);
 
-        await expect(createEngine(canvas, { requiredFeatures: ["bgra8unorm-storage"] })).rejects.toThrow(/bgra8unorm-storage/);
+        await expect(createEngineWithFeatures(canvas, { requiredFeatures: ["bgra8unorm-storage"] })).rejects.toThrow(/bgra8unorm-storage/);
     });
 
     it("rejects engine creation when the adapter lacks required shader-f16", async () => {
@@ -79,7 +81,7 @@ describe("compute f16 engine opt-in", () => {
             },
         });
 
-        await expect(createEngine({} as OffscreenCanvas, { requiredFeatures: ["shader-f16"] })).rejects.toThrow(/shader-f16/);
+        await expect(createEngineWithFeatures({} as OffscreenCanvas, { requiredFeatures: ["shader-f16"] })).rejects.toThrow(/shader-f16/);
     });
 
     it("requests shader-f16 only through per-engine required features", async () => {
@@ -114,7 +116,7 @@ describe("compute f16 engine opt-in", () => {
             },
         });
 
-        const engine = await createEngine(canvas, { requiredFeatures: ["shader-f16"] });
+        const engine = await createEngineWithFeatures(canvas, { requiredFeatures: ["shader-f16"] });
 
         expect(requestDevice).toHaveBeenCalledWith(expect.objectContaining({ requiredFeatures: ["shader-f16"] }));
         const regularEngine = await createEngine(canvas);

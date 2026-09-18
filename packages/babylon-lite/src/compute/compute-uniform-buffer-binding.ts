@@ -1,6 +1,6 @@
 import type { EngineContext } from "../engine/engine.js";
-import type { UniformBuffer } from "../resource/uniform-buffer.js";
-import { _hasUniformBuffer } from "../resource/uniform-buffer.js";
+import type { UniformBuffer } from "./compute-uniform-buffer.js";
+import { _hasUniformBuffer } from "./compute-uniform-buffer.js";
 import { _createComputeBindingDecl, _installComputeBindingResolver, type ComputeBindingDecl } from "./compute-binding.js";
 import { _getComputeBufferBindingResource, _resolveComputeBufferBinding, type ComputeBufferRange, type ComputeBufferResource } from "./compute-buffer-binding.js";
 

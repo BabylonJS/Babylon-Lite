@@ -14,7 +14,7 @@ import skyFragSrc from "../../../shaders/skybox-cubemap.fragment.wgsl?raw";
 import { getSceneBindGroupLayout, createDefaultPipelineDescriptor } from "../../render/scene-helpers.js";
 import { WGSL_FOG } from "../../shader/wgsl-fog.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
-import { createUniformBuffer } from "../../resource/uniform-buffer-gpu.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
 
 export interface SkyboxCubeMapGPU {

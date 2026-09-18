@@ -67,7 +67,7 @@ export function isComputeF16Supported(engine?: EngineContext): boolean | Promise
 /** Create a typed arena writer whose layout may contain f16 scalar, vector, or matrix fields. */
 export function createComputeUniformF16Writer(arena: ComputeUniformArena, slot: number, layout: ComputeUniformLayout): ComputeUniformWriter {
     if (!arena._task.engine._device.features.has("shader-f16")) {
-        throw new Error('createComputeUniformF16Writer requires createEngine(..., { requiredFeatures: ["shader-f16"] }).');
+        throw new Error('createComputeUniformF16Writer requires createEngineWithFeatures(..., { requiredFeatures: ["shader-f16"] }).');
     }
     _installComputeUniformF16Write(floatToFloat16);
     return _createComputeUniformWriter(arena, slot, layout, new DV(new ArrayBuffer(8)));

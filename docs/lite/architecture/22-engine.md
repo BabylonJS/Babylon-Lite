@@ -89,11 +89,16 @@ export function disposeEngine(engine: EngineContext): void;
 export function renderFrame(engine: EngineContext, delta: number, surfaces?: readonly [SurfaceContext, ...SurfaceContext[]]): void;
 
 export interface EngineOptions extends SurfaceOptions {
-    readonly requiredFeatures?: readonly GPUFeatureName[];
     readonly requiredLimits?: Record<string, GPUSize64 | undefined>;
     readonly useHighPrecisionMatrix?: boolean;
     readonly useFloatingOrigin?: boolean;
 }
+
+export interface EngineFeatureOptions extends EngineOptions {
+    readonly requiredFeatures: readonly GPUFeatureName[];
+}
+
+export function createEngineWithFeatures(canvas: RenderCanvas, options: EngineFeatureOptions): Promise<EngineContext>;
 
 /** Create the Babylon Lite engine. Acquires GPU adapter + device, configures swapchain. */
 export async function createEngine(canvas: RenderCanvas, options?: EngineOptions): Promise<EngineContext>;
@@ -121,7 +126,7 @@ interface EngineContextInternal extends EngineContext {
 ### Initialization Sequence (`createEngine`)
 
 1. **Adapter request**: `navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })` — throws if WebGPU unavailable.
-2. **Device request**: `EngineOptions.requiredFeatures` explicitly opts into adapter-supported WebGPU features, including `shader-f16`. `createEngine` validates every required feature, deduplicates them with Lite's opportunistically supported float-filtering, texture-compression (including unaligned compressed dimensions), timestamp-query, and primitive-index features, then calls `adapter.requestDevice({ requiredFeatures, requiredLimits })`.
+2. **Device request**: `createEngine` requests Lite's opportunistically supported float-filtering, texture-compression (including unaligned compressed dimensions), timestamp-query, and primitive-index features. The opt-in `createEngineWithFeatures` wrapper additionally validates and requests explicit adapter-supported features such as `shader-f16`, without retaining feature-selection logic in ordinary engine bundles.
 3. **Canvas context**: `canvas.getContext('webgpu')` — throws if context unavailable.
 4. **Swap chain configure**: `context.configure({ device, format, alphaMode })` where `format = navigator.gpu.getPreferredCanvasFormat()` and `alphaMode = options?.alphaMode ?? "opaque"`.
 5. **MSAA**: Defaults to `msaaSamples = 4`, or `1` when requested.

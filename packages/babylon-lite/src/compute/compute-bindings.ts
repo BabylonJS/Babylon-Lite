@@ -62,10 +62,10 @@ export function createComputeBindingSet(shader: ComputeShader, resources: Comput
     let dynamicSlots: Map<string, ComputeDynamicBindingSlot> | null = null;
     let volatileEntries: ResolvedComputeBinding[] | null = null;
     for (const decl of shader._decls) {
-        const input = resources[decl.name];
-        if (!input) {
+        if (!Object.hasOwn(resources, decl.name)) {
             throw new Error(`ComputeBindingSet: binding "${decl.name}" has no resource.`);
         }
+        const input = resources[decl.name];
         const resolver = _getComputeBindingResolver(decl._kind);
         const resolved = resolver._resolve(shader._engine, decl, input);
         const entry = { _decl: decl, _resolver: resolver, _state: resolved._state };
@@ -106,15 +106,19 @@ export function _ensureComputeBindingGroups(bindings: ComputeBindingSet, validat
     }
     const shader = bindings._shader;
     _assertComputeShaderLive(shader);
-    const resourceEpoch = shader._engine._resourceEpoch ?? 0;
+    let resourceEpoch = shader._engine._resourceEpoch ?? 0;
     if (bindings._device === shader._engine._device && bindings._groups && bindings._resourceEpoch === resourceEpoch) {
-        if (validateVolatile) {
-            for (let i = 0; i < (bindings._volatileEntries?.length ?? 0); i++) {
-                const entry = bindings._volatileEntries![i]!;
+        const volatileEntries = validateVolatile ? bindings._volatileEntries : null;
+        if (volatileEntries) {
+            for (let i = 0; i < volatileEntries.length; i++) {
+                const entry = volatileEntries[i]!;
                 entry._resolver._validate!(shader._engine, entry._state);
             }
+            resourceEpoch = shader._engine._resourceEpoch ?? 0;
         }
-        return bindings._groups;
+        if (bindings._resourceEpoch === resourceEpoch) {
+            return bindings._groups;
+        }
     }
     const layouts = _getComputeGroupLayouts(shader);
     const groups: GPUBindGroup[] = [];

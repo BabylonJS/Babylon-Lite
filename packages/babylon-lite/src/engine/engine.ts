@@ -325,11 +325,6 @@ export interface RenderTargetSize {
  */
 export interface EngineOptions extends SurfaceOptions {
     /**
-     * WebGPU features that must be enabled on the device.
-     * Engine creation rejects before requesting the device when the selected adapter lacks one.
-     */
-    requiredFeatures?: readonly GPUFeatureName[];
-    /**
      * Extra WebGPU device limits to request when calling `adapter.requestDevice()`.
      * Use to raise per-device caps such as `maxColorAttachmentBytesPerSample` (default 32),
      * which is required when rendering into many MRT attachments. Caller is responsible for
@@ -358,10 +353,14 @@ export interface EngineOptions extends SurfaceOptions {
  *  every non-XR engine paying for the option: non-XR bundles never call the setter, the bundler
  *  proves this is always null, and the `_adapterOptionsHook ? … : {}` spread below folds to `{}`,
  *  so `createEngine`'s adapter request stays byte-identical. */
-let _adapterOptionsHook: (() => GPURequestAdapterOptions) | null = null;
+type DeviceFeaturesResolver = (adapter: GPUAdapter, options?: EngineOptions) => GPUFeatureName[];
+type EngineCreationHook = (() => GPURequestAdapterOptions) & { deviceFeatures?: DeviceFeaturesResolver };
+let _adapterOptionsHook: EngineCreationHook | null = null;
 /** @internal Install extra `requestAdapter` options (called by `enableXrCompatibleAdapter`). */
 export function _installAdapterOptions(hook: () => GPURequestAdapterOptions): void {
+    const deviceFeatures = _adapterOptionsHook?.deviceFeatures;
     _adapterOptionsHook = hook;
+    _adapterOptionsHook.deviceFeatures = deviceFeatures;
 }
 /** @internal Resolve the extra adapter options (empty when no hook is installed). Used by
  *  device-lost recovery so a recovered adapter keeps any XR-compatibility that was requested. */
@@ -385,6 +384,13 @@ export function _getSupportedDeviceFeatures(adapter: GPUAdapter): GPUFeatureName
     return OPTIONAL_DEVICE_FEATURES.filter((feature) => adapter.features.has(feature));
 }
 
+/** @internal Install explicit `requestDevice` feature selection. */
+export function _installDeviceFeaturesResolver(resolve: DeviceFeaturesResolver): void {
+    const hook: EngineCreationHook = _adapterOptionsHook ?? (() => ({}));
+    hook.deviceFeatures = resolve;
+    _adapterOptionsHook = hook;
+}
+
 /** Create the Babylon Lite engine bound to `canvas`. Acquires the GPU adapter + device,
  *  configures the canvas's WebGPU context, and returns an `EngineContext` that *is also*
  *  the primary `SurfaceContext` — i.e. the returned engine is itself the surface for the
@@ -401,15 +407,7 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
     }
     // Optional features are requested opportunistically so their public enable functions can activate
     // later without recreating the device. Unsupported adapters keep the corresponding feature inactive.
-    const features = _getSupportedDeviceFeatures(adapter);
-    for (const feature of options?.requiredFeatures ?? []) {
-        if (!adapter.features.has(feature)) {
-            throw new Error(`WebGPU adapter does not support required feature "${feature}".`);
-        }
-        if (!features.includes(feature)) {
-            features.push(feature);
-        }
-    }
+    const features = _adapterOptionsHook?.deviceFeatures?.(adapter, options) ?? _getSupportedDeviceFeatures(adapter);
     const device = await adapter.requestDevice({ requiredFeatures: features, requiredLimits: options?.requiredLimits });
 
     // eslint-disable-next-line no-console
@@ -657,7 +655,6 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
         engine._gpuTimerEnd?.(finalEncoder);
         engine._cbs[0] = finalEncoder.finish();
         engine._device.queue.submit(engine._cbs);
-        engine._computeOneShotSubmitted?.(finalEncoder);
         engine._flushGpuRetirements?.(engine);
         engine.drawCallCount = total;
         // Resolve + read back the timestamp pair asynchronously (its own submit, after the frame's) and

@@ -8,9 +8,19 @@ import type { ComputeDispatch } from "./compute-dispatch.js";
 import { _getComputePipeline, prepareComputeShader } from "./compute-shader.js";
 import type { ComputeUniformArena } from "./compute-uniform-arena.js";
 
+type ComputeDispatchPrepareRecord = (pass: GPUComputePassEncoder, dispatch: ComputeDispatch) => void;
+let _prepareComputeDispatchRecord: ComputeDispatchPrepareRecord | null = null;
+
+/** @internal Install optional per-dispatch recording state. */
+export function _installComputeDispatchPrepareRecord(prepare: ComputeDispatchPrepareRecord): void {
+    _prepareComputeDispatchRecord = prepare;
+}
+
 /** A frame-graph task that records an ordered dispatch list into one compute pass. */
 export interface ComputeTask extends Task {
     readonly dispatches: readonly ComputeDispatch[];
+    /** Runtime execution gate used by reusable and one-shot compute scheduling. */
+    executionEnabled: boolean;
     /** @internal Mutable alias of `dispatches`. */
     readonly _dispatches: ComputeDispatch[];
     /** @internal */
@@ -49,6 +59,7 @@ export function createComputeTask(engine: EngineContext, name = "compute"): Comp
         name,
         engine,
         dispatches,
+        executionEnabled: true,
         _dispatches: dispatches,
         _passes: [],
         _pass: null,
@@ -66,6 +77,9 @@ export function createComputeTask(engine: EngineContext, name = "compute"): Comp
             const lastGroups: (GPUBindGroup | null)[] = [];
             const lastOffsets: (readonly number[] | null)[] = [];
             setComputePassExecuteEnabled(pass, () => {
+                if (!task.executionEnabled) {
+                    return false;
+                }
                 for (let i = 0; i < dispatches.length; i++) {
                     if (dispatches[i]!.enabled) {
                         return true;
@@ -114,6 +128,7 @@ export function createComputeTask(engine: EngineContext, name = "compute"): Comp
                         lastGroups[group] = bindGroup;
                         lastOffsets[group] = offsets;
                     }
+                    _prepareComputeDispatchRecord?.(encoder, dispatch);
                     if (dispatch._record) {
                         dispatch._record(encoder, dispatch);
                     } else {
@@ -172,6 +187,7 @@ export function submitComputeTasks(tasks: readonly ComputeTask[]): void {
         return;
     }
     const engine = tasks[0]!.engine;
+    let hasEnabledTask = false;
     for (const task of tasks) {
         if (task.engine !== engine) {
             throw new Error("submitComputeTasks requires tasks from the same engine.");
@@ -179,15 +195,21 @@ export function submitComputeTasks(tasks: readonly ComputeTask[]): void {
         if (task._disposed || !task._pass) {
             throw new Error(`ComputeTask "${task.name}" must be recorded and active before direct submission.`);
         }
+        hasEnabledTask ||= task.executionEnabled !== false;
     }
     if (engine._currentEncoder) {
         throw new Error("submitComputeTasks cannot run while a frame is being recorded.");
+    }
+    if (!hasEnabledTask) {
+        return;
     }
     const encoder = engine._device.createCommandEncoder({ label: "direct-compute-tasks" });
     engine._currentEncoder = encoder;
     try {
         for (const task of tasks) {
-            task._pass!._execute();
+            if (task.executionEnabled !== false) {
+                task._pass!._execute();
+            }
         }
     } finally {
         engine._currentEncoder = undefined!;

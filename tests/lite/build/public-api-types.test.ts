@@ -147,10 +147,96 @@ const preparedForTask: Promise<void> = prepareShaderMaterialPipelineForTask(task
 void prepared;
 void preparedForTask;
 const readback: Promise<ArrayBuffer> = readStorageBuffer(storage);
+const rangedReadback: Promise<ArrayBuffer> = readStorageBuffer(storage, 4, 8);
 void readback;
+void rangedReadback;
 // @ts-expect-error GPU allocation handles remain internal.
 storage._buffer;
 resizeSharedMeshGeometry(engine, [mesh], new Float32Array(9), new Float32Array(9), new Uint32Array([0, 1, 2]));
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes the complete compute scheduling and immediate-data surface", () => {
+        const probePath = resolve(BUILD_DIR, "compute-api.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    addComputeDispatch, armComputeOneShot, computeStorageBufferBinding, computeUniformBufferBinding,
+    createComputeBindingSet, createComputeDispatch, createComputeImmediateShader, createComputeIndirectDispatch,
+    createComputeOneShot, createComputePipelineVariant, createComputeTask, createComputeUniformArena,
+    createComputeUniformLayout, createComputeUniformWriter, createEngineWithFeatures, createStorageBuffer, createUniformBuffer,
+    isComputeImmediatesSupported, prepareComputeTask, setComputeDispatchDynamicOffset,
+    setComputeDispatchImmediates, setComputeUniformF32, submitComputeTasks,
+    type ComputeImmediateData, type EngineContext,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const canvas: OffscreenCanvas;
+const featuredEngine: Promise<EngineContext> = createEngineWithFeatures(canvas, { requiredFeatures: ["shader-f16"] });
+void featuredEngine;
+const uniforms = createUniformBuffer(engine, 256);
+const storage = createStorageBuffer(engine, 256, { writable: true, indirect: true });
+const shader = createComputeImmediateShader(engine, {
+    computeSource: "requires immediate_address_space; var<immediate> value: vec4f; @compute @workgroup_size(1) fn main() {}",
+    immediateByteLength: 16,
+    bindings: [
+        computeUniformBufferBinding("params", { group: 0, binding: 0, dynamicOffset: true, minBindingSize: 16 }),
+        computeStorageBufferBinding("data", { group: 0, binding: 1, access: "read-write" }),
+    ],
+});
+const bindings = createComputeBindingSet(shader, { params: { buffer: uniforms, size: 16 }, data: storage });
+const dispatch = createComputeDispatch(shader, bindings, { size: { x: 1 } });
+const immediateData: ComputeImmediateData = new Float32Array(4);
+setComputeDispatchImmediates(dispatch, immediateData);
+setComputeDispatchDynamicOffset(dispatch, "params", 0);
+const variant = createComputePipelineVariant(shader, { width: 4 });
+void variant;
+const indirect = createComputeIndirectDispatch(shader, bindings, { buffer: storage });
+setComputeDispatchImmediates(indirect, new Uint32Array(4));
+const task = createComputeTask(engine);
+addComputeDispatch(task, dispatch);
+addComputeDispatch(task, indirect);
+const arena = createComputeUniformArena(task, 16, 1);
+const layout = createComputeUniformLayout([{ name: "time", type: "f32" }]);
+const writer = createComputeUniformWriter(arena, 0, layout);
+setComputeUniformF32(writer, "time", 1);
+const shot = createComputeOneShot(task);
+const armed: Promise<void> = armComputeOneShot(shot);
+const prepared: Promise<void> = prepareComputeTask(task);
+submitComputeTasks([task]);
+void armed;
+void prepared;
+isComputeImmediatesSupported() satisfies boolean;
+// @ts-expect-error GPU pipeline handles remain internal.
+shader._pipeline;
+// @ts-expect-error GPU allocation handles remain internal.
+uniforms._buffer;
 `
             );
             const result = spawnSync(

@@ -1,7 +1,7 @@
-import { prepareMipmaps, recordPreparedMipmaps } from "../texture/generate-mipmaps.js";
 import type { Task } from "../frame-graph/task.js";
 import type { ComputeStorageTexture } from "../resource/compute-storage-texture.js";
 import { _supportsComputeRenderMipmaps } from "../resource/compute-storage-mip-support.js";
+import { prepareComputeMipmaps, recordPreparedComputeMipmaps } from "./compute-mipmap-preparation.js";
 
 /** Create a task that regenerates mip chains for sampled 2D compute storage textures. */
 export function createComputeStorageTextureMipmapsTask(name: string, resources: readonly ComputeStorageTexture[]): Task {
@@ -23,7 +23,7 @@ export function createComputeStorageTextureMipmapsTask(name: string, resources: 
             );
         }
     }
-    const prepared = textures.map((resource) => prepareMipmaps(engine, resource._texture));
+    const prepared = textures.map((resource) => prepareComputeMipmaps(engine, resource._texture));
     return {
         name,
         engine,
@@ -37,7 +37,7 @@ export function createComputeStorageTextureMipmapsTask(name: string, resources: 
                 if (resource._destroyed) {
                     throw new Error(`Compute storage texture mipmap task "${name}" contains a disposed resource.`);
                 }
-                recordPreparedMipmaps(engine._currentEncoder, prepared[i]!);
+                recordPreparedComputeMipmaps(engine._currentEncoder, prepared[i]!);
             }
             return 0;
         },

@@ -1,6 +1,6 @@
-import type { UniformBufferOptions } from "../resource/uniform-buffer.js";
-import { _getUniformBufferHandle, createUniformBuffer, disposeUniformBuffer } from "../resource/uniform-buffer.js";
-import type { UniformBuffer } from "../resource/uniform-buffer.js";
+import type { UniformBufferOptions } from "./compute-uniform-buffer.js";
+import { _getUniformBufferHandle, createUniformBuffer, disposeUniformBuffer } from "./compute-uniform-buffer.js";
+import type { UniformBuffer } from "./compute-uniform-buffer.js";
 import { align } from "../resource/gpu-buffers.js";
 import type { ComputeTask } from "./compute-task.js";
 

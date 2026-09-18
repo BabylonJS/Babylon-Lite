@@ -21,8 +21,8 @@ import {
     registerScene,
     setShaderAttributeFormats,
     startEngine,
+    wgsl,
 } from "babylon-lite";
-import { wgsl } from "babylon-lite/shader/wgsl.js";
 import {
     buildScene188Indices,
     buildScene188Noise,

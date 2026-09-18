@@ -15,6 +15,8 @@ export {
     setGpuTimingEnabled,
     isGpuTimingSupported,
 } from "./engine/engine.js";
+export { createEngineWithFeatures } from "./compute/compute-engine-features.js";
+export type { EngineFeatureOptions } from "./compute/compute-engine-features.js";
 export { disposeEngine } from "./engine/engine-dispose.js";
 export { waitForGpuResourceRetirements } from "./engine/gpu-resource-retirement.js";
 export { VERSION } from "./engine/version.js";
@@ -288,8 +290,8 @@ export type { Csg2Solid } from "./mesh/csg2.js";
 // ─── Resources ───────────────────────────────────────────────────────
 export { createStorageBuffer, updateStorageBuffer, readStorageBuffer, disposeStorageBuffer } from "./resource/storage-buffer.js";
 export type { StorageBuffer, StorageBufferOptions } from "./resource/storage-buffer.js";
-export { createUniformBuffer, updateUniformBuffer, disposeUniformBuffer } from "./resource/uniform-buffer.js";
-export type { UniformBuffer, UniformBufferOptions } from "./resource/uniform-buffer.js";
+export { createUniformBuffer, updateUniformBuffer, disposeUniformBuffer } from "./compute/compute-uniform-buffer.js";
+export type { UniformBuffer, UniformBufferOptions } from "./compute/compute-uniform-buffer.js";
 // GPU-resident geometry: a mesh sources its vertices straight from a storage
 // allocation and the draw reads them in place, with no readback and no copy.
 // Whoever fills the allocation -- the CPU, or eventually a compute pass -- is the
@@ -332,7 +334,7 @@ export type { ComputeStorageTexture, ComputeStorageTextureOptions, ComputeStorag
 export { createComputeBindingSet, disposeComputeBindingSet } from "./compute/compute-bindings.js";
 export type { ComputeBindingSet, ComputeBindingResources } from "./compute/compute-bindings.js";
 export { createComputeDispatch, setComputeDispatchSize } from "./compute/compute-dispatch.js";
-export type { ComputeDispatch, ComputeDispatchOptions, ComputeDirectDispatch } from "./compute/compute-dispatch.js";
+export type { ComputeDispatch, ComputeDispatchOptions, ComputeDirectDispatch, ComputeImmediateData } from "./compute/compute-dispatch.js";
 export { setComputeDispatchDynamicOffset } from "./compute/compute-dynamic-offset.js";
 export { createComputeIndirectDispatch, setComputeIndirectDispatch } from "./compute/compute-indirect-dispatch.js";
 export type { ComputeIndirectDispatchOptions } from "./compute/compute-indirect-dispatch.js";
@@ -342,6 +344,8 @@ export { createComputeTask, addComputeDispatch, removeComputeDispatch, prepareCo
 export type { ComputeTask } from "./compute/compute-task.js";
 export { createComputeOneShot, armComputeOneShot, disposeComputeOneShot } from "./compute/compute-one-shot.js";
 export type { ComputeOneShot } from "./compute/compute-one-shot.js";
+export { createComputeImmediateShader, isComputeImmediatesSupported, setComputeDispatchImmediates } from "./compute/compute-immediates.js";
+export type { ComputeImmediateShaderOptions } from "./compute/compute-immediates.js";
 export { createComputeUniformArena, getComputeUniformSlotOffset, updateComputeUniformSlot } from "./compute/compute-uniform-arena.js";
 export type { ComputeUniformArena } from "./compute/compute-uniform-arena.js";
 export {

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
-import { disposeEngine } from "../../../packages/babylon-lite/src/engine/engine";
+import { disposeEngine } from "../../../packages/babylon-lite/src/engine/engine-dispose";
 import { createComputeBindingSet, _ensureComputeBindingGroups } from "../../../packages/babylon-lite/src/compute/compute-bindings";
 import { computeSamplerBinding } from "../../../packages/babylon-lite/src/compute/compute-sampler-binding";
 import { createComputeShader } from "../../../packages/babylon-lite/src/compute/compute-shader";
@@ -17,7 +17,7 @@ import { computeUniformBufferBinding } from "../../../packages/babylon-lite/src/
 import { cloneComputeStorageTexture2D, createComputeStorageTexture2D, disposeComputeStorageTexture2D } from "../../../packages/babylon-lite/src/resource/compute-storage-texture";
 import { createComputeStorageTexture, disposeComputeStorageTexture } from "../../../packages/babylon-lite/src/resource/compute-storage-texture-view";
 import { createStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer";
-import { createUniformBuffer } from "../../../packages/babylon-lite/src/resource/uniform-buffer";
+import { createUniformBuffer } from "../../../packages/babylon-lite/src/compute/compute-uniform-buffer";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
 import { createDepthPyramid } from "../../../packages/babylon-lite/src/frame-graph/depth-pyramid";
 import { createComputeStorageTextureMipmapsTask } from "../../../packages/babylon-lite/src/compute/compute-storage-texture-mipmaps";
@@ -635,6 +635,37 @@ describe("compute texture bindings", () => {
         releaseTexture(texture);
 
         expect(() => _ensureComputeBindingGroups(bindings)).toThrow(/invalid texture/);
+    });
+
+    it("rebuilds cached groups when a stable texture facade replaces its allocation", async () => {
+        const { engine, groups } = makeEngine();
+        const texture = ordinaryTexture(engine);
+        const resource = await createComputeTextureResource(engine, texture);
+        const shader = createComputeShader(engine, {
+            computeSource: `@compute @workgroup_size(1) fn main() {}`,
+            bindings: [computeTextureBinding("source", { group: 0, binding: 0 })],
+        });
+        const bindings = createComputeBindingSet(shader, { source: resource });
+        const replacement = ordinaryTexture(engine);
+        Object.assign(texture, { texture: replacement.texture, view: replacement.view });
+
+        _ensureComputeBindingGroups(bindings);
+
+        expect(groups).toHaveLength(2);
+        expect(Array.from(groups[1]!.entries)[0]!.resource).toBe(replacement.view);
+    });
+
+    it("freezes every resource-specific binding layout descriptor", () => {
+        const declarations = [
+            computeTextureBinding("texture", { group: 0, binding: 0 }),
+            computeSamplerBinding("sampler", { group: 0, binding: 1 }),
+            computeStorageTextureBinding("storage", { group: 0, binding: 2, format: "rgba8unorm" }),
+        ];
+
+        for (const declaration of declarations) {
+            const layout = declaration._layout;
+            expect(Object.isFrozen(layout.texture ?? layout.sampler ?? layout.storageTexture)).toBe(true);
+        }
     });
 
     it("rejects unsupported storage formats and texture binding counts over device limits", () => {

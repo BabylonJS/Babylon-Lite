@@ -3,7 +3,7 @@ import { SS, TU } from "../engine/gpu-flags.js";
 import { getProjectionMatrix, getViewMatrix, getEffectiveAspectRatio, _cameraChangeKey, type Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { SceneContext } from "../scene/scene.js";
-import { createUniformBuffer } from "../resource/uniform-buffer-gpu.js";
+import { createUniformBuffer } from "../resource/uniform-buffer.js";
 import type { PbrExt } from "../material/pbr/pbr-flags.js";
 import { _registerPbrExt } from "../material/pbr/pbr-flags.js";
 import { CLUSTERED_LIGHT_STRUCTS, _clusteredPointLightBlock } from "../material/pbr/fragments/clustered-light-wgsl.js";

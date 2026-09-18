@@ -10,7 +10,7 @@ import type { Mat4Storage } from "../math/types.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import type { DirectionalLight } from "../light/directional-light.js";
 import type { Mesh } from "../mesh/mesh.js";
-import { createUniformBuffer } from "../resource/uniform-buffer-gpu.js";
+import { createUniformBuffer } from "../resource/uniform-buffer.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";

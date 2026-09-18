@@ -2,6 +2,7 @@
 
 import {
     addComputeDispatch,
+    addMeshToTask,
     addTask,
     addToScene,
     attachControl,
@@ -43,6 +44,7 @@ import {
     setEffectTexture,
     setShadowTaskCasterMeshes,
     startEngine,
+    withSampledDepthTexture,
 } from "babylon-lite";
 import type { ArcRotateCamera, Mat4 } from "babylon-lite";
 import { buildScene169NoisePixels, SCENE169_FLAME_POSITION, SCENE169_LITE_FLAME_COMPUTE_WGSL, SCENE169_NOISE_SIZE, SCENE169_SEEK_TIME } from "../shared/scene169-compute-flame.js";
@@ -115,20 +117,24 @@ async function main(): Promise<void> {
 
     const width = canvas.width;
     const height = canvas.height;
-    const source = createRenderTargetTexture(engine, {
-        lbl: "scene169-source",
-        format: "rgba8unorm",
-        dFormat: "depth32float",
-        samples: 1,
-        size: { width, height },
-    });
+    const source = createRenderTargetTexture(
+        engine,
+        {
+            lbl: "scene169-source",
+            format: "rgba8unorm",
+            dFormat: "depth32float",
+            samples: 1,
+            size: { width, height },
+        },
+        withSampledDepthTexture
+    );
     if (!source.depthTexture) {
         throw new Error("Scene 169 requires a sampled depth attachment.");
     }
-    const sourceTask = createRenderTask({ name: "scene169-source", rt: source.rt, clrColor: scene.clearColor, clr: true }, engine, scene);
-    sourceTask.addMesh(ground);
-    sourceTask.addMesh(candle);
-    sourceTask.addMesh(wick);
+    const sourceTask = createRenderTask({ name: "scene169-source", rt: source.rt, clrColor: scene.clearColor, clr: true, autoMirror: false }, engine, scene);
+    addMeshToTask(sourceTask, ground);
+    addMeshToTask(sourceTask, candle);
+    addMeshToTask(sourceTask, wick);
 
     const sourceTexture = await createComputeTextureResource(engine, source.texture);
     const depthTexture = await createComputeTextureResource(engine, source.depthTexture);

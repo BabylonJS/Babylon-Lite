@@ -17,7 +17,7 @@ import type { Renderable, MeshGroupBuildResult, MeshRebuildResources } from "../
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
-import { createUniformBuffer } from "../../resource/uniform-buffer-gpu.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 import { getOrCreatePbrBindings, getOrCreatePbrPipeline, createPbrMeshBindGroup, clearPbrPipelineCache } from "./pbr-pipeline.js";
 import {
     _registerPbrExt,
