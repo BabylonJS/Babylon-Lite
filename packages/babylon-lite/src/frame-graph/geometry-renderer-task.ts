@@ -232,6 +232,8 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
     _createPbrGeometryView: ((src: PbrMaterialProps, cfg: PbrGeometryViewConfig) => PbrGeometryMaterialView) | null;
     _computePbrFeatures: ((mat: PbrMaterialProps) => MaterialRenderFeatures) | null;
     _createNodeGeometryView: ((src: NodeMaterial, cfg: NodeGeometryViewConfig) => NodeGeometryMaterialView) | null;
+    /** In-flight bridge import for a material family that first appeared after `_preload`. */
+    _lateLoad?: Promise<void>;
 }
 
 // ─── Factory ───────────────────────────────────────────────────────────────
@@ -838,21 +840,32 @@ function resolveSourceMaterial(task: GeometryRendererTaskInternal, material: Mat
     if (!buildGroup) {
         return null;
     }
-    if (buildGroup._materialFamily === "standard") {
+    const family = buildGroup._materialFamily;
+    // `_preload` imports a family bridge only for the families present when it runs. When a family first
+    // appears later (a PBR mesh added to a Standard-only scene), skip its meshes while the bridge is
+    // imported, then reset `_boundVer` so the next `execute()` binds them.
+    if (!(family === "standard" ? task._createStandardGeometryView : family === "pbr" ? task._createPbrGeometryView : family !== "node" || task._createNodeGeometryView)) {
+        task._lateLoad ??= task._preload!().then(() => {
+            task._lateLoad = undefined;
+            task._boundVer = -1;
+        });
+        return null;
+    }
+    if (family === "standard") {
         const mat = src as StandardMaterialProps;
         if (!mat._renderFeatures) {
             mat._renderFeatures = { features: task._computeStandardFeatures!(mat) };
         }
         return { _mat: mat, _family: "standard" };
     }
-    if (buildGroup._materialFamily === "pbr") {
+    if (family === "pbr") {
         const mat = src as PbrMaterialProps;
         if (!mat._renderFeatures) {
             mat._renderFeatures = task._computePbrFeatures!(mat);
         }
         return { _mat: mat, _family: "pbr" };
     }
-    if (buildGroup._materialFamily === "node") {
+    if (family === "node") {
         // Node materials carry their own `_renderFeatures` (set at parse time)
         // and own all geometry-shader emission, so no feature computation is needed.
         return { _mat: src as NodeMaterial, _family: "node" };

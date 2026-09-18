@@ -893,6 +893,30 @@ describe("GeometryRendererTask", () => {
         expect(oldLifetime).toHaveLength(0);
     });
 
+    it("binds a mesh whose material family first appears after the task was preloaded", async () => {
+        // `_preload` imports a family bridge only for families present at that moment. A PBR mesh
+        // added to a Standard-only scene later used to reach an unloaded bridge and throw on every
+        // frame, from `execute()` and from every `frameGraph.build()`.
+        const { scene, internal, meshes } = await setupGeoTask(1);
+        const { createPbrMaterial } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material");
+        type M = import("../../../packages/babylon-lite/src/mesh/mesh").Mesh;
+        const late = { ...(meshes[0] as unknown as Record<string, unknown>), material: createPbrMaterial() } as unknown as M;
+        scene.meshes.push(late);
+        scene._renderableVersion++;
+
+        expect(() => internal.execute()).not.toThrow();
+        // The Standard mesh keeps rendering while the PBR bridge loads.
+        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0]]);
+
+        // Once the bridge is in, the bound list is marked stale so the next execute binds the late mesh.
+        const lateState = internal as unknown as { _lateLoad?: Promise<void>; _createPbrGeometryView: unknown; _boundVer: number };
+        expect(lateState._lateLoad).toBeInstanceOf(Promise);
+        await lateState._lateLoad;
+        expect(lateState._createPbrGeometryView).toBeTypeOf("function");
+        expect(lateState._boundVer).toBe(-1);
+        expect(lateState._lateLoad).toBeUndefined();
+    });
+
     it("keeps previous bindings active and rolls back every staged resource when a later replacement fails", async () => {
         const { scene, internal, meshes } = await setupGeoTask(2);
         const previousBound = internal._bound;
