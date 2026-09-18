@@ -34,7 +34,7 @@ import { MSH_HAS_MORPH_TARGETS, MSH_HAS_THIN_INSTANCES } from "../mesh-features.
 import type { StandardSceneShaderContext } from "./standard-material.js";
 import type { MeshVbLayout } from "../../mesh/mesh.js";
 import { composeStandardShader } from "./standard-pipeline.js";
-import { HAS_SKELETON, HAS_SKELETON_8, HAS_SPECULAR_TEXTURE, MATERIAL_ALPHA_BLEND, SPECULAR_USES_UV2 } from "./standard-flags.js";
+import { DISABLE_LIGHTING, HAS_SKELETON, HAS_SKELETON_8, HAS_SPECULAR_TEXTURE, MATERIAL_ALPHA_BLEND, SPECULAR_USES_UV2 } from "./standard-flags.js";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
 
 const STAGE_FRAGMENT = 0x2;
@@ -70,7 +70,8 @@ function needsLocalPos(attachments: readonly GeometryTextureType[]): boolean {
  *
  *  All variable references resolve to symbols already declared by
  *  `standard-template.ts` / the standard fragment registry:
- *    - `normalW`  — normalized world normal (post-bump if HAS_BUMP_TEXTURE).
+ *    - `normalW`  — normalized world normal (post-bump if HAS_BUMP_TEXTURE). Lit fragments only:
+ *       an unlit (`disableLighting`) fragment has no such local, so `input.vn` is read instead.
  *    - `input.vp` — world position.
  *    - `baseColor`/`mat.tl` — diffuse texture sample (rgb) × diffuseLevel.
  *    - `specularColor`/`mat.sc` — specular colour, replaced by the std-specular
@@ -80,7 +81,7 @@ function needsLocalPos(attachments: readonly GeometryTextureType[]): boolean {
  *       params UBO (added only when `needsGpUbo`).
  *    - `input.vCurrentClip` / `input.vPreviousClip` — added by the velocity
  *       fragment when LINEAR_VELOCITY is requested. */
-function attachmentExpr(type: GeometryTextureType, wg: string, hasSpecular: boolean, specularUv: string): WgslSource {
+function attachmentExpr(type: GeometryTextureType, wg: string, hasSpecular: boolean, specularUv: string, normal: string): WgslSource {
     switch (type) {
         case GeometryTextureType.IRRADIANCE:
             // BJS Standard material can't split irradiance — outputs (0, 0, 0).
@@ -108,9 +109,9 @@ function attachmentExpr(type: GeometryTextureType, wg: string, hasSpecular: bool
             // shader-composer (fragment input struct).
             return wgsl`vec4<f32>(input.clipPos.z, 0.0, 0.0, ${wg})`;
         case GeometryTextureType.VIEW_NORMAL:
-            return wgsl`vec4<f32>(normalize((scene.view * vec4<f32>(normalW, 0.0)).xyz), ${wg})`;
+            return wgsl`vec4<f32>(normalize((scene.view * vec4<f32>(${normal}, 0.0)).xyz), ${wg})`;
         case GeometryTextureType.WORLD_NORMAL:
-            return wgsl`vec4<f32>(normalW * 0.5 + vec3<f32>(0.5), ${wg})`;
+            return wgsl`vec4<f32>(${normal} * 0.5 + vec3<f32>(0.5), ${wg})`;
         case GeometryTextureType.ALBEDO:
             // BJS: vec4(baseColor.rgb, writeGeometryInfo). The standard
             // fragment already multiplied the diffuse sample by `mat.tl`
@@ -280,7 +281,10 @@ ${attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`).join("\n")}
     //    materials get a correct binary mask under the per-attachment
     //    ALPHA_COMBINE blend pipeline state.
     const wg = `select(0.0, 1.0, alpha > 0.4)`;
-    const writes = wgsl`${attachments.map((type, i) => wgsl`out.f${i} = ${attachmentExpr(type, wg, hasSpecular, specularUv)};`).join("\n")}`;
+    // An unlit (`disableLighting`) fragment never declares the lit-only `normalW` local, so its normal
+    // attachments read the interpolated vertex normal directly.
+    const normal = stdFeatures & DISABLE_LIGHTING ? "normalize(input.vn)" : "normalW";
+    const writes = wgsl`${attachments.map((type, i) => wgsl`out.f${i} = ${attachmentExpr(type, wg, hasSpecular, specularUv, normal)};`).join("\n")}`;
     const extraColorWrite = emitColor ? wgsl`\nout.color = color;` : wgsl``;
     const replacement = wgsl`var out: FragmentOutput;
 ${writes}${extraColorWrite}

@@ -27,7 +27,7 @@ import {
 } from "../../../packages/babylon-lite/src/material/standard/standard-pipeline";
 import { createStandardFogFragment } from "../../../packages/babylon-lite/src/material/standard/std-fog-wgsl";
 import { createStdCsmShadowFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/std-csm-shadow-fragment";
-import { HAS_SKELETON, HAS_SKELETON_8, VERTEX_ALPHA, STD_SCENE_FOG } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
+import { DISABLE_LIGHTING, HAS_SKELETON, HAS_SKELETON_8, VERTEX_ALPHA, STD_SCENE_FOG } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import { stdSkeletonExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-skeleton-fragment";
 import { createStdVertexColorFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/std-vertex-color-fragment";
 import { composeStandardGeometryShader } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-output-shader";
@@ -496,6 +496,20 @@ describe("Standard template + fragments integration", () => {
         enableStandardSkeleton();
         await preloadStandardGeometryFeatures([{ skeleton: {} }] as never, true);
         expect(_getStandardGeometrySkeletonVelocityFactory()).toBe(createStandardGeometrySkeletonVelocity);
+    });
+
+    it("unlit Standard geometry normals read the interpolated normal, not the lit-only normalW local", () => {
+        // A `disableLighting` fragment never declares `normalW`, so a normal attachment that referenced it
+        // produced invalid WGSL: the pipeline failed to compile and the whole frame's command buffer was dropped.
+        const attachments = [GeometryTextureType.VIEW_NORMAL, GeometryTextureType.WORLD_NORMAL];
+        const unlit = composeStandardGeometryShader(DISABLE_LIGHTING, 0, [], attachments);
+        expect(unlit._fragmentWGSL).not.toContain("normalW");
+        expect(unlit._fragmentWGSL).toContain("out.f0 = vec4<f32>(normalize((scene.view * vec4<f32>(normalize(input.vn), 0.0)).xyz)");
+        expect(unlit._fragmentWGSL).toContain("out.f1 = vec4<f32>(normalize(input.vn) * 0.5 + vec3<f32>(0.5)");
+        // Lit materials keep using `normalW`, which carries the bump perturbation.
+        const lit = composeStandardGeometryShader(0, 0, [], attachments);
+        expect(lit._fragmentWGSL).toContain("var normalW = normalize(input.vn);");
+        expect(lit._fragmentWGSL).toContain("out.f1 = vec4<f32>(normalW * 0.5 + vec3<f32>(0.5)");
     });
 
     it("forward Standard vertex color: RGB is unconditional, alpha only under the VERTEXALPHA opt-in", () => {
