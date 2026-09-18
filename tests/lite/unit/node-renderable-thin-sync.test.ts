@@ -7,10 +7,17 @@ import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { syncThinInstanceForDraw, syncThinInstanceGpuData } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu";
 import type { ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
+import type { MeshRebuildResources } from "../../../packages/babylon-lite/src/render/renderable";
 import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-remove";
 import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 
-function buildFixture(transparent: boolean, meshCount = 1, withNodeUbo = false) {
+interface FixtureOptions {
+    readonly buffers?: Array<GPUBuffer & { label?: string; destroy: ReturnType<typeof vi.fn> }>;
+    readonly failBindGroup?: boolean;
+    readonly resources?: MeshRebuildResources;
+}
+
+function buildFixture(transparent: boolean, meshCount = 1, withNodeUbo = false, options?: FixtureOptions) {
     const matrixBuffer = { size: 128, destroy: vi.fn() } as unknown as GPUBuffer;
     const indirectWrites: number[][] = [];
     const writeBuffer = vi.fn((buffer: GPUBuffer, _offset: number, data: ArrayBuffer, dataOffset = 0, size?: number) => {
@@ -18,7 +25,7 @@ function buildFixture(transparent: boolean, meshCount = 1, withNodeUbo = false) 
             indirectWrites.push(Array.from(new Uint32Array(data, dataOffset, (size ?? data.byteLength) / 4)));
         }
     });
-    const buffers: Array<GPUBuffer & { label?: string; destroy: ReturnType<typeof vi.fn> }> = [];
+    const buffers = options?.buffers ?? [];
     const engine = {
         format: "bgra8unorm",
         _retirements: null,
@@ -31,7 +38,12 @@ function buildFixture(transparent: boolean, meshCount = 1, withNodeUbo = false) 
                 buffers.push(buffer);
                 return buffer;
             }),
-            createBindGroup: vi.fn(() => ({}) as GPUBindGroup),
+            createBindGroup: vi.fn(() => {
+                if (options?.failBindGroup) {
+                    throw new Error("bind group creation failed");
+                }
+                return {} as GPUBindGroup;
+            }),
             queue: { writeBuffer },
         },
     } as unknown as EngineContext;
@@ -114,7 +126,7 @@ function buildFixture(transparent: boolean, meshCount = 1, withNodeUbo = false) 
             },
         } as unknown as Mesh);
     }
-    const output = buildNodeMeshRenderables(scene, meshes);
+    const output = buildNodeMeshRenderables(scene, meshes, undefined, options?.resources);
     scene.meshes.push(...meshes);
     scene._renderables.push(...output.renderables);
     const group = meshes as typeof meshes & { o?: typeof output.renderables };
@@ -249,6 +261,51 @@ describe("node-material packet ownership", () => {
         expect(meshUbos[0]!.destroy).toHaveBeenCalledOnce();
         expect(meshUbos[1]!.destroy).toHaveBeenCalledOnce();
         expect(nodeUbo.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("unregisters retired main-scene packets from scene lifetime ownership", () => {
+        const { engine, meshes, scene } = buildFixture(false, 2, true);
+        const [firstMesh, secondMesh] = meshes;
+        const retainedMeshes = (): Mesh[] =>
+            scene._disposables.flatMap((dispose) => {
+                const packet = (dispose as (() => void) & { p?: { _mesh?: Mesh } }).p;
+                return packet?._mesh ? [packet._mesh] : [];
+            });
+
+        expect(retainedMeshes()).toHaveLength(2);
+        expect(retainedMeshes()[0]).toBe(firstMesh);
+        expect(retainedMeshes()[1]).toBe(secondMesh);
+
+        removeFromScene(scene, firstMesh!);
+        expect(retainedMeshes()).toEqual([secondMesh!]);
+        removeFromScene(scene, secondMesh!);
+        expect(retainedMeshes()).toEqual([]);
+
+        disposeGpuResourceRetirements(engine);
+        expect(scene._meshDisposables.size).toBe(0);
+        expect(retainedMeshes()).toEqual([]);
+    });
+
+    it("keeps auxiliary packet lifetime explicit and out of main-scene ownership", () => {
+        const resources: MeshRebuildResources = { _lifetimeDisposers: [] };
+        const { buffers, scene } = buildFixture(false, 1, true, { resources });
+
+        expect(scene._disposables).toEqual([]);
+        expect(scene._meshDisposables.size).toBe(0);
+        expect(resources._lifetimeDisposers).toHaveLength(2);
+
+        resources._lifetimeDisposers.forEach((dispose) => dispose());
+        resources._lifetimeDisposers.forEach((dispose) => dispose());
+        expect(buffers.filter((buffer) => buffer.label === "node-mesh-ubo")[0]!.destroy).toHaveBeenCalledOnce();
+        expect(buffers.filter((buffer) => buffer.label === "node-ubo")[0]!.destroy).toHaveBeenCalledOnce();
+    });
+
+    it("cleans partial Node resources when packet construction fails", () => {
+        const buffers: Array<GPUBuffer & { label?: string; destroy: ReturnType<typeof vi.fn> }> = [];
+
+        expect(() => buildFixture(false, 1, true, { buffers, failBindGroup: true })).toThrow("bind group creation failed");
+        expect(buffers).toHaveLength(2);
+        expect(buffers.every((buffer) => buffer.destroy.mock.calls.length === 1)).toBe(true);
     });
 
     it("does not draw a hidden packet in opaque or transparent output", () => {
