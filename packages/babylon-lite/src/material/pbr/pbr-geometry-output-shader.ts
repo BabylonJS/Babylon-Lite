@@ -172,6 +172,7 @@ function attachmentExpr(type: GeometryTextureType, wg: string, hasIbl: boolean):
             return wgsl`vec4<f32>(0.5 * (${prev} - ${cur}), 0.0, ${wg})`;
         }
     }
+    return wgsl``;
 }
 
 // ─── Composer entry ────────────────────────────────────────────────────

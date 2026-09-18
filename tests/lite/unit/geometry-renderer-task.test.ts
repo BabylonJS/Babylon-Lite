@@ -905,8 +905,9 @@ describe("Mesh-blending geometry shader contracts", () => {
 
         expect(composed._fragmentWGSL).toContain("@location(0) f0: vec4<f32>,");
         expect(composed._fragmentWGSL).toContain("@location(1) meshBlendTag1: u32,");
-        expect(composed._fragmentWGSL).toContain("out.meshBlendTag1 = select(select(0u, u32(mesh.meshBlendTag), alpha > 0.4), u32(mesh.meshBlendTag), mat.aCut > 0.0);");
-        expect(composed._meshUboSpec._offsets.has("meshBlendTag")).toBe(true);
+        expect(composed._fragmentWGSL).toContain("out.meshBlendTag1 = select(select(0u, mesh.lc >> 8u, alpha > 0.4), mesh.lc >> 8u, mat.aCut > 0.0);");
+        expect(composed._meshUboSpec._offsets.has("meshBlendTag")).toBe(false);
+        expect(composed._meshUboSpec._offsets.has("lc")).toBe(true);
     });
 
     it("validates the resolved raw Standard mesh tag before its geometry UBO upload", async () => {
@@ -973,9 +974,10 @@ describe("Mesh-blending geometry shader contracts", () => {
 
         expect(composed._fragmentWGSL).toContain("@location(0) f0: vec4<f32>,");
         expect(composed._fragmentWGSL).toContain("@location(1) meshBlendTag1: u32,");
-        expect(composed._fragmentWGSL).toContain("out.meshBlendTag1 = u32(material.meshBlendTag);");
+        expect(composed._fragmentWGSL).toContain("out.meshBlendTag1 = mesh.lc >> 8u;");
         expect(composed._vertexWGSL).toContain("meshBlendNormalWorld=transposeMat3(inverseMat3(meshBlendNormalWorld));");
-        expect(composed._materialUboSpec!._offsets.has("meshBlendTag")).toBe(true);
+        expect(composed._materialUboSpec!._offsets.has("meshBlendTag")).toBe(false);
+        expect(composed._meshUboSpec._offsets.has("lc")).toBe(true);
     });
 
     it("re-emits a Node geometry graph with an engine-owned u32 mesh-tag slot", async () => {

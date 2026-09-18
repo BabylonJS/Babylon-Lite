@@ -294,7 +294,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
     const depthCompare = config.targetTexture?._descriptor.depthCompare ?? config.depthTexture?._descriptor.depthCompare;
     const depthClearValue = config.targetTexture?._descriptor.depthClearValue ?? config.depthTexture?._descriptor.depthClearValue;
 
-    const typeAccessors = new Array<RenderTarget | null>(GEOMETRY_TEXTURE_DESCRIPTIONS.length).fill(null) as Record<GeometryTextureType, RenderTarget | null>;
+    const typeAccessors = new Array<RenderTarget | null>(GEOMETRY_TEXTURE_DESCRIPTIONS.length).fill(null) as unknown as Record<GeometryTextureType, RenderTarget | null>;
     const wrapperTargets = attachments.map((a) => (typeAccessors[a._type] = createWrapperRenderTarget(outputTarget, a)));
 
     const ownedDepthWrapper: RenderTarget | null = config.depthTexture ? null : createDepthWrapperRenderTarget(outputTarget, samples, depthClearValue, depthCompare);
@@ -349,10 +349,10 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _mrt: outputTarget,
         outputTexture: config.targetTexture,
         geometryDepthTexture,
-        excludeFromVelocity(mesh) {
+        excludeFromVelocity(mesh: Mesh) {
             task._excludedFromVelocity.add(mesh);
         },
-        includeInVelocity(mesh) {
+        includeInVelocity(mesh: Mesh) {
             task._excludedFromVelocity.delete(mesh);
         },
         _attachments: attachments,
@@ -464,7 +464,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         dispose(): void {
             disposeTask(task, eng);
         },
-    } as GeometryRendererTaskInternal;
+    } as unknown as GeometryRendererTaskInternal;
     for (let type = 0; type < GEOMETRY_TEXTURE_DESCRIPTIONS.length; type++) {
         (task as unknown as Record<string, RenderTarget | null>)["geometry" + GEOMETRY_TEXTURE_DESCRIPTIONS[type]!.name + "Texture"] = typeAccessors[type as GeometryTextureType];
     }

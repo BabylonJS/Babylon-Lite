@@ -144,6 +144,7 @@ function geomWrite(type: GeometryTextureType, inputs: Map<GeometryTextureType, N
             // Stored as vec3 — node materials do not compute velocity, default 0.
             return v ? wgsl`vec4<f32>(${v.expr}, ${wg})` : ZERO(wg);
     }
+    return wgsl``;
 }
 
 /** Re-emit the graph from the GeometryTextureOutputBlock terminal and build the

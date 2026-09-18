@@ -178,7 +178,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     let extensionValue = 0;
     if (extension) {
         extensionValue = extension.value(mesh);
-        meshUboU32![16] |= extensionValue << 8;
+        meshUboU32![16] = meshUboU32![16]! | (extensionValue << 8);
     }
     const meshUBO = createUniformBuffer(engine, meshUboData);
     let materialUBO: GPUBuffer | null = null;
@@ -265,7 +265,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
             _packMeshWorld(meshUboData, mesh.worldMatrix, 0, 0);
             writeMeshLightSelection(mesh, scene.lights, meshUboData);
             if (extension) {
-                meshUboU32![16] |= nextExtensionValue << 8;
+                meshUboU32![16] = meshUboU32![16]! | (nextExtensionValue << 8);
                 extensionValue = nextExtensionValue;
             }
             device.queue.writeBuffer(meshUBO, 0, meshUboData as Float32Array<ArrayBuffer>);

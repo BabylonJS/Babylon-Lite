@@ -122,6 +122,7 @@ function attachmentExpr(type: GeometryTextureType, wg: string, hasSpecular: bool
             return wgsl`vec4<f32>(0.5 * (${prev} - ${cur}), 0.0, ${wg})`;
         }
     }
+    return wgsl``;
 }
 
 /** ShaderFragment contributing the `gp` UBO + (optionally) velocity / local-position varyings.

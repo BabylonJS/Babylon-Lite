@@ -208,7 +208,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     let extensionValue = 0;
     if (extension) {
         extensionValue = extension.value(mesh);
-        meshUboU32![16] |= extensionValue << 8;
+        meshUboU32![16] = meshUboU32![16]! | (extensionValue << 8);
     }
     const skeletonVelocityFactory = res._hasSkeletonVelocity ? _getStandardGeometrySkeletonVelocityFactory() : null;
     const meshUBO = createUniformBuffer(engine, meshUboData);
@@ -289,7 +289,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
                 meshUboData[velocityEnabledOffset / 4] = velocityEnabled ? 1 : 0;
             }
             if (extension) {
-                meshUboU32![16] |= nextExtensionValue << 8;
+                meshUboU32![16] = meshUboU32![16]! | (nextExtensionValue << 8);
                 extensionValue = nextExtensionValue;
             }
             device.queue.writeBuffer(meshUBO, 0, meshUboData as Float32Array<ArrayBuffer>);
