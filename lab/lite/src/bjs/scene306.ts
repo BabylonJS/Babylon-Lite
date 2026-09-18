@@ -16,7 +16,7 @@ import "@babylonjs/core/Physics/joinedPhysicsEngineComponent";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { PhysicsViewer } from "@babylonjs/core/Debug/physicsViewer";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode.pure";
-import { PhysicsShape, PhysicsShapeBox } from "@babylonjs/core/Physics/v2/physicsShape";
+import { PhysicsShapeBox } from "@babylonjs/core/Physics/v2/physicsShape";
 
 const PHYSICS_FPS = 60;
 

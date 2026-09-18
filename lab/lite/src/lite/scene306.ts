@@ -9,7 +9,6 @@ import {
     createGround,
     createHavokWorld,
     createHemisphericLight,
-    createIdentityMat4,
     createMat4FromQuat,
     createPhysicsAggregate,
     createPhysicsBody,
