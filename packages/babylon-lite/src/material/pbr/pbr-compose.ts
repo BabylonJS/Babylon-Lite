@@ -201,7 +201,6 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             _noColorOutput: (features2 & PBR2_NO_COLOR_OUTPUT) !== 0,
             _esmShadowOutput: (features2 & PBR2_ESM_SHADOW_OUTPUT) !== 0,
             _esmShadowDepthCode,
-            _vbStrides: vbStrides,
         });
 
         const frags: ShaderFragment[] = [];
@@ -237,7 +236,7 @@ export function createPbrComposer(deps: PbrComposerDeps): PbrComposeFn {
             frags.push(_createThinInstanceFragment(hasMesh(MSH_HAS_INSTANCE_COLOR)));
         }
 
-        const composed = frags.reduce((shader, fragment) => fragment._pc?.(shader) ?? shader, composeShader(template, frags));
+        const composed = frags.reduce((shader, fragment) => fragment._pc?.(shader) ?? shader, composeShader(template, frags, vbStrides));
         cache.set(ckey, composed);
         return composed;
     };

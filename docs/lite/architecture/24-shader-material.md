@@ -24,6 +24,7 @@ The design follows the Lite material contract:
 export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMaterial;
 export function enableShaderMaterialInstanceWorld(material: ShaderMaterial): void;
 export function enableShaderMaterialFinalColor(material: ShaderMaterial): void;
+export function setShaderAttributeFormats(material: ShaderMaterial, formats: ShaderAttributeFormats): void;
 ```
 
 `createShaderMaterial` is synchronous and accepts already-resolved WGSL source strings.
@@ -46,6 +47,7 @@ export interface ShaderMaterialOptions {
     readonly backFaceCulling?: boolean;
     readonly depthWrite?: boolean;
     readonly depthCompare?: GPUCompareFunction;
+    readonly topology?: "point-list" | "line-list" | "triangle-list";
 }
 ```
 
@@ -87,13 +89,63 @@ export interface ShaderMaterial extends Material {
 
 `blend` is an explicit color-target blend-state override. When present, it replaces the state derived from `blendMode`, implies `needAlphaBlending` unless explicitly overridden, defaults `depthWrite` to `false`, and participates in the cross-material pipeline-cache key.
 
+`topology` defaults to `triangle-list`. It is fixed when the material is created and participates
+in pipeline selection; callers supplying line-list geometry can use `"line-list"` for diagnostic
+wireframe rendering without accessing internal pipeline state. Indexed strip topologies are rejected
+because WebGPU requires a `stripIndexFormat` matching each mesh's index buffer, while ShaderMaterial
+pipeline grouping is material-based.
+
 ### Attributes
 
 ```typescript
-export type ShaderAttributeName = "position" | "normal" | "uv" | "uv2" | "tangent" | "color";
+export type ShaderAttributeName = "position" | "normal" | "uv" | "uv2" | "tangent" | "color" | "joints" | "weights" | "joints1" | "weights1";
+export type ShaderAttributeFormats = Partial<Record<ShaderAttributeName, GPUVertexFormat>>;
 ```
 
 The order in `options.attributes` is the vertex buffer binding order and the WGSL `@location` order. Unsupported names throw during material creation. Missing optional mesh buffers use zero-filled buffers. When `enableShaderMaterialFinalColor()` is enabled, its missing `color` fallback is instead white so color multiplication does not black out meshes without vertex colors. `position` is required for normal mesh rendering.
+
+`setShaderAttributeFormats` changes the material-owned vertex signature before registration or pipeline preparation: the declared
+`GPUVertexFormat` selects both the generated WGSL input type and the tight default stride. Mesh-owned
+`MeshGPU._vbLayout` supplies per-attribute stride/offset packing independently. The same material can
+draw ordinary tight geometry and storage-backed slabs only when their physical formats are compatible.
+Canonical CPU/glTF geometry retains its canonical encodings (for example, XYZ positions use
+`float32x3`); declaring `float32x4` does not repack those buffers. Such mismatches are rejected during
+renderable construction. Noncanonical formats are supported on matching storage-backed streams;
+their offset alignment and byte extent must fit the declared stride. Format declarations are
+snapshotted by the setter, and storage-backed constant-zero streams remain valid for all supported formats.
+Packed variants participate in sync,
+async, cross-material, depth/normal-view, and thin-instance pipeline keys. Storage-backed draws preserve
+the mesh's `_baseVertex`, and absent optional slab streams use the shared zero-stride default buffer.
+Mesh-specific layouts reuse the binding's resolved formats and change only stride/offset, rather
+than rebuilding the material signature for every mesh.
+
+The storage/format opt-in installs one synchronous support record in `shader-vb-support.ts`. That small
+module owns shared canonical format/type/stride metadata and the attribute layout helper, while
+the renderable passes its authored-stream lookup to the optional support callbacks. Importing
+`setShaderAttributeFormats` or constructing storage geometry therefore does not
+statically pull the full lazy `shader-pipeline.ts` / `shader-renderable.ts` implementation into the entry
+module. Direct draws pass `baseVertex` to WebGPU without a forwarding wrapper. Thin-instance paths
+resolve their combined vertex layouts once during construction and share them across binding and
+async preparation; indirect argument encoding remains in `mesh-indexed-indirect.ts`.
+
+The interleaved glTF loader installs the same resolver when it creates a strided mesh.
+PBR, Standard, and picking consume that mesh packing directly; installing the resolver
+also makes plain and thin-instance ShaderMaterial draws use the recorded stride and
+per-attribute offsets. The loader's normalized COLOR_0 stream remains a separate tight
+float32x4 buffer, while attributes that stay interleaved retain their authored packing.
+Vertex-format support is needed only when preparing layouts and grouping packets; renderable draw
+closures do not retain it. Missing-buffer allocation calls the engine-owned seam directly.
+With the final-color helper enabled, missing storage-backed color inputs use one mesh-owned
+white float32 RGBA record with zero stride. Its physical fallback format is canonical float32x4,
+including when the authored color declaration uses a normalized format, so the neutral value
+remains white. The buffer is released with the last geometry owner; ordinary missing streams
+still use their existing zero defaults.
+Validation computes each mesh's missing-stream mask once before packet allocation. Packets retain
+that mask for grouping and layout resolution, avoiding repeated stream scans. Opaque and transparent
+renderables share target-binding construction, while retaining their distinct ordering and update behavior.
+Default GPU picking supports compatible float32 components only. A material's incompatible position
+or requested discard-data format produces an explicit picking error; callers may exclude that mesh
+with `mesh.pickable = false`, a filter, or an ignore entry.
 
 ### Thin instances and GPU culling
 
@@ -318,6 +370,8 @@ packages/babylon-lite/src/material/shader/
   shader-group-builder.ts  MeshGroupBuilder entry point and lazy renderable import.
   shader-renderable.ts     Per-scene/per-mesh renderables, UBO writes, bind groups.
   shader-pipeline.ts       Generated prelude, BGL creation, pipeline cache.
+  shader-vb-support.ts     Tiny opt-in seam and canonical attribute layouts.
+  shader-vb.ts             Declared formats, per-mesh packing, grouping, bounded defaults.
 ```
 
 ### Group builder
@@ -509,7 +563,7 @@ fn mainFragment(input: VertexOutput) -> @location(0) vec4<f32> {
 6. For each material, `shader-pipeline.ts` builds a generated prelude, shader module, group-1 BGL, and render pipeline for the active target signature.
 7. For each mesh, the renderable prepares the CPU system-uniform image, uses `createUniformBuffer` to allocate and upload it transactionally, then registers packet cleanup before creating group 1. The allocation label is preserved, and a failed initial upload destroys the unpublished buffer.
 8. Each frame, `DrawBinding.update(context)` refreshes system UBOs when world/camera/target data changes and custom UBOs when `_uboVersion` changes.
-9. Draw binds vertex buffers in material attribute order, sets index buffer, sets group 1, and calls `drawIndexed`.
+9. Draw binds vertex buffers in material attribute order, sets index buffer and group 1, then issues an indexed draw with the mesh's optional storage-allocation `_baseVertex`.
 10. If `setShaderTexture` changes a texture, the next update recreates group 1 for affected mesh packets and updates acquired/released texture references.
 11. Material swaps use `shaderGroupBuilder._rebuildSingle`, matching Standard/PBR.
 

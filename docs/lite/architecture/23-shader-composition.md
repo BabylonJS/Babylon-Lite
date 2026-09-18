@@ -176,42 +176,45 @@ The `SLOT_RE = /\/\*([A-Z_0-9]+)\*\//g` regex finds all markers. For each marker
 4. Replaces the marker with the concatenated code
 
 **Fragment slot markers** (fragment shader):
-| Slot | Purpose |
-|------|---------|
-| `HF` | Helper functions |
+
+| Slot | Purpose                         |
+| ---- | ------------------------------- |
+| `HF` | Helper functions                |
 | `SV` | Shader variables initialization |
-| `AT` | Alpha/texture modifications |
-| `AC` | Alpha cutoff |
-| `MF` | Material function overrides |
-| `BL` | Before lighting variables |
-| `AD` | After direct lighting |
-| `AI` | Ambient/IBL integration |
-| `NI` | Normal injection |
-| `BC` | Before color output |
-| `BA` | Before alpha output |
+| `AT` | Alpha/texture modifications     |
+| `AC` | Alpha cutoff                    |
+| `MF` | Material function overrides     |
+| `BL` | Before lighting variables       |
+| `AD` | After direct lighting           |
+| `AI` | Ambient/IBL integration         |
+| `NI` | Normal injection                |
+| `BC` | Before color output             |
+| `BA` | Before alpha output             |
 
 **Vertex slot markers**:
-| Slot | Purpose |
-|------|---------|
-| `VR` | Before main body (morph pre-skinning) |
+
+| Slot | Purpose                                                 |
+| ---- | ------------------------------------------------------- |
+| `VR` | Before main body (morph pre-skinning)                   |
 | `VW` | Compute `finalWorld` (skeleton skinning, thin-instance) |
-| `VB` | After world transform (varying passthrough) |
+| `VB` | After world transform (varying passthrough)             |
 
 ### Template Markers (non-slot)
 
 Fixed markers replaced once (not iterated over fragments):
-| Marker | Replacement |
-|--------|-------------|
-| `/*SU*/` | `struct SceneUniforms { ... }` |
-| `/*MU*/` | `struct MeshUniforms { ... }` |
-| `/*VI*/` | `struct VertexInput { ... }` |
-| `/*VO*/` | `struct VertexOutput { ... }` |
-| `/*VD*/` | Vertex binding declarations |
+
+| Marker   | Replacement                                    |
+| -------- | ---------------------------------------------- |
+| `/*SU*/` | `struct SceneUniforms { ... }`                 |
+| `/*MU*/` | `struct MeshUniforms { ... }`                  |
+| `/*VI*/` | `struct VertexInput { ... }`                   |
+| `/*VO*/` | `struct VertexOutput { ... }`                  |
+| `/*VD*/` | Vertex binding declarations                    |
 | `/*VP*/` | Vertex function parameters (builtins + inputs) |
-| `/*VH*/` | Vertex helper functions |
-| `/*FI*/` | `struct FragmentInput { ... }` |
-| `/*HF*/` | Fragment helper functions |
-| `/*FB*/` | Fragment binding declarations |
+| `/*VH*/` | Vertex helper functions                        |
+| `/*FI*/` | `struct FragmentInput { ... }`                 |
+| `/*HF*/` | Fragment helper functions                      |
+| `/*FB*/` | Fragment binding declarations                  |
 
 ### Bind Group Layout Construction
 
@@ -231,9 +234,13 @@ Binding assignment order:
 
 Each binding gets:
 
-- A `GPUBindGroupLayoutEntry` via `bglEntry()` (maps BindingKind → WebGPU descriptor)
-- A WGSL declaration via `declWGSL()` (e.g., `@group(1) @binding(3) var normalTex: texture_2d<f32>;`)
+- A `GPUBindGroupLayoutEntry` and matching WGSL declaration from the same `BindingKind` branch
+  (e.g., `@group(1) @binding(3) var normalTex: texture_2d<f32>;`)
 - Assignment to vertex and/or fragment declaration lists based on `visibility`
+
+Descriptor and declaration construction share one type dispatch, so sampler kinds, texture
+dimensions and uniform qualifiers cannot drift between parallel helpers. The generated
+vertex-input text is also reused by the input structure and vertex entry-point parameters.
 
 ### Vertex Buffer Layout Construction
 

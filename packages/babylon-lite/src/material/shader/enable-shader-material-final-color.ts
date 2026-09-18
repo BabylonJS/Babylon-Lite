@@ -50,7 +50,7 @@ function whiteColorBuffer(engine: EngineContext, gpu: MeshGPU): GPUBuffer {
         return gpu._shaderColorFallback;
     }
     const positionBytes = gpu.positionBuffer.size;
-    const vertexCount = gpu._vbLayout?._p?._count ?? (positionBytes === 4 ? 0 : positionBytes / 12);
+    const vertexCount = gpu._vertexCount !== undefined ? 1 : (gpu._vbLayout?.position?._count ?? (positionBytes === 4 ? 0 : positionBytes / 12));
     const buffer = engine._device.createBuffer({
         label: "shader-final-color-white",
         size: Math.max(vertexCount * 16, 4),

@@ -87,8 +87,8 @@ interface PbrGeometryViewResources {
     _alphaBlend: boolean;
 }
 
-function _variantKey(meshFeatures: number, lightMode: number, singleLightType: string, pluginIndex: number): string {
-    return `${meshFeatures}:${lightMode}:${singleLightType}:${pluginIndex}`;
+function _variantKey(meshFeatures: number, lightMode: number, singleLightType: string, pluginIndex: number, meshVertexKey: string): string {
+    return `${meshFeatures}:${lightMode}:${singleLightType}:${pluginIndex}${meshVertexKey}`;
 }
 
 /** Build a {@link Renderable} for one mesh drawn through a PBR geometry view. */
@@ -149,8 +149,8 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const meshFeatures = _computeMeshFeatures(mesh, receiveShadows) | ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0);
     const pluginIndex = source._pi ?? 0;
 
-    const variantKey = _variantKey(meshFeatures, lightMode, singleLightType, pluginIndex);
-    const res = _ensureViewResources(view, engine, ctx, meshFeatures, lightMode, singleLightType, pluginIndex, variantKey);
+    const variantKey = _variantKey(meshFeatures, lightMode, singleLightType, pluginIndex, mesh._gpu._vbKey ?? "");
+    const res = _ensureViewResources(view, engine, ctx, meshFeatures, lightMode, singleLightType, pluginIndex, variantKey, mesh._gpu._vbLayout, mesh._gpu._vbKey ?? "");
     // The geometry pass composes its OWN variant, so it needs the mesh's exotic primitive state
     // stamped on separately (see ComposedShader._prim). `variantKey` folds in meshFeatures, whose
     // topology bits this mirrors, so a cached variant only ever sees one value here.
@@ -267,7 +267,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
         }
         const ti = hasTI ? mesh.thinInstances : null;
         if (ti && syncThinInstanceForDraw) {
-            thinDrawArgs = syncThinInstanceForDraw(engine, ti, hasTIColor, mesh._gpu.indexCount);
+            thinDrawArgs = syncThinInstanceForDraw(engine, ti, hasTIColor, mesh._gpu);
         }
     };
     const _invalidate = (): void => {
@@ -320,7 +320,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
         if (ti && thinDrawArgs) {
             pass.drawIndexedIndirect(thinDrawArgs, 0);
         } else {
-            pass.drawIndexed(gpu.indexCount, ti?.count);
+            pass.drawIndexed(gpu.indexCount, ti?.count ?? 1, 0, gpu._baseVertex);
         }
         return 1;
     };
@@ -352,7 +352,9 @@ function _ensureViewResources(
     lightMode: 0 | 1 | 2,
     singleLightType: string,
     pluginIndex: number,
-    variantKey: string
+    variantKey: string,
+    meshVertexLayout: Mesh["_gpu"]["_vbLayout"],
+    meshVertexKey: string
 ): PbrGeometryViewResources {
     let cache = view._geometry as Map<string, PbrGeometryViewResources> | undefined;
     if (!cache) {
@@ -370,8 +372,6 @@ function _ensureViewResources(
     const features2 = view._renderFeatures.features2 ?? 0;
     const sceneFeatures = ctx._sceneFeatures;
     const source = view.source as PbrMaterialProps;
-    const vbLayout = (source as unknown as { _vbLayout?: import("../../mesh/mesh.js").MeshVbLayout })._vbLayout;
-    const vbKey = "";
     const uv2Mask = (source as { _uv2Mask?: number })._uv2Mask ?? 0;
 
     // Compose with the active-attachment scope set so the registered ext
@@ -388,8 +388,8 @@ function _ensureViewResources(
             lightMode,
             singleLightType,
             "",
-            vbLayout,
-            vbKey,
+            meshVertexLayout,
+            meshVertexKey,
             view._geometryAttachments,
             view._emitColor,
             uv2Mask,

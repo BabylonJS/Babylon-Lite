@@ -223,16 +223,15 @@ function ensureGeometryCompile(view: NodeGeometryMaterialView, res: NodeGeometry
         }),
         // Geometry MRT renders upright into offscreen targets (the task packs an
         // un-flipped scene UBO), matching the Standard/PBR geometry renderables.
-        _buildPipeline: (device, a) =>
-            device.createRenderPipeline({
-                label: "node-material-geometry",
-                layout: device.createPipelineLayout({ bindGroupLayouts: [a._sceneBGL, a._meshBGL] }),
-                vertex: { module: a._shaderModule, entryPoint: "vs_main", buffers: [...a._vertexBuffers] },
-                fragment: { module: a._shaderModule, entryPoint: "fs_main", targets: colorFormats.map((f) => ({ format: f })) },
-                depthStencil: { format: a._depthFormat, depthCompare: a._depthCompare, depthWriteEnabled: true },
-                multisample: { count: a._msaaSamples },
-                primitive: { topology: "triangle-list", cullMode, frontFace: "ccw" },
-            }),
+        _buildPipelineDescriptor: (device, a) => ({
+            label: "node-material-geometry",
+            layout: device.createPipelineLayout({ bindGroupLayouts: [a._sceneBGL, a._meshBGL] }),
+            vertex: { module: a._shaderModule, entryPoint: "vs_main", buffers: [...a._vertexBuffers] },
+            fragment: { module: a._shaderModule, entryPoint: "fs_main", targets: colorFormats.map((f) => ({ format: f })) },
+            depthStencil: { format: a._depthFormat, depthCompare: a._depthCompare, depthWriteEnabled: true },
+            multisample: { count: a._msaaSamples },
+            primitive: { topology: "triangle-list", cullMode, frontFace: "ccw" },
+        }),
     };
     const compile = compileNodePipeline(res._geomState, res._vertexWgsl, res._fragmentWgsl, {
         _engine: engine,
@@ -283,11 +282,12 @@ function ensureGeometryNodeUBO(res: NodeGeometryViewResources, compile: NodeComp
         return res._nodeUBO;
     }
     res._nodeUBOReady = true;
-    if (compile._nodeUboBinding === null || compile._nodeUboSize === 0) {
+    const spec = compile._nodeUboSpec;
+    if (!spec || spec._totalBytes === 0) {
         return null;
     }
-    const scratch = new F32(compile._nodeUboSize / 4);
-    for (const [name, offsetBytes] of compile._nodeUboOffsets) {
+    const scratch = new F32(spec._totalBytes / 4);
+    for (const [name, offsetBytes] of spec._offsets) {
         const live = source._uniformValues.get(name);
         if (live) {
             scratch.set(live._values, offsetBytes >> 2);
@@ -298,7 +298,7 @@ function ensureGeometryNodeUBO(res: NodeGeometryViewResources, compile: NodeComp
             scratch.set(def, offsetBytes >> 2);
         }
     }
-    const ubo = engine._device.createBuffer({ label: "node-geom-ubo", size: compile._nodeUboSize, usage: BU.UNIFORM | BU.COPY_DST });
+    const ubo = engine._device.createBuffer({ label: "node-geom-ubo", size: spec._totalBytes, usage: BU.UNIFORM | BU.COPY_DST });
     engine._device.queue.writeBuffer(ubo, 0, scratch);
     res._nodeUBO = ubo;
     return ubo;
@@ -410,10 +410,10 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
                 }
                 pass.setIndexBuffer(g.indexBuffer, g.indexFormat);
                 pass.setBindGroup(1, bindGroup!);
-                pass.drawIndexed(g.indexCount);
+                pass.drawIndexed(g.indexCount, 1, 0, g._baseVertex);
                 return 1;
             };
-            return { renderable: r, pipeline: compile._pipeline, update, draw };
+            return { renderable: r, pipeline: compile._pipelineForMesh(mesh._gpu), update, draw };
         },
     };
     r._worldCenter = sortCenter;

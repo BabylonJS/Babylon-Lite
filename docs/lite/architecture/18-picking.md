@@ -178,6 +178,13 @@ attribute and forwards it flat to `PickDiscardInput.vertexData` as a padded `vec
 | `tangent` | `float32x4` | `(x, y, z, w)`          |
 | `color`   | `float32x4` | `(r, g, b, a)`          |
 
+Material-declared formats must be compatible with these float32 reads. Extra float32 components
+may be ignored (for example, `float32x4` positions are read as XYZ), but float16, integer,
+normalized, or undersized component formats are rejected explicitly rather than reinterpreted.
+Position validation runs before opening the pick encoder; discard-data validation runs only
+when an authored stream is actually consumed. Missing streams retain the zero fallback below.
+Exclude incompatible geometry using `Mesh.pickable = false`, `PickOptions.filter`, or `ignore`.
+
 The forwarding is `@interpolate(flat)`, so categorical payloads remain exact within a triangle.
 If a regular mesh does not own the requested GPU attribute, the picker uses the position-only pipeline
 and supplies `vec4f(0.0)`; known zero-filled placeholder UV buffers (`hasUv === false`) are not bound.
@@ -348,17 +355,19 @@ each attachment is a single texel:
 ### Bind Groups
 
 **Regular meshes:**
-| Group | Binding | Type | Content |
-|-------|---------|------|---------|
-| 0 | 0 | uniform | `mat4x4f` viewProjection + `vec2f` original fragment coordinate (shared, 80 bytes) |
-| 1 | 0 | uniform | `mat4x4f` world + `u32` pickId (80 bytes, 16-aligned) |
+
+| Group | Binding | Type    | Content                                                                            |
+| ----- | ------- | ------- | ---------------------------------------------------------------------------------- |
+| 0     | 0       | uniform | `mat4x4f` viewProjection + `vec2f` original fragment coordinate (shared, 80 bytes) |
+| 1     | 0       | uniform | `mat4x4f` world + `u32` pickId (80 bytes, 16-aligned)                              |
 
 **Thin-instanced meshes:**
-| Group | Binding | Type | Content |
-|-------|---------|------|---------|
-| 0 | 0 | uniform | `mat4x4f` viewProjection + `vec2f` original fragment coordinate (shared, 80 bytes) |
-| 1 | 0 | uniform | `mat4x4f` mesh world + `u32` baseMeshPickId + `u32` excludedThinInstance (80 bytes) |
-| 1 | 1 | read-only-storage | `array<mat4x4f>` — instance world matrices |
+
+| Group | Binding | Type              | Content                                                                             |
+| ----- | ------- | ----------------- | ----------------------------------------------------------------------------------- |
+| 0     | 0       | uniform           | `mat4x4f` viewProjection + `vec2f` original fragment coordinate (shared, 80 bytes)  |
+| 1     | 0       | uniform           | `mat4x4f` mesh world + `u32` baseMeshPickId + `u32` excludedThinInstance (80 bytes) |
+| 1     | 1       | read-only-storage | `array<mat4x4f>` — instance world matrices                                          |
 
 **Discard/world-adjust storage:**
 
@@ -521,18 +530,18 @@ the intended coverage.
 
 ## File Manifest
 
-| File                         | Role                                                                               |
-| ---------------------------- | ---------------------------------------------------------------------------------- |
-| `picking-info.ts`            | `PickingInfo` interface + `createEmptyPickingInfo`                                 |
-| `ray.ts`                     | `Ray` interface + `createPickingRay`                                               |
-| `gpu-picker.ts`              | GPU ID/depth/detail pass, snapshot resolve, detailed surface decode, ignore handling |
-| `pick-contributor.ts`        | `PickContributor` seam — optional pickable entities (GS, billboards) register here |
-| `gs-picking-pipeline.ts`     | GS pick pipeline (lazy-imported by the GS pick contributor)                        |
-| `billboard-pick-pipeline.ts` | Billboard pick pipeline (lazy-imported by the billboard pick contributor)          |
-| `deform-picking-projection.ts` | Lazy skeleton/morph pick projection; reuses the render path's skinning/morph WGSL          |
-| `deformed-vertex.ts`         | O(1) CPU deformation of one vertex/triangle (hotspots, detailed face normals)       |
-| `picking-pipeline.ts`        | Unified cached pipeline/layout owner for every mesh pick variant                   |
-| `picking-shader.ts`          | Unified WGSL generator for basic/detailed, regular/thin, data/adjust variants       |
-| `vat-picking-pipeline.ts`    | Lazy VAT projection layouts/bindings; reuses VAT material WGSL                     |
-| `detailed-picking.ts`        | `enableDetailedPicking` gate + lazy exact-primitive detail decoder                  |
-| `picking-helpers.ts`         | `getPickedNormal`, `getPickedUV` — barycentric interpolation                       |
+| File                           | Role                                                                                 |
+| ------------------------------ | ------------------------------------------------------------------------------------ |
+| `picking-info.ts`              | `PickingInfo` interface + `createEmptyPickingInfo`                                   |
+| `ray.ts`                       | `Ray` interface + `createPickingRay`                                                 |
+| `gpu-picker.ts`                | GPU ID/depth/detail pass, snapshot resolve, detailed surface decode, ignore handling |
+| `pick-contributor.ts`          | `PickContributor` seam — optional pickable entities (GS, billboards) register here   |
+| `gs-picking-pipeline.ts`       | GS pick pipeline (lazy-imported by the GS pick contributor)                          |
+| `billboard-pick-pipeline.ts`   | Billboard pick pipeline (lazy-imported by the billboard pick contributor)            |
+| `deform-picking-projection.ts` | Lazy skeleton/morph pick projection; reuses the render path's skinning/morph WGSL    |
+| `deformed-vertex.ts`           | O(1) CPU deformation of one vertex/triangle (hotspots, detailed face normals)        |
+| `picking-pipeline.ts`          | Unified cached pipeline/layout owner for every mesh pick variant                     |
+| `picking-shader.ts`            | Unified WGSL generator for basic/detailed, regular/thin, data/adjust variants        |
+| `vat-picking-pipeline.ts`      | Lazy VAT projection layouts/bindings; reuses VAT material WGSL                       |
+| `detailed-picking.ts`          | `enableDetailedPicking` gate + lazy exact-primitive detail decoder                   |
+| `picking-helpers.ts`           | `getPickedNormal`, `getPickedUV` — barycentric interpolation                         |

@@ -108,6 +108,56 @@ describe("material cache ownership", () => {
     });
 });
 
+describe("Standard mesh vertex-layout identity", () => {
+    it("keeps forward and geometry pipeline variants separate for different storage layouts", () => {
+        const engine = makeEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const material = createStandardMaterial();
+        const meshA = makeMesh(material);
+        const meshB = makeMesh(material);
+        meshA._gpu = {
+            ...meshA._gpu,
+            _vbLayout: {
+                position: { _stride: 32, _offset: 0 },
+                normal: { _stride: 32, _offset: 12 },
+            },
+            _vbKey: ":storage-a",
+        };
+        meshB._gpu = {
+            ...meshB._gpu,
+            _vbLayout: {
+                position: { _stride: 40, _offset: 4 },
+                normal: { _stride: 40, _offset: 20 },
+            },
+            _vbKey: ":storage-b",
+        };
+
+        const forward = buildStandardMeshRenderables(scene, [meshA, meshB], {});
+        const forwardA = forward.renderables[0]!.bind(engine, signature).pipeline as unknown as GPURenderPipelineDescriptor;
+        const forwardB = forward.renderables[1]!.bind(engine, signature).pipeline as unknown as GPURenderPipelineDescriptor;
+        expect(forwardB).not.toBe(forwardA);
+        expect(forwardA.vertex.buffers).toEqual([
+            { arrayStride: 32, stepMode: "vertex", attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }] },
+            { arrayStride: 32, stepMode: "vertex", attributes: [{ shaderLocation: 1, offset: 12, format: "float32x3" }] },
+        ]);
+        expect(forwardB.vertex.buffers).toEqual([
+            { arrayStride: 40, stepMode: "vertex", attributes: [{ shaderLocation: 0, offset: 4, format: "float32x3" }] },
+            { arrayStride: 40, stepMode: "vertex", attributes: [{ shaderLocation: 1, offset: 20, format: "float32x3" }] },
+        ]);
+
+        const view = createStandardGeometryMaterialView(material, { attachments: [GeometryTextureType.WORLD_NORMAL], emitColor: false });
+        const ownerA = geometryResources();
+        const ownerB = geometryResources();
+        const geometryA = buildStandardGeometryRenderable(scene, meshA, view, ownerA).bind(engine, signature).pipeline as unknown as GPURenderPipelineDescriptor;
+        const geometryB = buildStandardGeometryRenderable(scene, meshB, view, ownerB).bind(engine, signature).pipeline as unknown as GPURenderPipelineDescriptor;
+        expect(geometryB).not.toBe(geometryA);
+        expect(geometryA.vertex.buffers).toEqual(forwardA.vertex.buffers);
+        expect(geometryB.vertex.buffers).toEqual(forwardB.vertex.buffers);
+        ownerA._lifetimeDisposers.forEach((dispose) => dispose());
+        ownerB._lifetimeDisposers.forEach((dispose) => dispose());
+    });
+});
+
 describe("Standard plugin identity", () => {
     it("keeps a geometry-view UBO alive through a main-material swap and releases it with the view packet", () => {
         const engine = makeEngine();
