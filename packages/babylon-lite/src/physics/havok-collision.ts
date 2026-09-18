@@ -71,10 +71,16 @@ export function setPhysicsBodyCollisionEventsEnabled(world: PhysicsWorld, body: 
  * @param cb - Callback invoked with each {@link PhysicsCollisionInfo} as it is read.
  */
 export function onPhysicsCollision(world: PhysicsWorld, cb: (info: PhysicsCollisionInfo) => void): void {
+    if (world._collision) {
+        world._collision.callbacks.push(cb);
+        return;
+    }
     const hknp = world._hknp;
     const events = ensureHavokEventContext(world);
     const startedValue = hknp.EventType.COLLISION_STARTED.value;
     const continuedValue = hknp.EventType.COLLISION_CONTINUED.value;
+    const collision = { callbacks: [cb] };
+    world._collision = collision;
 
     onPhysicsAfterStep(world, () => {
         let addr = hknp.HP_World_GetCollisionEvents(world._hkWorld)[1];
@@ -104,7 +110,13 @@ export function onPhysicsCollision(world: PhysicsWorld, cb: (info: PhysicsCollis
                 impulse: floatBuf[offB + 13 + 3]!,
                 distance: (pointB.x - pointA.x) * normal.x + (pointB.y - pointA.y) * normal.y + (pointB.z - pointA.z) * normal.z,
             };
-            cb(info);
+            const callbackCount = collision.callbacks.length;
+            for (let index = 0; index < callbackCount; index++) {
+                collision.callbacks[index]!(info);
+                if (world._disposed) {
+                    return;
+                }
+            }
             addr = hknp.HP_World_GetNextCollisionEvent(world._hkWorld, addr);
         }
     });

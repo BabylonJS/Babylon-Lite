@@ -409,7 +409,11 @@ struct lightsUniforms { count: u32, _p0: u32, _p1: u32, _p2: u32, lights: array<
         wgslParts.push(src);
     }
 
-    const vsSig = state.usesMorphTargets ? wgsl`(in: VertexIn, @builtin(vertex_index) vertexIndex: u32)` : wgsl`(in: VertexIn)`;
+    const vertexBuiltins = [
+        state.usesMorphTargets ? "@builtin(vertex_index) vertexIndex: u32" : "",
+        state.usesInstanceIndex ? "@builtin(instance_index) instanceIndex: u32" : "",
+    ].filter(Boolean);
+    const vsSig = wgsl`(in: VertexIn${vertexBuiltins.length ? `, ${vertexBuiltins.join(", ")}` : ""})`;
     wgslParts.push(
         wgsl`@vertex\nfn vs_main${vsSig} -> VertexOut {\n` +
             wgsl`    var out: VertexOut;\n` +
@@ -586,7 +590,7 @@ function alphaModeToBlend(mode: number): GPUBlendState | undefined {
         case 2: // ALPHA_COMBINE (standard)
             return {
                 color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
-                alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
+                alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
             };
         case 7: // ALPHA_PREMULTIPLIED
             return {

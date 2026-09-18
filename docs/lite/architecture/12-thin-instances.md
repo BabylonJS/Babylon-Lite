@@ -1,12 +1,12 @@
 # Module: Thin Instances
 
-> Package path: `packages/babylon-lite/src/mesh/` (data + GPU sync + GPU culling), `packages/babylon-lite/src/material/standard/`, `packages/babylon-lite/src/material/pbr/`, and `packages/babylon-lite/src/material/shader/` (rendering)
+> Package path: `packages/babylon-lite/src/mesh/` (data + GPU sync + GPU culling), `packages/babylon-lite/src/material/standard/`, `packages/babylon-lite/src/material/pbr/`, `packages/babylon-lite/src/material/node/`, and `packages/babylon-lite/src/material/shader/` (rendering)
 
 ## Purpose
 
 Thin instances allow a single mesh to be drawn thousands of times with unique per-instance world matrices and optional per-instance RGBA colors, using a single instanced draw call. This is the primary mechanism for rendering large crowds, particle-like effects, and procedural grids. The system is split into three layers — CPU data model, GPU buffer sync, and material integration — designed so that **scenes that don't use thin instances pay zero bundle-size cost**.
 
-Thin instances are supported by all three mesh material families: **Standard**, **PBR**, and **ShaderMaterial** (custom user-WGSL). For ShaderMaterial integration specifics (auto-injected `world0..world3` / `instanceColor` vertex attributes and the user-shader contract) see `24-shader-material.md`.
+Thin instances are supported by all four mesh material families: **Standard**, **PBR**, **NodeMaterial**, and **ShaderMaterial** (custom user-WGSL). For ShaderMaterial integration specifics (auto-injected `world0..world3` / `instanceColor` vertex attributes and the user-shader contract) see `24-shader-material.md`.
 
 A ShaderMaterial draw may explicitly ignore an existing instance-color stream with
 `useThinInstanceColors: false`. This is draw-local: the mesh keeps its colors for other materials, while the
@@ -103,6 +103,14 @@ Call `enableThinInstanceDynamicDrawCount()` before `registerScene()` when a sync
 counts interactively. Its next normal GPU sync creates the stable indirect argument buffer during warm-up,
 so the first later count change does not invalidate cached render bundles.
 
+All thin-instance material families, including Node Material main, transparent,
+and override/shadow bindings, synchronize the active count in their per-frame
+update. A binding initially recorded with a direct draw promotes to one stable
+indirect argument buffer when its count first changes; the visibility epoch
+then invalidates that one stale bundle. Subsequent transitions, including
+nonzero-to-zero and zero-to-nonzero changes within capacity, update only the
+indirect arguments and keep the matrix buffer and cached bundle stable.
+
 `enableThinInstanceWorldBounds()` is a setup-time, tree-shakable opt-in for hand-built thin-instance meshes
 that will be consumed by `createDefaultCamera()` or automatic environment sizing. It expands the prototype's
 object-local box through `mesh.worldMatrix × instanceMatrix` for every active instance and ignores parked
@@ -191,10 +199,12 @@ standardGroupBuilder (standard-material.ts)
   │  passes syncThinInstanceBuffers as tiSync callback
   ▼
 buildStandardMeshRenderables (standard-renderable.ts)
-  │  stores tiSync in the draw closure
+  │  stores the version-gated GPU sync in the per-frame update closure
+  │  binds the stable matrix/color buffers in the draw closure
   ▼
-Per-frame draw
-  │  if (mesh.thinInstances && tiSync):
+Per-frame update + draw
+  │  update: if mesh.thinInstances, upload dirty matrix/color ranges
+  │  draw: if mesh.thinInstances and tiSync:
   │    slot = tiSync(device, ti, pass, slot, hasInstanceColor)
   │    pass.drawIndexed(indexCount, ti.count)  ← instanced draw
   ▼
@@ -231,18 +241,26 @@ This avoids shifting the entire array, keeping removal O(1). Callers must be awa
 
 ### Version Tracking
 
-| Version field      | Bumped by                                                                                                  | Checked by                                |
-| ------------------ | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Version field      | Bumped by                                                                                                                      | Checked by                                      |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
 | `_version`         | Matrix/count helpers plus color helpers (color-only changes leave the matrix dirty range empty but still dirty static shadows) | `syncThinInstanceBuffers` (matrix sync/version) |
-| `_colorVersion`    | `setThinInstanceColors`                                                                                    | `syncThinInstanceBuffers` (color upload)  |
-| `_gpuVersion`      | `syncThinInstanceBuffers` (after matrix upload)                                                            | —                                         |
-| `_colorGpuVersion` | `syncThinInstanceBuffers` (after color upload)                                                             | —                                         |
+| `_colorVersion`    | `setThinInstanceColors`                                                                                                        | `syncThinInstanceBuffers` (color upload)        |
+| `_gpuVersion`      | `syncThinInstanceBuffers` (after matrix upload)                                                                                | —                                               |
+| `_colorGpuVersion` | `syncThinInstanceBuffers` (after color upload)                                                                                 | —                                               |
 
 GPU upload is skipped when `_version === _gpuVersion` (or `_colorVersion === _colorGpuVersion`), avoiding redundant `writeBuffer` calls for static instances.
 `setThinInstanceDrawCount` does not mark either data stream dirty; draw-argument synchronization observes
 `count` independently. It advances the existing thin-instance version without marking matrix/color ranges
 dirty, so shadow caches observe the change while GPU synchronization performs no attribute upload. Static
 ESM, PCF, and CSM maps therefore redraw only when one of their actual casters changes.
+
+Opaque main-color and shadow draws are normally recorded into cached render bundles. Recording-time
+`setVertexBuffer` calls retain the GPU buffer handle, not a snapshot of its contents, so runtime matrix
+mutation must upload through that same buffer from the renderable's per-frame `update` closure before either
+bundle executes. Uploading only from the draw closure is incorrect: that closure does not run again while a
+cached bundle is reused. The update remains version-gated, and a same-capacity mutation must not recreate the
+buffer or invalidate/re-record the bundle. Buffer growth or usage changes still follow the existing
+visibility-epoch invalidation path because those operations replace the captured handle.
 
 ---
 
@@ -292,14 +310,14 @@ The per-binding cull lifecycle is factored into one shared module, `packages/bab
 
 Cull state is owned by each `DrawBinding`, not by `ThinInstanceData`, because the same mesh can be rendered by multiple render tasks/cameras. Each binding owns:
 
-| Resource              | Usage     | Purpose   |
+| Resource | Usage | Purpose |
 | --------------------- | --------- | --------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| source matrix buffer  | `VERTEX   | COPY_DST  | STORAGE`                                                                     | Full CPU-authored instance matrix list                                      |
-| source color buffer   | `VERTEX   | COPY_DST  | STORAGE`                                                                     | Full CPU-authored color list, when present                                  |
-| visible matrix buffer | `VERTEX   | STORAGE`  | Compacted visible matrices written by compute and read by the vertex shader  |
-| visible color buffer  | `VERTEX   | STORAGE`  | Compacted visible colors, when present                                       |
-| indirect args buffer  | `INDIRECT | STORAGE   | COPY_DST`                                                                    | `[indexCount, visibleInstanceCount, firstIndex, baseVertex, firstInstance]` |
-| params uniform        | `UNIFORM  | COPY_DST` | Six frustum planes, mesh world matrix, local bounding sphere, instance count |
+| source matrix buffer | `VERTEX   | COPY_DST  | STORAGE` | Full CPU-authored instance matrix list |
+| source color buffer | `VERTEX   | COPY_DST  | STORAGE` | Full CPU-authored color list, when present |
+| visible matrix buffer | `VERTEX   | STORAGE` | Compacted visible matrices written by compute and read by the vertex shader |
+| visible color buffer | `VERTEX   | STORAGE` | Compacted visible colors, when present |
+| indirect args buffer | `INDIRECT | STORAGE   | COPY_DST` | `[indexCount, visibleInstanceCount, firstIndex, baseVertex, firstInstance]` |
+| params uniform | `UNIFORM  | COPY_DST` | Six frustum planes, mesh world matrix, local bounding sphere, instance count |
 
 ### Per-Frame Flow
 
@@ -571,15 +589,18 @@ Scene 16 chunk breakdown: `scene16.js` (18.1 KB) + `standard-renderable` (22.5 K
 ```
 1. standardGroupBuilder detects mesh.thinInstances
 2. Dynamically imports thin-instance-gpu.ts (cached after first load)
-3. Passes syncThinInstanceBuffers as tiSync to buildStandardMeshRenderables
-4. For each mesh with thinInstances:
-   a. tiSync checks _version vs _gpuVersion
+3. Retains the shared sync helper for per-frame upload and draw-time binding
+4. For each mesh with thinInstances, before cached main/shadow bundles execute:
+   a. the renderable update checks _version vs _gpuVersion
    b. Creates / resizes GPU buffer if needed (capacity x 64 bytes for matrices)
    c. writeBuffer from CPU Float32Array → GPU
    d. Bumps _gpuVersion = _version
-   e. setVertexBuffer(slot, matrixBuffer); slot++
-   f. If hasColor: same flow for color buffer (capacity x 16 bytes); slot++
-   g. drawIndexed(indexCount, ti.count), or drawIndexedIndirect(argsBuffer, 0) after GPU culling
+5. During bundle recording or direct transparent drawing:
+   a. setVertexBuffer(slot, stable matrixBuffer); slot++
+   b. If hasColor: bind the stable color buffer; slot++
+   c. drawIndexed(indexCount, ti.count), or drawIndexedIndirect(argsBuffer, 0) after GPU culling
+6. On steady opaque frames, the cached main and shadow bundles reuse those buffer handles and consume
+   the contents uploaded by step 4 without re-recording.
 ```
 
 ### Mutation (Runtime)
@@ -638,6 +659,41 @@ Scene 17 (`scene17-pbr-std-thin-instances`) validates PBR thin instances: a PBR 
 
 ---
 
+## Node Material Integration
+
+Node materials opt into thin instances with
+`parseNodeMaterialFromSnippet(engine, id, { hasInstances: true })`. When the
+graph reaches an `InstancesBlock`, its world output declares four
+`float32x4`, step-mode `instance` attributes and evaluates:
+
+```wgsl
+meshU.world * mat4x4<f32>(in.world0, in.world1, in.world2, in.world3)
+```
+
+The block's `instanceID` output reads `@builtin(instance_index)` and converts it
+to the Babylon-compatible `f32` graph value. If instance support is disabled,
+the block returns `meshU.world` and `0.0`; neither the attributes nor the
+builtin are emitted.
+
+The renderable uses the shared thin-instance GPU helper in two distinct phases:
+
+- each opaque packet update and each transparent renderable update performs the
+  version-gated upload before rendering;
+- bundle recording/direct drawing binds the resulting stable matrix buffer and
+  issues `drawIndexed(indexCount, thinInstances.count)`.
+
+This separation is required because opaque Node Material main and shadow
+bundles are cached: their draw closures record once, while their update
+closures continue to run every frame. Both passes bind the same matrix buffer,
+so one pre-render upload makes the current contents visible to both without
+separate dirty flags or duplicate writes. The GPU sync module is dynamically
+imported while parsing only when `hasInstances` is enabled and is retained on
+that material. Consequently an ordinary node-material scene does not include
+thin-instance upload code. Per-instance colors and GPU culling are not part of
+the node-material opt-in.
+
+---
+
 ## Babylon.js Equivalence Map
 
 | Babylon Lite                                 | Babylon.js                                                                                         |
@@ -686,7 +742,7 @@ Scene 17 (`scene17-pbr-std-thin-instances`) validates PBR thin instances: a PBR 
 | Swap-remove correctness | `removeThinInstance(i)` → last instance moves to slot `i`, count decrements        |
 | Version skip            | Static instances: GPU upload skipped when `_version === _gpuVersion`               |
 | Color independence      | Matrix mutation does not trigger color re-upload (separate version counters)       |
-| Count-only draw update  | Active count changes update draw args without dirtying matrix or color buffers      |
+| Count-only draw update  | Active count changes update draw args without dirtying matrix or color buffers     |
 | Zero-cost loading       | Scenes without thin instances never fetch `thin-instance-gpu.js` chunk             |
 
 ---
@@ -705,6 +761,9 @@ Scene 17 (`scene17-pbr-std-thin-instances`) validates PBR thin instances: a PBR 
 | `src/material/mesh-features.ts`                            | `MSH_HAS_THIN_INSTANCES`, `MSH_HAS_INSTANCE_COLOR` feature flag constants                          |
 | `src/material/pbr/pbr-renderable.ts`                       | PBR thin-instance detection, fragment/culling loading, instanced draw                              |
 | `src/material/pbr/pbr-pipeline.ts`                         | PBR pipeline vertex buffer layouts for thin instances                                              |
+| `src/material/node/blocks/instances-block.ts`              | Node graph instance-world attributes and `instanceID` builtin                                      |
+| `src/material/node/node-material.ts`                       | Node-material thin-instance opt-in and lazy GPU-sync loading                                       |
+| `src/material/node/node-renderable.ts`                     | Node-material matrix binding and instanced draw                                                    |
 | `src/shader/fragments/thin-instance-fragment.ts`           | ShaderFragment for instance matrix/color — shared by PBR and Standard                              |
 | `lab/lite/src/lite/scene16.ts`                             | Reference/check scene: 40x40x40 = 64K colored cubes with opt-in GPU culling                        |
 | `lab/lite/src/lite/scene17.ts`                             | Reference/check scene: PBR + Standard thin instances in one scene, both culling-enabled            |

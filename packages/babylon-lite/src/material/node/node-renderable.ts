@@ -56,6 +56,10 @@ interface NodePacket {
     _lastWorldVersion: number;
     _lastReceivesShadow: number;
     _lastLightsCount: number;
+    _drawArgs?: GPUBuffer | null;
+    _disposed?: boolean;
+    _owner?: NodePacket[];
+    _onOwnerEmpty?: () => void;
 }
 
 type NodeRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
@@ -108,6 +112,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
               })
             : material._compile;
         const meshBGL = compile._meshBGL;
+        let opaqueRenderable: Renderable | undefined;
 
         // Node UBO is per-material (same across all meshes using it).
         let nodeUBO: GPUBuffer | null = null;
@@ -116,6 +121,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
             writeNodeUBO(engine, nodeUBO, material);
             material._nodeUBO = nodeUBO;
         }
+        let livePackets = matMeshes.length;
 
         const _packMeshWorld = engine._makePackMeshWorld?.(scene as SceneContext) ?? packMat4IntoF32;
         const packets: NodePacket[] = [];
@@ -174,7 +180,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
             }
             const _meshBG = device.createBindGroup({ label: "node-mesh-bg", layout: meshBGL, entries });
 
-            packets.push({
+            const packet: NodePacket = {
                 _mesh,
                 _meshUBO,
                 _meshBG,
@@ -182,11 +188,49 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                 _lastWorldVersion: _mesh.worldMatrixVersion,
                 _lastReceivesShadow: recv,
                 _lastLightsCount: scene.lights.length,
-            });
+            };
+            packets.push(packet);
+            const map = materialOverride ? scene._meshAuxDisposables : scene._meshDisposables;
+            const disposers = map.get(_mesh) ?? [];
+            let resourcesDisposed = false;
+            disposers.push(
+                Object.assign(
+                    () => {
+                        packet._disposed = true;
+                        const owner = packet._owner;
+                        if (owner) {
+                            const index = owner.indexOf(packet);
+                            if (index >= 0) {
+                                owner.splice(index, 1);
+                            }
+                            packet._owner = undefined;
+                            if (owner.length === 0 && opaqueRenderable) {
+                                packet._onOwnerEmpty?.();
+                            }
+                        } else {
+                            packet._onOwnerEmpty?.();
+                        }
+                        if (resourcesDisposed) {
+                            return;
+                        }
+                        resourcesDisposed = true;
+                        _meshUBO.destroy();
+                        if (--livePackets === 0 && nodeUBO) {
+                            nodeUBO.destroy();
+                            if (material._nodeUBO === nodeUBO) {
+                                material._nodeUBO = null;
+                            }
+                        }
+                    },
+                    { p: packet }
+                )
+            );
+            map.set(_mesh, disposers);
         }
 
         // Vertex attribute order (matches compile.state — captured on material).
         const attrNames = material._vertexAttrNames;
+        const hasInstanceWorld = attrNames.includes("world0");
 
         const updatePacketUBO = (pkt: NodePacket): void => {
             const recv = pkt._mesh.receiveShadows ? 1 : 0;
@@ -215,15 +259,29 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
             }
         };
 
+        const syncPacketThinInstances = (pkt: NodePacket): void => {
+            const ti = pkt._mesh.thinInstances;
+            if (ti && hasInstanceWorld) {
+                pkt._drawArgs = material._syncThinInstanceForDraw!(engine, ti, false, pkt._mesh._gpu.indexCount);
+            }
+        };
+
         const drawPacket = (pass: NodeRenderPass, pkt: NodePacket): void => {
             const g = pkt._mesh._gpu;
+            const ti = pkt._mesh.thinInstances;
+            syncPacketThinInstances(pkt);
             for (let i = 0; i < attrNames.length; i++) {
-                const buf = getAttrBuffer(engine, g, attrNames[i]!);
+                const name = attrNames[i]!;
+                const buf = name.startsWith("world") && ti?._gpuBuffer ? ti._gpuBuffer : getAttrBuffer(engine, g, name);
                 pass.setVertexBuffer(i, buf);
             }
             pass.setIndexBuffer(g.indexBuffer, g.indexFormat);
             pass.setBindGroup(1, pkt._meshBG);
-            pass.drawIndexed(g.indexCount);
+            if (pkt._drawArgs) {
+                pass.drawIndexedIndirect(pkt._drawArgs, 0);
+            } else {
+                pass.drawIndexed(g.indexCount, hasInstanceWorld ? ti?.count : undefined);
+            }
         };
 
         const isTransparent = !noColorOutput && !esmShadowOutput && material._needsAlphaBlending;
@@ -238,8 +296,12 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                 const cz = pkt._mesh.position?.z ?? wm[14]!;
                 const sortCenter: [number, number, number] = [cx, cy, cz];
                 const _baseUpdate = (): void => {
+                    if (pkt._disposed || pkt._mesh.visible === false || (!materialOverride && pkt._mesh.material !== material)) {
+                        return;
+                    }
                     updatePacketUBO(pkt);
                     updateNodeUBO();
+                    syncPacketThinInstances(pkt);
                     // Update world center for sorting.
                     const m = pkt._mesh.worldMatrix as unknown as ArrayLike<number>;
                     sortCenter[0] = m[12]!;
@@ -251,6 +313,9 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                 };
                 const update = engine._wrapRenderableForFO?.(_baseUpdate, scene as SceneContext, _invalidate) ?? _baseUpdate;
                 const draw = (pass: NodeRenderPass): number => {
+                    if (pkt._disposed || pkt._mesh.visible === false || (!materialOverride && pkt._mesh.material !== material)) {
+                        return 0;
+                    }
                     drawPacket(pass, pkt);
                     return 1;
                 };
@@ -263,15 +328,29 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                         return { renderable: rTrans, pipeline: compile._pipeline, update, draw };
                     },
                 };
+                pkt._onOwnerEmpty = () => {
+                    detachRenderable(scene, material, rTrans);
+                };
                 renderables.push(rTrans);
             }
         } else {
             // Opaque: batch all meshes into one renderable for state efficiency.
+            if (packets.length > 1) {
+                for (const packet of packets) {
+                    packet._owner = packets;
+                }
+            }
             const _baseUpdate = (): void => {
                 for (const pkt of packets) {
+                    if (pkt._disposed || pkt._mesh.visible === false || (!materialOverride && pkt._mesh.material !== material)) {
+                        continue;
+                    }
                     updatePacketUBO(pkt);
+                    syncPacketThinInstances(pkt);
                 }
-                updateNodeUBO();
+                if (packets.length) {
+                    updateNodeUBO();
+                }
             };
             const _invalidate = (): void => {
                 for (const pkt of packets) {
@@ -282,6 +361,9 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
             const draw = (pass: NodeRenderPass): number => {
                 let draws = 0;
                 for (const pkt of packets) {
+                    if (pkt._disposed || pkt._mesh.visible === false || (!materialOverride && pkt._mesh.material !== material)) {
+                        continue;
+                    }
                     drawPacket(pass, pkt);
                     draws++;
                 }
@@ -290,10 +372,17 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
             const rOpaque: Renderable = {
                 order: 100,
                 isTransparent: false,
+                mesh: packets.length === 1 ? packets[0]!._mesh : undefined,
                 bind() {
                     return { renderable: rOpaque, pipeline: compile._pipeline, update, draw };
                 },
             };
+            opaqueRenderable = rOpaque;
+            for (const packet of packets) {
+                packet._onOwnerEmpty = () => {
+                    detachRenderable(scene, material, rOpaque);
+                };
+            }
             renderables.push(rOpaque);
         }
     }
@@ -303,6 +392,18 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
     };
 
     return { renderables, rebuildSingle };
+}
+
+function detachRenderable(scene: SceneContext, material: NodeMaterial, renderable: Renderable): void {
+    const renderableIndex = scene._renderables.indexOf(renderable);
+    if (renderableIndex >= 0) {
+        scene._renderables.splice(renderableIndex, 1);
+    }
+    const output = scene._groups.get(material._buildGroup)?.o;
+    const outputIndex = output?.indexOf(renderable) ?? -1;
+    if (outputIndex >= 0) {
+        output!.splice(outputIndex, 1);
+    }
 }
 
 // Per-gpu-object cached zero buffers for attributes that a NodeMaterial's

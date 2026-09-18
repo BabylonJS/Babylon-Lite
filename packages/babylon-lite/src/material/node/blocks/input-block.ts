@@ -11,6 +11,7 @@
 
 import type { BlockEmitter, NodeBuildState, NodeEmitContext, NodeExpr, NodeValueType, Stage, NodeBlock } from "../node-types.js";
 import { WGSL } from "../node-types.js";
+import { nodeUniformName } from "../node-parser.js";
 import { wgsl } from "../../../shader/wgsl.js";
 
 type BjsType = number; // NodeMaterialBlockConnectionPointTypes
@@ -121,8 +122,7 @@ function emitUniform(block: NodeBlock, state: NodeBuildState, ctx: NodeEmitConte
     // Determine the WGSL type. BJS serializes the port type under `type`.
     const portType = (block.serialized["type"] as BjsType | undefined) ?? 0x10;
     const type = ctx.bjsTypeToNodeType(portType, "InputBlock");
-    // UBO field name — use block name (must be unique; parser enforces via namedInputs key).
-    const fieldName = ctx.sanitize(block.name || `input${block.id}`);
+    const fieldName = nodeUniformName(ctx.graph, block, ctx.sanitize);
     // Dedup.
     if (!state.nodeUboFields.find((f) => f._name === fieldName)) {
         state.nodeUboFields.push({ _name: fieldName, _type: WGSL[type] as any });

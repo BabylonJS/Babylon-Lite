@@ -16,6 +16,7 @@ import type { SceneNode } from "../scene/scene-node.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { HavokFloatingOriginContext, WorldRegion } from "./havok-floating-origin.js";
+import type { PhysicsCollisionInfo } from "./havok-collision.js";
 import { invertMat4 } from "../math/invert-mat4.js";
 import { multiplyMat4 } from "../math/multiply-mat4.js";
 import { createScalingMat4 } from "../math/create-scaling-mat4.js";
@@ -225,6 +226,10 @@ export interface PhysicsWorld {
     _thin?: HavokThinInstanceContext;
     /** @internal Lazily installed body-aware event lifetime seam. */
     _events?: HavokEventContext;
+    /** @internal Lazily installed shared collision-event dispatcher. */
+    _collision?: HavokCollisionContext;
+    /** @internal Set before native disposal so callbacks and stale step closures stop immediately. */
+    _disposed?: boolean;
     /** @internal Callbacks run after each physics step (post body→node sync, pre-render). */
     _afterStep?: ((timestep: number) => void)[];
     /** @internal Lazily-created Havok query collector, cached by the standalone `physics/havok-queries.ts` module. */
@@ -240,9 +245,15 @@ export type ResolvedPhysicsBodyInstance = [PhysicsBody, any, number];
 export interface HavokEventContext {
     begin(): void;
     end(): void;
+    add(body: PhysicsBody): void;
     remove(body: PhysicsBody): boolean;
     resolve(nativeId: unknown): ResolvedPhysicsBodyInstance | null;
     dispose(): void;
+}
+
+/** @internal Installed only when collision events are enabled. */
+export interface HavokCollisionContext {
+    readonly callbacks: ((info: PhysicsCollisionInfo) => void)[];
 }
 
 /** @internal Installed only when thin-instance physics is explicitly enabled. */
@@ -253,10 +264,14 @@ export interface HavokThinInstanceContext {
     to(body: PhysicsBody): boolean;
     target(body: PhysicsBody): boolean;
     count(body: PhysicsBody): number | undefined;
+    instance(body: PhysicsBody, index: number): any | undefined;
     resolve(nativeId: unknown): ResolvedPhysicsBodyInstance | null;
     com(body: PhysicsBody, nativeBody: any, localCenter: readonly [number, number, number]): Vec3 | undefined;
     matrix(body: PhysicsBody, nativeBody: any): Mat4 | undefined;
     impulse(body: PhysicsBody, impulse: Vec3): boolean;
+    mass(body: PhysicsBody, properties: PhysicsMassProperties, shapeLessInertiaFromMass?: boolean): boolean;
+    lock(body: PhysicsBody, requestedMask: number): boolean;
+    unlock(body: PhysicsBody, requestedMask: number): boolean;
     dispose(): void;
 }
 
@@ -348,6 +363,9 @@ export async function enableHavokThinInstancePhysics(world: PhysicsWorld): Promi
 const MAX_STEP_MS = 100;
 
 function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
+    if (world._disposed) {
+        return;
+    }
     const { _hknp: hknp, _hkWorld: hkWorld, _bodies: bodies } = world;
     // Step size in ms: the world's own fixed step when set (`> 0`), otherwise the live per-frame delta
     // the scene supplies — which the render loop already resolves as `scene.fixedDeltaMs > 0 ?
@@ -403,6 +421,9 @@ function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
         try {
             for (let i = 0; i < cbs.length; i++) {
                 cbs[i]!(dt);
+                if (world._disposed) {
+                    break;
+                }
             }
         } finally {
             events?.end();
@@ -600,6 +621,7 @@ export function createPhysicsBody(world: PhysicsWorld, node: SceneNode, motionTy
     const thinBody = world._thin?.create(node, motionType, startsAsleep);
     if (thinBody) {
         world._bodies.push(thinBody);
+        world._events?.add(thinBody);
         return thinBody;
     }
     const hkMotion =
@@ -633,6 +655,7 @@ export function createPhysicsBody(world: PhysicsWorld, node: SceneNode, motionTy
     }
 
     world._bodies.push(body);
+    world._events?.add(body);
     return body;
 }
 
@@ -1140,6 +1163,9 @@ export function setPhysicsShapeMaterial(world: PhysicsWorld, shape: PhysicsShape
  *   so it tumbles around its real centre.
  */
 export function setPhysicsBodyMass(world: PhysicsWorld, body: PhysicsBody, mass: number, centerOfMass?: Vec3): void {
+    if (world._thin?.mass(body, { mass, centerOfMass }, true)) {
+        return;
+    }
     // Match Babylon.js HavokPlugin._internalUpdateMassProperties: for a body with a shape, start from
     // the shape-derived mass properties (correct anisotropic inertia tensor + centre of mass +
     // orientation) and override only the mass scalar. Writing a placeholder isotropic inertia would
@@ -1162,6 +1188,9 @@ export function setPhysicsBodyMass(world: PhysicsWorld, body: PhysicsBody, mass:
  * @param properties - Mass-property overrides.
  */
 export function setPhysicsBodyMassProperties(world: PhysicsWorld, body: PhysicsBody, properties: PhysicsMassProperties): void {
+    if (world._thin?.mass(body, properties)) {
+        return;
+    }
     const massProps = buildMassProperties(world, body);
     if (properties.centerOfMass) {
         massProps[0] = [properties.centerOfMass.x, properties.centerOfMass.y, properties.centerOfMass.z];
@@ -1217,6 +1246,45 @@ export function applyPhysicsImpulse(world: PhysicsWorld, body: PhysicsBody, impu
     hknp.HP_Body_ApplyImpulse(body._hkBody, [loc.x, loc.y, loc.z], [impulse.x, impulse.y, impulse.z]);
 }
 
+function resolveBodyInstance(world: PhysicsWorld, body: PhysicsBody, instanceIndex: number): any {
+    if (body._world !== world) {
+        throw new Error("Physics body does not belong to this world.");
+    }
+    if (!world._bodies.includes(body)) {
+        throw new Error("Physics body has been removed from this world.");
+    }
+    if (!Number.isInteger(instanceIndex) || instanceIndex < 0) {
+        throw new RangeError("Physics body instance index must be a nonnegative integer.");
+    }
+    const count = world._thin?.count(body);
+    if (count === undefined) {
+        if (instanceIndex !== 0) {
+            throw new RangeError("Ordinary physics bodies only have instance index 0.");
+        }
+        return body._hkBody;
+    }
+    const nativeBody = world._thin!.instance(body, instanceIndex);
+    if (!nativeBody) {
+        throw new RangeError(`Physics body instance index ${instanceIndex} is out of range (count: ${count}).`);
+    }
+    return nativeBody;
+}
+
+/** Applies an impulse to exactly one native body represented by a thin-instance physics body. */
+export function applyPhysicsBodyInstanceImpulse(world: PhysicsWorld, body: PhysicsBody, instanceIndex: number, impulse: Vec3, location: Vec3): void {
+    const nativeBody = resolveBodyInstance(world, body, instanceIndex);
+    world._hknp.HP_Body_ApplyImpulse(nativeBody, [location.x, location.y, location.z], [impulse.x, impulse.y, impulse.z]);
+}
+
+/** Writes one physics body instance's current linear velocity into `result`. */
+export function getPhysicsBodyInstanceLinearVelocityToRef(world: PhysicsWorld, body: PhysicsBody, instanceIndex: number, result: Vec3): void {
+    const nativeBody = resolveBodyInstance(world, body, instanceIndex);
+    const velocity = world._hknp.HP_Body_GetLinearVelocity(nativeBody)[1];
+    result.x = velocity[0];
+    result.y = velocity[1];
+    result.z = velocity[2];
+}
+
 /**
  * Set a body's linear velocity (m/s) directly — e.g. to impart a throw velocity on release.
  */
@@ -1257,6 +1325,9 @@ export function lockPhysicsBodyRotationAxes(world: PhysicsWorld, body: PhysicsBo
     if (requestedMask === 0) {
         return;
     }
+    if (world._thin?.lock(body, requestedMask)) {
+        return;
+    }
     const previousMask = body._rotationLockMask ?? 0;
     const mask = previousMask | requestedMask;
     if (mask === previousMask) {
@@ -1270,16 +1341,16 @@ export function lockPhysicsBodyRotationAxes(world: PhysicsWorld, body: PhysicsBo
         if (result[0] !== ok) {
             throw new Error("Failed to read physics body mass properties.");
         }
-        source = cloneMassProperties(result[1]);
+        source = _cloneMassProperties(result[1]);
     }
-    const massProperties = cloneMassProperties(source!);
-    applyBodyRotationLocks(massProperties, mask);
+    const massProperties = _cloneMassProperties(source!);
+    _applyBodyRotationLocks(massProperties, mask);
     world._hknp.HP_Body_SetMassProperties(body._hkBody, massProperties);
     body._rotationLockMask = mask;
     body._rotationLockSource = source;
     body._massPropertiesTransform ??= (properties) => {
-        body._rotationLockSource = cloneMassProperties(properties);
-        applyBodyRotationLocks(properties, body._rotationLockMask ?? 0);
+        body._rotationLockSource = _cloneMassProperties(properties);
+        _applyBodyRotationLocks(properties, body._rotationLockMask ?? 0);
     };
 }
 
@@ -1289,13 +1360,16 @@ export function lockPhysicsBodyRotationAxes(world: PhysicsWorld, body: PhysicsBo
  */
 export function unlockPhysicsBodyRotationAxes(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis[]): void {
     const requestedMask = physicsRotationAxesMask(axes);
+    if (world._thin?.unlock(body, requestedMask)) {
+        return;
+    }
     const previousMask = body._rotationLockMask ?? 0;
     const mask = previousMask & ~requestedMask;
     if (mask === previousMask) {
         return;
     }
-    const massProperties = cloneMassProperties(body._rotationLockSource!);
-    applyBodyRotationLocks(massProperties, mask);
+    const massProperties = _cloneMassProperties(body._rotationLockSource!);
+    _applyBodyRotationLocks(massProperties, mask);
     world._hknp.HP_Body_SetMassProperties(body._hkBody, massProperties);
     body._rotationLockMask = mask || undefined;
     if (mask === 0) {
@@ -1320,11 +1394,13 @@ function physicsRotationAxesMask(axes: readonly PhysicsRotationAxis[]): number {
     return mask;
 }
 
-function cloneMassProperties(massProperties: any[]): any[] {
+/** @internal */
+export function _cloneMassProperties(massProperties: any[]): any[] {
     return [[...massProperties[0]], massProperties[1], [...massProperties[2]], [...massProperties[3]]];
 }
 
-function applyBodyRotationLocks(massProperties: any[], mask: number): void {
+/** @internal */
+export function _applyBodyRotationLocks(massProperties: any[], mask: number): void {
     if (mask === 0) {
         return;
     }
@@ -1598,6 +1674,10 @@ export function getPhysicsBodyDebugGeometry(world: PhysicsWorld, body: PhysicsBo
  * @param world - The physics world to dispose.
  */
 export function disposePhysics(world: PhysicsWorld): void {
+    if (world._disposed) {
+        return;
+    }
+    world._disposed = true;
     // Stop per-frame stepping before any native world is released so a still-queued
     // _beforeRender callback can't step a freed world (use-after-free in Havok WASM).
     world._stopStep?.();
@@ -1607,8 +1687,10 @@ export function disposePhysics(world: PhysicsWorld): void {
     // onPhysicsCollision). They read the native world via HP_World_GetCollisionEvents,
     // so they must not survive it — clear them alongside the step callback.
     world._afterStep = undefined;
+    world._collision = undefined;
 
     if (world._fo) {
+        world._events?.dispose();
         world._fo.dispose(world);
         return;
     }

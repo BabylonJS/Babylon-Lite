@@ -412,6 +412,7 @@ export { enableMaterialTracking } from "./material/observable-material.js";
 // ─── Loaders ─────────────────────────────────────────────────────────
 export { loadGltf } from "./loader-gltf/load-gltf.js";
 export { enableGltfCameras } from "./loader-gltf/gltf-feature-camera.js";
+export { enableGltfCpuTangents } from "./loader-gltf/gltf-feature-cpu-tangents.js";
 export type { AssetContainer } from "./asset-container.js";
 export { getContainerMeshes } from "./asset-container.js";
 export { selectVariant, getVariantNames, resetVariant } from "./loader-gltf/material-variants.js";
@@ -473,6 +474,7 @@ export {
     setBoneScaling,
     setBoneVisible,
     setBonePoseDeferred,
+    setBoneWorldPoseDeferred,
     bakeSkeleton,
     clearBoneOverride,
 } from "./skeleton/bone-control.js";
@@ -926,8 +928,10 @@ export {
     setPhysicsBodyMass,
     setPhysicsBodyMassProperties,
     applyPhysicsImpulse,
+    applyPhysicsBodyInstanceImpulse,
     setPhysicsBodyLinearVelocity,
     getPhysicsBodyLinearVelocity,
+    getPhysicsBodyInstanceLinearVelocityToRef,
     getPhysicsBodyAngularVelocity,
     setPhysicsBodyAngularVelocity,
     lockPhysicsBodyRotationAxes,

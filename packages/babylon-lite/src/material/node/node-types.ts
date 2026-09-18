@@ -188,6 +188,8 @@ export interface NodeBuildState {
     /** When false (default), InstancesBlock passes through the uniform world
      *  matrix. Set to true when thin-instance attributes are bound. */
     hasInstances: boolean;
+    /** Set by InstancesBlock.instanceID. Adds the WGSL vertex instance builtin only for graphs that read it. */
+    usesInstanceIndex: boolean;
     /** @internal Populated by {@link GeometryTextureOutputBlock} during a
      *  geometry-pass re-emit (see node-geometry-view.ts). Maps each CONNECTED
      *  geometry input to its already-resolved WGSL expression so the node

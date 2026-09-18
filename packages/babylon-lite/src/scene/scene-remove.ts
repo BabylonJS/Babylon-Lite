@@ -110,6 +110,7 @@ declare const _removeMatchesAdd: _AssertTrue<_ParamsEqual<Parameters<typeof addT
 interface DetachablePacket {
     _disposed: boolean;
     _owner?: DetachablePacket[];
+    _onOwnerEmpty?: () => void;
 }
 type DetachableDisposer = (() => void) & { p?: DetachablePacket };
 
@@ -133,6 +134,11 @@ function retireMeshTeardown(scene: SceneContext, teardown: (() => void)[]): void
                     owner.splice(index, 1);
                 }
                 packet._owner = undefined;
+                if (owner.length === 0) {
+                    packet._onOwnerEmpty?.();
+                }
+            } else {
+                packet._onOwnerEmpty?.();
             }
         }
     }
