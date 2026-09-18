@@ -5,7 +5,11 @@ import {
     normalizeKhrInteractivityRuntimeValue,
 } from "babylon-lite";
 
+import type { AnimationGroup } from "../animations/animation.js";
+import type { Camera } from "../cameras/cameras.js";
 import { unsupported } from "../error.js";
+import type { Material } from "../materials/materials.js";
+import type { Node } from "../node/node.js";
 
 const KHR_INTERACTIVITY_UNSUPPORTED =
     "KHR_interactivity depends on Babylon.js FlowGraph block, connection, context, serialization, and glTF-reference models. Lite's flow-graph runtime uses a different graph model, so a stable cross-model adapter requires a broader loader/runtime design.";
@@ -484,10 +488,10 @@ export type KhrInteractivityRootCollection = "nodes" | "animations" | "cameras" 
 
 export interface IKHRInteractivitySerializerContext {
     getNodeCount(): number;
-    getNodeIndex(node: unknown): number | undefined;
-    getAnimationIndex(animation: unknown): number | undefined;
-    getCameraIndex(camera: unknown): number | undefined;
-    getMaterialIndex(material: unknown): number | undefined;
+    getNodeIndex(node: Node): number | undefined;
+    getAnimationIndex(animation: AnimationGroup): number | undefined;
+    getCameraIndex(camera: Camera): number | undefined;
+    getMaterialIndex(material: Material): number | undefined;
     getRootIndex?(collection: KhrInteractivityRootCollection, entity: object): number | undefined;
     setNodeExtension(nodeIndex: number, extensionName: string, value: unknown): void;
 }

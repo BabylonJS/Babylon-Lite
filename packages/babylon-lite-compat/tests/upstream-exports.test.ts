@@ -7,6 +7,7 @@ import {
     RegisterEnginesWebGPUExtensionsEngineTexture2DArrayImageSource,
     ValidateFlowGraph,
 } from "../src/index";
+import type { AnimationGroup, Camera, Material, Node } from "../src/index";
 import { LiteCompatError } from "../src/error";
 import type { IGLTFToFlowGraphMapping } from "../src/loading/unsupported-khr-interactivity";
 
@@ -169,5 +170,22 @@ describe("upstream export coverage", () => {
         expect(() => GLTF2._CaptureKHRInteractivityRuntimeInputDefaults({})).toThrow(/FlowGraph block/);
         expect(() => GLTF2.CreateKHRInteractivityExportPlan([])).toThrow(/glTF serializer/);
         expect(() => new GLTF2.KHRInteractivityExportPlan([])).toThrow(/glTF serializer/);
+    });
+
+    it("preserves serializer context callback types", () => {
+        const nodeIndices = new Map<Node, number>();
+        const animationIndices = new Map<AnimationGroup, number>();
+        const cameraIndices = new Map<Camera, number>();
+        const materialIndices = new Map<Material, number>();
+        const context: GLTF2.IKHRInteractivitySerializerContext = {
+            getNodeCount: () => nodeIndices.size,
+            getNodeIndex: (node) => nodeIndices.get(node),
+            getAnimationIndex: (animation) => animationIndices.get(animation),
+            getCameraIndex: (camera) => cameraIndices.get(camera),
+            getMaterialIndex: (material) => materialIndices.get(material),
+            setNodeExtension: () => undefined,
+        };
+
+        expect(context.getNodeCount()).toBe(0);
     });
 });
