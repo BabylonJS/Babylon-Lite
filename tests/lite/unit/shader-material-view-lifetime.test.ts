@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import type { MaterialView } from "../../../packages/babylon-lite/src/material/material";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import type { ShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
 import { createShaderMaterial, setShaderFloat } from "../../../packages/babylon-lite/src/material/shader/shader-material";
@@ -136,7 +137,7 @@ describe("ShaderMaterial private view lifetime", () => {
         const buffer = material._shaderCustomUbo!;
         expect(borrowed._shaderCustomUbo).toBe(buffer);
         expect(Object.hasOwn(borrowed, "_shaderCustomUbo")).toBe(false);
-        releaseMaterialViewGpu(f.engine, material);
+        releaseMaterialViewGpu(f.engine, material as unknown as MaterialView);
         releaseMaterialViewGpu(f.engine, borrowed);
         f.complete();
         await waitForGpuResourceRetirements(f.engine);

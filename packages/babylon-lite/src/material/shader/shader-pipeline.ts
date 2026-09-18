@@ -115,7 +115,7 @@ export function getOrCreateShaderPipelineBindings(engine: EngineContext, materia
         cache?.setBindings(material, bindings);
     }
 
-    if (state.source && Object.hasOwn(state, "_shaderCustomUbo") && state._shaderCustomUbo) {
+    if (state.source && state._shaderCustomUbo && state._shaderCustomUbo !== state.source._shaderCustomUbo) {
         const buffer = state._shaderCustomUbo;
         retireGpuResources(state._shaderCustomEngine ?? engine, () => buffer.destroy());
     }

@@ -575,7 +575,7 @@ their packet in scene-owned disposer maps. Storage-buffer allocations remain own
 a second, unread raw-buffer list. Disposing a shader packet releases its system UBO and texture
 leases without disposing caller-owned storage allocations.
 
-`releaseMaterialViewGpu(engine: EngineContext, view: ShaderMaterial): void` closes an abandoned
+`releaseMaterialViewGpu(engine: EngineContext, view: MaterialView): void` closes an abandoned
 ShaderMaterial view's own custom UBO. Detach every draw using that view first; this is terminal
 abandonment, not a suspension/resume API. A source material or a view borrowing its source's UBO
 is a no-op. The pipeline owner captures the exact owned buffer and its allocating engine, clears

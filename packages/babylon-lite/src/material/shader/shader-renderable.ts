@@ -526,11 +526,8 @@ function ensureCustomUbo(engine: EngineContext, material: ShaderMaterial, custom
     if (!state._shaderCustomUbo || !state._shaderCustomData) {
         state._shaderCustomUbo = createEmptyUniformBuffer(engine, customSpec._totalBytes, "shader-custom-ubo");
         state._shaderCustomEngine = engine;
-        // Shadow inherited pipeline identity so a source-first renewal cannot make this private UBO look current.
-        /* eslint-disable no-self-assign -- intentional Object.create prototype shadowing */
-        state._shaderDevice = state._shaderDevice;
-        state._shaderCacheGeneration = state._shaderCacheGeneration;
-        /* eslint-enable no-self-assign */
+        state._shaderDevice = engine._device;
+        state._shaderCacheGeneration = state._shaderPipelineCache?.generation;
         state._shaderCustomData = new ArrayBuffer(customSpec._totalBytes);
         state._shaderCustomBytes = new U8(state._shaderCustomData);
         state._shaderCustomVersion = -1;

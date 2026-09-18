@@ -1,6 +1,7 @@
 import type { EngineContext } from "../../engine/engine.js";
 import { retireGpuResources } from "../../engine/gpu-resource-retirement.js";
 import { isShaderMaterial } from "../material-guards.js";
+import type { MaterialView } from "../material.js";
 import { isMaterialView } from "../material-view.js";
 import type { ShaderMaterial } from "./shader-material.js";
 
@@ -21,7 +22,7 @@ export function _retireShaderMaterialViewGpu(engine: EngineContext, view: Shader
 
 /** Abandon a ShaderMaterial view after detaching all its draws. Only its own custom buffer is
  * retired; source/borrowed state and shared bindings remain alive. Recreate a view to use it again. */
-export function releaseMaterialViewGpu(engine: EngineContext, view: ShaderMaterial): void {
+export function releaseMaterialViewGpu(engine: EngineContext, view: MaterialView): void {
     if (isMaterialView(view) && isShaderMaterial(view)) {
         _retireShaderMaterialViewGpu(engine, view);
     }
