@@ -14,12 +14,14 @@
 import type { Mat4, Vec3, Quat } from "../math/types.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import type { SceneContext } from "../scene/scene-core.js";
+import type { IWorldMatrixProvider } from "../scene/parentable.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { HavokFloatingOriginContext, WorldRegion } from "./havok-floating-origin.js";
 import { invertMat4 } from "../math/invert-mat4.js";
 import { multiplyMat4 } from "../math/multiply-mat4.js";
 import { createScalingMat4 } from "../math/create-scaling-mat4.js";
 import { decomposeMat4 } from "../math/decompose-mat4.js";
+import { havokTransformToNode, nodeToHavokTransform } from "./havok-transform.js";
 
 // ─── Enums ───────────────────────────────────────────────────────────
 
@@ -206,6 +208,13 @@ export interface PhysicsWorld {
     /** @internal */ _hknp: any;
     /** @internal */ readonly _hkWorld: any;
     /** @internal */ readonly _bodies: PhysicsBody[];
+    /** @internal Reusable post-step hierarchy lookup and traversal scratch. */
+    readonly _syncAncestorByNode: Map<IWorldMatrixProvider, number>;
+    /** @internal */ _syncParentIndices: Int32Array;
+    /** @internal */ _syncVisitState: Uint8Array;
+    /** @internal */ readonly _syncParentStack: IWorldMatrixProvider[];
+    /** @internal */ readonly _syncStack: number[];
+    /** @internal */ readonly _syncOrder: number[];
     /** @internal Owning scene, retained so out-of-step callers (e.g. the character controller) can
      *  read the current per-frame delta (`scene.fixedDeltaMs` / `engine._currentDelta`) when the
      *  world has no fixed step configured. The world already captures the scene in its per-frame
@@ -285,6 +294,12 @@ export function createHavokWorld(scene: SceneContext, hknp: any, gravity?: Vec3)
         _hknp: hknp,
         _hkWorld: hkWorld,
         _bodies: [],
+        _syncAncestorByNode: new Map(),
+        _syncParentIndices: new Int32Array(0),
+        _syncVisitState: new Uint8Array(0),
+        _syncParentStack: [],
+        _syncStack: [],
+        _syncOrder: [],
         _scene: scene,
         _fixedDeltaMs: 0,
         _gravity: [g.x, g.y, g.z],
@@ -366,31 +381,26 @@ function _stepWorld(world: PhysicsWorld, deltaMs: number): void {
     // Floating-origin worlds run a multi-region step (loaded on demand).
     if (world._fo) {
         world._fo.step(world, dt);
-        return;
-    }
-
-    // Pre-step: sync moved nodes into Havok. A body syncs only when its prestep type is not
-    // DISABLED and it is either ANIMATED (kinematic) or explicitly pre-stepped. TELEPORT snaps the
-    // body to the node; ACTION sets a velocity toward it (so resting bodies are dragged via friction).
-    for (let i = 0; i < bodies.length; i++) {
-        const b = bodies[i]!;
-        if (b._prestepType !== PhysicsPrestepType.DISABLED && (b.motionType === (PhysicsMotionType.ANIMATED as number) || b._preStep)) {
-            if (b._prestepType === PhysicsPrestepType.ACTION) {
-                _syncNodeToBodyTarget(hknp, b);
-            } else {
-                _syncNodeToBody(hknp, b);
+    } else {
+        // Pre-step: sync moved nodes into Havok. A body syncs only when its prestep type is not
+        // DISABLED and it is either ANIMATED (kinematic) or explicitly pre-stepped. TELEPORT snaps the
+        // body to the node; ACTION sets a velocity toward it (so resting bodies are dragged via friction).
+        for (let i = 0; i < bodies.length; i++) {
+            const b = bodies[i]!;
+            if (b._prestepType !== PhysicsPrestepType.DISABLED && (b.motionType === (PhysicsMotionType.ANIMATED as number) || b._preStep)) {
+                if (b._prestepType === PhysicsPrestepType.ACTION) {
+                    _syncNodeToBodyTarget(hknp, b);
+                } else {
+                    _syncNodeToBody(hknp, b);
+                }
             }
         }
-    }
 
-    hknp.HP_World_Step(hkWorld, dt);
+        hknp.HP_World_Step(hkWorld, dt);
 
-    // Post-step: sync DYNAMIC bodies from Havok → node
-    for (let i = 0; i < bodies.length; i++) {
-        const b = bodies[i]!;
-        if (b.motionType === (PhysicsMotionType.DYNAMIC as number)) {
-            _syncBodyToNode(hknp, b);
-        }
+        // Post-step: sync DYNAMIC bodies from Havok → node, with ancestors first so each child
+        // converts its world transform against the parent's transform from this same physics step.
+        _syncDynamicBodiesParentFirst(world, hknp, _syncBodyToNode);
     }
 
     // After-step hooks run once body→node sync is complete, before rendering. This mirrors
@@ -422,16 +432,97 @@ export function onPhysicsAfterStep(world: PhysicsWorld, cb: (timestep: number) =
     (world._afterStep ??= []).push(cb);
 }
 
+/** @internal Synchronize dynamic bodies in hierarchy order without allocating per-step traversal containers. */
+export function _syncDynamicBodiesParentFirst(world: PhysicsWorld, hknp: any, sync: (hknp: any, body: PhysicsBody) => void): void {
+    const bodies = world._bodies;
+    const ancestorByNode = world._syncAncestorByNode;
+    ancestorByNode.clear();
+
+    if (world._syncParentIndices.length < bodies.length) {
+        world._syncParentIndices = new Int32Array(bodies.length);
+        world._syncVisitState = new Uint8Array(bodies.length);
+    }
+    const parentIndices = world._syncParentIndices;
+    const visitState = world._syncVisitState;
+    parentIndices.fill(-1, 0, bodies.length);
+    visitState.fill(0, 0, bodies.length);
+
+    for (let i = 0; i < bodies.length; i++) {
+        const body = bodies[i]!;
+        if (body.motionType === (PhysicsMotionType.DYNAMIC as number)) {
+            ancestorByNode.set(body.node, i);
+        }
+    }
+
+    // Collapse intervening non-physics transform nodes to the nearest dynamic-body ancestor.
+    // Negative cache values distinguish a hierarchy with no such ancestor from a chain currently
+    // being resolved, which also prevents an invalid parent cycle from hanging the physics step.
+    const parentStack = world._syncParentStack;
+    for (let i = 0; i < bodies.length; i++) {
+        const body = bodies[i]!;
+        if (body.motionType !== (PhysicsMotionType.DYNAMIC as number)) {
+            continue;
+        }
+        parentStack.length = 0;
+        let parent = body.node.parent;
+        let parentIndex = -1;
+        while (parent) {
+            const cached = ancestorByNode.get(parent);
+            if (cached !== undefined) {
+                parentIndex = cached >= 0 ? cached : -1;
+                break;
+            }
+            ancestorByNode.set(parent, -2);
+            parentStack.push(parent);
+            parent = "parent" in parent ? ((parent as { parent?: IWorldMatrixProvider | null }).parent ?? null) : null;
+        }
+        parentIndices[i] = parentIndex;
+        for (let j = 0; j < parentStack.length; j++) {
+            ancestorByNode.set(parentStack[j]!, parentIndex);
+        }
+    }
+
+    const stack = world._syncStack;
+    const order = world._syncOrder;
+    stack.length = 0;
+    order.length = 0;
+
+    // Iterative depth-first traversal avoids call-stack growth for deeply nested scene hierarchies.
+    for (let i = 0; i < bodies.length; i++) {
+        if (bodies[i]!.motionType !== (PhysicsMotionType.DYNAMIC as number) || visitState[i] !== 0) {
+            continue;
+        }
+        stack.push(i);
+        while (stack.length > 0) {
+            const current = stack[stack.length - 1]!;
+            if (visitState[current] === 0) {
+                visitState[current] = 1;
+                const parentIndex = parentIndices[current]!;
+                if (parentIndex >= 0 && visitState[parentIndex] === 0) {
+                    stack.push(parentIndex);
+                    continue;
+                }
+            }
+            stack.pop();
+            if (visitState[current] !== 2) {
+                visitState[current] = 2;
+                order.push(current);
+            }
+        }
+    }
+
+    for (let i = 0; i < order.length; i++) {
+        sync(hknp, bodies[order[i]!]!);
+    }
+}
+
 function _syncBodyToNode(hknp: any, body: PhysicsBody): void {
     if (body._world._thin?.from(body)) {
         return;
     }
     const t = hknp.HP_Body_GetQTransform(body._hkBody)[1];
-    const pos = t[0]; // [x, y, z]
-    const rot = t[1]; // [x, y, z, w]
     const node = body.node;
-    node.position.set(pos[0], pos[1], pos[2]);
-    node.rotationQuaternion.set(rot[0], rot[1], rot[2], rot[3]);
+    havokTransformToNode(t, node);
 }
 
 function _syncNodeToBody(hknp: any, body: PhysicsBody): void {
@@ -439,12 +530,7 @@ function _syncNodeToBody(hknp: any, body: PhysicsBody): void {
         return;
     }
     const node = body.node;
-    const p = node.position;
-    const q = node.rotationQuaternion;
-    hknp.HP_Body_SetQTransform(body._hkBody, [
-        [p.x, p.y, p.z],
-        [q.x, q.y, q.z, q.w],
-    ]);
+    hknp.HP_Body_SetQTransform(body._hkBody, nodeToHavokTransform(node));
 }
 
 // ACTION prestep: instead of snapping the body, set its target transform so Havok derives a
@@ -455,12 +541,7 @@ function _syncNodeToBodyTarget(hknp: any, body: PhysicsBody): void {
         return;
     }
     const node = body.node;
-    const p = node.position;
-    const q = node.rotationQuaternion;
-    hknp.HP_Body_SetTargetQTransform(body._hkBody, [
-        [p.x, p.y, p.z],
-        [q.x, q.y, q.z, q.w],
-    ]);
+    hknp.HP_Body_SetTargetQTransform(body._hkBody, nodeToHavokTransform(node));
 }
 
 // ─── Gravity ─────────────────────────────────────────────────────────
@@ -623,13 +704,7 @@ export function createPhysicsBody(world: PhysicsWorld, node: SceneNode, motionTy
     } else {
         // Add to world first, then set transform (Havok resets transform on add)
         hknp.HP_World_AddBody(hkWorld, hkBody, startsAsleep);
-
-        const p = node.position;
-        const q = node.rotationQuaternion;
-        hknp.HP_Body_SetQTransform(hkBody, [
-            [p.x, p.y, p.z],
-            [q.x, q.y, q.z, q.w],
-        ]);
+        hknp.HP_Body_SetQTransform(hkBody, nodeToHavokTransform(node));
     }
 
     world._bodies.push(body);
@@ -1406,15 +1481,32 @@ export function setPhysicsBodyMotionType(world: PhysicsWorld, body: PhysicsBody,
  * reads the node before the next physics step stays consistent.
  */
 export function setPhysicsBodyTransform(world: PhysicsWorld, body: PhysicsBody, position: Vec3, rotation: Quat): void {
-    world._hknp.HP_Body_SetQTransform(body._hkBody, [
+    if (world._fo) {
+        world._fo.setBodyTransform(world, body, position, rotation);
+        return;
+    }
+    const t = [
         [position.x, position.y, position.z],
         [rotation.x, rotation.y, rotation.z, rotation.w],
-    ]);
+    ] as const;
+    world._hknp.HP_Body_SetQTransform(body._hkBody, t);
     if (world._thin?.count(body) !== undefined) {
         return;
     }
-    body.node.position.set(position.x, position.y, position.z);
-    body.node.rotationQuaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+    havokTransformToNode(t, body.node);
+}
+
+/**
+ * Get a body's current world-space position and orientation.
+ */
+export function getPhysicsBodyTransform(world: PhysicsWorld, body: PhysicsBody): { position: Vec3; rotation: Quat } {
+    if (world._fo) {
+        return world._fo.getBodyTransform(world, body);
+    }
+    const t = world._hknp.HP_Body_GetQTransform(body._hkBody)[1];
+    const position = { x: t[0][0], y: t[0][1], z: t[0][2] };
+    const rotation = { x: t[1][0], y: t[1][1], z: t[1][2], w: t[1][3] };
+    return { position, rotation };
 }
 
 // ─── Removal ─────────────────────────────────────────────────────────
@@ -1607,6 +1699,10 @@ export function disposePhysics(world: PhysicsWorld): void {
     // onPhysicsCollision). They read the native world via HP_World_GetCollisionEvents,
     // so they must not survive it — clear them alongside the step callback.
     world._afterStep = undefined;
+    world._syncAncestorByNode.clear();
+    world._syncParentStack.length = 0;
+    world._syncStack.length = 0;
+    world._syncOrder.length = 0;
 
     if (world._fo) {
         world._fo.dispose(world);
