@@ -7,6 +7,7 @@ import type { BindingDecl, ComposedShader, FragmentSlot, ShaderFragment, ShaderT
 import { computeUboLayout } from "./ubo-layout.js";
 import { SCENE_UBO_WGSL } from "./scene-uniforms.js";
 import { wgsl } from "./wgsl.js";
+import type { MeshVbLayout } from "../mesh/mesh.js";
 
 const STAGE_VERTEX = 0x1;
 const STAGE_FRAGMENT = 0x2;
@@ -96,7 +97,7 @@ function injectSlots(tpl: string, sorted: readonly ShaderFragment[], key: "_frag
     });
 }
 
-export function composeShader(template: ShaderTemplate, fragments: readonly ShaderFragment[]): ComposedShader {
+export function composeShader(template: ShaderTemplate, fragments: readonly ShaderFragment[], meshVertexLayout?: MeshVbLayout): ComposedShader {
     const sorted = topoSort(fragments);
 
     // Collect fragment data
@@ -130,11 +131,12 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     const groups = new Map<string, GPUVertexBufferLayout & { attributes: GPUVertexAttribute[] }>();
     for (let i = 0; i < allAttrs.length; i++) {
         const a = allAttrs[i]!;
+        const meshLayout = a._stepMode !== "instance" ? meshVertexLayout?.[a._name] : undefined;
         inputLines.push(wgsl`@location(${i}) ${a._name}:${a._type},`);
         let layout = a._bufferGroup ? groups.get(a._bufferGroup) : undefined;
         if (!layout) {
             layout = {
-                arrayStride: a._arrayStride,
+                arrayStride: meshLayout?._stride ?? a._arrayStride,
                 stepMode: a._stepMode ?? "vertex",
                 attributes: [],
             };
@@ -144,7 +146,7 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
                 _vertexBufferLayouts.push(layout);
             }
         }
-        layout.attributes.push({ shaderLocation: i, offset: a._offset ?? 0, format: a._gpuFormat });
+        layout.attributes.push({ shaderLocation: i, offset: meshLayout?._offset ?? a._offset ?? 0, format: a._gpuFormat });
     }
     for (const layout of groups.values()) {
         _vertexBufferLayouts.push(layout);
@@ -254,7 +256,8 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     }
 
     const _fragmentKey = sorted.map((f) => f._id).join("|");
-    const vParams = (vBuiltins.length ? vBuiltins.join("\n") + "\n" : "") + inputLines.join("\n");
+    const vertexInputs = inputLines.join("\n");
+    const vParams = (vBuiltins.length ? vBuiltins.join("\n") + "\n" : "") + vertexInputs;
     const meshStruct = wgsl`struct MeshUniforms{\n${_meshUboSpec._structBody}\n}`;
     const materialStruct = _materialUboSpec
         ? wgsl`\nstruct MaterialUniforms{\n${_materialUboSpec._structBody}\n}\n@group(1)@binding(1) var<uniform> material:MaterialUniforms;`
@@ -263,7 +266,7 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
     let vertexWGSL = replaceSections(template._vertexTemplate, VERTEX_SECTIONS, [
         SCENE_UBO_WGSL,
         meshStruct,
-        wgsl`struct VertexInput{\n${inputLines.join("\n")}\n}`,
+        wgsl`struct VertexInput{\n${vertexInputs}\n}`,
         wgsl`struct VertexOutput{\n${varyBody}\n}`,
         vDecls.join("\n"),
         vParams,

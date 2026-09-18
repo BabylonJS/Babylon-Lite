@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { cloneTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
 import { disposeMeshGpu } from "../../../packages/babylon-lite/src/mesh/mesh-dispose";
-import { resizeMeshGeometry } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
+import { resizeMeshGeometry, resizeSharedMeshGeometry } from "../../../packages/babylon-lite/src/mesh/mesh-factories";
+import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import { release } from "../../../packages/babylon-lite/src/resource/ref-count";
 import type { Mesh, MeshGPU } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { SkeletonData } from "../../../packages/babylon-lite/src/animation/types";
@@ -58,7 +59,6 @@ describe("mesh clone GPU buffer ownership", () => {
                 _capacity: 1,
                 _version: 1,
                 _gpuBuffer: null,
-                _gpuBufferStorage: false,
                 _gpuVersion: 0,
                 _dirtyMin: 0,
                 _dirtyMax: 1,
@@ -132,6 +132,117 @@ describe("mesh clone GPU buffer ownership", () => {
         expect(gpu.normalBuffer.destroy).toHaveBeenCalledTimes(1);
         expect(gpu.uvBuffer.destroy).toHaveBeenCalledTimes(1);
         expect(gpu.indexBuffer.destroy).toHaveBeenCalledTimes(1);
+    });
+
+    it("rebuilds a clone family once and keeps the replacement geometry shared", () => {
+        const gpu: MeshGPU = {
+            positionBuffer: fakeBuffer(),
+            normalBuffer: fakeBuffer(),
+            uvBuffer: fakeBuffer(),
+            indexBuffer: fakeBuffer(),
+            indexCount: 3,
+            indexFormat: "uint16",
+        };
+        const src = makeMesh(gpu);
+        const cloneA = cloneTransformNode(src) as Mesh;
+        const cloneB = cloneTransformNode(src) as Mesh;
+        const createBuffer = vi.fn(mappedBuffer);
+        const engine = {
+            _device: {
+                createBuffer,
+                queue: { writeBuffer: vi.fn() },
+            },
+            _renderingContexts: [],
+            _retirements: [],
+        } as unknown as EngineContext;
+        const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+        const normals = new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]);
+        const indices = new Uint32Array([0, 1, 2]);
+
+        resizeSharedMeshGeometry(engine, [src, cloneA, cloneB], positions, normals, indices);
+
+        expect(src._gpu).toBe(cloneA._gpu);
+        expect(src._gpu).toBe(cloneB._gpu);
+        expect(src._gpu._refCount).toBe(3);
+        expect(createBuffer).toHaveBeenCalledTimes(4);
+        disposeGpuResourceRetirements(engine);
+        expect(gpu.positionBuffer.destroy).toHaveBeenCalledOnce();
+        expect(gpu.normalBuffer.destroy).toHaveBeenCalledOnce();
+        expect(gpu.uvBuffer.destroy).toHaveBeenCalledOnce();
+        expect(gpu.indexBuffer.destroy).toHaveBeenCalledOnce();
+    });
+
+    it.each(["duplicate source", "duplicate clone", "disposed source", "disposed clone", "sparse"] as const)(
+        "rejects %s in a shared resize before allocating or changing ownership",
+        (invalid) => {
+            const gpu: MeshGPU = {
+                positionBuffer: fakeBuffer(),
+                normalBuffer: fakeBuffer(),
+                uvBuffer: fakeBuffer(),
+                indexBuffer: fakeBuffer(),
+                indexCount: 3,
+                indexFormat: "uint16",
+            };
+            const source = makeMesh(gpu);
+            const clone = cloneTransformNode(source) as Mesh;
+            const outside = cloneTransformNode(source) as Mesh;
+            const createBuffer = vi.fn(mappedBuffer);
+            const engine = { _device: { createBuffer, queue: { writeBuffer: vi.fn() } }, _renderingContexts: [], _retirements: [] } as unknown as EngineContext;
+            let selected = [source, clone];
+            if (invalid === "duplicate source") {
+                selected = [source, source];
+            } else if (invalid === "duplicate clone") {
+                selected.push(clone);
+            } else if (invalid === "disposed source") {
+                disposeMeshGpu(source);
+            } else if (invalid === "disposed clone") {
+                disposeMeshGpu(clone);
+            } else {
+                selected = new Array<Mesh>(2);
+                selected[0] = source;
+            }
+            const owners = gpu._refCount;
+
+            expect(() =>
+                resizeSharedMeshGeometry(engine, selected, new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), new Uint32Array([0, 1, 2]))
+            ).toThrow(/distinct.*live/i);
+            expect(createBuffer).not.toHaveBeenCalled();
+            expect(source._gpu).toBe(gpu);
+            expect(clone._gpu).toBe(gpu);
+            expect(outside._gpu).toBe(gpu);
+            expect(gpu._refCount).toBe(owners);
+            expect(engine._retirements).toHaveLength(0);
+            expect(gpu.positionBuffer.destroy).not.toHaveBeenCalled();
+            expect(gpu.indexBuffer.destroy).not.toHaveBeenCalled();
+        }
+    );
+
+    it("updates a selected clone subset without releasing an outside owner's geometry", () => {
+        const gpu: MeshGPU = {
+            positionBuffer: fakeBuffer(),
+            normalBuffer: fakeBuffer(),
+            uvBuffer: fakeBuffer(),
+            indexBuffer: fakeBuffer(),
+            indexCount: 3,
+            indexFormat: "uint16",
+        };
+        const source = makeMesh(gpu);
+        const clone = cloneTransformNode(source) as Mesh;
+        const outside = cloneTransformNode(source) as Mesh;
+        const createBuffer = vi.fn(mappedBuffer);
+        const engine = { _device: { createBuffer, queue: { writeBuffer: vi.fn() } }, _renderingContexts: [], _retirements: [] } as unknown as EngineContext;
+
+        resizeSharedMeshGeometry(engine, [source, clone], new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), new Uint32Array([0, 1, 2]));
+
+        expect(createBuffer).toHaveBeenCalledTimes(4);
+        expect(source._gpu).toBe(clone._gpu);
+        expect(source._gpu._refCount).toBe(2);
+        expect(outside._gpu).toBe(gpu);
+        expect(gpu._refCount).toBe(1);
+        expect(engine._retirements).toHaveLength(0);
+        disposeMeshGpu(outside);
+        expect(gpu.indexBuffer.destroy).toHaveBeenCalledOnce();
+        expect(source._gpu.indexBuffer.destroy).not.toHaveBeenCalled();
     });
 
     it("does not destroy shared buffers when the source mesh is disposed while a clone is still alive", () => {

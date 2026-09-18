@@ -1,4 +1,4 @@
-import type { Mesh } from "../mesh/mesh.js";
+import type { Mesh, MeshGPU } from "../mesh/mesh.js";
 import type { StorageBuffer } from "../resource/storage-buffer.js";
 import type { Texture2D, Texture2DOptions, Texture2DRecoverySource } from "../texture/texture-2d.js";
 import type { PixelsTexture2DOptions } from "../texture/pixels-texture.js";
@@ -114,16 +114,16 @@ export interface EngineContext extends SurfaceContext {
     _options?: EngineOptions;
     /** @internal Live high-level storage allocations owned by this engine. */
     _storageBuffers?: Set<StorageBuffer>;
-    /** @internal Storage-related limits retained lazily for device-loss recovery. */
-    _storageRequiredLimits?: Record<string, GPUSize64>;
-    /** @internal Installed lazily by the storage-buffer module. */
-    _rebuildStorageBuffers?: () => void;
     /** @internal Installed lazily by the storage-buffer module. */
     _disposeStorageBuffers?: () => void;
     /** @internal Managed resource disposal callbacks installed behind `_disposeStorageBuffers`. */
     _managedResourceDisposers?: Array<() => void>;
     /** @internal Installed only while independent managed resource families are live. */
     _disposeManagedResources?: () => void;
+    /** @internal Constant missing-attribute buffer, installed only by storage-backed geometry. */
+    _getVertexDefaultBuffer?: (gpu: MeshGPU) => GPUBuffer | null;
+    /** @internal Bumped when a managed resource handle is destroyed or replaced. */
+    _resourceEpoch?: number;
     /** @internal Shared 1×1 white texture used as the default baseColor / ORM for
      *  factor-only PBR materials (created via `createPbrMaterial` without textures).
      *  A white ORM yields `metallic = metallicFactor`, `roughness = roughnessFactor`,

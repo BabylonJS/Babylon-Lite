@@ -1,4 +1,5 @@
 # Module: In-place Mesh Geometry Update
+
 > Package path: `packages/babylon-lite/src/mesh/mesh-factories.ts`
 
 ## Purpose
@@ -9,8 +10,9 @@ cached render and shadow bundles remain valid. CPU geometry, bounds, detailed pi
 device-loss recovery are updated atomically with the GPU contents.
 
 Topology growth or shrinkage may use either `resizeMeshGeometry`, which replaces exact-size buffers and
-invalidates cached bundles safely, or `updateMeshGeometryCapacity`, which reserves grow-only capacity and
-keeps the inactive index tail degenerate so live procedural edits retain stable buffer identities and draw topology.
+invalidates cached bundles safely, `resizeSharedMeshGeometry`, which performs one upload and keeps a
+clone family on one reference-counted geometry object, or `updateMeshGeometryCapacity`, which reserves
+grow-only capacity and keeps the inactive index tail degenerate so live procedural edits retain stable buffer identities and draw topology.
 
 ## Public API Surface
 
@@ -45,7 +47,24 @@ export function updateMeshGeometryCapacity(
     colors?: Float32Array,
     reserveFactor?: number
 ): MeshGeometryCapacityResult;
+
+export function resizeSharedMeshGeometry(
+    engine: EngineContext,
+    meshes: readonly Mesh[],
+    positions: Float32Array,
+    normals: Float32Array,
+    indices: Uint32Array,
+    uvs?: Float32Array,
+    uvs2?: Float32Array,
+    tangents?: Float32Array,
+    colors?: Float32Array
+): void;
 ```
+
+`resizeSharedMeshGeometry` requires a nonempty, dense list of distinct, live meshes sharing
+one owned, tightly-packed GPU geometry. It rejects duplicate, disposed, missing, or
+different-geometry entries before allocating buffers or changing reference counts.
+The list may select only part of a clone family; omitted owners keep the old allocation.
 
 The existing single-attribute update helpers also accept optional source/destination vertex ranges:
 
@@ -113,7 +132,10 @@ None. Shaders consume the same attributes at the same locations and formats.
 2. Call `updateMeshGeometry` for same-layout edits.
 3. Call `updateMeshGeometryCapacity` for repeated live topology changes with stable attribute presence.
 4. Call `resizeMeshGeometry` for one-shot exact-size topology or optional-attribute layout changes.
-5. Subsequent picking and device-loss recovery observe the latest complete active geometry.
+5. Call `resizeSharedMeshGeometry` when every supplied clone must keep sharing one rebuilt allocation.
+6. Storage-backed/interleaved/borrowed geometry rejects these tightly-packed mutation APIs; update its
+   source `StorageBuffer` instead.
+7. Subsequent picking and device-loss recovery observe the latest complete active geometry.
 
 Validation throws before mutation, so a failed call leaves CPU/GPU state unchanged.
 
@@ -133,6 +155,8 @@ refreshing bounding information, without changing the mesh or submesh draw topol
 - Reject changed vertex or index counts.
 - Reject optional-attribute presence/length changes.
 - Reject interleaved or shared-clone geometry.
+- Reject duplicate, disposed, or missing shared-resize owners before any upload or ownership change.
+- Confirm a shared-resize subset leaves omitted clone owners on their original live allocation.
 - Reject invalid capacity factors and changing optional-attribute presence on the capacity path.
 - Confirm same-size updates keep every GPU buffer identity unchanged.
 - Confirm shrink/growth within capacity keeps every GPU buffer identity and the GPU draw index capacity unchanged.
