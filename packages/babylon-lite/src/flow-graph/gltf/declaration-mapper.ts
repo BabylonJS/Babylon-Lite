@@ -193,7 +193,7 @@ const NATIVE_OPS: Readonly<Record<string, FgOpMapping>> = {
     "math/extract3": { block: FgBlockType.ExtractVector3, outputValues: { "0": "x", "1": "y", "2": "z" } },
     "math/extract4": { block: FgBlockType.ExtractVector4, outputValues: { "0": "x", "1": "y", "2": "z", "3": "w" } },
     "math/rotate2D": { block: FgBlockType.Rotate2D, valueInputs: { angle: "b" } },
-    "math/select": { block: FgBlockType.Conditional },
+    "math/select": { block: FgBlockType.Conditional, valueInputs: { condition: "condition", a: "onTrue", b: "onFalse" } },
     // math/switch: data switch; cases array from glTF configuration.
     "math/switch": { block: FgBlockType.DataSwitch, configArrayKeys: { cases: "cases" } },
 

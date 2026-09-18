@@ -33,7 +33,7 @@ function ensureHooks(): void {
 
 /** Whether this browser exposes WGSL's `immediate_address_space`. */
 export function isComputeImmediatesSupported(): boolean {
-    return globalThis.navigator?.gpu?.wgslLanguageFeatures.has("immediate_address_space") === true;
+    return globalThis.navigator?.gpu?.wgslLanguageFeatures?.has("immediate_address_space") === true;
 }
 
 /** Create a compute program whose explicit pipeline layout includes an immediate-data range. */

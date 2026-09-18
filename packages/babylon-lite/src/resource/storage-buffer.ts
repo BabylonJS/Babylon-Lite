@@ -170,6 +170,8 @@ export function updateStorageBuffer(engine: EngineContext, buffer: StorageBuffer
 
 /** Read an aligned range of a GPU-writable storage allocation through one lazily reused staging buffer.
  *  Call after the producing frame is submitted; an active frame encoder is rejected. */
+export function readStorageBuffer(buffer: StorageBuffer): Promise<ArrayBuffer>;
+export function readStorageBuffer(buffer: StorageBuffer, byteOffset: number, byteLength?: number): Promise<ArrayBuffer>;
 export function readStorageBuffer(buffer: StorageBuffer, byteOffset = 0, byteLength = buffer.byteLength - byteOffset): Promise<ArrayBuffer> {
     if (buffer._destroyed || !buffer._buffer || !buffer._engine._storageBuffers?.has(buffer)) {
         return Promise.reject(new Error("StorageBuffer is not a live registered allocation."));

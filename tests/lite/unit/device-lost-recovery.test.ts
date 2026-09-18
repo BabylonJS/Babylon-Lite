@@ -478,7 +478,6 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
         recovery.disable();
     });
 
-
     it("rebuilds a recoverable texture that no registered rendering context references", async () => {
         // A sprite atlas page the app owns but has not drawn from yet is reachable from nothing the
         // per-kind recovery walks visit. Leaving it on the lost device turns the next writeTexture

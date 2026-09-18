@@ -159,58 +159,60 @@ describe("scheduled compute dispatch", () => {
             bindings: [computeStorageBufferBinding("constructor", { group: 0, binding: 0 })],
         });
 
-        it("records a complete retained immediate image before direct dispatch", () => {
-            vi.stubGlobal("navigator", { gpu: { wgslLanguageFeatures: new Set(["immediate_address_space"]) } });
-            try {
-                const { engine, computePasses, device } = makeEngine();
-                expect(isComputeImmediatesSupported()).toBe(true);
-                const shader = createComputeImmediateShader(engine, {
-                    computeSource: `requires immediate_address_space; var<immediate> params: vec4f; @compute @workgroup_size(1) fn main() {}`,
-                    immediateByteLength: 16,
-                });
-                const dispatch = createComputeDispatch(shader, createComputeBindingSet(shader, {}), { size: { x: 1 } });
-                const data = new Float32Array([1, 2, 3, 4]);
-                setComputeDispatchImmediates(dispatch, data);
-                const task = createComputeTask(engine);
-                addComputeDispatch(task, dispatch);
-
-                task.record();
-                task._passes[0]!._execute();
-
-                expect(device.createPipelineLayout).toHaveBeenCalledWith(expect.objectContaining({ immediateSize: 16 }));
-                expect(computePasses[0]!.immediates).toEqual([data]);
-            } finally {
-                vi.unstubAllGlobals();
-            }
-        });
-
-        it("rejects unsupported or incomplete immediate data", () => {
-            vi.stubGlobal("navigator", { gpu: { wgslLanguageFeatures: new Set<string>() } });
-            const { engine } = makeEngine();
-            expect(() =>
-                createComputeImmediateShader(engine, {
-                    computeSource: `@compute @workgroup_size(1) fn main() {}`,
-                    immediateByteLength: 16,
-                })
-            ).toThrow(/immediate_address_space/);
-            vi.stubGlobal("navigator", { gpu: { wgslLanguageFeatures: new Set(["immediate_address_space"]) } });
-            try {
-                const shader = createComputeImmediateShader(engine, {
-                    computeSource: `requires immediate_address_space; var<immediate> params: vec4f; @compute @workgroup_size(1) fn main() {}`,
-                    immediateByteLength: 16,
-                });
-                const dispatch = createComputeDispatch(shader, createComputeBindingSet(shader, {}), { size: { x: 1 } });
-                expect(() => setComputeDispatchImmediates(dispatch, new Uint32Array(3))).toThrow(/exactly 16 bytes/);
-                const task = createComputeTask(engine);
-                addComputeDispatch(task, dispatch);
-                task.record();
-                expect(() => task._passes[0]!._execute()).toThrow(/initialize all 16 bytes/);
-            } finally {
-                vi.unstubAllGlobals();
-            }
-        });
-
         expect(() => createComputeBindingSet(shader, {})).toThrow('binding "constructor" has no resource');
+    });
+
+    it("records a complete retained immediate image before direct dispatch", () => {
+        vi.stubGlobal("navigator", { gpu: { wgslLanguageFeatures: new Set(["immediate_address_space"]) } });
+        try {
+            const { engine, computePasses, device } = makeEngine();
+            expect(isComputeImmediatesSupported()).toBe(true);
+            const shader = createComputeImmediateShader(engine, {
+                computeSource: `requires immediate_address_space; var<immediate> params: vec4f; @compute @workgroup_size(1) fn main() {}`,
+                immediateByteLength: 16,
+            });
+            const dispatch = createComputeDispatch(shader, createComputeBindingSet(shader, {}), { size: { x: 1 } });
+            const data = new Float32Array([1, 2, 3, 4]);
+            setComputeDispatchImmediates(dispatch, data);
+            const task = createComputeTask(engine);
+            addComputeDispatch(task, dispatch);
+
+            task.record();
+            task._passes[0]!._execute();
+
+            expect(device.createPipelineLayout).toHaveBeenCalledWith(expect.objectContaining({ immediateSize: 16 }));
+            expect(computePasses[0]!.immediates).toEqual([data]);
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it("rejects unsupported or incomplete immediate data", () => {
+        vi.stubGlobal("navigator", { gpu: {} });
+        expect(isComputeImmediatesSupported()).toBe(false);
+        vi.stubGlobal("navigator", { gpu: { wgslLanguageFeatures: new Set<string>() } });
+        const { engine } = makeEngine();
+        expect(() =>
+            createComputeImmediateShader(engine, {
+                computeSource: `@compute @workgroup_size(1) fn main() {}`,
+                immediateByteLength: 16,
+            })
+        ).toThrow(/immediate_address_space/);
+        vi.stubGlobal("navigator", { gpu: { wgslLanguageFeatures: new Set(["immediate_address_space"]) } });
+        try {
+            const shader = createComputeImmediateShader(engine, {
+                computeSource: `requires immediate_address_space; var<immediate> params: vec4f; @compute @workgroup_size(1) fn main() {}`,
+                immediateByteLength: 16,
+            });
+            const dispatch = createComputeDispatch(shader, createComputeBindingSet(shader, {}), { size: { x: 1 } });
+            expect(() => setComputeDispatchImmediates(dispatch, new Uint32Array(3))).toThrow(/exactly 16 bytes/);
+            const task = createComputeTask(engine);
+            addComputeDispatch(task, dispatch);
+            task.record();
+            expect(() => task._passes[0]!._execute()).toThrow(/initialize all 16 bytes/);
+        } finally {
+            vi.unstubAllGlobals();
+        }
     });
 
     it("records differently parameterized dispatches into one pass with one uniform upload", () => {

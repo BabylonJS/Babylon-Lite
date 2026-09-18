@@ -646,13 +646,16 @@ describe("compute texture bindings", () => {
             bindings: [computeTextureBinding("source", { group: 0, binding: 0 })],
         });
         const bindings = createComputeBindingSet(shader, { source: resource });
+        const initialGroup = bindings._groups![0]!;
         const replacement = ordinaryTexture(engine);
         Object.assign(texture, { texture: replacement.texture, view: replacement.view });
 
         _ensureComputeBindingGroups(bindings);
 
-        expect(groups).toHaveLength(2);
-        expect(Array.from(groups[1]!.entries)[0]!.resource).toBe(replacement.view);
+        const rebuiltGroup = groups.at(-1)!;
+        expect(bindings._groups).toEqual([rebuiltGroup]);
+        expect(rebuiltGroup).not.toBe(initialGroup);
+        expect(Array.from(rebuiltGroup.entries)[0]!.resource).toBe(replacement.view);
     });
 
     it("freezes every resource-specific binding layout descriptor", () => {
