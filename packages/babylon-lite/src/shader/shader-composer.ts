@@ -192,37 +192,40 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
         const b = isShadow ? sb++ : mb++;
         const g = isShadow ? 2 : 1;
         const entry: GPUBindGroupLayoutEntry = { binding: b, visibility: d._visibility };
-        const type = d._type;
+        const bindingType = d._type;
         let qualifier = "";
-        let shaderType: string;
-        switch (type._kind) {
+        let declarationType: string;
+        switch (bindingType._kind) {
             case "uniform-buffer":
                 entry.buffer = { type: "uniform" };
                 qualifier = "<uniform>";
-                shaderType = `${d._name}Uniforms`;
+                declarationType = `${d._name}Uniforms`;
                 break;
             case "texture": {
-                const defaultType = type._textureType === "texture_depth_2d" ? "depth" : type._textureType === "texture_2d<u32>" ? "uint" : "float";
+                const defaultSampleType = bindingType._textureType === "texture_depth_2d" ? "depth" : bindingType._textureType === "texture_2d<u32>" ? "uint" : "float";
                 entry.texture = {
-                    sampleType: (type._sampleType ?? defaultType) as GPUTextureSampleType,
-                    viewDimension: type._textureType.includes("array") ? "2d-array" : type._textureType.includes("cube") ? "cube" : "2d",
+                    sampleType: bindingType._sampleType ?? defaultSampleType,
+                    viewDimension: bindingType._textureType.includes("array") ? "2d-array" : bindingType._textureType.includes("cube") ? "cube" : "2d",
                 };
-                shaderType = type._textureType;
+                declarationType = bindingType._textureType;
                 break;
             }
             case "sampler":
                 entry.sampler = {
-                    type: type._samplerType === "sampler_comparison" ? "comparison" : type._samplerType === "sampler_non_filtering" ? "non-filtering" : "filtering",
+                    type: bindingType._samplerType === "sampler_comparison" ? "comparison" : bindingType._samplerType === "sampler_non_filtering" ? "non-filtering" : "filtering",
                 };
-                shaderType = type._samplerType === "sampler_non_filtering" ? "sampler" : type._samplerType;
+                declarationType = bindingType._samplerType === "sampler_non_filtering" ? "sampler" : bindingType._samplerType;
                 break;
             case "storage-texture":
-                entry.storageTexture = { access: type._access as GPUStorageTextureAccess, format: type._format as GPUTextureFormat };
-                shaderType = `texture_storage_2d<${type._format},${type._access}>`;
+                entry.storageTexture = {
+                    access: bindingType._access === "read" ? "read-only" : bindingType._access === "write" ? "write-only" : "read-write",
+                    format: bindingType._format as GPUTextureFormat,
+                };
+                declarationType = `texture_storage_2d<${bindingType._format},${bindingType._access}>`;
                 break;
         }
         (isShadow ? shadowBGL : meshBGL).push(entry);
-        const w = wgsl`@group(${g})@binding(${b}) var${qualifier} ${d._name}:${shaderType};`;
+        const w = wgsl`@group(${g})@binding(${b}) var${qualifier} ${d._name}:${declarationType};`;
         if (d._visibility & STAGE_VERTEX) {
             vDecls.push(w);
         }

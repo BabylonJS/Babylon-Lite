@@ -30,13 +30,13 @@ import {
     createSolidTexture2D,
     GeometryTextureType,
     loadGltf,
-    loadNodeBlockEmitterWithGeometry,
     parseNodeMaterialFromSnippet,
     registerScene,
     startEngine,
 } from "babylon-lite";
 import type { AssetContainer, Material, Mesh, Texture2D } from "babylon-lite";
 import { SCENE149_NME_JSON } from "../shared/scene149-nme.js";
+import { createBlockLoader } from "../shared/scene149-block-loader.js";
 
 const POWERPLANT_URL = "https://assets.babylonjs.com/meshes/PowerPlant/powerplant.glb";
 
@@ -106,8 +106,9 @@ async function main(): Promise<void> {
         }
         list.push(mesh);
     }
+    const blockLoader = createBlockLoader();
     for (const [origMat, meshes] of byMaterial) {
-        const nodeMat = await parseNodeMaterialFromSnippet(engine, "", { json: SCENE149_NME_JSON, blockLoader: loadNodeBlockEmitterWithGeometry });
+        const nodeMat = await parseNodeMaterialFromSnippet(engine, "", { json: SCENE149_NME_JSON, blockLoader });
         nodeMat.inputs.albedo!.texture = resolveAlbedo(engine, origMat);
         for (const mesh of meshes) {
             mesh.material = nodeMat;
