@@ -24,6 +24,7 @@ export function createComputeStorageTextureMipmapsTask(name: string, resources: 
         }
     }
     const prepared = textures.map((resource) => prepareComputeMipmaps(engine, resource._texture));
+    const drawCount = prepared.reduce((count, levels) => count + levels.length, 0);
     return {
         name,
         engine,
@@ -39,7 +40,7 @@ export function createComputeStorageTextureMipmapsTask(name: string, resources: 
                 }
                 recordPreparedComputeMipmaps(engine._currentEncoder, prepared[i]!);
             }
-            return 0;
+            return drawCount;
         },
         dispose(): void {
             textures.length = 0;

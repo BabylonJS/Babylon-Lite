@@ -128,6 +128,43 @@ function ordinaryTexture(engine: EngineContext, format: GPUTextureFormat = "rgba
 }
 
 describe("compute texture bindings", () => {
+    it("reports one draw for every regenerated storage-texture mip level", async () => {
+        const { engine } = makeEngine();
+        const pass = {
+            setPipeline: vi.fn(),
+            setBindGroup: vi.fn(),
+            draw: vi.fn(),
+            end: vi.fn(),
+        } as unknown as GPURenderPassEncoder;
+        const beginRenderPass = vi.fn(() => pass);
+        engine._currentEncoder = { beginRenderPass } as unknown as GPUCommandEncoder;
+        const first = await createComputeStorageTexture(engine, {
+            width: 8,
+            height: 8,
+            viewDimension: "2d",
+            format: "rgba8unorm",
+            sampled: true,
+            mipMaps: true,
+        });
+        const second = await createComputeStorageTexture(engine, {
+            width: 4,
+            height: 4,
+            viewDimension: "2d",
+            format: "rgba8unorm",
+            sampled: true,
+            mipMaps: true,
+        });
+        const task = createComputeStorageTextureMipmapsTask("mips", [first, second]);
+
+        expect(task.execute!()).toBe(5);
+        expect(beginRenderPass).toHaveBeenCalledTimes(5);
+        expect(pass.draw).toHaveBeenCalledTimes(5);
+
+        task.dispose();
+        disposeComputeStorageTexture(first);
+        disposeComputeStorageTexture(second);
+    });
+
     it.each([false, true])("requires explicit texture-formats-tier1 for rgba8snorm render mipmaps (enabled=%s)", async (enabled) => {
         const { engine, device } = makeEngine(enabled ? ["texture-formats-tier1"] : []);
         const features = [...device.features];
