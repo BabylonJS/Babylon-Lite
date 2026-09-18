@@ -385,6 +385,31 @@ describe("Property animation", () => {
         expect(target.position.x).toBe(3);
     });
 
+    it("preserves exact frame-derived STEP boundaries", () => {
+        const manager = createAnimationManager();
+        const target = { x: 0 };
+        const clip = createPropertyAnimationClip(
+            "step-frame-boundary",
+            [
+                {
+                    path: "x",
+                    interpolation: "step",
+                    keys: [
+                        { frame: 0, value: 0 },
+                        { frame: 1, value: 10 },
+                    ],
+                },
+            ],
+            { frameRate: 60 }
+        );
+        const group = createPropertyAnimationGroup(manager, target, clip, { loop: false, fromFrame: 0, toFrame: 1 });
+
+        updateAnimationManager(manager, 1000 / 60);
+
+        expect(group._stopped).toBe(true);
+        expect(target.x).toBe(10);
+    });
+
     it("throws when a property path cannot be resolved", () => {
         const manager = createAnimationManager();
         const clip = createPropertyAnimationClip("bad", [

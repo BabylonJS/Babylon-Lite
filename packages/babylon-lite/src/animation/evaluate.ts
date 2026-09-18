@@ -3,11 +3,12 @@
 
 import { F32 } from "../engine/typed-arrays.js";
 import type { AnimationEasing } from "./easing.js";
+import type { PropertyAnimationSampler } from "./property-animation.js";
 import type { AnimationSampler } from "./types.js";
 import { INTERP_STEP, INTERP_CUBICSPLINE } from "./types.js";
 
 /** Binary search: find index i such that `input[i] <= t < input[i+1]`. */
-function findKeyframe(input: Float32Array, t: number): number {
+function findKeyframe(input: Float32Array | Float64Array, t: number): number {
     let lo = 0;
     let hi = input.length - 1;
     if (t <= input[0]!) {
@@ -206,7 +207,7 @@ export function evaluateSampler(sampler: AnimationSampler, t: number, stride: nu
  * so imported glTF samplers retain their unchanged LINEAR/STEP/CUBICSPLINE path.
  */
 export function evaluatePropertySampler(
-    sampler: AnimationSampler,
+    sampler: PropertyAnimationSampler,
     t: number,
     stride: number,
     isQuat: boolean,

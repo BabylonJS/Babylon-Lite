@@ -114,9 +114,15 @@ export interface PropertyAnimationClipOptions {
     readonly frameRate?: number;
 }
 
+export interface PropertyAnimationSampler {
+    readonly input: Float64Array;
+    readonly output: Float32Array;
+    readonly interpolation: typeof INTERP_LINEAR | typeof INTERP_STEP;
+}
+
 export interface PropertyAnimationTrack {
     readonly path: string;
-    readonly sampler: AnimationSampler;
+    readonly sampler: PropertyAnimationSampler;
     readonly stride: number;
     readonly quaternion: boolean;
     readonly easing?: AnimationEasing;
@@ -289,6 +295,9 @@ All animation data uses flat typed arrays for GPU-friendly memory layout:
 - **AnimationSampler.output**: Packed contiguously:
     - LINEAR/STEP: `[value0, value1, ...]` — `stride` floats per keyframe
     - CUBICSPLINE: `[inTangent0, value0, outTangent0, inTangent1, value1, outTangent1, ...]` — `stride * 3` floats per keyframe
+- **PropertyAnimationSampler.input**: `Float64Array` timestamps preserve caller-authored
+  frame boundaries exactly after division by frame rate. Generic/glTF
+  `AnimationSampler.input` remains `Float32Array`.
 
 ### Keyframe Search
 
@@ -526,10 +535,14 @@ Manual property clips share the packed keyframe representation with glTF animati
 
 ### Property Binding
 
-Manual property bindings are resolved once when the group is created:
+Manual property paths are validated and their leaf owner/property pair is resolved
+when the group is created:
 
 - scalar paths (`position.x`, `alpha`, `visible`) write directly to the resolved property;
 - vector/quaternion paths (`position`, `scaling`, `rotationQuaternion`) call `.set(...)` when the target object exposes a setter method;
+- vector/quaternion writers cache the current property object but compare its identity
+  on every write, rebuilding the component/setter writer only when application code
+  replaces that object during playback;
 - invalid paths throw immediately during `createPropertyAnimationGroup()` so typos never fail silently.
 
 Bindings are target-specific; `PropertyAnimationClip` is reusable, while the generated property runtime tracks are owned by the returned `AnimationGroup`.
@@ -637,9 +650,17 @@ writes for every delegated track.
 The compat facade owns native manager membership: delegated groups are attached
 only while actively playing, detached on pause, stop, or natural completion, and
 reattached on restart. A seek evaluates once without rejoining the per-frame
-manager. Scene disposal clears compat-owned managers. Completion is derived from
-the native group's stopped state together with the fallback subset's per-track
-state rather than reconstructing an endpoint from floating-point time.
+manager. Each group retains its first-attachment order token, so reattaching an
+older paused group restores its precedence relative to newer groups instead of
+appending it after them. Scene disposal clears compat-owned managers. Completion
+is derived from the native group's stopped state together with the fallback
+subset's per-track state rather than reconstructing an endpoint from
+floating-point time.
+
+Compat keeps the public six-argument `Animatable(target, animations, from, to,
+loop, speedRatio)` constructor. Native manager/group ownership is supplied only
+through an internal factory state, so existing TypeScript and JavaScript callers
+retain their argument positions.
 
 Fallback ownership is compared at the resolved leaf object/property pair, not
 only by root target and dotted-path text. This preserves Babylon.js write order

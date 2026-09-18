@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { NullEngine, WebGPUEngine, AbstractEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
-import { Animation, AnimationKeyInterpolation } from "../src/animations/animation";
+import { Animatable, Animation, AnimationKeyInterpolation } from "../src/animations/animation";
 import { CubicEase, QuadraticEase } from "../src/animations/easing";
 import { Color3, Color4 } from "../src/math/color";
 import { Quaternion } from "../src/math/quaternion";
@@ -140,6 +140,21 @@ describe("NullEngine (headless)", () => {
         expect(compatEvaluate).not.toHaveBeenCalled();
     });
 
+    it("preserves the public six-argument Animatable constructor", () => {
+        const target = { x: 0 };
+        const animation = new Animation("direct", "x", 10);
+        animation.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 10, value: 10 },
+        ]);
+
+        const animatable = new Animatable(target, [animation], 0, 10, false, 1);
+        animatable._tick(500);
+
+        expect(animatable.masterFrame).toBe(5);
+        expect(target.x).toBe(5);
+    });
+
     it("uses the explicit compat fallback for mixed per-key interpolation", () => {
         const engine = new NullEngine();
         const scene = new Scene(engine);
@@ -201,6 +216,39 @@ describe("NullEngine (headless)", () => {
         for (const evaluate of compatEvaluators) {
             expect(evaluate).not.toHaveBeenCalled();
         }
+    });
+
+    it("follows replaced vector and quaternion property objects during native playback", () => {
+        const scene = new Scene(new NullEngine());
+        const target = {
+            position: new Vector3(),
+            rotationQuaternion: new Quaternion(),
+        };
+        const position = new Animation("position", "position", 10, Animation.ANIMATIONTYPE_VECTOR3);
+        position.setKeys([
+            { frame: 0, value: new Vector3(0, 0, 0) },
+            { frame: 10, value: new Vector3(10, 20, 30) },
+        ]);
+        const rotation = new Animation("rotation", "rotationQuaternion", 10, Animation.ANIMATIONTYPE_QUATERNION);
+        rotation.setKeys([
+            { frame: 0, value: new Quaternion(0, 0, 0, 1) },
+            { frame: 10, value: new Quaternion(0, 0, 1, 0) },
+        ]);
+
+        scene.beginDirectAnimation(target, [position, rotation], 0, 10, false);
+        scene._tick(250);
+        const replacedPosition = new Vector3(100, 100, 100);
+        const replacedRotation = new Quaternion(1, 0, 0, 0);
+        target.position = replacedPosition;
+        target.rotationQuaternion = replacedRotation;
+
+        scene._tick(250);
+
+        expect(target.position).toBe(replacedPosition);
+        expect(target.position.asArray()).toEqual([5, 10, 15]);
+        expect(target.rotationQuaternion).toBe(replacedRotation);
+        expect(target.rotationQuaternion.z).toBeCloseTo(Math.SQRT1_2, 6);
+        expect(target.rotationQuaternion.w).toBeCloseTo(Math.SQRT1_2, 6);
     });
 
     it("observes easing replacement and clearing during native playback", () => {
@@ -312,6 +360,29 @@ describe("NullEngine (headless)", () => {
         scene._tick(500);
 
         expect(animatable._lite).toBeDefined();
+        expect(target.x).toBeCloseTo(150);
+    });
+
+    it("preserves native write precedence when an older group pauses and restarts", () => {
+        const scene = new Scene(new NullEngine());
+        const target = { x: 0 };
+        const olderAnimation = new Animation("older", "x", 10);
+        olderAnimation.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 10, value: 10 },
+        ]);
+        const newerAnimation = new Animation("newer", "x", 10);
+        newerAnimation.setKeys([
+            { frame: 0, value: 100 },
+            { frame: 10, value: 200 },
+        ]);
+
+        const older = scene.beginDirectAnimation(target, [olderAnimation], 0, 10, false);
+        older.pause();
+        scene.beginDirectAnimation(target, [newerAnimation], 0, 10, false);
+        older.restart();
+        scene._tick(500);
+
         expect(target.x).toBeCloseTo(150);
     });
 
@@ -555,6 +626,22 @@ describe("NullEngine (headless)", () => {
         fractionalScene._tick(2050);
         expect(fractionalAnimatable.animationStarted).toBe(false);
         expect(fractionalTarget.x).toBe(123);
+    });
+
+    it("applies the final STEP key at a non-exact frame-derived end time", () => {
+        const scene = new Scene(new NullEngine());
+        const target = { x: 0 };
+        const animation = new Animation("step", "x", 60);
+        animation.setKeys([
+            { frame: 0, value: 0, interpolation: AnimationKeyInterpolation.STEP },
+            { frame: 1, value: 10 },
+        ]);
+
+        const animatable = scene.beginDirectAnimation(target, [animation], 0, 1, false);
+        scene._tick(1000 / 60);
+
+        expect(animatable.animationStarted).toBe(false);
+        expect(target.x).toBe(10);
     });
 
     it("pauses mixed native and fallback tracks without rewriting external changes", () => {

@@ -2,19 +2,20 @@
 // Stored on scene.animationGroups[]. Pure state interface.
 
 import type { EngineContext } from "../engine/engine.js";
-import type { AnimationClip, AnimationSampler, GltfAnimationData, NodeRest, SkeletonBinding } from "./types.js";
+import type { AnimationClip, GltfAnimationData, NodeRest, SkeletonBinding } from "./types.js";
 import type { AnimationGroupMask } from "./animation-group-mask.js";
 import type { LiteMetadata } from "../metadata.js";
 import { PATH_POINTER, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE } from "./types.js";
 import { createAnimationController } from "../skeleton/skeleton-updater.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
 import type { AnimationManager } from "./animation-manager.js";
+import type { PropertyAnimationSampler } from "./property-animation.js";
 import { _setTickAnimationImpl } from "./animation-tick.js";
 
 const DEFAULT_FRAME_RATE = 60;
 
 export interface AnimationPropertyRuntimeTrack {
-    readonly sampler: AnimationSampler;
+    readonly sampler: PropertyAnimationSampler;
     readonly stride: number;
     readonly quaternion: boolean;
     readonly easing?: (gradient: number) => number;
@@ -82,6 +83,10 @@ export interface AnimationGroup {
      *  {@link addAnimationGroup}. Type-only import, so it is erased at build — no runtime cycle
      *  and no bundle cost for always-loaded consumers (e.g. scene-core's render-loop tick). */
     _animationManager?: AnimationManager;
+    /** @internal Stable first-attachment order within `_animationOrderManager`. */
+    _animationOrder?: number;
+    /** @internal Manager for which `_animationOrder` was allocated. */
+    _animationOrderManager?: AnimationManager;
     /** @internal Applies the current time once without advancing playback. */
     _evaluate?: (engine?: EngineContext) => void;
 }

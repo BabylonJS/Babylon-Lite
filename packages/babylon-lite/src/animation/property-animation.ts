@@ -4,7 +4,6 @@ import type { AnimationGroup, AnimationPropertyRuntimeTrack } from "./animation-
 import { addAnimationGroup } from "./animation-group-task.js";
 import type { AnimationManager } from "./animation-manager.js";
 import { INTERP_LINEAR, INTERP_STEP } from "./types.js";
-import type { AnimationSampler } from "./types.js";
 import { evaluatePropertySampler } from "./evaluate.js";
 import type { AnimationEasing } from "./easing.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
@@ -40,10 +39,17 @@ export interface PropertyAnimationClipOptions {
     readonly frameRate?: number;
 }
 
+/** Property-only sampler storage. Double-precision timestamps preserve exact caller-authored frame boundaries. */
+export interface PropertyAnimationSampler {
+    readonly input: Float64Array;
+    readonly output: Float32Array;
+    readonly interpolation: typeof INTERP_LINEAR | typeof INTERP_STEP;
+}
+
 /** A compiled animation track: a sampler plus the metadata needed to evaluate and write its property. */
 export interface PropertyAnimationTrack {
     readonly path: string;
-    readonly sampler: AnimationSampler;
+    readonly sampler: PropertyAnimationSampler;
     readonly stride: number;
     readonly quaternion: boolean;
     readonly easing?: AnimationEasing;
@@ -221,7 +227,7 @@ function createPointerAnimationGroup(
 
 const _pointerScratch = new F32(16);
 
-function createSampler(track: PropertyAnimationTrackOptions, frameRate: number): AnimationSampler {
+function createSampler(track: PropertyAnimationTrackOptions, frameRate: number): PropertyAnimationSampler {
     if (track.keys.length === 0) {
         throw new Error(`Animation track "${track.path}" requires at least one key`);
     }
@@ -231,7 +237,7 @@ function createSampler(track: PropertyAnimationTrackOptions, frameRate: number):
 
     const stride = getTrackStride(track);
     const sorted = [...track.keys].sort((a, b) => getKeyTime(a, frameRate, track.path) - getKeyTime(b, frameRate, track.path));
-    const input = new F32(sorted.length);
+    const input = new Float64Array(sorted.length);
     const output = new F32(sorted.length * stride);
     let lastTime = -Infinity;
     for (let i = 0; i < sorted.length; i++) {
@@ -334,7 +340,19 @@ function createPropertyWriter(target: Record<string, unknown>, property: string,
         throw new Error(`Animation property path "${path}" has unsupported vector size ${stride}`);
     }
 
-    const targetValue = target[property];
+    let targetValue = target[property];
+    let writeValue = createVectorValueWriter(targetValue, stride, path);
+    return (output, offset) => {
+        const currentValue = target[property];
+        if (currentValue !== targetValue) {
+            targetValue = currentValue;
+            writeValue = createVectorValueWriter(currentValue, stride, path);
+        }
+        writeValue(output, offset);
+    };
+}
+
+function createVectorValueWriter(targetValue: unknown, stride: number, path: string): PropertyWriter {
     if (isSettable(targetValue)) {
         switch (stride) {
             case 2:

@@ -708,6 +708,7 @@ export type {
     PropertyAnimationClip,
     PropertyAnimationClipOptions,
     PropertyAnimationInterpolation,
+    PropertyAnimationSampler,
     PropertyAnimationTrack,
     PropertyAnimationTrackOptions,
 } from "./animation/property-animation.js";

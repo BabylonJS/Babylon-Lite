@@ -335,6 +335,13 @@ function isAnimationVectorValue(value: unknown): value is IAnimationVectorValue 
     );
 }
 
+interface AnimatableNativeState {
+    readonly manager: AnimationManager | undefined;
+    readonly group: LiteAnimationGroup | undefined;
+    readonly fallbackAnimations: readonly Animation[];
+    readonly fallbackReason: string | undefined;
+}
+
 /**
  * Babylon.js `Animatable` facade. Supported direct-animation tracks delegate to a
  * native Lite property group; unsupported tracks retain the compat CPU evaluator.
@@ -349,35 +356,37 @@ export class Animatable {
     private _speedRatio: number;
     private _paused = false;
     private _stopped = false;
+    private readonly _nativeManager: AnimationManager | undefined;
     private readonly _fallbackAnimations: readonly Animation[];
     private readonly _fallbackFrames = new Map<Animation, number>();
     private readonly _fallbackElapsedFrames = new Map<Animation, number>();
     private readonly _fallbackRepeatCounts = new Map<Animation, number>();
     private readonly _completedFallbackAnimations = new Set<Animation>();
 
+    public constructor(target: unknown, animations: Animation[], from: number, to: number, loop: boolean, speedRatio: number);
+    /** @internal */
+    public constructor(target: unknown, animations: Animation[], from: number, to: number, loop: boolean, speedRatio: number, nativeState: AnimatableNativeState);
     public constructor(
-        private readonly _nativeManager: AnimationManager | undefined,
         private readonly _target: unknown,
         private readonly _animations: Animation[],
         private readonly _from: number,
         private readonly _to: number,
         private readonly _loop: boolean,
         speedRatio: number,
-        nativeGroup?: LiteAnimationGroup,
-        fallbackAnimations: readonly Animation[] = _animations,
-        nativeFallbackReason?: string
+        nativeState?: AnimatableNativeState
     ) {
         this._speedRatio = speedRatio;
-        this._lite = nativeGroup;
-        this._fallbackAnimations = fallbackAnimations;
-        this._nativeFallbackReason = nativeFallbackReason;
+        this._nativeManager = nativeState?.manager;
+        this._lite = nativeState?.group;
+        this._fallbackAnimations = nativeState?.fallbackAnimations ?? _animations;
+        this._nativeFallbackReason = nativeState?.fallbackReason;
         this.masterFrame = _from;
-        for (const animation of fallbackAnimations) {
+        for (const animation of this._fallbackAnimations) {
             this._resetFallbackAnimation(animation, _from);
         }
-        if (nativeGroup) {
-            liteGoToFrame(nativeGroup, _from);
-            playAnimation(nativeGroup);
+        if (this._lite) {
+            liteGoToFrame(this._lite, _from);
+            playAnimation(this._lite);
         }
         this._applyFallback();
     }
@@ -396,18 +405,12 @@ export class Animatable {
         const partition = partitionAnimations(target, animations, from, to, speedRatio, blockedNativeBindings);
         const nativeManager = partition.nativeAnimations.length > 0 ? getManager() : undefined;
         const nativeGroup = nativeManager ? createNativeAnimationGroup(nativeManager, target, partition.nativeAnimations, from, to, loop, speedRatio) : undefined;
-        return new Animatable(
-            nativeManager,
-            target,
-            animations.slice(),
-            from,
-            to,
-            loop,
-            speedRatio,
-            nativeGroup,
-            partition.fallbackAnimations,
-            partition.fallbackReasons.length > 0 ? partition.fallbackReasons.join("; ") : undefined
-        );
+        return new Animatable(target, animations.slice(), from, to, loop, speedRatio, {
+            manager: nativeManager,
+            group: nativeGroup,
+            fallbackAnimations: partition.fallbackAnimations,
+            fallbackReason: partition.fallbackReasons.length > 0 ? partition.fallbackReasons.join("; ") : undefined,
+        });
     }
 
     /** @internal Return why any track cannot preserve its semantics on Lite, or undefined when all are supported. */
