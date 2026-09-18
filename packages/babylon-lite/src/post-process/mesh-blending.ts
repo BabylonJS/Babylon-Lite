@@ -665,20 +665,19 @@ function ensureBlueNoise(task: MeshBlendingPostProcessTaskInternal): void {
 
 function writeUniforms(task: MeshBlendingPostProcessTaskInternal): void {
     const data = task._uniformData;
+    const camera = task.camera;
     const width = task.outputTexture._width;
     const height = task.outputTexture._height;
-    const projection = getProjectionMatrix(task.camera, getEffectiveAspectRatio(task.camera, width, height));
+    const projection = getProjectionMatrix(camera, getEffectiveAspectRatio(camera, width, height));
     data.fill(0);
     packMat4IntoF32(data, projection, 0);
-    if (!writeInverseProjection(data, projection, !!task.camera.ortho)) {
+    if (!writeInverseProjection(data, projection, !!camera.ortho)) {
         throw new Error(`MeshBlendingPostProcessTask "${task.name}": camera projection matrix must be invertible.`);
     }
     if (task.debugMode === MeshBlendDebugMode.WorldPosition) {
-        packMat4IntoF32(data, task.camera.worldMatrix, 32);
+        packMat4IntoF32(data, camera.worldMatrix, 32);
         if (task.engine.useFloatingOrigin) {
-            data[44] = 0;
-            data[45] = 0;
-            data[46] = 0;
+            data.fill(0, 44, 47);
         }
     }
     for (let index = 0; index < 4; index++) {
@@ -687,7 +686,7 @@ function writeUniforms(task: MeshBlendingPostProcessTaskInternal): void {
         data[52 + index] = definition.minimumProjectedRadius;
     }
 
-    data[56] = task.camera.ortho ? 1 : 0;
+    data[56] = camera.ortho ? 1 : 0;
     data[57] = task.slopeFactor;
     data[58] = task.enabled ? 1 : 0;
     if (task._uniformBuffer) {
