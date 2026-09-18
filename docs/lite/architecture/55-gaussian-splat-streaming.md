@@ -336,20 +336,20 @@ errorProxy = projectedRadius * representation.error
 
 This is an error-weighted projected-radius proxy in pixels, not a metric geometric error bound.
 
-The planner begins with the cheapest positive representation for every visible leaf. If this baseline exceeds `maxSplats`, selection fails explicitly; it never drops visible leaves silently. While budget remains, upgrades are ranked by:
+The planner begins with the cheapest positive representation for every visible leaf and recomputes allocation from that floor whenever the camera, viewport, transform, or target changes. If this baseline exceeds `maxSplats`, selection fails explicitly; it never drops visible leaves silently. Screen error decides whether a successor is justified. Among justified affordable successors, the nearest leaf bounds to the current camera upgrade first; equal distances prefer greater current projected screen-error proxy and then stable leaf ID:
 
 ```text
-gain = max(0, currentErrorProxy - candidateErrorProxy)
-score = gain / addedSplats
+currentErrorProxy = projectedRadiusPx * current.error
 ```
 
-Only Pareto-chain successors are candidates. Stop when the best affordable upgrade would exceed `maxSplats`, all leaves meet `screenError`, or no positive gain remains. Stable leaf ID breaks ties.
+Only Pareto-chain successors with positive error reduction are candidates; splat cost is an admission constraint, not an efficiency divisor. Distance ordering concentrates scarce detail in camera-containing and nearby volumes instead of spending the finite budget on many cheap distant leaves. Stop when no affordable upgrade remains above its threshold, all leaves meet `screenError`, or no positive reduction remains.
 
-Hysteresis applies to the previously retained target:
+Previous targets do not reserve budget before the solve. Hysteresis biases each candidate threshold instead:
 
-- upgrading requires current error proxy greater than `screenError * (1 + lodHysteresis)`;
-- downgrading for quality alone requires it below `screenError * (1 - lodHysteresis)`;
-- hard splat/GPU/CPU budget pressure may downgrade immediately.
+- steps up to the previous target use `screenError * (1 - lodHysteresis)`, retaining displayed detail within the lower band when it still wins the current distance ordering;
+- steps beyond the previous target use `screenError * (1 + lodHysteresis)`;
+- steps without a previous target, and every step under hard pressure, use `screenError`;
+- no hysteresis value, including zero, can lock an old region's allocation when a moved camera makes another visible leaf's screen error worse.
 
 File request priorities are:
 
@@ -614,6 +614,24 @@ The demo provides detail error and splat-budget controls, an accessible Orbit / 
 An initially collapsed native `details` section in the same panel reports the active camera's world position and yaw/pitch/roll in degrees. It always derives from `scene.camera.worldMatrix`, never mode-specific local fields: translation is matrix elements 12–14, forward is the normalized third basis column, yaw is rotation about world +Y, pitch is positive when looking up, and roll is the signed rotation of the first basis column from the zero-roll right vector about forward. Near a vertical forward direction, yaw falls back to the projected right/up basis so every valid displayed value remains finite; exact and rounded negative zero format as zero. Nonfinite, zero-length, or singular camera bases are rejected by the pure pose reader with a `RangeError`; the HUD catches only that expected validation type, displays its specific message plus unavailable fields instead of substituting plausible zero values, and rethrows unrelated failures. The toggle event refreshes the values immediately when opened, while the render callback skips all pose derivation and formatting while collapsed. The HUD keeps its existing content width but bounds its total box to the viewport margins and scrolls vertically when expanded content exceeds a short viewport. The blocking overlay disappears on `firstFrameReady`, not convergence.
 
 Attribution is always visible: “Get lost in the alleys of historical Trogir, Croatia” by Paolo Tosolini, source `https://superspl.at/scene/14bac5b2`, licensed CC BY 4.0.
+
+No dataset bytes, personal path, fabricated thumbnail, or golden reference are committed.
+
+### Opt-in LOD convergence comparison
+
+`pnpm compare:splat-lod` is a development-only Playwright/localhost tool; it is not imported by the library or demo bundle and exposes no production globals. It uses a dedicated blank localhost page rather than the lab gallery, renders the same manifest in native engine adapters, and records deterministic convergence at named waypoints. The reference adapter is pinned to PlayCanvas `2.22.1`, revision `73787b3ba852728d04c8d5eabf2b5f773b3bf9da`; missing or changed native fields fail explicitly. Built-ins are `overview`, the reported user pose at eye `(15.8, 1.68, -70.5)` with yaw `75.83°`, pitch `-10.43°` and roll zero, `published-street` at eye `(14.7745447, 1.5231726, -42.5117302)` targeting `(16.2620824, 1.3343776, -43.8352073)`, then `overview-return` and `user-repeat` to expose warm-cache history. Every stop uses vertical FOV `0.8` radians, near `0.1`, far `1500`, viewport `900x1000`, DPR `1`, sample interval `250 ms`, quiet hold `2000 ms`, and timeout `60000 ms` unless overridden. The PlayCanvas adapter mirrors world Z and forward Z for its right-handed camera while both adapters retain the authored 180-degree scene-Z placement. Each report identifies adapter and engine version, repository revision and dirty state, actual settings, and requested plus actual camera matrices.
+
+The CLI flags are `--engine=lite|playcanvas|both`, `--profiles=matched|all`, `--asset-url=URL`, `--output=DIR`, `--poses=FILE`, `--waypoints=NAMES`, `--width=N`, `--height=N`, `--dpr=N`, `--splat-budget=N`, `--gpu-mib=N`, `--cpu-mib=N`, `--screen-error=N`, `--sample-ms=N`, `--hold-ms=N`, `--timeout-ms=N`, `--port=N`, and `--headed=true|false`. Defaults are both engines, all profiles, the Babylon-hosted Trogir URL, 750,000 splats, 256 MiB GPU, 96 MiB CPU, and screen error 2. The matched profile keeps both engines at the nominal 750,000 target and the normalized lens, but is not exact resource parity because only Lite enforces those byte budgets. The viewer-budget profile compares unchanged Lite 750,000 against PlayCanvas 4,000,000 and must not attribute that budget advantage to selection policy. This comparison profile remains distinct from the standalone demo's 4,010,000 capacity and 1 GiB ledger.
+
+```powershell
+pnpm compare:splat-lod --engine=both --profiles=all --asset-url=https://assets.babylonjs.com/splats/Trogir/lod-meta.json --output=.splat-lod-reports\trogir --width=900 --height=1000 --dpr=1 --splat-budget=750000 --gpu-mib=256 --cpu-mib=96 --screen-error=2 --sample-ms=250 --hold-ms=2000 --timeout-ms=60000 --port=5191
+```
+
+Each engine starts cold, then the built-in return/repeat waypoints measure authentic warm-cache/history behavior in the same native instance. The CLI owns and disposes its browser and dedicated HMR-disabled Vite server in `finally`, writes bounded JSON Lines, formatted JSON, and a human-readable text summary under ignored `.splat-lod-reports/`, and emits records only when the stable state fingerprint changes or the quiet heartbeat expires.
+
+Every sample contains elapsed time; native phase, queue, pressure and error state; requested and actual camera transforms; memory where the adapter can measure it; and stable leaf IDs with both the common transformed-AABB frustum result and the native planner visibility when that state is observable, distance to transformed bounds, target/requested LOD, resident alternatives, actual displayed/resolved LOD, splat counts, source state, and target-display gap. Lite resolves actual display only from the currently published canonical GPU intervals by source identity plus `(offset, count)`; PlayCanvas resolves it from the native current-world `(fileIndex, offset, count)` tuple. Neither adapter infers actual display from mutable target or pending state. Aggregates include `0-1m`, `1-5m`, `5-15m`, and `15m+` distance bins, nearest cross-engine displayed-LOD differences, displayed/target histograms, active/selected counts, and convergence disposition. A visible positive target with no resolved display counts as a gap in both per-bin and whole-waypoint metrics.
+
+An empty queue is not convergence. A stop is `converged` only after native readiness, zero queued files, zero pending requests/transitions, no pressure or error, every common-visible target being present in the native resolved intervals, and the quiet hold. It is `failed` and aborts the run when a native stream, source, browser runtime, page, console, or uncaptured WebGPU error occurs; `budget-limited` when native pressure is explicit and state remains unchanged for the hold; `stalled` for a ready, queue-free, unchanged non-pressure gap; or `timeout` at the deadline. Each adapter bounds its complete initialization sequence, including module/device/manifest/asset loading and first-frame readiness, with the configured timeout and disposes every partially constructed native object it owns. The parent runner independently bounds the whole page evaluation, records browser `pageerror` and error-console events, and always closes the browser and server. Lite creates immutable canonical capacity and required WebGPU buffer limits from the requested foreground budget plus the environment reserve; the CLI accepts at most 4,000,000 foreground splats and rejects larger values before browser launch rather than silently running a lower capacity.
 
 No dataset bytes, personal path, fabricated thumbnail, or golden reference are committed.
 

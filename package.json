@@ -62,6 +62,7 @@
         "format": "prettier --write \"packages/**/src/**/*.ts\" \"tests/lite/**/*.ts\" \"config/**/*.ts\" \"*.config.ts\" \"**/*.md\"",
         "format:check": "prettier --check \"packages/**/src/**/*.ts\" \"tests/lite/**/*.ts\" \"config/**/*.ts\" \"*.config.ts\" \"**/*.md\"",
         "analyze-bundle": "tsx scripts/analyze-bundle.ts",
+        "compare:splat-lod": "tsx scripts/compare-splat-lod.ts",
         "coverage:scene": "tsx scripts/coverage-scene.ts",
         "select:affected-scenes": "tsx scripts/select-affected-scenes.ts",
         "docs": "typedoc",

@@ -107,6 +107,7 @@ function nearestDistance(bound: StreamBound, position: ArrayLike<number>): numbe
 interface Candidate {
     visible: VisibleLeaf;
     currentIndex: number;
+    distanceToCamera: number;
     projectedRadius: number;
 }
 
@@ -136,43 +137,25 @@ export function planStreamSelection(input: StreamSelectionInput): StreamSelectio
     collectVisible(input.root, input.worldMatrix, planes, visible);
     visible.sort((a, b) => a.leaf.id - b.leaf.id);
     const focalScale = (input.targetHeight * Math.abs(input.projectionP11)) / 2;
-    const candidates: Candidate[] = visible.map((entry) => ({
-        visible: entry,
-        currentIndex: 0,
-        projectedRadius: (focalScale * entry.bound.radius) / Math.max(entry.bound.radius + nearestDistance(entry.bound, input.cameraPosition), input.near),
-    }));
+    const candidates: Candidate[] = visible.map((entry) => {
+        const distanceToCamera = nearestDistance(entry.bound, input.cameraPosition);
+        return {
+            visible: entry,
+            currentIndex: 0,
+            distanceToCamera,
+            projectedRadius: (focalScale * entry.bound.radius) / Math.max(entry.bound.radius + distanceToCamera, input.near),
+        };
+    });
     const baselineSplats = candidates.reduce((sum, candidate) => sum + candidate.visible.leaf.alternatives[0]!.count, 0);
     if (baselineSplats > input.maxSplats) {
         throw new Error(`${PREFIX} selection: visible coarse baseline (${baselineSplats} splats) exceeds maxSplats (${input.maxSplats})`);
     }
     let selectedSplats = baselineSplats;
 
-    if (!input.hardBudgetPressure && input.previousTargets) {
-        let retainedSplats = baselineSplats;
-        const retained: number[] = [];
-        for (const candidate of candidates) {
-            const previous = input.previousTargets.get(candidate.visible.leaf.id);
-            const index = previous
-                ? candidate.visible.leaf.alternatives.findIndex((rep) => rep.fileId === previous.fileId && rep.offset === previous.offset && rep.count === previous.count)
-                : -1;
-            const cheaperError = index > 0 ? candidate.projectedRadius * candidate.visible.leaf.alternatives[index - 1]!.error : 0;
-            const preserve = index > 0 && cheaperError >= input.screenError * (1 - input.lodHysteresis);
-            retained.push(preserve ? index : 0);
-            if (preserve) {
-                retainedSplats += candidate.visible.leaf.alternatives[index]!.count - candidate.visible.leaf.alternatives[0]!.count;
-            }
-        }
-        if (retainedSplats <= input.maxSplats) {
-            selectedSplats = retainedSplats;
-            for (let index = 0; index < candidates.length; index++) {
-                candidates[index]!.currentIndex = retained[index]!;
-            }
-        }
-    }
-
     for (;;) {
         let best: Candidate | null = null;
-        let bestScore = -Infinity;
+        let bestDistance = Infinity;
+        let bestError = -Infinity;
         let bestAdded = 0;
         for (const candidate of candidates) {
             const alternatives = candidate.visible.leaf.alternatives;
@@ -182,8 +165,18 @@ export function planStreamSelection(input: StreamSelectionInput): StreamSelectio
                 continue;
             }
             const previous = input.previousTargets?.get(candidate.visible.leaf.id);
-            const isRetainedTarget = !!previous && current.fileId === previous.fileId && current.offset === previous.offset && current.count === previous.count;
-            const threshold = isRetainedTarget ? input.screenError * (1 + input.lodHysteresis) : input.screenError;
+            const previousIndex = previous
+                ? alternatives.findIndex(
+                      (representation) => representation.fileId === previous.fileId && representation.offset === previous.offset && representation.count === previous.count
+                  )
+                : -1;
+            const nextIndex = candidate.currentIndex + 1;
+            const threshold =
+                input.hardBudgetPressure || previousIndex < 0
+                    ? input.screenError
+                    : nextIndex <= previousIndex
+                      ? input.screenError * (1 - input.lodHysteresis)
+                      : input.screenError * (1 + input.lodHysteresis);
             const currentError = candidate.projectedRadius * current.error;
             if (currentError <= threshold) {
                 continue;
@@ -193,14 +186,19 @@ export function planStreamSelection(input: StreamSelectionInput): StreamSelectio
                 continue;
             }
             const gain = candidate.projectedRadius * Math.max(0, current.error - next.error);
-            const score = gain / added;
-            if (score > bestScore || (score === bestScore && candidate.visible.leaf.id < best!.visible.leaf.id)) {
+            if (
+                gain > 0 &&
+                (candidate.distanceToCamera < bestDistance ||
+                    (candidate.distanceToCamera === bestDistance &&
+                        (currentError > bestError || (currentError === bestError && candidate.visible.leaf.id < best!.visible.leaf.id))))
+            ) {
                 best = candidate;
-                bestScore = score;
+                bestDistance = candidate.distanceToCamera;
+                bestError = currentError;
                 bestAdded = added;
             }
         }
-        if (!best || bestScore <= 0) {
+        if (!best) {
             break;
         }
         best.currentIndex++;

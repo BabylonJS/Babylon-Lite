@@ -115,7 +115,7 @@ describe("splat stream bounds and frustum", () => {
 });
 
 describe("splat stream selection planner", () => {
-    it("starts from every visible coarse representation and greedily upgrades by stable gain/cost", () => {
+    it("starts from every visible coarse representation and upgrades nearest eligible bounds first", () => {
         const parsed = makeManifest();
         const plan = planStreamSelection(input(parsed, { maxSplats: 4 }));
         expect(plan.visibleLeaves).toBe(3);
@@ -150,6 +150,94 @@ describe("splat stream selection planner", () => {
         expect(preserved.selections[0]!.target.lod).toBe(1);
         const downgraded = planStreamSelection(input(parsed, { targetHeight: 2, screenError: 1, previousTargets: previousFine }));
         expect(downgraded.selections[0]!.target.lod).toBe(0);
+    });
+
+    it("reallocates a saturated budget to the newly nearest volume without history lock", () => {
+        const parsed = parseSplatStreamManifest(
+            {
+                version: 1,
+                lodLevels: 2,
+                lodErrors: true,
+                filenames: ["fine/meta.json", "coarse/meta.json"],
+                tree: {
+                    bound: { min: [-3.4, -0.4, -3.4], max: [3.4, 0.4, -2.6] },
+                    children: [
+                        {
+                            bound: { min: [-3.4, -0.4, -3.4], max: [-2.6, 0.4, -2.6] },
+                            lods: { "0": { file: 0, offset: 0, count: 100 }, "1": { file: 1, offset: 0, count: 10 } },
+                            errors: [0, 1],
+                        },
+                        {
+                            bound: { min: [2.6, -0.4, -3.4], max: [3.4, 0.4, -2.6] },
+                            lods: { "0": { file: 0, offset: 100, count: 100 }, "1": { file: 1, offset: 10, count: 10 } },
+                            errors: [0, 1],
+                        },
+                    ],
+                },
+            },
+            "https://assets.example/lod-meta.json"
+        );
+        const projection = createPerspectiveMat4LH(2.6, 1, 0.1, 100);
+        const at = (cameraX: number, previousTargets?: ReadonlyMap<number, StreamRepresentation>, lodHysteresis = 0.15) => {
+            const viewProjection = new Float32Array(projection);
+            viewProjection[12] = -projection[0]! * cameraX;
+            return planStreamSelection(
+                input(parsed, {
+                    viewProjectionMatrix: viewProjection,
+                    projectionP11: projection[5]!,
+                    cameraPosition: [cameraX, 0, 0],
+                    targetHeight: 1000,
+                    maxSplats: 110,
+                    screenError: 2,
+                    previousTargets,
+                    lodHysteresis,
+                })
+            );
+        };
+        const left = at(-3);
+        expect(left.selections.map((selection) => selection.target.lod)).toEqual([0, 1]);
+        const previous = new Map(left.selections.map((selection) => [selection.leaf.id, selection.target] as const));
+        expect(at(3, previous).selections.map((selection) => selection.target.lod)).toEqual([1, 0]);
+        expect(at(3, previous, 0).selections.map((selection) => selection.target.lod)).toEqual([1, 0]);
+    });
+
+    it("prioritizes a nearer expensive upgrade over a farther cheap upgrade", () => {
+        const parsed = parseSplatStreamManifest(
+            {
+                version: 1,
+                lodLevels: 2,
+                lodErrors: true,
+                filenames: ["fine/meta.json", "coarse/meta.json"],
+                tree: {
+                    bound: { min: [-0.4, -0.4, -3.4], max: [5.4, 0.4, -2.6] },
+                    children: [
+                        {
+                            bound: { min: [-0.4, -0.4, -3.4], max: [0.4, 0.4, -2.6] },
+                            lods: { "0": { file: 0, offset: 0, count: 100 }, "1": { file: 1, offset: 0, count: 10 } },
+                            errors: [0, 1],
+                        },
+                        {
+                            bound: { min: [4.6, -0.4, -3.4], max: [5.4, 0.4, -2.6] },
+                            lods: { "0": { file: 0, offset: 100, count: 20 }, "1": { file: 1, offset: 10, count: 10 } },
+                            errors: [0, 1],
+                        },
+                    ],
+                },
+            },
+            "https://assets.example/lod-meta.json"
+        );
+        const projection = createPerspectiveMat4LH(2.6, 1, 0.1, 100);
+        const plan = planStreamSelection(
+            input(parsed, {
+                viewProjectionMatrix: projection,
+                projectionP11: projection[5]!,
+                cameraPosition: [0, 0, 0],
+                targetHeight: 1000,
+                maxSplats: 110,
+                screenError: 2,
+            })
+        );
+        expect(plan.selections.map((selection) => selection.target.lod)).toEqual([0, 1]);
     });
 
     it("downgrades immediately under hard pressure and fails rather than dropping visible leaves", () => {
