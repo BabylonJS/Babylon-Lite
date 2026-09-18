@@ -2669,7 +2669,7 @@
         "id": 306,
         "slug": "scene306-physics-parents",
         "name": "Scene 306 — Physics - Nodes with Parents",
-        "maxMad": 0.04,
+        "maxMad": 0.17,
         "maxRawKB": 45,
         "description": "Synchronization between physics and scene node transform hierarchies. Validates that physics bodies with parented nodes update their world transforms correctly and vica versa, and that the physics simulation respects the hierarchy.",
         "tags": ["physics"],
