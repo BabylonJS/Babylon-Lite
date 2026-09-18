@@ -518,8 +518,6 @@ pixelOffset = round(vec2<f32>(direction.x, -direction.y) * distancePixels);
 
 Blue noise is indexed with `algorithmPixel`. Candidate directions, refinement angles, and debug direction colors remain unchanged from Babylon.js; every search, continuation, target-color, and opposite-direction texture offset uses `pixelOffset`. Without both conversions, the same displayed pixel would read another blue-noise row and probe vertically mirrored candidates.
 
-WGSL `sin`/`cos` precision varies between GPU implementations. Direction vectors are therefore rounded to `1 / 65536` immediately after trigonometric evaluation. At supported render-target extents this is below the half-pixel threshold used by `pixelOffset`, preserving Babylon.js texel choices while preventing binary debug classifications from drifting across GPUs.
-
 ### Compile-time quality constants
 
 | Quality   | Directions | Radial samples | Direction samples | Direction steps | Exact edge | Radius scale | Rotation         | Jitter | Fallback | Tiny object | Secondary | Interpolation |
@@ -1048,6 +1046,8 @@ Each scene includes:
 - bundle-size discovery through the existing scene-config-driven bundle harness.
 
 Each scene has a committed Babylon.js golden under `reference/lite/` and a gallery thumbnail under `lab/public/thumbnails/`.
+
+Scene 311 compares against a fresh Babylon.js capture from the same browser session. Its two half-width post-process viewports map fragment centers exactly onto source-texel boundaries, where fullscreen-varying interpolation can select an adjacent texel on different GPU implementations. A same-GPU reference preserves the strict MAD thresholds without changing the committed golden or weakening the algorithm.
 
 ## Dependencies
 
