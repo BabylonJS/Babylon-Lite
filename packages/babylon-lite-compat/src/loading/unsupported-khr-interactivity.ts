@@ -1,7 +1,16 @@
+import {
+    createKhrInteractivityRuntimeValueSnapshot,
+    hasDefaultInteractivityFlowInput,
+    normalizeInteractivityEventDataConfiguration,
+    normalizeKhrInteractivityRuntimeValue,
+} from "babylon-lite";
+
 import { unsupported } from "../error.js";
 
 const KHR_INTERACTIVITY_UNSUPPORTED =
     "KHR_interactivity depends on Babylon.js FlowGraph block, connection, context, serialization, and glTF-reference models. Lite's flow-graph runtime uses a different graph model, so a stable cross-model adapter requires a broader loader/runtime design.";
+const KHR_INTERACTIVITY_EXPORT_UNSUPPORTED =
+    "KHR_interactivity export planning depends on Babylon.js FlowGraph block provenance and the Babylon.js glTF serializer's final entity-index remapping context. Lite exposes a different runtime graph model and no glTF serializer.";
 
 export type KHRInteractivitySignature = "bool" | "float" | "float2" | "float3" | "float4" | "float2x2" | "float3x3" | "float4x4" | "int" | "ref" | "custom";
 
@@ -176,6 +185,12 @@ export interface IGLTFToFlowGraphMapping {
     >;
 }
 
+export interface IKHRInteractivityOperationRegistryEntry {
+    op: string;
+    extension?: string;
+    mapping: IGLTFToFlowGraphMapping;
+}
+
 export interface IDebugLogTemplateParseResult {
     valid: boolean;
     sockets: string[];
@@ -203,6 +218,18 @@ export function addNewInteractivityFlowGraphMapping(_key: string, _extension: st
 
 export function getAllSupportedNativeNodeTypes(): string[] {
     return unsupported("GLTF2.getAllSupportedNativeNodeTypes", KHR_INTERACTIVITY_UNSUPPORTED);
+}
+
+export function HasDefaultInteractivityFlowInput(operation: string): boolean {
+    return hasDefaultInteractivityFlowInput(operation);
+}
+
+export function NormalizeInteractivityEventDataConfiguration(value: unknown): unknown {
+    return normalizeInteractivityEventDataConfiguration(value);
+}
+
+export function GetInteractivityOperationRegistry(): readonly IKHRInteractivityOperationRegistryEntry[] {
+    return unsupported("GLTF2.GetInteractivityOperationRegistry", KHR_INTERACTIVITY_UNSUPPORTED);
 }
 
 export type KHRInteractivityFlowGraphType =
@@ -329,6 +356,55 @@ export interface IKHRInteractivityGraphModel {
     valid: boolean;
 }
 
+export interface IKHRInteractivityInputDefaultProvenance {
+    runtimeValueFingerprint?: string;
+    unrepresentable?: true;
+}
+
+export interface IKHRInteractivityConfigurationProvenance {
+    sourceValue?: unknown[];
+    runtimeValue?: unknown;
+}
+
+export interface IKHRInteractivityBlockProvenance {
+    graphIndex: number;
+    nodeIndex: number;
+    declarationIndex: number;
+    operation: string;
+    role: number;
+    sourcePath: string;
+    configuration?: Record<string, IKHRInteractivityConfigurationProvenance>;
+    generatedConfiguration?: Record<string, unknown>;
+    generatedConfigurationRuntime?: Record<string, IKHRInteractivityInputDefaultProvenance>;
+    generatedInputDefaults?: Record<string, IKHRInteractivityInputDefaultProvenance>;
+}
+
+export interface IKHRInteractivitySocketProvenance extends IKHRInteractivityBlockProvenance {
+    kind: "value" | "flow";
+    direction: "input" | "output";
+    socket: string;
+    sourceValue?: IKHRInteractivityVariable | IKHRInteractivityOutputSocketReference;
+    runtimeValue?: unknown[];
+    runtimeValueSnapshot?: IKHRInteractivityInputDefaultProvenance;
+}
+
+export interface IKHRInteractivityGraphProvenance {
+    graphIndex: number;
+    specificationCommit: string;
+    source: IKHRInteractivityGraph;
+    authoredVariableValues?: Record<number, unknown[]>;
+    authoredVariableTypes?: Record<number, string>;
+    authoredVariableStructureChanged?: boolean;
+}
+
+export function _NormalizeKHRInteractivityRuntimeValue(value: unknown): unknown[] | undefined {
+    return normalizeKhrInteractivityRuntimeValue(value);
+}
+
+export function _CreateKHRInteractivityRuntimeValueSnapshot(value: unknown): IKHRInteractivityInputDefaultProvenance {
+    return createKhrInteractivityRuntimeValueSnapshot(value);
+}
+
 export interface IKHRInteractivityDocument {
     specificationCommit: string;
     source: unknown;
@@ -351,6 +427,115 @@ export function CreateKHRInteractivityGraphModel(_graph: unknown, _index = 0, _s
 
 export function CreateKHRInteractivityDocument(_extension: unknown, _supportedExtensions?: ReadonlySet<string>, _assetNodeCount?: number): IKHRInteractivityDocument {
     return unsupported("GLTF2.CreateKHRInteractivityDocument", KHR_INTERACTIVITY_UNSUPPORTED);
+}
+
+export function _CaptureKHRInteractivityRuntimeInputDefaults(_flowGraph: unknown): void {
+    unsupported("GLTF2._CaptureKHRInteractivityRuntimeInputDefaults", KHR_INTERACTIVITY_UNSUPPORTED);
+}
+
+export type KHRInteractivityExportClassification = "exact" | "inverse-composite" | "unsupported" | "lossy";
+
+export interface IKHRInteractivityExportDiagnostic {
+    code:
+        | "GRAPH_SOURCE_MISSING"
+        | "GRAPH_COUNT_MISMATCH"
+        | "NODE_SOURCE_MISSING"
+        | "BLOCK_PROVENANCE_INVALID"
+        | "BLOCK_ROLE_MISSING"
+        | "BLOCK_ROLE_DUPLICATE"
+        | "BLOCK_TYPE_MISMATCH"
+        | "BLOCK_UNSUPPORTED"
+        | "BLOCK_AMBIGUOUS"
+        | "COMPOSITE_CONNECTION_CHANGED"
+        | "SOCKET_PROVENANCE_MISSING"
+        | "SOCKET_CONNECTION_AMBIGUOUS"
+        | "SOCKET_TARGET_UNREPRESENTABLE"
+        | "INPUT_DEFAULT_UNREPRESENTABLE"
+        | "VALUE_UNREPRESENTABLE"
+        | "CONFIGURATION_UNREPRESENTABLE"
+        | "REFERENCE_UNRESOLVED"
+        | "DEPENDENCY_CYCLE"
+        | "GRAPH_INVALID";
+    path: string;
+    message: string;
+    severity: "error" | "warning";
+    graphIndex?: number;
+    nodeIndex?: number;
+    blockId?: string;
+    socket?: string;
+}
+
+export interface IKHRInteractivityNodeExportAnalysis {
+    graphIndex: number;
+    nodeIndex?: number;
+    operation?: string;
+    blockIds: string[];
+    classification: KHRInteractivityExportClassification;
+    diagnostics: IKHRInteractivityExportDiagnostic[];
+}
+
+export interface IKHRInteractivityExportAnalysis {
+    representable: boolean;
+    nodes: IKHRInteractivityNodeExportAnalysis[];
+    diagnostics: IKHRInteractivityExportDiagnostic[];
+}
+
+export type KhrInteractivityRootCollection = "nodes" | "animations" | "cameras" | "materials" | "meshes" | "textures" | "images" | "samplers" | "skins" | "scenes";
+
+export interface IKHRInteractivitySerializerContext {
+    getNodeCount(): number;
+    getNodeIndex(node: unknown): number | undefined;
+    getAnimationIndex(animation: unknown): number | undefined;
+    getCameraIndex(camera: unknown): number | undefined;
+    getMaterialIndex(material: unknown): number | undefined;
+    getRootIndex?(collection: KhrInteractivityRootCollection, entity: object): number | undefined;
+    setNodeExtension(nodeIndex: number, extensionName: string, value: unknown): void;
+}
+
+export interface IKHRInteractivityExportProvider {
+    readonly required: boolean;
+    readonly additionalExtensionsUsed: readonly string[];
+    readonly additionalExtensionsRequired: readonly string[];
+    analyze(): IKHRInteractivityExportAnalysis;
+    build(context: IKHRInteractivitySerializerContext): unknown;
+}
+
+export interface IKHRInteractivityExportOptions {
+    document?: IKHRInteractivityDocument;
+    sourceGLTF?: IGLTF;
+    defaultGraphIndex?: number;
+    targetFps?: number;
+    required?: boolean;
+    additionalExtensionsRequired?: readonly string[];
+}
+
+export class KHRInteractivityExportError extends Error {
+    public constructor(public readonly diagnostics: readonly IKHRInteractivityExportDiagnostic[]) {
+        super(diagnostics.map((diagnostic) => `${diagnostic.path}: ${diagnostic.message}`).join("\n"));
+        this.name = "KHRInteractivityExportError";
+    }
+}
+
+export class KHRInteractivityExportPlan implements IKHRInteractivityExportProvider {
+    public readonly required = true;
+    public readonly additionalExtensionsUsed: readonly string[] = [];
+    public readonly additionalExtensionsRequired: readonly string[] = [];
+
+    public constructor(_flowGraphs: readonly unknown[], _options: IKHRInteractivityExportOptions = {}) {
+        unsupported("GLTF2.KHRInteractivityExportPlan", KHR_INTERACTIVITY_EXPORT_UNSUPPORTED);
+    }
+
+    public analyze(): IKHRInteractivityExportAnalysis {
+        return unsupported("GLTF2.KHRInteractivityExportPlan.analyze", KHR_INTERACTIVITY_EXPORT_UNSUPPORTED);
+    }
+
+    public build(_context: IKHRInteractivitySerializerContext): unknown {
+        return unsupported("GLTF2.KHRInteractivityExportPlan.build", KHR_INTERACTIVITY_EXPORT_UNSUPPORTED);
+    }
+}
+
+export function CreateKHRInteractivityExportPlan(flowGraphs: readonly unknown[], options: IKHRInteractivityExportOptions = {}): KHRInteractivityExportPlan {
+    return new KHRInteractivityExportPlan(flowGraphs, options);
 }
 
 export interface InteractivityEvent {
