@@ -78,8 +78,11 @@ const attributes = {
 };
 
 /** @internal */
-export function _attributeInfo(name: ShaderAttributeName): ShaderAttributeInfo {
-    return attributes[name];
+export function _attributeInfo(name: ShaderAttributeName): ShaderAttributeInfo;
+/** @internal */
+export function _attributeInfo(name: string): ShaderAttributeInfo | undefined;
+export function _attributeInfo(name: string): ShaderAttributeInfo | undefined {
+    return attributes[name as ShaderAttributeName];
 }
 
 /** @internal Canonical tight layout for one attribute. */

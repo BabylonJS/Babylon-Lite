@@ -47,7 +47,7 @@ export interface ShaderMaterialOptions {
     readonly backFaceCulling?: boolean;
     readonly depthWrite?: boolean;
     readonly depthCompare?: GPUCompareFunction;
-    readonly topology?: GPUPrimitiveTopology;
+    readonly topology?: "point-list" | "line-list" | "triangle-list";
 }
 ```
 
@@ -91,7 +91,9 @@ export interface ShaderMaterial extends Material {
 
 `topology` defaults to `triangle-list`. It is fixed when the material is created and participates
 in pipeline selection; callers supplying line-list geometry can use `"line-list"` for diagnostic
-wireframe rendering without accessing internal pipeline state.
+wireframe rendering without accessing internal pipeline state. Indexed strip topologies are rejected
+because WebGPU requires a `stripIndexFormat` matching each mesh's index buffer, while ShaderMaterial
+pipeline grouping is material-based.
 
 ### Attributes
 

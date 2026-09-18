@@ -7,6 +7,7 @@ import type { WgslSource } from "../../shader/wgsl.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { MeshGPU } from "../../mesh/mesh.js";
 import { getShaderGroupBuilder } from "./shader-group-builder.js";
+import { _attributeInfo } from "./shader-vb-support.js";
 import { bumpVisibilityEpoch } from "../../engine/engine.js";
 
 /** Vertex attribute names a ShaderMaterial can bind. `joints`/`weights` (and `joints1`/`weights1`
@@ -89,8 +90,9 @@ export interface ShaderMaterialOptions {
     /** Slope-scaled depth bias — extra bias proportional to the depth gradient, so steeply-angled (grazing)
      *  surfaces get more bias. Pairs with `depthBias` to kill z-fighting at oblique angles. Default 0. */
     readonly depthBiasSlopeScale?: number;
-    /** Primitive topology for this material. Defaults to `triangle-list`. */
-    readonly topology?: GPUPrimitiveTopology;
+    /** Primitive topology for this material. Defaults to `triangle-list`.
+     *  Strip topologies are not supported because their required index format is mesh-specific. */
+    readonly topology?: "point-list" | "line-list" | "triangle-list";
 }
 
 /** A custom uniform declaration: WGSL identifier, type, and optional default. */
@@ -182,7 +184,7 @@ export interface ShaderMaterial extends Material {
     readonly depthBias: number;
     readonly depthBiasSlopeScale: number;
     /** @internal Primitive topology override. Undefined means triangle-list. */
-    readonly _topology?: GPUPrimitiveTopology;
+    readonly _topology?: ShaderMaterialOptions["topology"];
     /** Optional stencil-test state baked into the main-pass pipeline (mask write / discard). Set after
      *  creation (`mat.stencil = { ... }`) and call `enableMaterialStencil()` before `registerScene`. Default
      *  none. See `StencilState`. */
@@ -210,18 +212,7 @@ function assertIdentifier(kind: string, name: string): void {
 }
 
 function isSupportedAttribute(name: string): name is ShaderAttributeName {
-    return (
-        name === "position" ||
-        name === "normal" ||
-        name === "uv" ||
-        name === "uv2" ||
-        name === "tangent" ||
-        name === "color" ||
-        name === "joints" ||
-        name === "weights" ||
-        name === "joints1" ||
-        name === "weights1"
-    );
+    return !!_attributeInfo(name);
 }
 
 function isSystemUniform(name: string): name is ShaderSystemUniformName {
@@ -262,6 +253,10 @@ export function _isShaderSystemUniform(name: string): name is ShaderSystemUnifor
 export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMaterial {
     if (!options.vertexSource || !options.fragmentSource) {
         throw new Error("ShaderMaterial: vertexSource and fragmentSource must be non-empty WGSL strings.");
+    }
+    const topology = options.topology as GPUPrimitiveTopology | undefined;
+    if (topology?.endsWith("-strip")) {
+        throw new Error("ShaderMaterial: strip topologies are unsupported because indexed draws require a mesh-specific stripIndexFormat.");
     }
 
     const attributes: ShaderAttributeName[] = [];
@@ -359,7 +354,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         depthOnlyFragment: options.depthOnlyFragment ?? false,
         depthBias: options.depthBias ?? 0,
         depthBiasSlopeScale: options.depthBiasSlopeScale ?? 0,
-        _topology: options.topology,
+        _topology: topology as ShaderMaterialOptions["topology"],
         _buildGroup: getShaderGroupBuilder(),
         _uboVersion: 0,
         _uniformValues: uniformValues,

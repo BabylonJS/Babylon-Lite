@@ -33,16 +33,19 @@ function makeEngine() {
     };
 }
 
-function makeMaterial(fragment: WgslSource = wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`, blend?: GPUBlendState, topology?: GPUPrimitiveTopology) {
-    const material = createShaderMaterial({
+function makeMaterial(
+    fragment: WgslSource = wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+    blend?: GPUBlendState,
+    topology?: "point-list" | "line-list" | "triangle-list"
+) {
+    return createShaderMaterial({
         vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
         fragmentSource: fragment,
         attributes: ["position"],
         uniforms: ["world", { name: "tint", type: "vec3<f32>" }],
         ...(blend ? { blend } : {}),
+        topology,
     });
-    Object.assign(material, { _topology: topology });
-    return material;
 }
 
 const signature = {
@@ -160,6 +163,17 @@ describe("ShaderMaterial pipeline cache", () => {
         expect(createRenderPipeline).toHaveBeenCalledTimes(2);
         expect(createRenderPipeline.mock.calls[0]![0]!.primitive!.topology).toBe("triangle-list");
         expect(createRenderPipeline.mock.calls[1]![0]!.primitive!.topology).toBe("line-list");
+    });
+
+    it.each(["line-strip", "triangle-strip"] as const)("rejects unsupported %s topology before pipeline creation", (topology) => {
+        expect(() =>
+            createShaderMaterial({
+                vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
+                fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(1); }`,
+                attributes: ["position"],
+                topology: topology as never,
+            })
+        ).toThrow("ShaderMaterial: strip topologies are unsupported because indexed draws require a mesh-specific stripIndexFormat.");
     });
 
     it("specializes getFinalWorld for regular and thin-instanced pipelines", () => {
