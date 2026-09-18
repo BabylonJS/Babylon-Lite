@@ -161,4 +161,32 @@ console.log(createRenderTargetTexture(globalThis.engine, {
         expect(result.significantWarnings).toEqual([]);
         expect(result.code.includes(marker)).toBe(retained);
     });
+
+    it.each([
+        ["createComputeShader, createComputeDispatch", false],
+        ["createComputeImmediateShader, setComputeDispatchImmediates", true],
+    ] as const)("keeps compute immediate-data support opt-in: %s", async (imports, retained) => {
+        const result = await runRollup({
+            entrySource: `import { ${imports} } from ${JSON.stringify(LIB_ENTRY)};\nconsole.log(${imports});\n`,
+            format: "es",
+            minify: false,
+        });
+        expect(result.errors).toEqual([]);
+        expect(result.significantWarnings).toEqual([]);
+        expect(result.code.includes("immediate_address_space")).toBe(retained);
+    });
+
+    it.each([
+        ["createEngine", false],
+        ["createEngineWithFeatures", true],
+    ] as const)("keeps explicit device-feature validation opt-in: %s", async (imports, retained) => {
+        const result = await runRollup({
+            entrySource: `import { ${imports} } from ${JSON.stringify(LIB_ENTRY)};\nconsole.log(${imports});\n`,
+            format: "es",
+            minify: false,
+        });
+        expect(result.errors).toEqual([]);
+        expect(result.significantWarnings).toEqual([]);
+        expect(result.code.includes("_installDeviceFeaturesResolver")).toBe(retained);
+    });
 });

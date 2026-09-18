@@ -61,7 +61,12 @@ export type BindingKind =
           readonly sampleType?: "float" | "unfilterable-float" | "depth" | "sint" | "uint";
       }
     | { readonly kind: "sampler"; readonly samplerType: "sampler" | "sampler_comparison" }
-    | { readonly kind: "storage-texture"; readonly access: "read" | "write" | "read_write"; readonly format: string };
+    | {
+          readonly kind: "storage-texture";
+          readonly access: "read" | "write" | "read_write";
+          readonly gpuAccess: GPUStorageTextureAccess;
+          readonly format: string;
+      };
 
 export interface BindingDecl {
     readonly name: string; // WGSL variable name
