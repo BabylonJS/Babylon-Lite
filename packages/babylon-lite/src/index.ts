@@ -548,6 +548,13 @@ export type { AssetContainer } from "./asset-container.js";
 export { getContainerMeshes } from "./asset-container.js";
 export { selectVariant, getVariantNames, resetVariant } from "./loader-gltf/material-variants.js";
 export type { MaterialVariantData } from "./loader-gltf/material-variants.js";
+export {
+    hasDefaultInteractivityFlowInput,
+    normalizeInteractivityEventDataConfiguration,
+    normalizeKhrInteractivityRuntimeValue,
+    createKhrInteractivityRuntimeValueSnapshot,
+} from "./loader-gltf/khr-interactivity-helpers.js";
+export type { KhrInteractivityRuntimeValueSnapshot } from "./loader-gltf/khr-interactivity-helpers.js";
 // Decoder base-URL config for KHR_draco_mesh_compression / EXT_meshopt_compression.
 // The heavy decoder glue stays dynamic-imported (zero bytes for assets that don't
 // use it); only these tiny setters are statically reachable from the entry point.
@@ -710,6 +717,7 @@ export type { GltfMetadata, LiteMetadata } from "./metadata.js";
 
 // ─── Color ───────────────────────────────────────────────────────────
 export { linearToSrgbByte, srgbByteToLinear, packedSrgbToLinearRgba } from "./math/color.js";
+export { MinTemperatureKelvin, MaxTintMagnitude, temperatureTintToXyz, getWhiteBalanceMatrix } from "./math/color-temperature.js";
 
 // ─── Thin Instances ──────────────────────────────────────────────────
 export {
