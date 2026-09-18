@@ -51,6 +51,7 @@ const liteMocks = vi.hoisted(() => ({
 vi.mock("babylon-lite", () => liteMocks);
 
 import { StandardMaterial, PBRMaterial } from "../src/materials/materials";
+import { Color3 } from "../src/math/color";
 import { Texture } from "../src/textures/textures";
 import { AbstractMesh } from "../src/meshes/meshes";
 import type { Scene } from "../src/scene/scene";
@@ -196,6 +197,36 @@ describe("PBRMaterial texture-readiness rebuild (issue #476b)", () => {
         expect((mat._lite as { _gammaAlbedo?: unknown })._gammaAlbedo).toBe(true);
         expect(liteMocks.createSolidTexture2D).toHaveBeenCalledWith(engineLite, 1, 1, 1);
         expect(liteMocks.rebuildMaterial).toHaveBeenCalledWith((scene as unknown as { _lite: object })._lite, mat._lite);
+    });
+});
+
+describe("PBRMaterial factor-only materials", () => {
+    it("applies albedo colour, metallic and roughness exactly once, also when they are set again after the first build", () => {
+        const { scene, engineLite } = fakeScene(true);
+        const floor = new PBRMaterial("floor", scene);
+        floor.albedoColor = new Color3(0.68, 0.67, 0.62);
+        floor.metallic = 0;
+        floor.roughness = 0.9;
+        floor._ensureRenderable(engineLite as never);
+
+        // Room code re-applies the same look on every refresh. With the values baked into the solid
+        // texel these writes went into the factor on top of it: colour² and roughness².
+        floor.albedoColor = new Color3(0.68, 0.67, 0.62);
+        floor.roughness = 0.9;
+        floor._ensureRenderable(engineLite as never);
+
+        // The backing textures are neutral, so texel × factor is the value itself.
+        for (const call of liteMocks.createSolidTexture2D.mock.calls) {
+            expect((call as unknown[]).slice(1).every((channel) => channel === 1)).toBe(true);
+        }
+        const lite = floor._lite as { baseColorFactor?: number[]; roughnessFactor?: number; metallicFactor?: number };
+        expect(lite.baseColorFactor).toEqual([0.68, 0.67, 0.62, 1]);
+        expect(lite.roughnessFactor).toBe(0.9);
+        expect(lite.metallicFactor).toBe(0);
+        // And the Babylon.js-facing getters keep reporting what the app set.
+        expect(floor.roughness).toBe(0.9);
+        expect(floor.metallic).toBe(0);
+        expect(floor.albedoColor.g).toBeCloseTo(0.67);
     });
 });
 
