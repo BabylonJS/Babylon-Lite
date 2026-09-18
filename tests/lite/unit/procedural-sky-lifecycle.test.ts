@@ -33,7 +33,7 @@ vi.mock("../../../packages/babylon-lite/src/loader-env/rgbd-decode.js", async ()
     await mocks.moduleGate;
     return { decodeBrdfPng: mocks.decodeBrdfPng };
 });
-vi.mock("../../../packages/babylon-lite/src/texture/generate-mipmaps.js", () => ({
+vi.mock("../../../packages/babylon-lite/src/texture/mipmap-preparation.js", () => ({
     prepareMipmaps: mocks.prepareMipmaps,
     recordPreparedMipmaps: mocks.recordPreparedMipmaps,
 }));

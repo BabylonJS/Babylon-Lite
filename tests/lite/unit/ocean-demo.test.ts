@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { oceanFftStageCount } from "../../../lab/lite/src/demos/ocean/constants";
 import { createOceanFftStageOrder } from "../../../lab/lite/src/demos/ocean/fft";
@@ -7,6 +9,17 @@ import { decodeOceanGaussianNoise, oceanTurbulenceOutputIndex } from "../../../l
 import { createOceanSpectrumBuffer, DEFAULT_OCEAN_SPECTRUM } from "../../../lab/lite/src/demos/ocean/spectrum";
 
 describe("Ocean demo math", () => {
+    it("uses a sampled surface depth target and root-only render-task mesh population", () => {
+        const source = readFileSync(resolve(__dirname, "../../../lab/lite/src/demos/ocean/demo.ts"), "utf-8");
+
+        expect(source).toContain("createSurfaceRenderTargetTexture(");
+        expect(source).toContain("withSampledDepthTexture");
+        expect(source).toContain("addMeshToTask(depthTask, mesh)");
+        expect(source).toContain("addMeshToTask(sceneTask, mesh)");
+        expect(source).not.toContain("createRenderTargetTexture(");
+        expect(source).not.toMatch(/\b(?:depthTask|sceneTask)\.addMesh\(/);
+    });
+
     it("validates FFT dimensions and orders horizontal stages before vertical stages", () => {
         expect(oceanFftStageCount(256)).toBe(8);
         expect(() => oceanFftStageCount(300)).toThrow(/power of two/);

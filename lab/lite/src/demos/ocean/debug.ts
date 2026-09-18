@@ -1,4 +1,5 @@
 import {
+    addMeshToTask,
     addToScene,
     createFreeCamera,
     createMeshFromData,
@@ -7,6 +8,7 @@ import {
     enableOrthographicCamera,
     setShaderFloat,
     setShaderTexture,
+    wgsl,
     type ComputeStorageTexture,
     type EngineContext,
     type Mesh,
@@ -14,7 +16,6 @@ import {
     type RenderTask,
     type SceneContext,
 } from "babylon-lite";
-import { wgsl } from "babylon-lite/shader/wgsl.js";
 import type { OceanComputeResources } from "./resources.js";
 
 const VERTEX = wgsl`struct VertexOutput{@builtin(position) position:vec4f,@location(0) uv:vec2f}
@@ -101,7 +102,7 @@ export function createOceanTextureDebug(engine: EngineContext, scene: SceneConte
             mesh.pickable = false;
             mesh.visible = true;
             addToScene(scene, mesh);
-            task.addMesh(mesh);
+            addMeshToTask(task, mesh);
             meshes.push(mesh);
         }
     }

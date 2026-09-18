@@ -1,6 +1,7 @@
 import {
     addTask,
     addTaskAtStart,
+    addMeshToTask,
     addToScene,
     attachFreeControl,
     createBloomPostProcessTask,
@@ -14,7 +15,7 @@ import {
     enableMirroredMeshes,
     isPbrMaterial,
     createRenderTarget,
-    createRenderTargetTexture,
+    createSurfaceRenderTargetTexture,
     createRenderTask,
     createSceneContext,
     disposeScene,
@@ -33,6 +34,7 @@ import {
     setLightIntensity as updateLightIntensity,
     startEngine,
     updateProceduralSkyEnvironment,
+    withSampledDepthTexture,
 } from "babylon-lite";
 import { OCEAN_SUN_DIRECTION, OCEAN_TEXTURE_SIZE } from "./constants.js";
 import { createOceanBuoy } from "./buoy.js";
@@ -70,7 +72,7 @@ export async function runOceanDemo(canvas: HTMLCanvasElement): Promise<void> {
         }
     };
     setUiHidden(uiHidden);
-    window.addEventListener("keydown", (event) => {
+    const onUiKeyDown = (event: KeyboardEvent): void => {
         if (
             event.code !== "F8" ||
             event.repeat ||
@@ -82,7 +84,7 @@ export async function runOceanDemo(canvas: HTMLCanvasElement): Promise<void> {
         }
         event.preventDefault();
         setUiHidden(!uiHidden);
-    });
+    };
     const resolution = queryNumber(query, "resolution", OCEAN_TEXTURE_SIZE);
     const lengthScale = queryNumber(query, "lengthScale", 15);
     const vertexDensity = queryNumber(query, "vertexDensity", 30);
@@ -100,6 +102,11 @@ export async function runOceanDemo(canvas: HTMLCanvasElement): Promise<void> {
     };
     const engine = await createEngine(canvas, { maxDevicePixelRatio: 1 });
     const scene = createSceneContext(engine, { defaultRenderTask: false });
+    window.addEventListener("keydown", onUiKeyDown);
+    onSceneDispose(scene, () => {
+        window.removeEventListener("keydown", onUiKeyDown);
+        clearTimeout(reloadTimer);
+    });
     let ownedSimulation: OceanSimulation | undefined;
     let completeCleanup!: () => void;
     let failCleanup!: (error: unknown) => void;
@@ -122,21 +129,31 @@ export async function runOceanDemo(canvas: HTMLCanvasElement): Promise<void> {
             { x: -33.91187023336096, y: 4.727123075533213, z: -8.578004717405992 },
             { x: -32.91802588437002, y: 4.835790486320023, z: -8.599564026570702 }
         );
-        (globalThis as typeof globalThis & { getOceanCameraParameters: () => unknown }).getOceanCameraParameters = () => ({
+        const getOceanCameraParameters = () => ({
             position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
             rotation: { x: camera._pitch, y: camera._yaw, z: 0 },
             target: { x: camera.target.x, y: camera.target.y, z: camera.target.z },
+        });
+        const oceanGlobal = globalThis as typeof globalThis & { getOceanCameraParameters?: () => unknown };
+        oceanGlobal.getOceanCameraParameters = getOceanCameraParameters;
+        onSceneDispose(scene, () => {
+            if (oceanGlobal.getOceanCameraParameters === getOceanCameraParameters) {
+                delete oceanGlobal.getOceanCameraParameters;
+            }
         });
         camera.nearPlane = 1;
         camera.farPlane = 100_000;
         camera.speed = 2;
         scene.camera = camera;
-        attachFreeControl(camera, canvas, scene, {
-            upKeys: ["Space", "PageUp"],
-            downKeys: ["KeyC", "PageDown"],
-            fastKeys: ["ShiftLeft", "ShiftRight"],
-            fastMultiplier: 5,
-        });
+        onSceneDispose(
+            scene,
+            attachFreeControl(camera, canvas, scene, {
+                upKeys: ["Space", "PageUp"],
+                downKeys: ["KeyC", "PageDown"],
+                fastKeys: ["ShiftLeft", "ShiftRight"],
+                fastMultiplier: 5,
+            })
+        );
 
         const sun = createDirectionalLight([-OCEAN_SUN_DIRECTION[0], -OCEAN_SUN_DIRECTION[1], -OCEAN_SUN_DIRECTION[2]], 1.15);
         const shadows = createCsmDirectionalShadowGenerator(engine, sun, {
@@ -155,19 +172,23 @@ export async function runOceanDemo(canvas: HTMLCanvasElement): Promise<void> {
         const buoy = await createOceanBuoy(engine, scene);
         setShadowTaskCasterMeshes(shadows, buoy.meshes);
 
-        const opaqueDepth = createRenderTargetTexture(engine, {
-            lbl: "ocean-opaque-depth",
-            format: engine.format,
-            dFormat: "depth32float",
-            samples: 1,
-            size: engine,
-        });
+        const opaqueDepth = createSurfaceRenderTargetTexture(
+            engine,
+            {
+                lbl: "ocean-opaque-depth",
+                format: engine.format,
+                dFormat: "depth32float",
+                samples: 1,
+                size: engine,
+            },
+            withSampledDepthTexture
+        );
         if (!opaqueDepth.depthTexture) {
             throw new Error("Ocean requires a sampled opaque depth texture.");
         }
         const depthTask = createRenderTask({ name: "ocean-depth-prepass", rt: opaqueDepth.rt, clr: true, clrColor: scene.clearColor, cs: true }, engine, scene);
         for (const mesh of buoy.meshes) {
-            depthTask.addMesh(mesh);
+            addMeshToTask(depthTask, mesh);
         }
 
         const simulation = await createOceanSimulation(engine, resolution);
@@ -203,7 +224,7 @@ export async function runOceanDemo(canvas: HTMLCanvasElement): Promise<void> {
         const sceneTask = createRenderTask({ name: "ocean-scene", rt: sceneTarget, clr: false, depthClear: true, sharedRt: true, autoMirror: false }, engine, scene);
         enableRenderTaskMeshRefresh(sceneTask);
         for (const mesh of [...ocean.meshes, ...buoy.meshes]) {
-            sceneTask.addMesh(mesh);
+            addMeshToTask(sceneTask, mesh);
         }
         const textureDebug = createOceanTextureDebug(engine, scene, sceneTarget, simulation.resources);
         const timing = createOceanTimingPanel(engine);

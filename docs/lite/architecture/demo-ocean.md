@@ -297,9 +297,9 @@ JONSWAP        = scale * TMA * alpha * g² * omega^-5
 directionality = mix(cos² distribution, cosine-2s distribution, spreadBlend)
 ```
 
-The reference optionally loads Gaussian values from `noise.exr` and otherwise generates normal
-random values on the CPU. The port generates deterministic Box-Muller Gaussian values in the
-initial-spectrum compute shader. This changes only the random realization, not the spectrum model.
+The port always loads the same fixed `noise.exr` R/G field used by the reference configuration and
+uploads those Gaussian values to the initial-spectrum compute shader. This preserves the exact
+random realization required for deterministic `seekTime` parity.
 
 ## FFT
 

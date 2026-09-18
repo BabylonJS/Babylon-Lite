@@ -39,6 +39,7 @@ export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement,
     const upKeys = options.upKeys ?? ["Space", "PageUp"];
     const downKeys = options.downKeys ?? ["ShiftLeft", "ShiftRight", "PageDown"];
     const fastKeys = options.fastKeys ?? [];
+    const fastMultiplier = options.fastMultiplier ?? 1;
     const hasAny = (codes: readonly string[]): boolean => {
         for (const code of codes) {
             if (keys.has(code)) {
@@ -95,7 +96,7 @@ export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement,
         // BJS speed formula: speed * sqrt(deltaTime / (fps * 100))
         // Simplified: fps ≈ 1000/deltaMs, so deltaTime/(fps*100) = deltaMs^2 / 100000
         const dt = Math.max(deltaMs, 1);
-        const moveSpeed = camera.speed * (hasAny(fastKeys) ? (options.fastMultiplier ?? 1) : 1) * Math.sqrt((dt * dt) / 100000);
+        const moveSpeed = camera.speed * (hasAny(fastKeys) ? fastMultiplier : 1) * Math.sqrt((dt * dt) / 100000);
 
         // Accumulate keyboard input into camera direction (local space)
         if (keys.has("KeyW") || keys.has("ArrowUp")) {

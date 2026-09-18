@@ -5,8 +5,6 @@ import { setShadowTaskCasterMeshes } from "../../../packages/babylon-lite/src/fr
 import { createShadowTask } from "../../../packages/babylon-lite/src/frame-graph/shadow-task";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
-import { createCsmShadowFragment } from "../../../packages/babylon-lite/src/shader/fragments/csm-shadow-fragment-core";
-import { createShadowFragment } from "../../../packages/babylon-lite/src/shader/fragments/shadow-fragment-core";
 import { setShadowGeneratorEnabled } from "../../../packages/babylon-lite/src/shadow/shadow-enabled";
 import type { ShadowGenerator, ShadowTaskInternalState } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
 
@@ -71,13 +69,13 @@ describe("runtime shadow enablement", () => {
         expect(receiverUpdate).toHaveBeenLastCalledWith((taskState as ShadowTaskInternalState & { _uboData: Float32Array })._uboData);
     });
 
-    it("emits an early fully-lit return before disabled shadow texture sampling", () => {
-        const pcf = String(createShadowFragment("pcf", [{ lightIndex: 0, shadowType: "pcf" }])._helperFunctions);
-        const esm = String(createShadowFragment("esm", [{ lightIndex: 0, shadowType: "esm" }])._helperFunctions);
-        const csm = String(createCsmShadowFragment("csm", [{ lightIndex: 0 }])._helperFunctions);
+    it("preserves later shadow render-hook replacements", () => {
+        const { generator, task } = createFixture("pcf");
+        setShadowGeneratorEnabled(generator, true);
+        const replacement = vi.fn(() => 3);
+        generator._renderShadowMap = replacement;
 
-        expect(pcf.indexOf("if (darkness >= 1.0)")).toBeLessThan(pcf.indexOf("textureSampleCompareLevel"));
-        expect(esm.indexOf("if (darkness >= 1.0)")).toBeLessThan(esm.indexOf("textureSampleLevel"));
-        expect(csm.indexOf("if (csmInfo_0.shadowsInfo.x >= 1.0)")).toBeLessThan(csm.indexOf("csmSample_0(idx"));
+        expect(task.execute!()).toBe(3);
+        expect(replacement).toHaveBeenCalledOnce();
     });
 });

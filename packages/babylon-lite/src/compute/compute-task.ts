@@ -72,6 +72,7 @@ export function createComputeTask(engine: EngineContext, name = "compute"): Comp
                 throw new Error(`ComputeTask "${task.name}" has been disposed.`);
             }
             task._pass?._dispose();
+            task._passes.length = 0;
             const pass = createComputePass(task.name, task);
             task._pass = pass;
             const lastGroups: (GPUBindGroup | null)[] = [];

@@ -1,7 +1,7 @@
 import {
     addToScene,
     createPointLight,
-    eulerToQuat,
+    eulerXYZToQuatTuple,
     getContainerMeshes,
     goToFrame,
     loadGltf,
@@ -181,7 +181,7 @@ export async function createOceanBuoy(engine: EngineContext, scene: SceneContext
             if (rightY > rightUy) {
                 angleZ = -angleZ;
             }
-            stepQuaternion = eulerToQuat(angleX / steps, 0, angleZ / steps);
+            stepQuaternion = eulerXYZToQuatTuple(angleX / steps, 0, angleZ / steps);
             currentStep = 0;
         },
     };

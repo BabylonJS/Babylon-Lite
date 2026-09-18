@@ -69,7 +69,14 @@ function fixture() {
         createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => {
             if (fail.bufferLabel && descriptor.label === fail.bufferLabel) throw new Error("buffer allocation failed");
             const mapped = new ArrayBuffer(Number(descriptor.size));
-            const buffer = { label: descriptor.label, size: descriptor.size, getMappedRange: () => mapped, unmap: vi.fn(), destroy: vi.fn() } as unknown as GPUBuffer;
+            const buffer = {
+                label: descriptor.label,
+                size: descriptor.size,
+                getMappedRange: () => mapped,
+                mapAsync: vi.fn(async () => undefined),
+                unmap: vi.fn(),
+                destroy: vi.fn(),
+            } as unknown as GPUBuffer;
             buffers.push(buffer);
             return buffer;
         }),
@@ -86,9 +93,20 @@ function fixture() {
             if (fail.shader) throw new Error("shader failed");
             return {} as GPUComputePipeline;
         }),
+        createCommandEncoder: vi.fn(() => ({
+            beginComputePass: vi.fn(() => ({
+                setPipeline: vi.fn(),
+                setBindGroup: vi.fn(),
+                dispatchWorkgroups: vi.fn(),
+                dispatchWorkgroupsIndirect: vi.fn(),
+                end: vi.fn(),
+            })),
+            copyBufferToBuffer: vi.fn(),
+            finish: vi.fn(() => ({})),
+        })),
         pushErrorScope: vi.fn(),
         popErrorScope: vi.fn(async () => null),
-        queue: { writeBuffer: vi.fn(), onSubmittedWorkDone: vi.fn(async (): Promise<void> => undefined) },
+        queue: { writeBuffer: vi.fn(), submit: vi.fn(), onSubmittedWorkDone: vi.fn(async (): Promise<void> => undefined) },
     };
     return { engine: { _device: device } as unknown as Lite.EngineContext, device, fail, textures, buffers };
 }
@@ -109,6 +127,7 @@ function expectReleased(f: ReturnType<typeof fixture>) {
 
 beforeEach(() => {
     created.shaders.length = created.bindings.length = created.tasks.length = 0;
+    vi.stubGlobal("GPUMapMode", { READ: 1 });
     vi.stubGlobal(
         "fetch",
         vi.fn(async () => ({
@@ -213,6 +232,24 @@ describe("Ocean construction ownership", () => {
         expect(() => simulation.update(1, 1 / 60)).toThrow(/disposed/);
         await expect(simulation.readBuoyancy()).rejects.toThrow(/disposed/);
         await expect(simulation.warmup(1)).rejects.toThrow(/disposed/);
+        simulation.dispose();
+        expectReleased(f);
+    });
+
+    it("records direct-submit tasks and samples buoyancy while frame execution is disabled", async () => {
+        const f = fixture();
+        const simulation = await createOceanSimulation(f.engine, 8);
+        for (const task of created.tasks) {
+            expect(task._pass).not.toBeNull();
+        }
+        await expect(simulation.warmup(0)).resolves.toBe(2);
+        expect(simulation.mergeTask.executionEnabled).toBe(false);
+
+        const samples = await simulation.sampleBuoyancy(new Float32Array(12));
+
+        expect(samples).toHaveLength(12);
+        expect(simulation.mergeTask.executionEnabled).toBe(false);
+        expect(f.device.queue.submit).toHaveBeenCalledTimes(5);
         simulation.dispose();
         expectReleased(f);
     });

@@ -6,12 +6,29 @@ import type { ShadowGenerator, ShadowGeneratorEnabledState, ShadowTaskInternalSt
 export function setShadowGeneratorEnabled(generator: ShadowGenerator, enabled: boolean): void {
     let state = generator._runtimeEnabledState;
     if (!state) {
-        state = {
+        const renderShadowMap = generator._renderShadowMap;
+        if (!renderShadowMap) {
+            throw new Error("setShadowGeneratorEnabled requires a configured shadow generator.");
+        }
+        const installedState: ShadowGeneratorEnabledState = {
             enabled: true,
             uploadData: new F32(1),
+            renderShadowMap,
         };
+        state = installedState;
         generator._runtimeEnabledState = state;
-        generator._runtimeEnabled = (engine, taskState) => syncShadowGeneratorEnabled(engine, generator, taskState, state!);
+        const renderWhenEnabled = (engine: EngineContext, taskState: ShadowTaskInternalState): number =>
+            syncShadowGeneratorEnabled(engine, generator, taskState, installedState) ? installedState.renderShadowMap(engine, taskState) : 0;
+        Object.defineProperty(generator, "_renderShadowMap", {
+            configurable: true,
+            enumerable: true,
+            get: () => renderWhenEnabled,
+            set: (replacement: ShadowGenerator["_renderShadowMap"]) => {
+                if (replacement && replacement !== renderWhenEnabled) {
+                    installedState.renderShadowMap = replacement;
+                }
+            },
+        });
     }
     if (state.enabled === enabled) {
         return;

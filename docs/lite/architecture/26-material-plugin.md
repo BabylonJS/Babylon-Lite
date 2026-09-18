@@ -46,7 +46,7 @@ export interface PluginSamplerDecl {
     readonly texture: string;
     readonly sampler: string;
     readonly textureType?: "texture_2d<f32>" | "texture_depth_2d";
-    readonly samplerType?: "sampler" | "sampler_non_filtering" | "sampler_comparison";
+    readonly samplerType?: "sampler" | "sampler_non_filtering";
     readonly visibility?: "vertex" | "fragment" | "vertex-fragment";
 }
 export interface PluginTextureBinding {

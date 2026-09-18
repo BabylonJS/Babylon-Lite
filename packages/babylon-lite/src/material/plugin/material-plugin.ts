@@ -66,7 +66,7 @@ export interface PluginSamplerDecl {
     /** Defaults to "texture_2d<f32>". */
     readonly textureType?: "texture_2d<f32>" | "texture_depth_2d";
     /** Defaults to "sampler". */
-    readonly samplerType?: "sampler" | "sampler_non_filtering" | "sampler_comparison";
+    readonly samplerType?: "sampler" | "sampler_non_filtering";
     /** Shader stages that read this pair. Defaults to "fragment". */
     readonly visibility?: "vertex" | "fragment" | "vertex-fragment";
 }

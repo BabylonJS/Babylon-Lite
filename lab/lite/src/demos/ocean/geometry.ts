@@ -248,6 +248,11 @@ export function createOceanClipmap(
     let useWireframe = options.wireframe === true;
     let noMaterialLod = options.noMaterialLod ?? true;
     let k = 4 * vertexDensity + 1;
+    let transformRevision = 0;
+    let appliedTransformRevision = -1;
+    let lastCameraX = Number.NaN;
+    let lastCameraY = Number.NaN;
+    let lastCameraZ = Number.NaN;
     const topology = (geometry: OceanGeometryData): OceanGeometryData => (useWireframe ? wireframe(geometry) : geometry);
     const center = createMesh(engine, "ocean-center", topology(createOceanPlaneGeometry(2 * k, 2 * k, 1, SEAM_BOTTOM | SEAM_TOP | SEAM_LEFT | SEAM_RIGHT)));
     const ringGeometry = topology(ring(k));
@@ -296,6 +301,7 @@ export function createOceanClipmap(
         resizeFamily(rings, nextRing);
         resizeFamily(trims, nextTrim);
         resize(skirtMesh, topology(skirt(k, skirtSize)));
+        transformRevision++;
     };
 
     return {
@@ -306,9 +312,16 @@ export function createOceanClipmap(
         skirt: skirtMesh,
         setGeometryParameter(name, value): void {
             if (name === "lengthScale") {
-                lengthScale = value;
+                if (lengthScale !== value) {
+                    lengthScale = value;
+                    transformRevision++;
+                }
             } else if (name === "clipLevels") {
-                clipLevels = Math.min(MAX_CLIP_LEVELS, Math.max(1, Math.round(value)));
+                const next = Math.min(MAX_CLIP_LEVELS, Math.max(1, Math.round(value)));
+                if (clipLevels !== next) {
+                    clipLevels = next;
+                    transformRevision++;
+                }
             } else if (name === "vertexDensity") {
                 const next = Math.min(40, Math.max(1, Math.round(value)));
                 if (vertexDensity !== next) {
@@ -318,6 +331,7 @@ export function createOceanClipmap(
             } else if (skirtSize !== value) {
                 skirtSize = value;
                 resize(skirtMesh, topology(skirt(k, skirtSize)));
+                transformRevision++;
             }
         },
         setWireframe(enabled): void {
@@ -327,13 +341,19 @@ export function createOceanClipmap(
             }
         },
         setNoMaterialLod(enabled): void {
-            noMaterialLod = enabled;
+            if (noMaterialLod !== enabled) {
+                noMaterialLod = enabled;
+                transformRevision++;
+            }
         },
         update(camera: Camera): void {
             const cameraWorld = camera.worldMatrix;
             const cameraX = cameraWorld[12]!;
             const cameraY = cameraWorld[13]!;
             const cameraZ = cameraWorld[14]!;
+            if (appliedTransformRevision === transformRevision && lastCameraX === cameraX && lastCameraY === cameraY && lastCameraZ === cameraZ) {
+                return;
+            }
             const activeLevels = clipLevels - Math.min(clipLevels, Math.max(0, Math.floor(Math.log2((1.7 * Math.abs(cameraY) + 1) / lengthScale))));
             const centerLevel = clipLevels - activeLevels - 1;
             center.material = noMaterialLod ? materials.close : chooseMaterial(materials, centerLevel);
@@ -376,6 +396,10 @@ export function createOceanClipmap(
             skirtMesh.material = noMaterialLod ? materials.close : materials.far;
             skirtMesh.position.set(previousX - scale * (skirtSize + 0.5 - 0.5 / k), 0, previousZ - scale * (skirtSize + 0.5 - 0.5 / k));
             skirtMesh.scaling.set(scale, 1, scale);
+            appliedTransformRevision = transformRevision;
+            lastCameraX = cameraX;
+            lastCameraY = cameraY;
+            lastCameraZ = cameraZ;
         },
     };
 }

@@ -456,6 +456,9 @@ export async function createOceanSimulation(engine: EngineContext, size: number,
             settings
         );
         await owner.prepare();
+        for (const task of [initializationTask, spectrumTask, fftTask, mergeTask]) {
+            task.record();
+        }
         let frame = 0;
         const simulation = {
             initializationTask,
@@ -521,7 +524,9 @@ export async function createOceanSimulation(engine: EngineContext, size: number,
             },
             async sampleBuoyancy(points: Float32Array): Promise<Float32Array> {
                 simulation.setBuoyancyFrame(points);
+                const taskEnabled = mergeTask.executionEnabled;
                 const enabledStates = mergePairs.map((pair) => [pair.aToB.enabled, pair.bToA.enabled] as const);
+                mergeTask.executionEnabled = true;
                 for (const pair of mergePairs) {
                     pair.aToB.enabled = false;
                     pair.bToA.enabled = false;
@@ -533,6 +538,7 @@ export async function createOceanSimulation(engine: EngineContext, size: number,
                     return new Float32Array(samples);
                 } finally {
                     if (!scope.disposed) {
+                        mergeTask.executionEnabled = taskEnabled;
                         for (let index = 0; index < mergePairs.length; index++) {
                             mergePairs[index]!.aToB.enabled = enabledStates[index]![0];
                             mergePairs[index]!.bToA.enabled = enabledStates[index]![1];
