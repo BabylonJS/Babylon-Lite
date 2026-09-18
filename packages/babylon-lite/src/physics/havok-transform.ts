@@ -104,8 +104,43 @@ export function havokTransformToNode(transform: readonly [readonly [number, numb
         const i8 = (wm[4]! * wm[9]! - wm[5]! * wm[8]!) * invDet;
         const i9 = (wm[1]! * wm[8]! - wm[0]! * wm[9]!) * invDet;
         const i10 = (wm[0]! * wm[5]! - wm[1]! * wm[4]!) * invDet;
-        const iwm = [i0, i1, i2, 0, i4, i5, i6, 0, i8, i9, i10];
-        const r = composeMatrixRotation(iwm, rot[0], rot[1], rot[2], rot[3]);
+        // Decompose the complete inverse-parent × desired-world basis; the inverse basis alone is sheared by a rotated parent's non-uniform scale.
+        const qx = rot[0];
+        const qy = rot[1];
+        const qz = rot[2];
+        const qw = rot[3];
+        const xx = qx * qx;
+        const yy = qy * qy;
+        const zz = qz * qz;
+        const xy = qx * qy;
+        const xz = qx * qz;
+        const yz = qy * qz;
+        const wx = qw * qx;
+        const wy = qw * qy;
+        const wz = qw * qz;
+        const w0 = 1 - 2 * (yy + zz);
+        const w1 = 2 * (xy + wz);
+        const w2 = 2 * (xz - wy);
+        const w4 = 2 * (xy - wz);
+        const w5 = 1 - 2 * (xx + zz);
+        const w6 = 2 * (yz + wx);
+        const w8 = 2 * (xz + wy);
+        const w9 = 2 * (yz - wx);
+        const w10 = 1 - 2 * (xx + yy);
+        const local = [
+            i0 * w0 + i4 * w1 + i8 * w2,
+            i1 * w0 + i5 * w1 + i9 * w2,
+            i2 * w0 + i6 * w1 + i10 * w2,
+            0,
+            i0 * w4 + i4 * w5 + i8 * w6,
+            i1 * w4 + i5 * w5 + i9 * w6,
+            i2 * w4 + i6 * w5 + i10 * w6,
+            0,
+            i0 * w8 + i4 * w9 + i8 * w10,
+            i1 * w8 + i5 * w9 + i9 * w10,
+            i2 * w8 + i6 * w9 + i10 * w10,
+        ];
+        const r = composeMatrixRotation(local, 0, 0, 0, 1);
         applyLocalTransform(
             node,
             pos[0] * i0 + pos[1] * i4 + pos[2] * i8 - wm[12]! * i0 - wm[13]! * i4 - wm[14]! * i8,

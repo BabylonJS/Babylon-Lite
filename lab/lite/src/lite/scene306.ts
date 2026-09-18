@@ -74,8 +74,8 @@ async function main(): Promise<void> {
     light.intensity = 0.7;
     addToScene(scene, light);
 
-    // Ground — 16x16
-    const ground = createGround(engine, { width: 16, height: 16 });
+    // Ground — 20x16
+    const ground = createGround(engine, { width: 20, height: 16 });
     ground.material = createStandardMaterial();
     addToScene(scene, ground);
 
@@ -188,6 +188,28 @@ async function main(): Promise<void> {
     });
     setPhysicsShapeMaterial(world, shape6a, 0.5, 0.1);
     setPhysicsBodyShape(world, body6a, shape6a);
+
+    // dynamic cube7 with offset parent with rotation and non-uniform scale
+    const rotQ7 = eulerXYZToQuatTuple(0, (55 * Math.PI) / 180, 0);
+    const parent7 = createTransformNode("parent7", 8, 3, 0);
+    parent7.rotationQuaternion.set(rotQ7[0], rotQ7[1], rotQ7[2], rotQ7[3]);
+    parent7.scaling.set(3, 0.5, 0.5);
+    addToScene(scene, parent7);
+
+    const cube7 = createBox(engine, 1);
+    cube7.position.set(0.5, 0, -2);
+    cube7.material = cubeMat;
+    cube7.parent = parent7;
+    parent7.children.push(cube7);
+    addToScene(scene, cube7);
+    const body7 = createPhysicsBody(world, cube7, PhysicsMotionType.DYNAMIC);
+    setPhysicsBodyMass(world, body7, 1);
+    const shape7 = createPhysicsShape(world, {
+        type: PhysicsShapeType.BOX,
+        parameters: { extents: vec3(3, 0.5, 0.5) },
+    });
+    setPhysicsShapeMaterial(world, shape7, 0.5, 0.1);
+    setPhysicsBodyShape(world, body7, shape7);
 
     // physics debug viewer
     const physViewer = createPhysicsViewer(scene, world, { color: [1, 1, 1, 1] });

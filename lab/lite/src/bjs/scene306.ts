@@ -53,8 +53,8 @@ function readCaptureAfterFrames(): number | null {
     const light = new HemisphericLight("light", new Vector3(0, 1, 0), scene);
     light.intensity = 0.7;
 
-    // Ground — 16x16
-    const ground = MeshBuilder.CreateGround("ground", { width: 16, height: 16 }, scene);
+    // Ground — 20x16
+    const ground = MeshBuilder.CreateGround("ground", { width: 20, height: 16 }, scene);
 
     // Havok physics
     const havokInstance = await HavokPhysics({ locateFile: () => "/HavokPhysics.wasm" });
@@ -157,6 +157,21 @@ function readCaptureAfterFrames(): number | null {
     cube6.parent = matNode6a;
     cube6.material = cubeMat;
     const body6a = new PhysicsAggregate(matNode6a, new PhysicsShapeBox(Vector3.Zero(), Quaternion.Identity(), new Vector3(1, 1, 1), scene), {
+        mass: 1,
+        friction: 0.5,
+        restitution: 0.1,
+    });
+
+    const parent7 = new TransformNode("parent7", scene);
+    parent7.position.set(8, 3, 0);
+    parent7.rotationQuaternion = Quaternion.FromEulerAngles(0, (55 * Math.PI) / 180, 0);
+    parent7.scaling.set(3, 0.5, 0.5);
+
+    const cube7 = MeshBuilder.CreateBox("cube7", undefined, scene);
+    cube7.position.set(0.5, 0, -2);
+    cube7.material = cubeMat;
+    cube7.parent = parent7;
+    new PhysicsAggregate(cube7, PhysicsShapeType.BOX, {
         mass: 1,
         friction: 0.5,
         restitution: 0.1,
