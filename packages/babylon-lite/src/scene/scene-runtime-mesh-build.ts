@@ -376,6 +376,9 @@ async function materializeRuntimeMesh(scene: SceneContext, state: RuntimeBuildSt
                 } else {
                     packet._onOwnerEmpty?.();
                 }
+                if (packet._onOwnerEmpty) {
+                    packet._onOwnerEmpty = undefined;
+                }
             }
         }
         retireGpuResources(scene.surface.engine, () => {

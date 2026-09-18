@@ -1,13 +1,14 @@
 import { composeMat4 } from "../math/compose-mat4.js";
 import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
 import { _quatFromRotationBasis } from "../math/create-quat-from-rotation-mat4.js";
+import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import type { Mat4, Mat4Storage, Quat } from "../math/types.js";
 import type { Mesh } from "../mesh/mesh.js";
 import { flushThinInstances } from "../mesh/thin-instance.js";
 import type { SceneNode } from "../scene/scene-node.js";
+import { buildNativeMassProperties } from "./havok-mass-properties.js";
 import { PhysicsMotionType, PhysicsPrestepType } from "./havok.js";
-import { _applyBodyRotationLocks, _cloneMassProperties } from "./havok.js";
-import type { HavokThinInstanceContext, PhysicsBody, PhysicsMassProperties, PhysicsWorld } from "./havok.js";
+import type { HavokThinInstanceContext, PhysicsBody, PhysicsWorld } from "./havok.js";
 
 type NativeTransform = [number[], number[]];
 type ThinBodyState = [
@@ -22,51 +23,7 @@ type ThinBodyState = [
     carrierVersion: number,
     carrierIdentity: boolean,
     scaledShapes: Map<string, any>,
-    massSources: any[][] | null,
 ];
-
-function multiplyMat4IntoBuffer(dst: Mat4Storage, d: number, a: Mat4Storage, i: number, b: Mat4Storage, j: number): void {
-    const a0 = a[i]!,
-        a1 = a[i + 1]!,
-        a2 = a[i + 2]!;
-    const a4 = a[i + 4]!,
-        a5 = a[i + 5]!,
-        a6 = a[i + 6]!;
-    const a8 = a[i + 8]!,
-        a9 = a[i + 9]!,
-        a10 = a[i + 10]!;
-    const a12 = a[i + 12]!,
-        a13 = a[i + 13]!,
-        a14 = a[i + 14]!;
-    let b0 = b[j]!,
-        b1 = b[j + 1]!,
-        b2 = b[j + 2]!;
-    dst[d] = a0 * b0 + a4 * b1 + a8 * b2;
-    dst[d + 1] = a1 * b0 + a5 * b1 + a9 * b2;
-    dst[d + 2] = a2 * b0 + a6 * b1 + a10 * b2;
-    dst[d + 3] = 0;
-    b0 = b[j + 4]!;
-    b1 = b[j + 5]!;
-    b2 = b[j + 6]!;
-    dst[d + 4] = a0 * b0 + a4 * b1 + a8 * b2;
-    dst[d + 5] = a1 * b0 + a5 * b1 + a9 * b2;
-    dst[d + 6] = a2 * b0 + a6 * b1 + a10 * b2;
-    dst[d + 7] = 0;
-    b0 = b[j + 8]!;
-    b1 = b[j + 9]!;
-    b2 = b[j + 10]!;
-    dst[d + 8] = a0 * b0 + a4 * b1 + a8 * b2;
-    dst[d + 9] = a1 * b0 + a5 * b1 + a9 * b2;
-    dst[d + 10] = a2 * b0 + a6 * b1 + a10 * b2;
-    dst[d + 11] = 0;
-    b0 = b[j + 12]!;
-    b1 = b[j + 13]!;
-    b2 = b[j + 14]!;
-    dst[d + 12] = a0 * b0 + a4 * b1 + a8 * b2 + a12;
-    dst[d + 13] = a1 * b0 + a5 * b1 + a9 * b2 + a13;
-    dst[d + 14] = a2 * b0 + a6 * b1 + a10 * b2 + a14;
-    dst[d + 15] = 1;
-}
 
 function isIdentity(matrix: Mat4): boolean {
     for (let index = 0; index < 16; index++) {
@@ -266,31 +223,6 @@ function setInstanceShapes(raw: any, state: ThinBodyState, shape: any): any {
     return result;
 }
 
-function buildInstanceMassProperties(raw: any, body: PhysicsBody, handle: any, properties: PhysicsMassProperties, shapeLessInertiaFromMass: boolean): any[] {
-    let massProperties: any[];
-    if (body._shape) {
-        const shape = raw.HP_Body_GetShape(handle);
-        const shapeMass = shape[0] === (raw.Result?.RESULT_OK ?? 0) ? raw.HP_Shape_BuildMassProperties(shape[1]) : null;
-        massProperties = shapeMass?.[0] === (raw.Result?.RESULT_OK ?? 0) ? _cloneMassProperties(shapeMass[1]) : [[0, 0, 0], 1, [1, 1, 1], [0, 0, 0, 1]];
-    } else {
-        const inertia = shapeLessInertiaFromMass ? (properties.mass ?? 1) : 1;
-        massProperties = [[0, 0, 0], 1, [inertia, inertia, inertia], [0, 0, 0, 1]];
-    }
-    if (properties.centerOfMass) {
-        massProperties[0] = [properties.centerOfMass.x, properties.centerOfMass.y, properties.centerOfMass.z];
-    }
-    if (properties.mass !== undefined) {
-        massProperties[1] = properties.mass;
-    }
-    if (properties.inertia) {
-        massProperties[2] = [properties.inertia.x, properties.inertia.y, properties.inertia.z];
-    }
-    if (properties.inertiaOrientation) {
-        massProperties[3] = [properties.inertiaOrientation.x, properties.inertiaOrientation.y, properties.inertiaOrientation.z, properties.inertiaOrientation.w];
-    }
-    return massProperties;
-}
-
 /** @internal Creates the stateful seam and Havok facade installed by `enableHavokThinInstancePhysics`. */
 export function createHavokThinInstanceContext(world: PhysicsWorld): HavokThinInstanceContext {
     const raw = world._hknp;
@@ -443,7 +375,6 @@ export function createHavokThinInstanceContext(world: PhysicsWorld): HavokThinIn
                 mesh.worldMatrixVersion,
                 carrierIdentity,
                 new Map<string, any>(),
-                null,
             ]);
             return body;
         },
@@ -555,74 +486,17 @@ export function createHavokThinInstanceContext(world: PhysicsWorld): HavokThinIn
             }
             return true;
         },
-        mass(body, properties, shapeLessInertiaFromMass = false) {
+        mass(body, properties, fallbackInertia) {
             const state = states.get(body._hkBody);
             if (!state) {
                 return false;
             }
-            const mask = body._rotationLockMask ?? 0;
-            const sources = mask ? new Array<any[]>(state[1].length) : null;
-            for (let index = 0; index < state[1].length; index++) {
-                const massProperties = buildInstanceMassProperties(raw, body, state[1][index], properties, shapeLessInertiaFromMass);
-                if (sources) {
-                    sources[index] = _cloneMassProperties(massProperties);
-                    _applyBodyRotationLocks(massProperties, mask);
-                }
-                raw.HP_Body_SetMassProperties(state[1][index], massProperties);
-            }
-            state[11] = sources;
-            return true;
-        },
-        lock(body, requestedMask) {
-            const state = states.get(body._hkBody);
-            if (!state) {
-                return false;
-            }
-            const previousMask = body._rotationLockMask ?? 0;
-            const mask = previousMask | requestedMask;
-            if (mask === previousMask) {
-                return true;
-            }
-            let sources = state[11];
-            if (previousMask === 0) {
-                sources = new Array<any[]>(state[1].length);
-                const ok = raw.Result?.RESULT_OK ?? 0;
-                for (let index = 0; index < state[1].length; index++) {
-                    const result = raw.HP_Body_GetMassProperties(state[1][index]);
-                    if (result[0] !== ok) {
-                        throw new Error("Failed to read physics body mass properties.");
-                    }
-                    sources[index] = _cloneMassProperties(result[1]);
-                }
-            }
-            for (let index = 0; index < state[1].length; index++) {
-                const massProperties = _cloneMassProperties(sources![index]!);
-                _applyBodyRotationLocks(massProperties, mask);
-                raw.HP_Body_SetMassProperties(state[1][index], massProperties);
-            }
-            state[11] = sources;
-            body._rotationLockMask = mask;
-            return true;
-        },
-        unlock(body, requestedMask) {
-            const state = states.get(body._hkBody);
-            if (!state) {
-                return false;
-            }
-            const previousMask = body._rotationLockMask ?? 0;
-            const mask = previousMask & ~requestedMask;
-            if (mask === previousMask) {
-                return true;
-            }
-            const sources = state[11]!;
-            for (let index = 0; index < state[1].length; index++) {
-                const massProperties = _cloneMassProperties(sources[index]!);
-                _applyBodyRotationLocks(massProperties, mask);
-                raw.HP_Body_SetMassProperties(state[1][index], massProperties);
-            }
-            body._rotationLockMask = mask || undefined;
-            if (mask === 0) {
-                state[11] = null;
+            const transform = body._massPropertiesTransform;
+            let index = 0;
+            for (const handle of state[1]) {
+                const massProperties = buildNativeMassProperties(raw, handle, properties, fallbackInertia);
+                transform?.(massProperties, index++);
+                raw.HP_Body_SetMassProperties(handle, massProperties);
             }
             return true;
         },

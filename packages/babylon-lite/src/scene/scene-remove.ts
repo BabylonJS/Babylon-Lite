@@ -140,6 +140,9 @@ function retireMeshTeardown(scene: SceneContext, teardown: (() => void)[]): void
             } else {
                 packet._onOwnerEmpty?.();
             }
+            if (packet._onOwnerEmpty) {
+                packet._onOwnerEmpty = undefined;
+            }
         }
     }
     retireSceneGpu(scene, () => {

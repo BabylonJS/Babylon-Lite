@@ -218,6 +218,22 @@ describe("node-material packet ownership", () => {
         expect(meshUbos[0]!.destroy).not.toHaveBeenCalled();
         expect(nodeUbo.destroy).not.toHaveBeenCalled();
 
+        disposeGpuResourceRetirements(engine);
+        pass.drawIndexed.mockClear();
+        binding.draw(pass as never, engine);
+        expect(pass.drawIndexed).toHaveBeenCalledTimes(1);
+        expect(scene._renderables).toContain(renderable);
+        expect(group.o).toContain(renderable);
+        expect(meshUbos[0]!.destroy).toHaveBeenCalledOnce();
+        expect(meshUbos[1]!.destroy).not.toHaveBeenCalled();
+        expect(nodeUbo.destroy).not.toHaveBeenCalled();
+
+        removeFromScene(scene, firstMesh!);
+        disposeGpuResourceRetirements(engine);
+        expect(meshUbos[0]!.destroy).toHaveBeenCalledOnce();
+        expect(scene._renderables).toContain(renderable);
+        expect(group.o).toContain(renderable);
+
         pass.drawIndexed.mockClear();
         removeFromScene(scene, secondMesh!);
         binding.draw(pass as never, engine);

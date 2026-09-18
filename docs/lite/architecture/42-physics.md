@@ -112,11 +112,33 @@ zero is not a template for those derived values. The caller's explicit
 mass/centre/inertia overrides and active angular-lock mask are then applied to
 each instance using the same public-body contract.
 
+Native shape derivation and explicit override application live in a
+side-effect-free mass-properties leaf shared by ordinary and thin bodies.
+Cloning and rotation-lock transforms occupy a separate leaf so importing mass
+derivation does not retain axis-lock machinery. Each caller retains only the modules it invokes.
+The lazy thin chunk imports those leaves directly rather than reaching back
+through `havok.ts`, which prevents thin-only lock machinery from becoming part
+of ordinary physics entry chunks.
+
+The generalized mass-properties setter is also an opt-in leaf. Core body
+creation and the scalar-mass convenience API retain their narrow
+shape-derived path, while callers that override inertia or its orientation
+load the generalized merge helper. Thin physics imports that merge helper in
+its existing lazy chunk; scalar mass supplies its mass-proportional
+shape-less inertia fallback explicitly.
+
+The rotation-lock API itself owns thin-body lock persistence. It uses the thin
+context's existing count and indexed native-handle access, stores one unlocked
+mass source per instance on the body, and installs the same mass-rebuild
+transform seam used by ordinary bodies. The base thin context therefore does
+not retain lock/unlock loops or inertia-axis math unless a caller imports the
+rotation-lock API.
+
 Carrier inversion and shape scaling stay implemented inside the lazy
-thin-instance chunk. In particular, the lazy chunk must not import a helper
-also retained by core Havok paths when that would make Rollup hoist the helper
-into scenes that never execute thin-instance physics. Optional physics pays
-for its matrix work only after `enableHavokThinInstancePhysics`.
+thin-instance chunk. Carrier composition reuses the math layer's offset-aware
+multiply helper, while inversion remains local so ordinary scenes do not retain
+an otherwise unused inverse kernel. Optional physics pays for this matrix work
+only after `enableHavokThinInstancePhysics`.
 
 Matrix write-back may canonicalize multiplication residue to exact zero only
 within a small machine-roundoff multiple relative to the affected basis
@@ -181,6 +203,8 @@ specific raycast/collision instance identity.
 | File                                                   | Responsibility                                                            |
 | ------------------------------------------------------ | ------------------------------------------------------------------------- |
 | `havok.ts`                                             | Core: world create/step/dispose, bodies, shapes, aggregates, forces       |
+| `havok-mass-properties.ts`                             | Shared native mass derivation and explicit overrides                      |
+| `havok-rotation-locks.ts`                              | Mass cloning and shared body-axis inertia lock transforms                 |
 | `havok-thin-instances.ts`                              | Lazy native-body fan-out and matrix synchronization for thin instances    |
 | `havok-instance-access.ts`                             | Validated opt-in impulse/velocity access for one body instance            |
 | `havok-events.ts`                                      | Lazy body resolution and event-safe deferred release                      |

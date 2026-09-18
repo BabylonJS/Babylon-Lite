@@ -926,7 +926,6 @@ export {
     setPhysicsShapeFilterCollideMask,
     setPhysicsShapeMaterial,
     setPhysicsBodyMass,
-    setPhysicsBodyMassProperties,
     applyPhysicsImpulse,
     applyPhysicsBodyInstanceImpulse,
     setPhysicsBodyLinearVelocity,
@@ -934,8 +933,6 @@ export {
     getPhysicsBodyInstanceLinearVelocityToRef,
     getPhysicsBodyAngularVelocity,
     setPhysicsBodyAngularVelocity,
-    lockPhysicsBodyRotationAxes,
-    unlockPhysicsBodyRotationAxes,
     setPhysicsBodyMotionType,
     setPhysicsBodyTransform,
     removePhysicsBody,
@@ -948,6 +945,8 @@ export {
     PhysicsConstraintType,
     PhysicsConstraintAxis,
 } from "./physics/havok.js";
+export { setPhysicsBodyMassProperties } from "./physics/havok-body-mass-properties.js";
+export { lockPhysicsBodyRotationAxes, unlockPhysicsBodyRotationAxes } from "./physics/havok-rotation-locks.js";
 export { enableHavokThinInstancePhysicsSync } from "./physics/enable-havok-thin-instance-physics-sync.js";
 export type {
     PhysicsWorld,

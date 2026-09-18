@@ -5,6 +5,7 @@ import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scen
 import { CharacterCollisionObservable, PhysicsCharacterController } from "../../../packages/babylon-lite/src/physics/character-controller";
 import { onPhysicsCollision, setPhysicsBodyCollisionEventsEnabled } from "../../../packages/babylon-lite/src/physics/havok-collision";
 import { physicsRaycast } from "../../../packages/babylon-lite/src/physics/havok-queries";
+import { lockPhysicsBodyRotationAxes, unlockPhysicsBodyRotationAxes } from "../../../packages/babylon-lite/src/physics/havok-rotation-locks";
 import { onPhysicsTriggerBodies } from "../../../packages/babylon-lite/src/physics/havok-trigger";
 import {
     applyPhysicsBodyImpulse,
@@ -15,7 +16,6 @@ import {
     disposePhysics,
     enableHavokThinInstancePhysics,
     getPhysicsBodyInstanceCount,
-    lockPhysicsBodyRotationAxes,
     PhysicsMotionType,
     PhysicsPrestepType,
     PhysicsShapeType,
@@ -24,13 +24,12 @@ import {
     setPhysicsBodyAngularVelocity,
     setPhysicsBodyLinearVelocity,
     setPhysicsBodyMass,
-    setPhysicsBodyMassProperties,
     setPhysicsBodyMotionType,
     setPhysicsBodyPrestepType,
     setPhysicsBodyShape,
     setPhysicsBodyTransform,
-    unlockPhysicsBodyRotationAxes,
 } from "../../../packages/babylon-lite/src/physics/havok";
+import { setPhysicsBodyMassProperties } from "../../../packages/babylon-lite/src/physics/havok-body-mass-properties";
 import type { PhysicsBody, PhysicsShape } from "../../../packages/babylon-lite/src/physics/havok";
 
 function makeMockHknp() {

@@ -11,6 +11,7 @@ import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/s
 import { rebuildScenePbrPipelines } from "../../../packages/babylon-lite/src/scene/scene-rebuild";
 import { B as startRuntimeMeshBuild } from "../../../packages/babylon-lite/src/scene/scene-runtime-mesh-build";
 import { _t } from "../../../packages/babylon-lite/src/frame-graph/transmission";
+import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 
 function createScene(engine: EngineContext): SceneContext {
     return {
@@ -489,9 +490,26 @@ describe("runtime material rebuild ownership", () => {
         const engine = { _retirements: [] } as unknown as EngineContext;
         const scene = createScene(engine);
         scene._built = true;
-        const packet = { _disposed: false, _owner: [] as unknown[] };
-        packet._owner.push(packet);
-        const oldDispose = Object.assign(vi.fn(), { p: packet });
+        const onOwnerEmpty = vi.fn();
+        const sibling = { _disposed: false };
+        const owner: unknown[] = [];
+        const packet: { _disposed: boolean; _owner?: unknown[]; _onOwnerEmpty: () => void } = { _disposed: false, _owner: owner, _onOwnerEmpty: onOwnerEmpty };
+        owner.push(packet, sibling);
+        const oldDispose = Object.assign(
+            vi.fn(() => {
+                packet._disposed = true;
+                if (packet._owner) {
+                    const index = packet._owner.indexOf(packet);
+                    if (index >= 0) {
+                        packet._owner.splice(index, 1);
+                    }
+                    packet._owner = undefined;
+                } else {
+                    packet._onOwnerEmpty();
+                }
+            }),
+            { p: packet }
+        );
         const builder = (async (ctx: SceneContext, meshes: Mesh[]) => {
             const rebuild = (_target: SceneContext, mesh: Mesh): Renderable => renderable(mesh);
             for (const mesh of meshes) {
@@ -513,8 +531,14 @@ describe("runtime material rebuild ownership", () => {
 
         expect(packet._disposed).toBe(true);
         expect(packet._owner).toBeUndefined();
+        expect(owner).toEqual([sibling]);
+        expect(onOwnerEmpty).not.toHaveBeenCalled();
         expect(oldDispose).not.toHaveBeenCalled();
         expect(engine._retirements).toHaveLength(1);
+
+        disposeGpuResourceRetirements(engine);
+        expect(oldDispose).toHaveBeenCalledOnce();
+        expect(onOwnerEmpty).not.toHaveBeenCalled();
     });
 
     it("keeps a removed disposer packet reachable while an async runtime build is active", async () => {

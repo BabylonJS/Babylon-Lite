@@ -210,6 +210,9 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                         } else {
                             packet._onOwnerEmpty?.();
                         }
+                        if (packet._onOwnerEmpty) {
+                            packet._onOwnerEmpty = undefined;
+                        }
                         if (resourcesDisposed) {
                             return;
                         }

@@ -32,11 +32,11 @@ import {
     PhysicsMotionType,
     PhysicsShapeType,
     removePhysicsBody,
-    setPhysicsBodyMassProperties,
     setPhysicsBodyPreStep,
     setPhysicsBodyShape,
     worldStepSeconds,
 } from "./havok.js";
+import { setPhysicsBodyMassProperties } from "./havok-body-mass-properties.js";
 import type { PhysicsBody, PhysicsShape, PhysicsWorld } from "./havok.js";
 
 // ─── Public types ────────────────────────────────────────────────────
