@@ -1047,7 +1047,7 @@ Each scene includes:
 
 Each scene has a committed Babylon.js golden under `reference/lite/` and a gallery thumbnail under `lab/public/thumbnails/`.
 
-Scene 311 compares against a fresh Babylon.js capture from the same browser session. Its two half-width post-process viewports map fragment centers exactly onto source-texel boundaries, where fullscreen-varying interpolation can select an adjacent texel on different GPU implementations. A same-GPU reference preserves the strict MAD thresholds without changing the committed golden or weakening the algorithm.
+Scene 311 compares against a fresh Babylon.js capture from the same browser session. Its two half-width post-process viewports map fragment centers exactly onto source-texel boundaries, where fullscreen-varying interpolation can select an adjacent texel on different GPU implementations. A same-GPU reference preserves the strict MAD thresholds without changing the committed golden or weakening the algorithm. The panels occupy 75% of the frame height; the foreground-only MAD check remains the coverage guard while the full-frame check detects broader regressions.
 
 ## Dependencies
 

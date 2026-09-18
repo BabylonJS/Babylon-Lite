@@ -28,7 +28,7 @@ function createSolidTexture(engine: Parameters<typeof createTexture2DFromPixels>
 }
 
 function createTaggedPlane(engine: Parameters<typeof createPlane>[0], width: number, x: number, renderedColor: Color, baseColor: Color, groupId: number) {
-    const plane = createPlane(engine, { width, height: 7.2 });
+    const plane = createPlane(engine, { width, height: 4.5 });
     plane.position.set(x, 0, 0);
     const material = createStandardMaterial();
     material.diffuseTexture = createSolidTexture(engine, baseColor);
@@ -70,8 +70,8 @@ async function main(): Promise<void> {
         const currentGroup = 1 + index * 2;
         const targetGroup = currentGroup + 1;
         addToScene(scene, createTaggedPlane(engine, 1.55, cellStart + 0.775, [0.32, 0.35, 0.4], [0.32, 0.35, 0.4], currentGroup));
-        addToScene(scene, createTaggedPlane(engine, 0.25, cellStart + 1.675, [0.015, 0.004, 0.001], [1, 0.48, 0.04], targetGroup));
-        addToScene(scene, createTaggedPlane(engine, cellWidth - 1.8, cellStart + (cellWidth + 1.8) * 0.5, [1, 0.48, 0.04], [1, 0.48, 0.04], targetGroup));
+        addToScene(scene, createTaggedPlane(engine, 0.24, cellStart + 1.67, [0.015, 0.004, 0.001], [1, 0.48, 0.04], targetGroup));
+        addToScene(scene, createTaggedPlane(engine, cellWidth - 1.79, cellStart + (cellWidth + 1.79) * 0.5, [1, 0.48, 0.04], [1, 0.48, 0.04], targetGroup));
     }
 
     const sceneColor = createRenderTarget({ lbl: "scene311-color", format: "rgba16float", samples: 1, size: engine });

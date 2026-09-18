@@ -34,7 +34,7 @@ function createSolidTexture(scene: Scene, color: Color): RawTexture {
 }
 
 function createTaggedPlane(scene: Scene, width: number, x: number, renderedColor: Color, baseColor: Color, groupId: number) {
-    const plane = MeshBuilder.CreatePlane(`plane-${groupId}-${x}`, { width, height: 7.2 }, scene);
+    const plane = MeshBuilder.CreatePlane(`plane-${groupId}-${x}`, { width, height: 4.5 }, scene);
     plane.position.set(x, 0, 0);
     const material = new StandardMaterial(`material-${groupId}-${x}`, scene);
     material.diffuseTexture = createSolidTexture(scene, baseColor);
@@ -81,8 +81,8 @@ function createTaggedPlane(scene: Scene, width: number, x: number, renderedColor
         const currentGroup = 1 + index * 2;
         const targetGroup = currentGroup + 1;
         createTaggedPlane(scene, 1.55, cellStart + 0.775, [0.32, 0.35, 0.4], [0.32, 0.35, 0.4], currentGroup);
-        createTaggedPlane(scene, 0.25, cellStart + 1.675, [0.015, 0.004, 0.001], [1, 0.48, 0.04], targetGroup);
-        createTaggedPlane(scene, cellWidth - 1.8, cellStart + (cellWidth + 1.8) * 0.5, [1, 0.48, 0.04], [1, 0.48, 0.04], targetGroup);
+        createTaggedPlane(scene, 0.24, cellStart + 1.67, [0.015, 0.004, 0.001], [1, 0.48, 0.04], targetGroup);
+        createTaggedPlane(scene, cellWidth - 1.79, cellStart + (cellWidth + 1.79) * 0.5, [1, 0.48, 0.04], [1, 0.48, 0.04], targetGroup);
     }
 
     const frameGraph = new FrameGraph(scene, true);
