@@ -13,6 +13,7 @@ function makeTask(): ComputeTask {
     return {
         name: "one-shot",
         engine,
+        executionEnabled: true,
         dispatches: [],
         _dispatches: [],
         _passes: [],

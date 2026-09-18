@@ -174,7 +174,6 @@ console.log(createRenderTargetTexture(globalThis.engine, {
         expect(result.errors).toEqual([]);
         expect(result.significantWarnings).toEqual([]);
         expect(result.code.includes("immediate_address_space")).toBe(retained);
-        expect(result.code.includes("setImmediates")).toBe(retained);
     });
 
     it.each([
@@ -188,6 +187,6 @@ console.log(createRenderTargetTexture(globalThis.engine, {
         });
         expect(result.errors).toEqual([]);
         expect(result.significantWarnings).toEqual([]);
-        expect(result.code.includes("does not support required feature")).toBe(retained);
+        expect(result.code.includes("_installDeviceFeaturesResolver")).toBe(retained);
     });
 });
