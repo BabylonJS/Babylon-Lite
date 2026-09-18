@@ -3,12 +3,11 @@
 
 import { F32 } from "../engine/typed-arrays.js";
 import type { AnimationEasing } from "./easing.js";
-import type { PropertyAnimationSampler } from "./property-animation.js";
 import type { AnimationSampler } from "./types.js";
 import { INTERP_STEP, INTERP_CUBICSPLINE } from "./types.js";
 
 /** Binary search: find index i such that `input[i] <= t < input[i+1]`. */
-function findKeyframe(input: Float32Array | Float64Array, t: number): number {
+function findKeyframe(input: Float32Array, t: number): number {
     let lo = 0;
     let hi = input.length - 1;
     if (t <= input[0]!) {
@@ -207,7 +206,7 @@ export function evaluateSampler(sampler: AnimationSampler, t: number, stride: nu
  * so imported glTF samplers retain their unchanged LINEAR/STEP/CUBICSPLINE path.
  */
 export function evaluatePropertySampler(
-    sampler: PropertyAnimationSampler,
+    sampler: AnimationSampler,
     t: number,
     stride: number,
     isQuat: boolean,
@@ -216,21 +215,25 @@ export function evaluatePropertySampler(
     dstOffset: number
 ): void {
     const { input, output, interpolation } = sampler;
+    // Property key times are stored as Float32. Canonicalize caller-authored
+    // double-precision times to the same domain so exact frame/key boundaries
+    // select the authored key rather than the preceding STEP segment.
+    const sampleTime = Math.fround(t);
     const keyCount = input.length;
 
     if (keyCount === 0) {
         return;
     }
-    if (keyCount === 1 || t <= input[0]!) {
+    if (keyCount === 1 || sampleTime <= input[0]!) {
         copySample(output, 0, stride, dst, dstOffset);
         return;
     }
-    if (t >= input[keyCount - 1]!) {
+    if (sampleTime >= input[keyCount - 1]!) {
         copySample(output, (keyCount - 1) * stride, stride, dst, dstOffset);
         return;
     }
 
-    const idx = findKeyframe(input, t);
+    const idx = findKeyframe(input, sampleTime);
     if (interpolation === INTERP_STEP) {
         copySample(output, idx * stride, stride, dst, dstOffset);
         return;
@@ -239,7 +242,7 @@ export function evaluatePropertySampler(
     const t0 = input[idx]!;
     const t1 = input[idx + 1]!;
     const dt = t1 - t0;
-    const linearGradient = dt > 0 ? (t - t0) / dt : 0;
+    const linearGradient = dt > 0 ? (sampleTime - t0) / dt : 0;
     const gradient = easing ? easing(linearGradient) : linearGradient;
 
     interpolateLinearSample(output, idx, stride, isQuat, gradient, dst, dstOffset);

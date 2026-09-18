@@ -114,15 +114,9 @@ export interface PropertyAnimationClipOptions {
     readonly frameRate?: number;
 }
 
-export interface PropertyAnimationSampler {
-    readonly input: Float64Array;
-    readonly output: Float32Array;
-    readonly interpolation: typeof INTERP_LINEAR | typeof INTERP_STEP;
-}
-
 export interface PropertyAnimationTrack {
     readonly path: string;
-    readonly sampler: PropertyAnimationSampler;
+    readonly sampler: AnimationSampler;
     readonly stride: number;
     readonly quaternion: boolean;
     readonly easing?: AnimationEasing;
@@ -295,9 +289,11 @@ All animation data uses flat typed arrays for GPU-friendly memory layout:
 - **AnimationSampler.output**: Packed contiguously:
     - LINEAR/STEP: `[value0, value1, ...]` — `stride` floats per keyframe
     - CUBICSPLINE: `[inTangent0, value0, outTangent0, inTangent1, value1, outTangent1, ...]` — `stride * 3` floats per keyframe
-- **PropertyAnimationSampler.input**: `Float64Array` timestamps preserve caller-authored
-  frame boundaries exactly after division by frame rate. Generic/glTF
-  `AnimationSampler.input` remains `Float32Array`.
+- **Property animation timestamps** use the existing `AnimationSampler.input`
+  `Float32Array`. Property-only evaluation canonicalizes playback time with
+  `Math.fround()` before key lookup and interpolation so caller-authored frame and
+  time boundaries are compared in the same precision domain. Generic/glTF sampler
+  evaluation remains unchanged.
 
 ### Keyframe Search
 

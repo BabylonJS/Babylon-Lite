@@ -2,20 +2,19 @@
 // Stored on scene.animationGroups[]. Pure state interface.
 
 import type { EngineContext } from "../engine/engine.js";
-import type { AnimationClip, GltfAnimationData, NodeRest, SkeletonBinding } from "./types.js";
+import type { AnimationClip, AnimationSampler, GltfAnimationData, NodeRest, SkeletonBinding } from "./types.js";
 import type { AnimationGroupMask } from "./animation-group-mask.js";
 import type { LiteMetadata } from "../metadata.js";
 import { PATH_POINTER, PATH_TRANSLATION, PATH_ROTATION, PATH_SCALE } from "./types.js";
 import { createAnimationController } from "../skeleton/skeleton-updater.js";
 import type { AnimationController } from "../skeleton/skeleton-updater.js";
 import type { AnimationManager } from "./animation-manager.js";
-import type { PropertyAnimationSampler } from "./property-animation.js";
 import { _setTickAnimationImpl } from "./animation-tick.js";
 
 const DEFAULT_FRAME_RATE = 60;
 
 export interface AnimationPropertyRuntimeTrack {
-    readonly sampler: PropertyAnimationSampler;
+    readonly sampler: AnimationSampler;
     readonly stride: number;
     readonly quaternion: boolean;
     readonly easing?: (gradient: number) => number;

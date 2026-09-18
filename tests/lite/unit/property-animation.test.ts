@@ -397,17 +397,21 @@ describe("Property animation", () => {
                     keys: [
                         { frame: 0, value: 0 },
                         { frame: 1, value: 10 },
+                        { frame: 2, value: 20 },
                     ],
                 },
             ],
             { frameRate: 60 }
         );
-        const group = createPropertyAnimationGroup(manager, target, clip, { loop: false, fromFrame: 0, toFrame: 1 });
+        const group = createPropertyAnimationGroup(manager, target, clip, { loop: false, fromFrame: 0, toFrame: 2 });
 
         updateAnimationManager(manager, 1000 / 60);
-
-        expect(group._stopped).toBe(true);
+        expect(group._stopped).toBe(false);
         expect(target.x).toBe(10);
+
+        updateAnimationManager(manager, 1000 / 60);
+        expect(group._stopped).toBe(true);
+        expect(target.x).toBe(20);
     });
 
     it("throws when a property path cannot be resolved", () => {
