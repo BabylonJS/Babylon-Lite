@@ -411,9 +411,9 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
                 }
             }
             const loads: Promise<void>[] = [];
-            if (task.geometryMeshBlendTagTexture) {
+            if (typeAccessors[GeometryTextureType.MESH_BLEND_TAG]) {
                 const extension = _geometryOutputExtension;
-                if (!extension || extension.type !== GeometryTextureType.MESH_BLEND_TAG) {
+                if (!extension) {
                     throw new Error("GeometryRendererTask: MESH_BLEND_TAG is not enabled.");
                 }
                 for (const attachment of task._attachments) {
@@ -736,7 +736,8 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
     if (sc._renderableVersion !== task._boundVer) {
         rebuildBoundMeshes(task, config, eng, sc);
     }
-    const aspect = mrt._width / mrt._height;
+    const viewport = camera.viewport;
+    const aspect = (mrt._width / mrt._height) * (viewport ? viewport.width / viewport.height : 1);
     writeSceneUBO(task, eng, sc, camera, aspect);
     // Positional light data must share the effective task camera's origin; under an
     // override-FO the task owns its lights UBO and refreshes it here each frame.

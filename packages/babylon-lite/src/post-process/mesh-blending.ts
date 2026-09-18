@@ -675,7 +675,7 @@ function writeUniforms(task: MeshBlendingPostProcessTaskInternal): void {
     }
     if (task.debugMode === MeshBlendDebugMode.WorldPosition) {
         packMat4IntoF32(data, task.camera.worldMatrix, 32);
-        if (task.camera._useFloatingOrigin) {
+        if (task.engine.useFloatingOrigin) {
             data[44] = 0;
             data[45] = 0;
             data[46] = 0;

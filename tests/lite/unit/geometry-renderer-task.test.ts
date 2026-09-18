@@ -682,6 +682,47 @@ describe("GeometryRendererTask", () => {
         expect(ls[6]).toBe(3);
     });
 
+    it("uses the camera viewport's effective aspect ratio for geometry projection", async () => {
+        const { createArcRotateCamera } = await import("../../../packages/babylon-lite/src/camera/arc-rotate");
+        const { getViewProjectionMatrix } = await import("../../../packages/babylon-lite/src/camera/camera");
+        const engine = makeMockEngine();
+        engine._currentEncoder = {
+            beginRenderPass: () =>
+                ({
+                    setBindGroup: () => undefined,
+                    setPipeline: () => undefined,
+                    end: () => undefined,
+                }) as unknown as GPURenderPassEncoder,
+        } as unknown as GPUCommandEncoder;
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        const camera = createArcRotateCamera(0, Math.PI / 2, 5, { x: 0, y: 0, z: 0 });
+        camera.viewport = { x: 0, y: 0, width: 0.5, height: 1 };
+        scene.camera = camera;
+        const task = createGeometryRendererTask(
+            {
+                textureDescriptions: [{ type: GeometryTextureType.WORLD_POSITION }],
+                size: { width: 200, height: 100 },
+                meshes: [],
+            },
+            engine,
+            scene
+        ) as unknown as {
+            _preload(): Promise<void>;
+            record(): void;
+            execute(): number;
+            _sceneData: Float32Array;
+        };
+
+        await task._preload();
+        task.record();
+        task.execute();
+        const effective = Array.from(getViewProjectionMatrix(camera, 1));
+        const raw = Array.from(getViewProjectionMatrix(camera, 2));
+
+        expect(Array.from(task._sceneData.subarray(0, 16))).toEqual(effective);
+        expect(effective).not.toEqual(raw);
+    });
+
     // ── Scene-mutation re-sync (stale `_bound` after removal / material swap) ──────
     // `execute()` re-syncs `_bound` when `scene._renderableVersion` advances so a
     // removed mesh is never drawn against destroyed UBOs/vertex buffers and a swapped

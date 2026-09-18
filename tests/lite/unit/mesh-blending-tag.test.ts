@@ -313,7 +313,7 @@ describe("mesh-blending configuration and radius math", () => {
         task.dispose();
     });
 
-    it("keeps WorldPosition debug reconstruction in the floating-origin frame", () => {
+    it("keeps WorldPosition debug in the engine's floating-origin frame for an unflagged override camera", () => {
         const { camera, device, engine, target } = createMeshBlendingTestContext();
         const world = camera.worldMatrix as unknown as Float32Array;
         world[0] = 0;
@@ -323,7 +323,8 @@ describe("mesh-blending configuration and radius math", () => {
         world[12] = 1_000_000_000;
         world[13] = -2_000_000_000;
         world[14] = 3_000_000_000;
-        camera._useFloatingOrigin = true;
+        engine.useFloatingOrigin = true;
+        expect(camera._useFloatingOrigin).toBeUndefined();
         const task = createMeshBlendingPostProcessTask(
             {
                 sourceTexture: target("rgba16float"),
