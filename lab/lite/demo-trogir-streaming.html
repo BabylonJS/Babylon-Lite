@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+        <link rel="icon" href="data:," />
+        <title>Babylon Lite — Trogir Gaussian Splat Streaming</title>
+        <style>
+            :root {
+                color-scheme: dark;
+                font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+            }
+            html,
+            body {
+                margin: 0;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+                background: #080b0e;
+                color: #f4f6f8;
+            }
+            canvas {
+                width: 100%;
+                height: 100%;
+                display: block;
+                touch-action: none;
+            }
+            .glass {
+                background: rgba(8, 12, 16, 0.76);
+                border: 1px solid rgba(255, 255, 255, 0.16);
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                backdrop-filter: blur(10px);
+            }
+            #loading {
+                position: fixed;
+                inset: 0;
+                z-index: 20;
+                display: grid;
+                place-items: center;
+                background: radial-gradient(circle at 50% 42%, #17212a, #080b0e 65%);
+                transition: opacity 0.35s ease;
+            }
+            #loading.hidden {
+                opacity: 0;
+                pointer-events: none;
+            }
+            .loading-card {
+                max-width: 580px;
+                margin: 20px;
+                padding: 24px 28px;
+                border-radius: 14px;
+                text-align: center;
+            }
+            .spinner {
+                width: 44px;
+                height: 44px;
+                margin: 0 auto 16px;
+                border: 4px solid #31424f;
+                border-top-color: #58c6ff;
+                border-radius: 50%;
+                animation: spin 0.8s linear infinite;
+            }
+            #loading.error .spinner {
+                display: none;
+            }
+            #loading.error .loading-card {
+                border-color: rgba(255, 112, 112, 0.6);
+            }
+            #loadingTitle {
+                margin: 0 0 7px;
+                font-size: 1.1rem;
+            }
+            #loadingDetail {
+                margin: 0;
+                color: #b9c7d1;
+                line-height: 1.5;
+                white-space: pre-wrap;
+            }
+            @keyframes spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+            #hud {
+                position: fixed;
+                top: 12px;
+                left: 12px;
+                z-index: 10;
+                width: min(310px, calc(100vw - 48px));
+                max-height: calc(100vh - 52px);
+                padding: 13px 15px;
+                overflow-y: auto;
+                border-radius: 10px;
+                font-size: 12px;
+            }
+            #hud h1 {
+                margin: 0 0 9px;
+                font-size: 14px;
+                font-weight: 650;
+            }
+            .stats {
+                display: grid;
+                grid-template-columns: 1fr auto;
+                gap: 4px 14px;
+                margin-bottom: 12px;
+                color: #bdc9d1;
+            }
+            .stats output {
+                color: #fff;
+                font-variant-numeric: tabular-nums;
+            }
+            .control {
+                display: grid;
+                grid-template-columns: 85px 1fr 58px;
+                align-items: center;
+                gap: 8px;
+                margin-top: 8px;
+            }
+            .control input {
+                width: 100%;
+                accent-color: #58c6ff;
+            }
+            .control output {
+                text-align: right;
+                font-variant-numeric: tabular-nums;
+            }
+            .camera-mode {
+                width: 100%;
+                margin-top: 10px;
+                padding: 7px 10px;
+                border: 1px solid rgba(88, 198, 255, 0.55);
+                border-radius: 6px;
+                background: rgba(31, 74, 98, 0.72);
+                color: #fff;
+                font: inherit;
+                cursor: pointer;
+            }
+            .camera-mode:hover,
+            .camera-mode:focus-visible {
+                background: rgba(43, 103, 136, 0.9);
+                outline: 2px solid transparent;
+            }
+            .camera-pose {
+                margin-top: 10px;
+                padding-top: 9px;
+                border-top: 1px solid rgba(255, 255, 255, 0.13);
+            }
+            .camera-pose summary {
+                color: #d9e5eb;
+                cursor: pointer;
+                user-select: none;
+            }
+            .camera-pose-grid {
+                display: grid;
+                grid-template-columns: 1fr auto;
+                gap: 3px 14px;
+                margin-top: 8px;
+                color: #9fb0bb;
+            }
+            .camera-pose-grid output {
+                color: #fff;
+                font-variant-numeric: tabular-nums;
+            }
+            .camera-pose-convention {
+                margin: 7px 0 0;
+                color: #788c99;
+                line-height: 1.35;
+            }
+            .camera-pose-status {
+                margin: 7px 0 0;
+                color: #ffb3b3;
+            }
+            .hint {
+                margin-top: 10px;
+                color: #8fa1ae;
+            }
+            .credit {
+                position: fixed;
+                z-index: 11;
+                right: 12px;
+                bottom: 12px;
+                max-width: min(520px, calc(100vw - 48px));
+                padding: 7px 10px;
+                border-radius: 7px;
+                color: #eaf1f5;
+                font-size: 11px;
+                line-height: 1.4;
+                text-decoration: none;
+            }
+            .credit:hover {
+                background: rgba(8, 12, 16, 0.94);
+            }
+            @media (max-width: 620px) {
+                #hud {
+                    top: 8px;
+                    left: 8px;
+                }
+                .credit {
+                    right: 8px;
+                    bottom: 8px;
+                }
+            }
+            @media (prefers-reduced-motion: reduce) {
+                .spinner {
+                    animation-duration: 2s;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="renderCanvas"></canvas>
+        <div id="loading" role="status" aria-live="polite">
+            <div class="loading-card glass">
+                <div class="spinner" aria-hidden="true"></div>
+                <h1 id="loadingTitle">Preparing coarse Trogir view…</h1>
+                <p id="loadingDetail">Streaming the public Trogir hierarchy and its broadest shared representation. Fine detail follows after this view is drawable.</p>
+            </div>
+        </div>
+        <aside id="hud" class="glass" aria-label="Streaming controls and statistics">
+            <h1>Trogir · Gaussian splat streaming</h1>
+            <div class="stats">
+                <span>Phase</span><output id="phase">bootstrap</output> <span>First coarse frame</span><output id="firstFrame">—</output> <span>Selected splats</span
+                ><output id="selectedSplats">0</output> <span>Visible / covered leaves</span><output id="leaves">0 / 0</output> <span>Resident / allocated GPU</span
+                ><output id="gpuBytes">0 / 0 MB</output> <span>Resident files / requests</span><output id="requests">0 / 0</output>
+            </div>
+            <label class="control" for="screenError"
+                ><span>Detail error</span><input id="screenError" type="range" min="0.5" max="8" value="2" step="0.25" /><output id="screenErrorValue">2.00 px</output></label
+            >
+            <label class="control" for="splatBudget"
+                ><span>Splat budget</span><input id="splatBudget" type="range" min="10000" max="1000000" value="750000" step="10000" /><output id="splatBudgetValue"
+                    >750k</output
+                ></label
+            >
+            <button id="cameraMode" class="camera-mode" type="button" aria-pressed="false" aria-label="Switch to first-person camera">Camera: Orbit</button>
+            <div id="cameraHint" class="hint">Drag to orbit · wheel or pinch to zoom</div>
+            <details id="cameraPose" class="camera-pose">
+                <summary>Camera pose</summary>
+                <div class="camera-pose-grid">
+                    <span>Position X</span><output id="cameraX">0.00</output> <span>Position Y</span><output id="cameraY">0.00</output> <span>Position Z</span
+                    ><output id="cameraZ">0.00</output> <span>Yaw</span><output id="cameraYaw">0.00°</output> <span>Pitch</span><output id="cameraPitch">0.00°</output>
+                    <span>Roll</span><output id="cameraRoll">0.00°</output>
+                </div>
+                <p id="cameraPoseStatus" class="camera-pose-status" role="status" hidden>Camera pose unavailable</p>
+                <p class="camera-pose-convention">World position · degrees · yaw about world Y · pitch positive looking up</p>
+            </details>
+        </aside>
+        <a class="credit glass" href="https://superspl.at/scene/14bac5b2" target="_blank" rel="noopener noreferrer">
+            <b>“Get lost in the alleys of historical Trogir, Croatia”</b> by Paolo Tosolini · source · CC BY 4.0
+        </a>
+        <script type="module" src="/lite/bundle/demos/trogir-streaming.js"></script>
+    </body>
+</html>
