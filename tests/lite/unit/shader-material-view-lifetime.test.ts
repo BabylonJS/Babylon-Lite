@@ -14,6 +14,7 @@ import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 
 type TestBuffer = GPUBuffer & { bytes: Uint8Array; destroyed: number };
 type TestMaterial = ShaderMaterial & { _shaderCustomUbo: TestBuffer | null; _shaderBindings: unknown };
+type TestView = TestMaterial & MaterialView;
 
 function fixture() {
     let complete!: () => void;
@@ -65,13 +66,13 @@ function source(transparent = false): TestMaterial {
     }) as TestMaterial;
 }
 
-function privateView(material: ShaderMaterial): TestMaterial {
+function privateView(material: ShaderMaterial): TestView {
     const view = createMaterialView(material, { features: 0 });
     Object.defineProperties(view, {
         _shaderCustomUbo: { value: null, writable: true },
         _shaderCustomData: { value: null, writable: true },
     });
-    return view as unknown as TestMaterial;
+    return view as unknown as TestView;
 }
 
 function build(f: ReturnType<typeof fixture>, material: ShaderMaterial) {
@@ -132,7 +133,7 @@ describe("ShaderMaterial private view lifetime", () => {
         const f = fixture(),
             material = source();
         build(f, material);
-        const borrowed = createMaterialView(material, { features: 0 }) as unknown as TestMaterial;
+        const borrowed = createMaterialView(material, { features: 0 }) as unknown as TestView;
         build(f, borrowed);
         const buffer = material._shaderCustomUbo!;
         expect(borrowed._shaderCustomUbo).toBe(buffer);
