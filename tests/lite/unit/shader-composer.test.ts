@@ -225,7 +225,7 @@ describe("composeShader", () => {
             ] as const
         ).map(([access, gpuAccess]) => ({
             name: `storage ${access}`,
-            type: { _kind: "storage-texture", _access: access, _format: "rgba8unorm" } satisfies BindingKind,
+            type: { _kind: "storage-texture", _access: access, _gpuAccess: gpuAccess, _format: "rgba8unorm" } satisfies BindingKind,
             layout: { storageTexture: { access: gpuAccess, format: "rgba8unorm" } } satisfies Omit<GPUBindGroupLayoutEntry, "binding" | "visibility">,
             declarationType: `texture_storage_2d<rgba8unorm,${access}>`,
         })),
