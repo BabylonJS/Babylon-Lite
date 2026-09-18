@@ -313,6 +313,38 @@ describe("mesh-blending configuration and radius math", () => {
         task.dispose();
     });
 
+    it("keeps WorldPosition debug reconstruction in the floating-origin frame", () => {
+        const { camera, device, engine, target } = createMeshBlendingTestContext();
+        const world = camera.worldMatrix as unknown as Float32Array;
+        world[0] = 0;
+        world[1] = 1;
+        world[4] = -1;
+        world[5] = 0;
+        world[12] = 1_000_000_000;
+        world[13] = -2_000_000_000;
+        world[14] = 3_000_000_000;
+        camera._useFloatingOrigin = true;
+        const task = createMeshBlendingPostProcessTask(
+            {
+                sourceTexture: target("rgba16float"),
+                meshBlendTagTexture: target("r8uint"),
+                depthTexture: target("r32float"),
+                camera,
+                debugMode: MeshBlendDebugMode.WorldPosition,
+            },
+            engine
+        );
+
+        task.record();
+        vi.mocked(device.queue.writeBuffer).mockClear();
+        task.updateUniforms();
+        const data = vi.mocked(device.queue.writeBuffer).mock.calls.at(-1)![2] as Float32Array;
+        expect(Array.from(data.subarray(32, 44))).toEqual(Array.from(world.subarray(0, 12)));
+        expect(Array.from(data.subarray(44, 47))).toEqual([0, 0, 0]);
+        expect(data[47]).toBe(1);
+        task.dispose();
+    });
+
     it("records, executes, rebinds replaced inputs, and disposes task-owned GPU resources", () => {
         const { camera, createBindGroup, destroyedBuffers, destroyedTextures, engine, pass, target } = createMeshBlendingTestContext();
         const sourceTexture = target("rgba16float");

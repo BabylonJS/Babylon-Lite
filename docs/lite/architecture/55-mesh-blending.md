@@ -357,7 +357,7 @@ One 240-byte uniform buffer is written as 60 `f32` values:
 | `58`        | `enabled`, `1` or `0`                     |
 | `59`        | reserved zero                             |
 
-Projection and inverse projection are computed from the task camera and the output dimensions. The `inverseView` range remains zero for ordinary variants and is computed and written only for the WorldPosition debug variant. Orthographic state is `camera.ortho ? 1 : 0`.
+Projection and inverse projection are computed from the task camera and the output dimensions. The `inverseView` range remains zero for ordinary variants and is computed and written only for the WorldPosition debug variant. Under floating origin its translation is zeroed to invert the effective rendering view and preserve eye-relative precision. Orthographic state is `camera.ortho ? 1 : 0`.
 
 ### Blue noise
 
