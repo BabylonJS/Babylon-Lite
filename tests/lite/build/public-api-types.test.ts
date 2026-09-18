@@ -35,6 +35,195 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes graph-specific Node block loaders only through the root API", () => {
+        const probePath = resolve(BUILD_DIR, "node-block-loader.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createNodeMaterialBlockLoader, nodeInputBlock, nodeTextureBlock, nodeMatrixBuilder,
+    nodePbrMetallicRoughnessBlockFull, type ParseNodeMaterialOptions, type NodeMaterialBlock,
+} from "./index.js";
+const blocks: readonly NodeMaterialBlock[] = [nodeInputBlock, nodeTextureBlock, nodeMatrixBuilder];
+const options: ParseNodeMaterialOptions = { blockLoader: createNodeMaterialBlockLoader(blocks) };
+createNodeMaterialBlockLoader([nodePbrMetallicRoughnessBlockFull]);
+// @ts-expect-error Implementation callbacks are internal, not public GPU/compiler API.
+nodeInputBlock._load();
+void options;
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("requires at least one source for separate-file KTX2 arrays", () => {
+        const probePath = resolve(BUILD_DIR, "ktx2-array-sources.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    loadKtx2Texture2DArrayFromUrls,
+    uploadKtx2Texture2DArrayFromBuffers,
+    type EngineContext,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const buffer: ArrayBuffer;
+uploadKtx2Texture2DArrayFromBuffers(engine, [buffer]);
+loadKtx2Texture2DArrayFromUrls(engine, ["layer.ktx2"]);
+// @ts-expect-error Separate-file KTX2 arrays require at least one buffer.
+uploadKtx2Texture2DArrayFromBuffers(engine, []);
+// @ts-expect-error Separate-file KTX2 arrays require at least one URL.
+loadKtx2Texture2DArrayFromUrls(engine, []);
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes standalone tasks, opt-in RTTs, and storage-backed geometry", () => {
+        const probePath = resolve(BUILD_DIR, "render-task-opt-in.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createSceneContext, createRenderTask, addMeshToTask, createRenderTargetTexture,
+    createSurfaceRenderTargetTexture, onRenderTargetTextureResize, withSampledDepthTexture,
+    createStorageBuffer, readStorageBuffer, createMeshFromStorageBuffer,
+    createShaderMaterial, setShaderAttributeFormats, resizeSharedMeshGeometry,
+    prepareShaderMaterialPipeline, prepareShaderMaterialPipelineForTask,
+    type EngineContext, type Mesh, type StorageBufferOptions, type MeshFromStorageOptions, type RenderTargetSurfaceSize,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const mesh: Mesh;
+const fixed = createRenderTargetTexture(engine, {
+    format: "rgba8unorm", samples: 1, size: { width: 32, height: 32 },
+});
+const fixedDepth = createRenderTargetTexture(engine, {
+    dFormat: "depth32float", samples: 1, size: { width: 32, height: 32 },
+}, withSampledDepthTexture);
+const surface = createSurfaceRenderTargetTexture(engine, {
+    format: "rgba8unorm", dFormat: "depth32float",
+    depthClearValue: 1, depthCompare: "less-equal",
+    samples: 1, size: engine,
+}, withSampledDepthTexture);
+const surfaceDepth = createSurfaceRenderTargetTexture(engine, {
+    dFormat: "depth32float", samples: 1, size: engine,
+}, withSampledDepthTexture);
+const scaledSize: RenderTargetSurfaceSize = { surface: engine, scale: 0.5 };
+createSurfaceRenderTargetTexture(engine, {
+    format: "rgba8unorm", samples: 1, size: scaledSize,
+});
+const dynamicSize = Math.random() > 0.5 ? engine : scaledSize;
+const forwardedDescriptor: Parameters<typeof createSurfaceRenderTargetTexture>[1] = {
+    format: "rgba8unorm", samples: 1, size: dynamicSize,
+};
+createSurfaceRenderTargetTexture(engine, forwardedDescriptor);
+const task = createRenderTask({ name: "explicit", rt: fixed.rt }, engine, createSceneContext(engine));
+addMeshToTask(task, mesh);
+// @ts-expect-error Task mesh population is a tree-shakable standalone API.
+task.addMesh(mesh);
+onRenderTargetTextureResize(surface, () => {})();
+onRenderTargetTextureResize(surfaceDepth, () => {})();
+fixedDepth.texture satisfies typeof fixedDepth.depthTexture;
+const storageOptions: StorageBufferOptions = { writable: true, vertex: true, indirect: true };
+const storage = createStorageBuffer(engine, 1024, storageOptions);
+const indices = createStorageBuffer(engine, new Uint32Array([0, 1, 2]), { index: true });
+const geometryOptions: MeshFromStorageOptions = {
+    storage, indices, indexCount: 3, indexFormat: "uint32",
+    vertexCount: 3, arrayStride: 16, baseVertex: 2,
+    boundMin: [-1, -1, -1], boundMax: [1, 1, 1],
+};
+const storageMesh = createMeshFromStorageBuffer(engine, "storage", geometryOptions);
+// @ts-expect-error Storage-backed attribute offsets do not support skinning streams.
+const unsupportedOffsets: NonNullable<MeshFromStorageOptions["attributeOffsets"]> = { joints: 0 };
+void unsupportedOffsets;
+const shader = createShaderMaterial({ vertexSource: "", fragmentSource: "", attributes: ["position"] });
+setShaderAttributeFormats(shader, { position: "float32x4" });
+storageMesh.material = shader;
+const prepared: Promise<void> = prepareShaderMaterialPipeline(engine, shader, "mesh", task, storageMesh);
+const preparedForTask: Promise<void> = prepareShaderMaterialPipelineForTask(task, shader, "mesh", storageMesh);
+void prepared;
+void preparedForTask;
+const readback: Promise<ArrayBuffer> = readStorageBuffer(storage);
+void readback;
+// @ts-expect-error GPU allocation handles remain internal.
+storage._buffer;
+resizeSharedMeshGeometry(engine, [mesh], new Float32Array(9), new Float32Array(9), new Uint32Array([0, 1, 2]));
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("type-checks cleanly with no references to internal-only types", () => {
         expect(existsSync(DTS_PATH)).toBe(true);
 
@@ -247,11 +436,12 @@ float64Result satisfies Float64Array;
         expect(external, `build/index.d.ts leaks types from external modules: ${external.join(", ")}`).toEqual([]);
     });
 
-    it("strips the shader-source brand so consumers can pass plain strings", () => {
+    it("exports the WGSL tag while stripping the source brand so consumers can pass plain strings", () => {
         const dts = readFileSync(DTS_PATH, "utf-8");
 
         expect(dts).not.toContain("WgslSource");
         expect(dts).not.toContain("wgslSourceBrand");
+        expect(dts).toContain("declare function wgsl(");
         expect(dts).toContain("readonly vertexSource: string;");
         expect(dts).toContain("readonly fragmentSource: string;");
 
@@ -259,9 +449,9 @@ float64Result satisfies Float64Array;
         try {
             writeFileSync(
                 probePath,
-                `import type { ShaderMaterialOptions } from "./index.js";
+                `import { wgsl, type ShaderMaterialOptions } from "./index.js";
 const options: ShaderMaterialOptions = {
-    vertexSource: "plain consumer vertex WGSL",
+    vertexSource: wgsl\`tagged consumer vertex WGSL\`,
     fragmentSource: "plain consumer fragment WGSL",
     attributes: [],
 };

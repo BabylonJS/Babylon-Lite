@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { createGeometryRendererTask } from "../../../packages/babylon-lite/src/frame-graph/geometry-renderer-task";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+import type { MeshRebuilder } from "../../../packages/babylon-lite/src/render/renderable";
+import { createSurfaceRenderTargetTexture } from "../../../packages/babylon-lite/src/texture/rtt-surface";
+import { disposeRenderTargetTexture } from "../../../packages/babylon-lite/src/texture/rtt";
 
 const gpuGlobals = globalThis as Omit<typeof globalThis, "GPUBufferUsage" | "GPUShaderStage" | "GPUTextureUsage"> & {
     GPUBufferUsage?: { UNIFORM: number; COPY_DST: number; STORAGE: number };
@@ -34,7 +38,7 @@ function makeMockEngine(): EngineContext {
                 createView: () => ({}) as GPUTextureView,
                 destroy: () => undefined,
             }) as unknown as GPUTexture,
-        queue: { writeBuffer: () => undefined },
+        queue: { writeBuffer: () => undefined, onSubmittedWorkDone: async () => undefined },
     } as unknown as GPUDevice;
     const eng = {
         canvas: { width: 800, height: 600 } as HTMLCanvasElement,
@@ -113,6 +117,17 @@ describe("GeometryRendererTask", () => {
         expect(task.geometryScreenspaceDepthTexture).toBeNull();
     });
 
+    it("creates the scene bind group only when the task records", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine) as SceneContext;
+        const createBindGroup = vi.spyOn(engine._device, "createBindGroup");
+        const task = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }] }, engine, scene);
+
+        expect(createBindGroup).not.toHaveBeenCalled();
+        task.record();
+        expect(createBindGroup).toHaveBeenCalledOnce();
+    });
+
     it("outputTarget MRT colorFormats matches textureDescriptions order and length", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
@@ -181,11 +196,70 @@ describe("GeometryRendererTask", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
         const task = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }], samples: 1, size: { width: 32, height: 24 } }, engine, scene);
-        const internal = task as unknown as { record(): void; _mrt: { _depthTexture: GPUTexture | null; _depthView: GPUTextureView | null } };
+        const internal = task as unknown as {
+            record(): void;
+            _mrt: { _depthTexture: GPUTexture | null; _depthView: GPUTextureView | null };
+            _signature: { _depthCompare?: GPUCompareFunction };
+        };
 
         const depthRt = task.geometryDepthTexture;
         expect(depthRt).toBeTruthy();
         expect(depthRt._descriptor.dFormat).toBe("depth32float");
+        expect(depthRt._descriptor.depthClearValue).toBeUndefined();
+        expect(depthRt._descriptor.depthCompare).toBeUndefined();
+        expect(depthRt._descriptor.samples).toBe(1);
+        expect(depthRt._eager).toBe(true);
+
+        internal.record();
+
+        // After record(): wrapper slots populated from the MRT.
+        expect(depthRt._depthTexture).toBe(internal._mrt._depthTexture);
+        expect(depthRt._depthView).toBe(internal._mrt._depthView);
+        expect(depthRt._width).toBe(32);
+        expect(depthRt._height).toBe(24);
+        expect(internal._signature._depthCompare).toBe("greater-equal");
+    });
+
+    it("propagates an explicit target depth convention to owned geometry depth", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine) as SceneContext;
+        const target = {
+            _descriptor: {
+                format: "bgra8unorm" as const,
+                depthClearValue: 1,
+                depthCompare: "less-equal" as const,
+                samples: 1 as const,
+                size: { width: 32, height: 24 } as const,
+            },
+            _colorTexture: null,
+            _colorView: null,
+            _depthTexture: null,
+            _depthView: null,
+            _width: 0,
+            _height: 0,
+        } as unknown as import("../../../packages/babylon-lite/src/engine/render-target").RenderTarget;
+        const task = createGeometryRendererTask(
+            {
+                textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }],
+                samples: 1,
+                size: { width: 32, height: 24 },
+                targetTexture: target,
+            },
+            engine,
+            scene
+        );
+        const internal = task as unknown as {
+            record(): void;
+            _mrt: { _depthTexture: GPUTexture | null; _depthView: GPUTextureView | null };
+            _renderPassDescriptor: GPURenderPassDescriptor;
+            _signature: { _depthCompare?: GPUCompareFunction };
+        };
+
+        const depthRt = task.geometryDepthTexture;
+        expect(depthRt).toBeTruthy();
+        expect(depthRt._descriptor.dFormat).toBe("depth32float");
+        expect(depthRt._descriptor.depthClearValue).toBe(1);
+        expect(depthRt._descriptor.depthCompare).toBe("less-equal");
         expect(depthRt._descriptor.samples).toBe(1);
         expect(depthRt._eager).toBe(true);
 
@@ -199,13 +273,21 @@ describe("GeometryRendererTask", () => {
         expect(depthRt._depthView).toBe(internal._mrt._depthView);
         expect(depthRt._width).toBe(32);
         expect(depthRt._height).toBe(24);
+        expect(internal._signature._depthCompare).toBe("less-equal");
+        expect(internal._renderPassDescriptor.depthStencilAttachment?.depthClearValue).toBe(1);
     });
 
     it("returns the externally-supplied depthTexture from `geometryDepthTexture`", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
         const external = {
-            _descriptor: { dFormat: "depth32float" as const, samples: 1 as const, size: { width: 800, height: 600 } as const },
+            _descriptor: {
+                dFormat: "depth32float" as const,
+                depthClearValue: 1,
+                depthCompare: "less-equal" as const,
+                samples: 1 as const,
+                size: { width: 800, height: 600 } as const,
+            },
             _colorTexture: null,
             _colorView: null,
             _depthTexture: null,
@@ -216,6 +298,8 @@ describe("GeometryRendererTask", () => {
         const task = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }], samples: 1, depthTexture: external }, engine, scene);
         // The accessor returns the same object the caller passed in.
         expect(task.geometryDepthTexture).toBe(external);
+        const signature = (task as unknown as { _signature: { _depthCompare?: GPUCompareFunction } })._signature;
+        expect(signature._depthCompare).toBe("less-equal");
     });
 
     it("outputTexture is undefined when targetTexture is not provided", () => {
@@ -239,6 +323,76 @@ describe("GeometryRendererTask", () => {
         } as unknown as import("../../../packages/babylon-lite/src/engine/render-target").RenderTarget;
         const task = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }], samples: 1, targetTexture: target }, engine, scene);
         expect(task.outputTexture).toBe(target);
+    });
+
+    it("synchronizes sampled eager color and depth targets before recording", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine) as SceneContext;
+        const target = createRenderTarget({ format: "bgra8unorm", samples: 1, size: { width: 32, height: 24 } });
+        target._eager = true;
+        target._colorTexture = engine._device.createTexture({
+            size: { width: 32, height: 24 },
+            format: "bgra8unorm",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        target._colorView = target._colorTexture.createView();
+        target._syncEager = vi.fn();
+        const depth = createRenderTarget({ dFormat: "depth32float", samples: 1, size: { width: 32, height: 24 } });
+        depth._eager = true;
+        depth._depthTexture = engine._device.createTexture({
+            size: { width: 32, height: 24 },
+            format: "depth32float",
+            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        depth._depthView = depth._depthTexture.createView();
+        depth._syncEager = vi.fn();
+        const task = createGeometryRendererTask(
+            {
+                textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }],
+                samples: 1,
+                size: { width: 32, height: 24 },
+                targetTexture: target,
+                depthTexture: depth,
+            },
+            engine,
+            scene
+        );
+
+        task.record();
+
+        expect(target._syncEager).toHaveBeenCalledWith(engine);
+        expect(depth._syncEager).toHaveBeenCalledWith(engine);
+    });
+
+    it("keeps a scaled geometry MRT aligned with its external target across surface resize", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine) as SceneContext;
+        const size = { surface: engine, scale: 0.5 } as const;
+        const target = createSurfaceRenderTargetTexture(engine, { format: "bgra8unorm", samples: 1, size });
+        const task = createGeometryRendererTask(
+            {
+                textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }],
+                samples: 1,
+                size,
+                targetTexture: target.rt,
+            },
+            engine,
+            scene
+        );
+        const internal = task as unknown as { _mrt: { _width: number; _height: number } };
+
+        task.record();
+        expect([internal._mrt._width, internal._mrt._height]).toEqual([400, 300]);
+        expect([target.rt._width, target.rt._height]).toEqual([400, 300]);
+
+        engine.canvas.width = 66;
+        engine.canvas.height = 34;
+        task.record();
+        expect([internal._mrt._width, internal._mrt._height]).toEqual([33, 17]);
+        expect([target.rt._width, target.rt._height]).toEqual([33, 17]);
+
+        task.dispose();
+        disposeRenderTargetTexture(target);
     });
 
     it("throws when targetTexture sampleCount mismatches samples", () => {
@@ -275,19 +429,18 @@ describe("GeometryRendererTask", () => {
         );
     });
 
-    it("retires bound resources via DEFERRED retirement after task disposal (detached copy)", () => {
+    it("retires task-owned bound resources after task disposal using a detached generation", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
         const task = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }] }, engine, scene);
 
-        // Inject a bound entry exposing a geometry disposer (as the standard geometry
-        // renderable would). If dispose passed the live `_bound` by reference and then
-        // emptied it, the deferred callback would iterate nothing and this spy would
-        // never fire.
         const disposeSpy = vi.fn();
         const mesh = { name: "geo-mesh" } as unknown as import("../../../packages/babylon-lite/src/mesh/mesh").Mesh;
-        const internal = task as unknown as { _bound: Array<{ _mesh: unknown; _binding: { renderable: { _geometryDispose?: () => void } }; _view: unknown }> };
-        internal._bound.push({ _mesh: mesh, _binding: { renderable: { _geometryDispose: disposeSpy } }, _view: {} });
+        const lifetime = [disposeSpy];
+        const internal = task as unknown as {
+            _bound: Array<{ _mesh: unknown; _binding: { renderable: object }; _view: unknown; _lifetimeDisposers: (() => void)[] }>;
+        };
+        internal._bound.push({ _mesh: mesh, _binding: { renderable: {} }, _view: {}, _lifetimeDisposers: lifetime });
 
         const eng = engine as unknown as { _retirements: Array<() => void> | null };
         eng._retirements = [];
@@ -300,96 +453,42 @@ describe("GeometryRendererTask", () => {
         // Drain retirements (simulating the next submitted frame).
         eng._retirements!.forEach((r) => r());
         expect(disposeSpy).toHaveBeenCalledOnce();
+        expect(lifetime).toHaveLength(0);
     });
 
-    // ── Cross-family retirement contract ────────────────────────────────────────
-    // All three geometry families (Standard, PBR, Node) produce the SAME ownership
-    // shape: an idempotent per-mesh `_geometryDispose` closure that is also the SAME
-    // reference registered on `scene._meshAuxDisposables`, plus (Standard/Node) a view
-    // exposing `_disposeGeometryResources`. `registerAux` below mirrors the inline aux
-    // registration each family performs. These tests drive that shape through the task's
-    // make-before-break retirement to prove: the per-mesh disposer is DETACHED from the
-    // aux list synchronously (so re-records don't grow it), the GPU frees are DEFERRED
-    // past the in-flight frame, and both the per-mesh and per-view disposers run exactly
-    // once — with a material-swap-style aux drain making a second retirement a safe
-    // no-op (idempotent, no double free).
-    const registerAux = (scene: SceneContext, mesh: unknown, free: () => void): (() => void) => {
-        let disposed = false;
-        const dispose = (): void => {
-            if (disposed) {
-                return;
-            }
-            disposed = true;
-            free();
-        };
-        const m = mesh as import("../../../packages/babylon-lite/src/mesh/mesh").Mesh;
-        const list = scene._meshAuxDisposables.get(m) ?? [];
-        list.push(dispose);
-        scene._meshAuxDisposables.set(m, list);
-        return dispose;
-    };
-
-    it("detaches the per-mesh aux disposer synchronously then defers the per-mesh + per-view frees, running each once", () => {
+    it("removes and retires every matching bound entry immediately when the scene removes a mesh", () => {
         const engine = makeMockEngine();
         const scene = createSceneContext(engine) as SceneContext;
         const task = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.VIEW_NORMAL }] }, engine, scene);
-
-        const mesh = { name: "geo-mesh" } as unknown as import("../../../packages/babylon-lite/src/mesh/mesh").Mesh;
-        const free = vi.fn();
-        // The renderable's `_geometryDispose` IS the closure registered on the aux list.
-        const dispose = registerAux(scene, mesh, free);
-        expect(scene._meshAuxDisposables.get(mesh)).toEqual([dispose]);
-        expect(scene._meshDisposables.has(mesh)).toBe(false);
-
-        const viewDispose = vi.fn();
-        const view = { _disposeGeometryResources: viewDispose };
+        const removedMesh = { name: "removed" };
+        const keptMesh = { name: "kept" };
+        const firstFree = vi.fn();
+        const secondFree = vi.fn();
+        const keptFree = vi.fn();
         const internal = task as unknown as {
-            _bound: Array<{ _mesh: unknown; _binding: { renderable: { _geometryDispose?: () => void } }; _view: unknown }>;
-            _views: Map<string, unknown>;
+            _removeMesh(mesh: object): void;
+            _bound: Array<{ _mesh: object; _binding: { renderable: object }; _view: object; _lifetimeDisposers: (() => void)[] }>;
         };
-        internal._bound.push({ _mesh: mesh, _binding: { renderable: { _geometryDispose: dispose } }, _view: view });
-        internal._views.set("k", view);
-
+        internal._bound.push(
+            { _mesh: removedMesh, _binding: { renderable: {} }, _view: {}, _lifetimeDisposers: [firstFree] },
+            { _mesh: keptMesh, _binding: { renderable: {} }, _view: {}, _lifetimeDisposers: [keptFree] },
+            { _mesh: removedMesh, _binding: { renderable: {} }, _view: {}, _lifetimeDisposers: [secondFree] }
+        );
         const eng = engine as unknown as { _retirements: Array<() => void> | null };
         eng._retirements = [];
 
-        task.dispose();
-        // Aux disposer detached synchronously (outside any scene drain) so the list
-        // neither grows across re-records nor keeps a dead reference.
-        expect(scene._meshAuxDisposables.has(mesh)).toBe(false);
-        // Both frees deferred — nothing run synchronously.
-        expect(free).not.toHaveBeenCalled();
-        expect(viewDispose).not.toHaveBeenCalled();
+        internal._removeMesh(removedMesh);
+
+        expect(internal._bound.map((entry) => entry._mesh)).toEqual([keptMesh]);
+        expect(firstFree).not.toHaveBeenCalled();
+        expect(secondFree).not.toHaveBeenCalled();
+        expect(keptFree).not.toHaveBeenCalled();
         expect(eng._retirements!.length).toBe(1);
 
         eng._retirements!.forEach((r) => r());
-        expect(free).toHaveBeenCalledOnce();
-        expect(viewDispose).toHaveBeenCalledOnce();
-
-        // Idempotent: a subsequent aux drain (real scene-remove) is a safe no-op.
-        dispose();
-        expect(free).toHaveBeenCalledOnce();
-    });
-
-    it("cannot invalidate live geometry on a material swap: the disposer lives on _meshAuxDisposables, which swaps never drain", () => {
-        const engine = makeMockEngine();
-        const scene = createSceneContext(engine) as SceneContext;
-
-        const mesh = { name: "swap-mesh" } as unknown as import("../../../packages/babylon-lite/src/mesh/mesh").Mesh;
-        const free = vi.fn();
-        registerAux(scene, mesh, free);
-
-        // A MAIN-material swap drains + rebuilds ONLY `_meshDisposables` (never the aux
-        // map). Simulate that drain: the geometry packet must survive so the live
-        // geometry bind group's buffers are not destroyed under an in-flight pass.
-        const mainList = scene._meshDisposables.get(mesh);
-        for (const fn of mainList ?? []) {
-            fn();
-        }
-        scene._meshDisposables.delete(mesh);
-
-        expect(free).not.toHaveBeenCalled();
-        expect(scene._meshAuxDisposables.get(mesh)).toHaveLength(1);
+        expect(firstFree).toHaveBeenCalledOnce();
+        expect(secondFree).toHaveBeenCalledOnce();
+        expect(keptFree).not.toHaveBeenCalled();
     });
 
     it("executes an override-camera FO pass with coherent world / view / positional-light origins", async () => {
@@ -601,8 +700,9 @@ describe("GeometryRendererTask", () => {
             _removeMesh(mesh: object): void;
             _bound: Array<{
                 _mesh: M;
-                _view: { source: unknown; _buildGroup: { _rebuildSingle?: () => unknown } };
-                _binding: { renderable: { _geometryDispose?: () => void } };
+                _view: { source: unknown; _buildGroup: { _rebuildSingle?: MeshRebuilder } };
+                _binding: { renderable: object };
+                _lifetimeDisposers: (() => void)[];
             }>;
         };
         await internal._preload();
@@ -613,15 +713,9 @@ describe("GeometryRendererTask", () => {
     const idxCount = (m: import("../../../packages/babylon-lite/src/mesh/mesh").Mesh): number => (m as unknown as { _gpu: { indexCount: number } })._gpu.indexCount;
 
     function simulateMeshRemoval(scene: SceneContext, task: { _removeMesh(mesh: object): void }, mesh: import("../../../packages/babylon-lite/src/mesh/mesh").Mesh): void {
-        // Simulate removeFromScene: evict task-local bindings before draining the
-        // mesh's AUX disposer, then drop it from the scene and bump the mutation version.
+        // Simulate removeFromScene: evict task-owned geometry resources first, then
+        // drop the mesh from the scene and bump the mutation version.
         task._removeMesh(mesh);
-        const auxDisposers = scene._meshAuxDisposables.get(mesh) ?? [];
-        expect(auxDisposers.length).toBeGreaterThan(0);
-        for (const fn of auxDisposers) {
-            fn();
-        }
-        scene._meshAuxDisposables.delete(mesh);
         scene.meshes.splice(scene.meshes.indexOf(mesh), 1);
         scene._renderableVersion++;
     }
@@ -632,6 +726,7 @@ describe("GeometryRendererTask", () => {
 
         const removed = meshes[1]!;
         simulateMeshRemoval(scene, internal, removed);
+        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0]]);
 
         drawnIndexCounts.length = 0;
         const draws = internal.execute();
@@ -662,8 +757,8 @@ describe("GeometryRendererTask", () => {
         const mesh = meshes[0]!;
         const oldView = internal._bound[0]!._view;
         expect(oldView.source).toBe(mesh.material);
-        const oldDispose = internal._bound[0]!._binding.renderable._geometryDispose;
-        expect(typeof oldDispose).toBe("function");
+        const oldLifetime = internal._bound[0]!._lifetimeDisposers;
+        expect(oldLifetime.length).toBeGreaterThan(0);
 
         // Swap the material and bump the mutation version, mirroring processMaterialSwaps.
         const newMat = createStandardMaterial();
@@ -682,25 +777,58 @@ describe("GeometryRendererTask", () => {
         // ...and the old binding is retired make-before-break (deferred GPU free queued),
         // not destroyed synchronously under a possibly-in-flight frame.
         expect(retirements.length).toBeGreaterThan(0);
-        // Draining the deferred retirement disposes the old binding exactly once (idempotent).
+        expect(oldLifetime.length).toBeGreaterThan(0);
         retirements.forEach((r) => r());
-        expect(() => oldDispose!()).not.toThrow();
+        expect(oldLifetime).toHaveLength(0);
     });
 
-    it("keeps the previous bindings active when a replacement build fails", async () => {
-        const { scene, internal, meshes, createStandardMaterial } = await setupGeoTask(1);
+    it("keeps previous bindings active and rolls back every staged resource when a later replacement fails", async () => {
+        const { scene, internal, meshes } = await setupGeoTask(2);
         const previousBound = internal._bound;
         const buildGroup = previousBound[0]!._view._buildGroup;
         const originalRebuild = buildGroup._rebuildSingle;
-        buildGroup._rebuildSingle = () => {
-            throw new Error("replacement build failed");
+        const firstDispose = vi.fn();
+        const failingDispose = vi.fn();
+        buildGroup._rebuildSingle = (candidateScene, mesh, material, resources) => {
+            resources!._lifetimeDisposers.push(mesh === meshes[0] ? firstDispose : failingDispose);
+            if (mesh === meshes[1]) {
+                throw new Error("replacement build failed");
+            }
+            return originalRebuild!(candidateScene, mesh, material, resources);
         };
-        meshes[0]!.material = createStandardMaterial();
         scene._renderableVersion++;
 
         try {
             expect(() => internal.execute()).toThrow("replacement build failed");
             expect(internal._bound).toBe(previousBound);
+            expect(firstDispose).toHaveBeenCalledOnce();
+            expect(failingDispose).toHaveBeenCalledOnce();
+        } finally {
+            buildGroup._rebuildSingle = originalRebuild;
+        }
+    });
+
+    it("stamps and rolls back the staged lifetime sink when replacement binding fails", async () => {
+        const { scene, internal } = await setupGeoTask(1);
+        const previousBound = internal._bound;
+        const buildGroup = previousBound[0]!._view._buildGroup;
+        const originalRebuild = buildGroup._rebuildSingle;
+        const dispose = vi.fn();
+        buildGroup._rebuildSingle = (candidateScene, mesh, material, resources) => {
+            resources!._lifetimeDisposers.push(dispose);
+            const renderable = originalRebuild!(candidateScene, mesh, material, resources);
+            renderable.bind = () => {
+                expect(renderable._lifetimeDisposers).toBe(resources!._lifetimeDisposers);
+                throw new Error("replacement bind failed");
+            };
+            return renderable;
+        };
+        scene._renderableVersion++;
+
+        try {
+            expect(() => internal.execute()).toThrow("replacement bind failed");
+            expect(internal._bound).toBe(previousBound);
+            expect(dispose).toHaveBeenCalledOnce();
         } finally {
             buildGroup._rebuildSingle = originalRebuild;
         }

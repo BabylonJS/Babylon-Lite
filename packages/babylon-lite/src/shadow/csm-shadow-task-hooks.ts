@@ -14,7 +14,7 @@ import type { Material, MaterialView } from "../material/material.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
-import { createRenderTask, removeMeshFromTask, type RenderTask } from "../frame-graph/render-task.js";
+import { addMeshToTask, createRenderTask, removeMeshFromTask, type RenderTask } from "../frame-graph/render-task.js";
 import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } from "../camera/camera.js";
 import { invertMat4ToRefOrIdentity } from "../math/invert-mat4-to-ref-or-identity.js";
 import { casterVersionSum, createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
@@ -55,8 +55,6 @@ export interface CsmTaskState extends ShadowTaskInternalState {
     _cameras: Camera[];
     /** @internal */
     _scene: SceneContext;
-    /** @internal */
-    _cameraVersion: number;
     /** @internal */
     _lastCasterVersion: number;
     /** @internal */
@@ -200,7 +198,7 @@ export function ensureCsmShadowTaskState(
                     const view = getNoColorView(m.material, views);
                     for (let c = 0; c < tasks.length; c++) {
                         if (c <= (maxCascade ?? c)) {
-                            tasks[c]!.addMesh(m, { material: view });
+                            addMeshToTask(tasks[c]!, m, { material: view });
                         }
                     }
                     snapshotShadowCasterMaterial(m.material, materials, gens);
@@ -210,6 +208,7 @@ export function ensureCsmShadowTaskState(
             // Force each cascade to re-resolve its newly-added pending casters + re-bucket its binding lists.
             for (const t of tasks) {
                 t._lastVersion = -1;
+                t._ob.length = 0;
             }
             existing._casterMeshes = casterMeshes;
             existing._renderableVersion = scene._renderableVersion;
@@ -235,8 +234,8 @@ export function ensureCsmShadowTaskState(
             _descriptor: {
                 size: { width: cfg._mapSize, height: cfg._mapSize },
                 dFormat: "depth32float",
-                _depthClearValue: 1,
-                _depthCompare: "less-equal",
+                depthClearValue: 1,
+                depthCompare: "less-equal",
                 samples: 1,
             },
             _colorTexture: null,
@@ -255,7 +254,7 @@ export function ensureCsmShadowTaskState(
             // Per-caster cascade cap: a capped caster renders only into layers 0..maxCascade (its far-layer
             // shadow is sub-texel anyway), saving the excluded layers' draws + pipeline switches.
             if (material && i <= (mesh._shadowMaxCascade ?? i)) {
-                task.addMesh(mesh, { material: getNoColorView(material, materialViews) });
+                addMeshToTask(task, mesh, { material: getNoColorView(material, materialViews) });
             }
         }
         tasks.push(task);
@@ -298,7 +297,6 @@ export function ensureCsmShadowTaskState(
         _tasks: tasks,
         _cameras: cameras,
         _scene: scene,
-        _cameraVersion: 0,
         _lastCasterVersion: -1,
         _lastLightVersion: -1,
         _lastCamVersion: -1,
@@ -351,13 +349,12 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
         }
     }
 
-    state._cameraVersion++;
     for (let i = 0; i < cascades._transforms.length; i++) {
         const cam = state._cameras[i]!;
         cam.fov = 1;
         const clipBias = cfg._worldSpaceBias === null ? cfg._bias * 0.5 : csmWorldBiasClipOffset(cfg._worldSpaceBias, cascades._near[i]!, cascades._far[i]!);
         _biasViewProjection(cascades._transforms[i]!, clipBias);
-        updateShadowCameraBase(cam, state._cameraVersion, cascades._near[i]!, cascades._far[i]!, cascades._views[i]!, cascades._transforms[i]!);
+        updateShadowCameraBase(cam, cam.worldMatrixVersion + 1, cascades._near[i]!, cascades._far[i]!, cascades._views[i]!, cascades._transforms[i]!);
     }
 
     state._lastCasterVersion = casterVersion;

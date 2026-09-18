@@ -9,14 +9,13 @@ import { createPbrTemplate } from "../../../packages/babylon-lite/src/material/p
 import { CLUSTERED_LIGHT_STRUCTS, _clusteredPointLightBlock, _clusteredSpotLightBlock } from "../../../packages/babylon-lite/src/material/pbr/fragments/clustered-light-wgsl";
 import { createStandardTemplate } from "../../../packages/babylon-lite/src/material/standard/standard-template";
 import { createEmissiveColorFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/emissive-fragment";
-import { createClearcoatFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/clearcoat-fragment";
-import { PBR_HAS_CLEARCOAT } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags";
-import { createSheenFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/sheen-fragment";
+import { createClearcoatFragment, pbrExt as clearcoatExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/clearcoat-fragment";
+import { createSheenFragment, pbrExt as sheenExt } from "../../../packages/babylon-lite/src/material/pbr/fragments/sheen-fragment";
 import { createIblFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/ibl-fragment";
 import { createSkeletonFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/skeleton-fragment";
 import { createMorphFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/morph-fragment";
 import { createThinInstanceFragment } from "../../../packages/babylon-lite/src/shader/fragments/thin-instance-fragment";
-import { createPbrShadowFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/pbr-shadow-fragment";
+import { preparePbrShadowFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/pbr-shadow-fragment";
 import { createShadowOnlyFragment } from "../../../packages/babylon-lite/src/material/pbr/fragments/shadow-only-fragment";
 import { createNormalMapFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/normal-map-fragment";
 import type { PbrTemplateConfig } from "../../../packages/babylon-lite/src/material/pbr/pbr-template";
@@ -40,6 +39,8 @@ import { _getStandardGeometrySkeletonVelocityFactory, preloadStandardGeometryFea
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/scene-helpers";
 
+const PBR_HAS_CLEARCOAT = 1 << 20;
+
 const defaultPbrConfig: PbrTemplateConfig = {
     _normalMode: "none",
     _hasEmissiveTexture: false,
@@ -59,6 +60,17 @@ const defaultPbrConfig: PbrTemplateConfig = {
 // ── PBR Template Integration ────────────────────────────────────
 
 describe("PBR template + fragments integration", () => {
+    it("preserves the clearcoat feature bit behind its fragment", () => {
+        expect(clearcoatExt.detect!({ _clearCoat: { isEnabled: true } })).toEqual({ f: PBR_HAS_CLEARCOAT, f2: 0 });
+        expect(clearcoatExt.detect!({ _clearCoat: { isEnabled: false } })).toEqual({ f: 0, f2: 0 });
+    });
+
+    it("preserves sheen texture and albedo-scaling bit assignments", () => {
+        const sheen = { isEnabled: true, texture: {}, albedoScaling: true };
+        expect(sheenExt.detect!({ _sheen: sheen })).toEqual({ f: (1 << 22) | (1 << 23) | (1 << 30), f2: 0 });
+        expect(sheenExt.detect!({ _sheen: { ...sheen, isEnabled: false } })).toEqual({ f: 0, f2: 0 });
+    });
+
     it("composes minimal PBR (no extensions)", () => {
         const template = createPbrTemplate({ ...defaultPbrConfig });
         const result = composeShader(template, []);
@@ -252,16 +264,17 @@ describe("PBR template + fragments integration", () => {
         expect((tiLayout!.attributes as unknown as GPUVertexAttribute[]).length).toBe(4); // world0-3
     });
 
-    it("composes PBR + shadow", () => {
+    it("composes PBR + shadow", async () => {
         const template = createPbrTemplate({ ...defaultPbrConfig, _normalMode: "tangent" });
-        const result = composeShader(template, [createPbrShadowFragment()]);
+        const createPbrShadowFragment = await preparePbrShadowFragment([{ lightIndex: 0, shadowType: "esm" }]);
+        const result = composeShader(template, [createPbrShadowFragment([{ lightIndex: 0, shadowType: "esm" }])]);
         expect(result._fragmentWGSL).toContain("computeShadowESM_0");
         expect(result._fragmentWGSL).toContain("@group(2)");
         expect(result._shadowBGLDescriptor).not.toBeNull();
         expect((result._shadowBGLDescriptor!.entries as unknown as GPUBindGroupLayoutEntry[]).length).toBe(3);
     });
 
-    it("composes full PBR (IBL + clearcoat + sheen + emissive + shadow)", () => {
+    it("composes full PBR (IBL + clearcoat + sheen + emissive + shadow)", async () => {
         const template = createPbrTemplate({
             ...defaultPbrConfig,
             _normalMode: "tangent",
@@ -271,12 +284,13 @@ describe("PBR template + fragments integration", () => {
             _hasEmissiveColor: true,
             _hasIbl: true,
         });
+        const createPbrShadowFragment = await preparePbrShadowFragment([{ lightIndex: 0, shadowType: "esm" }]);
         const fragments: ShaderFragment[] = [
             createIblFragment(true),
             createClearcoatFragment(PBR_HAS_CLEARCOAT, 0, true, false, true)!,
             createSheenFragment(false, true),
             createEmissiveColorFragment(true),
-            createPbrShadowFragment(),
+            createPbrShadowFragment([{ lightIndex: 0, shadowType: "esm" }]),
         ];
         const result = composeShader(template, fragments);
         // All helpers present

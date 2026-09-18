@@ -40,7 +40,6 @@ function fakeScene(): SceneContext {
         _materialSwapQueue: [],
         _groups: new Map(),
         _meshDisposables: new Map(),
-        _meshAuxDisposables: new Map(),
         _renderableVersion: 0,
         _disposables: [],
         _frameGraph: { _tasks: [] },

@@ -27,7 +27,6 @@ export interface ThinInstanceData {
     _capacity: number; // allocated capacity (≥ count)
     _version: number; // bumped by every mutating helper; checked by render system
     _gpuBuffer: GPUBuffer | null; // matrix GPU buffer, managed by render system
-    _gpuBufferStorage: boolean; // true when buffer includes STORAGE usage for compute culling
     _gpuVersion: number; // last _version uploaded to GPU
     colors?: Float32Array | null; // optional RGBA per instance (4 floats each)
     _colorVersion: number; // independent of _version; bumped by setThinInstanceColors
@@ -110,6 +109,13 @@ indirect argument buffer when its count first changes; the visibility epoch
 then invalidates that one stale bundle. Subsequent transitions, including
 nonzero-to-zero and zero-to-nonzero changes within capacity, update only the
 indirect arguments and keep the matrix buffer and cached bundle stable.
+
+The CPU indirect-argument array is also the index-count/base-vertex snapshot; these values
+are not duplicated in parallel fields. The stored instance count acknowledges a successful
+upload and is invalidated before writing, so a failed upload retries without allocating new
+argument buffers. Base vertices are compared as signed 32-bit words.
+Matrix buffers always carry `STORAGE` for GPU picking, so switching culling on/off does
+not recreate or re-upload them. Color buffers still track their optional storage usage.
 
 `enableThinInstanceWorldBounds()` is a setup-time, tree-shakable opt-in for hand-built thin-instance meshes
 that will be consumed by `createDefaultCamera()` or automatic environment sizing. It expands the prototype's

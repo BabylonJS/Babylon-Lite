@@ -1,13 +1,16 @@
 import { F32, U32, I32, U8 } from "../../engine/typed-arrays.js";
 import { BU } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
+import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { SceneContext } from "../../scene/scene.js";
 import type { Mesh, MeshGPU } from "../../mesh/mesh.js";
-import type { MeshGroupBuildResult, Renderable, DrawUpdateContext } from "../../render/renderable.js";
+import type { MeshGroupBuildResult, MeshRebuildResources, Renderable, DrawUpdateContext } from "../../render/renderable.js";
 import type { Material } from "../material.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
-import { createEmptyUniformBuffer } from "../../resource/gpu-buffers.js";
-import { acquireTexture, releaseTexture } from "../../resource/gpu-pool.js";
+import { createEmptyUniformBuffer } from "../../resource/empty-uniform-buffer.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer.js";
+import { acquireTexture } from "../../resource/texture-acquire.js";
+import { releaseTexture } from "../../resource/texture-release.js";
 import { getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix, getViewProjectionMatrix, _cameraChangeKey } from "../../camera/camera.js";
 import type { Camera } from "../../camera/camera.js";
 import { multiplyMat4IntoBuffer } from "../../math/multiply-mat4-into-buffer.js";
@@ -17,8 +20,9 @@ import type { ShaderPipelineBindings } from "./shader-pipeline.js";
 import { _isShaderSystemUniform } from "./shader-material.js";
 import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "./shader-pipeline.js";
 import type { UniformCopyBatch } from "../../render/uniform-copy-batch.js";
+import { _attributeInfo, _getShaderVbSupport, type ShaderRenderPass, type ShaderVbLayout } from "./shader-vb-support.js";
 
-type UniformBatchFactory = (signature: import("../../engine/render-target.js").RenderTargetSignature) => UniformCopyBatch;
+type UniformBatchFactory = (signature: RenderTargetSignature) => UniformCopyBatch;
 
 /** @internal Exported as a type only (zero runtime bytes) for the dynamically-imported
  *  thin-instance builder. */
@@ -26,14 +30,17 @@ export interface ShaderPacket {
     readonly mesh: Mesh;
     readonly systemUBO: GPUBuffer;
     readonly systemData: Float32Array;
-    /** @internal */
-    _bindGroup: GPUBindGroup;
+    /** @internal Null only while `createPacket` is constructing the packet; a
+     *  packet is never published unless bind-group creation succeeds. */
+    _bindGroup: GPUBindGroup | null;
     /** @internal */
     _lastResourceVersion: number;
+    /** @internal Actual custom buffer retained by group 1, independently of the resource revision. */
+    _boundCustomUbo?: GPUBuffer | null;
     /** @internal */
     _boundTextures: Texture2D[];
-    /** @internal */
-    _boundStorageBuffers: GPUBuffer[];
+    /** @internal Missing constant vertex streams computed before allocating this packet. */
+    _vertexMask?: number;
     /** @internal Set when the owning mesh is removed and this packet's GPU resources are
      *  destroyed. A combined (multi-mesh) renderable keeps every packet in its
      *  closure, so update()/draw() must skip disposed packets to avoid writing to
@@ -62,12 +69,11 @@ export interface ShaderPacket {
 }
 
 interface ShaderMaterialRenderState extends ShaderMaterial {
+    _shaderDevice?: GPUDevice;
     _shaderBindings?: ShaderPipelineBindings;
-    _shaderCustomUbo?: GPUBuffer | null;
+    _shaderCacheGeneration?: number;
+    _shaderPipelineCache?: { readonly generation: number };
     _shaderCustomSpec?: UboSpec | null;
-    _shaderCustomData?: ArrayBuffer | null;
-    _shaderCustomBytes?: Uint8Array<ArrayBuffer> | null;
-    _shaderCustomVersion?: number;
 }
 
 /** @internal */
@@ -108,14 +114,14 @@ export function _installShaderUniformWriters(systemWriter: ShaderSystemUniformWr
     customUniformWriter = customWriter;
 }
 
-/** @internal */
-export type ShaderRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
+/** @internal Mesh-specific base vertex layout captured for async pipeline preparation. */
+export type ShaderAsyncVertexLayout = ShaderVbLayout;
 
 export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh[], getUniformBatch?: UniformBatchFactory): MeshGroupBuildResult {
     const renderables: Renderable[] = [];
 
-    const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable =>
-        buildSingleShaderRenderable(s, mesh, (materialOverride ?? mesh.material) as ShaderMaterial, materialOverride != null, getUniformBatch);
+    const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material, rebuildResources?: MeshRebuildResources): Renderable =>
+        buildSingleShaderRenderable(s, mesh, (materialOverride ?? mesh.material) as ShaderMaterial, !!materialOverride, getUniformBatch, rebuildResources);
 
     const byMaterial = new Map<ShaderMaterial, Mesh[]>();
     for (const mesh of meshes) {
@@ -129,8 +135,9 @@ export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh
     }
 
     for (const [material, matMeshes] of byMaterial) {
-        const built = buildMaterialRenderables(scene, material, matMeshes, false, getUniformBatch);
-        renderables.push(...built);
+        for (const renderable of buildMaterialRenderables(scene, material, matMeshes, false, getUniformBatch)) {
+            renderables.push(renderable);
+        }
     }
 
     return { renderables, rebuildSingle };
@@ -149,25 +156,16 @@ export async function buildShaderGroup(scene: SceneContext, meshes: Mesh[]): Pro
         getUniformBatch = getUniformCopyBatch;
     }
     const firstMaterial = meshes[0]?.material;
-    if (firstMaterial && meshes.some((mesh) => mesh.material !== firstMaterial)) {
+    if (meshes.some((mesh) => mesh.material !== firstMaterial)) {
         const { enableShaderPipelineCache } = await import("./shader-pipeline-cache.js");
         enableShaderPipelineCache(scene.surface.engine, meshes);
     }
     const buildPlain = (s: SceneContext, plainMeshes: Mesh[]): MeshGroupBuildResult => buildShaderMaterialRenderables(s, plainMeshes, getUniformBatch);
-    if (!meshes.some((m) => !!m.thinInstances)) {
+    if (!meshes.some((m) => m.thinInstances)) {
         return buildPlain(scene, meshes);
     }
-    if (_asyncPipelineRegistrar) {
-        for (const mesh of meshes) {
-            if (mesh.thinInstances) {
-                const material = mesh.material as ShaderMaterial;
-                const hasColor = !!mesh.thinInstances.colors && material._tic != 0;
-                _asyncPipelineRegistrar(scene, material, mesh, hasColor ? "thin-instances-color" : "thin-instances");
-            }
-        }
-    }
     const mod = await import("./shader-thin-instance.js");
-    const cull = meshes.some((m) => !!m.thinInstances?._gpuCullingEnabled) ? await import("../../mesh/thin-instance-cull-binding.js") : undefined;
+    const cull = meshes.some((m) => m.thinInstances?._gpuCullingEnabled) ? await import("../../mesh/thin-instance-cull-binding.js") : undefined;
     return mod.buildShaderRenderablesWithInstancing(
         scene,
         meshes,
@@ -179,11 +177,31 @@ export async function buildShaderGroup(scene: SceneContext, meshes: Mesh[]): Pro
         getOrCreateShaderPipeline,
         getOrCreateShaderPipelineBindings,
         getUniformBatch,
-        cull
+        cull,
+        _resolveShaderMeshVertexLayout,
+        _asyncPipelineRegistrar
+            ? (mesh, material, hasColor, vertexLayout) => _asyncPipelineRegistrar!(scene, material, mesh, hasColor ? "thin-instances-color" : "thin-instances", vertexLayout)
+            : undefined
     );
 }
 
-export type ShaderAsyncPipelineRegistrar = (scene: SceneContext, material: ShaderMaterial, key: Renderable | Mesh, layout?: "thin-instances" | "thin-instances-color") => void;
+/** @internal Resolve validated physical packing for explicit preparation and thin-instance builders. */
+export function _resolveShaderMeshVertexLayout(material: ShaderMaterial, bindings: ShaderPipelineBindings, mesh?: Mesh): ShaderVbLayout | null {
+    if (!mesh) {
+        return null;
+    }
+    const support = _getShaderVbSupport();
+    const missing = support?._validateMesh(material, mesh, _getShaderAttributeBuffer) ?? 0;
+    return support?._forMesh(material, bindings, mesh, missing) ?? null;
+}
+
+export type ShaderAsyncPipelineRegistrar = (
+    scene: SceneContext,
+    material: ShaderMaterial,
+    key: Renderable | Mesh,
+    layout?: "thin-instances" | "thin-instances-color",
+    vertexLayout?: ShaderAsyncVertexLayout
+) => void;
 
 let _asyncPipelineRegistrar: ShaderAsyncPipelineRegistrar | null = null;
 /** @internal Install the optional async ShaderMaterial recipe registrar. */
@@ -191,44 +209,81 @@ export function _installAsyncShaderPipelineRegistrar(register: ShaderAsyncPipeli
     _asyncPipelineRegistrar = register;
 }
 
-function buildSingleShaderRenderable(scene: SceneContext, mesh: Mesh, material: ShaderMaterial, isOverride: boolean, getUniformBatch?: UniformBatchFactory): Renderable {
-    return buildMaterialRenderables(scene, material, [mesh], isOverride, getUniformBatch)[0]!;
+function buildSingleShaderRenderable(
+    scene: SceneContext,
+    mesh: Mesh,
+    material: ShaderMaterial,
+    isOverride: boolean,
+    getUniformBatch?: UniformBatchFactory,
+    resources?: MeshRebuildResources
+): Renderable {
+    return buildMaterialRenderables(scene, material, [mesh], isOverride, getUniformBatch, resources)[0]!;
 }
 
-function buildMaterialRenderables(scene: SceneContext, material: ShaderMaterial, meshes: readonly Mesh[], isOverride = false, getUniformBatch?: UniformBatchFactory): Renderable[] {
+function buildMaterialRenderables(
+    scene: SceneContext,
+    material: ShaderMaterial,
+    meshes: readonly Mesh[],
+    isOverride = false,
+    getUniformBatch?: UniformBatchFactory,
+    resources?: MeshRebuildResources
+): Renderable[] {
     const engine = scene.surface.engine;
+    const vbRender = _getShaderVbSupport() ?? undefined;
+    const missing = vbRender && meshes.map((mesh) => vbRender._validateMesh(material, mesh, _getShaderAttributeBuffer));
     const bindings = getOrCreateShaderPipelineBindings(engine, material);
     ensureCustomUbo(engine, material, bindings.customSpec);
-    // `isOverride` marks an AUX view packet (a material-override registered into an explicit task, e.g. a
-    // depth/SSAO no-colour view) — route its disposer to `_meshAuxDisposables` so a MAIN-material swap of this
-    // same mesh does not tear it down out from under that task.
-    const packets = meshes.map((mesh) => createPacket(scene, material, bindings.systemSpec, mesh, isOverride));
-    const isTransparent = material.needAlphaBlending;
-    if (isTransparent) {
-        return packets.map((packet) => createTransparentRenderable(scene, material, packet, isOverride, getUniformBatch));
+    const packets = meshes.map((mesh, index) => createPacket(scene, material, bindings.systemSpec, mesh, resources, missing?.[index]));
+    if (material.needAlphaBlending) {
+        return packets.map((packet) =>
+            createTransparentRenderable(
+                scene,
+                material,
+                packet,
+                isOverride,
+                getUniformBatch,
+                vbRender?._forMesh(material, bindings, packet.mesh, packet._vertexMask ?? 0) ?? undefined
+            )
+        );
     }
-    return [createOpaqueRenderable(scene, material, packets, isOverride, getUniformBatch)];
+    // One opaque renderable resolves ONE pipeline for all its packets, so meshes that
+    // describe their own vertex packing cannot share it with tightly-packed ones.
+    const buildOpaque = (group: readonly ShaderPacket[]): Renderable =>
+        createOpaqueRenderable(
+            scene,
+            material,
+            group,
+            isOverride,
+            getUniformBatch,
+            vbRender?._forMesh(material, bindings, group[0]!.mesh, group[0]!._vertexMask ?? 0) ?? undefined
+        );
+    const groups = vbRender?._group(packets);
+    return groups ? Array.from(groups, buildOpaque) : [buildOpaque(packets)];
 }
 
-function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh, aux = false): ShaderPacket {
+function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec: UboSpec, mesh: Mesh, resources?: MeshRebuildResources, vertexMask?: number): ShaderPacket {
     const engine = scene.surface.engine;
-    const systemUBO = createEmptyUniformBuffer(engine, systemSpec._totalBytes, "shader-system-ubo");
     const systemData = new F32(systemSpec._totalBytes / 4);
     systemUniformWriter(systemData, systemSpec, material, mesh, scene.camera, engine.canvas.width || 1, engine.canvas.height || 1);
-    engine._device.queue.writeBuffer(systemUBO, 0, systemData);
+    const systemUBO = createUniformBuffer(engine, systemData, "shader-system-ubo");
     const packet: ShaderPacket = {
         mesh,
         systemUBO,
         systemData,
-        _bindGroup: createShaderBindGroup(engine, material, systemUBO),
+        _bindGroup: null,
         _lastResourceVersion: material._resourceVersion,
-        _boundTextures: collectShaderTextures(material),
-        _boundStorageBuffers: collectShaderStorageBuffers(material),
+        _boundTextures: [],
     };
-    for (const tex of packet._boundTextures) {
-        acquireTexture(tex);
+    if (vertexMask) {
+        packet._vertexMask = vertexMask;
     }
-    registerMeshTextureDisposer(scene, mesh, packet, aux);
+    registerMeshTextureDisposer(scene, mesh, packet, resources);
+    packet._bindGroup = createShaderBindGroup(engine, material, systemUBO);
+    packet._boundCustomUbo = (material as ShaderMaterialRenderState)._shaderCustomUbo;
+    for (const tex of collectShaderTextures(material)) {
+        acquireTexture(tex);
+        packet._boundTextures.push(tex);
+    }
     return packet;
 }
 
@@ -237,22 +292,22 @@ function createOpaqueRenderable(
     material: ShaderMaterial,
     packets: readonly ShaderPacket[],
     isOverride: boolean,
-    getUniformBatch?: UniformBatchFactory
+    getUniformBatch?: UniformBatchFactory,
+    asyncVertexLayout?: ShaderAsyncVertexLayout
 ): Renderable {
+    let order = packets.length === 1 ? (packets[0]!.mesh.renderOrder ?? 100) : Infinity;
     // Only merged renderables (>1 mesh) can outlive an individual packet's mesh,
     // so give those packets a back-reference enabling disposal-time compaction.
     if (packets.length > 1) {
         for (const packet of packets) {
             packet._owner = packets as ShaderPacket[];
+            order = Math.min(order, packet.mesh.renderOrder ?? 100);
         }
     }
     const update = (context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void => {
         updateCustomUbo(scene.surface.engine, material, uniformBatch);
         for (const packet of packets) {
-            if (packet._disposed) {
-                continue;
-            }
-            if (!isOverride && packet.mesh.material !== material) {
+            if (packet._disposed || (!isOverride && packet.mesh.material !== material)) {
                 continue;
             }
             updatePacket(scene, material, packet, context, uniformBatch);
@@ -270,33 +325,29 @@ function createOpaqueRenderable(
         return draws;
     };
     const r: Renderable = {
-        order: packets.length === 1 ? (packets[0]!.mesh.renderOrder ?? 100) : Math.min(...packets.map((p) => p.mesh.renderOrder ?? 100)),
+        order,
         isTransparent: false,
         mesh: packets.length === 1 ? packets[0]!.mesh : undefined,
         bind(eng, sig) {
-            const bindings = getOrCreateShaderPipelineBindings(eng, material);
-            const uniformBatch = getUniformBatch?.(sig);
-            return {
-                renderable: r,
-                pipeline: getOrCreateShaderPipeline(eng, sig, material, bindings),
-                _updateBatches: uniformBatch ? [uniformBatch] : undefined,
-                update: (context) => update(context, uniformBatch),
-                draw: (pass) => draw(pass, eng),
-            };
+            return createShaderBinding(eng, sig, material, r, update, draw, getUniformBatch, asyncVertexLayout);
         },
     };
-    _asyncPipelineRegistrar?.(scene, material, r);
+    _asyncPipelineRegistrar?.(scene, material, r, undefined, asyncVertexLayout);
     return r;
 }
 
-function createTransparentRenderable(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, isOverride: boolean, getUniformBatch?: UniformBatchFactory): Renderable {
+function createTransparentRenderable(
+    scene: SceneContext,
+    material: ShaderMaterial,
+    packet: ShaderPacket,
+    isOverride: boolean,
+    getUniformBatch?: UniformBatchFactory,
+    asyncVertexLayout?: ShaderAsyncVertexLayout
+): Renderable {
     const wm = packet.mesh.worldMatrix as unknown as ArrayLike<number>;
     const sortCenter: [number, number, number] = [wm[12]!, wm[13]!, wm[14]!];
     const update = (context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void => {
-        if (packet._disposed) {
-            return;
-        }
-        if (!isOverride && packet.mesh.material !== material) {
+        if (packet._disposed || (!isOverride && packet.mesh.material !== material)) {
             return;
         }
         updateCustomUbo(scene.surface.engine, material, uniformBatch);
@@ -307,10 +358,7 @@ function createTransparentRenderable(scene: SceneContext, material: ShaderMateri
         sortCenter[2] = m[14]!;
     };
     const draw = (pass: ShaderRenderPass, engine: EngineContext): number => {
-        if (packet._disposed) {
-            return 0;
-        }
-        if (!isOverride && packet.mesh.material !== material) {
+        if (packet._disposed || (!isOverride && packet.mesh.material !== material)) {
             return 0;
         }
         drawPacket(pass, engine, material, packet);
@@ -323,19 +371,32 @@ function createTransparentRenderable(scene: SceneContext, material: ShaderMateri
         mesh: packet.mesh,
         _worldCenter: sortCenter,
         bind(eng, sig) {
-            const bindings = getOrCreateShaderPipelineBindings(eng, material);
-            const uniformBatch = getUniformBatch?.(sig);
-            return {
-                renderable: r,
-                pipeline: getOrCreateShaderPipeline(eng, sig, material, bindings),
-                _updateBatches: uniformBatch ? [uniformBatch] : undefined,
-                update: (context) => update(context, uniformBatch),
-                draw: (pass) => draw(pass, eng),
-            };
+            return createShaderBinding(eng, sig, material, r, update, draw, getUniformBatch, asyncVertexLayout);
         },
     };
-    _asyncPipelineRegistrar?.(scene, material, r);
+    _asyncPipelineRegistrar?.(scene, material, r, undefined, asyncVertexLayout);
     return r;
+}
+
+function createShaderBinding(
+    engine: EngineContext,
+    signature: RenderTargetSignature,
+    material: ShaderMaterial,
+    renderable: Renderable,
+    update: (context: DrawUpdateContext, uniformBatch?: UniformCopyBatch) => void,
+    draw: (pass: ShaderRenderPass, engine: EngineContext) => number,
+    getUniformBatch?: UniformBatchFactory,
+    vertexLayout?: ShaderAsyncVertexLayout
+): ReturnType<Renderable["bind"]> {
+    const bindings = getOrCreateShaderPipelineBindings(engine, material);
+    const uniformBatch = getUniformBatch?.(signature);
+    return {
+        renderable,
+        pipeline: getOrCreateShaderPipeline(engine, signature, material, bindings, vertexLayout?._key, vertexLayout?._vbs),
+        _updateBatches: uniformBatch ? [uniformBatch] : undefined,
+        update: (context) => update(context, uniformBatch),
+        draw: (pass) => draw(pass, engine),
+    };
 }
 
 function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: ShaderPacket, context: DrawUpdateContext, uniformBatch?: UniformCopyBatch): void {
@@ -381,33 +442,76 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
         packet._lastAspect = aspect;
         packet._lastAlphaCutoff = alphaCutoff;
     }
-    if (packet._lastResourceVersion !== material._resourceVersion) {
+    if (packet._lastResourceVersion !== material._resourceVersion || packet._boundCustomUbo !== state._shaderCustomUbo) {
         // Acquire the NEW bound textures BEFORE releasing the old set: a texture present in both (e.g. a material
         // that only swapped ONE of its textures) must never transiently drop to ref-count 0, or releaseTexture
         // would destroy a GPUTexture that the new bind group still uses. (Releasing first destroys a unique
         // ref-count-1 texture — exposed by a custom material binding a per-material texture nothing else shares.)
         const newTextures = collectShaderTextures(material);
-        for (const tex of newTextures) {
-            acquireTexture(tex);
+        const acquiredTextures: Texture2D[] = [];
+        let bindGroup: GPUBindGroup;
+        try {
+            bindGroup = createShaderBindGroup(engine, material, packet.systemUBO);
+            for (const tex of newTextures) {
+                acquireTexture(tex);
+                acquiredTextures.push(tex);
+            }
+        } catch (error) {
+            for (const tex of acquiredTextures) {
+                releaseTexture(tex);
+            }
+            throw error;
         }
-        for (const tex of packet._boundTextures) {
+        const oldTextures = packet._boundTextures;
+        packet._bindGroup = bindGroup;
+        packet._boundTextures = acquiredTextures;
+        packet._lastResourceVersion = material._resourceVersion;
+        packet._boundCustomUbo = state._shaderCustomUbo;
+        for (const tex of oldTextures) {
             releaseTexture(tex);
         }
-        packet._bindGroup = createShaderBindGroup(engine, material, packet.systemUBO);
-        packet._boundTextures = newTextures;
-        packet._boundStorageBuffers = collectShaderStorageBuffers(material);
-        packet._lastResourceVersion = material._resourceVersion;
     }
+}
+
+function _getShaderAttributeBuffer(mesh: Mesh, name: ShaderAttributeName): GPUBuffer | null {
+    const gpu = mesh._gpu;
+    switch (name) {
+        case "position":
+            return gpu.positionBuffer;
+        case "normal":
+            return gpu.normalBuffer ?? null;
+        case "uv":
+            return gpu.uvBuffer ?? null;
+        case "uv2":
+            return gpu.uv2Buffer ?? null;
+        case "tangent":
+            return gpu.tangentBuffer ?? null;
+        case "color":
+            return gpu.colorBuffer ?? null;
+        case "joints":
+            return getSkinBuffer(mesh, "jointsBuffer");
+        case "weights":
+            return getSkinBuffer(mesh, "weightsBuffer");
+        case "joints1":
+            return getSkinBuffer(mesh, "joints1Buffer");
+        case "weights1":
+            return getSkinBuffer(mesh, "weights1Buffer");
+    }
+}
+
+function getSkinBuffer(mesh: Mesh, field: "jointsBuffer" | "weightsBuffer" | "joints1Buffer" | "weights1Buffer"): GPUBuffer | null {
+    return mesh.vat?.[field] ?? mesh.skeleton?.[field] ?? null;
 }
 
 function drawPacket(pass: ShaderRenderPass, engine: EngineContext, material: ShaderMaterial, packet: ShaderPacket): void {
     const gpu = packet.mesh._gpu;
-    for (let i = 0; i < material.attributes.length; i++) {
-        pass.setVertexBuffer(i, getAttrBuffer(engine, packet.mesh, material.attributes[i]!));
+    const attributes = material.attributes;
+    for (let i = 0; i < attributes.length; i++) {
+        pass.setVertexBuffer(i, getAttrBuffer(engine, packet.mesh, attributes[i]!, material));
     }
     pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
-    pass.setBindGroup(1, packet._bindGroup);
-    pass.drawIndexed(gpu.indexCount);
+    pass.setBindGroup(1, packet._bindGroup!);
+    pass.drawIndexed(gpu.indexCount, 1, 0, gpu._baseVertex);
 }
 
 function ensureCustomUbo(engine: EngineContext, material: ShaderMaterial, customSpec: UboSpec | null): void {
@@ -419,14 +523,15 @@ function ensureCustomUbo(engine: EngineContext, material: ShaderMaterial, custom
         state._shaderCustomVersion = material._uniformVersion;
         return;
     }
-    if (state._shaderCustomUbo && state._shaderCustomData) {
-        updateCustomUbo(engine, material);
-        return;
+    if (!state._shaderCustomUbo || !state._shaderCustomData) {
+        state._shaderCustomUbo = createEmptyUniformBuffer(engine, customSpec._totalBytes, "shader-custom-ubo");
+        state._shaderCustomEngine = engine;
+        state._shaderDevice = engine._device;
+        state._shaderCacheGeneration = state._shaderPipelineCache?.generation;
+        state._shaderCustomData = new ArrayBuffer(customSpec._totalBytes);
+        state._shaderCustomBytes = new U8(state._shaderCustomData);
+        state._shaderCustomVersion = -1;
     }
-    state._shaderCustomUbo = createEmptyUniformBuffer(engine, customSpec._totalBytes, "shader-custom-ubo");
-    state._shaderCustomData = new ArrayBuffer(customSpec._totalBytes);
-    state._shaderCustomBytes = new U8(state._shaderCustomData);
-    state._shaderCustomVersion = -1;
     updateCustomUbo(engine, material);
 }
 
@@ -519,46 +624,32 @@ function collectShaderTextures(material: ShaderMaterial): Texture2D[] {
     return textures;
 }
 
-function collectShaderStorageBuffers(material: ShaderMaterial): GPUBuffer[] {
-    const buffers: GPUBuffer[] = [];
-    for (const slot of material._storageBufferSlots.values()) {
-        if (slot.current) {
-            const buffer = slot.current._buffer;
-            if (buffer) {
-                buffers.push(buffer);
+function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: ShaderPacket, resources?: MeshRebuildResources): void {
+    const dispose = Object.assign(
+        () => {
+            packet._disposed = true;
+            if (packet._owner) {
+                const oi = packet._owner.indexOf(packet);
+                if (oi >= 0) {
+                    packet._owner.splice(oi, 1);
+                }
+                packet._owner = undefined;
             }
-        }
-    }
-    return buffers;
-}
-
-function registerMeshTextureDisposer(scene: SceneContext, mesh: Mesh, packet: ShaderPacket, aux = false): void {
-    // Aux (override) view packets go in `_meshAuxDisposables` so a main-material swap leaves them alone; main
-    // packets stay in `_meshDisposables` (torn down + rebuilt by the swap drain). Both are drained on real removal.
-    const map = aux ? scene._meshAuxDisposables : scene._meshDisposables;
-    const list = map.get(mesh) ?? [];
-    list.push(
-        Object.assign(
-            () => {
-                packet._disposed = true;
-                if (packet._owner) {
-                    const oi = packet._owner.indexOf(packet);
-                    if (oi >= 0) {
-                        packet._owner.splice(oi, 1);
-                    }
-                    packet._owner = undefined;
-                }
-                packet.systemUBO.destroy();
-                for (const tex of packet._boundTextures) {
-                    releaseTexture(tex);
-                }
-                packet._boundTextures = [];
-                packet._boundStorageBuffers = [];
-            },
-            { p: packet }
-        )
+            packet.systemUBO.destroy();
+            for (const tex of packet._boundTextures) {
+                releaseTexture(tex);
+            }
+            packet._boundTextures = [];
+        },
+        { p: packet }
     );
-    map.set(mesh, list);
+    if (resources) {
+        resources._lifetimeDisposers.push(dispose);
+        return;
+    }
+    const list = scene._meshDisposables.get(mesh) ?? [];
+    list.push(dispose);
+    scene._meshDisposables.set(mesh, list);
 }
 
 /** @internal Scratch for the camera-relative mesh world matrix under floating
@@ -696,56 +787,25 @@ function writeSystemUniforms(data: Float32Array, spec: UboSpec, material: Shader
     }
 }
 
-let zeroAttrCache: WeakMap<object, Map<string, GPUBuffer>> | null = null;
+let zeroAttrCache: WeakMap<MeshGPU, Record<string, GPUBuffer | undefined>> | null = null;
 
-function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: string): GPUBuffer {
-    if (!zeroAttrCache) {
-        zeroAttrCache = new WeakMap();
+function getZeroAttrBuffer(engine: EngineContext, gpu: MeshGPU, name: ShaderAttributeName): GPUBuffer {
+    const constant = engine._getVertexDefaultBuffer?.(gpu);
+    if (constant) {
+        return constant;
     }
-    let cache = zeroAttrCache.get(gpu as unknown as object);
+    let cache = zeroAttrCache?.get(gpu);
     if (!cache) {
-        cache = new Map();
-        zeroAttrCache.set(gpu as unknown as object, cache);
+        cache = Object.create(null) as Record<string, GPUBuffer | undefined>;
+        (zeroAttrCache ??= new WeakMap()).set(gpu, cache);
     }
-    const existing = cache.get(name);
-    if (existing) {
-        return existing;
-    }
-    const vertexCount = gpu.positionBuffer.size / 12;
-    const stride = name === "uv" || name === "uv2" ? 8 : name === "normal" ? 12 : 16;
-    const buffer = engine._device.createBuffer({ label: `shader-zero-${name}`, size: vertexCount * stride, usage: BU.VERTEX | BU.COPY_DST });
-    cache.set(name, buffer);
-    return buffer;
+    return (cache[name] ??= engine._device.createBuffer({
+        label: `shader-zero-${name}`,
+        size: Math.max((gpu._vbLayout?.position?._count ?? Math.floor(gpu.positionBuffer.size / 12)) * _attributeInfo(name)._stride, 4),
+        usage: BU.VERTEX | BU.COPY_DST,
+    }));
 }
 
-/** Skinning vertex buffers live on the mesh's `skeleton` (live skinning) or `vat` (baked vertex
- *  animation, which moves them off the dropped skeleton) — not on `MeshGPU`. */
-function getSkinBuffer(mesh: Mesh, field: "jointsBuffer" | "weightsBuffer" | "joints1Buffer" | "weights1Buffer"): GPUBuffer | null {
-    return mesh.vat?.[field] ?? mesh.skeleton?.[field] ?? null;
-}
-
-function getAttrBuffer(engine: EngineContext, mesh: Mesh, name: ShaderAttributeName): GPUBuffer {
-    const gpu = mesh._gpu;
-    switch (name) {
-        case "position":
-            return gpu.positionBuffer;
-        case "normal":
-            return gpu.normalBuffer ?? getZeroAttrBuffer(engine, gpu, "normal");
-        case "uv":
-            return gpu.uvBuffer ?? getZeroAttrBuffer(engine, gpu, "uv");
-        case "uv2":
-            return gpu.uv2Buffer ?? getZeroAttrBuffer(engine, gpu, "uv2");
-        case "tangent":
-            return gpu.tangentBuffer ?? getZeroAttrBuffer(engine, gpu, "tangent");
-        case "color":
-            return gpu.colorBuffer ?? getZeroAttrBuffer(engine, gpu, "color");
-        case "joints":
-            return getSkinBuffer(mesh, "jointsBuffer") ?? getZeroAttrBuffer(engine, gpu, "joints");
-        case "weights":
-            return getSkinBuffer(mesh, "weightsBuffer") ?? getZeroAttrBuffer(engine, gpu, "weights");
-        case "joints1":
-            return getSkinBuffer(mesh, "joints1Buffer") ?? getZeroAttrBuffer(engine, gpu, "joints1");
-        case "weights1":
-            return getSkinBuffer(mesh, "weights1Buffer") ?? getZeroAttrBuffer(engine, gpu, "weights1");
-    }
+function getAttrBuffer(engine: EngineContext, mesh: Mesh, name: ShaderAttributeName, material: ShaderMaterial): GPUBuffer {
+    return _getShaderAttributeBuffer(mesh, name) ?? (name === "color" ? material._colorFallback?.(engine, mesh._gpu) : undefined) ?? getZeroAttrBuffer(engine, mesh._gpu, name);
 }

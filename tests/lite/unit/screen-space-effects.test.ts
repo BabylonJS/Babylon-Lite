@@ -210,6 +210,12 @@ describe("resolution scale + sizing helpers", () => {
         expect(resolveScreenSpaceSourceSize(built)).toEqual({ width: 64, height: 32 });
         const unbuilt = { _width: 0, _height: 0, _descriptor: { size: { width: 128, height: 72 } } } as unknown as RenderTarget;
         expect(resolveScreenSpaceSourceSize(unbuilt)).toEqual({ width: 128, height: 72 });
+        const scaled = {
+            _width: 0,
+            _height: 0,
+            _descriptor: { size: { surface: { canvas: { width: 65, height: 3 } }, scale: 0.5 } },
+        } as unknown as RenderTarget;
+        expect(resolveScreenSpaceSourceSize(scaled)).toEqual({ width: 32, height: 1 });
     });
 });
 

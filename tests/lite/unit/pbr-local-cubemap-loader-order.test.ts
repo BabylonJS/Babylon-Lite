@@ -32,8 +32,10 @@ const mocks = vi.hoisted(() => ({
     createEmptyUniformBuffer: vi.fn(() => ({ destroy: vi.fn() }) as unknown as GPUBuffer),
 }));
 
-vi.mock("../../../packages/babylon-lite/src/resource/gpu-pool.js", () => ({
+vi.mock("../../../packages/babylon-lite/src/resource/gpu-texture-acquire.js", () => ({
     acquireGPUTexture: mocks.acquireGPUTexture,
+}));
+vi.mock("../../../packages/babylon-lite/src/resource/gpu-texture-release.js", () => ({
     releaseGPUTexture: mocks.releaseGPUTexture,
 }));
 
@@ -66,8 +68,7 @@ vi.mock("../../../packages/babylon-lite/src/resource/samplers.js", async (import
     getBilinearSampler: mocks.getBilinearSampler,
 }));
 
-vi.mock("../../../packages/babylon-lite/src/resource/gpu-buffers.js", async (importOriginal) => ({
-    ...(await importOriginal<typeof import("../../../packages/babylon-lite/src/resource/gpu-buffers.js")>()),
+vi.mock("../../../packages/babylon-lite/src/resource/empty-uniform-buffer.js", () => ({
     createEmptyUniformBuffer: mocks.createEmptyUniformBuffer,
 }));
 
@@ -145,5 +146,7 @@ describe("PBR local cubemap loader ordering", () => {
 
         expect(Number(descriptors[2]!.usage) & TU.COPY_SRC).toBe(TU.COPY_SRC);
         expect(Number(descriptors[3]!.usage) & TU.COPY_SRC).toBe(TU.COPY_SRC);
+        expect(mocks.createEmptyUniformBuffer).toHaveBeenCalledTimes(2);
+        expect(mocks.acquireGPUTexture).toHaveBeenCalledTimes(8);
     });
 });

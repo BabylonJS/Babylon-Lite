@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { createRenderTarget, type RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
-import type { RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
+import { addMeshToTask, createRenderTask, type RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
+import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import { setShadowTaskCasterMeshes } from "../../../packages/babylon-lite/src/frame-graph/shadow-inputs";
 import {
     _prepareAsyncShaderPipelinesForScene,
@@ -16,10 +17,12 @@ import { createShaderMaterial } from "../../../packages/babylon-lite/src/materia
 import { clearShaderPipelineCache, enableShaderPipelineCache } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline-cache";
 import { getOrCreateShaderPipeline, getOrCreateShaderPipelineBindings } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline";
 import { buildShaderRenderablesWithInstancing } from "../../../packages/babylon-lite/src/material/shader/shader-thin-instance";
-import type { ShaderPacket } from "../../../packages/babylon-lite/src/material/shader/shader-renderable";
+import { buildShaderMaterialRenderables, type ShaderPacket } from "../../../packages/babylon-lite/src/material/shader/shader-renderable";
+import { _enableShaderVb } from "../../../packages/babylon-lite/src/material/shader/shader-vb";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/scene-helpers";
-import type { Renderable } from "../../../packages/babylon-lite/src/render/renderable";
+import type { MeshRebuildResources, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
+import type { Material } from "../../../packages/babylon-lite/src/material/material";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { ShadowGenerator } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
@@ -99,6 +102,93 @@ function layoutArgs(layout: "mesh" | "thin-instances" | "thin-instances-color", 
 }
 
 describe("async ShaderMaterial pipeline compilation", () => {
+    it.each(["mesh", "thin-instances", "thin-instances-color"] as const)("explicitly prepares the exact packed %s layout through both public helpers", async (layout) => {
+        for (const taskHelper of [false, true]) {
+            clearSceneBGLCache();
+            _enableShaderVb();
+            const { engine, createRenderPipeline, createRenderPipelineAsync } = makeEngine();
+            const material = makeMaterial();
+            const mesh = {
+                material,
+                _gpu: {
+                    positionBuffer: {} as GPUBuffer,
+                    _vbLayout: { position: { _stride: 20, _offset: 4 } },
+                    _vbKey: "packed-position",
+                },
+            } as unknown as Mesh;
+            const task = targetTask(engine);
+            if (taskHelper) {
+                await prepareShaderMaterialPipelineForTask(task, material, layout, mesh);
+            } else {
+                await prepareShaderMaterialPipeline(engine, material, layout, task, mesh);
+            }
+            const bindings = getOrCreateShaderPipelineBindings(engine, material);
+            const expected = layoutArgs(layout, bindings);
+            expected.vertexBuffers = [
+                { ...expected.vertexBuffers[0]!, arrayStride: 20, attributes: [{ shaderLocation: 0, offset: 4, format: "float32x3" }] },
+                ...expected.vertexBuffers.slice(1),
+            ];
+            getOrCreateShaderPipeline(engine, signature, material, bindings, `${expected.variantKey}packed-position`, expected.vertexBuffers, expected.instanceAttrs);
+            expect(createRenderPipeline).not.toHaveBeenCalled();
+            expect(createRenderPipelineAsync).toHaveBeenCalledOnce();
+            expect(createRenderPipelineAsync.mock.calls[0]![0].vertex.buffers).toEqual(expected.vertexBuffers);
+        }
+    });
+
+    it("prepares pending task meshes with temporary ownership without consuming the pending queue", async () => {
+        const { engine, createRenderPipelineAsync } = makeEngine();
+        Object.assign(engine._device, {
+            createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => ({ size: descriptor.size, destroy: vi.fn() })),
+            createBindGroup: vi.fn(() => ({})),
+            queue: { writeBuffer: vi.fn() },
+        });
+        enableAsyncShaderPipelineCompilation(engine);
+        const mesh = {} as Mesh;
+        const main = [vi.fn()];
+        const release = vi.fn();
+        const scene = {
+            surface: { engine },
+            lights: [],
+            _groups: new Map(),
+            _meshDisposables: new Map([[mesh, main]]),
+            _renderables: [],
+            _frameGraph: { _tasks: [] },
+            _disposables: [],
+        } as unknown as SceneContext;
+        const bind = vi.fn();
+        const renderable = { mesh, order: 0, isTransparent: false, bind } as Renderable;
+        const builder = Object.assign(async () => ({ renderables: [renderable], rebuildSingle: () => renderable }), {
+            _sceneIndependentRebuild: true,
+            _rebuildSingle: (_scene: SceneContext, _mesh: Mesh, _material?: Material, resources?: MeshRebuildResources) => {
+                if (!resources) throw new Error("Expected task-owned resource lists.");
+                resources._lifetimeDisposers.push(release);
+                _registerAsyncShaderPipelineRecipe(scene, material, renderable);
+                return renderable;
+            },
+        });
+        const material = { ...makeMaterial(), _buildGroup: builder };
+        mesh.material = material;
+        const rt = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 1, height: 1 } });
+        const task = createRenderTask({ name: "pending", rt, autoMirror: false }, engine, scene);
+        addMeshToTask(task, mesh, { material });
+        const renderables = task._renderables;
+        const pending = task._pendingMeshes;
+        scene._frameGraph._tasks.push(task);
+        await _prepareAsyncShaderPipelinesForScene(scene);
+        expect(createRenderPipelineAsync).toHaveBeenCalledOnce();
+        expect(task._pendingMeshes).toBe(pending);
+        expect(task._renderables).toBe(renderables);
+        expect(pending).toHaveLength(1);
+        expect(task._renderables).toHaveLength(0);
+        expect(task._config.autoMirror).toBe(false);
+        expect(scene._meshDisposables.get(mesh)).toBe(main);
+        expect(main[0]).not.toHaveBeenCalled();
+        expect(release).toHaveBeenCalledOnce();
+        expect(bind).not.toHaveBeenCalled();
+        task.dispose();
+        disposeGpuResourceRetirements(engine);
+    });
+
     it("is inert until enabled and enabling is idempotent", async () => {
         const { engine, createRenderPipelineAsync } = makeEngine();
         const material = makeMaterial();
@@ -193,6 +283,60 @@ describe("async ShaderMaterial pipeline compilation", () => {
         expect(prepared.createRenderPipelineAsync.mock.calls[0]![0]).toEqual(synchronous.createRenderPipeline.mock.calls[0]![0]);
     });
 
+    it("prepares the automatic plain-mesh recipe with the mesh-owned vertex layout", async () => {
+        clearSceneBGLCache();
+        _enableShaderVb();
+        const { engine, createRenderPipeline, createRenderPipelineAsync } = makeEngine();
+        Object.assign(engine, { canvas: { width: 1, height: 1 } });
+        Object.assign(engine._device, {
+            createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => ({ size: descriptor.size, destroy: vi.fn() })),
+            createBindGroup: vi.fn((descriptor: GPUBindGroupDescriptor) => descriptor as unknown as GPUBindGroup),
+            queue: { writeBuffer: vi.fn() },
+        });
+        const material = makeMaterial();
+        const mesh = {
+            material,
+            children: [],
+            receiveShadows: false,
+            worldMatrix: new Float32Array(16),
+            worldMatrixVersion: 0,
+            _gpu: {
+                positionBuffer: {} as GPUBuffer,
+                indexBuffer: {} as GPUBuffer,
+                indexCount: 3,
+                indexFormat: "uint32",
+                _vbLayout: { position: { _stride: 20, _offset: 4 } },
+                _vbKey: "packed-position",
+            },
+        } as unknown as Mesh;
+        const scene = {
+            surface: { engine },
+            camera: null,
+            lights: [],
+            _meshDisposables: new Map(),
+            _renderables: [],
+        } as unknown as SceneContext;
+        enableAsyncShaderPipelineCompilation(engine);
+        const result = buildShaderMaterialRenderables(scene, [mesh]);
+        const task = {
+            scene,
+            _renderables: result.renderables,
+            _pendingMeshes: [],
+            _targetSignature: signature,
+            _config: { autoMirror: false },
+        } as unknown as RenderTask;
+        Object.assign(scene, { _frameGraph: { _tasks: [task] }, _renderables: result.renderables });
+
+        await _prepareAsyncShaderPipelinesForScene(scene);
+        result.renderables[0]!.bind(engine, signature);
+
+        expect(createRenderPipeline).not.toHaveBeenCalled();
+        expect(createRenderPipelineAsync).toHaveBeenCalledOnce();
+        const vertexBuffers = createRenderPipelineAsync.mock.calls[0]![0]!.vertex.buffers!;
+        expect(vertexBuffers[0]!.arrayStride).toBe(20);
+        expect(vertexBuffers[0]!.attributes[0]!.offset).toBe(4);
+    });
+
     it("prepares the instance-color getFinalColor specialization", async () => {
         clearSceneBGLCache();
         const { engine, createShaderModule } = makeEngine();
@@ -216,7 +360,7 @@ describe("async ShaderMaterial pipeline compilation", () => {
         const target = createRenderTarget({
             format: "rgba16float",
             dFormat: "depth32float",
-            _depthCompare: "less-equal",
+            depthCompare: "less-equal",
             samples: 4,
             size: { width: 64, height: 64 },
         });

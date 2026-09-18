@@ -25,7 +25,6 @@ function makeThinInstances(): ThinInstanceData {
         _capacity: 2,
         _version: 1,
         _gpuBuffer: { size: 2 * 64 } as GPUBuffer,
-        _gpuBufferStorage: false,
         _gpuVersion: 1,
         _dirtyMin: 0,
         _dirtyMax: 2,
@@ -91,7 +90,6 @@ describe("shadow caster dirty tracking", () => {
         const state = {
             _task: task,
             _camera: camera,
-            _cameraVersion: 0,
             _lastCasterVersion: -1,
             _lastLightVersion: -1,
             _lastFoVersion: -1,

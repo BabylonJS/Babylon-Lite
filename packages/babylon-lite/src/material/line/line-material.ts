@@ -1,7 +1,6 @@
 import type { Color4 } from "../../math/types.js";
-import type { Material } from "../material.js";
 import type { Mesh } from "../../mesh/mesh.js";
-import type { MeshGroupBuilder } from "../../render/renderable.js";
+import type { MeshGroupBuilder, MeshRebuilder } from "../../render/renderable.js";
 import type { ShaderMaterial } from "../shader/shader-material.js";
 import { createShaderMaterial, setShaderUniform } from "../shader/shader-material.js";
 import { getShaderGroupBuilder } from "../shader/shader-group-builder.js";
@@ -47,9 +46,9 @@ function getLineGroupBuilder(): MeshGroupBuilder {
         }
         const result = await shaderBuilder(scene, meshes);
         const innerRebuildSingle = result.rebuildSingle;
-        const rebuildSingle = (rebuildScene: typeof scene, mesh: Mesh, materialOverride?: Material) => {
+        const rebuildSingle: MeshRebuilder = (rebuildScene, mesh, materialOverride, resources) => {
             requireThinInstances(mesh, (materialOverride ?? mesh.material) as LineMaterial);
-            return innerRebuildSingle(rebuildScene, mesh, materialOverride);
+            return innerRebuildSingle(rebuildScene, mesh, materialOverride, resources);
         };
         builder._rebuildSingle = rebuildSingle;
         return { ...result, rebuildSingle };

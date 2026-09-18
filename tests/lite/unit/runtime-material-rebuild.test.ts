@@ -5,7 +5,7 @@ import type { Material } from "../../../packages/babylon-lite/src/material/mater
 import { rebuildMaterial } from "../../../packages/babylon-lite/src/material/material-rebuild";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { setThinInstances } from "../../../packages/babylon-lite/src/mesh/thin-instance";
-import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
+import type { MeshGroupBuilder, MeshRebuilder, MeshRebuildResources, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import { addToScene, buildScene, type RuntimeSceneBuildHooks, type SceneContext, type SceneMeshGroup } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap";
 import { rebuildScenePbrPipelines } from "../../../packages/babylon-lite/src/scene/scene-rebuild";
@@ -24,7 +24,6 @@ function createScene(engine: EngineContext): SceneContext {
         _uniformUpdaters: [],
         _disposables: [],
         _meshDisposables: new Map(),
-        _meshAuxDisposables: new Map(),
         _materialSwapQueue: [],
         _beforeRender: [],
         _renderableVersion: 0,
@@ -124,11 +123,11 @@ describe("runtime material rebuild ownership", () => {
 
     it("keeps the runtime dispatcher on the scene group instead of the shared builder", async () => {
         const scene = createScene({ _retirements: [] } as unknown as EngineContext);
-        const base = (_target: SceneContext, mesh: Mesh): Renderable => renderable(mesh);
+        const base = vi.fn<MeshRebuilder>((_target, mesh) => renderable(mesh));
+        const specialized = vi.fn<MeshRebuilder>((_target, mesh) => renderable(mesh));
         const builder = (async (_ctx: SceneContext, meshes: Mesh[]) => {
-            const rebuild = (_target: SceneContext, mesh: Mesh): Renderable => renderable(mesh);
-            builder._rebuildSingle = rebuild;
-            return { renderables: meshes.map(renderable), rebuildSingle: rebuild };
+            builder._rebuildSingle = specialized;
+            return { renderables: meshes.map(renderable), rebuildSingle: specialized };
         }) as MeshGroupBuilder;
         builder._materialFamily = "standard";
         builder._rebuildSingle = base;
@@ -146,6 +145,12 @@ describe("runtime material rebuild ownership", () => {
         expect(Object.getOwnPropertyDescriptor(builder, "_rebuildSingle")?.get).toBeUndefined();
         expect(group.r).not.toBe(base);
         expect(mesh._runtimeThinBuild).toBeTypeOf("function");
+        const resources: MeshRebuildResources = { _lifetimeDisposers: [] };
+        group.r!(scene, mesh, material, resources);
+        expect(specialized).toHaveBeenCalledWith(scene, mesh, material, resources);
+        const other = { material } as Mesh;
+        group.r!(scene, other, material, resources);
+        expect(base).toHaveBeenCalledWith(scene, other, material, resources);
     });
 
     it("deduplicates stable cleanup references without dropping distinct closures", async () => {
@@ -262,6 +267,78 @@ describe("runtime material rebuild ownership", () => {
         rebuildMaterial(scene, material);
 
         expect(material._renderFeatures).toBeUndefined();
+    });
+
+    it("retires synchronous Standard rebuild resources after the in-flight frame", () => {
+        const engine = { _retirements: [] } as unknown as EngineContext;
+        const scene = createScene(engine);
+        const oldDispose = vi.fn();
+        const newDispose = vi.fn();
+        const material = {} as Material;
+        const mesh = { material } as Mesh;
+        const previous = renderable(mesh);
+        const rebuilt = { ...renderable(mesh), order: 50 };
+        const rebuild = vi.fn((target: SceneContext, targetMesh: Mesh): Renderable => {
+            target._meshDisposables.set(targetMesh, [newDispose]);
+            return rebuilt;
+        });
+        const builder = Object.assign(vi.fn(), { _materialFamily: "standard", _rebuildSingle: rebuild }) as unknown as MeshGroupBuilder;
+        Object.assign(material, { _buildGroup: builder });
+        scene.meshes.push(mesh);
+        scene._groups.set(builder, Object.assign([mesh], { r: rebuild }));
+        scene._renderables.push(previous);
+        scene._meshDisposables.set(mesh, [oldDispose]);
+
+        rebuildMaterial(scene, material);
+
+        expect(oldDispose).not.toHaveBeenCalled();
+        expect(engine._retirements).toHaveLength(1);
+        expect(scene._meshDisposables.get(mesh)).toEqual([newDispose]);
+        expect(scene._renderables).toEqual([rebuilt]);
+        engine._retirements!.splice(0).forEach((retire) => retire());
+        expect(oldDispose).toHaveBeenCalledOnce();
+    });
+
+    it("detaches rebuilt ShaderMaterial packets from their merged renderable before GPU retirement", () => {
+        const engine = { _retirements: [] } as unknown as EngineContext;
+        const scene = createScene(engine);
+        const material = {} as Material;
+        const meshA = { material } as Mesh;
+        const meshB = { material } as Mesh;
+        type Packet = { _disposed?: boolean; _owner?: Packet[] };
+        const packetA: Packet = {};
+        const packetB: Packet = {};
+        const owner = [packetA, packetB];
+        packetA._owner = owner;
+        packetB._owner = owner;
+        const oldDisposeA = Object.assign(vi.fn(), { p: packetA });
+        const oldDisposeB = Object.assign(vi.fn(), { p: packetB });
+        const rebuiltA = renderable(meshA);
+        const rebuiltB = renderable(meshB);
+        const rebuild = vi.fn((_target: SceneContext, mesh: Mesh) => (mesh === meshA ? rebuiltA : rebuiltB));
+        const builder = Object.assign(vi.fn(), { _materialFamily: "shader", _rebuildSingle: rebuild }) as unknown as MeshGroupBuilder;
+        Object.assign(material, { _buildGroup: builder });
+        scene.meshes.push(meshA, meshB);
+        scene._groups.set(builder, Object.assign([meshA, meshB], { r: rebuild }));
+        const merged = { order: 100, isTransparent: false } as Renderable;
+        scene._renderables.push(merged);
+        scene._meshDisposables.set(meshA, [oldDisposeA]);
+        scene._meshDisposables.set(meshB, [oldDisposeB]);
+
+        rebuildMaterial(scene, material);
+
+        expect(packetA._disposed).toBe(true);
+        expect(packetB._disposed).toBe(true);
+        expect(packetA._owner).toBeUndefined();
+        expect(packetB._owner).toBeUndefined();
+        expect(owner).toEqual([]);
+        expect(oldDisposeA).not.toHaveBeenCalled();
+        expect(oldDisposeB).not.toHaveBeenCalled();
+        expect(engine._retirements).toHaveLength(2);
+        expect(scene._renderables).toEqual([merged, rebuiltA, rebuiltB]);
+        engine._retirements!.splice(0).forEach((retire) => retire());
+        expect(oldDisposeA).toHaveBeenCalledOnce();
+        expect(oldDisposeB).toHaveBeenCalledOnce();
     });
 
     it("routes a PBR material swap that gains gamma albedo through the asynchronous scene rebuild", async () => {
@@ -493,7 +570,7 @@ describe("runtime material rebuild ownership", () => {
         const onOwnerEmpty = vi.fn();
         const sibling = { _disposed: false };
         const owner: unknown[] = [];
-        const packet: { _disposed: boolean; _owner?: unknown[]; _onOwnerEmpty: () => void } = { _disposed: false, _owner: owner, _onOwnerEmpty: onOwnerEmpty };
+        const packet: { _disposed: boolean; _owner?: unknown[]; _onOwnerEmpty?: () => void } = { _disposed: false, _owner: owner, _onOwnerEmpty: onOwnerEmpty };
         owner.push(packet, sibling);
         const oldDispose = Object.assign(
             vi.fn(() => {
@@ -505,7 +582,7 @@ describe("runtime material rebuild ownership", () => {
                     }
                     packet._owner = undefined;
                 } else {
-                    packet._onOwnerEmpty();
+                    packet._onOwnerEmpty?.();
                 }
             }),
             { p: packet }

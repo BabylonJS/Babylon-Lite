@@ -11,8 +11,18 @@ import type { Material, MaterialView } from "../material/material.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
-import { _buildBindings, _resolvePendingMeshes, createRenderTask, removeMeshFromTask, type RenderTask } from "../frame-graph/render-task.js";
-import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
+import {
+    addMeshToTask,
+    _buildBindings,
+    _enableTaskMeshPopulation,
+    _resolvePendingMeshes,
+    createRenderTask,
+    removeMeshFromTask,
+    type RenderTask,
+} from "../frame-graph/render-task.js";
+import type { MeshRebuildResources } from "../render/renderable.js";
+import type { RenderTaskBindingGeneration, RenderTaskPopulation } from "../frame-graph/render-task-base.js";
+import { retireGpuResources, runGpuResourceCallbacks } from "../engine/gpu-resource-retirement.js";
 import { createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
 import { getNoColorView, shadowCasterMaterialChanged, snapshotShadowCasterMaterial } from "./pcf-shadow-task-hooks.js";
 import { createCsmRefitGate, createCsmStaticRefitScheduler, type CsmRefitGate, type CsmStaticRefitScheduler } from "./csm-refit-gate.js";
@@ -46,14 +56,21 @@ interface CsmCachedTaskState extends CsmTaskState {
     _cachedContentVersion: number;
 }
 
-/** @internal Rebuild one destination task's binding lists after `transferMeshBetweenTasks` moved meshes into it. */
-function rebuildTransferTarget(to: RenderTask): void {
-    if (!to._recorded) {
+interface MeshTransfer {
+    from: RenderTask;
+    mesh: object;
+}
+
+let pendingTransfers: WeakMap<RenderTask, MeshTransfer[]> | null = null;
+
+/** @internal Commit a destination's queued transfers and bindings together. */
+export function rebuildTransferTarget(to: RenderTask): void {
+    const transfers = pendingTransfers?.get(to);
+    if (!transfers?.length) {
         return;
     }
-    _resolvePendingMeshes(to, to.scene as SceneContext);
-    to._af = false;
-    _buildBindings(to, to.engine as EngineContext, to._targetSignature);
+    applyTransfers(to, transfers);
+    pendingTransfers!.delete(to);
 }
 
 /** @internal Move a resolved mesh between same-signature tasks without rebuilding its packet.
@@ -64,42 +81,118 @@ function rebuildTransferTarget(to: RenderTask): void {
  *  case, not a corner. Callers that pass a set rebuild each touched task ONCE after the batch;
  *  omitting it keeps the original eager behaviour for single ad-hoc moves. */
 export function transferMeshBetweenTasks(from: RenderTask, to: RenderTask, mesh: object, pendingTargets?: Set<RenderTask>): void {
-    let moved = false;
-    for (let i = from._pendingMeshes.length - 1; i >= 0; i--) {
-        const pending = from._pendingMeshes[i]!;
-        if (pending.mesh === mesh) {
-            from._pendingMeshes.splice(i, 1);
-            to._pendingMeshes.push(pending);
-            moved = true;
-        }
-    }
-    for (let i = from._renderables.length - 1; i >= 0; i--) {
-        const renderable = from._renderables[i]!;
-        if (renderable.mesh === mesh) {
-            from._renderables.splice(i, 1);
-            if (!to._renderables.includes(renderable)) {
-                to._renderables.push(renderable);
-            }
-            moved = true;
-        }
-    }
-    if (!moved) {
+    if (from === to || (!from._pendingMeshes?.some((entry) => entry.mesh === mesh) && !from._renderables.some((renderable) => renderable.mesh === mesh))) {
         return;
     }
-    for (const bindings of [from._opaqueBindings, from._directBindings, from._transparentBindings]) {
-        for (let i = bindings.length - 1; i >= 0; i--) {
-            if (bindings[i]!.renderable.mesh === mesh) {
-                bindings.splice(i, 1);
-            }
-        }
+    if (from.scene !== to.scene || from.engine !== to.engine || from._disposed || to._disposed) {
+        throw new Error("Render-task transfers require live tasks in the same scene.");
     }
-    from._ob.length = 0;
-    from._lastVersion = -1;
+    _enableTaskMeshPopulation(to);
     if (pendingTargets) {
+        pendingTransfers ??= new WeakMap();
+        let transfers = pendingTransfers.get(to);
+        if (!transfers) {
+            pendingTransfers.set(to, (transfers = []));
+        }
+        transfers.push({ from, mesh });
         pendingTargets.add(to);
         return;
     }
-    rebuildTransferTarget(to);
+    applyTransfers(to, [{ from, mesh }]);
+}
+
+function applyTransfers(to: RenderTask, transfers: readonly MeshTransfer[]): void {
+    const tasks = [...new Set(transfers.map((transfer) => transfer.from)), to];
+    transactRenderTasks(
+        tasks,
+        (candidates) => {
+            const destination = candidates[candidates.length - 1]!;
+            for (const { from, mesh } of transfers) {
+                const source = candidates[tasks.indexOf(from)]!;
+                destination.population._pendingMeshes.push(...source.population._pendingMeshes.filter((entry) => entry.mesh === mesh));
+                source.population._pendingMeshes = source.population._pendingMeshes.filter((entry) => entry.mesh !== mesh);
+                for (const renderable of source.population._renderables) {
+                    if (renderable.mesh === mesh && !destination.population._renderables.includes(renderable)) {
+                        destination.population._renderables.push(renderable);
+                    }
+                }
+                source.population._renderables = source.population._renderables.filter((renderable) => renderable.mesh !== mesh);
+                source.generation._renderables = source.population._renderables;
+                source.generation._opaqueBindings = source.generation._opaqueBindings.filter((binding) => binding.renderable.mesh !== mesh);
+                source.generation._directBindings = source.generation._directBindings.filter((binding) => binding.renderable.mesh !== mesh);
+                source.generation._transparentBindings = source.generation._transparentBindings.filter((binding) => binding.renderable.mesh !== mesh);
+                source.generation._batchState = source.generation._batchState?._select([
+                    source.generation._opaqueBindings,
+                    source.generation._directBindings,
+                    source.generation._transparentBindings,
+                ]);
+                source.generation._ob = [];
+                source.generation._lastVersion = -1;
+            }
+        },
+        to._sceneBG ? [to] : []
+    );
+}
+
+interface TaskTransferCandidate {
+    task: RenderTask;
+    previousBatchState?: RenderTaskBindingGeneration["_batchState"];
+    population: RenderTaskPopulation;
+    generation: RenderTaskBindingGeneration;
+    created: MeshRebuildResources[];
+}
+
+function transactRenderTasks(tasks: readonly RenderTask[], prepare: (tasks: TaskTransferCandidate[]) => void, rebind: readonly RenderTask[]): void {
+    const transactions: TaskTransferCandidate[] = tasks.map((task) => {
+        const population: RenderTaskPopulation = {
+            scene: task.scene,
+            _renderables: task._renderables.slice(),
+            _pendingMeshes: task._pendingMeshes!.slice(),
+        };
+        return {
+            task,
+            previousBatchState: task._batchState,
+            population,
+            generation: {
+                _renderables: population._renderables,
+                _opaqueBindings: task._opaqueBindings,
+                _directBindings: task._directBindings,
+                _transparentBindings: task._transparentBindings,
+                _ob: [],
+                _lastVersion: task._lastVersion,
+                _lastVis: task._lastVis,
+                _batchState: task._batchState,
+            },
+            created: [],
+        };
+    });
+    try {
+        prepare(transactions);
+        const retained = transactions.map((transaction) => transaction.previousBatchState);
+        for (const transaction of transactions) {
+            if (rebind.includes(transaction.task)) {
+                _resolvePendingMeshes(transaction.population, transaction.created);
+                transaction.generation = _buildBindings(transaction.task, transaction.population._renderables, false, false, retained);
+            }
+        }
+    } catch (error) {
+        const retained = transactions.map((transaction) => transaction.previousBatchState);
+        for (const transaction of transactions) {
+            for (const resources of transaction.created) {
+                runGpuResourceCallbacks(resources._lifetimeDisposers);
+            }
+            transaction.generation._batchState?._release(undefined, retained);
+        }
+        throw error;
+    }
+    for (const transaction of transactions) {
+        transaction.task._pendingMeshes = transaction.population._pendingMeshes;
+        Object.assign(transaction.task, transaction.generation);
+    }
+    const retained = transactions.map((transaction) => transaction.generation._batchState);
+    for (const transaction of transactions) {
+        transaction.previousBatchState?._release(transaction.task.engine, retained);
+    }
 }
 
 /** Build or update the opt-in static-cache CSM task state. */
@@ -158,7 +251,7 @@ export function ensureCsmShadowCacheState(
                     const view = getNoColorView(mesh.material, views);
                     for (let cascade = 0; cascade < existing._tasks.length; cascade++) {
                         if (cascade <= (maxCascade ?? cascade)) {
-                            existing._tasks[cascade]!.addMesh(mesh, { material: view });
+                            addMeshToTask(existing._tasks[cascade]!, mesh, { material: view });
                         }
                     }
                     snapshotShadowCasterMaterial(mesh.material, materials, gens);
@@ -168,6 +261,7 @@ export function ensureCsmShadowCacheState(
             }
             for (const task of existing._tasks) {
                 task._lastVersion = -1;
+                task._ob.length = 0;
             }
             existing._casterMeshes = casterMeshes;
             existing._renderableVersion = scene._renderableVersion;
@@ -221,7 +315,7 @@ export function ensureCsmShadowCacheState(
             const material = mesh.material;
             if (material && cascade <= (mesh._shadowMaxCascade ?? cascade)) {
                 const target = gate.isDynamic(mesh) ? dynamicTask : staticTask;
-                target.addMesh(mesh, { material: getNoColorView(material, materialViews) });
+                addMeshToTask(target, mesh, { material: getNoColorView(material, materialViews) });
             }
         }
         staticTasks.push(staticTask);
@@ -283,7 +377,6 @@ export function ensureCsmShadowCacheState(
         _tasks: tasks,
         _cameras: cameras,
         _scene: scene,
-        _cameraVersion: 0,
         _lastCasterVersion: -1,
         _lastLightVersion: -1,
         _lastCamVersion: -1,
@@ -308,7 +401,9 @@ export function ensureCsmShadowCacheState(
         _cachedContentVersion: -1,
     };
     if (replacedDefaultState) {
+        const version = scene._renderableVersion;
         state._task.record();
+        state._recordedVersion = version;
     }
     return state;
 }
@@ -383,7 +478,7 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
             { width: cfg._mapSize, height: cfg._mapSize, depthOrArrayLayers: cfg._numCascades }
         );
         for (const task of cached._tasks) {
-            if (task._renderables.length || task._pendingMeshes.length) {
+            if (task._renderables.length || task._pendingMeshes?.length) {
                 draws += task.execute?.() ?? 0;
             }
         }
@@ -395,7 +490,7 @@ export function renderCsmShadowMapCached(engine: EngineContext, sg: ShadowGenera
                 { width: cfg._mapSize, height: cfg._mapSize, depthOrArrayLayers: 1 }
             );
             const task = cached._tasks[cascade]!;
-            if (task._renderables.length || task._pendingMeshes.length) {
+            if (task._renderables.length || task._pendingMeshes?.length) {
                 draws += task.execute?.() ?? 0;
             }
         }
@@ -408,7 +503,6 @@ function publishCsmCascades(engine: EngineContext, sg: ShadowGenerator, state: C
     if (fullUpdate) {
         _writeCsmUbo(state._uboData, cascades, cfg);
     }
-    state._cameraVersion++;
     for (const cascade of updatedCascades) {
         const transform = cascades._transforms[cascade]!;
         if (!fullUpdate) {
@@ -418,7 +512,7 @@ function publishCsmCascades(engine: EngineContext, sg: ShadowGenerator, state: C
         cascadeCamera.fov = 1;
         const clipBias = cfg._worldSpaceBias === null ? cfg._bias * 0.5 : csmWorldBiasClipOffset(cfg._worldSpaceBias, cascades._near[cascade]!, cascades._far[cascade]!);
         _biasViewProjection(transform, clipBias);
-        updateShadowCameraBase(cascadeCamera, state._cameraVersion, cascades._near[cascade]!, cascades._far[cascade]!, cascades._views[cascade]!, transform);
+        updateShadowCameraBase(cascadeCamera, cascadeCamera.worldMatrixVersion + 1, cascades._near[cascade]!, cascades._far[cascade]!, cascades._views[cascade]!, transform);
     }
     sg._version++;
     engine._device.queue.writeBuffer(sg._shadowUBO, 0, state._uboData as Float32Array<ArrayBuffer>);
@@ -435,8 +529,8 @@ function createLayerTarget(texture: GPUTexture, cascade: number, mapSize: number
         _descriptor: {
             size: { width: mapSize, height: mapSize },
             dFormat: "depth32float",
-            _depthClearValue: 1,
-            _depthCompare: "less-equal",
+            depthClearValue: 1,
+            depthCompare: "less-equal",
             samples: 1,
         },
         _colorTexture: null,

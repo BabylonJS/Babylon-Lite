@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { computeUboLayout } from "../../../packages/babylon-lite/src/shader/ubo-layout";
 import { composeShader } from "../../../packages/babylon-lite/src/shader/shader-composer";
-import type { ShaderFragment, ShaderTemplate, UboField } from "../../../packages/babylon-lite/src/shader/fragment-types";
+import type { BindingDecl, BindingKind, ShaderFragment, ShaderTemplate, UboField } from "../../../packages/babylon-lite/src/shader/fragment-types";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
+import { createMeshVertexLayout } from "../../../packages/babylon-lite/src/mesh/mesh-vertex-layout";
 
 // WebGPU shader stage constants for testing (Node has no GPUShaderStage global)
 const FRAGMENT = 0x2;
@@ -159,6 +160,180 @@ function makeTemplate(overrides?: Partial<ShaderTemplate>): ShaderTemplate {
 }
 
 describe("composeShader", () => {
+    const bindingCases: {
+        name: string;
+        type: BindingKind;
+        layout: Omit<GPUBindGroupLayoutEntry, "binding" | "visibility">;
+        declarationType: string;
+        qualifier?: string;
+    }[] = [
+        { name: "uniform", type: { _kind: "uniform-buffer" }, layout: { buffer: { type: "uniform" } }, declarationType: "resourceUniforms", qualifier: "<uniform>" },
+        {
+            name: "float texture",
+            type: { _kind: "texture", _textureType: "texture_2d<f32>" },
+            layout: { texture: { sampleType: "float", viewDimension: "2d" } },
+            declarationType: "texture_2d<f32>",
+        },
+        {
+            name: "cube texture",
+            type: { _kind: "texture", _textureType: "texture_cube<f32>" },
+            layout: { texture: { sampleType: "float", viewDimension: "cube" } },
+            declarationType: "texture_cube<f32>",
+        },
+        {
+            name: "uint texture",
+            type: { _kind: "texture", _textureType: "texture_2d<u32>" },
+            layout: { texture: { sampleType: "uint", viewDimension: "2d" } },
+            declarationType: "texture_2d<u32>",
+        },
+        {
+            name: "depth texture",
+            type: { _kind: "texture", _textureType: "texture_depth_2d" },
+            layout: { texture: { sampleType: "depth", viewDimension: "2d" } },
+            declarationType: "texture_depth_2d",
+        },
+        {
+            name: "depth array",
+            type: { _kind: "texture", _textureType: "texture_depth_2d_array", _sampleType: "depth" },
+            layout: { texture: { sampleType: "depth", viewDimension: "2d-array" } },
+            declarationType: "texture_depth_2d_array",
+        },
+        {
+            name: "explicit sample type",
+            type: { _kind: "texture", _textureType: "texture_2d<f32>", _sampleType: "unfilterable-float" },
+            layout: { texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+            declarationType: "texture_2d<f32>",
+        },
+        { name: "filtering sampler", type: { _kind: "sampler", _samplerType: "sampler" }, layout: { sampler: { type: "filtering" } }, declarationType: "sampler" },
+        {
+            name: "non-filtering sampler",
+            type: { _kind: "sampler", _samplerType: "sampler_non_filtering" },
+            layout: { sampler: { type: "non-filtering" } },
+            declarationType: "sampler",
+        },
+        {
+            name: "comparison sampler",
+            type: { _kind: "sampler", _samplerType: "sampler_comparison" },
+            layout: { sampler: { type: "comparison" } },
+            declarationType: "sampler_comparison",
+        },
+        ...(
+            [
+                ["read", "read-only"],
+                ["write", "write-only"],
+                ["read_write", "read-write"],
+            ] as const
+        ).map(([access, gpuAccess]) => ({
+            name: `storage ${access}`,
+            type: { _kind: "storage-texture", _access: access, _format: "rgba8unorm" } satisfies BindingKind,
+            layout: { storageTexture: { access: gpuAccess, format: "rgba8unorm" } } satisfies Omit<GPUBindGroupLayoutEntry, "binding" | "visibility">,
+            declarationType: `texture_storage_2d<rgba8unorm,${access}>`,
+        })),
+    ];
+
+    describe.each(bindingCases)("$name binding", ({ type, layout, declarationType, qualifier = "" }) => {
+        for (const group of ["mesh", "shadow"] as const) {
+            it.each([1, 2, 3])(`preserves the ${group} descriptor and declaration at visibility %i`, (visibility) => {
+                const result = composeShader(
+                    makeTemplate({
+                        _baseMaterialUboFields: [{ _name: "factor", _type: "f32" }],
+                        _baseBindings: [{ _name: "resource", _type: type, _group: group, _visibility: visibility }],
+                    }),
+                    []
+                );
+                const binding = group === "shadow" ? 0 : 2;
+                const entries = Array.from((group === "shadow" ? result._shadowBGLDescriptor : result._meshBGLDescriptor)!.entries);
+                expect(entries[binding]).toEqual({ binding, visibility, ...layout });
+                const declaration = `@group(${group === "shadow" ? 2 : 1})@binding(${binding}) var${qualifier} resource:${declarationType};`;
+                expect(result._vertexWGSL.includes(declaration)).toBe(!!(visibility & 1));
+                expect(result._fragmentWGSL.includes(declaration)).toBe(!!(visibility & 2));
+            });
+        }
+    });
+
+    it.each([
+        ["uniform", { _kind: "uniform-buffer" }, { buffer: { type: "uniform" } }, "var<uniform> resource:resourceUniforms;"],
+        ["depth", { _kind: "texture", _textureType: "texture_depth_2d" }, { texture: { sampleType: "depth", viewDimension: "2d" } }, "var resource:texture_depth_2d;"],
+        ["uint", { _kind: "texture", _textureType: "texture_2d<u32>" }, { texture: { sampleType: "uint", viewDimension: "2d" } }, "var resource:texture_2d<u32>;"],
+        [
+            "array",
+            { _kind: "texture", _textureType: "texture_depth_2d_array", _sampleType: "depth" },
+            { texture: { sampleType: "depth", viewDimension: "2d-array" } },
+            "var resource:texture_depth_2d_array;",
+        ],
+        ["cube", { _kind: "texture", _textureType: "texture_cube<f32>" }, { texture: { sampleType: "float", viewDimension: "cube" } }, "var resource:texture_cube<f32>;"],
+        ["filtering", { _kind: "sampler", _samplerType: "sampler" }, { sampler: { type: "filtering" } }, "var resource:sampler;"],
+        ["non-filtering", { _kind: "sampler", _samplerType: "sampler_non_filtering" }, { sampler: { type: "non-filtering" } }, "var resource:sampler;"],
+        ["comparison", { _kind: "sampler", _samplerType: "sampler_comparison" }, { sampler: { type: "comparison" } }, "var resource:sampler_comparison;"],
+    ] satisfies Array<[string, BindingDecl["_type"], Partial<GPUBindGroupLayoutEntry>, string]>)(
+        "emits matching GPU and WGSL %s bindings for both stages",
+        (_name, type, layout, declaration) => {
+            const fragment: ShaderFragment = { _id: "binding", _bindings: [{ _name: "resource", _type: type, _visibility: 3 }] };
+            const result = composeShader(makeTemplate(), [fragment]);
+            expect(Array.from(result._meshBGLDescriptor.entries)[1]).toEqual({ binding: 1, visibility: 3, ...layout });
+            expect(result._vertexWGSL).toContain(`@group(1)@binding(1) ${declaration}`);
+            expect(result._fragmentWGSL).toContain(`@group(1)@binding(1) ${declaration}`);
+        }
+    );
+
+    it("applies mesh packing without mutating attributes or overriding instance-rate fragment inputs", () => {
+        const template = makeTemplate();
+        const fragment: ShaderFragment = {
+            _id: "instance-color",
+            _vertexAttributes: [{ _name: "color", _type: "vec4<f32>", _gpuFormat: "float32x4", _arrayStride: 32, _offset: 16, _stepMode: "instance" }],
+        };
+        const original = structuredClone(template._baseVertexAttributes);
+        const result = composeShader(
+            template,
+            [fragment],
+            createMeshVertexLayout({
+                position: { _stride: 48, _offset: 4 },
+                normal: { _stride: 48, _offset: 20 },
+                color: { _stride: 48, _offset: 32 },
+            })
+        );
+        expect(result._vertexBufferLayouts).toEqual([
+            { arrayStride: 48, stepMode: "vertex", attributes: [{ shaderLocation: 0, offset: 4, format: "float32x3" }] },
+            { arrayStride: 48, stepMode: "vertex", attributes: [{ shaderLocation: 1, offset: 20, format: "float32x3" }] },
+            { arrayStride: 32, stepMode: "instance", attributes: [{ shaderLocation: 2, offset: 16, format: "float32x4" }] },
+        ]);
+        expect(template._baseVertexAttributes).toEqual(original);
+        expect(composeShader(template, [])._vertexBufferLayouts[0]!.arrayStride).toBe(12);
+        expect(result._vertexWGSL).toContain("position:vec3<f32>");
+    });
+
+    it("keeps ungrouped layouts before first-seen groups and preserves their first attribute's packing", () => {
+        const result = composeShader(
+            makeTemplate({
+                _baseVertexAttributes: [
+                    { _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 32, _bufferGroup: "mesh" },
+                    { _name: "normal", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 64, _offset: 12, _bufferGroup: "mesh" },
+                    { _name: "uv", _type: "vec2<f32>", _gpuFormat: "float32x2", _arrayStride: 8 },
+                    { _name: "instance", _type: "vec4<f32>", _gpuFormat: "float32x4", _arrayStride: 64, _offset: 16, _bufferGroup: "instances", _stepMode: "instance" },
+                ],
+            }),
+            []
+        );
+        expect(result._vertexBufferLayouts).toEqual([
+            { arrayStride: 8, stepMode: "vertex", attributes: [{ shaderLocation: 2, offset: 0, format: "float32x2" }] },
+            {
+                arrayStride: 32,
+                stepMode: "vertex",
+                attributes: [
+                    { shaderLocation: 0, offset: 0, format: "float32x3" },
+                    { shaderLocation: 1, offset: 12, format: "float32x3" },
+                ],
+            },
+            { arrayStride: 64, stepMode: "instance", attributes: [{ shaderLocation: 3, offset: 16, format: "float32x4" }] },
+        ]);
+    });
+
+    it("keeps lexical ready-queue order with repeated dependency edges", () => {
+        const fragments: ShaderFragment[] = [{ _id: "z" }, { _id: "a", _dependencies: ["b", "b"] }, { _id: "b" }];
+        expect(composeShader(makeTemplate(), fragments)._fragmentKey).toBe("b|a|z");
+        expect(fragments[1]!._dependencies).toEqual(["b", "b"]);
+    });
+
     it("composes with zero fragments", () => {
         const result = composeShader(makeTemplate(), []);
         expect(result._fragmentKey).toBe("");
@@ -351,17 +526,16 @@ describe("composeShader", () => {
         expect(firstEntry.buffer).toEqual({ type: "uniform" });
     });
 
-    it("deduplicates vertex attributes by name", () => {
+    it("deduplicates vertex attributes by name while preserving the base layout", () => {
         const frag: ShaderFragment = {
             _id: "test",
-            _vertexAttributes: [
-                // Same as base "position" — should be deduped
-                { _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
-            ],
+            _vertexAttributes: [{ _name: "position", _type: "vec4<f32>", _gpuFormat: "float32x4", _arrayStride: 16 }],
         };
         const result = composeShader(makeTemplate(), [frag]);
         // Should only have 2 vertex buffer layouts (position + normal), not 3
         expect(result._vertexBufferLayouts.length).toBe(2);
+        expect(result._vertexBufferLayouts[0]!.arrayStride).toBe(12);
+        expect(result._vertexWGSL).toContain("position:vec3<f32>");
     });
 
     it("handles base template bindings before fragment bindings", () => {

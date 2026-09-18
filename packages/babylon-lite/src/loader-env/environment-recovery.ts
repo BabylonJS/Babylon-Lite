@@ -1,7 +1,8 @@
 import type { EngineContext } from "../engine/engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { EnvironmentTextures } from "./load-env.js";
-import { acquireGPUTexture, releaseGPUTexture } from "../resource/gpu-pool.js";
+import { acquireGPUTexture } from "../resource/gpu-texture-acquire.js";
+import { releaseGPUTexture } from "../resource/gpu-texture-release.js";
 import { assembleEnvironmentTextures, loadBrdfImage } from "./env-helpers.js";
 import { parseEnvFile } from "./env-parse.js";
 

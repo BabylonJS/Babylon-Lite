@@ -220,6 +220,62 @@ describe("PBR shader variant caches", () => {
         expect(pipelineWithZeroIndex).toBe(pipelineWithoutIndex);
     });
 
+    it("keeps forward and geometry variants separate for different storage layouts", async () => {
+        const { engine } = makeEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const material = createPbrMaterial();
+        const meshA = makeMesh(material);
+        const meshB = makeMesh(material);
+        meshA._gpu = {
+            ...meshA._gpu,
+            _vbLayout: {
+                position: { _stride: 32, _offset: 0 },
+                normal: { _stride: 32, _offset: 12 },
+                uv: { _stride: 32, _offset: 24 },
+            },
+            _vbKey: ":storage-a",
+        };
+        meshB._gpu = {
+            ...meshB._gpu,
+            _vbLayout: {
+                position: { _stride: 40, _offset: 4 },
+                normal: { _stride: 40, _offset: 20 },
+                uv: { _stride: 40, _offset: 32 },
+            },
+            _vbKey: ":storage-b",
+        };
+        scene._groups.set(material._buildGroup, [meshA, meshB]);
+
+        const forward = await buildPbrRenderables(scene, [meshA, meshB], undefined);
+        const forwardA = forward.renderables[0]!.bind(engine, signature).pipeline as unknown as GPURenderPipelineDescriptor;
+        const forwardB = forward.renderables[1]!.bind(engine, signature).pipeline as unknown as GPURenderPipelineDescriptor;
+        expect(forwardB).not.toBe(forwardA);
+        expect(forwardA.vertex.buffers).toEqual([
+            { arrayStride: 32, stepMode: "vertex", attributes: [{ shaderLocation: 0, offset: 0, format: "float32x3" }] },
+            { arrayStride: 32, stepMode: "vertex", attributes: [{ shaderLocation: 1, offset: 12, format: "float32x3" }] },
+            { arrayStride: 32, stepMode: "vertex", attributes: [{ shaderLocation: 2, offset: 24, format: "float32x2" }] },
+        ]);
+        expect(forwardB.vertex.buffers).toEqual([
+            { arrayStride: 40, stepMode: "vertex", attributes: [{ shaderLocation: 0, offset: 4, format: "float32x3" }] },
+            { arrayStride: 40, stepMode: "vertex", attributes: [{ shaderLocation: 1, offset: 20, format: "float32x3" }] },
+            { arrayStride: 40, stepMode: "vertex", attributes: [{ shaderLocation: 2, offset: 32, format: "float32x2" }] },
+        ]);
+
+        const view = createPbrGeometryMaterialView(material, {
+            attachments: [GeometryTextureType.WORLD_NORMAL],
+            emitColor: false,
+        });
+        const ownerA = { _lifetimeDisposers: [] as (() => void)[] };
+        const ownerB = { _lifetimeDisposers: [] as (() => void)[] };
+        const geometryA = buildPbrGeometryRenderable(scene, meshA, view, ownerA).bind(engine, signature).pipeline as unknown as GPURenderPipelineDescriptor;
+        const geometryB = buildPbrGeometryRenderable(scene, meshB, view, ownerB).bind(engine, signature).pipeline as unknown as GPURenderPipelineDescriptor;
+        expect(geometryB).not.toBe(geometryA);
+        expect(geometryA.vertex.buffers).toEqual(forwardA.vertex.buffers);
+        expect(geometryB.vertex.buffers).toEqual(forwardB.vertex.buffers);
+        ownerA._lifetimeDisposers.forEach((dispose) => dispose());
+        ownerB._lifetimeDisposers.forEach((dispose) => dispose());
+    });
+
     it("threads material-plugin variants through geometry-output composition and caches", async () => {
         const { engine, createShaderModule } = makeEngine();
         const scene = createSceneContext(engine, { defaultRenderTask: false });
@@ -240,11 +296,13 @@ describe("PBR shader variant caches", () => {
             attachments: [GeometryTextureType.WORLD_NORMAL],
             emitColor: false,
         });
-        const pipelineA = buildPbrGeometryRenderable(scene, mesh, view).bind(engine, signature).pipeline;
+        const ownerA = { _lifetimeDisposers: [] as (() => void)[] };
+        const pipelineA = buildPbrGeometryRenderable(scene, mesh, view, ownerA).bind(engine, signature).pipeline;
 
         materialA.plugins = [pluginB];
         materialA._pi = materialB._pi;
-        const pipelineB = buildPbrGeometryRenderable(scene, mesh, view).bind(engine, signature).pipeline;
+        const ownerB = { _lifetimeDisposers: [] as (() => void)[] };
+        const pipelineB = buildPbrGeometryRenderable(scene, mesh, view, ownerB).bind(engine, signature).pipeline;
 
         expect(pipelineB).not.toBe(pipelineA);
         expect((view._geometry as Map<string, unknown>).size).toBe(2);

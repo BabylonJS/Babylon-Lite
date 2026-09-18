@@ -6,7 +6,7 @@ import { TU } from "../engine/gpu-flags.js";
 import type { Texture2D } from "./texture-2d.js";
 import type { EngineContext } from "../engine/engine.js";
 import { getBilinearSampler } from "../resource/samplers.js";
-import { acquireTexture } from "../resource/gpu-pool.js";
+import { acquireTexture } from "../resource/texture-acquire.js";
 
 /** Create a 1×1 solid-color `Texture2D` from straight RGBA components in [0, 1].
  *  @param engine - Engine context.

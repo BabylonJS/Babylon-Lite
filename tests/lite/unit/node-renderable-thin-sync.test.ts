@@ -11,7 +11,7 @@ import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-
 import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 
 function buildFixture(transparent: boolean, meshCount = 1, withNodeUbo = false) {
-    const matrixBuffer = { size: 128 } as GPUBuffer;
+    const matrixBuffer = { size: 128, destroy: vi.fn() } as unknown as GPUBuffer;
     const indirectWrites: number[][] = [];
     const writeBuffer = vi.fn((buffer: GPUBuffer, _offset: number, data: ArrayBuffer, dataOffset = 0, size?: number) => {
         if (buffer.size === 20) {
@@ -55,14 +55,15 @@ function buildFixture(transparent: boolean, meshCount = 1, withNodeUbo = false) 
         _compile: {
             _meshBGL: {},
             _nodeUboBinding: withNodeUbo ? 1 : null,
-            _nodeUboSize: withNodeUbo ? 16 : 0,
+            _nodeUboSpec: withNodeUbo ? { _totalBytes: 16, _offsets: new Map(), _structBody: "" } : null,
+            _meshUboFloats: 20,
             _usesMeshAttributeFlags: false,
             _textureBindings: [],
-            _morphBindings: null,
             _envBindings: null,
             _shadowBindings: [],
             _esmShadowParamsBinding: null,
             _pipeline: {},
+            _pipelineForMesh: () => ({}),
         },
         _renderFeatures: null,
         _vertexAttrNames: ["position", "world0", "world1", "world2", "world3"],
@@ -81,7 +82,6 @@ function buildFixture(transparent: boolean, meshCount = 1, withNodeUbo = false) 
             _capacity: 2,
             _version: 1,
             _gpuBuffer: matrixBuffer,
-            _gpuBufferStorage: false,
             _gpuVersion: 1,
             _dirtyMin: 2,
             _dirtyMax: 0,
@@ -104,8 +104,12 @@ function buildFixture(transparent: boolean, meshCount = 1, withNodeUbo = false) 
             receiveShadows: false,
             _gpu: {
                 indexCount: 3,
-                indexBuffer: {} as GPUBuffer,
+                _baseVertex: 0,
+                indexBuffer: { destroy: vi.fn() } as unknown as GPUBuffer,
                 indexFormat: "uint16",
+                positionBuffer: { destroy: vi.fn() } as unknown as GPUBuffer,
+                normalBuffer: { destroy: vi.fn() } as unknown as GPUBuffer,
+                uvBuffer: { destroy: vi.fn() } as unknown as GPUBuffer,
                 vertexBuffers: new Map([["position", {} as GPUBuffer]]),
             },
         } as unknown as Mesh);
@@ -175,7 +179,7 @@ describe.each([
 
         binding.update!({ targetWidth: 1, targetHeight: 1 });
         binding.draw(pass as never, {} as EngineContext);
-        expect(pass.drawIndexed).toHaveBeenLastCalledWith(3, 2);
+        expect(pass.drawIndexed).toHaveBeenLastCalledWith(3, 2, 0, 0);
         expect(thinInstances._drawArgsBuffer).toBeUndefined();
 
         thinInstances.count = 0;

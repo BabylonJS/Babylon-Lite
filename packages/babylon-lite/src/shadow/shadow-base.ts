@@ -10,7 +10,7 @@ import type { Mat4Storage } from "../math/types.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import type { DirectionalLight } from "../light/directional-light.js";
 import type { Mesh } from "../mesh/mesh.js";
-import { createUniformBuffer } from "../resource/gpu-buffers.js";
+import { createUniformBuffer } from "../resource/uniform-buffer.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
@@ -159,8 +159,8 @@ export function createShadowRenderTarget(sg: ShadowGenerator, colorTexture: GPUT
             size: { width: mapSize, height: mapSize },
             format: colorTexture ? "rgba16float" : undefined,
             dFormat: "depth32float",
-            _depthClearValue: 1,
-            _depthCompare: "less-equal",
+            depthClearValue: 1,
+            depthCompare: "less-equal",
             samples: 1,
         },
         _colorTexture: colorTexture,

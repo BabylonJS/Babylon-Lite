@@ -124,7 +124,7 @@ describe("updateMeshGeometry", () => {
     it("rejects shared, interleaved, and non-uint32 geometry", () => {
         const geometry = replacementGeometry();
         const shared = makeFixture({ _refCount: 2 });
-        const interleaved = makeFixture({ _vbLayout: { _p: { _stride: 12, _offset: 0 } } });
+        const interleaved = makeFixture({ _vbLayout: { position: { _stride: 12, _offset: 0 } } });
         const uint16 = makeFixture({ indexFormat: "uint16" });
 
         expect(() =>

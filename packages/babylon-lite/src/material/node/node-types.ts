@@ -7,6 +7,9 @@
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { UboField, BindingDecl, VertexAttribute, Varying } from "../../shader/fragment-types.js";
 import type { GeometryTextureType } from "../../frame-graph/geometry-types.js";
+import type { EngineContext } from "../../engine/engine.js";
+import type { Mesh } from "../../mesh/mesh.js";
+import type { LightBase } from "../../light/types.js";
 
 // ─── Graph (parser output) ───────────────────────────────────────────
 
@@ -114,6 +117,33 @@ export interface NodeLoopVariable {
     readonly indexVar: string;
 }
 
+/** Per-mesh binding seam retained on a compiled Node pipeline only when an
+ *  opt-in vertex block installed one. */
+export type NodeVertexFeatureBinder = (engine: EngineContext, mesh: Mesh, entries: GPUBindGroupEntry[]) => void;
+
+/** Opaque compact vertex-feature payload:
+ *  binding count, WGSL declarations, BGL entries, vertex parameters, mesh binder. */
+export type NodeVertexFeatureCompile = readonly [
+    bindingCount: number,
+    wgslDecls: string,
+    bglEntries: readonly GPUBindGroupLayoutEntry[],
+    vertexParams: string,
+    bindMesh: NodeVertexFeatureBinder,
+];
+
+/** Binding-allocation factory installed by an opt-in vertex block emitter. */
+export type NodeVertexFeatureFactory = (startBinding: number) => NodeVertexFeatureCompile;
+
+/** Per-mesh CPU writer installed by an opt-in mesh feature. */
+export type NodeMeshFeatureWriter = (mesh: Mesh, lights: readonly LightBase[], data: Float32Array) => void;
+
+/** Opaque compact mesh-feature payload:
+ *  mesh-struct fields, helpers, declarations, UBO floats, CPU writer. */
+export type NodeMeshFeatureCompile = readonly [meshFields: string, meshHelpers: string, wgslDecls: string, meshUboFloats: number, writeMesh: NodeMeshFeatureWriter];
+
+/** Mesh-layout factory installed by an opt-in block emitter. */
+export type NodeMeshFeatureFactory = () => NodeMeshFeatureCompile;
+
 /** Build state threaded through every emit call. */
 export interface NodeBuildState {
     readonly vertex: StageState;
@@ -146,10 +176,14 @@ export interface NodeBuildState {
     usesFragDepth: boolean;
     usesClipPlanes: boolean;
     usesMeshAttributeExists: boolean;
-    /** Set by MorphTargetsBlock. The pipeline allocates two vertex-only
-     *  bindings (morph texture + morph UBO), declares the struct, and adds
-     *  a `@builtin(vertex_index)` param to vs_main. */
+    /** Set by MorphTargetsBlock for geometry-pass rejection diagnostics. */
     usesMorphTargets: boolean;
+    /** Optional vertex compiler/binder installed by an opt-in block module.
+     *  @internal */
+    _vertexFeature?: NodeVertexFeatureFactory;
+    /** Optional mesh-layout/writer installed by an opt-in block module.
+     *  @internal */
+    _meshFeature?: NodeMeshFeatureFactory;
     /** Set by parseNodeMaterialFromSnippet when shadowGenerators are supplied.
      *  The pipeline allocates shadow bindings (texture + sampler + UBO) per
      *  shadow-casting light, emits light-space varyings in vs_main, and injects

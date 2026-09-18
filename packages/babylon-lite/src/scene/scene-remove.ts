@@ -8,8 +8,8 @@ import type { TransformNode } from "./transform-node.js";
 import type { SceneNode } from "./scene-node.js";
 import type { AssetContainer } from "../asset-container.js";
 import { disposeMeshGpu } from "../mesh/mesh-dispose.js";
-import { removeMeshFromTask } from "../frame-graph/render-task.js";
-import type { RenderTask } from "../frame-graph/render-task.js";
+import { _removeMeshFromRenderTask } from "../frame-graph/render-task-base.js";
+import type { RenderTaskBase } from "../frame-graph/render-task-base.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 
 /** Remove an entity from the scene, undoing what `addToScene` did. Accepts the same
@@ -293,6 +293,7 @@ function removeChildren(scene: SceneContext, node: SceneNode): void {
 /** Remove a mesh from the scene and destroy its GPU resources.
  *  Internal helper — `removeFromScene` dispatches here for the Mesh case. */
 function removeMeshFromScene(scene: SceneContext, mesh: Mesh): void {
+    scene._meshMaterialChange?.(mesh);
     // Notify tasks that retain their own per-mesh bindings before this mesh's
     // UBOs and shared geometry are destroyed below. The hook is optional so core
     // scene removal does not statically import any feature task module.
@@ -312,14 +313,6 @@ function removeMeshFromScene(scene: SceneContext, mesh: Mesh): void {
         didMutate = true;
         teardown.push(...fns);
         scene._meshDisposables.delete(mesh);
-    }
-    // AUX (override) view packets — depth/SSAO no-colour views another task registered on this mesh. A material
-    // swap deliberately leaves these alone (see `_meshAuxDisposables`); a real removal must still free them.
-    const auxFns = scene._meshAuxDisposables.get(mesh);
-    if (auxFns) {
-        didMutate = true;
-        teardown.push(...auxFns);
-        scene._meshAuxDisposables.delete(mesh);
     }
     const mi2 = scene.meshes.indexOf(mesh);
     if (mi2 >= 0) {
@@ -367,7 +360,7 @@ function removeMeshFromScene(scene: SceneContext, mesh: Mesh): void {
     // (a `_config` field alone is NOT sufficient — post/effect tasks also have one).
     for (const task of scene._frameGraph._tasks) {
         if ("_renderables" in (task as object)) {
-            removeMeshFromTask(task as RenderTask, mesh);
+            _removeMeshFromRenderTask(task as RenderTaskBase, mesh);
         }
     }
     // Free the mesh's shared GPU buffers only when this was its LAST owning scene — a single

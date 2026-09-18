@@ -170,6 +170,39 @@ Shadow generators share math and UBO packing helpers only. Caster ownership live
 - **`buildLightViewMatrix()` / `multiply4x4()`** — shared light-space matrix math for ESM and PCF task paths.
 - **`createShadowParamsUBO()` / `createSharedShadowUBO()`** — shared GPU buffer setup for generator-owned receiver resources.
 
+### Standard/PBR Receiver Code Generation
+
+Standard and PBR prepare receiver code at their existing asynchronous material-build boundaries, then retain a scene-local synchronous fragment factory for pipeline composition and later per-mesh rebuilds:
+
+1. The immutable scene shadow slots are classified before composition.
+2. If any slot is CSM, CSM keeps precedence: only CSM slots are forwarded to the registered CSM receiver factory. The fallback loader is not called, preserving the existing unsupported mixed CSM+ESM/PCF behavior.
+3. Otherwise the dynamically imported `shadow-fragment-builder.ts` uses `shadow-algorithms.ts` to load only the algorithms present in the slots:
+    - ESM-only: builder + `shadow-fragment-esm.ts`
+    - PCF-only: builder + `shadow-fragment-pcf.ts`
+    - mixed ESM+PCF: builder + both algorithm modules
+4. Standard stores the prepared factory in its immutable `StandardShadowContext`; PBR passes its prepared closure into `createPbrComposer`. Synchronous material swaps, geometry views, and pipeline-cache misses therefore never import code.
+
+`shadow-fragment-builder.ts` prepares one-pass Standard/PBR assembly through the shared `shadow-algorithms.ts` loader. Each algorithm module supplies one readonly descriptor containing its immutable texture/sampler binding types plus only two methods: its sampling expression and its WGSL helper body. The builder owns all common binding/emission scaffolding, avoiding mutable append adapters and duplicated descriptor construction. The immutable binding-type objects are reused across slots. For each slot the builder appends varyings, algorithm-specific texture/sampler bindings, the shared shadow-info UBO binding, vertex calculations, sampling calls, and helpers. The immutable `shadowInfo_NUniforms` declaration string is created once per slot and reused in both vertex and fragment helper lists. Returned binding/varying order and emitted WGSL remain byte-identical to the previous three-pass generator.
+
+`shadow-fragment-core.ts` remains the synchronous combined internal compatibility entry and deliberately imports both fallback algorithms. Material wrappers use the prepared loader instead, so the legacy entry cannot pull unused PCF into ESM scenes, unused ESM into PCF scenes, or either fallback into CSM-only scenes. PBR continues remapping the shared builder's `AD` fragment slot to `AS`; Standard retains `AD`.
+
+PCF code generation shares the offset-vector formula between the two axes and generates the nine
+tap statements in row-major order (row outer, column inner, each `0..2`). These loops run only
+while preparing shader source: the emitted GPU shader remains fully unrolled, byte-identical to
+the captured reference, with unchanged multiplication and accumulation order.
+
+`shadow-algorithms.ts` supplies the identical clip-space conversion, UV conversion, and
+outside-frustum rejection to both ESM and PCF helpers. The same preparation and sampling
+implementations serve Node receivers without importing Standard/PBR fragment assembly.
+
+Node parsing awaits `prepareNodeShadowEmitter` before pipeline compilation. Its scene-local
+synchronous emitter retains only the requested algorithms, preserves group-1 bindings,
+deduplicated varyings, Node world-position injection, and the `_sf` dispatcher. Shared helper
+generation preserves all shader tokens and arithmetic; only Node's former indentation changes.
+`node-shadow.ts` is a combined synchronous compatibility entry, not a parser dependency.
+Node emission assembles declarations, varying membership, bindings, and dispatch in one pass,
+reusing each light's generated shadow-info symbol.
+
 ### ESM Generator — GPU Textures
 
 | Label              | Size                | Format         | Usage                                |
@@ -399,7 +432,7 @@ PCF depth rendering uses the regular material renderable path with a pass-specif
 
 ### PCF Main-Pass Integration
 
-Standard, PBR, and Node shadow receiver fragments emit PCF sampling code and bind-group layout directly from the scene's shadow-light list. There is no generator-side PCF shader registration path; the generator only exposes receiver-facing texture/sampler/UBO resources.
+Standard, PBR, and Node shadow receivers use asynchronously prepared sampling algorithms. Node retains its own group-1 binding and dispatcher assembly. There is no generator-side PCF shader registration path; the generator only exposes receiver-facing texture/sampler/UBO resources.
 
 **Receiver bind group entries for main pass:**
 
@@ -602,6 +635,13 @@ Implements a 33-tap Gaussian blur matching Babylon's `kernelBlur` post-process w
 
 ESM generators expose their depth/blur resources to `ShadowTask`. Caster meshes are registered as `ShadowTask` inputs. During `record()`, PCF creates a depth-only `RenderTask` over the generator's depth texture; ESM creates an ESM color+depth `RenderTask` over its task resources. Both paths create one shadow material view per unique caster material.
 
+Each generator state owns an aggregate `_recordedVersion`. `ShadowTask` snapshots `scene._renderableVersion` before recording and publishes that snapshot only after every inner pass records successfully. A partial cascade failure therefore leaves the old value intact for retry, and a scene mutation during recording leaves a deliberately stale snapshot that forces the next frame to record again. Shadow camera facades similarly carry their installed cache version themselves, so PCF, ESM, and CSM updates advance `camera.worldMatrixVersion` directly instead of maintaining a second counter in task state.
+
+The ESM horizontal and vertical blur passes share one internal recording helper. Each still
+creates the current target view, clears to transparent black, stores the result, binds the same
+blur pipeline and its axis-specific bind group, and draws three vertices. Horizontal output
+feeds vertical input; the reported draw count remains the caster count plus two.
+
 ### ESM Initialization (once)
 
 1. Create shadow params UBO (bias, depthScale, depthValues)
@@ -763,21 +803,34 @@ Returns: casters.length  (depth draws only — no blur passes)
 12. **Caster dirty tracking** — After mutating a mesh's worldMatrixVersion, `ShadowTask` detects the task-owned caster input versions and re-executes the material-view render task.
     12b. **Forced refresh** — With `forceRefreshEveryFrame=true`, `ShadowTask` re-executes the PCF material-view render task even if light and caster world matrix versions are unchanged, covering morph targets and other GPU-driven deformations.
 13. **writeShadowUboFields** — Output Float32Array(24) matches expected layout: [lightMatrix×16, depthValues.x, depthValues.y, 0, 0, shadowsInfo×4].
+14. **Receiver output stability** — Empty, ESM-only, PCF-only, mixed, and non-contiguous Standard/PBR slot lists reproduce byte-exact fragment objects, including binding order and PBR `AD` → `AS` remapping.
+15. **Receiver feature isolation** — Built Standard/PBR wrappers have no static fallback-core or algorithm import; ESM and PCF helper modules contain only their own WGSL codegen.
+16. **Prepared algorithm guard** — An ESM-only prepared factory rejects PCF slots and a PCF-only factory rejects ESM slots rather than silently emitting an invalid receiver.
+17. **CSM precedence** — A list containing CSM forwards only CSM light indices to the registered receiver factory and does not prepare fallback algorithms.
 
 ---
 
 ## File Manifest
 
-| File                                             | Role                                                                                                                                                                       |
-| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/shadow/shadow-base.ts`                      | Shared shadow math, params UBO, receiver UBO, and `writeShadowUboFields()` helpers                                                                                         |
-| `src/shadow/shadow-generator.ts`                 | Shared `ShadowGenerator` contract                                                                                                                                          |
-| `src/shadow/esm-directional-shadow-generator.ts` | Directional ESM generator — shadow params UBO, ESM/depth/blur textures, blur pipeline, receiver UBO, task resource accessors, and directional AABB-fit matrix helper       |
-| `src/shadow/pcf-spotlight-shadow-generator.ts`   | Spot PCF shadow generator — factory function, spot light matrix helper, depth texture/comparison sampler ownership, and spot receiver depth values                         |
-| `src/shadow/pcf-directional-shadow-generator.ts` | Directional PCF shadow generator — factory function, directional AABB-fit matrix helper, depth texture/comparison sampler ownership, and directional receiver depth values |
-| `src/frame-graph/shadow-inputs.ts`               | Public caster-mesh input registration for shadow tasks                                                                                                                     |
-| `src/frame-graph/shadow-task.ts`                 | Internal frame-graph task that schedules shadows before receiver rendering and renders PCF/ESM casters via Standard/PBR/Node shadow material views                         |
-| `src/shadow/pcf-shadow-task-hooks.ts`            | Shared PCF preload/state/render hooks used by spot and directional PCF generators                                                                                          |
-| `shaders/shadow-blur.vertex.wgsl`                | Blur vertex shader: fullscreen triangle generation + UV computation                                                                                                        |
+| File                                                     | Role                                                                                                                                                                       |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/shadow/shadow-base.ts`                              | Shared shadow math, params UBO, receiver UBO, and `writeShadowUboFields()` helpers                                                                                         |
+| `src/shadow/shadow-generator.ts`                         | Shared `ShadowGenerator` contract                                                                                                                                          |
+| `src/shadow/esm-directional-shadow-generator.ts`         | Directional ESM generator — shadow params UBO, ESM/depth/blur textures, blur pipeline, receiver UBO, task resource accessors, and directional AABB-fit matrix helper       |
+| `src/shadow/pcf-spotlight-shadow-generator.ts`           | Spot PCF shadow generator — factory function, spot light matrix helper, depth texture/comparison sampler ownership, and spot receiver depth values                         |
+| `src/shadow/pcf-directional-shadow-generator.ts`         | Directional PCF shadow generator — factory function, directional AABB-fit matrix helper, depth texture/comparison sampler ownership, and directional receiver depth values |
+| `src/frame-graph/shadow-inputs.ts`                       | Public caster-mesh input registration for shadow tasks                                                                                                                     |
+| `src/frame-graph/shadow-task.ts`                         | Internal frame-graph task that schedules shadows before receiver rendering and renders PCF/ESM casters via Standard/PBR/Node shadow material views                         |
+| `src/shadow/pcf-shadow-task-hooks.ts`                    | Shared PCF preload/state/render hooks used by spot and directional PCF generators                                                                                          |
+| `src/shader/fragments/shadow-fragment-core.ts`           | Combined synchronous compatibility entry for direct internal callers                                                                                                       |
+| `src/shader/fragments/shadow-algorithms.ts`              | Shared algorithm preparation, descriptor types, and projection source for all material families                                                                            |
+| `src/shader/fragments/shadow-fragment-builder.ts`        | Algorithm-neutral one-pass Standard/PBR receiver fragment assembly                                                                                                         |
+| `src/shader/fragments/shadow-fragment-esm.ts`            | ESM-only receiver bindings, sampling call, and WGSL helpers                                                                                                                |
+| `src/shader/fragments/shadow-fragment-pcf.ts`            | PCF-only receiver bindings, sampling call, and WGSL helpers                                                                                                                |
+| `src/material/node/node-shadow-emitter.ts`               | Prepared Node group-1 declarations, varyings, bindings, and shadow-factor dispatch                                                                                         |
+| `src/material/node/node-shadow.ts`                       | Combined synchronous Node compatibility entry                                                                                                                              |
+| `src/material/standard/fragments/std-shadow-fragment.ts` | Standard receiver preparation, CSM precedence, scene-local caching, and fragment ID                                                                                        |
+| `src/material/pbr/fragments/pbr-shadow-fragment.ts`      | PBR receiver preparation, CSM precedence, fragment ID, and `AD` → `AS` remapping                                                                                           |
+| `shaders/shadow-blur.vertex.wgsl`                        | Blur vertex shader: fullscreen triangle generation + UV computation                                                                                                        |
 
 The spot matrix helper lives in `shadow/pcf-spotlight-shadow-generator.ts`.

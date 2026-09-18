@@ -5,7 +5,7 @@
  *  list, target-texture intent, optional `gp` UBO (shared across the task's
  *  materials), and reverse-culling flag. The view also shadows
  *  {@link Material._buildGroup} with {@link getStandardGeometryGroupBuilder} so
- *  that `RenderTask.addMesh` (and the geometry renderer task) materialize a
+ *  that `addMeshToTask` (and the geometry renderer task) materialize a
  *  {@link Renderable} through the shared standard geometry renderable
  *  infrastructure — no view-aware branching required in core render-task.
  *
@@ -19,7 +19,7 @@ import type { Mesh } from "../../mesh/mesh.js";
 import type { Camera } from "../../camera/camera.js";
 import { GEOMETRY_OUTPUT, MATERIAL_ALPHA_BLEND } from "./standard-flags.js";
 import type { StandardMaterialProps } from "./standard-material.js";
-import { getStandardGeometryGroupBuilder, disposeStandardGeometryViewResources } from "./standard-geometry-renderable.js";
+import { getStandardGeometryGroupBuilder } from "./standard-geometry-renderable.js";
 import { _getStandardGeometrySkeletonVelocityLoader } from "./standard-geometry-feature-hooks.js";
 import type { createStandardGeometrySkeletonVelocity } from "./standard-geometry-skeleton-velocity.js";
 import type { createThinInstanceFragment } from "../../shader/fragments/thin-instance-fragment.js";
@@ -132,10 +132,6 @@ export interface StandardGeometryMaterialView extends MaterialView {
     /** @internal Shared per-view resources cache populated lazily by the renderable
      *  factory. Opaque to callers. */
     _geometry?: unknown;
-    /** @internal Retire the view's shared GPU resources (material + UV UBOs). Set
-     *  by {@link createStandardGeometryMaterialView}; called by the owning geometry
-     *  task when it discards this view on re-record/dispose. Idempotent. */
-    _disposeGeometryResources?: () => void;
 }
 
 /** Wrap a Standard material as a geometry-output view.
@@ -156,6 +152,5 @@ export function createStandardGeometryMaterialView(source: StandardMaterialProps
     Object.defineProperty(view, "_velocityExclusions", { value: config.velocityExclusions ?? null, enumerable: false });
     Object.defineProperty(view, "_camera", { value: config.camera ?? null, enumerable: false });
     Object.defineProperty(view, "_buildGroup", { value: getStandardGeometryGroupBuilder(), enumerable: false });
-    Object.defineProperty(view, "_disposeGeometryResources", { value: () => disposeStandardGeometryViewResources(view), enumerable: false });
     return view;
 }

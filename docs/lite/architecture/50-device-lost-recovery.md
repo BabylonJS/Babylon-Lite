@@ -85,6 +85,12 @@ rebuilds textures, geometry, skeletons, morph targets, environment lighting,
 shadow generators, renderables, scene/light bind groups, frame-graph tasks, and
 render targets.
 
+Automatic reconstruction of storage-backed meshes and writable/vertex/index/indirect storage is not part
+of this integration. Their recovery-specific registry, retained sources, and handle-refresh
+pass have been removed pending the recovery redesign. The existing CPU-backed storage
+buffer hook remains for plain read-only allocations. Applications must recreate affected
+GPU-role allocations and meshes.
+
 Environment recovery supports `loadEnvironment` (`.env`) and
 `loadHdrEnvironment`. Recovery must be enabled before the environment is
 loaded so the URL/settings source is retained. It recreates the specular cube
@@ -145,13 +151,13 @@ that then discards the locals they were built from.
 
 Two capture-based designs were measured first and rejected. Describing
 backgrounds up front — passing the loaders' strategy inputs to one seam and
-re-deriving the rules during recovery — cost ~65 B for *every* environment-loading
+re-deriving the rules during recovery — cost ~65 B for _every_ environment-loading
 scene. Per-background capture (`engine._dlr?.g(...)` inside each builder's `if`
 block) narrowed that to ~21 B, but still only for scenes that build a background.
 Discovery removes the loader seam entirely. Against the pre-feature baseline the
 feature now measures +1,707 B across 73 scenes, of which scene164 — the recovery
 parity scene, and the only one that enables recovery — carries +1,554 B; 56
-scenes are *smaller* than before because the loader capture seam is gone. The 11
+scenes are _smaller_ than before because the loader capture seam is gone. The 11
 background-building scenes pay 16–56 B each for the thunk. The thunk is stamped
 unconditionally rather than gated on capture being enabled; one closure per
 background is cheaper than the branch that would guard it. Choosing thunks over
@@ -319,7 +325,7 @@ threaded as a parameter because the handlers' own walks call `rebuildTexture2D`
 too, and a parameter those call sites did not pass would silently drop the
 ownership of anything they rebuilt first.
 
-Whether a texture has been *released* is asked of every kind, because every kind
+Whether a texture has been _released_ is asked of every kind, because every kind
 can reach that state — `releaseTexture` is public API, and its first call
 destroys a texture whose creator took no reference of its own. Rebuilding a
 destroyed texture hands a live one back to a wrapper the application has

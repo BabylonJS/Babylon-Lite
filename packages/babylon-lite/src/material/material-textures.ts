@@ -6,7 +6,7 @@ import type { StandardMaterialProps } from "./standard/standard-material.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import { getMaterialFamily } from "./material-family.js";
 import { getMaterialSource } from "./material-view.js";
-import { collectPbrBoundTextures } from "./pbr/pbr-material.js";
+import { collectPbrBoundTextures } from "./pbr/collect-pbr-bound-textures.js";
 import { collectStdBoundTextures } from "./standard/collect-std-bound-textures.js";
 
 /**

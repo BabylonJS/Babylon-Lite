@@ -10,12 +10,13 @@ export {
     renderFrame,
     resizeEngine,
     setEngineSize,
-    disposeEngine,
     getRenderingContextKind,
     getRenderingContexts,
     setGpuTimingEnabled,
     isGpuTimingSupported,
 } from "./engine/engine.js";
+export { disposeEngine } from "./engine/engine-dispose.js";
+export { waitForGpuResourceRetirements } from "./engine/gpu-resource-retirement.js";
 export { VERSION } from "./engine/version.js";
 export type { EngineContext, EngineOptions, RenderCanvas, RenderingContext } from "./engine/engine.js";
 export { createNullEngine, stepScene, runHeadlessSteps } from "./engine/null-engine.js";
@@ -45,6 +46,7 @@ export {
     registerSceneWithShadowSupport,
     unregisterScene,
 } from "./scene/scene.js";
+export { markMeshRenderableDirty } from "./scene/mesh-scene-registry.js";
 export type { SceneContextOptions } from "./scene/scene.js";
 export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
 export { setEnvironmentBlur } from "./scene/set-environment-blur.js";
@@ -60,6 +62,8 @@ export { enableErrorDecoding, decodeError } from "./enable-error-decoding.js";
 // Subtree visibility toggle (used to hide a node before deferring its disposal,
 // e.g. streaming voxel chunks). Standalone module — bundled only when used.
 export { setSubtreeVisible } from "./scene/visibility.js";
+export { packMeshBlendingTag, unpackMeshBlendingTag, createDefaultMeshBlendRadiusDefinitions } from "./mesh/mesh-blending-tag.js";
+export type { MeshBlendingTag, MeshBlendRadiusDefinition, MeshBlendRadiusDefinitions } from "./mesh/mesh-blending-tag.js";
 
 // ─── Frame graph ─────────────────────────────────────────────────────
 // Scene-owned ordered list of tasks. The default scene pass is a
@@ -75,7 +79,7 @@ export type { Pass, RenderPassExecuteFunc } from "./frame-graph/pass.js";
 export { addPassDependencies } from "./frame-graph/pass.js";
 export type { RenderPass } from "./frame-graph/render-pass.js";
 export type { RenderTask, RenderTaskConfig } from "./frame-graph/render-task.js";
-export { createRenderTask, removeMeshFromTask } from "./frame-graph/render-task.js";
+export { createRenderTask, addMeshToTask, removeMeshFromTask } from "./frame-graph/render-task.js";
 export type { DepthPyramid, DepthPyramidOptions, DepthPyramidReduce, DepthPyramidTaskOptions } from "./frame-graph/depth-pyramid.js";
 export { createDepthPyramid, createDepthPyramidTask } from "./frame-graph/depth-pyramid.js";
 export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";
@@ -89,18 +93,23 @@ export { createGeometryRendererTask } from "./frame-graph/geometry-renderer-task
 export type { GeometryRendererTask, GeometryRendererTaskConfig, GeometryRendererTextureDescription } from "./frame-graph/geometry-renderer-task.js";
 export { GeometryTextureType } from "./frame-graph/geometry-types.js";
 export type { ShadowTask } from "./frame-graph/shadow-task.js";
-export type { RenderTarget, RenderTargetDescriptor } from "./engine/render-target.js";
+export type { RenderTarget, RenderTargetDescriptor, RenderTargetSurfaceSize } from "./engine/render-target.js";
 export { createRenderTarget } from "./engine/render-target.js";
-export { createRenderTargetTexture } from "./texture/rtt.js";
+export { createRenderTargetTexture, disposeRenderTargetTexture } from "./texture/rtt.js";
+export { createSurfaceRenderTargetTexture, onRenderTargetTextureResize } from "./texture/rtt-surface.js";
+export { withSampledDepthTexture } from "./texture/rtt-depth.js";
+export type { RenderTargetDepthSampler, RenderTargetTextureResult } from "./texture/rtt.js";
 // Pooled GPU samplers (same descriptor → same GPUSampler). Public so consumers building their own
 // sampled-texture wrappers around managed render targets don't have to reach into `engine._device`.
-export { getOrCreateSampler, clearSamplerCache } from "./resource/gpu-pool.js";
+export { getOrCreateSampler, clearSamplerCache } from "./resource/sampler-pool.js";
 // acquireTexture/releaseTexture let a consumer register the lifetime of its OWN GPU texture in Lite's
 // ref-count pool, so a texture it creates (e.g. a mipped render texture for a Hi-Z pyramid) survives a
 // ShaderMaterial's per-version release/acquire cycle instead of being destroyed at count 0.
-export { acquireTexture, releaseTexture } from "./resource/gpu-pool.js";
+export { acquireTexture } from "./resource/texture-acquire.js";
+export { releaseTexture } from "./resource/texture-release.js";
 export { enableSceneTransmission, enableRenderTaskTransmission } from "./frame-graph/transmission.js";
 export type { TransmissionOptions, SceneColorGrab } from "./frame-graph/transmission.js";
+export { enableRenderTaskMeshRefresh } from "./frame-graph/render-task-mesh-refresh.js";
 
 // ─── Fullscreen Effects ─────────────────────────────────────────────
 export { createEffectWrapper, setEffectUniforms, setEffectTexture, createEffectRenderTask, disposeEffectWrapper } from "./effect/effect-renderer.js";
@@ -246,6 +255,7 @@ export {
     updateMeshUv2,
     updateMeshTangents,
     resizeMeshGeometry,
+    resizeSharedMeshGeometry,
     invalidateRenderBundles,
 } from "./mesh/mesh-factories.js";
 export type { MeshGeometryCapacityResult, MeshGeometryRange, MeshGeometryUpdateRanges } from "./mesh/mesh-factories.js";
@@ -270,8 +280,17 @@ export { initializeCsg2Async, isCsg2Ready, createCsg2FromMesh, csg2Subtract, csg
 export type { Csg2Solid } from "./mesh/csg2.js";
 
 // ─── Resources ───────────────────────────────────────────────────────
-export { createStorageBuffer, updateStorageBuffer, disposeStorageBuffer } from "./resource/storage-buffer.js";
-export type { StorageBuffer } from "./resource/storage-buffer.js";
+export { createStorageBuffer, updateStorageBuffer, readStorageBuffer, disposeStorageBuffer } from "./resource/storage-buffer.js";
+export type { StorageBuffer, StorageBufferOptions } from "./resource/storage-buffer.js";
+// GPU-resident geometry: a mesh sources its vertices straight from a storage
+// allocation and the draw reads them in place, with no readback and no copy.
+// Whoever fills the allocation -- the CPU, or eventually a compute pass -- is the
+// caller's business. Tree-shaken away when unused.
+export { createMeshFromStorageBuffer } from "./mesh/mesh-from-storage.js";
+export type { MeshFromStorageOptions } from "./mesh/mesh-from-storage.js";
+// Non-canonical vertex formats for a ShaderMaterial (e.g. a float32x4 position packing
+// data in .w). Opt-in: costs nothing in scenes that never declare one.
+export { setShaderAttributeFormats } from "./material/shader/shader-vb.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
@@ -288,6 +307,8 @@ export {
     createTexture2DArrayFromUrls,
     uploadKtx2Texture2DArray,
     loadKtx2Texture2DArray,
+    uploadKtx2Texture2DArrayFromBuffers,
+    loadKtx2Texture2DArrayFromUrls,
 } from "./texture/texture-array.js";
 export type { Texture2DArray, TextureArrayOptions, ArrayLayerUploadOptions, TextureArrayFromUrlsOptions } from "./texture/texture-array.js";
 export { createDynamicTexture, updateDynamicTexture } from "./texture/dynamic-texture.js";
@@ -365,6 +386,7 @@ export {
     setShaderVector3,
     setShaderMatrix,
 } from "./material/shader/shader-material.js";
+export { wgsl } from "./shader/wgsl.js";
 export { enableShaderUniformRangeUpdates } from "./material/shader/shader-uniform-range.js";
 export { enableShaderMaterialUniformCaching } from "./material/shader/enable-shader-material-uniform-caching.js";
 export { enableShaderMaterialInstanceWorld } from "./material/shader/enable-shader-material-instance-world.js";
@@ -384,10 +406,120 @@ export { createLineMaterial, setLineMaterialColor } from "./material/line/line-m
 export type { LineMaterial, LineMaterialOptions } from "./material/line/line-material.js";
 export { createPbrNoColorMaterialView } from "./material/pbr/no-color-view.js";
 export { parseNodeMaterialFromSnippet } from "./material/node/node-material.js";
+export { createNodeMaterialBlockLoader } from "./material/node/node-block-loader.js";
+export type { NodeMaterialBlock } from "./material/node/node-block-loader.js";
+// BEGIN GENERATED NODE BLOCK EXPORTS
+export {
+    nodeAddBlock,
+    nodeAmbientOcclusionBlock,
+    nodeAnisotropyBlock,
+    nodeArcTan2Block,
+    nodeBiPlanarBlock,
+    nodeBonesBlock,
+    nodeClampBlock,
+    nodeClearCoatBlock,
+    nodeClipPlanesBlock,
+    nodeCloudBlock,
+    nodeColorConverterBlock,
+    nodeColorMergerBlock,
+    nodeColorSplitterBlock,
+    nodeConditionalBlock,
+    nodeCrossBlock,
+    nodeCurveBlock,
+    nodeDerivativeBlock,
+    nodeDesaturateBlock,
+    nodeDiscardBlock,
+    nodeDistanceBlock,
+    nodeDivideBlock,
+    nodeDotBlock,
+    nodeElbowBlock,
+    nodeFogBlock,
+    nodeFragCoordBlock,
+    nodeFragDepthBlock,
+    nodeFragmentOutputBlock,
+    nodeFresnelBlock,
+    nodeFrontFacingBlock,
+    nodeGeometryTextureOutputBlock,
+    nodeGradientBlock,
+    nodeHeightToNormalBlock,
+    nodeImageProcessingBlock,
+    nodeImageSourceBlock,
+    nodeInputBlock,
+    nodeInstancesBlock,
+    nodeIridescenceBlock,
+    nodeLengthBlock,
+    nodeLerpBlock,
+    nodeLightBlock,
+    nodeLightInformationBlock,
+    nodeLoopBlock,
+    nodeMatrixBuilder,
+    nodeMatrixDeterminantBlock,
+    nodeMatrixSplitterBlock,
+    nodeMatrixTransposeBlock,
+    nodeMaxBlock,
+    nodeMeshAttributeExistsBlock,
+    nodeMinBlock,
+    nodeModBlock,
+    nodeMorphTargetsBlock,
+    nodeMultiplyBlock,
+    nodeNegateBlock,
+    nodeNLerpBlock,
+    nodeDebugBlock,
+    nodeTeleportInBlock,
+    nodeTeleportOutBlock,
+    nodeNormalBlendBlock,
+    nodeNormalizeBlock,
+    nodeOneMinusBlock,
+    nodeOppositeBlock,
+    nodePannerBlock,
+    nodePbrMetallicRoughnessBlock,
+    nodePbrMetallicRoughnessBlockFull,
+    nodePerturbNormalBlock,
+    nodePosterizeBlock,
+    nodePowBlock,
+    nodeRandomNumberBlock,
+    nodeReciprocalBlock,
+    nodeReflectBlock,
+    nodeReflectionBlock,
+    nodeReflectionTextureBaseBlock,
+    nodeReflectionTextureBlock,
+    nodeRefractBlock,
+    nodeRefractionBlock,
+    nodeRemapBlock,
+    nodeReplaceColorBlock,
+    nodeRotate2dBlock,
+    nodeScaleBlock,
+    nodeScreenSizeBlock,
+    nodeScreenSpaceBlock,
+    nodeShadowMapBlock,
+    nodeSheenBlock,
+    nodeSimplexPerlin3DBlock,
+    nodeSmoothStepBlock,
+    nodeStepBlock,
+    nodeStorageReadBlock,
+    nodeStorageWriteBlock,
+    nodeSubSurfaceBlock,
+    nodeSubtractBlock,
+    nodeTBNBlock,
+    nodeTextureBlock,
+    nodeTransformBlock,
+    nodeTrigonometryBlock,
+    nodeTriPlanarBlock,
+    nodeTwirlBlock,
+    nodeVectorMergerBlock,
+    nodeVectorSplitterBlock,
+    nodeVertexOutputBlock,
+    nodeViewDirectionBlock,
+    nodeVoronoiNoiseBlock,
+    nodeWaveBlock,
+    nodeWorleyNoise3DBlock,
+} from "./material/node/node-blocks.js";
+// END GENERATED NODE BLOCK EXPORTS
 export { loadNodeBlockEmitterWithGeometry } from "./material/node/node-geometry-block-loader.js";
 export { createNodeNoColorMaterialView } from "./material/node/no-color-view.js";
 export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./material/node/node-material.js";
 export { createMaterialView } from "./material/material-view.js";
+export { releaseMaterialViewGpu } from "./material/shader/shader-material-view-gpu.js";
 export { getMaterialFamily } from "./material/material-family.js";
 export { getMaterialTextures } from "./material/material-textures.js";
 export { isPbrMaterial, isStandardMaterial, isShaderMaterial, isNodeMaterial } from "./material/material-guards.js";
@@ -643,6 +775,7 @@ export type {
     ShaderDefineValue,
     ShaderDefineMap,
     ShaderDefine,
+    ShaderAttributeFormats,
 } from "./material/shader/shader-material.js";
 export type {
     PbrMaterialProps,

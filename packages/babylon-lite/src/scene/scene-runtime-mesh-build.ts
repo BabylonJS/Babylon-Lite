@@ -404,7 +404,7 @@ async function materializeRuntimeMesh(scene: SceneContext, state: RuntimeBuildSt
     if (builder._materialFamily === "pbr" && hadBuiltGroup && builtPbrContext) {
         (pbrState._pbrMeshGeomContexts ??= new WeakMap()).set(mesh, builtPbrContext);
     }
-    installRuntimeRebuild(scene, state, builder, mesh, result.rebuildSingle, hadBuiltGroup ? (previousSceneBase ?? previousRebuild) : result.rebuildSingle);
+    installRuntimeRebuild(scene, state, builder, mesh, result.rebuildSingle, hadBuiltGroup ? previousSceneBase : result.rebuildSingle);
     (mesh.material as { _csmGen?: number })._csmGen = ((mesh.material as { _csmGen?: number })._csmGen ?? 0) + 1;
     const group = scene._groups.get(builder);
     if (group && !hadBuiltGroup) {
@@ -427,14 +427,14 @@ function installRuntimeRebuild(
     if (!runtime) {
         const scenes = new WeakMap<SceneContext, WeakMap<Mesh, RuntimeRebuild>>();
         const bases = new WeakMap<SceneContext, RuntimeRebuild>();
-        const dispatch: RuntimeRebuild = (targetScene, targetMesh, override) => {
+        const dispatch: RuntimeRebuild = (targetScene, targetMesh, override, resources) => {
             const specialized = scenes.get(targetScene)?.get(targetMesh);
             if (specialized) {
-                return specialized(targetScene, targetMesh, override);
+                return specialized(targetScene, targetMesh, override, resources);
             }
             const base = bases.get(targetScene) ?? targetScene._groups.get(builder)?.r;
             if (base) {
-                return base(targetScene, targetMesh, override);
+                return base(targetScene, targetMesh, override, resources);
             }
             throw new Error("Material group has not completed its initial build");
         };

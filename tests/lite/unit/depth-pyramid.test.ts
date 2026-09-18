@@ -6,7 +6,9 @@ const pool = vi.hoisted(() => ({
     getOrCreateSampler: vi.fn(() => ({}) as GPUSampler),
 }));
 
-vi.mock("../../../packages/babylon-lite/src/resource/gpu-pool.js", () => pool);
+vi.mock("../../../packages/babylon-lite/src/resource/texture-acquire.js", () => ({ acquireTexture: pool.acquireTexture }));
+vi.mock("../../../packages/babylon-lite/src/resource/texture-release.js", () => ({ releaseTexture: pool.releaseTexture }));
+vi.mock("../../../packages/babylon-lite/src/resource/texture-sampler-pool.js", () => ({ getOrCreateSampler: pool.getOrCreateSampler }));
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { createDepthPyramid } from "../../../packages/babylon-lite/src/frame-graph/depth-pyramid";
@@ -43,5 +45,8 @@ describe("depth pyramid reduction", () => {
         expect(shader).toContain(`r=${reduce}(r,`);
 
         pyramid.dispose();
+        expect(pool.acquireTexture).toHaveBeenCalledOnce();
+        expect(pool.releaseTexture).toHaveBeenCalledOnce();
+        expect(pool.getOrCreateSampler).toHaveBeenCalledOnce();
     });
 });

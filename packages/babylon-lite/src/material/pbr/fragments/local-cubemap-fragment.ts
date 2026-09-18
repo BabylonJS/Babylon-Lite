@@ -8,7 +8,8 @@
 
 import type { ComposedShader, ShaderFragment, UboField } from "../../../shader/fragment-types.js";
 import { BU } from "../../../engine/gpu-flags.js";
-import { createMappedBuffer, createUniformBuffer } from "../../../resource/gpu-buffers.js";
+import { createMappedBuffer } from "../../../resource/mapped-buffer.js";
+import { createUniformBuffer } from "../../../resource/uniform-buffer.js";
 import type { PbrExt, _PbrBindCtx } from "../pbr-flags.js";
 import { PBR_HAS_SKYBOX, PBR2_ESM_SHADOW_OUTPUT, PBR2_NO_COLOR_OUTPUT } from "../pbr-flag-bits.js";
 import { _getPbrLocalEnvironment, type PbrLocalEnvironmentState } from "../pbr-local-cubemap-state.js";

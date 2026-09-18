@@ -1,4 +1,4 @@
-import type { Mesh } from "../mesh/mesh.js";
+import type { Mesh, MeshGPU } from "../mesh/mesh.js";
 import type { StorageBuffer } from "../resource/storage-buffer.js";
 import type { Texture2D, Texture2DOptions, Texture2DRecoverySource } from "../texture/texture-2d.js";
 import type { PixelsTexture2DOptions } from "../texture/pixels-texture.js";
@@ -11,7 +11,6 @@ import type { GpuTaskTimer } from "./gpu-task-timer.js";
 import type { RenderTaskGpuTimings } from "./gpu-task-timing.js";
 import type { DeviceLostRecoveryState } from "./device-lost-recovery.js";
 import type { SceneContext } from "../scene/scene-core.js";
-import { disposeGpuResourceRetirements, flushGpuResourceRetirements } from "./gpu-resource-retirement.js";
 
 // Module-scoped visibility epoch. setSubtreeVisible (scene/visibility.ts,
 // loaded only by KHR_node_visibility / KHR_animation_pointer features) bumps
@@ -54,10 +53,10 @@ export interface EngineContext extends SurfaceContext {
     /** Number of GPU draw calls in the latest {@link renderFrame} call, summed across its selected surfaces. */
     drawCallCount: number;
 
-    /** GPU time spent on the last measured frame, in milliseconds — 0 until the first measured frame and
-     *  while GPU timing is disabled (the default). Enable with {@link setGpuTimingEnabled}; query device
-     *  capability with {@link isGpuTimingSupported}. Updates a frame or two behind, since the timestamp
-     *  readback is async and off the render critical path, so reading it does not perturb the value. */
+    /** Instrumented GPU interval for the last measured frame, in milliseconds — from the beginning of
+     *  the opening marker dispatch through the end of the closing marker dispatch, including every command
+     *  recorded for the frame and the two marker dispatches themselves. It is 0 until the first measured
+     *  frame and while timing is disabled. Readback is asynchronous and does not stall rendering. */
     gpuFrameTimeMs: number;
     /** @internal GPU frame timer, lazily created the first time GPU timing is enabled (null when the
      *  device is unsupported, undefined until the first {@link setGpuTimingEnabled} call dynamic-imports
@@ -68,7 +67,7 @@ export interface EngineContext extends SurfaceContext {
      *  the resolve hook may remain assigned to task timing independently. {@link renderFrame} only optional-chains them, so none of the timer code is statically
      *  reachable from the always-bundled engine — scenes that never enable timing ship zero bytes of it
      *  (mirrors the screenshot `_captureService` hook). The timestamps are written *into the frame's command
-     *  encoder* (begin first, end last) so the GPU executes them contiguously around just that frame's work;
+     *  encoder* (begin first, end last) so the GPU executes them contiguously around that frame's work;
      *  `_gpuTimerResolve` runs after the frame's submit to read the pair back asynchronously. */
     _gpuTimerBegin?: (encoder: GPUCommandEncoder) => void;
     /** @internal See `_gpuTimerBegin`. */
@@ -115,12 +114,16 @@ export interface EngineContext extends SurfaceContext {
     _options?: EngineOptions;
     /** @internal Live high-level storage allocations owned by this engine. */
     _storageBuffers?: Set<StorageBuffer>;
-    /** @internal Storage-related limits retained lazily for device-loss recovery. */
-    _storageRequiredLimits?: Record<string, GPUSize64>;
-    /** @internal Installed lazily by the storage-buffer module. */
-    _rebuildStorageBuffers?: () => void;
     /** @internal Installed lazily by the storage-buffer module. */
     _disposeStorageBuffers?: () => void;
+    /** @internal Managed resource disposal callbacks installed behind `_disposeStorageBuffers`. */
+    _managedResourceDisposers?: Array<() => void>;
+    /** @internal Installed only while independent managed resource families are live. */
+    _disposeManagedResources?: () => void;
+    /** @internal Constant missing-attribute buffer, installed only by storage-backed geometry. */
+    _getVertexDefaultBuffer?: (gpu: MeshGPU) => GPUBuffer | null;
+    /** @internal Bumped when a managed resource handle is destroyed or replaced. */
+    _resourceEpoch?: number;
     /** @internal Shared 1×1 white texture used as the default baseColor / ORM for
      *  factor-only PBR materials (created via `createPbrMaterial` without textures).
      *  A white ORM yields `metallic = metallicFactor`, `roughness = roughnessFactor`,
@@ -130,10 +133,6 @@ export interface EngineContext extends SurfaceContext {
      *  before rebuilding PBR groups so the resolver recreates it on the replacement
      *  device. */
     _pbrFallbackTex?: Texture2D;
-    /** @internal Stable cache cleanup callbacks used by scene material groups. */
-    _pbrCleanup?: () => void;
-    /** @internal */
-    _standardCleanup?: () => void;
     /** @internal */
     _dlr?: DeviceLostRecoveryCapture;
     /** @internal */
@@ -151,11 +150,13 @@ export interface EngineContext extends SurfaceContext {
     _currentDelta: number;
     /** @internal */
     _cbs: GPUCommandBuffer[];
+    /** @internal Frame-boundary flush installed on the first queued GPU resource retirement. */
+    _flushGpuRetirements?: (engine: EngineContext) => void;
     /** @internal GPU resource disposers waiting for the next frame command buffer to be submitted. */
     _retirements?: Array<() => void> | null;
     /** @internal Retirement batches whose queue fence has not resolved yet. Kept reachable so engine
      *  teardown and device-lost recovery can still claim and run them synchronously. */
-    _retiring?: Array<Array<() => void>> | null;
+    _retiring?: Set<Array<() => void>> | null;
 
     /** @internal Per-renderable update closure wrapper. Set when the engine
      *  was created with `useFloatingOrigin: true`. Wraps a renderable's bare
@@ -361,6 +362,22 @@ export function _getAdapterOptions(): GPURequestAdapterOptions {
     return _adapterOptionsHook ? _adapterOptionsHook() : {};
 }
 
+const OPTIONAL_DEVICE_FEATURES = [
+    "float32-filterable",
+    "texture-compression-astc",
+    "texture-compression-bc",
+    "texture-compression-etc2",
+    "texture-compression-unaligned" as GPUFeatureName,
+    "timestamp-query",
+    "primitive-index",
+] as const satisfies readonly GPUFeatureName[];
+
+/** @internal Select every optional feature supported by the adapter. The returned list is
+ *  passed unchanged to `requestDevice` and later captured by device-lost recovery. */
+export function _getSupportedDeviceFeatures(adapter: GPUAdapter): GPUFeatureName[] {
+    return OPTIONAL_DEVICE_FEATURES.filter((feature) => adapter.features.has(feature));
+}
+
 /** Create the Babylon Lite engine bound to `canvas`. Acquires the GPU adapter + device,
  *  configures the canvas's WebGPU context, and returns an `EngineContext` that *is also*
  *  the primary `SurfaceContext` — i.e. the returned engine is itself the surface for the
@@ -376,21 +393,9 @@ export async function createEngine(canvas: RenderCanvas, options?: EngineOptions
         throw new Error("WebGPU adapter not available");
     }
 
-    const features: GPUFeatureName[] = [];
     // Optional features are requested opportunistically so their public enable functions can activate
     // later without recreating the device. Unsupported adapters keep the corresponding feature inactive.
-    for (const f of [
-        "float32-filterable",
-        "texture-compression-astc",
-        "texture-compression-bc",
-        "texture-compression-etc2",
-        "timestamp-query",
-        "primitive-index",
-    ] as GPUFeatureName[]) {
-        if (adapter.features.has(f)) {
-            features.push(f);
-        }
-    }
+    const features = _getSupportedDeviceFeatures(adapter);
     const device = await adapter.requestDevice({ requiredFeatures: features, requiredLimits: options?.requiredLimits });
 
     // eslint-disable-next-line no-console
@@ -541,6 +546,7 @@ export function startEngine(engine: EngineContext): Promise<void> {
 }
 
 /** Resolve when every GPU command submitted before this call has completed.
+ *  This does not wait for deferred resource releases; use `waitForGpuResourceRetirements` for teardown.
  *  This is a synchronization boundary for infrequent lifecycle transitions such as revealing a fully
  *  prepared scene; frame loops should not await it during steady rendering. */
 export function waitForGpuIdle(engine: EngineContext): Promise<void> {
@@ -556,28 +562,7 @@ export function stopEngine(engine: EngineContext): void {
     engine._renderFn = null;
     // No further frame will submit, so retirements queued by (say) a `removeFromScene` issued right
     // before the stop would otherwise sit pending until `disposeEngine`. Flush them behind a fence.
-    flushGpuResourceRetirements(engine);
-}
-
-/** Release all engine-owned GPU resources (device + every attached surface's swapchain
- *  context). Rendering contexts own their own GPU resources (frame graphs, render
- *  targets) and dispose them separately. */
-export function disposeEngine(engine: EngineContext): void {
-    // Drain BEFORE stopping: teardown at engine disposal must stay synchronous, because the device is
-    // destroyed below. `stopEngine` otherwise takes the retirement list for its fenced flush, which
-    // would defer the teardown past `device.destroy()` — and `onSubmittedWorkDone()` on a destroyed
-    // device never usefully resolves. Draining first leaves that flush a no-op.
-    disposeGpuResourceRetirements(engine);
-    stopEngine(engine);
-    const surfaces = engine._surfaces;
-    for (const s of surfaces) {
-        s._renderingContexts.length = 0;
-        s._ro?.disconnect();
-        s._context.unconfigure();
-    }
-    surfaces.length = 0;
-    engine._disposeStorageBuffers?.();
-    engine._device.destroy();
+    engine._flushGpuRetirements?.(engine);
 }
 
 /**
@@ -611,56 +596,61 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
         // Nothing left to draw (e.g. the last scene was unregistered). No submit will happen this frame,
         // so any retirement queued by that removal has to be drained behind a fence instead of waiting
         // for a `queue.submit` that will never come.
-        return flushGpuResourceRetirements(engine);
+        return engine._flushGpuRetirements?.(engine);
     }
 
     const encoder = engine._device.createCommandEncoder({ label: "frame" });
     engine._currentEncoder = encoder;
     engine._currentDelta = delta;
+    try {
+        // Optional GPU timing: write the frame's opening timestamp into the frame encoder. `_gpuTimerBegin`
+        // is undefined unless timing is enabled (its hooks are installed/removed by `setGpuTimingEnabled` from
+        // a dynamic-imported module), so a frame that never enabled timing pays only this short-circuit and
+        // ships none of the timer code. The begin/end pair is written *into* the encoder so the GPU executes
+        // them contiguously around this frame's passes. The published interval also includes both marker
+        // dispatches; see `setGpuTimingEnabled` for the public contract.
+        engine._gpuTimerBegin?.(encoder);
 
-    // Optional GPU timing: write the frame's opening timestamp into the frame encoder. `_gpuTimerBegin`
-    // is undefined unless timing is enabled (its hooks are installed/removed by `setGpuTimingEnabled` from
-    // a dynamic-imported module), so a frame that never enabled timing pays only this short-circuit and
-    // ships none of the timer code. The begin/end pair is written *into* the encoder so the GPU executes
-    // them contiguously around this frame's passes — measuring only the frame's own GPU work.
-    engine._gpuTimerBegin?.(encoder);
-
-    total = 0;
-    for (let i = 0; i < surfaces.length; i++) {
-        const surface = surfaces[i]!;
-        // A queued screenshot (`captureScreenshot`) needs this surface's swapchain marked COPY_SRC
-        // before its frame texture is acquired — reconfiguring the context EXPIRES the current
-        // canvas texture, so it cannot run mid-frame. The hook is installed lazily by
-        // `captureScreenshot`, so non-capturing surfaces ship none of the reconfigure code and pay
-        // only this short-circuit.
-        surface._capturePreFrame?.(surface);
-        _refreshScRT(surface);
-        const ctxs = surface._renderingContexts;
-        for (let j = 0; j < ctxs.length; j++) {
-            const s = ctxs[j]!;
-            s._update();
-            total += s._drawCallsPre + s._record();
+        total = 0;
+        for (let i = 0; i < surfaces.length; i++) {
+            const surface = surfaces[i]!;
+            // A queued screenshot (`captureScreenshot`) needs this surface's swapchain marked COPY_SRC
+            // before its frame texture is acquired — reconfiguring the context EXPIRES the current
+            // canvas texture, so it cannot run mid-frame. The hook is installed lazily by
+            // `captureScreenshot`, so non-capturing surfaces ship none of the reconfigure code and pay
+            // only this short-circuit.
+            surface._capturePreFrame?.(surface);
+            _refreshScRT(surface);
+            const ctxs = surface._renderingContexts;
+            for (let j = 0; j < ctxs.length; j++) {
+                const s = ctxs[j]!;
+                s._update();
+                total += s._drawCallsPre + s._record();
+            }
         }
-    }
 
-    const finalEncoder = engine._currentEncoder;
-    // Per-surface screenshot readback hook — undefined (a no-op optional call) until
-    // `captureScreenshot(surface)` lazily installs it on that surface, so surfaces that
-    // never capture keep this to a single short-circuit and ship none of the readback code.
-    // Each service records its surface's swapchain copy into this frame's encoder.
-    for (let i = 0; i < surfaces.length; i++) {
-        surfaces[i]!._captureService?.(surfaces[i]!, finalEncoder);
+        const finalEncoder = engine._currentEncoder;
+        // Per-surface screenshot readback hook — undefined (a no-op optional call) until
+        // `captureScreenshot(surface)` lazily installs it on that surface, so surfaces that
+        // never capture keep this to a single short-circuit and ship none of the readback code.
+        // Each service records its surface's swapchain copy into this frame's encoder.
+        for (let i = 0; i < surfaces.length; i++) {
+            const surface = surfaces[i]!;
+            surface._captureService?.(surface, finalEncoder);
+        }
+        // Closing timestamp goes in just before the frame encoder is finished, so it bookends exactly the
+        // frame's recorded GPU work (a no-op short-circuit when timing is disabled).
+        engine._gpuTimerEnd?.(finalEncoder);
+        engine._cbs[0] = finalEncoder.finish();
+        engine._device.queue.submit(engine._cbs);
+        engine._flushGpuRetirements?.(engine);
+        engine.drawCallCount = total;
+        // Resolve + read back the timestamp pair asynchronously (its own submit, after the frame's) and
+        // publish the latest completed sample to `gpuFrameTimeMs`. Non-blocking — never stalls this frame.
+        engine._gpuTimerResolve?.();
+    } finally {
+        engine._currentEncoder = undefined!;
     }
-    // Closing timestamp goes in just before the frame encoder is finished, so it bookends exactly the
-    // frame's recorded GPU work (a no-op short-circuit when timing is disabled).
-    engine._gpuTimerEnd?.(finalEncoder);
-    engine._cbs[0] = finalEncoder.finish();
-    engine._device.queue.submit(engine._cbs);
-    flushGpuResourceRetirements(engine);
-    engine.drawCallCount = total;
-    // Resolve + read back the timestamp pair asynchronously (its own submit, after the frame's) and
-    // publish the latest completed sample to `gpuFrameTimeMs`. Non-blocking — never stalls this frame.
-    engine._gpuTimerResolve?.();
 }
 
 /** Whether GPU frame-time measurement is available on this engine's device — i.e. the adapter offered
@@ -671,15 +661,16 @@ export function isGpuTimingSupported(engine: EngineContext): boolean {
 }
 
 /** Enable or disable per-frame GPU timing. Disabled by default and a no-op on devices where
- *  {@link isGpuTimingSupported} is false. While on, {@link EngineContext.gpuFrameTimeMs} is updated each
- *  frame with the measured GPU time — the time the GPU spends on that frame's work, not CPU/wall-clock
- *  time — a frame or two behind via an async, non-blocking readback.
+ *  {@link isGpuTimingSupported} is false. While on, {@link EngineContext.gpuFrameTimeMs} is updated
+ *  a frame or two behind via asynchronous readback. The value is an instrumented GPU interval: it
+ *  includes every command recorded for the frame plus the opening and closing one-workgroup marker
+ *  dispatches. It is not CPU/wall-clock time and should not be treated as a marker-free pass duration.
  *
  *  Implementation: the timer module is dynamic-imported on the first enable, so engines that never call
  *  this ship none of it. Once loaded, three tiny per-frame hooks are installed on the engine; while timing
  *  is off they are undefined and {@link renderFrame} only optional-chains them (a no-op short-circuit), so
  *  scenes that never enable timing pay effectively nothing. The opening/closing timestamps are written into
- *  the frame's command encoder so the GPU runs them contiguously around just that frame's passes. The first
+ *  the frame's command encoder so the GPU runs them contiguously around that frame's passes. The first
  *  enable takes effect a microtask later (the GPU resources are created lazily, then reused); subsequent
  *  toggles are synchronous. */
 export function setGpuTimingEnabled(engine: EngineContext, enabled: boolean): void {

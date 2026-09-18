@@ -22,7 +22,7 @@ import { getBilinearSampler } from "../resource/samplers.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Mat4 } from "../math/types.js";
 import type { RenderTarget } from "../engine/render-target.js";
-import { buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
+import { _resolveRenderTargetSize, buildRenderTarget, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { createPostProcessTask, type PostProcessTask } from "../frame-graph/post-process-task.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { screenSpaceRaymarchWGSL } from "./screen-space-raymarch-wgsl.js";
@@ -122,11 +122,7 @@ export function resolveScreenSpaceSourceSize(source: RenderTarget): { width: num
     if (source._width > 0 && source._height > 0) {
         return { width: source._width, height: source._height };
     }
-    const size = source._descriptor.size;
-    if ("canvas" in size) {
-        return { width: size.canvas.width, height: size.canvas.height };
-    }
-    return size;
+    return _resolveRenderTargetSize(source._descriptor);
 }
 
 /** Throw when `target` is the same object as `source`: sampling and rendering the same

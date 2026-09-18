@@ -20,8 +20,10 @@
 import type { ShaderFragment, BindingDecl, UboField } from "../../../shader/fragment-types.js";
 import type { PbrMaterialProps, ClearCoatProps } from "../pbr-material.js";
 import type { PbrExt } from "../pbr-flags.js";
-import { PBR_HAS_CLEARCOAT, PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP } from "../pbr-flag-bits.js";
+import { PBR_HAS_METALLIC_REFLECTANCE_MAP, PBR_HAS_REFLECTANCE_MAP } from "../pbr-flag-bits.js";
 import { wgsl } from "../../../shader/wgsl.js";
+
+const PBR_HAS_CLEARCOAT = 1 << 20;
 
 // Clearcoat-only features2 bits, kept out of the shared flag module.
 const PBR2_CC_INT_MAP = 1 << 0;

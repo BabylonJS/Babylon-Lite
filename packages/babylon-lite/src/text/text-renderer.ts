@@ -8,7 +8,7 @@
 import { registerRenderingContext, unregisterRenderingContext } from "../engine/engine.js";
 import type { RenderingContext } from "../engine/engine.js";
 import type { SurfaceContext } from "../engine/surface.js";
-import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
+import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
 import type { TextData } from "./text-data.js";
 import { TEXT_INSTANCE_BYTES } from "./text-data.js";
 import type { CurveSetId } from "./glyph-storage.js";

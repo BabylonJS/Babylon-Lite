@@ -3,8 +3,10 @@
  *  hook builds variant material data shared with the material-ext driver. */
 
 import type { AssetContainer } from "../asset-container.js";
-import { collectPbrBoundTextures, type PbrMaterialProps } from "../material/pbr/pbr-material.js";
-import { acquireTexture, releaseTexture } from "../resource/gpu-pool.js";
+import { collectPbrBoundTextures } from "../material/pbr/collect-pbr-bound-textures.js";
+import { type PbrMaterialProps } from "../material/pbr/pbr-material.js";
+import { acquireTexture } from "../resource/texture-acquire.js";
+import { releaseTexture } from "../resource/texture-release.js";
 import type { GltfFeature } from "./gltf-feature.js";
 import { _registerAssetContainerSceneCleanup } from "./gltf-scene-cleanup.js";
 import type { MaterialVariantData } from "./material-variants.js";

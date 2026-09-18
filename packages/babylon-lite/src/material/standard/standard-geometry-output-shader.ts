@@ -32,6 +32,7 @@ import { GeometryTextureType } from "../../frame-graph/geometry-types.js";
 import type { ComposedShader, ShaderFragment, Varying } from "../../shader/fragment-types.js";
 import { MSH_HAS_MORPH_TARGETS, MSH_HAS_THIN_INSTANCES } from "../mesh-features.js";
 import type { StandardSceneShaderContext } from "./standard-material.js";
+import type { MeshVbLayout } from "../../mesh/mesh.js";
 import { composeStandardShader } from "./standard-pipeline.js";
 import { HAS_SKELETON, HAS_SKELETON_8, HAS_SPECULAR_TEXTURE, MATERIAL_ALPHA_BLEND, SPECULAR_USES_UV2 } from "./standard-flags.js";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
@@ -230,7 +231,8 @@ export function composeStandardGeometryShader(
     attachments: readonly GeometryTextureType[],
     esmShadowDepthCode = "",
     emitColor = false,
-    sceneShader: StandardSceneShaderContext | null = null
+    sceneShader: StandardSceneShaderContext | null = null,
+    meshVertexLayout?: MeshVbLayout
 ): ComposedShader {
     // Strip MATERIAL_ALPHA_BLEND so the standard fragment does NOT emit
     // ALPHA_COMBINE blend in its color output — we drive blending per
@@ -243,7 +245,7 @@ export function composeStandardGeometryShader(
         wantsGp || wantsVelocity || wantsLocalPos
             ? [...extFragments, createGeometryParamsFragment(wantsGp, wantsVelocity, wantsLocalPos, stdFeatures, meshFeatures)]
             : extFragments;
-    const base = composeStandardShader(stdFeatures, meshFeatures, fragments, esmShadowDepthCode, sceneShader);
+    const base = composeStandardShader(stdFeatures, meshFeatures, fragments, esmShadowDepthCode, sceneShader, meshVertexLayout);
 
     const hasSpecular = !!(features & HAS_SPECULAR_TEXTURE);
     const specularUv = features & STD_HAS_UV_TRANSFORM ? "input.vs" : features & SPECULAR_USES_UV2 ? "input.vv" : "input.vu";

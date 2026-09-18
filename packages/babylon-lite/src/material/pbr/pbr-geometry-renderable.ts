@@ -21,21 +21,23 @@ import { F32 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import type { Mesh } from "../../mesh/mesh.js";
-import type { MeshGroupBuilder, Renderable } from "../../render/renderable.js";
-import { writeMeshLightSelection } from "../../render/lights-ubo.js";
+import type { MeshGroupBuilder, MeshRebuildResources, Renderable } from "../../render/renderable.js";
+import { writeMeshLightSelection } from "../../render/mesh-light-selection.js";
 import type { SceneContext } from "../../scene/scene-core.js";
-import { createUniformBuffer } from "../../resource/gpu-buffers.js";
-import { acquireTexture, releaseTexture } from "../../resource/gpu-pool.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer.js";
+import { acquireTexture } from "../../resource/texture-acquire.js";
+import { releaseTexture } from "../../resource/texture-release.js";
 import type { ComposedShader } from "../../shader/fragment-types.js";
-import { targetSignatureKey, REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
+import { targetSignatureKey } from "../../engine/render-target-signature.js";
+import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_TANGENTS, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
 import type { Material } from "../material.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 
 import type { PbrMaterialProps } from "./pbr-material.js";
-import { collectPbrBoundTextures } from "./pbr-material.js";
-import { _computePbrMaterialFeatures } from "./pbr-material.js";
+import { collectPbrBoundTextures } from "./collect-pbr-bound-textures.js";
+import { _computePbrMaterialFeatures } from "./pbr-material-features.js";
 import { PBR_HAS_ALPHA_BLEND, PBR_HAS_DOUBLE_SIDED, PBR_HAS_NORMAL_MAP, PBR2_HAS_UV2 } from "./pbr-flags.js";
 import { createPbrMeshBindGroup } from "./pbr-pipeline.js";
 import type { _PbrGeometryContext } from "./pbr-renderable.js";
@@ -59,9 +61,13 @@ export function getPbrGeometryGroupBuilder(): MeshGroupBuilder {
         throw new Error("pbr-geometry view does not support scene group building");
     }) as MeshGroupBuilder;
     builder._materialFamily = "pbr";
-    builder._rebuildSingle = (scene: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
+    builder._sceneIndependentRebuild = true;
+    builder._rebuildSingle = (scene: SceneContext, mesh: Mesh, materialOverride?: Material, resources?: MeshRebuildResources): Renderable => {
         const view = (materialOverride ?? mesh.material) as PbrGeometryMaterialView;
-        return buildPbrGeometryRenderable(scene, mesh, view);
+        if (!resources) {
+            throw new Error("pbr-geometry rebuild requires task-owned resources");
+        }
+        return buildPbrGeometryRenderable(scene, mesh, view, resources);
     };
     return (_pbrGeometryGroupBuilder = builder);
 }
@@ -81,12 +87,12 @@ interface PbrGeometryViewResources {
     _alphaBlend: boolean;
 }
 
-function _variantKey(meshFeatures: number, lightMode: number, singleLightType: string, pluginIndex: number): string {
-    return `${meshFeatures}:${lightMode}:${singleLightType}:${pluginIndex}`;
+function _variantKey(meshFeatures: number, lightMode: number, singleLightType: string, pluginIndex: number, meshVertexKey: string): string {
+    return `${meshFeatures}:${lightMode}:${singleLightType}:${pluginIndex}${meshVertexKey}`;
 }
 
 /** Build a {@link Renderable} for one mesh drawn through a PBR geometry view. */
-export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view: PbrGeometryMaterialView): Renderable {
+export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view: PbrGeometryMaterialView, resources: MeshRebuildResources): Renderable {
     const engine = scene.surface.engine;
     const device = engine._device;
 
@@ -143,8 +149,8 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const meshFeatures = _computeMeshFeatures(mesh, receiveShadows) | ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0);
     const pluginIndex = source._pi ?? 0;
 
-    const variantKey = _variantKey(meshFeatures, lightMode, singleLightType, pluginIndex);
-    const res = _ensureViewResources(view, engine, ctx, meshFeatures, lightMode, singleLightType, pluginIndex, variantKey);
+    const variantKey = _variantKey(meshFeatures, lightMode, singleLightType, pluginIndex, mesh._gpu._vbKey ?? "");
+    const res = _ensureViewResources(view, engine, ctx, meshFeatures, lightMode, singleLightType, pluginIndex, variantKey, mesh._gpu._vbLayout, mesh._gpu._vbKey ?? "");
     // The geometry pass composes its OWN variant, so it needs the mesh's exotic primitive state
     // stamped on separately (see ComposedShader._prim). `variantKey` folds in meshFeatures, whose
     // topology bits this mirrors, so a cached variant only ever sees one value here.
@@ -167,13 +173,29 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     _packMeshWorld(meshUboData, mesh.worldMatrix, 0, 0);
     writeMeshLightSelection(mesh, scene.lights, meshUboData);
     const meshUBO = createUniformBuffer(engine, meshUboData);
+    let materialUBO: GPUBuffer | null = null;
+    let boundTextures: ReturnType<typeof collectPbrBoundTextures> = [];
+    let perMeshDisposed = false;
+    const _disposePerMesh = (): void => {
+        if (perMeshDisposed) {
+            return;
+        }
+        perMeshDisposed = true;
+        meshUBO.destroy();
+        materialUBO?.destroy();
+        for (const texture of boundTextures) {
+            releaseTexture(texture);
+        }
+        boundTextures.length = 0;
+    };
+    resources._lifetimeDisposers.push(_disposePerMesh);
 
     // ── Material UBO ───────────────────────────────────────────────────
     const materialSpec = composed._materialUboSpec!;
     const matInitData = new F32(materialSpec._totalBytes / 4);
     // Use the per-scene writer captured on the geometry context.
     _writePbrMaterialData(matInitData, source, materialSpec);
-    const materialUBO = createUniformBuffer(engine, matInitData);
+    materialUBO = createUniformBuffer(engine, matInitData);
 
     // ── Mesh bind group (group 1). Pass the VIEW as the "material" so the
     //    PBR geometry ext can read `view._gpUBO`. The view inherits all
@@ -206,30 +228,10 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     }
 
     // ── Texture acquire/release lifecycle ──────────────────────────────
-    const boundTextures = collectPbrBoundTextures(source);
-    boundTextures.forEach(acquireTexture);
-    // Per-mesh geometry resources are an AUX/override packet owned by the geometry
-    // TASK, not by the mesh's main material. Registering them on `_meshAuxDisposables`
-    // (NOT `_meshDisposables`) means a MAIN-material swap — which drains + rebuilds
-    // `_meshDisposables` — can no longer destroy this live geometry mesh/material UBO
-    // out from under an in-flight geometry pass. A real `removeFromScene` still frees
-    // them, and the owning task retires the SAME closure on re-record/dispose (see
-    // `retireGeometryBindings`, which also detaches it from the aux list outside any
-    // drain). Idempotent WITHOUT a guard flag: `GPUBuffer.destroy()` is a no-op when
-    // already destroyed, and clearing `boundTextures` after release makes a second call
-    // a no-op release loop — so the task-retire + scene-remove orderings never double
-    // free. MUST NOT self-remove from the aux array (the scene drains iterate it live).
-    const _disposePerMesh = (): void => {
-        meshUBO.destroy();
-        materialUBO.destroy();
-        boundTextures.forEach(releaseTexture);
-        boundTextures.length = 0;
-    };
-    const auxDisposables = scene._meshAuxDisposables;
-    const auxList = auxDisposables.get(mesh) ?? [];
-    auxList.push(_disposePerMesh);
-    auxDisposables.set(mesh, auxList);
-
+    boundTextures = collectPbrBoundTextures(source);
+    for (const texture of boundTextures) {
+        acquireTexture(texture);
+    }
     const hasNormalMap = (features & PBR_HAS_NORMAL_MAP) !== 0 && (meshFeatures & MSH_HAS_TANGENTS) !== 0;
     const hasUV2 = (features2 & PBR2_HAS_UV2) !== 0 && (meshFeatures & MSH_HAS_UV2) !== 0;
     const hasVertexColor = (meshFeatures & MSH_HAS_VERTEX_COLOR) !== 0;
@@ -265,7 +267,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
         }
         const ti = hasTI ? mesh.thinInstances : null;
         if (ti && syncThinInstanceForDraw) {
-            thinDrawArgs = syncThinInstanceForDraw(engine, ti, hasTIColor, mesh._gpu.indexCount);
+            thinDrawArgs = syncThinInstanceForDraw(engine, ti, hasTIColor, mesh._gpu);
         }
     };
     const _invalidate = (): void => {
@@ -318,7 +320,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
         if (ti && thinDrawArgs) {
             pass.drawIndexedIndirect(thinDrawArgs, 0);
         } else {
-            pass.drawIndexed(gpu.indexCount, ti?.count);
+            pass.drawIndexed(gpu.indexCount, ti?.count ?? 1, 0, gpu._baseVertex);
         }
         return 1;
     };
@@ -337,7 +339,6 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
         },
     };
     r._worldCenter = sortCenter;
-    r._geometryDispose = _disposePerMesh;
     return r;
 }
 
@@ -351,7 +352,9 @@ function _ensureViewResources(
     lightMode: 0 | 1 | 2,
     singleLightType: string,
     pluginIndex: number,
-    variantKey: string
+    variantKey: string,
+    meshVertexLayout: Mesh["_gpu"]["_vbLayout"],
+    meshVertexKey: string
 ): PbrGeometryViewResources {
     let cache = view._geometry as Map<string, PbrGeometryViewResources> | undefined;
     if (!cache) {
@@ -369,8 +372,6 @@ function _ensureViewResources(
     const features2 = view._renderFeatures.features2 ?? 0;
     const sceneFeatures = ctx._sceneFeatures;
     const source = view.source as PbrMaterialProps;
-    const vbLayout = (source as unknown as { _vbLayout?: import("../../mesh/mesh.js").MeshVbLayout })._vbLayout;
-    const vbKey = "";
     const uv2Mask = (source as { _uv2Mask?: number })._uv2Mask ?? 0;
 
     // Compose with the active-attachment scope set so the registered ext
@@ -387,8 +388,8 @@ function _ensureViewResources(
             lightMode,
             singleLightType,
             "",
-            vbLayout,
-            vbKey,
+            meshVertexLayout,
+            meshVertexKey,
             view._geometryAttachments,
             view._emitColor,
             uv2Mask,

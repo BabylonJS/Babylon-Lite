@@ -18,10 +18,10 @@ import type { EnvironmentTextures } from "../loader-env/load-env.js";
 import type { EnvironmentRecoverySource } from "../loader-env/environment-recovery.js";
 import type { FrameGraph } from "../frame-graph/frame-graph.js";
 import { createFrameGraph, _appendTask } from "../frame-graph/frame-graph.js";
-import { createRenderTask } from "../frame-graph/render-task.js";
-import { createRenderTarget } from "../engine/render-target.js";
+import { _createAutomaticRenderTask } from "../frame-graph/render-task-base.js";
+import { _createDirectRenderTarget } from "../engine/render-target.js";
 import type { AssetContainer } from "../asset-container.js";
-import type { SceneLightGpuState } from "../render/lights-ubo.js";
+import type { SceneLightGpuState } from "../render/scene-lights-ubo.js";
 import type { ClusteredLightContainer } from "../light/clustered.js";
 import type { FgRuntime } from "../flow-graph/runtime.js";
 import type { PickSource } from "../picking/pick-contributor.js";
@@ -204,13 +204,9 @@ export interface SceneContext extends RenderingContext {
     _disposables: (() => void)[];
     /** @internal Per-mesh cleanup callbacks (mesh UBOs, bind groups). For material swap + dispose. */
     _meshDisposables: Map<Mesh, (() => void)[]>;
-    /** @internal Per-mesh cleanup callbacks for AUX (material-OVERRIDE) view packets that an explicit render
-     *  task registered on a mesh it does not own — e.g. a depth-prepass / SSAO no-colour view of a wall. Kept
-     *  SEPARATE from `_meshDisposables` because a MAIN-material swap (`processMaterialSwaps`, which rebuilds
-     *  only the main renderable) must NOT tear these down: they belong to another task, whose cached bundle
-     *  would then replay a destroyed system UBO ("used in submit while destroyed"). Drained only on a real mesh
-     *  removal (`removeFromScene`) and scene dispose, exactly like `_meshDisposables` minus the swap path. */
-    _meshAuxDisposables: Map<Mesh, (() => void)[]>;
+    /** @internal Resource-usage observer called after add/reassignment and before removal teardown.
+     *  Undefined material detaches a mesh's main-material usage. */
+    _meshMaterialChange?: (mesh: Mesh, material?: Mesh["material"]) => void;
     /** @internal Meshes whose material was changed via setter — drained before each render frame. */
     _materialSwapQueue: Mesh[];
     /** @internal Monotonic counter bumped when the renderable list changes (add/remove/rebuild). */
@@ -235,7 +231,7 @@ export interface SceneContext extends RenderingContext {
     _lightGpuState?: SceneLightGpuState;
 
     /** Frame graph driving this scene's rendering. Created eagerly by
-     *  `createSceneContext` with a default `RenderTask` that mirrors
+     *  `createSceneContext` with a lightweight automatic render task that mirrors
      *  `_renderables` into the swapchain. User code may add additional tasks
      *  (offscreen RTTs, post-FX, UI overlays, etc.). */
     /** @internal */
@@ -304,7 +300,6 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
         _groups: new Map(),
         _disposables: [],
         _meshDisposables: new Map(),
-        _meshAuxDisposables: new Map(),
         _materialSwapQueue: [],
         _renderableVersion: 0,
         _materialEpoch: 0,
@@ -363,10 +358,10 @@ export function createSceneContext(surface: SurfaceContext, options?: SceneConte
         // All three reads (format / msaaSamples / scRT) come from the bound `surface`.
         const msaa = surface.msaaSamples > 1;
         const rt = msaa
-            ? createRenderTarget({ lbl: "scene-color", format: surface.format, dFormat: "depth24plus-stencil8", samples: surface.msaaSamples, size: surface })
+            ? _createDirectRenderTarget({ lbl: "scene-color", format: surface.format, dFormat: "depth24plus-stencil8", samples: surface.msaaSamples, size: surface })
             : surface.scRT;
-        const depth = msaa ? undefined : createRenderTarget({ lbl: "scene-depth", dFormat: "depth24plus-stencil8", samples: 1, size: surface });
-        _appendTask(fg, createRenderTask({ name: "scene", rt, rst: msaa ? surface.scRT : undefined, depth }, eng, ctx));
+        const depth = msaa ? undefined : _createDirectRenderTarget({ lbl: "scene-depth", dFormat: "depth24plus-stencil8", samples: 1, size: surface });
+        _appendTask(fg, _createAutomaticRenderTask({ name: "scene", rt, rst: msaa ? surface.scRT : undefined, depth }, eng, ctx));
     }
     ctx._disposables.push(() => fg.dispose());
     return ctx;
@@ -489,6 +484,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
                 enqueueMaterialSwap(ctx, mesh);
             }
         }
+        ctx._meshMaterialChange?.(mesh, mesh.material);
     } else if ("lightType" in entity) {
         ctx.lights.push(entity as LightBase);
     }
@@ -517,11 +513,7 @@ export function disposeScene(scene: SceneContext): void {
             for (const fns of ctx._meshDisposables.values()) {
                 fns.forEach((dispose) => dispose());
             }
-            for (const fns of ctx._meshAuxDisposables.values()) {
-                fns.forEach((dispose) => dispose());
-            }
             ctx._meshDisposables.clear();
-            ctx._meshAuxDisposables.clear();
             ctx._disposables.splice(0).forEach((dispose) => dispose());
             ctx._renderables.length = ctx._uniformUpdaters.length = 0;
             return 1;
@@ -535,12 +527,6 @@ export function disposeScene(scene: SceneContext): void {
             }
         }
         ctx._meshDisposables.clear();
-        for (const fns of ctx._meshAuxDisposables.values()) {
-            for (const fn of fns) {
-                fn();
-            }
-        }
-        ctx._meshAuxDisposables.clear();
         for (const mesh of ctx.meshes) {
             // Free the mesh's shared GPU buffers only when this was its LAST owning scene.
             // `disposeMeshGpu` is idempotent (`mesh._disposed`), so a deferred free still in flight

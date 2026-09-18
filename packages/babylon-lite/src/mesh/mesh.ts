@@ -3,7 +3,7 @@
 
 import { BU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
-import { createMappedBuffer } from "../resource/gpu-buffers.js";
+import { createMappedBuffer } from "../resource/mapped-buffer.js";
 import type { Material } from "../material/material.js";
 import type { SkeletonData, MorphTargetData, VatData } from "../animation/types.js";
 import type { ThinInstanceData } from "./thin-instance.js";
@@ -27,23 +27,14 @@ export interface MeshVbAttr {
     /** @internal Byte offset within the shared buffer, encoded in the pipeline vertex
      *  layout `attributes[].offset` (the buffer is bound at offset 0). */
     readonly _offset: number;
+    /** @internal Accessor vertex count when this attribute comes from an interleaved bufferView. */
+    readonly _count?: number;
 }
 
-/** Optional per-attribute interleave layout. Only set for meshes that source one
- *  or more attributes from a strided (interleaved) glTF bufferView. */
+/** Null-prototype packing dictionary keyed by material attribute name. */
 export interface MeshVbLayout {
     /** @internal */
-    readonly _p?: MeshVbAttr;
-    /** @internal */
-    readonly _n?: MeshVbAttr;
-    /** @internal */
-    readonly _t?: MeshVbAttr;
-    /** @internal */
-    readonly _u?: MeshVbAttr;
-    /** @internal */
-    readonly _u2?: MeshVbAttr;
-    /** @internal */
-    readonly _c?: MeshVbAttr;
+    readonly [attributeName: string]: MeshVbAttr | undefined;
 }
 
 /** Opaque GPU geometry handle (user never touches these). */
@@ -54,6 +45,8 @@ export interface MeshGPU {
     readonly uvBuffer: GPUBuffer;
     readonly uv2Buffer?: GPUBuffer | null;
     readonly colorBuffer?: GPUBuffer | null;
+    /** @internal Mesh-owned neutral color buffer installed by opt-in material helpers. */
+    _shaderColorFallback?: GPUBuffer;
     readonly hasUv?: boolean;
     readonly hasUv2?: boolean;
     readonly hasTangent?: boolean;
@@ -61,6 +54,21 @@ export interface MeshGPU {
     readonly indexBuffer: GPUBuffer;
     readonly indexCount: number;
     readonly indexFormat: GPUIndexFormat;
+    /** @internal First vertex of this mesh within a shared vertex allocation, applied as the
+     *  draw call's `baseVertex`. Lets many meshes take slots in one GPU-resident slab without
+     *  a non-zero `setVertexBuffer` bind offset. Undefined/0 → canonical behaviour. */
+    readonly _baseVertex?: number;
+    /** @internal Logical vertex count in a GPU-produced mesh's slot. Does not include
+     *  `_baseVertex` or unused capacity elsewhere in its shared allocation. */
+    readonly _vertexCount?: number;
+    /** @internal When false, disposing the mesh does NOT destroy its vertex-side buffers —
+     *  they are BORROWED from a longer-lived allocation (a GPU-resident slab shared by many
+     *  meshes) and must outlive this mesh. Without it, retiring one slot destroys the slab
+     *  every other slot is still drawing from. Defaults to owning. */
+    readonly _ownsVertexBuffers?: boolean;
+    /** @internal When false, disposing the mesh does NOT destroy `indexBuffer` — the topology
+     *  is shared across meshes and owned by the caller. Defaults to owning. */
+    readonly _ownsIndexBuffer?: boolean;
     /** @internal Reserved vertex capacity for grow-only procedural geometry. */
     _vertexCapacity?: number;
     /** @internal Reserved index capacity for grow-only procedural geometry. */

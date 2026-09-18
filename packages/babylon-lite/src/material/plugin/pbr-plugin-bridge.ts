@@ -16,16 +16,12 @@ import type { PbrExt } from "../pbr/pbr-flags.js";
 import type { PbrMaterialProps } from "../pbr/pbr-material.js";
 import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { MaterialPlugin } from "./material-plugin.js";
-import { bindPluginTextures, buildPluginFragment, enabledPlugins, pluginSignature, writePluginUbo } from "./plugin-bridge-shared.js";
+import { bindPluginTextures, buildPluginFragment, collectPluginTextures, enabledPlugins, pluginSignature, writePluginUbo } from "./plugin-bridge-shared.js";
 
-interface PluginEntry {
-    readonly _fragment: ShaderFragment | null;
-}
-
-// Lazy-init module state (no module-level Map — GUIDANCE §4). Signature identities
-// remain stable for the runtime because pipeline/binding caches outlive individual scenes.
+// Shader identities outlive scene registration and device changes. Keep only
+// immutable fragment data here, never material instances or their callbacks.
 let _sigToIndex: Map<string, number> | null = null;
-let _indexToEntry: Map<number, PluginEntry> | null = null;
+let _indexToFragment: ShaderFragment[] | null = null;
 let _counter = 0;
 
 function _indexFor(plugins: readonly MaterialPlugin[]): number {
@@ -33,9 +29,11 @@ function _indexFor(plugins: readonly MaterialPlugin[]): number {
     const map = (_sigToIndex ??= new Map());
     let idx = map.get(sig);
     if (idx === undefined) {
-        idx = ++_counter;
+        idx = _counter + 1;
+        const fragment = buildPluginFragment(plugins, idx, false)._fragment;
+        (_indexToFragment ??= [])[idx] = fragment;
         map.set(sig, idx);
-        (_indexToEntry ??= new Map()).set(idx, { _fragment: buildPluginFragment(plugins, idx, false)._fragment });
+        _counter = idx;
     }
     return idx;
 }
@@ -46,6 +44,7 @@ const pbrPluginExt: PbrExt = {
     detect(mat) {
         const material = mat as PbrMaterialProps & { plugins?: MaterialPlugin[] };
         const plugins = material.plugins;
+        material._preparedPlugins = plugins?.length ? enabledPlugins(plugins) : undefined;
         material._pi = plugins?.length ? _indexFor(plugins) : 0;
         return { f: 0, f2: 0 };
     },
@@ -54,26 +53,28 @@ const pbrPluginExt: PbrExt = {
         if (!idx) {
             return null;
         }
-        return _indexToEntry?.get(idx)?._fragment ?? null;
+        const fragment = _indexToFragment?.[idx];
+        if (!fragment) {
+            throw new Error("PBR material plugin signature is not registered.");
+        }
+        return fragment;
     },
     writeUbo(data, mat, offsets) {
-        const plugins = (mat as PbrMaterialProps & { plugins?: MaterialPlugin[] }).plugins;
+        const plugins = (mat as PbrMaterialProps)._preparedPlugins;
         if (plugins?.length) {
             writePluginUbo(plugins, data, offsets);
         }
     },
     bind(ctx, entries, b) {
-        const plugins = (ctx._material as PbrMaterialProps & { plugins?: MaterialPlugin[] }).plugins;
+        const plugins = (ctx._material as PbrMaterialProps)._preparedPlugins;
         return plugins?.length ? bindPluginTextures(plugins, entries, b) : b;
     },
     textures(mat, out) {
-        const plugins = (mat as PbrMaterialProps & { plugins?: MaterialPlugin[] }).plugins;
+        const plugins = (mat as PbrMaterialProps)._preparedPlugins;
         if (!plugins?.length) {
             return;
         }
-        for (const p of enabledPlugins(plugins)) {
-            p.getActiveTextures?.(out);
-        }
+        collectPluginTextures(plugins, out);
     },
 };
 
