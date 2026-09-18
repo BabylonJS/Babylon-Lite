@@ -679,7 +679,7 @@ export async function loadGaussianSplatStream(engine: EngineContext, metadataUrl
     }
     const retirement = createSplatSourceRetirement(engine);
     const ledger = createSplatStreamGpuLedger(normalized.maxGpuBytes, retirement);
-    const gpu = (runtime.createGpuState ?? createSplatStreamGpuState)(engine, normalized.maxSplats, normalized.maxGpuBytes, ledger);
+    const gpu = (runtime.createGpuState ?? createSplatStreamGpuState)(engine, normalized.maxCapacitySplats, normalized.maxGpuBytes, ledger);
     const testableGpu = gpu as SplatStreamGpuState & { ledger?: typeof ledger; gpuBytes?: number };
     testableGpu.ledger ??= ledger;
     testableGpu.gpuBytes ??= 0;

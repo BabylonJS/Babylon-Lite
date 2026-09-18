@@ -16,9 +16,11 @@ import { attachTrogirCameraMode } from "./trogir-camera-mode";
 import { formatTrogirCameraPose } from "./trogir-camera-pose";
 import { placeTrogirStream } from "./trogir-streaming-placement";
 
-const DEFAULT_METADATA_URL = "https://d28zzqy0iyovbz.cloudfront.net/14bac5b2/v1/lod-meta.json";
+const DEFAULT_METADATA_URL = "https://assets.babylonjs.com/splats/Trogir/lod-meta.json";
 const LOCAL_SETUP = 'GS_STREAM_ASSET_ROOT="<dataset-directory>" pnpm --dir lab dev';
 const MB = 1024 * 1024;
+const MAX_FOREGROUND_SPLATS = 4_000_000;
+const STREAM_CAPACITY = MAX_FOREGROUND_SPLATS + 10_000;
 
 function metadataUrl(): string {
     const configured = new URLSearchParams(location.search).get("assetRoot");
@@ -182,11 +184,17 @@ async function main(): Promise<void> {
     window.addEventListener("pagehide", dispose, { once: true });
 
     try {
-        engine = await createEngine(canvas);
+        engine = await createEngine(canvas, {
+            requiredLimits: {
+                maxBufferSize: STREAM_CAPACITY * 64,
+                maxStorageBufferBindingSize: STREAM_CAPACITY * 64,
+            },
+        });
         scene = createSceneContext(engine);
         stream = await loadGaussianSplatStream(engine, metadataUrl(), {
-            maxSplats: 1_000_000,
-            maxGpuBytes: 256 * MB,
+            maxSplats: 750_000,
+            maxCapacitySplats: STREAM_CAPACITY,
+            maxGpuBytes: 1024 * MB,
             maxCpuBytes: 96 * MB,
             screenError: 2,
         });

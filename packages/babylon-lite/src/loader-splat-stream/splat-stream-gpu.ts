@@ -235,6 +235,12 @@ function passStateBytes(capacity: number): number {
 export function createSplatStreamGpuState(engine: EngineContext, requestedCapacity: number, maxGpuBytes: number, sharedLedger?: SplatStreamGpuLedger): SplatStreamGpuState {
     const device = engine._device;
     const capacity = getSplatStreamGpuCapacity(device, requestedCapacity, maxGpuBytes);
+    if (capacity < requestedCapacity) {
+        throw new Error(
+            `[GaussianSplatStream] requested GPU capacity ${requestedCapacity} exceeds the admitted device/budget capacity ${capacity} ` +
+                `(maxBufferSize ${device.limits.maxBufferSize}, maxStorageBufferBindingSize ${device.limits.maxStorageBufferBindingSize}, maxGpuBytes ${maxGpuBytes})`
+        );
+    }
     const ledger = sharedLedger ?? createSplatStreamGpuLedger(maxGpuBytes, (dispose) => retireGpuResources(engine, dispose));
     const gpuBytes = streamStateBytes(capacity);
     const initialPassBytes = passStateBytes(capacity);

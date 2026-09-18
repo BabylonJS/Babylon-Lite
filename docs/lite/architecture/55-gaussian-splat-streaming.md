@@ -24,6 +24,7 @@ All public values are pure data. Behavior is provided by standalone functions. `
 ```ts
 export interface GaussianSplatStreamOptions {
     maxSplats?: number;
+    maxCapacitySplats?: number;
     maxGpuBytes?: number;
     maxCpuBytes?: number;
     maxConcurrentRequests?: number;
@@ -71,16 +72,17 @@ export function disposeGaussianSplatStream(scene: SceneContext, stream: Gaussian
 
 Defaults:
 
-| Option                  |   Default | Validation                                                                |
-| ----------------------- | --------: | ------------------------------------------------------------------------- |
-| `maxSplats`             | 1,000,000 | safe integer, greater than zero                                           |
-| `maxGpuBytes`           |   256 MiB | safe integer, greater than zero, reduced only by documented device limits |
-| `maxCpuBytes`           |    64 MiB | safe integer, greater than zero                                           |
-| `maxConcurrentRequests` |         6 | safe integer in 1..32                                                     |
-| `maxConcurrentDecodes`  |         2 | safe integer in 1..8                                                      |
-| `screenError`           |  2 pixels | finite and greater than zero                                              |
-| `lodHysteresis`         |      0.15 | finite in 0..1                                                            |
-| `maxRetries`            |         2 | safe integer in 0..8                                                      |
+| Option                  |   Default | Validation                                   |
+| ----------------------- | --------: | -------------------------------------------- |
+| `maxSplats`             | 1,000,000 | safe integer, greater than zero              |
+| `maxCapacitySplats`     | maxSplats | immutable safe integer, at least `maxSplats` |
+| `maxGpuBytes`           |   256 MiB | safe integer, greater than zero              |
+| `maxCpuBytes`           |    64 MiB | safe integer, greater than zero              |
+| `maxConcurrentRequests` |         6 | safe integer in 1..32                        |
+| `maxConcurrentDecodes`  |         2 | safe integer in 1..8                         |
+| `screenError`           |  2 pixels | finite and greater than zero                 |
+| `lodHysteresis`         |      0.15 | finite in 0..1                               |
+| `maxRetries`            |         2 | safe integer in 0..8                         |
 
 The load promise resolves after the manifest is validated and stream state is initialized. It does not wait for a chunk. `attachGaussianSplatStream` is explicit, idempotence-guarded, and must run before or during scene registration. `firstFrameReady` resolves only after a nonempty coarse indirect draw has been submitted and `queue.onSubmittedWorkDone()` confirms completion. It rejects on bootstrap failure or disposal before that draw. Refinement failures remain visible through `stats.error` without rejecting an already-resolved readiness promise.
 
@@ -387,7 +389,7 @@ Each resident source owns:
 
 Source texture bytes are `5 * width * height * 4`. GPU accounting uses one stream-wide ledger and includes active canonical atlas, projected records, two key/index arrays, both indirect buffers, radix histograms/scans, uniforms, source metadata, pending replacement generation, and resources queued for retirement. `residentGpuBytes` is the exact byte total of currently useful allocated buffers/textures; `allocatedGpuBytes` additionally retains retirement-pending bytes until their fence disposer runs. Admission holds (which own budget but are not yet allocations) are not reported as allocated bytes. Before source textures are created, global-ledger admission computes the byte shortfall after crediting source bytes already queued for retirement, selects only enough additional protected-aware source LRU victims to make that reservation possible after retirement, and retires them. Their allocated bytes remain charged until the submission fence disposer runs, so an attempt waits rather than evicting extra sources while prior victims are still retiring. Source upload reserves once and transfers that reservation to the cache; cache admission never grants it again.
 
-Canonical capacity is bounded by device limits and by at most 75% of `maxGpuBytes` for one canonical plus one pass-local working generation, leaving source headroom. The exact first pass-local allocation is held before source requests can consume its budget, then converted to allocated bytes when the binding is built. Additional target bindings require independent admission. Replacement is make-before-break, and old generations remain charged until `retireGpuResources` runs.
+Canonical capacity is bounded by device limits and by at most 75% of `maxGpuBytes` for one canonical plus one pass-local working generation, leaving source headroom. `maxCapacitySplats` separates this immutable allocation ceiling from the mutable `maxSplats` selection target. If device limits or the working budget cannot admit the requested capacity exactly, load fails with the requested and admitted capacities instead of silently clamping and failing later during display. The exact first pass-local allocation is held before source requests can consume its budget, then converted to allocated bytes when the binding is built. Additional target bindings require independent admission. Replacement is make-before-break, and old generations remain charged until `retireGpuResources` runs.
 
 Eviction is byte-aware LRU among resident sources with zero displayed refs, zero pending refs, zero active-interval refs, and no bootstrap pin. Active descriptors, including the environment interval, pending replacements, and submitted generations protect resources. `lastUsedFrame` advances only when a source participates in the active interval generation; merely remaining warm does not refresh it. Eviction removes the cache entry and synchronously clears its source runtime plus every matching displayed and pending leaf reference before retirement, so no stale descriptor can falsely satisfy target equality or coverage. If that leaf becomes visible again, the best already-resident alternative at or below its target is displayed immediately while the unchanged target source is requested again. The main bootstrap fallback remains pinned. Sparse-leaf fallback intervals may be copied into canonical active storage without pinning their entire otherwise-unused large source after a later replacement is displayed.
 
@@ -596,7 +598,7 @@ The Vite plugin mounts only the configured dataset root at `/local-gs/trogir/` w
 Client metadata URL precedence:
 
 1. `?assetRoot=<dataset-root-or-full-lod-meta.json-url>` resolved against `location.href`;
-2. the public source manifest `https://d28zzqy0iyovbz.cloudfront.net/14bac5b2/v1/lod-meta.json`.
+2. the Babylon-hosted public source manifest `https://assets.babylonjs.com/splats/Trogir/lod-meta.json`.
 
 The public source requires no local setup. To select the optional local mount explicitly:
 
@@ -607,7 +609,7 @@ http://localhost:5174/demo-trogir-streaming.html?assetRoot=/local-gs/trogir/
 
 An `assetRoot` ending in `/lod-meta.json` is used as the manifest URL directly; other values retain directory-root behavior and have `lod-meta.json` appended. If the selected source cannot be loaded, the page reports the error and shows both the local setup and hosted override forms instead of hanging.
 
-The demo provides detail error and splat-budget controls, an accessible Orbit / First person camera-mode button, and a nonblocking HUD for phase, first-frame time, selected splats, visible/covered leaves, resident/allocated GPU bytes, resident files, and pending requests. Orbit is the default. Switching camera modes creates the corresponding public Lite camera at the active camera's world-space eye and look direction, copies FOV/near/far, detaches the inactive controls before attaching the new controls, and leaves the stream instance and residency untouched. Returning to orbit uses the last orbit focus distance along the current first-person look direction, preserving the current eye and heading without teleporting; restored near-pole beta values widen that camera's interaction limits rather than clamping and moving the pose. `attachTrogirCameraMode` returns one idempotent detach function instead of attaching behavior to public state. The active mode, button state, and control help remain synchronized; detachment removes the button listener and whichever camera controls are active.
+The demo provides detail error and splat-budget controls, an accessible Orbit / First person camera-mode button, and a nonblocking HUD for phase, first-frame time, selected splats, visible/covered leaves, resident/allocated GPU bytes, resident files, and pending requests. The splat-budget slider starts at 750,000 and reaches 4,000,000 foreground splats. The demo therefore requests a 4,010,000-splat immutable capacity (reserving 10,000 slots for the 9,237-splat environment), a 1 GiB stream ledger, and the corresponding 256,640,000-byte WebGPU storage-buffer limits at device creation. This allocates the large working set up front even at the default target; an adapter that cannot expose those limits fails explicitly during startup. Orbit is the default. Switching camera modes creates the corresponding public Lite camera at the active camera's world-space eye and look direction, copies FOV/near/far, detaches the inactive controls before attaching the new controls, and leaves the stream instance and residency untouched. Returning to orbit uses the last orbit focus distance along the current first-person look direction, preserving the current eye and heading without teleporting; restored near-pole beta values widen that camera's interaction limits rather than clamping and moving the pose. `attachTrogirCameraMode` returns one idempotent detach function instead of attaching behavior to public state. The active mode, button state, and control help remain synchronized; detachment removes the button listener and whichever camera controls are active.
 
 An initially collapsed native `details` section in the same panel reports the active camera's world position and yaw/pitch/roll in degrees. It always derives from `scene.camera.worldMatrix`, never mode-specific local fields: translation is matrix elements 12–14, forward is the normalized third basis column, yaw is rotation about world +Y, pitch is positive when looking up, and roll is the signed rotation of the first basis column from the zero-roll right vector about forward. Near a vertical forward direction, yaw falls back to the projected right/up basis so every valid displayed value remains finite; exact and rounded negative zero format as zero. Nonfinite, zero-length, or singular camera bases are rejected by the pure pose reader with a `RangeError`; the HUD catches only that expected validation type, displays its specific message plus unavailable fields instead of substituting plausible zero values, and rethrows unrelated failures. The toggle event refreshes the values immediately when opened, while the render callback skips all pose derivation and formatting while collapsed. The HUD keeps its existing content width but bounds its total box to the viewport margins and scrolls vertically when expanded content exceeds a short viewport. The blocking overlay disappears on `firstFrameReady`, not convergence.
 

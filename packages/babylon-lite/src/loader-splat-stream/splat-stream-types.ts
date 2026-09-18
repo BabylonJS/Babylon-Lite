@@ -8,6 +8,8 @@ import type { SplatStreamGpuLedger } from "./splat-stream-gpu-ledger.js";
 
 export interface GaussianSplatStreamOptions {
     maxSplats?: number;
+    /** Immutable GPU working-set capacity. Defaults to maxSplats and must be at least maxSplats. */
+    maxCapacitySplats?: number;
     maxGpuBytes?: number;
     maxCpuBytes?: number;
     maxConcurrentRequests?: number;
@@ -152,6 +154,7 @@ export interface GaussianSplatStream extends SceneNode {
 /** @internal */
 export interface NormalizedSplatStreamOptions {
     readonly maxSplats: number;
+    readonly maxCapacitySplats: number;
     readonly maxGpuBytes: number;
     readonly maxCpuBytes: number;
     readonly maxConcurrentRequests: number;
@@ -297,8 +300,14 @@ export function normalizeSplatStreamOptions(options: GaussianSplatStreamOptions 
     if (!Number.isSafeInteger(maxRetries) || maxRetries < 0 || maxRetries > 8) {
         throw new RangeError("[GaussianSplatStream] maxRetries must be a safe integer in 0..8");
     }
+    const maxSplats = positiveSafeInteger(options.maxSplats, 1_000_000, "maxSplats");
+    const maxCapacitySplats = positiveSafeInteger(options.maxCapacitySplats, maxSplats, "maxCapacitySplats");
+    if (maxCapacitySplats < maxSplats) {
+        throw new RangeError("[GaussianSplatStream] maxCapacitySplats must be at least maxSplats");
+    }
     return {
-        maxSplats: positiveSafeInteger(options.maxSplats, 1_000_000, "maxSplats"),
+        maxSplats,
+        maxCapacitySplats,
         maxGpuBytes: positiveSafeInteger(options.maxGpuBytes, 256 * 1024 * 1024, "maxGpuBytes"),
         maxCpuBytes: positiveSafeInteger(options.maxCpuBytes, 64 * 1024 * 1024, "maxCpuBytes"),
         maxConcurrentRequests: positiveSafeInteger(options.maxConcurrentRequests, 6, "maxConcurrentRequests", 32),

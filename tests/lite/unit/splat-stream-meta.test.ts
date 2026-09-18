@@ -122,6 +122,7 @@ describe("lod-meta v1", () => {
     it("validates option defaults and ranges before allocation", () => {
         expect(normalizeSplatStreamOptions()).toMatchObject({
             maxSplats: 1_000_000,
+            maxCapacitySplats: 1_000_000,
             maxGpuBytes: 256 * 1024 * 1024,
             maxCpuBytes: 64 * 1024 * 1024,
             maxConcurrentRequests: 6,
@@ -131,6 +132,11 @@ describe("lod-meta v1", () => {
             maxRetries: 2,
         });
         expect(() => normalizeSplatStreamOptions({ maxConcurrentRequests: 33 })).toThrow(RangeError);
+        expect(normalizeSplatStreamOptions({ maxSplats: 750_000, maxCapacitySplats: 4_010_000 })).toMatchObject({
+            maxSplats: 750_000,
+            maxCapacitySplats: 4_010_000,
+        });
+        expect(() => normalizeSplatStreamOptions({ maxSplats: 750_000, maxCapacitySplats: 749_999 })).toThrow("at least maxSplats");
         expect(() => normalizeSplatStreamOptions({ maxConcurrentDecodes: 0 })).toThrow(RangeError);
         expect(() => normalizeSplatStreamOptions({ lodHysteresis: 1.1 })).toThrow(RangeError);
         expect(() => normalizeSplatStreamOptions({ maxRetries: -1 })).toThrow(RangeError);
