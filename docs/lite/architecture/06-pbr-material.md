@@ -50,6 +50,11 @@ pbr-renderable.ts:
 
 ## Dynamic Feature Flags (`pbr-flags.ts`)
 
+Bits used exclusively by one lazy fragment are declared in that fragment, with
+their numbers reserved in `pbr-flag-bits.ts`: clearcoat owns bit 20, and sheen
+owns its texture/albedo-scaling bits 23 and 30. Shared cross-fragment bits remain
+shared. Moving ownership does not change any bit value or shader-cache key.
+
 | Flag                               | Constant  | Condition                     | Shader effect                                        |
 | ---------------------------------- | --------- | ----------------------------- | ---------------------------------------------------- |
 | `PBR_HAS_NORMAL_MAP`               | `1 << 0`  | Mesh has tangent buffer       | Tangent vertex attr + normal texture + TBN transform |

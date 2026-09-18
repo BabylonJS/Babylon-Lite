@@ -35,6 +35,50 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes graph-specific Node block loaders only through the root API", () => {
+        const probePath = resolve(BUILD_DIR, "node-block-loader.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createNodeMaterialBlockLoader, nodeInputBlock, nodeTextureBlock, nodeMatrixBuilder,
+    nodePbrMetallicRoughnessBlockFull, type ParseNodeMaterialOptions, type NodeMaterialBlock,
+} from "./index.js";
+const blocks: readonly NodeMaterialBlock[] = [nodeInputBlock, nodeTextureBlock, nodeMatrixBuilder];
+const options: ParseNodeMaterialOptions = { blockLoader: createNodeMaterialBlockLoader(blocks) };
+createNodeMaterialBlockLoader([nodePbrMetallicRoughnessBlockFull]);
+// @ts-expect-error Implementation callbacks are internal, not public GPU/compiler API.
+nodeInputBlock._load();
+void options;
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("requires at least one source for separate-file KTX2 arrays", () => {
         const probePath = resolve(BUILD_DIR, "ktx2-array-sources.probe.ts");
         try {
