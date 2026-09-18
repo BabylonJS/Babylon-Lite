@@ -1,6 +1,6 @@
 # Bundle-size follow-up
 
-The consolidated change is based on master `639937f5`, after PR #736 merged.
+The consolidated change is based on master `adca50f3`, after PRs #736 and #737 merged.
 It contains only the retained bundle work, not another copy of the matrix change.
 Measurements count only runtime-fetched JavaScript, with the existing raw/gzip
 accounting and unchanged scene ceilings. Historical matrix CPU measurements are
@@ -8,33 +8,39 @@ not reused as evidence for these changes.
 
 ## Final combined result against current master
 
-The retained set comprises fragment-owned PBR constants, a single shader-binding
-dispatch, consolidated Node pipeline descriptors, and opt-in graph-specific lazy
-block loaders. All thirteen affected scenes shrink in both raw and gzip bytes.
+The retained set comprises fragment-owned PBR constants, corrected storage-texture
+access descriptors, consolidated Node pipeline descriptors, and opt-in graph-specific
+lazy block loaders. Master now independently includes the single shader-binding
+dispatch, so its earlier savings are no longer attributed to this PR.
 The larger gains require selecting a fixed graph's blocks; the default loader
 continues to support arbitrary graphs without a new opt-in requirement.
 
-| Scene | Raw before | Raw after | Gzip before | Gzip after | Gzip saved |
+| Scene | Raw before | Raw after | Gzip before | Gzip after | Gzip delta |
 | ----- | ---------: | --------: | ----------: | ---------: | ---------: |
-| 1     |     89,208 |    89,022 |      38,485 |     38,437 |         48 |
-| 2     |     45,480 |    45,341 |      18,985 |     18,976 |          9 |
-| 7     |    106,169 |   105,981 |      46,302 |     46,262 |         40 |
-| 28    |     87,397 |    87,209 |      36,994 |     36,942 |         52 |
-| 29    |     91,267 |    91,083 |      39,165 |     39,116 |         49 |
-| 62    |     57,805 |    52,419 |      25,278 |     23,673 |      1,605 |
-| 66    |     88,908 |    85,918 |      43,550 |     42,674 |        876 |
-| 72    |    108,413 |   108,219 |      45,921 |     45,867 |         54 |
-| 88    |     57,818 |    50,832 |      26,709 |     24,361 |      2,348 |
-| 140   |     91,907 |    91,243 |      45,030 |     44,827 |        203 |
-| 141   |    114,458 |   113,660 |      50,865 |     50,695 |        170 |
-| 149   |    102,288 |    96,742 |      43,652 |     42,000 |      1,652 |
-| 231   |     52,232 |    52,089 |      21,431 |     21,427 |          4 |
+| 1     |     88,922 |    88,937 |      38,414 |     38,417 |         +3 |
+| 2     |     45,296 |    45,358 |      18,979 |     19,005 |        +26 |
+| 7     |    105,886 |   105,896 |      46,261 |     46,261 |          0 |
+| 28    |     87,111 |    87,124 |      36,933 |     36,924 |         -9 |
+| 29    |     90,981 |    90,998 |      39,098 |     39,101 |         +3 |
+| 62    |     57,774 |    52,474 |      25,445 |     23,843 |     -1,602 |
+| 66    |     88,885 |    85,980 |      43,706 |     42,836 |       -870 |
+| 72    |    108,411 |   108,290 |      46,089 |     46,044 |        -45 |
+| 88    |     57,789 |    50,894 |      26,866 |     24,529 |     -2,337 |
+| 140   |     91,881 |    91,305 |      45,175 |     44,995 |       -180 |
+| 141   |    114,128 |   113,617 |      50,988 |     50,875 |       -113 |
+| 149   |    102,270 |    96,811 |      43,740 |     42,164 |     -1,576 |
+| 231   |     52,038 |    52,105 |      21,423 |     21,446 |        +23 |
+| 285   |     44,860 |    44,860 |      18,917 |     18,912 |         -5 |
 
-The four converted graphs save **876-2,348 gzip bytes** and **2,990-6,986 raw
+The four converted graphs save **870-2,337 gzip bytes** and **2,905-6,895 raw
 bytes**, including their generated loader code. These are per-scene results, not
 additive application-wide savings. The simple graph exceeds the 1 KiB gzip keep
 target. The remaining changes are small; their value also includes removing
-duplicate code and correcting storage-texture access descriptors.
+duplicate code and correcting storage-texture access descriptors. Against the
+new master baseline, that correctness fix leaves small increases in six
+Standard/PBR controls: at most **67 raw / 26 gzip bytes**, explicitly approved
+by the user. No ceiling was raised. The new storage-geometry control (scene285)
+has unchanged raw size.
 
 An independent library/bundle rebuild matches fetched bodies, manifests, module
 attribution and exact accounting. The generated loader modules are present in
@@ -45,12 +51,16 @@ lint, generator freshness and three published-API/root-export assertions.
 The review follow-up covers 131 targeted unit cases, including catalog
 completeness, all four shared matrix loaders and immediate rejection of malformed
 descriptors; ten regression cases fail on the original implementation.
+After integrating storage-backed geometry, 360 scoped cases pass, including
+per-mesh vertex packing and pipeline-cache coverage. The ten original Node
+output snapshots remain unchanged. Geometry retains master's descriptor callback
+and packed pipelines reuse the consolidated descriptor.
 No performance or visual tests were run for this bundle campaign.
 
 Evidence: session `3eaf8721-c709-45e3-acc3-1c52e502f504`,
-`files/bundle-pr/report-review-candidate.json`, with `baseline/`,
-`review-candidate/`, `review-reproduced/`, the retained/review patches and paired
-logs. The original `report.json` remains archived. The following sections preserve the earlier
+`files/bundle-pr/merge-storage/report.json`, with `baseline/`, `candidate/`,
+`reproduced/`, the retained patch, explicit control-drift approval and paired
+logs. The original and review-follow-up reports remain archived. The following sections preserve the earlier
 incremental experiments and their original baselines; do not add those deltas
 to the final combined table above.
 
@@ -152,8 +162,9 @@ terminals. Generated loaders are ordinary counted runtime modules, never
 excluded `*-nme.ts` data payloads. The simple texture graph exceeds the 1 KiB gzip
 keep target. Full NME, loop and geometry graphs also shrink. The user explicitly
 accepted control drift of up to +4 gzip bytes in scene2 and +3 raw bytes in
-scene141 during the isolated experiment; no ceilings were changed. The final
-combined result against current master has no regression in either control.
+scene141 during the isolated experiment; no ceilings were changed. The later
+master integration and its separate explicit approval are reported in the final
+combined result above.
 
 The first eager catalog exceeded scene ceilings and was rejected. A per-block
 static variant saved more bytes for bundler consumers but connected every block
