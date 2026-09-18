@@ -681,6 +681,27 @@ export { setShadowCasterMaterial } from "./material/set-shadow-caster-material.j
 
 // ─── Animation ───────────────────────────────────────────────────────
 export { createAnimationController } from "./skeleton/skeleton-updater.js";
+export {
+    backEase,
+    bezierCurveEase,
+    bounceEase,
+    circleEase,
+    createBackEase,
+    createBezierCurveEase,
+    createBounceEase,
+    createElasticEase,
+    createExponentialEase,
+    createPowerEase,
+    cubicEase,
+    elasticEase,
+    exponentialEase,
+    powerEase,
+    quadraticEase,
+    quarticEase,
+    quinticEase,
+    sineEase,
+} from "./animation/easing.js";
+export type { AnimationEasing } from "./animation/easing.js";
 // Opt-in bone control for skinned models (near-zero bundle cost unless enableBoneControl is called).
 export {
     enableBoneControl,

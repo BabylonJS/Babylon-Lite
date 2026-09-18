@@ -7,6 +7,7 @@ export const ANIMATION_GROUP_TASK_CATEGORY = "animation-group";
 
 interface AnimationGroupTaskManager extends AnimationManager {
     _animationGroups?: AnimationGroup[];
+    _nextAnimationGroupOrder?: number;
 }
 
 interface AnimationGroupTaskGroup extends AnimationGroup {
@@ -45,6 +46,12 @@ export function addAnimationGroup(manager: AnimationManager, group: AnimationGro
     if (owner === manager) {
         return;
     }
+    const managerInternal = manager as AnimationGroupTaskManager;
+    if (groupInternal._animationOrderManager !== manager) {
+        groupInternal._animationOrderManager = manager;
+        groupInternal._animationOrder = managerInternal._nextAnimationGroupOrder ?? 0;
+        managerInternal._nextAnimationGroupOrder = groupInternal._animationOrder + 1;
+    }
     const task =
         groupInternal._animationTask ??
         createAnimationTask(
@@ -65,10 +72,25 @@ export function addAnimationGroup(manager: AnimationManager, group: AnimationGro
                 },
             }
         );
-    getMutableAnimationGroups(manager).push(group);
+    const groups = getMutableAnimationGroups(manager);
+    const order = groupInternal._animationOrder!;
+    let groupIndex = groups.length;
+    while (groupIndex > 0 && ((groups[groupIndex - 1] as AnimationGroupTaskGroup)._animationOrder ?? -1) > order) {
+        groupIndex--;
+    }
+    groups.splice(groupIndex, 0, group);
     groupInternal._animationManager = manager;
     groupInternal._animationTask = task;
     addAnimationTask(manager, task);
+    const nextTask = (groups[groupIndex + 1] as AnimationGroupTaskGroup | undefined)?._animationTask;
+    if (nextTask) {
+        const taskIndex = manager.animations.indexOf(task);
+        const nextTaskIndex = manager.animations.indexOf(nextTask);
+        if (taskIndex > nextTaskIndex && nextTaskIndex !== -1) {
+            manager.animations.splice(taskIndex, 1);
+            manager.animations.splice(nextTaskIndex, 0, task);
+        }
+    }
 }
 
 /** Attaches each group in `groups` to `manager` via {@link addAnimationGroup}. */

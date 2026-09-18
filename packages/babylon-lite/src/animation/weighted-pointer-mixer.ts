@@ -4,7 +4,7 @@ import type { AnimationGroup, AnimationPropertyMixer, AnimationPropertyRuntimeTr
 import { ANIMATION_GROUP_TASK_CATEGORY, getAnimationGroups } from "./animation-group-task.js";
 import { setAnimationTaskCategoryHandler } from "./animation-manager.js";
 import type { AnimationManager } from "./animation-manager.js";
-import { evaluateSampler } from "./evaluate.js";
+import { evaluatePropertySampler } from "./evaluate.js";
 
 const MIX_TRACKS = 0;
 const MIX_FROM = 1;
@@ -107,7 +107,7 @@ function updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: num
 
         for (let trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
             const track = tracks[trackIndex]!;
-            evaluateSampler(track.sampler, t, track.stride, track.quaternion, scratch.sample, 0);
+            evaluatePropertySampler(track.sampler, t, track.stride, track.quaternion, track.easing, scratch.sample, 0);
             const bucket = getTrackBucket(scratch.buckets, track);
             if (!bucket.contested) {
                 track.writer(scratch.sample, 0);
@@ -145,13 +145,21 @@ function advancePropertyGroupTime(group: AnimationGroup, mixer: AnimationPropert
         return fromTime;
     }
 
-    if (group.loopAnimation) {
-        group.currentTime = fromTime + ((group.currentTime - fromTime) % duration);
-        if (group.currentTime < fromTime) {
-            group.currentTime += duration;
+    if (group.isPlaying) {
+        if (group.loopAnimation) {
+            group.currentTime = fromTime + ((group.currentTime - fromTime) % duration);
+            if (group.currentTime < fromTime) {
+                group.currentTime += duration;
+            }
+        } else {
+            group.currentTime = Math.min(Math.max(group.currentTime, fromTime), toTime);
+            if (group.speedRatio >= 0 && group.currentTime >= toTime) {
+                group.isPlaying = false;
+                group._stopped = true;
+            }
         }
     } else {
-        group.currentTime = Math.min(Math.max(group.currentTime, fromTime), toTime);
+        group.currentTime = Math.min(Math.max(group.currentTime, 0), mixer[MIX_DURATION]);
     }
     return group.currentTime;
 }
