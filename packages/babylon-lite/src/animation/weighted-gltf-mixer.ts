@@ -14,11 +14,21 @@ import { _boneApplier } from "../skeleton/bone-control-hooks.js";
 import type { BoneOverride } from "../skeleton/bone-control.js";
 
 type PropertyMixerHandler = (manager: AnimationManager, deltaMs: number, onlyPropertyGroups: boolean) => boolean;
+type PropertyMixerDirectHandler = (manager: AnimationManager, group: AnimationGroup) => void;
+type PropertyMixerFinishHandler = (manager: AnimationManager) => void;
 let _propertyMixerHandler: PropertyMixerHandler | null = null;
+let _propertyMixerDirectHandler: PropertyMixerDirectHandler | null = null;
+let _propertyMixerFinishHandler: PropertyMixerFinishHandler | null = null;
 
 /** @internal Install opt-in property-track handling for the skeletal blend manager. */
-export function _installPropertyMixerHandler(handler: PropertyMixerHandler | null): void {
+export function _installPropertyMixerHandler(
+    handler: PropertyMixerHandler | null,
+    directHandler: PropertyMixerDirectHandler | null = null,
+    finishHandler: PropertyMixerFinishHandler | null = null
+): void {
     _propertyMixerHandler = handler;
+    _propertyMixerDirectHandler = directHandler;
+    _propertyMixerFinishHandler = finishHandler;
 }
 
 const GLTF_CLIP = 0;
@@ -129,10 +139,16 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
         if (handledPropertyGroups) {
             for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
                 const group = groups[groupIndex]!;
-                if (!group._stopped && !group._propertyMixerHandled) {
+                if (group._stopped) {
+                    continue;
+                }
+                if (group._propertyMixerHandled) {
+                    _propertyMixerDirectHandler?.(manager, group);
+                } else {
                     tickAnimationCore(group, deltaMs, manager.engine);
                 }
             }
+            _propertyMixerFinishHandler?.(manager);
         }
         return handledPropertyGroups;
     }
@@ -145,6 +161,7 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
             continue;
         }
         if (handledPropertyGroups && group._propertyMixerHandled) {
+            _propertyMixerDirectHandler?.(manager, group);
             continue;
         }
 
@@ -175,6 +192,9 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
             uploadTarget(manager, target);
         }
     });
+    if (handledPropertyGroups) {
+        _propertyMixerFinishHandler?.(manager);
+    }
 
     return true;
 }

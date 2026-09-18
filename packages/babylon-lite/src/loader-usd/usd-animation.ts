@@ -242,11 +242,11 @@ export async function apply(context: UsdContext): Promise<void> {
         };
     });
     const { createAnimationGroups } = await import("../animation/animation-group.js");
-    const [{ _installPropertyMixerHandler }, { _updateWeightedPointerAnimations }] = await Promise.all([
+    const [{ _installPropertyMixerHandler }, { _finishWeightedPointerAnimations, _updateWeightedPointerAnimations, _writeUncontestedPointerTracks }] = await Promise.all([
         import("../animation/weighted-gltf-mixer.js"),
         import("../animation/weighted-pointer-mixer.js"),
     ]);
-    _installPropertyMixerHandler(_updateWeightedPointerAnimations);
+    _installPropertyMixerHandler(_updateWeightedPointerAnimations, _writeUncontestedPointerTracks, _finishWeightedPointerAnimations);
     const nativeGroups = createAnimationGroups({
         clips,
         nodes: rests,

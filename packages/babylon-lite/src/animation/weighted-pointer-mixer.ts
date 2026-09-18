@@ -149,9 +149,11 @@ export function _updateWeightedPointerAnimations(manager: AnimationManager, delt
             evaluateSampler(track.sampler, t, track.stride, track.quaternion, scratch.sample, 0);
             const bucket = findTrackBucket(scratch.buckets, track);
             if (!bucket?.contested) {
-                track.writer(scratch.sample, 0);
-                if (track._afterWrite) {
-                    scratch.afterWrites.add(track._afterWrite);
+                if (!onlyPropertyGroups) {
+                    track.writer(scratch.sample, 0);
+                    if (track._afterWrite) {
+                        scratch.afterWrites.add(track._afterWrite);
+                    }
                 }
                 continue;
             }
@@ -175,11 +177,43 @@ export function _updateWeightedPointerAnimations(manager: AnimationManager, delt
             scratch.afterWrites.add(bucket.afterWrite);
         }
     }
-    for (const publish of scratch.afterWrites) {
-        publish();
+    if (!onlyPropertyGroups) {
+        _finishWeightedPointerAnimations(manager);
     }
 
     return handledPropertyGroups > 0;
+}
+
+/** @internal Write a mixed group's uncontested tracks when the outer manager reaches its registration slot. */
+export function _writeUncontestedPointerTracks(manager: AnimationManager, group: AnimationGroup): void {
+    const scratch = scratchByManager?.get(manager);
+    const tracks = group._propertyMixer?.[MIX_TRACKS];
+    if (!scratch || !tracks || !group._propertyMixerHandled) {
+        return;
+    }
+    for (let trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
+        const track = tracks[trackIndex]!;
+        if (trackMaskedOut(group, track) || findTrackBucket(scratch.buckets, track)?.contested) {
+            continue;
+        }
+        evaluateSampler(track.sampler, group.currentTime, track.stride, track.quaternion, scratch.sample, 0);
+        track.writer(scratch.sample, 0);
+        if (track._afterWrite) {
+            scratch.afterWrites.add(track._afterWrite);
+        }
+    }
+}
+
+/** @internal Publish deduplicated property side effects after every manager group has evaluated. */
+export function _finishWeightedPointerAnimations(manager: AnimationManager): void {
+    const afterWrites = scratchByManager?.get(manager)?.afterWrites;
+    if (!afterWrites) {
+        return;
+    }
+    for (const publish of afterWrites) {
+        publish();
+    }
+    afterWrites.clear();
 }
 
 function clearManagerScratch(manager: AnimationManager): void {

@@ -615,6 +615,80 @@ describe("USD command materialization", () => {
         clearAnimationManager(manager);
     });
 
+    it("preserves an uncontested track's order when another track in the same group is blended", async () => {
+        const fixture = usdFixture({ morph: true });
+        const { engine } = usdTestEngine();
+        const container = usdTestContainer(fixture);
+        await materializeUsd(engine, fixture, container);
+        disposeUsd(container);
+
+        const manager = createAnimationManager();
+        const target = { value: 0, other: 0 };
+        const gltf: AnimationGroup = {
+            name: "gltf",
+            duration: 1,
+            isPlaying: false,
+            currentTime: 0,
+            targetedAnimations: [],
+            speedRatio: 1,
+            loopAnimation: false,
+            weight: 1,
+            _stopped: false,
+            _ctrl: {
+                time: 0,
+                playing: false,
+                speedRatio: 1,
+                loop: false,
+                tick: () => {
+                    target.value = 5;
+                },
+            },
+            _gltfMixer: [{ name: "gltf", channels: [], samplers: [], duration: 1 }, [], []],
+        };
+        addAnimationGroup(manager, gltf);
+        createPropertyAnimationGroup(
+            manager,
+            target,
+            createPropertyAnimationClip("full", [
+                {
+                    path: "value",
+                    keys: [
+                        { time: 0, value: 10 },
+                        { time: 1, value: 10 },
+                    ],
+                },
+                {
+                    path: "other",
+                    keys: [
+                        { time: 0, value: 2 },
+                        { time: 1, value: 2 },
+                    ],
+                },
+            ])
+        );
+        const fractional = createPropertyAnimationGroup(
+            manager,
+            target,
+            createPropertyAnimationClip("fractional", [
+                {
+                    path: "other",
+                    keys: [
+                        { time: 0, value: 4 },
+                        { time: 1, value: 4 },
+                    ],
+                },
+            ])
+        );
+        setAnimationWeight(fractional, 0.5);
+        enableAnimationBlending(manager);
+
+        updateAnimationManager(manager, 0);
+
+        expect(target.value).toBe(10);
+        expect(target.other).toBe(4);
+        clearAnimationManager(manager);
+    });
+
     it("rejects duplicate morph target IDs", async () => {
         const fixture = usdFixture({ morph: true, duplicateMorph: true });
         const { engine } = usdTestEngine();
