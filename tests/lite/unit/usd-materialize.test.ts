@@ -13,7 +13,8 @@ import { materializeUsd } from "../../../packages/babylon-lite/src/loader-usd/us
 import { getContainerMeshes } from "../../../packages/babylon-lite/src/asset-container";
 import { createPbrMaterial, type PbrMaterialProps } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
 import type { MaterialPlugin } from "../../../packages/babylon-lite/src/material/plugin/material-plugin";
-import type { SceneNode } from "../../../packages/babylon-lite/src/scene/scene-node";
+import { createSceneNode, type SceneNode } from "../../../packages/babylon-lite/src/scene/scene-node";
+import { setParent } from "../../../packages/babylon-lite/src/scene/set-parent";
 import { readUsdCommands, UsdOp, usdField } from "../../../packages/babylon-lite/src/loader-usd/usd-protocol";
 import { usdFixture, usdTestContainer, usdTestEngine } from "./usd-fixture";
 import { registerPbrPlugins } from "../../../packages/babylon-lite/src/material/plugin/pbr-plugin-bridge";
@@ -124,6 +125,27 @@ describe("USD command materialization", () => {
         vi.mocked(engine._device.queue.writeTexture).mockClear();
         tickAnimationCore(container.animationGroups![0]!, 16, engine);
         expect(engine._device.queue.writeTexture).not.toHaveBeenCalled();
+        disposeUsd(container);
+    });
+
+    it("restores matrix animation storage after reparenting and a TRS edit", async () => {
+        const fixture = usdFixture({ skin: true });
+        const { engine } = usdTestEngine();
+        const container = usdTestContainer(fixture);
+        await materializeUsd(engine, fixture, container);
+        const group = container.animationGroups![0]!;
+        const target = group.targetedAnimations[1]!.target as SceneNode;
+
+        setParent(target, createSceneNode("newParent"));
+        target.position.set(7, -1, 4);
+        expect(target._localMatrix).toBeUndefined();
+        vi.mocked(engine._device.queue.writeTexture).mockClear();
+
+        goToFrame(group, 12, engine);
+
+        expect(target._localMatrix).toBeDefined();
+        expect(target.worldMatrix[13]).toBeCloseTo(2);
+        expect(engine._device.queue.writeTexture).toHaveBeenCalledTimes(2);
         disposeUsd(container);
     });
 

@@ -168,8 +168,10 @@ channels also expose Lite property-mixer tracks with stable target identities an
 `enableAnimationBlending` manager path apply normally. Native 16-float matrix
 tracks blend all affine components against the authored pose and normalize
 overweight sums. This preserves exact full-weight matrices, including shear,
-while keeping partial-weight matrices affine. Track writers update CPU state
-first; a deduplicated post-write publication uploads each affected rig and morph
+while keeping partial-weight matrices affine. If public reparenting followed by
+a TRS edit hands a matrix-animated target back to TRS, its next matrix sample
+recreates raw matrix storage and invalidates the world matrix and affected rig.
+Track writers update CPU state first; a deduplicated post-write publication uploads each affected rig and morph
 buffer once after all groups have been evaluated. Mixer scratch is released
 when its groups leave the manager, so a cleared long-lived manager does not
 retain a disposed USD context. Paused groups whose sample has not changed

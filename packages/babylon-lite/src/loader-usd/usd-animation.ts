@@ -1,6 +1,7 @@
 import type { AnimationChannel, AnimationClip, AnimationSampler, NodeRest } from "../animation/types.js";
 import { INTERP_LINEAR, PATH_POINTER } from "../animation/types.js";
 import type { AnimationGroup, AnimationPropertyMixStrategy, AnimationPropertyRuntimeTrack, TargetedAnimation } from "../animation/animation-group.js";
+import { allocateMat4 } from "../math/_matrix-allocator.js";
 import { decomposeMat4 } from "../math/decompose-mat4.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import type { Mat4Storage } from "../math/types.js";
@@ -48,8 +49,8 @@ function matrixMixStrategy(reference: ArrayLike<number>): AnimationPropertyMixSt
 
 function matrixWriter(target: SceneNode, markRigDirty: () => void): (values: Float32Array, offset: number) => void {
     return (values, offset) => {
-        const matrix = target._localMatrix as unknown as Mat4Storage;
-        let changed = false;
+        let changed = target._localMatrix === undefined;
+        const matrix = (target._localMatrix ??= allocateMat4()) as unknown as Mat4Storage;
         // Gf row-major row-vector bytes are Lite column-major column-vector bytes.
         for (let index = 0; index < 16; index++) {
             const value = values[offset + index]!;
