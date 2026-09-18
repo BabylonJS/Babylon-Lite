@@ -70,8 +70,8 @@ async function main(): Promise<void> {
         const currentGroup = 1 + index * 2;
         const targetGroup = currentGroup + 1;
         addToScene(scene, createTaggedPlane(engine, 1.55, cellStart + 0.775, [0.32, 0.35, 0.4], [0.32, 0.35, 0.4], currentGroup));
-        addToScene(scene, createTaggedPlane(engine, 0.24, cellStart + 1.67, [0.015, 0.004, 0.001], [1, 0.48, 0.04], targetGroup));
-        addToScene(scene, createTaggedPlane(engine, cellWidth - 1.79, cellStart + (cellWidth + 1.79) * 0.5, [1, 0.48, 0.04], [1, 0.48, 0.04], targetGroup));
+        addToScene(scene, createTaggedPlane(engine, 0.25, cellStart + 1.675, [0.015, 0.004, 0.001], [1, 0.48, 0.04], targetGroup));
+        addToScene(scene, createTaggedPlane(engine, cellWidth - 1.8, cellStart + (cellWidth + 1.8) * 0.5, [1, 0.48, 0.04], [1, 0.48, 0.04], targetGroup));
     }
 
     const sceneColor = createRenderTarget({ lbl: "scene311-color", format: "rgba16float", samples: 1, size: engine });
