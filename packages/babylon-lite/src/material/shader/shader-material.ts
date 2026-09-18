@@ -199,6 +199,16 @@ export interface ShaderMaterial extends Material {
     _uniformVersion: number;
     /** @internal */
     _resourceVersion: number;
+    /** @internal Private custom UBO owned by this material or view. */
+    _shaderCustomUbo?: GPUBuffer | null;
+    /** @internal Engine that allocated the private custom UBO. */
+    _shaderCustomEngine?: EngineContext;
+    /** @internal CPU-side storage for the private custom UBO. */
+    _shaderCustomData?: ArrayBuffer | null;
+    /** @internal Byte view over the private custom UBO data. */
+    _shaderCustomBytes?: Uint8Array<ArrayBuffer> | null;
+    /** @internal Uniform version last written to the private custom UBO. */
+    _shaderCustomVersion?: number;
 }
 
 function isIdentifier(name: string): boolean {

@@ -35,6 +35,8 @@ export interface ShaderPacket {
     _bindGroup: GPUBindGroup | null;
     /** @internal */
     _lastResourceVersion: number;
+    /** @internal Actual custom buffer retained by group 1, independently of the resource revision. */
+    _boundCustomUbo?: GPUBuffer | null;
     /** @internal */
     _boundTextures: Texture2D[];
     /** @internal Missing constant vertex streams computed before allocating this packet. */
@@ -67,12 +69,11 @@ export interface ShaderPacket {
 }
 
 interface ShaderMaterialRenderState extends ShaderMaterial {
+    _shaderDevice?: GPUDevice;
     _shaderBindings?: ShaderPipelineBindings;
-    _shaderCustomUbo?: GPUBuffer | null;
+    _shaderCacheGeneration?: number;
+    _shaderPipelineCache?: { readonly generation: number };
     _shaderCustomSpec?: UboSpec | null;
-    _shaderCustomData?: ArrayBuffer | null;
-    _shaderCustomBytes?: Uint8Array<ArrayBuffer> | null;
-    _shaderCustomVersion?: number;
 }
 
 /** @internal */
@@ -278,6 +279,7 @@ function createPacket(scene: SceneContext, material: ShaderMaterial, systemSpec:
     }
     registerMeshTextureDisposer(scene, mesh, packet, resources);
     packet._bindGroup = createShaderBindGroup(engine, material, systemUBO);
+    packet._boundCustomUbo = (material as ShaderMaterialRenderState)._shaderCustomUbo;
     for (const tex of collectShaderTextures(material)) {
         acquireTexture(tex);
         packet._boundTextures.push(tex);
@@ -440,7 +442,7 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
         packet._lastAspect = aspect;
         packet._lastAlphaCutoff = alphaCutoff;
     }
-    if (packet._lastResourceVersion !== material._resourceVersion) {
+    if (packet._lastResourceVersion !== material._resourceVersion || packet._boundCustomUbo !== state._shaderCustomUbo) {
         // Acquire the NEW bound textures BEFORE releasing the old set: a texture present in both (e.g. a material
         // that only swapped ONE of its textures) must never transiently drop to ref-count 0, or releaseTexture
         // would destroy a GPUTexture that the new bind group still uses. (Releasing first destroys a unique
@@ -464,6 +466,7 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
         packet._bindGroup = bindGroup;
         packet._boundTextures = acquiredTextures;
         packet._lastResourceVersion = material._resourceVersion;
+        packet._boundCustomUbo = state._shaderCustomUbo;
         for (const tex of oldTextures) {
             releaseTexture(tex);
         }
@@ -522,6 +525,12 @@ function ensureCustomUbo(engine: EngineContext, material: ShaderMaterial, custom
     }
     if (!state._shaderCustomUbo || !state._shaderCustomData) {
         state._shaderCustomUbo = createEmptyUniformBuffer(engine, customSpec._totalBytes, "shader-custom-ubo");
+        state._shaderCustomEngine = engine;
+        // Shadow inherited pipeline identity so a source-first renewal cannot make this private UBO look current.
+        /* eslint-disable no-self-assign -- intentional Object.create prototype shadowing */
+        state._shaderDevice = state._shaderDevice;
+        state._shaderCacheGeneration = state._shaderCacheGeneration;
+        /* eslint-enable no-self-assign */
         state._shaderCustomData = new ArrayBuffer(customSpec._totalBytes);
         state._shaderCustomBytes = new U8(state._shaderCustomData);
         state._shaderCustomVersion = -1;

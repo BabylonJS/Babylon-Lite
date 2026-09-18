@@ -365,11 +365,13 @@ Generated names intentionally match the names listed in the options where possib
 ```text
 packages/babylon-lite/src/material/shader/
   shader-material.ts       Public types, factory, setters, validation.
+  shader-material-view-gpu.ts  Terminal private view-UBO retirement.
   enable-shader-material-instance-world.ts  Opt-in regular/thin-instance final-world helper.
   enable-shader-material-final-color.ts  Opt-in effective vertex/instance color helper.
   shader-group-builder.ts  MeshGroupBuilder entry point and lazy renderable import.
   shader-renderable.ts     Per-scene/per-mesh renderables, UBO writes, bind groups.
-  shader-pipeline.ts       Generated prelude, BGL creation, pipeline cache.
+  shader-pipeline.ts       Generated prelude, BGL creation, pipeline lookup.
+  shader-pipeline-cache.ts Lazy cross-material bindings, modules, and pipeline cache.
   shader-vb-support.ts     Tiny opt-in seam and canonical attribute layouts.
   shader-vb.ts             Declared formats, per-mesh packing, grouping, bounded defaults.
 ```
@@ -572,6 +574,27 @@ their packet in scene-owned disposer maps. Storage-buffer allocations remain own
 `StorageBuffer` and engine registration; packets bind the live validated handle but do not maintain
 a second, unread raw-buffer list. Disposing a shader packet releases its system UBO and texture
 leases without disposing caller-owned storage allocations.
+
+`releaseMaterialViewGpu(engine: EngineContext, view: ShaderMaterial): void` closes an abandoned
+ShaderMaterial view's own custom UBO. Detach every draw using that view first; this is terminal
+abandonment, not a suspension/resume API. A source material or a view borrowing its source's UBO
+is a no-op. The pipeline owner captures the exact owned buffer and its allocating engine, clears
+the private CPU/UBO state synchronously, and queues its destruction through `retireGpuResources`.
+Repeated calls before or after the queue fence do not destroy again. Shared bindings, shader
+modules, source uniforms, textures and storage buffers are untouched.
+
+Pipeline context renewal also retires a view's previous owned custom UBO before replacing its state.
+Source-material cleanup is outside this view-abandonment API.
+The allocation records its engine, so renewal on another engine retires through the old engine's
+queue. Packet updates recreate a missing custom UBO and compare the actually bound buffer with
+the current one, in addition to resource revision, before drawing. Plain, transparent and
+thin-instance packets consume this same update path. Device recovery still owns rebuilding all
+other device-bound packet resources; this rule alone is not a complete packet recovery API.
+
+The focused lifetime tests use real material/view factories and packet writers with inert GPU
+buffers: source plus three private views, fenced/idempotent release, borrowed-view safety,
+generation renewal and a changed allocating engine. They inspect submitted bytes and bindings;
+they do not measure rendered pixels, VRAM or browser performance.
 
 Packet ownership is independent of material-override identity: a supplied resource sink owns an
 auxiliary packet; without one, the packet belongs to the scene's main mesh disposer list. Plain

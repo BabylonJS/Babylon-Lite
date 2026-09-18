@@ -10,6 +10,13 @@ interface ShaderModuleEntry {
     readonly module: GPUShaderModule;
 }
 
+interface ShaderModulePair {
+    readonly vertId: number;
+    readonly fragId: number;
+    readonly vertModule: GPUShaderModule;
+    readonly fragModule: GPUShaderModule | null;
+}
+
 interface DeviceCache extends ShaderPipelineCache {
     readonly bindings: Map<string, ShaderPipelineBindings>;
     readonly modules: Map<string, ShaderModuleEntry>;
@@ -54,6 +61,7 @@ function getDeviceCache(device: GPUDevice): DeviceCache {
     }
     const bindings = new Map<string, ShaderPipelineBindings>();
     const modules = new Map<string, ShaderModuleEntry>();
+    const materialModules = new WeakMap<ShaderMaterial, { bindings: ShaderPipelineBindings; entries: Map<string, ShaderModulePair> }>();
     cache = {
         bindings,
         modules,
@@ -78,6 +86,23 @@ function getDeviceCache(device: GPUDevice): DeviceCache {
                 modules.set(code, entry);
             }
             return entry;
+        },
+        getModules(gpu, material, currentBindings, key, createCodes): ShaderModulePair {
+            let memo = materialModules.get(material);
+            if (!memo || memo.bindings !== currentBindings) {
+                memo = { bindings: currentBindings, entries: new Map() };
+                materialModules.set(material, memo);
+            }
+            let resolved = memo.entries.get(key);
+            if (!resolved) {
+                const [vertexCode, fragmentCode] = createCodes();
+                const label = material.name ?? "shader";
+                const vert = cache!.getModule(gpu, vertexCode, `${label}-vertex`);
+                const frag = fragmentCode === null ? null : cache!.getModule(gpu, fragmentCode, `${label}-fragment`);
+                resolved = { vertId: vert.id, fragId: frag?.id ?? 0, vertModule: vert.module, fragModule: frag?.module ?? null };
+                memo.entries.set(key, resolved);
+            }
+            return resolved;
         },
         getPipelineKey(sig, variantKey, vertexModuleId, fragmentModuleId, vertexBuffers, material, stencilKey): string {
             return JSON.stringify([
