@@ -73,7 +73,16 @@ export type BindingKind =
     /** @internal */
     | { readonly _kind: "sampler"; readonly _samplerType: "sampler" | "sampler_non_filtering" | "sampler_comparison" }
     /** @internal */
-    | { readonly _kind: "storage-texture"; readonly _access: "read" | "write" | "read_write"; readonly _format: string };
+    | {
+          /** @internal */
+          readonly _kind: "storage-texture";
+          /** @internal WGSL storage access token. */
+          readonly _access: "read" | "write" | "read_write";
+          /** @internal WebGPU bind-group-layout access value. */
+          readonly _gpuAccess: GPUStorageTextureAccess;
+          /** @internal */
+          readonly _format: string;
+      };
 
 export interface BindingDecl {
     /** @internal WGSL variable name (e.g. "normalTex", "brdfSampler_") */

@@ -1637,6 +1637,16 @@
         "skipPerf": true
     },
     {
+        "id": 169,
+        "slug": "scene169-compute-flame",
+        "name": "Scene 169 — Depth-Aware Compute Flame",
+        "maxMad": 0.01,
+        "maxRawKB": 90.2,
+        "description": "Port of Playground #KOBPUW#18. A candle scene renders into sampled color and reverse-depth attachments, then a frame-graph compute task composites an animated procedural flame into a storage texture with depth occlusion before a fullscreen presentation pass.",
+        "tags": ["compute", "frame-graph", "storage-texture", "depth"],
+        "skipPerf": true
+    },
+    {
         "id": 170,
         "slug": "scene170-navigation-basic",
         "name": "Scene 170 - Navigation Basic",
@@ -1792,6 +1802,26 @@
         "tags": ["post-process", "anti-aliasing", "smaa", "orthographic"],
         "skipParity": true,
         "skipParityReason": "Babylon.js has no equivalent SMAA frame-graph post-process task.",
+        "skipPerf": true
+    },
+    {
+        "id": 188,
+        "slug": "scene188-compute-geometry",
+        "name": "Scene 188 — Compute-Generated Storage Geometry",
+        "maxMad": 0.01,
+        "maxRawKB": 69.9,
+        "description": "A one-shot compute task samples matching 3D and 2D-array textures and fills one vertex-capable storage slab. Four meshes render directly from separate baseVertex slots with no readback or copy.",
+        "tags": ["compute", "storage-buffer", "geometry", "texture-3d", "texture-array"],
+        "skipPerf": true
+    },
+    {
+        "id": 189,
+        "slug": "scene189-indirect-compute",
+        "name": "Scene 189 — GPU-Produced Indirect Dispatch",
+        "maxMad": 0.01,
+        "maxRawKB": 68.4,
+        "description": "One compute pass reads and writes a 3D r32uint storage texture while producing indirect workgroup counts; a later compute pass consumes those counts to generate vertex data rendered directly from storage.",
+        "tags": ["compute", "indirect", "storage-buffer", "storage-texture"],
         "skipPerf": true
     },
     {

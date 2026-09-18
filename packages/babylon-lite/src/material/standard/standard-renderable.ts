@@ -45,7 +45,7 @@ import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 import { wgsl } from "../../shader/wgsl.js";
 
 /** Scratch buffer for material UBO writes (24 floats = 96 bytes). Reused across
- *  every Standard renderable since binding updates are single-threaded per frame. */
+ *  Standard renderable creation and binding updates, which are synchronous. */
 const _stdMatScratch = new F32(24);
 
 /** Thin instance GPU sync callback type — loaded dynamically only when needed. */
@@ -198,9 +198,9 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
         const meshUBO = createUniformBuffer(engine, meshUboData);
         disposers.push(() => meshUBO.destroy());
         const textureLevel = (features & NEEDS_UV) !== 0 ? 1.0 : 0;
-        const matData = new F32(24);
-        writeStdMaterialData(matData, mat, textureLevel);
-        const materialUBO = createUniformBuffer(engine, matData);
+        _stdMatScratch.fill(0);
+        writeStdMaterialData(_stdMatScratch, mat, textureLevel);
+        const materialUBO = createUniformBuffer(engine, _stdMatScratch);
         disposers.push(() => materialUBO.destroy());
         const meshBindGroup = createStandardMeshBindGroup(s, bindings, meshUBO, materialUBO, mat, mesh.morphTargets ?? null, mesh, disposers, isOverride || !!resources);
 

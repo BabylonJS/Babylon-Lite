@@ -30,8 +30,12 @@ export interface StorageBuffer {
     _readback?: GPUBuffer;
     /** @internal Device that owns `_readback`. */
     _readbackDevice?: GPUDevice;
-    /** @internal Coalesces overlapping read requests for this allocation. */
+    /** @internal Coalesces identical read requests for this allocation. */
     _readPending?: Promise<ArrayBuffer>;
+    /** @internal Source range for the pending read. */
+    _readPendingOffset?: number;
+    /** @internal */
+    _readPendingLength?: number;
 }
 
 /** Options for {@link createStorageBuffer}.
@@ -162,9 +166,11 @@ export function updateStorageBuffer(engine: EngineContext, buffer: StorageBuffer
     }
 }
 
-/** Read a GPU-writable storage allocation through one lazily reused staging buffer.
+/** Read an aligned range of a GPU-writable storage allocation through one lazily reused staging buffer.
  *  Call after the producing frame is submitted; an active frame encoder is rejected. */
-export function readStorageBuffer(buffer: StorageBuffer): Promise<ArrayBuffer> {
+export function readStorageBuffer(buffer: StorageBuffer): Promise<ArrayBuffer>;
+export function readStorageBuffer(buffer: StorageBuffer, byteOffset: number, byteLength?: number): Promise<ArrayBuffer>;
+export function readStorageBuffer(buffer: StorageBuffer, byteOffset = 0, byteLength = buffer.byteLength - byteOffset): Promise<ArrayBuffer> {
     if (buffer._destroyed || !buffer._buffer || !buffer._engine._storageBuffers?.has(buffer)) {
         return Promise.reject(new Error("StorageBuffer is not a live registered allocation."));
     }
@@ -174,37 +180,59 @@ export function readStorageBuffer(buffer: StorageBuffer): Promise<ArrayBuffer> {
     if (buffer._engine._currentEncoder) {
         return Promise.reject(new Error("readStorageBuffer cannot run while a frame encoder is active; wait until the producing frame is submitted."));
     }
+    if (!Number.isSafeInteger(byteOffset) || byteOffset < 0 || (byteOffset & 3) !== 0) {
+        return Promise.reject(new Error("readStorageBuffer byteOffset must be a non-negative safe integer and multiple of 4."));
+    }
+    if (!Number.isSafeInteger(byteLength) || byteLength < 0 || (byteLength & 3) !== 0) {
+        return Promise.reject(new Error("readStorageBuffer byteLength must be a non-negative safe integer and multiple of 4."));
+    }
+    if (byteOffset + byteLength > buffer.byteLength) {
+        return Promise.reject(new Error(`readStorageBuffer range exceeds the buffer's ${buffer.byteLength}-byte capacity.`));
+    }
+    if (byteLength === 0) {
+        return Promise.resolve(new ArrayBuffer(0));
+    }
     const device = buffer._engine._device;
     if (buffer._readPending) {
         if (buffer._readbackDevice !== device) {
             return Promise.reject(new Error("StorageBuffer device changed during a pending readback."));
         }
-        return buffer._readPending;
+        if (buffer._readPendingOffset === byteOffset && buffer._readPendingLength === byteLength) {
+            return buffer._readPending;
+        }
+        return buffer._readPending.then(
+            () => readStorageBuffer(buffer, byteOffset, byteLength),
+            () => readStorageBuffer(buffer, byteOffset, byteLength)
+        );
     }
-    if (buffer._readback && buffer._readbackDevice !== device) {
+    if (buffer._readback && (buffer._readbackDevice !== device || buffer._readback.size < byteLength)) {
         buffer._readback.destroy();
         buffer._readback = undefined;
     }
     const staging = (buffer._readback ??= device.createBuffer({
         label: buffer._label ? `${buffer._label}-readback` : "storage-readback",
-        size: buffer.byteLength,
+        size: byteLength,
         usage: BU.COPY_DST | BU.MAP_READ,
     }));
     buffer._readbackDevice = device;
     const encoder = device.createCommandEncoder({ label: buffer._label ? `${buffer._label}-readback` : "storage-readback" });
-    encoder.copyBufferToBuffer(buffer._buffer, 0, staging, 0, buffer.byteLength);
+    encoder.copyBufferToBuffer(buffer._buffer, byteOffset, staging, 0, byteLength);
     device.queue.submit([encoder.finish()]);
+    buffer._readPendingOffset = byteOffset;
+    buffer._readPendingLength = byteLength;
     buffer._readPending = staging
-        .mapAsync(GPUMapMode.READ)
+        .mapAsync(GPUMapMode.READ, 0, byteLength)
         .then(() => {
             try {
-                return staging.getMappedRange().slice(0);
+                return staging.getMappedRange(0, byteLength).slice(0);
             } finally {
                 staging.unmap();
             }
         })
         .finally(() => {
             buffer._readPending = undefined;
+            buffer._readPendingOffset = undefined;
+            buffer._readPendingLength = undefined;
         });
     return buffer._readPending;
 }

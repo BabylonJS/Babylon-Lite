@@ -23,7 +23,7 @@ interface StorageBufferOptions {
 
 function createStorageBuffer(engine: EngineContext, source: ArrayBufferView | number, labelOrOptions?: string | StorageBufferOptions): StorageBuffer;
 function updateStorageBuffer(engine: EngineContext, buffer: StorageBuffer, data: ArrayBufferView, byteOffset?: number): void;
-function readStorageBuffer(buffer: StorageBuffer): Promise<ArrayBuffer>;
+function readStorageBuffer(buffer: StorageBuffer, byteOffset?: number, byteLength?: number): Promise<ArrayBuffer>;
 function disposeStorageBuffer(buffer: StorageBuffer): void;
 ```
 
@@ -131,10 +131,13 @@ Disposal is idempotent. Updating or rebinding a disposed resource throws; a zero
 `readStorageBuffer` rejects while the owning engine has an active frame encoder, before staging
 allocation or submission. Read after the producing frame has been submitted; an independent copy
 must never overtake compute writes already recorded into that frame.
-Only writable allocations support readback. Concurrent reads share the pending promise and reuse a
-lazy staging buffer; each completed read returns an independent `ArrayBuffer` copy. A device change
-is rejected while a read is pending, and later reads replace staging allocated on an older device.
-If mapped-range extraction or copying fails, staging is still unmapped before reuse and the
+Only writable allocations support readback. Optional offset and length values must be non-negative
+safe integers aligned to four bytes and remain within the allocation. This lets callers read GPU
+counters or diagnostics without copying an entire slab. Identical concurrent ranges share the pending
+promise; different ranges queue behind the active read. One lazy staging allocation is reused and
+grown only when needed, and each completed read returns an independent `ArrayBuffer` copy. A device
+change is rejected while a read is pending, and later reads replace staging allocated on an older
+device. If mapped-range extraction or copying fails, staging is still unmapped before reuse and the
 read promise preserves the failure. Updates to writable buffers create no CPU shadow views.
 
 ## Babylon.js Equivalence Map

@@ -802,19 +802,17 @@ export class PBRMaterial extends PushMaterial {
         }
         // Babylon Lite's PBR pipeline samples baseColorTexture/ormTexture unconditionally,
         // so a factor-only Babylon.js PBR material (colours but no maps) must be backed by
-        // 1×1 solid textures. Bake the factors into the textures and neutralize the factors
-        // so each contribution is applied exactly once.
+        // 1×1 solid textures. Keep those NEUTRAL (white) and leave the values in the factors.
+        // Baking the values into the texel and neutralizing the factors applied them once only
+        // until the next `albedoColor` / `metallic` / `roughness` write: the setters write the
+        // factor, which then multiplied the already-baked texel (colour², roughness²), and the
+        // getters read back the neutralized 1.
         if (!lite.baseColorTexture) {
-            const f = this._albedoFactor;
-            lite.baseColorTexture = createSolidTexture2D(engine, f[0], f[1], f[2], f[3]);
-            lite.baseColorFactor = [1, 1, 1, 1];
+            lite.baseColorTexture = createSolidTexture2D(engine, 1, 1, 1, 1);
+            lite.baseColorFactor = [...this._albedoFactor];
         }
         if (!lite.ormTexture) {
-            const rough = lite.roughnessFactor ?? 1;
-            const metal = lite.metallicFactor ?? 1;
-            lite.ormTexture = createSolidTexture2D(engine, 1, rough, metal);
-            lite.roughnessFactor = 1;
-            lite.metallicFactor = 1;
+            lite.ormTexture = createSolidTexture2D(engine, 1, 1, 1);
         }
     }
 
