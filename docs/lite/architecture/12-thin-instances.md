@@ -27,7 +27,6 @@ export interface ThinInstanceData {
     _capacity: number; // allocated capacity (≥ count)
     _version: number; // bumped by every mutating helper; checked by render system
     _gpuBuffer: GPUBuffer | null; // matrix GPU buffer, managed by render system
-    _gpuBufferStorage: boolean; // true when buffer includes STORAGE usage for compute culling
     _gpuVersion: number; // last _version uploaded to GPU
     colors?: Float32Array | null; // optional RGBA per instance (4 floats each)
     _colorVersion: number; // independent of _version; bumped by setThinInstanceColors
@@ -102,6 +101,13 @@ matrix range `[0, count)` dirty for upload.
 Call `enableThinInstanceDynamicDrawCount()` before `registerScene()` when a synchronized pool will change
 counts interactively. Its next normal GPU sync creates the stable indirect argument buffer during warm-up,
 so the first later count change does not invalidate cached render bundles.
+
+The CPU indirect-argument array is also the index-count/base-vertex snapshot; these values
+are not duplicated in parallel fields. The stored instance count acknowledges a successful
+upload and is invalidated before writing, so a failed upload retries without allocating new
+argument buffers. Base vertices are compared as signed 32-bit words.
+Matrix buffers always carry `STORAGE` for GPU picking, so switching culling on/off does
+not recreate or re-upload them. Color buffers still track their optional storage usage.
 
 `enableThinInstanceWorldBounds()` is a setup-time, tree-shakable opt-in for hand-built thin-instance meshes
 that will be consumed by `createDefaultCamera()` or automatic environment sizing. It expands the prototype's
@@ -231,12 +237,12 @@ This avoids shifting the entire array, keeping removal O(1). Callers must be awa
 
 ### Version Tracking
 
-| Version field      | Bumped by                                                                                                  | Checked by                                |
-| ------------------ | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Version field      | Bumped by                                                                                                                      | Checked by                                      |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
 | `_version`         | Matrix/count helpers plus color helpers (color-only changes leave the matrix dirty range empty but still dirty static shadows) | `syncThinInstanceBuffers` (matrix sync/version) |
-| `_colorVersion`    | `setThinInstanceColors`                                                                                    | `syncThinInstanceBuffers` (color upload)  |
-| `_gpuVersion`      | `syncThinInstanceBuffers` (after matrix upload)                                                            | —                                         |
-| `_colorGpuVersion` | `syncThinInstanceBuffers` (after color upload)                                                             | —                                         |
+| `_colorVersion`    | `setThinInstanceColors`                                                                                                        | `syncThinInstanceBuffers` (color upload)        |
+| `_gpuVersion`      | `syncThinInstanceBuffers` (after matrix upload)                                                                                | —                                               |
+| `_colorGpuVersion` | `syncThinInstanceBuffers` (after color upload)                                                                                 | —                                               |
 
 GPU upload is skipped when `_version === _gpuVersion` (or `_colorVersion === _colorGpuVersion`), avoiding redundant `writeBuffer` calls for static instances.
 `setThinInstanceDrawCount` does not mark either data stream dirty; draw-argument synchronization observes
@@ -292,14 +298,14 @@ The per-binding cull lifecycle is factored into one shared module, `packages/bab
 
 Cull state is owned by each `DrawBinding`, not by `ThinInstanceData`, because the same mesh can be rendered by multiple render tasks/cameras. Each binding owns:
 
-| Resource              | Usage     | Purpose   |
+| Resource | Usage | Purpose |
 | --------------------- | --------- | --------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| source matrix buffer  | `VERTEX   | COPY_DST  | STORAGE`                                                                     | Full CPU-authored instance matrix list                                      |
-| source color buffer   | `VERTEX   | COPY_DST  | STORAGE`                                                                     | Full CPU-authored color list, when present                                  |
-| visible matrix buffer | `VERTEX   | STORAGE`  | Compacted visible matrices written by compute and read by the vertex shader  |
-| visible color buffer  | `VERTEX   | STORAGE`  | Compacted visible colors, when present                                       |
-| indirect args buffer  | `INDIRECT | STORAGE   | COPY_DST`                                                                    | `[indexCount, visibleInstanceCount, firstIndex, baseVertex, firstInstance]` |
-| params uniform        | `UNIFORM  | COPY_DST` | Six frustum planes, mesh world matrix, local bounding sphere, instance count |
+| source matrix buffer | `VERTEX   | COPY_DST  | STORAGE` | Full CPU-authored instance matrix list |
+| source color buffer | `VERTEX   | COPY_DST  | STORAGE` | Full CPU-authored color list, when present |
+| visible matrix buffer | `VERTEX   | STORAGE` | Compacted visible matrices written by compute and read by the vertex shader |
+| visible color buffer | `VERTEX   | STORAGE` | Compacted visible colors, when present |
+| indirect args buffer | `INDIRECT | STORAGE   | COPY_DST` | `[indexCount, visibleInstanceCount, firstIndex, baseVertex, firstInstance]` |
+| params uniform | `UNIFORM  | COPY_DST` | Six frustum planes, mesh world matrix, local bounding sphere, instance count |
 
 ### Per-Frame Flow
 
@@ -686,7 +692,7 @@ Scene 17 (`scene17-pbr-std-thin-instances`) validates PBR thin instances: a PBR 
 | Swap-remove correctness | `removeThinInstance(i)` → last instance moves to slot `i`, count decrements        |
 | Version skip            | Static instances: GPU upload skipped when `_version === _gpuVersion`               |
 | Color independence      | Matrix mutation does not trigger color re-upload (separate version counters)       |
-| Count-only draw update  | Active count changes update draw args without dirtying matrix or color buffers      |
+| Count-only draw update  | Active count changes update draw args without dirtying matrix or color buffers     |
 | Zero-cost loading       | Scenes without thin instances never fetch `thin-instance-gpu.js` chunk             |
 
 ---

@@ -2,7 +2,7 @@
  *
  *  Each entity provides only getLocalMatrix(). This module handles:
  *  - version tracking (_worldVersion bumped by own TRS changes and ancestor motion)
- *  - caching and staleness detection (_cachedWorld nulled on any change)
+ *  - separate local/world caches (ancestor changes retain the local matrix)
  *  - PUSH dirty propagation: a transform write invalidates the node AND all of its
  *    descendants up front, so per-frame consumers can read worldMatrixVersion in
  *    O(1) (a plain field read) instead of walking the parent chain.
@@ -31,8 +31,7 @@ import type { IWorldMatrixProvider } from "./parentable.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import type { Mat4Storage } from "../math/types.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
-import { composeMat4 } from "../math/compose-mat4.js";
-import { createIdentityMat4 } from "../math/create-identity-mat4.js";
+import { composeMat4IntoBuffer } from "../math/compose-mat4-into-buffer.js";
 
 export interface WorldMatrixAccessors {
     /** Getter — returns lazily computed world matrix. */
@@ -43,7 +42,7 @@ export interface WorldMatrixAccessors {
     markLocalDirty(): void;
     /** Reference to parent — set directly. */
     parent: IWorldMatrixProvider | null;
-    /** @internal Push: mark this node and its whole subtree dirty (clean-guarded). */
+    /** @internal Push: invalidate world caches/versions throughout the subtree. */
     _invalidate(): void;
     /** @internal Register a same-module child so future invalidations reach it. */
     _addChild(child: WorldMatrixAccessors): void;
@@ -68,13 +67,25 @@ function peekWorldMatrixState(p: IWorldMatrixProvider | null): WorldMatrixAccess
     return (s as WorldMatrixAccessors | undefined) ?? null;
 }
 
-/** @internal Bump one engine object's world version without changing its transform values. */
+/** @internal Invalidate subtree world matrices/versions without discarding local transforms. */
 export function _markWorldMatrixDirty(host: IWorldMatrixProvider): void {
     peekWorldMatrixState(host)?._invalidate();
 }
 
+/** @internal Invalidate a changed local transform and its subtree's world matrices. */
+export function _markLocalMatrixDirty(host: IWorldMatrixProvider): void {
+    peekWorldMatrixState(host)?.markLocalDirty();
+}
+
 /** Compose a local TRS matrix, skipping the general composition path for the default transform. */
 export function composeTrsLocalMatrix(position: Vec3, rotation: Quat, scaling: Vec3): Mat4 {
+    const local = allocateMat4();
+    composeTrsLocalMatrixIntoBuffer(local as unknown as Mat4Storage, position, rotation, scaling);
+    return local;
+}
+
+/** Compose into reusable local storage, preserving the default-transform identity fast path. */
+export function composeTrsLocalMatrixIntoBuffer(local: Mat4Storage, position: Vec3, rotation: Quat, scaling: Vec3): void {
     const isIdentity =
         position.x === 0 &&
         position.y === 0 &&
@@ -86,18 +97,24 @@ export function composeTrsLocalMatrix(position: Vec3, rotation: Quat, scaling: V
         scaling.x === 1 &&
         scaling.y === 1 &&
         scaling.z === 1;
-    return isIdentity ? createIdentityMat4() : composeMat4(position.x, position.y, position.z, rotation.x, rotation.y, rotation.z, rotation.w, scaling.x, scaling.y, scaling.z);
+    if (isIdentity) {
+        local.fill(0);
+        local[0] = local[5] = local[10] = local[15] = 1;
+    } else {
+        composeMat4IntoBuffer(local, 0, position.x, position.y, position.z, rotation.x, rotation.y, rotation.z, rotation.w, scaling.x, scaling.y, scaling.z);
+    }
 }
 
 /**
  * Create world matrix state for any entity type.
  *
  * @param getLocalMatrix - Entity-specific function that returns the local (pre-parent)
- *   transform matrix. Called only when the cache is stale.
+ *   transform matrix. Called on first use and after markLocalDirty(), not ancestor motion.
  */
 export function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixAccessors {
     let _worldVersion = 0;
     let _lastSeenParentVersion = -1;
+    let _cachedLocal: Mat4 | null = null;
     let _cachedWorld: Mat4 | null = null;
     const _ownedWorld: Mat4 = allocateMat4();
     let _parent: IWorldMatrixProvider | null = null;
@@ -151,6 +168,7 @@ export function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixA
         },
 
         markLocalDirty(): void {
+            _cachedLocal = null;
             invalidate();
         },
 
@@ -161,7 +179,7 @@ export function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixA
             if (_cachedWorld !== null) {
                 return _cachedWorld;
             }
-            const local = getLocalMatrix();
+            const local = (_cachedLocal ??= getLocalMatrix());
             if (_parent !== null) {
                 const pw = _parent.worldMatrix;
                 multiplyMat4IntoBuffer(_ownedWorld as unknown as Mat4Storage, 0, pw as unknown as Mat4Storage, 0, local as unknown as Mat4Storage, 0);
@@ -179,9 +197,7 @@ export function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixA
             return _worldVersion;
         },
 
-        _invalidate(): void {
-            invalidate();
-        },
+        _invalidate: invalidate,
 
         _addChild(child: WorldMatrixAccessors): void {
             _children.push(child);

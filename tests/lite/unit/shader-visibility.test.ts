@@ -182,7 +182,7 @@ describe("ShaderMaterial visibility", () => {
                 indexBuffer: {} as GPUBuffer,
                 indexCount: 3,
                 indexFormat: "uint32",
-                _vbLayout: { _p: { _stride: 32, _offset: 0, _count: 3 } },
+                _vbLayout: { position: { _stride: 32, _offset: 0, _count: 3 } },
             },
         });
         const scene = { surface: { engine }, camera: null, _meshDisposables: new Map() } as unknown as SceneContext;

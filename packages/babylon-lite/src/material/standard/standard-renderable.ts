@@ -62,7 +62,7 @@ type ThinInstanceSync = (
 export interface StdFragmentFactories {
     tiSync?: ThinInstanceSync;
     /** Uploads dirty thin-instance data and promotes cached draws to stable indirect args when their count changes. */
-    tiUpdate?: (engine: EngineContext, ti: any, hasColor: boolean, indexCount: number) => GPUBuffer | null;
+    tiUpdate?: (engine: EngineContext, ti: any, hasColor: boolean, gpu: Mesh["_gpu"]) => GPUBuffer | null;
     tiFragment?: (hasColor: boolean) => ShaderFragment;
     shadow?: StandardShadowContext;
     /** Present only when at least one mesh in the build has morph targets. */
@@ -182,7 +182,9 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             shaderKey,
             esmShadowDepthCode,
             (mat as StandardMaterialProps).stencil ?? null,
-            shadowOutput ? null : sceneShader
+            shadowOutput ? null : sceneShader,
+            mesh._gpu._vbLayout,
+            mesh._gpu._vbKey ?? ""
         );
 
         const meshUboData = new F32(bindings._composed._meshUboSpec._totalBytes / 4);
@@ -244,7 +246,7 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             }
             const ti = hasThinInstances ? mesh.thinInstances : null;
             if (ti && tiUpdate) {
-                thinDrawArgs = tiUpdate(engine, ti, hasInstanceColor, mesh._gpu.indexCount);
+                thinDrawArgs = tiUpdate(engine, ti, hasInstanceColor, mesh._gpu);
             }
         };
         // FO-version wrapper applied only when the engine has floating-origin
@@ -265,20 +267,19 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
             }
             const g = mesh._gpu;
             let slot = 0;
-            const vb = g._vbLayout;
-            pass.setVertexBuffer(slot++, g.positionBuffer, vb?._p?._offset);
-            pass.setVertexBuffer(slot++, g.normalBuffer, vb?._n?._offset);
+            pass.setVertexBuffer(slot++, g.positionBuffer);
+            pass.setVertexBuffer(slot++, g.normalBuffer);
             if (needsUV) {
-                pass.setVertexBuffer(slot++, g.uvBuffer, vb?._u?._offset);
+                pass.setVertexBuffer(slot++, g.uvBuffer);
             }
             if (needsUV2 && g.uv2Buffer) {
-                pass.setVertexBuffer(slot++, g.uv2Buffer, vb?._u2?._offset);
+                pass.setVertexBuffer(slot++, g.uv2Buffer);
             }
             for (const bindVertexBuffers of vertexBufferBinders) {
                 slot = bindVertexBuffers(mesh, pass, slot);
             }
             if (hasVertexColor) {
-                pass.setVertexBuffer(slot++, g.colorBuffer!, vb?._c?._offset);
+                pass.setVertexBuffer(slot++, g.colorBuffer!);
             }
 
             const ti = hasThinInstances ? mesh.thinInstances : null;
@@ -292,11 +293,11 @@ export function buildStandardMeshRenderables(scene: SceneContext, meshes: Mesh[]
                 pass.setBindGroup(2, shadowBindGroup);
             }
             if (cullBinding) {
-                cullBinding.draw(pass, g.indexCount, ti!.count);
+                cullBinding.draw(pass, g, ti!.count);
             } else if (ti && thinDrawArgs) {
                 pass.drawIndexedIndirect(thinDrawArgs, 0);
             } else {
-                pass.drawIndexed(g.indexCount, ti?.count);
+                pass.drawIndexed(g.indexCount, ti?.count ?? 1, 0, g._baseVertex);
             }
             return 1;
         };

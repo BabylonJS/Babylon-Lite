@@ -204,7 +204,7 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
     for (const [name, blockId] of graph.namedInputs) {
         const block = graph.blocks.get(blockId)!;
         const _name = sanitize(block.name || `input${block.id}`);
-        const _offsetBytes = compile._nodeUboOffsets.get(_name);
+        const _offsetBytes = compile._nodeUboSpec?._offsets.get(_name);
         if (_offsetBytes === undefined) {
             continue;
         }
@@ -252,7 +252,7 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         if (uniformValues.has(_name)) {
             continue;
         } // already handled above
-        const _offsetBytes = compile._nodeUboOffsets.get(_name);
+        const _offsetBytes = compile._nodeUboSpec?._offsets.get(_name);
         if (_offsetBytes === undefined) {
             continue;
         }
@@ -419,7 +419,7 @@ export function extractDefault(raw: unknown, type: NodeValueType): number[] {
 // ─── UBO writer ─────────────────────────────────────────────────────
 
 export function writeNodeUBO(engine: EngineContext, buffer: GPUBuffer, material: NodeMaterial): void {
-    const size = material._compile._nodeUboSize;
+    const size = material._compile._nodeUboSpec?._totalBytes ?? 0;
     if (size === 0) {
         return;
     }
