@@ -110,10 +110,11 @@ function makeEngine(features: string[] = []) {
     return { engine, device, layouts, groups, textures };
 }
 
-function ordinaryTexture(engine: EngineContext, format: GPUTextureFormat = "rgba8unorm"): Texture2D {
+function ordinaryTexture(engine: EngineContext, format: GPUTextureFormat = "rgba8unorm", sampleCount = 1): Texture2D {
     const texture = engine._device.createTexture({
         size: { width: 4, height: 4 },
         format,
+        sampleCount,
         usage: GPUTextureUsage.TEXTURE_BINDING,
     });
     const result: Texture2D = {
@@ -340,6 +341,31 @@ describe("compute texture bindings", () => {
         const second = makeEngine();
         await expect(createComputeTextureResource(first.engine, ordinaryTexture(first.engine), { sampleType: "depth" })).rejects.toThrow(/sample type/);
         await expect(createComputeTextureResource(first.engine, ordinaryTexture(second.engine, "depth32float"))).rejects.toThrow(/foreign device/);
+    });
+
+    it.each([
+        ["rgba8unorm", "unfilterable-float"],
+        ["depth32float", "depth"],
+        ["rgba8uint", "uint"],
+        ["rgba8sint", "sint"],
+    ] as const)("infers multisampled %s resources as %s", async (format, sampleType) => {
+        const { engine, layouts } = makeEngine();
+        const resource = await createComputeTextureResource(engine, ordinaryTexture(engine, format, 4));
+
+        expect(resource.sampleType).toBe(sampleType);
+        expect(resource.multisampled).toBe(true);
+        expect(layouts.at(-1)!.entries[0]!.texture).toMatchObject({ sampleType, multisampled: true });
+    });
+
+    it.each(["depth", "uint", "sint"] as const)("preserves explicit multisampled %s declarations", (sampleType) => {
+        const declaration = computeTextureBinding("image", { group: 0, binding: 0, multisampled: true, sampleType });
+        expect(declaration._layout.texture).toMatchObject({ sampleType, multisampled: true });
+    });
+
+    it("defaults multisampled float declarations to unfilterable and rejects explicit filterable float", () => {
+        const declaration = computeTextureBinding("image", { group: 0, binding: 0, multisampled: true });
+        expect(declaration._layout.texture).toMatchObject({ sampleType: "unfilterable-float", multisampled: true });
+        expect(() => computeTextureBinding("image", { group: 0, binding: 0, multisampled: true, sampleType: "float" })).toThrow(/unfilterable-float/);
     });
 
     it("rejects adaptation when the engine device changes during validation", async () => {

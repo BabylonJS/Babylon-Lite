@@ -88,7 +88,7 @@ export function computeUniformBufferBinding(name: string, options: ComputeUnifor
 export interface ComputeTextureBindingOptions {
     readonly group: number;
     readonly binding: number;
-    readonly sampleType?: "float" | "unfilterable-float" | "depth";
+    readonly sampleType?: "float" | "unfilterable-float" | "depth" | "sint" | "uint";
     readonly multisampled?: boolean;
 }
 
@@ -300,7 +300,7 @@ export function computeStorageTextureViewBinding(
 ): ComputeBindingDecl;
 ```
 
-`createComputeTextureResource` validates an existing 2D `Texture2D` through a temporary WebGPU validation error scope, so wrong-device views are rejected without adding ownership metadata to ordinary texture wrappers. It derives float/depth/integer sample compatibility from the real GPU format. Full or stencil-only depth-stencil views are rejected, while a wrapper explicitly exposing a depth-only view is accepted and validated by WebGPU. Array and 3D views use the dedicated advanced helper. Stable facades that replace their underlying texture allocation automatically invalidate cached compute bind groups. `invalidateComputeTextureResource` is required only when an application replaces a wrapper's `view` while retaining the same GPU texture.
+`createComputeTextureResource` validates an existing 2D `Texture2D` through a temporary WebGPU validation error scope, so wrong-device views are rejected without adding ownership metadata to ordinary texture wrappers. It derives float/depth/integer sample compatibility from the real GPU format. Multisampled floating-point color textures use `unfilterable-float`; depth, signed-integer, and unsigned-integer sample types are preserved. A multisampled declaration with no explicit sample type defaults to `unfilterable-float`, while explicit filterable `float` is rejected. Full or stencil-only depth-stencil views are rejected, while a wrapper explicitly exposing a depth-only view is accepted and validated by WebGPU. Array and 3D views use the dedicated advanced helper. Stable facades that replace their underlying texture allocation automatically invalidate cached compute bind groups. `invalidateComputeTextureResource` is required only when an application replaces a wrapper's `view` while retaining the same GPU texture.
 
 `createComputeTextureViewResource` and `computeTextureViewBinding` are the advanced opt-in path for `1d`, `2d-array`, `cube`, `cube-array`, and `3d` views. The ordinary 2D helpers do not import them. The resource helper validates the caller-selected view dimension and multisampling through a temporary bind group; Babylon Lite never exposes the underlying GPU view.
 

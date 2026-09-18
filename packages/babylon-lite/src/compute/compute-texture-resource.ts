@@ -100,12 +100,13 @@ export async function _createComputeTextureViewResource(
     }
 ): Promise<ComputeTextureResource> {
     const inferredSampleType = _inferComputeTextureSampleType(engine, texture);
-    const sampleType = options?.sampleType ?? inferredSampleType;
-    if (!_isComputeTextureSampleTypeCompatible(inferredSampleType, sampleType)) {
-        throw new Error(`createComputeTextureResource: declared sample type ${sampleType} is incompatible with texture format ${texture.texture.format}.`);
-    }
     const viewDimension = options.viewDimension;
     const multisampled = texture.texture.sampleCount > 1;
+    const requiredSampleType = multisampled && inferredSampleType === "float" ? "unfilterable-float" : inferredSampleType;
+    const sampleType = options?.sampleType ?? requiredSampleType;
+    if (!_isComputeTextureSampleTypeCompatible(requiredSampleType, sampleType)) {
+        throw new Error(`createComputeTextureResource: declared sample type ${sampleType} is incompatible with texture format ${texture.texture.format}.`);
+    }
     if (options.multisampled !== undefined && options.multisampled !== multisampled) {
         throw new Error(`createComputeTextureViewResource: declared multisampled=${options.multisampled} does not match the texture.`);
     }

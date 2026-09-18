@@ -68,8 +68,11 @@ export function _computeTextureViewBinding(
         }
         _validateComputeTextureResource(resource);
     });
-    const sampleType = options.sampleType ?? "float";
     const multisampled = options.multisampled ?? false;
+    const sampleType = options.sampleType ?? (multisampled ? "unfilterable-float" : "float");
+    if (multisampled && sampleType === "float") {
+        throw new Error("computeTextureBinding: multisampled float textures require sampleType unfilterable-float.");
+    }
     return _createComputeBindingDecl(name, options.group, options.binding, TEXTURE_KIND, { texture: { sampleType, viewDimension: options.viewDimension, multisampled } }, {
         sampleType,
         multisampled,
