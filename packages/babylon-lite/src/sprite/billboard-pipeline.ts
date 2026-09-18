@@ -50,10 +50,6 @@ export interface BillboardInstanceSortScratch {
     _sortDepths: Float32Array;
 }
 
-function getDepthModeEntry(depthMode: BillboardDepthMode): (typeof DEPTH_MODE_TABLE)[BillboardDepthMode] {
-    return DEPTH_MODE_TABLE[depthMode];
-}
-
 /** @internal Shared by the optional billboard custom-shader composer. */
 export function makeBillboardBasisWgsl(orientation: BillboardOrientation): string {
     switch (orientation) {
@@ -167,7 +163,7 @@ export function getOrCreateBillboardPipeline(
     depthCompare: GPUCompareFunction = "greater-equal"
 ): GPURenderPipeline {
     const deviceCache = getBillboardPipelineDeviceCache(engine, cache);
-    const depthEntry = getDepthModeEntry(system._depthMode);
+    const depthEntry = DEPTH_MODE_TABLE[system._depthMode];
     const alphaToCoverageResolver = _getAlphaToCoverageResolver();
     const alphaToCoverage = depthEntry.writeEnabled && sampleCount > 1 && !!alphaToCoverageResolver?.(system);
     const customKey = _getBillboardFxHook()?.pipelineKeyPart(system) ?? "";
@@ -416,7 +412,7 @@ function getShaderModule(engine: EngineContext, cache: BillboardPipelineDeviceCa
     if (customModule) {
         return customModule;
     }
-    const key = `${orientation}:${getDepthModeEntry(depthMode).index}:${alphaToCoverage ? "a" : "n"}`;
+    const key = `${orientation}:${DEPTH_MODE_TABLE[depthMode].index}:${alphaToCoverage ? "a" : "n"}`;
     let module = cache._shaderModules.get(key);
     if (!module) {
         module = engine._device.createShaderModule({ code: makeBillboardWgsl(orientation, depthMode, alphaToCoverage) });
@@ -437,7 +433,7 @@ function buildBillboardPipeline(
     depthCompare: GPUCompareFunction
 ): GPURenderPipeline {
     const device = engine._device;
-    const depthEntry = getDepthModeEntry(system._depthMode);
+    const depthEntry = DEPTH_MODE_TABLE[system._depthMode];
     const shaderModule = getShaderModule(engine, cache, system, alphaToCoverage);
     const layoutEntries: GPUBindGroupLayoutEntry[] = [
         { binding: 0, visibility: SS.VERTEX | SS.FRAGMENT, buffer: { type: "uniform" } },

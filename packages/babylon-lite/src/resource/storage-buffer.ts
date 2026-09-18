@@ -30,8 +30,6 @@ export interface StorageBuffer {
     _readback?: GPUBuffer;
     /** @internal Device that owns `_readback`. */
     _readbackDevice?: GPUDevice;
-    /** @internal Allocated readback capacity. */
-    _readbackSize?: number;
     /** @internal Coalesces identical read requests for this allocation. */
     _readPending?: Promise<ArrayBuffer>;
     /** @internal Source range for the pending read. */
@@ -207,10 +205,9 @@ export function readStorageBuffer(buffer: StorageBuffer, byteOffset = 0, byteLen
             () => readStorageBuffer(buffer, byteOffset, byteLength)
         );
     }
-    if (buffer._readback && (buffer._readbackDevice !== device || (buffer._readbackSize ?? 0) < byteLength)) {
+    if (buffer._readback && (buffer._readbackDevice !== device || buffer._readback.size < byteLength)) {
         buffer._readback.destroy();
         buffer._readback = undefined;
-        buffer._readbackSize = undefined;
     }
     const staging = (buffer._readback ??= device.createBuffer({
         label: buffer._label ? `${buffer._label}-readback` : "storage-readback",
@@ -218,7 +215,6 @@ export function readStorageBuffer(buffer: StorageBuffer, byteOffset = 0, byteLen
         usage: BU.COPY_DST | BU.MAP_READ,
     }));
     buffer._readbackDevice = device;
-    buffer._readbackSize ??= byteLength;
     const encoder = device.createCommandEncoder({ label: buffer._label ? `${buffer._label}-readback` : "storage-readback" });
     encoder.copyBufferToBuffer(buffer._buffer, byteOffset, staging, 0, byteLength);
     device.queue.submit([encoder.finish()]);
@@ -252,7 +248,6 @@ export function disposeStorageBuffer(buffer: StorageBuffer): void {
     buffer._readback?.destroy();
     buffer._readback = undefined;
     buffer._readbackDevice = undefined;
-    buffer._readbackSize = undefined;
     buffer._buffer?.destroy();
     buffer._buffer = null;
     buffer._engine._storageBuffers.delete(buffer);

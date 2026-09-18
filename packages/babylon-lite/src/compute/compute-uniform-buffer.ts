@@ -1,6 +1,7 @@
 import { BU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
-import { align, createMappedBuffer } from "../resource/gpu-buffers.js";
+import { align } from "../resource/buffer-alignment.js";
+import { createMappedBuffer } from "../resource/mapped-buffer.js";
 import { registerManagedResourceDisposer } from "../resource/managed-resource-hooks.js";
 
 declare const uniformBufferBrand: unique symbol;
