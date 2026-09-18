@@ -227,10 +227,24 @@ function copyLiteMaterialData(src: object, dst: object): void {
 export class StandardMaterial extends PushMaterial {
     /** @internal Underlying Babylon Lite standard-material props. */
     public readonly _lite: StandardMaterialProps;
+    /** Diffuse colour as the app set it. Kept apart from `_lite.diffuseColor`, which is forced to white
+     *  while the material is unlit (see `_syncDiffuse`). */
+    private _diffuse: Tuple3 | null = null;
 
     public constructor(name: string, scene?: Scene) {
         super(name, scene);
         this._lite = createStandardMaterial();
+    }
+
+    /**
+     * Babylon.js shades an unlit StandardMaterial as `emissive + ambient`: the diffuse colour only scales
+     * the accumulated light, and there is none. Lite's unlit path is `emissive × diffuse`, so the usual
+     * "unlit colour" setup (black diffuse, colour in emissive) rendered black. Hand Lite a neutral white
+     * diffuse while lighting is disabled and the app's own colour otherwise.
+     */
+    private _syncDiffuse(): void {
+        const diffuse = (this._diffuse ??= [...this._lite.diffuseColor]);
+        this._lite.diffuseColor = this._lite.disableLighting ? [1, 1, 1] : [diffuse[0], diffuse[1], diffuse[2]];
     }
 
     public override getClassName(): string {
@@ -238,10 +252,11 @@ export class StandardMaterial extends PushMaterial {
     }
 
     public get diffuseColor(): Color3 {
-        return readColor3(this._lite.diffuseColor);
+        return readColor3(this._diffuse ?? this._lite.diffuseColor);
     }
     public set diffuseColor(value: Color3) {
-        this._lite.diffuseColor = [value.r, value.g, value.b];
+        this._diffuse = [value.r, value.g, value.b];
+        this._syncDiffuse();
         this._markDirty();
     }
 
@@ -274,6 +289,7 @@ export class StandardMaterial extends PushMaterial {
     }
     public set disableLighting(value: boolean) {
         this._lite.disableLighting = value;
+        this._syncDiffuse();
         this._markDirty();
     }
 
@@ -392,6 +408,7 @@ export class StandardMaterial extends PushMaterial {
     public override clone(name: string): StandardMaterial {
         const cloned = new StandardMaterial(name, this._scene);
         this._cloneBaseInto(cloned);
+        cloned._diffuse = this._diffuse && [this._diffuse[0], this._diffuse[1], this._diffuse[2]];
         cloned.useAlphaFromDiffuseTexture = this.useAlphaFromDiffuseTexture;
         cloned._diffuseTexture = this._diffuseTexture;
         cloned._bumpTexture = this._bumpTexture;
