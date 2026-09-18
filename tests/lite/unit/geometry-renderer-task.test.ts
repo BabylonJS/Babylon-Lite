@@ -686,9 +686,13 @@ describe("GeometryRendererTask", () => {
         const { createArcRotateCamera } = await import("../../../packages/babylon-lite/src/camera/arc-rotate");
         const { getViewProjectionMatrix } = await import("../../../packages/babylon-lite/src/camera/camera");
         const engine = makeMockEngine();
+        const setViewport = vi.fn();
+        const setScissorRect = vi.fn();
         engine._currentEncoder = {
             beginRenderPass: () =>
                 ({
+                    setViewport,
+                    setScissorRect,
                     setBindGroup: () => undefined,
                     setPipeline: () => undefined,
                     end: () => undefined,
@@ -721,6 +725,8 @@ describe("GeometryRendererTask", () => {
 
         expect(Array.from(task._sceneData.subarray(0, 16))).toEqual(effective);
         expect(effective).not.toEqual(raw);
+        expect(setViewport).toHaveBeenCalledExactlyOnceWith(0, 0, 100, 100, 0, 1);
+        expect(setScissorRect).toHaveBeenCalledExactlyOnceWith(0, 0, 100, 100);
     });
 
     // ── Scene-mutation re-sync (stale `_bound` after removal / material swap) ──────

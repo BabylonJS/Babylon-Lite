@@ -11,12 +11,12 @@ describe("mesh-blending PBR opt-in support", () => {
         const depthTexture = createRenderTarget({ format: "r32float", samples: 1, size: { width: 16, height: 16 } });
         const config = { sourceTexture, meshBlendTagTexture, depthTexture, camera: {} as never };
 
-        expect(flags._getPbrExts().has("mesh-blending-non-uniform-normal")).toBe(false);
+        expect(flags._getPbrExts().has("mesh-blend-normal")).toBe(false);
         expect(() => createMeshBlendingPostProcessTask({ ...config, quality: 99 as never }, {} as never)).toThrow(RangeError);
-        expect(flags._getPbrExts().has("mesh-blending-non-uniform-normal")).toBe(false);
+        expect(flags._getPbrExts().has("mesh-blend-normal")).toBe(false);
 
         const task = createMeshBlendingPostProcessTask(config, {} as never);
-        expect(flags._getPbrExts().has("mesh-blending-non-uniform-normal")).toBe(true);
+        expect(flags._getPbrExts().has("mesh-blend-normal")).toBe(true);
         task.dispose();
     });
 
@@ -30,10 +30,10 @@ describe("mesh-blending PBR opt-in support", () => {
         const { createPbrTemplate } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-template");
         const { composeShader } = await import("../../../packages/babylon-lite/src/shader/shader-composer");
 
-        expect(flags._getPbrExts().has("mesh-blending-non-uniform-normal")).toBe(false);
+        expect(flags._getPbrExts().has("mesh-blend-normal")).toBe(false);
         support._installMeshBlendingPbrSupport();
 
-        const extension = flags._getPbrExts().get("mesh-blending-non-uniform-normal")!;
+        const extension = flags._getPbrExts().get("mesh-blend-normal")!;
         const context = {
             _features: flags.PBR_HAS_NORMAL_MAP,
             _features2: 0,

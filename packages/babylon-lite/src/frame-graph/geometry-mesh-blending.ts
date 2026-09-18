@@ -6,7 +6,7 @@ import type { Mesh } from "../mesh/mesh.js";
 import { resolveMeshBlendingTag } from "../mesh/mesh-blending-tag.js";
 import type { ShaderFragment } from "../shader/fragment-types.js";
 import { wgsl } from "../shader/wgsl.js";
-import { GeometryTextureType, _installGeometryOutputExtension, type GeometryOutputExtension } from "./geometry-types.js";
+import { GEOMETRY_TEXTURE_DESCRIPTIONS, GeometryTextureType, _installGeometryOutputExtension, type GeometryOutputExtension } from "./geometry-types.js";
 
 let _extension: GeometryOutputExtension | null = null;
 
@@ -36,6 +36,18 @@ function isZeroColor(value: GPUColor): boolean {
     return color.r === 0 && color.g === 0 && color.b === 0 && color.a === 0;
 }
 
+function validateAttachment(format: GPUTextureFormat, clearValue: GPUColor, samples: number): void {
+    if (format !== "r8uint") {
+        throw new Error(`GeometryRendererTask: MESH_BLEND_TAG format must be r8uint, received ${format}.`);
+    }
+    if (!isZeroColor(clearValue)) {
+        throw new Error("GeometryRendererTask: MESH_BLEND_TAG clearValue must be unsigned integer zero.");
+    }
+    if (samples !== 1) {
+        throw new Error("GeometryRendererTask: MESH_BLEND_TAG requires samples: 1.");
+    }
+}
+
 function createNonUniformNormalFragment(ctx: _PbrFragCtx): ShaderFragment | null {
     if (!_activePbrGeometryAttachments?.includes(GeometryTextureType.MESH_BLEND_TAG)) {
         return null;
@@ -46,7 +58,7 @@ function createNonUniformNormalFragment(ctx: _PbrFragCtx): ShaderFragment | null
     const doubleSidedCorrection = (ctx._features & PBR_HAS_DOUBLE_SIDED) !== 0 ? wgsl`if(!frontFacing){N=-N;}` : "";
     const anisotropyCorrection = (ctx._features & PBR_HAS_ANISOTROPY) !== 0 ? wgsl`anisoB=normalize(cross(N,anisoT));` : "";
     return {
-        _id: "mesh-blending-non-uniform-normal",
+        _id: "mesh-blend-normal",
         _varyings: hasTangentNormal ? [{ _name: "worldTangentNormal", _type: "vec3<f32>" }] : undefined,
         _vertexHelperFunctions: wgsl`fn transposeMat3(inMatrix:mat3x3<f32>)->mat3x3<f32>{
 let i0=inMatrix[0];let i1=inMatrix[1];let i2=inMatrix[2];
@@ -95,17 +107,6 @@ export function _installMeshBlendingGeometrySupport() {
         nodeWrite: (index) => wgsl`out.meshBlendTag${index} = u32(meshU.receivesShadow.x);`,
         value,
         colorTarget,
-        validateAttachment(format, clearValue, samples) {
-            if (format !== "r8uint") {
-                throw new Error(`GeometryRendererTask: MESH_BLEND_TAG format must be r8uint, received ${format}.`);
-            }
-            if (!isZeroColor(clearValue)) {
-                throw new Error("GeometryRendererTask: MESH_BLEND_TAG clearValue must be unsigned integer zero.");
-            }
-            if (samples !== 1) {
-                throw new Error("GeometryRendererTask: MESH_BLEND_TAG requires samples: 1.");
-            }
-        },
         validateNode(material) {
             if (material._needsAlphaBlending) {
                 throw new Error(
@@ -116,8 +117,9 @@ export function _installMeshBlendingGeometrySupport() {
     } satisfies GeometryOutputExtension;
     _extension = extension;
     _installGeometryOutputExtension(extension);
+    GEOMETRY_TEXTURE_DESCRIPTIONS[extension.type]!._validate = validateAttachment;
     _registerPbrExt({
-        id: "mesh-blending-non-uniform-normal",
+        id: "mesh-blend-normal",
         phase: "vertex",
         frag: createNonUniformNormalFragment,
     });

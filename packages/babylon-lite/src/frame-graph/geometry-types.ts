@@ -62,6 +62,8 @@ export interface GeometryTextureDescription {
     /** Default WebGPU color format for the attachment. Callers may override per attachment. */
     readonly defaultFormat: GPUTextureFormat;
     readonly clearValue: GeometryClearValue;
+    /** @internal Optional attachment validation installed by typed output support. */
+    _validate?(format: GPUTextureFormat, clearValue: GPUColor, samples: number): void;
 }
 
 const ZERO: GPUColor = { r: 0, g: 0, b: 0, a: 0 };
@@ -85,7 +87,14 @@ export const GEOMETRY_TEXTURE_DESCRIPTIONS: readonly GeometryTextureDescription[
     { name: "WorldNormal", defaultFormat: "rgba16float", clearValue: ZERO },
     { name: "Albedo", defaultFormat: "rgba8unorm", clearValue: ZERO },
     { name: "LinearVelocity", defaultFormat: "rgba16float", clearValue: ZERO },
-    { name: "MeshBlendTag", defaultFormat: "r8uint", clearValue: ZERO },
+    {
+        name: "MeshBlendTag",
+        defaultFormat: "r8uint",
+        clearValue: ZERO,
+        _validate: () => {
+            throw new Error("GeometryRendererTask: MESH_BLEND_TAG is not enabled.");
+        },
+    },
 ];
 
 /** Optional typed geometry-output support installed only by an opt-in attachment. */
@@ -97,7 +106,6 @@ export interface GeometryOutputExtension {
     nodeWrite(index: number): WgslSource;
     value(mesh: Mesh): number;
     colorTarget(format: GPUTextureFormat, blend: GPUBlendState | undefined, device: GPUDevice): GPUColorTargetState;
-    validateAttachment(format: GPUTextureFormat, clearValue: GPUColor, samples: number): void;
     validateNode(material: { readonly _needsAlphaBlending: boolean }): void;
 }
 

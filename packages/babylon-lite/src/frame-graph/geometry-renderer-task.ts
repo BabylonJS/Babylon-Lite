@@ -60,9 +60,9 @@ import { SCENE_UBO_BYTES } from "../shader/scene-uniforms-size.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { Task } from "./task.js";
 import type { GeometryClearValue } from "./geometry-types.js";
-import { GEOMETRY_TEXTURE_DESCRIPTIONS, GeometryTextureType, _geometryOutputExtension } from "./geometry-types.js";
+import { GEOMETRY_TEXTURE_DESCRIPTIONS, GeometryTextureType } from "./geometry-types.js";
 import { _packSceneUniforms } from "./scene-uniforms-pack.js";
-import { getProjectionMatrix } from "../camera/camera.js";
+import { getProjectionMatrix, _applyCameraViewport } from "../camera/camera.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import type { Mat4Storage } from "../math/types.js";
 
@@ -411,16 +411,8 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
                 }
             }
             const loads: Promise<void>[] = [];
-            if (typeAccessors[GeometryTextureType.MESH_BLEND_TAG]) {
-                const extension = _geometryOutputExtension;
-                if (!extension) {
-                    throw new Error("GeometryRendererTask: MESH_BLEND_TAG is not enabled.");
-                }
-                for (const attachment of task._attachments) {
-                    if (attachment._type === extension.type) {
-                        extension.validateAttachment(attachment._format, attachment._clearValue, samples);
-                    }
-                }
+            for (const attachment of task._attachments) {
+                GEOMETRY_TEXTURE_DESCRIPTIONS[attachment._type]!._validate?.(attachment._format, attachment._clearValue, samples);
             }
             if (hasStandard) {
                 loads.push(
@@ -753,6 +745,7 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
     }
 
     const pass = eng._currentEncoder.beginRenderPass(task._renderPassDescriptor);
+    _applyCameraViewport(pass, camera, mrt._width, mrt._height);
     pass.setBindGroup(0, task._sceneBG!);
     let lastPipeline: GPURenderPipeline | null = null;
     let draws = 0;

@@ -357,7 +357,7 @@ One 240-byte uniform buffer is written as 60 `f32` values:
 | `58`        | `enabled`, `1` or `0`                     |
 | `59`        | reserved zero                             |
 
-Projection and inverse projection are computed from the task camera and the output dimensions, including the camera viewport's effective aspect ratio. The `inverseView` range remains zero for ordinary variants and is computed and written only for the WorldPosition debug variant. When the engine uses floating origin its translation is zeroed to match the geometry producer's effective rendering view, including override cameras without a camera-local floating-origin flag. Orthographic state is `camera.ortho ? 1 : 0`.
+Projection and inverse projection are computed from the task camera and the output dimensions, including the camera viewport's effective aspect ratio. The geometry producer applies the same integer viewport and scissor bounds as the regular source render, so SceneColor, depth, and tags remain pixel-aligned. The `inverseView` range remains zero for ordinary variants and is computed and written only for the WorldPosition debug variant. When the engine uses floating origin its translation is zeroed to match the geometry producer's effective rendering view, including override cameras without a camera-local floating-origin flag. Orthographic state is `camera.ortho ? 1 : 0`.
 
 ### Blue noise
 
