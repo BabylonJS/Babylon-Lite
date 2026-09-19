@@ -3,7 +3,7 @@ import {
     addTaskAtStart,
     addMeshToTask,
     addToScene,
-    attachFreeControl,
+    attachConfigurableFreeControl,
     createBloomPostProcessTask,
     createCsmDirectionalShadowGenerator,
     createComputeStorageTextureMipmapsTask,
@@ -11,7 +11,7 @@ import {
     createEngine,
     createFreeCamera,
     computeProceduralSkySunColor,
-    enableMaterialPlugins,
+    enablePbrMaterialPluginVertexData,
     enableMirroredMeshes,
     isPbrMaterial,
     createRenderTarget,
@@ -147,7 +147,7 @@ export async function runOceanDemo(canvas: HTMLCanvasElement): Promise<void> {
         scene.camera = camera;
         onSceneDispose(
             scene,
-            attachFreeControl(camera, canvas, scene, {
+            attachConfigurableFreeControl(camera, canvas, scene, {
                 upKeys: ["Space", "PageUp"],
                 downKeys: ["KeyC", "PageDown"],
                 fastKeys: ["ShiftLeft", "ShiftRight"],
@@ -481,7 +481,7 @@ export async function runOceanDemo(canvas: HTMLCanvasElement): Promise<void> {
         });
 
         await enableMirroredMeshes(scene);
-        enableMaterialPlugins(scene);
+        enablePbrMaterialPluginVertexData();
         await registerSceneWithShadowSupport(scene);
         if (seekValue !== null || paused) {
             simulation.setBuoyancyFrame(buoy.probePositions());

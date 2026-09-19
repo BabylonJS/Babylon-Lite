@@ -164,7 +164,8 @@ export type { ArcRotateInterpolationGoal, ArcRotateInterpolationOptions } from "
 export { createFreeCamera } from "./camera/free-camera.js";
 export { createBankedFreeCamera } from "./camera/banked-free-camera.js";
 export { attachFreeControl } from "./camera/free-camera-controls.js";
-export type { FreeCameraControlOptions } from "./camera/free-camera-controls.js";
+export { attachConfigurableFreeControl } from "./camera/configurable-free-camera-controls.js";
+export type { FreeCameraControlOptions } from "./camera/configurable-free-camera-controls.js";
 export { enableOrthographicCamera, disableOrthographicCamera } from "./camera/orthographic.js";
 export type { OrthographicBounds, OrthographicBoundsOptions } from "./camera/orthographic.js";
 
@@ -624,6 +625,7 @@ export type {
     PluginTextureBinding,
 } from "./material/plugin/material-plugin.js";
 export { enableMaterialPlugins, reconcileMaterialPlugins } from "./material/plugin/enable-material-plugins.js";
+export { enablePbrMaterialPluginVertexData } from "./material/plugin/enable-pbr-material-plugin-vertex-data.js";
 export { bakeStdPluginMaterial } from "./material/plugin/std-plugin-bridge.js";
 export { enableMaterialStencil } from "./material/enable-material-stencil.js";
 export { getAlphaToCoverage, setAlphaToCoverage } from "./render/alpha-to-coverage.js";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { attachFreeControl } from "../../../packages/babylon-lite/src/camera/free-camera-controls";
+import { attachConfigurableFreeControl } from "../../../packages/babylon-lite/src/camera/configurable-free-camera-controls";
 import { createFreeCamera } from "../../../packages/babylon-lite/src/camera/free-camera";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 
@@ -30,7 +30,7 @@ describe("free camera controls", () => {
         camera.inertia = 0;
         const scene = { _beforeRender: [] } as unknown as SceneContext;
         const { canvas, emitKey } = createCanvasFixture();
-        attachFreeControl(camera, canvas, scene, { upKeys: ["KeyE"], downKeys: ["KeyQ"], fastKeys: ["ShiftLeft"], fastMultiplier: 5 });
+        attachConfigurableFreeControl(camera, canvas, scene, { upKeys: ["KeyE"], downKeys: ["KeyQ"], fastKeys: ["ShiftLeft"], fastMultiplier: 5 });
 
         emitKey("keydown", "KeyE");
         emitKey("keydown", "ShiftLeft");
@@ -49,7 +49,7 @@ describe("free camera controls", () => {
         const camera = createFreeCamera({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 });
         const scene = { _beforeRender: [] } as unknown as SceneContext;
         const { canvas, listeners } = createCanvasFixture();
-        const cleanup = attachFreeControl(camera, canvas, scene);
+        const cleanup = attachConfigurableFreeControl(camera, canvas, scene);
 
         cleanup();
 

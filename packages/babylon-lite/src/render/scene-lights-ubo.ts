@@ -23,11 +23,12 @@ export function getLightsUboSize(): number {
     return 16 + MAX_LIGHTS * LIGHT_ENTRY_FLOATS * 4;
 }
 
-/** Compute a composite version from all lights' data and transforms. */
+/** Compute a composite version from all lights (sum of _lightVersion).
+ *  Returns 0 for lights without version tracking (always refresh). */
 function computeLightsVersion(lights: readonly LightBase[]): number {
     let v = 0;
     for (const light of lights) {
-        v += (light._lightVersion ?? 0) + light.worldMatrixVersion;
+        v += light._lightVersion ?? 0;
     }
     return v;
 }

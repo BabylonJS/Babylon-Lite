@@ -173,9 +173,6 @@ export interface ShaderFragment {
     /** @internal UBO fields appended to MeshUniforms (mesh bind group) */
     readonly _uboFields?: readonly UboField[];
 
-    /** @internal The host material UBO must be visible to the vertex stage. */
-    readonly _materialUboVertexVisible?: boolean;
-
     /** @internal Extra stage-visible bindings (uniform buffers, textures, samplers). */
     readonly _bindings?: readonly BindingDecl[];
 

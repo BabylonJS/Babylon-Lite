@@ -19,16 +19,16 @@ export function setShadowGeneratorEnabled(generator: ShadowGenerator, enabled: b
         generator._runtimeEnabledState = state;
         const renderWhenEnabled = (engine: EngineContext, taskState: ShadowTaskInternalState): number =>
             syncShadowGeneratorEnabled(engine, generator, taskState, installedState) ? installedState.renderShadowMap(engine, taskState) : 0;
-        Object.defineProperty(generator, "_renderShadowMap", {
-            configurable: true,
-            enumerable: true,
-            get: () => renderWhenEnabled,
-            set: (replacement: ShadowGenerator["_renderShadowMap"]) => {
-                if (replacement && replacement !== renderWhenEnabled) {
-                    installedState.renderShadowMap = replacement;
-                }
-            },
-        });
+        generator._renderShadowMap = renderWhenEnabled;
+        const previousReplacer = generator._replaceShadowTaskHooks;
+        generator._replaceShadowTaskHooks = (ensure, render) => {
+            if (previousReplacer) {
+                previousReplacer(ensure, render);
+            } else {
+                generator._ensureShadowTaskState = ensure;
+                installedState.renderShadowMap = render;
+            }
+        };
     }
     if (state.enabled === enabled) {
         return;

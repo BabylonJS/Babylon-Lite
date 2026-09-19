@@ -73,7 +73,7 @@ describe("runtime shadow enablement", () => {
         const { generator, task } = createFixture("pcf");
         setShadowGeneratorEnabled(generator, true);
         const replacement = vi.fn(() => 3);
-        generator._renderShadowMap = replacement;
+        generator._replaceShadowTaskHooks!(generator._ensureShadowTaskState!, replacement);
 
         expect(task.execute!()).toBe(3);
         expect(replacement).toHaveBeenCalledOnce();

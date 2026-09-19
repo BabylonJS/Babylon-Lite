@@ -17,6 +17,11 @@ their WGSL into a scene's module graph. Shared Standard extension calls carry
 material and scene context; an optional variant-key hook supplies cache identity.
 Plugin flags, identity encoding, and scene-local UBO state belong to the bridge.
 
+PBR plugins that declare custom varyings or vertex-visible uniforms, textures, or
+samplers use the separate `enablePbrMaterialPluginVertexData()` entry point instead.
+Keeping that bridge separate preserves byte-identical bundles for existing fragment
+plugins and for every scene that does not opt in.
+
 ## Public API Surface
 
 ```ts
@@ -77,7 +82,22 @@ interface Material {
 Public exports (`index.ts`): `MaterialPlugin`, `MaterialPluginPoint`,
 `PluginUboField`, `PluginVaryingDecl`, `PluginSamplerDecl`, `PluginTextureBinding` (all `export type`),
 plus the runtime functions `enableMaterialPlugins(scene)` and
-`bakeStdPluginMaterial(material, scene)`.
+`bakeStdPluginMaterial(material, scene)`, and the PBR-only vertex-resource enabler
+`enablePbrMaterialPluginVertexData()`.
+
+## PBR vertex-resource opt-in
+
+```ts
+material.plugins = [vertexPlugin];
+enablePbrMaterialPluginVertexData();
+await registerScene(scene);
+```
+
+Use this entry point instead of `enableMaterialPlugins(scene)` when a PBR plugin
+uses `getVaryings()`, vertex-visible UBO fields, or vertex-visible samplers. Its
+dedicated bridge patches only that composed PBR shader's material-UBO visibility
+and vertex declaration. It does not modify the universal shader composer and must
+not be enabled alongside the ordinary PBR plugin bridge for the same materials.
 
 ## Opt-in entry point — `enableMaterialPlugins(scene)`
 
@@ -145,10 +165,16 @@ material.plugins ──► enableMaterialPlugins(scene) ──► {pbr,std}-plug
                                   ├─ pluginSignature(plugins)  → stable cache key string
                                   ├─ buildPluginFragment(plugins, idx, forStandard) → { _fragment, _stdUboSpec }
                                   │     getCustomCode → _fragmentSlots / _vertexSlots / _helperFunctions
-                                  │     getUniforms.ubo → _uboFields (PBR) | self-managed stage-visible `pluginUbo` binding (Standard)
-                                  │     getSamplers → _bindings (texture+sampler pairs)
+                                  │     getUniforms.ubo → _uboFields (PBR) | self-managed fragment `pluginUbo` binding (Standard)
+                                  │     getSamplers → fragment texture+sampler bindings
                                   ├─ writePluginUbo  → plugin.writeUbo(data, offsets)
                                   └─ bindPluginTextures → plugin.bindTextures → GPU entries
+
+material.plugins ──► enablePbrMaterialPluginVertexData()
+                  └─► pbr-plugin-vertex-bridge.ts
+                      └─► pbr-plugin-vertex-data.ts
+                          ├─ custom varyings and vertex-visible resources
+                          └─ `_pc` patch for the opted-in PBR material UBO only
 ```
 
 Each material caches its enabled plugins in stable priority order when its plugin signature is

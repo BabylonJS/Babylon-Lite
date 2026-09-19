@@ -114,7 +114,7 @@ export function enableDeformableShadowBounds(generator: ShadowGenerator, provide
     }
     const preload = generator._preloadShadowTask;
     const ensure = generator._ensureShadowTaskState;
-    const render = generator._runtimeEnabledState?.renderShadowMap ?? generator._renderShadowMap;
+    const render = generator._renderShadowMap;
     if (!preload || !ensure || !render) {
         throw new Error("Deformable shadows require a fully initialized shadow generator");
     }
