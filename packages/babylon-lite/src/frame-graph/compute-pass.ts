@@ -53,7 +53,7 @@ export function createComputePass(name: string, task: Task): ComputePass {
             pass._dependencies.clear();
         },
     };
-    task._passes.push(pass);
+    task._passes[0] = pass;
     return pass;
 }
 

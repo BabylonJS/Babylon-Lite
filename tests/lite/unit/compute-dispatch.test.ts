@@ -116,6 +116,18 @@ describe("scheduled compute dispatch", () => {
         expect(() => submitComputeTasks([task])).toThrow(/while a frame is being recorded/);
     });
 
+    it("replaces its recorded pass without retaining a disposed pass", () => {
+        const { engine } = makeEngine();
+        const task = createComputeTask(engine, "repeat-record");
+
+        task.record();
+        const firstPass = task._pass;
+        task.record();
+
+        expect(task._passes).toEqual([task._pass]);
+        expect(task._pass).not.toBe(firstPass);
+    });
+
     it("requires compute graphs to be recreated after the engine device changes", async () => {
         const { engine } = makeEngine();
         const shader = createComputeShader(engine, { computeSource: `@compute @workgroup_size(1) fn main() {}` });

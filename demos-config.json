@@ -1,5 +1,12 @@
 [
     {
+        "slug": "ocean",
+        "name": "Ocean",
+        "description": "A GPU spectral ocean driven by Babylon Lite compute tasks: JONSWAP spectrum generation, time-dependent amplitudes, multi-stage 2D inverse FFT, and a displaced water surface. Port of Playground YX6IB8#758.",
+        "tags": ["compute", "shader", "showcase"],
+        "mobile": false
+    },
+    {
         "slug": "npe-sprite2d",
         "name": "NPE on Sprite2D",
         "description": "An authored Node Particle Editor graph rendered through Lite's scene-less pure-2D SpriteRenderer. The NPE simulation stays world-space while the native bridge maps its live particle columns to one allocation-free Sprite2D layer.",

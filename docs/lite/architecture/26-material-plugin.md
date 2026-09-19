@@ -17,6 +17,11 @@ their WGSL into a scene's module graph. Shared Standard extension calls carry
 material and scene context; an optional variant-key hook supplies cache identity.
 Plugin flags, identity encoding, and scene-local UBO state belong to the bridge.
 
+PBR plugins that declare custom varyings or vertex-visible uniforms, textures, or
+samplers use the separate `enablePbrMaterialPluginVertexData()` entry point instead.
+Keeping that bridge separate preserves byte-identical bundles for existing fragment
+plugins and for every scene that does not opt in.
+
 ## Public API Surface
 
 ```ts
@@ -36,12 +41,19 @@ export type MaterialPluginPoint =
 export interface PluginUboField {
     readonly name: string;
     readonly type: string;
+    readonly visibility?: "vertex" | "fragment" | "vertex-fragment";
 } // WGSL type verbatim
+export interface PluginVaryingDecl {
+    readonly name: string;
+    readonly type: "f32" | "vec2f" | "vec3f" | "vec4f" | "vec2<f32>" | "vec3<f32>" | "vec4<f32>";
+}
 export interface PluginSamplerDecl {
     readonly texture: string;
     readonly sampler: string;
     readonly textureType?: "texture_2d<f32>";
+    readonly depthTexture?: boolean; // PBR vertex-resource bridge only
     readonly samplerType?: "sampler" | "sampler_non_filtering";
+    readonly visibility?: "vertex" | "fragment" | "vertex-fragment";
 }
 export interface PluginTextureBinding {
     readonly texture: Texture2D;
@@ -55,6 +67,7 @@ export interface MaterialPlugin {
     defines?: Record<string, boolean | number>;
     getCustomCode?(shaderType: "vertex" | "fragment"): Partial<Record<MaterialPluginPoint, string>> | null;
     getUniforms?(): { ubo?: PluginUboField[] };
+    getVaryings?(): PluginVaryingDecl[];
     getSamplers?(): PluginSamplerDecl[];
     writeUbo?(data: Float32Array, offsets: ReadonlyMap<string, number>): void;
     bindTextures?(out: PluginTextureBinding[]): void;
@@ -68,9 +81,30 @@ interface Material {
 ```
 
 Public exports (`index.ts`): `MaterialPlugin`, `MaterialPluginPoint`,
-`PluginUboField`, `PluginSamplerDecl`, `PluginTextureBinding` (all `export type`),
+`PluginUboField`, `PluginVaryingDecl`, `PluginSamplerDecl`, `PluginTextureBinding` (all `export type`),
 plus the runtime functions `enableMaterialPlugins(scene)` and
-`bakeStdPluginMaterial(material, scene)`.
+`bakeStdPluginMaterial(material, scene)`, and the PBR-only vertex-resource enabler
+`enablePbrMaterialPluginVertexData()`.
+
+## PBR vertex-resource opt-in
+
+```ts
+material.plugins = [vertexPlugin];
+enablePbrMaterialPluginVertexData();
+await registerScene(scene);
+```
+
+Use this entry point instead of `enableMaterialPlugins(scene)` when a PBR plugin
+uses `getVaryings()`, vertex-visible UBO fields, or vertex-visible samplers. Its
+dedicated bridge patches only that composed PBR shader's material-UBO visibility
+and vertex declaration. It does not modify the universal shader composer. Once
+enabled, the vertex-capable bridge remains the active PBR plugin bridge when
+`enableMaterialPlugins(scene)` or `reconcileMaterialPlugins(scene, material)`
+re-registers plugin support, so live plugin mutations retain their vertex resources.
+Both PBR bridges allocate identities and store immutable shader fragments in one
+lazy shared registry. Ordinary and vertex-resource variants therefore cannot
+collide in the composer or bindings caches, and fragments created before the
+vertex bridge is enabled remain resolvable without renumbering existing materials.
 
 ## Opt-in entry point — `enableMaterialPlugins(scene)`
 
@@ -114,7 +148,7 @@ only the generic Standard binding hook carries scene ownership context.
 | CUSTOM_FRAGMENT_UPDATE_ALPHA                 | AT                      | alpha-test region                    |
 | CUSTOM_FRAGMENT_UPDATE_DIFFUSE               | AC                      | Standard diffuse update              |
 | CUSTOM_FRAGMENT_BEFORE_LIGHTS                | MF                      | after f0, before lights              |
-| CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION | AI **and** NI           | ibl + non-ibl color tails            |
+| CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION | NI                      | after the IBL/non-IBL color tail     |
 | CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR             | BC                      | after tonemap+gamma (demo uses this) |
 | CUSTOM_VERTEX_MAIN_BEGIN                     | VR                      |                                      |
 | CUSTOM_VERTEX_UPDATE_WORLDPOS                | VW                      |                                      |
@@ -138,10 +172,16 @@ material.plugins ──► enableMaterialPlugins(scene) ──► {pbr,std}-plug
                                   ├─ pluginSignature(plugins)  → stable cache key string
                                   ├─ buildPluginFragment(plugins, idx, forStandard) → { _fragment, _stdUboSpec }
                                   │     getCustomCode → _fragmentSlots / _vertexSlots / _helperFunctions
-                                  │     getUniforms.ubo → _uboFields (PBR) | self-managed `pluginUbo` binding (Standard)
-                                  │     getSamplers → _bindings (texture+sampler pairs)
+                                  │     getUniforms.ubo → _uboFields (PBR) | self-managed fragment `pluginUbo` binding (Standard)
+                                  │     getSamplers → fragment texture+sampler bindings
                                   ├─ writePluginUbo  → plugin.writeUbo(data, offsets)
                                   └─ bindPluginTextures → plugin.bindTextures → GPU entries
+
+material.plugins ──► enablePbrMaterialPluginVertexData()
+                  └─► pbr-plugin-vertex-bridge.ts
+                      └─► pbr-plugin-vertex-data.ts
+                          ├─ custom varyings and vertex-visible resources
+                          └─ `_pc` patch for the opted-in PBR material UBO only
 ```
 
 Each material caches its enabled plugins in stable priority order when its plugin signature is
