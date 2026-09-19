@@ -7,9 +7,11 @@ export interface SplatStreamGpuLedger {
     tryReserve(bytes: number): boolean;
     tryHold(bytes: number): boolean;
     commitHold(bytes: number): void;
+    restoreHold(bytes: number): void;
     releaseHold(bytes: number): void;
     release(bytes: number): void;
     retire(bytes: number, dispose: () => void): void;
+    retireToHold(bytes: number, dispose: () => void): void;
 }
 
 /** @internal Creates the single GPU allocation ledger owned by one stream. */
@@ -42,6 +44,11 @@ export function createSplatStreamGpuLedger(maxBytes: number, retire: (dispose: (
             ledger.residentBytes += bytes;
             ledger.allocatedBytes += bytes;
         },
+        restoreHold(bytes): void {
+            ledger.residentBytes -= bytes;
+            ledger.allocatedBytes -= bytes;
+            ledger.heldBytes += bytes;
+        },
         releaseHold(bytes): void {
             ledger.heldBytes -= bytes;
         },
@@ -57,6 +64,14 @@ export function createSplatStreamGpuLedger(maxBytes: number, retire: (dispose: (
                 } finally {
                     ledger.allocatedBytes -= bytes;
                 }
+            });
+        },
+        retireToHold(bytes, dispose): void {
+            ledger.residentBytes -= bytes;
+            retire(() => {
+                ledger.allocatedBytes -= bytes;
+                ledger.heldBytes += bytes;
+                dispose();
             });
         },
     };

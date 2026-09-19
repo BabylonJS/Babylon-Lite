@@ -58,7 +58,6 @@ export interface SplatStreamGpuState {
     readonly engine: EngineContext;
     readonly capacity: number;
     readonly canonical: GPUBuffer;
-    readonly gatherParams: GPUBuffer;
     readonly pipelines: SharedPipelines;
     readonly ledger: SplatStreamGpuLedger;
     readonly gpuBytes: number;
@@ -67,6 +66,9 @@ export interface SplatStreamGpuState {
     count: number;
     contentGeneration: number;
     gatheredGeneration: number;
+    gatherParameterHoldBytes: number;
+    gatherParametersInFlight: number;
+    gatherHoldReleasePending: boolean;
     disposed: boolean;
 }
 
@@ -222,7 +224,7 @@ function scanLevelSizes(groups: number): Array<{ count: number; blocks: number }
 }
 
 function streamStateBytes(capacity: number): number {
-    return capacity * RECORD_BYTES + PARAM_SLOT_BYTES * Math.min(capacity, 4096);
+    return capacity * RECORD_BYTES;
 }
 
 function passStateBytes(capacity: number): number {
@@ -252,23 +254,16 @@ export function createSplatStreamGpuState(engine: EngineContext, requestedCapaci
         throw new Error("[GaussianSplatStream] GPU budget cannot admit canonical stream state");
     }
     let canonical: GPUBuffer | null = null;
-    let gatherParams: GPUBuffer | null = null;
     try {
         canonical = device.createBuffer({
             label: "splat stream canonical",
             size: checkedBufferSize(device, capacity * RECORD_BYTES, "canonical"),
             usage: BU.STORAGE | BU.COPY_SRC | BU.COPY_DST,
         });
-        gatherParams = device.createBuffer({
-            label: "splat stream gather parameters",
-            size: PARAM_SLOT_BYTES * Math.min(capacity, 4096),
-            usage: BU.UNIFORM | BU.COPY_DST,
-        });
         return {
             engine,
             capacity,
             canonical,
-            gatherParams,
             pipelines: createPipelines(device),
             ledger,
             gpuBytes,
@@ -277,11 +272,13 @@ export function createSplatStreamGpuState(engine: EngineContext, requestedCapaci
             count: 0,
             contentGeneration: 0,
             gatheredGeneration: -1,
+            gatherParameterHoldBytes: 0,
+            gatherParametersInFlight: 0,
+            gatherHoldReleasePending: false,
             disposed: false,
         };
     } catch (reason) {
         canonical?.destroy();
-        gatherParams?.destroy();
         ledger.releaseHold(initialPassBytes);
         ledger.release(gpuBytes);
         throw reason;
@@ -486,54 +483,129 @@ function writeRadixParams(data: Uint32Array, slot: number, count: number, groups
     return offset;
 }
 
-function recordGather(state: SplatStreamGpuState, encoder: GPUCommandEncoder): void {
+/** @internal Protects one bounded submission's gather descriptors before source admission. */
+export function holdSplatStreamGatherParameters(state: SplatStreamGpuState, maxIntervals: number): void {
+    const bytes = maxIntervals * PARAM_SLOT_BYTES;
+    if (!Number.isSafeInteger(bytes) || bytes <= 0 || state.gatherParameterHoldBytes || !state.ledger.tryHold(bytes)) {
+        throw new Error("[GaussianSplatStream] GPU budget cannot protect submission-local gather parameters");
+    }
+    state.gatherParameterHoldBytes = bytes;
+}
+
+function recordGather(state: SplatStreamGpuState, encoder: GPUCommandEncoder): boolean {
     if (state.gatheredGeneration === state.contentGeneration) {
-        return;
+        return true;
     }
     const device = state.engine._device;
     const maxGroups = device.limits.maxComputeWorkgroupsPerDimension;
-    const params = new ArrayBuffer(state.gatherParams.size);
-    const u32 = new Uint32Array(params);
-    const f32 = new Float32Array(params);
-    const dispatches: Array<{ bindGroup: GPUBindGroup; offset: number; groups: number }> = [];
-    let slot = 0;
+    const dispatches: Array<{ interval: SplatStreamGpuInterval; consumed: number; count: number; groups: number }> = [];
     for (const interval of state.intervals) {
         let consumed = 0;
         while (consumed < interval.count) {
-            if (slot * PARAM_SLOT_BYTES >= state.gatherParams.size) {
-                throw new Error("[GaussianSplatStream] active intervals exceed bounded gather parameter capacity");
-            }
             const count = Math.min(interval.count - consumed, maxGroups * WORKGROUP_SIZE);
-            const offset = slot * PARAM_SLOT_BYTES;
-            const base = offset / 4;
-            u32.set([interval.sourceOffset + consumed, count, interval.destinationOffset + consumed, interval.source.width], base);
-            f32.set(interval.source.meansMin, base + 4);
-            f32.set(interval.source.meansMax, base + 8);
-            const bindGroup = device.createBindGroup({
-                layout: state.pipelines.gatherLayout,
-                entries: [
-                    ...interval.source.views.map((view, binding) => ({ binding, resource: view })),
-                    { binding: 5, resource: { buffer: interval.source.codebooks } },
-                    { binding: 6, resource: { buffer: state.canonical } },
-                    { binding: 7, resource: { buffer: state.gatherParams, size: 48 } },
-                ],
-            });
-            dispatches.push({ bindGroup, offset, groups: Math.ceil(count / WORKGROUP_SIZE) });
+            dispatches.push({ interval, consumed, count, groups: Math.ceil(count / WORKGROUP_SIZE) });
             consumed += count;
-            slot++;
         }
     }
-    if (slot) {
-        device.queue.writeBuffer(state.gatherParams, 0, params, 0, slot * PARAM_SLOT_BYTES);
+    const protectedParameters = state.gatherParameterHoldBytes > 0;
+    const parameterBytes = dispatches.length * PARAM_SLOT_BYTES;
+    if (protectedParameters && (state.gatherParametersInFlight > 0 || parameterBytes > state.gatherParameterHoldBytes)) {
+        return false;
+    }
+    if (dispatches.length) {
         const pass = encoder.beginComputePass({ label: "splat stream gather" });
         pass.setPipeline(state.pipelines.gather);
-        for (const dispatch of dispatches) {
-            pass.setBindGroup(0, dispatch.bindGroup, [dispatch.offset]);
-            pass.dispatchWorkgroups(dispatch.groups);
+        for (let first = 0; first < dispatches.length; first += 4096) {
+            const chunk = dispatches.slice(first, first + 4096);
+            const bytes = chunk.length * PARAM_SLOT_BYTES;
+            if (!protectedParameters && !state.ledger.tryReserve(bytes)) {
+                pass.end();
+                throw new Error("[GaussianSplatStream] GPU budget cannot admit submission-local gather parameters");
+            }
+            let params: GPUBuffer | null = null;
+            let committedProtectedParameters = false;
+            try {
+                params = device.createBuffer({
+                    label: "splat stream submission-local gather parameters",
+                    size: bytes,
+                    usage: BU.UNIFORM,
+                    mappedAtCreation: true,
+                });
+                if (protectedParameters) {
+                    state.ledger.commitHold(bytes);
+                    committedProtectedParameters = true;
+                    state.gatherParametersInFlight++;
+                }
+                const mapped = params.getMappedRange();
+                const u32 = new Uint32Array(mapped);
+                const f32 = new Float32Array(mapped);
+                for (let slot = 0; slot < chunk.length; slot++) {
+                    const dispatch = chunk[slot]!;
+                    const base = (slot * PARAM_SLOT_BYTES) / 4;
+                    u32.set(
+                        [
+                            dispatch.interval.sourceOffset + dispatch.consumed,
+                            dispatch.count,
+                            dispatch.interval.destinationOffset + dispatch.consumed,
+                            dispatch.interval.source.width,
+                        ],
+                        base
+                    );
+                    f32.set(dispatch.interval.source.meansMin, base + 4);
+                    f32.set(dispatch.interval.source.meansMax, base + 8);
+                }
+                params.unmap();
+                for (let slot = 0; slot < chunk.length; slot++) {
+                    const dispatch = chunk[slot]!;
+                    const bindGroup = device.createBindGroup({
+                        layout: state.pipelines.gatherLayout,
+                        entries: [
+                            ...dispatch.interval.source.views.map((view, binding) => ({ binding, resource: view })),
+                            { binding: 5, resource: { buffer: dispatch.interval.source.codebooks } },
+                            { binding: 6, resource: { buffer: state.canonical } },
+                            { binding: 7, resource: { buffer: params, size: 48 } },
+                        ],
+                    });
+                    pass.setBindGroup(0, bindGroup, [slot * PARAM_SLOT_BYTES]);
+                    pass.dispatchWorkgroups(dispatch.groups);
+                }
+            } catch (reason) {
+                params?.destroy();
+                if (protectedParameters) {
+                    if (committedProtectedParameters) {
+                        state.ledger.restoreHold(bytes);
+                        state.gatherParametersInFlight--;
+                    }
+                } else {
+                    state.ledger.release(bytes);
+                }
+                pass.end();
+                throw reason;
+            }
+            const retiredParams = params;
+            const disposeParameters = (): void => {
+                retiredParams.destroy();
+                if (protectedParameters) {
+                    state.gatherParametersInFlight--;
+                    if (state.gatherParametersInFlight === 0 && state.gatherHoldReleasePending) {
+                        state.ledger.releaseHold(state.gatherParameterHoldBytes);
+                        state.gatherParameterHoldBytes = 0;
+                        state.gatherHoldReleasePending = false;
+                    }
+                } else {
+                    state.ledger.release(bytes);
+                }
+            };
+            if (protectedParameters) {
+                state.ledger.retireToHold(bytes, disposeParameters);
+            } else {
+                retireGpuResources(state.engine, disposeParameters);
+            }
         }
         pass.end();
     }
     state.gatheredGeneration = state.contentGeneration;
+    return true;
 }
 
 function packProjectParams(projection: PendingProjection): ArrayBuffer {
@@ -689,7 +761,9 @@ export function createSplatStreamDrawBatch(state: SplatStreamGpuState, signature
             if (!pending || this._retired || state.disposed) {
                 return;
             }
-            recordGather(state, engine._currentEncoder);
+            if (!recordGather(state, engine._currentEncoder)) {
+                return;
+            }
             if (pending.key !== passGpu.lastKey) {
                 recordProjectionAndSort(state, passGpu, pending, engine._currentEncoder);
                 if (state.count > 0 && !passGpu.bootstrapClaimed && !passGpu.bootstrapReadback && state.ledger.tryReserve(INDIRECT_BYTES)) {
@@ -778,13 +852,20 @@ export function retireSplatStreamGpuState(state: SplatStreamGpuState): void {
         return;
     }
     state.disposed = true;
+    if (state.gatherParameterHoldBytes) {
+        if (state.gatherParametersInFlight) {
+            state.gatherHoldReleasePending = true;
+        } else {
+            state.ledger.releaseHold(state.gatherParameterHoldBytes);
+            state.gatherParameterHoldBytes = 0;
+        }
+    }
     if (state.passHoldBytes) {
         state.ledger.releaseHold(state.passHoldBytes);
         state.passHoldBytes = 0;
     }
     state.ledger.retire(state.gpuBytes, () => {
         state.canonical.destroy();
-        state.gatherParams.destroy();
     });
 }
 

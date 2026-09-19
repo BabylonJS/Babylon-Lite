@@ -86,11 +86,17 @@ function getRenderBindGroup(engine: EngineContext, entry: RenderPipelineEntry, p
     return passGpu.bindGroup;
 }
 
+/** @internal Gives each material/view binding one stable selection identity. */
+export function createSplatStreamSelectionUpdate(onUpdate?: (context: DrawUpdateContext, binding: object) => void): (context: DrawUpdateContext) => void {
+    const selectionBinding = {};
+    return (context) => onUpdate?.(context, selectionBinding);
+}
+
 /** @internal Builds the GPU streaming draw only; public loader/attach orchestration intentionally lives elsewhere. */
 export function buildSplatStreamGpuRenderable(
     state: SplatStreamGpuState,
     worldMatrix: () => ArrayLike<number>,
-    onUpdate?: (context: DrawUpdateContext) => void,
+    onUpdate?: (context: DrawUpdateContext, binding: object) => void,
     onDraw?: (nonemptySignal: Promise<boolean> | null) => void
 ): Renderable {
     const renderable: Renderable = {
@@ -99,10 +105,11 @@ export function buildSplatStreamGpuRenderable(
         bind(engine: EngineContext, signature: RenderTargetSignature): DrawBinding {
             const entry = getPipeline(engine, signature);
             const batch: SplatStreamDrawBatch = getSplatStreamDrawBatch(state, signature);
+            const updateSelection = createSplatStreamSelectionUpdate(onUpdate);
             const worldView = new Float32Array(16);
             let drawable = false;
             const update = (context: DrawUpdateContext): void => {
-                onUpdate?.(context);
+                updateSelection(context);
                 const camera = context._camera;
                 drawable = !!camera && !camera.ortho && context.targetWidth > 0 && context.targetHeight > 0;
                 if (!drawable || !camera) {

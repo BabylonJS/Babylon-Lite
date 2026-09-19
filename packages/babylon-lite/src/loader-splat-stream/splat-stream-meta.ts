@@ -163,9 +163,9 @@ function parseLeafRepresentations(
         fail(context, "leaf has no positive-count representation");
     }
     if (!authoredErrors) {
-        const finest = raw.reduce((best, rep) => (rep.lod > best.lod ? rep : best));
+        const finest = raw.reduce((best, rep) => (rep.lod < best.lod ? rep : best));
         let previousError = 0;
-        for (const rep of raw.slice().sort((a, b) => b.lod - a.lod)) {
+        for (const rep of raw.slice().sort((a, b) => a.lod - b.lod)) {
             rep.error = previousError = Math.max(previousError, Math.log(finest.count / rep.count));
         }
     }

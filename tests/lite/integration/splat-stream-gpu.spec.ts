@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { resolve } from "node:path";
 
 const gpuModuleUrl = `/@fs/${resolve(__dirname, "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-gpu.ts").replaceAll("\\", "/")}`;
+const materialModuleUrl = `/@fs/${resolve(__dirname, "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-material.ts").replaceAll("\\", "/")}`;
 const retirementModuleUrl = `/@fs/${resolve(__dirname, "../../../packages/babylon-lite/src/engine/gpu-resource-retirement.ts").replaceAll("\\", "/")}`;
 
 test.beforeEach(async ({ page }) => {
@@ -14,6 +15,7 @@ test("compiles shaders and gathers canonical SOG records without clamping color"
         if (!adapter) {
             return null;
         }
+
         const device = await adapter.requestDevice();
         device.pushErrorScope("validation");
         const gpu = await import(moduleUrl);
@@ -602,3 +604,230 @@ for (const [count, requestedCapacity] of [
         expect(result!.args).toEqual([6, result!.validCount, 0, 0]);
     });
 }
+
+test("isolates chunked gather and camera snapshots across two passes in one submission", async ({ page }) => {
+    const result = await page.evaluate(async (moduleUrl) => {
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) {
+            return null;
+        }
+        const device = await adapter.requestDevice();
+        device.pushErrorScope("validation");
+        const gpu = await import(moduleUrl);
+        const encoder = device.createCommandEncoder();
+        const engine = { _device: device, _currentEncoder: encoder };
+        const makeSource = (selector: number) => {
+            const sh0Codebook = new Float32Array(256);
+            sh0Codebook[selector] = selector;
+            const metadata = {
+                count: 1,
+                meansMin: new Float32Array([0, 0, -Math.log(2)]),
+                meansMax: new Float32Array([0, 0, -Math.log(2)]),
+                scaleCodebook: new Float32Array(256),
+                sh0Codebook,
+                imageUrls: ["", "", "", "", ""],
+            };
+            const images = Array.from({ length: 5 }, () => new Uint8Array(4));
+            images[3]!.set([128, 128, 128, 252]);
+            images[4]!.set([selector, 0, 0, 255]);
+            return gpu.uploadSplatStreamSourceBytes(device, metadata, 1, 1, images);
+        };
+        const sourceA = makeSource(1);
+        const sourceB = makeSource(2);
+        const intervalCount = 4097;
+        const state = gpu.createSplatStreamGpuState(engine, intervalCount, 16 * 1024 * 1024);
+        const batchA = gpu.createSplatStreamDrawBatch(state, { _sampleCount: 1 });
+        const batchB = gpu.createSplatStreamDrawBatch(state, { _sampleCount: 1 });
+        const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+        const offscreen = identity.slice();
+        offscreen[12] = 100;
+        const canonicalFirstA = device.createBuffer({ size: 64, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+        const canonicalLastA = device.createBuffer({ size: 64, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+        const indirectA = device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+        const canonicalB = device.createBuffer({ size: 64, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+        const indirectB = device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+
+        gpu.setSplatStreamGpuIntervals(
+            state,
+            Array.from({ length: intervalCount }, (_, destinationOffset) => ({
+                source: sourceA,
+                sourceOffset: 0,
+                count: 1,
+                destinationOffset,
+            })),
+            1
+        );
+        batchA.queue({ count: intervalCount, key: "pass-a", worldView: identity, projection: identity, width: 64, height: 64, near: 0.01 });
+        batchA.flush(engine);
+        encoder.copyBufferToBuffer(state.canonical, 0, canonicalFirstA, 0, 64);
+        encoder.copyBufferToBuffer(state.canonical, (intervalCount - 1) * 64, canonicalLastA, 0, 64);
+        encoder.copyBufferToBuffer(batchA.passGpu.indirect, 0, indirectA, 0, 16);
+
+        gpu.setSplatStreamGpuIntervals(state, [{ source: sourceB, sourceOffset: 0, count: 1, destinationOffset: 0 }], 2);
+        batchB.queue({ count: 1, key: "pass-b", worldView: offscreen, projection: identity, width: 64, height: 64, near: 0.01 });
+        batchB.flush(engine);
+        encoder.copyBufferToBuffer(state.canonical, 0, canonicalB, 0, 64);
+        encoder.copyBufferToBuffer(batchB.passGpu.indirect, 0, indirectB, 0, 16);
+
+        device.queue.submit([encoder.finish()]);
+        const reads = [canonicalFirstA, canonicalLastA, indirectA, canonicalB, indirectB];
+        await Promise.all(reads.map((buffer) => buffer.mapAsync(GPUMapMode.READ)));
+        const canonical = (buffer: GPUBuffer) => Array.from(new Float32Array(buffer.getMappedRange().slice(0)));
+        const indirect = (buffer: GPUBuffer) => Array.from(new Uint32Array(buffer.getMappedRange().slice(0)));
+        const firstA = canonical(canonicalFirstA);
+        const lastA = canonical(canonicalLastA);
+        const second = canonical(canonicalB);
+        const error = await device.popErrorScope();
+        return {
+            firstColorA: firstA[12],
+            lastColorA: lastA[12],
+            colorB: second[12],
+            indirectA: indirect(indirectA),
+            indirectB: indirect(indirectB),
+            error: error?.message,
+        };
+    }, gpuModuleUrl);
+    test.skip(result === null, "A WebGPU adapter is unavailable");
+    expect(result!.error).toBeUndefined();
+    expect(result!.lastColorA).toBe(result!.firstColorA);
+    expect(result!.colorB).not.toBe(result!.firstColorA);
+    expect(result!.indirectA).toEqual([6, 4097, 0, 0]);
+    expect(result!.indirectB).toEqual([6, 0, 0, 0]);
+});
+
+test("keeps distinct stable selection identities for actual material bindings", async ({ page }) => {
+    const result = await page.evaluate(
+        async ({ gpuUrl, materialUrl }) => {
+            const adapter = await navigator.gpu.requestAdapter();
+            if (!adapter) {
+                return null;
+            }
+            const device = await adapter.requestDevice();
+            device.pushErrorScope("validation");
+            const gpu = await import(gpuUrl);
+            const material = await import(materialUrl);
+            const engine = { _device: device, _currentEncoder: device.createCommandEncoder() };
+            const state = gpu.createSplatStreamGpuState(engine, 1, 8 * 1024 * 1024);
+            const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+            const seen: object[] = [];
+            const renderable = material.buildSplatStreamGpuRenderable(
+                state,
+                () => identity,
+                (_context: unknown, binding: object) => seen.push(binding)
+            );
+            const signature = { _colorFormat: "rgba8unorm", _sampleCount: 1 };
+            const first = renderable.bind(engine, signature);
+            const second = renderable.bind(engine, signature);
+            const camera = {
+                fov: 1,
+                nearPlane: 0.01,
+                farPlane: 100,
+                children: [],
+                worldMatrix: identity,
+                worldMatrixVersion: 0,
+                _viewCache: new Float32Array(16),
+                _projCache: new Float32Array(16),
+                _vpCache: new Float32Array(16),
+            };
+            const context = { targetWidth: 64, targetHeight: 64, _camera: camera };
+            first.update(context);
+            second.update(context);
+            first.update(context);
+            second.update(context);
+            const error = await device.popErrorScope();
+            return {
+                distinct: seen[0] !== seen[1],
+                firstStable: seen[0] === seen[2],
+                secondStable: seen[1] === seen[3],
+                identityCount: new Set(seen).size,
+                error: error?.message,
+            };
+        },
+        { gpuUrl: gpuModuleUrl, materialUrl: materialModuleUrl }
+    );
+    test.skip(result === null, "A WebGPU adapter is unavailable");
+    expect(result!.error).toBeUndefined();
+    expect(result).toMatchObject({ distinct: true, firstStable: true, secondStable: true, identityCount: 2 });
+});
+
+test("protects gather descriptors under a full source ledger until the prior submission retires", async ({ page }) => {
+    const result = await page.evaluate(async (moduleUrl) => {
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) {
+            return null;
+        }
+        const device = await adapter.requestDevice();
+        device.pushErrorScope("validation");
+        const gpu = await import(moduleUrl);
+        let encoder = device.createCommandEncoder();
+        const engine: {
+            _device: GPUDevice;
+            _currentEncoder: GPUCommandEncoder;
+            _flushGpuRetirements?: (engine: unknown) => void;
+        } = { _device: device, _currentEncoder: encoder };
+        const makeSource = (selector: number) => {
+            const metadata = {
+                count: 1,
+                meansMin: new Float32Array([0, 0, -Math.log(2)]),
+                meansMax: new Float32Array([0, 0, -Math.log(2)]),
+                scaleCodebook: new Float32Array(256),
+                sh0Codebook: Float32Array.from({ length: 256 }, (_, index) => (index === selector ? selector : 0)),
+                imageUrls: ["", "", "", "", ""],
+            };
+            const images = Array.from({ length: 5 }, () => new Uint8Array(4));
+            images[3]!.set([128, 128, 128, 252]);
+            images[4]!.set([selector, 0, 0, 255]);
+            return gpu.uploadSplatStreamSourceBytes(device, metadata, 1, 1, images);
+        };
+        const sourceA = makeSource(1);
+        const sourceB = makeSource(2);
+        const state = gpu.createSplatStreamGpuState(engine, 1, 1024 * 1024);
+        gpu.holdSplatStreamGatherParameters(state, 1);
+        const batch = gpu.createSplatStreamDrawBatch(state, { _sampleCount: 1 });
+        const filler = state.ledger.maxBytes - state.ledger.allocatedBytes - state.ledger.heldBytes;
+        if (!state.ledger.tryReserve(filler)) {
+            throw new Error("failed to saturate the source ledger");
+        }
+        const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+        const read = () => device.createBuffer({ size: 64, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+        const beforeRetirement = read();
+        const afterRetirement = read();
+
+        gpu.setSplatStreamGpuIntervals(state, [{ source: sourceA, sourceOffset: 0, count: 1, destinationOffset: 0 }], 1);
+        batch.queue({ count: 1, key: "a", worldView: identity, projection: identity, width: 64, height: 64, near: 0.01 });
+        batch.flush(engine);
+        gpu.setSplatStreamGpuIntervals(state, [{ source: sourceB, sourceOffset: 0, count: 1, destinationOffset: 0 }], 2);
+        batch.queue({ count: 1, key: "b-blocked", worldView: identity, projection: identity, width: 64, height: 64, near: 0.01 });
+        batch.flush(engine);
+        encoder.copyBufferToBuffer(state.canonical, 0, beforeRetirement, 0, 64);
+        device.queue.submit([encoder.finish()]);
+        engine._flushGpuRetirements!(engine);
+        await device.queue.onSubmittedWorkDone();
+        await Promise.resolve();
+
+        encoder = device.createCommandEncoder();
+        engine._currentEncoder = encoder;
+        batch.queue({ count: 1, key: "b-retired", worldView: identity, projection: identity, width: 64, height: 64, near: 0.01 });
+        batch.flush(engine);
+        encoder.copyBufferToBuffer(state.canonical, 0, afterRetirement, 0, 64);
+        device.queue.submit([encoder.finish()]);
+        await Promise.all([beforeRetirement.mapAsync(GPUMapMode.READ), afterRetirement.mapAsync(GPUMapMode.READ)]);
+        const color = (buffer: GPUBuffer) => new Float32Array(buffer.getMappedRange().slice(0))[12];
+        const error = await device.popErrorScope();
+        return {
+            before: color(beforeRetirement),
+            after: color(afterRetirement),
+            inFlight: state.gatherParametersInFlight,
+            heldBytes: state.ledger.heldBytes,
+            allocatedBytes: state.ledger.allocatedBytes,
+            maxBytes: state.ledger.maxBytes,
+            error: error?.message,
+        };
+    }, gpuModuleUrl);
+    test.skip(result === null, "A WebGPU adapter is unavailable");
+    expect(result!.error).toBeUndefined();
+    expect(result!.before).not.toBe(result!.after);
+    expect(result!.inFlight).toBe(1);
+    expect(result!.heldBytes).toBe(0);
+    expect(result!.allocatedBytes).toBe(result!.maxBytes);
+});

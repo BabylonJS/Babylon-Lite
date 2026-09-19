@@ -18,11 +18,11 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reje
     return { promise, resolve, reject };
 }
 
-function metadata(imagePrefix = "image"): unknown {
+function metadata(imagePrefix = "image", count = 1): unknown {
     const codebook = Array.from({ length: 256 }, (_, index) => index);
     return {
         version: 2,
-        count: 1,
+        count,
         means: { mins: [0, 0, 0], maxs: [1, 1, 1], files: [`${imagePrefix}-0.webp`, `${imagePrefix}-1.webp`] },
         scales: { codebook, files: [`${imagePrefix}-2.webp`] },
         quats: { files: [`${imagePrefix}-3.webp`] },
@@ -96,6 +96,158 @@ function standardFetch(calls: string[]): typeof fetch {
 }
 
 describe("splat stream transport", () => {
+    it("rejects when retained decoded images plus encoded payload and the next bitmap exceed the real CPU peak", async () => {
+        const fakeGpu = gpu();
+        const encoded = new Uint8Array(768 * 1024);
+        encoded.set(webp(512, 512));
+        const fetchMock = vi.fn(async (input: string | URL | Request) =>
+            String(input).endsWith("meta.json") ? response(metadata("image", 512 * 512)) : response(encoded, 200, "image/webp")
+        ) as unknown as typeof fetch;
+        const decode = vi.fn(async () => bitmap(512, 512));
+        const manager = createSplatStreamRequestManager(1, 1, 5.5 * 1024 * 1024, 0, {
+            device: fakeGpu.device,
+            fetch: fetchMock,
+            decode,
+        });
+        await expect(manager.request(request("https://a.test/meta.json", 0))).rejects.toThrow("payloads retained by the same preparation");
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(decode).not.toHaveBeenCalled();
+        expect(manager.cpuBytes).toBe(0);
+    });
+
+    it("charges the retained encoded body and every decoded bitmap slot together at decoder entry", async () => {
+        const encoded = new Uint8Array(768 * 1024);
+        encoded.set(webp(512, 512));
+        const fetchMock = vi.fn(async (input: string | URL | Request) =>
+            String(input).endsWith("meta.json") ? response(metadata("image", 512 * 512)) : response(encoded, 200, "image/webp")
+        ) as unknown as typeof fetch;
+        const decoderLedgerBytes: number[] = [];
+        const manager = createSplatStreamRequestManager(1, 1, 6 * 1024 * 1024, 0, {
+            device: gpu().device,
+            fetch: fetchMock,
+            decode: async () => {
+                decoderLedgerBytes.push(manager.cpuBytes);
+                return bitmap(512, 512);
+            },
+        });
+        await manager.request(request("https://a.test/meta.json", 0));
+        expect(decoderLedgerBytes).toEqual(Array.from({ length: 5 }, () => 5.75 * 1024 * 1024));
+        expect(manager.cpuBytes).toBe(0);
+    });
+
+    it("admits concurrent known and streamed payload preparations without retained-byte cycles", async () => {
+        const encoded = new Uint8Array(768 * 1024);
+        encoded.set(webp(512, 512));
+        const firstDecode = deferred<void>();
+        let decodeCount = 0;
+        const payloadFetches: string[] = [];
+        const fetchMock = vi.fn(async (input: string | URL | Request) => {
+            const url = String(input);
+            if (url.endsWith("meta.json")) {
+                return response(metadata(url.includes("/a/") ? "a" : "b", 512 * 512));
+            }
+            payloadFetches.push(url);
+            if (url.includes("/a/")) {
+                return new Response(encoded, {
+                    headers: { "content-type": "image/webp", "content-length": String(encoded.byteLength) },
+                });
+            }
+            return new Response(
+                new ReadableStream<Uint8Array>({
+                    start(controller) {
+                        controller.enqueue(encoded);
+                        controller.close();
+                    },
+                }),
+                { headers: { "content-type": "image/webp" } }
+            );
+        }) as unknown as typeof fetch;
+        const manager = createSplatStreamRequestManager(2, 2, 6 * 1024 * 1024, 0, {
+            device: gpu().device,
+            fetch: fetchMock,
+            decode: async () => {
+                if (decodeCount++ === 0) {
+                    await firstDecode.promise;
+                }
+                return bitmap(512, 512);
+            },
+        });
+        const a = manager.request(request("https://a.test/a/meta.json", 0));
+        const b = manager.request(request("https://a.test/b/meta.json", 1));
+        await vi.waitFor(() => expect(decodeCount).toBe(1));
+        expect(payloadFetches.some((url) => url.includes("/b/"))).toBe(false);
+        firstDecode.resolve();
+        await expect(Promise.race([Promise.all([a, b]), new Promise((_, reject) => setTimeout(() => reject(new Error("preparations stalled")), 2000))])).resolves.toHaveLength(2);
+        expect(payloadFetches.filter((url) => url.includes("/a/"))).toHaveLength(5);
+        expect(payloadFetches.filter((url) => url.includes("/b/"))).toHaveLength(5);
+        expect(manager.cpuBytes).toBe(0);
+    });
+
+    it("does not let metadata hold the only HTTP slot while the payload-lane owner needs its next image", async () => {
+        const image = new Uint8Array(4096);
+        image.set(webp(512, 512));
+        const firstDecode = deferred<void>();
+        let decodeCount = 0;
+        const fetches: string[] = [];
+        const fetchMock = vi.fn(async (input: string | URL | Request) => {
+            const url = String(input);
+            fetches.push(url);
+            if (url.endsWith("meta.json")) {
+                const json = JSON.stringify(metadata(url.includes("/a/") ? "a" : "b", 512 * 512));
+                const body = url.includes("/b/") ? json.padEnd(8192, " ") : json;
+                return new Response(body, {
+                    headers: { "content-type": "application/json", "content-length": String(new TextEncoder().encode(body).byteLength) },
+                });
+            }
+            return new Response(image, {
+                headers: { "content-type": "image/webp", "content-length": String(image.byteLength) },
+            });
+        }) as unknown as typeof fetch;
+        const manager = createSplatStreamRequestManager(1, 1, 5 * 1024 * 1024 + image.byteLength, 0, {
+            device: gpu().device,
+            fetch: fetchMock,
+            decode: async () => {
+                decodeCount++;
+                if (decodeCount === 1) {
+                    await firstDecode.promise;
+                }
+                return bitmap(512, 512);
+            },
+        });
+
+        const a = manager.request(request("https://a.test/a/meta.json", 0));
+        const b = manager.request(request("https://a.test/b/meta.json", 1));
+        await vi.waitFor(() => expect(decodeCount).toBe(1));
+        expect(fetches).not.toContain("https://a.test/b/meta.json");
+        firstDecode.resolve();
+        await expect(Promise.race([Promise.all([a, b]), new Promise((_, reject) => setTimeout(() => reject(new Error("preparations stalled")), 2000))])).resolves.toHaveLength(2);
+        expect(fetches).toContain("https://a.test/b/meta.json");
+        expect(manager.cpuBytes).toBe(0);
+    });
+
+    it("does not let a superseded generation signal cancel the replacement job", async () => {
+        const firstDecode = deferred<void>();
+        let decodeCount = 0;
+        const firstController = new AbortController();
+        const manager = createSplatStreamRequestManager(2, 2, 10_000, 0, {
+            device: gpu().device,
+            fetch: standardFetch([]),
+            decode: async () => {
+                if (decodeCount++ === 0) {
+                    await firstDecode.promise;
+                }
+                return bitmap();
+            },
+        });
+        const first = manager.request({ ...request("https://a.test/meta.json", 0, SplatRequestPriority.Upgrade, 1), signal: firstController.signal });
+        await vi.waitFor(() => expect(decodeCount).toBe(1));
+        const replacement = manager.request(request("https://a.test/meta.json", 0, SplatRequestPriority.Upgrade, 2));
+        firstController.abort();
+        firstDecode.resolve();
+        await expect(first).rejects.toThrow("aborted");
+        await expect(replacement).resolves.toMatchObject({ generation: 2 });
+    });
+
     it("deduplicates resolved URLs and uploads five byte-preserving RGBA8 textures", async () => {
         const calls: string[] = [];
         const fakeGpu = gpu();
@@ -147,10 +299,11 @@ describe("splat stream transport", () => {
         const low = manager.request(request("https://a.test/low/meta.json", 2, SplatRequestPriority.Prefetch));
         const high = manager.request(request("https://a.test/high/meta.json", 3, SplatRequestPriority.Uncovered));
         await Promise.resolve();
-        expect(order).toEqual(["https://a.test/a/meta.json", "https://a.test/b/meta.json"]);
+        expect(order).toEqual(["https://a.test/a/meta.json"]);
         gates.get("https://a.test/a/meta.json")!.resolve(response(metadata()));
         await a;
         await vi.waitFor(() => expect(order).toContain("https://a.test/high/meta.json"));
+        expect(order).not.toContain("https://a.test/b/meta.json");
         expect(order).not.toContain("https://a.test/low/meta.json");
         void b.catch(() => undefined);
         void low.catch(() => undefined);

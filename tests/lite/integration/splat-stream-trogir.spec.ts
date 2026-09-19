@@ -79,7 +79,7 @@ test.describe("Trogir streaming demo", () => {
 
 test.describe("Trogir actual stream", () => {
     test.skip(!ACTUAL_STREAM_CONFIGURED, "Set GS_STREAM_ASSET_ROOT or GS_STREAM_TEST_URL to an authorized loose Trogir dataset.");
-    test("retains a valid default-budget scene through pressure, navigation, resize, and behind-camera views", async ({ page }) => {
+    test("retains a valid default-budget scene through bounded settlement, navigation, resize, and behind-camera views", async ({ page }) => {
         test.setTimeout(120_000);
         await page.goto("/");
         const result = await page.evaluate(
@@ -161,30 +161,43 @@ test.describe("Trogir actual stream", () => {
                     if (environment.state !== "resident") {
                         throw new Error(`Trogir environment did not become resident: ${environment.state}`);
                     }
-                    let stablePressureFrames = 0;
+                    let stableSettlementFrames = 0;
                     let blockedFingerprint = "";
-                    const pressureDeadline = performance.now() + 60_000;
-                    while (stablePressureFrames < 5 && performance.now() < pressureDeadline) {
+                    const settlementDeadline = performance.now() + 60_000;
+                    while (stableSettlementFrames < 5 && performance.now() < settlementDeadline) {
                         await new Promise(requestAnimationFrame);
                         const nextFingerprint = stream._sourceStates
                             .filter((state: SourceState & { generation: number }) => state.state === "blocked")
                             .map((state: SourceState & { generation: number }) => `${state.source.url}:${state.generation}`)
                             .join("|");
                         const stable =
-                            stream.stats.phase === "budget-limited" &&
+                            (stream.stats.phase === "idle" || stream.stats.phase === "budget-limited") &&
                             stream.stats.queuedFiles === 0 &&
                             stream.stats.pendingRequests === 0 &&
                             nextFingerprint === blockedFingerprint;
-                        stablePressureFrames = stable ? stablePressureFrames + 1 : 0;
+                        stableSettlementFrames = stable ? stableSettlementFrames + 1 : 0;
                         blockedFingerprint = nextFingerprint;
                     }
-                    if (stablePressureFrames < 5) {
-                        throw new Error(`Trogir stream did not reach stable budget pressure: ${stream.stats.phase}`);
+                    if (stableSettlementFrames < 5) {
+                        throw new Error(`Trogir stream did not settle within its budget: ${stream.stats.phase}`);
                     }
-                    const pressure = {
+                    const canonicalContains = (representation: { fileId: number; offset: number; count: number } | null): boolean =>
+                        !!representation &&
+                        stream._gpu.intervals.some(
+                            (interval: { source: unknown; sourceOffset: number; count: number }) =>
+                                interval.source === stream!._sourceStates[representation.fileId]!.gpu &&
+                                interval.sourceOffset === representation.offset &&
+                                interval.count === representation.count
+                        );
+                    const visibleLeaves = stream._leafStates.filter((leaf: LeafState) => leaf.visible);
+                    const settlement = {
                         phase: stream.stats.phase,
                         error: stream.stats.error?.message,
                         blockedFingerprint,
+                        generationPressure: stream._generationPressure,
+                        targetCanonicalGaps: visibleLeaves.filter((leaf: LeafState) => !canonicalContains(leaf.target as never)).length,
+                        displayedCanonicalGaps: visibleLeaves.filter((leaf: LeafState) => !canonicalContains(leaf.displayed as never)).length,
+                        pendingLeaves: visibleLeaves.filter((leaf: LeafState & { pending: unknown }) => leaf.pending).length,
                         allocated: stream._gpu.ledger.allocatedBytes,
                         held: stream._gpu.ledger.heldBytes,
                         max: stream._gpu.ledger.maxBytes,
@@ -308,7 +321,7 @@ test.describe("Trogir actual stream", () => {
                         (interval: GpuInterval) => stream!._sourceStates.find((state: SourceState) => state.gpu === interval.source)?.source.url === environment.source.url
                     );
                     return {
-                        pressure,
+                        settlement,
                         nearbyLods,
                         nearby,
                         resized,
@@ -334,9 +347,12 @@ test.describe("Trogir actual stream", () => {
         );
 
         expect(result.environmentActive).toBe(true);
-        expect(result.pressure).toMatchObject({ phase: "budget-limited", error: undefined });
-        expect(result.pressure.allocated + result.pressure.held).toBeLessThanOrEqual(result.pressure.max);
-        expect(result.pressure.blockedFingerprint).not.toBe("");
+        expect(["idle", "budget-limited"]).toContain(result.settlement.phase);
+        expect(result.settlement).toMatchObject({ error: undefined, targetCanonicalGaps: 0, displayedCanonicalGaps: 0, pendingLeaves: 0 });
+        expect(result.settlement.allocated + result.settlement.held).toBeLessThanOrEqual(result.settlement.max);
+        if (result.settlement.phase === "budget-limited") {
+            expect(result.settlement.generationPressure || result.settlement.blockedFingerprint !== "").toBe(true);
+        }
         expect(result.finalError).toBeUndefined();
         expect(result.nearbyLods.targetZero).toBeGreaterThan(0);
         expect(result.nearbyLods.displayedZero).toBeGreaterThan(0);

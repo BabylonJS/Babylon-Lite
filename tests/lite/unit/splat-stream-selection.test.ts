@@ -4,11 +4,12 @@ import { createPerspectiveMat4LH } from "../../../packages/babylon-lite/src/math
 import { parseSplatStreamManifest } from "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-meta";
 import {
     extractStreamFrustumPlanes,
+    planMergedStreamSelection,
     planStreamSelection,
     selectBootstrapSource,
     transformStreamBound,
 } from "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-selection";
-import type { StreamManifest, StreamRepresentation, StreamSelectionInput } from "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-types";
+import type { StreamManifest, StreamRepresentation, StreamSelectionInput, StreamSelectionPlan } from "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-types";
 
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 
@@ -247,6 +248,45 @@ describe("splat stream selection planner", () => {
         expect(pressured.selectedSplats).toBe(3);
         expect(pressured.selections.every((selection) => selection.target.lod === 0)).toBe(true);
         expect(() => planStreamSelection(input(parsed, { maxSplats: 2 }))).toThrow("visible coarse baseline");
+    });
+
+    it("solves disjoint camera demand once against the shared capacity", () => {
+        const parsed = parseSplatStreamManifest(
+            {
+                version: 1,
+                lodLevels: 2,
+                lodErrors: true,
+                filenames: ["coarse/meta.json", "fine/meta.json"],
+                tree: {
+                    bound: { min: [-2, -1, -2], max: [2, 1, -1] },
+                    children: [
+                        {
+                            bound: { min: [-2, -1, -2], max: [-1, 1, -1] },
+                            lods: { "0": { file: 0, offset: 0, count: 20 }, "1": { file: 1, offset: 0, count: 70 } },
+                            errors: [1, 0],
+                        },
+                        {
+                            bound: { min: [1, -1, -2], max: [2, 1, -1] },
+                            lods: { "0": { file: 0, offset: 20, count: 40 }, "1": { file: 1, offset: 70, count: 70 } },
+                            errors: [1, 0],
+                        },
+                    ],
+                },
+            },
+            "https://assets.example/lod-meta.json"
+        );
+        const cameraPlan = (leafIndex: number, distanceToCamera: number): StreamSelectionPlan => {
+            const leaf = parsed.leaves[leafIndex]!;
+            const target = leaf.alternatives[1]!;
+            return {
+                selections: [{ leaf, target, projectedError: 0, projectedRadius: 100, distanceToCamera }],
+                visibleLeaves: 1,
+                selectedSplats: target.count,
+            };
+        };
+        const plan = planMergedStreamSelection([cameraPlan(0, 10), cameraPlan(1, 1)], 100, 2, 0.15);
+        expect(plan.selectedSplats).toBe(90);
+        expect(plan.selections.map((selection) => selection.target.count)).toEqual([20, 70]);
     });
 
     it("supports cameras inside bounds and rejects orthographic planning explicitly", () => {

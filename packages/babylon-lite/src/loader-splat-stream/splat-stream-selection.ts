@@ -1,4 +1,14 @@
-import type { FrustumPlane, StreamBound, StreamLeaf, StreamSelection, StreamSelectionInput, StreamSelectionPlan, StreamSource, StreamTreeNode } from "./splat-stream-types.js";
+import type {
+    FrustumPlane,
+    StreamBound,
+    StreamLeaf,
+    StreamRepresentation,
+    StreamSelection,
+    StreamSelectionInput,
+    StreamSelectionPlan,
+    StreamSource,
+    StreamTreeNode,
+} from "./splat-stream-types.js";
 
 const PREFIX = "[GaussianSplatStream]";
 
@@ -105,23 +115,22 @@ function nearestDistance(bound: StreamBound, position: ArrayLike<number>): numbe
 }
 
 interface Candidate {
-    visible: VisibleLeaf;
+    leaf: StreamLeaf;
     currentIndex: number;
     distanceToCamera: number;
     projectedRadius: number;
 }
 
-/** @internal Plans visible leaf alternatives under error, splat-budget, and hysteresis constraints. */
-export function planStreamSelection(input: StreamSelectionInput): StreamSelectionPlan {
-    if (input.perspective === false) {
-        throw new Error(`${PREFIX} selection: orthographic cameras are unsupported`);
-    }
+interface CandidatePlanOptions {
+    readonly maxSplats: number;
+    readonly screenError: number;
+    readonly lodHysteresis: number;
+    readonly previousTargets?: ReadonlyMap<number, StreamRepresentation>;
+    readonly hardBudgetPressure?: boolean;
+}
+
+function validateCandidatePlanOptions(input: CandidatePlanOptions): void {
     if (
-        !Number.isFinite(input.projectionP11) ||
-        !Number.isFinite(input.targetHeight) ||
-        input.targetHeight <= 0 ||
-        !Number.isFinite(input.near) ||
-        input.near <= 0 ||
         !Number.isSafeInteger(input.maxSplats) ||
         input.maxSplats <= 0 ||
         !Number.isFinite(input.screenError) ||
@@ -132,21 +141,12 @@ export function planStreamSelection(input: StreamSelectionInput): StreamSelectio
     ) {
         throw new Error(`${PREFIX} selection: invalid planner parameters`);
     }
-    const planes = extractStreamFrustumPlanes(input.viewProjectionMatrix);
-    const visible: VisibleLeaf[] = [];
-    collectVisible(input.root, input.worldMatrix, planes, visible);
-    visible.sort((a, b) => a.leaf.id - b.leaf.id);
-    const focalScale = (input.targetHeight * Math.abs(input.projectionP11)) / 2;
-    const candidates: Candidate[] = visible.map((entry) => {
-        const distanceToCamera = nearestDistance(entry.bound, input.cameraPosition);
-        return {
-            visible: entry,
-            currentIndex: 0,
-            distanceToCamera,
-            projectedRadius: (focalScale * entry.bound.radius) / Math.max(entry.bound.radius + distanceToCamera, input.near),
-        };
-    });
-    const baselineSplats = candidates.reduce((sum, candidate) => sum + candidate.visible.leaf.alternatives[0]!.count, 0);
+}
+
+function planCandidates(candidates: Candidate[], input: CandidatePlanOptions): StreamSelectionPlan {
+    validateCandidatePlanOptions(input);
+    candidates.sort((left, right) => left.leaf.id - right.leaf.id);
+    const baselineSplats = candidates.reduce((sum, candidate) => sum + candidate.leaf.alternatives[0]!.count, 0);
     if (baselineSplats > input.maxSplats) {
         throw new Error(`${PREFIX} selection: visible coarse baseline (${baselineSplats} splats) exceeds maxSplats (${input.maxSplats})`);
     }
@@ -158,13 +158,13 @@ export function planStreamSelection(input: StreamSelectionInput): StreamSelectio
         let bestError = -Infinity;
         let bestAdded = 0;
         for (const candidate of candidates) {
-            const alternatives = candidate.visible.leaf.alternatives;
+            const alternatives = candidate.leaf.alternatives;
             const current = alternatives[candidate.currentIndex]!;
             const next = alternatives[candidate.currentIndex + 1];
             if (!next) {
                 continue;
             }
-            const previous = input.previousTargets?.get(candidate.visible.leaf.id);
+            const previous = input.previousTargets?.get(candidate.leaf.id);
             const previousIndex = previous
                 ? alternatives.findIndex(
                       (representation) => representation.fileId === previous.fileId && representation.offset === previous.offset && representation.count === previous.count
@@ -189,8 +189,7 @@ export function planStreamSelection(input: StreamSelectionInput): StreamSelectio
             if (
                 gain > 0 &&
                 (candidate.distanceToCamera < bestDistance ||
-                    (candidate.distanceToCamera === bestDistance &&
-                        (currentError > bestError || (currentError === bestError && candidate.visible.leaf.id < best!.visible.leaf.id))))
+                    (candidate.distanceToCamera === bestDistance && (currentError > bestError || (currentError === bestError && candidate.leaf.id < best!.leaf.id))))
             ) {
                 best = candidate;
                 bestDistance = candidate.distanceToCamera;
@@ -206,10 +205,71 @@ export function planStreamSelection(input: StreamSelectionInput): StreamSelectio
     }
 
     const selections: StreamSelection[] = candidates.map((candidate) => {
-        const target = candidate.visible.leaf.alternatives[candidate.currentIndex]!;
-        return { leaf: candidate.visible.leaf, target, projectedError: candidate.projectedRadius * target.error };
+        const target = candidate.leaf.alternatives[candidate.currentIndex]!;
+        return {
+            leaf: candidate.leaf,
+            target,
+            projectedError: candidate.projectedRadius * target.error,
+            distanceToCamera: candidate.distanceToCamera,
+            projectedRadius: candidate.projectedRadius,
+        };
     });
-    return { selections, visibleLeaves: visible.length, selectedSplats };
+    return { selections, visibleLeaves: candidates.length, selectedSplats };
+}
+
+/** @internal Plans visible leaf alternatives under error, splat-budget, and hysteresis constraints. */
+export function planStreamSelection(input: StreamSelectionInput): StreamSelectionPlan {
+    if (input.perspective === false) {
+        throw new Error(`${PREFIX} selection: orthographic cameras are unsupported`);
+    }
+    if (!Number.isFinite(input.projectionP11) || !Number.isFinite(input.targetHeight) || input.targetHeight <= 0 || !Number.isFinite(input.near) || input.near <= 0) {
+        throw new Error(`${PREFIX} selection: invalid planner parameters`);
+    }
+    validateCandidatePlanOptions(input);
+    const planes = extractStreamFrustumPlanes(input.viewProjectionMatrix);
+    const visible: VisibleLeaf[] = [];
+    collectVisible(input.root, input.worldMatrix, planes, visible);
+    visible.sort((a, b) => a.leaf.id - b.leaf.id);
+    const focalScale = (input.targetHeight * Math.abs(input.projectionP11)) / 2;
+    const candidates: Candidate[] = visible.map((entry) => {
+        const distanceToCamera = nearestDistance(entry.bound, input.cameraPosition);
+        return {
+            leaf: entry.leaf,
+            currentIndex: 0,
+            distanceToCamera,
+            projectedRadius: (focalScale * entry.bound.radius) / Math.max(entry.bound.radius + distanceToCamera, input.near),
+        };
+    });
+    return planCandidates(candidates, input);
+}
+
+/** @internal Merges camera demand, then performs one shared capacity-constrained selection. */
+export function planMergedStreamSelection(
+    plans: readonly StreamSelectionPlan[],
+    maxSplats: number,
+    screenError: number,
+    lodHysteresis: number,
+    previousTargets?: ReadonlyMap<number, StreamRepresentation>,
+    hardBudgetPressure = false
+): StreamSelectionPlan {
+    const merged = new Map<number, Candidate>();
+    for (const plan of plans) {
+        for (const selection of plan.selections) {
+            const current = merged.get(selection.leaf.id);
+            if (!current) {
+                merged.set(selection.leaf.id, {
+                    leaf: selection.leaf,
+                    currentIndex: 0,
+                    distanceToCamera: selection.distanceToCamera,
+                    projectedRadius: selection.projectedRadius,
+                });
+            } else {
+                current.distanceToCamera = Math.min(current.distanceToCamera, selection.distanceToCamera);
+                current.projectedRadius = Math.max(current.projectedRadius, selection.projectedRadius);
+            }
+        }
+    }
+    return planCandidates([...merged.values()], { maxSplats, screenError, lodHysteresis, previousTargets, hardBudgetPressure });
 }
 
 /** @internal Chooses the coarse bootstrap source by coverage, aggregate cost, then stable file ID. */

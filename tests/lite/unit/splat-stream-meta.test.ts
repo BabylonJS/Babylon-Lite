@@ -45,7 +45,7 @@ describe("lod-meta v1", () => {
         const input = manifest(
             {
                 bound: bound([-2, -1, -5], [4, 3, 2]),
-                children: [leaf({ "0": rep(0, 0, 25), "1": rep(0, 25, 0), "2": rep(1, 0, 100) }), leaf({ "0": rep(0, 25, 20), "2": rep(1, 100, 80) })],
+                children: [leaf({ "0": rep(0, 0, 100), "1": rep(0, 100, 0), "2": rep(1, 0, 25) }), leaf({ "0": rep(0, 100, 80), "2": rep(1, 25, 20) })],
             },
             { filenames: ["shared/meta.json", "./shared/meta.json"] }
         );
@@ -56,7 +56,7 @@ describe("lod-meta v1", () => {
         expect(parsed.leaves.map((item) => item.id)).toEqual([0, 1]);
         expect(Array.from(parsed.root.boundMin)).toEqual([-2, -1, -2]);
         expect(Array.from(parsed.root.boundMax)).toEqual([4, 3, 5]);
-        expect(parsed.leaves[0]!.alternatives.map((item) => item.lod)).toEqual([0, 2]);
+        expect(parsed.leaves[0]!.alternatives.map((item) => item.lod)).toEqual([2, 0]);
         expect(parsed.leaves[0]!.alternatives[0]!.error).toBeCloseTo(Math.log(4));
         expect(parsed.leaves[0]!.alternatives[1]!.error).toBe(0);
     });

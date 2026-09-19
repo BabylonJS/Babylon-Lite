@@ -69,6 +69,12 @@ export interface StreamLeafRuntime {
     selectionGeneration: number;
 }
 
+/** @internal One camera/target binding's latest planner result. */
+export interface StreamBindingSelection {
+    frame: number;
+    readonly plan: StreamSelectionPlan;
+}
+
 /** @internal */
 export interface StreamSourceRuntime {
     readonly source: StreamSource;
@@ -95,7 +101,7 @@ export interface SplatStreamRuntimeDependencies {
     readonly buildRenderable?: (
         state: SplatStreamGpuState,
         worldMatrix: () => ArrayLike<number>,
-        update: (context: DrawUpdateContext) => void,
+        update: (context: DrawUpdateContext, binding?: object) => void,
         draw: (nonemptySignal: Promise<boolean> | null) => void
     ) => Renderable;
     readonly requestManager?: SplatStreamRequestManager;
@@ -133,6 +139,12 @@ export interface GaussianSplatStream extends SceneNode {
     _contentGeneration: number;
     /** @internal */
     _frame: number;
+    /** @internal */
+    _bindingFrame: number;
+    /** @internal */
+    readonly _bindingSelections: Map<object, StreamBindingSelection>;
+    /** @internal */
+    _generationPressure: boolean;
     /** @internal */
     _refinementEnabled: boolean;
     /** @internal */
@@ -269,6 +281,8 @@ export interface StreamSelection {
     readonly leaf: StreamLeaf;
     readonly target: StreamRepresentation;
     readonly projectedError: number;
+    readonly distanceToCamera: number;
+    readonly projectedRadius: number;
 }
 
 /** @internal */

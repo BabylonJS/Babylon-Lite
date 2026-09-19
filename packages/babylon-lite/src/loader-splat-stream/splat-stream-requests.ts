@@ -88,6 +88,7 @@ interface RequestJob {
     reject: (reason: unknown) => void;
     promise: Promise<PreparedSplatSource>;
     state: "queued" | "active";
+    detachSignal?: () => void;
 }
 
 interface Waiter {
@@ -218,12 +219,13 @@ export function createSplatStreamRequestManager(
     const queue: RequestJob[] = [];
     const httpWaiters: Waiter[] = [];
     const decodeWaiters: Waiter[] = [];
+    const payloadWaiters: Waiter[] = [];
     const cpuWaiters: CpuWaiter[] = [];
     let sequence = 0;
     let activePreparations = 0;
     let activeHttp = 0;
     let activeDecodes = 0;
-    let activeDecodedReservations = 0;
+    let activePayload = false;
     let cpuBytes = 0;
     let fetchedBytes = 0;
     let disposed = false;
@@ -267,6 +269,54 @@ export function createSplatStreamRequestManager(
                 waiters.push(waiter);
             }
         });
+    const acquirePayload = (signal: AbortSignal): Promise<void> =>
+        new Promise<void>((resolve, reject) => {
+            const abort = (): void => {
+                const index = payloadWaiters.indexOf(waiter);
+                if (index >= 0) {
+                    payloadWaiters.splice(index, 1);
+                }
+                reject(asError(signal.reason));
+            };
+            const run = (): void => {
+                signal.removeEventListener("abort", abort);
+                if (signal.aborted || disposed) {
+                    reject(asError(signal.reason));
+                    return;
+                }
+                activePayload = true;
+                resolve();
+            };
+            const waiter: Waiter = {
+                run,
+                signal,
+                reject: (reason) => {
+                    signal.removeEventListener("abort", abort);
+                    reject(reason instanceof Error ? reason : asError(reason));
+                },
+            };
+            if (!activePayload) {
+                run();
+            } else {
+                payloadWaiters.push(waiter);
+                if (signal.aborted) {
+                    abort();
+                } else {
+                    signal.addEventListener("abort", abort, { once: true });
+                }
+            }
+        });
+    const releasePayload = (): void => {
+        activePayload = false;
+        while (payloadWaiters.length > 0) {
+            const next = payloadWaiters.shift()!;
+            if (!next.signal.aborted) {
+                next.run();
+                break;
+            }
+            next.reject(asError(next.signal.reason));
+        }
+    };
 
     const pumpCpu = (): void => {
         for (let index = 0; index < cpuWaiters.length;) {
@@ -292,27 +342,51 @@ export function createSplatStreamRequestManager(
             return Promise.resolve();
         }
         return new Promise<void>((resolve, reject) => {
-            cpuWaiters.push({ bytes, resolve, reject, signal });
+            const abort = (): void => {
+                const index = cpuWaiters.indexOf(waiter);
+                if (index >= 0) {
+                    cpuWaiters.splice(index, 1);
+                }
+                reject(asError(signal.reason));
+            };
+            const waiter: CpuWaiter = {
+                bytes,
+                signal,
+                resolve: () => {
+                    signal.removeEventListener("abort", abort);
+                    resolve();
+                },
+                reject: (reason) => {
+                    signal.removeEventListener("abort", abort);
+                    reject(reason instanceof Error ? reason : asError(reason));
+                },
+            };
+            cpuWaiters.push(waiter);
+            if (signal.aborted) {
+                abort();
+            } else {
+                signal.addEventListener("abort", abort, { once: true });
+            }
         });
     };
-    const reserveNow = (bytes: number, context: string): void => {
-        if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > maxCpuBytes || cpuBytes + bytes > maxCpuBytes) {
-            throw new Error(`${PREFIX} ${context}: maxCpuBytes cannot admit ${bytes} bytes without blocking retained payloads`);
+    const reserveOwned = async (bytes: number, ownedBytes: number, context: string, signal: AbortSignal): Promise<void> => {
+        if (!Number.isSafeInteger(ownedBytes) || ownedBytes < 0 || ownedBytes + bytes > maxCpuBytes) {
+            throw new Error(`${PREFIX} ${context}: maxCpuBytes cannot admit ${bytes} bytes without blocking payloads retained by the same preparation`);
         }
-        cpuBytes += bytes;
+        await reserve(bytes, context, signal);
     };
     const release = (bytes: number): void => {
         cpuBytes -= bytes;
         pumpCpu();
     };
-
     interface FetchedBody {
         readonly blob: Blob;
         readonly header: Uint8Array;
         readonly mimeType: string;
+        readonly bytes: number;
         release(): void;
     }
-    const fetchWithRetry = async (url: string, fileId: number, signal: AbortSignal): Promise<FetchedBody> => {
+    const fetchWithRetry = async (url: string, fileId: number, signal: AbortSignal, retainedBytes = (): number => 0): Promise<FetchedBody> => {
         for (let attempt = 0; ; attempt++) {
             try {
                 return await runLimited(maxConcurrentRequests, "http", signal, async () => {
@@ -328,8 +402,13 @@ export function createSplatStreamRequestManager(
                         throw new TransientHttpError(error.message);
                     }
                     const declared = contentLength(response, url);
-                    if (declared !== null) {
-                        await reserve(declared, `response ${url}`, signal);
+                    try {
+                        if (declared !== null) {
+                            await reserveOwned(declared, retainedBytes(), `response ${url}`, signal);
+                        }
+                    } catch (reason) {
+                        await response.body?.cancel();
+                        throw reason;
                     }
                     let reserved = declared ?? 0;
                     let total = 0;
@@ -351,7 +430,7 @@ export function createSplatStreamRequestManager(
                                 }
                                 if (total + part.value.byteLength > reserved) {
                                     const extra = total + part.value.byteLength - reserved;
-                                    reserveNow(extra, `streamed response ${url}`);
+                                    await reserveOwned(extra, retainedBytes() + reserved, `streamed response ${url}`, signal);
                                     reserved += extra;
                                 }
                                 total += part.value.byteLength;
@@ -379,6 +458,7 @@ export function createSplatStreamRequestManager(
                             blob: new Blob(chunks, { type: response.headers.get("content-type") ?? "" }),
                             header,
                             mimeType: response.headers.get("content-type") ?? "",
+                            bytes: reserved,
                             release(): void {
                                 if (!released) {
                                     released = true;
@@ -420,7 +500,7 @@ export function createSplatStreamRequestManager(
 
     const prepare = async (job: RequestJob, signal: AbortSignal): Promise<PreparedSplatSource> => {
         const request = job.request;
-        const metadata = parseLooseSogV2Metadata(await readJson(request.url, request.fileId, signal), request.url);
+        await acquirePayload(signal);
         const bitmaps: ImageBitmap[] = [];
         const textures: GPUTexture[] = [];
         const mimeTypes: string[] = [];
@@ -429,30 +509,24 @@ export function createSplatStreamRequestManager(
         let metadataBuffer: GPUBuffer | null = null;
         let gpuReserved = false;
         try {
+            const metadata = parseLooseSogV2Metadata(await readJson(request.url, request.fileId, signal), request.url);
             for (const imageUrl of metadata.imageUrls) {
-                const body = await fetchWithRetry(imageUrl, request.fileId, signal);
+                const body = await fetchWithRetry(imageUrl, request.fileId, signal, () => reservedDecodedBytes);
                 mimeTypes.push(body.mimeType);
                 let bitmap: ImageBitmap;
                 try {
                     const dimensions = webpDimensions(body.header, imageUrl);
-                    if (reservedDecodedBytes === 0) {
-                        const bitmapBytes = dimensions.width * dimensions.height * 4;
-                        const totalDecodedBytes = bitmapBytes * 5;
+                    const bitmapReservation = dimensions.width * dimensions.height * 4;
+                    if (bitmaps.length === 0) {
+                        const totalDecodedBytes = bitmapReservation * metadata.imageUrls.length;
                         validateLooseSogV2Images(
                             metadata,
                             metadata.imageUrls.map((url) => ({ ...dimensions, mimeType: "image/webp", url })),
                             maxCpuBytes,
                             job.intervals
                         );
-                        if (cpuBytes + totalDecodedBytes <= maxCpuBytes) {
-                            reserveNow(totalDecodedBytes, `decoded images ${request.url}`);
-                        } else if (activeDecodedReservations > 0) {
-                            await reserve(totalDecodedBytes, `decoded images ${request.url}`, signal);
-                        } else {
-                            reserveNow(totalDecodedBytes, `decoded images ${request.url}`);
-                        }
+                        await reserveOwned(totalDecodedBytes, body.bytes, `decoded images ${request.url}`, signal);
                         reservedDecodedBytes = totalDecodedBytes;
-                        activeDecodedReservations++;
                     } else if (dimensions.width !== bitmaps[0]!.width || dimensions.height !== bitmaps[0]!.height) {
                         throw new Error(`${PREFIX} image ${imageUrl}: dimensions do not match the source`);
                     }
@@ -531,10 +605,8 @@ export function createSplatStreamRequestManager(
             for (const bitmap of bitmaps) {
                 bitmap.close();
             }
-            if (reservedDecodedBytes) {
-                activeDecodedReservations--;
-            }
             release(reservedDecodedBytes);
+            releasePayload();
         }
     };
 
@@ -543,7 +615,7 @@ export function createSplatStreamRequestManager(
             return;
         }
         queue.sort((a, b) => a.request.priority - b.request.priority || a.sequence - b.sequence);
-        while (activePreparations < maxConcurrentDecodes + 1 && queue.length > 0) {
+        while (activePreparations < 1 && queue.length > 0) {
             const index = queue.findIndex((candidate) => !activeUrls.has(candidate.request.url));
             if (index < 0) {
                 break;
@@ -562,12 +634,14 @@ export function createSplatStreamRequestManager(
                         throw abortError();
                     }
                     jobs.delete(job.request.url);
+                    job.detachSignal?.();
                     job.resolve(source);
                 })
                 .catch((error: unknown) => {
                     if (jobs.get(job.request.url) === job) {
                         jobs.delete(job.request.url);
                     }
+                    job.detachSignal?.();
                     job.reject(asError(error));
                 })
                 .finally(() => {
@@ -618,6 +692,7 @@ export function createSplatStreamRequestManager(
                     return existing.promise;
                 }
                 existing.controller.abort(abortError());
+                existing.detachSignal?.();
                 const queuedIndex = queue.indexOf(existing);
                 if (queuedIndex >= 0) {
                     queue.splice(queuedIndex, 1);
@@ -645,7 +720,20 @@ export function createSplatStreamRequestManager(
                 if (request.signal.aborted) {
                     return Promise.reject(asError(request.signal.reason));
                 }
-                request.signal.addEventListener("abort", () => manager.cancel(url), { once: true });
+                const abort = (): void => {
+                    if (jobs.get(url) !== job) {
+                        return;
+                    }
+                    job.controller.abort(abortError());
+                    if (job.state === "queued") {
+                        queue.splice(queue.indexOf(job), 1);
+                        jobs.delete(url);
+                        job.detachSignal?.();
+                        job.reject(abortError());
+                    }
+                };
+                request.signal.addEventListener("abort", abort, { once: true });
+                job.detachSignal = () => request.signal!.removeEventListener("abort", abort);
             }
             jobs.set(url, job);
             queue.push(job);
@@ -667,6 +755,7 @@ export function createSplatStreamRequestManager(
             if (job.state === "queued") {
                 queue.splice(queue.indexOf(job), 1);
                 jobs.delete(url);
+                job.detachSignal?.();
                 job.reject(abortError());
             }
         },
@@ -677,17 +766,19 @@ export function createSplatStreamRequestManager(
             disposed = true;
             for (const job of jobs.values()) {
                 job.controller.abort(abortError());
+                job.detachSignal?.();
                 if (job.state === "queued") {
                     job.reject(abortError());
                 }
             }
             jobs.clear();
             queue.length = 0;
-            for (const waiter of [...httpWaiters, ...decodeWaiters]) {
+            for (const waiter of [...httpWaiters, ...decodeWaiters, ...payloadWaiters]) {
                 waiter.reject(abortError());
             }
             httpWaiters.length = 0;
             decodeWaiters.length = 0;
+            payloadWaiters.length = 0;
             for (const waiter of cpuWaiters) {
                 waiter.reject(abortError());
             }
