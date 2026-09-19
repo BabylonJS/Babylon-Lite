@@ -97,8 +97,10 @@ await registerScene(scene);
 Use this entry point instead of `enableMaterialPlugins(scene)` when a PBR plugin
 uses `getVaryings()`, vertex-visible UBO fields, or vertex-visible samplers. Its
 dedicated bridge patches only that composed PBR shader's material-UBO visibility
-and vertex declaration. It does not modify the universal shader composer and must
-not be enabled alongside the ordinary PBR plugin bridge for the same materials.
+and vertex declaration. It does not modify the universal shader composer. Once
+enabled, the vertex-capable bridge remains the active PBR plugin bridge when
+`enableMaterialPlugins(scene)` or `reconcileMaterialPlugins(scene, material)`
+re-registers plugin support, so live plugin mutations retain their vertex resources.
 
 ## Opt-in entry point — `enableMaterialPlugins(scene)`
 

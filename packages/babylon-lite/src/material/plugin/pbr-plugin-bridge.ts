@@ -78,8 +78,15 @@ const pbrPluginExt: PbrExt = {
     },
 };
 
+let activePbrPluginExt = pbrPluginExt;
+
+/** @internal Preserve an opt-in PBR plugin bridge across later registration and reconciliation. */
+export function _setActivePbrPluginExt(extension: PbrExt): void {
+    activePbrPluginExt = extension;
+}
+
 /** Register the PBR plugin bridge extension. Called from `pbr-renderable` only
  *  when at least one PBR material in the scene carries plugins. */
 export function registerPbrPlugins(register: (ext: PbrExt) => void): void {
-    register(pbrPluginExt);
+    register(activePbrPluginExt);
 }
