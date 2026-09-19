@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    attachTrogirFirstPersonCameraMode,
     attachTrogirCameraMode,
     createTrogirFirstPersonCamera,
     createTrogirOrbitCamera,
     createTrogirStartupOrbitCamera,
+    type TrogirCameraMode,
     type TrogirCameraModeBindings,
 } from "../../../lab/lite/src/demos/trogir-camera-mode";
 import { formatTrogirCameraPose, readTrogirCameraPose } from "../../../lab/lite/src/demos/trogir-camera-pose";
@@ -14,25 +16,53 @@ import type { FreeCamera } from "../../../packages/babylon-lite/src/camera/free-
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 
 describe("Trogir camera modes", () => {
-    it("creates the exact startup HUD pose and preserves it through a camera-mode round trip", () => {
+    it("starts with first-person controls at the exact HUD pose and preserves the 260-radius round trip", () => {
         const orbit = createTrogirStartupOrbitCamera(260);
         orbit.nearPlane = 0.1;
         orbit.farPlane = 1500;
-        expect(formatTrogirCameraPose(orbit.worldMatrix)).toEqual({
+        const firstPerson = createTrogirFirstPersonCamera(orbit);
+        const startupPose = {
             x: "-33.03",
             y: "0.24",
             z: "-65.76",
             yaw: "27.70",
             pitch: "6.62",
             roll: "0.00",
-        });
-        expect([orbit.radius, orbit.nearPlane, orbit.farPlane]).toEqual([260, 0.1, 1500]);
+        };
+        expect(formatTrogirCameraPose(firstPerson.worldMatrix)).toEqual(startupPose);
+        expect([firstPerson.nearPlane, firstPerson.farPlane]).toEqual([0.1, 1500]);
 
-        const firstPerson = createTrogirFirstPersonCamera(orbit);
-        const restored = createTrogirOrbitCamera(firstPerson, orbit.radius);
-        expect(formatTrogirCameraPose(firstPerson.worldMatrix)).toEqual(formatTrogirCameraPose(orbit.worldMatrix));
-        expect(formatTrogirCameraPose(restored.worldMatrix)).toEqual(formatTrogirCameraPose(orbit.worldMatrix));
-        expect([restored.radius, restored.nearPlane, restored.farPlane]).toEqual([260, 0.1, 1500]);
+        const scene = { camera: firstPerson } as unknown as SceneContext;
+        const canvas = { dataset: {} } as HTMLCanvasElement;
+        const button = new EventTarget() as unknown as HTMLButtonElement;
+        Object.defineProperty(button, "dataset", { value: {} });
+        button.setAttribute = () => undefined;
+        const hint = { textContent: "" } as HTMLElement;
+        const attached: TrogirCameraMode[] = [];
+        const bindings: TrogirCameraModeBindings = {
+            attachOrbit: () => {
+                attached.push("orbit");
+                return () => undefined;
+            },
+            attachFirstPerson: () => {
+                attached.push("firstPerson");
+                return () => undefined;
+            },
+        };
+
+        const detach = attachTrogirFirstPersonCameraMode(scene, canvas, button, hint, firstPerson, orbit.radius, bindings);
+        expect(attached).toEqual(["firstPerson"]);
+        expect([button.dataset.cameraMode, canvas.dataset.cameraMode, button.textContent]).toEqual(["firstPerson", "firstPerson", "Camera: First person"]);
+        button.dispatchEvent(new Event("click"));
+        const restoredOrbit = scene.camera as ArcRotateCamera;
+        expect(attached).toEqual(["firstPerson", "orbit"]);
+        expect(formatTrogirCameraPose(restoredOrbit.worldMatrix)).toEqual(startupPose);
+        expect([restoredOrbit.radius, restoredOrbit.nearPlane, restoredOrbit.farPlane]).toEqual([260, 0.1, 1500]);
+        button.dispatchEvent(new Event("click"));
+        expect(attached).toEqual(["firstPerson", "orbit", "firstPerson"]);
+        expect(formatTrogirCameraPose(scene.camera!.worldMatrix)).toEqual(startupPose);
+        expect([(scene.camera as FreeCamera).nearPlane, (scene.camera as FreeCamera).farPlane]).toEqual([0.1, 1500]);
+        detach();
     });
 
     it("reports stable world-space poses for known, orbit, and first-person cameras", () => {

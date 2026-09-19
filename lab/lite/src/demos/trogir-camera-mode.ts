@@ -90,21 +90,28 @@ function configureOrbit(camera: ArcRotateCamera, scene: SceneContext): void {
     );
 }
 
-export function attachTrogirCameraMode(
+function attachCameraMode(
     scene: SceneContext,
     canvas: HTMLCanvasElement,
     button: HTMLButtonElement,
     hint: HTMLElement,
-    initialCamera: ArcRotateCamera,
+    initialCamera: ArcRotateCamera | FreeCamera,
+    initialMode: TrogirCameraMode,
+    initialOrbitRadius: number,
     bindings?: TrogirCameraModeBindings
 ): () => void {
-    let mode: TrogirCameraMode = "orbit";
+    let mode = initialMode;
     let camera: ArcRotateCamera | FreeCamera = initialCamera;
-    let orbitRadius = initialCamera.radius;
-    let detach = (bindings?.attachOrbit ?? attachControl)(initialCamera, canvas, scene);
+    let orbitRadius = initialOrbitRadius;
     let disposed = false;
 
-    configureOrbit(initialCamera, scene);
+    if (mode === "orbit") {
+        configureOrbit(initialCamera as ArcRotateCamera, scene);
+    }
+    let detach =
+        mode === "orbit"
+            ? (bindings?.attachOrbit ?? attachControl)(initialCamera as ArcRotateCamera, canvas, scene)
+            : (bindings?.attachFirstPerson ?? attachFreeControl)(initialCamera as FreeCamera, canvas, scene);
 
     const updateUi = (): void => {
         const firstPerson = mode === "firstPerson";
@@ -148,4 +155,27 @@ export function attachTrogirCameraMode(
         button.removeEventListener("click", toggle);
         detach();
     };
+}
+
+export function attachTrogirCameraMode(
+    scene: SceneContext,
+    canvas: HTMLCanvasElement,
+    button: HTMLButtonElement,
+    hint: HTMLElement,
+    initialCamera: ArcRotateCamera,
+    bindings?: TrogirCameraModeBindings
+): () => void {
+    return attachCameraMode(scene, canvas, button, hint, initialCamera, "orbit", initialCamera.radius, bindings);
+}
+
+export function attachTrogirFirstPersonCameraMode(
+    scene: SceneContext,
+    canvas: HTMLCanvasElement,
+    button: HTMLButtonElement,
+    hint: HTMLElement,
+    initialCamera: FreeCamera,
+    orbitRadius: number,
+    bindings?: TrogirCameraModeBindings
+): () => void {
+    return attachCameraMode(scene, canvas, button, hint, initialCamera, "firstPerson", orbitRadius, bindings);
 }

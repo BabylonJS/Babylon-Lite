@@ -11,7 +11,7 @@ import {
     startEngine,
 } from "babylon-lite";
 import type { EngineContext, GaussianSplatStream, SceneContext } from "babylon-lite";
-import { attachTrogirCameraMode, createTrogirStartupOrbitCamera } from "./trogir-camera-mode";
+import { attachTrogirFirstPersonCameraMode, createTrogirFirstPersonCamera, createTrogirStartupOrbitCamera } from "./trogir-camera-mode";
 import { formatTrogirCameraPose } from "./trogir-camera-pose";
 import { placeTrogirStream } from "./trogir-streaming-placement";
 
@@ -191,23 +191,25 @@ async function main(): Promise<void> {
         });
         scene = createSceneContext(engine);
         stream = await loadGaussianSplatStream(engine, metadataUrl(), {
-            maxSplats: 750_000,
+            maxSplats: 1_200_000,
             maxCapacitySplats: STREAM_CAPACITY,
             maxGpuBytes: 1024 * MB,
             maxCpuBytes: 96 * MB,
             screenError: 2,
         });
         placeTrogirStream(stream);
-        const camera = createTrogirStartupOrbitCamera(260);
-        camera.nearPlane = 0.1;
-        camera.farPlane = 1500;
+        const startupOrbit = createTrogirStartupOrbitCamera(260);
+        startupOrbit.nearPlane = 0.1;
+        startupOrbit.farPlane = 1500;
+        const camera = createTrogirFirstPersonCamera(startupOrbit);
         scene.camera = camera;
-        disposeCameraMode = attachTrogirCameraMode(
+        disposeCameraMode = attachTrogirFirstPersonCameraMode(
             scene,
             canvas,
             document.getElementById("cameraMode") as HTMLButtonElement,
             document.getElementById("cameraHint") as HTMLElement,
-            camera
+            camera,
+            startupOrbit.radius
         );
 
         attachGaussianSplatStream(scene, stream);
