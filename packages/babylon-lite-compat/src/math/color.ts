@@ -112,6 +112,45 @@ export class Color3 {
     }
 }
 
+/**
+ * @internal A `Color3` whose `r`/`g`/`b` read and write **through** to a live Babylon Lite colour tuple, so
+ * inherited in-place methods (`copyFrom`, `set`, `scaleInPlace`, …) reach the Lite object — the colour
+ * counterpart of `LiteBackedVector3`. A tuple write cannot notify anyone by itself, so `onWrite` lets the
+ * owner publish the change.
+ */
+class LiteBackedColor3 extends Color3 {
+    public constructor(tuple: [number, number, number], onWrite: () => void) {
+        super(0, 0, 0);
+        (["r", "g", "b"] as const).forEach((key, i) => {
+            Object.defineProperty(this, key, {
+                enumerable: true,
+                configurable: true,
+                get: () => tuple[i],
+                set: (value: number) => {
+                    tuple[i] = value;
+                    onWrite();
+                },
+            });
+        });
+    }
+}
+
+/** One stable proxy per Lite tuple, so `light.diffuse === light.diffuse` (Babylon.js identity parity). */
+const _liteColor3Proxies = new WeakMap<object, Color3>();
+
+/**
+ * @internal Return the cached write-through `Color3` proxy over a Lite colour tuple (creating it on first
+ * use). `onWrite` runs after every component write.
+ */
+export function liteBackedColor3(tuple: [number, number, number], onWrite: () => void): Color3 {
+    let proxy = _liteColor3Proxies.get(tuple);
+    if (!proxy) {
+        proxy = new LiteBackedColor3(tuple, onWrite);
+        _liteColor3Proxies.set(tuple, proxy);
+    }
+    return proxy;
+}
+
 export class Color4 {
     public constructor(
         public r: number = 0,
