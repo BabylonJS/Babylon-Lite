@@ -135,18 +135,20 @@ class LiteBackedColor3 extends Color3 {
     }
 }
 
-/** One stable proxy per Lite tuple, so `light.diffuse === light.diffuse` (Babylon.js identity parity). */
-const _liteColor3Proxies = new WeakMap<object, Color3>();
+/** One stable proxy per Lite tuple, so `light.diffuse === light.diffuse` (Babylon.js identity parity).
+ *  Created on first use: a module-level `new WeakMap()` would be an import-time side effect. */
+let _liteColor3Proxies: WeakMap<object, Color3> | null = null;
 
 /**
  * @internal Return the cached write-through `Color3` proxy over a Lite colour tuple (creating it on first
  * use). `onWrite` runs after every component write.
  */
 export function liteBackedColor3(tuple: [number, number, number], onWrite: () => void): Color3 {
-    let proxy = _liteColor3Proxies.get(tuple);
+    const proxies = (_liteColor3Proxies ??= new WeakMap<object, Color3>());
+    let proxy = proxies.get(tuple);
     if (!proxy) {
         proxy = new LiteBackedColor3(tuple, onWrite);
-        _liteColor3Proxies.set(tuple, proxy);
+        proxies.set(tuple, proxy);
     }
     return proxy;
 }
