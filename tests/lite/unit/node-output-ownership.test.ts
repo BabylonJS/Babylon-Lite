@@ -95,6 +95,9 @@ describe("Node output ownership", () => {
             const observation = JSON.stringify({ descriptor, groups, transparent: !!result.renderables[0]!.isTransparent }, (_key, value: unknown) =>
                 typeof value === "string" ? value.replace(/\s+/g, " ").trim() : value
             );
+            if (mode === "color" && extended) {
+                expect(descriptor.fragment!.targets[0]!.blend?.alpha).toEqual({ srcFactor: "one", dstFactor: "one", operation: "add" });
+            }
             // Lock the pre-extraction WGSL, descriptors and binding order, not just source spelling.
             expect(createHash("sha256").update(observation).digest("hex")).toMatchSnapshot();
             expect(binding.pipeline).toBe(descriptor);
