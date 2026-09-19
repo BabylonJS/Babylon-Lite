@@ -42,6 +42,7 @@ import {
 
 import { Mesh } from "./meshes.js";
 import type { Scene } from "../scene/scene.js";
+import { attachMaterialToScene } from "../materials/materials.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
 import type { NodeMaterial } from "../materials/node-material.js";
 
@@ -55,9 +56,8 @@ interface MeshLike {
 /** @internal Add a freshly-built CSG result mesh to its scene at engine start. */
 function deferAddCsgMesh(mesh: Mesh, scene: Scene, material?: CompatMaterial): void {
     scene._deferAdd(() => {
-        const engine = scene.getEngine()._lite;
         if (material) {
-            material._ensureRenderable(engine);
+            attachMaterialToScene(material, scene);
             mesh._lite.material = material._lite as never;
         }
         addToScene(scene._lite, mesh._lite);
@@ -158,7 +158,7 @@ export class CSG2 {
         // Build a slot-indexed Lite material array (sparse; only referenced slots are read).
         const materials: LiteMaterial[] = [];
         for (const [slot, material] of this._materials) {
-            material._ensureRenderable(engine);
+            attachMaterialToScene(material, scene);
             materials[slot] = material._lite as never;
         }
         const liteMeshes = createMeshesFromCsg2(engine, this._lite, materials, name);

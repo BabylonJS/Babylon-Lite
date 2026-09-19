@@ -39,6 +39,7 @@ import {
     type ObstacleHandle as LiteObstacleHandle,
 } from "babylon-lite";
 
+import { attachMaterialToScene } from "../materials/materials.js";
 import { Mesh } from "../meshes/meshes.js";
 import { Vector3 } from "../math/vector.js";
 import type { Scene } from "../scene/scene.js";
@@ -177,7 +178,9 @@ class RecastNavigationJSPluginV2 {
         const mesh = new Mesh("navDebugMesh", lite, scene);
         scene._deferAdd(() => {
             const mat = mesh.material;
-            mat?._ensureRenderable(engine);
+            if (mat) {
+                attachMaterialToScene(mat, scene);
+            }
             if (mat?._lite) {
                 mesh._lite.material = mat._lite as never;
             }

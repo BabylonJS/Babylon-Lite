@@ -224,6 +224,19 @@ function copyLiteMaterialData(src: object, dst: object): void {
     }
 }
 
+/**
+ * @internal The one place a compat material is made ready to render in a scene: adopt the scene, then
+ * finalize the GPU-facing resources. Babylon.js allows `new StandardMaterial(name)` with no scene, so every
+ * path that registers a mesh — the live `material` setter, the deferred primitive add, CSG results, the
+ * navigation debug mesh — must go through here. A material that is rendered by a scene it never adopted has
+ * no scene to rebuild in, and its later `_refreshInScene()` requests (a `disableLighting` toggle, a texture
+ * that finished loading) silently do nothing.
+ */
+export function attachMaterialToScene(material: { _ensureRenderable(engine: EngineContext): void; _adoptScene?(scene: Scene): void }, scene: Scene): void {
+    material._adoptScene?.(scene);
+    material._ensureRenderable(scene.getEngine()._lite);
+}
+
 export class StandardMaterial extends PushMaterial {
     /** @internal Underlying Babylon Lite standard-material props. */
     public readonly _lite: StandardMaterialProps;

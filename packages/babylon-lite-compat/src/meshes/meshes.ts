@@ -53,7 +53,7 @@ import { BoundingInfo } from "../culling/bounding.js";
 import { unsupported } from "../error.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
-import { Material as CompatMaterialBase } from "../materials/materials.js";
+import { attachMaterialToScene, Material as CompatMaterialBase } from "../materials/materials.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
 import type { NodeMaterial } from "../materials/node-material.js";
 import type { PhysicsBody } from "../physics/physics.js";
@@ -355,8 +355,7 @@ export class AbstractMesh extends TransformNode {
             // rebuild (enqueued by the `_lite.material` reassignment below) sees
             // complete props. Adopt the scene so a still-loading texture assigned to
             // this material can reconcile itself on readiness.
-            (renderMaterial as { _adoptScene?: (s: Scene) => void })._adoptScene?.(scene);
-            renderMaterial._ensureRenderable(engineOf(scene));
+            attachMaterialToScene(renderMaterial, scene);
         }
         if (renderMaterial?._lite) {
             this._lite.material = renderMaterial._lite as never;
@@ -1330,12 +1329,11 @@ function addPrimitive(mesh: Mesh, scene: Scene, afterAdd?: () => void): Mesh {
             return;
         }
         const mat = mesh.material;
-        // Babylon.js allows `new StandardMaterial(name)` with no scene. Assigned before startup, such a
-        // material never goes through the live branch of the `material` setter, so adopt the mesh's scene
-        // here, where the final pre-start material is known. Without a scene its later rebuild requests
-        // (`_refreshInScene`: a loaded texture, a `disableLighting` toggle) silently did nothing.
-        (mat as { _adoptScene?: (s: Scene) => void } | null)?._adoptScene?.(scene);
-        mat?._ensureRenderable(engineOf(scene));
+        // Assigned before startup, a material never goes through the live branch of the `material` setter,
+        // so this is where the final pre-start material gets its scene.
+        if (mat) {
+            attachMaterialToScene(mat, scene);
+        }
         // Re-bind in case the material's Lite handle resolved late (async-parsed
         // NodeMaterial, or a texture map that loaded after `mesh.material = …`).
         if (mat?._lite) {
