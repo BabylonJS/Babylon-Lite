@@ -665,6 +665,8 @@ export { loadSkybox } from "./loader-skybox/load-skybox.js";
 export { loadSplat } from "./loader-splat/load-splat.js";
 export { loadSOG } from "./loader-splat/load-sog.js";
 export { loadSPZ } from "./loader-splat/load-spz.js";
+export { loadGaussianSplatStream, attachGaussianSplatStream, disposeGaussianSplatStream } from "./loader-splat-stream/load-gaussian-splat-stream.js";
+export type { GaussianSplatStream, GaussianSplatStreamOptions, GaussianSplatStreamPhase, GaussianSplatStreamStats } from "./loader-splat-stream/splat-stream-types.js";
 export type { GaussianSplattingMesh } from "./mesh/GaussianSplatting/gaussian-splatting-mesh.js";
 export { bakeCurrentTransformIntoVertices, bakeTransformIntoVertices } from "./mesh/GaussianSplatting/gaussian-splatting-bake.js";
 export type { GsShaderFragment, GsFragmentSlot } from "./mesh/GaussianSplatting/gaussian-splatting-mesh.js";

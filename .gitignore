@@ -98,4 +98,5 @@ lab/public/lite/api-docs/
 # Kenney asset source GLBs (CC0) - bake outputs are committed under lab/public
 scratch/
 playwright-report/
+.splat-lod-reports/
 lab/public/littlest-tokyo/CREDITS.txt

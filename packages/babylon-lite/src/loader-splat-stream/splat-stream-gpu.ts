@@ -1,0 +1,1072 @@
+import { BU, SS, TU } from "../engine/gpu-flags.js";
+import type { EngineContext } from "../engine/engine.js";
+import type { RenderTargetSignature } from "../engine/render-target.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
+import type { DrawUpdateBatch } from "../render/renderable.js";
+import { enableDrawBatchCollection } from "../render/draw-update-batches.js";
+import type { SogV2SourceMetadata } from "./splat-stream-types.js";
+import { createSplatStreamGpuLedger, type SplatStreamGpuLedger } from "./splat-stream-gpu-ledger.js";
+import COMPACT_WGSL from "./splat-stream-compact.wgsl?raw";
+import GATHER_WGSL from "./splat-stream-gather.wgsl?raw";
+import PROJECT_WGSL from "./splat-stream-project.wgsl?raw";
+import RADIX_WGSL from "./splat-stream-radix.wgsl?raw";
+
+const RECORD_BYTES = 64;
+const KEY_BYTES = 8;
+const INDIRECT_BYTES = 16;
+const RUNTIME_BYTES = 128;
+const RUNTIME_DISPATCH_OFFSET = 16;
+const RADIX_PARAM_FIRST_SLOT = 16;
+let _drawBatches: WeakMap<SplatStreamGpuState, WeakMap<RenderTargetSignature, SplatStreamDrawBatch>> | null = null;
+const PARAM_SLOT_BYTES = 256;
+const WORKGROUP_SIZE = 256;
+const RADIX_PASSES = 8;
+
+/** @internal Five byte-exact SOG textures and their two scalar codebooks. */
+export interface SplatStreamSourceGpu {
+    readonly textures: readonly [GPUTexture, GPUTexture, GPUTexture, GPUTexture, GPUTexture];
+    readonly views: readonly [GPUTextureView, GPUTextureView, GPUTextureView, GPUTextureView, GPUTextureView];
+    readonly codebooks: GPUBuffer;
+    readonly width: number;
+    readonly height: number;
+    readonly count: number;
+    readonly meansMin: Float32Array;
+    readonly meansMax: Float32Array;
+    /** @internal */
+    _destroyed: boolean;
+}
+
+/** @internal One source interval copied into the canonical active generation. */
+export interface SplatStreamGpuInterval {
+    readonly source: SplatStreamSourceGpu;
+    readonly sourceOffset: number;
+    readonly count: number;
+    readonly destinationOffset: number;
+}
+
+interface SharedPipelines {
+    readonly gather: GPUComputePipeline;
+    readonly project: GPUComputePipeline;
+    readonly compactScan: GPUComputePipeline;
+    readonly compactAdd: GPUComputePipeline;
+    readonly compactSetup: GPUComputePipeline;
+    readonly compactScatter: GPUComputePipeline;
+    readonly histogram: GPUComputePipeline;
+    readonly scan: GPUComputePipeline;
+    readonly add: GPUComputePipeline;
+    readonly bases: GPUComputePipeline;
+    readonly scatter: GPUComputePipeline;
+    readonly gatherLayout: GPUBindGroupLayout;
+    readonly projectLayout: GPUBindGroupLayout;
+    readonly compactLayout: GPUBindGroupLayout;
+    readonly radixLayout: GPUBindGroupLayout;
+}
+
+/** @internal Stream-owned canonical records shared by all pass-local bindings. */
+export interface SplatStreamGpuState {
+    readonly engine: EngineContext;
+    readonly capacity: number;
+    readonly canonical: GPUBuffer;
+    readonly pipelines: SharedPipelines;
+    readonly ledger: SplatStreamGpuLedger;
+    readonly gpuBytes: number;
+    passHoldBytes: number;
+    intervals: readonly SplatStreamGpuInterval[];
+    count: number;
+    contentGeneration: number;
+    gatheredGeneration: number;
+    gatherParameterHoldBytes: number;
+    gatherParametersInFlight: number;
+    gatherHoldReleasePending: boolean;
+    disposed: boolean;
+}
+
+interface ScanLevel {
+    readonly count: number;
+    readonly blocks: number;
+    readonly values: GPUBuffer;
+    readonly scanned: GPUBuffer;
+    readonly sums: GPUBuffer;
+}
+
+interface CompactScanLevel {
+    readonly count: number;
+    readonly blocks: number;
+    readonly scanned: GPUBuffer;
+    readonly sums: GPUBuffer;
+}
+
+/** @internal Projection and sorting resources private to one camera/target binding. */
+export interface SplatStreamPassGpu {
+    readonly projected: GPUBuffer;
+    readonly keys: readonly [GPUBuffer, GPUBuffer];
+    readonly valid: GPUBuffer;
+    readonly prefix: GPUBuffer;
+    readonly compactDummy: GPUBuffer;
+    readonly runtime: GPUBuffer;
+    readonly indirect: GPUBuffer;
+    readonly indirectTemplate: GPUBuffer;
+    readonly projectParams: GPUBuffer;
+    readonly radixParams: GPUBuffer;
+    readonly digitBases: GPUBuffer;
+    readonly levels: readonly ScanLevel[];
+    readonly compactLevels: readonly CompactScanLevel[];
+    readonly gpuBytes: number;
+    bootstrapReadback: GPUBuffer | null;
+    bootstrapSignal: Promise<boolean> | null;
+    bootstrapClaimed: boolean;
+    sorted: GPUBuffer;
+    bindGroup: GPUBindGroup | null;
+    lastKey: string;
+    destroyed: boolean;
+}
+
+interface PendingProjection {
+    readonly count: number;
+    readonly key: string;
+    readonly worldView: Float32Array;
+    readonly projection: Float32Array;
+    readonly width: number;
+    readonly height: number;
+    readonly near: number;
+}
+
+/** @internal Feature-owned batch; records into, but never submits, the active encoder. */
+export interface SplatStreamDrawBatch extends DrawUpdateBatch {
+    readonly passGpu: SplatStreamPassGpu;
+    queue(projection: PendingProjection): void;
+    takeBootstrapSignal(): Promise<boolean> | null;
+}
+
+let _pipelineCache: { device: GPUDevice; value: SharedPipelines } | null = null;
+
+function createPipelines(device: GPUDevice): SharedPipelines {
+    if (_pipelineCache?.device === device) {
+        return _pipelineCache.value;
+    }
+    const dynamicUniform = { type: "uniform" as const, hasDynamicOffset: true, minBindingSize: 48 };
+    const gatherLayout = device.createBindGroupLayout({
+        entries: [
+            ...Array.from({ length: 5 }, (_, binding) => ({ binding, visibility: SS.COMPUTE, texture: { sampleType: "float" as const } })),
+            { binding: 5, visibility: SS.COMPUTE, buffer: { type: "read-only-storage" } },
+            { binding: 6, visibility: SS.COMPUTE, buffer: { type: "storage" } },
+            { binding: 7, visibility: SS.COMPUTE, buffer: dynamicUniform },
+        ],
+    });
+    const projectLayout = device.createBindGroupLayout({
+        entries: [
+            { binding: 0, visibility: SS.COMPUTE, buffer: { type: "read-only-storage" } },
+            { binding: 1, visibility: SS.COMPUTE, buffer: { type: "storage" } },
+            { binding: 2, visibility: SS.COMPUTE, buffer: { type: "storage" } },
+            { binding: 3, visibility: SS.COMPUTE, buffer: { type: "storage" } },
+            { binding: 4, visibility: SS.COMPUTE, buffer: { ...dynamicUniform, minBindingSize: 192 } },
+        ],
+    });
+    const compactLayout = device.createBindGroupLayout({
+        entries: [
+            { binding: 0, visibility: SS.COMPUTE, buffer: { type: "read-only-storage" } },
+            { binding: 1, visibility: SS.COMPUTE, buffer: { type: "storage" } },
+            { binding: 2, visibility: SS.COMPUTE, buffer: { type: "read-only-storage" } },
+            { binding: 3, visibility: SS.COMPUTE, buffer: { type: "storage" } },
+            { binding: 4, visibility: SS.COMPUTE, buffer: { type: "storage" } },
+            { binding: 5, visibility: SS.COMPUTE, buffer: { type: "read-only-storage" } },
+            { binding: 6, visibility: SS.COMPUTE, buffer: { type: "storage" } },
+            { binding: 7, visibility: SS.COMPUTE, buffer: { type: "storage" } },
+            { binding: 8, visibility: SS.COMPUTE, buffer: dynamicUniform },
+        ],
+    });
+    const radixLayout = device.createBindGroupLayout({
+        entries: [
+            { binding: 0, visibility: SS.COMPUTE, buffer: { type: "read-only-storage" } },
+            { binding: 1, visibility: SS.COMPUTE, buffer: { type: "storage" } },
+            { binding: 2, visibility: SS.COMPUTE, buffer: { type: "storage" } },
+            { binding: 3, visibility: SS.COMPUTE, buffer: { type: "storage" } },
+            { binding: 4, visibility: SS.COMPUTE, buffer: { type: "storage" } },
+            { binding: 5, visibility: SS.COMPUTE, buffer: { type: "storage" } },
+            { binding: 6, visibility: SS.COMPUTE, buffer: { ...dynamicUniform, minBindingSize: 32 } },
+            { binding: 7, visibility: SS.COMPUTE, buffer: { type: "read-only-storage" } },
+        ],
+    });
+    const gatherModule = device.createShaderModule({ label: "splat stream gather", code: GATHER_WGSL });
+    const projectModule = device.createShaderModule({ label: "splat stream projection", code: PROJECT_WGSL });
+    const compactModule = device.createShaderModule({ label: "splat stream compaction", code: COMPACT_WGSL });
+    const radixModule = device.createShaderModule({ label: "splat stream radix", code: RADIX_WGSL });
+    const compute = (module: GPUShaderModule, layout: GPUBindGroupLayout, entryPoint: string): GPUComputePipeline =>
+        device.createComputePipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }), compute: { module, entryPoint } });
+    const value = {
+        gather: compute(gatherModule, gatherLayout, "main"),
+        project: compute(projectModule, projectLayout, "main"),
+        compactScan: compute(compactModule, compactLayout, "scanMain"),
+        compactAdd: compute(compactModule, compactLayout, "addMain"),
+        compactSetup: compute(compactModule, compactLayout, "setupMain"),
+        compactScatter: compute(compactModule, compactLayout, "scatterMain"),
+        histogram: compute(radixModule, radixLayout, "histogramMain"),
+        scan: compute(radixModule, radixLayout, "scanMain"),
+        add: compute(radixModule, radixLayout, "addMain"),
+        bases: compute(radixModule, radixLayout, "basesMain"),
+        scatter: compute(radixModule, radixLayout, "scatterMain"),
+        gatherLayout,
+        projectLayout,
+        compactLayout,
+        radixLayout,
+    };
+    _pipelineCache = { device, value };
+    return value;
+}
+
+function checkedBufferSize(device: GPUDevice, size: number, label: string): number {
+    if (!Number.isSafeInteger(size) || size <= 0 || size > device.limits.maxBufferSize || size > device.limits.maxStorageBufferBindingSize) {
+        throw new Error(`[GaussianSplatStream] GPU ${label} buffer size ${size} exceeds device limits`);
+    }
+    return size;
+}
+
+/** @internal Admits a bounded canonical capacity before allocating any working buffers. */
+export function getSplatStreamGpuCapacity(device: GPUDevice, requested: number, maxGpuBytes: number): number {
+    if (!Number.isSafeInteger(requested) || requested <= 0 || !Number.isSafeInteger(maxGpuBytes) || maxGpuBytes <= 0) {
+        throw new RangeError("[GaussianSplatStream] GPU capacity inputs must be positive safe integers");
+    }
+    const dispatchCapacity = device.limits.maxComputeWorkgroupsPerDimension * WORKGROUP_SIZE;
+    const storageCapacity = Math.floor(Math.min(device.limits.maxBufferSize, device.limits.maxStorageBufferBindingSize) / RECORD_BYTES);
+    const workingBudget = Math.floor(maxGpuBytes * 0.75);
+    const fits = (capacity: number): boolean => streamStateBytes(capacity) + passStateBytes(capacity) <= workingBudget;
+    let low = 0;
+    let high = Math.min(requested, dispatchCapacity, storageCapacity);
+    while (low < high) {
+        const middle = Math.ceil((low + high) / 2);
+        if (fits(middle)) {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    const capacity = low;
+    if (capacity < 1) {
+        throw new Error("[GaussianSplatStream] GPU budget/device limits cannot admit one canonical splat");
+    }
+    return capacity;
+}
+
+/** @internal Allocates the stream-owned canonical generation. */
+function bufferBytes(size: number): number {
+    return Math.max(size, 64);
+}
+
+function scanLevelSizes(groups: number): Array<{ count: number; blocks: number }> {
+    const levels: Array<{ count: number; blocks: number }> = [];
+    for (let count = groups; count > 0; count = Math.ceil(count / WORKGROUP_SIZE)) {
+        const blocks = Math.ceil(count / WORKGROUP_SIZE);
+        levels.push({ count, blocks });
+        if (blocks === 1) {
+            break;
+        }
+    }
+    return levels;
+}
+
+function streamStateBytes(capacity: number): number {
+    return capacity * RECORD_BYTES;
+}
+
+function passStateBytes(capacity: number): number {
+    const fixed = capacity * RECORD_BYTES + capacity * KEY_BYTES * 2 + capacity * 4 * 2 + RUNTIME_BYTES + 64 + INDIRECT_BYTES * 2 + PARAM_SLOT_BYTES + PARAM_SLOT_BYTES * 256 + 64;
+    return (
+        fixed + scanLevelSizes(Math.ceil(capacity / WORKGROUP_SIZE)).reduce((total, level) => total + bufferBytes(16 * level.count * 4) * 2 + bufferBytes(16 * level.blocks * 4), 0)
+    );
+}
+
+export function createSplatStreamGpuState(engine: EngineContext, requestedCapacity: number, maxGpuBytes: number, sharedLedger?: SplatStreamGpuLedger): SplatStreamGpuState {
+    const device = engine._device;
+    const capacity = getSplatStreamGpuCapacity(device, requestedCapacity, maxGpuBytes);
+    if (capacity < requestedCapacity) {
+        throw new Error(
+            `[GaussianSplatStream] requested GPU capacity ${requestedCapacity} exceeds the admitted device/budget capacity ${capacity} ` +
+                `(maxBufferSize ${device.limits.maxBufferSize}, maxStorageBufferBindingSize ${device.limits.maxStorageBufferBindingSize}, maxGpuBytes ${maxGpuBytes})`
+        );
+    }
+    const ledger = sharedLedger ?? createSplatStreamGpuLedger(maxGpuBytes, (dispose) => retireGpuResources(engine, dispose));
+    const gpuBytes = streamStateBytes(capacity);
+    const initialPassBytes = passStateBytes(capacity);
+    const stateReserved = ledger.tryReserve(gpuBytes);
+    if (!stateReserved || !ledger.tryHold(initialPassBytes)) {
+        if (stateReserved) {
+            ledger.release(gpuBytes);
+        }
+        throw new Error("[GaussianSplatStream] GPU budget cannot admit canonical stream state");
+    }
+    let canonical: GPUBuffer | null = null;
+    try {
+        canonical = device.createBuffer({
+            label: "splat stream canonical",
+            size: checkedBufferSize(device, capacity * RECORD_BYTES, "canonical"),
+            usage: BU.STORAGE | BU.COPY_SRC | BU.COPY_DST,
+        });
+        return {
+            engine,
+            capacity,
+            canonical,
+            pipelines: createPipelines(device),
+            ledger,
+            gpuBytes,
+            passHoldBytes: initialPassBytes,
+            intervals: [],
+            count: 0,
+            contentGeneration: 0,
+            gatheredGeneration: -1,
+            gatherParameterHoldBytes: 0,
+            gatherParametersInFlight: 0,
+            gatherHoldReleasePending: false,
+            disposed: false,
+        };
+    } catch (reason) {
+        canonical?.destroy();
+        ledger.releaseHold(initialPassBytes);
+        ledger.release(gpuBytes);
+        throw reason;
+    }
+}
+
+function createSourceTextures(
+    device: GPUDevice,
+    width: number,
+    height: number
+): {
+    textures: [GPUTexture, GPUTexture, GPUTexture, GPUTexture, GPUTexture];
+    views: [GPUTextureView, GPUTextureView, GPUTextureView, GPUTextureView, GPUTextureView];
+} {
+    const textures = Array.from({ length: 5 }, (_, index) =>
+        device.createTexture({
+            label: `splat stream SOG source ${index}`,
+            size: [width, height],
+            format: "rgba8unorm",
+            usage: TU.TEXTURE_BINDING | TU.COPY_DST | TU.RENDER_ATTACHMENT,
+        })
+    ) as [GPUTexture, GPUTexture, GPUTexture, GPUTexture, GPUTexture];
+    return { textures, views: textures.map((texture) => texture.createView()) as [GPUTextureView, GPUTextureView, GPUTextureView, GPUTextureView, GPUTextureView] };
+}
+
+function finishSource(
+    device: GPUDevice,
+    metadata: SogV2SourceMetadata,
+    width: number,
+    height: number,
+    textures: [GPUTexture, GPUTexture, GPUTexture, GPUTexture, GPUTexture]
+): SplatStreamSourceGpu {
+    const codebookData = new Float32Array(512);
+    codebookData.set(metadata.scaleCodebook);
+    codebookData.set(metadata.sh0Codebook, 256);
+    const codebooks = device.createBuffer({ label: "splat stream SOG codebooks", size: codebookData.byteLength, usage: BU.STORAGE | BU.COPY_DST });
+    device.queue.writeBuffer(codebooks, 0, codebookData);
+    return {
+        textures,
+        views: textures.map((texture) => texture.createView()) as [GPUTextureView, GPUTextureView, GPUTextureView, GPUTextureView, GPUTextureView],
+        codebooks,
+        width,
+        height,
+        count: metadata.count,
+        meansMin: metadata.meansMin,
+        meansMax: metadata.meansMax,
+        _destroyed: false,
+    };
+}
+
+/** @internal Uploads five decoded WebP images without Y flip, color conversion, or premultiplication. */
+export function uploadSplatStreamSourceImages(
+    device: GPUDevice,
+    metadata: SogV2SourceMetadata,
+    width: number,
+    height: number,
+    images: readonly GPUCopyExternalImageSource[]
+): SplatStreamSourceGpu {
+    if (images.length !== 5) {
+        throw new Error("[GaussianSplatStream] GPU upload requires exactly five source images");
+    }
+    const { textures } = createSourceTextures(device, width, height);
+    try {
+        for (let index = 0; index < 5; index++) {
+            device.queue.copyExternalImageToTexture({ source: images[index]! }, { texture: textures[index]! }, { width, height });
+        }
+        return finishSource(device, metadata, width, height, textures);
+    } catch (error) {
+        textures.forEach((texture) => texture.destroy());
+        throw error;
+    }
+}
+
+/** @internal Byte-array upload path used by focused GPU tests and non-DOM decoders. */
+export function uploadSplatStreamSourceBytes(device: GPUDevice, metadata: SogV2SourceMetadata, width: number, height: number, images: readonly Uint8Array[]): SplatStreamSourceGpu {
+    if (images.length !== 5 || images.some((image) => image.byteLength !== width * height * 4)) {
+        throw new Error("[GaussianSplatStream] GPU byte upload requires five exact RGBA8 images");
+    }
+    const { textures } = createSourceTextures(device, width, height);
+    try {
+        for (let index = 0; index < 5; index++) {
+            device.queue.writeTexture({ texture: textures[index]! }, images[index]!, { bytesPerRow: width * 4, rowsPerImage: height }, { width, height });
+        }
+        return finishSource(device, metadata, width, height, textures);
+    } catch (error) {
+        textures.forEach((texture) => texture.destroy());
+        throw error;
+    }
+}
+
+/** @internal Idempotently destroys an unreferenced source generation. */
+export function destroySplatStreamSourceGpu(source: SplatStreamSourceGpu): void {
+    if (source._destroyed) {
+        return;
+    }
+    source._destroyed = true;
+    source.textures.forEach((texture) => texture.destroy());
+    source.codebooks.destroy();
+}
+
+/** @internal Publishes a deterministic active generation; gather is deferred to the draw batch. */
+export function setSplatStreamGpuIntervals(state: SplatStreamGpuState, intervals: readonly SplatStreamGpuInterval[], generation: number): void {
+    if (state.disposed) {
+        throw new Error("[GaussianSplatStream] GPU state is disposed");
+    }
+    let count = 0;
+    for (const interval of intervals) {
+        if (
+            !Number.isSafeInteger(interval.sourceOffset) ||
+            !Number.isSafeInteger(interval.count) ||
+            !Number.isSafeInteger(interval.destinationOffset) ||
+            interval.sourceOffset < 0 ||
+            interval.count < 0 ||
+            interval.destinationOffset < 0 ||
+            interval.sourceOffset + interval.count > interval.source.count ||
+            interval.destinationOffset + interval.count > state.capacity
+        ) {
+            throw new Error("[GaussianSplatStream] GPU interval is outside admitted source/canonical bounds");
+        }
+        count = Math.max(count, interval.destinationOffset + interval.count);
+    }
+    state.intervals = intervals.slice();
+    state.count = count;
+    state.contentGeneration = generation;
+}
+
+function makeScanLevels(device: GPUDevice, groups: number, createBuffer = (descriptor: GPUBufferDescriptor): GPUBuffer => device.createBuffer(descriptor)): ScanLevel[] {
+    const levels: ScanLevel[] = [];
+    for (const { count, blocks } of scanLevelSizes(groups)) {
+        const values = createBuffer({ size: checkedBufferSize(device, Math.max(16 * count * 4, 64), "radix values"), usage: BU.STORAGE | BU.COPY_DST });
+        const scanned = createBuffer({ size: checkedBufferSize(device, Math.max(16 * count * 4, 64), "radix scan"), usage: BU.STORAGE });
+        const sums = createBuffer({ size: checkedBufferSize(device, Math.max(16 * blocks * 4, 64), "radix sums"), usage: BU.STORAGE | BU.COPY_SRC });
+        levels.push({ count, blocks, values, scanned, sums });
+    }
+    return levels;
+}
+
+function makeCompactScanLevels(capacity: number, prefix: GPUBuffer, radixLevels: readonly ScanLevel[]): CompactScanLevel[] {
+    const levels: CompactScanLevel[] = [];
+    let count = capacity;
+    for (let index = 0; ; index++) {
+        const blocks = Math.ceil(count / WORKGROUP_SIZE);
+        const scratch = radixLevels[Math.max(0, index - 1)]!;
+        levels.push({
+            count,
+            blocks,
+            scanned: index === 0 ? prefix : scratch.scanned,
+            sums: index === 0 ? radixLevels[0]!.values : scratch.sums,
+        });
+        if (blocks === 1) {
+            return levels;
+        }
+        count = blocks;
+    }
+}
+
+/** @internal Allocates independent projection/sort state for one pass binding. */
+export function createSplatStreamPassGpu(state: SplatStreamGpuState): SplatStreamPassGpu {
+    const device = state.engine._device;
+    const capacity = state.capacity;
+    const groups = Math.ceil(capacity / WORKGROUP_SIZE);
+    const gpuBytes = passStateBytes(capacity);
+    if (state.passHoldBytes === gpuBytes) {
+        state.ledger.commitHold(gpuBytes);
+        state.passHoldBytes = 0;
+    } else if (!state.ledger.tryReserve(gpuBytes)) {
+        throw new Error("[GaussianSplatStream] GPU budget cannot admit pass-local projection and radix state");
+    }
+    const allocated: GPUBuffer[] = [];
+    const create = (descriptor: GPUBufferDescriptor): GPUBuffer => {
+        const buffer = device.createBuffer(descriptor);
+        allocated.push(buffer);
+        return buffer;
+    };
+    try {
+        const projected = create({ size: checkedBufferSize(device, capacity * RECORD_BYTES, "projected"), usage: BU.STORAGE | BU.COPY_SRC });
+        const keys = [
+            create({ size: checkedBufferSize(device, capacity * KEY_BYTES, "radix key"), usage: BU.STORAGE | BU.COPY_SRC | BU.COPY_DST }),
+            create({ size: checkedBufferSize(device, capacity * KEY_BYTES, "radix key"), usage: BU.STORAGE | BU.COPY_SRC | BU.COPY_DST }),
+        ] as const;
+        const valid = create({ size: checkedBufferSize(device, capacity * 4, "projection validity"), usage: BU.STORAGE | BU.COPY_SRC });
+        const prefix = create({ size: checkedBufferSize(device, capacity * 4, "compaction prefix"), usage: BU.STORAGE | BU.COPY_SRC });
+        const compactDummy = create({ size: 64, usage: BU.STORAGE });
+        const runtime = create({ size: RUNTIME_BYTES, usage: BU.STORAGE | BU.INDIRECT | BU.COPY_SRC | BU.COPY_DST });
+        const indirect = create({ size: INDIRECT_BYTES, usage: BU.STORAGE | BU.INDIRECT | BU.COPY_SRC | BU.COPY_DST });
+        const indirectTemplate = create({ size: INDIRECT_BYTES, usage: BU.COPY_SRC, mappedAtCreation: true });
+        new Uint32Array(indirectTemplate.getMappedRange()).set([6, 0, 0, 0]);
+        indirectTemplate.unmap();
+        const levels = makeScanLevels(device, groups, create);
+        return {
+            projected,
+            keys,
+            valid,
+            prefix,
+            compactDummy,
+            runtime,
+            indirect,
+            indirectTemplate,
+            projectParams: create({ size: PARAM_SLOT_BYTES, usage: BU.UNIFORM | BU.COPY_DST }),
+            radixParams: create({ size: PARAM_SLOT_BYTES * 256, usage: BU.UNIFORM | BU.COPY_DST }),
+            digitBases: create({ size: 64, usage: BU.STORAGE }),
+            levels,
+            compactLevels: makeCompactScanLevels(capacity, prefix, levels),
+            gpuBytes,
+            bootstrapReadback: null,
+            bootstrapSignal: null,
+            bootstrapClaimed: false,
+            sorted: keys[0],
+            bindGroup: null,
+            lastKey: "",
+            destroyed: false,
+        };
+    } catch (reason) {
+        allocated.forEach((buffer) => buffer.destroy());
+        state.ledger.release(gpuBytes);
+        throw reason;
+    }
+}
+
+function bindGroup(
+    device: GPUDevice,
+    layout: GPUBindGroupLayout,
+    buffers: readonly [GPUBuffer, GPUBuffer, GPUBuffer, GPUBuffer, GPUBuffer, GPUBuffer, GPUBuffer, GPUBuffer]
+): GPUBindGroup {
+    return device.createBindGroup({
+        layout,
+        entries: buffers.map((buffer, binding) => ({ binding, resource: { buffer, size: binding === 6 ? 32 : undefined } })),
+    });
+}
+
+function compactBindGroup(
+    device: GPUDevice,
+    layout: GPUBindGroupLayout,
+    buffers: readonly [GPUBuffer, GPUBuffer, GPUBuffer, GPUBuffer, GPUBuffer, GPUBuffer, GPUBuffer, GPUBuffer, GPUBuffer]
+): GPUBindGroup {
+    return device.createBindGroup({
+        layout,
+        entries: buffers.map((buffer, binding) => ({ binding, resource: { buffer, size: binding === 8 ? 48 : undefined } })),
+    });
+}
+
+function writeRadixParams(data: Uint32Array, slot: number, level: number, shift: number, blocks: number, stride: number, parentStride = 0): number {
+    const offset = slot * PARAM_SLOT_BYTES;
+    const base = offset / 4;
+    data.set([0, level, shift, blocks, stride, parentStride], base);
+    return offset;
+}
+
+function writeCompactParams(data: Uint32Array, slot: number, count: number, groups: number, blocks: number, stride: number, parentStride: number, levelCount: number): number {
+    const offset = slot * PARAM_SLOT_BYTES;
+    const base = offset / 4;
+    data.set([count, groups, blocks, stride, parentStride, levelCount], base);
+    return offset;
+}
+
+/** @internal Protects one bounded submission's gather descriptors before source admission. */
+export function holdSplatStreamGatherParameters(state: SplatStreamGpuState, maxIntervals: number): void {
+    const bytes = maxIntervals * PARAM_SLOT_BYTES;
+    if (!Number.isSafeInteger(bytes) || bytes <= 0 || state.gatherParameterHoldBytes || !state.ledger.tryHold(bytes)) {
+        throw new Error("[GaussianSplatStream] GPU budget cannot protect submission-local gather parameters");
+    }
+    state.gatherParameterHoldBytes = bytes;
+}
+
+function recordGather(state: SplatStreamGpuState, encoder: GPUCommandEncoder): boolean {
+    if (state.gatheredGeneration === state.contentGeneration) {
+        return true;
+    }
+    const device = state.engine._device;
+    const maxGroups = device.limits.maxComputeWorkgroupsPerDimension;
+    const dispatches: Array<{ interval: SplatStreamGpuInterval; consumed: number; count: number; groups: number }> = [];
+    for (const interval of state.intervals) {
+        let consumed = 0;
+        while (consumed < interval.count) {
+            const count = Math.min(interval.count - consumed, maxGroups * WORKGROUP_SIZE);
+            dispatches.push({ interval, consumed, count, groups: Math.ceil(count / WORKGROUP_SIZE) });
+            consumed += count;
+        }
+    }
+    const protectedParameters = state.gatherParameterHoldBytes > 0;
+    const parameterBytes = dispatches.length * PARAM_SLOT_BYTES;
+    if (protectedParameters && (state.gatherParametersInFlight > 0 || parameterBytes > state.gatherParameterHoldBytes)) {
+        return false;
+    }
+    if (dispatches.length) {
+        const pass = encoder.beginComputePass({ label: "splat stream gather" });
+        pass.setPipeline(state.pipelines.gather);
+        for (let first = 0; first < dispatches.length; first += 4096) {
+            const chunk = dispatches.slice(first, first + 4096);
+            const bytes = chunk.length * PARAM_SLOT_BYTES;
+            if (!protectedParameters && !state.ledger.tryReserve(bytes)) {
+                pass.end();
+                throw new Error("[GaussianSplatStream] GPU budget cannot admit submission-local gather parameters");
+            }
+            let params: GPUBuffer | null = null;
+            let committedProtectedParameters = false;
+            try {
+                params = device.createBuffer({
+                    label: "splat stream submission-local gather parameters",
+                    size: bytes,
+                    usage: BU.UNIFORM,
+                    mappedAtCreation: true,
+                });
+                if (protectedParameters) {
+                    state.ledger.commitHold(bytes);
+                    committedProtectedParameters = true;
+                    state.gatherParametersInFlight++;
+                }
+                const mapped = params.getMappedRange();
+                const u32 = new Uint32Array(mapped);
+                const f32 = new Float32Array(mapped);
+                for (let slot = 0; slot < chunk.length; slot++) {
+                    const dispatch = chunk[slot]!;
+                    const base = (slot * PARAM_SLOT_BYTES) / 4;
+                    u32.set(
+                        [
+                            dispatch.interval.sourceOffset + dispatch.consumed,
+                            dispatch.count,
+                            dispatch.interval.destinationOffset + dispatch.consumed,
+                            dispatch.interval.source.width,
+                        ],
+                        base
+                    );
+                    f32.set(dispatch.interval.source.meansMin, base + 4);
+                    f32.set(dispatch.interval.source.meansMax, base + 8);
+                }
+                params.unmap();
+                for (let slot = 0; slot < chunk.length; slot++) {
+                    const dispatch = chunk[slot]!;
+                    const bindGroup = device.createBindGroup({
+                        layout: state.pipelines.gatherLayout,
+                        entries: [
+                            ...dispatch.interval.source.views.map((view, binding) => ({ binding, resource: view })),
+                            { binding: 5, resource: { buffer: dispatch.interval.source.codebooks } },
+                            { binding: 6, resource: { buffer: state.canonical } },
+                            { binding: 7, resource: { buffer: params, size: 48 } },
+                        ],
+                    });
+                    pass.setBindGroup(0, bindGroup, [slot * PARAM_SLOT_BYTES]);
+                    pass.dispatchWorkgroups(dispatch.groups);
+                }
+            } catch (reason) {
+                params?.destroy();
+                if (protectedParameters) {
+                    if (committedProtectedParameters) {
+                        state.ledger.restoreHold(bytes);
+                        state.gatherParametersInFlight--;
+                    }
+                } else {
+                    state.ledger.release(bytes);
+                }
+                pass.end();
+                throw reason;
+            }
+            const retiredParams = params;
+            const disposeParameters = (): void => {
+                retiredParams.destroy();
+                if (protectedParameters) {
+                    state.gatherParametersInFlight--;
+                    if (state.gatherParametersInFlight === 0 && state.gatherHoldReleasePending) {
+                        state.ledger.releaseHold(state.gatherParameterHoldBytes);
+                        state.gatherParameterHoldBytes = 0;
+                        state.gatherHoldReleasePending = false;
+                    }
+                } else {
+                    state.ledger.release(bytes);
+                }
+            };
+            if (protectedParameters) {
+                state.ledger.retireToHold(bytes, disposeParameters);
+            } else {
+                retireGpuResources(state.engine, disposeParameters);
+            }
+        }
+        pass.end();
+    }
+    state.gatheredGeneration = state.contentGeneration;
+    return true;
+}
+
+function packProjectParams(projection: PendingProjection): ArrayBuffer {
+    const bytes = new ArrayBuffer(PARAM_SLOT_BYTES);
+    const f32 = new Float32Array(bytes);
+    const u32 = new Uint32Array(bytes);
+    f32.set(projection.worldView, 0);
+    f32.set(projection.projection, 16);
+    // mat3 columns have 16-byte strides in uniform address space.
+    f32.set([projection.worldView[0]!, projection.worldView[1]!, projection.worldView[2]!], 32);
+    f32.set([projection.worldView[4]!, projection.worldView[5]!, projection.worldView[6]!], 36);
+    f32.set([projection.worldView[8]!, projection.worldView[9]!, projection.worldView[10]!], 40);
+    u32[44] = projection.count;
+    f32[45] = projection.width;
+    f32[46] = projection.height;
+    f32[47] = projection.near;
+    return bytes;
+}
+
+function recordProjectionAndSort(state: SplatStreamGpuState, passGpu: SplatStreamPassGpu, projection: PendingProjection, encoder: GPUCommandEncoder): void {
+    const device = state.engine._device;
+    encoder.copyBufferToBuffer(passGpu.indirectTemplate, 0, passGpu.indirect, 0, INDIRECT_BYTES);
+    encoder.clearBuffer(passGpu.runtime);
+    if (projection.count === 0) {
+        passGpu.sorted = passGpu.keys[0];
+        return;
+    }
+    device.queue.writeBuffer(passGpu.projectParams, 0, packProjectParams(projection));
+    const projectBindGroup = device.createBindGroup({
+        layout: state.pipelines.projectLayout,
+        entries: [
+            { binding: 0, resource: { buffer: state.canonical } },
+            { binding: 1, resource: { buffer: passGpu.projected } },
+            { binding: 2, resource: { buffer: passGpu.keys[1] } },
+            { binding: 3, resource: { buffer: passGpu.valid } },
+            { binding: 4, resource: { buffer: passGpu.projectParams, size: 192 } },
+        ],
+    });
+    const projectPass = encoder.beginComputePass({ label: "splat stream projection" });
+    projectPass.setPipeline(state.pipelines.project);
+    projectPass.setBindGroup(0, projectBindGroup, [0]);
+    projectPass.dispatchWorkgroups(Math.ceil(projection.count / WORKGROUP_SIZE));
+    projectPass.end();
+
+    const paramData = new Uint32Array((PARAM_SLOT_BYTES * 256) / 4);
+    let slot = 0;
+    let compactCount = projection.count;
+    for (let levelIndex = 0; levelIndex < passGpu.compactLevels.length; levelIndex++) {
+        const level = passGpu.compactLevels[levelIndex]!;
+        const input = levelIndex === 0 ? passGpu.valid : passGpu.compactLevels[levelIndex - 1]!.sums;
+        const offset = writeCompactParams(paramData, slot++, projection.count, compactCount, level.blocks, level.count, 0, passGpu.levels.length);
+        device.queue.writeBuffer(passGpu.radixParams, offset, paramData.buffer, offset, PARAM_SLOT_BYTES);
+        const scan = encoder.beginComputePass({ label: "splat stream compact scan" });
+        scan.setPipeline(state.pipelines.compactScan);
+        scan.setBindGroup(
+            0,
+            compactBindGroup(device, state.pipelines.compactLayout, [
+                passGpu.keys[1],
+                passGpu.keys[0],
+                input,
+                level.scanned,
+                level.sums,
+                passGpu.compactDummy,
+                passGpu.indirect,
+                passGpu.runtime,
+                passGpu.radixParams,
+            ]),
+            [offset]
+        );
+        scan.dispatchWorkgroups(Math.ceil(compactCount / WORKGROUP_SIZE));
+        scan.end();
+        compactCount = Math.ceil(compactCount / WORKGROUP_SIZE);
+    }
+    for (let levelIndex = passGpu.compactLevels.length - 2; levelIndex >= 0; levelIndex--) {
+        const child = passGpu.compactLevels[levelIndex]!;
+        const parent = passGpu.compactLevels[levelIndex + 1]!;
+        const childCount = Math.ceil(projection.count / WORKGROUP_SIZE ** levelIndex);
+        const offset = writeCompactParams(paramData, slot++, projection.count, childCount, child.blocks, child.count, parent.count, passGpu.levels.length);
+        device.queue.writeBuffer(passGpu.radixParams, offset, paramData.buffer, offset, PARAM_SLOT_BYTES);
+        const add = encoder.beginComputePass({ label: "splat stream compact add" });
+        add.setPipeline(state.pipelines.compactAdd);
+        add.setBindGroup(
+            0,
+            compactBindGroup(device, state.pipelines.compactLayout, [
+                passGpu.keys[1],
+                passGpu.keys[0],
+                passGpu.compactDummy,
+                child.scanned,
+                child.sums,
+                parent.scanned,
+                passGpu.indirect,
+                passGpu.runtime,
+                passGpu.radixParams,
+            ]),
+            [offset]
+        );
+        add.dispatchWorkgroups(Math.ceil(childCount / WORKGROUP_SIZE));
+        add.end();
+    }
+    const root = passGpu.compactLevels[passGpu.compactLevels.length - 1]!;
+    let offset = writeCompactParams(paramData, slot++, projection.count, 0, root.blocks, root.count, 0, passGpu.levels.length);
+    device.queue.writeBuffer(passGpu.radixParams, offset, paramData.buffer, offset, PARAM_SLOT_BYTES);
+    const setup = encoder.beginComputePass({ label: "splat stream compact setup" });
+    setup.setPipeline(state.pipelines.compactSetup);
+    setup.setBindGroup(
+        0,
+        compactBindGroup(device, state.pipelines.compactLayout, [
+            passGpu.keys[1],
+            passGpu.keys[0],
+            passGpu.valid,
+            passGpu.prefix,
+            root.sums,
+            passGpu.compactDummy,
+            passGpu.indirect,
+            passGpu.runtime,
+            passGpu.radixParams,
+        ]),
+        [offset]
+    );
+    setup.dispatchWorkgroups(1);
+    setup.end();
+    offset = writeCompactParams(paramData, slot++, projection.count, projection.count, 0, projection.count, 0, passGpu.levels.length);
+    device.queue.writeBuffer(passGpu.radixParams, offset, paramData.buffer, offset, PARAM_SLOT_BYTES);
+    const compact = encoder.beginComputePass({ label: "splat stream compact scatter" });
+    compact.setPipeline(state.pipelines.compactScatter);
+    compact.setBindGroup(
+        0,
+        compactBindGroup(device, state.pipelines.compactLayout, [
+            passGpu.keys[1],
+            passGpu.keys[0],
+            passGpu.valid,
+            passGpu.prefix,
+            root.sums,
+            passGpu.compactDummy,
+            passGpu.indirect,
+            passGpu.runtime,
+            passGpu.radixParams,
+        ]),
+        [offset]
+    );
+    compact.dispatchWorkgroups(Math.ceil(projection.count / WORKGROUP_SIZE));
+    compact.end();
+
+    let input = passGpu.keys[0];
+    let output = passGpu.keys[1];
+    slot = RADIX_PARAM_FIRST_SLOT;
+    const dispatchIndirect = (pipeline: GPUComputePipeline, group: GPUBindGroup, offset: number, dispatchSlot: number): void => {
+        const compute = encoder.beginComputePass({ label: "splat stream radix stage" });
+        compute.setPipeline(pipeline);
+        compute.setBindGroup(0, group, [offset]);
+        compute.dispatchWorkgroupsIndirect(passGpu.runtime, RUNTIME_DISPATCH_OFFSET + dispatchSlot * 12);
+        compute.end();
+    };
+    for (let radixPass = 0; radixPass < RADIX_PASSES; radixPass++) {
+        const shift = radixPass * 4;
+        const level0 = passGpu.levels[0]!;
+        let offset = writeRadixParams(paramData, slot++, 0, shift, level0.blocks, level0.count);
+        device.queue.writeBuffer(passGpu.radixParams, offset, paramData.buffer, offset, PARAM_SLOT_BYTES);
+        dispatchIndirect(
+            state.pipelines.histogram,
+            bindGroup(device, state.pipelines.radixLayout, [input, output, level0.values, level0.scanned, level0.sums, passGpu.digitBases, passGpu.radixParams, passGpu.runtime]),
+            offset,
+            0
+        );
+        for (let levelIndex = 0; levelIndex < passGpu.levels.length; levelIndex++) {
+            const level = passGpu.levels[levelIndex]!;
+            const values = levelIndex === 0 ? level.values : passGpu.levels[levelIndex - 1]!.sums;
+            offset = writeRadixParams(paramData, slot++, levelIndex, shift, level.blocks, level.count);
+            device.queue.writeBuffer(passGpu.radixParams, offset, paramData.buffer, offset, PARAM_SLOT_BYTES);
+            dispatchIndirect(
+                state.pipelines.scan,
+                bindGroup(device, state.pipelines.radixLayout, [input, output, values, level.scanned, level.sums, passGpu.digitBases, passGpu.radixParams, passGpu.runtime]),
+                offset,
+                1 + levelIndex
+            );
+        }
+        for (let levelIndex = passGpu.levels.length - 2; levelIndex >= 0; levelIndex--) {
+            const child = passGpu.levels[levelIndex]!;
+            const parent = passGpu.levels[levelIndex + 1]!;
+            offset = writeRadixParams(paramData, slot++, levelIndex, shift, child.blocks, child.count, parent.count);
+            device.queue.writeBuffer(passGpu.radixParams, offset, paramData.buffer, offset, PARAM_SLOT_BYTES);
+            dispatchIndirect(
+                state.pipelines.add,
+                bindGroup(device, state.pipelines.radixLayout, [
+                    input,
+                    output,
+                    parent.scanned,
+                    child.scanned,
+                    child.sums,
+                    passGpu.digitBases,
+                    passGpu.radixParams,
+                    passGpu.runtime,
+                ]),
+                offset,
+                1 + passGpu.levels.length + levelIndex
+            );
+        }
+        const radixRoot = passGpu.levels[passGpu.levels.length - 1]!;
+        offset = writeRadixParams(paramData, slot++, passGpu.levels.length - 1, shift, radixRoot.blocks, radixRoot.count);
+        device.queue.writeBuffer(passGpu.radixParams, offset, paramData.buffer, offset, PARAM_SLOT_BYTES);
+        const bases = encoder.beginComputePass({ label: "splat stream radix bases" });
+        bases.setPipeline(state.pipelines.bases);
+        bases.setBindGroup(
+            0,
+            bindGroup(device, state.pipelines.radixLayout, [
+                input,
+                output,
+                radixRoot.values,
+                radixRoot.scanned,
+                radixRoot.sums,
+                passGpu.digitBases,
+                passGpu.radixParams,
+                passGpu.runtime,
+            ]),
+            [offset]
+        );
+        bases.dispatchWorkgroups(1);
+        bases.end();
+        offset = writeRadixParams(paramData, slot++, 0, shift, level0.blocks, level0.count);
+        device.queue.writeBuffer(passGpu.radixParams, offset, paramData.buffer, offset, PARAM_SLOT_BYTES);
+        dispatchIndirect(
+            state.pipelines.scatter,
+            bindGroup(device, state.pipelines.radixLayout, [input, output, level0.values, level0.scanned, level0.sums, passGpu.digitBases, passGpu.radixParams, passGpu.runtime]),
+            offset,
+            0
+        );
+        [input, output] = [output, input];
+    }
+    passGpu.sorted = input;
+}
+
+/** @internal Creates a target-local batch and enables target collection. */
+export function createSplatStreamDrawBatch(state: SplatStreamGpuState, signature: RenderTargetSignature): SplatStreamDrawBatch {
+    enableDrawBatchCollection(signature);
+    const passGpu = createSplatStreamPassGpu(state);
+    let pending: PendingProjection | null = null;
+    const batch: SplatStreamDrawBatch = {
+        _retired: false,
+        passGpu,
+        reset(): void {
+            pending = null;
+        },
+        queue(projection): void {
+            pending = projection;
+        },
+        takeBootstrapSignal(): Promise<boolean> | null {
+            return null;
+        },
+        flush(engine): void {
+            if (!pending || this._retired || state.disposed) {
+                return;
+            }
+            if (!recordGather(state, engine._currentEncoder)) {
+                return;
+            }
+            if (pending.key !== passGpu.lastKey) {
+                recordProjectionAndSort(state, passGpu, pending, engine._currentEncoder);
+                if (state.count > 0 && !passGpu.bootstrapClaimed && !passGpu.bootstrapReadback && state.ledger.tryReserve(INDIRECT_BYTES)) {
+                    try {
+                        const readback = engine._device.createBuffer({ size: INDIRECT_BYTES, usage: BU.COPY_DST | BU.MAP_READ });
+                        engine._currentEncoder.copyBufferToBuffer(passGpu.indirect, 0, readback, 0, INDIRECT_BYTES);
+                        passGpu.bootstrapReadback = readback;
+                        passGpu.bootstrapSignal = new Promise<void>((resolve) => retireGpuResources(engine, resolve)).then(async () => {
+                            try {
+                                await readback.mapAsync(GPUMapMode.READ);
+                                return new Uint32Array(readback.getMappedRange())[1]! > 0;
+                            } finally {
+                                if (readback.mapState === "mapped") {
+                                    readback.unmap();
+                                }
+                                readback.destroy();
+                                passGpu.bootstrapReadback = null;
+                                state.ledger.release(INDIRECT_BYTES);
+                            }
+                        });
+                    } catch (reason) {
+                        state.ledger.release(INDIRECT_BYTES);
+                        throw reason;
+                    }
+                }
+                passGpu.lastKey = pending.key;
+                passGpu.bindGroup = null;
+            }
+        },
+        destroy(): void {
+            if (passGpu.destroyed) {
+                return;
+            }
+            passGpu.destroyed = true;
+            state.ledger.retire(passGpu.gpuBytes, () => {
+                passGpu.projected.destroy();
+                passGpu.keys.forEach((buffer) => buffer.destroy());
+                passGpu.valid.destroy();
+                passGpu.prefix.destroy();
+                passGpu.compactDummy.destroy();
+                passGpu.runtime.destroy();
+                passGpu.indirect.destroy();
+                passGpu.indirectTemplate.destroy();
+                passGpu.projectParams.destroy();
+                passGpu.radixParams.destroy();
+                passGpu.digitBases.destroy();
+                passGpu.levels.forEach((level) => {
+                    level.values.destroy();
+                    level.scanned.destroy();
+                    level.sums.destroy();
+                });
+            });
+            if (passGpu.bootstrapReadback && !passGpu.bootstrapSignal) {
+                const readback = passGpu.bootstrapReadback;
+                passGpu.bootstrapReadback = null;
+                state.ledger.retire(INDIRECT_BYTES, () => readback.destroy());
+            }
+        },
+    };
+    batch.takeBootstrapSignal = (): Promise<boolean> | null => {
+        if (passGpu.bootstrapClaimed || !passGpu.bootstrapSignal) {
+            return null;
+        }
+        passGpu.bootstrapClaimed = true;
+        return passGpu.bootstrapSignal;
+    };
+    return batch;
+}
+
+/** @internal Reuses a live batch only for the same stream state and render-task signature object. */
+export function getSplatStreamDrawBatch(state: SplatStreamGpuState, signature: RenderTargetSignature): SplatStreamDrawBatch {
+    _drawBatches ??= new WeakMap();
+    let bySignature = _drawBatches.get(state);
+    if (!bySignature) {
+        bySignature = new WeakMap();
+        _drawBatches.set(state, bySignature);
+    }
+    const cached = bySignature.get(signature);
+    if (cached && !cached._retired) {
+        return cached;
+    }
+    const batch = createSplatStreamDrawBatch(state, signature);
+    bySignature.set(signature, batch);
+    return batch;
+}
+
+/** @internal Make-before-break replacement helper for stream-owned canonical generations. */
+export function retireSplatStreamGpuState(state: SplatStreamGpuState): void {
+    if (state.disposed) {
+        return;
+    }
+    state.disposed = true;
+    if (state.gatherParameterHoldBytes) {
+        if (state.gatherParametersInFlight) {
+            state.gatherHoldReleasePending = true;
+        } else {
+            state.ledger.releaseHold(state.gatherParameterHoldBytes);
+            state.gatherParameterHoldBytes = 0;
+        }
+    }
+    if (state.passHoldBytes) {
+        state.ledger.releaseHold(state.passHoldBytes);
+        state.passHoldBytes = 0;
+    }
+    state.ledger.retire(state.gpuBytes, () => {
+        state.canonical.destroy();
+    });
+}
+
+/** @internal Deterministic exact-value key used to skip unchanged projection/sort work. */
+export function splatStreamProjectionKey(contentGeneration: number, width: number, height: number, worldView: ArrayLike<number>, projection: ArrayLike<number>): string {
+    let key = `${contentGeneration}/${width}/${height}`;
+    for (let i = 0; i < 16; i++) {
+        key += `/${worldView[i]}/${projection[i]}`;
+    }
+    return key;
+}

@@ -1,5 +1,12 @@
 [
     {
+        "slug": "trogir-streaming",
+        "name": "Trogir Gaussian Splat Streaming",
+        "description": "Stream Paolo Tosolini’s public Trogir capture while Babylon Lite draws a coarse shared Gaussian-splat representation first, then refines visible detail under live screen-error and splat-budget controls. An asset-root override supports local or alternate hosted copies.",
+        "tags": ["showcase", "gaussian splatting", "streaming"],
+        "mobile": false
+    },
+    {
         "slug": "npe-sprite2d",
         "name": "NPE on Sprite2D",
         "description": "An authored Node Particle Editor graph rendered through Lite's scene-less pure-2D SpriteRenderer. The NPE simulation stays world-space while the native bridge maps its live particle columns to one allocation-free Sprite2D layer.",
