@@ -17,6 +17,8 @@ const liteMocks = vi.hoisted(() => ({
     markMaterialUboDirty: vi.fn(),
     createSolidTexture2D: vi.fn(() => ({ id: "solid" })),
     rebuildMaterial: vi.fn(),
+    createBox: vi.fn(() => ({ name: "", children: [] }) as Record<string, unknown>),
+    addToScene: vi.fn(),
     loadTexture2D: vi.fn(),
     loadBasisTexture2D: vi.fn(),
     loadKtxTexture2D: vi.fn(),
@@ -53,7 +55,7 @@ vi.mock("babylon-lite", () => liteMocks);
 import { StandardMaterial, PBRMaterial } from "../src/materials/materials";
 import { Color3 } from "../src/math/color";
 import { Texture } from "../src/textures/textures";
-import { AbstractMesh } from "../src/meshes/meshes";
+import { AbstractMesh, MeshBuilder } from "../src/meshes/meshes";
 import type { Scene } from "../src/scene/scene";
 
 type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void };
@@ -105,6 +107,7 @@ beforeEach(() => {
     liteMocks.createStandardMaterial.mockImplementation(() => ({ diffuseTexture: null, emissiveTexture: null, bumpTexture: null }));
     liteMocks.createPbrMaterial.mockImplementation(() => ({}));
     liteMocks.createSolidTexture2D.mockImplementation(() => ({ id: "solid" }));
+    liteMocks.createBox.mockImplementation(() => ({ name: "", children: [] }));
 });
 
 describe("BaseTexture._onReady", () => {
@@ -230,6 +233,66 @@ describe("PBRMaterial factor-only materials", () => {
     });
 });
 
+describe("StandardMaterial.disableLighting on a live material", () => {
+    it("rebuilds the material so the shader variant and the compensated diffuse switch together", () => {
+        const { scene } = fakeScene(true);
+        const led = new StandardMaterial("led", scene);
+        led.diffuseColor = new Color3(0, 0, 0);
+        led.emissiveColor = new Color3(0, 0, 1);
+        expect(liteMocks.rebuildMaterial).not.toHaveBeenCalled();
+
+        // Lighting on/off selects a different shader. Marking the UBO dirty alone would keep the cached lit
+        // shader running with the neutral white diffuse, so a red scene light would turn the blue
+        // emissive magenta.
+        led.disableLighting = true;
+        expect((led._lite as { diffuseColor?: number[] }).diffuseColor).toEqual([1, 1, 1]);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledTimes(1);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledWith((scene as unknown as { _lite: object })._lite, led._lite);
+
+        // Same value again: nothing to rebuild.
+        led.disableLighting = true;
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledTimes(1);
+
+        // Back to lit: the app's diffuse returns and the lit variant is rebuilt.
+        led.disableLighting = false;
+        expect((led._lite as { diffuseColor?: number[] }).diffuseColor).toEqual([0, 0, 0]);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledTimes(2);
+    });
+
+    it("rebuilds a material built with no scene and assigned to a mesh before startup", () => {
+        // Babylon.js-style scene-less construction. The material used to stay without a scene (`_scene`
+        // undefined), so a post-start toggle rebuilt nothing and kept the cached lit shader.
+        const { scene, registerMaterial } = fakeScene(false);
+        const pendingAdds: Array<() => void> = [];
+        Object.assign(scene, { defaultMaterial: undefined, _deferAdd: (add: () => void) => pendingAdds.push(add), _registerMesh: vi.fn(), _unregisterNode: vi.fn() });
+        const led = new StandardMaterial("led");
+        led.diffuseColor = new Color3(0, 0, 0);
+        const strip = MeshBuilder.CreateBox("strip", {}, scene);
+        strip.material = led;
+        // Ownership is settled at assignment, before startup; GPU finalization waits for the engine.
+        expect(registerMaterial).toHaveBeenCalledWith(led);
+        expect(led.getScene()).toBe(scene);
+
+        // Engine start: the scene goes live and flushes its deferred mesh adds.
+        (scene as unknown as { _hasStarted: boolean })._hasStarted = true;
+        for (const add of pendingAdds.splice(0)) {
+            add();
+        }
+
+        led.disableLighting = true;
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledTimes(1);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledWith((scene as unknown as { _lite: object })._lite, led._lite);
+    });
+
+    it("does not rebuild before the scene has started", () => {
+        const { scene } = fakeScene(false);
+        const led = new StandardMaterial("led", scene);
+        led.diffuseColor = new Color3(0, 0, 0);
+        led.disableLighting = true;
+        expect(liteMocks.rebuildMaterial).not.toHaveBeenCalled();
+    });
+});
+
 describe("Mesh material setter reconciliation (issue #476a)", () => {
     const materialSetter = Object.getOwnPropertyDescriptor(AbstractMesh.prototype, "material")!.set!;
 
@@ -253,7 +316,7 @@ describe("Mesh material setter reconciliation (issue #476a)", () => {
         expect(liteMesh.material).toBe(mat._lite);
     });
 
-    it("only rebinds (no ensure/adopt) before the engine has started", () => {
+    it("adopts the scene and rebinds, without GPU finalization, before the engine has started", () => {
         const { scene } = fakeScene(false);
         const liteMesh: { material: unknown } = { material: null };
         const mesh = Object.create(AbstractMesh.prototype) as { _lite: typeof liteMesh; _scene: Scene };
@@ -263,7 +326,9 @@ describe("Mesh material setter reconciliation (issue #476a)", () => {
         const mat = fakeMaterial();
         materialSetter.call(mesh, mat);
 
-        expect(mat._adoptScene).not.toHaveBeenCalled();
+        // Ownership does not wait for startup: not every pre-start assignment is followed by a registration
+        // callback that sees this material (an imported mesh has none). Finalization needs the engine.
+        expect(mat._adoptScene).toHaveBeenCalledWith(scene);
         expect(mat._ensureRenderable).not.toHaveBeenCalled();
         expect(liteMesh.material).toBe(mat._lite);
     });
