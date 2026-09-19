@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { computeUboLayout } from "../../../packages/babylon-lite/src/shader/ubo-layout";
 import { composeShader } from "../../../packages/babylon-lite/src/shader/shader-composer";
-import type { BindingDecl, ShaderFragment, ShaderTemplate, UboField } from "../../../packages/babylon-lite/src/shader/fragment-types";
+import type { BindingDecl, BindingKind, ShaderFragment, ShaderTemplate, UboField } from "../../../packages/babylon-lite/src/shader/fragment-types";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 import { createMeshVertexLayout } from "../../../packages/babylon-lite/src/mesh/mesh-vertex-layout";
 
@@ -160,6 +160,97 @@ function makeTemplate(overrides?: Partial<ShaderTemplate>): ShaderTemplate {
 }
 
 describe("composeShader", () => {
+    const bindingCases: {
+        name: string;
+        type: BindingKind;
+        layout: Omit<GPUBindGroupLayoutEntry, "binding" | "visibility">;
+        declarationType: string;
+        qualifier?: string;
+    }[] = [
+        { name: "uniform", type: { _kind: "uniform-buffer" }, layout: { buffer: { type: "uniform" } }, declarationType: "resourceUniforms", qualifier: "<uniform>" },
+        {
+            name: "float texture",
+            type: { _kind: "texture", _textureType: "texture_2d<f32>" },
+            layout: { texture: { sampleType: "float", viewDimension: "2d" } },
+            declarationType: "texture_2d<f32>",
+        },
+        {
+            name: "cube texture",
+            type: { _kind: "texture", _textureType: "texture_cube<f32>" },
+            layout: { texture: { sampleType: "float", viewDimension: "cube" } },
+            declarationType: "texture_cube<f32>",
+        },
+        {
+            name: "uint texture",
+            type: { _kind: "texture", _textureType: "texture_2d<u32>" },
+            layout: { texture: { sampleType: "uint", viewDimension: "2d" } },
+            declarationType: "texture_2d<u32>",
+        },
+        {
+            name: "depth texture",
+            type: { _kind: "texture", _textureType: "texture_depth_2d" },
+            layout: { texture: { sampleType: "depth", viewDimension: "2d" } },
+            declarationType: "texture_depth_2d",
+        },
+        {
+            name: "depth array",
+            type: { _kind: "texture", _textureType: "texture_depth_2d_array", _sampleType: "depth" },
+            layout: { texture: { sampleType: "depth", viewDimension: "2d-array" } },
+            declarationType: "texture_depth_2d_array",
+        },
+        {
+            name: "explicit sample type",
+            type: { _kind: "texture", _textureType: "texture_2d<f32>", _sampleType: "unfilterable-float" },
+            layout: { texture: { sampleType: "unfilterable-float", viewDimension: "2d" } },
+            declarationType: "texture_2d<f32>",
+        },
+        { name: "filtering sampler", type: { _kind: "sampler", _samplerType: "sampler" }, layout: { sampler: { type: "filtering" } }, declarationType: "sampler" },
+        {
+            name: "non-filtering sampler",
+            type: { _kind: "sampler", _samplerType: "sampler_non_filtering" },
+            layout: { sampler: { type: "non-filtering" } },
+            declarationType: "sampler",
+        },
+        {
+            name: "comparison sampler",
+            type: { _kind: "sampler", _samplerType: "sampler_comparison" },
+            layout: { sampler: { type: "comparison" } },
+            declarationType: "sampler_comparison",
+        },
+        ...(
+            [
+                ["read", "read-only"],
+                ["write", "write-only"],
+                ["read_write", "read-write"],
+            ] as const
+        ).map(([access, gpuAccess]) => ({
+            name: `storage ${access}`,
+            type: { _kind: "storage-texture", _access: access, _gpuAccess: gpuAccess, _format: "rgba8unorm" } satisfies BindingKind,
+            layout: { storageTexture: { access: gpuAccess, format: "rgba8unorm" } } satisfies Omit<GPUBindGroupLayoutEntry, "binding" | "visibility">,
+            declarationType: `texture_storage_2d<rgba8unorm,${access}>`,
+        })),
+    ];
+
+    describe.each(bindingCases)("$name binding", ({ type, layout, declarationType, qualifier = "" }) => {
+        for (const group of ["mesh", "shadow"] as const) {
+            it.each([1, 2, 3])(`preserves the ${group} descriptor and declaration at visibility %i`, (visibility) => {
+                const result = composeShader(
+                    makeTemplate({
+                        _baseMaterialUboFields: [{ _name: "factor", _type: "f32" }],
+                        _baseBindings: [{ _name: "resource", _type: type, _group: group, _visibility: visibility }],
+                    }),
+                    []
+                );
+                const binding = group === "shadow" ? 0 : 2;
+                const entries = Array.from((group === "shadow" ? result._shadowBGLDescriptor : result._meshBGLDescriptor)!.entries);
+                expect(entries[binding]).toEqual({ binding, visibility, ...layout });
+                const declaration = `@group(${group === "shadow" ? 2 : 1})@binding(${binding}) var${qualifier} resource:${declarationType};`;
+                expect(result._vertexWGSL.includes(declaration)).toBe(!!(visibility & 1));
+                expect(result._fragmentWGSL.includes(declaration)).toBe(!!(visibility & 2));
+            });
+        }
+    });
+
     it.each([
         ["uniform", { _kind: "uniform-buffer" }, { buffer: { type: "uniform" } }, "var<uniform> resource:resourceUniforms;"],
         ["depth", { _kind: "texture", _textureType: "texture_depth_2d" }, { texture: { sampleType: "depth", viewDimension: "2d" } }, "var resource:texture_depth_2d;"],

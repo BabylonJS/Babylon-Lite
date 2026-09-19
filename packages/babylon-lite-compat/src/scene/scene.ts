@@ -565,6 +565,9 @@ export class Scene extends AbstractScene {
     }
     public set defaultMaterial(value: StandardMaterial) {
         this._defaultMaterial = value;
+        // A replacement built Babylon.js-style with no scene is owned by this scene from now on: it is the
+        // effective material of every mesh without its own, none of which goes through a material setter.
+        value?._adoptScene(this);
     }
 
     public get clearColor(): Color4 {

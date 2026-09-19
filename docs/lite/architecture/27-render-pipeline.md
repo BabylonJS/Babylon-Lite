@@ -69,7 +69,6 @@ export type MeshRebuilder = (scene: SceneContext, mesh: Mesh, materialOverride?:
 ```typescript
 export interface Task {
     readonly name: string;
-    executionEnabled?: boolean;
     readonly engine: EngineContext;
     readonly scene?: SceneContext;
     _passes: Pass[];
@@ -90,8 +89,6 @@ export interface FrameGraph {
 ```
 
 `createSceneContext()` eagerly creates a `FrameGraph` with one default `RenderTask` named `"scene"` that renders into the swapchain unless called with `{ defaultRenderTask: false }`. Post-process pipelines that render the scene to an offscreen source and write their final pass to the swapchain disable this default task so the scene is not drawn twice. User code can add tasks with `addTask()`, `addTaskAtStart()`, or `addTaskBefore()`.
-
-`executionEnabled` defaults to enabled. Setting it to `false` keeps the task recorded and its resources alive while `FrameGraph.execute()` skips both its task-level `execute()` hook and recorded passes for that frame.
 
 ### RenderTask
 

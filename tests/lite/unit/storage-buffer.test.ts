@@ -283,6 +283,33 @@ describe("StorageBuffer", () => {
         expect(staging.destroy).toHaveBeenCalledOnce();
     });
 
+    it("reads aligned subranges without copying the whole allocation", async () => {
+        const source = { destroy: vi.fn() } as unknown as GPUBuffer;
+        const mapped = new Uint32Array([3, 4]);
+        const staging = {
+            destroy: vi.fn(),
+            mapAsync: vi.fn(async () => undefined),
+            getMappedRange: vi.fn(() => mapped.buffer),
+            unmap: vi.fn(),
+        } as unknown as GPUBuffer;
+        const copyBufferToBuffer = vi.fn();
+        const device = {
+            limits: { maxBufferSize: 256 * 1024 * 1024 },
+            createBuffer: vi.fn().mockReturnValueOnce(source).mockReturnValueOnce(staging),
+            createCommandEncoder: vi.fn(() => ({ copyBufferToBuffer, finish: vi.fn(() => ({})) })),
+            queue: { writeBuffer: vi.fn(), submit: vi.fn() },
+        } as unknown as GPUDevice;
+        const storage = createStorageBuffer({ _device: device } as EngineContext, 16, { writable: true });
+
+        expect(Array.from(new Uint32Array(await readStorageBuffer(storage, 8, 8)))).toEqual([3, 4]);
+        expect(copyBufferToBuffer).toHaveBeenCalledWith(source, 8, staging, 0, 8);
+        expect(staging.mapAsync).toHaveBeenCalledWith(GPUMapMode.READ, 0, 8);
+        expect(staging.getMappedRange).toHaveBeenCalledWith(0, 8);
+        await expect(readStorageBuffer(storage, 2, 8)).rejects.toThrow(/byteOffset/);
+        await expect(readStorageBuffer(storage, 8, 6)).rejects.toThrow(/byteLength/);
+        await expect(readStorageBuffer(storage, 12, 8)).rejects.toThrow(/exceeds/);
+    });
+
     it("does not reuse an older pending readback for a call made during frame recording", async () => {
         const { engine } = makeEngine();
         const storage = createStorageBuffer(engine, 16, { writable: true });

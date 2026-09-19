@@ -16,7 +16,6 @@ import { SS } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
 import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
-import { createDefaultPipelineDescriptor } from "../../render/scene-helpers.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 import { computeUboLayout } from "../../shader/ubo-layout.js";
 import type { UboSpec } from "../../shader/fragment-types.js";
@@ -423,7 +422,7 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
     }
 
     // Blend state for alpha-blended materials.
-    const blend = alphaModeToBlend(alphaMode);
+    const blend = _nodeAlphaModeToBlend(alphaMode);
     const depthWriteEnabled = blend === undefined;
 
     const sceneBGL = getSceneBindGroupLayout(_engine);
@@ -468,46 +467,33 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
             };
         });
     const vertexBuffers = createVertexBuffers();
-    let descriptor: GPURenderPipelineDescriptor;
-    if (mrt) {
-        descriptor = mrt._buildPipelineDescriptor(device, {
-            _shaderModule: shaderModule,
-            _sceneBGL: sceneBGL,
-            _meshBGL,
-            _vertexBuffers: vertexBuffers,
-            _depthFormat: depthFormat,
-            _depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE,
-            _msaaSamples,
-        });
-    } else if (noColorOutput) {
-        descriptor = {
-            label: "node-material-depth",
-            layout: device.createPipelineLayout({ bindGroupLayouts: [sceneBGL, _meshBGL] }),
-            vertex: { module: shaderModule, entryPoint: "vs_main", buffers: vertexBuffers },
-            fragment: { module: shaderModule, entryPoint: "fs_main", targets: [] },
-            depthStencil: { format: depthFormat, depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE, depthWriteEnabled: true },
-            multisample: { count: _msaaSamples },
-            primitive: { topology: "triangle-list", cullMode: opts._backFaceCulling !== false ? "back" : "none" },
-        };
-    } else {
-        descriptor = createDefaultPipelineDescriptor({
-            _label: "node-material",
-            _engine,
-            _bgls: [sceneBGL, _meshBGL],
-            _vertModule: shaderModule,
-            _fragModule: shaderModule,
-            _vertexBuffers: vertexBuffers,
-            _format,
-            _depthStencilFormat: opts._depthStencilFormat,
-            _depthCompare: opts._depthCompare,
-            _msaaSamples,
-            _cullMode: opts._backFaceCulling !== false ? "back" : "none",
-            _blend: esmShadowOutput ? undefined : blend,
-            _depthWriteEnabled: esmShadowOutput || depthWriteEnabled,
-        });
-        descriptor.vertex.entryPoint = "vs_main";
-        descriptor.fragment!.entryPoint = "fs_main";
-    }
+    const descriptor: GPURenderPipelineDescriptor = mrt
+        ? mrt._buildPipelineDescriptor(device, {
+              _shaderModule: shaderModule,
+              _sceneBGL: sceneBGL,
+              _meshBGL,
+              _vertexBuffers: vertexBuffers,
+              _depthFormat: depthFormat,
+              _depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE,
+              _msaaSamples,
+          })
+        : {
+              label: noColorOutput ? "node-material-depth" : "node-material",
+              layout: device.createPipelineLayout({ bindGroupLayouts: [sceneBGL, _meshBGL] }),
+              vertex: { module: shaderModule, entryPoint: "vs_main", buffers: vertexBuffers },
+              fragment: {
+                  module: shaderModule,
+                  entryPoint: "fs_main",
+                  targets: noColorOutput ? [] : [!esmShadowOutput && blend ? { format: _format, blend } : { format: _format }],
+              },
+              depthStencil: {
+                  format: depthFormat,
+                  depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE,
+                  depthWriteEnabled: shadowOutput || depthWriteEnabled,
+              },
+              multisample: { count: _msaaSamples },
+              primitive: { topology: "triangle-list", cullMode: opts._backFaceCulling !== false ? "back" : "none", frontFace: noColorOutput ? undefined : "ccw" },
+          };
 
     const _pipeline = device.createRenderPipeline(descriptor);
     let meshPipelines: Map<string, GPURenderPipeline> | null = null;
@@ -549,8 +535,8 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
 
 // ─── Alpha mode → blend state ───────────────────────────────────────
 
-/** Map BJS alpha mode to a WebGPU blend state. Returns undefined for opaque (mode 0). */
-function alphaModeToBlend(mode: number): GPUBlendState | undefined {
+/** @internal Map a Babylon.js alpha mode to the corresponding WebGPU blend state. */
+export function _nodeAlphaModeToBlend(mode: number): GPUBlendState | undefined {
     switch (mode) {
         case 1: // ALPHA_ADD
         case 2: // ALPHA_COMBINE (standard)

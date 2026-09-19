@@ -62,7 +62,7 @@ import type { Task } from "./task.js";
 import type { GeometryClearValue } from "./geometry-types.js";
 import { GEOMETRY_TEXTURE_DESCRIPTIONS, GeometryTextureType } from "./geometry-types.js";
 import { _packSceneUniforms } from "./scene-uniforms-pack.js";
-import { getProjectionMatrix } from "../camera/camera.js";
+import { getProjectionMatrix, _applyCameraViewport } from "../camera/camera.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import type { Mat4Storage } from "../math/types.js";
 
@@ -154,6 +154,7 @@ export interface GeometryRendererTask extends Task {
     readonly geometryWorldNormalTexture: RenderTarget | null;
     readonly geometryAlbedoTexture: RenderTarget | null;
     readonly geometryLinearVelocityTexture: RenderTarget | null;
+    readonly geometryMeshBlendTagTexture: RenderTarget | null;
     /** Skip a mesh from the velocity attachment's previous-world tracking. */
     excludeFromVelocity(mesh: Mesh): void;
     /** Re-include a mesh in velocity tracking. */
@@ -243,25 +244,26 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
     if (config.textureDescriptions.length === 0) {
         throw new Error("GeometryRendererTask: textureDescriptions must contain at least one entry.");
     }
-    if (config.textureDescriptions.length > 8) {
-        throw new Error(`GeometryRendererTask: textureDescriptions length ${config.textureDescriptions.length} exceeds the WebGPU max of 8 color attachments.`);
+    if (config.textureDescriptions.length + (config.targetTexture ? 1 : 0) > 8) {
+        throw new Error("GeometryRendererTask: too many color attachments.");
     }
 
+    const samples = config.samples ?? 1;
     const attachments: AttachmentInfo[] = config.textureDescriptions.map((d, i) => {
         const desc = GEOMETRY_TEXTURE_DESCRIPTIONS[d.type];
         if (!desc) {
             throw new Error(`GeometryRendererTask: unknown texture type ${d.type as number}.`);
         }
+        const format = d.format ?? desc.defaultFormat;
         return {
             _type: d.type,
             _index: i,
-            _format: d.format ?? desc.defaultFormat,
+            _format: format,
             _clearValue: d.clearValue ?? desc.clearValue,
         };
     });
     const needsVelocity = attachments.some((a) => a._type === GeometryTextureType.LINEAR_VELOCITY);
     const needsParams = needsVelocity || attachments.some((a) => a._type === GeometryTextureType.NORMALIZED_VIEW_DEPTH);
-    const samples = config.samples ?? 1;
     const size = config.size ?? sc.surface;
 
     if (config.depthTexture) {
@@ -292,16 +294,8 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
     const depthCompare = config.targetTexture?._descriptor.depthCompare ?? config.depthTexture?._descriptor.depthCompare;
     const depthClearValue = config.targetTexture?._descriptor.depthClearValue ?? config.depthTexture?._descriptor.depthClearValue;
 
-    const wrapperTargets: (RenderTarget | null)[] = [];
-    const typeAccessors: Record<GeometryTextureType, RenderTarget | null> = {} as Record<GeometryTextureType, RenderTarget | null>;
-    for (let t = 0; t < GEOMETRY_TEXTURE_DESCRIPTIONS.length; t++) {
-        typeAccessors[t as GeometryTextureType] = null;
-    }
-    for (const a of attachments) {
-        const wrapper = createWrapperRenderTarget(outputTarget, a);
-        wrapperTargets.push(wrapper);
-        typeAccessors[a._type] = wrapper;
-    }
+    const typeAccessors = new Array<RenderTarget | null>(GEOMETRY_TEXTURE_DESCRIPTIONS.length).fill(null) as unknown as Record<GeometryTextureType, RenderTarget | null>;
+    const wrapperTargets = attachments.map((a) => (typeAccessors[a._type] = createWrapperRenderTarget(outputTarget, a)));
 
     const ownedDepthWrapper: RenderTarget | null = config.depthTexture ? null : createDepthWrapperRenderTarget(outputTarget, samples, depthClearValue, depthCompare);
     const geometryDepthTexture: RenderTarget = config.depthTexture ?? ownedDepthWrapper!;
@@ -347,7 +341,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _sampleCount: samples,
     };
 
-    const task: GeometryRendererTaskInternal = {
+    const task = {
         name: config.name ?? "geometry-renderer",
         engine: eng,
         scene: sc,
@@ -355,21 +349,10 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _mrt: outputTarget,
         outputTexture: config.targetTexture,
         geometryDepthTexture,
-        geometryIrradianceTexture: typeAccessors[GeometryTextureType.IRRADIANCE],
-        geometryWorldPositionTexture: typeAccessors[GeometryTextureType.WORLD_POSITION],
-        geometryLocalPositionTexture: typeAccessors[GeometryTextureType.LOCAL_POSITION],
-        geometryReflectivityTexture: typeAccessors[GeometryTextureType.REFLECTIVITY],
-        geometryViewDepthTexture: typeAccessors[GeometryTextureType.VIEW_DEPTH],
-        geometryNormalizedViewDepthTexture: typeAccessors[GeometryTextureType.NORMALIZED_VIEW_DEPTH],
-        geometryScreenspaceDepthTexture: typeAccessors[GeometryTextureType.SCREENSPACE_DEPTH],
-        geometryViewNormalTexture: typeAccessors[GeometryTextureType.VIEW_NORMAL],
-        geometryWorldNormalTexture: typeAccessors[GeometryTextureType.WORLD_NORMAL],
-        geometryAlbedoTexture: typeAccessors[GeometryTextureType.ALBEDO],
-        geometryLinearVelocityTexture: typeAccessors[GeometryTextureType.LINEAR_VELOCITY],
-        excludeFromVelocity(mesh) {
+        excludeFromVelocity(mesh: Mesh) {
             task._excludedFromVelocity.add(mesh);
         },
-        includeInVelocity(mesh) {
+        includeInVelocity(mesh: Mesh) {
             task._excludedFromVelocity.delete(mesh);
         },
         _attachments: attachments,
@@ -428,6 +411,9 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
                 }
             }
             const loads: Promise<void>[] = [];
+            for (const attachment of task._attachments) {
+                GEOMETRY_TEXTURE_DESCRIPTIONS[attachment._type]!._validate?.(attachment._format, attachment._clearValue, samples);
+            }
             if (hasStandard) {
                 loads.push(
                     (async () => {
@@ -470,7 +456,10 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         dispose(): void {
             disposeTask(task, eng);
         },
-    };
+    } as unknown as GeometryRendererTaskInternal;
+    for (let type = 0; type < GEOMETRY_TEXTURE_DESCRIPTIONS.length; type++) {
+        (task as unknown as Record<string, RenderTarget | null>)["geometry" + GEOMETRY_TEXTURE_DESCRIPTIONS[type]!.name + "Texture"] = typeAccessors[type as GeometryTextureType];
+    }
     return task;
 }
 
@@ -739,7 +728,8 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
     if (sc._renderableVersion !== task._boundVer) {
         rebuildBoundMeshes(task, config, eng, sc);
     }
-    const aspect = mrt._width / mrt._height;
+    const viewport = camera.viewport;
+    const aspect = (mrt._width / mrt._height) * (viewport ? viewport.width / viewport.height : 1);
     writeSceneUBO(task, eng, sc, camera, aspect);
     // Positional light data must share the effective task camera's origin; under an
     // override-FO the task owns its lights UBO and refreshes it here each frame.
@@ -755,6 +745,7 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
     }
 
     const pass = eng._currentEncoder.beginRenderPass(task._renderPassDescriptor);
+    _applyCameraViewport(pass, camera, mrt._width, mrt._height);
     pass.setBindGroup(0, task._sceneBG!);
     let lastPipeline: GPURenderPipeline | null = null;
     let draws = 0;

@@ -15,6 +15,8 @@ export {
     setGpuTimingEnabled,
     isGpuTimingSupported,
 } from "./engine/engine.js";
+export { createEngineWithFeatures } from "./compute/compute-engine-features.js";
+export type { EngineFeatureOptions } from "./compute/compute-engine-features.js";
 export { disposeEngine } from "./engine/engine-dispose.js";
 export { waitForGpuResourceRetirements } from "./engine/gpu-resource-retirement.js";
 export { VERSION } from "./engine/version.js";
@@ -62,7 +64,14 @@ export { enableErrorDecoding, decodeError } from "./enable-error-decoding.js";
 // Subtree visibility toggle (used to hide a node before deferring its disposal,
 // e.g. streaming voxel chunks). Standalone module — bundled only when used.
 export { setSubtreeVisible } from "./scene/visibility.js";
-export { packMeshBlendingTag, unpackMeshBlendingTag, createDefaultMeshBlendRadiusDefinitions } from "./mesh/mesh-blending-tag.js";
+export {
+    MeshBlendingRadiusClass,
+    createDefaultMeshBlendRadiusDefinitions,
+    packMeshBlendingTag,
+    resolveMeshBlendingTag,
+    unpackMeshBlendingTag,
+    validatePackedMeshBlendingTag,
+} from "./mesh/mesh-blending-tag.js";
 export type { MeshBlendingTag, MeshBlendRadiusDefinition, MeshBlendRadiusDefinitions } from "./mesh/mesh-blending-tag.js";
 
 // ─── Frame graph ─────────────────────────────────────────────────────
@@ -72,7 +81,13 @@ export { getFrameGraph } from "./scene/scene.js";
 export type { FrameGraph } from "./frame-graph/frame-graph.js";
 export { buildFrameGraphTask } from "./frame-graph/frame-graph.js";
 export { addRenderPass, addTask, addTaskAtStart, addTaskBefore, addTaskAfter } from "./frame-graph/frame-graph-actions.js";
-export { createFrameGraphContext, registerFrameGraphContext, unregisterFrameGraphContext, disposeFrameGraphContext } from "./frame-graph/frame-graph-context.js";
+export {
+    createFrameGraphContext,
+    registerFrameGraphContext,
+    registerFrameGraphContextAsync,
+    unregisterFrameGraphContext,
+    disposeFrameGraphContext,
+} from "./frame-graph/frame-graph-context.js";
 export type { FrameGraphContext, FrameGraphContextOptions } from "./frame-graph/frame-graph-context.js";
 export type { Task } from "./frame-graph/task.js";
 export type { Pass, RenderPassExecuteFunc } from "./frame-graph/pass.js";
@@ -85,6 +100,8 @@ export { createDepthPyramid, createDepthPyramidTask } from "./frame-graph/depth-
 export { createImageProcessingTask } from "./frame-graph/image-processing-task.js";
 export type { ImageProcessingSource, ImageProcessingTaskConfig } from "./frame-graph/image-processing-task.js";
 export type { PostProcessTask, PostProcessTaskSettings, PostProcessAlphaMode, PostProcessSamplingMode } from "./frame-graph/post-process-task.js";
+export { createMeshBlendRadiusDefinition, createMeshBlendingPostProcessTask, MeshBlendDebugMode, MeshBlendDepthType, MeshBlendQuality } from "./post-process/mesh-blending.js";
+export type { MeshBlendingPostProcessTask, MeshBlendingPostProcessTaskConfig } from "./post-process/mesh-blending.js";
 export { createCopyToTextureTask } from "./frame-graph/copy-to-texture-task.js";
 export type { CopyToTextureTask, CopyToTextureTaskConfig } from "./frame-graph/copy-to-texture-task.js";
 export { createDepthResolveTask } from "./frame-graph/depth-resolve-task.js";
@@ -282,6 +299,8 @@ export type { Csg2Solid } from "./mesh/csg2.js";
 // ─── Resources ───────────────────────────────────────────────────────
 export { createStorageBuffer, updateStorageBuffer, readStorageBuffer, disposeStorageBuffer } from "./resource/storage-buffer.js";
 export type { StorageBuffer, StorageBufferOptions } from "./resource/storage-buffer.js";
+export { createUniformBuffer, updateUniformBuffer, disposeUniformBuffer } from "./compute/compute-uniform-buffer.js";
+export type { UniformBuffer, UniformBufferOptions } from "./compute/compute-uniform-buffer.js";
 // GPU-resident geometry: a mesh sources its vertices straight from a storage
 // allocation and the draw reads them in place, with no readback and no copy.
 // Whoever fills the allocation -- the CPU, or eventually a compute pass -- is the
@@ -291,6 +310,74 @@ export type { MeshFromStorageOptions } from "./mesh/mesh-from-storage.js";
 // Non-canonical vertex formats for a ShaderMaterial (e.g. a float32x4 position packing
 // data in .w). Opt-in: costs nothing in scenes that never declare one.
 export { setShaderAttributeFormats } from "./material/shader/shader-vb.js";
+// User-facing compute: immutable program and binding state, reusable dispatches,
+// and frame-graph scheduling through one compute pass per task.
+export { createComputeShader, prepareComputeShader, disposeComputeShader } from "./compute/compute-shader.js";
+export type { ComputeShader, ComputeShaderOptions } from "./compute/compute-shader.js";
+export type { ComputeBindingDecl } from "./compute/compute-binding.js";
+export { computeStorageBufferBinding } from "./compute/compute-storage-buffer-binding.js";
+export type { ComputeStorageBufferBindingOptions, ComputeStorageBufferRange } from "./compute/compute-storage-buffer-binding.js";
+export { computeUniformBufferBinding } from "./compute/compute-uniform-buffer-binding.js";
+export type { ComputeUniformBufferBindingOptions, ComputeUniformBufferRange } from "./compute/compute-uniform-buffer-binding.js";
+export { createComputeTextureResource, invalidateComputeTextureResource } from "./compute/compute-texture-resource.js";
+export type { ComputeTextureResource, ComputeTextureResourceOptions, ComputeTextureSampleType } from "./compute/compute-texture-resource.js";
+export { createComputeTextureViewResource } from "./compute/compute-texture-view-resource.js";
+export type { ComputeTextureViewResourceOptions } from "./compute/compute-texture-view-resource.js";
+export { createComputeSampler } from "./compute/compute-sampler-resource.js";
+export type { ComputeSampler, ComputeSamplerType } from "./compute/compute-sampler-resource.js";
+export { computeTextureBinding } from "./compute/compute-texture-binding.js";
+export type { ComputeTextureBindingOptions } from "./compute/compute-texture-binding.js";
+export { computeTextureViewBinding } from "./compute/compute-texture-view-binding.js";
+export type { ComputeTextureViewBindingOptions } from "./compute/compute-texture-view-binding.js";
+export { computeSamplerBinding } from "./compute/compute-sampler-binding.js";
+export type { ComputeSamplerBindingOptions } from "./compute/compute-sampler-binding.js";
+export { computeStorageTextureBinding } from "./compute/compute-storage-texture-binding.js";
+export type { ComputeStorageTextureBindingOptions } from "./compute/compute-storage-texture-binding.js";
+export { computeStorageTextureViewBinding } from "./compute/compute-storage-texture-view-binding.js";
+export type { ComputeStorageTextureViewBindingOptions } from "./compute/compute-storage-texture-view-binding.js";
+export { createComputeStorageTexture2D, cloneComputeStorageTexture2D, disposeComputeStorageTexture2D } from "./resource/compute-storage-texture.js";
+export type { ComputeStorageTexture2D, ComputeStorageTexture2DOptions, ComputeStorageTextureFormat } from "./resource/compute-storage-texture.js";
+export { createComputeStorageTexture, disposeComputeStorageTexture } from "./resource/compute-storage-texture-view.js";
+export { createComputeStorageTextureMipmapsTask } from "./compute/compute-storage-texture-mipmaps.js";
+export type { ComputeStorageTexture, ComputeStorageTextureOptions, ComputeStorageTextureViewDimension } from "./resource/compute-storage-texture-view.js";
+export { createComputeBindingSet, disposeComputeBindingSet } from "./compute/compute-bindings.js";
+export type { ComputeBindingSet, ComputeBindingResources } from "./compute/compute-bindings.js";
+export { createComputeDispatch, setComputeDispatchSize } from "./compute/compute-dispatch.js";
+export type { ComputeDispatch, ComputeDispatchOptions, ComputeDirectDispatch, ComputeImmediateData } from "./compute/compute-dispatch.js";
+export { setComputeDispatchDynamicOffset } from "./compute/compute-dynamic-offset.js";
+export { createComputeIndirectDispatch, setComputeIndirectDispatch } from "./compute/compute-indirect-dispatch.js";
+export type { ComputeIndirectDispatchOptions } from "./compute/compute-indirect-dispatch.js";
+export { createComputePipelineVariant, prepareComputePipelineVariant, createComputeVariantDispatch } from "./compute/compute-pipeline-variant.js";
+export type { ComputePipelineVariant, ComputePipelineConstants, ComputeVariantDispatchOptions } from "./compute/compute-pipeline-variant.js";
+export { createComputeTask, addComputeDispatch, removeComputeDispatch, prepareComputeTask, submitComputeTasks } from "./compute/compute-task.js";
+export type { ComputeTask } from "./compute/compute-task.js";
+export { createComputeOneShot, armComputeOneShot, disposeComputeOneShot } from "./compute/compute-one-shot.js";
+export type { ComputeOneShot } from "./compute/compute-one-shot.js";
+export { createComputeImmediateShader, isComputeImmediatesSupported, setComputeDispatchImmediates } from "./compute/compute-immediates.js";
+export type { ComputeImmediateShaderOptions } from "./compute/compute-immediates.js";
+export { createComputeUniformArena, getComputeUniformSlotOffset, updateComputeUniformSlot } from "./compute/compute-uniform-arena.js";
+export type { ComputeUniformArena } from "./compute/compute-uniform-arena.js";
+export {
+    createComputeUniformLayout,
+    createComputeUniformWriter,
+    setComputeUniform,
+    setComputeUniformF16,
+    setComputeUniformF32,
+    setComputeUniformI32,
+    setComputeUniformMatrix,
+    setComputeUniformU32,
+    setComputeUniformVector,
+} from "./compute/compute-uniform-writer.js";
+export { createComputeUniformF16Writer, isComputeF16Supported } from "./compute/compute-uniform-f16.js";
+export type {
+    ComputeUniformField,
+    ComputeUniformLayout,
+    ComputeUniformMatrixType,
+    ComputeUniformScalarType,
+    ComputeUniformType,
+    ComputeUniformVectorType,
+    ComputeUniformWriter,
+} from "./compute/compute-uniform-writer.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
@@ -406,6 +493,115 @@ export { createLineMaterial, setLineMaterialColor } from "./material/line/line-m
 export type { LineMaterial, LineMaterialOptions } from "./material/line/line-material.js";
 export { createPbrNoColorMaterialView } from "./material/pbr/no-color-view.js";
 export { parseNodeMaterialFromSnippet } from "./material/node/node-material.js";
+export { createNodeMaterialBlockLoader } from "./material/node/node-block-loader.js";
+export type { NodeMaterialBlock } from "./material/node/node-block-loader.js";
+// BEGIN GENERATED NODE BLOCK EXPORTS
+export {
+    nodeAddBlock,
+    nodeAmbientOcclusionBlock,
+    nodeAnisotropyBlock,
+    nodeArcTan2Block,
+    nodeBiPlanarBlock,
+    nodeBonesBlock,
+    nodeClampBlock,
+    nodeClearCoatBlock,
+    nodeClipPlanesBlock,
+    nodeCloudBlock,
+    nodeColorConverterBlock,
+    nodeColorMergerBlock,
+    nodeColorSplitterBlock,
+    nodeConditionalBlock,
+    nodeCrossBlock,
+    nodeCurveBlock,
+    nodeDerivativeBlock,
+    nodeDesaturateBlock,
+    nodeDiscardBlock,
+    nodeDistanceBlock,
+    nodeDivideBlock,
+    nodeDotBlock,
+    nodeElbowBlock,
+    nodeFogBlock,
+    nodeFragCoordBlock,
+    nodeFragDepthBlock,
+    nodeFragmentOutputBlock,
+    nodeFresnelBlock,
+    nodeFrontFacingBlock,
+    nodeGeometryTextureOutputBlock,
+    nodeGradientBlock,
+    nodeHeightToNormalBlock,
+    nodeImageProcessingBlock,
+    nodeImageSourceBlock,
+    nodeInputBlock,
+    nodeInstancesBlock,
+    nodeIridescenceBlock,
+    nodeLengthBlock,
+    nodeLerpBlock,
+    nodeLightBlock,
+    nodeLightInformationBlock,
+    nodeLoopBlock,
+    nodeMatrixBuilder,
+    nodeMatrixDeterminantBlock,
+    nodeMatrixSplitterBlock,
+    nodeMatrixTransposeBlock,
+    nodeMaxBlock,
+    nodeMeshAttributeExistsBlock,
+    nodeMinBlock,
+    nodeModBlock,
+    nodeMorphTargetsBlock,
+    nodeMultiplyBlock,
+    nodeNegateBlock,
+    nodeNLerpBlock,
+    nodeDebugBlock,
+    nodeTeleportInBlock,
+    nodeTeleportOutBlock,
+    nodeNormalBlendBlock,
+    nodeNormalizeBlock,
+    nodeOneMinusBlock,
+    nodeOppositeBlock,
+    nodePannerBlock,
+    nodePbrMetallicRoughnessBlock,
+    nodePbrMetallicRoughnessBlockFull,
+    nodePerturbNormalBlock,
+    nodePosterizeBlock,
+    nodePowBlock,
+    nodeRandomNumberBlock,
+    nodeReciprocalBlock,
+    nodeReflectBlock,
+    nodeReflectionBlock,
+    nodeReflectionTextureBaseBlock,
+    nodeReflectionTextureBlock,
+    nodeRefractBlock,
+    nodeRefractionBlock,
+    nodeRemapBlock,
+    nodeReplaceColorBlock,
+    nodeRotate2dBlock,
+    nodeScaleBlock,
+    nodeScreenSizeBlock,
+    nodeScreenSpaceBlock,
+    nodeShadowMapBlock,
+    nodeSheenBlock,
+    nodeSimplexPerlin3DBlock,
+    nodeSmoothStepBlock,
+    nodeStepBlock,
+    nodeStorageReadBlock,
+    nodeStorageWriteBlock,
+    nodeSubSurfaceBlock,
+    nodeSubtractBlock,
+    nodeTBNBlock,
+    nodeTextureBlock,
+    nodeTransformBlock,
+    nodeTrigonometryBlock,
+    nodeTriPlanarBlock,
+    nodeTwirlBlock,
+    nodeVectorMergerBlock,
+    nodeVectorSplitterBlock,
+    nodeVertexOutputBlock,
+    nodeViewDirectionBlock,
+    nodeVoronoiNoiseBlock,
+    nodeWaveBlock,
+    nodeWorleyNoise3DBlock,
+} from "./material/node/node-blocks.js";
+// END GENERATED NODE BLOCK EXPORTS
 export { loadNodeBlockEmitterWithGeometry } from "./material/node/node-geometry-block-loader.js";
 export { createNodeNoColorMaterialView } from "./material/node/no-color-view.js";
 export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./material/node/node-material.js";
@@ -439,6 +635,13 @@ export type { AssetContainer } from "./asset-container.js";
 export { getContainerMeshes } from "./asset-container.js";
 export { selectVariant, getVariantNames, resetVariant } from "./loader-gltf/material-variants.js";
 export type { MaterialVariantData } from "./loader-gltf/material-variants.js";
+export {
+    hasDefaultInteractivityFlowInput,
+    normalizeInteractivityEventDataConfiguration,
+    normalizeKhrInteractivityRuntimeValue,
+    createKhrInteractivityRuntimeValueSnapshot,
+} from "./loader-gltf/khr-interactivity-helpers.js";
+export type { KhrInteractivityRuntimeValueSnapshot } from "./loader-gltf/khr-interactivity-helpers.js";
 // Decoder base-URL config for KHR_draco_mesh_compression / EXT_meshopt_compression.
 // The heavy decoder glue stays dynamic-imported (zero bytes for assets that don't
 // use it); only these tiny setters are statically reachable from the entry point.
@@ -603,6 +806,7 @@ export type { GltfMetadata, LiteMetadata } from "./metadata.js";
 
 // ─── Color ───────────────────────────────────────────────────────────
 export { linearToSrgbByte, srgbByteToLinear, packedSrgbToLinearRgba } from "./math/color.js";
+export { MinTemperatureKelvin, MaxTintMagnitude, temperatureTintToXyz, getWhiteBalanceMatrix } from "./math/color-temperature.js";
 
 // ─── Thin Instances ──────────────────────────────────────────────────
 export {

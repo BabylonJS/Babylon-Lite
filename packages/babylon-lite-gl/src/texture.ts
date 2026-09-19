@@ -55,14 +55,10 @@ export interface GLTexture {
     _disposed: boolean;
     /** @internal */
     _refCount: number;
-    /**
-     * Replay closure for context-restore (§4.7 of 00-lite-gl.md). Captures the
-     * original upload arguments and re-issues the `gl.texImage2D` /
-     * `texParameteri` sequence into the freshly-allocated `handle`. After
-     * the upload completes the texture is ready iff `_isReadyAfterUpload`.
-     * @internal
-     */
+    /** Replays the latest pixel content into the currently bound texture handle. @internal */
     _upload: (engine: GLEngineContext) => void;
+    /** Initializes creation-time sampling state on the bound texture handle. @internal */
+    _initializeParameters?: (engine: GLEngineContext) => void;
     /**
      * Snapshot of `isReady` captured on `webglcontextlost` so the restore
      * handler knows whether to flip it back on after `_upload`. Textures
@@ -128,6 +124,14 @@ export function setUnpackState(engine: GLEngineContext, flipY: boolean, premulti
     }
 }
 
+/** Apply sampling and wrap state to the texture currently bound for upload. @internal */
+export function setBoundTextureParams(gl: WebGL2RenderingContext, minFilter: GLenum, magFilter: GLenum, wrapS: GLenum, wrapT: GLenum): void {
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, minFilter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, magFilter);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrapS);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrapT);
+}
+
 /** Uint8 / float raw texture upload. The pixel data can be replaced later via
  *  {@link updateRawTexture}; the sampling and wrap can be changed via
  *  {@link updateTextureSamplingMode} / {@link updateTextureWrapMode}. */
@@ -171,10 +175,10 @@ export function createRawTexture(
         setUnpackState(target, invertY, premultiply, curAlign);
         bindTextureForUpload(target, tex.handle);
         g.texImage2D(g.TEXTURE_2D, 0, internalFormat, curWidth, curHeight, 0, format, type, curData);
-        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, minFilter);
-        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, magFilter);
-        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_S, wrapS);
-        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_T, wrapT);
+    };
+
+    const initializeParameters = (target: GLEngineContext): void => {
+        setBoundTextureParams(target.gl, minFilter, magFilter, wrapS, wrapT);
     };
 
     const tex: GLTexture = {
@@ -186,6 +190,7 @@ export function createRawTexture(
         _disposed: false,
         _refCount: 1,
         _upload: upload,
+        _initializeParameters: initializeParameters,
         _wasReady: true,
     };
     tex._updateRaw = (target: GLEngineContext, newData: ArrayBufferView | null, newWidth: number, newHeight: number, unpackAlignment: number): void => {
@@ -198,6 +203,7 @@ export function createRawTexture(
         upload(target);
     };
     upload(engine);
+    initializeParameters(engine);
     engine._textures.push(tex);
     return tex;
 }
@@ -336,10 +342,7 @@ export function createTextureFromHandle(engine: GLEngineContext, handle: WebGLTe
     if (options !== undefined) {
         const gl = engine.gl;
         bindTextureForUpload(engine, handle);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, options.minFilter ?? gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, options.magFilter ?? gl.LINEAR);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, options.wrapS ?? gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, options.wrapT ?? gl.CLAMP_TO_EDGE);
+        setBoundTextureParams(gl, options.minFilter ?? gl.LINEAR, options.magFilter ?? gl.LINEAR, options.wrapS ?? gl.CLAMP_TO_EDGE, options.wrapT ?? gl.CLAMP_TO_EDGE);
     }
     return tex;
 }
@@ -378,10 +381,10 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
         } else {
             g.texImage2D(g.TEXTURE_2D, 0, g.RGBA, 1, 1, 0, g.RGBA, g.UNSIGNED_BYTE, placeholderPixels);
         }
-        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, minFilter);
-        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, magFilter);
-        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_S, wrapS);
-        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_T, wrapT);
+    };
+
+    const initializeParameters = (target: GLEngineContext): void => {
+        setBoundTextureParams(target.gl, minFilter, magFilter, wrapS, wrapT);
     };
 
     const tex: GLTexture = {
@@ -393,10 +396,12 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
         _disposed: false,
         _refCount: 1,
         _upload: upload,
+        _initializeParameters: initializeParameters,
         _wasReady: false,
     };
     // Placeholder upload — makes the texture sampleable before the real image arrives.
     upload(engine);
+    initializeParameters(engine);
     engine._textures.push(tex);
 
     // Fetch + decode the real image. Re-uploads via the same closure once the

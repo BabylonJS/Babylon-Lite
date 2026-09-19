@@ -225,3 +225,17 @@ export function getEffectiveAspectRatio(camera: Camera | null | undefined, targe
     const v = camera?.viewport;
     return (targetWidth / targetHeight) * (v ? v.width / v.height : 1);
 }
+
+/** @internal Apply a normalized camera viewport to a WebGPU render pass. */
+export function _applyCameraViewport(pass: GPURenderPassEncoder, camera: Camera | null | undefined, targetWidth: number, targetHeight: number): void {
+    const v = camera?.viewport;
+    if (!v) {
+        return;
+    }
+    const x = Math.floor(v.x * targetWidth);
+    const y = Math.floor((1 - v.y - v.height) * targetHeight);
+    const width = Math.ceil((v.x + v.width) * targetWidth) - x;
+    const height = Math.ceil((1 - v.y) * targetHeight) - y;
+    pass.setViewport(x, y, width, height, 0, 1);
+    pass.setScissorRect(x, y, width, height);
+}

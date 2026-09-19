@@ -248,7 +248,11 @@ export function ensureCsmShadowTaskState(
             _ownsDepthTexture: false, // borrowed: the shared CSM depth array is owned by the generator
         };
         const camera = createShadowCamera(sg);
-        const task = createRenderTask({ name: `csm${i}`, rt, clr: true, cam: camera, _skipClusteredLights: true }, engine, scene);
+        // `autoMirror: false`: a shadow task's render list is its caster set and nothing else. With the default
+        // auto-mirror an EMPTY caster set makes the task copy every scene renderable at record() time, so the
+        // receivers — whose bind groups sample this very depth array — are drawn INTO it ("usage
+        // (TextureBinding|RenderAttachment) … in the same synchronization scope", an invalid frame every frame).
+        const task = createRenderTask({ name: `csm${i}`, rt, clr: true, cam: camera, autoMirror: false, _skipClusteredLights: true }, engine, scene);
         for (const mesh of casterMeshes) {
             const material = mesh.material;
             // Per-caster cascade cap: a capped caster renders only into layers 0..maxCascade (its far-layer
