@@ -224,13 +224,54 @@ function copyLiteMaterialData(src: object, dst: object): void {
     }
 }
 
+/** Structural view of a compat material as the mesh registration paths need it. */
+interface SceneAttachableMaterial {
+    _ensureRenderable(engine: EngineContext): void;
+    _adoptScene?(scene: Scene): void;
+}
+
+/**
+ * @internal Scene OWNERSHIP of a material, independent of GPU finalization. Babylon.js allows
+ * `new StandardMaterial(name)` with no scene, so the material a mesh renders with adopts that mesh's scene
+ * as soon as the two meet — whether or not the scene has started. A material rendered by a scene it never
+ * adopted has no scene to rebuild in, and its later `_refreshInScene()` requests (a `disableLighting`
+ * toggle, a texture that finished loading) silently do nothing.
+ */
+export function adoptMaterialScene(material: SceneAttachableMaterial, scene: Scene): void {
+    material._adoptScene?.(scene);
+}
+
+/**
+ * @internal Ownership plus GPU finalization (`_ensureRenderable`). Finalization needs the engine, so it stays
+ * gated to the moments a mesh actually enters the running scene: the live branch of the `material` setter
+ * and the deferred registration at engine start.
+ */
+export function attachMaterialToScene(material: SceneAttachableMaterial, scene: Scene): void {
+    adoptMaterialScene(material, scene);
+    material._ensureRenderable(scene.getEngine()._lite);
+}
+
 export class StandardMaterial extends PushMaterial {
     /** @internal Underlying Babylon Lite standard-material props. */
     public readonly _lite: StandardMaterialProps;
+    /** Diffuse colour as the app set it. Kept apart from `_lite.diffuseColor`, which is forced to white
+     *  while the material is unlit (see `_syncDiffuse`). */
+    private _diffuse: Tuple3 | null = null;
 
     public constructor(name: string, scene?: Scene) {
         super(name, scene);
         this._lite = createStandardMaterial();
+    }
+
+    /**
+     * Babylon.js shades an unlit StandardMaterial as `emissive + ambient`: the diffuse colour only scales
+     * the accumulated light, and there is none. Lite's unlit path is `emissive × diffuse`, so the usual
+     * "unlit colour" setup (black diffuse, colour in emissive) rendered black. Hand Lite a neutral white
+     * diffuse while lighting is disabled and the app's own colour otherwise.
+     */
+    private _syncDiffuse(): void {
+        const diffuse = (this._diffuse ??= [...this._lite.diffuseColor]);
+        this._lite.diffuseColor = this._lite.disableLighting ? [1, 1, 1] : [diffuse[0], diffuse[1], diffuse[2]];
     }
 
     public override getClassName(): string {
@@ -238,10 +279,11 @@ export class StandardMaterial extends PushMaterial {
     }
 
     public get diffuseColor(): Color3 {
-        return readColor3(this._lite.diffuseColor);
+        return readColor3(this._diffuse ?? this._lite.diffuseColor);
     }
     public set diffuseColor(value: Color3) {
-        this._lite.diffuseColor = [value.r, value.g, value.b];
+        this._diffuse = [value.r, value.g, value.b];
+        this._syncDiffuse();
         this._markDirty();
     }
 
@@ -273,8 +315,17 @@ export class StandardMaterial extends PushMaterial {
         return this._lite.disableLighting;
     }
     public set disableLighting(value: boolean) {
+        const changed = this._lite.disableLighting !== value;
         this._lite.disableLighting = value;
+        this._syncDiffuse();
         this._markDirty();
+        // Lighting on/off is a shader variant, not a uniform: a material that has already rendered keeps
+        // its compiled shader until its renderables are rebuilt. Rebuild together with the diffuse swap —
+        // otherwise the cached lit shader would run with the neutral white diffuse and let the scene
+        // lights tint an unlit material. No-op until the scene has started.
+        if (changed) {
+            this._refreshInScene();
+        }
     }
 
     protected override _applyBackFaceCulling(value: boolean): void {
@@ -392,6 +443,7 @@ export class StandardMaterial extends PushMaterial {
     public override clone(name: string): StandardMaterial {
         const cloned = new StandardMaterial(name, this._scene);
         this._cloneBaseInto(cloned);
+        cloned._diffuse = this._diffuse && [this._diffuse[0], this._diffuse[1], this._diffuse[2]];
         cloned.useAlphaFromDiffuseTexture = this.useAlphaFromDiffuseTexture;
         cloned._diffuseTexture = this._diffuseTexture;
         cloned._bumpTexture = this._bumpTexture;

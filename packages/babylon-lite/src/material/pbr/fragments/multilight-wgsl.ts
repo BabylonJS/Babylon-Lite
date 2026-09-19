@@ -73,7 +73,7 @@ var directSpecular = vec3<f32>(0.0);
 let directRoughness = max(roughness, AA_factor_x);
 let directAlphaG = directRoughness * directRoughness + 0.0005;
 var shadowFactors = array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")});
-let lightCount = min(mesh.lc, ${MAX_LIGHTS}u);
+let lightCount = min(mesh.lc & 255u, ${MAX_LIGHTS}u);
 /*AS*/
 // First-light aliases — kept at directLightBlock scope so the AD slot below
 // (clearcoat / sheen / subsurface) sees the same single-light variable names

@@ -41,7 +41,7 @@ import type { Material } from "../material/material.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { buildRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
-import { getViewMatrix, _cameraChangeKey } from "../camera/camera.js";
+import { getViewMatrix, _applyCameraViewport, _cameraChangeKey } from "../camera/camera.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
 import { _packSceneUniforms } from "./scene-uniforms-pack.js";
 import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
@@ -546,17 +546,7 @@ function executePassBody(task: RenderTaskBase, pass: GPURenderPassEncoder): numb
     const sceneBG = task._sceneBG!;
 
     const camera = cfg.cam ?? scene.camera;
-    const v = camera?.viewport;
-    if (v) {
-        const rw = rt._width;
-        const rh = rt._height;
-        const x = Math.floor(v.x * rw);
-        const y = Math.floor((1 - v.y - v.height) * rh);
-        const w = Math.ceil((v.x + v.width) * rw) - x;
-        const h = Math.ceil((1 - v.y) * rh) - y;
-        pass.setViewport(x, y, w, h, 0, 1);
-        pass.setScissorRect(x, y, w, h);
-    }
+    _applyCameraViewport(pass, camera, rt._width, rt._height);
     // Scene bind group (group 0) is task-owned and identical for every draw in this pass.
     pass.setBindGroup(0, sceneBG);
 
