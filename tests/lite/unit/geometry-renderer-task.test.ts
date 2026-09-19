@@ -1,5 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
+// Lets one test hold the Standard family's optional-feature preload open; every other test runs the real one.
+const standardFeaturePreload = vi.hoisted(() => ({ override: null as null | (() => Promise<void>) }));
+vi.mock("../../../packages/babylon-lite/src/material/standard/geometry-view", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("../../../packages/babylon-lite/src/material/standard/geometry-view")>();
+    return {
+        ...actual,
+        preloadStandardGeometryFeatures: (...args: Parameters<typeof actual.preloadStandardGeometryFeatures>) =>
+            standardFeaturePreload.override ? standardFeaturePreload.override() : actual.preloadStandardGeometryFeatures(...args),
+    };
+});
+
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { createRenderTarget, type RenderTarget, type RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
 import { _installMeshBlendingGeometrySupport } from "../../../packages/babylon-lite/src/frame-graph/geometry-mesh-blending";
@@ -915,6 +926,70 @@ describe("GeometryRendererTask", () => {
         expect(lateState._createPbrGeometryView).toBeTypeOf("function");
         expect(lateState._boundVer).toBe(-1);
         expect(lateState._lateLoad).toBeUndefined();
+    });
+
+    it("exposes a late Standard family only after its optional feature helpers have loaded", async () => {
+        // `_preload` used to install the Standard factory BEFORE awaiting the skeletal-velocity / thin-instance
+        // helpers. A resize or scene mutation landing in that window passed the readiness guard and threw
+        // "... was not preloaded", stopping the render loop although the import completed a moment later.
+        const { scene, internal } = await setupGeoTask(1);
+        const state = internal as unknown as { _lateLoad?: Promise<void>; _createStandardGeometryView: unknown; _computeStandardFeatures: unknown; _boundVer: number };
+        state._createStandardGeometryView = null; // the family has not been seen by `_preload` yet
+        state._computeStandardFeatures = null;
+        let release!: () => void;
+        standardFeaturePreload.override = () => new Promise<void>((resolve) => (release = resolve));
+        try {
+            scene._renderableVersion++;
+            expect(() => internal.execute()).not.toThrow();
+            // Let the bridge import settle; the feature preload is still held open.
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            expect(state._createStandardGeometryView).toBeNull();
+            // A frame-graph rebuild / execute in that window must keep skipping the family, not throw.
+            scene._renderableVersion++;
+            expect(() => internal.execute()).not.toThrow();
+            expect(internal._bound).toEqual([]);
+
+            release();
+            await state._lateLoad;
+            expect(state._createStandardGeometryView).toBeTypeOf("function");
+            expect(state._boundVer).toBe(-1);
+        } finally {
+            standardFeaturePreload.override = null;
+        }
+    });
+
+    it("reports a rejected late bridge load and retries on a later frame", async () => {
+        const { scene, internal, meshes } = await setupGeoTask(1);
+        const { createPbrMaterial } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material");
+        type M = import("../../../packages/babylon-lite/src/mesh/mesh").Mesh;
+        const late = { ...(meshes[0] as unknown as Record<string, unknown>), material: createPbrMaterial() } as unknown as M;
+        scene.meshes.push(late);
+        scene._renderableVersion++;
+
+        const state = internal as unknown as { _preload(): Promise<void>; _lateLoad?: Promise<void>; _createPbrGeometryView: unknown; _boundVer: number };
+        const realPreload = state._preload.bind(state);
+        const failure = new Error("chunk failed to load");
+        state._preload = vi.fn().mockRejectedValueOnce(failure).mockImplementation(realPreload);
+        const reported = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        try {
+            internal.execute();
+            await state._lateLoad;
+            // Reported, not swallowed and not left as an unhandled rejection...
+            expect(reported).toHaveBeenCalledWith(failure);
+            // ...and neither the cached promise nor the bound list keeps the family locked out.
+            expect(state._lateLoad).toBeUndefined();
+            expect(state._boundVer).toBe(-1);
+            expect(state._createPbrGeometryView).toBeNull();
+
+            // The next frame starts a fresh attempt, which now succeeds.
+            expect(() => internal.execute()).not.toThrow();
+            expect(state._lateLoad).toBeInstanceOf(Promise);
+            await state._lateLoad;
+            expect(state._preload).toHaveBeenCalledTimes(2);
+            expect(state._createPbrGeometryView).toBeTypeOf("function");
+        } finally {
+            reported.mockRestore();
+        }
     });
 
     it("keeps previous bindings active and rolls back every staged resource when a later replacement fails", async () => {

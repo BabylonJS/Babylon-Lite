@@ -423,9 +423,12 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
                             import("../material/standard/geometry-view.js"),
                             import("../material/standard/standard-material-features.js"),
                         ]);
+                        // Expose the family only once its optional helpers (skeletal velocity, thin instances)
+                        // are in too: `resolveSourceMaterial` treats the factory as proof that the whole family
+                        // is ready, and a resize / scene mutation can reach it while this is still in flight.
+                        await viewMod.preloadStandardGeometryFeatures(meshes, task._needsVelocity);
                         task._createStandardGeometryView = viewMod.createStandardGeometryMaterialView;
                         task._computeStandardFeatures = matMod._computeStandardMaterialFeatures;
-                        await viewMod.preloadStandardGeometryFeatures(meshes, task._needsVelocity);
                     })()
                 );
             }
@@ -843,12 +846,16 @@ function resolveSourceMaterial(task: GeometryRendererTaskInternal, material: Mat
     const family = buildGroup._materialFamily;
     // `_preload` imports a family bridge only for the families present when it runs. When a family first
     // appears later (a PBR mesh added to a Standard-only scene), skip its meshes while the bridge is
-    // imported, then reset `_boundVer` so the next `execute()` binds them.
+    // imported, then reset `_boundVer` so the next `execute()` binds them. A rejected import is reported
+    // and ends the same way — cached promise dropped, bound list stale — so the next frame starts a fresh
+    // attempt instead of locking this family (and any later one) out for good.
     if (!(family === "standard" ? task._createStandardGeometryView : family === "pbr" ? task._createPbrGeometryView : family !== "node" || task._createNodeGeometryView)) {
-        task._lateLoad ??= task._preload!().then(() => {
-            task._lateLoad = undefined;
-            task._boundVer = -1;
-        });
+        task._lateLoad ??= task._preload!()
+            .catch((error: unknown) => console.error(error))
+            .then(() => {
+                task._lateLoad = undefined;
+                task._boundVer = -1;
+            });
         return null;
     }
     if (family === "standard") {
