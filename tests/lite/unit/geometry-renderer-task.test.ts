@@ -1027,7 +1027,7 @@ describe("Mesh-blending geometry shader contracts", () => {
         expect(composed._meshUboSpec._offsets.has("lc")).toBe(true);
     });
 
-    it("re-emits a Node geometry graph with an engine-owned u32 mesh-tag slot", async () => {
+    it("re-emits a Node geometry graph with an engine-owned u32 mesh-tag slot and geometry-safe additive blending", async () => {
         const engine = makeMockEngine();
         const graph = {
             blocks: [
@@ -1096,7 +1096,7 @@ describe("Mesh-blending geometry shader contracts", () => {
         resources._lifetimeDisposers.forEach((dispose) => dispose());
 
         (material as NodeMaterial & { _needsAlphaBlending: boolean })._needsAlphaBlending = true;
-        (material._graph as { alphaMode: number }).alphaMode = 2;
+        (material._graph as { alphaMode: number }).alphaMode = 1;
 
         const transparentView = createNodeGeometryMaterialView(material, {
             attachments: [GeometryTextureType.VIEW_DEPTH, GeometryTextureType.ALBEDO],
@@ -1123,8 +1123,12 @@ describe("Mesh-blending geometry shader contracts", () => {
             _sampleCount: 1,
         } as unknown as RenderTargetSignature);
         const transparentPipeline = createPipeline.mock.calls.at(-1)![0];
-        expect(transparentPipeline.fragment!.targets[0]).toMatchObject({ format: "r16float", blend: expect.any(Object) });
-        expect(transparentPipeline.fragment!.targets[1]).toMatchObject({ format: "rgba8unorm", blend: expect.any(Object) });
+        const geometryBlend = {
+            color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
+            alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
+        };
+        expect(transparentPipeline.fragment!.targets[0]).toEqual({ format: "r16float", blend: geometryBlend });
+        expect(transparentPipeline.fragment!.targets[1]).toEqual({ format: "rgba8unorm", blend: geometryBlend });
         expect(transparentPipeline.depthStencil!.depthWriteEnabled).toBe(false);
         transparentResources._lifetimeDisposers.forEach((dispose) => dispose());
 

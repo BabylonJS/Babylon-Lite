@@ -22,10 +22,14 @@ describe("mesh-blending WGSL bindings and coordinates", () => {
         expect(code).toContain("let pixel=clamp(vec2i(floor(input.uv*vec2f(size))),vec2i(0),size-vec2i(1))");
     });
 
-    it("uses Lite's top-left fullscreen UV and flips pixel UV back to NDC Y", () => {
+    it("reconstructs NDC and projected radii in the source camera viewport", () => {
         const code = shader();
         expect(code).toContain("out.uv=vec2f(p.x*0.5+0.5,0.5-p.y*0.5)");
+        expect(code).toContain("r:vec4f,m:vec4f,f:vec4f,v:vec4f");
+        expect(code).toContain("(vec2f(cp(pixel,size))-uniforms.v.xy+vec2f(0.5))/uniforms.v.zw");
         expect(code).toContain("let ndcXY=vec2f(uv.x*2.0-1.0,1.0-uv.y*2.0)");
+        expect(code).toContain("0.5*uniforms.v.w*abs(uniforms.projection[1][1])");
+        expect(code).not.toContain("f32(size.y)");
     });
 
     it("maps Lite storage coordinates to Babylon.js algorithm coordinates", () => {
@@ -205,7 +209,7 @@ describe("mesh-blending WGSL math, debug, and output contracts", () => {
     it("preserves exact source texels for disabled and rejected non-debug paths", () => {
         const code = shader();
         expect(code).toContain("let source=textureLoad(sourceTexture,pixel,0);");
-        expect(code).toContain("if(uniforms.flags.z<0.5){return source;}");
+        expect(code).toContain("if(uniforms.f.z<0.5){return source;}");
         expect(code).toContain("return select(source,vec4f(0.04,0.04,0.04,1),DEBUG_MODE!=0);");
         expect(code).toContain("return primaryColor.b;");
     });

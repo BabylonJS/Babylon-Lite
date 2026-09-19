@@ -236,7 +236,7 @@ export function createMeshBlendingPostProcessTask(config: MeshBlendingPostProces
         _compiledBaseColorFormat: null,
         _compiledAlphaMode: -1,
         _uniformBuffer: null,
-        _uniformData: new F32(60),
+        _uniformData: new F32(64),
         _blueNoiseData: createMeshBlendingBlueNoiseData(),
         _blueNoiseTexture: null,
         _blueNoiseView: null,
@@ -539,7 +539,7 @@ function ensureGpuState(task: MeshBlendingPostProcessTaskInternal): void {
     ensureBlueNoise(task);
     task._uniformBuffer ??= task.engine._device.createBuffer({
         label: `${task.name}-uniforms`,
-        size: 240,
+        size: 256,
         usage: BU.UNIFORM | BU.COPY_DST,
     });
     const hasBaseColor = !!task.baseColorTexture;
@@ -666,8 +666,8 @@ function ensureBlueNoise(task: MeshBlendingPostProcessTaskInternal): void {
 function writeUniforms(task: MeshBlendingPostProcessTaskInternal): void {
     const data = task._uniformData;
     const camera = task.camera;
-    const width = task.outputTexture._width;
-    const height = task.outputTexture._height;
+    const width = task.depthTexture._width;
+    const height = task.depthTexture._height;
     const projection = getProjectionMatrix(camera, getEffectiveAspectRatio(camera, width, height));
     data.fill(0);
     packMat4IntoF32(data, projection, 0);
@@ -689,6 +689,18 @@ function writeUniforms(task: MeshBlendingPostProcessTaskInternal): void {
     data[56] = camera.ortho ? 1 : 0;
     data[57] = task.slopeFactor;
     data[58] = task.enabled ? 1 : 0;
+    const viewport = camera.viewport;
+    if (viewport) {
+        const x = Math.floor(viewport.x * width);
+        const y = Math.floor((1 - viewport.y - viewport.height) * height);
+        data[60] = x;
+        data[61] = y;
+        data[62] = Math.ceil((viewport.x + viewport.width) * width) - x;
+        data[63] = Math.ceil((1 - viewport.y) * height) - y;
+    } else {
+        data[62] = width;
+        data[63] = height;
+    }
     if (task._uniformBuffer) {
         task.engine._device.queue.writeBuffer(task._uniformBuffer, 0, data as Float32Array<ArrayBuffer>);
     }

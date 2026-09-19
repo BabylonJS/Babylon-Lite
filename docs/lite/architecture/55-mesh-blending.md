@@ -104,11 +104,12 @@ Geometry tag invariants:
 - the complete MRT remains limited to eight color attachments;
 - its clear is exact unsigned integer zero;
 - its pipeline target has no blend state;
-- all other attachments retain their existing blend behavior;
+- all other attachments retain their existing geometry blend behavior;
 - transparent meshes are included by default; callers can pass a filtered `meshes` array for opaque-only tags;
 - Standard and PBR alpha-tested geometry preserves discard coverage, but blended transparent tags remain order-dependent and can overwrite an underlying tag with zero;
 - alpha-blended geometry attachments must use a blendable format; 32-bit float attachments require `float32-blendable`, so callers without that feature should override `VIEW_DEPTH` to `r16float` or pass a filtered mesh list;
 - transparent Node materials are rejected when `MESH_BLEND_TAG` is requested because the graph's fragment alpha is not available to the geometry terminal; callers must filter them out;
+- ordinary transparent Node geometry always uses opacity/replacement blending for data attachments, even when the forward material uses additive color blending;
 - overlapping transparent layers remain caller-controlled and are not made order-independent by mesh blending.
 
 ### Mesh-blending configuration
@@ -343,7 +344,7 @@ The task never leaves a stale old-device handle reachable from executable state.
 
 ### Uniform layout
 
-One 240-byte uniform buffer is written as 60 `f32` values:
+One 256-byte uniform buffer is written as 64 `f32` values:
 
 | Float range | Value                                     |
 | ----------- | ----------------------------------------- |
@@ -356,8 +357,10 @@ One 240-byte uniform buffer is written as 60 `f32` values:
 | `57`        | `slopeFactor`                             |
 | `58`        | `enabled`, `1` or `0`                     |
 | `59`        | reserved zero                             |
+| `60..61`    | source camera viewport origin in pixels   |
+| `62..63`    | source camera viewport dimensions         |
 
-Projection and inverse projection are computed from the task camera and the output dimensions, including the camera viewport's effective aspect ratio. The geometry producer applies the same integer viewport and scissor bounds as the regular source render, so SceneColor, depth, and tags remain pixel-aligned. The `inverseView` range remains zero for ordinary variants and is computed and written only for the WorldPosition debug variant. When the engine uses floating origin its translation is zeroed to match the geometry producer's effective rendering view, including override cameras without a camera-local floating-origin flag. Orthographic state is `camera.ortho ? 1 : 0`.
+Projection and inverse projection are computed from the task camera and source-attachment dimensions, including the camera viewport's effective aspect ratio. The source camera viewport is packed with the same floor/ceil rules as the geometry render pass; reconstruction maps full-attachment pixels into that integer viewport and projected world-radius calculations use its pixel height. This source viewport is independent of the optional post-process output viewport. The `inverseView` range remains zero for ordinary variants and is computed and written only for the WorldPosition debug variant. When the engine uses floating origin its translation is zeroed to match the geometry producer's effective rendering view, including override cameras without a camera-local floating-origin flag. Orthographic state is `camera.ortho ? 1 : 0`.
 
 ### Blue noise
 
@@ -453,6 +456,8 @@ The Node geometry view continues to re-emit the graph from `GeometryTextureOutpu
 
 The tag is engine-controlled and is not exposed as a `GeometryTextureOutputBlock` graph input.
 
+Transparent Node geometry uses the same opacity/replacement blend state as Standard and PBR geometry outputs regardless of the material's forward alpha mode. Additive forward blending is never copied to geometry data attachments because it would numerically add depth, position, and normal values to previous contents.
+
 ### Pipeline color targets
 
 For each attachment format:
@@ -505,10 +510,10 @@ Pixel coordinates:
 ```wgsl
 renderSize = textureDimensions(depthTexture, 0);
 pixel = clamp(vec2<i32>(floor(uv * vec2<f32>(renderSize))), vec2<i32>(0), vec2<i32>(renderSize) - 1);
-pixelUv = (vec2<f32>(pixel) + 0.5) / vec2<f32>(renderSize);
+pixelUv = (vec2<f32>(pixel) - sourceViewport.xy + 0.5) / sourceViewport.zw;
 ```
 
-Because UV Y increases downward, reconstruction uses:
+`sourceViewport` contains the source camera's integer raster origin and dimensions, not the independently configurable post-process output viewport. Because UV Y increases downward, reconstruction uses:
 
 ```wgsl
 ndcXY = vec2<f32>(pixelUv.x * 2.0 - 1.0, 1.0 - pixelUv.y * 2.0);

@@ -222,7 +222,8 @@ function ensureGeometryCompile(view: NodeGeometryMaterialView, res: NodeGeometry
         throw new Error("node-geometry: render target has no color attachments");
     }
     const cullMode: GPUCullMode = source._graph.backFaceCulling ? (view._reverseCulling ? "front" : "back") : "none";
-    const alphaMode = source._needsAlphaBlending ? source._graph.alphaMode : 0;
+    // Geometry attachments store data, so transparent Node materials use opacity/replacement blending even when their forward color pass is additive.
+    const alphaMode = source._needsAlphaBlending ? 2 : 0;
     const blend = _nodeAlphaModeToBlend(alphaMode);
     // All geometry-specific WGSL object-literals + the MRT pipeline descriptor
     // live here (lazy module). compileNodePipeline only splices strings + calls

@@ -346,6 +346,29 @@ describe("mesh-blending configuration and radius math", () => {
         task.dispose();
     });
 
+    it("packs the source camera's integer viewport independently of the output viewport", () => {
+        const { camera, device, engine, target } = createMeshBlendingTestContext();
+        camera.viewport = { x: 0.1, y: 0.2, width: 0.55, height: 0.4 };
+        const task = createMeshBlendingPostProcessTask(
+            {
+                sourceTexture: target("rgba16float"),
+                meshBlendTagTexture: target("r8uint"),
+                depthTexture: target("r32float"),
+                camera,
+                viewport: { x: 0.5, y: 0, width: 0.5, height: 1 },
+            },
+            engine
+        );
+
+        task.record();
+        vi.mocked(device.queue.writeBuffer).mockClear();
+        task.updateUniforms();
+        const data = vi.mocked(device.queue.writeBuffer).mock.calls.at(-1)![2] as Float32Array;
+        expect(data.length).toBe(64);
+        expect(Array.from(data.subarray(60, 64))).toEqual([6, 12, 36, 14]);
+        task.dispose();
+    });
+
     it("records, executes, rebinds replaced inputs, and disposes task-owned GPU resources", () => {
         const { camera, createBindGroup, destroyedBuffers, destroyedTextures, engine, pass, target } = createMeshBlendingTestContext();
         const sourceTexture = target("rgba16float");

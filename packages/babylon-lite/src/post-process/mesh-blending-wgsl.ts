@@ -222,7 +222,7 @@ let p=positions[vertexIndex];var out:VertexOutput;out.position=vec4f(p,0,1);out.
 @group(0) @binding(2) var depthTexture:texture_2d<f32>;
 ${baseBinding}
 @group(0) @binding(${noiseBinding}) var blueNoiseTexture:texture_2d<f32>;
-struct MeshBlendUniforms{projection:mat4x4f,inverseProjection:mat4x4f,inverseView:mat4x4f,worldRadii:vec4f,minimumProjectedRadii:vec4f,flags:vec4f}
+struct MeshBlendUniforms{projection:mat4x4f,inverseProjection:mat4x4f,inverseView:mat4x4f,r:vec4f,m:vec4f,f:vec4f,v:vec4f}
 @group(0) @binding(${uniformBinding}) var<uniform> uniforms:MeshBlendUniforms;
 const DIRECTION_COUNT:i32=${q.directionCount};
 const RADIAL_SAMPLE_COUNT:i32=${q.radialSampleCount};
@@ -267,7 +267,7 @@ struct S{f:vec4f,a:vec4f,b:vec4f,c:vec4f,t:vec4f,${baseFields}o:bool}
 struct E{s:S,c:vec4f,b:vec4f,${worldPositionField}sa:f32,f:f32,n:bool}
 fn cp(pixel:vec2i,size:vec2i)->vec2i{return clamp(pixel,vec2i(0),size-vec2i(1));}
 fn ib(pixel:vec2i,size:vec2i)->bool{return pixel.x>=0&&pixel.y>=0&&pixel.x<size.x&&pixel.y<size.y;}
-fn pu(pixel:vec2i,size:vec2i)->vec2f{return (vec2f(cp(pixel,size))+vec2f(0.5))/vec2f(size);}
+fn pu(pixel:vec2i,size:vec2i)->vec2f{return (vec2f(cp(pixel,size))-uniforms.v.xy+vec2f(0.5))/uniforms.v.zw;}
 fn lt(pixel:vec2i,size:vec2i)->T{let packed=textureLoad(tagTexture,cp(pixel,size),0).r;return T(packed&0x3fu,packed>>6u);}
 fn ld(pixel:vec2i,size:vec2i)->f32{return textureLoad(depthTexture,cp(pixel,size),0).r;}
 fn cv(values:vec4f,index:u32)->f32{if(index==0u){return values.x;}if(index==1u){return values.y;}if(index==2u){return values.z;}return values.w;}
@@ -278,15 +278,15 @@ let view=uniforms.inverseProjection*vec4f(ndcXY,dn(depth),1);return view.xyz/vie
 }
 fn fv(value:f32)->bool{return (bitcast<u32>(value)&0x7f800000u)!=0x7f800000u;}
 fn vp(value:vec3f)->bool{return fv(value.x)&&fv(value.y)&&fv(value.z);}
-fn ps(renderHeight:f32)->f32{return max(0.5*renderHeight*abs(uniforms.projection[1][1]),EPSILON);}
-fn rf(c:u32,viewDepth:f32,renderHeight:f32)->f32{
-let scale=ps(renderHeight);var projected=cv(uniforms.worldRadii,c)*scale;
-if(uniforms.flags.x<0.5){projected/=max(viewDepth,EPSILON);}
-let scaled=max(projected,cv(uniforms.minimumProjectedRadii,c))*RADIUS_SCALE;
+fn ps()->f32{return max(0.5*uniforms.v.w*abs(uniforms.projection[1][1]),EPSILON);}
+fn rf(c:u32,viewDepth:f32)->f32{
+let scale=ps();var projected=cv(uniforms.r,c)*scale;
+if(uniforms.f.x<0.5){projected/=max(viewDepth,EPSILON);}
+let scaled=max(projected,cv(uniforms.m,c))*RADIUS_SCALE;
 return select(0.0,max(1.0,scaled),scaled>0.0);
 }
-fn wu(viewDepth:f32,renderHeight:f32)->f32{let units=1.0/ps(renderHeight);return select(units*max(viewDepth,EPSILON),units,uniforms.flags.x>0.5);}
-fn ss(oppositeFacing:f32)->f32{if(uniforms.flags.y<=1.0){return 1.0;}return MIN_SLOPE_SCALE+(1.0-MIN_SLOPE_SCALE)*pow(clamp(oppositeFacing,0.0,1.0),uniforms.flags.y-1.0);}
+fn wu(viewDepth:f32)->f32{let units=1.0/ps();return select(units*max(viewDepth,EPSILON),units,uniforms.f.x>0.5);}
+fn ss(oppositeFacing:f32)->f32{if(uniforms.f.y<=1.0){return 1.0;}return MIN_SLOPE_SCALE+(1.0-MIN_SLOPE_SCALE)*pow(clamp(oppositeFacing,0.0,1.0),uniforms.f.y-1.0);}
 fn ap(pixel:vec2i,size:vec2i)->vec2i{return vec2i(pixel.x,size.y-1-pixel.y);}
 fn po(d:vec2f,x:f32)->vec2i{return vec2i(round(vec2f(d.x,-d.y)*x));}
 fn ln(pixel:vec2i,renderSize:vec2i)->vec2f{let noiseSize=vec2i(textureDimensions(blueNoiseTexture,0));let noisePixel=ap(pixel,renderSize);let wrapped=vec2i(noisePixel.x%noiseSize.x,noisePixel.y%noiseSize.y);return textureLoad(blueNoiseTexture,wrapped,0).rg;}
@@ -300,7 +300,7 @@ let normalized=(f32(radial)+jitter)/f32(RADIAL_SAMPLE_COUNT);let x=max(1.0,ceil(
 for(var directionIndex=0;directionIndex<DIRECTION_COUNT;directionIndex++){
 let d=da(directionIndex,rotation,sector,direction0,direction1,direction2);let sampled=lt(pixel+po(d,x),size);
 if(sampled.g==0u||sampled.g==current.g||sampled.g==ignoredGroup){continue;}
-let c=min(current.c,sampled.c);let radius=rf(c,viewDepth,f32(size.y));
+let c=min(current.c,sampled.c);let radius=rf(c,viewDepth);
 if(x>radius){continue;}let s=1.0-clamp(x/max(radius,EPSILON),0.0,1.0);
 if(s>best.s){best=C(sampled.g,c,d,x,radius,s,true);}
 }
@@ -330,14 +330,14 @@ return ib(*outPixel,size)&&lt(*outPixel,size).g==k.t;
 }
 fn tr(t:vec2i,size:vec2i,viewDepth:f32,k:ptr<function,C>)->bool{
 (*k).c=min((*k).c,lt(t,size).c);
-(*k).r=min((*k).r,rf((*k).c,viewDepth,f32(size.y)));
+(*k).r=min((*k).r,rf((*k).c,viewDepth));
 return (*k).x<=(*k).r;
 }
 fn nf(pixel:vec2i,size:vec2i,current:T,viewDepth:f32,ignoredGroup:u32,preferredGroup:u32)->C{
 var best=ic();
 for(var index=0;index<4;index++){var offset:vec2i;if(index==0){offset=vec2i(1,0);}else if(index==1){offset=vec2i(-1,0);}else if(index==2){offset=vec2i(0,1);}else{offset=vec2i(0,-1);}
 let tag=lt(pixel+po(vec2f(offset),1.0),size);if(tag.g==0u||tag.g==current.g||tag.g==ignoredGroup){continue;}
-let c=min(current.c,tag.c);let radius=rf(c,viewDepth,f32(size.y));if(radius<1.0){continue;}
+let c=min(current.c,tag.c);let radius=rf(c,viewDepth);if(radius<1.0){continue;}
 var s=1.0-1.0/max(radius,1.0);if(tag.g==preferredGroup){s+=1.0;}if(s>best.s){best=C(tag.g,c,vec2f(offset),1.0,radius,s,true);}
 }
 return best;
@@ -353,7 +353,7 @@ fn vc(a:vec2i,e:vec2i,b:vec2i,c:vec2i,size:vec2i,current:T,k:C,allowMissingConti
 if(tagE.g!=current.g||tagB.g!=k.t||(!allowMissingContinuation&&tagC.g!=k.t)){return REJECTION_NO_CONTINUATION;}
 let pa=rv(a,size,ld(a,size));let pe=rv(e,size,ld(e,size));let pb=rv(b,size,ld(b,size));let pc=rv(c,size,ld(c,size));
 if(!vp(pa)||!vp(pe)||!vp(pb)||!vp(pc)){return REJECTION_INVALID_DEPTH;}*currentPosition=pa;
-let units=wu(abs(pa.z),f32(size.y));let radius=k.r*units;let tolerance=BOUNDARY_PIXEL_TOLERANCE*units;let boundary=pb-pe;
+let units=wu(abs(pa.z));let radius=k.r*units;let tolerance=BOUNDARY_PIXEL_TOLERANCE*units;let boundary=pb-pe;
 if(length(boundary)>BOUNDARY_SEPARATION_FACTOR*radius+tolerance){return REJECTION_DEPTH_SEPARATION;}
 let depthDelta=abs(abs(pb.z)-abs(pe.z));if(depthDelta>max(FOREGROUND_DEPTH_FACTOR*radius,tolerance)&&depthDelta>FOREGROUND_LATERAL_FACTOR*length(boundary.xy)){return REJECTION_FOREGROUND_BACKGROUND;}
 if(distance(pb,pc)>TARGET_SPAN_FACTOR*radius+tolerance||distance(pa,pc)>TOTAL_SPAN_FACTOR*radius+tolerance){return REJECTION_PHYSICAL_SPAN;}
@@ -408,11 +408,11 @@ fn jc(reason:i32,ratio:f32)->vec3f{if(reason==REJECTION_NONE){return mix(vec3f(0
 fn sc(stage:i32)->vec3f{if(stage<=0){return vec3f(0.03);}if(stage==1){return vec3f(0.1,0.15,0.45);}if(stage==2){return vec3f(0.1,0.35,0.7);}if(stage==3){return vec3f(0.05,0.65,0.8);}if(stage==4){return vec3f(0.1,0.8,0.55);}if(stage==5){return vec3f(0.45,0.9,0.25);}if(stage==6){return vec3f(0.95,0.75,0.1);}return vec3f(0.15,1,0.25);}
 @fragment fn meshBlendFragment(input:VertexOutput)->@location(0) vec4f{
 let size=vec2i(textureDimensions(depthTexture,0));let pixel=clamp(vec2i(floor(input.uv*vec2f(size))),vec2i(0),size-vec2i(1));let source=textureLoad(sourceTexture,pixel,0);
-if(uniforms.flags.z<0.5){return source;}
+if(uniforms.f.z<0.5){return source;}
 let current=lt(pixel,size);if(DEBUG_MODE==1){if(current.g==0u){return vec4f(0,0,0,1);}return vec4f(rc(current.c)*(0.45+0.55*fract(f32(current.g)*0.61803398875)),1);}
 if(current.g==0u){if(DEBUG_MODE==3){return vec4f(0,0,0,1);}return select(source,vec4f(0.04,0.04,0.04,1),DEBUG_MODE!=0);}
 let sizingPosition=rv(pixel,size,ld(pixel,size));if(!vp(sizingPosition)){if(DEBUG_MODE==4){return vec4f(jc(REJECTION_INVALID_DEPTH,0),1);}if(DEBUG_MODE==5){return vec4f(0.45,0.1,0.1,1);}return select(source,vec4f(0.04,0.04,0.04,1),DEBUG_MODE!=0);}
-let currentRadius=rf(current.c,abs(sizingPosition.z),f32(size.y));if(currentRadius<1.0){if(DEBUG_MODE==3){return vec4f(rc(current.c)*0.25,1);}if(DEBUG_MODE==4){return vec4f(jc(REJECTION_PHYSICAL_SPAN,0),1);}if(DEBUG_MODE==5){return vec4f(0.2,0.2,0.65,1);}return select(source,vec4f(0.04,0.04,0.04,1),DEBUG_MODE!=0);}
+let currentRadius=rf(current.c,abs(sizingPosition.z));if(currentRadius<1.0){if(DEBUG_MODE==3){return vec4f(rc(current.c)*0.25,1);}if(DEBUG_MODE==4){return vec4f(jc(REJECTION_PHYSICAL_SPAN,0),1);}if(DEBUG_MODE==5){return vec4f(0.2,0.2,0.65,1);}return select(source,vec4f(0.04,0.04,0.04,1),DEBUG_MODE!=0);}
 let random=ln(pixel,size);let sector=TWO_PI/f32(DIRECTION_COUNT);let rotation=select(floor(random.x*8.0)*0.125*sector,random.x*sector,FULL_RANDOM_ROTATION);
 let direction0=vec2f(cos(rotation),sin(rotation));let direction1=vec2f(cos(rotation+sector),sin(rotation+sector));let direction2=vec2f(cos(rotation+sector*2.0),sin(rotation+sector*2.0));
 let primary=eb(pixel,size,current,currentRadius,abs(sizingPosition.z),0u,random,rotation,sector,direction0,direction1,direction2);${secondarySearch}
