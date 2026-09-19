@@ -64,7 +64,9 @@ export interface PluginSamplerDecl {
     readonly texture: string;
     readonly sampler: string;
     /** Defaults to "texture_2d<f32>". */
-    readonly textureType?: "texture_2d<f32>" | "texture_depth_2d";
+    readonly textureType?: "texture_2d<f32>";
+    /** Declare a depth texture when using `enablePbrMaterialPluginVertexData`. */
+    readonly depthTexture?: boolean;
     /** Defaults to "sampler". */
     readonly samplerType?: "sampler" | "sampler_non_filtering";
     /** Shader stages that read this pair. Defaults to "fragment". */

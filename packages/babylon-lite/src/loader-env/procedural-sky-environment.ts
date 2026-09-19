@@ -89,21 +89,31 @@ let reflectionProbeDirection=vec3f(cubeDirection.x,-cubeDirection.y,cubeDirectio
 textureStore(outputFaces,vec2i(gid.xy),i32(gid.z),vec4f(pow(sky(reflectionProbeDirection),vec3f(2.2)),1.0));
 }`;
 
+/** Atmospheric parameters used to generate and update a procedural sky environment. */
 export interface ProceduralSkyEnvironmentOptions {
+    /** Normalized world-space direction from the scene toward the sun. */
     readonly sunDirection: readonly [number, number, number];
+    /** Sky luminance/exposure control. */
     readonly luminance: number;
+    /** Atmospheric aerosol density. */
     readonly turbidity: number;
+    /** Rayleigh scattering strength. */
     readonly rayleigh: number;
+    /** Mie scattering strength. */
     readonly mieCoefficient: number;
+    /** Mie phase-function directionality. */
     readonly mieDirectionalG: number;
 }
 
+/** Initial procedural-sky parameters plus the BRDF lookup texture URL. */
 export interface ProceduralSkyEnvironmentLoadOptions extends ProceduralSkyEnvironmentOptions {
+    /** URL of the BRDF lookup texture used by PBR environment lighting. */
     readonly brdfUrl: string;
     /** @internal Test hook for deterministic asynchronous chunk scheduling. */
     readonly _yield?: () => Promise<void>;
 }
 
+/** Opaque handle for an environment created by {@link loadProceduralSkyEnvironment}. */
 export interface ProceduralSkyEnvironment {
     /** @internal */
     readonly _scene: SceneContext;
@@ -392,6 +402,7 @@ function createPreScaledHarmonics(irradiance: Float32Array): Float32Array {
     return harmonics;
 }
 
+/** Compute the linear RGB sun color produced by the procedural atmosphere parameters. */
 export function computeProceduralSkySunColor(options: ProceduralSkyEnvironmentOptions): [number, number, number] {
     validateOptions(options);
     const context = makeCpuContext(options);
@@ -400,6 +411,7 @@ export function computeProceduralSkySunColor(options: ProceduralSkyEnvironmentOp
     return [output[0]!, output[1]!, output[2]!];
 }
 
+/** Regenerate an active procedural environment. Returns false when superseded by a newer update. */
 export async function updateProceduralSkyEnvironment(environment: ProceduralSkyEnvironment, options: ProceduralSkyEnvironmentOptions): Promise<boolean> {
     assertEnvironmentActive(environment);
     options = { ...options, sunDirection: [...options.sunDirection] };
@@ -437,6 +449,7 @@ function assertEnvironmentActive(environment: ProceduralSkyEnvironment): void {
     }
 }
 
+/** Create, publish, and own a procedural PBR environment for an unregistered scene without an existing environment. */
 export async function loadProceduralSkyEnvironment(scene: SceneContext, options: ProceduralSkyEnvironmentLoadOptions): Promise<ProceduralSkyEnvironment> {
     if (scene._z) {
         throw new Error("loadProceduralSkyEnvironment cannot load into a disposed scene.");

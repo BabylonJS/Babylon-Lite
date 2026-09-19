@@ -50,7 +50,8 @@ export interface PluginVaryingDecl {
 export interface PluginSamplerDecl {
     readonly texture: string;
     readonly sampler: string;
-    readonly textureType?: "texture_2d<f32>" | "texture_depth_2d";
+    readonly textureType?: "texture_2d<f32>";
+    readonly depthTexture?: boolean; // PBR vertex-resource bridge only
     readonly samplerType?: "sampler" | "sampler_non_filtering";
     readonly visibility?: "vertex" | "fragment" | "vertex-fragment";
 }

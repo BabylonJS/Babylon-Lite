@@ -163,7 +163,7 @@ export function createOceanMaterialPlugin(
                 { texture: "oceanTurbulence1B", sampler: "oceanTurbulence1BSampler" },
                 { texture: "oceanTurbulence2A", sampler: "oceanTurbulence2ASampler" },
                 { texture: "oceanTurbulence2B", sampler: "oceanTurbulence2BSampler" },
-                { texture: "oceanDepth", sampler: "oceanDepthSampler", textureType: "texture_depth_2d", samplerType: "sampler_non_filtering" },
+                { texture: "oceanDepth", sampler: "oceanDepthSampler", depthTexture: true, samplerType: "sampler_non_filtering" },
                 { texture: "oceanFoam", sampler: "oceanFoamSampler" },
             ];
         },

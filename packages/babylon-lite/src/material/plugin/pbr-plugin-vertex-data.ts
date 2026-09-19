@@ -90,7 +90,11 @@ export function buildPbrVertexPluginFragment(plugins: readonly MaterialPlugin[],
         for (const sampler of plugin.getSamplers?.() ?? []) {
             const visibility = sampler.visibility === "vertex" ? STAGE_VERTEX : sampler.visibility === "vertex-fragment" ? STAGE_VERTEX | STAGE_FRAGMENT : STAGE_FRAGMENT;
             bindings.push(
-                { _name: sampler.texture, _type: { _kind: "texture", _textureType: sampler.textureType ?? "texture_2d<f32>" }, _visibility: visibility },
+                {
+                    _name: sampler.texture,
+                    _type: { _kind: "texture", _textureType: sampler.depthTexture ? "texture_depth_2d" : (sampler.textureType ?? "texture_2d<f32>") },
+                    _visibility: visibility,
+                },
                 { _name: sampler.sampler, _type: { _kind: "sampler", _samplerType: sampler.samplerType ?? "sampler" }, _visibility: visibility }
             );
         }
