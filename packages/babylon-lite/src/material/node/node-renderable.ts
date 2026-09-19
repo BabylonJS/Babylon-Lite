@@ -36,10 +36,47 @@ interface NodePacket {
     _onOwnerEmpty?: () => void;
 }
 
+type NodeDisposer = (() => void) & { p: NodePacket };
+
 type NodeRenderPass = GPURenderPassEncoder | GPURenderBundleEncoder;
 
 /** Build NME renderables for a set of meshes that share a NodeMaterial. */
 export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], materialOverride?: Material, resources?: MeshRebuildResources): MeshGroupBuildResult {
+    const createdDisposers: (() => void)[] = [];
+    const mainRegistrations: Array<{ mesh: Mesh; dispose: NodeDisposer }> = [];
+    try {
+        return buildNodeMeshRenderablesImpl(scene, meshes, materialOverride, resources, createdDisposers, mainRegistrations);
+    } catch (error) {
+        for (const { mesh, dispose } of mainRegistrations) {
+            const registered = scene._meshDisposables.get(mesh);
+            const index = registered?.indexOf(dispose) ?? -1;
+            if (index >= 0) {
+                registered!.splice(index, 1);
+                if (registered!.length === 0) {
+                    scene._meshDisposables.delete(mesh);
+                }
+            }
+        }
+        if (!resources) {
+            for (const dispose of createdDisposers) {
+                removeCallback(scene._disposables, dispose);
+            }
+        }
+        for (let i = createdDisposers.length - 1; i >= 0; i--) {
+            createdDisposers[i]!();
+        }
+        throw error;
+    }
+}
+
+function buildNodeMeshRenderablesImpl(
+    scene: SceneContext,
+    meshes: Mesh[],
+    materialOverride: Material | undefined,
+    resources: MeshRebuildResources | undefined,
+    createdDisposers: (() => void)[],
+    mainRegistrations: Array<{ mesh: Mesh; dispose: NodeDisposer }>
+): MeshGroupBuildResult {
     const engine = scene.surface.engine;
     const device = engine._device;
     const lifetimeDisposers = resources?._lifetimeDisposers ?? scene._disposables;
@@ -100,6 +137,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
             }
         };
         if (nodeUBO) {
+            createdDisposers.push(disposeNodeUbo);
             lifetimeDisposers.push(disposeNodeUbo);
             writeNodeUBO(engine, nodeUBO, material);
         }
@@ -123,6 +161,9 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
             let resourcesDisposed = false;
             const dispose = Object.assign(
                 () => {
+                    if (!resources) {
+                        removeCallback(scene._disposables, dispose);
+                    }
                     if (packet._mesh) {
                         packet._disposed = true;
                         const owner = packet._owner;
@@ -147,10 +188,14 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                     _meshUBO.destroy();
                     if (--livePackets === 0) {
                         disposeNodeUbo();
+                        if (!resources) {
+                            removeCallback(scene._disposables, disposeNodeUbo);
+                        }
                     }
                 },
                 { p: packet }
             );
+            createdDisposers.push(dispose);
             lifetimeDisposers.push(dispose);
 
             const entries: GPUBindGroupEntry[] = [{ binding: 0, resource: { buffer: _meshUBO } }];
@@ -204,6 +249,7 @@ export function buildNodeMeshRenderables(scene: SceneContext, meshes: Mesh[], ma
                 const disposers = scene._meshDisposables.get(_mesh) ?? [];
                 disposers.push(dispose);
                 scene._meshDisposables.set(_mesh, disposers);
+                mainRegistrations.push({ mesh: _mesh, dispose });
             }
         }
 
@@ -386,6 +432,13 @@ function detachRenderable(scene: SceneContext, material: NodeMaterial, renderabl
     const outputIndex = output?.indexOf(renderable) ?? -1;
     if (outputIndex >= 0) {
         output!.splice(outputIndex, 1);
+    }
+}
+
+function removeCallback(callbacks: (() => void)[], callback: () => void): void {
+    const index = callbacks.indexOf(callback);
+    if (index >= 0) {
+        callbacks.splice(index, 1);
     }
 }
 

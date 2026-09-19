@@ -698,6 +698,25 @@ that material. Consequently an ordinary node-material scene does not include
 thin-instance upload code. Per-instance colors and GPU culling are not part of
 the node-material opt-in.
 
+Node packet ownership follows the same synchronous visibility / deferred GPU
+retirement split for ordinary and thin-instance meshes. Main-scene packet
+disposers are reachable both from `scene._meshDisposables` and from the scene
+lifetime registry so partially built scenes still clean up safely. Removing or
+synchronously rebuilding a mesh unregisters the duplicate scene-lifetime
+reference, unlinks its packet immediately, and consumes the group's one-shot
+owner-empty callback when the final packet leaves. An empty merged renderable
+therefore cannot reach binding, and the lifetime registry cannot retain
+retired meshes. Packet callbacks reference-count the shared Node UBO, destroy
+it only after the final mesh resource retires, and then unregister its
+idempotent scene-lifetime fallback.
+
+Auxiliary renderables instead register every allocation in the caller's
+`MeshRebuildResources._lifetimeDisposers` sink and never acquire main-scene
+ownership. Node construction tracks all allocations until publication: if any
+later bind-group or feature-binding step throws, every unpublished buffer is
+released and any provisional main-mesh registration is removed before the
+error propagates.
+
 ---
 
 ## Babylon.js Equivalence Map

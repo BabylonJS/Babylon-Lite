@@ -360,6 +360,10 @@ async function materializeRuntimeMesh(scene: SceneContext, state: RuntimeBuildSt
     }
     if (previousDisposers) {
         for (const dispose of previousDisposers) {
+            const lifetimeIndex = scene._disposables.indexOf(dispose);
+            if (lifetimeIndex >= 0) {
+                scene._disposables.splice(lifetimeIndex, 1);
+            }
             const packet = (dispose as DetachableDisposer).p;
             if (packet) {
                 packet._disposed = true;

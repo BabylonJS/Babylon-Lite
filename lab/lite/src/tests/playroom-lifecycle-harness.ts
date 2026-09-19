@@ -19,7 +19,7 @@ import {
     setThinInstanceCount,
     startEngine,
 } from "babylon-lite";
-import type { EngineContext, PhysicsWorld, Vec3 } from "babylon-lite";
+import type { EngineContext, PhysicsWorld, RenderTask, Task, Vec3 } from "babylon-lite";
 import { createPlayroomAudio } from "../demos/playroom/audio.js";
 import { loadPlayroomAssets } from "../demos/playroom/assets.js";
 import { createPlayroomCameras } from "../demos/playroom/camera.js";
@@ -246,6 +246,30 @@ function activeInstanceCount(world: WorldState): number {
     return count;
 }
 
+function retirementCallbackCount(engine: EngineContext): number {
+    let count = 0;
+    for (const batch of engine._retiring ?? []) {
+        count += batch.length;
+    }
+    return count;
+}
+
+function isRenderTask(task: Task): task is RenderTask {
+    return "_renderables" in task;
+}
+
+function auxiliaryDisposerOwnerCount(state: PlayroomState): number {
+    let count = 0;
+    for (const task of state.scene._frameGraph._tasks) {
+        if (isRenderTask(task)) {
+            for (const renderable of task._renderables) {
+                count += renderable._lifetimeDisposers ? 1 : 0;
+            }
+        }
+    }
+    return count;
+}
+
 function report(state: PlayroomState, effects: PlayroomEffects, mode: string): object {
     const engine = state.engine;
     const eventCount = native.collisionEvents.STARTED + native.collisionEvents.CONTINUED + native.collisionEvents.FINISHED;
@@ -289,8 +313,8 @@ function report(state: PlayroomState, effects: PlayroomEffects, mode: string): o
             calls: gpuWrites.calls - readyGpuWriteCalls,
             sourceBytes: gpuWrites.sourceBytes - readyGpuWriteBytes,
             pendingRetirements: engine._retirements?.length ?? 0,
-            retiringBatches: engine._retiring?.length ?? 0,
-            retiringCallbacks: engine._retiring?.reduce((sum, batch) => sum + batch.length, 0) ?? 0,
+            retiringBatches: engine._retiring?.size ?? 0,
+            retiringCallbacks: retirementCallbackCount(engine),
         },
         effects: {
             score: effects.scoreParticles.length,
@@ -316,7 +340,7 @@ function report(state: PlayroomState, effects: PlayroomEffects, mode: string): o
             nodeRenderables: nodeOutputs.filter((renderable) => state.scene._renderables.includes(renderable)).length,
             nodeGroupRenderables: nodeOutputs.length,
             meshDisposerOwners: state.scene._meshDisposables.size,
-            auxDisposerOwners: state.scene._meshAuxDisposables.size,
+            auxDisposerOwners: auxiliaryDisposerOwnerCount(state),
         },
     };
 }

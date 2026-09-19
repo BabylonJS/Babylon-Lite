@@ -14,12 +14,12 @@
     "sounds/snow-globe-wood-base-soft-1.mp3"
   ],
   "fileCount": 80,
-  "totalBytes": 26472325,
+  "totalBytes": 26471680,
   "files": [
     {
       "path": "shader-texture-bindings.json",
-      "bytes": 1991,
-      "sha256": "8609336fd0254008b10468f6bb950ae57a2c321fd8049ea40eaa247c46226337",
+      "bytes": 1940,
+      "sha256": "a226498f5edc2041b419f154b421b9c0ef908c3e3efe44701a58ffc427bc89ef",
       "sourcePath": "derived from source Node Material graphs",
       "derived": true
     },
@@ -123,8 +123,8 @@
     },
     {
       "path": "gltf/bunny-rig.json",
-      "bytes": 10445,
-      "sha256": "0d2aee3b499cb66ff2cc71f3defd89fa5849b978b70ec83cd4ef40e3bbf1903b",
+      "bytes": 9853,
+      "sha256": "f237406f1cecaee9c98b6a6a6b74b57c7e929e8f2d5dc546ade11991d0960448",
       "sourcePath": "derived from docs/assets/gltf/bunny_rigged.glb",
       "derived": true
     },
@@ -193,15 +193,15 @@
     },
     {
       "path": "shaders/babylonBurster.json",
-      "bytes": 16264,
-      "sha256": "15d9b4154e04c3e9e20e7a082d13faf1cc0d6fa825538273ad62b0bda5c90d1f",
+      "bytes": 16263,
+      "sha256": "82b69c729db2a2be160feee5b7bcd4d516c6a57efc64f3e125697a873a35eef7",
       "sourcePath": "docs/assets/shaders/babylonBurster.json",
       "derived": true
     },
     {
       "path": "shaders/domino.json",
-      "bytes": 35438,
-      "sha256": "373bac239a954622c6685956b3bedfe4bf636c7cf985cd65c3c5b116d63cca3b",
+      "bytes": 35437,
+      "sha256": "c58562128330fa0b399ce186a9cbd01d51202bc51583413daf377cb3a67f4e9f",
       "sourcePath": "docs/assets/shaders/domino.json",
       "derived": true
     },

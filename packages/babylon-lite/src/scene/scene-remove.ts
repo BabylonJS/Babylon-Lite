@@ -124,6 +124,7 @@ type DetachableDisposer = (() => void) & { p?: DetachablePacket };
  *  actual GPU destruction has to wait. Twin of the detach in `scene-runtime-mesh-build.ts`. */
 function retireMeshTeardown(scene: SceneContext, teardown: (() => void)[]): void {
     for (const dispose of teardown) {
+        spliceOut(scene._disposables, dispose);
         const packet = (dispose as DetachableDisposer).p;
         if (packet) {
             packet._disposed = true;
