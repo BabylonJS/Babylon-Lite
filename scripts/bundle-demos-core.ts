@@ -27,6 +27,7 @@ import {
     labDir,
     srcDir,
     outDir,
+    litePackageResolverPlugin,
     terserPropertyManglePlugin,
     isLiteBundleExternal,
     writeBundleInfo,
@@ -330,14 +331,16 @@ export async function buildDemo(slug: string): Promise<void> {
         base: "./",
         publicDir: false,
         logLevel: "warn",
-        plugins: [wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
+        plugins: [litePackageResolverPlugin(srcDir), wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
         resolve: {
             // Demos resolve `babylon-lite` to the TS SOURCE (not `build/lib`) on purpose:
             // demos have no bundle-size ceilings, and using source keeps the dev iteration
             // loop fast (no package rebuild required to see demo changes). Demo sizes could
             // therefore differ slightly from a real consumer's, but the scene bundle-size
             // tests (which DO build against `build/lib`) are what guard against size drift.
-            alias: { "babylon-lite": srcDir, ...(havokEsm ? { "@babylonjs/havok": havokEsm } : {}) },
+            // `litePackageResolverPlugin` resolves root and lab-only deep imports before
+            // Vite applies the package's intentionally root-only public export map.
+            alias: havokEsm ? { "@babylonjs/havok": havokEsm } : {},
             dedupe: ["@babylonjs/core"],
         },
         build: {
@@ -365,8 +368,11 @@ export async function buildDemo(slug: string): Promise<void> {
         // logic below picks them up alongside the main entry.
         worker: {
             format: "es",
-            plugins: () => [wgslMinifyPlugin(), terserPropertyManglePlugin()],
+            plugins: () => [litePackageResolverPlugin(srcDir), wgslMinifyPlugin(), terserPropertyManglePlugin()],
             rollupOptions: {
+                // Worker builds have their own Rollup options and do not inherit the
+                // main build's vendor externalization.
+                external: (id: string) => id !== "@babylonjs/havok" && isLiteBundleExternal(id),
                 output: {
                     entryFileNames: `${slug}-worker-[hash].js`,
                     chunkFileNames: `${slug}-worker-[name]-[hash].js`,
