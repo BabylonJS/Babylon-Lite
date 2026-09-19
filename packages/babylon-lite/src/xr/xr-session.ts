@@ -390,6 +390,7 @@ function onXrFrame(ctx: XrSessionContext, time: DOMHighResTimeStamp, frame: XRFr
         }
 
         eng._device.queue.submit([encoder.finish()]);
+        eng._computeOneShotSubmitted?.(encoder);
         flushGpuResourceRetirements(eng);
     } finally {
         eng._currentEncoder = prevEncoder;

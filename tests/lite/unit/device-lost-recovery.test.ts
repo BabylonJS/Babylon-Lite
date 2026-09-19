@@ -243,20 +243,22 @@ describe("device-lost recovery context dispatch", () => {
 
     it("preserves non-default glTF sampler settings through recovery", async () => {
         const samplerDescriptors: GPUSamplerDescriptor[] = [];
-        const device = {
-            features: new Set<GPUFeatureName>(),
-            lost: new Promise<GPUDeviceLostInfo>(() => undefined),
-            createTexture: vi.fn(() => ({
-                createView: vi.fn(() => ({})),
-            })),
-            createSampler: vi.fn((descriptor: GPUSamplerDescriptor) => {
-                samplerDescriptors.push(descriptor);
-                return {};
-            }),
-            queue: {
-                writeTexture: vi.fn(),
-            },
-        } as unknown as GPUDevice;
+        const makeDevice = (): GPUDevice =>
+            ({
+                features: new Set<GPUFeatureName>(),
+                lost: new Promise<GPUDeviceLostInfo>(() => undefined),
+                createTexture: vi.fn(() => ({
+                    createView: vi.fn(() => ({})),
+                })),
+                createSampler: vi.fn((descriptor: GPUSamplerDescriptor) => {
+                    samplerDescriptors.push(descriptor);
+                    return {};
+                }),
+                queue: {
+                    writeTexture: vi.fn(),
+                },
+            }) as unknown as GPUDevice;
+        const device = makeDevice();
         const engine = { _device: device } as unknown as EngineContext;
         const defaultSampler = {} as GPUSampler;
         const bitmap = {} as ImageBitmap;
@@ -392,7 +394,13 @@ describe("device-lost recovery unreferenced texture rebuild", () => {
         return {
             features: new Set<GPUFeatureName>(),
             lost: new Promise<GPUDeviceLostInfo>(() => undefined),
-            createTexture: vi.fn(() => ({ createView: vi.fn(() => ({})), destroy: vi.fn() })),
+            createTexture: vi.fn((descriptor: GPUTextureDescriptor) => ({
+                format: descriptor.format,
+                sampleCount: descriptor.sampleCount ?? 1,
+                mipLevelCount: descriptor.mipLevelCount ?? 1,
+                createView: vi.fn((viewDescriptor?: GPUTextureViewDescriptor) => ({ viewDescriptor })),
+                destroy: vi.fn(),
+            })),
             createSampler: vi.fn(() => ({})),
             queue: { writeTexture: vi.fn(), copyExternalImageToTexture: vi.fn() },
         } as unknown as GPUDevice;

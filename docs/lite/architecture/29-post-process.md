@@ -15,6 +15,14 @@ The reusable helper exists because most post-processes share the same shape:
 - one color output target;
 - optional alpha blending and normalized viewport/scissor.
 
+Mesh blending is deliberately implemented as a dedicated task rather than
+through `createPostProcessTask`: its tag input is `texture_2d<u32>`, every input
+uses exact `textureLoad`, it owns deterministic `rg8unorm` blue noise, and its
+quality/debug/base-color options specialize a large shader. The dedicated
+module remains fully tree-shakable and follows the same source/target,
+viewport, clear, alpha-mode, device-rebuild, and owned-internal-target
+conventions. See `55-mesh-blending.md` for the complete contract.
+
 ## Public API Surface (types, functions, constants — full signatures)
 
 ```ts
@@ -143,6 +151,55 @@ export interface BloomPostProcessTask extends Task, PostProcessTaskSettings {
 }
 
 export function createBloomPostProcessTask(config: BloomPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): BloomPostProcessTask;
+
+export enum MeshBlendQuality {
+    Low = 0,
+    Medium = 1,
+    High = 2,
+    Cinematic = 3,
+}
+
+export enum MeshBlendDepthType {
+    View = 0,
+    Screen = 1,
+}
+
+export enum MeshBlendDebugMode {
+    Off = 0,
+    PackedTag = 1,
+    CandidateDirectionDistance = 2,
+    SeamFade = 3,
+    RejectionReason = 4,
+    StageWork = 5,
+    Continuation = 6,
+    TinyObject = 7,
+    MultiTarget = 8,
+    TargetColor = 9,
+    ShadowAttenuation = 10,
+    ColorInterpolation = 11,
+    WorldPosition = 12,
+}
+
+export interface MeshBlendingPostProcessTaskConfig {
+    name?: string;
+    sourceTexture: RenderTarget;
+    meshBlendTagTexture: RenderTarget;
+    depthTexture: RenderTarget;
+    baseColorTexture?: RenderTarget | null;
+    targetTexture?: RenderTarget | null;
+    camera: Camera;
+    quality?: MeshBlendQuality;
+    depthType?: MeshBlendDepthType;
+    debugMode?: MeshBlendDebugMode;
+    radiusClasses?: readonly MeshBlendRadiusDefinition[];
+    slopeFactor?: number;
+    enabled?: boolean;
+    alphaMode?: PostProcessAlphaMode;
+    viewport?: NormalizedViewport | null;
+    clear?: boolean;
+}
+
+export function createMeshBlendingPostProcessTask(config: MeshBlendingPostProcessTaskConfig, engine: EngineContext, scene?: SceneContext): MeshBlendingPostProcessTask;
 
 export interface FrameGraphContextOptions {
     name?: string;

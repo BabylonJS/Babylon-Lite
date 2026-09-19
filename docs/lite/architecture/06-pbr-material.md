@@ -50,6 +50,11 @@ pbr-renderable.ts:
 
 ## Dynamic Feature Flags (`pbr-flags.ts`)
 
+Bits used exclusively by one lazy fragment are declared in that fragment, with
+their numbers reserved in `pbr-flag-bits.ts`: clearcoat owns bit 20, and sheen
+owns its texture/albedo-scaling bits 23 and 30. Shared cross-fragment bits remain
+shared. Moving ownership does not change any bit value or shader-cache key.
+
 | Flag                               | Constant  | Condition                     | Shader effect                                        |
 | ---------------------------------- | --------- | ----------------------------- | ---------------------------------------------------- |
 | `PBR_HAS_NORMAL_MAP`               | `1 << 0`  | Mesh has tangent buffer       | Tangent vertex attr + normal texture + TBN transform |
@@ -715,8 +720,8 @@ its descriptor-construction loop; Standard and PBR share that receiver-only impl
     N_local = normalize(normal)
     T_local = normalize(tangent.xyz)
     B_local = cross(N_local, T_local) * tangent.w
-    worldTangent = normalize((finalWorld × vec4(T_local, 0)).xyz)
-    worldBitangent = normalize((finalWorld × vec4(B_local, 0)).xyz)
+    worldTangent = (finalWorld × vec4(T_local, 0)).xyz
+    worldBitangent = (finalWorld × vec4(B_local, 0)).xyz
     ```
 7. `/*VB*/` — Shadow light-space transform (if `MSH_RECEIVE_SHADOWS`)
 

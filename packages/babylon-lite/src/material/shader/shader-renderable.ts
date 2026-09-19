@@ -121,7 +121,7 @@ export function buildShaderMaterialRenderables(scene: SceneContext, meshes: Mesh
     const renderables: Renderable[] = [];
 
     const rebuildSingle = (s: SceneContext, mesh: Mesh, materialOverride?: Material, rebuildResources?: MeshRebuildResources): Renderable =>
-        buildSingleShaderRenderable(s, mesh, (materialOverride ?? mesh.material) as ShaderMaterial, !!materialOverride, getUniformBatch, rebuildResources);
+        buildMaterialRenderables(s, (materialOverride ?? mesh.material) as ShaderMaterial, [mesh], !!materialOverride, getUniformBatch, rebuildResources)[0]!;
 
     const byMaterial = new Map<ShaderMaterial, Mesh[]>();
     for (const mesh of meshes) {
@@ -207,17 +207,6 @@ let _asyncPipelineRegistrar: ShaderAsyncPipelineRegistrar | null = null;
 /** @internal Install the optional async ShaderMaterial recipe registrar. */
 export function _installAsyncShaderPipelineRegistrar(register: ShaderAsyncPipelineRegistrar): void {
     _asyncPipelineRegistrar = register;
-}
-
-function buildSingleShaderRenderable(
-    scene: SceneContext,
-    mesh: Mesh,
-    material: ShaderMaterial,
-    isOverride: boolean,
-    getUniformBatch?: UniformBatchFactory,
-    resources?: MeshRebuildResources
-): Renderable {
-    return buildMaterialRenderables(scene, material, [mesh], isOverride, getUniformBatch, resources)[0]!;
 }
 
 function buildMaterialRenderables(
