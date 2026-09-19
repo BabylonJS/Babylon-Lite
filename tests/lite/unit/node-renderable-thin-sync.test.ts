@@ -7,6 +7,7 @@ import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { syncThinInstanceForDraw, syncThinInstanceGpuData } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu";
 import type { ThinInstanceData } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
+import { createSceneContext, disposeScene, onSceneDispose } from "../../../packages/babylon-lite/src/scene/scene";
 import type { MeshRebuildResources } from "../../../packages/babylon-lite/src/render/renderable";
 import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-remove";
 import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
@@ -160,6 +161,77 @@ function fakePass() {
     };
 }
 
+function buildSceneDisposalFixture(groupSizes: readonly number[]) {
+    const buffers: Array<GPUBuffer & { label?: string; destroy: ReturnType<typeof vi.fn> }> = [];
+    const device = {
+        createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => {
+            const buffer = { size: descriptor.size, label: descriptor.label, destroy: vi.fn() } as unknown as GPUBuffer & {
+                label?: string;
+                destroy: ReturnType<typeof vi.fn>;
+            };
+            buffers.push(buffer);
+            return buffer;
+        }),
+        createBindGroup: vi.fn(() => ({}) as GPUBindGroup),
+        queue: { writeBuffer: vi.fn() },
+    };
+    const engine = {
+        format: "bgra8unorm",
+        _device: device,
+        _renderingContexts: [],
+    } as unknown as EngineContext;
+    Object.assign(engine, { engine });
+    const scene = createSceneContext(engine, { defaultRenderTask: false });
+
+    for (const groupSize of groupSizes) {
+        const material = {
+            _compile: {
+                _meshBGL: {},
+                _nodeUboBinding: 1,
+                _nodeUboSpec: { _totalBytes: 16, _offsets: new Map(), _structBody: "" },
+                _meshUboFloats: 20,
+                _usesMeshAttributeFlags: false,
+                _textureBindings: [],
+                _envBindings: null,
+                _shadowBindings: [],
+                _esmShadowParamsBinding: null,
+                _pipeline: {},
+                _pipelineForMesh: () => ({}),
+            },
+            _renderFeatures: null,
+            _vertexAttrNames: ["position"],
+            _needsAlphaBlending: false,
+            _uboDirty: false,
+            _uniformValues: new Map(),
+        } as unknown as NodeMaterial;
+        const meshes = Array.from(
+            { length: groupSize },
+            () =>
+                ({
+                    material,
+                    visible: true,
+                    parent: null,
+                    worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+                    worldMatrixVersion: 1,
+                    receiveShadows: false,
+                    _gpu: {
+                        indexCount: 3,
+                        _baseVertex: 0,
+                        indexBuffer: {} as GPUBuffer,
+                        indexFormat: "uint16",
+                        positionBuffer: {} as GPUBuffer,
+                        normalBuffer: {} as GPUBuffer,
+                        uvBuffer: {} as GPUBuffer,
+                        vertexBuffers: new Map([["position", {} as GPUBuffer]]),
+                    },
+                }) as unknown as Mesh
+        );
+        scene._renderables.push(...buildNodeMeshRenderables(scene, meshes).renderables);
+    }
+
+    return { buffers, scene };
+}
+
 describe.each([
     ["opaque", false],
     ["transparent", true],
@@ -214,6 +286,21 @@ describe.each([
 });
 
 describe("node-material packet ownership", () => {
+    it("runs every scene disposer once when Node packet cleanup unregisters sibling callbacks", () => {
+        const { buffers, scene } = buildSceneDisposalFixture([2, 1]);
+        const trailingCleanup = vi.fn();
+        onSceneDispose(scene, trailingCleanup);
+
+        disposeScene(scene);
+        disposeScene(scene);
+
+        expect(trailingCleanup).toHaveBeenCalledOnce();
+        expect(buffers.map((buffer) => buffer.label)).toEqual(["node-ubo", "node-mesh-ubo", "node-mesh-ubo", "node-ubo", "node-mesh-ubo"]);
+        expect(buffers.every((buffer) => buffer.destroy.mock.calls.length === 1)).toBe(true);
+        expect(scene._meshDisposables.size).toBe(0);
+        expect(scene._disposables).toEqual([]);
+    });
+
     it("detaches one opaque sibling synchronously and retires only its packet resources", () => {
         const { buffers, engine, group, meshes, renderable, scene } = buildFixture(false, 2, true);
         const binding = renderable.bind(engine, { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth32float", _sampleCount: 1 });
