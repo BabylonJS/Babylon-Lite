@@ -22,7 +22,7 @@ import {
     setShadowTaskCasterMeshes,
     startEngine,
 } from "babylon-lite";
-import type { EngineContext, PhysicsWorld, RenderTask, Task, Vec3 } from "babylon-lite";
+import type { EngineContext, Mat4, PhysicsWorld, RenderTask, Task, Vec3 } from "babylon-lite";
 import { createPlayroomAudio } from "../demos/playroom/audio.js";
 import { loadPlayroomAssets } from "../demos/playroom/assets.js";
 import { createPlayroomCameras } from "../demos/playroom/camera.js";
@@ -370,6 +370,8 @@ function placementState(state: PlayroomState): object {
         recordId: number;
         index: number;
         cpu: number[];
+        cpuWorldPosition: number[];
+        cpuWorldRotation: number[];
         nativePosition: number[];
         nativeRotation: number[];
     }> = [];
@@ -407,7 +409,7 @@ function placementState(state: PlayroomState): object {
             const linear = state.physics._hknp.HP_Body_GetLinearVelocity(nativeBody)[1] as number[];
             const angular = state.physics._hknp.HP_Body_GetAngularVelocity(nativeBody)[1] as number[];
             const local = thin.matrices.slice(index * 16, index * 16 + 16);
-            const worldMatrix = multiplyMat4(record.mesh.worldMatrix, local);
+            const worldMatrix = multiplyMat4(record.mesh.worldMatrix, local as unknown as Mat4);
             const worldTransform = decomposeMat4(worldMatrix);
             maxLinearVelocity = Math.max(maxLinearVelocity, Math.hypot(linear[0]!, linear[1]!, linear[2]!));
             maxAngularVelocity = Math.max(maxAngularVelocity, Math.hypot(angular[0]!, angular[1]!, angular[2]!));

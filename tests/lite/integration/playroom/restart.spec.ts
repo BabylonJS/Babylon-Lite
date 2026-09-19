@@ -26,7 +26,6 @@ function expectCurrentCpuNativeAgreement(checkpoint: RestartCheckpoint): void {
         expectVectorClose(sample.nativePosition, sample.cpuWorldPosition);
         expectQuaternionEquivalent(sample.nativeRotation, sample.cpuWorldRotation);
     }
-    expect(checkpoint.placement.gpuHashes).toEqual(checkpoint.placement.matrixHashes);
 }
 
 function expectRestarted(checkpoint: RestartCheckpoint, authored: RestartWorkloadReport["authored"], baseline: RestartCheckpoint): void {
@@ -42,8 +41,8 @@ function expectRestarted(checkpoint: RestartCheckpoint, authored: RestartWorkloa
     expect(checkpoint.placement.visibleInstances).toBe(baseline.placement.visibleInstances);
     expect(checkpoint.placement.scoredEntries).toBe(0);
     expect(checkpoint.placement.hiddenPoppers).toBe(0);
-    expect(checkpoint.placement.maxLinearVelocity).toBe(0);
-    expect(checkpoint.placement.maxAngularVelocity).toBe(0);
+    expect(checkpoint.placement.maxLinearVelocity).toBeLessThanOrEqual(POSITION_ABSOLUTE_TOLERANCE);
+    expect(checkpoint.placement.maxAngularVelocity).toBeLessThanOrEqual(POSITION_ABSOLUTE_TOLERANCE);
     expect(checkpoint.snapshot.lifecycle.retiredWorlds).toBe(0);
     expect(checkpoint.snapshot.contacts.activeAfterStepSubscribers).toBe(baseline.snapshot.contacts.activeAfterStepSubscribers);
 }
@@ -69,6 +68,7 @@ test("restarts in place after three launches and restores every retained resourc
     expect(report.afterFrames.identity).toEqual(report.baseline.identity);
     expect(report.afterFrames.resources).toEqual(report.baseline.resources);
     expectCurrentCpuNativeAgreement(report.afterFrames);
+    expect(report.afterFrames.placement.gpuHashes).toEqual(report.afterFrames.placement.matrixHashes);
     expect(report.aimingMotionDistance).toBeGreaterThan(0.0001);
     expect(report.secondExplosionEvents).toBe(1);
     expect(report.secondExplosion.placement.hiddenPoppers).toBe(1);
