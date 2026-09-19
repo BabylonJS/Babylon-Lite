@@ -8,6 +8,11 @@ interface ProjectionSettings {
     readonly farPlane: number;
 }
 
+const DEG_TO_RAD = Math.PI / 180;
+const STARTUP_EYE = { x: -33.03, y: 0.24, z: -65.76 };
+const STARTUP_YAW = 27.7 * DEG_TO_RAD;
+const STARTUP_PITCH = 6.62 * DEG_TO_RAD;
+
 export interface TrogirCameraModeBindings {
     readonly attachOrbit: (camera: ArcRotateCamera, canvas: HTMLCanvasElement, scene: SceneContext) => () => void;
     readonly attachFirstPerson: (camera: FreeCamera, canvas: HTMLCanvasElement, scene: SceneContext) => () => void;
@@ -55,6 +60,21 @@ export function createTrogirOrbitCamera(camera: FreeCamera, radius: number): Arc
     next.target.z = target.z + pose.eye.z - generatedEye[14]!;
     copyProjection(camera, next);
     return next;
+}
+
+export function createTrogirStartupOrbitCamera(radius: number): ArcRotateCamera {
+    const cosPitch = Math.cos(STARTUP_PITCH);
+    const forward = {
+        x: Math.sin(STARTUP_YAW) * cosPitch,
+        y: Math.sin(STARTUP_PITCH),
+        z: Math.cos(STARTUP_YAW) * cosPitch,
+    };
+    const camera = createFreeCamera(STARTUP_EYE, {
+        x: STARTUP_EYE.x + forward.x,
+        y: STARTUP_EYE.y + forward.y,
+        z: STARTUP_EYE.z + forward.z,
+    });
+    return createTrogirOrbitCamera(camera, radius);
 }
 
 function configureOrbit(camera: ArcRotateCamera, scene: SceneContext): void {

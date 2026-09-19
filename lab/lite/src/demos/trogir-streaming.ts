@@ -1,6 +1,5 @@
 import {
     attachGaussianSplatStream,
-    createArcRotateCamera,
     createEngine,
     createSceneContext,
     disposeEngine,
@@ -12,7 +11,7 @@ import {
     startEngine,
 } from "babylon-lite";
 import type { EngineContext, GaussianSplatStream, SceneContext } from "babylon-lite";
-import { attachTrogirCameraMode } from "./trogir-camera-mode";
+import { attachTrogirCameraMode, createTrogirStartupOrbitCamera } from "./trogir-camera-mode";
 import { formatTrogirCameraPose } from "./trogir-camera-pose";
 import { placeTrogirStream } from "./trogir-streaming-placement";
 
@@ -198,7 +197,8 @@ async function main(): Promise<void> {
             maxCpuBytes: 96 * MB,
             screenError: 2,
         });
-        const camera = createArcRotateCamera(-Math.PI / 2, 1.16, 260, placeTrogirStream(stream));
+        placeTrogirStream(stream);
+        const camera = createTrogirStartupOrbitCamera(260);
         camera.nearPlane = 0.1;
         camera.farPlane = 1500;
         scene.camera = camera;

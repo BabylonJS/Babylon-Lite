@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { attachTrogirCameraMode, createTrogirFirstPersonCamera, createTrogirOrbitCamera, type TrogirCameraModeBindings } from "../../../lab/lite/src/demos/trogir-camera-mode";
+import {
+    attachTrogirCameraMode,
+    createTrogirFirstPersonCamera,
+    createTrogirOrbitCamera,
+    createTrogirStartupOrbitCamera,
+    type TrogirCameraModeBindings,
+} from "../../../lab/lite/src/demos/trogir-camera-mode";
 import { formatTrogirCameraPose, readTrogirCameraPose } from "../../../lab/lite/src/demos/trogir-camera-pose";
 import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
 import type { ArcRotateCamera } from "../../../packages/babylon-lite/src/camera/arc-rotate";
@@ -8,6 +14,27 @@ import type { FreeCamera } from "../../../packages/babylon-lite/src/camera/free-
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 
 describe("Trogir camera modes", () => {
+    it("creates the exact startup HUD pose and preserves it through a camera-mode round trip", () => {
+        const orbit = createTrogirStartupOrbitCamera(260);
+        orbit.nearPlane = 0.1;
+        orbit.farPlane = 1500;
+        expect(formatTrogirCameraPose(orbit.worldMatrix)).toEqual({
+            x: "-33.03",
+            y: "0.24",
+            z: "-65.76",
+            yaw: "27.70",
+            pitch: "6.62",
+            roll: "0.00",
+        });
+        expect([orbit.radius, orbit.nearPlane, orbit.farPlane]).toEqual([260, 0.1, 1500]);
+
+        const firstPerson = createTrogirFirstPersonCamera(orbit);
+        const restored = createTrogirOrbitCamera(firstPerson, orbit.radius);
+        expect(formatTrogirCameraPose(firstPerson.worldMatrix)).toEqual(formatTrogirCameraPose(orbit.worldMatrix));
+        expect(formatTrogirCameraPose(restored.worldMatrix)).toEqual(formatTrogirCameraPose(orbit.worldMatrix));
+        expect([restored.radius, restored.nearPlane, restored.farPlane]).toEqual([260, 0.1, 1500]);
+    });
+
     it("reports stable world-space poses for known, orbit, and first-person cameras", () => {
         const roll = Math.PI / 6;
         const known = new Float32Array([Math.cos(roll), Math.sin(roll), 0, 0, -Math.sin(roll), Math.cos(roll), 0, 0, 0, 0, 1, 0, -0, 2, -3, 1]);
