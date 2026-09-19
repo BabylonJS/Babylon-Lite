@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "repository": "BabylonJS/ThePlayroom",
+    "revision": "d22ce23ef308e28d1f8b6598b4c72ea944205925",
+    "babylonCoreVersion": "6.0.0",
+    "havokVersion": "1.0.0",
+    "sourceBlobs": {
+      "app_package/src/Playground/assets.ts": "9c04726e643a8af08f61c590d74eb5efffc36103",
+      "app_package/src/Playground/Puzzles/chess.ts": "69fb32ba10af6c9c427f6ec5bd1ced90c41199a9",
+      "app_package/src/Playground/Puzzles/cubeStack.ts": "a2cd8ca0932a255d2c4e496d3d3169831312f26a",
+      "app_package/src/Playground/Puzzles/stack.ts": "ce12df19007be597e7e782f63e0464bf4b49e0c3",
+      "app_package/src/Playground/Puzzles/tower.ts": "79de39d3d932336118b283f98d6a71b13cbce756"
+    }
+  },
+  "automaticBoxRule": "Babylon.js 6 PhysicsAggregate uses full world bounding-box extents multiplied by the transform node scaling; center uses the local bounding-box center multiplied once by node scaling.",
+  "boxes": {
+    "towerGameBlock": {
+      "sourceConstruction": "automatic aggregate after source scale 20 was baked into vertices",
+      "center": [0, 0.14999999105930328, 0],
+      "extents": [0.4999999701976776, 0.29999998211860657, 1.4999998807907104],
+      "effectiveInstanceScale": [1, 1, 1]
+    },
+    "transformedTowerGameBlock": {
+      "sourceConstruction": "explicit PhysicsShapeBox after source scale 0.2 was baked into vertices",
+      "center": [0, 0, 0],
+      "extents": [0.5, 1.5, 0.3],
+      "effectiveInstanceScale": [1, 1, 1]
+    },
+    "cube": {
+      "sourceConstruction": "automatic aggregate after source scale 1 was baked into vertices",
+      "center": [0, 0.25, 0],
+      "extents": [0.5, 0.5, 0.5],
+      "effectiveInstanceScale": [1, 1, 1]
+    },
+    "chessboard": {
+      "sourceConstruction": "automatic aggregate with source carrier scale 0.6 left live",
+      "center": [0, 0.0260188989341259, 0],
+      "extents": [0.7200000286102295, 0.03122267872095108, 0.7200000286102295],
+      "effectiveInstanceScale": [1, 1, 1]
+    }
+  }
+}

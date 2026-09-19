@@ -53,6 +53,7 @@ const PLATFORMER_SRC = resolve(labDir, "public/platformer");
 const SANDBLOX_SRC = resolve(labDir, "public/sandblox");
 const RACER_SRC = resolve(labDir, "public/racer");
 const ANTIGRAVITY_RACER_SRC = resolve(labDir, "public/antigravity-racer");
+const PLAYROOM_SRC = resolve(labDir, "public/playroom");
 const SCREEN_SPACE_EFFECTS_SRC = resolve(labDir, "public/screen-space-effects");
 const DRACO_FILES = ["draco_decoder.js", "draco_decoder.wasm"];
 
@@ -265,6 +266,10 @@ function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
         copyRequiredDir(ANTIGRAVITY_RACER_SRC, resolve(demosDir, "antigravity-racer"), "Antigravity Racer");
     }
 
+    if (demos.some((demo) => demo.slug === "playroom")) {
+        copyRequiredDir(PLAYROOM_SRC, resolve(demosDir, "playroom"), "The Playroom");
+    }
+
     if (demos.some((demo) => demo.slug === "bath-day")) {
         const glb = resolve(labDir, "public", "bath_day.glb");
         if (existsSync(glb)) {
@@ -313,7 +318,7 @@ function writeDemoHtml(demos: DemoConfigEntry[], manifest: Record<string, DemoMa
 }
 
 function demoRequiresReady(slug: string): boolean {
-    return slug === "racer";
+    return slug === "racer" || slug === "playroom";
 }
 
 export async function buildDemo(slug: string): Promise<void> {

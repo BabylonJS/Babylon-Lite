@@ -15,6 +15,7 @@ export interface RebuildMaterialOptions {
 interface DetachablePacket {
     _disposed?: boolean;
     _owner?: DetachablePacket[];
+    _onOwnerEmpty?: () => void;
 }
 
 type DetachableDisposer = (() => void) & { p?: DetachablePacket };
@@ -98,6 +99,10 @@ function rebuildSceneMesh(ctx: SceneContext, mesh: Mesh): boolean | Promise<void
     if (old) {
         ctx._meshDisposables.delete(mesh);
         for (const dispose of old) {
+            const lifetimeIndex = ctx._disposables.indexOf(dispose);
+            if (lifetimeIndex >= 0) {
+                ctx._disposables.splice(lifetimeIndex, 1);
+            }
             const packet = (dispose as DetachableDisposer).p;
             if (packet) {
                 packet._disposed = true;
@@ -108,6 +113,14 @@ function rebuildSceneMesh(ctx: SceneContext, mesh: Mesh): boolean | Promise<void
                         owner.splice(index, 1);
                     }
                     packet._owner = undefined;
+                    if (owner.length === 0) {
+                        packet._onOwnerEmpty?.();
+                    }
+                } else {
+                    packet._onOwnerEmpty?.();
+                }
+                if (packet._onOwnerEmpty) {
+                    packet._onOwnerEmpty = undefined;
                 }
             }
         }

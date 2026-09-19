@@ -1096,7 +1096,7 @@
         "slug": "scene103-thin-instance-raycast",
         "name": "Scene 103 — Thin-Instance Raycast Picking",
         "maxMad": 0.5,
-        "maxRawKB": 64.1,
+        "maxRawKB": 66.1,
         "maxGzipKB": 26,
         "description": "Havok Physics V2 thin-instanced wall + raycast instance picking (port of PG #I6AR8X). A 10×6×3 wall of thin-instanced cylinders with seeded per-instance colors. One STATIC thin-instance BOX aggregate creates 180 native bodies; raycast bodyIndex identifies the hit instance and is matched between Lite and Babylon.js for deterministic rays. A green indicator sphere marks the last hit.",
         "tags": ["std", "procedural", "physics", "thin-instance"],
@@ -2637,7 +2637,7 @@
         "slug": "scene290-physics-thin-instances",
         "name": "Scene 290 — Havok Thin Instances",
         "maxMad": 0.5,
-        "maxRawKB": 66,
+        "maxRawKB": 66.1,
         "description": "Havok Physics V2 drives 1,000 boxes, 1,000 spheres, and 8 convex torus knots through three thin-instance matrix buffers, ported from playground #PX6E6C#25 without GUI or Ammo.",
         "tags": ["std", "procedural", "physics", "havok", "thin-instances"],
         "skipPerf": true

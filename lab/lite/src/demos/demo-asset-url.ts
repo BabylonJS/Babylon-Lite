@@ -1,3 +1,5 @@
+import { setDracoBaseUrl, setMeshoptBaseUrl } from "babylon-lite";
+
 /** Resolve an asset beside a bundled demo while preserving the lab server's public asset route. */
 export function demoAssetUrl(path: string, moduleUrl: string): string {
     const url = new URL(path, moduleUrl);
@@ -15,10 +17,6 @@ export function demoAssetUrl(path: string, moduleUrl: string): string {
  */
 export async function configureDemoDecoderBases(moduleUrl: string): Promise<void> {
     const base = demoAssetUrl("./", moduleUrl);
-    const [{ setDracoBaseUrl }, { setMeshoptBaseUrl }] = await Promise.all([
-        import("babylon-lite/loader-gltf/draco-decode.js"),
-        import("babylon-lite/loader-gltf/meshopt-decode.js"),
-    ]);
     setDracoBaseUrl(base);
     setMeshoptBaseUrl(base);
 }

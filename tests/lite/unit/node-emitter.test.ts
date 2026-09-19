@@ -113,6 +113,57 @@ describe("NodeMaterial emitter core", () => {
         expect(result.state.nodeUboFields.filter((f) => f._name === "c")).toHaveLength(1);
     });
 
+    it("keeps same-named serialized inputs as distinct uniforms", async () => {
+        const graph = parseNodeMaterialSource({
+            blocks: [
+                {
+                    customType: "BABYLON.InputBlock",
+                    id: 1,
+                    name: "Float",
+                    mode: 0,
+                    type: 0x1,
+                    value: 0.625,
+                    inputs: [],
+                    outputs: [{ name: "output" }],
+                },
+                {
+                    customType: "BABYLON.InputBlock",
+                    id: 2,
+                    name: "Float",
+                    mode: 0,
+                    type: 0x1,
+                    value: Math.PI,
+                    inputs: [],
+                    outputs: [{ name: "output" }],
+                },
+                {
+                    customType: "BABYLON.VectorMergerBlock",
+                    id: 3,
+                    name: "merge",
+                    inputs: [
+                        { name: "x", targetBlockId: 1, targetConnectionName: "output" },
+                        { name: "y", targetBlockId: 2, targetConnectionName: "output" },
+                    ],
+                    outputs: [{ name: "xyzw" }],
+                },
+                {
+                    customType: "BABYLON.FragmentOutputBlock",
+                    id: 4,
+                    name: "out",
+                    inputs: [{ name: "rgba", targetBlockId: 3, targetConnectionName: "xyzw" }],
+                    outputs: [],
+                },
+            ],
+            outputNodes: [4],
+        });
+        const emitters = await loadGraphEmitters(graph);
+        const result = emitGraph(graph, emitters, 4, null);
+
+        expect(result.state.nodeUboFields.map((field) => field._name)).toEqual(["Float", "Float1"]);
+        expect(result.fragmentWgsl).toContain("nodeU.Float");
+        expect(result.fragmentWgsl).toContain("nodeU.Float1");
+    });
+
     it("casts vec4 to vec3 via .xyz when needed", async () => {
         const g = {
             blocks: [

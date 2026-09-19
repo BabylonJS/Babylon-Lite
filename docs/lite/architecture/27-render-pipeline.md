@@ -64,6 +64,13 @@ export type MeshRebuilder = (scene: SceneContext, mesh: Mesh, materialOverride?:
 
 `DrawBinding.update(context)` is called once per frame per binding before the render pass is opened. The context contains the current pass target dimensions (`targetWidth`, `targetHeight`) and active pass camera (`_camera`) so bindings can refresh target-size-dependent UBOs or camera-sorted instance buffers without rebuilding their pipelines or bind groups. Mesh/material UBO updates that do not need this state still use this hook and version-guard their writes.
 
+Opaque material-family renderables may merge several meshes into one cached
+draw binding. Each per-mesh packet in such a binding remains independently
+owned: removing a mesh synchronously marks and detaches its packet before GPU
+retirement, and hidden or detached packets are never updated or drawn.
+Per-packet resources are retired with their mesh; resources shared by the
+merged material group stay alive until its last packet retires.
+
 ### Frame graph (`frame-graph/`)
 
 ```typescript
