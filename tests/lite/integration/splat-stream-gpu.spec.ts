@@ -289,9 +289,7 @@ test("culls behind-camera splats and resets the indirect prefix with Lite perspe
     expect(result!.mixed.indirect).toEqual([6, 3, 0, 0]);
     expect(result!.mixed.sorted.slice(0, 3).map((entry) => entry.index)).toEqual([5, 7, 4]);
     expect(result!.mixed.sorted.slice(0, 3).every((entry) => entry.key !== 0xffffffff)).toBe(true);
-    expect(result!.mixed.sorted.slice(3).every((entry) => entry.key === 0xffffffff)).toBe(true);
     expect(result!.culled.indirect).toEqual([6, 0, 0, 0]);
-    expect(result!.culled.sorted.every((entry) => entry.key === 0xffffffff)).toBe(true);
 });
 
 test("matches Lite Gaussian viewport normalization and culls a large offscreen ellipse", async ({ page }) => {
@@ -348,7 +346,7 @@ test("matches Lite Gaussian viewport normalization and culls a large offscreen e
     expect(result!.error).toBeUndefined();
     expect(result!.indirect).toEqual([6, 1, 0, 0]);
     expect(Math.hypot(result!.projected[4]!, result!.projected[5]!)).toBeCloseTo(0.0375, 5);
-    expect(result!.sorted).toEqual([result!.sorted[0]!, 0, 0xffffffff, 1]);
+    expect(result!.sorted.slice(0, 2)).toEqual([result!.sorted[0]!, 0]);
 });
 
 test("rejects far-off-axis near-plane centers and caps valid ellipse axes", async ({ page }) => {
@@ -403,7 +401,6 @@ test("rejects far-off-axis near-plane centers and caps valid ellipse axes", asyn
     expect(result!.error).toBeUndefined();
     expect(result!.indirect).toEqual([6, 1, 0, 0]);
     expect(result!.sorted.slice(0, 2)).toEqual([result!.sorted[0]!, 1]);
-    expect(result!.sorted.slice(2)).toEqual([0xffffffff, 0, 0xffffffff, 2]);
     const onAxis = result!.projected.slice(16, 32);
     const clipW = onAxis[3]!;
     const majorPixels = Math.hypot((onAxis[4]! / clipW) * 640, (onAxis[5]! / clipW) * 480);
@@ -507,9 +504,6 @@ test("preserves radix integrity when active counts collapse below the allocated 
                         }
                         seen[index] = 1;
                         previousKey = key;
-                    } else if (key !== 0xffffffff) {
-                        failures.push(`non-sentinel suffix at ${slot}: key=${key} index=${index}`);
-                        break;
                     }
                 }
                 return { count, indirect, failures };
@@ -566,8 +560,8 @@ for (const [count, requestedCapacity] of [
                     values[base + 4] = values[base + 7] = values[base + 9] = 0.001;
                     values[base + 12] = values[base + 13] = values[base + 14] = 1;
                     const depthBits = new Uint32Array(new Float32Array([depth]).buffer)[0]!;
-                    expected.push({ key: invalid ? 0xffffffff : ~depthBits >>> 0, index });
                     if (!invalid) {
+                        expected.push({ key: ~depthBits >>> 0, index });
                         validCount++;
                     }
                 }
@@ -584,17 +578,27 @@ for (const [count, requestedCapacity] of [
                 const keyBytes = Math.max(count * 8, 8);
                 const keysRead = device.createBuffer({ size: keyBytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
                 const argsRead = device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+                const runtimeRead = device.createBuffer({ size: 128, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
                 if (count) {
                     encoder.copyBufferToBuffer(batch.passGpu.sorted, 0, keysRead, 0, count * 8);
                 }
                 encoder.copyBufferToBuffer(batch.passGpu.indirect, 0, argsRead, 0, 16);
+                encoder.copyBufferToBuffer(batch.passGpu.runtime, 0, runtimeRead, 0, 128);
                 device.queue.submit([encoder.finish()]);
-                await Promise.all([keysRead.mapAsync(GPUMapMode.READ), argsRead.mapAsync(GPUMapMode.READ)]);
+                await Promise.all([keysRead.mapAsync(GPUMapMode.READ), argsRead.mapAsync(GPUMapMode.READ), runtimeRead.mapAsync(GPUMapMode.READ)]);
                 const words = new Uint32Array(keysRead.getMappedRange().slice(0));
-                const actual = Array.from({ length: count }, (_, index) => ({ key: words[index * 2]!, index: words[index * 2 + 1]! }));
+                const actual = Array.from({ length: validCount }, (_, index) => ({ key: words[index * 2]!, index: words[index * 2 + 1]! }));
                 expected.sort((a, b) => a.key - b.key || a.index - b.index);
                 const error = await device.popErrorScope();
-                return { actual, expected, args: Array.from(new Uint32Array(argsRead.getMappedRange().slice(0))), validCount, error: error?.message };
+                return {
+                    actual,
+                    expected,
+                    args: Array.from(new Uint32Array(argsRead.getMappedRange().slice(0))),
+                    runtime: Array.from(new Uint32Array(runtimeRead.getMappedRange().slice(0))),
+                    levelCount: batch.passGpu.levels.length,
+                    validCount,
+                    error: error?.message,
+                };
             },
             { moduleUrl: gpuModuleUrl, count, requestedCapacity }
         );
@@ -602,8 +606,148 @@ for (const [count, requestedCapacity] of [
         expect(result!.error).toBeUndefined();
         expect(result!.actual).toEqual(result!.expected);
         expect(result!.args).toEqual([6, result!.validCount, 0, 0]);
+        expect(result!.runtime[0]).toBe(result!.validCount);
+        if (count === 0) {
+            expect(result!.runtime.every((value) => value === 0)).toBe(true);
+        } else {
+            const dispatch = (slot: number): number[] => result!.runtime.slice(4 + slot * 3, 7 + slot * 3);
+            let levelItems = Math.ceil(result!.validCount / 256);
+            expect(dispatch(0)).toEqual([levelItems, 1, 1]);
+            for (let level = 0; level < result!.levelCount; level++) {
+                expect(dispatch(1 + level)).toEqual([Math.max(1, Math.ceil(levelItems / 256)), 16, 1]);
+                levelItems = Math.ceil(levelItems / 256);
+            }
+            let childItems = Math.ceil(result!.validCount / 256);
+            for (let child = 0; child + 1 < result!.levelCount; child++) {
+                expect(dispatch(1 + result!.levelCount + child)).toEqual([Math.ceil(childItems / 256), 16, 1]);
+                childItems = Math.ceil(childItems / 256);
+            }
+        }
     });
 }
+
+test("compacts zero-many-one-zero survivors with stable cross-group ties and fresh indirect work", async ({ page }) => {
+    const result = await page.evaluate(
+        async ({ moduleUrl, retirementUrl }) => {
+            const adapter = await navigator.gpu.requestAdapter();
+            if (!adapter) {
+                return null;
+            }
+            const device = await adapter.requestDevice();
+            device.pushErrorScope("validation");
+            const gpu = await import(moduleUrl);
+            const retirement = await import(retirementUrl);
+            const capacity = 600;
+            const engine = { _device: device, _currentEncoder: device.createCommandEncoder() };
+            const state = gpu.createSplatStreamGpuState(engine, capacity, 16 * 1024 * 1024);
+            state.count = capacity;
+            state.contentGeneration = state.gatheredGeneration = 1;
+            const batch = gpu.createSplatStreamDrawBatch(state, { _sampleCount: 1 });
+            const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+
+            const run = async (name: string, live: (index: number) => boolean) => {
+                const canonical = new Float32Array(capacity * 16);
+                const expected: number[] = [];
+                for (let index = 0; index < capacity; index++) {
+                    const base = index * 16;
+                    canonical[base + 2] = 3;
+                    canonical[base + 3] = live(index) ? 1 : 0;
+                    canonical[base + 4] = canonical[base + 7] = canonical[base + 9] = 0.001;
+                    canonical[base + 12] = canonical[base + 13] = canonical[base + 14] = 1;
+                    if (live(index)) {
+                        expected.push(index);
+                    }
+                }
+                device.queue.writeBuffer(state.canonical, 0, canonical);
+                engine._currentEncoder = device.createCommandEncoder();
+                batch.reset();
+                batch.queue({ count: capacity, key: name, worldView: identity, projection: identity, width: 4096, height: 4096, near: 0.01 });
+                batch.flush(engine);
+                const keysRead = device.createBuffer({ size: Math.max(expected.length * 8, 8), usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+                const argsRead = device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+                const runtimeRead = device.createBuffer({ size: 128, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+                if (expected.length) {
+                    engine._currentEncoder.copyBufferToBuffer(batch.passGpu.sorted, 0, keysRead, 0, expected.length * 8);
+                }
+                engine._currentEncoder.copyBufferToBuffer(batch.passGpu.indirect, 0, argsRead, 0, 16);
+                engine._currentEncoder.copyBufferToBuffer(batch.passGpu.runtime, 0, runtimeRead, 0, 128);
+                device.queue.submit([engine._currentEncoder.finish()]);
+                retirement.flushGpuResourceRetirements(engine);
+                await Promise.all([keysRead.mapAsync(GPUMapMode.READ), argsRead.mapAsync(GPUMapMode.READ), runtimeRead.mapAsync(GPUMapMode.READ)]);
+                const words = new Uint32Array(keysRead.getMappedRange());
+                const pairs = Array.from({ length: expected.length }, (_, slot) => ({ key: words[slot * 2]!, index: words[slot * 2 + 1]! }));
+                return {
+                    expected,
+                    pairs,
+                    args: Array.from(new Uint32Array(argsRead.getMappedRange())),
+                    runtime: Array.from(new Uint32Array(runtimeRead.getMappedRange())),
+                };
+            };
+
+            const frames = [
+                await run("zero-a", () => false),
+                await run("many", (index) => index % 5 !== 0),
+                await run("one", (index) => index === 511),
+                await run("zero-b", () => false),
+            ];
+            const error = await device.popErrorScope();
+            return { frames, error: error?.message };
+        },
+        { moduleUrl: gpuModuleUrl, retirementUrl: retirementModuleUrl }
+    );
+    test.skip(result === null, "A WebGPU adapter is unavailable");
+    expect(result!.error).toBeUndefined();
+    for (const frame of result!.frames) {
+        expect(frame.args).toEqual([6, frame.expected.length, 0, 0]);
+        expect(frame.runtime[0]).toBe(frame.expected.length);
+        expect(frame.runtime.slice(4, 7)).toEqual([Math.ceil(frame.expected.length / 256), 1, 1]);
+        expect(frame.pairs.map((pair) => pair.index)).toEqual(frame.expected);
+        expect(frame.pairs.every((pair) => pair.key !== 0xffffffff)).toBe(true);
+    }
+});
+
+test("accounts and retires compaction resources while preserving the demo capacity", async ({ page }) => {
+    const result = await page.evaluate(
+        async ({ moduleUrl, retirementUrl }) => {
+            const adapter = await navigator.gpu.requestAdapter();
+            if (!adapter) {
+                return null;
+            }
+            const device = await adapter.requestDevice();
+            device.pushErrorScope("validation");
+            const gpu = await import(moduleUrl);
+            const retirement = await import(retirementUrl);
+            const engine = { _device: device, _currentEncoder: device.createCommandEncoder() };
+            const budgetedDemoCapacity = gpu.getSplatStreamGpuCapacity(
+                { limits: { maxComputeWorkgroupsPerDimension: 65_535, maxBufferSize: 1024 ** 3, maxStorageBufferBindingSize: 1024 ** 3 } } as GPUDevice,
+                4_010_000,
+                1024 ** 3
+            );
+            const state = gpu.createSplatStreamGpuState(engine, 257, 16 * 1024 * 1024);
+            const beforeBatch = { allocated: state.ledger.allocatedBytes, held: state.ledger.heldBytes };
+            const batch = gpu.createSplatStreamDrawBatch(state, { _sampleCount: 1 });
+            const afterBatch = { allocated: state.ledger.allocatedBytes, held: state.ledger.heldBytes };
+            batch.destroy();
+            gpu.retireSplatStreamGpuState(state);
+            device.queue.submit([engine._currentEncoder.finish()]);
+            retirement.flushGpuResourceRetirements(engine);
+            await device.queue.onSubmittedWorkDone();
+            await Promise.resolve();
+            const retired = { allocated: state.ledger.allocatedBytes, held: state.ledger.heldBytes };
+            const error = await device.popErrorScope();
+            return { budgetedDemoCapacity, beforeBatch, afterBatch, retired, error: error?.message };
+        },
+        { moduleUrl: gpuModuleUrl, retirementUrl: retirementModuleUrl }
+    );
+    test.skip(result === null, "A WebGPU adapter is unavailable");
+    expect(result!.error).toBeUndefined();
+    expect(result!.budgetedDemoCapacity).toBe(4_010_000);
+    expect(result!.beforeBatch.allocated).toBeGreaterThan(0);
+    expect(result!.beforeBatch.held).toBeGreaterThan(0);
+    expect(result!.afterBatch.allocated).toBe(result!.beforeBatch.allocated + result!.beforeBatch.held);
+    expect(result!.afterBatch.held).toBe(0);
+    expect(result!.retired).toEqual({ allocated: 0, held: 0 });
+});
 
 test("isolates chunked gather and camera snapshots across two passes in one submission", async ({ page }) => {
     const result = await page.evaluate(async (moduleUrl) => {
@@ -759,11 +903,11 @@ test("protects gather descriptors under a full source ledger until the prior sub
         const device = await adapter.requestDevice();
         device.pushErrorScope("validation");
         const gpu = await import(moduleUrl);
+        const retirement = await import(new URL("../engine/gpu-resource-retirement.ts", new URL(moduleUrl, location.href)).href);
         let encoder = device.createCommandEncoder();
         const engine: {
             _device: GPUDevice;
             _currentEncoder: GPUCommandEncoder;
-            _flushGpuRetirements?: (engine: unknown) => void;
         } = { _device: device, _currentEncoder: encoder };
         const makeSource = (selector: number) => {
             const metadata = {
@@ -801,9 +945,7 @@ test("protects gather descriptors under a full source ledger until the prior sub
         batch.flush(engine);
         encoder.copyBufferToBuffer(state.canonical, 0, beforeRetirement, 0, 64);
         device.queue.submit([encoder.finish()]);
-        engine._flushGpuRetirements!(engine);
-        await device.queue.onSubmittedWorkDone();
-        await Promise.resolve();
+        await retirement.waitForGpuResourceRetirements(engine);
 
         encoder = device.createCommandEncoder();
         engine._currentEncoder = encoder;

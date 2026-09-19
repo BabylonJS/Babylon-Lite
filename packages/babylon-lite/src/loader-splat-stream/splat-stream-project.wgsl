@@ -23,16 +23,10 @@ struct ProjectParams {
     height: f32,
     near: f32,
 }
-struct DrawArgs {
-    vertexCount: u32,
-    instanceCount: atomic<u32>,
-    firstVertex: u32,
-    firstInstance: u32,
-}
 @group(0) @binding(0) var<storage, read> canonical: array<CanonicalSplat>;
 @group(0) @binding(1) var<storage, read_write> projected: array<ProjectedSplat>;
 @group(0) @binding(2) var<storage, read_write> keys: array<KeyIndex>;
-@group(0) @binding(3) var<storage, read_write> args: DrawArgs;
+@group(0) @binding(3) var<storage, read_write> valid: array<u32>;
 @group(0) @binding(4) var<uniform> params: ProjectParams;
 
 fn finite4(v: vec4<f32>) -> bool {
@@ -42,7 +36,7 @@ fn finite2(v: vec2<f32>) -> bool {
     return all(v == v) && all(abs(v) <= vec2<f32>(3.402823e38));
 }
 fn invalid(index: u32) {
-    keys[index] = KeyIndex(0xffffffffu, index);
+    valid[index] = 0u;
 }
 
 @compute @workgroup_size(256)
@@ -108,5 +102,5 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     }
     projected[index] = ProjectedSplat(clip, vec4<f32>(clipAxis0, 0.0, 0.0), vec4<f32>(clipAxis1, 0.0, 0.0), vec4<f32>(splat.color.xyz, splat.centerOpacity.w));
     keys[index] = KeyIndex(~bitcast<u32>(viewCenter.z), index);
-    atomicAdd(&args.instanceCount, 1u);
+    valid[index] = 1u;
 }

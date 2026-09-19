@@ -92,24 +92,42 @@ test.describe("Trogir actual stream", () => {
                     import(`${root}/loader-splat-stream/load-gaussian-splat-stream.ts`),
                     import(placementModule),
                 ]);
-                let projectResources: GPUBuffer[] | null = null;
+                let renderResources: readonly [GPUBuffer, GPUBuffer] | null = null;
                 let indirectBuffer: GPUBuffer | null = null;
+                let boundRenderResources: readonly [GPUBuffer, GPUBuffer] | null = null;
+                const renderBindGroups = new WeakMap<GPUBindGroup, readonly [GPUBuffer, GPUBuffer]>();
                 const originalCreateBindGroup = GPUDevice.prototype.createBindGroup;
+                const originalSetBindGroup = GPURenderPassEncoder.prototype.setBindGroup;
                 const originalDrawIndirect = GPURenderPassEncoder.prototype.drawIndirect;
                 type SourceState = { source: { url: string }; state: string; gpu?: unknown };
                 type GpuInterval = { source: unknown };
                 type LeafState = { visible: boolean; target: { lod: number }; displayed: { lod: number } | null };
+                type SetBindGroupArgs =
+                    | [index: number, bindGroup: GPUBindGroup | null]
+                    | [index: number, bindGroup: GPUBindGroup | null, dynamicOffsets: Iterable<number>]
+                    | [index: number, bindGroup: GPUBindGroup | null, dynamicOffsetsData: Uint32Array, dynamicOffsetsDataStart: number, dynamicOffsetsDataLength: number];
                 GPUDevice.prototype.createBindGroup = function (descriptor): GPUBindGroup {
                     const entries = Array.from(descriptor.entries);
-                    if (entries.length === 5 && "buffer" in entries[4]!.resource && entries[4]!.resource.size === 192) {
-                        projectResources = entries
-                            .map((entry) => ("buffer" in entry.resource ? entry.resource.buffer : null))
-                            .filter((buffer): buffer is GPUBuffer => buffer !== null);
+                    const bindGroup = originalCreateBindGroup.call(this, descriptor);
+                    const buffers = entries.map((entry) => ("buffer" in entry.resource ? entry.resource.buffer : null)).filter((buffer): buffer is GPUBuffer => buffer !== null);
+                    if (entries.length === 2 && buffers.length === 2) {
+                        renderBindGroups.set(bindGroup, [buffers[0]!, buffers[1]!]);
                     }
-                    return originalCreateBindGroup.call(this, descriptor);
+                    return bindGroup;
                 };
+                GPURenderPassEncoder.prototype.setBindGroup = function (this: GPURenderPassEncoder, ...args: SetBindGroupArgs): undefined {
+                    const [index, bindGroup] = args;
+                    if (index === 1) {
+                        boundRenderResources = bindGroup ? (renderBindGroups.get(bindGroup) ?? null) : null;
+                    }
+                    (originalSetBindGroup as unknown as (this: GPURenderPassEncoder, ...originalArgs: SetBindGroupArgs) => undefined).apply(this, args);
+                    return undefined;
+                } as typeof originalSetBindGroup;
                 GPURenderPassEncoder.prototype.drawIndirect = function (buffer, offset): undefined {
-                    indirectBuffer = buffer;
+                    if (boundRenderResources) {
+                        renderResources = boundRenderResources;
+                        indirectBuffer = buffer;
+                    }
                     originalDrawIndirect.call(this, buffer, offset);
                     return undefined;
                 };
@@ -249,15 +267,15 @@ test.describe("Trogir actual stream", () => {
                     }> => {
                         engineModule.renderFrame(engine, 16);
                         await engine._device.queue.onSubmittedWorkDone();
-                        const resources = projectResources;
+                        const resources = renderResources;
                         const indirectSource = indirectBuffer;
                         if (!resources || !indirectSource) {
-                            throw new Error("Streaming projection resources were not observed");
+                            throw new Error("Streaming draw resources were not observed");
                         }
                         const indirect = new Uint32Array(await read(indirectSource, 16));
                         const active = stream!._gpu.count;
-                        const keys = new Uint32Array(await read(resources[2]!, active * 8));
-                        const projected = new Float32Array(await read(resources[1]!, active * 64));
+                        const keys = new Uint32Array(await read(resources[1], active * 8));
+                        const projected = new Float32Array(await read(resources[0], active * 64));
                         const seen = new Uint8Array(active);
                         let invalidPrefix = 0;
                         let duplicates = 0;
@@ -334,6 +352,7 @@ test.describe("Trogir actual stream", () => {
                     };
                 } finally {
                     GPUDevice.prototype.createBindGroup = originalCreateBindGroup;
+                    GPURenderPassEncoder.prototype.setBindGroup = originalSetBindGroup;
                     GPURenderPassEncoder.prototype.drawIndirect = originalDrawIndirect;
                     engineModule.stopEngine(engine);
                     if (stream) {

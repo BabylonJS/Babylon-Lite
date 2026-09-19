@@ -438,7 +438,7 @@ struct ProjectedSplat {
 }
 ```
 
-Projection writes each record at its deterministic active input index. Culled records remain unspecified and receive a sentinel key.
+Projection writes each surviving record at its deterministic active input index. Culled records and their sparse key slots remain unspecified and receive validity zero.
 
 ### Sort and indirect records
 
@@ -446,13 +446,29 @@ Projection writes each record at its deterministic active input index. Culled re
 struct KeyIndex { key: u32, index: u32 } // 8 bytes
 struct DrawIndirectArgs {
     vertexCount: u32,   // always 6
-    instanceCount: u32, // GPU valid counter
+    instanceCount: u32, // GPU survivor count
     firstVertex: u32,   // 0
     firstInstance: u32, // 0
 }
 ```
 
-The projection pass initializes every key to `0xffffffff`; valid positive view depths use `~bitcast<u32>(depth)` so ascending unsigned order is far-to-near. The indirect instance count is reset to zero, then atomically incremented only by valid projections. Runtime never reads it back.
+Projection writes one validity flag and one sparse `(key, canonicalIndex)` pair at each active canonical index. Valid positive view depths use `~bitcast<u32>(depth)` so ascending unsigned order is far-to-near. Invalid projections write flag zero and need not initialize their sparse pair. The 64-byte projected cache remains indexed by canonical ID; it is never physically compacted and therefore needs no second 256 MiB cache at four-million capacity.
+
+After projection, a stable GPU compaction scans the validity flags in original canonical order and scatters surviving key/index pairs into a dense prefix. The scan is a hierarchical 256-lane exclusive Blelloch scan: level zero scans flags, each higher level scans the previous level's block sums, and reverse add passes propagate parent offsets. A survivor at canonical index `i` writes to `exclusivePrefix[i]`, so pre-sort order is strictly ascending canonical index across workgroups. Equal depth keys therefore retain the same deterministic original-ID tie order as the previous full-pool stable radix sort. Compaction never rewrites projected records; dense pairs continue to reference their original projected/canonical IDs.
+
+A fixed one-invocation setup reads the compact scan's root total and writes:
+
+```text
+runtime[0] = survivorCount
+drawIndirect = { vertexCount: 6, instanceCount: survivorCount, firstVertex: 0, firstInstance: 0 }
+dispatch[0] = { x: ceil(survivorCount / 256), y: 1, z: 1 } // histogram and scatter
+dispatch[1 + level] = { x: max(1, ceil(levelItemCount / 256)), y: 16, z: 1 } // radix scans
+dispatch[1 + levelCount + childLevel] = { x: ceil(childCount / 256), y: 16, z: 1 } // radix adds
+```
+
+`levelCount` starts at `ceil(survivorCount / 256)` and recursively applies `ceil(n / 256)`. Scan dispatches use at least one workgroup so zero survivors overwrite every root total with zero; histogram, add, and scatter dispatch zero work when their GPU-derived count is zero. The runtime/dispatch buffer has `STORAGE | INDIRECT | COPY_SRC | COPY_DST` usage and is pass-local; `COPY_DST` permits an explicit pre-projection reset so an empty active pool cannot reuse prior-frame counts. Production never maps or reads survivor counts.
+
+Compaction adds exactly two `u32` arrays per admitted pass capacity: one validity flag and one exclusive prefix, or 8 bytes per capacity entry (32,080,000 bytes at the demo's 4,010,000-splat capacity). A 128-byte survivor/dispatch buffer and one 64-byte nonaliasing binding placeholder complete the added fixed allocation. The hierarchical compaction scan reuses radix scratch before histogram overwrites it. All 32,080,192 added bytes participate in initial pass hold, allocation admission, partial-failure unwind, and fenced retirement; the existing 1 GiB demo ledger still admits the unchanged 4,010,000 capacity while its mutable startup target is 1,200,000.
 
 ## Compute Pipelines
 
@@ -462,7 +478,7 @@ One dispatch per active source/range group reads the five source textures and co
 
 Gather parameters use a distinct 256-byte dynamic-uniform slot per recorded dispatch. Rewriting one uniform location between encoded dispatches is forbidden.
 
-The shader applies the exact SOG decode, covariance, and handedness math above. Invalid quaternion selectors or nonfinite results write opacity zero; projection later emits a sentinel.
+The shader applies the exact SOG decode, covariance, and handedness math above. Invalid quaternion selectors or nonfinite results write opacity zero; projection later emits validity zero.
 
 ### Projection, ellipse, culling, and keys
 
@@ -489,30 +505,31 @@ For `abs(b) + abs(lambda0-a) > epsilon`, normalize `(b, lambda0-a)`; otherwise c
 Ellipse axes use `min(sqrt(2 * lambda), 1024)` pixels independently for the major and minor lengths, matching Lite's existing saturation convention. They are converted to clip offsets as `pixelAxis * clip.w / viewport`; the viewport normalization has no additional factor of two. Both clip axes must remain finite before conservative offscreen culling includes their combined extents. The center-domain guard and axis saturation are reference-equivalence limits of the established Lite Gaussian projection, not dataset-specific decoder or covariance changes.
 
 7. write the projected record at the active index;
-8. write `(depthKey, activeIndex)`;
-9. atomically increment indirect instance count.
+8. write `(depthKey, activeIndex)` and validity one at that same sparse index.
+
+The post-projection compaction then produces the dense live key prefix and the GPU survivor count. Projection still evaluates every active canonical record and does not change visibility, opacity, clipping, covariance, or depth-key math.
 
 The raster kernel remains Lite-compatible: generated billboard corners span `[-2,2]`; fragment alpha is `exp(-dot(corner,corner)) * opacity`; fragments outside radius 2 are discarded. The covariance factor, 0.3 kernel, `sqrt(2*lambda)` axes, corner range, and exponent are a single convention and must not be mixed with another engine's focal/kernel normalization.
 
 ### Portable stable 32-bit radix sort
 
-Sort includes all active records, including invalid sentinels. Valid records sort first, so the GPU indirect count draws the sorted valid prefix without compaction readback.
+Sort consumes only the compacted survivor prefix. No invalid sentinel enters radix input, and no stale suffix from an earlier larger frame can affect histogram totals, scatter destinations, or draw order.
 
 Use 4 bits per pass, 16 digits, eight least-significant-digit passes, 256 items per workgroup:
 
-1. **Histogram:** each group writes 16 digit counts. Workgroup atomics are permitted only for counts.
+1. **Histogram:** each indirectly dispatched live group writes 16 digit counts. Workgroup atomics are permitted only for counts.
 2. **Hierarchical scan:** exclusive-scan each digit's group counts in 256-element blocks using Blelloch upsweep/downsweep in workgroup memory. Recursively scan block sums until one block remains, then add scanned block bases on the way down. Non-power-of-two tails load zero. A 16-element scan of digit totals supplies global digit bases.
    At every hierarchy level, digit rows use the allocation-capacity stride, not the active-count stride. Runtime-sized block sums are copied digit-by-digit into the next level's capacity-strided rows. The digit-base pass reads each root total at `digit * root.blocks`, where `root.blocks` is the selected level's allocation-capacity sum-row stride even when the active hierarchy collapses to level zero. This is required when capacity greatly exceeds the current active count, whether the active scan uses one hierarchy level or several.
 
-3. **Stable scatter:** each invocation computes its stable within-group rank by counting equal digits among earlier workgroup lanes from a shared digit array. It writes to:
+3. **Stable scatter:** each indirectly dispatched invocation computes its stable within-group rank by counting equal digits among earlier workgroup lanes from a shared digit array. It writes to:
 
 ```text
 digitBase[digit] + scannedGroupCount[group,digit] + localStableRank
 ```
 
-This bounded 256-lane local operation avoids nondeterministic atomic scatter, subgroup assumptions, inter-workgroup spin waiting, and a single-thread global scan. Ping-pong buffers alternate every pass. Stable active input order plus stable passes makes equal keys deterministic.
+This bounded 256-lane local operation avoids nondeterministic atomic scatter, subgroup assumptions, inter-workgroup spin waiting, and a single-thread global scan. Ping-pong buffers alternate every pass. Stable compacted canonical-ID order plus stable passes makes equal keys deterministic.
 
-Every pass has an immutable parameter record at a distinct 256-byte uniform offset. Histogram and scan buffer sizes derive from admitted capacity and are checked against device dispatch and storage limits. Counts 0 and 1 take explicit no-dispatch/copy paths and still reset indirect args.
+Every pass has an immutable parameter record at a distinct 256-byte uniform offset. Histogram, every hierarchy scan, every reverse add, and scatter use `dispatchWorkgroupsIndirect` with the GPU-produced survivor count; only compaction over the known active projection pool, the one-invocation runtime setup, and the 16-lane digit-base pass use direct dispatch. Histogram and scan buffer sizes derive from admitted capacity and are checked against device dispatch and storage limits. Zero, singleton, partial, non-multiple-of-256, and all-survivor counts use the same path. Zero survivors reset draw args and scan roots, while visible-to-zero-to-visible transitions cannot reuse stale rows or stale indirect dimensions.
 
 ## Render Pipeline Configuration
 
@@ -552,7 +569,7 @@ render pass begins
 one indirect draw
 ```
 
-The batch never retains, finishes, or separately submits the active encoder. Distinct camera/target bindings own distinct projection/sort resources so one pass cannot overwrite another pass's pending records. Gather parameters are immutable submission-local mapped buffers, chunked in at most 4,096 dynamic-offset records and retired after the referencing submission; recording another pass or encoder cannot rewrite an earlier dispatch's snapshot, and valid active interval counts above 4,096 remain supported. Shared source textures and canonical content remain stream-owned.
+The batch never retains, finishes, or separately submits the active encoder. Distinct camera/target bindings own distinct projected caches, validity/prefix buffers, compaction/radix scratch, survivor/runtime dispatch arguments, and draw arguments so one pass cannot overwrite another pass's pending records. Gather parameters are immutable submission-local mapped buffers, chunked in at most 4,096 dynamic-offset records and retired after the referencing submission; recording another pass or encoder cannot rewrite an earlier dispatch's snapshot, and valid active interval counts above 4,096 remain supported. Shared source textures and canonical content remain stream-owned. Every added pass-local buffer is included in admission accounting, destroyed on partial allocation failure, and retired exactly once with its owning pass.
 
 Publication is one transaction over the aggregate display. Every GPU-ready reduction is staged without an intermediate per-leaf fit gate and applied to a scratch count before capacity is checked, even when no single reduction gets an already-over-capacity intermediate below the limit. Only after the complete reduced generation fits are affordable upgrades admitted. Logical displayed descriptors change only for the admitted set. A capacity-rejected resident fine target is removed from pending cache protection even when a coarse representation is already displayed. For an uncovered leaf, fallback search walks every successively cheaper resident alternative and publishes the first one that fits the actual aggregate after committed reductions; a resident but still-unaffordable intermediate fallback cannot hide a cheaper admissible representation. After the final admission pass, every unpublished capacity-rejected upgrade loses pending protection. Active canonical sources stay protected while missing downgrade prerequisites load. Unmet resident aggregate targets set persistent generation pressure independently of pending cache protection, reported as `budget-limited` until the target publishes or camera demand withdraws it, including when the current display itself is below capacity.
 
@@ -681,6 +698,7 @@ Every cache is lazy and device-keyed. Importing the root exports performs no wor
 - gather interval offset mapping and same-file multiple leaves;
 - projection using Lite's real reverse-Z perspective: negative/eye/near-boundary/positive depths, large behind-eye ellipses, camera/world translation and rotation, sentinel ordering, and indirect reset after an all-culled frame;
 - radix counts 0, 1, equal keys, sentinels, near-identical depths, non-power-of-two tails, 255/256/257 items, 65,536 hierarchy boundary, active-count collapse at capacity 500,000, stale-row recovery, and multiple passes;
+- survivor compaction verifies dense prefixes without invalid sentinels, GPU count-driven dispatch dimensions, strict equal-depth canonical-ID ties across workgroups, and zero-to-many-to-one-to-zero transitions;
 - actual material `bind` calls preserve distinct stable selection identities for separate views;
 - actual WGSL pipeline compilation and GPU readback only in tests.
 

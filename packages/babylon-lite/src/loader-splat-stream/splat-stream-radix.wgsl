@@ -17,9 +17,21 @@ struct Params {
 @group(0) @binding(4) var<storage, read_write> sums: array<u32>;
 @group(0) @binding(5) var<storage, read_write> digitBases: array<u32>;
 @group(0) @binding(6) var<uniform> params: Params;
+@group(0) @binding(7) var<storage, read> runtime: array<u32>;
 var<workgroup> histogram: array<atomic<u32>, 16>;
 var<workgroup> scanData: array<u32, 256>;
 var<workgroup> digits: array<u32, 256>;
+
+fn runtimeCount() -> u32 {
+    return runtime[0];
+}
+fn runtimeGroups(level: u32) -> u32 {
+    var count = (runtimeCount() + 255u) / 256u;
+    for (var index = 0u; index < level; index++) {
+        count = (count + 255u) / 256u;
+    }
+    return count;
+}
 
 @compute @workgroup_size(256)
 fn histogramMain(@builtin(local_invocation_id) local: vec3<u32>, @builtin(workgroup_id) group: vec3<u32>) {
@@ -28,7 +40,7 @@ fn histogramMain(@builtin(local_invocation_id) local: vec3<u32>, @builtin(workgr
     }
     workgroupBarrier();
     let index = group.x * 256u + local.x;
-    if (index < params.count) {
+    if (index < runtimeCount()) {
         let digit = (input[index].key >> params.shift) & 15u;
         atomicAdd(&histogram[digit], 1u);
     }
@@ -43,8 +55,9 @@ fn scanMain(@builtin(local_invocation_id) local: vec3<u32>, @builtin(workgroup_i
     let block = group.x;
     let digit = group.y;
     let index = block * 256u + local.x;
+    let groups = runtimeGroups(params.groups);
     scanData[local.x] = 0u;
-    if (index < params.groups) {
+    if (index < groups) {
         scanData[local.x] = values[digit * params.stride + index];
     }
     workgroupBarrier();
@@ -74,7 +87,7 @@ fn scanMain(@builtin(local_invocation_id) local: vec3<u32>, @builtin(workgroup_i
         }
         workgroupBarrier();
     }
-    if (index < params.groups) {
+    if (index < groups) {
         scanned[digit * params.stride + index] = scanData[local.x];
     }
 }
@@ -83,7 +96,8 @@ fn scanMain(@builtin(local_invocation_id) local: vec3<u32>, @builtin(workgroup_i
 fn addMain(@builtin(global_invocation_id) id: vec3<u32>) {
     let index = id.x;
     let digit = id.y;
-    if (index >= params.groups) {
+    let groups = runtimeGroups(params.groups);
+    if (index >= groups) {
         return;
     }
     let block = index / 256u;
@@ -108,7 +122,7 @@ fn basesMain(@builtin(local_invocation_id) local: vec3<u32>) {
 @compute @workgroup_size(256)
 fn scatterMain(@builtin(local_invocation_id) local: vec3<u32>, @builtin(workgroup_id) group: vec3<u32>) {
     let index = group.x * 256u + local.x;
-    let valid = index < params.count;
+    let valid = index < runtimeCount();
     var digit = 16u;
     if (valid) {
         digit = (input[index].key >> params.shift) & 15u;
