@@ -1,5 +1,5 @@
 import { distanceToComparisonBound, intersectsComparisonFrustum, transformTrogirManifestBound } from "./splat-lod-comparison-geometry.ts";
-import { classifySplatLodOutcome, countSplatLodTargetDisplayGaps, waitForSplatLodDeadline } from "../../../../scripts/splat-lod-comparison-outcome.ts";
+import { classifySplatLodOutcome, countSplatLodTargetDisplayGaps, readSplatLodJsonResponse, waitForSplatLodDeadline } from "./splat-lod-comparison-outcome.ts";
 
 const PLAYCANVAS_URL = "https://cdn.jsdelivr.net/npm/playcanvas@2.22.1/build/playcanvas.mjs";
 const EXPECTED_VERSION = "2.22.1";
@@ -112,7 +112,7 @@ function sourceState(octree, loader, url, fileIndex) {
     return "unrequested";
 }
 
-async function createReference(options, deadline) {
+async function createReference(options, deadline, initialWaypoint) {
     let app = null;
     let device = null;
     try {
@@ -123,11 +123,14 @@ async function createReference(options, deadline) {
         if (!navigator.gpu) {
             throw new Error("PlayCanvas comparison requires WebGPU");
         }
-        const response = await waitForSplatLodDeadline(fetch(options.assetUrl), deadline, "PlayCanvas manifest request");
+        const manifestController = new AbortController();
+        const response = await waitForSplatLodDeadline(fetch(options.assetUrl, { signal: manifestController.signal }), deadline, "PlayCanvas manifest request", undefined, () =>
+            manifestController.abort()
+        );
         if (!response.ok) {
             throw new Error(`PlayCanvas manifest HTTP ${response.status}`);
         }
-        const manifest = await response.json();
+        const manifest = await readSplatLodJsonResponse(response, deadline, "PlayCanvas manifest body", manifestController);
         const rawLeaves = [];
         collectLeaves(manifest.tree, "tree", rawLeaves);
         const canvas = document.createElement("canvas");
@@ -229,7 +232,6 @@ async function createReference(options, deadline) {
         };
         app.systems.gsplat.on("frame:ready", onReady);
         app.autoRender = true;
-        app.start();
         const setPose = (pose) => {
             const position = new pc.Vec3(pose.eye[0], pose.eye[1], -pose.eye[2]);
             const target = new pc.Vec3(pose.target[0], pose.target[1], -pose.target[2]);
@@ -237,6 +239,8 @@ async function createReference(options, deadline) {
             camera.lookAt(target, new pc.Vec3(0, 1, 0));
             app.renderNextFrame = true;
         };
+        setPose(requestedPose(initialWaypoint, overviewTarget(manifest)));
+        app.start();
         const snapshot = (pose) => {
             const current = context();
             if (!current) {
@@ -349,14 +353,18 @@ export async function runPlayCanvasLodComparison(options, emit) {
     let reference = null;
     const summaries = [];
     const { waypoints, ...settings } = options;
+    const initializationStartedAt = performance.now();
     try {
-        reference = await createReference(options, performance.now() + options.timeoutMs);
+        reference = await createReference(options, initializationStartedAt + options.timeoutMs, waypoints[0]);
         const center = overviewTarget(reference.manifest);
-        for (const waypoint of waypoints) {
-            const sampleSequence = waypoint.name.includes("return") || waypoint.name.includes("repeat") ? "warm" : options.sequence;
+        for (let waypointIndex = 0; waypointIndex < waypoints.length; waypointIndex++) {
+            const waypoint = waypoints[waypointIndex];
+            const sampleSequence = waypointIndex === 0 ? "cold" : "warm";
             const pose = requestedPose(waypoint, center);
-            reference.setPose(pose);
-            const startedAt = performance.now();
+            if (waypointIndex > 0) {
+                reference.setPose(pose);
+            }
+            const startedAt = waypointIndex === 0 ? initializationStartedAt : performance.now();
             let changedAt = startedAt;
             let emittedAt = -Infinity;
             let previousFingerprint = "";

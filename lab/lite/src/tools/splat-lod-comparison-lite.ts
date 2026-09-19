@@ -12,15 +12,8 @@ import {
     stopEngine,
 } from "babylon-lite";
 import type { ArcRotateCamera, GaussianSplatStream } from "babylon-lite";
-import type {
-    SplatLodCameraRecord,
-    SplatLodComparisonOptions,
-    SplatLodLeafRecord,
-    SplatLodRunSummary,
-    SplatLodSampleRecord,
-    SplatLodWaypoint,
-} from "../../../../scripts/splat-lod-comparison-types";
-import { classifySplatLodOutcome, countSplatLodTargetDisplayGaps, waitForSplatLodDeadline } from "../../../../scripts/splat-lod-comparison-outcome";
+import type { SplatLodCameraRecord, SplatLodComparisonOptions, SplatLodLeafRecord, SplatLodRunSummary, SplatLodSampleRecord, SplatLodWaypoint } from "./splat-lod-comparison-types";
+import { classifySplatLodOutcome, countSplatLodTargetDisplayGaps, observeSplatLodGpuDevice, waitForSplatLodDeadline } from "./splat-lod-comparison-outcome";
 import { transformStreamBound } from "../../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-selection";
 import type { StreamLeafRuntime, StreamRepresentation } from "../../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-types";
 import { placeTrogirStream } from "../demos/trogir-streaming-placement";
@@ -121,7 +114,7 @@ function leafRecord(
         nativeVisible: state.visible,
         distance: distanceToComparisonBound(eye, comparisonBound),
         targetLod: commonVisible ? representationLod(state.target) : null,
-        requestedLod: commonVisible ? representationLod(state.target) : null,
+        requestedLod: null,
         displayedLod: commonVisible ? (displayed?.lod ?? null) : null,
         resolvedLods: commonVisible && displayed ? [displayed.lod] : [],
         targetCount: commonVisible ? state.target.count : null,
@@ -188,12 +181,15 @@ export async function runLiteLodComparison(options: SplatLodComparisonOptions, e
     canvas.style.width = `${options.width}px`;
     canvas.style.height = `${options.height}px`;
     document.body.replaceChildren(canvas);
-    const deadline = performance.now() + options.timeoutMs;
+    const initializationStartedAt = performance.now();
+    const deadline = initializationStartedAt + options.timeoutMs;
     let engine: Awaited<ReturnType<typeof createEngine>> | null = null;
     let scene: ReturnType<typeof createSceneContext> | null = null;
     let stream: GaussianSplatStream | null = null;
-    let gpuErrorHandler: ((event: GPUUncapturedErrorEvent) => void) | null = null;
+    let stopGpuObservation: (() => void) | null = null;
     const gpuErrors: string[] = [];
+    let readinessError: string | null = null;
+    let tearingDown = false;
     const summaries: SplatLodRunSummary["waypoints"][number][] = [];
     try {
         const capacity = options.maxSplats + 10_000;
@@ -208,11 +204,7 @@ export async function runLiteLodComparison(options: SplatLodComparisonOptions, e
             "Babylon Lite engine initialization",
             disposeEngine
         );
-        gpuErrorHandler = (event): void => {
-            event.preventDefault();
-            gpuErrors.push(event.error.message);
-        };
-        engine._device.addEventListener("uncapturederror", gpuErrorHandler);
+        stopGpuObservation = observeSplatLodGpuDevice(engine._device, (message) => gpuErrors.push(message));
         scene = createSceneContext(engine);
         stream = await waitForSplatLodDeadline(
             loadGaussianSplatStream(engine, options.assetUrl, {
@@ -230,21 +222,29 @@ export async function runLiteLodComparison(options: SplatLodComparisonOptions, e
                 }
             }
         );
+        void stream.firstFrameReady.catch((reason: unknown) => {
+            if (!tearingDown) {
+                readinessError = reason instanceof Error ? reason.message : String(reason);
+            }
+        });
         const overview = placeTrogirStream(stream);
         const overviewTarget: readonly [number, number, number] = [overview.x, overview.y, overview.z];
         const camera = createArcRotateCamera(-Math.PI / 2, 1.16, 260, overview);
+        let requestedCamera = setCameraPose(camera, options.waypoints[0]!, overviewTarget);
         scene.camera = camera;
         attachGaussianSplatStream(scene, stream);
         await waitForSplatLodDeadline(registerScene(scene), deadline, "Babylon Lite scene registration");
         await waitForSplatLodDeadline(startEngine(engine), deadline, "Babylon Lite engine start");
-        await waitForSplatLodDeadline(stream.firstFrameReady, deadline, "Babylon Lite first frame");
         const paths = leafPaths(stream);
         const activeStream = stream;
-        for (const waypoint of options.waypoints) {
-            const sampleSequence = waypoint.name.includes("return") || waypoint.name.includes("repeat") ? "warm" : options.sequence;
-            const requestedCamera = setCameraPose(camera, waypoint, overviewTarget);
+        for (let waypointIndex = 0; waypointIndex < options.waypoints.length; waypointIndex++) {
+            const waypoint = options.waypoints[waypointIndex]!;
+            const sampleSequence = waypointIndex === 0 ? "cold" : "warm";
+            if (waypointIndex > 0) {
+                requestedCamera = setCameraPose(camera, waypoint, overviewTarget);
+            }
             const requestedTarget = requestedCamera.requestedTarget;
-            const startedAt = performance.now();
+            const startedAt = waypointIndex === 0 ? initializationStartedAt : performance.now();
             let changedAt = startedAt;
             let emittedAt = -Infinity;
             let previousFingerprint = "";
@@ -256,7 +256,7 @@ export async function runLiteLodComparison(options: SplatLodComparisonOptions, e
                 const leaves = activeStream._leafStates.map((state) => leafRecord(activeStream, paths, state, actualEye, requestedTarget, options.width / options.height));
                 const gapLeaves = countSplatLodTargetDisplayGaps(leaves);
                 const pressure = stream.stats.phase === "budget-limited";
-                const error = gpuErrors[0] ?? stream.stats.error?.message ?? null;
+                const error = gpuErrors[0] ?? readinessError ?? stream.stats.error?.message ?? null;
                 const cameraRecord: SplatLodCameraRecord = {
                     ...requestedCamera,
                     actualWorldMatrix: Array.from(camera.worldMatrix),
@@ -308,6 +308,11 @@ export async function runLiteLodComparison(options: SplatLodComparisonOptions, e
                     await emit(final);
                     emittedAt = now;
                 }
+                const acceptedError = gpuErrors[0] ?? readinessError ?? stream.stats.error?.message ?? null;
+                if (disposition !== "sampling" && disposition !== "failed" && acceptedError) {
+                    final = { ...final, disposition: "failed", error: acceptedError };
+                    await emit(final);
+                }
                 if (disposition !== "sampling") {
                     break;
                 }
@@ -354,9 +359,8 @@ export async function runLiteLodComparison(options: SplatLodComparisonOptions, e
             waypoints: summaries,
         };
     } finally {
-        if (engine && gpuErrorHandler) {
-            engine._device.removeEventListener("uncapturederror", gpuErrorHandler);
-        }
+        tearingDown = true;
+        stopGpuObservation?.();
         if (engine) {
             stopEngine(engine);
         }

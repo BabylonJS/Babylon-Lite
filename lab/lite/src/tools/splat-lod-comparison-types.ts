@@ -6,6 +6,10 @@ export interface SplatLodWaypoint {
     readonly pitchDegrees?: number;
 }
 
+export function formatSplatLodRuntimeError(engine: string, message: string): string {
+    return `${engine} browser runtime error: ${message}`;
+}
+
 export interface SplatLodComparisonOptions {
     readonly codeRevision: string;
     readonly workingTreeDirty: boolean;

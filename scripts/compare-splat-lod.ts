@@ -9,7 +9,8 @@ import {
     type SplatLodRunSummary,
     type SplatLodSampleRecord,
     type SplatLodWaypoint,
-} from "./splat-lod-comparison-types";
+} from "../lab/lite/src/tools/splat-lod-comparison-types";
+import { createSplatLodRuntimeFailureGate, settleSplatLodRuntimeLifecycle } from "../lab/lite/src/tools/splat-lod-comparison-outcome";
 
 const DEFAULT_ASSET_URL = "https://assets.babylonjs.com/splats/Trogir/lod-meta.json";
 const SUPPORTED_OPTIONS = new Set([
@@ -139,17 +140,56 @@ async function runAdapter(url: string, engine: "lite" | "playcanvas", options: S
         headless: option("headed") !== "true",
         args: ["--force-color-profile=srgb", "--enable-unsafe-webgpu"],
     });
+    let page;
     try {
-        const page = await browser.newPage({ viewport: { width: options.width, height: options.height }, deviceScaleFactor: options.dpr });
-        const runtimeErrors: string[] = [];
-        page.on("pageerror", (error) => runtimeErrors.push(`pageerror: ${error.message}`));
+        page = await browser.newPage({ viewport: { width: options.width, height: options.height }, deviceScaleFactor: options.dpr });
+    } catch (reason) {
+        await browser.close().catch(() => undefined);
+        throw reason;
+    }
+    const firstWaypoint = options.waypoints[0]!;
+    const initializationEye = firstWaypoint.eye ?? ([0, 0, 0] as const);
+    const initializationRecord: SplatLodSampleRecord = {
+        type: "sample",
+        schemaVersion: 1,
+        engine: engine === "lite" ? "babylon-lite" : "playcanvas",
+        engineVersion: "initializing",
+        sequence: "cold",
+        profile: options.profile,
+        waypoint: firstWaypoint.name,
+        elapsedMs: 0,
+        phase: "initializing",
+        disposition: "sampling",
+        queuedFiles: 0,
+        pendingRequests: 0,
+        selectedSplats: 0,
+        activeSplats: 0,
+        residentGpuBytes: null,
+        allocatedGpuBytes: null,
+        pressure: false,
+        error: null,
+        camera: {
+            requestedEye: initializationEye,
+            requestedTarget: firstWaypoint.target ?? initializationEye,
+            actualWorldMatrix: [],
+            fov: 0.8,
+            near: 0.1,
+            far: 1500,
+            viewport: [options.width, options.height],
+            dpr: options.dpr,
+        },
+        leaves: [],
+    };
+    const gate = createSplatLodRuntimeFailureGate(engine, (record) => appendFileSync(jsonlPath, `${JSON.stringify(record)}\n`), initializationRecord);
+    const operation = (async (): Promise<SplatLodRunSummary> => {
+        page.on("pageerror", (error) => gate.fail(`pageerror: ${error.message}`));
         page.on("console", (message) => {
             if (message.type() === "error") {
-                runtimeErrors.push(`console: ${message.text()}`);
+                gate.fail(`console: ${message.text()}`);
             }
         });
         await page.exposeFunction("__emitSplatLodRecord", (record: SplatLodSampleRecord) => {
-            appendFileSync(jsonlPath, `${JSON.stringify(record)}\n`);
+            gate.accept(record);
         });
         await page.goto(url, { waitUntil: "domcontentloaded" });
         const adapterPath = engine === "lite" ? "lab/lite/src/tools/splat-lod-comparison-lite.ts" : "lab/lite/src/tools/splat-lod-comparison-playcanvas.mjs";
@@ -161,6 +201,7 @@ async function runAdapter(url: string, engine: "lite" | "playcanvas", options: S
         let timeout: ReturnType<typeof setTimeout> | undefined;
         const summary = await Promise.race([
             evaluation,
+            gate.failure,
             new Promise<never>((_, reject) => {
                 timeout = setTimeout(() => reject(new Error(`${engine} page evaluation timed out after ${evaluationTimeoutMs} ms`)), evaluationTimeoutMs);
             }),
@@ -169,14 +210,9 @@ async function runAdapter(url: string, engine: "lite" | "playcanvas", options: S
                 clearTimeout(timeout);
             }
         });
-        await page.waitForTimeout(0);
-        if (runtimeErrors.length > 0) {
-            throw new Error(`${engine} browser runtime error(s): ${runtimeErrors.join(" | ")}`);
-        }
         return summary;
-    } finally {
-        await browser.close();
-    }
+    })();
+    return settleSplatLodRuntimeLifecycle(operation, () => browser.close(), gate.failure);
 }
 
 function humanSummary(summaries: readonly SplatLodRunSummary[]): string {
