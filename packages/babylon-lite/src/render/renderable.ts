@@ -79,6 +79,11 @@ export interface Renderable {
     _worldCenter?: [number, number, number];
     /** @internal Material reference at build time — for detecting material swaps. */
     _lastMaterial?: any;
+    /** @internal Generation of the forward state this renderable was built for: the material's render-feature
+     *  object (replaced whenever `rebuildMaterial` invalidates it) and the mesh capability bits. Lets a pass
+     *  that derives its own renderable from the forward context (the PBR geometry renderer) tell a current
+     *  forward build from retained make-before-break output. Stamped by the PBR group builder. */
+    _gen?: readonly [unknown, number];
     /** @internal Owner-provided sink for cached resources that outlive individual bind() generations. */
     _lifetimeDisposers?: (() => void)[];
     /** @internal Rebuilds this renderable on a replacement device after device loss.

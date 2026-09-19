@@ -15,6 +15,7 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import { createRenderTarget, type RenderTarget, type RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
 import { _installMeshBlendingGeometrySupport } from "../../../packages/babylon-lite/src/frame-graph/geometry-mesh-blending";
 import { createGeometryRendererTask } from "../../../packages/babylon-lite/src/frame-graph/geometry-renderer-task";
+import { _computeMeshFeatures } from "../../../packages/babylon-lite/src/material/mesh-features";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 import { buildNodeGeometryRenderable } from "../../../packages/babylon-lite/src/material/node/node-geometry-renderable";
 import { loadNodeBlockEmitterWithGeometry } from "../../../packages/babylon-lite/src/material/node/node-geometry-block-loader";
@@ -937,6 +938,31 @@ describe("GeometryRendererTask", () => {
         _createPbrGeometryView: ((source: unknown, config: unknown) => { _buildGroup: { _rebuildSingle?: unknown } }) | null;
     };
 
+    type ForwardRenderable = { mesh?: LateMesh; _gen?: readonly [unknown, number] };
+
+    /** What the forward PBR build tracks for a mesh when it completes: a renderable stamped with the material
+     *  render-feature object and the mesh capability bits it was built for. */
+    function forwardRenderableFor(mesh: LateMesh): ForwardRenderable {
+        return { mesh, _gen: [(mesh.material as { _renderFeatures?: unknown })._renderFeatures, _computeMeshFeatures(mesh)] };
+    }
+
+    /** Swap the PBR view's renderable builder for a recording one: the real PBR geometry renderable needs the
+     *  composed scene shader, which the mocked device cannot provide. */
+    function recordPbrGeometryBuilds(state: LateState): unknown[] {
+        const realFactory = state._createPbrGeometryView!;
+        const builtFor: unknown[] = [];
+        state._createPbrGeometryView = (source, viewConfig) => {
+            const view = realFactory(source, viewConfig);
+            view._buildGroup._rebuildSingle = (_scene: unknown, mesh: unknown) => {
+                builtFor.push(mesh);
+                const renderable = { mesh, isTransparent: false, order: 0, bind: () => ({ renderable, pipeline: {}, draw: () => 1 }) };
+                return renderable;
+            };
+            return view;
+        };
+        return builtFor;
+    }
+
     async function addLatePbrMesh(existingContext: boolean) {
         const setup = await setupGeoTask(1);
         const { scene, internal, meshes } = setup;
@@ -946,7 +972,7 @@ describe("GeometryRendererTask", () => {
         const pbrScene = scene as unknown as { _pbrGeomContext?: unknown };
         // The PBR group as the runtime build leaves it while pending: the mesh has joined the group, but the
         // group's tracked output holds no renderable for it yet.
-        const group = Object.assign([late], { o: [] as Array<{ mesh?: LateMesh }> });
+        const group = Object.assign([late], { o: [] as ForwardRenderable[] });
         scene._groups.set((material as unknown as { _buildGroup: never })._buildGroup, group as never);
         if (existingContext) {
             // An existing PBR scene: this context was composed before the late mesh existed (no thin-instance
@@ -962,23 +988,11 @@ describe("GeometryRendererTask", () => {
         expect(state._createPbrGeometryView).toBeTypeOf("function");
 
         const completeForwardBuild = (): unknown[] => {
-            // The real PBR geometry renderable needs the composed scene shader, which the mocked device cannot
-            // provide, so from here on a recording builder stands in for it.
-            const realFactory = state._createPbrGeometryView!;
-            const builtFor: unknown[] = [];
-            state._createPbrGeometryView = (source, viewConfig) => {
-                const view = realFactory(source, viewConfig);
-                view._buildGroup._rebuildSingle = (_scene: unknown, mesh: unknown) => {
-                    builtFor.push(mesh);
-                    const renderable = { mesh, isTransparent: false, order: 0, bind: () => ({ renderable, pipeline: {}, draw: () => 1 }) };
-                    return renderable;
-                };
-                return view;
-            };
+            const builtFor = recordPbrGeometryBuilds(state);
             // What the forward build does when it completes: publish the context, track the mesh's renderable
-            // in its group's output, bump the scene version.
+            // (stamped with the generation it was built for) in its group's output, bump the scene version.
             pbrScene._pbrGeomContext = {};
-            group.o.push({ mesh: late });
+            group.o.push(forwardRenderableFor(late));
             scene._renderableVersion++;
             return builtFor;
         };
@@ -1023,6 +1037,59 @@ describe("GeometryRendererTask", () => {
         expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0], late]);
     });
 
+    it("keeps an already-built PBR mesh out while a forward rebuild for its current generation is pending", async () => {
+        // The retained-old-output window. An already forward-built PBR mesh gains thin instances and its
+        // material goes through a same-group rebuild. Forward rebuilds are make-before-break, so until the
+        // rebuild completes the group still tracks the OLD renderable. Historical membership in `group.o`
+        // therefore proves nothing: if the geometry bridge finishes loading in that window, binding the mesh
+        // pairs its new state with the old context — an instanced draw without the instance-matrix buffer.
+        const { scene, internal, meshes } = await setupGeoTask(1);
+        const { createPbrMaterial } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material");
+        const { _computePbrMaterialFeatures } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material-features");
+        const material = createPbrMaterial() as unknown as { _buildGroup: never; _renderFeatures?: unknown };
+        material._renderFeatures = _computePbrMaterialFeatures(material as never);
+        const built = { ...(meshes[0] as unknown as Record<string, unknown>), material } as unknown as LateMesh;
+        // Forward state of an existing PBR scene: context published, the mesh's renderable tracked by its group.
+        (scene as unknown as { _pbrGeomContext?: unknown })._pbrGeomContext = {};
+        const group = Object.assign([built], { o: [forwardRenderableFor(built)] });
+        scene._groups.set(material._buildGroup, group as never);
+        scene.meshes.push(built);
+        scene._renderableVersion++;
+
+        // The mesh changes generation twice over before the geometry bridge is even in: first thin instances...
+        (built as unknown as { thinInstances: unknown }).thinInstances = { count: 4 };
+        // ...and a material rebuild request, which drops the render-feature object (`rebuildMaterial`).
+        material._renderFeatures = undefined;
+
+        const state = internal as unknown as LateState;
+        internal.execute();
+        await state._lateLoad;
+        const builtFor = recordPbrGeometryBuilds(state);
+
+        // Late bridge completion inside the window: the old forward output is still tracked, the mesh stays out.
+        expect(() => internal.execute()).not.toThrow();
+        expect(builtFor).toEqual([]);
+        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0]]);
+
+        // Each change alone is enough to keep it out. Material generation current again, capability still stale:
+        group.o[0] = { ...forwardRenderableFor(built), _gen: [material._renderFeatures, _computeMeshFeatures(meshes[0]!)] };
+        scene._renderableVersion++;
+        internal.execute();
+        expect(builtFor).toEqual([]);
+        // Capability current, material generation stale:
+        group.o[0] = { ...forwardRenderableFor(built), _gen: [{}, _computeMeshFeatures(built)] };
+        scene._renderableVersion++;
+        internal.execute();
+        expect(builtFor).toEqual([]);
+
+        // The forward rebuild completes: the group tracks a renderable built for the mesh as it is now.
+        group.o[0] = forwardRenderableFor(built);
+        scene._renderableVersion++;
+        expect(() => internal.execute()).not.toThrow();
+        expect(builtFor).toEqual([built]);
+        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0], built]);
+    });
+
     it("still binds an off-scene PBR mesh of an explicit list against the scene-level context", async () => {
         // Caller-supplied off-scene meshes are never forward-built, so the deferral must not apply to them.
         const { scene, internal, meshes } = await setupGeoTask(1, true);
@@ -1035,17 +1102,7 @@ describe("GeometryRendererTask", () => {
         const state = internal as unknown as LateState;
         internal.execute();
         await state._lateLoad;
-        const realFactory = state._createPbrGeometryView!;
-        const builtFor: unknown[] = [];
-        state._createPbrGeometryView = (source, viewConfig) => {
-            const view = realFactory(source, viewConfig);
-            view._buildGroup._rebuildSingle = (_scene: unknown, mesh: unknown) => {
-                builtFor.push(mesh);
-                const renderable = { mesh, isTransparent: false, order: 0, bind: () => ({ renderable, pipeline: {}, draw: () => 1 }) };
-                return renderable;
-            };
-            return view;
-        };
+        const builtFor = recordPbrGeometryBuilds(state);
         expect(() => internal.execute()).not.toThrow();
         expect(builtFor).toEqual([offScene]);
     });

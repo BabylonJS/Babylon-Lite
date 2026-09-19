@@ -14,6 +14,9 @@
  *  `./pbr-geometry-output-shader.ts`. */
 
 import { createMaterialView } from "../material-view.js";
+import { _computeMeshFeatures, MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
+import type { Mesh } from "../../mesh/mesh.js";
+import type { Renderable } from "../../render/renderable.js";
 import type { MaterialView } from "../material.js";
 import type { GeometryTextureType } from "../../frame-graph/geometry-types.js";
 import type { Camera } from "../../camera/camera.js";
@@ -101,6 +104,23 @@ export function _setActivePbrGeometryAttachments(att: readonly GeometryTextureTy
  *  - Registers the PBR geometry extension (idempotent) so subsequent
  *    composePbr calls pick up the `gp` UBO + geometry varyings when
  *    `PBR2_GEOMETRY_OUTPUT` is set. */
+/**
+ * @internal Whether `forward` — the renderable the scene's PBR group currently tracks for `mesh` — was built
+ * for the mesh's CURRENT generation: same material render-feature object and same mesh capability bits.
+ *
+ * A PBR geometry renderable reuses the forward PBR context, which only covers what the forward build that
+ * published it has seen. Forward rebuilds are asynchronous and make-before-break, so while one is pending the
+ * group still tracks the OLD renderable: binding the mesh then would pair its new state (first thin
+ * instances, morph targets, changed material features) with the old composer — an instanced draw without the
+ * instance-matrix buffer, or an invalid shader. `rebuildMaterial` drops `_renderFeatures` at request time, so
+ * a pending material rebuild is visible as a changed object; a capability change shows up in the mesh bits.
+ */
+export function isPbrForwardBuildCurrent(forward: Renderable | undefined, mesh: Mesh): boolean {
+    const gen = forward?._gen;
+    const current = _computeMeshFeatures(mesh) | ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0);
+    return !!gen && gen[0] === (mesh.material as PbrMaterialProps | null)?._renderFeatures && !((gen[1] ^ current) & ~MSH_RECEIVE_SHADOWS);
+}
+
 export function createPbrGeometryMaterialView(source: PbrMaterialProps, config: PbrGeometryViewConfig): PbrGeometryMaterialView {
     _ensurePbrGeometryExt(() => _activePbrGeometryAttachments);
     const baseFeatures = source._renderFeatures?.features ?? 0;

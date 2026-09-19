@@ -231,6 +231,7 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
     _computeStandardFeatures: ((mat: StandardMaterialProps) => number) | null;
     _createPbrGeometryView: ((src: PbrMaterialProps, cfg: PbrGeometryViewConfig) => PbrGeometryMaterialView) | null;
     _computePbrFeatures: ((mat: PbrMaterialProps) => MaterialRenderFeatures) | null;
+    _isPbrForwardCurrent: ((forward: Renderable | undefined, mesh: Mesh) => boolean) | null;
     _createNodeGeometryView: ((src: NodeMaterial, cfg: NodeGeometryViewConfig) => NodeGeometryMaterialView) | null;
     /** In-flight bridge import for a material family that first appeared after `_preload`. */
     _lateLoad?: Promise<void>;
@@ -383,6 +384,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _computeStandardFeatures: null,
         _createPbrGeometryView: null,
         _computePbrFeatures: null,
+        _isPbrForwardCurrent: null,
         _createNodeGeometryView: null,
 
         _removeMesh(value: object): void {
@@ -438,6 +440,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
                         const [viewMod, matMod] = await Promise.all([import("../material/pbr/pbr-geometry-view.js"), import("../material/pbr/pbr-material-features.js")]);
                         task._createPbrGeometryView = viewMod.createPbrGeometryMaterialView;
                         task._computePbrFeatures = matMod._computePbrMaterialFeatures;
+                        task._isPbrForwardCurrent = viewMod.isPbrForwardBuildCurrent;
                     })()
                 );
             }
@@ -528,8 +531,8 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
     const removed = task._removedMeshes;
     const meshes = config.meshes ?? sc.meshes;
     const attachmentTypes = task._attachments.map((a) => a._type);
-    // Meshes each PBR group's completed forward build has produced a renderable for (filled lazily below).
-    const forwardBuilt = new Map<unknown, Set<Mesh | undefined>>();
+    // Forward renderable each PBR group currently tracks per mesh (filled lazily below).
+    const forwardBuilt = new Map<unknown, Map<Mesh | undefined, Renderable>>();
     try {
         for (const mesh of meshes) {
             if (removed?.has(mesh)) {
@@ -543,21 +546,20 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
                 continue;
             }
             // A PBR geometry renderable reuses the scene's forward PBR context, and that context only covers
-            // what the forward build that published it has seen. A mesh added at runtime is forward-built
-            // asynchronously, so it stays deferred until ITS build has completed — i.e. until its group's
-            // tracked output holds a renderable for it — not merely until some PBR context exists: with no
-            // context the build throws out of `execute()`, and against a pre-existing one the first
-            // thin-instanced mesh draws every instance at the base transform and the first morphed mesh
-            // compiles an invalid shader. The forward build bumps `_renderableVersion` when it completes,
-            // which re-syncs this list and binds the mesh. Off-scene meshes of an explicit list are never
-            // forward-built and keep using the scene-level context.
+            // what the forward build that published it has seen. Forward (re)builds are asynchronous and
+            // make-before-break, so a PBR mesh of the scene is bound only while the renderable its group
+            // tracks for it was built for the mesh's CURRENT material / capability generation (see
+            // `isPbrForwardBuildCurrent`): not before its first forward build, and not during a pending
+            // rebuild, when the group still tracks the old output. Otherwise it stays out of the pass; the
+            // forward build bumps `_renderableVersion` when it completes, which re-syncs this list. Off-scene
+            // meshes of an explicit list are never forward-built and keep using the scene-level context.
             if (resolved._family === "pbr" && (!config.meshes || sc.meshes.includes(mesh))) {
                 const group = sc._groups.get((resolved._mat as Material)._buildGroup);
                 let built = forwardBuilt.get(group);
                 if (!built) {
-                    forwardBuilt.set(group, (built = new Set(group?.o?.map((renderable) => renderable.mesh))));
+                    forwardBuilt.set(group, (built = new Map(group?.o?.map((renderable) => [renderable.mesh, renderable]))));
                 }
-                if (!built.has(mesh)) {
+                if (!task._isPbrForwardCurrent!(built.get(mesh), mesh)) {
                     continue;
                 }
             }
