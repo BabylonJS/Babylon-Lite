@@ -349,11 +349,14 @@ Destruction and score eligibility remain between throws. The ten ragdoll
 bodies and nine constraints persist across all three throws: Next Kick
 resets the complete body set to the cached spawn configuration, clears linear
 and angular velocities, and leaves every body `DYNAMIC`. Replay is an
-in-page reset. It disposes and
-rebuilds the puzzle bodies, shapes, and meshes, clears effects/audio/debounce
-and score state, reattaches the existing ragdoll records, refreshes collision
-events and shadow casters, and returns directly to aiming without navigation or
-new pose callbacks.
+in-page reset. It restores copied authored thin-instance matrices into the
+existing CPU slabs and native bodies, clears velocities,
+effects/audio/debounce and score state, restores popped props, resets the
+existing ragdoll, and returns directly to aiming. Meshes, GPU buffers, physics
+bodies, shapes, constraints, collision registration, shadow membership, and
+pose callbacks retain their identities across every replay.
+Restored puzzle bodies remain simulation-controlled, matching initial gameplay:
+gravity and contacts can wake and move them while the player is aiming.
 
 Each eligible body/instance awards seven points once. Contact identity and
 scored flags live in the demo registry, not engine handles.
@@ -416,8 +419,11 @@ focus rings, and touch-safe pointer handling.
 
 Poppers arm after kick/free entry, trigger once above angular speed `0.06`, and
 apply per-instance linear-falloff impulses within radius `1.6` (power `0.096`,
-or `0.256` for the two strong poppers). Removal is deferred until contact
-draining is complete so chains remain valid.
+or `0.256` for the two strong poppers). A popped body is hidden and excluded
+from scoring immediately, then parked below the scene and made static after
+contact draining completes. Replay invalidates any queued park, restores the
+existing body and matrix, and re-enables the popper without allocating a
+replacement.
 
 ## Effects and audio
 
@@ -521,12 +527,14 @@ uses the subsystem reset path described above. The shared demo bundler copies
 the entire `playroom` directory beside the flat bundle, so both
 `/lite/demo-playroom.html` and arbitrary nested flat deployments resolve JS,
 WASM, models, graphs, images, environment faces, and MP3 files locally.
-During replay, replaced meshes are hidden through the scene visibility API and
-their GPU teardown is deferred for 120 rendered frames. Hiding suppresses their
-draw packets immediately; removal then synchronously detaches per-mesh packets
-from merged main and shadow renderables before thin-instance buffers are
-retired. The delay remains a gameplay resource-retirement policy rather than
-the mechanism that prevents stale cached packets from drawing.
+Replay performs no scene or GPU retirement. During construction, each batch
+captures its authored thin-instance matrix slab and native-pose checkpoint
+before physics stepping begins; replay uses them to update the existing native
+instances and retained matrix buffers.
+Restored bodies have zero linear/angular velocity and start asleep under their
+normal simulation-controlled activation. This keeps main/shadow packets and
+caster membership stable while making the reset synchronous and allocation-free
+for native and GPU resources.
 
 ### Lifecycle investigation harness
 

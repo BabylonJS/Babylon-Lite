@@ -4,8 +4,12 @@ import {
     getPhysicsBodyInstanceCount,
     getPhysicsBodyInstanceLinearVelocityToRef,
     onPhysicsCollision,
-    removePhysicsBody,
+    PhysicsMotionType,
+    setPhysicsBodyAngularVelocity,
     setPhysicsBodyCollisionEventsEnabled,
+    setPhysicsBodyLinearVelocity,
+    setPhysicsBodyMotionType,
+    setPhysicsBodyTransform,
     setThinInstanceCount,
 } from "babylon-lite";
 import type { PhysicsBody, PhysicsCollisionInfo, PhysicsWorld } from "babylon-lite";
@@ -35,7 +39,7 @@ export function scoreCollision(state: PlayroomState, info: PhysicsCollisionInfo)
     }
     const selected = a.family === "ground" ? b : a;
     const index = selected === b ? info.collidedAgainstIndex : info.colliderIndex;
-    if (selected.family === "ground" || selected.family === "wall" || selected.scored.has(index)) {
+    if (selected.active === false || selected.family === "ground" || selected.family === "wall" || selected.scored.has(index)) {
         return;
     }
     selected.scored.add(index);
@@ -49,7 +53,7 @@ export function applyRadialExplosion(physics: PhysicsWorld, world: WorldState, s
     const power = strong ? POPPER_STRONG_POWER : POPPER_POWER;
     let affected = 0;
     for (const record of world.records) {
-        if (record.family === "ground" || record.family === "wall" || !record.mass || !world.bodiesByObject.has(record.body)) {
+        if (record.active === false || record.family === "ground" || record.family === "wall" || !record.mass || !world.bodiesByObject.has(record.body)) {
             continue;
         }
         const count = getPhysicsBodyInstanceCount(record.body);
@@ -77,6 +81,7 @@ function maybePop(state: PlayroomState, record: BodyRecord, other: BodyRecord): 
     if (
         !state.poppersArmed ||
         record.family !== "popper" ||
+        record.active === false ||
         record.popperIndex === undefined ||
         record.scored.has(-1) ||
         other.family === "ground" ||
@@ -88,15 +93,23 @@ function maybePop(state: PlayroomState, record: BodyRecord, other: BodyRecord): 
     }
     record.scored.add(-1);
     const affected = applyRadialExplosion(state.physics, state.world, record, record.popperIndex === 0 || record.popperIndex === 2);
+    record.active = false;
+    const generation = (record.resetGeneration ?? 0) + 1;
+    record.resetGeneration = generation;
     state.canvas.dataset.lastExplosionCount = String(affected);
     record.mesh.visible = false;
     if ("thinInstances" in record.mesh && record.mesh.thinInstances) {
         setThinInstanceCount(record.mesh, 0);
     }
+    setPhysicsBodyCollisionEventsEnabled(state.physics, record.body, false);
     queueMicrotask(() => {
-        if (state.world.bodiesByObject.delete(record.body)) {
-            removePhysicsBody(state.physics, record.body);
+        if (state.disposed || record.active !== false || record.resetGeneration !== generation) {
+            return;
         }
+        setPhysicsBodyLinearVelocity(state.physics, record.body, { x: 0, y: 0, z: 0 });
+        setPhysicsBodyAngularVelocity(state.physics, record.body, { x: 0, y: 0, z: 0 });
+        setPhysicsBodyTransform(state.physics, record.body, { x: 0, y: -1000 - record.id, z: 0 }, record.mesh.rotationQuaternion);
+        setPhysicsBodyMotionType(state.physics, record.body, PhysicsMotionType.STATIC);
     });
     document.dispatchEvent(new CustomEvent("playroom-popper", { detail: { point: bodyPosition(record, 0) } }));
 }
@@ -117,7 +130,7 @@ export function installPhysicsEvents(state: PlayroomState): void {
         if (a && b && info.type !== "FINISHED") {
             maybePop(state, a, b);
             maybePop(state, b, a);
-            if (state.world.bodiesByObject.has(a.body) && state.world.bodiesByObject.has(b.body)) {
+            if (a.active !== false && b.active !== false) {
                 const matches = matchContactAudio(a, info.colliderIndex, b, info.collidedAgainstIndex, audioMatches);
                 const now = performance.now();
                 let hasEligibleMatch = false;
@@ -149,5 +162,5 @@ export function enablePhysicsEvents(state: Pick<PlayroomState, "physics" | "worl
 
 export function canPushBody(world: WorldState, body: PhysicsBody): boolean {
     const record = world.bodiesByObject.get(body);
-    return !!record && record.mass > 0 && record.family !== "ragdoll";
+    return !!record && record.active !== false && record.mass > 0 && record.family !== "ragdoll";
 }

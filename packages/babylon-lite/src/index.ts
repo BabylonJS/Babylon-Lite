@@ -1079,6 +1079,7 @@ export {
     PhysicsConstraintAxis,
 } from "./physics/havok.js";
 export { setPhysicsBodyMassProperties } from "./physics/havok-body-mass-properties.js";
+export { capturePhysicsBodyInstanceResetState, resetPhysicsBodyInstances } from "./physics/reset-physics-body-instances.js";
 export { lockPhysicsBodyRotationAxes, unlockPhysicsBodyRotationAxes } from "./physics/havok-rotation-locks.js";
 export { enableHavokThinInstancePhysicsSync } from "./physics/enable-havok-thin-instance-physics-sync.js";
 export type {

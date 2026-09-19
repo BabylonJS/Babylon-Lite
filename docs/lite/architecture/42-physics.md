@@ -187,6 +187,14 @@ bodies). The active thin-instance count is fixed when the body is created:
 callers must populate matrices and explicitly enable thin-instance physics before
 body construction. Without the enabler, core body creation performs no
 thin-instance detection and follows the ordinary single-body path.
+`capturePhysicsBodyInstanceResetState(world, body)` replaces the private reset
+checkpoint with the body's current local matrices and carrier transform.
+`resetPhysicsBodyInstances(world, body)` restores that fixed set without
+replacing the mesh slab or any native body. It performs one native pose
+assignment per instance, clears linear and angular velocities, puts each body
+to sleep under its existing activation control, and dirties the retained matrix
+buffer once. The carrier transform must remain unchanged between capture and
+reset; per-instance signed scale is restored from the captured local matrices.
 Floating-origin multi-region simulation rejects thin-instance bodies explicitly
 until it can track one region per native instance.
 

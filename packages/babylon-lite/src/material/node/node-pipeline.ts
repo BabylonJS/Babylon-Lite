@@ -549,6 +549,6 @@ function alphaModeToBlend(mode: number): GPUBlendState | undefined {
     const dstFactor: GPUBlendFactor = mode === 1 ? "one" : "one-minus-src-alpha";
     return {
         color: { srcFactor: mode === 7 ? "one" : "src-alpha", dstFactor, operation: "add" },
-        alpha: { srcFactor: "one", dstFactor, operation: "add" },
+        alpha: { srcFactor: "one", dstFactor: mode === 7 ? dstFactor : "one", operation: "add" },
     };
 }

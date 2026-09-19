@@ -5,6 +5,7 @@ import {
     createSceneContext,
     disposeEngine,
     disposePhysics,
+    enableHavokThinInstancePhysics,
     getPhysicsBodyAngularVelocity,
     getPhysicsBodyLinearVelocity,
     onPhysicsCollision,
@@ -205,6 +206,7 @@ async function main(): Promise<void> {
     scene.fixedDeltaMs = 1000 / 60;
     const assets = await loadPlayroomAssets(engine, new URL("/playroom-oracle-entry.js", window.location.href).href);
     const physics = createHavokWorld(scene, hknp, { x: 0, y: -9.81, z: 0 });
+    await enableHavokThinInstancePhysics(physics);
     const world = buildPlayroomWorld(engine, scene, physics, assets);
     const ragdoll = createBunnyRagdoll(scene, physics, assets, world, { x: 0, y: 0.9, z: 0 });
     installBunnyPoseSync(

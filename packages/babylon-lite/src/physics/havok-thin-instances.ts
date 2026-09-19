@@ -85,7 +85,8 @@ function updateCarrier(state: ThinBodyState): Mat4 {
     return carrier;
 }
 
-function thinInstanceTransform(
+/** @internal Shared transform decomposition for optional thin-instance reset support. */
+export function _thinInstanceTransform(
     matrices: Mat4Storage,
     index: number,
     carrier: Mat4,
@@ -324,6 +325,7 @@ export function createHavokThinInstanceContext(world: PhysicsWorld): HavokThinIn
     };
 
     return {
+        resetNative: raw,
         validate,
         create(node, motionType, startsAsleep) {
             const mesh = node as Mesh;
@@ -352,7 +354,7 @@ export function createHavokThinInstanceContext(world: PhysicsWorld): HavokThinIn
                 handles[i] = handle;
                 raw.HP_Body_SetMotionType(handle, hkMotion);
                 raw.HP_World_AddBody(hkWorld, handle, startsAsleep);
-                raw.HP_Body_SetQTransform(handle, thinInstanceTransform(thin.matrices, i, carrier, carrierIdentity, matrixScratch, transform, rotation, scales));
+                raw.HP_Body_SetQTransform(handle, _thinInstanceTransform(thin.matrices, i, carrier, carrierIdentity, matrixScratch, transform, rotation, scales));
             }
             const body: PhysicsBody = {
                 _hkBody: handles[0],
@@ -402,7 +404,7 @@ export function createHavokThinInstanceContext(world: PhysicsWorld): HavokThinIn
             const matrices = (body.node as Mesh).thinInstances!.matrices;
             const carrier = updateCarrier(state);
             for (let i = 0; i < state[1].length; i++) {
-                raw.HP_Body_SetQTransform(state[1][i], thinInstanceTransform(matrices, i, carrier, state[9], state[6], state[3], state[4], state[5]));
+                raw.HP_Body_SetQTransform(state[1][i], _thinInstanceTransform(matrices, i, carrier, state[9], state[6], state[3], state[4], state[5]));
             }
             return true;
         },

@@ -88,6 +88,9 @@ export interface BodyRecord {
     readonly scored: Set<number>;
     readonly audioTags: readonly string[];
     readonly popperIndex?: number;
+    readonly initialInstanceCount?: number;
+    active?: boolean;
+    resetGeneration?: number;
 }
 
 export interface WorldState {

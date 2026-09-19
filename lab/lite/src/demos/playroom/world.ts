@@ -1,20 +1,26 @@
 import {
     addPhysicsShapeChild,
     addToScene,
+    capturePhysicsBodyInstanceResetState,
     cloneTransformNode,
     createGround,
     createPbrMaterial,
     createPhysicsBody,
     createPhysicsShape,
+    getPhysicsBodyInstanceCount,
     createTransformNode,
     PhysicsMotionType,
     PhysicsPrestepType,
     PhysicsShapeType,
+    resetPhysicsBodyInstances,
+    setPhysicsBodyCollisionEventsEnabled,
+    setPhysicsBodyMotionType,
     setPhysicsBodyMass,
     setPhysicsBodyPrestepType,
     setPhysicsBodyShape,
     setPhysicsShapeMaterial,
     setThinInstanceColors,
+    setThinInstanceCount,
     setThinInstances,
     releasePhysicsShape,
     removeFromScene,
@@ -133,6 +139,12 @@ function addBatch(scene: SceneContext, world: PhysicsWorld, assets: PlayroomAsse
     setPhysicsBodyPrestepType(body, PhysicsPrestepType.DISABLED);
     setPhysicsBodyShape(world, body, shape);
     setPhysicsBodyMass(world, body, batch.mass);
+    const initialInstanceCount = getPhysicsBodyInstanceCount(body);
+    const expectedInstanceCount = batch.matrices.length / 16;
+    if (initialInstanceCount !== expectedInstanceCount) {
+        throw new Error(`Playroom batch ${mesh.name} created ${initialInstanceCount} physics bodies instead of ${expectedInstanceCount}.`);
+    }
+    capturePhysicsBodyInstanceResetState(world, body);
     return remember(state, {
         id: state.nextBodyId++,
         family: batch.family,
@@ -143,6 +155,9 @@ function addBatch(scene: SceneContext, world: PhysicsWorld, assets: PlayroomAsse
         scored: new Set(),
         audioTags: audioTagsForBatch(batch),
         popperIndex,
+        initialInstanceCount,
+        active: true,
+        resetGeneration: 0,
     });
 }
 
@@ -189,7 +204,18 @@ function addGroundAndWalls(engine: EngineContext, scene: SceneContext, world: Ph
     setPhysicsBodyShape(world, groundBody, groundShape);
     setPhysicsBodyMass(world, groundBody, 0);
     state.shapes.push(groundShape);
-    remember(state, { id: state.nextBodyId++, family: "ground", body: groundBody, mesh: ground, mass: 0, shape: groundShape, scored: new Set(), audioTags: ["soft", "ground"] });
+    remember(state, {
+        id: state.nextBodyId++,
+        family: "ground",
+        body: groundBody,
+        mesh: ground,
+        mass: 0,
+        shape: groundShape,
+        scored: new Set(),
+        audioTags: ["soft", "ground"],
+        active: true,
+        resetGeneration: 0,
+    });
 
     const walls = [
         [
@@ -217,7 +243,18 @@ function addGroundAndWalls(engine: EngineContext, scene: SceneContext, world: Ph
         setPhysicsBodyShape(world, body, shape);
         setPhysicsBodyMass(world, body, 0);
         state.shapes.push(shape);
-        remember(state, { id: state.nextBodyId++, family: "wall", body, mesh: node, mass: 0, shape, scored: new Set(), audioTags: [] });
+        remember(state, {
+            id: state.nextBodyId++,
+            family: "wall",
+            body,
+            mesh: node,
+            mass: 0,
+            shape,
+            scored: new Set(),
+            audioTags: [],
+            active: true,
+            resetGeneration: 0,
+        });
     }
 }
 
@@ -235,45 +272,33 @@ export function buildPlayroomWorld(engine: EngineContext, scene: SceneContext, w
     return state;
 }
 
-export function disposePlayroomWorldMeshes(scene: SceneContext, state: WorldState, preserved: readonly BodyRecord[] = []): void {
-    const keep = new Set(preserved);
+export function resetPlayroomWorld(physics: PhysicsWorld, state: WorldState): void {
     for (const record of state.records) {
-        if (keep.has(record)) {
+        record.scored.clear();
+        if (record.initialInstanceCount === undefined) {
             continue;
         }
-        removeFromScene(scene, record.mesh);
+        const wasActive = record.active !== false;
+        record.active = true;
+        record.resetGeneration = (record.resetGeneration ?? 0) + 1;
+        record.mesh.visible = true;
+        if (!wasActive) {
+            setPhysicsBodyMotionType(physics, record.body, PhysicsMotionType.DYNAMIC);
+            setPhysicsBodyCollisionEventsEnabled(physics, record.body, true);
+            setThinInstanceCount(record.mesh as Mesh, record.initialInstanceCount);
+        }
+        resetPhysicsBodyInstances(physics, record.body);
     }
 }
 
-export function disposePlayroomWorld(scene: SceneContext, physics: PhysicsWorld, state: WorldState, preserved: readonly BodyRecord[] = [], deferMeshRemoval = false): void {
-    const keep = new Set(preserved);
+export function disposePlayroomWorld(scene: SceneContext, physics: PhysicsWorld, state: WorldState): void {
     for (const record of state.records) {
-        if (keep.has(record)) {
-            continue;
-        }
         if (state.bodiesByObject.has(record.body)) {
             removePhysicsBody(physics, record.body);
         }
+        removeFromScene(scene, record.mesh);
     }
-    if (!deferMeshRemoval) {
-        disposePlayroomWorldMeshes(scene, state, preserved);
-    }
-    const preservedShapes = new Set(preserved.flatMap((record) => (record.shape ? [record.shape] : [])));
     for (const shape of state.shapes) {
-        if (!preservedShapes.has(shape)) {
-            releasePhysicsShape(physics, shape);
-        }
+        releasePhysicsShape(physics, shape);
     }
-}
-
-export function attachPreservedRagdoll(state: WorldState, records: readonly BodyRecord[], constraints: readonly WorldState["constraints"][number][]): void {
-    for (const record of records) {
-        state.records.push(record);
-        state.bodiesByObject.set(record.body, record);
-        if (record.shape) {
-            state.shapes.push(record.shape);
-        }
-    }
-    state.constraints.push(...constraints);
-    state.nextBodyId = Math.max(state.nextBodyId, ...records.map((record) => record.id + 1));
 }

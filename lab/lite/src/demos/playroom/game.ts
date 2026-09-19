@@ -1,17 +1,15 @@
-import { getPhysicsBodyLinearVelocity, onBeforeRender, setShadowTaskCasterMeshes, setSubtreeVisible } from "babylon-lite";
+import { getPhysicsBodyLinearVelocity, onBeforeRender } from "babylon-lite";
 import type { AudioState, PlayroomAssets, PlayroomState, WorldState } from "./types.js";
 import { aimDirection, setFreeCamera, updateFollowCamera } from "./camera.js";
 import { disposePlayroomAudio, playPlayroomSound, resetPlayroomAudio, startFlightAudio, stopFlightAudio, unlockPlayroomAudio, updateFlightAudio } from "./audio.js";
 import { createBunnyRagdoll, disposeBunny, installBunnyPoseSync, launchBunny, relocateBunny } from "./ragdoll.js";
-import { enablePhysicsEvents, installPhysicsEvents } from "./physics.js";
+import { installPhysicsEvents } from "./physics.js";
 import type { PlayroomEffects } from "./effects.js";
 import { resetPlayroomEffects, showConfetti, showScoreStar, updateAimingEffect, updatePlayroomEffects } from "./effects.js";
 import { installPlayroomUi, updatePlayroomUi } from "./ui.js";
 import { installFreeModeInput } from "./input.js";
-import { attachPreservedRagdoll, buildPlayroomWorld, disposePlayroomWorld, disposePlayroomWorldMeshes } from "./world.js";
+import { disposePlayroomWorld, resetPlayroomWorld } from "./world.js";
 import type { ArcRotateCamera, EngineContext, FreeCamera, PhysicsWorld, SceneContext, ShadowGenerator } from "babylon-lite";
-
-const WORLD_RETIREMENT_FRAMES = 120;
 
 function nextBunny(state: PlayroomState): void {
     relocateBunny(state.physics, state.ragdoll, { x: 0, y: 1, z: 0 });
@@ -108,21 +106,7 @@ export function resetPlayroomGame(state: PlayroomState, effects: PlayroomEffects
     resetPlayroomAudio(state.audio);
     resetPlayroomEffects(effects);
     delete state.canvas.dataset.lastExplosionCount;
-    const retiredWorld = state.world;
-    const ragdollRecords = new Set(state.ragdoll.records);
-    for (const record of retiredWorld.records) {
-        if (!ragdollRecords.has(record)) {
-            setSubtreeVisible(record.mesh, false);
-        }
-    }
-    disposePlayroomWorld(state.scene, state.physics, retiredWorld, state.ragdoll.records, true);
-    const rebuilt = buildPlayroomWorld(state.engine, state.scene, state.physics, state.assets);
-    attachPreservedRagdoll(rebuilt, state.ragdoll.records, state.ragdoll.constraints);
-    state.world = rebuilt;
-    // Shadow and cached render bundles rebuild asynchronously; keep the hidden
-    // matrices alive until every task has stopped submitting the old packets.
-    state.retiredWorlds.push({ world: retiredWorld, frames: WORLD_RETIREMENT_FRAMES });
-    enablePhysicsEvents(state);
+    resetPlayroomWorld(state.physics, state.world);
     relocateBunny(state.physics, state.ragdoll, { x: 0, y: 1, z: 0 });
     for (const record of state.ragdoll.records) {
         record.scored.clear();
@@ -134,10 +118,6 @@ export function resetPlayroomGame(state: PlayroomState, effects: PlayroomEffects
     state.camera.target.x = 0;
     state.camera.target.y = 0.3;
     state.camera.target.z = 0;
-    setShadowTaskCasterMeshes(
-        state.shadow,
-        state.world.meshes.filter((mesh) => mesh.visible !== false)
-    );
     beginAiming(state);
 }
 
@@ -204,13 +184,6 @@ export function createPlayroomGame(options: CreatePlayroomGameOptions): Playroom
         if (state.disposed) {
             return;
         }
-        for (let index = state.retiredWorlds.length - 1; index >= 0; index--) {
-            const retired = state.retiredWorlds[index]!;
-            if (--retired.frames <= 0) {
-                disposePlayroomWorldMeshes(state.scene, retired.world, state.ragdoll.records);
-                state.retiredWorlds.splice(index, 1);
-            }
-        }
         updateAimingEffect(options.effects, state.ragdoll.root.mesh.position, state.camera, state.phase === "aiming");
         updatePlayroomEffects(options.effects, deltaMs);
         updateFollowCamera(state);
@@ -254,9 +227,6 @@ export function disposePlayroomGame(state: PlayroomState, effects: PlayroomEffec
     }
     resetPlayroomEffects(effects);
     disposePlayroomAudio(state.audio);
-    for (const retired of state.retiredWorlds.splice(0)) {
-        disposePlayroomWorldMeshes(state.scene, retired.world, state.ragdoll.records);
-    }
     disposeBunny(state.scene, state.physics, state.world, state.ragdoll);
     disposePlayroomWorld(state.scene, state.physics, state.world);
 }

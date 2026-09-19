@@ -17,6 +17,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { HavokFloatingOriginContext, WorldRegion } from "./havok-floating-origin.js";
 import type { PhysicsCollisionInfo } from "./havok-collision.js";
+import type { HP_BodyId } from "@babylonjs/havok";
 import { invertMat4 } from "../math/invert-mat4.js";
 import { multiplyMat4 } from "../math/multiply-mat4.js";
 import { createScalingMat4 } from "../math/create-scaling-mat4.js";
@@ -259,7 +260,17 @@ export interface HavokCollisionContext {
 }
 
 /** @internal Installed only when thin-instance physics is explicitly enabled. */
+export interface HavokThinInstanceResetNative {
+    readonly ActivationState: { readonly INACTIVE: unknown };
+    HP_Body_SetQTransform(body: HP_BodyId, transform: [number[], number[]]): unknown;
+    HP_Body_SetLinearVelocity(body: HP_BodyId, velocity: number[]): unknown;
+    HP_Body_SetAngularVelocity(body: HP_BodyId, velocity: number[]): unknown;
+    HP_Body_SetActivationState(body: HP_BodyId, state: unknown): unknown;
+}
+
+/** @internal Installed only when thin-instance physics is explicitly enabled. */
 export interface HavokThinInstanceContext {
+    readonly resetNative: HavokThinInstanceResetNative;
     validate(node: SceneNode): void;
     create(node: SceneNode, motionType: PhysicsMotionType, startsAsleep: boolean): PhysicsBody | undefined;
     from(body: PhysicsBody): boolean;

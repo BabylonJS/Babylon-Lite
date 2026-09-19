@@ -147,6 +147,8 @@ function addBody(scene: SceneContext, physics: PhysicsWorld, world: WorldState, 
         shape,
         scored: new Set(),
         audioTags: ["soft", "projectile"],
+        active: true,
+        resetGeneration: 0,
     };
     world.records.push(record);
     world.bodiesByObject.set(body, record);
