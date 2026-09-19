@@ -218,7 +218,7 @@ export function composeShader(template: ShaderTemplate, fragments: readonly Shad
                 break;
             case "storage-texture":
                 entry.storageTexture = {
-                    access: bindingType._access === "read" ? "read-only" : bindingType._access === "write" ? "write-only" : "read-write",
+                    access: bindingType._gpuAccess,
                     format: bindingType._format as GPUTextureFormat,
                 };
                 declarationType = `texture_storage_2d<${bindingType._format},${bindingType._access}>`;

@@ -6,7 +6,7 @@
  * NeonBrush's `InputGlow`) tree-shake it out.
  */
 import type { GLEngineContext } from "./context.js";
-import { bindTextureForUpload, setUnpackState, type GLTexture, type GLTextureOptions } from "./texture.js";
+import { bindTextureForUpload, setBoundTextureParams, setUnpackState, type GLTexture, type GLTextureOptions } from "./texture.js";
 
 /** High-level sampling presets, mirroring Babylon's `Texture.*_SAMPLINGMODE`
  *  numeric constants. Each resolves to GL min/mag filters (and mip generation
@@ -75,17 +75,17 @@ export function createHtmlElementTexture(
         const g = target.gl;
         setUnpackState(target, invertY, false);
         bindTextureForUpload(target, tex.handle);
-        g.texImage2D(g.TEXTURE_2D, 0, g.RGBA, g.RGBA, g.UNSIGNED_BYTE, element);
+        g.texImage2D(g.TEXTURE_2D, 0, g.RGBA8, g.RGBA, g.UNSIGNED_BYTE, element);
         const [w, h] = sizeOf();
         tex.width = w;
         tex.height = h;
-        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, minFilter);
-        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, magFilter);
-        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_S, wrapS);
-        g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_T, wrapT);
         if (generateMipMaps) {
             g.generateMipmap(g.TEXTURE_2D);
         }
+    };
+
+    const initializeParameters = (target: GLEngineContext): void => {
+        setBoundTextureParams(target.gl, minFilter, magFilter, wrapS, wrapT);
     };
 
     const [w0, h0] = sizeOf();
@@ -98,9 +98,11 @@ export function createHtmlElementTexture(
         _disposed: false,
         _refCount: 1,
         _upload: upload,
+        _initializeParameters: initializeParameters,
         _wasReady: true,
     };
     upload(engine);
+    initializeParameters(engine);
     engine._textures.push(tex);
     return tex;
 }

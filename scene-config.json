@@ -1637,6 +1637,16 @@
         "skipPerf": true
     },
     {
+        "id": 169,
+        "slug": "scene169-compute-flame",
+        "name": "Scene 169 — Depth-Aware Compute Flame",
+        "maxMad": 0.01,
+        "maxRawKB": 90.2,
+        "description": "Port of Playground #KOBPUW#18. A candle scene renders into sampled color and reverse-depth attachments, then a frame-graph compute task composites an animated procedural flame into a storage texture with depth occlusion before a fullscreen presentation pass.",
+        "tags": ["compute", "frame-graph", "storage-texture", "depth"],
+        "skipPerf": true
+    },
+    {
         "id": 170,
         "slug": "scene170-navigation-basic",
         "name": "Scene 170 - Navigation Basic",
@@ -1792,6 +1802,26 @@
         "tags": ["post-process", "anti-aliasing", "smaa", "orthographic"],
         "skipParity": true,
         "skipParityReason": "Babylon.js has no equivalent SMAA frame-graph post-process task.",
+        "skipPerf": true
+    },
+    {
+        "id": 188,
+        "slug": "scene188-compute-geometry",
+        "name": "Scene 188 — Compute-Generated Storage Geometry",
+        "maxMad": 0.01,
+        "maxRawKB": 69.9,
+        "description": "A one-shot compute task samples matching 3D and 2D-array textures and fills one vertex-capable storage slab. Four meshes render directly from separate baseVertex slots with no readback or copy.",
+        "tags": ["compute", "storage-buffer", "geometry", "texture-3d", "texture-array"],
+        "skipPerf": true
+    },
+    {
+        "id": 189,
+        "slug": "scene189-indirect-compute",
+        "name": "Scene 189 — GPU-Produced Indirect Dispatch",
+        "maxMad": 0.01,
+        "maxRawKB": 68.4,
+        "description": "One compute pass reads and writes a 3D r32uint storage texture while producing indirect workgroup counts; a later compute pass consumes those counts to generate vertex data rendered directly from storage.",
+        "tags": ["compute", "indirect", "storage-buffer", "storage-texture"],
         "skipPerf": true
     },
     {
@@ -2674,6 +2704,72 @@
         "maxRawKB": 45,
         "description": "Scene 262's deterministic NPE particle field with Teleport fan-out plus Elbow, Debug, and a Particle-scope LocalVariable around its per-particle size. Lite normalizes the graph before evaluator traversal and must preserve Babylon.js pixels.",
         "tags": ["npe", "particles", "billboards", "teleport", "local-variable", "graph-plumbing"],
+        "skipPerf": true
+    },
+    {
+        "id": 310,
+        "slug": "scene310-mesh-blending-core",
+        "name": "Scene 310 — Mesh Blending Core",
+        "maxMad": 1.5,
+        "maxRegionMad": 5,
+        "maxRawKB": 135,
+        "description": "HDR-capable single-sample SceneColor with Standard/PBR intersections across all four radius classes, default Medium/view-depth mesh blending, and a same-group pair that intentionally retains a hard seam.",
+        "tags": ["frame-graph", "geometry-renderer", "post-process", "mesh-blending", "standard", "pbr", "hdr"],
+        "skipPerf": true
+    },
+    {
+        "id": 311,
+        "slug": "scene311-mesh-blending-shadow-attenuation",
+        "name": "Scene 311 — Mesh Blending Shadow Attenuation",
+        "maxMad": 2,
+        "maxRegionMad": 5,
+        "maxRawKB": 150,
+        "description": "Split-screen ShadowAttenuation debug repeats three deterministic seams without albedo on the left and with albedo-based attenuation on the right. Deliberately dark shadow strips between matching orange base colors make the right-side attenuation immediately visible.",
+        "tags": ["frame-graph", "geometry-renderer", "post-process", "mesh-blending", "shadows", "albedo"],
+        "skipPerf": true
+    },
+    {
+        "id": 312,
+        "slug": "scene312-mesh-blending-ortho-screen-depth",
+        "name": "Scene 312 — Mesh Blending Orthographic Screen Depth",
+        "maxMad": 0.8,
+        "maxRegionMad": 1.2,
+        "maxRawKB": 138,
+        "description": "A nearly full-frame reverse-Z orthographic panel mosaic uses screen-space depth, High quality, and custom radius/slope settings, keeping the MAD focused on the blended seams rather than empty background.",
+        "tags": ["frame-graph", "geometry-renderer", "post-process", "mesh-blending", "orthographic", "reverse-depth"],
+        "skipPerf": true
+    },
+    {
+        "id": 313,
+        "slug": "scene313-mesh-blending-alpha-cutout",
+        "name": "Scene 313 — Mesh Blending Alpha Cutouts",
+        "maxMad": 0.8,
+        "maxRegionMad": 3,
+        "maxRawKB": 145,
+        "description": "PackedTag debug covers procedural RGBA alpha-tested Standard and PBR planes over tagged backing meshes, proving discarded fragments leave the underlying mesh tag intact.",
+        "tags": ["frame-graph", "geometry-renderer", "post-process", "mesh-blending", "alpha-test", "standard", "pbr"],
+        "skipPerf": true
+    },
+    {
+        "id": 314,
+        "slug": "scene314-mesh-blending-cinematic-junctions",
+        "name": "Scene 314 — Mesh Blending Cinematic Junctions",
+        "maxMad": 2,
+        "maxRegionMad": 7,
+        "maxRawKB": 145,
+        "description": "Cinematic final-color rendering stresses a three-group junction, tiny-object continuation/fallback paths, and duplicated contact pairs.",
+        "tags": ["frame-graph", "geometry-renderer", "post-process", "mesh-blending", "instances"],
+        "skipPerf": true
+    },
+    {
+        "id": 315,
+        "slug": "scene315-mesh-blending-coastal-cliff",
+        "name": "Scene 315 — Mesh Blending Coastal Cliff",
+        "maxMad": 0.5,
+        "maxRegionMad": 0.8,
+        "maxRawKB": 160,
+        "description": "The hosted coastalCliff.glb asset exercises real PBR materials, unique per-mesh tags, known foliage exclusions, screen depth, linear albedo shadow attenuation, asset-scaled radii, and Medium-quality mesh blending over most of the frame.",
+        "tags": ["frame-graph", "geometry-renderer", "post-process", "mesh-blending", "pbr", "gltf", "albedo"],
         "skipPerf": true
     }
 ]

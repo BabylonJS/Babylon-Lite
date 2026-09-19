@@ -28,7 +28,7 @@
  *  end of the fragment to output the data for the geometry textures".
  */
 
-import { GeometryTextureType } from "../../frame-graph/geometry-types.js";
+import { GeometryTextureType, _geometryOutputExtension } from "../../frame-graph/geometry-types.js";
 import type { ComposedShader, ShaderFragment, Varying } from "../../shader/fragment-types.js";
 import { MSH_HAS_MORPH_TARGETS, MSH_HAS_THIN_INSTANCES } from "../mesh-features.js";
 import type { StandardSceneShaderContext } from "./standard-material.js";
@@ -70,7 +70,8 @@ function needsLocalPos(attachments: readonly GeometryTextureType[]): boolean {
  *
  *  All variable references resolve to symbols already declared by
  *  `standard-template.ts` / the standard fragment registry:
- *    - `normalW`  — normalized world normal (post-bump if HAS_BUMP_TEXTURE).
+ *    - `normalW`  — normalized world normal (post-bump if HAS_BUMP_TEXTURE). Declared by the lit and
+ *       the unlit (`disableLighting`) template alike.
  *    - `input.vp` — world position.
  *    - `baseColor`/`mat.tl` — diffuse texture sample (rgb) × diffuseLevel.
  *    - `specularColor`/`mat.sc` — specular colour, replaced by the std-specular
@@ -122,6 +123,7 @@ function attachmentExpr(type: GeometryTextureType, wg: string, hasSpecular: bool
             return wgsl`vec4<f32>(0.5 * (${prev} - ${cur}), 0.0, ${wg})`;
         }
     }
+    return wgsl``;
 }
 
 /** ShaderFragment contributing the `gp` UBO + (optionally) velocity / local-position varyings.
@@ -241,6 +243,7 @@ export function composeStandardGeometryShader(
     const wantsGp = needsGpUbo(attachments);
     const wantsVelocity = needsVelocity(attachments);
     const wantsLocalPos = needsLocalPos(attachments);
+    const extension = _geometryOutputExtension && attachments.includes(_geometryOutputExtension.type) ? _geometryOutputExtension : null;
     const fragments =
         wantsGp || wantsVelocity || wantsLocalPos
             ? [...extFragments, createGeometryParamsFragment(wantsGp, wantsVelocity, wantsLocalPos, stdFeatures, meshFeatures)]
@@ -269,7 +272,7 @@ export function composeStandardGeometryShader(
     const colorSlot = attachments.length;
     const extraColorLine = emitColor ? wgsl`\n@location(${colorSlot}) color: vec4<f32>,` : wgsl``;
     const outputStruct = wgsl`struct FragmentOutput {
-${attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`).join("\n")}${extraColorLine}
+${attachments.map((type, i) => (type === extension?.type ? extension.field(i) : wgsl`@location(${i}) f${i}: vec4<f32>,`)).join("\n")}${extraColorLine}
 };
 `;
     frag = frag.replace("@fragment fn main", wgsl`${outputStruct}@fragment fn main`);
@@ -280,7 +283,9 @@ ${attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`).join("\n")}
     //    materials get a correct binary mask under the per-attachment
     //    ALPHA_COMBINE blend pipeline state.
     const wg = `select(0.0, 1.0, alpha > 0.4)`;
-    const writes = wgsl`${attachments.map((type, i) => wgsl`out.f${i} = ${attachmentExpr(type, wg, hasSpecular, specularUv)};`).join("\n")}`;
+    const writes = wgsl`${attachments
+        .map((type, i) => (type === extension?.type ? extension.standardWrite(i, features) : wgsl`out.f${i} = ${attachmentExpr(type, wg, hasSpecular, specularUv)};`))
+        .join("\n")}`;
     const extraColorWrite = emitColor ? wgsl`\nout.color = color;` : wgsl``;
     const replacement = wgsl`var out: FragmentOutput;
 ${writes}${extraColorWrite}

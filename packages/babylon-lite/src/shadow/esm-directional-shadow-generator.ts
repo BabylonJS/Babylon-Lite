@@ -270,6 +270,9 @@ export function ensureEsmShadowTaskState(
                 clr: true,
                 clrColor: { r: 0, g: 0, b: 0, a: 0 },
                 cam: camera,
+                // The render list is the caster set only: with no casters the scene must not be mirrored into the
+                // map, or every mesh — receivers included — would cast (see the CSM hooks).
+                autoMirror: false,
                 _skipClusteredLights: true,
             },
             engine,

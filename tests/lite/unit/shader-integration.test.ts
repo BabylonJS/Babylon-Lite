@@ -27,13 +27,17 @@ import {
 } from "../../../packages/babylon-lite/src/material/standard/standard-pipeline";
 import { createStandardFogFragment } from "../../../packages/babylon-lite/src/material/standard/std-fog-wgsl";
 import { createStdCsmShadowFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/std-csm-shadow-fragment";
-import { HAS_SKELETON, HAS_SKELETON_8, VERTEX_ALPHA, STD_SCENE_FOG } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
+import { DISABLE_LIGHTING, HAS_SKELETON, HAS_SKELETON_8, VERTEX_ALPHA, STD_SCENE_FOG } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import { stdSkeletonExt } from "../../../packages/babylon-lite/src/material/standard/fragments/std-skeleton-fragment";
 import { createStdVertexColorFragment } from "../../../packages/babylon-lite/src/material/standard/fragments/std-vertex-color-fragment";
 import { composeStandardGeometryShader } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-output-shader";
 import { createStandardGeometrySkeletonVelocity } from "../../../packages/babylon-lite/src/material/standard/standard-geometry-skeleton-velocity";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material";
+import { setStandardBumpTexture } from "../../../packages/babylon-lite/src/material/standard/set-std-bump";
+import { setStandardSpecularTexture } from "../../../packages/babylon-lite/src/material/standard/set-std-specular";
+import { _computeStandardMaterialFeatures } from "../../../packages/babylon-lite/src/material/standard/standard-material-features";
+import { _getStdExtsSorted } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import { enableStandardSkeleton, enableStandardUvOffset } from "../../../packages/babylon-lite/src/material/standard/enable-standard-mesh-features";
 import { _getStandardGeometrySkeletonVelocityFactory, preloadStandardGeometryFeatures } from "../../../packages/babylon-lite/src/material/standard/geometry-view";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
@@ -496,6 +500,56 @@ describe("Standard template + fragments integration", () => {
         enableStandardSkeleton();
         await preloadStandardGeometryFeatures([{ skeleton: {} }] as never, true);
         expect(_getStandardGeometrySkeletonVelocityFactory()).toBe(createStandardGeometrySkeletonVelocity);
+    });
+
+    it("unlit Standard geometry normals resolve: the unlit fragment declares normalW like the lit one", () => {
+        // A normal attachment reads `normalW`. The unlit (`disableLighting`) template used to drop its
+        // declaration, so any unlit mesh in a GeometryRendererTask with a normal attachment produced invalid
+        // WGSL (unresolved value 'normalW') and the whole frame's command buffer was dropped.
+        const attachments = [GeometryTextureType.VIEW_NORMAL, GeometryTextureType.WORLD_NORMAL];
+        for (const features of [DISABLE_LIGHTING, 0]) {
+            const fragmentWGSL = composeStandardGeometryShader(features, 0, [], attachments)._fragmentWGSL;
+            const declared = fragmentWGSL.indexOf("var normalW = normalize(input.vn);");
+            expect(declared).toBeGreaterThan(-1);
+            expect(fragmentWGSL.indexOf("out.f0 = vec4<f32>(normalize((scene.view * vec4<f32>(normalW, 0.0)).xyz)")).toBeGreaterThan(declared);
+            expect(fragmentWGSL.indexOf("out.f1 = vec4<f32>(normalW * 0.5 + vec3<f32>(0.5)")).toBeGreaterThan(declared);
+        }
+    });
+
+    it("keeps the Standard shader valid when lighting is toggled on a material with a normal or specular map", () => {
+        // `disableLighting` selects another shader variant, and a live toggle rebuilds the material with its
+        // maps still bound. The map fragments WRITE lit-path locals (`normalW = perturbNormal(...)`,
+        // `specularColor = textureSample(...)`); the unlit template used to drop their declarations, so the
+        // rebuilt WGSL assigned to an undeclared identifier, the pipeline was invalid and the mesh stopped
+        // rendering. Compose exactly what the renderable composes for each state and check every written
+        // local is declared before it is written.
+        const composeFor = (material: ReturnType<typeof createStandardMaterial>): string => {
+            const features = _computeStandardMaterialFeatures(material);
+            const fragments = _getStdExtsSorted()
+                .filter((ext) => features & ext._feature)
+                .map((ext) => ext._frag(features, 0, material));
+            return composeStandardShader(features, 0, fragments, "")._fragmentWGSL;
+        };
+        const expectDeclaredBeforeWritten = (fragmentWGSL: string, local: string): void => {
+            const written = fragmentWGSL.search(new RegExp(`(^|[^A-Za-z0-9_.])${local}\\s*=[^=]`, "m"));
+            const declared = fragmentWGSL.indexOf(`var ${local}`);
+            expect(written, `${local} is written by its map fragment`).toBeGreaterThan(-1);
+            expect(declared, `${local} is declared`).toBeGreaterThan(-1);
+            expect(declared, `${local} is declared before it is written`).toBeLessThan(written);
+        };
+
+        const texture = { texture: {}, sampler: {} } as never;
+        const material = createStandardMaterial();
+        setStandardBumpTexture(material, texture);
+        setStandardSpecularTexture(material, texture);
+
+        for (const disableLighting of [false, true, false]) {
+            material.disableLighting = disableLighting;
+            const fragmentWGSL = composeFor(material);
+            expect(fragmentWGSL.includes("computeLighting(")).toBe(!disableLighting);
+            expectDeclaredBeforeWritten(fragmentWGSL, "normalW");
+            expectDeclaredBeforeWritten(fragmentWGSL, "specularColor");
+        }
     });
 
     it("forward Standard vertex color: RGB is unconditional, alpha only under the VERTEXALPHA opt-in", () => {

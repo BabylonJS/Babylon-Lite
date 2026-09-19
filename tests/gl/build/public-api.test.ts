@@ -171,6 +171,7 @@ describe("babylon-lite-gl build output", () => {
         expect(typeof mod.GLBlendMode, "export GLBlendMode").toBe("object");
         expect(typeof mod.GLBlendEquation, "export GLBlendEquation").toBe("object");
         expect(typeof mod.GLSamplingMode, "export GLSamplingMode").toBe("object");
+        expect(mod.setBoundTextureParams, "internal texture parameter helper must not be public").toBeUndefined();
 
         // The legacy `unbindRenderTarget` was folded into `bindRenderTarget(engine, null)`
         // and MUST NOT ship — its presence would mean the converge regressed.

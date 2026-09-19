@@ -208,8 +208,11 @@ _1: f32,
     // View direction
     const viewDirCode = !_disableLighting ? wgsl`let viewDirectionW = normalize(scene.vEyePosition.xyz - input.vp);` : "";
 
-    // Normal computation — fragment can override via AC slot
-    const normalCode = _disableLighting ? "" : wgsl`var normalW = normalize(input.vn);`;
+    // Normal computation — fragment can override via AC slot. Declared for the unlit variant too: the AC
+    // slot exists in both variants, and a bound normal map writes `normalW` there. Without the declaration
+    // an unlit material with a bump texture (e.g. after a live `disableLighting` toggle) compiled invalid
+    // WGSL and its mesh stopped rendering. Unused in the unlit colour path, so the driver drops it.
+    const normalCode = wgsl`var normalW = normalize(input.vn);`;
 
     // Opacity — default from material alpha, fragment can modify via AT
     const opacityCode = wgsl`var alpha = mat.dc.a;`;
@@ -225,7 +228,8 @@ var baseColor = _ds.rgb * mat.tl;`
     // Diffuse color + emissive + specular — defaults, fragments can override via AT
     const diffuseColorCode = wgsl`let diffuseColor = mat.dc.rgb;`;
     const emissiveCode = wgsl`var emissiveContrib = mat.ec;`;
-    const specularColorCode = !_disableLighting ? wgsl`var specularColor = mat.sc.rgb;` : "";
+    // Same for `specularColor`: the AT slot exists in both variants and a bound specular map writes it.
+    const specularColorCode = wgsl`var specularColor = mat.sc.rgb;`;
     // Lighting block (only when lighting enabled)
     let lightingBlock: string;
     if (!_disableLighting) {
@@ -237,7 +241,7 @@ var specularBase = vec3<f32>(0.0);
 var shadowFactors = array<f32, ${MAX_LIGHTS}>(${new Array(MAX_LIGHTS).fill("1.0").join(", ")});
 var baseAmbientColor = vec3<f32>(1.0, 1.0, 1.0);
 var reflectionColor = vec3<f32>(0.0);
-let lc = min(mesh.lc, ${MAX_LIGHTS}u);
+let lc = min(mesh.lc & 255u, ${MAX_LIGHTS}u);
 /*AD*/
 for (var li = 0u; li < lc; li++) {
 let lightIndex = mli(li);

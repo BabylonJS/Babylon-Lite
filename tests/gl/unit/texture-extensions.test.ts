@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createGLEngine } from "../../../packages/babylon-lite-gl/src/context";
 import {
     createRawTexture,
@@ -8,6 +8,8 @@ import {
     updateTextureSamplingMode,
     updateTextureWrapMode,
     createTextureFromHandle,
+    loadTexture2D,
+    type GLTexture,
 } from "../../../packages/babylon-lite-gl/src/texture";
 import { createMockCanvas, createMockGL, fireLost, fireRestored, type MockCall, type MockGL } from "./_lite-gl-mock";
 
@@ -21,6 +23,10 @@ function makeEngine() {
 function callsNamed(mock: MockGL, name: string): MockCall[] {
     return mock.log.filter((c) => c.name === name);
 }
+
+afterEach(() => {
+    vi.unstubAllGlobals();
+});
 
 describe("lite-gl context caps: float render", () => {
     it("reports float/half-float render caps from the extensions", () => {
@@ -54,6 +60,7 @@ describe("lite-gl texture: raw update + sampling/wrap", () => {
         expect(ti?.args[4]).toBe(2); // height
         expect(tex.width).toBe(2);
         expect(tex.height).toBe(2);
+        expect(mock.count("texParameteri")).toBe(0);
     });
 
     it("updateRawTexture applies UNPACK_ALIGNMENT (cached) and restores 4 on the next default upload", () => {
@@ -81,6 +88,14 @@ describe("lite-gl texture: raw update + sampling/wrap", () => {
         fireRestored(canvas);
         const ti = callsNamed(mock, "texImage2D")[0];
         expect(ti?.args[8]).toBe(latest);
+        expect(mock.count("texParameteri")).toBe(4);
+    });
+
+    it("createRawTexture initializes all four texture parameters", () => {
+        const { mock, engine } = makeEngine();
+        mock.clear();
+        createRawTexture(engine, null, 1, 1, engine.gl.RGBA, engine.gl.UNSIGNED_BYTE);
+        expect(mock.count("texParameteri")).toBe(4);
     });
 
     it("updateTextureSamplingMode sets min/mag filters", () => {
@@ -101,6 +116,38 @@ describe("lite-gl texture: raw update + sampling/wrap", () => {
         const tp = callsNamed(mock, "texParameteri");
         expect(tp.some((c) => c.args[1] === engine.gl.TEXTURE_WRAP_S && c.args[2] === engine.gl.MIRRORED_REPEAT)).toBe(true);
         expect(tp.some((c) => c.args[1] === engine.gl.TEXTURE_WRAP_T && c.args[2] === engine.gl.REPEAT)).toBe(true);
+    });
+});
+
+describe("lite-gl texture: asynchronous image upload", () => {
+    it("skips parameters for the final image upload and restores them on a fresh handle", async () => {
+        const { mock, canvas, engine } = makeEngine();
+        const bitmap = { width: 8, height: 4, close: vi.fn() } as unknown as ImageBitmap;
+        vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, blob: async () => ({}) as Blob })) as unknown as typeof fetch);
+        vi.stubGlobal(
+            "createImageBitmap",
+            vi.fn(async () => bitmap)
+        );
+
+        mock.clear();
+        const loaded = new Promise<GLTexture>((resolve, reject) => {
+            loadTexture2D(engine, "texture.png", undefined, resolve, reject);
+        });
+        expect(mock.count("texParameteri")).toBe(4);
+        mock.clear();
+        const tex = await loaded;
+
+        expect(callsNamed(mock, "texImage2D")).toHaveLength(1);
+        expect(callsNamed(mock, "texImage2D")[0]?.args[5]).toBe(bitmap);
+        expect(mock.count("texParameteri")).toBe(0);
+        expect(tex.width).toBe(8);
+        expect(tex.height).toBe(4);
+
+        fireLost(canvas);
+        mock.clear();
+        fireRestored(canvas);
+        expect(callsNamed(mock, "texImage2D")[0]?.args[5]).toBe(bitmap);
+        expect(mock.count("texParameteri")).toBe(4);
     });
 });
 
