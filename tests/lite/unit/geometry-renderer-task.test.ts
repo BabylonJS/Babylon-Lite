@@ -928,30 +928,69 @@ describe("GeometryRendererTask", () => {
         expect(lateState._lateLoad).toBeUndefined();
     });
 
-    it("keeps a late PBR mesh deferred until its forward build has published the PBR context", async () => {
-        // Adding the first PBR mesh to a running Standard-only scene queues an asynchronous forward build.
-        // If the geometry bridge import wins that race, the next `execute()` used to reach
-        // `buildPbrGeometryRenderable()` before the scene had a PBR context and threw synchronously —
-        // outside the late-load rejection path, so the render loop stopped instead of retrying.
-        const { scene, internal, meshes } = await setupGeoTask(1);
+    // A late PBR mesh is forward-built asynchronously. These drive the geometry task through that pending
+    // window with the REAL PBR geometry builder, which throws on a missing or unusable context — so binding
+    // the mesh too early fails the test the same way it stops the render loop.
+    type LateMesh = import("../../../packages/babylon-lite/src/mesh/mesh").Mesh;
+    type LateState = {
+        _lateLoad?: Promise<void>;
+        _createPbrGeometryView: ((source: unknown, config: unknown) => { _buildGroup: { _rebuildSingle?: unknown } }) | null;
+    };
+
+    async function addLatePbrMesh(existingContext: boolean) {
+        const setup = await setupGeoTask(1);
+        const { scene, internal, meshes } = setup;
         const { createPbrMaterial } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material");
-        type M = import("../../../packages/babylon-lite/src/mesh/mesh").Mesh;
-        const late = { ...(meshes[0] as unknown as Record<string, unknown>), material: createPbrMaterial() } as unknown as M;
+        const material = createPbrMaterial();
+        const late = { ...(meshes[0] as unknown as Record<string, unknown>), material, thinInstances: { count: 4 } } as unknown as LateMesh;
+        const pbrScene = scene as unknown as { _pbrGeomContext?: unknown };
+        // The PBR group as the runtime build leaves it while pending: the mesh has joined the group, but the
+        // group's tracked output holds no renderable for it yet.
+        const group = Object.assign([late], { o: [] as Array<{ mesh?: LateMesh }> });
+        scene._groups.set((material as unknown as { _buildGroup: never })._buildGroup, group as never);
+        if (existingContext) {
+            // An existing PBR scene: this context was composed before the late mesh existed (no thin-instance
+            // helpers, no morph declarations) and is NOT sufficient to render it.
+            pbrScene._pbrGeomContext = {};
+        }
         scene.meshes.push(late);
         scene._renderableVersion++;
 
-        const state = internal as unknown as {
-            _lateLoad?: Promise<void>;
-            _boundVer: number;
-            _createPbrGeometryView: ((source: unknown, config: unknown) => { _buildGroup: { _rebuildSingle?: unknown } }) | null;
-        };
+        const state = internal as unknown as LateState;
         internal.execute();
         await state._lateLoad;
         expect(state._createPbrGeometryView).toBeTypeOf("function");
 
-        // The bridge is in, the forward PBR build is still pending: no PBR context on the scene yet.
-        const pbrScene = scene as unknown as { _pbrGeomContext?: unknown };
-        expect(pbrScene._pbrGeomContext).toBeUndefined();
+        const completeForwardBuild = (): unknown[] => {
+            // The real PBR geometry renderable needs the composed scene shader, which the mocked device cannot
+            // provide, so from here on a recording builder stands in for it.
+            const realFactory = state._createPbrGeometryView!;
+            const builtFor: unknown[] = [];
+            state._createPbrGeometryView = (source, viewConfig) => {
+                const view = realFactory(source, viewConfig);
+                view._buildGroup._rebuildSingle = (_scene: unknown, mesh: unknown) => {
+                    builtFor.push(mesh);
+                    const renderable = { mesh, isTransparent: false, order: 0, bind: () => ({ renderable, pipeline: {}, draw: () => 1 }) };
+                    return renderable;
+                };
+                return view;
+            };
+            // What the forward build does when it completes: publish the context, track the mesh's renderable
+            // in its group's output, bump the scene version.
+            pbrScene._pbrGeomContext = {};
+            group.o.push({ mesh: late });
+            scene._renderableVersion++;
+            return builtFor;
+        };
+        return { ...setup, late, completeForwardBuild };
+    }
+
+    it("keeps a late PBR mesh deferred while the scene has no PBR context yet", async () => {
+        // First PBR mesh in a running Standard-only scene: the geometry bridge import can win the race against
+        // the forward build, and `buildPbrGeometryRenderable()` then threw "scene has no PBR context"
+        // synchronously out of `execute()` — outside the late-load rejection path.
+        const { scene, internal, meshes, late, completeForwardBuild } = await addLatePbrMesh(false);
+
         expect(() => internal.execute()).not.toThrow();
         expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0]]);
         // Unrelated scene mutations and re-records in that window keep skipping it as well.
@@ -959,9 +998,43 @@ describe("GeometryRendererTask", () => {
         expect(() => internal.execute()).not.toThrow();
         expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0]]);
 
-        // The forward build completes: it publishes the PBR context and bumps the scene version. The real PBR
-        // renderable needs a composed scene shader, so hand the view a recording builder to observe the task
-        // reaching it for the late mesh once (and only once) the context exists.
+        const builtFor = completeForwardBuild();
+        expect(() => internal.execute()).not.toThrow();
+        expect(builtFor).toEqual([late]);
+        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0], late]);
+    });
+
+    it("keeps a late PBR mesh deferred while an existing PBR context cannot render it yet", async () => {
+        // Existing PBR scene, first thin-instanced PBR mesh added at runtime, resize / re-record while its
+        // forward build is pending. Any context used to be treated as sufficient, so the mesh was bound
+        // against the old scene-wide composer: no thin-instance helpers (every instance at the base
+        // transform) and, with morph targets, an invalid shader. It has to wait for ITS forward build.
+        const { scene, internal, meshes, late, completeForwardBuild } = await addLatePbrMesh(true);
+
+        expect(() => internal.execute()).not.toThrow();
+        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0]]);
+        scene._renderableVersion++;
+        expect(() => internal.execute()).not.toThrow();
+        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0]]);
+
+        const builtFor = completeForwardBuild();
+        expect(() => internal.execute()).not.toThrow();
+        expect(builtFor).toEqual([late]);
+        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0], late]);
+    });
+
+    it("still binds an off-scene PBR mesh of an explicit list against the scene-level context", async () => {
+        // Caller-supplied off-scene meshes are never forward-built, so the deferral must not apply to them.
+        const { scene, internal, meshes } = await setupGeoTask(1, true);
+        const { createPbrMaterial } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material");
+        const offScene = { ...(meshes[0] as unknown as Record<string, unknown>), material: createPbrMaterial() } as unknown as LateMesh;
+        (meshes as LateMesh[]).push(offScene);
+        (scene as unknown as { _pbrGeomContext?: unknown })._pbrGeomContext = {};
+        scene._renderableVersion++;
+
+        const state = internal as unknown as LateState;
+        internal.execute();
+        await state._lateLoad;
         const realFactory = state._createPbrGeometryView!;
         const builtFor: unknown[] = [];
         state._createPbrGeometryView = (source, viewConfig) => {
@@ -973,11 +1046,8 @@ describe("GeometryRendererTask", () => {
             };
             return view;
         };
-        pbrScene._pbrGeomContext = {};
-        scene._renderableVersion++;
         expect(() => internal.execute()).not.toThrow();
-        expect(builtFor).toEqual([late]);
-        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0], late]);
+        expect(builtFor).toEqual([offScene]);
     });
 
     it("exposes a late Standard family only after its optional feature helpers have loaded", async () => {

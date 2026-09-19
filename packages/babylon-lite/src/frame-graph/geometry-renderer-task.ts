@@ -528,7 +528,8 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
     const removed = task._removedMeshes;
     const meshes = config.meshes ?? sc.meshes;
     const attachmentTypes = task._attachments.map((a) => a._type);
-    const pbrScene = sc as SceneContext & { _pbrGeomContext?: unknown; _pbrMeshGeomContexts?: WeakMap<Mesh, unknown> };
+    // Meshes each PBR group's completed forward build has produced a renderable for (filled lazily below).
+    const forwardBuilt = new Map<unknown, Set<Mesh | undefined>>();
     try {
         for (const mesh of meshes) {
             if (removed?.has(mesh)) {
@@ -541,12 +542,24 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
             if (!resolved) {
                 continue;
             }
-            // A PBR mesh added at runtime is forward-built asynchronously, and its geometry renderable reuses
-            // the PBR context that build publishes. Until then the mesh stays deferred: building it now would
-            // throw synchronously out of `execute()`. The forward build bumps `_renderableVersion` when it
-            // completes, which re-syncs this list and binds the mesh.
-            if (resolved._family === "pbr" && !(pbrScene._pbrMeshGeomContexts?.has(mesh) || pbrScene._pbrGeomContext)) {
-                continue;
+            // A PBR geometry renderable reuses the scene's forward PBR context, and that context only covers
+            // what the forward build that published it has seen. A mesh added at runtime is forward-built
+            // asynchronously, so it stays deferred until ITS build has completed — i.e. until its group's
+            // tracked output holds a renderable for it — not merely until some PBR context exists: with no
+            // context the build throws out of `execute()`, and against a pre-existing one the first
+            // thin-instanced mesh draws every instance at the base transform and the first morphed mesh
+            // compiles an invalid shader. The forward build bumps `_renderableVersion` when it completes,
+            // which re-syncs this list and binds the mesh. Off-scene meshes of an explicit list are never
+            // forward-built and keep using the scene-level context.
+            if (resolved._family === "pbr" && (!config.meshes || sc.meshes.includes(mesh))) {
+                const group = sc._groups.get((resolved._mat as Material)._buildGroup);
+                let built = forwardBuilt.get(group);
+                if (!built) {
+                    forwardBuilt.set(group, (built = new Set(group?.o?.map((renderable) => renderable.mesh))));
+                }
+                if (!built.has(mesh)) {
+                    continue;
+                }
             }
             const resources: MeshRebuildResources = { _lifetimeDisposers: [] };
             created.push(resources);
