@@ -260,9 +260,8 @@ describe("StandardMaterial.disableLighting on a live material", () => {
     });
 
     it("rebuilds a material built with no scene and assigned to a mesh before startup", () => {
-        // Babylon.js-style scene-less construction. Before startup the `material` setter does not adopt the
-        // scene, so without adoption at deferred registration `_scene` stayed undefined and a post-start
-        // toggle kept the cached lit shader.
+        // Babylon.js-style scene-less construction. The material used to stay without a scene (`_scene`
+        // undefined), so a post-start toggle rebuilt nothing and kept the cached lit shader.
         const { scene, registerMaterial } = fakeScene(false);
         const pendingAdds: Array<() => void> = [];
         Object.assign(scene, { defaultMaterial: undefined, _deferAdd: (add: () => void) => pendingAdds.push(add), _registerMesh: vi.fn(), _unregisterNode: vi.fn() });
@@ -270,15 +269,15 @@ describe("StandardMaterial.disableLighting on a live material", () => {
         led.diffuseColor = new Color3(0, 0, 0);
         const strip = MeshBuilder.CreateBox("strip", {}, scene);
         strip.material = led;
-        expect(registerMaterial).not.toHaveBeenCalled();
+        // Ownership is settled at assignment, before startup; GPU finalization waits for the engine.
+        expect(registerMaterial).toHaveBeenCalledWith(led);
+        expect(led.getScene()).toBe(scene);
 
         // Engine start: the scene goes live and flushes its deferred mesh adds.
         (scene as unknown as { _hasStarted: boolean })._hasStarted = true;
         for (const add of pendingAdds.splice(0)) {
             add();
         }
-        expect(registerMaterial).toHaveBeenCalledWith(led);
-        expect(led.getScene()).toBe(scene);
 
         led.disableLighting = true;
         expect(liteMocks.rebuildMaterial).toHaveBeenCalledTimes(1);
@@ -317,7 +316,7 @@ describe("Mesh material setter reconciliation (issue #476a)", () => {
         expect(liteMesh.material).toBe(mat._lite);
     });
 
-    it("only rebinds (no ensure/adopt) before the engine has started", () => {
+    it("adopts the scene and rebinds, without GPU finalization, before the engine has started", () => {
         const { scene } = fakeScene(false);
         const liteMesh: { material: unknown } = { material: null };
         const mesh = Object.create(AbstractMesh.prototype) as { _lite: typeof liteMesh; _scene: Scene };
@@ -327,7 +326,9 @@ describe("Mesh material setter reconciliation (issue #476a)", () => {
         const mat = fakeMaterial();
         materialSetter.call(mesh, mat);
 
-        expect(mat._adoptScene).not.toHaveBeenCalled();
+        // Ownership does not wait for startup: not every pre-start assignment is followed by a registration
+        // callback that sees this material (an imported mesh has none). Finalization needs the engine.
+        expect(mat._adoptScene).toHaveBeenCalledWith(scene);
         expect(mat._ensureRenderable).not.toHaveBeenCalled();
         expect(liteMesh.material).toBe(mat._lite);
     });

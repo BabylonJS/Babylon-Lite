@@ -40,7 +40,7 @@ import {
     type Material as LiteMaterial,
 } from "babylon-lite";
 
-import { Mesh } from "./meshes.js";
+import { Mesh, registerMeshAtStart } from "./meshes.js";
 import type { Scene } from "../scene/scene.js";
 import { attachMaterialToScene } from "../materials/materials.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
@@ -51,17 +51,6 @@ type CompatMaterial = StandardMaterial | PBRMaterial | NodeMaterial;
 /** A compat mesh exposes its backing Lite mesh as `_lite`. */
 interface MeshLike {
     _lite: import("babylon-lite").Mesh;
-}
-
-/** @internal Add a freshly-built CSG result mesh to its scene at engine start. */
-function deferAddCsgMesh(mesh: Mesh, scene: Scene, material?: CompatMaterial): void {
-    scene._deferAdd(() => {
-        if (material) {
-            attachMaterialToScene(material, scene);
-            mesh._lite.material = material._lite as never;
-        }
-        addToScene(scene._lite, mesh._lite);
-    });
 }
 
 /**
@@ -97,8 +86,14 @@ export class CSG {
         const engine = scene.getEngine()._lite;
         const lite = createMeshFromCsg(engine, this._lite, name);
         const mesh = new Mesh(name, lite, scene);
-        deferAddCsgMesh(mesh, scene, material ?? undefined);
-        return mesh;
+        // As in Babylon.js, the explicit material becomes the result's `material`. The registration at
+        // engine start then finalizes whatever the mesh's effective material is by then, so a material
+        // assigned to the returned mesh before startup (the usual follow-up to `toMesh(name, null, scene)`)
+        // is not lost behind a captured argument.
+        if (material) {
+            mesh.material = material;
+        }
+        return registerMeshAtStart(mesh, scene);
     }
 }
 
@@ -166,8 +161,18 @@ export class CSG2 {
         // the first in a compat `Mesh` clobbers it with the scene default, so restore it.
         const savedMaterials = liteMeshes.map((m) => m.material);
         const root = new Mesh(name, liteMeshes[0]!, scene);
+        const wrapped = root.material;
         root._lite.material = savedMaterials[0] as never;
-        scene._deferAdd(() => addToScene(scene._lite, root._lite));
+        scene._deferAdd(() => {
+            // The result renders with its source materials unless the app gave the returned mesh one of its
+            // own before startup; that one is finalized and bound here like any other pre-start assignment.
+            const assigned = root.material;
+            if (assigned && assigned !== wrapped) {
+                attachMaterialToScene(assigned, scene);
+                root._lite.material = assigned._lite as never;
+            }
+            addToScene(scene._lite, root._lite);
+        });
         // Parent the remaining material sub-meshes under the returned mesh so the whole
         // result moves as one (Babylon.js returns a single multi-material mesh).
         for (let i = 1; i < liteMeshes.length; i++) {

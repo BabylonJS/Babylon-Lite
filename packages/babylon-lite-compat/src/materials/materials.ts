@@ -224,16 +224,30 @@ function copyLiteMaterialData(src: object, dst: object): void {
     }
 }
 
+/** Structural view of a compat material as the mesh registration paths need it. */
+interface SceneAttachableMaterial {
+    _ensureRenderable(engine: EngineContext): void;
+    _adoptScene?(scene: Scene): void;
+}
+
 /**
- * @internal The one place a compat material is made ready to render in a scene: adopt the scene, then
- * finalize the GPU-facing resources. Babylon.js allows `new StandardMaterial(name)` with no scene, so every
- * path that registers a mesh — the live `material` setter, the deferred primitive add, CSG results, the
- * navigation debug mesh — must go through here. A material that is rendered by a scene it never adopted has
- * no scene to rebuild in, and its later `_refreshInScene()` requests (a `disableLighting` toggle, a texture
- * that finished loading) silently do nothing.
+ * @internal Scene OWNERSHIP of a material, independent of GPU finalization. Babylon.js allows
+ * `new StandardMaterial(name)` with no scene, so the material a mesh renders with adopts that mesh's scene
+ * as soon as the two meet — whether or not the scene has started. A material rendered by a scene it never
+ * adopted has no scene to rebuild in, and its later `_refreshInScene()` requests (a `disableLighting`
+ * toggle, a texture that finished loading) silently do nothing.
  */
-export function attachMaterialToScene(material: { _ensureRenderable(engine: EngineContext): void; _adoptScene?(scene: Scene): void }, scene: Scene): void {
+export function adoptMaterialScene(material: SceneAttachableMaterial, scene: Scene): void {
     material._adoptScene?.(scene);
+}
+
+/**
+ * @internal Ownership plus GPU finalization (`_ensureRenderable`). Finalization needs the engine, so it stays
+ * gated to the moments a mesh actually enters the running scene: the live branch of the `material` setter
+ * and the deferred registration at engine start.
+ */
+export function attachMaterialToScene(material: SceneAttachableMaterial, scene: Scene): void {
+    adoptMaterialScene(material, scene);
     material._ensureRenderable(scene.getEngine()._lite);
 }
 

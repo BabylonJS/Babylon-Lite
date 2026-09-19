@@ -53,7 +53,7 @@ import { BoundingInfo } from "../culling/bounding.js";
 import { unsupported } from "../error.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
-import { attachMaterialToScene, Material as CompatMaterialBase } from "../materials/materials.js";
+import { adoptMaterialScene, attachMaterialToScene, Material as CompatMaterialBase } from "../materials/materials.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
 import type { NodeMaterial } from "../materials/node-material.js";
 import type { PhysicsBody } from "../physics/physics.js";
@@ -347,15 +347,21 @@ export class AbstractMesh extends TransformNode {
         this._material = value;
         const scene = this._scene;
         const renderMaterial = value ?? scene?.defaultMaterial;
-        if (renderMaterial && scene?._hasStarted) {
-            // The mesh already entered the scene, so the boot-time build (which
-            // normally calls `_ensureRenderable` via `addPrimitive`) has run. Finalize
-            // the material's GPU-facing resources now — PBR solid textures and any
-            // resolved texture handles — before rebinding, so Lite's material-swap
-            // rebuild (enqueued by the `_lite.material` reassignment below) sees
-            // complete props. Adopt the scene so a still-loading texture assigned to
-            // this material can reconcile itself on readiness.
-            attachMaterialToScene(renderMaterial, scene);
+        if (renderMaterial && scene) {
+            if (scene._hasStarted) {
+                // The mesh already entered the scene, so the boot-time build (which
+                // normally calls `_ensureRenderable` via `registerMeshAtStart`) has run. Finalize
+                // the material's GPU-facing resources now — PBR solid textures and any
+                // resolved texture handles — before rebinding, so Lite's material-swap
+                // rebuild (enqueued by the `_lite.material` reassignment below) sees
+                // complete props.
+                attachMaterialToScene(renderMaterial, scene);
+            } else {
+                // Before startup only ownership is settled here; finalization waits for the engine. Not every
+                // pre-start assignment is followed by a registration callback that sees this material (an
+                // imported mesh has none at all), so ownership cannot wait for one.
+                adoptMaterialScene(renderMaterial, scene);
+            }
         }
         if (renderMaterial?._lite) {
             this._lite.material = renderMaterial._lite as never;
@@ -1324,13 +1330,20 @@ function engineOf(scene: Scene): EngineContext {
  * (via `scene._deferAdd`) to let those assignments settle.
  */
 function addPrimitive(mesh: Mesh, scene: Scene, afterAdd?: () => void): Mesh {
+    return registerMeshAtStart(mesh, scene, afterAdd);
+}
+
+/**
+ * @internal The deferred registration shared by every compat path that builds a mesh before engine start
+ * (primitives, legacy CSG results, the navigation debug mesh): at startup, finalize the mesh's EFFECTIVE
+ * material — its own, or `scene.defaultMaterial` as it is by then — rebind its Lite handle and add the mesh.
+ */
+export function registerMeshAtStart(mesh: Mesh, scene: Scene, afterAdd?: () => void): Mesh {
     scene._deferAdd(() => {
         if (mesh.isDisposed()) {
             return;
         }
-        const mat = mesh.material;
-        // Assigned before startup, a material never goes through the live branch of the `material` setter,
-        // so this is where the final pre-start material gets its scene.
+        const mat = mesh.material ?? scene.defaultMaterial;
         if (mat) {
             attachMaterialToScene(mat, scene);
         }

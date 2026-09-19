@@ -32,15 +32,13 @@ import {
     removeObstacle as liteRemoveObstacle,
     updateNavMeshObstacles as liteUpdateNavMeshObstacles,
     createMeshFromData,
-    addToScene,
     type NavigationPlugin as LiteNavigationPlugin,
     type NavCrowd as LiteNavCrowd,
     type Mesh as LiteMesh,
     type ObstacleHandle as LiteObstacleHandle,
 } from "babylon-lite";
 
-import { attachMaterialToScene } from "../materials/materials.js";
-import { Mesh } from "../meshes/meshes.js";
+import { Mesh, registerMeshAtStart } from "../meshes/meshes.js";
 import { Vector3 } from "../math/vector.js";
 import type { Scene } from "../scene/scene.js";
 
@@ -175,18 +173,7 @@ class RecastNavigationJSPluginV2 {
         const geo = liteCreateDebugNavMeshGeometry(this._lite);
         const engine = scene.getEngine()._lite;
         const lite = createMeshFromData(engine, "navDebugMesh", geo.positions, geo.normals, geo.indices);
-        const mesh = new Mesh("navDebugMesh", lite, scene);
-        scene._deferAdd(() => {
-            const mat = mesh.material;
-            if (mat) {
-                attachMaterialToScene(mat, scene);
-            }
-            if (mat?._lite) {
-                mesh._lite.material = mat._lite as never;
-            }
-            addToScene(scene._lite, mesh._lite);
-        });
-        return mesh;
+        return registerMeshAtStart(new Mesh("navDebugMesh", lite, scene), scene);
     }
 
     /** Babylon.js `plugin.getClosestPoint(position)` — snap to the navmesh. */
