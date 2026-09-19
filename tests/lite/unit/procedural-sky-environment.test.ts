@@ -148,4 +148,21 @@ describe("procedural sky environment", () => {
         const irradiance = await _computeProceduralSkyIrradiance(options, async () => undefined);
         expect(irradiance && Array.from(irradiance).every(Number.isFinite)).toBe(true);
     });
+
+    it.each([
+        { ...DEFAULT_OPTIONS, rayleigh: -1 },
+        { ...DEFAULT_OPTIONS, mieCoefficient: -0.001 },
+        { ...DEFAULT_OPTIONS, turbidity: -1 },
+        { ...DEFAULT_OPTIONS, rayleigh: 0, mieCoefficient: 0 },
+        { ...DEFAULT_OPTIONS, sunDirection: [0, -1, 0] as const, rayleigh: 0 },
+    ])("rejects atmospheric parameters that can produce invalid scattering", (options) => {
+        expect(() => computeProceduralSkySunColor(options)).toThrow(/non-negative scattering/);
+    });
+
+    it.each([
+        { ...DEFAULT_OPTIONS, rayleigh: 0 },
+        { ...DEFAULT_OPTIONS, mieCoefficient: 0 },
+    ])("allows one scattering component to be zero when the total remains positive", (options) => {
+        expect(computeProceduralSkySunColor(options).every(Number.isFinite)).toBe(true);
+    });
 });

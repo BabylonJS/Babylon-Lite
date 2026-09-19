@@ -346,6 +346,10 @@ export async function _computeProceduralSkyIrradiance(
 
 function validateOptions(options: ProceduralSkyEnvironmentOptions): void {
     const directionLength = Math.hypot(options.sunDirection[0], options.sunDirection[1], options.sunDirection[2]);
+    const sunY = options.sunDirection[1] / directionLength;
+    const sunFade = 1 - Math.min(1, Math.max(0, 1 - Math.exp((sunY * 500) / 450000)));
+    const rayleighCoefficient = options.rayleigh - (1 - sunFade);
+    const mieStrength = options.turbidity * options.mieCoefficient;
     if (
         !Number.isFinite(directionLength) ||
         !(directionLength > 0) ||
@@ -354,9 +358,13 @@ function validateOptions(options: ProceduralSkyEnvironmentOptions): void {
         !Number.isFinite(options.turbidity) ||
         !Number.isFinite(options.rayleigh) ||
         !Number.isFinite(options.mieCoefficient) ||
-        !Number.isFinite(options.mieDirectionalG)
+        !Number.isFinite(options.mieDirectionalG) ||
+        !(options.turbidity >= 0) ||
+        !(options.mieCoefficient >= 0) ||
+        !(rayleighCoefficient >= 0) ||
+        !(rayleighCoefficient > 0 || mieStrength > 0)
     ) {
-        throw new Error("Procedural sky environment requires finite atmospheric parameters, a non-zero sun direction, and positive luminance.");
+        throw new Error("Procedural sky environment requires finite non-negative scattering, non-zero total scattering, a non-zero sun direction, and positive luminance.");
     }
 }
 
