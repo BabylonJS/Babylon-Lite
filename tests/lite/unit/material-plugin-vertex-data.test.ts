@@ -1,8 +1,18 @@
 import { describe, expect, it } from "vitest";
+import { registerPbrVertexPlugins } from "../../../packages/babylon-lite/src/material/plugin/pbr-plugin-vertex-bridge";
 import { buildPbrVertexPluginFragment } from "../../../packages/babylon-lite/src/material/plugin/pbr-plugin-vertex-data";
+import type { PbrExt } from "../../../packages/babylon-lite/src/material/pbr/pbr-flags";
 import type { ComposedShader } from "../../../packages/babylon-lite/src/shader/fragment-types";
 
 describe("material plugin vertex data", () => {
+    it("registers with the fragment id prefix used for PBR binding dispatch", () => {
+        let extension: PbrExt | undefined;
+        registerPbrVertexPlugins((value) => {
+            extension = value;
+        });
+        expect(extension?.id).toBe("plugin");
+    });
+
     it("composes custom varyings and vertex-visible resources", () => {
         const fragment = buildPbrVertexPluginFragment(
             [

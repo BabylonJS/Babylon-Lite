@@ -23,7 +23,7 @@ function indexFor(plugins: readonly MaterialPlugin[]): number {
 }
 
 const pbrVertexPluginExt: PbrExt = {
-    id: "plugin-vertex-data",
+    id: "plugin",
     phase: "fragment",
     detect(material) {
         const pbrMaterial = material as PbrMaterialProps;

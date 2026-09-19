@@ -12,7 +12,7 @@ async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const progress = installFetchProgress(canvas, { estimatedBytes: 6_400_000 });
     try {
-        await configureDemoDecoderBases(import.meta.url);
+        configureDemoDecoderBases(import.meta.url);
         await runOceanDemo(canvas);
     } finally {
         progress.done();

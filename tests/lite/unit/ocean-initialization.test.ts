@@ -3,9 +3,11 @@ import type * as Lite from "../../../packages/babylon-lite/src/index";
 import { acquireTexture, releaseTexture } from "../../../packages/babylon-lite/src/resource/gpu-pool";
 import { createOceanComputeResources, disposeOceanComputeResources } from "../../../lab/lite/src/demos/ocean/resources";
 import { createOceanSimulation } from "../../../lab/lite/src/demos/ocean/simulation";
+import { DEFAULT_OCEAN_SPECTRUM } from "../../../lab/lite/src/demos/ocean/spectrum";
 import { createOceanResourceScope, disposeOceanScope, ownOceanResource } from "../../../lab/lite/src/demos/ocean/ownership";
 import { disposeOceanDemoResources } from "../../../lab/lite/src/demos/ocean/lifecycle";
 import { retireGpuResources } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
+import { submitComputeTasks } from "../../../packages/babylon-lite/src/compute/compute-task";
 
 const created = vi.hoisted(() => ({
     shaders: [] as Lite.ComputeShader[],
@@ -38,6 +40,7 @@ vi.mock("../../../packages/babylon-lite/src/index.ts", async (importOriginal) =>
 function fixture() {
     const textures: GPUTexture[] = [];
     const buffers: GPUBuffer[] = [];
+    const dispatchWorkgroups = vi.fn();
     const fail = { texture: -1, bufferLabel: "", bindingLabel: "", shader: false };
     let textureCount = 0;
     const device = {
@@ -97,7 +100,7 @@ function fixture() {
             beginComputePass: vi.fn(() => ({
                 setPipeline: vi.fn(),
                 setBindGroup: vi.fn(),
-                dispatchWorkgroups: vi.fn(),
+                dispatchWorkgroups,
                 dispatchWorkgroupsIndirect: vi.fn(),
                 end: vi.fn(),
             })),
@@ -108,7 +111,7 @@ function fixture() {
         popErrorScope: vi.fn(async () => null),
         queue: { writeBuffer: vi.fn(), submit: vi.fn(), onSubmittedWorkDone: vi.fn(async (): Promise<void> => undefined) },
     };
-    return { engine: { _device: device } as unknown as Lite.EngineContext, device, fail, textures, buffers };
+    return { engine: { _device: device } as unknown as Lite.EngineContext, device, dispatchWorkgroups, fail, textures, buffers };
 }
 
 function expectReleased(f: ReturnType<typeof fixture>) {
@@ -250,6 +253,22 @@ describe("Ocean construction ownership", () => {
         expect(samples).toHaveLength(12);
         expect(simulation.mergeTask.executionEnabled).toBe(false);
         expect(f.device.queue.submit).toHaveBeenCalledTimes(5);
+        simulation.dispose();
+        expectReleased(f);
+    });
+
+    it("keeps spectrum-generation dispatches enabled after one-time initialization work is disabled", async () => {
+        const f = fixture();
+        const simulation = await createOceanSimulation(f.engine, 8);
+        await simulation.warmup(0);
+        expect(simulation.initializationTask.dispatches.filter((dispatch) => dispatch.enabled)).toHaveLength(6);
+
+        const dispatchesBeforeUpdate = f.dispatchWorkgroups.mock.calls.length;
+        const updating = simulation.setSpectrum(DEFAULT_OCEAN_SPECTRUM);
+        submitComputeTasks([simulation.initializationTask]);
+        await updating;
+
+        expect(f.dispatchWorkgroups).toHaveBeenCalledTimes(dispatchesBeforeUpdate + 6);
         simulation.dispose();
         expectReleased(f);
     });

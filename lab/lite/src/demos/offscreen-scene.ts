@@ -56,7 +56,7 @@ export const BRDF_ASSET = demoAssetUrl("./brdf-lut.png", import.meta.url);
  *   (resolved against the document) so it loads correctly inside a worker.
  */
 export async function startOffscreenScene(canvas: RenderCanvas, brdfUrl: string = BRDF_ASSET): Promise<EngineContext> {
-    await configureDemoDecoderBases(import.meta.url);
+    configureDemoDecoderBases(import.meta.url);
 
     const engine = await createEngine(canvas);
     const scene = createSceneContext(engine);
