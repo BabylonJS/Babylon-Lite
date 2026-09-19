@@ -230,6 +230,41 @@ describe("PBRMaterial factor-only materials", () => {
     });
 });
 
+describe("StandardMaterial.disableLighting on a live material", () => {
+    it("rebuilds the material so the shader variant and the compensated diffuse switch together", () => {
+        const { scene } = fakeScene(true);
+        const led = new StandardMaterial("led", scene);
+        led.diffuseColor = new Color3(0, 0, 0);
+        led.emissiveColor = new Color3(0, 0, 1);
+        expect(liteMocks.rebuildMaterial).not.toHaveBeenCalled();
+
+        // Lighting on/off selects a different shader. Marking the UBO dirty alone would keep the cached lit
+        // shader running with the neutral white diffuse, so a red scene light would turn the blue
+        // emissive magenta.
+        led.disableLighting = true;
+        expect((led._lite as { diffuseColor?: number[] }).diffuseColor).toEqual([1, 1, 1]);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledTimes(1);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledWith((scene as unknown as { _lite: object })._lite, led._lite);
+
+        // Same value again: nothing to rebuild.
+        led.disableLighting = true;
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledTimes(1);
+
+        // Back to lit: the app's diffuse returns and the lit variant is rebuilt.
+        led.disableLighting = false;
+        expect((led._lite as { diffuseColor?: number[] }).diffuseColor).toEqual([0, 0, 0]);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not rebuild before the scene has started", () => {
+        const { scene } = fakeScene(false);
+        const led = new StandardMaterial("led", scene);
+        led.diffuseColor = new Color3(0, 0, 0);
+        led.disableLighting = true;
+        expect(liteMocks.rebuildMaterial).not.toHaveBeenCalled();
+    });
+});
+
 describe("Mesh material setter reconciliation (issue #476a)", () => {
     const materialSetter = Object.getOwnPropertyDescriptor(AbstractMesh.prototype, "material")!.set!;
 

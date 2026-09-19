@@ -288,9 +288,17 @@ export class StandardMaterial extends PushMaterial {
         return this._lite.disableLighting;
     }
     public set disableLighting(value: boolean) {
+        const changed = this._lite.disableLighting !== value;
         this._lite.disableLighting = value;
         this._syncDiffuse();
         this._markDirty();
+        // Lighting on/off is a shader variant, not a uniform: a material that has already rendered keeps
+        // its compiled shader until its renderables are rebuilt. Rebuild together with the diffuse swap —
+        // otherwise the cached lit shader would run with the neutral white diffuse and let the scene
+        // lights tint an unlit material. No-op until the scene has started.
+        if (changed) {
+            this._refreshInScene();
+        }
     }
 
     protected override _applyBackFaceCulling(value: boolean): void {
