@@ -101,6 +101,10 @@ and vertex declaration. It does not modify the universal shader composer. Once
 enabled, the vertex-capable bridge remains the active PBR plugin bridge when
 `enableMaterialPlugins(scene)` or `reconcileMaterialPlugins(scene, material)`
 re-registers plugin support, so live plugin mutations retain their vertex resources.
+Both PBR bridges allocate identities and store immutable shader fragments in one
+lazy shared registry. Ordinary and vertex-resource variants therefore cannot
+collide in the composer or bindings caches, and fragments created before the
+vertex bridge is enabled remain resolvable without renumbering existing materials.
 
 ## Opt-in entry point — `enableMaterialPlugins(scene)`
 

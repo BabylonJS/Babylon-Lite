@@ -1,24 +1,20 @@
 import type { PbrExt } from "../pbr/pbr-flags.js";
 import type { PbrMaterialProps } from "../pbr/pbr-material.js";
-import type { ShaderFragment } from "../../shader/fragment-types.js";
 import type { MaterialPlugin } from "./material-plugin.js";
 import { bindPluginTextures, collectPluginTextures, enabledPlugins, writePluginUbo } from "./plugin-bridge-shared.js";
-import { _setActivePbrPluginExt } from "./pbr-plugin-bridge.js";
+import { _allocatePbrPluginIndex, _getPbrPluginFragment, _registerPbrPluginFragment, _setActivePbrPluginExt } from "./pbr-plugin-registry.js";
 import { buildPbrVertexPluginFragment, pbrVertexPluginSignature } from "./pbr-plugin-vertex-data.js";
 
 let signatureToIndex: Map<string, number> | null = null;
-let indexToFragment: ShaderFragment[] | null = null;
-let counter = 0;
 
 function indexFor(plugins: readonly MaterialPlugin[]): number {
     const signature = pbrVertexPluginSignature(plugins);
     const map = (signatureToIndex ??= new Map());
     let index = map.get(signature);
     if (index === undefined) {
-        index = counter + 1;
-        (indexToFragment ??= [])[index] = buildPbrVertexPluginFragment(plugins, index);
+        index = _allocatePbrPluginIndex();
+        _registerPbrPluginFragment(index, buildPbrVertexPluginFragment(plugins, index));
         map.set(signature, index);
-        counter = index;
     }
     return index;
 }
@@ -38,7 +34,7 @@ const pbrVertexPluginExt: PbrExt = {
         if (!index) {
             return null;
         }
-        const fragment = indexToFragment?.[index];
+        const fragment = _getPbrPluginFragment(index);
         if (!fragment) {
             throw new Error("PBR material plugin vertex signature is not registered.");
         }

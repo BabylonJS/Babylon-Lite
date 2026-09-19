@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
-import { reconcileMaterialPlugins } from "../../../packages/babylon-lite/src/material/plugin/enable-material-plugins";
+import { enableMaterialPlugins, reconcileMaterialPlugins } from "../../../packages/babylon-lite/src/material/plugin/enable-material-plugins";
 import { enablePbrMaterialPluginVertexData } from "../../../packages/babylon-lite/src/material/plugin/enable-pbr-material-plugin-vertex-data";
 import type { MaterialPlugin } from "../../../packages/babylon-lite/src/material/plugin/material-plugin";
 import { registerPbrVertexPlugins } from "../../../packages/babylon-lite/src/material/plugin/pbr-plugin-vertex-bridge";
@@ -50,6 +50,59 @@ function shaders(pipeline: GPURenderPipeline): { vertex: string; fragment: strin
 }
 
 describe("material plugin vertex data", () => {
+    it("keeps ordinary and vertex-resource identities distinct on one device", async () => {
+        const engine = makeEngine();
+        const ordinaryScene = createSceneContext(engine, { defaultRenderTask: false });
+        const ordinaryMaterial = createPbrMaterial({
+            plugins: [
+                {
+                    name: "ordinary-plugin",
+                    getCustomCode: (stage) => (stage === "fragment" ? { CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION: "color*=0.5;// ordinary plugin" } : null),
+                },
+            ],
+        });
+        const ordinaryMesh = makeMesh(ordinaryMaterial);
+        addToScene(ordinaryScene, ordinaryMesh);
+        ordinaryScene._groups.set(ordinaryMaterial._buildGroup, [ordinaryMesh]);
+        enableMaterialPlugins(ordinaryScene);
+
+        const ordinaryResult = await buildPbrRenderables(ordinaryScene, [ordinaryMesh], undefined);
+        const ordinaryPipeline = ordinaryResult.renderables[0]!.bind(engine, signature).pipeline;
+        const ordinaryIndex = ordinaryMaterial._pi;
+        expect(shaders(ordinaryPipeline).fragment).toContain("ordinary plugin");
+
+        const vertexScene = createSceneContext(engine, { defaultRenderTask: false });
+        const vertexMaterial = createPbrMaterial({
+            plugins: [
+                {
+                    name: "vertex-plugin",
+                    getVaryings: () => [{ name: "customValue", type: "vec3<f32>" }],
+                    getCustomCode: (stage) =>
+                        stage === "vertex"
+                            ? { CUSTOM_VERTEX_MAIN_END: "out.customValue=vec3f(1.0);// vertex plugin" }
+                            : { CUSTOM_FRAGMENT_BEFORE_FINALCOLORCOMPOSITION: "color*=in.customValue;// vertex plugin" },
+                },
+            ],
+        });
+        const vertexMesh = makeMesh(vertexMaterial);
+        addToScene(vertexScene, vertexMesh);
+        vertexScene._groups.set(vertexMaterial._buildGroup, [vertexMesh]);
+        enablePbrMaterialPluginVertexData();
+
+        const vertexResult = await buildPbrRenderables(vertexScene, [vertexMesh], undefined);
+        const vertexPipeline = vertexResult.renderables[0]!.bind(engine, signature).pipeline;
+        const vertexShaders = shaders(vertexPipeline);
+        expect(vertexMaterial._pi).not.toBe(ordinaryIndex);
+        expect(vertexPipeline).not.toBe(ordinaryPipeline);
+        expect(vertexShaders.vertex).toContain("vertex plugin");
+        expect(vertexShaders.vertex).toContain("customValue");
+        expect(vertexShaders.fragment).toContain("vertex plugin");
+
+        const rebuiltOrdinary = await buildPbrRenderables(ordinaryScene, [ordinaryMesh], undefined);
+        expect(ordinaryMaterial._pi).toBe(ordinaryIndex);
+        expect(shaders(rebuiltOrdinary.renderables[0]!.bind(engine, signature).pipeline).fragment).toContain("ordinary plugin");
+    });
+
     it("registers with the fragment id prefix used for PBR binding dispatch", () => {
         let extension: PbrExt | undefined;
         registerPbrVertexPlugins((value) => {
