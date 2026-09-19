@@ -8,18 +8,18 @@ import {
     createHemisphericLight,
     createPcfDirectionalShadowGenerator,
     createSceneContext,
+    decomposeMat4,
     enableHavokThinInstancePhysics,
     getPhysicsBodyInstanceCount,
     loadEnvironment,
     loadSkybox,
+    multiplyMat4,
     registerSceneWithShadowSupport,
-    removePhysicsBody,
     setGpuTimingEnabled,
     setPhysicsBodyAngularVelocity,
     setPhysicsBodyTransform,
     setPhysicsTimestepMs,
     setShadowTaskCasterMeshes,
-    setThinInstanceCount,
     startEngine,
 } from "babylon-lite";
 import type { EngineContext, PhysicsWorld, RenderTask, Task, Vec3 } from "babylon-lite";
@@ -29,7 +29,6 @@ import { createPlayroomCameras } from "../demos/playroom/camera.js";
 import { createPlayroomEffects, resetPlayroomEffects } from "../demos/playroom/effects.js";
 import type { PlayroomEffects } from "../demos/playroom/effects.js";
 import { createPlayroomGame, disposePlayroomGame, resetPlayroomGame } from "../demos/playroom/game.js";
-import { applyRadialExplosion } from "../demos/playroom/physics.js";
 import type { BodyRecord, PlayroomState, WorldState } from "../demos/playroom/types.js";
 import { buildPlayroomWorld } from "../demos/playroom/world.js";
 import { demoAssetUrl } from "../demos/demo-asset-url.js";
@@ -291,6 +290,20 @@ function bodyPosition(record: BodyRecord, index = 0): Vec3 {
     return matrices ? { x: matrices[offset + 12]!, y: matrices[offset + 13]!, z: matrices[offset + 14]! } : mesh.position;
 }
 
+function setBodyActivationForTest(state: PlayroomState, record: BodyRecord, simulationControlled: boolean, wake: boolean): void {
+    const thin = state.physics._thin;
+    const count = thin?.count(record.body) ?? 1;
+    for (let index = 0; index < count; index++) {
+        const handle = thin?.instance(record.body, index) ?? record.body._hkBody;
+        if (simulationControlled) {
+            state.physics._hknp.HP_Body_SetActivationControl(handle, state.physics._hknp.ActivationControl.SIMULATION_CONTROLLED);
+        }
+        if (wake) {
+            state.physics._hknp.HP_Body_SetActivationState(handle, state.physics._hknp.ActivationState.ACTIVE);
+        }
+    }
+}
+
 function activeInstanceCount(world: WorldState): number {
     let count = 0;
     for (const record of world.records) {
@@ -393,12 +406,17 @@ function placementState(state: PlayroomState): object {
             const transform = state.physics._hknp.HP_Body_GetQTransform(nativeBody)[1] as [number[], number[]];
             const linear = state.physics._hknp.HP_Body_GetLinearVelocity(nativeBody)[1] as number[];
             const angular = state.physics._hknp.HP_Body_GetAngularVelocity(nativeBody)[1] as number[];
+            const local = thin.matrices.slice(index * 16, index * 16 + 16);
+            const worldMatrix = multiplyMat4(record.mesh.worldMatrix, local);
+            const worldTransform = decomposeMat4(worldMatrix);
             maxLinearVelocity = Math.max(maxLinearVelocity, Math.hypot(linear[0]!, linear[1]!, linear[2]!));
             maxAngularVelocity = Math.max(maxAngularVelocity, Math.hypot(angular[0]!, angular[1]!, angular[2]!));
             samples.push({
                 recordId: record.id,
                 index,
-                cpu: Array.from(thin.matrices.slice(index * 16, index * 16 + 16)),
+                cpu: Array.from(local),
+                cpuWorldPosition: [worldTransform.translation.x, worldTransform.translation.y, worldTransform.translation.z],
+                cpuWorldRotation: [worldTransform.rotation.x, worldTransform.rotation.y, worldTransform.rotation.z, worldTransform.rotation.w],
                 nativePosition: transform[0].slice(),
                 nativeRotation: transform[1].slice(),
             });
@@ -534,20 +552,8 @@ async function completeThrow(state: PlayroomState): Promise<void> {
 
 function explodePoppers(state: PlayroomState, count: number): number {
     let explosions = 0;
-    for (const record of state.world.poppers) {
-        if (explosions >= count || !state.world.bodiesByObject.has(record.body)) {
-            continue;
-        }
-        applyRadialExplosion(state.physics, state.world, record, record.popperIndex === 0 || record.popperIndex === 2);
-        const point = bodyPosition(record);
-        record.scored.add(-1);
-        record.mesh.visible = false;
-        if ("thinInstances" in record.mesh && record.mesh.thinInstances) {
-            setThinInstanceCount(record.mesh, 0);
-        }
-        state.world.bodiesByObject.delete(record.body);
-        removePhysicsBody(state.physics, record.body);
-        document.dispatchEvent(new CustomEvent("playroom-popper", { detail: { point } }));
+    while (explosions < count && state.world.poppers.some((record) => record.active !== false)) {
+        triggerPopperCollision(state);
         explosions++;
     }
     return explosions;
@@ -562,6 +568,7 @@ function triggerPopperCollision(state: PlayroomState): BodyRecord {
         throw new Error("Lifecycle restart workload requires an active popper, another prop, and collision callbacks.");
     }
     state.poppersArmed = true;
+    setBodyActivationForTest(state, record, true, true);
     setPhysicsBodyAngularVelocity(state.physics, record.body, { x: 0, y: 20, z: 0 });
     const point = bodyPosition(record);
     const info = {
@@ -581,7 +588,7 @@ function triggerPopperCollision(state: PlayroomState): BodyRecord {
     return record;
 }
 
-async function runRestartWorkload(state: PlayroomState, effects: PlayroomEffects, mode: string): Promise<object> {
+async function runRestartWorkload(state: PlayroomState, effects: PlayroomEffects, mode: string, authored: object): Promise<object> {
     const baseline = checkpoint(state, effects, mode);
     click("playroom-startup-action");
     for (let throwIndex = 0; throwIndex < 3; throwIndex++) {
@@ -592,10 +599,11 @@ async function runRestartWorkload(state: PlayroomState, effects: PlayroomEffects
         }
     }
     const target = state.world.records
-        .filter((record) => record.family !== "ragdoll" && "thinInstances" in record.mesh && record.mesh.thinInstances)
+        .filter((record) => record.mass > 0 && record.family !== "ragdoll" && "thinInstances" in record.mesh && record.mesh.thinInstances)
         .sort((a, b) => getPhysicsBodyInstanceCount(b.body) - getPhysicsBodyInstanceCount(a.body))[0]!;
     const count = getPhysicsBodyInstanceCount(target.body);
     const displacedIndices = [...new Set([0, Math.floor((count - 1) / 2), count - 1])];
+    setBodyActivationForTest(state, target, true, true);
     for (const index of displacedIndices) {
         applyPhysicsBodyInstanceImpulse(state.physics, target.body, index, { x: 4 + index, y: 8, z: -3 }, bodyPosition(target, index));
     }
@@ -603,16 +611,25 @@ async function runRestartWorkload(state: PlayroomState, effects: PlayroomEffects
     triggerPopperCollision(state);
     const disturbed = checkpoint(state, effects, mode);
 
+    setPhysicsTimestepMs(state.physics, Number.NaN);
     const startedAt = performance.now();
     click("playroom-replay");
     const syncMs = performance.now() - startedAt;
     const immediate = checkpoint(state, effects, mode);
     await Promise.resolve();
     const afterQueuedPop = checkpoint(state, effects, mode);
+    setPhysicsTimestepMs(state.physics, 1000 / 60);
+    const motionIndex = displacedIndices[0]!;
+    const motionBefore = bodyPosition(target, motionIndex);
+    const nativeBody = state.physics._thin!.instance(target.body, motionIndex)!;
+    state.physics._hknp.HP_Body_SetActivationState(nativeBody, state.physics._hknp.ActivationState.ACTIVE);
+    applyPhysicsBodyInstanceImpulse(state.physics, target.body, motionIndex, { x: 2, y: 4, z: -1 }, motionBefore);
     const recoveryStartedAt = performance.now();
     await waitFrames(2);
     const recoveryMs = performance.now() - recoveryStartedAt;
     const afterFrames = checkpoint(state, effects, mode);
+    const motionAfter = bodyPosition(target, motionIndex);
+    const aimingMotionDistance = Math.hypot(motionAfter.x - motionBefore.x, motionAfter.y - motionBefore.y, motionAfter.z - motionBefore.z);
 
     click("playroom-kick");
     const popperEventsBefore = popperEvents;
@@ -632,6 +649,7 @@ async function runRestartWorkload(state: PlayroomState, effects: PlayroomEffects
     const final = checkpoint(state, effects, mode);
     return {
         baseline,
+        authored,
         disturbed,
         immediate,
         afterQueuedPop,
@@ -640,6 +658,7 @@ async function runRestartWorkload(state: PlayroomState, effects: PlayroomEffects
         secondExplosionEvents,
         final,
         displacedIndices,
+        aimingMotionDistance,
         timings: { syncMs, recoveryMs, repeatedSyncMs },
     };
 }
@@ -776,6 +795,7 @@ async function main(): Promise<void> {
         setCameraMode: cameras.setMode,
         disposeCameras: cameras.dispose,
     });
+    const authoredPlacement = placementState(state);
     document.addEventListener("playroom-popper", () => popperEvents++);
     const rebuildResolutionMap = installResolutionObserver(physics);
     installFrameObserver(engine, state, effects);
@@ -805,7 +825,7 @@ async function main(): Promise<void> {
             } else if (detail.action === "full") {
                 result = await runFullWorkload(state, effects, rebuildResolutionMap, removeEffects, mode);
             } else if (detail.action === "restart") {
-                result = await runRestartWorkload(state, effects, mode);
+                result = await runRestartWorkload(state, effects, mode, authoredPlacement);
             } else if (detail.action === "dispose") {
                 result = await runDisposeWorkload(state, effects, mode);
             } else {

@@ -4,11 +4,41 @@ import type { DisposeWorkloadReport, RestartCheckpoint, RestartWorkloadReport } 
 
 test.describe.configure({ mode: "serial" });
 
-function expectRestarted(checkpoint: RestartCheckpoint, baseline: RestartCheckpoint): void {
+const POSITION_ABSOLUTE_TOLERANCE = 1e-5;
+const POSITION_RELATIVE_TOLERANCE = 1e-6;
+
+function expectVectorClose(actual: readonly number[], expected: readonly number[]): void {
+    expect(actual).toHaveLength(expected.length);
+    for (let index = 0; index < expected.length; index++) {
+        const tolerance = POSITION_ABSOLUTE_TOLERANCE + POSITION_RELATIVE_TOLERANCE * Math.abs(expected[index]!);
+        expect(Math.abs(actual[index]! - expected[index]!)).toBeLessThanOrEqual(tolerance);
+    }
+}
+
+function expectQuaternionEquivalent(actual: readonly number[], expected: readonly number[]): void {
+    const direct = Math.hypot(...actual.map((value, index) => value - expected[index]!));
+    const negated = Math.hypot(...actual.map((value, index) => value + expected[index]!));
+    expect(Math.min(direct, negated)).toBeLessThanOrEqual(POSITION_ABSOLUTE_TOLERANCE);
+}
+
+function expectCurrentCpuNativeAgreement(checkpoint: RestartCheckpoint): void {
+    for (const sample of checkpoint.placement.samples) {
+        expectVectorClose(sample.nativePosition, sample.cpuWorldPosition);
+        expectQuaternionEquivalent(sample.nativeRotation, sample.cpuWorldRotation);
+    }
+    expect(checkpoint.placement.gpuHashes).toEqual(checkpoint.placement.matrixHashes);
+}
+
+function expectRestarted(checkpoint: RestartCheckpoint, authored: RestartWorkloadReport["authored"], baseline: RestartCheckpoint): void {
     expect(checkpoint.identity).toEqual(baseline.identity);
     expect(checkpoint.resources).toEqual(baseline.resources);
-    expect(checkpoint.placement.matrixHashes).toEqual(baseline.placement.matrixHashes);
-    expect(checkpoint.placement.samples).toEqual(baseline.placement.samples);
+    expect(checkpoint.placement.matrixHashes).toEqual(authored.matrixHashes);
+    expect(checkpoint.placement.samples.map((sample) => sample.cpu)).toEqual(authored.samples.map((sample) => sample.cpu));
+    for (let index = 0; index < authored.samples.length; index++) {
+        expectVectorClose(checkpoint.placement.samples[index]!.nativePosition, authored.samples[index]!.nativePosition);
+        expectQuaternionEquivalent(checkpoint.placement.samples[index]!.nativeRotation, authored.samples[index]!.nativeRotation);
+    }
+    expectCurrentCpuNativeAgreement(checkpoint);
     expect(checkpoint.placement.visibleInstances).toBe(baseline.placement.visibleInstances);
     expect(checkpoint.placement.scoredEntries).toBe(0);
     expect(checkpoint.placement.hiddenPoppers).toBe(0);
@@ -34,11 +64,12 @@ test("restarts in place after three launches and restores every retained resourc
     expect(report.displacedIndices).toHaveLength(3);
     expect(report.disturbed.placement.matrixHashes).not.toEqual(report.baseline.placement.matrixHashes);
     expect(report.disturbed.placement.hiddenPoppers).toBeGreaterThan(0);
-    expectRestarted(report.immediate, report.baseline);
-    expectRestarted(report.afterQueuedPop, report.baseline);
+    expectRestarted(report.immediate, report.authored, report.baseline);
+    expectRestarted(report.afterQueuedPop, report.authored, report.baseline);
     expect(report.afterFrames.identity).toEqual(report.baseline.identity);
     expect(report.afterFrames.resources).toEqual(report.baseline.resources);
-    expect(report.afterFrames.placement.gpuHashes).toEqual(report.afterFrames.placement.matrixHashes);
+    expectCurrentCpuNativeAgreement(report.afterFrames);
+    expect(report.aimingMotionDistance).toBeGreaterThan(0.0001);
     expect(report.secondExplosionEvents).toBe(1);
     expect(report.secondExplosion.placement.hiddenPoppers).toBe(1);
     expect(report.final.identity).toEqual(report.baseline.identity);

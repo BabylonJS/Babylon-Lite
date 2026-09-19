@@ -255,7 +255,15 @@ export interface RestartIdentity {
 export interface RestartPlacement {
     matrixHashes: number[];
     gpuHashes: Array<number | null>;
-    samples: Array<{ recordId: number; index: number; cpu: number[]; nativePosition: number[]; nativeRotation: number[] }>;
+    samples: Array<{
+        recordId: number;
+        index: number;
+        cpu: number[];
+        cpuWorldPosition: number[];
+        cpuWorldRotation: number[];
+        nativePosition: number[];
+        nativeRotation: number[];
+    }>;
     visibleInstances: number;
     scoredEntries: number;
     hiddenPoppers: number;
@@ -280,6 +288,7 @@ export interface RestartCheckpoint {
 }
 
 export interface RestartWorkloadReport {
+    authored: RestartPlacement;
     baseline: RestartCheckpoint;
     disturbed: RestartCheckpoint;
     immediate: RestartCheckpoint;
@@ -289,6 +298,7 @@ export interface RestartWorkloadReport {
     secondExplosionEvents: number;
     final: RestartCheckpoint;
     displacedIndices: number[];
+    aimingMotionDistance: number;
     timings: { syncMs: number; recoveryMs: number; repeatedSyncMs: number[] };
 }
 
