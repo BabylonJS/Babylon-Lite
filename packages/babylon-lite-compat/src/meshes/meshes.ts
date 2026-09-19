@@ -396,6 +396,7 @@ export class AbstractMesh extends TransformNode {
             throw new RangeError("Mesh-blending tag must be 0 or contain a group ID between 1 and 63.");
         }
         this._meshBlendingTag = value;
+        this._lite.meshBlendingTag = value;
     }
 
     protected override _onEffectiveEnabledStateChanged(enabled: boolean): void {
