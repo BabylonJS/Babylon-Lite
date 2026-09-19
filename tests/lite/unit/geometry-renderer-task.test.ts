@@ -928,6 +928,58 @@ describe("GeometryRendererTask", () => {
         expect(lateState._lateLoad).toBeUndefined();
     });
 
+    it("keeps a late PBR mesh deferred until its forward build has published the PBR context", async () => {
+        // Adding the first PBR mesh to a running Standard-only scene queues an asynchronous forward build.
+        // If the geometry bridge import wins that race, the next `execute()` used to reach
+        // `buildPbrGeometryRenderable()` before the scene had a PBR context and threw synchronously —
+        // outside the late-load rejection path, so the render loop stopped instead of retrying.
+        const { scene, internal, meshes } = await setupGeoTask(1);
+        const { createPbrMaterial } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material");
+        type M = import("../../../packages/babylon-lite/src/mesh/mesh").Mesh;
+        const late = { ...(meshes[0] as unknown as Record<string, unknown>), material: createPbrMaterial() } as unknown as M;
+        scene.meshes.push(late);
+        scene._renderableVersion++;
+
+        const state = internal as unknown as {
+            _lateLoad?: Promise<void>;
+            _boundVer: number;
+            _createPbrGeometryView: ((source: unknown, config: unknown) => { _buildGroup: { _rebuildSingle?: unknown } }) | null;
+        };
+        internal.execute();
+        await state._lateLoad;
+        expect(state._createPbrGeometryView).toBeTypeOf("function");
+
+        // The bridge is in, the forward PBR build is still pending: no PBR context on the scene yet.
+        const pbrScene = scene as unknown as { _pbrGeomContext?: unknown };
+        expect(pbrScene._pbrGeomContext).toBeUndefined();
+        expect(() => internal.execute()).not.toThrow();
+        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0]]);
+        // Unrelated scene mutations and re-records in that window keep skipping it as well.
+        scene._renderableVersion++;
+        expect(() => internal.execute()).not.toThrow();
+        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0]]);
+
+        // The forward build completes: it publishes the PBR context and bumps the scene version. The real PBR
+        // renderable needs a composed scene shader, so hand the view a recording builder to observe the task
+        // reaching it for the late mesh once (and only once) the context exists.
+        const realFactory = state._createPbrGeometryView!;
+        const builtFor: unknown[] = [];
+        state._createPbrGeometryView = (source, viewConfig) => {
+            const view = realFactory(source, viewConfig);
+            view._buildGroup._rebuildSingle = (_scene: unknown, mesh: unknown) => {
+                builtFor.push(mesh);
+                const renderable = { mesh, isTransparent: false, order: 0, bind: () => ({ renderable, pipeline: {}, draw: () => 1 }) };
+                return renderable;
+            };
+            return view;
+        };
+        pbrScene._pbrGeomContext = {};
+        scene._renderableVersion++;
+        expect(() => internal.execute()).not.toThrow();
+        expect(builtFor).toEqual([late]);
+        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0], late]);
+    });
+
     it("exposes a late Standard family only after its optional feature helpers have loaded", async () => {
         // `_preload` used to install the Standard factory BEFORE awaiting the skeletal-velocity / thin-instance
         // helpers. A resize or scene mutation landing in that window passed the readiness guard and threw

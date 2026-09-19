@@ -528,6 +528,7 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
     const removed = task._removedMeshes;
     const meshes = config.meshes ?? sc.meshes;
     const attachmentTypes = task._attachments.map((a) => a._type);
+    const pbrScene = sc as SceneContext & { _pbrGeomContext?: unknown; _pbrMeshGeomContexts?: WeakMap<Mesh, unknown> };
     try {
         for (const mesh of meshes) {
             if (removed?.has(mesh)) {
@@ -538,6 +539,13 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
             }
             const resolved = resolveSourceMaterial(task, mesh.material);
             if (!resolved) {
+                continue;
+            }
+            // A PBR mesh added at runtime is forward-built asynchronously, and its geometry renderable reuses
+            // the PBR context that build publishes. Until then the mesh stays deferred: building it now would
+            // throw synchronously out of `execute()`. The forward build bumps `_renderableVersion` when it
+            // completes, which re-syncs this list and binds the mesh.
+            if (resolved._family === "pbr" && !(pbrScene._pbrMeshGeomContexts?.has(mesh) || pbrScene._pbrGeomContext)) {
                 continue;
             }
             const resources: MeshRebuildResources = { _lifetimeDisposers: [] };
