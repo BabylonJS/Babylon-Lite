@@ -1330,6 +1330,11 @@ function addPrimitive(mesh: Mesh, scene: Scene, afterAdd?: () => void): Mesh {
             return;
         }
         const mat = mesh.material;
+        // Babylon.js allows `new StandardMaterial(name)` with no scene. Assigned before startup, such a
+        // material never goes through the live branch of the `material` setter, so adopt the mesh's scene
+        // here, where the final pre-start material is known. Without a scene its later rebuild requests
+        // (`_refreshInScene`: a loaded texture, a `disableLighting` toggle) silently did nothing.
+        (mat as { _adoptScene?: (s: Scene) => void } | null)?._adoptScene?.(scene);
         mat?._ensureRenderable(engineOf(scene));
         // Re-bind in case the material's Lite handle resolved late (async-parsed
         // NodeMaterial, or a texture map that loaded after `mesh.material = …`).

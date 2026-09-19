@@ -17,6 +17,8 @@ const liteMocks = vi.hoisted(() => ({
     markMaterialUboDirty: vi.fn(),
     createSolidTexture2D: vi.fn(() => ({ id: "solid" })),
     rebuildMaterial: vi.fn(),
+    createBox: vi.fn(() => ({ name: "", children: [] }) as Record<string, unknown>),
+    addToScene: vi.fn(),
     loadTexture2D: vi.fn(),
     loadBasisTexture2D: vi.fn(),
     loadKtxTexture2D: vi.fn(),
@@ -53,7 +55,7 @@ vi.mock("babylon-lite", () => liteMocks);
 import { StandardMaterial, PBRMaterial } from "../src/materials/materials";
 import { Color3 } from "../src/math/color";
 import { Texture } from "../src/textures/textures";
-import { AbstractMesh } from "../src/meshes/meshes";
+import { AbstractMesh, MeshBuilder } from "../src/meshes/meshes";
 import type { Scene } from "../src/scene/scene";
 
 type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void };
@@ -105,6 +107,7 @@ beforeEach(() => {
     liteMocks.createStandardMaterial.mockImplementation(() => ({ diffuseTexture: null, emissiveTexture: null, bumpTexture: null }));
     liteMocks.createPbrMaterial.mockImplementation(() => ({}));
     liteMocks.createSolidTexture2D.mockImplementation(() => ({ id: "solid" }));
+    liteMocks.createBox.mockImplementation(() => ({ name: "", children: [] }));
 });
 
 describe("BaseTexture._onReady", () => {
@@ -254,6 +257,32 @@ describe("StandardMaterial.disableLighting on a live material", () => {
         led.disableLighting = false;
         expect((led._lite as { diffuseColor?: number[] }).diffuseColor).toEqual([0, 0, 0]);
         expect(liteMocks.rebuildMaterial).toHaveBeenCalledTimes(2);
+    });
+
+    it("rebuilds a material built with no scene and assigned to a mesh before startup", () => {
+        // Babylon.js-style scene-less construction. Before startup the `material` setter does not adopt the
+        // scene, so without adoption at deferred registration `_scene` stayed undefined and a post-start
+        // toggle kept the cached lit shader.
+        const { scene, registerMaterial } = fakeScene(false);
+        const pendingAdds: Array<() => void> = [];
+        Object.assign(scene, { defaultMaterial: undefined, _deferAdd: (add: () => void) => pendingAdds.push(add), _registerMesh: vi.fn(), _unregisterNode: vi.fn() });
+        const led = new StandardMaterial("led");
+        led.diffuseColor = new Color3(0, 0, 0);
+        const strip = MeshBuilder.CreateBox("strip", {}, scene);
+        strip.material = led;
+        expect(registerMaterial).not.toHaveBeenCalled();
+
+        // Engine start: the scene goes live and flushes its deferred mesh adds.
+        (scene as unknown as { _hasStarted: boolean })._hasStarted = true;
+        for (const add of pendingAdds.splice(0)) {
+            add();
+        }
+        expect(registerMaterial).toHaveBeenCalledWith(led);
+        expect(led.getScene()).toBe(scene);
+
+        led.disableLighting = true;
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledTimes(1);
+        expect(liteMocks.rebuildMaterial).toHaveBeenCalledWith((scene as unknown as { _lite: object })._lite, led._lite);
     });
 
     it("does not rebuild before the scene has started", () => {
