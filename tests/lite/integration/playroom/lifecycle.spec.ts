@@ -35,7 +35,7 @@ test("records launch, maximum explosions, quiet retention, three throws, and rep
     const maximum = lifecycleStage(report, "maximum-explosions");
     const quiet = lifecycleStage(report, "quiet");
     const threeThrows = lifecycleStage(report, "three-throws");
-    const firstReplayRetired = lifecycleStage(report, "first-replay-retired");
+    const firstReplay = lifecycleStage(report, "first-replay-retired");
     const replayBurst = lifecycleStage(report, "replay-burst");
     const postRetirement = lifecycleStage(report, "post-retirement");
 
@@ -49,11 +49,11 @@ test("records launch, maximum explosions, quiet retention, three throws, and rep
     expect(quiet.effects.descriptorRebuilds - maximum.effects.descriptorRebuilds).toBeGreaterThanOrEqual(quiet.effects.confetti * 110);
     expect(threeThrows.phase).toBe("ended");
     expect(threeThrows.throwCount).toBe(3);
-    expect(replayBurst.lifecycle.retiredWorlds).toBeGreaterThanOrEqual(2);
+    expect(replayBurst.lifecycle.retiredWorlds).toBe(0);
     expect(postRetirement.lifecycle.retiredWorlds).toBe(0);
     expect(postRetirement.lifecycle.sceneMeshes).toBe(idle.lifecycle.sceneMeshes);
-    expect(postRetirement.lifecycle.nodeRenderables).toBe(firstReplayRetired.lifecycle.nodeRenderables);
-    expect(postRetirement.lifecycle.nodeGroupRenderables).toBe(firstReplayRetired.lifecycle.nodeGroupRenderables);
+    expect(postRetirement.lifecycle.nodeRenderables).toBe(firstReplay.lifecycle.nodeRenderables);
+    expect(postRetirement.lifecycle.nodeGroupRenderables).toBe(firstReplay.lifecycle.nodeGroupRenderables);
     expect(postRetirement.lifecycle.meshDisposerOwners).toBe(idle.lifecycle.meshDisposerOwners);
     expect(postRetirement.lifecycle.auxDisposerOwners).toBe(idle.lifecycle.auxDisposerOwners);
     expect(postRetirement.native.bodies.live).toBe(idle.native.bodies.live);

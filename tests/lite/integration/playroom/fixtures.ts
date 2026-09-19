@@ -206,6 +206,8 @@ export interface LifecycleSnapshot {
     gpuWrites: {
         calls: number;
         sourceBytes: number;
+        bufferCreates: number;
+        bufferDestroys: number;
         pendingRetirements: number;
         retiringBatches: number;
         retiringCallbacks: number;
@@ -238,6 +240,64 @@ export interface LifecycleSnapshot {
     };
 }
 
+export interface RestartIdentity {
+    world: number;
+    records: number[];
+    meshes: number[];
+    bodies: number[];
+    nativeBodies: number[];
+    shapes: number[];
+    constraints: number[];
+    matrixArrays: number[];
+    matrixBuffers: number[];
+}
+
+export interface RestartPlacement {
+    matrixHashes: number[];
+    gpuHashes: Array<number | null>;
+    samples: Array<{ recordId: number; index: number; cpu: number[]; nativePosition: number[]; nativeRotation: number[] }>;
+    visibleInstances: number;
+    scoredEntries: number;
+    hiddenPoppers: number;
+    maxLinearVelocity: number;
+    maxAngularVelocity: number;
+}
+
+export interface RestartCheckpoint {
+    snapshot: LifecycleSnapshot;
+    identity: RestartIdentity;
+    placement: RestartPlacement;
+    resources: {
+        bodyCreates: number;
+        bodyReleases: number;
+        shapeCreates: number;
+        shapeReleases: number;
+        constraintCreates: number;
+        constraintReleases: number;
+        gpuBufferCreates: number;
+        gpuBufferDestroys: number;
+    };
+}
+
+export interface RestartWorkloadReport {
+    baseline: RestartCheckpoint;
+    disturbed: RestartCheckpoint;
+    immediate: RestartCheckpoint;
+    afterQueuedPop: RestartCheckpoint;
+    afterFrames: RestartCheckpoint;
+    secondExplosion: RestartCheckpoint;
+    secondExplosionEvents: number;
+    final: RestartCheckpoint;
+    displacedIndices: number[];
+    timings: { syncMs: number; recoveryMs: number; repeatedSyncMs: number[] };
+}
+
+export interface DisposeWorkloadReport {
+    before: RestartCheckpoint;
+    after: RestartCheckpoint;
+    repeated: RestartCheckpoint;
+}
+
 export interface LifecycleWorkloadReport {
     schemaVersion: number;
     sourceRevision: string;
@@ -266,7 +326,7 @@ export async function openLifecycleHarness(page: import("@playwright/test").Page
     expect(await page.locator("#renderCanvas").getAttribute("data-error")).toBeNull();
 }
 
-export async function lifecycleCommand<T>(page: import("@playwright/test").Page, action: "snapshot" | "wait" | "full", frames?: number): Promise<T> {
+export async function lifecycleCommand<T>(page: import("@playwright/test").Page, action: "snapshot" | "wait" | "full" | "restart" | "dispose", frames?: number): Promise<T> {
     return page.evaluate(
         ({ commandAction, commandFrames }) =>
             new Promise<T>((resolve, reject) => {
