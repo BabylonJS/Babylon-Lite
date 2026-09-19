@@ -14,15 +14,15 @@
  *  `./pbr-geometry-output-shader.ts`. */
 
 import { createMaterialView } from "../material-view.js";
-import { _computeMeshFeatures, MSH_RECEIVE_SHADOWS } from "../mesh-features.js";
 import type { Mesh } from "../../mesh/mesh.js";
+import type { SceneContext } from "../../scene/scene-core.js";
 import type { Renderable } from "../../render/renderable.js";
 import type { MaterialView } from "../material.js";
 import type { GeometryTextureType } from "../../frame-graph/geometry-types.js";
 import type { Camera } from "../../camera/camera.js";
-import { PBR_HAS_ALPHA_BLEND } from "./pbr-flags.js";
+import { PBR_HAS_ALPHA_BLEND, PBR2_ESM_SHADOW_OUTPUT, PBR2_NO_COLOR_OUTPUT } from "./pbr-flags.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
-import { getPbrGeometryGroupBuilder } from "./pbr-geometry-renderable.js";
+import { _pbrMeshRequest, getPbrGeometryGroupBuilder } from "./pbr-geometry-renderable.js";
 import { _ensurePbrGeometryExt } from "./pbr-geometry-output-shader.js";
 
 const PBR2_GEOMETRY_OUTPUT = 1 << 21;
@@ -106,19 +106,30 @@ export function _setActivePbrGeometryAttachments(att: readonly GeometryTextureTy
  *    `PBR2_GEOMETRY_OUTPUT` is set. */
 /**
  * @internal Whether `forward` — the renderable the scene's PBR group currently tracks for `mesh` — was built
- * for the mesh's CURRENT generation: same material render-feature object and same mesh capability bits.
+ * for the mesh's CURRENT generation: the same PBR context the geometry pass is about to compose against, the
+ * same material render-feature object, and the same request of that context — mesh feature bits
+ * (receive-shadows included), light mode and single-light type.
  *
- * A PBR geometry renderable reuses the forward PBR context, which only covers what the forward build that
- * published it has seen. Forward rebuilds are asynchronous and make-before-break, so while one is pending the
- * group still tracks the OLD renderable: binding the mesh then would pair its new state (first thin
- * instances, morph targets, changed material features) with the old composer — an instanced draw without the
- * instance-matrix buffer, or an invalid shader. `rebuildMaterial` drops `_renderFeatures` at request time, so
- * a pending material rebuild is visible as a changed object; a capability change shows up in the mesh bits.
+ * A PBR geometry renderable reuses the forward PBR context, and a context only carries what the forward build
+ * that produced it asked for: the single-light block of each light type it saw, the multi-light path only if
+ * some mesh needed it, shadow / thin-instance / morph helpers likewise. Forward rebuilds are asynchronous and
+ * make-before-break, so while one is pending (or has not been requested yet) the group still tracks the OLD
+ * renderable and the scene still publishes the OLD context. Binding the mesh then pairs its new state with
+ * that context: `receiveShadows` enabled on a single-light mesh, or a second light added, asks a single-light
+ * composer for the multi-light path — WGSL with undeclared light symbols; first thin instances draw without
+ * the instance-matrix buffer. So the geometry pass may only ask of a context what the forward build of that
+ * same mesh asked of it. `rebuildMaterial` drops `_renderFeatures` at request time, so a pending material
+ * rebuild shows up as a changed object; the rest is `_pbrMeshRequest`, the derivation the geometry renderable
+ * itself builds from, evaluated under the forward shadow rule (shadow-output materials never receive).
  */
-export function isPbrForwardBuildCurrent(forward: Renderable | undefined, mesh: Mesh): boolean {
+export function isPbrForwardBuildCurrent(scene: SceneContext, forward: Renderable | undefined, mesh: Mesh): boolean {
     const gen = forward?._gen;
-    const current = _computeMeshFeatures(mesh) | ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0);
-    return !!gen && gen[0] === (mesh.material as PbrMaterialProps | null)?._renderFeatures && !((gen[1] ^ current) & ~MSH_RECEIVE_SHADOWS);
+    const renderFeatures = (mesh.material as PbrMaterialProps | null)?._renderFeatures;
+    return (
+        !!gen &&
+        gen[4] === renderFeatures &&
+        _pbrMeshRequest(scene, mesh, (renderFeatures?.features2 ?? 0) & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)).every((value, index) => value === gen[index])
+    );
 }
 
 export function createPbrGeometryMaterialView(source: PbrMaterialProps, config: PbrGeometryViewConfig): PbrGeometryMaterialView {

@@ -938,12 +938,23 @@ describe("GeometryRendererTask", () => {
         _createPbrGeometryView: ((source: unknown, config: unknown) => { _buildGroup: { _rebuildSingle?: unknown } }) | null;
     };
 
-    type ForwardRenderable = { mesh?: LateMesh; _gen?: readonly [unknown, number] };
+    type ForwardRenderable = { mesh?: LateMesh; _gen?: readonly [unknown, number, number, string, unknown] };
+    type PbrContext = { _shadowLights: unknown[] };
+    type PbrScene = { _pbrGeomContext?: PbrContext };
 
-    /** What the forward PBR build tracks for a mesh when it completes: a renderable stamped with the material
-     *  render-feature object and the mesh capability bits it was built for. */
-    function forwardRenderableFor(mesh: LateMesh): ForwardRenderable {
-        return { mesh, _gen: [(mesh.material as { _renderFeatures?: unknown })._renderFeatures, _computeMeshFeatures(mesh)] };
+    /** A forward PBR context as far as the task can tell them apart: an identity plus its shadow lights. */
+    const pbrContext = (shadowLights: unknown[] = []): PbrContext => ({ _shadowLights: shadowLights });
+
+    /** What the forward PBR build tracks for a mesh when it completes: a renderable stamped with the request
+     *  the build made of its context — the context itself, the mesh feature bits (receive-shadows included),
+     *  the light mode, the single-light type — and the material render-feature object. Written out the way
+     *  `rebuildSingle` derives it (every light of these scenes affects every mesh). */
+    function forwardRenderableFor(scene: { lights: readonly { lightType: string }[] }, mesh: LateMesh): ForwardRenderable {
+        const context = (scene as unknown as PbrScene)._pbrGeomContext!;
+        const receiveShadows = mesh.receiveShadows && context._shadowLights.length > 0;
+        const lightMode = scene.lights.length === 0 ? 0 : scene.lights.length === 1 && !receiveShadows ? 1 : 2;
+        const singleLightType = lightMode === 1 ? scene.lights[0]!.lightType : "";
+        return { mesh, _gen: [context, _computeMeshFeatures(mesh, receiveShadows), lightMode, singleLightType, (mesh.material as { _renderFeatures?: unknown })._renderFeatures] };
     }
 
     /** Swap the PBR view's renderable builder for a recording one: the real PBR geometry renderable needs the
@@ -969,7 +980,7 @@ describe("GeometryRendererTask", () => {
         const { createPbrMaterial } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material");
         const material = createPbrMaterial();
         const late = { ...(meshes[0] as unknown as Record<string, unknown>), material, thinInstances: { count: 4 } } as unknown as LateMesh;
-        const pbrScene = scene as unknown as { _pbrGeomContext?: unknown };
+        const pbrScene = scene as unknown as PbrScene;
         // The PBR group as the runtime build leaves it while pending: the mesh has joined the group, but the
         // group's tracked output holds no renderable for it yet.
         const group = Object.assign([late], { o: [] as ForwardRenderable[] });
@@ -977,7 +988,7 @@ describe("GeometryRendererTask", () => {
         if (existingContext) {
             // An existing PBR scene: this context was composed before the late mesh existed (no thin-instance
             // helpers, no morph declarations) and is NOT sufficient to render it.
-            pbrScene._pbrGeomContext = {};
+            pbrScene._pbrGeomContext = pbrContext();
         }
         scene.meshes.push(late);
         scene._renderableVersion++;
@@ -991,8 +1002,8 @@ describe("GeometryRendererTask", () => {
             const builtFor = recordPbrGeometryBuilds(state);
             // What the forward build does when it completes: publish the context, track the mesh's renderable
             // (stamped with the generation it was built for) in its group's output, bump the scene version.
-            pbrScene._pbrGeomContext = {};
-            group.o.push(forwardRenderableFor(late));
+            pbrScene._pbrGeomContext = pbrContext();
+            group.o.push(forwardRenderableFor(scene, late));
             scene._renderableVersion++;
             return builtFor;
         };
@@ -1050,8 +1061,8 @@ describe("GeometryRendererTask", () => {
         material._renderFeatures = _computePbrMaterialFeatures(material as never);
         const built = { ...(meshes[0] as unknown as Record<string, unknown>), material } as unknown as LateMesh;
         // Forward state of an existing PBR scene: context published, the mesh's renderable tracked by its group.
-        (scene as unknown as { _pbrGeomContext?: unknown })._pbrGeomContext = {};
-        const group = Object.assign([built], { o: [forwardRenderableFor(built)] });
+        (scene as unknown as PbrScene)._pbrGeomContext = pbrContext();
+        const group = Object.assign([built], { o: [forwardRenderableFor(scene, built)] });
         scene._groups.set(material._buildGroup, group as never);
         scene.meshes.push(built);
         scene._renderableVersion++;
@@ -1072,22 +1083,116 @@ describe("GeometryRendererTask", () => {
         expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0]]);
 
         // Each change alone is enough to keep it out. Material generation current again, capability still stale:
-        group.o[0] = { ...forwardRenderableFor(built), _gen: [material._renderFeatures, _computeMeshFeatures(meshes[0]!)] };
+        const current = forwardRenderableFor(scene, built)._gen!;
+        group.o[0] = { mesh: built, _gen: [current[0], _computeMeshFeatures(meshes[0]!), current[2], current[3], current[4]] };
         scene._renderableVersion++;
         internal.execute();
         expect(builtFor).toEqual([]);
         // Capability current, material generation stale:
-        group.o[0] = { ...forwardRenderableFor(built), _gen: [{}, _computeMeshFeatures(built)] };
+        group.o[0] = { mesh: built, _gen: [current[0], current[1], current[2], current[3], {}] };
+        scene._renderableVersion++;
+        internal.execute();
+        expect(builtFor).toEqual([]);
+        // Everything about the mesh current, but built against another PBR context than the published one:
+        group.o[0] = { mesh: built, _gen: [pbrContext(), current[1], current[2], current[3], current[4]] };
         scene._renderableVersion++;
         internal.execute();
         expect(builtFor).toEqual([]);
 
         // The forward rebuild completes: the group tracks a renderable built for the mesh as it is now.
-        group.o[0] = forwardRenderableFor(built);
+        group.o[0] = forwardRenderableFor(scene, built);
         scene._renderableVersion++;
         expect(() => internal.execute()).not.toThrow();
         expect(builtFor).toEqual([built]);
         expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0], built]);
+    });
+
+    /** An existing single-light PBR scene whose mesh is forward-built, current, and bound by the geometry task. */
+    async function setupBoundSingleLightPbrMesh(shadowLights: unknown[]) {
+        const setup = await setupGeoTask(1);
+        const { scene, internal, meshes } = setup;
+        const { createPbrMaterial } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material");
+        const { _computePbrMaterialFeatures } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material-features");
+        const { createDirectionalLight } = await import("../../../packages/babylon-lite/src/light/directional-light");
+        const material = createPbrMaterial() as unknown as { _buildGroup: never; _renderFeatures?: unknown };
+        material._renderFeatures = _computePbrMaterialFeatures(material as never);
+        const built = { ...(meshes[0] as unknown as Record<string, unknown>), material, receiveShadows: false } as unknown as LateMesh;
+        scene.lights.push(createDirectionalLight([0, -1, 0]));
+        // The forward build saw one light and no shadow receiver: a single-light composer, nothing else.
+        (scene as unknown as PbrScene)._pbrGeomContext = pbrContext(shadowLights);
+        const group = Object.assign([built], { o: [forwardRenderableFor(scene, built)] });
+        expect(group.o[0]!._gen!.slice(2, 4)).toEqual([1, "directional"]);
+        scene._groups.set(material._buildGroup, group as never);
+        scene.meshes.push(built);
+        scene._renderableVersion++;
+
+        const state = internal as unknown as LateState;
+        internal.execute();
+        await state._lateLoad;
+        const builtFor = recordPbrGeometryBuilds(state);
+        internal.execute();
+        expect(builtFor).toEqual([built]);
+        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0], built]);
+        builtFor.length = 0;
+
+        /** The forward rebuild completes: a new context, and the group tracks a renderable built against it. */
+        const completeForwardRebuild = (): void => {
+            (scene as unknown as PbrScene)._pbrGeomContext = pbrContext(shadowLights);
+            group.o[0] = forwardRenderableFor(scene, built);
+            scene._renderableVersion++;
+        };
+        return { ...setup, built, builtFor, completeForwardRebuild };
+    }
+
+    it("keeps a single-light PBR mesh out once it starts receiving shadows, until its forward rebuild completes", async () => {
+        // The geometry task re-derives every binding on each scene mutation. `receiveShadows` turns a
+        // mono-light mesh into a multi-light-path one, so re-binding it while its forward rebuild is pending
+        // asked the retained single-light composer for the multi-light path: WGSL with undeclared light
+        // symbols. No material change and no mesh capability bit is involved.
+        const { scene, internal, meshes, built, builtFor, completeForwardRebuild } = await setupBoundSingleLightPbrMesh([{}]);
+
+        built.receiveShadows = true;
+        scene._renderableVersion++;
+        expect(() => internal.execute()).not.toThrow();
+        expect(builtFor).toEqual([]);
+        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0]]);
+        // Further mutations and re-records inside the window keep it out as well.
+        scene._renderableVersion++;
+        internal.execute();
+        expect(builtFor).toEqual([]);
+
+        completeForwardRebuild();
+        expect(() => internal.execute()).not.toThrow();
+        expect(builtFor).toEqual([built]);
+        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0], built]);
+    });
+
+    it("keeps a single-light PBR mesh out once a second light reaches it, until its forward rebuild completes", async () => {
+        // Same window, opened from the scene side: a second light changes the light mode the geometry pass
+        // derives for the mesh, while the mesh, its material and its capability bits are all untouched.
+        const { scene, internal, meshes, built, builtFor, completeForwardRebuild } = await setupBoundSingleLightPbrMesh([]);
+        const { createHemisphericLight } = await import("../../../packages/babylon-lite/src/light/hemispheric");
+
+        scene.lights.push(createHemisphericLight([0, 1, 0]));
+        scene._renderableVersion++;
+        expect(() => internal.execute()).not.toThrow();
+        expect(builtFor).toEqual([]);
+        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0]]);
+
+        completeForwardRebuild();
+        expect(() => internal.execute()).not.toThrow();
+        expect(builtFor).toEqual([built]);
+        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0], built]);
+
+        // Back to a single light of another type: that single-light block is not in the context either.
+        scene.lights.shift();
+        scene._renderableVersion++;
+        builtFor.length = 0;
+        internal.execute();
+        expect(builtFor).toEqual([]);
+        completeForwardRebuild();
+        internal.execute();
+        expect(builtFor).toEqual([built]);
     });
 
     it("still binds an off-scene PBR mesh of an explicit list against the scene-level context", async () => {
@@ -1096,7 +1201,7 @@ describe("GeometryRendererTask", () => {
         const { createPbrMaterial } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material");
         const offScene = { ...(meshes[0] as unknown as Record<string, unknown>), material: createPbrMaterial() } as unknown as LateMesh;
         (meshes as LateMesh[]).push(offScene);
-        (scene as unknown as { _pbrGeomContext?: unknown })._pbrGeomContext = {};
+        (scene as unknown as PbrScene)._pbrGeomContext = pbrContext();
         scene._renderableVersion++;
 
         const state = internal as unknown as LateState;

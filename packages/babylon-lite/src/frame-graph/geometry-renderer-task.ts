@@ -231,7 +231,7 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
     _computeStandardFeatures: ((mat: StandardMaterialProps) => number) | null;
     _createPbrGeometryView: ((src: PbrMaterialProps, cfg: PbrGeometryViewConfig) => PbrGeometryMaterialView) | null;
     _computePbrFeatures: ((mat: PbrMaterialProps) => MaterialRenderFeatures) | null;
-    _isPbrForwardCurrent: ((forward: Renderable | undefined, mesh: Mesh) => boolean) | null;
+    _isPbrForwardCurrent: ((scene: SceneContext, forward: Renderable | undefined, mesh: Mesh) => boolean) | null;
     _createNodeGeometryView: ((src: NodeMaterial, cfg: NodeGeometryViewConfig) => NodeGeometryMaterialView) | null;
     /** In-flight bridge import for a material family that first appeared after `_preload`. */
     _lateLoad?: Promise<void>;
@@ -548,18 +548,19 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
             // A PBR geometry renderable reuses the scene's forward PBR context, and that context only covers
             // what the forward build that published it has seen. Forward (re)builds are asynchronous and
             // make-before-break, so a PBR mesh of the scene is bound only while the renderable its group
-            // tracks for it was built for the mesh's CURRENT material / capability generation (see
-            // `isPbrForwardBuildCurrent`): not before its first forward build, and not during a pending
-            // rebuild, when the group still tracks the old output. Otherwise it stays out of the pass; the
-            // forward build bumps `_renderableVersion` when it completes, which re-syncs this list. Off-scene
-            // meshes of an explicit list are never forward-built and keep using the scene-level context.
+            // tracks for it was built for the mesh's CURRENT generation — PBR context, material, mesh
+            // capabilities, shadow receiving and light setup (see `isPbrForwardBuildCurrent`): not before its
+            // first forward build, and not while a rebuild is pending or still owed, when the group tracks
+            // the old output. Otherwise it stays out of the pass; the forward build bumps
+            // `_renderableVersion` when it completes, which re-syncs this list. Off-scene meshes of an
+            // explicit list are never forward-built and keep using the scene-level context.
             if (resolved._family === "pbr" && (!config.meshes || sc.meshes.includes(mesh))) {
                 const group = sc._groups.get((resolved._mat as Material)._buildGroup);
                 let built = forwardBuilt.get(group);
                 if (!built) {
                     forwardBuilt.set(group, (built = new Map(group?.o?.map((renderable) => [renderable.mesh, renderable]))));
                 }
-                if (!task._isPbrForwardCurrent!(built.get(mesh), mesh)) {
+                if (!task._isPbrForwardCurrent!(sc, built.get(mesh), mesh)) {
                     continue;
                 }
             }
