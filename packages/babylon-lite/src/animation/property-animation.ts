@@ -294,6 +294,16 @@ function resolvePropertyBinding(target: object, path: string, stride: number): R
         throw new Error(`Invalid animation property path "${path}"`);
     }
 
+    const owner = resolvePropertyOwner(target, parts, path);
+    const property = parts[parts.length - 1]!;
+    if (!(property in owner)) {
+        throw new Error(`Animation property path "${path}" could not resolve "${property}"`);
+    }
+
+    return { mixTarget: owner, mixProperty: property, writer: createPathPropertyWriter(target, parts, owner, property, stride, path) };
+}
+
+function resolvePropertyOwner(target: object, parts: readonly string[], path: string): Record<string, unknown> {
     let owner: unknown = target;
     for (let i = 0; i < parts.length - 1; i++) {
         const part = parts[i]!;
@@ -303,14 +313,7 @@ function resolvePropertyBinding(target: object, path: string, stride: number): R
         }
         owner = record[part];
     }
-
-    const property = parts[parts.length - 1]!;
-    const record = asRecord(owner, path);
-    if (!(property in record)) {
-        throw new Error(`Animation property path "${path}" could not resolve "${property}"`);
-    }
-
-    return { mixTarget: record, mixProperty: property, writer: createPropertyWriter(record, property, stride, path) };
+    return asRecord(owner, path);
 }
 
 function asRecord(value: unknown, path: string): Record<string, unknown> {
@@ -322,6 +325,22 @@ function asRecord(value: unknown, path: string): Record<string, unknown> {
 
 function isSettable(value: unknown): value is PathSettable {
     return (typeof value === "object" || typeof value === "function") && value !== null && typeof (value as { set?: unknown }).set === "function";
+}
+
+function createPathPropertyWriter(target: object, parts: readonly string[], initialOwner: Record<string, unknown>, property: string, stride: number, path: string): PropertyWriter {
+    let owner = initialOwner;
+    let write = createPropertyWriter(owner, property, stride, path);
+    return (output, offset) => {
+        const currentOwner = resolvePropertyOwner(target, parts, path);
+        if (currentOwner !== owner) {
+            if (!(property in currentOwner)) {
+                throw new Error(`Animation property path "${path}" could not resolve "${property}"`);
+            }
+            owner = currentOwner;
+            write = createPropertyWriter(owner, property, stride, path);
+        }
+        write(output, offset);
+    };
 }
 
 function createPropertyWriter(target: Record<string, unknown>, property: string, stride: number, path: string): PropertyWriter {

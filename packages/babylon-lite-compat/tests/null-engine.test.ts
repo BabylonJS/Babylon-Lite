@@ -251,6 +251,30 @@ describe("NullEngine (headless)", () => {
         expect(target.rotationQuaternion.w).toBeCloseTo(Math.SQRT1_2, 6);
     });
 
+    it("follows a replaced intermediate object for a native dotted scalar track", () => {
+        const scene = new Scene(new NullEngine());
+        const originalPosition = { x: 0 };
+        const target = { position: originalPosition };
+        const animation = new Animation("component", "position.x", 10);
+        animation.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 10, value: 10 },
+        ]);
+
+        const animatable = scene.beginDirectAnimation(target, [animation], 0, 10, false);
+        scene._tick(250);
+        expect(originalPosition.x).toBeCloseTo(2.5);
+
+        const replacementPosition = { x: 100 };
+        target.position = replacementPosition;
+        scene._tick(250);
+
+        expect(animatable._lite).toBeDefined();
+        expect(target.position).toBe(replacementPosition);
+        expect(replacementPosition.x).toBeCloseTo(5);
+        expect(originalPosition.x).toBeCloseTo(2.5);
+    });
+
     it("observes easing replacement and clearing during native playback", () => {
         const scene = new Scene(new NullEngine());
         const target = { x: 0 };
@@ -435,6 +459,29 @@ describe("NullEngine (headless)", () => {
         expect(secondAnimatable._lite).toBeUndefined();
         expect(secondAnimatable._nativeFallbackReason).toMatch(/overlaps a compat fallback path/);
         expect(target.x).toBeCloseTo(150);
+    });
+
+    it("keeps a later child path on fallback when an earlier fallback owns its parent path", () => {
+        const scene = new Scene(new NullEngine());
+        const target = { position: new Vector3(0, 0, 0) };
+        const olderParent = new Animation("fallbackParent", "position", 10, Animation.ANIMATIONTYPE_VECTOR3, Animation.ANIMATIONLOOPMODE_CONSTANT);
+        olderParent.setKeys([
+            { frame: 0, value: new Vector3(0, 0, 0) },
+            { frame: 10, value: new Vector3(10, 10, 10) },
+        ]);
+        const newerChild = new Animation("supportedChild", "position.x", 10);
+        newerChild.setKeys([
+            { frame: 0, value: 100 },
+            { frame: 10, value: 200 },
+        ]);
+
+        scene.beginDirectAnimation(target, [olderParent], 0, 10, false);
+        const childAnimatable = scene.beginDirectAnimation(target, [newerChild], 0, 10, false);
+        scene._tick(500);
+
+        expect(childAnimatable._lite).toBeUndefined();
+        expect(childAnimatable._nativeFallbackReason).toMatch(/overlaps a compat fallback path/);
+        expect(target.position.asArray()).toEqual([150, 5, 5]);
     });
 
     it("plays reverse ranges and negative speed through explicit fallback", () => {

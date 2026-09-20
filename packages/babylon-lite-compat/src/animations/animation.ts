@@ -756,15 +756,18 @@ function pathsOverlap(a: string, b: string): boolean {
 }
 
 interface AnimationBinding {
+    readonly root: object;
+    readonly path: string;
     readonly target: object;
     readonly property: string;
 }
 
 function resolveAnimationBinding(target: unknown, path: string): AnimationBinding | undefined {
     const parts = path.split(".");
-    if (parts.length === 0 || parts.some((part) => part.length === 0)) {
+    if (parts.length === 0 || parts.some((part) => part.length === 0) || (typeof target !== "object" && typeof target !== "function") || target === null) {
         return undefined;
     }
+    const root = target;
     let owner: unknown = target;
     for (let i = 0; i < parts.length - 1; i++) {
         if ((typeof owner !== "object" && typeof owner !== "function") || owner === null) {
@@ -772,11 +775,11 @@ function resolveAnimationBinding(target: unknown, path: string): AnimationBindin
         }
         owner = (owner as Record<string, unknown>)[parts[i]!];
     }
-    return (typeof owner === "object" || typeof owner === "function") && owner !== null ? { target: owner, property: parts[parts.length - 1]! } : undefined;
+    return (typeof owner === "object" || typeof owner === "function") && owner !== null ? { root, path, target: owner, property: parts[parts.length - 1]! } : undefined;
 }
 
 function bindingsOverlap(a: AnimationBinding, b: AnimationBinding): boolean {
-    return a.target === b.target && a.property === b.property;
+    return (a.root === b.root && pathsOverlap(a.path, b.path)) || (a.target === b.target && a.property === b.property);
 }
 
 function isAnimationBinding(binding: AnimationBinding | undefined): binding is AnimationBinding {

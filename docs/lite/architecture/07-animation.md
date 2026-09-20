@@ -531,8 +531,10 @@ Manual property clips share the packed keyframe representation with glTF animati
 
 ### Property Binding
 
-Manual property paths are validated and their leaf owner/property pair is resolved
-when the group is created:
+Manual property paths are validated when the group is created. Their leaf
+owner/property pair is re-resolved before each write so replacing an intermediate
+object during playback (for example assigning a new `position` while animating
+`position.x`) redirects subsequent writes to the replacement:
 
 - scalar paths (`position.x`, `alpha`, `visible`) write directly to the resolved property;
 - vector/quaternion paths (`position`, `scaling`, `rotationQuaternion`) call `.set(...)` when the target object exposes a setter method;
@@ -658,10 +660,12 @@ loop, speedRatio)` constructor. Native manager/group ownership is supplied only
 through an internal factory state, so existing TypeScript and JavaScript callers
 retain their argument positions.
 
-Fallback ownership is compared at the resolved leaf object/property pair, not
-only by root target and dotted-path text. This preserves Babylon.js write order
-when different target objects alias the same nested property and when an older
-stopped fallback animation is later restarted.
+Fallback ownership retains both the root target/dotted path and the resolved leaf
+object/property pair. Root-relative ancestor/descendant paths such as `position`
+and `position.x` therefore stay on the same evaluator across separate animation
+calls, while resolved leaf identity also preserves write order when different
+target objects alias the same nested property or an older stopped fallback is
+later restarted.
 
 The native easing adapter reads `Animation.getEasingFunction()` at sample time,
 so replacing or clearing animation-level easing remains live. The compiled clip
