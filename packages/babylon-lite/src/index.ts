@@ -303,6 +303,7 @@ export type { Csg2Solid } from "./mesh/csg2.js";
 // ─── Resources ───────────────────────────────────────────────────────
 export { createStorageBuffer, updateStorageBuffer, readStorageBuffer, disposeStorageBuffer } from "./resource/storage-buffer.js";
 export type { StorageBuffer, StorageBufferOptions } from "./resource/storage-buffer.js";
+export { clearStorageBuffer, updateStorageBufferRange, readStorageBufferAfterFrame } from "./resource/storage-buffer-operations.js";
 export { createUniformBuffer, updateUniformBuffer, disposeUniformBuffer } from "./compute/compute-uniform-buffer.js";
 export type { UniformBuffer, UniformBufferOptions } from "./compute/compute-uniform-buffer.js";
 // GPU-resident geometry: a mesh sources its vertices straight from a storage

@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
     createStorageBuffer: vi.fn(),
-    updateStorageBuffer: vi.fn(),
-    readStorageBuffer: vi.fn(),
+    updateStorageBufferRange: vi.fn(),
+    readStorageBufferAfterFrame: vi.fn(),
+    clearStorageBuffer: vi.fn(),
     disposeStorageBuffer: vi.fn(),
     createUniformBuffer: vi.fn(),
     updateUniformBuffer: vi.fn(),
@@ -37,7 +38,7 @@ const engine = { _lite: { id: "engine" } } as unknown as WebGPUEngine;
 beforeEach(() => {
     vi.clearAllMocks();
     mocks.createStorageBuffer.mockReturnValue({ byteLength: 64, _writable: true });
-    mocks.readStorageBuffer.mockResolvedValue(new Uint8Array([1, 2, 3, 4]).buffer);
+    mocks.readStorageBufferAfterFrame.mockResolvedValue(new Uint8Array([1, 2, 3, 4]).buffer);
     mocks.createUniformBuffer.mockReturnValue({ byteLength: 16 });
     mocks.computeStorageBufferBinding.mockImplementation((name, options) => ({ name, options }));
     mocks.computeUniformBufferBinding.mockImplementation((name, options) => ({ name, options }));
@@ -74,25 +75,26 @@ describe("StorageBuffer forwarding", () => {
         const buffer = new StorageBuffer(engine, 64);
         const lite = buffer.getBuffer();
         buffer.update([1, 2], 4);
-        const updateBytes = mocks.updateStorageBuffer.mock.calls[0]![2] as Uint8Array;
+        const updateBytes = mocks.updateStorageBufferRange.mock.calls[0]![2] as Uint8Array;
         expect(Array.from(new Float32Array(updateBytes.buffer, updateBytes.byteOffset, 2))).toEqual([1, 2]);
-        expect(mocks.updateStorageBuffer.mock.calls[0]!.slice(0, 2)).toEqual([engine._lite, buffer.getBuffer()]);
-        expect(mocks.updateStorageBuffer.mock.calls[0]![3]).toBe(4);
+        expect(mocks.updateStorageBufferRange.mock.calls[0]!.slice(0, 2)).toEqual([engine._lite, buffer.getBuffer()]);
+        expect(mocks.updateStorageBufferRange.mock.calls[0]![3]).toBe(4);
 
         buffer.clear(8, 12);
-        expect(mocks.updateStorageBuffer.mock.calls[1]![2]).toEqual(new Uint8Array(12));
-        expect(mocks.updateStorageBuffer.mock.calls[1]![3]).toBe(8);
+        expect(mocks.clearStorageBuffer).toHaveBeenCalledWith(engine._lite, buffer.getBuffer(), 8, 12);
 
         await expect(buffer.read(4, 4)).resolves.toEqual(new Uint8Array([1, 2, 3, 4]));
+        expect(mocks.readStorageBufferAfterFrame).toHaveBeenCalledWith(buffer.getBuffer(), 4, 4, false);
         const target = new Uint16Array(4);
-        await expect(buffer.read(0, 4, target)).resolves.toBe(target);
+        await expect(buffer.read(0, 4, target, true)).resolves.toBe(target);
+        expect(mocks.readStorageBufferAfterFrame).toHaveBeenLastCalledWith(buffer.getBuffer(), 0, 4, true);
         expect(new Uint8Array(target.buffer).subarray(0, 4)).toEqual(new Uint8Array([1, 2, 3, 4]));
 
         buffer.dispose();
         expect(mocks.disposeStorageBuffer).toHaveBeenCalledWith(lite);
         expect(buffer.getBuffer()).toBeNull();
         buffer.update(new Uint32Array([1]));
-        expect(mocks.updateStorageBuffer).toHaveBeenCalledTimes(2);
+        expect(mocks.updateStorageBufferRange).toHaveBeenCalledTimes(1);
     });
 
     it("rejects combined storage and uniform usage at the structural boundary", () => {
@@ -152,6 +154,17 @@ describe("UniformBuffer compute subset", () => {
         expect(mocks.updateUniformBuffer).toHaveBeenCalledTimes(2);
         expect((mocks.updateUniformBuffer.mock.calls[1]![2] as Float32Array)[0]).toBe(9);
     });
+
+    it("does not dirty a static buffer when a fractional value rounds to the stored float32", () => {
+        const buffer = new UniformBuffer(engine);
+        buffer.addUniform("fraction", 1);
+        buffer.updateFloat("fraction", 0.1);
+        buffer.update();
+        buffer.updateFloat("fraction", 0.1);
+        buffer.update();
+
+        expect(mocks.updateUniformBuffer).toHaveBeenCalledTimes(1);
+    });
 });
 
 describe("ComputeShader forwarding", () => {
@@ -176,15 +189,16 @@ describe("ComputeShader forwarding", () => {
 
         expect(shader.dispatch(4)).toBe(true);
         expect(mocks.computeUniformBufferBinding).toHaveBeenCalledWith("uniforms", { group: 0, binding: 0 });
-        expect(mocks.computeStorageBufferBinding).toHaveBeenCalledWith("values", { group: 0, binding: 1, access: "read-write" });
+        expect(mocks.computeStorageBufferBinding).toHaveBeenCalledWith("values", { group: 0, binding: 1, access: "read" });
         expect(mocks.createComputeShader).toHaveBeenCalledWith(engine._lite, {
             name: "update",
             computeSource: "@compute @workgroup_size(1) fn main() {}",
             entryPoint: "main",
             bindings: [
                 { name: "uniforms", options: { group: 0, binding: 0 } },
-                { name: "values", options: { group: 0, binding: 1, access: "read-write" } },
+                { name: "values", options: { group: 0, binding: 1, access: "read" } },
             ],
+            automaticLayout: true,
         });
 
         expect(mocks.createComputeBindingSet).toHaveBeenCalledWith({ name: "lite-shader" }, { uniforms: uniform, values: storage });
@@ -199,7 +213,7 @@ describe("ComputeShader forwarding", () => {
         expect(compiled).toHaveBeenCalledTimes(1);
     });
 
-    it("derives storage binding access from WGSL instead of copy flags", () => {
+    it("uses automatic shader-derived layouts without parsing WGSL storage declarations", () => {
         const shader = new ComputeShader(
             "read",
             engine,
@@ -212,6 +226,50 @@ describe("ComputeShader forwarding", () => {
 
         expect(shader.dispatch(1)).toBe(true);
         expect(mocks.computeStorageBufferBinding).toHaveBeenCalledWith("values", { group: 0, binding: 0, access: "read" });
+        expect(mocks.createComputeShader).toHaveBeenCalledWith(engine._lite, expect.objectContaining({ automaticLayout: true }));
+    });
+
+    it("keeps the compiled shader while rebuilding bindings and ignores identical assignments", () => {
+        const shader = new ComputeShader("stable", engine, { computeSource: "source" }, { bindingsMapping: { values: { group: 0, binding: 0 } } });
+        const first = { byteLength: 16, _writable: true };
+        const second = { byteLength: 16, _writable: true };
+        shader.setStorageBuffer("values", first as never);
+        shader.dispatch(1);
+        shader.setStorageBuffer("values", first as never);
+        shader.dispatch(1);
+        expect(mocks.createComputeBindingSet).toHaveBeenCalledTimes(1);
+
+        shader.setStorageBuffer("values", second as never);
+        shader.dispatch(1);
+        expect(mocks.disposeComputeBindingSet).toHaveBeenCalledTimes(1);
+        expect(mocks.createComputeBindingSet).toHaveBeenCalledTimes(2);
+        expect(mocks.createComputeShader).toHaveBeenCalledTimes(1);
+        expect(mocks.disposeComputeShader).not.toHaveBeenCalled();
+    });
+
+    it("defers changed binding reconstruction while fastMode is enabled", () => {
+        const shader = new ComputeShader("fast", engine, { computeSource: "source" }, { bindingsMapping: { values: { group: 0, binding: 0 } } });
+        shader.setStorageBuffer("values", { byteLength: 16, _writable: true } as never);
+        shader.dispatch(1);
+        shader.fastMode = true;
+        shader.setStorageBuffer("values", { byteLength: 16, _writable: true } as never);
+        shader.dispatch(1);
+        expect(mocks.createComputeBindingSet).toHaveBeenCalledTimes(1);
+
+        shader.triggerContextRebuild = true;
+        shader.dispatch(1);
+        expect(mocks.createComputeBindingSet).toHaveBeenCalledTimes(2);
+        expect(mocks.createComputeShader).toHaveBeenCalledTimes(1);
+    });
+
+    it("compiles and invokes onCompiled from isReady before submission", () => {
+        const shader = new ComputeShader("ready", engine, { computeSource: "source" });
+        const compiled = vi.fn();
+        shader.onCompiled = compiled;
+
+        expect(shader.isReady()).toBe(true);
+        expect(compiled).toHaveBeenCalledWith({ name: "lite-shader" });
+        expect(mocks.submitComputeTasks).not.toHaveBeenCalled();
     });
 
     it("forwards indirect dispatch and preserves its default byte offset", () => {

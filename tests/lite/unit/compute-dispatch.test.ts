@@ -140,6 +140,26 @@ describe("scheduled compute dispatch", () => {
         expect(() => setComputeIndirectDispatch(indirectDispatch, indirect)).toThrow(/recreate the compute graph/);
     });
 
+    it("uses shader-derived layouts when automatic layout is requested", () => {
+        const { engine, device } = makeEngine();
+        const layout = {} as GPUBindGroupLayout;
+        const pipeline = { getBindGroupLayout: vi.fn(() => layout) } as unknown as GPUComputePipeline;
+        vi.mocked(device.createComputePipeline).mockReturnValueOnce(pipeline);
+        const shader = createComputeShader(engine, {
+            computeSource: SOURCE,
+            automaticLayout: true,
+            bindings: [computeUniformBufferBinding("params", { group: 0, binding: 0 }), computeStorageBufferBinding("output", { group: 0, binding: 1 })],
+        });
+        const params = createComputeUniformArena(createComputeTask(engine), 16, 1).buffer;
+        const output = createStorageBuffer(engine, 16, { writable: true });
+
+        createComputeBindingSet(shader, { params, output });
+
+        expect(device.createComputePipeline).toHaveBeenCalledWith(expect.objectContaining({ layout: "auto" }));
+        expect(pipeline.getBindGroupLayout).toHaveBeenCalledWith(0);
+        expect(device.createBindGroupLayout).not.toHaveBeenCalled();
+    });
+
     it("accepts named and numeric WGSL override identifiers", () => {
         const { engine, computePasses } = makeEngine();
         const shader = createComputeShader(engine, {

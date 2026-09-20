@@ -254,7 +254,7 @@ export class UniformBuffer {
             throw new RangeError(`Uniform "${uniformName}" has room for ${this._uniformSizes.get(uniformName)} floats, not ${size}.`);
         }
         for (let i = 0; i < size; i++) {
-            const value = data[i]!;
+            const value = Math.fround(data[i]!);
             if (this._bufferData![location + i] !== value) {
                 this._bufferData![location + i] = value;
                 this._needSync = true;
@@ -274,7 +274,7 @@ export class UniformBuffer {
         }
         for (let i = 0; i < size; i++) {
             const destination = location + Math.floor(i / layout.strideSize) * 4 + (i % layout.strideSize);
-            const value = data[i]!;
+            const value = Math.fround(data[i]!);
             if (this._bufferData![destination] !== value) {
                 this._bufferData![destination] = value;
                 this._needSync = true;

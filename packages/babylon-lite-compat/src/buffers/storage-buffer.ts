@@ -1,4 +1,4 @@
-import { createStorageBuffer, disposeStorageBuffer, readStorageBuffer, updateStorageBuffer } from "babylon-lite";
+import { clearStorageBuffer, createStorageBuffer, disposeStorageBuffer, readStorageBufferAfterFrame, updateStorageBufferRange } from "babylon-lite";
 import type { StorageBuffer as LiteStorageBuffer } from "babylon-lite";
 
 import type { WebGPUEngine } from "../engine/engine.js";
@@ -70,7 +70,7 @@ export class StorageBuffer {
         if (!Number.isSafeInteger(byteOffset) || byteOffset < 0 || !Number.isSafeInteger(byteLength) || byteLength < 0 || byteOffset + byteLength > buffer.byteLength) {
             throw new RangeError(`StorageBuffer.clear range [${byteOffset}, ${byteOffset + byteLength}) exceeds the ${buffer.byteLength}-byte buffer.`);
         }
-        updateStorageBuffer(this._engine._lite, buffer, new Uint8Array(byteLength), byteOffset);
+        clearStorageBuffer(this._engine._lite, buffer, byteOffset, byteLength);
     }
 
     public update(data: DataArray, byteOffset = 0, byteLength?: number): void {
@@ -78,14 +78,14 @@ export class StorageBuffer {
             return;
         }
         this._assertCopyWritable("update");
-        updateStorageBuffer(this._engine._lite, this._lite, asBytes(data, byteLength), byteOffset);
+        updateStorageBufferRange(this._engine._lite, this._lite, asBytes(data, byteLength), byteOffset);
     }
 
-    public async read(offset = 0, size = this._requireBuffer().byteLength - offset, buffer?: ArrayBufferView, _noDelay = false): Promise<ArrayBufferView> {
+    public async read(offset = 0, size = this._requireBuffer().byteLength - offset, buffer?: ArrayBufferView, noDelay = false): Promise<ArrayBufferView> {
         if (!this._copyReadable) {
             throw new Error("StorageBuffer.read requires Constants.BUFFER_CREATIONFLAG_READ.");
         }
-        const result = await readStorageBuffer(this._requireBuffer(), offset, size);
+        const result = await readStorageBufferAfterFrame(this._requireBuffer(), offset, size, noDelay);
         const bytes = new Uint8Array(result);
         if (!buffer) {
             return bytes;

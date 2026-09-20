@@ -49,11 +49,6 @@ export interface IComputeShaderOptions {
 
 type ComputeEffect = LiteComputeShader;
 type BufferBinding = { readonly kind: "uniform"; readonly resource: LiteUniformBuffer } | { readonly kind: "storage"; readonly resource: LiteStorageBuffer };
-interface ComputeGraph {
-    readonly shader: LiteComputeShader;
-    readonly bindings: LiteComputeBindingSet;
-}
-
 let nextComputeShaderId = 1;
 
 function sourceFrom(shaderPath: IComputeShaderPath | string): string {
@@ -64,13 +59,6 @@ function sourceFrom(shaderPath: IComputeShaderPath | string): string {
         "ComputeShader.constructor",
         "Lite's public compute factory accepts complete WGSL source. Babylon.js ShaderStore names, external .compute.fx paths, and DOM script-element lookup have no public Lite resolver."
     );
-}
-
-function storageAccess(source: string, location: ComputeBindingLocation): "read" | "read-write" {
-    const bindingFirst = `@binding\\(${location.binding}\\)\\s*@group\\(${location.group}\\)`;
-    const groupFirst = `@group\\(${location.group}\\)\\s*@binding\\(${location.binding}\\)`;
-    const declaration = new RegExp(`(?:${bindingFirst}|${groupFirst})\\s*var<storage\\s*,\\s*(read|read_write)>`);
-    return source.match(declaration)?.[1] === "read" ? "read" : "read-write";
 }
 
 /** Babylon.js ComputeShader adapted to Lite's public buffer-backed compute graph. */
@@ -87,7 +75,10 @@ export class ComputeShader {
 
     private readonly _source: string;
     private readonly _bindings = new Map<string, BufferBinding>();
-    private _graph: ComputeGraph | null = null;
+    private _shader: LiteComputeShader | null = null;
+    private _bindingSet: LiteComputeBindingSet | null = null;
+    private _bindingsDirty = false;
+    private _shaderDirty = false;
     private _compiled = false;
 
     public constructor(
@@ -158,13 +149,23 @@ export class ComputeShader {
 
     public setUniformBuffer(name: string, buffer: UniformBuffer | LiteUniformBuffer): void {
         const resource = "_getLiteBuffer" in buffer ? buffer._getLiteBuffer() : buffer;
-        this._invalidateGraph();
+        const current = this._bindings.get(name);
+        if (current?.kind === "uniform" && current.resource === resource) {
+            return;
+        }
+        this._bindingsDirty = true;
+        this._shaderDirty ||= this._shader !== null && (current === undefined || current.kind !== "uniform");
         this._bindings.set(name, { kind: "uniform", resource });
     }
 
     public setStorageBuffer(name: string, buffer: StorageBuffer | LiteStorageBuffer): void {
         const resource = "_getLiteBuffer" in buffer ? buffer._getLiteBuffer() : buffer;
-        this._invalidateGraph();
+        const current = this._bindings.get(name);
+        if (current?.kind === "storage" && current.resource === resource) {
+            return;
+        }
+        this._bindingsDirty = true;
+        this._shaderDirty ||= this._shader !== null && (current === undefined || current.kind !== "storage");
         this._bindings.set(name, { kind: "storage", resource });
     }
 
@@ -184,15 +185,22 @@ export class ComputeShader {
                 throw new Error(`ComputeShader ('${this.name}'): No binding mapping has been provided for the property '${name}'`);
             }
         }
+        if (this._bindingsDirty) {
+            this._invalidateBindings(this._shaderDirty);
+            this._bindingsDirty = false;
+            this._shaderDirty = false;
+        }
+        this._createGraph();
         return true;
     }
 
     public dispatch(x: number, y = 1, z = 1): boolean {
-        if (!this.isReady()) {
-            return false;
-        }
+        const checkContext = !this.fastMode || this.triggerContextRebuild || !this._shader || !this._bindingSet;
         if (this.triggerContextRebuild) {
-            this._invalidateGraph();
+            this._bindingsDirty = true;
+        }
+        if (checkContext && !this.isReady()) {
+            return false;
         }
         const graph = this._createGraph();
         const dispatch = createComputeDispatch(graph.shader, graph.bindings, { size: { x, y, z } });
@@ -201,11 +209,12 @@ export class ComputeShader {
     }
 
     public dispatchIndirect(buffer: StorageBuffer | LiteStorageBuffer, offset = 0): boolean {
-        if (!this.isReady()) {
-            return false;
-        }
+        const checkContext = !this.fastMode || this.triggerContextRebuild || !this._shader || !this._bindingSet;
         if (this.triggerContextRebuild) {
-            this._invalidateGraph();
+            this._bindingsDirty = true;
+        }
+        if (checkContext && !this.isReady()) {
+            return false;
         }
         const resource = "_getLiteBuffer" in buffer ? buffer._getLiteBuffer() : buffer;
         const graph = this._createGraph();
@@ -231,10 +240,7 @@ export class ComputeShader {
         };
     }
 
-    private _createGraph(): ComputeGraph {
-        if (this._graph) {
-            return this._graph;
-        }
+    private _createGraph(): { shader: LiteComputeShader; bindings: LiteComputeBindingSet } {
         const declarations: ComputeBindingDecl[] = [];
         const resources: Record<string, unknown> = {};
         for (const [name, binding] of this._bindings) {
@@ -245,30 +251,34 @@ export class ComputeShader {
             declarations.push(
                 binding.kind === "uniform"
                     ? computeUniformBufferBinding(name, location)
-                    : computeStorageBufferBinding(name, { ...location, access: storageAccess(this._source, location) })
+                    : computeStorageBufferBinding(name, {
+                          ...location,
+                          access: this._options.useExplicitComputePipelineLayout === true ? "read-write" : "read",
+                      })
             );
             resources[name] = binding.resource;
         }
-        const shader = createComputeShader(this._engine._lite, {
+        const shader = (this._shader ??= createComputeShader(this._engine._lite, {
             name: this.name,
             computeSource: this._source,
             entryPoint: this._options.entryPoint,
             bindings: declarations,
-        });
-        this._graph = { shader, bindings: createComputeBindingSet(shader, resources as ComputeBindingResources) };
-        return this._graph;
+            automaticLayout: this._options.useExplicitComputePipelineLayout !== true,
+        }));
+        const bindings = (this._bindingSet ??= createComputeBindingSet(shader, resources as ComputeBindingResources));
+        if (!this._compiled) {
+            this._compiled = true;
+            this.onCompiled?.(shader);
+        }
+        return { shader, bindings };
     }
 
-    private _submit(graph: ComputeGraph, dispatch: ReturnType<typeof createComputeDispatch>): void {
+    private _submit(graph: { shader: LiteComputeShader; bindings: LiteComputeBindingSet }, dispatch: ReturnType<typeof createComputeDispatch>): void {
         const task = createComputeTask(this._engine._lite, this.name);
         addComputeDispatch(task, dispatch);
         task.record();
         try {
             submitComputeTasks([task]);
-            if (!this._compiled) {
-                this._compiled = true;
-                this.onCompiled?.(graph.shader);
-            }
         } catch (error) {
             if (error instanceof Error && error.message === "submitComputeTasks cannot run while a frame is being recorded.") {
                 return unsupported(
@@ -284,14 +294,16 @@ export class ComputeShader {
         }
     }
 
-    private _invalidateGraph(): void {
-        if (!this._graph) {
-            return;
+    private _invalidateBindings(recreateShader = false): void {
+        if (this._bindingSet) {
+            disposeComputeBindingSet(this._bindingSet);
+            this._bindingSet = null;
         }
-        disposeComputeBindingSet(this._graph.bindings);
-        disposeComputeShader(this._graph.shader);
-        this._graph = null;
-        this._compiled = false;
+        if (recreateShader && this._shader) {
+            disposeComputeShader(this._shader);
+            this._shader = null;
+            this._compiled = false;
+        }
     }
 }
 
