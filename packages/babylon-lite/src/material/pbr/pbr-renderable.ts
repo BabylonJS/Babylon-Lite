@@ -272,6 +272,16 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     const sceneFeatures = (hasEnv ? PBR_HAS_ENV : 0) | (toneMapping ? PBR_HAS_TONEMAP : 0) | (scene.fog ? PBR_HAS_FOG : 0);
     const syncThinInstanceBuffers = _syncThinInstanceBuffers;
     const syncThinInstanceForDraw = _syncThinInstanceForDraw;
+    // The per-scene PBR context the geometry-renderer path reuses (published on the scene below). Created
+    // before the renderables so each one can be stamped with the context it was composed against.
+    const geometryContext: _PbrGeometryContext = {
+        _composePbr: composePbr,
+        _sceneFeatures: sceneFeatures,
+        _envTextures: envTextures ?? null,
+        _shadowLights: shadowLights,
+        _syncThinInstanceBuffers: _syncThinInstanceBuffers,
+        _syncThinInstanceForDraw,
+    };
 
     // Closure used both for the initial per-mesh build below AND for later
     // material-swap / per-pass-override rebuilds (set on pbrGroupBuilder._rebuildSingle).
@@ -473,6 +483,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             isTransparent,
             _transmissive: needsTaskRefraction,
             mesh,
+            _gen: [geometryContext, meshFeatures, lightMode, singleLightType, renderFeatures],
             bind(eng, sig) {
                 const pipeline = getOrCreatePbrPipeline(eng as EngineContext, sig, bindings, mat);
                 const materialBindGroup = needsTaskRefraction
@@ -503,14 +514,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // the scene-wide scan above. Stored on the scene (not on pbrGroupBuilder)
     // to avoid a static cycle: pbrGroupBuilder lives in pbr-material.ts which
     // already dynamic-imports this module.
-    (scene as SceneContext & { _pbrGeomContext?: _PbrGeometryContext })._pbrGeomContext = {
-        _composePbr: composePbr,
-        _sceneFeatures: sceneFeatures,
-        _envTextures: envTextures ?? null,
-        _shadowLights: shadowLights,
-        _syncThinInstanceBuffers: _syncThinInstanceBuffers,
-        _syncThinInstanceForDraw,
-    };
+    (scene as SceneContext & { _pbrGeomContext?: _PbrGeometryContext })._pbrGeomContext = geometryContext;
 
     scene._disposables.push(clearPbrPipelineCache);
 

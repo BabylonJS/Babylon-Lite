@@ -14,12 +14,15 @@
  *  `./pbr-geometry-output-shader.ts`. */
 
 import { createMaterialView } from "../material-view.js";
+import type { Mesh } from "../../mesh/mesh.js";
+import type { SceneContext } from "../../scene/scene-core.js";
+import type { Renderable } from "../../render/renderable.js";
 import type { MaterialView } from "../material.js";
 import type { GeometryTextureType } from "../../frame-graph/geometry-types.js";
 import type { Camera } from "../../camera/camera.js";
-import { PBR_HAS_ALPHA_BLEND } from "./pbr-flags.js";
+import { PBR_HAS_ALPHA_BLEND, PBR2_ESM_SHADOW_OUTPUT, PBR2_NO_COLOR_OUTPUT } from "./pbr-flags.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
-import { getPbrGeometryGroupBuilder } from "./pbr-geometry-renderable.js";
+import { _pbrMeshRequest, getPbrGeometryGroupBuilder } from "./pbr-geometry-renderable.js";
 import { _ensurePbrGeometryExt } from "./pbr-geometry-output-shader.js";
 
 const PBR2_GEOMETRY_OUTPUT = 1 << 21;
@@ -101,6 +104,34 @@ export function _setActivePbrGeometryAttachments(att: readonly GeometryTextureTy
  *  - Registers the PBR geometry extension (idempotent) so subsequent
  *    composePbr calls pick up the `gp` UBO + geometry varyings when
  *    `PBR2_GEOMETRY_OUTPUT` is set. */
+/**
+ * @internal Whether `forward` — the renderable the scene's PBR group currently tracks for `mesh` — was built
+ * for the mesh's CURRENT generation: the same PBR context the geometry pass is about to compose against, the
+ * same material render-feature object, and the same request of that context — mesh feature bits
+ * (receive-shadows included), light mode and single-light type.
+ *
+ * A PBR geometry renderable reuses the forward PBR context, and a context only carries what the forward build
+ * that produced it asked for: the single-light block of each light type it saw, the multi-light path only if
+ * some mesh needed it, shadow / thin-instance / morph helpers likewise. Forward rebuilds are asynchronous and
+ * make-before-break, so while one is pending (or has not been requested yet) the group still tracks the OLD
+ * renderable and the scene still publishes the OLD context. Binding the mesh then pairs its new state with
+ * that context: `receiveShadows` enabled on a single-light mesh, or a second light added, asks a single-light
+ * composer for the multi-light path — WGSL with undeclared light symbols; first thin instances draw without
+ * the instance-matrix buffer. So the geometry pass may only ask of a context what the forward build of that
+ * same mesh asked of it. `rebuildMaterial` drops `_renderFeatures` at request time, so a pending material
+ * rebuild shows up as a changed object; the rest is `_pbrMeshRequest`, the derivation the geometry renderable
+ * itself builds from, evaluated under the forward shadow rule (shadow-output materials never receive).
+ */
+export function isPbrForwardBuildCurrent(scene: SceneContext, forward: Renderable | undefined, mesh: Mesh): boolean {
+    const gen = forward?._gen;
+    const renderFeatures = (mesh.material as PbrMaterialProps | null)?._renderFeatures;
+    return (
+        !!gen &&
+        gen[4] === renderFeatures &&
+        _pbrMeshRequest(scene, mesh, (renderFeatures?.features2 ?? 0) & (PBR2_NO_COLOR_OUTPUT | PBR2_ESM_SHADOW_OUTPUT)).every((value, index) => value === gen[index])
+    );
+}
+
 export function createPbrGeometryMaterialView(source: PbrMaterialProps, config: PbrGeometryViewConfig): PbrGeometryMaterialView {
     _ensurePbrGeometryExt(() => _activePbrGeometryAttachments);
     const baseFeatures = source._renderFeatures?.features ?? 0;
