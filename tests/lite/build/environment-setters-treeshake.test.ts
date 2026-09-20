@@ -63,6 +63,20 @@ describe("environment setter tree shaking", () => {
         expect(result.errors).toEqual([]);
         expect(result.significantWarnings).toEqual([]);
         expect(result.code).not.toContain("scene._environmentRotation");
+        expect(result.code).not.toContain("SUN_ANGULAR_DIAMETER_COS");
+    });
+
+    it("retains procedural sky generation only when its loader is consumed", async () => {
+        const result = await runRollup({
+            entrySource: `import { loadProceduralSkyEnvironment } from ${JSON.stringify(LIB_ENTRY)};\nconsole.log(loadProceduralSkyEnvironment);\n`,
+            format: "es",
+            minify: false,
+        });
+
+        expect(result.errors).toEqual([]);
+        expect(result.significantWarnings).toEqual([]);
+        expect(result.code).toContain("loadProceduralSkyEnvironment");
+        expect(result.code).toContain("SUN_ANGULAR_DIAMETER_COS");
     });
 
     it("keeps optional skybox shader code out of a non-feature environment consumer", async () => {

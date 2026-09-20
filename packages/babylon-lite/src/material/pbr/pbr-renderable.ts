@@ -225,7 +225,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // from the per-frame update() below (which always runs). It is version-gated, so static instances
     // cost nothing, and it never recreates the buffer for a same-capacity update — keeping the cached
     // bundle's setVertexBuffer reference valid.
-    let _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number) => GPUBuffer | null) | null = null;
+    let _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, gpu: Mesh["_gpu"]) => GPUBuffer | null) | null = null;
     if (hasSomeThinInstances) {
         const mod = await import("../../shader/fragments/thin-instance-fragment.js");
         _createThinInstanceFragment = mod.createThinInstanceFragment;
@@ -272,6 +272,16 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     const sceneFeatures = (hasEnv ? PBR_HAS_ENV : 0) | (toneMapping ? PBR_HAS_TONEMAP : 0) | (scene.fog ? PBR_HAS_FOG : 0);
     const syncThinInstanceBuffers = _syncThinInstanceBuffers;
     const syncThinInstanceForDraw = _syncThinInstanceForDraw;
+    // The per-scene PBR context the geometry-renderer path reuses (published on the scene below). Created
+    // before the renderables so each one can be stamped with the context it was composed against.
+    const geometryContext: _PbrGeometryContext = {
+        _composePbr: composePbr,
+        _sceneFeatures: sceneFeatures,
+        _envTextures: envTextures ?? null,
+        _shadowLights: shadowLights,
+        _syncThinInstanceBuffers: _syncThinInstanceBuffers,
+        _syncThinInstanceForDraw,
+    };
 
     // Closure used both for the initial per-mesh build below AND for later
     // material-swap / per-pass-override rebuilds (set on pbrGroupBuilder._rebuildSingle).
@@ -400,7 +410,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             // _syncThinInstanceForDraw declaration above). This is what makes per-frame animated
             // instance transforms (wind sway) actually reach the GPU despite the cached draw bundle.
             if (hasTI) {
-                thinDrawArgs = syncThinInstanceForDraw!(engine, mesh.thinInstances!, hasTIColor, mesh._gpu.indexCount);
+                thinDrawArgs = syncThinInstanceForDraw!(engine, mesh.thinInstances!, hasTIColor, mesh._gpu);
             }
         };
         // FO-version wrapper applied only when the engine has floating-origin
@@ -459,11 +469,11 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
 
             pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
             if (cullBinding) {
-                cullBinding.draw(pass, gpu.indexCount, ti!.count);
+                cullBinding.draw(pass, gpu, ti!.count);
             } else if (thinDrawArgs) {
                 pass.drawIndexedIndirect(thinDrawArgs, 0);
             } else {
-                pass.drawIndexed(gpu.indexCount, ti?.count);
+                pass.drawIndexed(gpu.indexCount, ti?.count ?? 1, 0, gpu._baseVertex);
             }
             return 1;
         };
@@ -473,6 +483,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
             isTransparent,
             _transmissive: needsTaskRefraction,
             mesh,
+            _gen: [geometryContext, meshFeatures, lightMode, singleLightType, renderFeatures],
             bind(eng, sig) {
                 const pipeline = getOrCreatePbrPipeline(eng as EngineContext, sig, bindings, mat);
                 const materialBindGroup = needsTaskRefraction
@@ -503,14 +514,7 @@ export async function buildPbrRenderables(scene: SceneContext, meshes: Mesh[], e
     // the scene-wide scan above. Stored on the scene (not on pbrGroupBuilder)
     // to avoid a static cycle: pbrGroupBuilder lives in pbr-material.ts which
     // already dynamic-imports this module.
-    (scene as SceneContext & { _pbrGeomContext?: _PbrGeometryContext })._pbrGeomContext = {
-        _composePbr: composePbr,
-        _sceneFeatures: sceneFeatures,
-        _envTextures: envTextures ?? null,
-        _shadowLights: shadowLights,
-        _syncThinInstanceBuffers: _syncThinInstanceBuffers,
-        _syncThinInstanceForDraw,
-    };
+    (scene as SceneContext & { _pbrGeomContext?: _PbrGeometryContext })._pbrGeomContext = geometryContext;
 
     scene._disposables.push(clearPbrPipelineCache);
 
@@ -535,7 +539,7 @@ export interface _PbrGeometryContext {
     /** @internal */
     readonly _syncThinInstanceBuffers: SyncThinInstanceBuffers | null;
     /** @internal */
-    readonly _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number) => GPUBuffer | null) | null;
+    readonly _syncThinInstanceForDraw: ((engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, gpu: Mesh["_gpu"]) => GPUBuffer | null) | null;
 }
 
 function toSingleLightType(type: string): SingleLightType {

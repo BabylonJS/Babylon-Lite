@@ -8,6 +8,8 @@ import type { EngineContext } from "../engine/engine.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { bumpVisibilityEpoch } from "../engine/engine.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
+import type { MeshGPU } from "./mesh.js";
+import { writeMeshIndexedIndirectArgs } from "./mesh-indexed-indirect.js";
 
 /** @internal Optional replacement buffers used by GPU culling after it compacts visible instances. */
 export interface ThinInstanceDrawBuffers {
@@ -22,10 +24,10 @@ export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceD
     let retiredMatrix: GPUBuffer | null = null;
     let retiredColor: GPUBuffer | null = null;
     let recreated = false;
-    if (ti._version !== ti._gpuVersion || ti._gpuBufferStorage !== needsStorage) {
+    if (ti._version !== ti._gpuVersion) {
         const byteSize = ti.count * 64;
         let bufferRecreated = false;
-        if (!ti._gpuBuffer || ti._gpuBuffer.size < byteSize || ti._gpuBufferStorage !== needsStorage) {
+        if (!ti._gpuBuffer || ti._gpuBuffer.size < byteSize) {
             if (ti._gpuBuffer) {
                 retiredMatrix = ti._gpuBuffer;
             }
@@ -38,7 +40,6 @@ export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceD
                 // (otherwise the whole pick pass is invalidated → nothing is pickable).
                 usage: BU.VERTEX | BU.COPY_DST | BU.STORAGE,
             });
-            ti._gpuBufferStorage = needsStorage;
             bufferRecreated = true;
             recreated = true;
         }
@@ -112,39 +113,36 @@ export function syncThinInstanceGpuData(engine: EngineContext, ti: ThinInstanceD
     return recreated;
 }
 
-/** Sync the stable indirect draw arguments captured by cached thin-instance render bundles. */
-export function syncThinInstanceDrawArgs(engine: EngineContext, ti: ThinInstanceData, indexCount: number): GPUBuffer {
+/** Sync stable indirect arguments, using their CPU words for geometry and the count as upload acknowledgement. */
+export function syncThinInstanceDrawArgs(engine: EngineContext, ti: ThinInstanceData, gpu: MeshGPU): GPUBuffer {
     if (!ti._drawArgsBuffer) {
         ti._drawArgsBuffer = engine._device.createBuffer({
             size: 20,
             usage: BU.INDIRECT | BU.COPY_DST,
         });
         ti._drawArgsData = new U32(5);
-        ti._drawArgsIndexCount = -1;
         ti._drawArgsInstanceCount = -1;
         bumpVisibilityEpoch();
     }
-    if (ti._drawArgsIndexCount !== indexCount || ti._drawArgsInstanceCount !== ti.count) {
-        const args = ti._drawArgsData!;
-        args[0] = indexCount;
-        args[1] = ti.count;
-        args[2] = 0;
-        args[3] = 0;
-        args[4] = 0;
+    const args = ti._drawArgsData!;
+    const baseVertex = gpu._baseVertex ?? 0;
+    if (args[0] !== gpu.indexCount || (args[3]! | 0) !== baseVertex || ti._drawArgsInstanceCount !== ti.count) {
+        writeMeshIndexedIndirectArgs(args, gpu, ti.count);
+        // A failed upload must retry even though the CPU words already contain the requested geometry.
+        ti._drawArgsInstanceCount = -1;
         engine._device.queue.writeBuffer(ti._drawArgsBuffer, 0, args.buffer, args.byteOffset, args.byteLength);
-        ti._drawArgsIndexCount = indexCount;
         ti._drawArgsInstanceCount = ti.count;
     }
     return ti._drawArgsBuffer;
 }
 
 /** Sync thin-instance vertex data and return stable indirect args only after a direct draw's count changes. */
-export function syncThinInstanceForDraw(engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, indexCount: number): GPUBuffer | null {
+export function syncThinInstanceForDraw(engine: EngineContext, ti: ThinInstanceData, hasColor: boolean, gpu: MeshGPU): GPUBuffer | null {
     syncThinInstanceGpuData(engine, ti, hasColor);
     if (!ti._drawArgsBuffer && (ti._drawArgsInstanceCount ??= ti.count) === ti.count) {
         return null;
     }
-    return syncThinInstanceDrawArgs(engine, ti, indexCount);
+    return syncThinInstanceDrawArgs(engine, ti, gpu);
 }
 
 /** Sync thin instance matrix + optional color GPU buffers and bind to vertex slots. */

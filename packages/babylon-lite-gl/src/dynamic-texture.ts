@@ -12,7 +12,7 @@
  * internally and replayed into the fresh handle on `webglcontextrestored` by the
  * engine's standard context-restore protocol.
  */
-import { bindTextureForUpload, setUnpackState, type GLTexture, type GLTextureOptions } from "./texture.js";
+import { bindTextureForUpload, setBoundTextureParams, setUnpackState, type GLTexture, type GLTextureOptions } from "./texture.js";
 import type { GLEngineContext } from "./context.js";
 
 /** Create a texture backed by an empty (blank) `width × height` RGBA8
@@ -68,10 +68,7 @@ export function createDynamicTexture(engine: GLEngineContext, width: number, hei
             g.texImage2D(g.TEXTURE_2D, 0, g.RGBA8, w, h, 0, g.RGBA, g.UNSIGNED_BYTE, null);
         }
         if (tex._dynParamsHandle !== tex.handle) {
-            g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, minFilter);
-            g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, magFilter);
-            g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_S, wrapS);
-            g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_T, wrapT);
+            setBoundTextureParams(g, minFilter, magFilter, wrapS, wrapT);
             tex._dynParamsHandle = tex.handle;
         }
         if (generateMipMaps && src !== null && src !== undefined) {

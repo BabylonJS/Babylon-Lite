@@ -9,6 +9,7 @@ import {
     RegisterEnginesWebGPUExtensionsEngineTexture2DArrayImageSource,
     ValidateFlowGraph,
 } from "../src/index";
+import type { AnimationGroup, Camera, Material, Node } from "../src/index";
 import { LiteCompatError } from "../src/error";
 import type { IGLTFToFlowGraphMapping } from "../src/loading/unsupported-khr-interactivity";
 
@@ -132,5 +133,66 @@ describe("upstream export coverage", () => {
         expect(mapping.validation?.({ declaration: 0, values: {} }, { types: [] }, { asset: { version: "2.0" }, nodes: [] })).toEqual({ valid: true, error: "invalid" });
         expect(serialized[0]?.dataInputs[0]?.name).toBe("value");
         expect(serialized[0]?.dataInputs[0]?.connectedPointIds).toEqual([]);
+    });
+
+    it("implements the pure KHR_interactivity registry helpers", () => {
+        expect(GLTF2.HasDefaultInteractivityFlowInput("flow/sequence")).toBe(true);
+        expect(GLTF2.HasDefaultInteractivityFlowInput("flow/waitAll")).toBe(false);
+        expect(GLTF2.HasDefaultInteractivityFlowInput("math/add")).toBe(false);
+        expect(GLTF2.HasDefaultInteractivityFlowInput("flow/log:BABYLON")).toBe(true);
+
+        expect(
+            GLTF2.NormalizeInteractivityEventDataConfiguration({
+                z: { type: { typeName: "number" }, value: { value: 3 } },
+                a: { type: "boolean", value: [true] },
+                malformed: 1,
+            })
+        ).toEqual([
+            { id: "a", type: "boolean", value: [true] },
+            { id: "malformed", malformed: true },
+            { id: "z", type: "number", value: [3] },
+        ]);
+    });
+
+    it("implements stable KHR_interactivity runtime value snapshots", () => {
+        expect(GLTF2._NormalizeKHRInteractivityRuntimeValue({ asArray: () => new Float32Array([1, 2]) })).toEqual([1, 2]);
+        expect(GLTF2._NormalizeKHRInteractivityRuntimeValue({ value: 3 })).toEqual([3]);
+        expect(GLTF2._CreateKHRInteractivityRuntimeValueSnapshot({ b: -0, a: Number.NaN })).toEqual({
+            runtimeValueFingerprint: '["array",[["object",[["a",["number","NaN"]],["b",["number","-0"]]]]]]',
+        });
+
+        const cyclic: { self?: unknown } = {};
+        cyclic.self = cyclic;
+        expect(GLTF2._CreateKHRInteractivityRuntimeValueSnapshot(cyclic)).toEqual({ unrepresentable: true });
+    });
+
+    it("exposes exporter symbols and names their structural blocker", () => {
+        const diagnostics: GLTF2.IKHRInteractivityExportDiagnostic[] = [{ code: "GRAPH_SOURCE_MISSING", path: "/graphs/0", message: "missing", severity: "error" }];
+        const error = new GLTF2.KHRInteractivityExportError(diagnostics);
+        expect(error.name).toBe("KHRInteractivityExportError");
+        expect(error.diagnostics).toBe(diagnostics);
+        expect(error.message).toBe("/graphs/0: missing");
+
+        expect(() => GLTF2.GetInteractivityOperationRegistry()).toThrow(/FlowGraph block/);
+        expect(() => GLTF2._CaptureKHRInteractivityRuntimeInputDefaults({})).toThrow(/FlowGraph block/);
+        expect(() => GLTF2.CreateKHRInteractivityExportPlan([])).toThrow(/glTF serializer/);
+        expect(() => new GLTF2.KHRInteractivityExportPlan([])).toThrow(/glTF serializer/);
+    });
+
+    it("preserves serializer context callback types", () => {
+        const nodeIndices = new Map<Node, number>();
+        const animationIndices = new Map<AnimationGroup, number>();
+        const cameraIndices = new Map<Camera, number>();
+        const materialIndices = new Map<Material, number>();
+        const context: GLTF2.IKHRInteractivitySerializerContext = {
+            getNodeCount: () => nodeIndices.size,
+            getNodeIndex: (node) => nodeIndices.get(node),
+            getAnimationIndex: (animation) => animationIndices.get(animation),
+            getCameraIndex: (camera) => cameraIndices.get(camera),
+            getMaterialIndex: (material) => materialIndices.get(material),
+            setNodeExtension: () => undefined,
+        };
+
+        expect(context.getNodeCount()).toBe(0);
     });
 });

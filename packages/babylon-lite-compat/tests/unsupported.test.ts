@@ -61,10 +61,6 @@ import {
     InterpolatingBehavior,
     GeospatialClippingBehavior,
     SceneSerializer,
-    MinTemperatureKelvin,
-    MaxTintMagnitude,
-    TemperatureTintToXyz,
-    GetWhiteBalanceMatrix,
     FluidRenderingObject,
     FluidRenderingObjectParticleSystem,
     FluidRenderingObjectCustomParticles,
@@ -317,10 +313,6 @@ describe("image-processing additions", () => {
 
     it("exposes constants and fails loudly for the unsupported white-balance subsystem", () => {
         const config = new ImageProcessingConfiguration();
-        expect(MinTemperatureKelvin).toBe(1e6 / 600);
-        expect(MaxTintMagnitude).toBe(150);
-        expect(() => TemperatureTintToXyz(6500, 0)).toThrow(LiteCompatError);
-        expect(() => GetWhiteBalanceMatrix(6500, 0)).toThrow(LiteCompatError);
         expect(config.whiteBalanceEnabled).toBe(false);
         expect(config.temperature).toBe(6500);
         expect(config.tint).toBe(0);

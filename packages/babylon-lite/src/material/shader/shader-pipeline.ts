@@ -6,12 +6,14 @@ import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 import { computeUboLayout } from "../../shader/ubo-layout.js";
 import type { UboField, UboSpec } from "../../shader/fragment-types.js";
-import type { ShaderAttributeName, ShaderMaterial, ShaderSamplerDecl, ShaderUniformDecl } from "./shader-material.js";
+import type { ShaderMaterial, ShaderSamplerDecl } from "./shader-material.js";
 import { _isShaderSystemUniform } from "./shader-material.js";
 import type { ResolvedStencil } from "../stencil-state.js";
 import type { StencilState } from "../material.js";
 import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook.js";
 import { wgsl, type WgslSource } from "../../shader/wgsl.js";
+import { _attributeInfo, _attributeLayout, _getShaderVbSupport } from "./shader-vb-support.js";
+import { retireGpuResources } from "../../engine/gpu-resource-retirement.js";
 
 /** Stencil resolver, installed only by `enableMaterialStencil`. Module-local with a single exported setter:
  *  when `enableMaterialStencil` is absent from the bundle the setter tree-shakes, the bundler proves this is
@@ -54,6 +56,15 @@ export interface ShaderPipelineCache {
     getBindings(material: ShaderMaterial): ShaderPipelineBindings | undefined;
     setBindings(material: ShaderMaterial, bindings: ShaderPipelineBindings): void;
     getModule(device: GPUDevice, code: string, label: string): { readonly id: number; readonly module: GPUShaderModule };
+    /** @internal */
+    _getModules(
+        device: GPUDevice,
+        material: ShaderMaterial,
+        bindings: ShaderPipelineBindings,
+        key: string,
+        label: string,
+        createCodes: () => readonly [vertex: string, fragment: string | null]
+    ): readonly [{ readonly id: number; readonly module: GPUShaderModule }, { readonly id: number; readonly module: GPUShaderModule } | null];
     getPipelineKey(
         sig: RenderTargetSignature,
         variantKey: string,
@@ -66,13 +77,10 @@ export interface ShaderPipelineCache {
 }
 
 interface ShaderMaterialPipelineState extends ShaderMaterial {
+    readonly source?: ShaderMaterial;
     _shaderDevice?: GPUDevice;
     _shaderBindings?: ShaderPipelineBindings;
-    _shaderCustomUbo?: GPUBuffer | null;
     _shaderCustomSpec?: UboSpec | null;
-    _shaderCustomData?: ArrayBuffer | null;
-    _shaderCustomBytes?: Uint8Array<ArrayBuffer> | null;
-    _shaderCustomVersion?: number;
     _shaderCacheGeneration?: number;
     _shaderPipelineCache?: ShaderPipelineCache;
 }
@@ -86,33 +94,40 @@ export function getOrCreateShaderPipelineBindings(engine: EngineContext, materia
 
     let bindings = cache?.getBindings(material);
     if (!bindings) {
-        const systemFields = material.uniformDecls.filter((u) => _isShaderSystemUniform(u.name)).map(toUboField);
-        const customFields = material.uniformDecls.filter((u) => !_isShaderSystemUniform(u.name)).map(toUboField);
+        const systemFields: UboField[] = [];
+        const customFields: UboField[] = [];
+        for (const uniform of material.uniformDecls) {
+            (_isShaderSystemUniform(uniform.name) ? systemFields : customFields).push({ _name: uniform.name, _type: uniform.type });
+        }
         const systemSpec = computeUboLayout(systemFields.length > 0 ? systemFields : [{ _name: "_pad", _type: "vec4<f32>" }]);
         const customSpec = customFields.length > 0 ? computeUboLayout(customFields) : null;
         const group1BGL = engine._device.createBindGroupLayout({
             label: "shader-material-group1",
             entries: buildBindGroupLayoutEntries(material.samplerDecls, material.storageBufferDecls, customSpec !== null),
         });
+        const vbSupport = _getShaderVbSupport();
         bindings = {
             group1BGL,
             systemSpec,
             customSpec,
-            vertexBuffers: material.attributes.map(attributeLayout),
+            vertexBuffers: vbSupport ? vbSupport._layouts(material) : material.attributes.map(_attributeLayout),
             pipelines: new Map(),
             _pipelineLayout: engine._device.createPipelineLayout({ bindGroupLayouts: [getSceneBindGroupLayout(engine), group1BGL] }),
         };
         cache?.setBindings(material, bindings);
     }
 
+    const buffer = state._shaderCustomUbo;
+    if (state.source && buffer && buffer !== state.source._shaderCustomUbo) {
+        retireGpuResources(state._shaderCustomEngine ?? engine, () => buffer.destroy());
+    }
     state._shaderDevice = engine._device;
     state._shaderCacheGeneration = cache?.generation;
     state._shaderBindings = bindings;
     state._shaderCustomSpec = bindings.customSpec;
-    state._shaderCustomUbo = null;
-    state._shaderCustomData = null;
-    state._shaderCustomBytes = null;
+    state._shaderCustomUbo = state._shaderCustomData = state._shaderCustomBytes = null;
     state._shaderCustomVersion = -1;
+    state._shaderCustomEngine = undefined;
     return bindings;
 }
 
@@ -139,57 +154,58 @@ export function getOrCreateShaderPipeline(
     const device = engine._device;
     const cache = (material as ShaderMaterialPipelineState)._shaderPipelineCache;
     const wantsFragment = !!sig._colorFormat || material.depthOnlyFragment;
+    const label = material.name ?? "shader";
     let key = `${targetSignatureKey(sig)}${variantKey}`;
-    let vertModule: GPUShaderModule | null = null;
-    let fragModule: GPUShaderModule | null = null;
-    // Thin-instance matrices add one layout; the optional RGBA stream adds a second.
+    if (!cache) {
+        const cached = bindings.pipelines.get(key);
+        if (cached) {
+            return cached;
+        }
+    }
+    let vertModule: GPUShaderModule;
+    let fragModule: GPUShaderModule | null;
     if (cache) {
+        // Thin-instance matrices add one layout; the optional RGBA stream adds a second.
+        const withInstanceColor = vertexBuffers.length > bindings.vertexBuffers.length + 1;
+        // Separator-safe key: each component is JSON-encoded so a "|" inside a variant or attribute list cannot collide.
+        const memoKey = JSON.stringify([variantKey, instanceAttrs, withInstanceColor, wantsFragment]);
+        const resolved = cache._getModules(device, material, bindings, memoKey, label, () => {
+            const basePrelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
+            const finalColor = _finalColorResolver?.(material, withInstanceColor);
+            const prelude = finalColor ? wgsl`${basePrelude}${finalColor}` : basePrelude;
+            return [`${prelude}\n${material.vertexSource}`, wantsFragment ? `${prelude}\n${material.fragmentSource}` : null];
+        });
+        key = cache.getPipelineKey(sig, variantKey, resolved[0].id, resolved[1]?.id ?? 0, vertexBuffers, material, stencil?._key ?? "");
+        const cached = bindings.pipelines.get(key);
+        if (cached) {
+            return cached;
+        }
+        vertModule = resolved[0].module;
+        fragModule = resolved[1]?.module ?? null;
+    } else {
         const basePrelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
         const finalColor = _finalColorResolver?.(material, vertexBuffers.length > bindings.vertexBuffers.length + 1);
         const prelude = finalColor ? wgsl`${basePrelude}${finalColor}` : basePrelude;
-        const vert = cache.getModule(device, `${prelude}\n${material.vertexSource}`, `${material.name ?? "shader"}-vertex`);
-        const frag = wantsFragment ? cache.getModule(device, `${prelude}\n${material.fragmentSource}`, `${material.name ?? "shader"}-fragment`) : null;
-        key = cache.getPipelineKey(sig, variantKey, vert.id, frag?.id ?? 0, vertexBuffers, material, stencil?._key ?? "");
-        vertModule = vert.module;
-        fragModule = frag?.module ?? null;
+        vertModule = device.createShaderModule({ label: `${label}-vertex`, code: wgsl`${prelude}\n${material.vertexSource}` });
+        fragModule = wantsFragment ? device.createShaderModule({ label: `${label}-fragment`, code: wgsl`${prelude}\n${material.fragmentSource}` }) : null;
     }
-    const cached = bindings.pipelines.get(key);
-    if (cached) {
-        return cached;
+    let colorTarget: GPUColorTargetState | null = null;
+    if (sig._colorFormat) {
+        colorTarget = { format: sig._colorFormat };
+        // Explicit blending replaces the default state, including for otherwise opaque materials.
+        if (material.blend) {
+            colorTarget.blend = material.blend;
+        } else if (material.needAlphaBlending) {
+            const dstFactor: GPUBlendFactor = material.blendMode === "additive" ? "one" : "one-minus-src-alpha";
+            colorTarget.blend = {
+                color: { srcFactor: "src-alpha", dstFactor, operation: "add" },
+                alpha: { srcFactor: "one", dstFactor, operation: "add" },
+            };
+        }
     }
-    if (!vertModule) {
-        const basePrelude = buildShaderPrelude(material, bindings.systemSpec, bindings.customSpec, instanceAttrs);
-        const finalColor = _finalColorResolver?.(material, vertexBuffers.length > bindings.vertexBuffers.length + 1);
-        const prelude = finalColor ? wgsl`${basePrelude}${finalColor}` : basePrelude;
-        vertModule = device.createShaderModule({ label: `${material.name ?? "shader"}-vertex`, code: wgsl`${prelude}\n${material.vertexSource}` });
-        fragModule = wantsFragment ? device.createShaderModule({ label: `${material.name ?? "shader"}-fragment`, code: wgsl`${prelude}\n${material.fragmentSource}` }) : null;
-    }
-    const colorTarget: GPUColorTargetState | null = sig._colorFormat
-        ? {
-              format: sig._colorFormat,
-              // An explicit material.blend REPLACES the needAlphaBlending-derived state entirely
-              // (see ShaderMaterialOptions.blend).
-              ...(material.blend
-                  ? { blend: material.blend }
-                  : material.needAlphaBlending
-                    ? {
-                          blend:
-                              material.blendMode === "additive"
-                                  ? ({
-                                        color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
-                                        alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
-                                    } satisfies GPUBlendState)
-                                  : ({
-                                        color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
-                                        alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-                                    } satisfies GPUBlendState),
-                      }
-                    : {}),
-          }
-        : null;
 
     const pipeline = device.createRenderPipeline({
-        label: `${material.name ?? "shader"}-pipeline`,
+        label: `${label}-pipeline`,
         layout: bindings._pipelineLayout,
         vertex: { module: vertModule, entryPoint: "mainVertex", buffers: vertexBuffers as GPUVertexBufferLayout[] },
         ...(fragModule ? { fragment: { module: fragModule, entryPoint: "mainFragment", targets: colorTarget ? [colorTarget] : [] } } : {}),
@@ -217,7 +233,8 @@ export function getOrCreateShaderPipeline(
               }
             : {}),
         multisample: alphaToCoverage ? { count: sig._sampleCount, alphaToCoverageEnabled: true } : { count: sig._sampleCount },
-        primitive: { topology: material._topology ?? "triangle-list", cullMode: material.backFaceCulling ? "back" : "none" },
+        // WebGPU defaults an omitted topology to triangle-list.
+        primitive: { topology: material._topology, cullMode: material.backFaceCulling ? "back" : "none" },
     });
     bindings.pipelines.set(key, pipeline);
     return pipeline;
@@ -227,10 +244,6 @@ export function getOrCreateShaderPipeline(
 export function _resolveShaderPipelineVariantKey(sig: RenderTargetSignature, material: ShaderMaterial, variantKey: string): string {
     const alphaToCoverageResolver = _getAlphaToCoverageResolver();
     return sig._sampleCount > 1 && !!alphaToCoverageResolver?.(material) ? `${variantKey}:a2c` : variantKey;
-}
-
-function toUboField(decl: ShaderUniformDecl): UboField {
-    return { _name: decl.name, _type: decl.type };
 }
 
 function buildBindGroupLayoutEntries(
@@ -273,25 +286,6 @@ function buildBindGroupLayoutEntries(
     return entries;
 }
 
-function attributeLayout(name: ShaderAttributeName, shaderLocation: number): GPUVertexBufferLayout {
-    switch (name) {
-        case "position":
-        case "normal":
-            return { arrayStride: 12, attributes: [{ shaderLocation, offset: 0, format: "float32x3" }] };
-        case "uv":
-        case "uv2":
-            return { arrayStride: 8, attributes: [{ shaderLocation, offset: 0, format: "float32x2" }] };
-        case "tangent":
-        case "color":
-        case "weights":
-        case "weights1":
-            return { arrayStride: 16, attributes: [{ shaderLocation, offset: 0, format: "float32x4" }] };
-        case "joints":
-        case "joints1":
-            return { arrayStride: 16, attributes: [{ shaderLocation, offset: 0, format: "uint32x4" }] };
-    }
-}
-
 function buildShaderPrelude(material: ShaderMaterial, systemSpec: UboSpec, customSpec: UboSpec | null, instanceAttrs = ""): string {
     let source = wgsl`${SCENE_UBO_WGSL}
 struct ShaderSystemUniforms {
@@ -326,9 +320,10 @@ ${customSpec._structBody}
     }
     source = wgsl`${source}struct VertexInput {
 `;
+    const vbSupport = _getShaderVbSupport();
     for (let i = 0; i < material.attributes.length; i++) {
         const attr = material.attributes[i]!;
-        source = wgsl`${source}@location(${i}) ${attr}: ${attributeWgslType(attr)},
+        source = wgsl`${source}@location(${i}) ${attr}: ${vbSupport?._wgslType(material, attr) ?? _attributeInfo(attr)._type},
 `;
     }
     source = wgsl`${source}${instanceAttrs}`;
@@ -349,23 +344,4 @@ function formatDefineValue(value: boolean | number): string {
         return `${value}.0`;
     }
     return String(value);
-}
-
-function attributeWgslType(name: ShaderAttributeName): string {
-    switch (name) {
-        case "position":
-        case "normal":
-            return "vec3<f32>";
-        case "uv":
-        case "uv2":
-            return "vec2<f32>";
-        case "tangent":
-        case "color":
-        case "weights":
-        case "weights1":
-            return "vec4<f32>";
-        case "joints":
-        case "joints1":
-            return "vec4<u32>";
-    }
 }

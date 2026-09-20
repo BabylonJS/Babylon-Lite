@@ -75,7 +75,6 @@ export interface FrameGraph {
 ```typescript
 export interface Task {
     readonly name: string;
-    executionEnabled?: boolean;
     readonly engine: EngineContext;
     readonly scene?: SceneContext;
     _passes: Pass[];
@@ -100,8 +99,6 @@ Task lifecycle:
 The `_passes` list is the per-task view of recorded passes. `FrameGraph.build()` clears it at the start of each task's record and the task is responsible for re-pushing its passes during `record()`. `RenderTask` is a direct task: `_passes` remains empty, `record()` prepares its descriptor/bindings, and `execute()` opens and closes the GPU render pass itself. User-defined pass-backed tasks and helpers created through `addRenderPass()` still use `_passes` plus the phase-2 `_initialize()` walk.
 
 `FrameGraph.execute()` sums the draw count returned by `task.execute()` when present; otherwise it drains the recorded passes. Direct execution is the deliberate built-in fast path, not only a migration escape hatch. Per-task GPU timing is opt-in: the public timing API dynamic-imports a profiler that wraps registered `FrameGraph.execute()` functions at runtime, so non-profiling bundles do not fetch profiler code or carry a static task-timing branch here. The built-in `ShadowTask` uses this path for shadow scheduling: ESM generators expose depth/blur resources that `ShadowTask` encodes, while PCF generators are rendered through ShadowTask-owned depth-only `RenderTask`s that use Standard/PBR/Node no-color shadow material views. These PCF variants keep a void fragment stage when needed so material `discard` logic still affects the depth attachment without binding a color target.
-
-`Task.executionEnabled` is a runtime-only gate that defaults to enabled. When set to `false`, `FrameGraph.execute()` skips both the task-level `execute()` hook and every recorded pass while preserving the task's recorded state and allocated resources. Task-specific fields such as `enabled` retain their own semantics and are not interpreted as this scheduling gate.
 
 ## `Pass` and `RenderPass`
 
@@ -231,15 +228,15 @@ export interface RenderTargetSurfaceSize {
 
 Render targets are pure-state descriptors plus owned GPU texture handles. `buildRenderTarget(rt, engine)` allocates textures during `RenderTask.record()`.
 
-| Field              | Meaning                                                                                                                                                           |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lbl`              | Optional GPU debug label.                                                                                                                                         |
-| `format`           | Optional color format. Omit for a depth-only target.                                                                                                              |
-| `dFormat`          | Optional depth/stencil format. Omit for a color-only target such as the surface swapchain wrapper.                                                                |
-| `depthClearValue`  | Optional clear depth; reverse-Z targets default to `0`, while standard-Z targets normally use `1`.                                                               |
-| `depthCompare`     | Optional pass-wide pipeline depth compare; defaults to reverse-Z `"greater-equal"` and overrides material defaults when supplied.                                  |
-| `samples`          | Attachment sample count (`1` or `4`).                                                                                                                             |
-| `size`             | A `SurfaceContext` for full live dimensions, `{ surface, scale }` for scaled live dimensions, or fixed `{ width, height }` device pixels. Passing `EngineContext` is valid because it extends `SurfaceContext`. |
+| Field             | Meaning                                                                                                                                                                                                         |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lbl`             | Optional GPU debug label.                                                                                                                                                                                       |
+| `format`          | Optional color format. Omit for a depth-only target.                                                                                                                                                            |
+| `dFormat`         | Optional depth/stencil format. Omit for a color-only target such as the surface swapchain wrapper.                                                                                                              |
+| `depthClearValue` | Optional clear depth; reverse-Z targets default to `0`, while standard-Z targets normally use `1`.                                                                                                              |
+| `depthCompare`    | Optional pass-wide pipeline depth compare; defaults to reverse-Z `"greater-equal"` and overrides material defaults when supplied.                                                                               |
+| `samples`         | Attachment sample count (`1` or `4`).                                                                                                                                                                           |
+| `size`            | A `SurfaceContext` for full live dimensions, `{ surface, scale }` for scaled live dimensions, or fixed `{ width, height }` device pixels. Passing `EngineContext` is valid because it extends `SurfaceContext`. |
 
 A scaled surface size applies a positive finite `scale` to each live canvas dimension, floors the
 result, and clamps each axis to at least one pixel. The scale is fixed by the descriptor while canvas
@@ -296,15 +293,11 @@ export function disposeRenderTargetTexture(result: RenderTargetTextureResult): v
 export function onRenderTargetTextureResize(result: RenderTargetTextureResult, callback: () => void): () => void;
 ```
 
-Use this when a pass output must be wired into a material before the frame graph is built. It eagerly allocates the render target and exposes the color attachment as `texture`. On a color target, a `dFormat` creates an owned depth-test attachment but no sampled depth facade by default. Pass `withSampledDepthTexture` as the third argument to opt into the additional `depthTexture`. A depth-only fixed or surface target must pass the helper; its `texture` and `depthTexture` then alias one sampled-depth wrapper.
+Use this when a pass output must be wired into a material or compute binding before the frame graph is built. It eagerly allocates the render target and exposes the color attachment as `texture`. On a color target, a `dFormat` creates an owned depth-test attachment but no sampled depth facade by default. Pass `withSampledDepthTexture` as the third argument to opt into the additional `depthTexture`. A depth-only fixed or surface target must pass the helper; its `texture` and `depthTexture` then alias one sampled-depth wrapper.
 
 ```typescript
 const output = createSurfaceRenderTargetTexture(engine, { format: engine.format, dFormat: "depth32float", samples: 1, size: engine }, withSampledDepthTexture);
-const halfDepth = createSurfaceRenderTargetTexture(
-    engine,
-    { dFormat: "depth32float", samples: 1, size: { surface: engine, scale: 0.5 } },
-    withSampledDepthTexture
-);
+const halfDepth = createSurfaceRenderTargetTexture(engine, { dFormat: "depth32float", samples: 1, size: { surface: engine, scale: 0.5 } }, withSampledDepthTexture);
 ```
 
 **Breaking migration:** depth-only `createRenderTargetTexture(engine, descriptor)` calls that previously received sampled depth as the primary `texture` must now pass `withSampledDepthTexture` as the third argument. The same requirement applies to `createSurfaceRenderTargetTexture`. Missing helpers are rejected before attachment allocation. Color targets, including color targets with a depth-test attachment, do not retain the depth helper or sampled-depth facade unless explicitly requested. Requesting sampled depth without a depth attachment throws and releases partially constructed attachments.
