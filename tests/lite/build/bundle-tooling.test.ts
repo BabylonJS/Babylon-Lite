@@ -57,6 +57,7 @@ describe("bundle tooling correctness", () => {
         expect(demoOwnsBundleFile("fluid-worker-shared-abc123.js", "fluid", slugs)).toBe(false);
         expect(demoOwnsBundleFile("fluid-old-abc123.js", "fluid", slugs)).toBe(true);
         expect(demoOwnsBundleFile("racer.js", "racer", slugs)).toBe(true);
+        expect(demoOwnsBundleFile("racer.js.map", "racer", slugs)).toBe(true);
         expect(demoOwnsBundleFile("unrelated.js", "racer", slugs)).toBe(false);
     });
 

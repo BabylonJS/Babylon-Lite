@@ -71,7 +71,7 @@ async function main(): Promise<void> {
 
     // Point the glTF decoders at the demo-local files so they resolve under any
     // base path (e.g. /lite-demos/) rather than the site root.
-    await configureDemoDecoderBases(import.meta.url);
+    configureDemoDecoderBases(import.meta.url);
 
     await Promise.all([
         loadGltf(engine, demoAssetUrl("./littlest-tokyo/LittlestTokyo.glb", import.meta.url)).then((asset) => {

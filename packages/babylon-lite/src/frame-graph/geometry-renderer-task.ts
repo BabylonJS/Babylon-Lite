@@ -231,7 +231,10 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
     _computeStandardFeatures: ((mat: StandardMaterialProps) => number) | null;
     _createPbrGeometryView: ((src: PbrMaterialProps, cfg: PbrGeometryViewConfig) => PbrGeometryMaterialView) | null;
     _computePbrFeatures: ((mat: PbrMaterialProps) => MaterialRenderFeatures) | null;
+    _isPbrForwardCurrent: ((scene: SceneContext, forward: Renderable | undefined, mesh: Mesh) => boolean) | null;
     _createNodeGeometryView: ((src: NodeMaterial, cfg: NodeGeometryViewConfig) => NodeGeometryMaterialView) | null;
+    /** In-flight bridge import for a material family that first appeared after `_preload`. */
+    _lateLoad?: Promise<void>;
 }
 
 // ─── Factory ───────────────────────────────────────────────────────────────
@@ -381,6 +384,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _computeStandardFeatures: null,
         _createPbrGeometryView: null,
         _computePbrFeatures: null,
+        _isPbrForwardCurrent: null,
         _createNodeGeometryView: null,
 
         _removeMesh(value: object): void {
@@ -421,9 +425,12 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
                             import("../material/standard/geometry-view.js"),
                             import("../material/standard/standard-material-features.js"),
                         ]);
+                        // Expose the family only once its optional helpers (skeletal velocity, thin instances)
+                        // are in too: `resolveSourceMaterial` treats the factory as proof that the whole family
+                        // is ready, and a resize / scene mutation can reach it while this is still in flight.
+                        await viewMod.preloadStandardGeometryFeatures(meshes, task._needsVelocity);
                         task._createStandardGeometryView = viewMod.createStandardGeometryMaterialView;
                         task._computeStandardFeatures = matMod._computeStandardMaterialFeatures;
-                        await viewMod.preloadStandardGeometryFeatures(meshes, task._needsVelocity);
                     })()
                 );
             }
@@ -433,6 +440,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
                         const [viewMod, matMod] = await Promise.all([import("../material/pbr/pbr-geometry-view.js"), import("../material/pbr/pbr-material-features.js")]);
                         task._createPbrGeometryView = viewMod.createPbrGeometryMaterialView;
                         task._computePbrFeatures = matMod._computePbrMaterialFeatures;
+                        task._isPbrForwardCurrent = viewMod.isPbrForwardBuildCurrent;
                     })()
                 );
             }
@@ -523,6 +531,8 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
     const removed = task._removedMeshes;
     const meshes = config.meshes ?? sc.meshes;
     const attachmentTypes = task._attachments.map((a) => a._type);
+    // Forward renderable each PBR group currently tracks per mesh (filled lazily below).
+    const forwardBuilt = new Map<unknown, Map<Mesh | undefined, Renderable>>();
     try {
         for (const mesh of meshes) {
             if (removed?.has(mesh)) {
@@ -534,6 +544,25 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
             const resolved = resolveSourceMaterial(task, mesh.material);
             if (!resolved) {
                 continue;
+            }
+            // A PBR geometry renderable reuses the scene's forward PBR context, and that context only covers
+            // what the forward build that published it has seen. Forward (re)builds are asynchronous and
+            // make-before-break, so a PBR mesh of the scene is bound only while the renderable its group
+            // tracks for it was built for the mesh's CURRENT generation — PBR context, material, mesh
+            // capabilities, shadow receiving and light setup (see `isPbrForwardBuildCurrent`): not before its
+            // first forward build, and not while a rebuild is pending or still owed, when the group tracks
+            // the old output. Otherwise it stays out of the pass; the forward build bumps
+            // `_renderableVersion` when it completes, which re-syncs this list. Off-scene meshes of an
+            // explicit list are never forward-built and keep using the scene-level context.
+            if (resolved._family === "pbr" && (!config.meshes || sc.meshes.includes(mesh))) {
+                const group = sc._groups.get((resolved._mat as Material)._buildGroup);
+                let built = forwardBuilt.get(group);
+                if (!built) {
+                    forwardBuilt.set(group, (built = new Map(group?.o?.map((renderable) => [renderable.mesh, renderable]))));
+                }
+                if (!task._isPbrForwardCurrent!(sc, built.get(mesh), mesh)) {
+                    continue;
+                }
             }
             const resources: MeshRebuildResources = { _lifetimeDisposers: [] };
             created.push(resources);
@@ -838,21 +867,36 @@ function resolveSourceMaterial(task: GeometryRendererTaskInternal, material: Mat
     if (!buildGroup) {
         return null;
     }
-    if (buildGroup._materialFamily === "standard") {
+    const family = buildGroup._materialFamily;
+    // `_preload` imports a family bridge only for the families present when it runs. When a family first
+    // appears later (a PBR mesh added to a Standard-only scene), skip its meshes while the bridge is
+    // imported, then reset `_boundVer` so the next `execute()` binds them. A rejected import is reported
+    // and ends the same way — cached promise dropped, bound list stale — so the next frame starts a fresh
+    // attempt instead of locking this family (and any later one) out for good.
+    if (!(family === "standard" ? task._createStandardGeometryView : family === "pbr" ? task._createPbrGeometryView : family !== "node" || task._createNodeGeometryView)) {
+        task._lateLoad ??= task._preload!()
+            .catch((error: unknown) => console.error(error))
+            .then(() => {
+                task._lateLoad = undefined;
+                task._boundVer = -1;
+            });
+        return null;
+    }
+    if (family === "standard") {
         const mat = src as StandardMaterialProps;
         if (!mat._renderFeatures) {
             mat._renderFeatures = { features: task._computeStandardFeatures!(mat) };
         }
         return { _mat: mat, _family: "standard" };
     }
-    if (buildGroup._materialFamily === "pbr") {
+    if (family === "pbr") {
         const mat = src as PbrMaterialProps;
         if (!mat._renderFeatures) {
             mat._renderFeatures = task._computePbrFeatures!(mat);
         }
         return { _mat: mat, _family: "pbr" };
     }
-    if (buildGroup._materialFamily === "node") {
+    if (family === "node") {
         // Node materials carry their own `_renderFeatures` (set at parse time)
         // and own all geometry-shader emission, so no feature computation is needed.
         return { _mat: src as NodeMaterial, _family: "node" };

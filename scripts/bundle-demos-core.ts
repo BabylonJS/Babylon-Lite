@@ -204,6 +204,9 @@ function copyRequiredDir(source: string, target: string, label: string): void {
 }
 
 function copyDemoRuntimeAssets(demos: DemoConfigEntry[]): void {
+    if (demos.some((demo) => demo.slug === "ocean")) {
+        cpSync(resolve(labDir, "lite", "demo-ocean-reference.html"), resolve(demosDir, "demo-ocean-reference.html"));
+    }
     if (demos.some((demo) => demo.slug === "doom")) {
         if (!existsSync(DOOM_SRC)) {
             throw new Error(`Missing DOOM assets at ${DOOM_SRC}`);
@@ -313,12 +316,13 @@ function writeDemoHtml(demos: DemoConfigEntry[], manifest: Record<string, DemoMa
 }
 
 function demoRequiresReady(slug: string): boolean {
-    return slug === "racer";
+    return slug === "racer" || slug === "ocean";
 }
 
-export async function buildDemo(slug: string): Promise<void> {
+export async function buildDemo(slug: string, options: { debug?: boolean } = {}): Promise<void> {
     const demoOutDir = resolve(demosDir, slug);
     rmSync(demoOutDir, { recursive: true, force: true });
+    const debug = options.debug === true;
 
     // Standalone demos have no import map, so Havok can't be externalized to
     // /vendor/havok.js like scenes do — bundle its ESM build inline instead.
@@ -330,7 +334,7 @@ export async function buildDemo(slug: string): Promise<void> {
         base: "./",
         publicDir: false,
         logLevel: "warn",
-        plugins: [wgslMinifyPlugin(), terserPropertyManglePlugin(), minimalVitePreloadPlugin()],
+        plugins: [...(debug ? [] : [wgslMinifyPlugin(), terserPropertyManglePlugin()]), minimalVitePreloadPlugin()],
         resolve: {
             // Demos resolve `babylon-lite` to the TS SOURCE (not `build/lib`) on purpose:
             // demos have no bundle-size ceilings, and using source keeps the dev iteration
@@ -344,8 +348,8 @@ export async function buildDemo(slug: string): Promise<void> {
             outDir: demoOutDir,
             emptyOutDir: true,
             target: LITE_BUNDLE_TARGET,
-            minify: "esbuild",
-            sourcemap: "hidden",
+            minify: debug ? false : "esbuild",
+            sourcemap: debug ? true : "hidden",
             modulePreload: { polyfill: false, resolveDependencies: () => [] },
             rollupOptions: {
                 input: { [slug]: resolve(labDir, `lite/src/demos/${slug}.ts`) },
@@ -365,7 +369,7 @@ export async function buildDemo(slug: string): Promise<void> {
         // logic below picks them up alongside the main entry.
         worker: {
             format: "es",
-            plugins: () => [wgslMinifyPlugin(), terserPropertyManglePlugin()],
+            plugins: () => (debug ? [] : [wgslMinifyPlugin(), terserPropertyManglePlugin()]),
             rollupOptions: {
                 output: {
                     entryFileNames: `${slug}-worker-[hash].js`,
@@ -384,7 +388,7 @@ export async function buildDemo(slug: string): Promise<void> {
     mkdirSync(demosDir, { recursive: true });
     const newNames = new Set<string>();
     for (const f of readdirSync(demoOutDir)) {
-        if (f.endsWith(".map")) continue;
+        if (!debug && f.endsWith(".map")) continue;
         if (!statSync(resolve(demoOutDir, f)).isFile()) continue;
         newNames.add(f);
         writeFileSync(resolve(demosDir, f), readFileSync(resolve(demoOutDir, f)));
@@ -415,7 +419,7 @@ export async function buildDemoSupportBundles(): Promise<void> {
  * skipped by default. Pass `{ measure: true }` to measure this demo and refresh
  * only its entry in demos-manifest.json.
  */
-export async function buildSingleDemo(slug: string, options: { measure?: boolean } = {}): Promise<void> {
+export async function buildSingleDemo(slug: string, options: { measure?: boolean; debug?: boolean } = {}): Promise<void> {
     const demos = loadDemosConfig();
     const demo = demos.find((d) => d.slug === slug);
     if (!demo) {
@@ -428,7 +432,7 @@ export async function buildSingleDemo(slug: string, options: { measure?: boolean
 
     mkdirSync(demosDir, { recursive: true });
     console.log(`Building demo ${slug}...`);
-    await buildDemo(slug);
+    await buildDemo(slug, { debug: options.debug });
     copyDemoRuntimeAssets([demo]);
 
     if (options.measure) {

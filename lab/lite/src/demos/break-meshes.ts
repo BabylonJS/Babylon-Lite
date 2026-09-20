@@ -90,7 +90,7 @@ async function main(): Promise<void> {
 
     // Resolve the glTF decoders + brdf LUT relative to this demo module so the
     // deployed demos site finds them under any base path.
-    await configureDemoDecoderBases(import.meta.url);
+    configureDemoDecoderBases(import.meta.url);
 
     const asset = await loadGltf(engine, MODEL_URL);
     addToScene(scene, asset);

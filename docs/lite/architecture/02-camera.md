@@ -251,8 +251,21 @@ Equivalent to Babylon.js `camera.upVector`, which `TargetCamera._getViewMatrix` 
  *  Matches Babylon.js FreeCamera input behavior.
  *  Camera stays plain data — this function reads/writes its properties.
  *  Returns a cleanup function to remove all listeners and the beforeRender hook. */
+export interface FreeCameraControlOptions {
+    upKeys?: readonly string[];
+    downKeys?: readonly string[];
+    fastKeys?: readonly string[];
+    fastMultiplier?: number;
+}
 export function attachFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement, scene?: SceneContext): () => void;
+export function attachConfigurableFreeControl(camera: FreeCamera, canvas: HTMLCanvasElement, scene?: SceneContext, options?: FreeCameraControlOptions): () => void;
 ```
+
+`attachFreeControl` retains the default mappings and byte-identical implementation used by existing
+scenes. `attachConfigurableFreeControl` is a separate opt-in so custom key arrays and speed-boost
+logic add zero bytes to ordinary free-camera users. Its `upKeys`/`downKeys` replace the default
+Space+PageUp / Shift+PageDown vertical mappings; `fastKeys` and `fastMultiplier` apply a held-key
+speed boost. Mouse look and inertia are unchanged.
 
 ### `orthographic.ts` — Opt-in Orthographic Projection
 
