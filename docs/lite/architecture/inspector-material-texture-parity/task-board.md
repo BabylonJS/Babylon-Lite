@@ -4,7 +4,6 @@
 
 | M | ID | Task | Skill | Notes |
 |---|----|------|-------|-------|
-| P2 | T-14 | Implement deterministic Node material inspection | execute-implementation-plan | plan T09 |
 | P2 | T-15 | Wire canonical bindings and preserve legacy texture enumeration | execute-implementation-plan | plan T10 |
 | P2 | T-16 | Implement safe texture metadata and consumer-aware transform mutation | execute-implementation-plan | plan T11 |
 | P3 | T-17 | Add an instance-owned Lite scene resource index service | execute-implementation-plan | plan T12 |
@@ -38,5 +37,6 @@
 | P2 | T-11 | Implement PBR core inspection and feature signatures | execute-implementation-plan | done 2026-09-21 · side-effect-free core descriptor, exact feature-signature U/R planning, and focused matrix/mutation coverage; dispatcher, optional PBR fragments, and texture inspection remain later tasks |
 | P2 | T-12 | Add PBR optional-family reconstruction and directional mutation | execute-implementation-plan | done 2026-09-21 · configured-family matrices, public-setter reconstruction, exact directional U/R planning, frame-graph transitions, and focused optional-family coverage |
 | P2 | T-13 | Implement declaration-driven Shader material inspection | execute-implementation-plan | done 2026-09-21 · declaration-ordered custom uniforms and samplers, read-only pipeline summary, public-setter A mutations, compatibility validation, and focused no-op/error coverage |
+| P2 | T-14 | Implement deterministic Node material inspection | execute-implementation-plan | done 2026-09-21 · lexically ordered public input handles, copied scalar/vector controls, canonical nullable textures, A/R mutation, and focused deterministic/rebuild coverage |
 
 ## Untriaged
