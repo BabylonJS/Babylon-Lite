@@ -85,16 +85,23 @@ export function readStorageBufferAfterFrame(buffer: StorageBuffer, byteOffset = 
     });
     engine._currentEncoder.copyBufferToBuffer(source, byteOffset, staging, 0, byteLength);
     return new Promise<ArrayBuffer>((resolve, reject) => {
-        const remove = addFramePostSubmitHook(engine, () => {
-            remove();
-            staging
-                .mapAsync(GPUMapMode.READ, 0, byteLength)
-                .then(() => staging.getMappedRange(0, byteLength).slice(0))
-                .then(resolve, reject)
-                .finally(() => {
-                    staging.unmap();
-                    staging.destroy();
-                });
-        });
+        const remove = addFramePostSubmitHook(
+            engine,
+            () => {
+                remove();
+                staging
+                    .mapAsync(GPUMapMode.READ, 0, byteLength)
+                    .then(() => staging.getMappedRange(0, byteLength).slice(0))
+                    .then(resolve, reject)
+                    .finally(() => {
+                        staging.unmap();
+                        staging.destroy();
+                    });
+            },
+            () => {
+                staging.destroy();
+                reject(new Error("Storage-buffer readback was abandoned before its frame could be submitted."));
+            }
+        );
     });
 }

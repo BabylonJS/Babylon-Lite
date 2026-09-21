@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { renderFrame, type EngineContext, type RenderingContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { addFramePostSubmitHook } from "../../../packages/babylon-lite/src/engine/frame-post-submit";
 import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { disposeSurface, type SurfaceContext } from "../../../packages/babylon-lite/src/engine/surface";
 
@@ -153,6 +154,22 @@ describe("renderFrame targets", () => {
         expect(probe.finish).not.toHaveBeenCalled();
         expect(probe.submit).not.toHaveBeenCalled();
         expect(probe.events).toEqual(["aux:pre", "aux:update"]);
+    });
+
+    it("cancels frame-bound post-submit work when recording fails", () => {
+        const { engine, surfaces } = makeEngine(["primary"]);
+        const run = vi.fn();
+        const cancel = vi.fn();
+        vi.mocked(surfaces[0]!._renderingContexts[0]!._update).mockImplementationOnce(() => {
+            addFramePostSubmitHook(engine, run, cancel);
+            throw new Error("frame failed");
+        });
+
+        expect(() => renderFrame(engine, 8)).toThrow(/frame failed/);
+        renderFrame(engine, 8);
+
+        expect(cancel).toHaveBeenCalledOnce();
+        expect(run).not.toHaveBeenCalled();
     });
 
     it("stops at the live engine surface count when an update disposes a later surface", () => {
