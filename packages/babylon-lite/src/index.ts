@@ -650,6 +650,7 @@ export type {
     MaterialInspectionMutationResult,
 } from "./inspection/inspection-types.js";
 export { inspectMaterial, getMaterialTextureBindings, setMaterialInspectionProperty, setMaterialInspectionTexture } from "./inspection/material-inspection.js";
+export { inspectTexture, setTextureInspectionTransform } from "./inspection/texture-inspection.js";
 export { isPbrMaterial, isStandardMaterial, isShaderMaterial, isNodeMaterial } from "./material/material-guards.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { enableMaterialUvTransform } from "./material/enable-material-uv-transform.js";

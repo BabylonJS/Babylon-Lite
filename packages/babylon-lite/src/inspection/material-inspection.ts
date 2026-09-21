@@ -535,7 +535,8 @@ function validateMutationPlan(access: MaterialInspectionEdit, plan: MaterialInsp
     }
 }
 
-function getUniqueOwningScenes(scope: MaterialInspectionMutationScope, source: Material): SceneContext[] {
+/** @internal Validate and deduplicate the explicit scene scope used by inspection mutations. */
+export function _validateInspectionScopeScenes(scope: MaterialInspectionMutationScope): SceneContext[] {
     if (!scope || !Array.isArray(scope.scenes)) {
         throw new TypeError("Material mutation scope must provide an array of scenes.");
     }
@@ -545,11 +546,21 @@ function getUniqueOwningScenes(scope: MaterialInspectionMutationScope, source: M
             scenes.push(scene);
         }
     }
+    for (const scene of scenes) {
+        if (!isObject(scene) || !Array.isArray(scene.meshes)) {
+            throw new TypeError("Material mutation scope contains an invalid scene.");
+        }
+    }
+    return scenes;
+}
+
+function getUniqueOwningScenes(scope: MaterialInspectionMutationScope, source: Material): SceneContext[] {
+    const scenes = _validateInspectionScopeScenes(scope);
     if (scenes.length === 0) {
         throw new Error("Material rebuild requires at least one owning scene.");
     }
     for (const scene of scenes) {
-        if (!isObject(scene) || !Array.isArray(scene.meshes) || !scene.meshes.some((mesh) => mesh?.material && resolveMaterial(mesh.material).source === source)) {
+        if (!scene.meshes.some((mesh) => mesh?.material && resolveMaterial(mesh.material).source === source)) {
             throw new Error("Material is not reachable from every scene in the mutation scope.");
         }
     }
