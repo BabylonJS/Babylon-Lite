@@ -25,6 +25,28 @@ import type { Texture2D } from "../../../packages/babylon-lite/src/texture/textu
 
 const pbrApis = vi.hoisted(() => ({
     enableStencil: vi.fn(),
+    enableLightmap: vi.fn(async () => {}),
+    setLightmap: vi.fn(
+        (
+            material: {
+                lightmapTexture?: unknown;
+                lightmapLevel?: number;
+                lightmapCoordIndex?: 0 | 1;
+                useLightmapAsShadowmap?: boolean;
+                gammaLightmap?: boolean;
+                _uv2Mask?: number;
+            },
+            texture: unknown,
+            options: { level: number; coordIndex: 0 | 1; useAsShadowmap: boolean; gamma: boolean }
+        ) => {
+            material.lightmapTexture = texture;
+            material.lightmapLevel = options.level;
+            material.lightmapCoordIndex = options.coordIndex;
+            material.useLightmapAsShadowmap = options.useAsShadowmap;
+            material.gammaLightmap = options.gamma;
+            material._uv2Mask = options.coordIndex === 1 ? (material._uv2Mask ?? 0) | 64 : (material._uv2Mask ?? 0) & ~64;
+        }
+    ),
     setAlphaCutoff: vi.fn((material: { _alphaCutOff?: number }, value: number) => {
         material._alphaCutOff = value;
     }),
@@ -41,6 +63,10 @@ vi.mock("../../../packages/babylon-lite/src/material/pbr/set-alpha-cutoff", () =
 }));
 vi.mock("../../../packages/babylon-lite/src/material/pbr/set-emissive", () => ({
     setPbrEmissive: pbrApis.setEmissive,
+}));
+vi.mock("../../../packages/babylon-lite/src/material/pbr/enable-pbr-lightmap", () => ({
+    enablePbrLightmap: pbrApis.enableLightmap,
+    setPbrLightmap: pbrApis.setLightmap,
 }));
 
 const EXPECTED_PROPERTIES = [
@@ -76,6 +102,66 @@ const EXPECTED_BINDINGS = [
     ["pbr.occlusion", "Occlusion Texture", "occlusionTexture"],
     ["pbr.emissive", "Emissive Texture", "emissiveTexture"],
     ["pbr.specGloss", "Specular-Glossiness Texture", "specGlossTexture"],
+] as const;
+
+const OPTIONAL_PROPERTY_IDS = [
+    "pbr.lightmapLevel",
+    "pbr.lightmapCoordIndex",
+    "pbr.useLightmapAsShadowmap",
+    "pbr.gammaLightmap",
+    "pbr.metallicReflectanceColor",
+    "pbr.metallicF0Factor",
+    "pbr.specularWeight",
+    "pbr.useOnlyMetallicFromTexture",
+    "pbr.clearCoat.enabled",
+    "pbr.clearCoat.intensity",
+    "pbr.clearCoat.roughness",
+    "pbr.clearCoat.indexOfRefraction",
+    "pbr.clearCoat.useF0Remap",
+    "pbr.clearCoat.bumpTextureScale",
+    "pbr.sheen.enabled",
+    "pbr.sheen.color",
+    "pbr.sheen.roughness",
+    "pbr.sheen.intensity",
+    "pbr.sheen.albedoScaling",
+    "pbr.iridescence.enabled",
+    "pbr.iridescence.intensity",
+    "pbr.iridescence.indexOfRefraction",
+    "pbr.iridescence.minimumThickness",
+    "pbr.iridescence.maximumThickness",
+    "pbr.anisotropy.enabled",
+    "pbr.anisotropy.intensity",
+    "pbr.anisotropy.direction",
+    "pbr.translucency.intensity",
+    "pbr.translucency.color",
+    "pbr.translucency.diffusionDistance",
+    "pbr.thickness.min",
+    "pbr.thickness.max",
+    "pbr.thickness.useGlTFChannel",
+    "pbr.tint.color",
+    "pbr.tint.atDistance",
+    "pbr.transmission.intensity",
+    "pbr.transmission.indexOfRefraction",
+    "pbr.transmission.useThicknessAsDepth",
+    "pbr.transmission.dispersion",
+] as const;
+
+const OPTIONAL_BINDING_IDS = [
+    "pbr.lightmap",
+    "pbr.metallicReflectance",
+    "pbr.reflectance",
+    "pbr.clearCoat",
+    "pbr.clearCoatRoughness",
+    "pbr.clearCoatBump",
+    "pbr.sheen",
+    "pbr.sheenRoughness",
+    "pbr.iridescence",
+    "pbr.iridescenceThickness",
+    "pbr.anisotropy",
+    "pbr.translucencyColor",
+    "pbr.translucencyIntensity",
+    "pbr.thickness",
+    "pbr.transmission",
 ] as const;
 
 beforeEach(() => {
@@ -163,6 +249,121 @@ async function setTexture(
     mutation: { readonly direction: "assign" | "replace"; readonly texture: object } | { readonly direction: "clear" }
 ) {
     return setMaterialInspectionTextureWithFamily(scope, material, id, mutation, pbrMaterialInspectionDescriptor);
+}
+
+function createConfiguredOptionalMaterial(withTextures = true): PbrMaterialProps {
+    const textures = Array.from({ length: OPTIONAL_BINDING_IDS.length }, (_, index) => texture2d(100 + index));
+    return createPbrMaterial({
+        lightmapTexture: textures[0],
+        lightmapLevel: 0.5,
+        lightmapCoordIndex: 1,
+        useLightmapAsShadowmap: true,
+        gammaLightmap: true,
+        _uv2Mask: 64,
+        _metallicReflectanceColor: [0.8, 0.7, 0.6],
+        _metallicF0Factor: 0.9,
+        _specularWeight: 0.75,
+        _useOnlyMetallicFromMetallicReflectanceTexture: true,
+        _metallicReflectanceTexture: withTextures ? textures[1] : undefined,
+        _reflectanceTexture: withTextures ? textures[2] : undefined,
+        _clearCoat: {
+            isEnabled: true,
+            intensity: 0.8,
+            roughness: 0.2,
+            indexOfRefraction: 1.4,
+            useF0Remap: false,
+            bumpTextureScale: 0.7,
+            texture: withTextures ? textures[3] : undefined,
+            roughnessTexture: withTextures ? textures[4] : undefined,
+            bumpTexture: withTextures ? textures[5] : undefined,
+        },
+        _sheen: {
+            isEnabled: true,
+            color: [0.2, 0.3, 0.4],
+            roughness: 0.35,
+            intensity: 0.65,
+            albedoScaling: true,
+            texture: withTextures ? textures[6] : undefined,
+            roughnessTexture: withTextures ? textures[7] : undefined,
+        },
+        _iridescence: {
+            isEnabled: true,
+            intensity: 0.6,
+            indexOfRefraction: 1.25,
+            minimumThickness: 120,
+            maximumThickness: 360,
+            texture: withTextures ? textures[8] : undefined,
+            thicknessTexture: withTextures ? textures[9] : undefined,
+        },
+        _anisotropy: {
+            isEnabled: true,
+            intensity: 0.55,
+            direction: [0.8, 0.2],
+            texture: withTextures ? textures[10] : undefined,
+        },
+        _subsurface: {
+            translucency: {
+                intensity: 0.45,
+                color: [0.9, 0.8, 0.7],
+                diffusionDistance: [1, 2, 3],
+                colorTexture: withTextures ? textures[11] : undefined,
+                intensityTexture: withTextures ? textures[12] : undefined,
+            },
+            scattering: { diffusionDistance: [9, 8, 7], metersPerUnit: 2 },
+            thickness: {
+                min: 0.1,
+                max: 0.9,
+                useGlTFChannel: true,
+                texture: withTextures ? textures[13] : undefined,
+            },
+            tint: { color: [0.6, 0.7, 0.8], atDistance: 4 },
+            refraction: {
+                intensity: 0.7,
+                indexOfRefraction: 1.45,
+                useThicknessAsDepth: true,
+                dispersion: 0.2,
+                texture: withTextures ? textures[14] : undefined,
+            },
+        },
+        _transmissive: true,
+    });
+}
+
+function readOptionalTexture(material: PbrMaterialProps, id: MaterialTextureBindingId): Texture2D | undefined {
+    switch (id) {
+        case "pbr.lightmap":
+            return material.lightmapTexture;
+        case "pbr.metallicReflectance":
+            return material._metallicReflectanceTexture;
+        case "pbr.reflectance":
+            return material._reflectanceTexture;
+        case "pbr.clearCoat":
+            return material._clearCoat?.texture;
+        case "pbr.clearCoatRoughness":
+            return material._clearCoat?.roughnessTexture;
+        case "pbr.clearCoatBump":
+            return material._clearCoat?.bumpTexture;
+        case "pbr.sheen":
+            return material._sheen?.texture;
+        case "pbr.sheenRoughness":
+            return material._sheen?.roughnessTexture;
+        case "pbr.iridescence":
+            return material._iridescence?.texture;
+        case "pbr.iridescenceThickness":
+            return material._iridescence?.thicknessTexture;
+        case "pbr.anisotropy":
+            return material._anisotropy?.texture;
+        case "pbr.translucencyColor":
+            return material._subsurface?.translucency?.colorTexture;
+        case "pbr.translucencyIntensity":
+            return material._subsurface?.translucency?.intensityTexture;
+        case "pbr.thickness":
+            return material._subsurface?.thickness?.texture;
+        case "pbr.transmission":
+            return material._subsurface?.refraction?.texture;
+        default:
+            throw new Error(`Unexpected optional binding ${id}.`);
+    }
 }
 
 describe("PBR core material inspection matrix", () => {
@@ -301,7 +502,9 @@ describe("PBR core material inspection matrix", () => {
     it("has no static optional fragment/setter imports, registrations, or eager collections", () => {
         const source = readFileSync(resolve(__dirname, "../../../packages/babylon-lite/src/inspection/pbr-material-inspection.ts"), "utf-8");
         expect(source).not.toMatch(/^import .*\/fragments\//m);
-        expect(source).not.toMatch(/^import .*\/(?:set-alpha-cutoff|set-emissive|enable-material-stencil|enable-material-uv-transform)/m);
+        expect(source).not.toMatch(
+            /^import .*\/(?:set-alpha-cutoff|set-emissive|enable-material-stencil|enable-material-uv-transform|enable-pbr-lightmap|set-metallic-reflectance|set-clearcoat|set-sheen|set-iridescence|set-anisotropy|set-subsurface|set-transmission|set-dispersion)/m
+        );
         expect(source).not.toMatch(/\b_registerPbrExt\s*\(/);
         expect(source).not.toMatch(/\bnew (?:Map|Set|WeakMap)\s*\(/);
     });
@@ -565,5 +768,410 @@ describe("PBR core texture mutation", () => {
         expect(material.emissiveTexture).toBeUndefined();
         expect(material.occlusionTexture).toBeUndefined();
         expect(rebuild).not.toHaveBeenCalled();
+    });
+});
+
+describe("PBR optional material inspection matrix", () => {
+    it("emits every configured optional family with public effective values and omits unconfigured sections", () => {
+        const material = createConfiguredOptionalMaterial();
+        const snapshot = inspect(material);
+        const values = propertyValues(material);
+
+        expect(snapshot.properties.map(({ id }) => id)).toEqual([...EXPECTED_PROPERTIES.map(([id]) => id), ...OPTIONAL_PROPERTY_IDS]);
+        expect(Object.fromEntries(OPTIONAL_PROPERTY_IDS.map((id) => [id, values[id]]))).toEqual({
+            "pbr.lightmapLevel": 0.5,
+            "pbr.lightmapCoordIndex": 1,
+            "pbr.useLightmapAsShadowmap": true,
+            "pbr.gammaLightmap": true,
+            "pbr.metallicReflectanceColor": [0.8, 0.7, 0.6],
+            "pbr.metallicF0Factor": 0.9,
+            "pbr.specularWeight": 0.75,
+            "pbr.useOnlyMetallicFromTexture": true,
+            "pbr.clearCoat.enabled": true,
+            "pbr.clearCoat.intensity": 0.8,
+            "pbr.clearCoat.roughness": 0.2,
+            "pbr.clearCoat.indexOfRefraction": 1.4,
+            "pbr.clearCoat.useF0Remap": false,
+            "pbr.clearCoat.bumpTextureScale": 0.7,
+            "pbr.sheen.enabled": true,
+            "pbr.sheen.color": [0.2, 0.3, 0.4],
+            "pbr.sheen.roughness": 0.35,
+            "pbr.sheen.intensity": 0.65,
+            "pbr.sheen.albedoScaling": true,
+            "pbr.iridescence.enabled": true,
+            "pbr.iridescence.intensity": 0.6,
+            "pbr.iridescence.indexOfRefraction": 1.25,
+            "pbr.iridescence.minimumThickness": 120,
+            "pbr.iridescence.maximumThickness": 360,
+            "pbr.anisotropy.enabled": true,
+            "pbr.anisotropy.intensity": 0.55,
+            "pbr.anisotropy.direction": [0.8, 0.2],
+            "pbr.translucency.intensity": 0.45,
+            "pbr.translucency.color": [0.9, 0.8, 0.7],
+            "pbr.translucency.diffusionDistance": [1, 2, 3],
+            "pbr.thickness.min": 0.1,
+            "pbr.thickness.max": 0.9,
+            "pbr.thickness.useGlTFChannel": true,
+            "pbr.tint.color": [0.6, 0.7, 0.8],
+            "pbr.tint.atDistance": 4,
+            "pbr.transmission.intensity": 0.7,
+            "pbr.transmission.indexOfRefraction": 1.45,
+            "pbr.transmission.useThicknessAsDepth": true,
+            "pbr.transmission.dispersion": 0.2,
+        });
+
+        const empty = inspect(createPbrMaterial());
+        expect(empty.properties.map(({ id }) => id)).toEqual(EXPECTED_PROPERTIES.map(([id]) => id));
+        expect(empty.textureBindings.map(({ id }) => id)).toEqual(EXPECTED_BINDINGS.map(([id]) => id));
+    });
+
+    it("keeps every configured optional binding in canonical order with exact directional capabilities", () => {
+        const populated = inspect(createConfiguredOptionalMaterial()).textureBindings.slice(EXPECTED_BINDINGS.length);
+        expect(populated.map(({ id }) => id)).toEqual(OPTIONAL_BINDING_IDS);
+        expect(populated.map(({ directions }) => directions)).toEqual(
+            OPTIONAL_BINDING_IDS.map((_, index) => (index < 3 ? ["replace", "navigate"] : ["replace", "clear", "navigate"]))
+        );
+
+        const emptySlots = inspect(createConfiguredOptionalMaterial(false)).textureBindings.slice(EXPECTED_BINDINGS.length);
+        expect(emptySlots.map(({ id }) => id)).toEqual(OPTIONAL_BINDING_IDS);
+        expect(emptySlots.map(({ directions }) => directions)).toEqual([["replace", "navigate"], ...OPTIONAL_BINDING_IDS.slice(1).map(() => ["assign"])]);
+    });
+
+    it("exposes configured one-way modes as read-only and omits scattering and probe internals", async () => {
+        const material = createPbrMaterial({
+            _unlit: true,
+            _unlitColor: [0.2, 0.3, 0.4],
+            _gammaAlbedo: true,
+            _skyboxMode: true,
+            _shadowOnly: true,
+            _shadowOnlyColor: [0.1, 0.2, 0.3],
+            _shadowOnlyOpacity: 0.6,
+            _shadowOnlyFalloff: 2,
+            _subsurface: { scattering: { diffusionDistance: [1, 2, 3], metersPerUnit: 4 } },
+            ...({
+                _localEnvironment: cubeTexture(1),
+                _reflectionProbe: cubeTexture(2),
+            } as Partial<PbrMaterialProps>),
+        });
+        const snapshot = inspect(material);
+        const special = snapshot.properties.filter(({ section }) => section === "special-modes");
+
+        expect(special.map(({ id }) => id)).toEqual([
+            "pbr.mode.unlit",
+            "pbr.mode.unlitColor",
+            "pbr.mode.gammaAlbedo",
+            "pbr.mode.skybox",
+            "pbr.mode.shadowOnly",
+            "pbr.mode.shadowOnlyColor",
+            "pbr.mode.shadowOnlyOpacity",
+            "pbr.mode.shadowOnlyFalloff",
+        ]);
+        expect(special.every(({ access }) => access.access === "read-only")).toBe(true);
+        expect(snapshot.properties.map(({ id }) => id)).not.toEqual(expect.arrayContaining(["pbr.scattering", "pbr.localEnvironment", "pbr.reflectionProbe"]));
+        expect(snapshot.textureBindings.map(({ id }) => id)).not.toEqual(expect.arrayContaining(["pbr.scattering", "pbr.localEnvironment", "pbr.reflectionProbe"]));
+
+        for (const property of special) {
+            await expect(setProperty({ scenes: [] }, material, property.id, property.value.state === "present" ? property.value.value : true)).rejects.toThrow(/read-only/);
+        }
+        expect(material._uboVersion).toBe(0);
+    });
+});
+
+describe("PBR optional property mutation", () => {
+    it("routes every optional field through its reconstructed public setter with the exact U/R class", async () => {
+        const mutations: readonly [MaterialInspectionPropertyId, MaterialInspectionPropertyValue, "U" | "R"][] = [
+            ["pbr.lightmapLevel", 0.6, "U"],
+            ["pbr.lightmapCoordIndex", 0, "R"],
+            ["pbr.useLightmapAsShadowmap", false, "R"],
+            ["pbr.gammaLightmap", false, "R"],
+            ["pbr.metallicReflectanceColor", [0.4, 0.5, 0.6], "U"],
+            ["pbr.metallicF0Factor", 0.8, "U"],
+            ["pbr.specularWeight", 0.6, "U"],
+            ["pbr.useOnlyMetallicFromTexture", false, "R"],
+            ["pbr.clearCoat.enabled", false, "R"],
+            ["pbr.clearCoat.intensity", 0.7, "U"],
+            ["pbr.clearCoat.roughness", 0.3, "U"],
+            ["pbr.clearCoat.indexOfRefraction", 1.6, "U"],
+            ["pbr.clearCoat.useF0Remap", true, "R"],
+            ["pbr.clearCoat.bumpTextureScale", 0.6, "U"],
+            ["pbr.sheen.enabled", false, "R"],
+            ["pbr.sheen.color", [0.4, 0.3, 0.2], "U"],
+            ["pbr.sheen.roughness", 0.45, "U"],
+            ["pbr.sheen.intensity", 0.55, "U"],
+            ["pbr.sheen.albedoScaling", false, "R"],
+            ["pbr.iridescence.enabled", false, "R"],
+            ["pbr.iridescence.intensity", 0.5, "U"],
+            ["pbr.iridescence.indexOfRefraction", 1.35, "U"],
+            ["pbr.iridescence.minimumThickness", 140, "U"],
+            ["pbr.iridescence.maximumThickness", 420, "U"],
+            ["pbr.anisotropy.enabled", false, "R"],
+            ["pbr.anisotropy.intensity", 0.45, "U"],
+            ["pbr.anisotropy.direction", [0.6, 0.4], "U"],
+            ["pbr.translucency.intensity", 0.35, "U"],
+            ["pbr.translucency.color", [0.7, 0.6, 0.5], "U"],
+            ["pbr.translucency.diffusionDistance", [3, 2, 1], "U"],
+            ["pbr.thickness.min", 0.2, "U"],
+            ["pbr.thickness.max", 1.2, "U"],
+            ["pbr.thickness.useGlTFChannel", false, "R"],
+            ["pbr.tint.color", [0.3, 0.4, 0.5], "U"],
+            ["pbr.tint.atDistance", 5, "U"],
+            ["pbr.transmission.intensity", 0.6, "U"],
+            ["pbr.transmission.indexOfRefraction", 1.6, "U"],
+            ["pbr.transmission.useThicknessAsDepth", false, "U"],
+            ["pbr.transmission.dispersion", 0.3, "U"],
+        ];
+
+        for (const [id, value, mutation] of mutations) {
+            const material = createConfiguredOptionalMaterial();
+            const { scene } = createScene([material]);
+            const result = await setProperty({ scenes: [scene] }, material, id, value);
+            expect(result, id).toEqual({
+                changed: true,
+                mutation,
+                postMutation: mutation === "R" ? "rebuild-material" : "none",
+            });
+            expect(propertyValues(material)[id], id).toEqual(value);
+        }
+    });
+
+    it("reconstructs each public setter family, preserves sibling state, and keeps stable numeric and color edits on U", async () => {
+        const material = createConfiguredOptionalMaterial();
+        const { scene } = createScene([material]);
+        const beforeTextures = new Map(OPTIONAL_BINDING_IDS.map((id) => [id, readOptionalTexture(material, id)]));
+        const mutations: readonly [MaterialInspectionPropertyId, MaterialInspectionPropertyValue][] = [
+            ["pbr.lightmapLevel", 0.6],
+            ["pbr.metallicReflectanceColor", [0.4, 0.5, 0.6]],
+            ["pbr.clearCoat.roughness", 0.3],
+            ["pbr.sheen.color", [0.4, 0.3, 0.2]],
+            ["pbr.iridescence.maximumThickness", 420],
+            ["pbr.anisotropy.direction", [0.6, 0.4]],
+            ["pbr.translucency.diffusionDistance", [3, 2, 1]],
+            ["pbr.thickness.max", 1.2],
+            ["pbr.tint.color", [0.3, 0.4, 0.5]],
+            ["pbr.transmission.indexOfRefraction", 1.6],
+            ["pbr.transmission.dispersion", 0.3],
+        ];
+
+        for (const [id, value] of mutations) {
+            const result = await setProperty({ scenes: [scene] }, material, id, value);
+            expect(result, id).toEqual({
+                changed: true,
+                mutation: "U",
+                postMutation: "none",
+            });
+        }
+
+        expect(material._uboVersion).toBe(mutations.length);
+        expect(material._subsurface?.scattering).toEqual({ diffusionDistance: [9, 8, 7], metersPerUnit: 2 });
+        expect(material._subsurface?.translucency).toMatchObject({ intensity: 0.45, color: [0.9, 0.8, 0.7] });
+        expect(material._subsurface?.thickness).toMatchObject({ min: 0.1, useGlTFChannel: true });
+        expect(material._subsurface?.tint).toMatchObject({ atDistance: 4 });
+        expect(material._subsurface?.refraction).toMatchObject({ intensity: 0.7, useThicknessAsDepth: true });
+        for (const [id, texture] of beforeTextures) {
+            expect(readOptionalTexture(material, id)).toBe(texture);
+        }
+    });
+
+    it("classifies feature transitions as R across shared material views and rebuilds frame graphs only for transmission participation", async () => {
+        const material = createPbrMaterial({ _clearCoat: { isEnabled: false, intensity: 0.8 } });
+        const view = createMaterialView(material, { features: 0, features2: 0 });
+        const first = createScene([material, view]);
+        const second = createScene([view]);
+
+        await expect(setProperty({ scenes: [first.scene, second.scene] }, material, "pbr.clearCoat.enabled", true)).resolves.toEqual({
+            changed: true,
+            mutation: "R",
+            postMutation: "rebuild-material",
+        });
+        expect(first.rebuild).toHaveBeenCalledTimes(2);
+        expect(second.rebuild).toHaveBeenCalledOnce();
+        expect(first.frameGraphBuild).not.toHaveBeenCalled();
+        expect(second.frameGraphBuild).not.toHaveBeenCalled();
+
+        const transmissive = createPbrMaterial({
+            _transmissive: true,
+            _subsurface: {
+                thickness: { min: 0.1, max: 1 },
+                tint: { color: [1, 0.9, 0.8], atDistance: 2 },
+                refraction: { intensity: 0, dispersion: 0 },
+            },
+        });
+        const transmissiveView = createMaterialView(transmissive, { features: 0, features2: 0 });
+        const transmissionScene = createScene([transmissive, transmissiveView]);
+
+        await expect(setProperty({ scenes: [transmissionScene.scene] }, transmissive, "pbr.transmission.intensity", 0.7)).resolves.toEqual({
+            changed: true,
+            mutation: "R",
+            postMutation: "rebuild-material-and-frame-graph",
+        });
+        expect(transmissionScene.rebuild).toHaveBeenCalledTimes(2);
+        expect(transmissionScene.frameGraphBuild).toHaveBeenCalledOnce();
+
+        await expect(setProperty({ scenes: [transmissionScene.scene] }, transmissive, "pbr.transmission.dispersion", 0.4)).resolves.toEqual({
+            changed: true,
+            mutation: "R",
+            postMutation: "rebuild-material",
+        });
+        expect(transmissionScene.rebuild).toHaveBeenCalledTimes(4);
+        expect(transmissionScene.frameGraphBuild).toHaveBeenCalledOnce();
+
+        await expect(setProperty({ scenes: [transmissionScene.scene] }, transmissive, "pbr.transmission.dispersion", 0.6)).resolves.toEqual({
+            changed: true,
+            mutation: "U",
+            postMutation: "none",
+        });
+        expect(transmissionScene.rebuild).toHaveBeenCalledTimes(4);
+        expect(transmissionScene.frameGraphBuild).toHaveBeenCalledOnce();
+    });
+
+    it("resolves every optional shader-mode boundary from before and after signatures", async () => {
+        const cases: readonly [PbrMaterialProps, MaterialInspectionPropertyId, MaterialInspectionPropertyValue][] = [
+            [createConfiguredOptionalMaterial(), "pbr.useLightmapAsShadowmap", false],
+            [
+                createPbrMaterial({
+                    _metallicReflectanceColor: [0.5, 0.5, 0.5],
+                    _metallicF0Factor: 1,
+                }),
+                "pbr.metallicReflectanceColor",
+                [1, 1, 1],
+            ],
+            [createPbrMaterial({ _clearCoat: { isEnabled: true, useF0Remap: false } }), "pbr.clearCoat.useF0Remap", true],
+            [createPbrMaterial({ _sheen: { isEnabled: true, albedoScaling: true } }), "pbr.sheen.albedoScaling", false],
+            [createPbrMaterial({ _iridescence: { isEnabled: true } }), "pbr.iridescence.enabled", false],
+            [createPbrMaterial({ _anisotropy: { isEnabled: true } }), "pbr.anisotropy.enabled", false],
+            [
+                createPbrMaterial({
+                    _subsurface: {
+                        translucency: {},
+                        thickness: { texture: texture2d(500), useGlTFChannel: true },
+                    },
+                }),
+                "pbr.thickness.useGlTFChannel",
+                false,
+            ],
+        ];
+
+        for (const [material, id, value] of cases) {
+            const { scene } = createScene([material]);
+            const result = await setProperty({ scenes: [scene] }, material, id, value);
+            expect(result, id).toEqual({
+                changed: true,
+                mutation: "R",
+                postMutation: "rebuild-material",
+            });
+        }
+
+        const transmissive = createPbrMaterial({
+            _transmissive: true,
+            _subsurface: { refraction: { intensity: 0.8 } },
+        });
+        const transmissionScene = createScene([transmissive]);
+        await expect(setProperty({ scenes: [transmissionScene.scene] }, transmissive, "pbr.transmission.intensity", 0)).resolves.toEqual({
+            changed: true,
+            mutation: "R",
+            postMutation: "rebuild-material-and-frame-graph",
+        });
+        expect(transmissionScene.frameGraphBuild).toHaveBeenCalledOnce();
+    });
+
+    it("awaits lightmap enablement before mutation and preserves the exact prior state on rejection", async () => {
+        const texture = texture2d(1);
+        const material = createPbrMaterial({
+            lightmapTexture: texture,
+            lightmapLevel: 0.5,
+            lightmapCoordIndex: 1,
+            useLightmapAsShadowmap: true,
+            gammaLightmap: false,
+            _uv2Mask: 95,
+        });
+        const { scene, rebuild } = createScene([material]);
+        pbrApis.enableLightmap.mockRejectedValueOnce(new Error("lightmap enable failed"));
+
+        await expect(setProperty({ scenes: [scene] }, material, "pbr.lightmapLevel", 0.8)).rejects.toThrow("lightmap enable failed");
+        expect(material).toMatchObject({
+            lightmapTexture: texture,
+            lightmapLevel: 0.5,
+            lightmapCoordIndex: 1,
+            useLightmapAsShadowmap: true,
+            gammaLightmap: false,
+            _uv2Mask: 95,
+            _uboVersion: 0,
+        });
+        expect(pbrApis.setLightmap).not.toHaveBeenCalled();
+        expect(rebuild).not.toHaveBeenCalled();
+
+        await expect(setProperty({ scenes: [scene] }, material, "pbr.lightmapCoordIndex", 0)).resolves.toMatchObject({ mutation: "R" });
+        expect(material._uv2Mask).toBe(31);
+    });
+});
+
+describe("PBR optional texture mutation", () => {
+    it("supports assign, replace, and clear for every reversible optional slot", async () => {
+        const material = createConfiguredOptionalMaterial(false);
+        const reversible = OPTIONAL_BINDING_IDS.slice(3);
+        const { scene } = createScene([material]);
+
+        for (let index = 0; index < reversible.length; index++) {
+            const id = reversible[index]!;
+            const first = texture2d(200 + index * 2);
+            const second = texture2d(201 + index * 2);
+
+            await expect(setTexture({ scenes: [scene] }, material, id, { direction: "assign", texture: first })).resolves.toEqual({
+                changed: true,
+                mutation: "R",
+                postMutation: "rebuild-material",
+            });
+            expect(readOptionalTexture(material, id)).toBe(first);
+            expect(inspect(material).textureBindings.find((entry) => entry.id === id)?.directions).toEqual(["replace", "clear", "navigate"]);
+
+            await expect(setTexture({ scenes: [scene] }, material, id, { direction: "replace", texture: second })).resolves.toEqual({
+                changed: true,
+                mutation: "R",
+                postMutation: "rebuild-material",
+            });
+            expect(readOptionalTexture(material, id)).toBe(second);
+
+            await expect(setTexture({ scenes: [scene] }, material, id, { direction: "clear" })).resolves.toEqual({
+                changed: true,
+                mutation: "R",
+                postMutation: "rebuild-material",
+            });
+            expect(readOptionalTexture(material, id)).toBeUndefined();
+        }
+    });
+
+    it("supports assign and replace but rejects unsafe clear for metallic reflectance, and rejects lightmap clear", async () => {
+        const material = createConfiguredOptionalMaterial(false);
+        const { scene } = createScene([material]);
+        const first = texture2d(300);
+        const second = texture2d(301);
+
+        for (const id of ["pbr.metallicReflectance", "pbr.reflectance"] as const) {
+            await expect(setTexture({ scenes: [scene] }, material, id, { direction: "assign", texture: first })).resolves.toMatchObject({ mutation: "R" });
+            await expect(setTexture({ scenes: [scene] }, material, id, { direction: "replace", texture: second })).resolves.toMatchObject({ mutation: "R" });
+            await expect(setTexture({ scenes: [scene] }, material, id, { direction: "clear" })).rejects.toThrow(/does not support/);
+            expect(readOptionalTexture(material, id)).toBe(second);
+        }
+
+        const originalLightmap = material.lightmapTexture;
+        await expect(setTexture({ scenes: [scene] }, material, "pbr.lightmap", { direction: "replace", texture: second })).resolves.toMatchObject({ mutation: "R" });
+        await expect(setTexture({ scenes: [scene] }, material, "pbr.lightmap", { direction: "clear" })).rejects.toThrow(/does not support/);
+        expect(material.lightmapTexture).toBe(second);
+        expect(material.lightmapTexture).not.toBe(originalLightmap);
+    });
+
+    it("changes only the selected semantic slot when replacing a texture shared by optional families", async () => {
+        const shared = texture2d(400);
+        const replacement = texture2d(401);
+        const material = createPbrMaterial({
+            _clearCoat: { isEnabled: true, texture: shared, roughnessTexture: shared },
+            _sheen: { isEnabled: true, texture: shared },
+        });
+        const { scene } = createScene([material]);
+
+        await expect(setTexture({ scenes: [scene] }, material, "pbr.clearCoat", { direction: "replace", texture: replacement })).resolves.toMatchObject({ mutation: "R" });
+        expect(material._clearCoat?.texture).toBe(replacement);
+        expect(material._clearCoat?.roughnessTexture).toBe(shared);
+        expect(material._sheen?.texture).toBe(shared);
     });
 });
