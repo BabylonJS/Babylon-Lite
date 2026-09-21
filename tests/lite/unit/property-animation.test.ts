@@ -13,6 +13,19 @@ import { INTERP_CUBICSPLINE, INTERP_LINEAR, INTERP_STEP } from "../../../package
 import type { AnimationGroup } from "../../../packages/babylon-lite/src/animation/animation-group";
 import type { AnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
 
+const typedArrayAllocations = vi.hoisted(() => ({ f32: 0 }));
+
+vi.mock("../../../packages/babylon-lite/src/engine/typed-arrays", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("../../../packages/babylon-lite/src/engine/typed-arrays")>();
+    const F32 = new Proxy(actual.F32, {
+        construct(target, args, newTarget) {
+            typedArrayAllocations.f32++;
+            return Reflect.construct(target, args, newTarget);
+        },
+    });
+    return { ...actual, F32 };
+});
+
 describe("Property animation", () => {
     it("leaves generic glTF sampler interpolation unchanged", () => {
         const output = new Float32Array(1);
@@ -500,6 +513,46 @@ describe("Property animation", () => {
         updateAnimationManager(manager, 1000);
 
         expect(target.position.x).toBeCloseTo(-5);
+    });
+
+    it("recycles blend storage across repeated intermediate property replacements", () => {
+        const manager = createAnimationManager();
+        const target = { position: { x: 0 } };
+        const positive = createPropertyAnimationClip("positive", [
+            {
+                path: "position.x",
+                keys: [
+                    { time: 0, value: 10 },
+                    { time: 1, value: 10 },
+                ],
+            },
+        ]);
+        const negative = createPropertyAnimationClip("negative", [
+            {
+                path: "position.x",
+                keys: [
+                    { time: 0, value: -10 },
+                    { time: 1, value: -10 },
+                ],
+            },
+        ]);
+
+        const positiveGroup = createPropertyAnimationGroup(manager, target, positive);
+        target.position = { x: 0 };
+        const negativeGroup = createPropertyAnimationGroup(manager, target, negative);
+        enablePropertyAnimationBlending(manager);
+        setAnimationWeight(positiveGroup, 0.25);
+        setAnimationWeight(negativeGroup, 0.75);
+        updateAnimationManager(manager, 10);
+        const allocationCount = typedArrayAllocations.f32;
+
+        for (let i = 0; i < 20; i++) {
+            target.position = { x: 0 };
+            updateAnimationManager(manager, 10);
+            expect(target.position.x).toBeCloseTo(-5);
+        }
+
+        expect(typedArrayAllocations.f32).toBe(allocationCount);
     });
 
     it("samples easing before applying a property-animation weight", () => {
