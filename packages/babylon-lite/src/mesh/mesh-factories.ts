@@ -167,13 +167,13 @@ export function createMeshFromData(
         boundMin: isFinite(min[0]) ? min : undefined,
         boundMax: isFinite(max[0]) ? max : undefined,
         _gpu: uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors),
+        _cpuPositions: positions,
+        _cpuNormals: normals,
+        _cpuUvs: uvs,
+        _cpuTangents: tangents,
+        _cpuIndices: indices,
     });
 
-    // Retain CPU geometry for detailed picking (ray-triangle intersection)
-    mesh._cpuPositions = positions;
-    mesh._cpuNormals = normals;
-    mesh._cpuUvs = uvs;
-    mesh._cpuIndices = indices;
     engine._dlr?.m(mesh, uvs2 ?? null, tangents ?? null, colors ?? null, indices, "uint32");
 
     return mesh;

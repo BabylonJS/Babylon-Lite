@@ -1081,6 +1081,7 @@ const MIME: Record<string, string> = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
+    ".mp3": "audio/mpeg",
     ".css": "text/css",
     ".wasm": "application/wasm",
 };

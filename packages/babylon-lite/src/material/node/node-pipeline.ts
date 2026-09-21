@@ -369,7 +369,8 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
         wgslParts.push(src);
     }
 
-    const vsSig = wgsl`(in: VertexIn${vertexFeature?.[3] ?? ""})`;
+    const instanceIndex = state.usesInstanceIndex ? wgsl`, @builtin(instance_index) instanceIndex: u32` : "";
+    const vsSig = wgsl`(in: VertexIn${vertexFeature?.[3] ?? ""}${instanceIndex})`;
     wgslParts.push(
         wgsl`@vertex\nfn vs_main${vsSig} -> VertexOut {\n` +
             wgsl`    var out: VertexOut;\n` +
@@ -548,6 +549,6 @@ export function _nodeAlphaModeToBlend(mode: number): GPUBlendState | undefined {
     const dstFactor: GPUBlendFactor = mode === 1 ? "one" : "one-minus-src-alpha";
     return {
         color: { srcFactor: mode === 7 ? "one" : "src-alpha", dstFactor, operation: "add" },
-        alpha: { srcFactor: "one", dstFactor, operation: "add" },
+        alpha: { srcFactor: "one", dstFactor: mode === 7 ? dstFactor : "one", operation: "add" },
     };
 }
