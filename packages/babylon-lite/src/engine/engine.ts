@@ -610,7 +610,6 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
     }
 
     const encoder = engine._device.createCommandEncoder({ label: "frame" });
-    let submitted = false;
     engine._currentEncoder = encoder;
     engine._currentDelta = delta;
     try {
@@ -654,16 +653,12 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
         engine._gpuTimerEnd?.(finalEncoder);
         engine._cbs[0] = finalEncoder.finish();
         engine._device.queue.submit(engine._cbs);
-        submitted = true;
         engine._flushGpuRetirements?.(engine);
         engine.drawCallCount = total;
         // Resolve + read back the timestamp pair asynchronously (its own submit, after the frame's) and
         // publish the latest completed sample to `gpuFrameTimeMs`. Non-blocking — never stalls this frame.
         engine._gpuTimerResolve?.();
     } finally {
-        if (!submitted) {
-            engine._gpuTaskTimerResolve?.(encoder, false);
-        }
         engine._currentEncoder = undefined!;
     }
 }

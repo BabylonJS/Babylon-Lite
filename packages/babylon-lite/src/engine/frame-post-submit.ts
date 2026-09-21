@@ -79,6 +79,15 @@ export function addFramePostSubmitHook(engine: EngineContext, scope: FramePostSu
     }
     const entry = { run: hook, cancel, encoder };
     state.hooks.add(entry);
+    if (encoder) {
+        queueMicrotask(() => {
+            if (state!.hooks.has(entry) && engine._currentEncoder !== encoder) {
+                state!.hooks.delete(entry);
+                cancel?.();
+                releaseState(engine, state!);
+            }
+        });
+    }
     return () => {
         if (!state!.hooks.delete(entry)) {
             return;

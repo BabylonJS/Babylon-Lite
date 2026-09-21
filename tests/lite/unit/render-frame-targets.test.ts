@@ -155,7 +155,7 @@ describe("renderFrame targets", () => {
         expect(probe.events).toEqual(["aux:pre", "aux:update"]);
     });
 
-    it("cancels abandoned frame-bound work immediately without another submission", () => {
+    it("cancels abandoned frame-bound work without another submission", async () => {
         const { engine, surfaces } = makeEngine(["primary"]);
         const run = vi.fn();
         const cancel = vi.fn();
@@ -164,6 +164,7 @@ describe("renderFrame targets", () => {
             throw new Error("frame failed");
         });
         expect(() => renderFrame(engine, 8)).toThrow(/frame failed/);
+        await Promise.resolve();
 
         expect(cancel).toHaveBeenCalledOnce();
         expect(run).not.toHaveBeenCalled();
