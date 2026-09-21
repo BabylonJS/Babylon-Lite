@@ -176,7 +176,7 @@ export { GetSupportedSimultaneousLights } from "./materials/material-helpers.js"
 
 // ─── Animation ───────────────────────────────────────────────────────
 export { Animation, AnimationGroup, AnimationTypes, AnimationLoopModes, AnimationKeyInterpolation, Animatable } from "./animations/animation.js";
-export type { IAnimationKey, AnimationGroupState } from "./animations/animation.js";
+export type { AnimationGroupState, AnimationValue, IAnimationKey, IAnimationVectorValue } from "./animations/animation.js";
 export {
     EasingFunction,
     CircleEase,
@@ -189,10 +189,13 @@ export {
     BackEase,
     ElasticEase,
     BounceEase,
+    PowerEase,
+    BezierCurveEase,
     EASINGMODE_EASEIN,
     EASINGMODE_EASEOUT,
     EASINGMODE_EASEINOUT,
 } from "./animations/easing.js";
+export type { IEasingFunction } from "./animations/easing.js";
 
 // ─── Misc ────────────────────────────────────────────────────────────
 export { Observable } from "./misc/observable.js";
