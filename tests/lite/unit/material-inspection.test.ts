@@ -13,6 +13,7 @@ import {
     type MaterialInspectionProperty,
     type MaterialInspectionPropertyValue,
     type MaterialTextureBinding,
+    type Texture2D,
 } from "../../../packages/babylon-lite/src";
 import {
     inspectMaterialWithFamily,
@@ -91,10 +92,18 @@ describe("unknown material family contract", () => {
     });
 });
 
-function createMaterial(family?: string, name?: unknown): Material & { amount?: number; vector?: number[] } {
+type TestMaterial = Material & {
+    amount?: number;
+    vector?: number[];
+    backFaceCulling?: boolean;
+    diffuseCoordIndex?: number;
+    diffuseTexture?: Texture2D;
+};
+
+function createMaterial(family?: string, name?: unknown): TestMaterial {
     const rebuild = vi.fn((_scene: SceneContext, mesh: Mesh) => ({ mesh, order: 0, isTransparent: false }) as Renderable);
     const builder = Object.assign(vi.fn(), { _materialFamily: family, _rebuildSingle: rebuild }) as unknown as MeshGroupBuilder;
-    return { _buildGroup: builder, _uboVersion: 0, name } as unknown as Material & { amount?: number; vector?: number[] };
+    return { _buildGroup: builder, _uboVersion: 0, name } as unknown as TestMaterial;
 }
 
 function createScene(materials: readonly Material[]): {
@@ -153,6 +162,17 @@ function binding(entity: object): MaterialTextureBinding {
     };
 }
 
+function texture2d(seed: number): Texture2D {
+    return {
+        texture: { seed } as unknown as GPUTexture,
+        view: { seed } as unknown as GPUTextureView,
+        sampler: { seed } as unknown as GPUSampler,
+        width: 1,
+        height: 1,
+        _sampleType: "float",
+    };
+}
+
 describe("common material inspection", () => {
     it("uses stable identity fallbacks, unwraps views, and safely handles malformed inputs", () => {
         const standard = createMaterial("standard");
@@ -165,7 +185,6 @@ describe("common material inspection", () => {
             family: "standard",
             displayName: "Standard Material",
             isView: false,
-            textureBindings: [],
         });
         expect(inspectMaterial(unknown)).toMatchObject({
             source: unknown,
@@ -181,7 +200,17 @@ describe("common material inspection", () => {
             displayName: "Standard Material",
             isView: true,
         });
-        expect(getMaterialTextureBindings(view)).toEqual([]);
+        expect(getMaterialTextureBindings(view).map(({ id }) => id)).toEqual([
+            "standard.diffuse",
+            "standard.emissive",
+            "standard.bump",
+            "standard.specular",
+            "standard.ambient",
+            "standard.lightmap",
+            "standard.opacity",
+            "standard.reflection2d",
+            "standard.reflectionCube",
+        ]);
 
         expect(inspectMaterial(null as unknown as Material)).toEqual({
             source: null,
@@ -519,5 +548,71 @@ describe("common material mutation execution", () => {
         await expect(setMaterialInspectionPropertyWithFamily({ scenes: [] }, source, "shader.uniform:amount", 2, setterFailure)).rejects.toThrow("setter failed");
         expect(source.amount).toBe(1);
         expect(source._uboVersion).toBe(0);
+    });
+});
+
+describe("canonical public material dispatcher", () => {
+    it("routes Standard mutations while preserving validation, ownership, deduplication, and no-op guarantees", async () => {
+        const source = createMaterial("standard");
+        source.backFaceCulling = true;
+        const initialTexture = texture2d(1);
+        const replacementTexture = texture2d(2);
+        source.diffuseTexture = initialTexture;
+        const view = createMaterialView(source, { features: 1 });
+        const { scene, rebuild } = createScene([source, view]);
+
+        await expect(setMaterialInspectionProperty({ scenes: [] }, source, "standard.backFaceCulling", false)).rejects.toThrow(/owning scene/);
+        expect(source.backFaceCulling).toBe(true);
+        await expect(setMaterialInspectionProperty({ scenes: [scene] }, source, "shader.uniform:amount", 1)).rejects.toThrow(/stale/);
+        expect(source.amount).toBeUndefined();
+        await expect(setMaterialInspectionProperty({ scenes: [scene] }, source, "standard.diffuseCoordIndex", 3)).rejects.toThrow(/does not accept enum value/);
+        expect(source.diffuseCoordIndex).toBeUndefined();
+
+        await expect(setMaterialInspectionProperty({ scenes: [scene, scene] }, view, "standard.backFaceCulling", false)).resolves.toEqual({
+            changed: true,
+            mutation: "R",
+            postMutation: "rebuild-material",
+        });
+        expect(source.backFaceCulling).toBe(false);
+        expect(rebuild).toHaveBeenCalledTimes(2);
+
+        await expect(setMaterialInspectionProperty({ scenes: [] }, source, "standard.backFaceCulling", false)).resolves.toEqual({
+            changed: false,
+            mutation: "R",
+            postMutation: "none",
+        });
+
+        await expect(
+            setMaterialInspectionTexture({ scenes: [scene, scene] }, view, "standard.diffuse", {
+                direction: "replace",
+                texture: replacementTexture,
+            })
+        ).resolves.toEqual({
+            changed: true,
+            mutation: "R",
+            postMutation: "rebuild-material",
+        });
+        expect(source.diffuseTexture).toBe(replacementTexture);
+        expect(rebuild).toHaveBeenCalledTimes(4);
+
+        await expect(
+            setMaterialInspectionTexture({ scenes: [scene] }, source, "standard.diffuse", {
+                direction: "replace",
+                texture: { _texture: {}, _view: {}, _sampler: {} },
+            })
+        ).rejects.toThrow(/requires a Texture2D/);
+        expect(source.diffuseTexture).toBe(replacementTexture);
+
+        await expect(
+            setMaterialInspectionTexture({ scenes: [] }, source, "standard.diffuse", {
+                direction: "replace",
+                texture: replacementTexture,
+            })
+        ).resolves.toEqual({
+            changed: false,
+            mutation: "R",
+            postMutation: "none",
+        });
+        expect(rebuild).toHaveBeenCalledTimes(4);
     });
 });

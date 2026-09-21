@@ -18,6 +18,10 @@ import type {
     MaterialTextureBindingId,
     MaterialTextureMutation,
 } from "./inspection-types.js";
+import { nodeMaterialInspectionDescriptor } from "./node-material-inspection.js";
+import { pbrMaterialInspectionDescriptor } from "./pbr-material-inspection.js";
+import { shaderMaterialInspectionDescriptor } from "./shader-material-inspection.js";
+import { standardMaterialInspectionDescriptor } from "./standard-material-inspection.js";
 
 /** @internal Family-owned inspection data before the common layer copies it into a public snapshot. */
 export interface MaterialInspectionFamilySnapshot {
@@ -57,34 +61,50 @@ interface ResolvedMaterial {
     readonly isView: boolean;
 }
 
-/** Inspect the common identity of a material. Family descriptors are wired by the family convergence task. */
+/** Inspect a material through its canonical family descriptor. */
 export function inspectMaterial(material: Material): MaterialInspection {
-    return inspectMaterialWithFamily(material);
+    return inspectMaterialWithFamily(material, getMaterialInspectionDescriptor(material));
 }
 
-/** Return the material's canonical named bindings. Unknown and not-yet-wired families return none. */
+/** Return the material's canonical named bindings. Unknown families return none. */
 export function getMaterialTextureBindings(material: Material): readonly MaterialTextureBinding[] {
-    return inspectMaterialWithFamily(material).textureBindings;
+    return inspectMaterial(material).textureBindings;
 }
 
-/** Change a common material property or reject a family property that is not currently described. */
+/** Change a common or family material property through its canonical descriptor. */
 export function setMaterialInspectionProperty(
     scope: MaterialInspectionMutationScope,
     material: Material,
     property: MaterialInspectionPropertyId,
     value: MaterialInspectionPropertyValue
 ): Promise<MaterialInspectionMutationResult> {
-    return setMaterialInspectionPropertyWithFamily(scope, material, property, value);
+    return setMaterialInspectionPropertyWithFamily(scope, material, property, value, getMaterialInspectionDescriptor(material));
 }
 
-/** Change a named binding or reject a binding that is not currently described. */
+/** Change a named binding through its canonical family descriptor. */
 export function setMaterialInspectionTexture(
     scope: MaterialInspectionMutationScope,
     material: Material,
     binding: MaterialTextureBindingId,
     mutation: MaterialTextureMutation
 ): Promise<MaterialInspectionMutationResult> {
-    return setMaterialInspectionTextureWithFamily(scope, material, binding, mutation);
+    return setMaterialInspectionTextureWithFamily(scope, material, binding, mutation, getMaterialInspectionDescriptor(material));
+}
+
+function getMaterialInspectionDescriptor(material: Material): MaterialInspectionFamilyDescriptor | undefined {
+    const source = resolveMaterial(material).source;
+    switch (readMaterialFamily(source)) {
+        case "standard":
+            return standardMaterialInspectionDescriptor;
+        case "pbr":
+            return pbrMaterialInspectionDescriptor;
+        case "shader":
+            return shaderMaterialInspectionDescriptor;
+        case "node":
+            return nodeMaterialInspectionDescriptor;
+        default:
+            return undefined;
+    }
 }
 
 /** @internal Build a copied common/family snapshot without retaining mutable tuple or capability arrays. */
