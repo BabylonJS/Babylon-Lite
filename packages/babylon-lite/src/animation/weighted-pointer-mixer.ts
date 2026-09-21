@@ -12,9 +12,9 @@ const MIX_TO = 2;
 const MIX_DURATION = 3;
 
 interface WeightedPointerBucket {
-    readonly target: object;
-    readonly property: string;
-    readonly values: Float32Array;
+    target: object;
+    property: string;
+    values: Float32Array;
     writer: (output: Float32Array, offset: number) => void;
     arity: number;
     quaternion: boolean;
@@ -30,6 +30,7 @@ interface WeightedPointerBucket {
 interface WeightedPointerScratch {
     readonly buckets: WeightedPointerBucket[];
     readonly sample: Float32Array;
+    bucketCount: number;
 }
 
 let scratchByManager: WeakMap<AnimationManager, WeightedPointerScratch> | undefined;
@@ -46,6 +47,7 @@ function getScratch(manager: AnimationManager): WeightedPointerScratch {
         scratch = {
             buckets: [],
             sample: new F32(16),
+            bucketCount: 0,
         };
         scratchByManager.set(manager, scratch);
     }
@@ -54,15 +56,8 @@ function getScratch(manager: AnimationManager): WeightedPointerScratch {
 
 function updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: number): boolean {
     const scratch = getScratch(manager);
+    scratch.bucketCount = 0;
     let contestedCount = 0;
-
-    for (let bucketIndex = 0; bucketIndex < scratch.buckets.length; bucketIndex++) {
-        const bucket = scratch.buckets[bucketIndex]!;
-        bucket.contested = false;
-        bucket.active = false;
-        bucket.hasReference = false;
-        bucket.values.fill(0);
-    }
 
     const groups = getAnimationGroups(manager);
     for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
@@ -74,7 +69,7 @@ function updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: num
         const tracks = mixer[MIX_TRACKS];
         for (let trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
             const track = tracks[trackIndex]!;
-            const bucket = getTrackBucket(scratch.buckets, track);
+            const bucket = getTrackBucket(scratch, track);
             if (!bucket.contested) {
                 bucket.contested = true;
                 contestedCount++;
@@ -83,6 +78,7 @@ function updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: num
     }
 
     if (contestedCount === 0) {
+        scratch.buckets.length = 0;
         return false;
     }
 
@@ -108,7 +104,7 @@ function updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: num
         for (let trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
             const track = tracks[trackIndex]!;
             evaluatePropertySampler(track.sampler, t, track.stride, track.quaternion, track.easing, scratch.sample, 0);
-            const bucket = getTrackBucket(scratch.buckets, track);
+            const bucket = getTrackBucket(scratch, track);
             if (!bucket.contested) {
                 track.writer(scratch.sample, 0);
                 continue;
@@ -119,7 +115,8 @@ function updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: num
         }
     }
 
-    for (let bucketIndex = 0; bucketIndex < scratch.buckets.length; bucketIndex++) {
+    scratch.buckets.length = scratch.bucketCount;
+    for (let bucketIndex = 0; bucketIndex < scratch.bucketCount; bucketIndex++) {
         const bucket = scratch.buckets[bucketIndex]!;
         if (!bucket.active) {
             continue;
@@ -164,10 +161,11 @@ function advancePropertyGroupTime(group: AnimationGroup, mixer: AnimationPropert
     return group.currentTime;
 }
 
-function getTrackBucket(buckets: WeightedPointerBucket[], track: AnimationPropertyRuntimeTrack): WeightedPointerBucket {
+function getTrackBucket(scratch: WeightedPointerScratch, track: AnimationPropertyRuntimeTrack): WeightedPointerBucket {
+    const buckets = scratch.buckets;
     const arity = track.stride;
     const target = track.mixTarget();
-    for (let bucketIndex = 0; bucketIndex < buckets.length; bucketIndex++) {
+    for (let bucketIndex = 0; bucketIndex < scratch.bucketCount; bucketIndex++) {
         const candidate = buckets[bucketIndex]!;
         if (candidate.target === target && candidate.property === track.mixProperty) {
             if (candidate.arity !== arity) {
@@ -179,22 +177,44 @@ function getTrackBucket(buckets: WeightedPointerBucket[], track: AnimationProper
         }
     }
 
-    const bucket: WeightedPointerBucket = {
-        target,
-        property: track.mixProperty,
-        values: new F32(arity),
-        writer: track.writer,
-        arity,
-        quaternion: track.quaternion,
-        contested: false,
-        active: false,
-        hasReference: false,
-        refX: 0,
-        refY: 0,
-        refZ: 0,
-        refW: 1,
-    };
-    buckets.push(bucket);
+    let bucket = buckets[scratch.bucketCount];
+    if (bucket) {
+        bucket.target = target;
+        bucket.property = track.mixProperty;
+        bucket.writer = track.writer;
+        bucket.quaternion = track.quaternion;
+        bucket.contested = false;
+        bucket.active = false;
+        bucket.hasReference = false;
+        bucket.refX = 0;
+        bucket.refY = 0;
+        bucket.refZ = 0;
+        bucket.refW = 1;
+        if (bucket.arity === arity) {
+            bucket.values.fill(0);
+        } else {
+            bucket.values = new F32(arity);
+            bucket.arity = arity;
+        }
+    } else {
+        bucket = {
+            target,
+            property: track.mixProperty,
+            values: new F32(arity),
+            writer: track.writer,
+            arity,
+            quaternion: track.quaternion,
+            contested: false,
+            active: false,
+            hasReference: false,
+            refX: 0,
+            refY: 0,
+            refZ: 0,
+            refW: 1,
+        };
+        buckets.push(bucket);
+    }
+    scratch.bucketCount++;
     return bucket;
 }
 
