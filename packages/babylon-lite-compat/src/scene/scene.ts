@@ -25,6 +25,7 @@ import {
     addToScene,
     createAnimationManager,
     addAnimationGroup,
+    clearAnimationManager,
     enableAnimationBlending,
     updateAnimationManager,
     pickMeshesWithRay as litePickWithRay,
@@ -140,8 +141,8 @@ export class Scene extends AbstractScene {
      * Babylon.js `scene.animationGroups` / `scene.animatables`. Loaded glTF /
      * `.babylon` animation clips live on the Lite scene; `animationGroups` returns
      * BJS-shaped `AnimationGroup`s over them (so scenes can `goToFrame`/`pause`/`stop`
-     * to freeze a model at a deterministic frame). `animatables` surfaces the running
-     * CPU `Animatable`s started via `beginDirectAnimation`.
+     * to freeze a model at a deterministic frame). `animatables` surfaces the
+     * native-backed and fallback `Animatable`s started through the scene.
      */
     public get animationGroups(): AnimationGroup[] {
         const liteGroups = this._lite.animationGroups ?? [];
@@ -192,6 +193,8 @@ export class Scene extends AbstractScene {
     private _materialPluginsRequested = false;
     private readonly _pendingMaterialPluginReconciliations = new Set<LiteMaterial>();
     private readonly _runningAnimatables: Animatable[] = [];
+    /** @internal Lite manager that owns supported compat property animations. */
+    private _propertyAnimationManager: AnimationManager | null = null;
     private readonly _animationGroupCache = new WeakMap<object, AnimationGroup>();
     /** @internal Structural `AnimationGroup`s stepped + weight-blended each frame. */
     private readonly _structuralGroups: AnimationGroup[] = [];
@@ -292,6 +295,9 @@ export class Scene extends AbstractScene {
         this.onBeforeAnimationsObservable.notifyObservers(this);
         if (this._blendManager) {
             updateAnimationManager(this._blendManager, deltaMs);
+        }
+        if (this._propertyAnimationManager) {
+            updateAnimationManager(this._propertyAnimationManager, deltaMs);
         }
         for (const a of this._runningAnimatables) {
             a._tick(deltaMs);
@@ -1123,11 +1129,29 @@ export class Scene extends AbstractScene {
 
     /**
      * Babylon.js `scene.beginDirectAnimation(target, animations, from, to, loop, speedRatio?)`.
-     * Drives the given `Animation`s on the CPU each frame, writing onto the target's
-     * (dotted) property path. Returns an `Animatable` with `goToFrame`/`pause`/`stop`.
+     * Delegates supported tracks to Babylon Lite property animation and retains
+     * explicit compat evaluation only for unsupported tracks. Returns one facade
+     * coordinating both subsets.
      */
     public beginDirectAnimation(target: unknown, animations: Animation[], from: number, to: number, loop = false, speedRatio = 1): Animatable {
-        const animatable = new Animatable(target, animations, from, to, loop, speedRatio);
+        if (speedRatio < 0) {
+            [from, to] = [to, from];
+            speedRatio = -speedRatio;
+        }
+        if (from > to) {
+            speedRatio = -speedRatio;
+        }
+        const blockedNativeBindings = this._runningAnimatables.flatMap((animatable) => animatable._getBlockingFallbackBindings());
+        const animatable = Animatable._create(
+            () => (this._propertyAnimationManager ??= createAnimationManager()),
+            target,
+            animations,
+            from,
+            to,
+            loop,
+            speedRatio,
+            blockedNativeBindings
+        );
         this._runningAnimatables.push(animatable);
         return animatable;
     }
@@ -1185,6 +1209,13 @@ export class Scene extends AbstractScene {
         this.onDisposeObservable.notifyObservers(this);
         this.onPointerObservable.clear();
         this._beforeRenderFlushCallbacks.clear();
+        if (this._propertyAnimationManager) {
+            clearAnimationManager(this._propertyAnimationManager);
+        }
+        if (this._blendManager) {
+            clearAnimationManager(this._blendManager);
+        }
+        this._runningAnimatables.length = 0;
         disposeScene(this._lite);
     }
 }
