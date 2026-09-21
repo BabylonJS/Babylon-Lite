@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
+import { createMaterialView } from "../../../packages/babylon-lite/src/material/material-view";
 import { rebuildMaterial } from "../../../packages/babylon-lite/src/material/material-rebuild";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { setThinInstances } from "../../../packages/babylon-lite/src/mesh/thin-instance";
@@ -251,10 +252,84 @@ describe("runtime material rebuild ownership", () => {
         const mesh = { _gpu: {}, material, children: [] } as unknown as Mesh;
         scene.meshes.push(mesh);
 
-        rebuildMaterial(scene, material);
+        const result = rebuildMaterial(scene, material);
 
+        expect(result).toBeUndefined();
         await vi.waitFor(() => expect(report).toHaveBeenCalledWith(failure));
         expect(log).toHaveBeenCalledWith(failure);
+        log.mockRestore();
+    });
+
+    it("awaits mesh completion before rebuilding the optional frame graph", async () => {
+        const events: string[] = [];
+        let finish!: () => void;
+        const gate = new Promise<void>((resolve) => (finish = resolve));
+        const scene = createScene({} as EngineContext);
+        scene._built = true;
+        scene._frameGraph.build = vi.fn(() => events.push("frame graph"));
+        scene._runtimeBuilds = {
+            w: true,
+            queue: () => gate,
+            _e: () => events.push("mesh"),
+            _x: vi.fn(),
+        } as unknown as RuntimeSceneBuildHooks;
+        const builder = (() => Promise.resolve({ renderables: [], rebuildSingle: (_target: SceneContext, target: Mesh) => renderable(target) })) as MeshGroupBuilder;
+        builder._materialFamily = "standard";
+        const material = { _buildGroup: builder } as Material;
+        const mesh = { _gpu: {}, material, children: [] } as unknown as Mesh;
+        scene.meshes.push(mesh);
+
+        const completion = rebuildMaterial(scene, material, { awaitCompletion: true, rebuildFrameGraph: true }).then(() => events.push("resolved"));
+
+        expect(events).toEqual([]);
+        expect(scene._frameGraph.build).not.toHaveBeenCalled();
+        finish();
+        await completion;
+
+        expect(events).toEqual(["mesh", "frame graph", "resolved"]);
+    });
+
+    it("rebuilds a source material and its MaterialView through the awaited overload", async () => {
+        const scene = createScene({ _retirements: [] } as unknown as EngineContext);
+        const rebuild = vi.fn((_target: SceneContext, target: Mesh) => renderable(target));
+        const builder = Object.assign(vi.fn(), { _materialFamily: "standard", _rebuildSingle: rebuild }) as unknown as MeshGroupBuilder;
+        const source = { _buildGroup: builder } as Material;
+        const view = createMaterialView(source, { features: 1 });
+        const sourceMesh = { material: source } as unknown as Mesh;
+        const viewMesh = { material: view } as unknown as Mesh;
+        scene.meshes.push(sourceMesh, viewMesh);
+        scene._groups.set(builder, Object.assign([sourceMesh, viewMesh], { r: rebuild }));
+
+        await expect(rebuildMaterial(scene, view, { awaitCompletion: true })).resolves.toBeUndefined();
+
+        expect(rebuild).toHaveBeenCalledTimes(2);
+        expect(rebuild).toHaveBeenNthCalledWith(1, scene, sourceMesh);
+        expect(rebuild).toHaveBeenNthCalledWith(2, scene, viewMesh);
+    });
+
+    it("rejects awaited rebuild failures without legacy reporting", async () => {
+        const failure = new Error("awaited material rebuild failed");
+        const report = vi.fn();
+        const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+        const scene = createScene({} as EngineContext);
+        scene._built = true;
+        scene._runtimeBuilds = {
+            w: true,
+            queue: () => Promise.resolve(),
+            _e: () => {
+                throw failure;
+            },
+            _x: report,
+        } as unknown as RuntimeSceneBuildHooks;
+        const builder = (() => Promise.resolve({ renderables: [], rebuildSingle: (_target: SceneContext, target: Mesh) => renderable(target) })) as MeshGroupBuilder;
+        builder._materialFamily = "standard";
+        const material = { _buildGroup: builder } as Material;
+        const mesh = { _gpu: {}, material, children: [] } as unknown as Mesh;
+        scene.meshes.push(mesh);
+
+        await expect(rebuildMaterial(scene, material, { awaitCompletion: true })).rejects.toBe(failure);
+        expect(report).not.toHaveBeenCalled();
+        expect(log).not.toHaveBeenCalled();
         log.mockRestore();
     });
 

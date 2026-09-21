@@ -613,10 +613,48 @@ export { createMaterialView } from "./material/material-view.js";
 export { releaseMaterialViewGpu } from "./material/shader/shader-material-view-gpu.js";
 export { getMaterialFamily } from "./material/material-family.js";
 export { getMaterialTextures } from "./material/material-textures.js";
+export type {
+    InspectionValue,
+    InspectionDatum,
+    InspectionNumberConstraint,
+    MaterialMutationClass,
+    AppliedMaterialMutationClass,
+    MaterialPostMutation,
+    MaterialInspectionEdit,
+    MaterialInspectionReadOnly,
+    MaterialInspectionAccess,
+    MaterialInspectionSection,
+    MaterialInspectionScalar,
+    MaterialInspectionTuple,
+    MaterialInspectionPropertyValue,
+    MaterialInspectionPropertyId,
+    MaterialInspectionProperty,
+    MaterialInspection,
+    TextureInspectionKind,
+    TextureBindingKind,
+    TextureSampleCategory,
+    TextureViewCategory,
+    TextureBindingDirection,
+    MaterialTextureBindingId,
+    MaterialInspectionTextureReference,
+    MaterialTextureBinding,
+    TextureInspectionOrigin,
+    TextureColorSpace,
+    TextureAddressMode,
+    TextureFilterMode,
+    TextureInspectionTransform,
+    TextureSamplerInspection,
+    TextureInspection,
+    MaterialInspectionMutationScope,
+    MaterialTextureMutation,
+    MaterialInspectionMutationResult,
+} from "./inspection/inspection-types.js";
+export { inspectMaterial, getMaterialTextureBindings, setMaterialInspectionProperty, setMaterialInspectionTexture } from "./inspection/material-inspection.js";
 export { isPbrMaterial, isStandardMaterial, isShaderMaterial, isNodeMaterial } from "./material/material-guards.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { enableMaterialUvTransform } from "./material/enable-material-uv-transform.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
+export type { RebuildMaterialOptions, AwaitedRebuildMaterialOptions } from "./material/material-rebuild.js";
 export { setSceneImageProcessing } from "./scene/scene-image-processing.js";
 export type { ImageProcessingUpdate } from "./scene/scene-image-processing.js";
 export { rebuildScenePbrPipelines, rebuildSceneRenderables } from "./scene/scene-rebuild.js";

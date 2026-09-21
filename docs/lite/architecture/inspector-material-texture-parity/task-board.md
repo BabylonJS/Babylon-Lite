@@ -4,10 +4,6 @@
 
 | M | ID | Task | Skill | Notes |
 |---|----|------|-------|-------|
-| P0 | T-06 | Freeze public and import-boundary tests | execute-implementation-plan | plan T01 |
-| P1 | T-07 | Add pure inspection value and capability types | execute-implementation-plan | plan T02 |
-| P1 | T-08 | Make material rebuild completion awaitable | execute-implementation-plan | plan T03 |
-| P1 | T-09 | Implement common material inspection and transaction primitives | execute-implementation-plan | plan T04 |
 | P2 | T-10 | Implement complete Standard material inspection | execute-implementation-plan | plan T05 |
 | P2 | T-11 | Implement PBR core inspection and feature signatures | execute-implementation-plan | plan T06 |
 | P2 | T-12 | Add PBR optional-family reconstruction and directional mutation | execute-implementation-plan | plan T07 |
@@ -38,5 +34,9 @@
 | | T-03 | Requirements | write-requirements | done 2026-09-20 · requirements.md |
 | | T-04 | Architecture | write-architecture | done 2026-09-21 · architecture.md |
 | | T-05 | Implementation plan | write-implementation-plan | done 2026-09-21 · plan.md |
+| P0 | T-06 | Freeze public and import-boundary tests | execute-implementation-plan | done 2026-09-21 · expected-red Lite contract tests; Babylon.js boundary in ed06d5cd |
+| P1 | T-07 | Add pure inspection value and capability types | execute-implementation-plan | done 2026-09-21 · inspection-types.ts and focused unit coverage |
+| P1 | T-08 | Make material rebuild completion awaitable | execute-implementation-plan | done 2026-09-21 · awaited rebuild overload and focused completion/error coverage |
+| P1 | T-09 | Implement common material inspection and transaction primitives | execute-implementation-plan | done 2026-09-21 · material-inspection.ts and focused transaction coverage |
 
 ## Untriaged
