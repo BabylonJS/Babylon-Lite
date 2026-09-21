@@ -7,11 +7,6 @@
 | P3 | T-17 | Add an instance-owned Lite scene resource index service | execute-implementation-plan | plan T12 |
 | P3 | T-18 | Move Material and Texture Explorer providers onto the index | execute-implementation-plan | plan T13 |
 | P3 | T-19 | Implement topology refresh and index disposal | execute-implementation-plan | plan T14 |
-| P4 | T-20 | Add shared field models and material section core | execute-implementation-plan | plan T15 |
-| P4 | T-21 | Add direction-aware texture binding property line | execute-implementation-plan | plan T16 |
-| P4 | T-22 | Add metadata-only texture core and accessible operation errors | execute-implementation-plan | plan T17 |
-| P5 | T-23 | Adapt Babylon.js material fields and bindings to shared P4 cores | execute-implementation-plan | plan T18 |
-| P5 | T-24 | Adapt Babylon.js metadata rows without touching preview/editor | execute-implementation-plan | plan T19 |
 | P6 | T-25 | Add lazy Lite material family adapters and Properties integration | execute-implementation-plan | plan T20 |
 | P6 | T-26 | Add Lite metadata-only texture adapter and Properties integration | execute-implementation-plan | plan T21 |
 | P6 | T-27 | Add adapter operation generations, refresh, errors, and cleanup | execute-implementation-plan | plan T22 |
@@ -38,5 +33,10 @@
 | P2 | T-14 | Implement deterministic Node material inspection | execute-implementation-plan | done 2026-09-21 · lexically ordered public input handles, copied scalar/vector controls, canonical nullable textures, A/R mutation, and focused deterministic/rebuild coverage |
 | P2 | T-15 | Wire canonical bindings and preserve legacy texture enumeration | execute-implementation-plan | done 2026-09-21 · root dispatcher, MaterialView/source identity, validated mutations, and legacy canonical-binding projection with focused compatibility/isolation coverage |
 | P2 | T-16 | Implement safe texture metadata and consumer-aware transform mutation | execute-implementation-plan | done 2026-09-21 · handle-free metadata, exact-wrapper Standard/PBR invalidation, T-06 contract/isolation green, and zero raw-byte delta in filtered scenes |
+| P4 | T-20 | Add shared field models and material section core | execute-implementation-plan | done 2026-09-21 · BabylonJS/Babylon.js commit ed06d5cd · runtime-neutral fields, section core, tests, and import isolation |
+| P4 | T-21 | Add direction-aware texture binding property line | execute-implementation-plan | done 2026-09-21 · BabylonJS/Babylon.js commit ed06d5cd · capability-driven assign/replace/clear/navigation with errors and accessibility |
+| P4 | T-22 | Add metadata-only texture core and accessible operation errors | execute-implementation-plan | done 2026-09-21 · BabylonJS/Babylon.js commit ed06d5cd · safe metadata rows, navigation, and no preview/editor coupling |
+| P5 | T-23 | Adapt Babylon.js material fields and bindings to shared P4 cores | execute-implementation-plan | done 2026-09-21 · BabylonJS/Babylon.js commit ed06d5cd · existing runtime behavior adapted to shared contracts |
+| P5 | T-24 | Adapt Babylon.js metadata rows without touching preview/editor | execute-implementation-plan | done 2026-09-21 · BabylonJS/Babylon.js commit ed06d5cd · metadata adapters preserve existing preview/editor ownership |
 
 ## Untriaged
