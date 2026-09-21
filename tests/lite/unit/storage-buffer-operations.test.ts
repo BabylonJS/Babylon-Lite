@@ -72,7 +72,7 @@ describe("compat storage-buffer operations", () => {
         updateStorageBufferRange(engine, storage, new Uint8Array([9, 10]), 1);
         expect(storage._data).toEqual(new Uint8Array([0, 9, 10, 0, 5, 6, 7, 8]));
 
-        engine._gpuTimerResolve!();
+        engine._gpuTaskTimerResolve!(engine._currentEncoder);
         expect(storage._data).toEqual(new Uint8Array(8));
     });
 
@@ -82,7 +82,6 @@ describe("compat storage-buffer operations", () => {
         engine._currentEncoder = frameEncoder as unknown as GPUCommandEncoder;
 
         clearStorageBuffer(engine, storage);
-        engine._framePostSubmitCancel!(engine._currentEncoder);
         engine._currentEncoder = undefined!;
         updateStorageBufferRange(engine, storage, new Uint8Array([9, 10]), 1);
 
@@ -90,7 +89,7 @@ describe("compat storage-buffer operations", () => {
         engine._currentEncoder = nextEncoder;
         const laterFrameHook = vi.fn();
         addFramePostSubmitHook(engine, "frame", laterFrameHook);
-        engine._framePostSubmit!(nextEncoder);
+        engine._gpuTaskTimerResolve!(nextEncoder);
 
         expect(laterFrameHook).toHaveBeenCalledOnce();
         expect(storage._data).toEqual(new Uint8Array([0, 9, 10, 0, 5, 6, 7, 8]));
@@ -114,7 +113,7 @@ describe("compat storage-buffer operations", () => {
 
         const pending = readStorageBufferAfterFrame(storage, 0, 4);
         expect(frameEncoder.copyBufferToBuffer).toHaveBeenCalledWith(source, 0, staging, 0, 4);
-        engine._framePostSubmit!(engine._currentEncoder);
+        engine._gpuTaskTimerResolve!(engine._currentEncoder);
 
         await expect(pending).resolves.toEqual(new Uint8Array([1, 2, 3, 4]).buffer);
         expect(staging.destroy).toHaveBeenCalledOnce();
@@ -126,7 +125,8 @@ describe("compat storage-buffer operations", () => {
         engine._currentEncoder = frameEncoder as unknown as GPUCommandEncoder;
 
         const pending = readStorageBufferAfterFrame(storage, 0, 4);
-        engine._framePostSubmitCancel!(engine._currentEncoder);
+        engine._currentEncoder = {} as GPUCommandEncoder;
+        engine._gpuTaskTimerResolve!(engine._currentEncoder);
 
         await expect(pending).rejects.toThrow(/abandoned before its frame could be submitted/);
         expect(staging.destroy).toHaveBeenCalledOnce();

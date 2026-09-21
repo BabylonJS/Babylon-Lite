@@ -3,7 +3,6 @@ import type { EngineContext } from "./engine.js";
 interface FramePostSubmitState {
     readonly hooks: Set<FramePostSubmitHook>;
     readonly dispatch: (encoder?: GPUCommandEncoder) => void;
-    readonly cancel: (encoder: GPUCommandEncoder) => void;
     lastDispatchedEncoder: GPUCommandEncoder | null;
 }
 
@@ -27,12 +26,6 @@ function releaseState(engine: EngineContext, state: FramePostSubmitState): void 
     if (!engine._gpuTimerWanted && engine._gpuTimerResolve === state.dispatch) {
         engine._gpuTimerResolve = undefined;
     }
-    if (engine._framePostSubmit === state.dispatch) {
-        engine._framePostSubmit = undefined;
-    }
-    if (engine._framePostSubmitCancel === state.cancel) {
-        engine._framePostSubmitCancel = undefined;
-    }
     _states?.delete(engine);
 }
 
@@ -53,6 +46,8 @@ export function addFramePostSubmitHook(engine: EngineContext, scope: FramePostSu
             state!.lastDispatchedEncoder = encoder;
             for (const current of hooks) {
                 if (current.encoder && current.encoder !== encoder) {
+                    hooks.delete(current);
+                    current.cancel?.();
                     continue;
                 }
                 if (current.encoder) {
@@ -62,22 +57,10 @@ export function addFramePostSubmitHook(engine: EngineContext, scope: FramePostSu
             }
             releaseState(engine, state!);
         };
-        const cancelFrame = (encoder: GPUCommandEncoder) => {
-            for (const current of hooks) {
-                if (current.encoder !== encoder) {
-                    continue;
-                }
-                hooks.delete(current);
-                current.cancel?.();
-            }
-            releaseState(engine, state!);
-        };
-        state = { hooks, dispatch, cancel: cancelFrame, lastDispatchedEncoder: null };
+        state = { hooks, dispatch, lastDispatchedEncoder: null };
         states.set(engine, state);
         engine._gpuTaskTimerResolve = dispatch;
         engine._gpuTimerResolve ??= dispatch;
-        engine._framePostSubmit = dispatch;
-        engine._framePostSubmitCancel = cancelFrame;
     }
     const entry = { run: hook, cancel, encoder };
     state.hooks.add(entry);

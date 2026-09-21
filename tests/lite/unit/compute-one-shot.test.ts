@@ -27,7 +27,7 @@ function makeTask(): ComputeTask {
 async function finishRecordedTask(task: ComputeTask): Promise<void> {
     const encoder = {} as GPUCommandEncoder;
     task._oneShotRecorded!(encoder);
-    task.engine._computeOneShotSubmitted!(encoder);
+    task.engine._gpuTaskTimerResolve!(encoder);
     await Promise.resolve();
 }
 
@@ -70,7 +70,7 @@ describe("compute one-shot scheduling", () => {
         engine._currentEncoder = {} as GPUCommandEncoder;
 
         expect(task._passes[0]!._execute()).toBe(0);
-        task.engine._computeOneShotSubmitted!(engine._currentEncoder);
+        task.engine._gpuTaskTimerResolve!(engine._currentEncoder);
         await oneShot.completion;
 
         expect(task.executionEnabled).toBe(false);
@@ -97,12 +97,12 @@ describe("compute one-shot scheduling", () => {
         const unrelatedEncoder = {} as GPUCommandEncoder;
         task._oneShotRecorded!(abandonedEncoder);
 
-        task.engine._computeOneShotSubmitted!(unrelatedEncoder);
+        task.engine._gpuTaskTimerResolve!(unrelatedEncoder);
         await Promise.resolve();
         expect(oneShot._armed).toBe(true);
         expect(task.executionEnabled).toBe(true);
 
-        task.engine._computeOneShotSubmitted!(abandonedEncoder);
+        task.engine._gpuTaskTimerResolve!(abandonedEncoder);
         await oneShot.completion;
         expect(oneShot._armed).toBe(false);
         expect(task.executionEnabled).toBe(false);
@@ -115,7 +115,7 @@ describe("compute one-shot scheduling", () => {
         const oneShot = createComputeOneShot(task);
         task._oneShotRecorded!(firstEncoder);
 
-        task.engine._computeOneShotSubmitted!(firstEncoder);
+        task.engine._gpuTaskTimerResolve!(firstEncoder);
         await oneShot.completion;
 
         expect(task.executionEnabled).toBe(false);
@@ -124,7 +124,7 @@ describe("compute one-shot scheduling", () => {
         task.engine._currentEncoder = secondEncoder;
         const rearmed = armComputeOneShot(oneShot);
         task._oneShotRecorded!(secondEncoder);
-        task.engine._computeOneShotSubmitted!(secondEncoder);
+        task.engine._gpuTaskTimerResolve!(secondEncoder);
         await rearmed;
 
         expect(task.executionEnabled).toBe(false);

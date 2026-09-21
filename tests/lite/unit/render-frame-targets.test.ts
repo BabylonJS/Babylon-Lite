@@ -16,8 +16,7 @@ function makeEngine(surfaceNames: readonly string[]): { engine: EngineContext; s
     const events: string[] = [];
     const commandBuffer = {} as GPUCommandBuffer;
     const finish = vi.fn(() => commandBuffer);
-    const encoder = { finish } as unknown as GPUCommandEncoder;
-    const createCommandEncoder = vi.fn(() => encoder);
+    const createCommandEncoder = vi.fn(() => ({ finish }) as unknown as GPUCommandEncoder);
     const submit = vi.fn();
     const engine = {} as EngineContext;
 
@@ -156,7 +155,7 @@ describe("renderFrame targets", () => {
         expect(probe.events).toEqual(["aux:pre", "aux:update"]);
     });
 
-    it("cancels frame-bound post-submit work when recording fails", () => {
+    it("cancels abandoned frame-bound work before dispatching the next frame", () => {
         const { engine, surfaces } = makeEngine(["primary"]);
         const run = vi.fn();
         const cancel = vi.fn();
@@ -172,10 +171,10 @@ describe("renderFrame targets", () => {
         expect(run).not.toHaveBeenCalled();
     });
 
-    it("notifies compute one-shots for every submitted canvas frame", () => {
+    it("notifies opt-in post-submit work for every submitted canvas frame", () => {
         const { engine } = makeEngine(["primary"]);
         const submitted = vi.fn();
-        engine._computeOneShotSubmitted = submitted;
+        addFramePostSubmitHook(engine, "persistent", submitted);
 
         renderFrame(engine, 8);
         renderFrame(engine, 8);

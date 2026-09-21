@@ -261,11 +261,11 @@ describe("GPU task timing installer", () => {
 
         expect(fg.execute()).toBe(5);
         const canvasEncoder = engine._currentEncoder;
-        engine._framePostSubmit?.({} as GPUCommandEncoder);
+        engine._gpuTaskTimerResolve?.({} as GPUCommandEncoder);
         await Promise.resolve();
         expect(snapshots).toEqual([]);
 
-        engine._framePostSubmit?.(canvasEncoder);
+        engine._gpuTaskTimerResolve?.(canvasEncoder);
         engine._gpuTimerResolve?.();
         await Promise.resolve();
         await Promise.resolve();
