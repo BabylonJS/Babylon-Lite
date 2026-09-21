@@ -4,7 +4,6 @@
 
 | M | ID | Task | Skill | Notes |
 |---|----|------|-------|-------|
-| P2 | T-11 | Implement PBR core inspection and feature signatures | execute-implementation-plan | plan T06 |
 | P2 | T-12 | Add PBR optional-family reconstruction and directional mutation | execute-implementation-plan | plan T07 |
 | P2 | T-13 | Implement declaration-driven Shader material inspection | execute-implementation-plan | plan T08 |
 | P2 | T-14 | Implement deterministic Node material inspection | execute-implementation-plan | plan T09 |
@@ -38,5 +37,6 @@
 | P1 | T-08 | Make material rebuild completion awaitable | execute-implementation-plan | done 2026-09-21 · awaited rebuild overload and focused completion/error coverage |
 | P1 | T-09 | Implement common material inspection and transaction primitives | execute-implementation-plan | done 2026-09-21 · material-inspection.ts and focused transaction coverage |
 | P2 | T-10 | Implement complete Standard material inspection | execute-implementation-plan | done 2026-09-21 · standard-material-inspection.ts and focused matrix/mutation coverage |
+| P2 | T-11 | Implement PBR core inspection and feature signatures | execute-implementation-plan | done 2026-09-21 · side-effect-free core descriptor, exact feature-signature U/R planning, and focused matrix/mutation coverage; dispatcher, optional PBR fragments, and texture inspection remain later tasks |
 
 ## Untriaged
