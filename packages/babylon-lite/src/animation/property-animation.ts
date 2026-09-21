@@ -70,7 +70,7 @@ export interface CreatePropertyAnimationGroupOptions {
 type PropertyWriter = (output: Float32Array, offset: number) => void;
 
 interface ResolvedPropertyBinding {
-    readonly mixTarget: object;
+    readonly mixTarget: () => object;
     readonly mixProperty: string;
     readonly writer: PropertyWriter;
 }
@@ -205,7 +205,7 @@ function createPointerAnimationGroup(
         frameRate: frameRate || DEFAULT_FRAME_RATE,
         isPlaying: false,
         currentTime: fromTime,
-        targetedAnimations: tracks.map((track) => ({ target: track.mixTarget, path: track.mixProperty })),
+        targetedAnimations: tracks.map((track) => ({ target: track.mixTarget(), path: track.mixProperty })),
         speedRatio: options?.speedRatio ?? 1,
         loopAnimation: options?.loop ?? true,
         weight: 1,
@@ -294,13 +294,11 @@ function resolvePropertyBinding(target: object, path: string, stride: number): R
         throw new Error(`Invalid animation property path "${path}"`);
     }
 
-    const owner = resolvePropertyOwner(target, parts, path);
     const property = parts[parts.length - 1]!;
-    if (!(property in owner)) {
-        throw new Error(`Animation property path "${path}" could not resolve "${property}"`);
-    }
+    const mixTarget = createMixTargetResolver(target, parts, property, path);
+    const owner = mixTarget();
 
-    return { mixTarget: owner, mixProperty: property, writer: createPathPropertyWriter(target, parts, owner, property, stride, path) };
+    return { mixTarget, mixProperty: property, writer: createPathPropertyWriter(mixTarget, owner, property, stride, path) };
 }
 
 function resolvePropertyOwner(target: object, parts: readonly string[], path: string): Record<string, unknown> {
@@ -327,15 +325,28 @@ function isSettable(value: unknown): value is PathSettable {
     return (typeof value === "object" || typeof value === "function") && value !== null && typeof (value as { set?: unknown }).set === "function";
 }
 
-function createPathPropertyWriter(target: object, parts: readonly string[], initialOwner: Record<string, unknown>, property: string, stride: number, path: string): PropertyWriter {
+function createMixTargetResolver(target: object, parts: readonly string[], property: string, path: string): () => Record<string, unknown> {
+    return () => {
+        const owner = resolvePropertyOwner(target, parts, path);
+        if (!(property in owner)) {
+            throw new Error(`Animation property path "${path}" could not resolve "${property}"`);
+        }
+        return owner;
+    };
+}
+
+function createPathPropertyWriter(
+    resolveTarget: () => Record<string, unknown>,
+    initialOwner: Record<string, unknown>,
+    property: string,
+    stride: number,
+    path: string
+): PropertyWriter {
     let owner = initialOwner;
     let write = createPropertyWriter(owner, property, stride, path);
     return (output, offset) => {
-        const currentOwner = resolvePropertyOwner(target, parts, path);
+        const currentOwner = resolveTarget();
         if (currentOwner !== owner) {
-            if (!(property in currentOwner)) {
-                throw new Error(`Animation property path "${path}" could not resolve "${property}"`);
-            }
             owner = currentOwner;
             write = createPropertyWriter(owner, property, stride, path);
         }

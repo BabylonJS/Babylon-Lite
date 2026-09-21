@@ -468,6 +468,40 @@ describe("Property animation", () => {
         expect(run("negative-first")).toBeCloseTo(-5);
     });
 
+    it("blends weighted groups created across an intermediate property replacement", () => {
+        const manager = createAnimationManager();
+        const target = { position: { x: 0 } };
+        const positive = createPropertyAnimationClip("positive", [
+            {
+                path: "position.x",
+                keys: [
+                    { time: 0, value: 0 },
+                    { time: 1, value: 10 },
+                ],
+            },
+        ]);
+        const negative = createPropertyAnimationClip("negative", [
+            {
+                path: "position.x",
+                keys: [
+                    { time: 0, value: 0 },
+                    { time: 1, value: -10 },
+                ],
+            },
+        ]);
+
+        const positiveGroup = createPropertyAnimationGroup(manager, target, positive, { loop: false });
+        target.position = { x: 0 };
+        const negativeGroup = createPropertyAnimationGroup(manager, target, negative, { loop: false });
+        enablePropertyAnimationBlending(manager);
+        setAnimationWeight(positiveGroup, 0.25);
+        setAnimationWeight(negativeGroup, 0.75);
+
+        updateAnimationManager(manager, 1000);
+
+        expect(target.position.x).toBeCloseTo(-5);
+    });
+
     it("samples easing before applying a property-animation weight", () => {
         const manager = createAnimationManager();
         const target = { value: 0 };

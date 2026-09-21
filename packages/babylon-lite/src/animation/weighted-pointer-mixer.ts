@@ -166,9 +166,10 @@ function advancePropertyGroupTime(group: AnimationGroup, mixer: AnimationPropert
 
 function getTrackBucket(buckets: WeightedPointerBucket[], track: AnimationPropertyRuntimeTrack): WeightedPointerBucket {
     const arity = track.stride;
+    const target = track.mixTarget();
     for (let bucketIndex = 0; bucketIndex < buckets.length; bucketIndex++) {
         const candidate = buckets[bucketIndex]!;
-        if (candidate.target === track.mixTarget && candidate.property === track.mixProperty) {
+        if (candidate.target === target && candidate.property === track.mixProperty) {
             if (candidate.arity !== arity) {
                 throw new Error("Weighted animation channels for the same property must use the same value size");
             }
@@ -179,7 +180,7 @@ function getTrackBucket(buckets: WeightedPointerBucket[], track: AnimationProper
     }
 
     const bucket: WeightedPointerBucket = {
-        target: track.mixTarget,
+        target,
         property: track.mixProperty,
         values: new F32(arity),
         writer: track.writer,
