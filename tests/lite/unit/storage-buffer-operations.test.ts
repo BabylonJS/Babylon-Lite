@@ -12,7 +12,8 @@ gpuGlobals.GPUBufferUsage ??= { STORAGE: 0x80, COPY_SRC: 0x4, COPY_DST: 0x8, MAP
 gpuGlobals.GPUMapMode ??= { READ: 0x1 };
 
 function makeEngine() {
-    const source = { destroy: vi.fn() } as unknown as GPUBuffer;
+    const sourceMapped = new ArrayBuffer(1024);
+    const source = { destroy: vi.fn(), getMappedRange: vi.fn(() => sourceMapped), unmap: vi.fn() } as unknown as GPUBuffer;
     const mapped = new Uint8Array([1, 2, 3, 4]).buffer;
     const staging = {
         mapAsync: vi.fn(async () => undefined),
@@ -44,6 +45,21 @@ describe("compat storage-buffer operations", () => {
         clearStorageBuffer(engine, storage);
         expect(directEncoder.clearBuffer).toHaveBeenCalledWith(source, 0, 16);
         expect(device.queue.submit).toHaveBeenCalledOnce();
+    });
+
+    it("keeps an existing CPU recovery shadow synchronized without creating one for GPU-owned buffers", () => {
+        const { engine } = makeEngine();
+        const storage = createStorageBuffer(engine, new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]));
+        clearStorageBuffer(engine, storage, 4, 4);
+        expect(storage._data).toEqual(new Uint8Array([1, 2, 3, 4, 0, 0, 0, 0]));
+
+        updateStorageBufferRange(engine, storage, new Uint8Array([9, 10]), 1);
+        expect(storage._data).toEqual(new Uint8Array([0, 9, 10, 0, 0, 0, 0, 0]));
+
+        const gpuOwned = createStorageBuffer(engine, 8, { writable: true });
+        clearStorageBuffer(engine, gpuOwned);
+        updateStorageBufferRange(engine, gpuOwned, new Uint8Array([11]), 1);
+        expect(gpuOwned._data).toBeNull();
     });
 
     it("aligns and pads byte-sized updates without rejecting valid Babylon.js ranges", () => {

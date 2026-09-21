@@ -175,10 +175,12 @@ stages:
                       PERF_REGRESSION_PCT: "50"
 
                 - script: |
-                      npx playwright test tests/lite/plumbing/dispose.spec.ts
-                      npx playwright test tests/lite/plumbing/material-swap.spec.ts
-                      npx playwright test tests/lite/plumbing/memory-leak.spec.ts
-                      npx playwright test tests/lite/plumbing/picking.spec.ts
+                      npx playwright test \
+                          tests/lite/plumbing/compute-lifecycle.spec.ts \
+                          tests/lite/plumbing/dispose.spec.ts \
+                          tests/lite/plumbing/material-swap.spec.ts \
+                          tests/lite/plumbing/memory-leak.spec.ts \
+                          tests/lite/plumbing/picking.spec.ts
                   displayName: "Run plumbing tests"
                   env:
                       HEADLESS: "true"

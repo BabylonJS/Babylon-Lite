@@ -160,6 +160,16 @@ describe("scheduled compute dispatch", () => {
         expect(device.createBindGroupLayout).not.toHaveBeenCalled();
     });
 
+    it("rejects pipeline variants for shaders with automatic layouts", () => {
+        const { engine } = makeEngine();
+        const shader = createComputeShader(engine, {
+            computeSource: `override value: u32 = 1; @compute @workgroup_size(1) fn main() {}`,
+            automaticLayout: true,
+        });
+
+        expect(() => createComputePipelineVariant(shader, { value: 2 })).toThrow(/require explicit binding layouts/);
+    });
+
     it("accepts named and numeric WGSL override identifiers", () => {
         const { engine, computePasses } = makeEngine();
         const shader = createComputeShader(engine, {

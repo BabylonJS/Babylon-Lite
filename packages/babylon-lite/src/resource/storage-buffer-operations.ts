@@ -21,11 +21,13 @@ export function clearStorageBuffer(engine: EngineContext, buffer: StorageBuffer,
     const handle = _getStorageBufferHandle(engine, buffer);
     if (engine._currentEncoder) {
         engine._currentEncoder.clearBuffer(handle, byteOffset, byteLength);
+        buffer._data?.fill(0, byteOffset, byteOffset + byteLength);
         return;
     }
     const encoder = engine._device.createCommandEncoder({ label: "storage-buffer-clear" });
     encoder.clearBuffer(handle, byteOffset, byteLength);
     engine._device.queue.submit([encoder.finish()]);
+    buffer._data?.fill(0, byteOffset, byteOffset + byteLength);
 }
 
 /** Write a storage-buffer range using Babylon.js/WebGPU alignment and zero-padding semantics. */
@@ -41,11 +43,13 @@ export function updateStorageBufferRange(engine: EngineContext, buffer: StorageB
     const sourceOffset = data.byteOffset - prefix;
     if (sourceOffset >= 0 && sourceOffset + alignedLength <= data.buffer.byteLength) {
         engine._device.queue.writeBuffer(handle, alignedOffset, data.buffer as ArrayBuffer, sourceOffset, alignedLength);
+        buffer._data?.set(new Uint8Array(data.buffer, sourceOffset, alignedLength), alignedOffset);
         return;
     }
     const padded = new Uint8Array(alignedLength);
     padded.set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), prefix);
     engine._device.queue.writeBuffer(handle, alignedOffset, padded);
+    buffer._data?.set(padded, alignedOffset);
 }
 
 /** Read storage data after the active frame submits, or immediately when outside a frame. */
