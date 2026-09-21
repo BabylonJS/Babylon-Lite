@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
-import { addFramePostSubmitHook } from "../../../packages/babylon-lite/src/engine/frame-post-submit";
 import { clearStorageBuffer, readStorageBufferAfterFrame, updateStorageBufferRange } from "../../../packages/babylon-lite/src/resource/storage-buffer-operations";
 import { createStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer";
 
@@ -76,23 +75,38 @@ describe("compat storage-buffer operations", () => {
         expect(storage._data).toEqual(new Uint8Array(8));
     });
 
-    it("discards shadow mutations recorded by an abandoned frame", () => {
+    it("discards shadow mutations recorded by an abandoned frame immediately", () => {
         const { engine, frameEncoder } = makeEngine();
         const storage = createStorageBuffer(engine, new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]));
         engine._currentEncoder = frameEncoder as unknown as GPUCommandEncoder;
 
         clearStorageBuffer(engine, storage);
+        engine._gpuTaskTimerResolve!(engine._currentEncoder, false);
         engine._currentEncoder = undefined!;
         updateStorageBufferRange(engine, storage, new Uint8Array([9, 10]), 1);
 
-        const nextEncoder = {} as GPUCommandEncoder;
-        engine._currentEncoder = nextEncoder;
-        const laterFrameHook = vi.fn();
-        addFramePostSubmitHook(engine, "frame", laterFrameHook);
-        engine._gpuTaskTimerResolve!(nextEncoder);
-
-        expect(laterFrameHook).toHaveBeenCalledOnce();
         expect(storage._data).toEqual(new Uint8Array([0, 9, 10, 0, 5, 6, 7, 8]));
+    });
+
+    it("dispatches consecutive storage hooks while GPU timing initialization is pending", () => {
+        const { engine, frameEncoder } = makeEngine();
+        const storage = createStorageBuffer(engine, new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]));
+        engine._gpuTimerWanted = true;
+        engine._currentEncoder = frameEncoder as unknown as GPUCommandEncoder;
+
+        clearStorageBuffer(engine, storage);
+        const firstDispatch = engine._gpuTimerResolve;
+        firstDispatch!();
+        expect(storage._data).toEqual(new Uint8Array(8));
+
+        updateStorageBufferRange(engine, storage, new Uint8Array([1, 2, 3, 4]), 0);
+        engine._currentEncoder = { clearBuffer: vi.fn() } as unknown as GPUCommandEncoder;
+        clearStorageBuffer(engine, storage);
+        const secondDispatch = engine._gpuTimerResolve;
+
+        expect(secondDispatch).not.toBe(firstDispatch);
+        secondDispatch!();
+        expect(storage._data).toEqual(new Uint8Array(8));
     });
 
     it("aligns and pads byte-sized updates without rejecting valid Babylon.js ranges", () => {
@@ -119,14 +133,13 @@ describe("compat storage-buffer operations", () => {
         expect(staging.destroy).toHaveBeenCalledOnce();
     });
 
-    it("rejects frame readback when recording is abandoned", async () => {
+    it("rejects and destroys frame readback immediately when recording is abandoned", async () => {
         const { engine, staging, frameEncoder } = makeEngine();
         const storage = createStorageBuffer(engine, 16, { writable: true });
         engine._currentEncoder = frameEncoder as unknown as GPUCommandEncoder;
 
         const pending = readStorageBufferAfterFrame(storage, 0, 4);
-        engine._currentEncoder = {} as GPUCommandEncoder;
-        engine._gpuTaskTimerResolve!(engine._currentEncoder);
+        engine._gpuTaskTimerResolve!(engine._currentEncoder, false);
 
         await expect(pending).rejects.toThrow(/abandoned before its frame could be submitted/);
         expect(staging.destroy).toHaveBeenCalledOnce();

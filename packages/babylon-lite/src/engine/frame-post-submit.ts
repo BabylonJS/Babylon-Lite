@@ -2,7 +2,7 @@ import type { EngineContext } from "./engine.js";
 
 interface FramePostSubmitState {
     readonly hooks: Set<FramePostSubmitHook>;
-    readonly dispatch: (encoder?: GPUCommandEncoder) => void;
+    readonly dispatch: (encoder?: GPUCommandEncoder, submitted?: boolean) => void;
     lastDispatchedEncoder: GPUCommandEncoder | null;
 }
 
@@ -23,10 +23,12 @@ function releaseState(engine: EngineContext, state: FramePostSubmitState): void 
     if (engine._gpuTaskTimerResolve === state.dispatch) {
         engine._gpuTaskTimerResolve = undefined;
     }
-    if (!engine._gpuTimerWanted && engine._gpuTimerResolve === state.dispatch) {
+    if (engine._gpuTimerResolve === state.dispatch) {
         engine._gpuTimerResolve = undefined;
     }
-    _states?.delete(engine);
+    if (_states?.get(engine) === state) {
+        _states.delete(engine);
+    }
 }
 
 /** @internal Register opt-in work that runs after a frame command buffer is submitted. */
@@ -39,8 +41,18 @@ export function addFramePostSubmitHook(engine: EngineContext, scope: FramePostSu
     let state = states.get(engine);
     if (!state) {
         const hooks = new Set<FramePostSubmitHook>();
-        const dispatch = (encoder = engine._currentEncoder) => {
+        const dispatch = (encoder = engine._currentEncoder, submitted = true) => {
             if (!encoder || state!.lastDispatchedEncoder === encoder) {
+                return;
+            }
+            if (!submitted) {
+                for (const current of hooks) {
+                    if (current.encoder === encoder) {
+                        hooks.delete(current);
+                        current.cancel?.();
+                    }
+                }
+                releaseState(engine, state!);
                 return;
             }
             state!.lastDispatchedEncoder = encoder;
@@ -59,8 +71,11 @@ export function addFramePostSubmitHook(engine: EngineContext, scope: FramePostSu
         };
         state = { hooks, dispatch, lastDispatchedEncoder: null };
         states.set(engine, state);
+        const previousTaskResolver = engine._gpuTaskTimerResolve;
         engine._gpuTaskTimerResolve = dispatch;
-        engine._gpuTimerResolve ??= dispatch;
+        if (!engine._gpuTimerResolve || engine._gpuTimerResolve === previousTaskResolver) {
+            engine._gpuTimerResolve = dispatch;
+        }
     }
     const entry = { run: hook, cancel, encoder };
     state.hooks.add(entry);
