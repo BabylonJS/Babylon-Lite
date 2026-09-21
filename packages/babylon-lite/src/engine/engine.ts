@@ -661,6 +661,7 @@ function _renderFrame(engine: EngineContext, delta: number, surfaces: readonly [
         engine._cbs[0] = finalEncoder.finish();
         engine._device.queue.submit(engine._cbs);
         submitted = true;
+        engine._computeOneShotSubmitted?.(finalEncoder);
         engine._framePostSubmit?.(finalEncoder);
         engine._flushGpuRetirements?.(engine);
         engine.drawCallCount = total;

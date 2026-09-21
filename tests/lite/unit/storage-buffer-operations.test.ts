@@ -89,7 +89,7 @@ describe("compat storage-buffer operations", () => {
         const nextEncoder = {} as GPUCommandEncoder;
         engine._currentEncoder = nextEncoder;
         const laterFrameHook = vi.fn();
-        addFramePostSubmitHook(engine, laterFrameHook);
+        addFramePostSubmitHook(engine, "frame", laterFrameHook);
         engine._framePostSubmit!(nextEncoder);
 
         expect(laterFrameHook).toHaveBeenCalledOnce();

@@ -108,17 +108,27 @@ describe("compute one-shot scheduling", () => {
         expect(task.executionEnabled).toBe(false);
     });
 
-    it("completes frame-recorded work through the existing post-submit resolver", async () => {
+    it("completes and rearms when created during an active frame", async () => {
         const task = makeTask();
+        const firstEncoder = {} as GPUCommandEncoder;
+        task.engine._currentEncoder = firstEncoder;
         const oneShot = createComputeOneShot(task);
-        const encoder = {} as GPUCommandEncoder;
-        task.engine._currentEncoder = encoder;
-        task._oneShotRecorded!(encoder);
+        task._oneShotRecorded!(firstEncoder);
 
-        task.engine._gpuTimerResolve!();
+        task.engine._computeOneShotSubmitted!(firstEncoder);
         await oneShot.completion;
 
         expect(task.executionEnabled).toBe(false);
+
+        const secondEncoder = {} as GPUCommandEncoder;
+        task.engine._currentEncoder = secondEncoder;
+        const rearmed = armComputeOneShot(oneShot);
+        task._oneShotRecorded!(secondEncoder);
+        task.engine._computeOneShotSubmitted!(secondEncoder);
+        await rearmed;
+
+        expect(task.executionEnabled).toBe(false);
+        expect(task.engine._device.queue.onSubmittedWorkDone).toHaveBeenCalledTimes(2);
     });
 
     it("does not execute or submit a completed one-shot through direct task submission", () => {

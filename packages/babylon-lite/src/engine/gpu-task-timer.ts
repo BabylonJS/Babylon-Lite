@@ -94,8 +94,12 @@ export function installGpuTaskTimer(timer: GpuTaskTimer, engine: EngineContext, 
     for (const surface of engine.surfaces) {
         patchSurface(timer, surface);
     }
-    const resolveTaskTiming = () => finishTaskTimingFrame(timer, publish);
-    const removePostSubmit = addFramePostSubmitHook(engine, resolveTaskTiming);
+    const resolveTaskTiming = (encoder: GPUCommandEncoder) => {
+        if (timer.currentEncoder === encoder) {
+            finishTaskTimingFrame(timer, publish);
+        }
+    };
+    const removePostSubmit = addFramePostSubmitHook(engine, "persistent", resolveTaskTiming);
     return () => {
         restoreWrappedFrameGraphs(timer, removePostSubmit);
         disposeGpuTaskTimer(timer);

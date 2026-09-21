@@ -1,5 +1,4 @@
 import type { EngineContext } from "../engine/engine.js";
-import { addFramePostSubmitHook } from "../engine/frame-post-submit.js";
 import type { ComputeTask } from "./compute-task.js";
 
 declare const computeOneShotBrand: unique symbol;
@@ -9,7 +8,6 @@ interface ComputeOneShotEngineState {
     readonly engine: EngineContext;
     readonly shots: Set<ComputeOneShot>;
     readonly recordedByEncoder: WeakMap<GPUCommandEncoder, Map<ComputeOneShot, number>>;
-    removeFramePostSubmit: () => void;
 }
 
 /** One-shot scheduling state for a compute task on its current device. */
@@ -34,10 +32,9 @@ function stateFor(engine: EngineContext): ComputeOneShotEngineState {
     const states = (_engineStates ??= new WeakMap());
     let state = states.get(engine);
     if (!state) {
-        state = { engine, shots: new Set(), recordedByEncoder: new WeakMap(), removeFramePostSubmit: () => {} };
+        state = { engine, shots: new Set(), recordedByEncoder: new WeakMap() };
         states.set(engine, state);
         engine._computeOneShotSubmitted = (encoder) => completeSubmittedOneShots(state!, encoder);
-        state.removeFramePostSubmit = addFramePostSubmitHook(engine, () => completeSubmittedOneShots(state!, engine._currentEncoder));
     }
     return state;
 }
@@ -78,7 +75,6 @@ function rejectPending(oneShot: ComputeOneShot, error: unknown): void {
 function releaseState(engine: EngineContext, state: ComputeOneShotEngineState): void {
     if (state.shots.size === 0) {
         engine._computeOneShotSubmitted = undefined;
-        state.removeFramePostSubmit();
         _engineStates?.delete(engine);
     }
 }

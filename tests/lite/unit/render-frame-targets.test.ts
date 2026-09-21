@@ -161,7 +161,7 @@ describe("renderFrame targets", () => {
         const run = vi.fn();
         const cancel = vi.fn();
         vi.mocked(surfaces[0]!._renderingContexts[0]!._update).mockImplementationOnce(() => {
-            addFramePostSubmitHook(engine, run, cancel);
+            addFramePostSubmitHook(engine, "frame", run, cancel);
             throw new Error("frame failed");
         });
 
@@ -170,6 +170,19 @@ describe("renderFrame targets", () => {
 
         expect(cancel).toHaveBeenCalledOnce();
         expect(run).not.toHaveBeenCalled();
+    });
+
+    it("notifies compute one-shots for every submitted canvas frame", () => {
+        const { engine } = makeEngine(["primary"]);
+        const submitted = vi.fn();
+        engine._computeOneShotSubmitted = submitted;
+
+        renderFrame(engine, 8);
+        renderFrame(engine, 8);
+
+        expect(submitted).toHaveBeenCalledTimes(2);
+        expect(submitted.mock.calls[0]![0]).toBeDefined();
+        expect(submitted.mock.calls[1]![0]).toBeDefined();
     });
 
     it("stops at the live engine surface count when an update disposes a later surface", () => {

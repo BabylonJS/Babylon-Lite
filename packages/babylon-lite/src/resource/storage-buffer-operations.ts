@@ -23,7 +23,7 @@ export function clearStorageBuffer(engine: EngineContext, buffer: StorageBuffer,
         engine._currentEncoder.clearBuffer(handle, byteOffset, byteLength);
         const shadow = buffer._data;
         if (shadow) {
-            const remove = addFramePostSubmitHook(engine, () => {
+            const remove = addFramePostSubmitHook(engine, "frame", () => {
                 remove();
                 shadow.fill(0, byteOffset, byteOffset + byteLength);
             });
@@ -87,6 +87,7 @@ export function readStorageBufferAfterFrame(buffer: StorageBuffer, byteOffset = 
     return new Promise<ArrayBuffer>((resolve, reject) => {
         const remove = addFramePostSubmitHook(
             engine,
+            "frame",
             () => {
                 remove();
                 staging

@@ -8,10 +8,12 @@ interface FramePostSubmitState {
 }
 
 interface FramePostSubmitHook {
-    readonly run: () => void;
+    readonly run: (encoder: GPUCommandEncoder) => void;
     readonly cancel?: () => void;
     readonly encoder: GPUCommandEncoder | null;
 }
+
+type FramePostSubmitHookScope = "frame" | "persistent";
 
 let _states: WeakMap<EngineContext, FramePostSubmitState> | null = null;
 
@@ -34,8 +36,12 @@ function releaseState(engine: EngineContext, state: FramePostSubmitState): void 
     _states?.delete(engine);
 }
 
-/** @internal Register opt-in work that runs after the main frame command buffer is submitted. */
-export function addFramePostSubmitHook(engine: EngineContext, hook: () => void, cancel?: () => void): () => void {
+/** @internal Register opt-in work that runs after a frame command buffer is submitted. */
+export function addFramePostSubmitHook(engine: EngineContext, scope: FramePostSubmitHookScope, hook: (encoder: GPUCommandEncoder) => void, cancel?: () => void): () => void {
+    const encoder = scope === "frame" ? engine._currentEncoder : null;
+    if (scope === "frame" && !encoder) {
+        throw new Error("Frame-bound post-submit work requires an active frame encoder.");
+    }
     const states = (_states ??= new WeakMap());
     let state = states.get(engine);
     if (!state) {
@@ -52,7 +58,7 @@ export function addFramePostSubmitHook(engine: EngineContext, hook: () => void, 
                 if (current.encoder) {
                     hooks.delete(current);
                 }
-                current.run();
+                current.run(encoder);
             }
             releaseState(engine, state!);
         };
@@ -73,7 +79,7 @@ export function addFramePostSubmitHook(engine: EngineContext, hook: () => void, 
         engine._framePostSubmit = dispatch;
         engine._framePostSubmitCancel = cancelFrame;
     }
-    const entry = { run: hook, cancel, encoder: engine._currentEncoder ?? null };
+    const entry = { run: hook, cancel, encoder };
     state.hooks.add(entry);
     return () => {
         if (!state!.hooks.delete(entry)) {
