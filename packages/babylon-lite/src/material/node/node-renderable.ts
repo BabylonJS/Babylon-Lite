@@ -255,7 +255,7 @@ function buildNodeMeshRenderablesImpl(
 
         // Vertex attribute order (matches compile.state — captured on material).
         const attrNames = material._vertexAttrNames;
-        const requiresInstances = attrNames.includes("world0") || material._state.usesInstanceIndex;
+        const requiresInstances = attrNames.includes("world0") || material._state?.usesInstanceIndex;
 
         const updatePacketUBO = (pkt: NodePacket): void => {
             const recv = pkt._mesh.receiveShadows ? 1 : 0;
