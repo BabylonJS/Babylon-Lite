@@ -336,6 +336,7 @@ function onXrFrame(ctx: XrSessionContext, time: DOMHighResTimeStamp, frame: XRFr
     const prevDelta = eng._currentDelta;
     eng._currentEncoder = encoder;
     eng._currentDelta = ctx.scene.fixedDeltaMs > 0 ? ctx.scene.fixedDeltaMs : delta;
+    let submitted = false;
     try {
         // Scene-wide per-frame work (animations, pre-passes, uniform updaters) — once,
         // shared by both eyes. Records into the XR command encoder.
@@ -390,11 +391,18 @@ function onXrFrame(ctx: XrSessionContext, time: DOMHighResTimeStamp, frame: XRFr
         }
 
         eng._device.queue.submit([encoder.finish()]);
+        submitted = true;
         eng._gpuTaskTimerResolve?.(encoder);
         flushGpuResourceRetirements(eng);
     } finally {
-        eng._currentEncoder = prevEncoder;
-        eng._currentDelta = prevDelta;
+        try {
+            if (!submitted) {
+                eng._gpuTaskTimerResolve?.(encoder, false);
+            }
+        } finally {
+            eng._currentEncoder = prevEncoder;
+            eng._currentDelta = prevDelta;
+        }
     }
 }
 

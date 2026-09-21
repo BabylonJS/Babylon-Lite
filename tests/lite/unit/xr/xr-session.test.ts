@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine";
 import { createSceneContext } from "../../../../packages/babylon-lite/src/scene/scene";
 import type { RenderTarget } from "../../../../packages/babylon-lite/src/engine/render-target";
-import { clearStorageBuffer } from "../../../../packages/babylon-lite/src/resource/storage-buffer-operations";
+import { clearStorageBuffer, readStorageBufferAfterFrame } from "../../../../packages/babylon-lite/src/resource/storage-buffer-operations";
 import { createStorageBuffer } from "../../../../packages/babylon-lite/src/resource/storage-buffer";
 import { enterXr, exitXr } from "../../../../packages/babylon-lite/src/xr/xr-session";
 
@@ -46,6 +46,7 @@ function makeMockEngine(): EngineContext {
                 } as unknown as GPURenderPassEncoder;
             },
             copyTextureToTexture: () => undefined,
+            copyBufferToBuffer: () => undefined,
             clearBuffer: () => undefined,
             finish: () => ({}) as GPUCommandBuffer,
         }) as unknown as GPUCommandEncoder;
@@ -597,6 +598,32 @@ describe("xr-session lifecycle", () => {
         currentSession.drive(16, makeFrame(makeViewerPose()));
 
         expect(storage._data).toEqual(new Uint8Array(4));
+        await exitXr(ctx);
+    });
+
+    it("cancels frame-bound storage readback when XR recording fails", async () => {
+        installXrGlobals();
+        const engine = makeMockEngine();
+        const storage = createStorageBuffer(engine, new Uint8Array([1, 2, 3, 4]), { writable: true });
+        const destroy = vi.fn();
+        engine._device.createBuffer = vi.fn(
+            () =>
+                ({
+                    destroy,
+                }) as unknown as GPUBuffer
+        );
+        const scene = createSceneContext(engine);
+        const ctx = await enterXr(scene, { input: false });
+        let readback!: Promise<ArrayBuffer>;
+        ctx.scene._update = () => {
+            readback = readStorageBufferAfterFrame(storage);
+            throw new Error("XR recording failed");
+        };
+
+        expect(() => currentSession.drive(16, makeFrame(makeViewerPose()))).toThrow("XR recording failed");
+        await expect(readback).rejects.toThrow("Storage-buffer readback was abandoned before its frame could be submitted.");
+        expect(destroy).toHaveBeenCalledOnce();
+        expect(submitCount).toBe(0);
         await exitXr(ctx);
     });
 
