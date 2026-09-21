@@ -289,18 +289,16 @@ describe("ComputeShader forwarding", () => {
         expect(() => shader.setTexture("texture", {} as never)).toThrow(/asynchronous createComputeTextureResource/);
     });
 
-    it("exposes ComputeShader.Parse before registration", () => {
-        const parsed = ComputeShader.Parse(
-            {
-                name: "parsed",
-                shaderPath: { computeSource: "source" },
-                options: { bindingsMapping: {} },
-            },
-            { getEngine: () => engine },
-            ""
-        );
+    it("roundtrips fastMode through serialization and Parse before registration", () => {
+        const original = new ComputeShader("parsed", engine, { computeSource: "source" }, { bindingsMapping: {} });
+        original.fastMode = true;
+
+        const parsed = ComputeShader.Parse(original.serialize(), { getEngine: () => engine }, "");
+
         expect(parsed).toBeInstanceOf(ComputeShader);
         expect(parsed.name).toBe("parsed");
+        expect(parsed.fastMode).toBe(true);
+        expect(parsed.serialize().fastMode).toBe(true);
     });
 
     it("reports Lite's active-frame submission boundary explicitly", () => {

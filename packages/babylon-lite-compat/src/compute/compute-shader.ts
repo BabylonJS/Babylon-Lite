@@ -314,12 +314,14 @@ export function ComputeShaderParse(source: Record<string, unknown>, scene: { get
             "Serialized Babylon.js textures require its texture parser, while Lite's public compute texture adapter is asynchronous and has no serialization registry."
         );
     }
-    return new ComputeShader(
+    const computeShader = new ComputeShader(
         String(source.name ?? ""),
         scene.getEngine(),
         source.shaderPath as IComputeShaderPath | string,
         (source.options ?? {}) as Partial<IComputeShaderOptions>
     );
+    computeShader.fastMode = source.fastMode === true;
+    return computeShader;
 }
 
 export function RegisterComputeShader(): void {}
