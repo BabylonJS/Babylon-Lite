@@ -21,7 +21,13 @@ export function clearStorageBuffer(engine: EngineContext, buffer: StorageBuffer,
     const handle = _getStorageBufferHandle(engine, buffer);
     if (engine._currentEncoder) {
         engine._currentEncoder.clearBuffer(handle, byteOffset, byteLength);
-        buffer._data?.fill(0, byteOffset, byteOffset + byteLength);
+        const shadow = buffer._data;
+        if (shadow) {
+            const remove = addFramePostSubmitHook(engine, () => {
+                remove();
+                shadow.fill(0, byteOffset, byteOffset + byteLength);
+            });
+        }
         return;
     }
     const encoder = engine._device.createCommandEncoder({ label: "storage-buffer-clear" });

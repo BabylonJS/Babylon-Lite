@@ -62,6 +62,19 @@ describe("compat storage-buffer operations", () => {
         expect(gpuOwned._data).toBeNull();
     });
 
+    it("applies in-frame clears to the recovery shadow in GPU execution order", () => {
+        const { engine, frameEncoder } = makeEngine();
+        const storage = createStorageBuffer(engine, new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]));
+        engine._currentEncoder = frameEncoder as unknown as GPUCommandEncoder;
+
+        clearStorageBuffer(engine, storage);
+        updateStorageBufferRange(engine, storage, new Uint8Array([9, 10]), 1);
+        expect(storage._data).toEqual(new Uint8Array([0, 9, 10, 0, 5, 6, 7, 8]));
+
+        engine._gpuTimerResolve!();
+        expect(storage._data).toEqual(new Uint8Array(8));
+    });
+
     it("aligns and pads byte-sized updates without rejecting valid Babylon.js ranges", () => {
         const { engine, device, source } = makeEngine();
         const storage = createStorageBuffer(engine, 16, { writable: true });
