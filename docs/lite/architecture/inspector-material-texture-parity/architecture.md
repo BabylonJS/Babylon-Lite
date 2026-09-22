@@ -16,6 +16,8 @@ T-06–T-29 implemented the architecture documented below, including Lite-owned 
 
 Lite publishes no `Inspection*` symbol and no generic Inspector mutation dispatcher. Stored PBR configuration objects, tuples, and Shader uniform arrays are returned by identity through compile-time readonly types, without defensive copies or runtime freezing. `TextureMetadata` is a handle-free optional-fact snapshot. `setTextureTransform` changes only the exact wrapper and returns a boolean; Inspector decides which materials must opt into UV transforms, be dirtied, or be rebuilt. `rebuildMaterial` returns its natural `void | Promise<void>` completion: synchronous setup failures throw, asynchronous failures reject and are also reported through the scene runtime channel. Node materials continue to expose their public input handles without a parallel descriptor layer.
 
+Migration from `rebuildMaterial(...): void`: callers that ignored the return value need no change; callers that explicitly typed the result as `void` must accept `void | Promise<void>`, and callers that need rebuild completion should use `await rebuildMaterial(...)`.
+
 The `packages/babylon-lite/src/inspection/` implementation described later in this document was removed rather than retained as a hidden duplicate descriptor system. The remainder of this document is the historical design and completion record for the first implementation; its Inspector UI behavior remains useful, but its Lite ownership and public signatures are non-normative.
 
 ## 1. Executive Summary
