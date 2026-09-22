@@ -2,9 +2,8 @@
 
 ## Queue
 
-| M   | ID   | Task                                                                | Skill                       | Notes    |
-| --- | ---- | ------------------------------------------------------------------- | --------------------------- | -------- |
-| P7  | T-29 | Verify public surface, builds, package isolation, and runtime bytes | execute-implementation-plan | plan T24 |
+| M   | ID  | Task | Skill | Notes |
+| --- | --- | ---- | ----- | ----- |
 
 ## Completed
 
@@ -38,5 +37,6 @@
 | P6  | T-26 | Add Lite metadata-only texture adapter and Properties integration     | execute-implementation-plan | done 2026-09-21 · BabylonJS/Babylon.js commit 7814f216 · safe metadata rows, exact consumer navigation, gated transform edits, and no preview/editor coupling                                                 |
 | P6  | T-27 | Add adapter operation generations, refresh, errors, and cleanup       | execute-implementation-plan | done 2026-09-21 · BabylonJS/Babylon.js commit 2a6d01e8 · generation-safe material/texture operations, stale-settle suppression, applied-state refresh, and deterministic disposal                             |
 | P7  | T-28 | Close the focused behavior, accessibility, and refresh matrix         | execute-implementation-plan | done 2026-09-21 · BabylonJS/Babylon.js commit 05f967d0 · per-row concurrency, accessible operation state/names, candidate filtering, and complete focused parity matrix                                       |
+| P7  | T-29 | Verify public surface, builds, package isolation, and runtime bytes   | execute-implementation-plan | done 2026-09-21 · BabylonJS/Babylon.js commit 7257ecc4 plus Lite final gate · root API/tree-shaking, lazy chunk boundaries, compiles/style, and filtered scene ceilings all green                             |
 
 ## Untriaged
