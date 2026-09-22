@@ -46,7 +46,7 @@ export function getMaterialTextures(material: Material): readonly Texture2D[] {
     }
 }
 
-function getStandardTextures(material: StandardMaterialProps): Texture2D[] {
+function getStandardTextures(material: StandardMaterialProps): readonly Texture2D[] {
     const textures: Texture2D[] = [];
     pushTexture(textures, material.diffuseTexture);
     pushTexture(textures, getStandardEmissiveTexture(material));
@@ -59,7 +59,7 @@ function getStandardTextures(material: StandardMaterialProps): Texture2D[] {
     return textures;
 }
 
-function getPbrTextures(material: PbrMaterialProps): Texture2D[] {
+function getPbrTextures(material: PbrMaterialProps): readonly Texture2D[] {
     const textures: Texture2D[] = [];
     for (const texture of [
         material.baseColorTexture,
@@ -100,7 +100,7 @@ function getPbrTextures(material: PbrMaterialProps): Texture2D[] {
     return textures;
 }
 
-function getShaderTextures(material: ShaderMaterial): Texture2D[] {
+function getShaderTextures(material: ShaderMaterial): readonly Texture2D[] {
     const textures: Texture2D[] = [];
     for (const declaration of material.samplerDecls) {
         pushTexture(textures, getShaderTexture(material, declaration.name));
@@ -108,7 +108,7 @@ function getShaderTextures(material: ShaderMaterial): Texture2D[] {
     return textures;
 }
 
-function getNodeTextures(inputs: NodeMaterial["inputs"]): Texture2D[] {
+function getNodeTextures(inputs: NodeMaterial["inputs"]): readonly Texture2D[] {
     const textures: Texture2D[] = [];
     for (const name in inputs) {
         if (Object.hasOwn(inputs, name)) {
