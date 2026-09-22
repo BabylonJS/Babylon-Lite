@@ -4,7 +4,6 @@
 
 | M | ID | Task | Skill | Notes |
 |---|----|------|-------|-------|
-| P6 | T-27 | Add adapter operation generations, refresh, errors, and cleanup | execute-implementation-plan | plan T22 |
 | P7 | T-28 | Close the focused behavior, accessibility, and refresh matrix | execute-implementation-plan | plan T23 |
 | P7 | T-29 | Verify public surface, builds, package isolation, and runtime bytes | execute-implementation-plan | plan T24 |
 
@@ -38,5 +37,6 @@
 | P5 | T-24 | Adapt Babylon.js metadata rows without touching preview/editor | execute-implementation-plan | done 2026-09-21 · BabylonJS/Babylon.js commit ed06d5cd · metadata adapters preserve existing preview/editor ownership |
 | P6 | T-25 | Add lazy Lite material family adapters and Properties integration | execute-implementation-plan | done 2026-09-21 · BabylonJS/Babylon.js commit ef36dd5b · lazy Standard/PBR/Shader/Node adapters, index-scoped mutations, exact-wrapper navigation, and focused integration coverage |
 | P6 | T-26 | Add Lite metadata-only texture adapter and Properties integration | execute-implementation-plan | done 2026-09-21 · BabylonJS/Babylon.js commit 7814f216 · safe metadata rows, exact consumer navigation, gated transform edits, and no preview/editor coupling |
+| P6 | T-27 | Add adapter operation generations, refresh, errors, and cleanup | execute-implementation-plan | done 2026-09-21 · BabylonJS/Babylon.js commit 2a6d01e8 · generation-safe material/texture operations, stale-settle suppression, applied-state refresh, and deterministic disposal |
 
 ## Untriaged
