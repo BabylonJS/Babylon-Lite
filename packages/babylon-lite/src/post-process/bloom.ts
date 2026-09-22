@@ -1,6 +1,6 @@
 import type { EngineContext } from "../engine/engine.js";
-import type { RenderTarget, RenderTargetDescriptor } from "../engine/render-target.js";
-import { createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
+import type { RenderTarget } from "../engine/render-target.js";
+import { _resolveRenderTargetSize, createRenderTarget, disposeRenderTarget } from "../engine/render-target.js";
 import { createPostProcessTask, type PostProcessTask, type PostProcessTaskSettings } from "../frame-graph/post-process-task.js";
 import type { Task } from "../frame-graph/task.js";
 import type { SceneContext } from "../scene/scene-core.js";
@@ -301,10 +301,5 @@ function resolveSourceSize(source: RenderTarget): { width: number; height: numbe
     if (source._width > 0 && source._height > 0) {
         return { width: source._width, height: source._height };
     }
-    const desc: RenderTargetDescriptor = source._descriptor;
-    if ("canvas" in desc.size) {
-        const canvas = desc.size.canvas;
-        return { width: canvas.width, height: canvas.height };
-    }
-    return desc.size;
+    return _resolveRenderTargetSize(source._descriptor);
 }

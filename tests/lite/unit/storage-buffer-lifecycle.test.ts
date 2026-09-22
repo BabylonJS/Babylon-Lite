@@ -6,6 +6,7 @@ import { createShaderMaterial, setShaderStorageBuffer } from "../../../packages/
 import { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/src/material/shader/shader-renderable.js";
 import { initMeshTransform } from "../../../packages/babylon-lite/src/mesh/mesh.js";
 import { _getStorageBufferHandle, createStorageBuffer, disposeStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
+import { getCpuStorageRecoveryLimits, rebuildCpuStorageBuffers } from "../../../packages/babylon-lite/src/resource/storage-buffer-recovery.js";
 import { updateStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
 import type { StorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer.js";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core.js";
@@ -107,6 +108,24 @@ function makeRenderableFixture() {
 }
 
 describe("StorageBuffer lifecycle", () => {
+    it("hides internal state while keeping identity immutable and lifecycle fields writable", () => {
+        const { engine } = makeEngine();
+        const storage = createStorageBuffer(engine, new Float32Array(1), { vertex: true, label: "identity" });
+        expect(Object.keys(storage)).toEqual(["byteLength"]);
+        for (const key of ["_buffer", "_destroyed", "_data", "_engine", "_label", "_writable", "_usage"]) {
+            expect(Object.getOwnPropertyDescriptor(storage, key)).toMatchObject({
+                enumerable: false,
+                configurable: false,
+                writable: ["_buffer", "_destroyed", "_data"].includes(key),
+            });
+        }
+        expect(storage._engine).toBe(engine);
+        expect(storage._label).toBe("identity");
+        disposeStorageBuffer(storage);
+        expect(storage._buffer).toBeNull();
+        expect(storage._destroyed).toBe(true);
+    });
+
     it("keeps storage ownership with the allocation when an auxiliary shader packet is disposed", () => {
         const fixture = makeRenderableFixture();
         const storage = createStorageBuffer(fixture.engine, new Float32Array(4));
@@ -142,14 +161,14 @@ describe("StorageBuffer lifecycle", () => {
         expect(storage._destroyed).toBe(true);
         expect(storage._data).toBeNull();
         expect(engine._storageBuffers).toBeUndefined();
-        expect(engine._storageRequiredLimits).toBeUndefined();
+        expect(getCpuStorageRecoveryLimits(engine)).toBeUndefined();
     });
 
     it("builds ShaderMaterial bind groups with the live recovered handle", () => {
         const fixture = makeRenderableFixture();
         const storage = createStorageBuffer(fixture.engine, new Float32Array(4));
         const initialHandle = storage._buffer;
-        expect(fixture.engine._storageRequiredLimits).toEqual({
+        expect(getCpuStorageRecoveryLimits(fixture.engine)).toEqual({
             maxBufferSize: 1024,
             maxStorageBufferBindingSize: 512,
             maxStorageBuffersPerShaderStage: 8,
@@ -162,7 +181,7 @@ describe("StorageBuffer lifecycle", () => {
 
         const replacement = makeRenderableFixture();
         fixture.engine._device = replacement.device;
-        fixture.engine._rebuildStorageBuffers!();
+        rebuildCpuStorageBuffers(fixture.engine);
         buildShaderMaterialRenderables(fixture.scene, [fixture.mesh]);
         const recoveredDescriptor = replacement.createBindGroup.mock.calls.at(-1)![0];
         expect((Array.from(recoveredDescriptor.entries).at(-1)!.resource as GPUBufferBinding).buffer).toBe(storage._buffer);

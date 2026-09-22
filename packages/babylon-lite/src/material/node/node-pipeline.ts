@@ -16,13 +16,14 @@ import { SS } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
 import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
-import { createDefaultPipelineDescriptor } from "../../render/scene-helpers.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 import { computeUboLayout } from "../../shader/ubo-layout.js";
+import type { UboSpec } from "../../shader/fragment-types.js";
 import { MAX_LIGHTS } from "../../light/types.js";
 import type { NodeBuildState, NodeMeshFeatureWriter, NodeVertexFeatureBinder } from "./node-types.js";
 import { wgsl } from "../../shader/wgsl.js";
 import type { NodeShadowEmitter, ShadowBinding } from "./node-shadow-emitter.js";
+import type { MeshGPU, MeshVbLayout } from "../../mesh/mesh.js";
 
 // ─── Shared WGSL preamble ───────────────────────────────────────────
 
@@ -54,10 +55,8 @@ export interface NodeCompileResult {
     readonly _pipeline: GPURenderPipeline;
     /** @internal */
     readonly _meshBGL: GPUBindGroupLayout;
-    /** @internal */
-    readonly _nodeUboSize: number;
-    /** @internal */
-    readonly _nodeUboOffsets: ReadonlyMap<string, number>;
+    /** @internal The shared layout result, or null when the graph has no node uniforms. */
+    readonly _nodeUboSpec: UboSpec | null;
     /** @internal The resolved bind-group slot (within group 1) for the node UBO. `null` if no uniforms. */
     readonly _nodeUboBinding: number | null;
     /** @internal Per-texture binding slots assigned by the pipeline builder. */
@@ -91,6 +90,8 @@ export interface NodeCompileResult {
      *  `null` when the geometry pass does not need it. Only set by the geometry
      *  (`_mrtOutput`) path. */
     readonly _geometryGpBinding: number | null;
+    /** @internal Resolve a pipeline whose vertex layouts honor one mesh's packing. */
+    readonly _pipelineForMesh: (gpu: MeshGPU) => GPURenderPipeline;
 }
 
 // ─── Pipeline cache ─────────────────────────────────────────────────
@@ -129,16 +130,6 @@ function buildVertexOut(state: NodeBuildState): string {
         lines.push(wgsl`    @location(${i}) ${v._name}: ${v._type},`);
     });
     return wgsl`struct VertexOut {\n${lines.join("\n")}\n};`;
-}
-
-function buildNodeUbo(state: NodeBuildState, binding: number): { struct: string; size: number; offsets: ReadonlyMap<string, number> } | null {
-    if (state.nodeUboFields.length === 0) {
-        return null;
-    }
-    const layout = computeUboLayout(state.nodeUboFields);
-    const lines = state.nodeUboFields.map((f) => `    ${f._name}: ${f._type},`);
-    const struct = wgsl`struct NodeU {\n${lines.join("\n")}\n};\n@group(1) @binding(${binding}) var<uniform> nodeU: NodeU;`;
-    return { struct, size: layout._totalBytes, offsets: layout._offsets };
 }
 
 function indent(body: string): string {
@@ -214,12 +205,11 @@ export interface MrtOutputOpts {
     /** @internal Build the `nmeGeom` UBO WGSL decl + group-1 BGL entry at the
      *  resolved binding (only called when {@link _needsGpUbo}). */
     readonly _buildGeomUbo: (binding: number) => { readonly _wgsl: string; readonly _bglEntry: GPUBindGroupLayoutEntry };
-    /** @internal Build the geometry MRT {@link GPURenderPipeline}. The whole
-     *  descriptor object-literal lives in the lazy module. */
-    readonly _buildPipeline: (device: GPUDevice, args: GeomPipelineArgs) => GPURenderPipeline;
+    /** @internal Build the geometry MRT descriptor once; vertex-packing variants reuse its pipeline layout. */
+    readonly _buildPipelineDescriptor: (device: GPUDevice, args: GeomPipelineArgs) => GPURenderPipelineDescriptor;
 }
 
-/** @internal Inputs the {@link MrtOutputOpts._buildPipeline} callback needs from the pipeline builder. */
+/** @internal Inputs the {@link MrtOutputOpts._buildPipelineDescriptor} callback needs from the pipeline builder. */
 export interface GeomPipelineArgs {
     /** @internal */
     readonly _shaderModule: GPUShaderModule;
@@ -249,9 +239,7 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
     //   scene group 0 binding 1 = shared lights UBO (if state.usesLightsUbo)
     let nextBinding = 1;
     const _nodeUboBinding = state.nodeUboFields.length > 0 ? nextBinding++ : null;
-    const nodeUbo = _nodeUboBinding !== null ? buildNodeUbo(state, _nodeUboBinding) : null;
-    const _nodeUboSize = nodeUbo?.size ?? 0;
-    const _nodeUboOffsets: ReadonlyMap<string, number> = nodeUbo?.offsets ?? new Map<string, number>();
+    const _nodeUboSpec = _nodeUboBinding !== null ? computeUboLayout(state.nodeUboFields) : null;
 
     const _textureBindings: { _name: string; _texBinding: number; _sampBinding: number }[] = [];
     const textureWgslDecls: string[] = [];
@@ -340,8 +328,8 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
 };`
             : "";
     const wgslParts: string[] = ["// Auto-generated by NodeMaterial — DO NOT EDIT", SCENE_UBO_WGSL, buildMeshStruct(meshFeature?.[0], meshFeature?.[1])];
-    if (nodeUbo) {
-        wgslParts.push(nodeUbo.struct);
+    if (_nodeUboSpec) {
+        wgslParts.push(wgsl`struct NodeU {\n${indent(_nodeUboSpec._structBody)}\n};\n@group(1) @binding(${_nodeUboBinding!}) var<uniform> nodeU: NodeU;`);
     }
     if (textureWgslDecls.length > 0) {
         wgslParts.push(textureWgslDecls.join("\n"));
@@ -381,7 +369,8 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
         wgslParts.push(src);
     }
 
-    const vsSig = wgsl`(in: VertexIn${vertexFeature?.[3] ?? ""})`;
+    const instanceIndex = state.usesInstanceIndex ? wgsl`, @builtin(instance_index) instanceIndex: u32` : "";
+    const vsSig = wgsl`(in: VertexIn${vertexFeature?.[3] ?? ""}${instanceIndex})`;
     wgslParts.push(
         wgsl`@vertex\nfn vs_main${vsSig} -> VertexOut {\n` +
             wgsl`    var out: VertexOut;\n` +
@@ -434,7 +423,7 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
     }
 
     // Blend state for alpha-blended materials.
-    const blend = alphaModeToBlend(alphaMode);
+    const blend = _nodeAlphaModeToBlend(alphaMode);
     const depthWriteEnabled = blend === undefined;
 
     const sceneBGL = getSceneBindGroupLayout(_engine);
@@ -465,63 +454,55 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
     }
     const _meshBGL = device.createBindGroupLayout({ label: "node-mesh", entries: meshBglEntries });
 
-    // Vertex buffers: one GPUVertexBufferLayout per declared attribute, each at location=i.
-    const _vertexBuffers: GPUVertexBufferLayout[] = state.vertexAttributes.map((a, i) => ({
-        arrayStride: a._arrayStride,
-        stepMode: a._stepMode ?? "vertex",
-        attributes: [{ format: a._gpuFormat, offset: a._offset ?? 0, shaderLocation: i }],
-    }));
+    const vertexAttributes = state.vertexAttributes.slice();
 
     const shaderModule = device.createShaderModule({ label: "node-material", code: _wgsl });
 
-    const _pipeline = mrt
-        ? mrt._buildPipeline(device, {
+    const createVertexBuffers = (meshVertexLayout?: MeshVbLayout): GPUVertexBufferLayout[] =>
+        vertexAttributes.map((attribute, shaderLocation) => {
+            const packing = attribute._stepMode !== "instance" ? meshVertexLayout?.[attribute._name] : undefined;
+            return {
+                arrayStride: packing?._stride ?? attribute._arrayStride,
+                stepMode: attribute._stepMode ?? "vertex",
+                attributes: [{ format: attribute._gpuFormat, offset: packing?._offset ?? attribute._offset ?? 0, shaderLocation }],
+            };
+        });
+    const vertexBuffers = createVertexBuffers();
+    const descriptor: GPURenderPipelineDescriptor = mrt
+        ? mrt._buildPipelineDescriptor(device, {
               _shaderModule: shaderModule,
               _sceneBGL: sceneBGL,
               _meshBGL,
-              _vertexBuffers,
+              _vertexBuffers: vertexBuffers,
               _depthFormat: depthFormat,
               _depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE,
               _msaaSamples,
           })
-        : device.createRenderPipeline(
-              noColorOutput
-                  ? {
-                        label: "node-material-depth",
-                        layout: device.createPipelineLayout({ bindGroupLayouts: [sceneBGL, _meshBGL] }),
-                        vertex: { module: shaderModule, entryPoint: "vs_main", buffers: _vertexBuffers },
-                        fragment: { module: shaderModule, entryPoint: "fs_main", targets: [] },
-                        depthStencil: { format: depthFormat, depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE, depthWriteEnabled: true },
-                        multisample: { count: _msaaSamples },
-                        primitive: { topology: "triangle-list", cullMode: opts._backFaceCulling !== false ? "back" : "none" },
-                    }
-                  : {
-                        ...createDefaultPipelineDescriptor({
-                            _label: "node-material",
-                            _engine,
-                            _bgls: [sceneBGL, _meshBGL],
-                            _vertModule: shaderModule,
-                            _fragModule: shaderModule,
-                            _vertexBuffers,
-                            _format,
-                            _depthStencilFormat: opts._depthStencilFormat,
-                            _depthCompare: opts._depthCompare,
-                            _msaaSamples,
-                            _cullMode: opts._backFaceCulling !== false ? "back" : "none",
-                            _blend: esmShadowOutput ? undefined : blend,
-                            _depthWriteEnabled: esmShadowOutput || depthWriteEnabled,
-                        }),
-                        vertex: { module: shaderModule, entryPoint: "vs_main", buffers: _vertexBuffers },
-                        fragment: { module: shaderModule, entryPoint: "fs_main", targets: [!esmShadowOutput && blend ? { format: _format, blend } : { format: _format }] },
-                    }
-          );
+        : {
+              label: noColorOutput ? "node-material-depth" : "node-material",
+              layout: device.createPipelineLayout({ bindGroupLayouts: [sceneBGL, _meshBGL] }),
+              vertex: { module: shaderModule, entryPoint: "vs_main", buffers: vertexBuffers },
+              fragment: {
+                  module: shaderModule,
+                  entryPoint: "fs_main",
+                  targets: noColorOutput ? [] : [!esmShadowOutput && blend ? { format: _format, blend } : { format: _format }],
+              },
+              depthStencil: {
+                  format: depthFormat,
+                  depthCompare: opts._depthCompare ?? REVERSE_DEPTH_COMPARE,
+                  depthWriteEnabled: shadowOutput || depthWriteEnabled,
+              },
+              multisample: { count: _msaaSamples },
+              primitive: { topology: "triangle-list", cullMode: opts._backFaceCulling !== false ? "back" : "none", frontFace: noColorOutput ? undefined : "ccw" },
+          };
 
+    const _pipeline = device.createRenderPipeline(descriptor);
+    let meshPipelines: Map<string, GPURenderPipeline> | null = null;
     const result: NodeCompileResult = {
         _wgsl,
         _pipeline,
         _meshBGL,
-        _nodeUboSize,
-        _nodeUboOffsets,
+        _nodeUboSpec,
         _nodeUboBinding,
         _textureBindings,
         _bindVertexFeature: vertexFeature?.[4],
@@ -533,6 +514,21 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
         _usesMeshAttributeFlags: state.usesMeshAttributeExists,
         _esmShadowParamsBinding,
         _geometryGpBinding,
+        _pipelineForMesh(gpu) {
+            if (!gpu._vbLayout || !gpu._vbKey) {
+                return _pipeline;
+            }
+            const cached = meshPipelines?.get(gpu._vbKey);
+            if (cached) {
+                return cached;
+            }
+            const pipeline = device.createRenderPipeline({
+                ...descriptor,
+                vertex: { ...descriptor.vertex, buffers: createVertexBuffers(gpu._vbLayout) },
+            });
+            (meshPipelines ??= new Map()).set(gpu._vbKey, pipeline);
+            return pipeline;
+        },
     };
     cache.set(cacheKey, result);
     return result;
@@ -540,25 +536,19 @@ export function compileNodePipeline(state: NodeBuildState, vertexBody: string, f
 
 // ─── Alpha mode → blend state ───────────────────────────────────────
 
-/** Map BJS alpha mode to a WebGPU blend state. Returns undefined for opaque (mode 0). */
-function alphaModeToBlend(mode: number): GPUBlendState | undefined {
+/** @internal Map a Babylon.js alpha mode to the corresponding WebGPU blend state. */
+export function _nodeAlphaModeToBlend(mode: number): GPUBlendState | undefined {
     switch (mode) {
         case 1: // ALPHA_ADD
-            return {
-                color: { srcFactor: "src-alpha", dstFactor: "one", operation: "add" },
-                alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
-            };
         case 2: // ALPHA_COMBINE (standard)
-            return {
-                color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
-                alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-            };
         case 7: // ALPHA_PREMULTIPLIED
-            return {
-                color: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-                alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
-            };
+            break;
         default: // 0 = DISABLE and any unsupported mode
             return undefined;
     }
+    const dstFactor: GPUBlendFactor = mode === 1 ? "one" : "one-minus-src-alpha";
+    return {
+        color: { srcFactor: mode === 7 ? "one" : "src-alpha", dstFactor, operation: "add" },
+        alpha: { srcFactor: "one", dstFactor: mode === 7 ? dstFactor : "one", operation: "add" },
+    };
 }

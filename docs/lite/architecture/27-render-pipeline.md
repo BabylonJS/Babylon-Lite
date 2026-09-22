@@ -64,12 +64,18 @@ export type MeshRebuilder = (scene: SceneContext, mesh: Mesh, materialOverride?:
 
 `DrawBinding.update(context)` is called once per frame per binding before the render pass is opened. The context contains the current pass target dimensions (`targetWidth`, `targetHeight`) and active pass camera (`_camera`) so bindings can refresh target-size-dependent UBOs or camera-sorted instance buffers without rebuilding their pipelines or bind groups. Mesh/material UBO updates that do not need this state still use this hook and version-guard their writes.
 
+Opaque material-family renderables may merge several meshes into one cached
+draw binding. Each per-mesh packet in such a binding remains independently
+owned: removing a mesh synchronously marks and detaches its packet before GPU
+retirement, and hidden or detached packets are never updated or drawn.
+Per-packet resources are retired with their mesh; resources shared by the
+merged material group stay alive until its last packet retires.
+
 ### Frame graph (`frame-graph/`)
 
 ```typescript
 export interface Task {
     readonly name: string;
-    executionEnabled?: boolean;
     readonly engine: EngineContext;
     readonly scene?: SceneContext;
     _passes: Pass[];
@@ -90,8 +96,6 @@ export interface FrameGraph {
 ```
 
 `createSceneContext()` eagerly creates a `FrameGraph` with one default `RenderTask` named `"scene"` that renders into the swapchain unless called with `{ defaultRenderTask: false }`. Post-process pipelines that render the scene to an offscreen source and write their final pass to the swapchain disable this default task so the scene is not drawn twice. User code can add tasks with `addTask()`, `addTaskAtStart()`, or `addTaskBefore()`.
-
-`executionEnabled` defaults to enabled. Setting it to `false` keeps the task recorded and its resources alive while `FrameGraph.execute()` skips both its task-level `execute()` hook and recorded passes for that frame.
 
 ### RenderTask
 

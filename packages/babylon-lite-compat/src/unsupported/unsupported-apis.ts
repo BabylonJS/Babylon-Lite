@@ -19,13 +19,10 @@ import type { Material } from "../materials/materials.js";
 import type { Scene } from "../scene/scene.js";
 import type { Camera } from "../cameras/cameras.js";
 import type { ShaderLanguage } from "../misc/engine-constants.js";
-import type { Vector3 } from "../math/vector.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
 import type { Mesh, InstancedMesh } from "../meshes/meshes.js";
 import { MaterialPluginBase } from "../materials/material-plugin.js";
 
-const WHITE_BALANCE_UNSUPPORTED =
-    "White balance requires color-temperature math, a shader uniform, material/post-process defines, and pipeline invalidation that Babylon Lite does not expose; adding it needs a cross-cutting Lite subsystem design.";
 const FLUID_RENDERER_UNSUPPORTED =
     "Fluid rendering requires dedicated depth, thickness, and diffuse passes plus render-target lifecycle and composition policies that Babylon Lite does not define.";
 const USD_LOADER_UNSUPPORTED =
@@ -123,18 +120,6 @@ export function ValidateFlowGraph(_flowGraph: unknown): IFlowGraphValidationResu
 
 export function ValidateFlowGraphWithBlockList(_flowGraph: unknown, _allKnownBlocks: unknown[]): IFlowGraphValidationResult {
     return unsupported("ValidateFlowGraphWithBlockList", FLOW_GRAPH_UNSUPPORTED);
-}
-
-// ─── Math / image processing ─────────────────────────────────────────
-export const MinTemperatureKelvin = 1e6 / 600;
-export const MaxTintMagnitude = 150;
-
-export function TemperatureTintToXyz(_temperatureKelvin: number, _tint: number): Vector3 {
-    return unsupported("TemperatureTintToXyz", WHITE_BALANCE_UNSUPPORTED);
-}
-
-export function GetWhiteBalanceMatrix(_temperatureKelvin: number, _tint: number): Float32Array | number[] {
-    return unsupported("GetWhiteBalanceMatrix", WHITE_BALANCE_UNSUPPORTED);
 }
 
 // ─── Fluid rendering ─────────────────────────────────────────────────

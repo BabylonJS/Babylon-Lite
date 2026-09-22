@@ -266,7 +266,7 @@ export async function apply(context: UsdContext): Promise<void> {
             stride: track.stride,
             quaternion: track.quaternion,
             writer: track.writer,
-            mixTarget: track.target,
+            mixTarget: () => track.target,
             mixProperty: track.path,
             _mix: track.mix,
             _targetName: track.targetName,

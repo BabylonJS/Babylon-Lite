@@ -144,7 +144,7 @@ async function runRecoveryStep<T>(description: string, action: () => Promise<T>)
 
 function resetFrameGraphTasks(engine: EngineContext, scene: SceneContext): void {
     for (const task of scene._frameGraph._tasks) {
-        if (!("_sceneUBO" in task && "_sceneBG" in task && "_opaqueBindings" in task)) {
+        if (!("_sceneUBO" in task && "_targetSignature" in task && "_opaqueBindings" in task)) {
             continue;
         }
         const rt = task as unknown as RecoverableRenderTask;
@@ -212,7 +212,7 @@ function uploadRetainedMesh(engine: EngineContext, mesh: Mesh): MeshGPU {
     return {
         positionBuffer: createMappedBuffer(engine, positions, BU.VERTEX),
         normalBuffer: createMappedBuffer(engine, normals, BU.VERTEX),
-        tangentBuffer: mesh._cpuTangents ? createMappedBuffer(engine, mesh._cpuTangents, BU.VERTEX) : null,
+        tangentBuffer: mesh._cpuTangents?.length ? createMappedBuffer(engine, mesh._cpuTangents, BU.VERTEX) : null,
         uvBuffer,
         uv2Buffer: mesh._cpuUv2s ? createMappedBuffer(engine, mesh._cpuUv2s, BU.VERTEX) : null,
         colorBuffer: mesh._cpuColors ? createMappedBuffer(engine, mesh._cpuColors, BU.VERTEX) : null,

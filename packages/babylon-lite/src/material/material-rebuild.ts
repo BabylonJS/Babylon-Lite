@@ -1,6 +1,7 @@
 import type { SceneContext } from "../scene/scene.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { Material } from "./material.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { getMaterialSource, isMaterialView } from "./material-view.js";
 import { resolveMeshRebuild } from "./resolve-mesh-rebuild.js";
 
@@ -10,6 +11,14 @@ export interface RebuildMaterialOptions {
     /** Rebuild the frame graph after material renderables are refreshed. Defaults to false so callers can batch updates. */
     rebuildFrameGraph?: boolean;
 }
+
+interface DetachablePacket {
+    _disposed?: boolean;
+    _owner?: DetachablePacket[];
+    _onOwnerEmpty?: () => void;
+}
+
+type DetachableDisposer = (() => void) & { p?: DetachablePacket };
 
 /** Rebuild renderables whose pipeline/bind-group feature state depends on a material.
  *  Use after texture, sampler, bind-group layout, culling, or feature changes.
@@ -88,10 +97,34 @@ function rebuildSceneMesh(ctx: SceneContext, mesh: Mesh): boolean | Promise<void
     }
     const old = ctx._meshDisposables.get(mesh);
     if (old) {
-        for (const fn of old) {
-            fn();
-        }
         ctx._meshDisposables.delete(mesh);
+        for (const dispose of old) {
+            const lifetimeIndex = ctx._disposables.indexOf(dispose);
+            if (lifetimeIndex >= 0) {
+                ctx._disposables.splice(lifetimeIndex, 1);
+            }
+            const packet = (dispose as DetachableDisposer).p;
+            if (packet) {
+                packet._disposed = true;
+                const owner = packet._owner;
+                if (owner) {
+                    const index = owner.indexOf(packet);
+                    if (index >= 0) {
+                        owner.splice(index, 1);
+                    }
+                    packet._owner = undefined;
+                    if (owner.length === 0) {
+                        packet._onOwnerEmpty?.();
+                    }
+                } else {
+                    packet._onOwnerEmpty?.();
+                }
+                if (packet._onOwnerEmpty) {
+                    packet._onOwnerEmpty = undefined;
+                }
+            }
+        }
+        retireGpuResources(ctx.surface.engine, () => old.forEach((fn) => fn()));
     }
     for (let i = ctx._renderables.length - 1; i >= 0; i--) {
         if (ctx._renderables[i]!.mesh === mesh) {

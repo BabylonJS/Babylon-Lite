@@ -35,6 +35,50 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes graph-specific Node block loaders only through the root API", () => {
+        const probePath = resolve(BUILD_DIR, "node-block-loader.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createNodeMaterialBlockLoader, nodeInputBlock, nodeTextureBlock, nodeMatrixBuilder,
+    nodePbrMetallicRoughnessBlockFull, type ParseNodeMaterialOptions, type NodeMaterialBlock,
+} from "./index.js";
+const blocks: readonly NodeMaterialBlock[] = [nodeInputBlock, nodeTextureBlock, nodeMatrixBuilder];
+const options: ParseNodeMaterialOptions = { blockLoader: createNodeMaterialBlockLoader(blocks) };
+createNodeMaterialBlockLoader([nodePbrMetallicRoughnessBlockFull]);
+// @ts-expect-error Implementation callbacks are internal, not public GPU/compiler API.
+nodeInputBlock._load();
+void options;
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("requires at least one source for separate-file KTX2 arrays", () => {
         const probePath = resolve(BUILD_DIR, "ktx2-array-sources.probe.ts");
         try {
@@ -82,7 +126,7 @@ loadKtx2Texture2DArrayFromUrls(engine, []);
         }
     });
 
-    it("exposes standalone task population and opt-in RTT factories", () => {
+    it("exposes standalone tasks, opt-in RTTs, and storage-backed geometry", () => {
         const probePath = resolve(BUILD_DIR, "render-task-opt-in.probe.ts");
         try {
             writeFileSync(
@@ -90,7 +134,10 @@ loadKtx2Texture2DArrayFromUrls(engine, []);
                 `import {
     createSceneContext, createRenderTask, addMeshToTask, createRenderTargetTexture,
     createSurfaceRenderTargetTexture, onRenderTargetTextureResize, withSampledDepthTexture,
-    type EngineContext, type Mesh,
+    createStorageBuffer, readStorageBuffer, createMeshFromStorageBuffer,
+    createShaderMaterial, setShaderAttributeFormats, resizeSharedMeshGeometry,
+    prepareShaderMaterialPipeline, prepareShaderMaterialPipelineForTask,
+    type EngineContext, type Mesh, type StorageBufferOptions, type MeshFromStorageOptions, type RenderTargetSurfaceSize,
 } from "./index.js";
 declare const engine: EngineContext;
 declare const mesh: Mesh;
@@ -101,11 +148,22 @@ const fixedDepth = createRenderTargetTexture(engine, {
     dFormat: "depth32float", samples: 1, size: { width: 32, height: 32 },
 }, withSampledDepthTexture);
 const surface = createSurfaceRenderTargetTexture(engine, {
-    format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: engine,
+    format: "rgba8unorm", dFormat: "depth32float",
+    depthClearValue: 1, depthCompare: "less-equal",
+    samples: 1, size: engine,
 }, withSampledDepthTexture);
 const surfaceDepth = createSurfaceRenderTargetTexture(engine, {
     dFormat: "depth32float", samples: 1, size: engine,
 }, withSampledDepthTexture);
+const scaledSize: RenderTargetSurfaceSize = { surface: engine, scale: 0.5 };
+createSurfaceRenderTargetTexture(engine, {
+    format: "rgba8unorm", samples: 1, size: scaledSize,
+});
+const dynamicSize = Math.random() > 0.5 ? engine : scaledSize;
+const forwardedDescriptor: Parameters<typeof createSurfaceRenderTargetTexture>[1] = {
+    format: "rgba8unorm", samples: 1, size: dynamicSize,
+};
+createSurfaceRenderTargetTexture(engine, forwardedDescriptor);
 const task = createRenderTask({ name: "explicit", rt: fixed.rt }, engine, createSceneContext(engine));
 addMeshToTask(task, mesh);
 // @ts-expect-error Task mesh population is a tree-shakable standalone API.
@@ -113,6 +171,116 @@ task.addMesh(mesh);
 onRenderTargetTextureResize(surface, () => {})();
 onRenderTargetTextureResize(surfaceDepth, () => {})();
 fixedDepth.texture satisfies typeof fixedDepth.depthTexture;
+const storageOptions: StorageBufferOptions = { writable: true, vertex: true, indirect: true };
+const storage = createStorageBuffer(engine, 1024, storageOptions);
+const indices = createStorageBuffer(engine, new Uint32Array([0, 1, 2]), { index: true });
+const geometryOptions: MeshFromStorageOptions = {
+    storage, indices, indexCount: 3, indexFormat: "uint32",
+    vertexCount: 3, arrayStride: 16, baseVertex: 2,
+    boundMin: [-1, -1, -1], boundMax: [1, 1, 1],
+};
+const storageMesh = createMeshFromStorageBuffer(engine, "storage", geometryOptions);
+// @ts-expect-error Storage-backed attribute offsets do not support skinning streams.
+const unsupportedOffsets: NonNullable<MeshFromStorageOptions["attributeOffsets"]> = { joints: 0 };
+void unsupportedOffsets;
+const shader = createShaderMaterial({ vertexSource: "", fragmentSource: "", attributes: ["position"] });
+setShaderAttributeFormats(shader, { position: "float32x4" });
+storageMesh.material = shader;
+const prepared: Promise<void> = prepareShaderMaterialPipeline(engine, shader, "mesh", task, storageMesh);
+const preparedForTask: Promise<void> = prepareShaderMaterialPipelineForTask(task, shader, "mesh", storageMesh);
+void prepared;
+void preparedForTask;
+const readback: Promise<ArrayBuffer> = readStorageBuffer(storage);
+const rangedReadback: Promise<ArrayBuffer> = readStorageBuffer(storage, 4, 8);
+void readback;
+void rangedReadback;
+// @ts-expect-error GPU allocation handles remain internal.
+storage._buffer;
+resizeSharedMeshGeometry(engine, [mesh], new Float32Array(9), new Float32Array(9), new Uint32Array([0, 1, 2]));
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
+    it("exposes the complete compute scheduling and immediate-data surface", () => {
+        const probePath = resolve(BUILD_DIR, "compute-api.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    addComputeDispatch, armComputeOneShot, computeStorageBufferBinding, computeUniformBufferBinding,
+    createComputeBindingSet, createComputeDispatch, createComputeImmediateShader, createComputeIndirectDispatch,
+    createComputeOneShot, createComputePipelineVariant, createComputeTask, createComputeUniformArena,
+    createComputeUniformLayout, createComputeUniformWriter, createEngineWithFeatures, createStorageBuffer, createUniformBuffer,
+    isComputeImmediatesSupported, prepareComputeTask, setComputeDispatchDynamicOffset,
+    setComputeDispatchImmediates, setComputeUniformF32, submitComputeTasks,
+    type ComputeImmediateData, type EngineContext,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const canvas: OffscreenCanvas;
+const featuredEngine: Promise<EngineContext> = createEngineWithFeatures(canvas, { requiredFeatures: ["shader-f16"] });
+void featuredEngine;
+const uniforms = createUniformBuffer(engine, 256);
+const storage = createStorageBuffer(engine, 256, { writable: true, indirect: true });
+const shader = createComputeImmediateShader(engine, {
+    computeSource: "requires immediate_address_space; var<immediate> value: vec4f; @compute @workgroup_size(1) fn main() {}",
+    immediateByteLength: 16,
+    bindings: [
+        computeUniformBufferBinding("params", { group: 0, binding: 0, dynamicOffset: true, minBindingSize: 16 }),
+        computeStorageBufferBinding("data", { group: 0, binding: 1, access: "read-write" }),
+    ],
+});
+const bindings = createComputeBindingSet(shader, { params: { buffer: uniforms, size: 16 }, data: storage });
+const dispatch = createComputeDispatch(shader, bindings, { size: { x: 1 } });
+const immediateData: ComputeImmediateData = new Float32Array(4);
+setComputeDispatchImmediates(dispatch, immediateData);
+setComputeDispatchDynamicOffset(dispatch, "params", 0);
+const variant = createComputePipelineVariant(shader, { width: 4 });
+void variant;
+const indirect = createComputeIndirectDispatch(shader, bindings, { buffer: storage });
+setComputeDispatchImmediates(indirect, new Uint32Array(4));
+const task = createComputeTask(engine);
+addComputeDispatch(task, dispatch);
+addComputeDispatch(task, indirect);
+const arena = createComputeUniformArena(task, 16, 1);
+const layout = createComputeUniformLayout([{ name: "time", type: "f32" }]);
+const writer = createComputeUniformWriter(arena, 0, layout);
+setComputeUniformF32(writer, "time", 1);
+const shot = createComputeOneShot(task);
+const armed: Promise<void> = armComputeOneShot(shot);
+const prepared: Promise<void> = prepareComputeTask(task);
+submitComputeTasks([task]);
+void armed;
+void prepared;
+isComputeImmediatesSupported() satisfies boolean;
+// @ts-expect-error GPU pipeline handles remain internal.
+shader._pipeline;
+// @ts-expect-error GPU allocation handles remain internal.
+uniforms._buffer;
 `
             );
             const result = spawnSync(
@@ -354,11 +522,12 @@ float64Result satisfies Float64Array;
         expect(external, `build/index.d.ts leaks types from external modules: ${external.join(", ")}`).toEqual([]);
     });
 
-    it("strips the shader-source brand so consumers can pass plain strings", () => {
+    it("exports the WGSL tag while stripping the source brand so consumers can pass plain strings", () => {
         const dts = readFileSync(DTS_PATH, "utf-8");
 
         expect(dts).not.toContain("WgslSource");
         expect(dts).not.toContain("wgslSourceBrand");
+        expect(dts).toContain("declare function wgsl(");
         expect(dts).toContain("readonly vertexSource: string;");
         expect(dts).toContain("readonly fragmentSource: string;");
 
@@ -366,9 +535,9 @@ float64Result satisfies Float64Array;
         try {
             writeFileSync(
                 probePath,
-                `import type { ShaderMaterialOptions } from "./index.js";
+                `import { wgsl, type ShaderMaterialOptions } from "./index.js";
 const options: ShaderMaterialOptions = {
-    vertexSource: "plain consumer vertex WGSL",
+    vertexSource: wgsl\`tagged consumer vertex WGSL\`,
     fragmentSource: "plain consumer fragment WGSL",
     attributes: [],
 };
@@ -434,6 +603,13 @@ void options;
         expect(dts).toContain('type PhysicsRotationAxis = "x" | "y" | "z"');
         expect(dts).toMatch(/lockPhysicsBodyRotationAxes\(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis\[\]\): void/);
         expect(dts).toMatch(/unlockPhysicsBodyRotationAxes\(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis\[\]\): void/);
+    });
+
+    it("exposes deferred absolute world-space bone poses", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).toMatch(/setBoneWorldPoseDeferred\(skeleton: Skeleton, bone: Bone, px: number, py: number, pz: number, rx: number, ry: number, rz: number, rw: number\): void/);
+        expect(dts).toMatch(/@public\s*\*\/\s*export declare function setBoneWorldPoseDeferred/);
     });
 
     it("exposes readonly rendering-context introspection without internal registries", () => {

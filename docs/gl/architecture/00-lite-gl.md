@@ -361,12 +361,14 @@ export interface GLTexture {
     _disposed: boolean;
     /** Internal ref count for shared textures (HtmlElementTexture wrappers etc.). */
     _refCount: number;
-    /** Replay closure for context-restore (§4.7). Captures the original
-     *  arguments (raw bytes + format/type, or decoded `ImageBitmap`, or
-     *  the source HTML element) and re-issues the `gl.texImage2D` /
-     *  `texParameteri` sequence. */
+    /** Replays the latest pixel content into the live texture handle. */
     _upload: (engine: GLEngineContext) => void;
+    /** Initializes creation-time sampling state on the bound texture handle. */
+    _initializeParameters?: (engine: GLEngineContext) => void;
 }
+
+/** Internal helper for applying sampling and wrap state to the bound upload texture. */
+export function setBoundTextureParams(gl: WebGL2RenderingContext, minFilter: GLenum, magFilter: GLenum, wrapS: GLenum, wrapT: GLenum): void;
 
 /** Uint8 raw upload. `format` and `type` are GL constants; the caller picks
  *  e.g. (gl.RGBA, gl.UNSIGNED_BYTE). Matches NeonBrush's createRawTexture usage. */
@@ -1194,8 +1196,9 @@ The application's `onContextLost` callback may e.g. hide the canvas.
 2. For each `tex` in `engine._textures`: allocate a fresh `WebGLTexture`,
    assign to `tex.handle`, call `tex._upload(engine)` to replay the original
    upload (raw bytes for `createRawTexture`; retained `ImageBitmap` for
-   `loadTexture2D`; source HTML element for `createHtmlElementTexture`).
-   Set `tex.isReady=true` once the replay completes.
+   `loadTexture2D`; source HTML element for `createHtmlElementTexture`), then
+   call `tex._initializeParameters?.(engine)` while that fresh handle remains
+   bound. Set `tex.isReady=true` once the replay completes.
 3. `engine._isLost = false`.
 4. Restart the render loop if it was active before loss.
 5. Fire every callback in `engine._onRestored`.
@@ -1647,6 +1650,8 @@ with `skip*: true` (or no `maxRawKB`) unless there is a documented reason in the
 | `context restored: programs re-linked, samplers re-bound`  | Simulate restore → effects re-linked, sampler `uniform1i` re-issued exactly once per sampler.             |
 | `context restored: raw texture upload replayed`            | Simulate restore → `_upload(engine)` called, texture handle replaced, isReady=true.                       |
 | `context restored: loadTexture2D replays from ImageBitmap` | No re-fetch of the URL; the retained `ImageBitmap` is re-uploaded.                                        |
+| `raw texture updates preserve bound parameters`            | Update pixels on the same handle → no `texParameteri`; restore → pixels plus all four parameters replay.  |
+| `loadTexture2D final upload preserves bound parameters`    | Final image upload emits no `texParameteri`; restore replays the bitmap and all four parameters.          |
 | `runRenderLoop dedupes identical callbacks`                | Registering the same fn twice → fired once per frame (matches `AbstractEngine`).                          |
 | `stopRenderLoop() removes all loops`                       | After no-arg stop, no callbacks fire.                                                                     |
 | `setBlendMode issues Babylon-exact params per mode`        | DISABLE/ADD/ALPHA/PREMULTIPLIED each emit the right `enable/disable` + `blendFuncSeparate` tuple.         |

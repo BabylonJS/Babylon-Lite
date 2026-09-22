@@ -114,6 +114,10 @@ function depthWriteEnabled(pipeline: GPURenderPipeline): boolean | undefined {
     return (pipeline as unknown as GPURenderPipelineDescriptor).depthStencil?.depthWriteEnabled;
 }
 
+function depthCompare(pipeline: GPURenderPipeline): GPUCompareFunction | undefined {
+    return (pipeline as unknown as GPURenderPipelineDescriptor).depthStencil?.depthCompare;
+}
+
 describe("WebGPU alpha-to-coverage", () => {
     it("tracks requested state without attaching behavior to Material", () => {
         const material = makeShaderMaterial();
@@ -329,5 +333,35 @@ describe("WebGPU alpha-to-coverage", () => {
         expect(enabledShader.code).not.toContain("discard");
         expect(alphaToCoverageEnabled(singleSample)).not.toBe(true);
         expect(singleSampleShader.code).toContain("discard");
+    });
+
+    it("propagates target depth comparisons through sprite, billboard, and text pipeline caches", () => {
+        const { engine } = makeEngine();
+        const sceneLayout = {} as GPUBindGroupLayout;
+
+        const spriteCache = createSpritePipelineCache();
+        const layer = { depth: "test-write", blendMode: spriteBlendOpaque } as Sprite2DLayer;
+        const reverseSprite = getOrCreateSpritePipeline(engine, spriteCache, "rgba8unorm", 1, spriteBlendOpaque, true, true, "depth24plus", sceneLayout, layer);
+        const standardSprite = getOrCreateSpritePipeline(engine, spriteCache, "rgba8unorm", 1, spriteBlendOpaque, true, true, "depth24plus", sceneLayout, layer, "less-equal");
+
+        const billboardCache = createBillboardPipelineCache();
+        const system = { _orientation: "facing", _depthMode: "cutout", blendMode: billboardBlendCutout } as BillboardSpriteSystem;
+        const reverseBillboard = getOrCreateBillboardPipeline(engine, billboardCache, "rgba8unorm", 1, system, "depth24plus", sceneLayout);
+        const standardBillboard = getOrCreateBillboardPipeline(engine, billboardCache, "rgba8unorm", 1, system, "depth24plus", sceneLayout, "less-equal");
+
+        clearTextPipelineCache(engine);
+        const text = {} as TextRenderable;
+        const reverseText = getOrCreateTextPipeline(engine, "rgba8unorm", 1, "depth24plus", true, text)._pipeline;
+        const standardText = getOrCreateTextPipeline(engine, "rgba8unorm", 1, "depth24plus", true, text, "less-equal")._pipeline;
+
+        for (const pipeline of [reverseSprite, reverseBillboard, reverseText]) {
+            expect(depthCompare(pipeline)).toBe("greater-equal");
+        }
+        for (const pipeline of [standardSprite, standardBillboard, standardText]) {
+            expect(depthCompare(pipeline)).toBe("less-equal");
+        }
+        expect(standardSprite).not.toBe(reverseSprite);
+        expect(standardBillboard).not.toBe(reverseBillboard);
+        expect(standardText).not.toBe(reverseText);
     });
 });

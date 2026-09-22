@@ -61,6 +61,31 @@ describe("StandardMaterial texture proxies", () => {
     });
 });
 
+describe("StandardMaterial.disableLighting colour", () => {
+    it("shades an unlit material by its emissive colour even when the diffuse colour is black", () => {
+        // Babylon.js: unlit = emissive + ambient (diffuse only scales the accumulated light, which is zero).
+        // Lite's unlit path is emissive × diffuse, so the usual "unlit colour" setup below rendered black.
+        const mat = new StandardMaterial("led");
+        mat.diffuseColor = new Color3(0, 0, 0);
+        mat.emissiveColor = new Color3(1, 0.85, 0.63);
+        mat.disableLighting = true;
+
+        expect(mat._lite.diffuseColor).toEqual([1, 1, 1]);
+        expect(mat._lite.emissiveColor).toEqual([1, 0.85, 0.63]);
+        // The Babylon.js-facing value is still what the app set.
+        expect(mat.diffuseColor.r).toBe(0);
+
+        // Order does not matter, and later diffuse writes stay neutral while unlit.
+        mat.diffuseColor = new Color3(0.2, 0.3, 0.4);
+        expect(mat._lite.diffuseColor).toEqual([1, 1, 1]);
+        expect(mat.diffuseColor.g).toBeCloseTo(0.3);
+
+        // Re-enabling lighting hands the app's diffuse colour back to Lite.
+        mat.disableLighting = false;
+        expect(mat._lite.diffuseColor).toEqual([0.2, 0.3, 0.4]);
+    });
+});
+
 describe("Material.clone", () => {
     it("StandardMaterial.clone copies data, shares textures, and gets its own renderable", () => {
         const mat = new StandardMaterial("src");

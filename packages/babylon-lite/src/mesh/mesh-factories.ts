@@ -7,7 +7,7 @@
 
 import { bumpVisibilityEpoch, type EngineContext } from "../engine/engine.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
-import { release } from "../resource/ref-count.js";
+import { release, retain } from "../resource/ref-count.js";
 import type { Mesh } from "./mesh.js";
 import { initMeshTransform, uploadMeshToGPU } from "./mesh.js";
 import { computeAabb } from "../math/compute-aabb.js";
@@ -167,13 +167,13 @@ export function createMeshFromData(
         boundMin: isFinite(min[0]) ? min : undefined,
         boundMax: isFinite(max[0]) ? max : undefined,
         _gpu: uploadMeshToGPU(engine, positions, normals, indices, uvs, uvs2, tangents, colors),
+        _cpuPositions: positions,
+        _cpuNormals: normals,
+        _cpuUvs: uvs,
+        _cpuTangents: tangents,
+        _cpuIndices: indices,
     });
 
-    // Retain CPU geometry for detailed picking (ray-triangle intersection)
-    mesh._cpuPositions = positions;
-    mesh._cpuNormals = normals;
-    mesh._cpuUvs = uvs;
-    mesh._cpuIndices = indices;
     engine._dlr?.m(mesh, uvs2 ?? null, tangents ?? null, colors ?? null, indices, "uint32");
 
     return mesh;
@@ -211,8 +211,8 @@ function writeVertexAttributeRange(
     vertexCount: number | undefined,
     sourceVertexOffset: number
 ): void {
-    if ((mesh._gpu._refCount ?? 1) > 1) {
-        throw new Error(`mesh attribute updates require unshared geometry: ${mesh.name}`);
+    if (mesh._gpu._vbLayout || mesh._gpu._ownsVertexBuffers === false || (mesh._gpu._refCount ?? 1) > 1) {
+        throw new Error(`mesh attribute updates require unshared, tightly-packed geometry; update the source StorageBuffer instead: ${mesh.name}`);
     }
     const sourceVertexCount = values.length / components;
     const count = vertexCount ?? sourceVertexCount - sourceVertexOffset;
@@ -437,6 +437,9 @@ export function resizeMeshGeometry(
     colors?: Float32Array
 ): void {
     const old = mesh._gpu;
+    if (old._vbLayout || old._ownsVertexBuffers === false) {
+        throw new Error(`resizeMeshGeometry requires owned, tightly-packed geometry; recreate or update the source StorageBuffer instead: ${mesh.name}`);
+    }
     // A geometry REALLOCATION: any cached draw recording that captured raw buffer handles (e.g. the main
     // opaque render bundle or the shadow task's bundle) must re-record, or it would keep binding the OLD
     // buffers we're about to free. Resize is a structural (vertex-count) change — conceptually a scene
@@ -456,17 +459,64 @@ export function resizeMeshGeometry(
     // them. Otherwise a later frame would legitimately bind the clone's still-live geometry after it
     // had been destroyed.
     if (release(old)) {
-        retireGpuResources(engine, () => {
-            old.positionBuffer.destroy();
-            old.normalBuffer.destroy();
-            old.indexBuffer.destroy();
-            old.uvBuffer.destroy();
-            old.uv2Buffer?.destroy();
-            old.tangentBuffer?.destroy();
-            old.colorBuffer?.destroy();
-            old._shaderColorFallback?.destroy();
-        });
+        retireMeshGeometryBuffers(engine, old);
     }
+}
+
+/** Replace one shared geometry allocation and keep every mesh in `meshes` sharing the replacement.
+ *  Supply distinct, live meshes referencing the same owned, tightly-packed MeshGPU object.
+ *  Owners omitted from the list keep their original geometry. */
+export function resizeSharedMeshGeometry(
+    engine: EngineContext,
+    meshes: readonly Mesh[],
+    positions: Float32Array,
+    normals: Float32Array,
+    indices: Uint32Array,
+    uvs?: Float32Array,
+    uvs2?: Float32Array,
+    tangents?: Float32Array,
+    colors?: Float32Array
+): void {
+    const first = meshes[0];
+    if (!first) {
+        throw new Error("resizeSharedMeshGeometry requires at least one mesh");
+    }
+    const old = first._gpu;
+    if (old._vbLayout || old._ownsVertexBuffers === false) {
+        throw new Error("resizeSharedMeshGeometry requires meshes sharing one owned, tightly-packed geometry");
+    }
+    const owners = new Set<Mesh>();
+    for (const mesh of meshes) {
+        if (!mesh || mesh._disposed || mesh._gpu !== old || owners.has(mesh)) {
+            throw new Error("resizeSharedMeshGeometry requires distinct, live meshes sharing one geometry");
+        }
+        owners.add(mesh);
+    }
+    resizeMeshGeometry(engine, first, positions, normals, indices, uvs, uvs2, tangents, colors);
+    const replacement = first._gpu;
+    for (let index = 1; index < meshes.length; index++) {
+        const mesh = meshes[index]!;
+        if (release(old)) {
+            retireMeshGeometryBuffers(engine, old);
+        }
+        retain(replacement);
+        mesh._gpu = replacement;
+        retainMeshGeometry(engine, mesh, positions, normals, indices, uvs, uvs2, tangents, colors);
+        _markWorldMatrixDirty(mesh);
+    }
+}
+
+function retireMeshGeometryBuffers(engine: EngineContext, gpu: Mesh["_gpu"]): void {
+    retireGpuResources(engine, () => {
+        gpu.positionBuffer.destroy();
+        gpu.normalBuffer.destroy();
+        gpu.indexBuffer.destroy();
+        gpu.uvBuffer.destroy();
+        gpu.uv2Buffer?.destroy();
+        gpu.tangentBuffer?.destroy();
+        gpu.colorBuffer?.destroy();
+        gpu._shaderColorFallback?.destroy();
+    });
 }
 
 /** Re-upload (part of) a mesh's NORMAL buffer — the twin of `updateMeshPositions` for dynamically

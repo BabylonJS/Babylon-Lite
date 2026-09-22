@@ -4,7 +4,7 @@ import type { AnimationGroup, AnimationPropertyMixer, AnimationPropertyMixStrate
 import { ANIMATION_GROUP_TASK_CATEGORY, getAnimationGroups } from "./animation-group-task.js";
 import { setAnimationTaskCategoryHandler } from "./animation-manager.js";
 import type { AnimationManager } from "./animation-manager.js";
-import { evaluateSampler } from "./evaluate.js";
+import { evaluatePropertySampler } from "./evaluate.js";
 
 const MIX_TRACKS = 0;
 const MIX_FROM = 1;
@@ -13,15 +13,14 @@ const MIX_DURATION = 3;
 const MIX_START = 4;
 
 interface WeightedPointerBucket {
-    readonly target: object;
-    readonly property: string;
-    readonly values: Float32Array;
+    target: object;
+    property: string;
+    values: Float32Array;
     writer: (output: Float32Array, offset: number) => void;
     arity: number;
     quaternion: boolean;
     mix?: AnimationPropertyMixStrategy;
     afterWrite?: () => void;
-    retained: boolean;
     contested: boolean;
     active: boolean;
     hasReference: boolean;
@@ -36,6 +35,7 @@ interface WeightedPointerScratch {
     readonly buckets: WeightedPointerBucket[];
     readonly sample: Float32Array;
     readonly afterWrites: Set<() => void>;
+    bucketCount: number;
 }
 
 let scratchByManager: WeakMap<AnimationManager, WeightedPointerScratch> | undefined;
@@ -53,6 +53,7 @@ function getScratch(manager: AnimationManager): WeightedPointerScratch {
             buckets: [],
             sample: new F32(16),
             afterWrites: new Set(),
+            bucketCount: 0,
         };
         scratchByManager.set(manager, scratch);
     }
@@ -63,17 +64,8 @@ function getScratch(manager: AnimationManager): WeightedPointerScratch {
 export function _updateWeightedPointerAnimations(manager: AnimationManager, deltaMs: number, onlyPropertyGroups = false): boolean {
     const scratch = getScratch(manager);
     scratch.afterWrites.clear();
+    scratch.bucketCount = 0;
     let contestedCount = 0;
-
-    for (let bucketIndex = 0; bucketIndex < scratch.buckets.length; bucketIndex++) {
-        const bucket = scratch.buckets[bucketIndex]!;
-        bucket.retained = false;
-        bucket.contested = false;
-        bucket.active = false;
-        bucket.hasReference = false;
-        bucket.totalWeight = 0;
-        bucket.values.fill(0);
-    }
 
     const groups = getAnimationGroups(manager);
     for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
@@ -93,20 +85,16 @@ export function _updateWeightedPointerAnimations(manager: AnimationManager, delt
             if (trackMaskedOut(group, track)) {
                 continue;
             }
-            const bucket = getTrackBucket(scratch.buckets, track);
+            const bucket = getTrackBucket(scratch, track);
             if (!bucket.contested) {
                 bucket.contested = true;
                 contestedCount++;
             }
         }
     }
-    for (let bucketIndex = scratch.buckets.length - 1; bucketIndex >= 0; bucketIndex--) {
-        if (!scratch.buckets[bucketIndex]!.retained) {
-            scratch.buckets.splice(bucketIndex, 1);
-        }
-    }
 
-    if (contestedCount === 0) {
+    if (contestedCount === 0 && !onlyPropertyGroups) {
+        scratch.buckets.length = 0;
         return false;
     }
 
@@ -125,7 +113,7 @@ export function _updateWeightedPointerAnimations(manager: AnimationManager, delt
             }
             continue;
         }
-        const mixGroup = group.weight !== 1 || tracks.some((track) => !trackMaskedOut(group, track) && findTrackBucket(scratch.buckets, track)?.contested);
+        const mixGroup = onlyPropertyGroups || group.weight !== 1 || tracks.some((track) => !trackMaskedOut(group, track) && findTrackBucket(scratch, track)?.contested);
         if (!mixGroup) {
             if (!onlyPropertyGroups) {
                 tickAnimationCore(group, deltaMs, manager.engine);
@@ -146,8 +134,8 @@ export function _updateWeightedPointerAnimations(manager: AnimationManager, delt
             if (trackMaskedOut(group, track)) {
                 continue;
             }
-            evaluateSampler(track.sampler, t, track.stride, track.quaternion, scratch.sample, 0);
-            const bucket = findTrackBucket(scratch.buckets, track);
+            evaluatePropertySampler(track.sampler, t, track.stride, track.quaternion, track.easing, scratch.sample, 0);
+            const bucket = findTrackBucket(scratch, track);
             if (!bucket?.contested) {
                 if (!onlyPropertyGroups) {
                     track.writer(scratch.sample, 0);
@@ -163,7 +151,8 @@ export function _updateWeightedPointerAnimations(manager: AnimationManager, delt
         }
     }
 
-    for (let bucketIndex = 0; bucketIndex < scratch.buckets.length; bucketIndex++) {
+    scratch.buckets.length = scratch.bucketCount;
+    for (let bucketIndex = 0; bucketIndex < scratch.bucketCount; bucketIndex++) {
         const bucket = scratch.buckets[bucketIndex]!;
         if (!bucket.active) {
             continue;
@@ -193,10 +182,10 @@ export function _writeUncontestedPointerTracks(manager: AnimationManager, group:
     }
     for (let trackIndex = 0; trackIndex < tracks.length; trackIndex++) {
         const track = tracks[trackIndex]!;
-        if (trackMaskedOut(group, track) || findTrackBucket(scratch.buckets, track)?.contested) {
+        if (trackMaskedOut(group, track) || findTrackBucket(scratch, track)?.contested) {
             continue;
         }
-        evaluateSampler(track.sampler, group.currentTime, track.stride, track.quaternion, scratch.sample, 0);
+        evaluatePropertySampler(track.sampler, group.currentTime, track.stride, track.quaternion, track.easing, scratch.sample, 0);
         track.writer(scratch.sample, 0);
         if (track._afterWrite) {
             scratch.afterWrites.add(track._afterWrite);
@@ -243,25 +232,45 @@ function advancePropertyGroupTime(group: AnimationGroup, mixer: AnimationPropert
         return group.currentTime;
     }
 
-    if (group.loopAnimation && group.isPlaying) {
-        group.currentTime = fromTime + ((group.currentTime - fromTime) % duration);
-        if (group.currentTime < fromTime) {
-            group.currentTime += duration;
+    if (group.isPlaying) {
+        if (group.loopAnimation) {
+            group.currentTime = fromTime + ((group.currentTime - fromTime) % duration);
+            if (group.currentTime < fromTime) {
+                group.currentTime += duration;
+            }
+        } else {
+            group.currentTime = Math.min(Math.max(group.currentTime, fromTime), toTime);
+            if (group.speedRatio >= 0 && group.currentTime >= toTime) {
+                group.isPlaying = false;
+                group._stopped = true;
+            }
         }
     } else {
-        group.currentTime = Math.min(Math.max(group.currentTime, fromTime), toTime);
+        group.currentTime = Math.min(Math.max(group.currentTime, clipStart), clipEnd);
     }
     return group.currentTime;
 }
 
-function findTrackBucket(buckets: WeightedPointerBucket[], track: AnimationPropertyRuntimeTrack): WeightedPointerBucket | undefined {
-    return buckets.find((bucket) => bucket.target === track.mixTarget && bucket.property === track.mixProperty);
+function findTrackBucket(scratch: WeightedPointerScratch, track: AnimationPropertyRuntimeTrack): WeightedPointerBucket | undefined {
+    const target = track.mixTarget();
+    for (let bucketIndex = 0; bucketIndex < scratch.bucketCount; bucketIndex++) {
+        const bucket = scratch.buckets[bucketIndex]!;
+        if (bucket.target === target && bucket.property === track.mixProperty) {
+            return bucket;
+        }
+    }
+    return undefined;
 }
 
-function getTrackBucket(buckets: WeightedPointerBucket[], track: AnimationPropertyRuntimeTrack): WeightedPointerBucket {
+function getTrackBucket(scratch: WeightedPointerScratch, track: AnimationPropertyRuntimeTrack): WeightedPointerBucket {
+    const buckets = scratch.buckets;
     const arity = track.stride;
-    const candidate = findTrackBucket(buckets, track);
-    if (candidate) {
+    const target = track.mixTarget();
+    for (let bucketIndex = 0; bucketIndex < scratch.bucketCount; bucketIndex++) {
+        const candidate = buckets[bucketIndex]!;
+        if (candidate.target !== target || candidate.property !== track.mixProperty) {
+            continue;
+        }
         if (candidate.arity !== arity) {
             throw new Error("Weighted animation channels for the same property must use the same value size");
         }
@@ -272,30 +281,53 @@ function getTrackBucket(buckets: WeightedPointerBucket[], track: AnimationProper
         }
         candidate.mix = track._mix;
         candidate.afterWrite = track._afterWrite;
-        candidate.retained = true;
         return candidate;
     }
 
-    const bucket: WeightedPointerBucket = {
-        target: track.mixTarget,
-        property: track.mixProperty,
-        values: new F32(arity),
-        writer: track.writer,
-        arity,
-        quaternion: track.quaternion,
-        mix: track._mix,
-        afterWrite: track._afterWrite,
-        retained: true,
-        contested: false,
-        active: false,
-        hasReference: false,
-        totalWeight: 0,
-        refX: 0,
-        refY: 0,
-        refZ: 0,
-        refW: 1,
-    };
-    buckets.push(bucket);
+    let bucket = buckets[scratch.bucketCount];
+    if (bucket) {
+        bucket.target = target;
+        bucket.property = track.mixProperty;
+        bucket.writer = track.writer;
+        bucket.quaternion = track.quaternion;
+        bucket.mix = track._mix;
+        bucket.afterWrite = track._afterWrite;
+        bucket.contested = false;
+        bucket.active = false;
+        bucket.hasReference = false;
+        bucket.totalWeight = 0;
+        bucket.refX = 0;
+        bucket.refY = 0;
+        bucket.refZ = 0;
+        bucket.refW = 1;
+        if (bucket.arity === arity) {
+            bucket.values.fill(0);
+        } else {
+            bucket.values = new F32(arity);
+            bucket.arity = arity;
+        }
+    } else {
+        bucket = {
+            target,
+            property: track.mixProperty,
+            values: new F32(arity),
+            writer: track.writer,
+            arity,
+            quaternion: track.quaternion,
+            mix: track._mix,
+            afterWrite: track._afterWrite,
+            contested: false,
+            active: false,
+            hasReference: false,
+            totalWeight: 0,
+            refX: 0,
+            refY: 0,
+            refZ: 0,
+            refW: 1,
+        };
+        buckets.push(bucket);
+    }
+    scratch.bucketCount++;
     return bucket;
 }
 

@@ -292,7 +292,7 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
             if (mesh.pickable !== false && (!pickFilter || pickFilter(mesh))) {
                 candidates.push({ mesh, ignore: null });
                 needsDeformation ||= !!(mesh.morphTargets || mesh.skeleton);
-                needsAdvancedPipeline ||= !!mesh.vat || !!mesh.thinInstances || !!mesh._gpu._vbLayout?._p;
+                needsAdvancedPipeline ||= !!mesh.vat || !!mesh.thinInstances || !!mesh._gpu._vbLayout?.position || !!mesh.material?._attributeFormats;
             }
         }
     }
@@ -427,7 +427,7 @@ async function pickAsyncImpl(picker: GpuPicker, x: number, y: number, options?: 
                 deformProjection!.bindDeformPickingProjection(engine, pass, set.regularPipeline, mesh, 1, !!discardBG);
             }
             pass.setIndexBuffer(gpu.indexBuffer, gpu.indexFormat);
-            pass.drawIndexed(gpu.indexCount);
+            pass.drawIndexed(gpu.indexCount, 1, 0, gpu._baseVertex);
             meshRanges.push({
                 base: nextId++,
                 count: 1,

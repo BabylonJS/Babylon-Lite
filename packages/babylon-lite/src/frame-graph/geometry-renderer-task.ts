@@ -37,11 +37,11 @@
 import { F32 } from "../engine/typed-arrays.js";
 import type { Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
-import type { SurfaceContext } from "../engine/surface.js";
-import type { RenderTarget, RenderTargetDescriptor, RenderTargetSignature } from "../engine/render-target.js";
+import type { RenderTarget, RenderTargetDescriptor, RenderTargetSignature, RenderTargetSurfaceSize } from "../engine/render-target.js";
 import { buildRenderTarget } from "../engine/render-target.js";
 import type { RenderTargetMrt } from "../engine/render-target-mrt.js";
 import { buildRenderTargetMrt, createRenderTargetMrt, disposeRenderTargetMrt, getSampledColorTexture, getSampledColorView } from "../engine/render-target-mrt.js";
+import type { SurfaceContext } from "../engine/surface.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { Material, MaterialRenderFeatures } from "../material/material.js";
 import { getMaterialSource } from "../material/material-view.js";
@@ -62,7 +62,7 @@ import type { Task } from "./task.js";
 import type { GeometryClearValue } from "./geometry-types.js";
 import { GEOMETRY_TEXTURE_DESCRIPTIONS, GeometryTextureType } from "./geometry-types.js";
 import { _packSceneUniforms } from "./scene-uniforms-pack.js";
-import { getProjectionMatrix } from "../camera/camera.js";
+import { getProjectionMatrix, _applyCameraViewport } from "../camera/camera.js";
 import { multiplyMat4IntoBuffer } from "../math/multiply-mat4-into-buffer.js";
 import type { Mat4Storage } from "../math/types.js";
 
@@ -89,8 +89,15 @@ export interface GeometryRendererTaskConfig {
     meshes?: readonly Mesh[];
     /** Per-pass camera override. Defaults to `scene.camera`. */
     camera?: Camera | null;
-    /** Render-target size. Defaults to the scene's `surface`. */
-    size?: SurfaceContext | { width: number; height: number };
+    /** Render-target size. Defaults to the scene's `surface`; accepts live
+     *  `{ surface, scale }` dimensions as well as full surfaces and pixels. */
+    size?:
+        | SurfaceContext
+        | RenderTargetSurfaceSize
+        | {
+              width: number;
+              height: number;
+          };
     /** MSAA sample count. Defaults to 1. */
     samples?: 1 | 4;
     /** Externally-owned depth attachment. When omitted, the task creates its
@@ -147,6 +154,7 @@ export interface GeometryRendererTask extends Task {
     readonly geometryWorldNormalTexture: RenderTarget | null;
     readonly geometryAlbedoTexture: RenderTarget | null;
     readonly geometryLinearVelocityTexture: RenderTarget | null;
+    readonly geometryMeshBlendTagTexture: RenderTarget | null;
     /** Skip a mesh from the velocity attachment's previous-world tracking. */
     excludeFromVelocity(mesh: Mesh): void;
     /** Re-include a mesh in velocity tracking. */
@@ -223,7 +231,10 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
     _computeStandardFeatures: ((mat: StandardMaterialProps) => number) | null;
     _createPbrGeometryView: ((src: PbrMaterialProps, cfg: PbrGeometryViewConfig) => PbrGeometryMaterialView) | null;
     _computePbrFeatures: ((mat: PbrMaterialProps) => MaterialRenderFeatures) | null;
+    _isPbrForwardCurrent: ((scene: SceneContext, forward: Renderable | undefined, mesh: Mesh) => boolean) | null;
     _createNodeGeometryView: ((src: NodeMaterial, cfg: NodeGeometryViewConfig) => NodeGeometryMaterialView) | null;
+    /** In-flight bridge import for a material family that first appeared after `_preload`. */
+    _lateLoad?: Promise<void>;
 }
 
 // ─── Factory ───────────────────────────────────────────────────────────────
@@ -236,25 +247,26 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
     if (config.textureDescriptions.length === 0) {
         throw new Error("GeometryRendererTask: textureDescriptions must contain at least one entry.");
     }
-    if (config.textureDescriptions.length > 8) {
-        throw new Error(`GeometryRendererTask: textureDescriptions length ${config.textureDescriptions.length} exceeds the WebGPU max of 8 color attachments.`);
+    if (config.textureDescriptions.length + (config.targetTexture ? 1 : 0) > 8) {
+        throw new Error("GeometryRendererTask: too many color attachments.");
     }
 
+    const samples = config.samples ?? 1;
     const attachments: AttachmentInfo[] = config.textureDescriptions.map((d, i) => {
         const desc = GEOMETRY_TEXTURE_DESCRIPTIONS[d.type];
         if (!desc) {
             throw new Error(`GeometryRendererTask: unknown texture type ${d.type as number}.`);
         }
+        const format = d.format ?? desc.defaultFormat;
         return {
             _type: d.type,
             _index: i,
-            _format: d.format ?? desc.defaultFormat,
+            _format: format,
             _clearValue: d.clearValue ?? desc.clearValue,
         };
     });
     const needsVelocity = attachments.some((a) => a._type === GeometryTextureType.LINEAR_VELOCITY);
     const needsParams = needsVelocity || attachments.some((a) => a._type === GeometryTextureType.NORMALIZED_VIEW_DEPTH);
-    const samples = config.samples ?? 1;
     const size = config.size ?? sc.surface;
 
     if (config.depthTexture) {
@@ -282,19 +294,13 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         sampleCount: samples,
         size,
     });
+    const depthCompare = config.targetTexture?._descriptor.depthCompare ?? config.depthTexture?._descriptor.depthCompare;
+    const depthClearValue = config.targetTexture?._descriptor.depthClearValue ?? config.depthTexture?._descriptor.depthClearValue;
 
-    const wrapperTargets: (RenderTarget | null)[] = [];
-    const typeAccessors: Record<GeometryTextureType, RenderTarget | null> = {} as Record<GeometryTextureType, RenderTarget | null>;
-    for (let t = 0; t < GEOMETRY_TEXTURE_DESCRIPTIONS.length; t++) {
-        typeAccessors[t as GeometryTextureType] = null;
-    }
-    for (const a of attachments) {
-        const wrapper = createWrapperRenderTarget(outputTarget, a);
-        wrapperTargets.push(wrapper);
-        typeAccessors[a._type] = wrapper;
-    }
+    const typeAccessors = new Array<RenderTarget | null>(GEOMETRY_TEXTURE_DESCRIPTIONS.length).fill(null) as unknown as Record<GeometryTextureType, RenderTarget | null>;
+    const wrapperTargets = attachments.map((a) => (typeAccessors[a._type] = createWrapperRenderTarget(outputTarget, a)));
 
-    const ownedDepthWrapper: RenderTarget | null = config.depthTexture ? null : createDepthWrapperRenderTarget(outputTarget, samples);
+    const ownedDepthWrapper: RenderTarget | null = config.depthTexture ? null : createDepthWrapperRenderTarget(outputTarget, samples, depthClearValue, depthCompare);
     const geometryDepthTexture: RenderTarget = config.depthTexture ?? ownedDepthWrapper!;
 
     const sceneUBO = createEmptyUniformBuffer(eng, SCENE_UBO_BYTES);
@@ -334,11 +340,11 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _colorFormat: sigColorFormats.join(),
         _colorFormats: sigColorFormats,
         _depthStencilFormat: (config.depthTexture ? config.depthTexture._descriptor.dFormat : outputTarget._descriptor.depthStencilFormat) ?? "depth32float",
-        _depthCompare: "greater-equal" as GPUCompareFunction,
+        _depthCompare: depthCompare ?? ("greater-equal" as GPUCompareFunction),
         _sampleCount: samples,
     };
 
-    const task: GeometryRendererTaskInternal = {
+    const task = {
         name: config.name ?? "geometry-renderer",
         engine: eng,
         scene: sc,
@@ -346,21 +352,10 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _mrt: outputTarget,
         outputTexture: config.targetTexture,
         geometryDepthTexture,
-        geometryIrradianceTexture: typeAccessors[GeometryTextureType.IRRADIANCE],
-        geometryWorldPositionTexture: typeAccessors[GeometryTextureType.WORLD_POSITION],
-        geometryLocalPositionTexture: typeAccessors[GeometryTextureType.LOCAL_POSITION],
-        geometryReflectivityTexture: typeAccessors[GeometryTextureType.REFLECTIVITY],
-        geometryViewDepthTexture: typeAccessors[GeometryTextureType.VIEW_DEPTH],
-        geometryNormalizedViewDepthTexture: typeAccessors[GeometryTextureType.NORMALIZED_VIEW_DEPTH],
-        geometryScreenspaceDepthTexture: typeAccessors[GeometryTextureType.SCREENSPACE_DEPTH],
-        geometryViewNormalTexture: typeAccessors[GeometryTextureType.VIEW_NORMAL],
-        geometryWorldNormalTexture: typeAccessors[GeometryTextureType.WORLD_NORMAL],
-        geometryAlbedoTexture: typeAccessors[GeometryTextureType.ALBEDO],
-        geometryLinearVelocityTexture: typeAccessors[GeometryTextureType.LINEAR_VELOCITY],
-        excludeFromVelocity(mesh) {
+        excludeFromVelocity(mesh: Mesh) {
             task._excludedFromVelocity.add(mesh);
         },
-        includeInVelocity(mesh) {
+        includeInVelocity(mesh: Mesh) {
             task._excludedFromVelocity.delete(mesh);
         },
         _attachments: attachments,
@@ -389,6 +384,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         _computeStandardFeatures: null,
         _createPbrGeometryView: null,
         _computePbrFeatures: null,
+        _isPbrForwardCurrent: null,
         _createNodeGeometryView: null,
 
         _removeMesh(value: object): void {
@@ -419,6 +415,9 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
                 }
             }
             const loads: Promise<void>[] = [];
+            for (const attachment of task._attachments) {
+                GEOMETRY_TEXTURE_DESCRIPTIONS[attachment._type]!._validate?.(attachment._format, attachment._clearValue, samples);
+            }
             if (hasStandard) {
                 loads.push(
                     (async () => {
@@ -426,9 +425,12 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
                             import("../material/standard/geometry-view.js"),
                             import("../material/standard/standard-material-features.js"),
                         ]);
+                        // Expose the family only once its optional helpers (skeletal velocity, thin instances)
+                        // are in too: `resolveSourceMaterial` treats the factory as proof that the whole family
+                        // is ready, and a resize / scene mutation can reach it while this is still in flight.
+                        await viewMod.preloadStandardGeometryFeatures(meshes, task._needsVelocity);
                         task._createStandardGeometryView = viewMod.createStandardGeometryMaterialView;
                         task._computeStandardFeatures = matMod._computeStandardMaterialFeatures;
-                        await viewMod.preloadStandardGeometryFeatures(meshes, task._needsVelocity);
                     })()
                 );
             }
@@ -438,6 +440,7 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
                         const [viewMod, matMod] = await Promise.all([import("../material/pbr/pbr-geometry-view.js"), import("../material/pbr/pbr-material-features.js")]);
                         task._createPbrGeometryView = viewMod.createPbrGeometryMaterialView;
                         task._computePbrFeatures = matMod._computePbrMaterialFeatures;
+                        task._isPbrForwardCurrent = viewMod.isPbrForwardBuildCurrent;
                     })()
                 );
             }
@@ -461,7 +464,10 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         dispose(): void {
             disposeTask(task, eng);
         },
-    };
+    } as unknown as GeometryRendererTaskInternal;
+    for (let type = 0; type < GEOMETRY_TEXTURE_DESCRIPTIONS.length; type++) {
+        (task as unknown as Record<string, RenderTarget | null>)["geometry" + GEOMETRY_TEXTURE_DESCRIPTIONS[type]!.name + "Texture"] = typeAccessors[type as GeometryTextureType];
+    }
     return task;
 }
 
@@ -470,8 +476,11 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
 function recordTask(task: GeometryRendererTaskInternal, config: GeometryRendererTaskConfig, eng: EngineContext, sc: SceneContext): void {
     buildRenderTargetMrt(task._mrt, eng);
 
-    if (config.targetTexture && !config.targetTexture._colorTexture) {
+    if (config.targetTexture && (config.targetTexture._syncEager || !config.targetTexture._colorTexture)) {
         buildRenderTarget(config.targetTexture, eng);
+    }
+    if (config.depthTexture?._syncEager) {
+        buildRenderTarget(config.depthTexture, eng);
     }
 
     const mrt = task._mrt;
@@ -522,6 +531,8 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
     const removed = task._removedMeshes;
     const meshes = config.meshes ?? sc.meshes;
     const attachmentTypes = task._attachments.map((a) => a._type);
+    // Forward renderable each PBR group currently tracks per mesh (filled lazily below).
+    const forwardBuilt = new Map<unknown, Map<Mesh | undefined, Renderable>>();
     try {
         for (const mesh of meshes) {
             if (removed?.has(mesh)) {
@@ -533,6 +544,25 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
             const resolved = resolveSourceMaterial(task, mesh.material);
             if (!resolved) {
                 continue;
+            }
+            // A PBR geometry renderable reuses the scene's forward PBR context, and that context only covers
+            // what the forward build that published it has seen. Forward (re)builds are asynchronous and
+            // make-before-break, so a PBR mesh of the scene is bound only while the renderable its group
+            // tracks for it was built for the mesh's CURRENT generation — PBR context, material, mesh
+            // capabilities, shadow receiving and light setup (see `isPbrForwardBuildCurrent`): not before its
+            // first forward build, and not while a rebuild is pending or still owed, when the group tracks
+            // the old output. Otherwise it stays out of the pass; the forward build bumps
+            // `_renderableVersion` when it completes, which re-syncs this list. Off-scene meshes of an
+            // explicit list are never forward-built and keep using the scene-level context.
+            if (resolved._family === "pbr" && (!config.meshes || sc.meshes.includes(mesh))) {
+                const group = sc._groups.get((resolved._mat as Material)._buildGroup);
+                let built = forwardBuilt.get(group);
+                if (!built) {
+                    forwardBuilt.set(group, (built = new Map(group?.o?.map((renderable) => [renderable.mesh, renderable]))));
+                }
+                if (!task._isPbrForwardCurrent!(sc, built.get(mesh), mesh)) {
+                    continue;
+                }
             }
             const resources: MeshRebuildResources = { _lifetimeDisposers: [] };
             created.push(resources);
@@ -635,11 +665,11 @@ function rebuildRenderPassDescriptor(task: GeometryRendererTaskInternal, config:
     if (config.depthTexture) {
         depthView = config.depthTexture._depthView;
         depthFormat = config.depthTexture._descriptor.dFormat;
-        depthClearValue = config.depthTexture._descriptor._depthClearValue ?? 0;
+        depthClearValue = config.targetTexture?._descriptor.depthClearValue ?? config.depthTexture._descriptor.depthClearValue ?? 0;
     } else {
         depthView = mrt._depthView;
         depthFormat = mrt._descriptor.depthStencilFormat;
-        depthClearValue = 0;
+        depthClearValue = task.geometryDepthTexture._descriptor.depthClearValue ?? 0;
     }
     const depthAttachment: GPURenderPassDepthStencilAttachment | null = depthView
         ? {
@@ -727,7 +757,8 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
     if (sc._renderableVersion !== task._boundVer) {
         rebuildBoundMeshes(task, config, eng, sc);
     }
-    const aspect = mrt._width / mrt._height;
+    const viewport = camera.viewport;
+    const aspect = (mrt._width / mrt._height) * (viewport ? viewport.width / viewport.height : 1);
     writeSceneUBO(task, eng, sc, camera, aspect);
     // Positional light data must share the effective task camera's origin; under an
     // override-FO the task owns its lights UBO and refreshes it here each frame.
@@ -743,6 +774,7 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
     }
 
     const pass = eng._currentEncoder.beginRenderPass(task._renderPassDescriptor);
+    _applyCameraViewport(pass, camera, mrt._width, mrt._height);
     pass.setBindGroup(0, task._sceneBG!);
     let lastPipeline: GPURenderPipeline | null = null;
     let draws = 0;
@@ -835,21 +867,36 @@ function resolveSourceMaterial(task: GeometryRendererTaskInternal, material: Mat
     if (!buildGroup) {
         return null;
     }
-    if (buildGroup._materialFamily === "standard") {
+    const family = buildGroup._materialFamily;
+    // `_preload` imports a family bridge only for the families present when it runs. When a family first
+    // appears later (a PBR mesh added to a Standard-only scene), skip its meshes while the bridge is
+    // imported, then reset `_boundVer` so the next `execute()` binds them. A rejected import is reported
+    // and ends the same way — cached promise dropped, bound list stale — so the next frame starts a fresh
+    // attempt instead of locking this family (and any later one) out for good.
+    if (!(family === "standard" ? task._createStandardGeometryView : family === "pbr" ? task._createPbrGeometryView : family !== "node" || task._createNodeGeometryView)) {
+        task._lateLoad ??= task._preload!()
+            .catch((error: unknown) => console.error(error))
+            .then(() => {
+                task._lateLoad = undefined;
+                task._boundVer = -1;
+            });
+        return null;
+    }
+    if (family === "standard") {
         const mat = src as StandardMaterialProps;
         if (!mat._renderFeatures) {
             mat._renderFeatures = { features: task._computeStandardFeatures!(mat) };
         }
         return { _mat: mat, _family: "standard" };
     }
-    if (buildGroup._materialFamily === "pbr") {
+    if (family === "pbr") {
         const mat = src as PbrMaterialProps;
         if (!mat._renderFeatures) {
             mat._renderFeatures = task._computePbrFeatures!(mat);
         }
         return { _mat: mat, _family: "pbr" };
     }
-    if (buildGroup._materialFamily === "node") {
+    if (family === "node") {
         // Node materials carry their own `_renderFeatures` (set at parse time)
         // and own all geometry-shader emission, so no feature computation is needed.
         return { _mat: src as NodeMaterial, _family: "node" };
@@ -881,11 +928,18 @@ function createWrapperRenderTarget(mrt: RenderTargetMrt, attachment: AttachmentI
     };
 }
 
-function createDepthWrapperRenderTarget(mrt: RenderTargetMrt, sampleCount: number): RenderTarget {
+function createDepthWrapperRenderTarget(
+    mrt: RenderTargetMrt,
+    sampleCount: number,
+    depthClearValue: number | undefined,
+    depthCompare: GPUCompareFunction | undefined
+): RenderTarget {
     const baseDesc = mrt._descriptor;
     const wrapperDesc: RenderTargetDescriptor = {
         lbl: `${baseDesc.label ?? "geometry"}.depth`,
         dFormat: baseDesc.depthStencilFormat,
+        depthClearValue,
+        depthCompare,
         samples: sampleCount,
         size: baseDesc.size,
     };

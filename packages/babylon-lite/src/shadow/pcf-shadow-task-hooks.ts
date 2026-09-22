@@ -145,6 +145,9 @@ export function ensurePcfShadowTaskState(
                 rt,
                 clr: true,
                 cam: camera,
+                // The render list is the caster set only: an empty set must not mirror the scene into the map
+                // (the receivers sample this depth texture — see the CSM hooks).
+                autoMirror: false,
                 _skipClusteredLights: true,
             },
             engine,

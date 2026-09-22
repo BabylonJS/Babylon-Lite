@@ -211,7 +211,7 @@ describe("base RenderTask ownership", () => {
         task._renderables.push(renderable);
         const initialGeneration = generation(task);
         expect(task._sceneBG).toBeUndefined();
-        expect("_sceneBG" in task).toBe(true);
+        expect("_targetSignature" in task).toBe(true);
         expect(f.device.createBindGroup).not.toHaveBeenCalled();
         f.failure.bindGroup = true;
         expect(() => task.record()).toThrow("bind group failed");
