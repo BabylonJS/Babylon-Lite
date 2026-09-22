@@ -69,6 +69,7 @@ export function addAnimationGroup(manager: AnimationManager, group: AnimationGro
                     if (groupInternal._animationManager === ownerManager) {
                         groupInternal._animationManager = undefined;
                     }
+                    group._mixerCleanup?.(ownerManager);
                 },
             }
         );

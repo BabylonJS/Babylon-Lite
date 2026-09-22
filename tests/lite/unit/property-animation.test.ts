@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createAnimationManager, startAnimationManager, stopAnimationManager, updateAnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
+import { addAnimationGroup } from "../../../packages/babylon-lite/src/animation/animation-group-task";
 import { goToFrame, pauseAnimation, playAnimation } from "../../../packages/babylon-lite/src/animation/animation-group";
 import { setAnimationWeight } from "../../../packages/babylon-lite/src/animation/animation-weight";
 import { enablePropertyAnimationBlending } from "../../../packages/babylon-lite/src/animation/weighted-pointer-mixer";
@@ -12,6 +13,8 @@ import { evaluateSampler } from "../../../packages/babylon-lite/src/animation/ev
 import { INTERP_CUBICSPLINE, INTERP_LINEAR, INTERP_STEP } from "../../../packages/babylon-lite/src/animation/types";
 import type { AnimationGroup } from "../../../packages/babylon-lite/src/animation/animation-group";
 import type { AnimationManager } from "../../../packages/babylon-lite/src/animation/animation-manager";
+import type { AnimationClip, NodeRest } from "../../../packages/babylon-lite/src/animation/types";
+import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 
 const typedArrayAllocations = vi.hoisted(() => ({ f32: 0 }));
 
@@ -719,5 +722,44 @@ describe("Property animation", () => {
         updateAnimationManager(manager, 250);
         expect(groupA.weight).toBeCloseTo(0.75);
         expect(groupB.weight).toBeCloseTo(0.25);
+    });
+
+    it("ticks property groups alongside weighted glTF without a property mixer hook", () => {
+        const engine = { _device: { queue: { writeTexture: vi.fn() } } } as unknown as EngineContext;
+        const manager = createAnimationManager({ engine });
+        const target = { value: 0 };
+        const clip = createPropertyAnimationClip("property", [
+            {
+                path: "value",
+                keys: [
+                    { time: 0, value: 0 },
+                    { time: 1, value: 10 },
+                ],
+            },
+        ]);
+        const propertyGroup = createPropertyAnimationGroup(manager, target, clip, { loop: false });
+        const gltfClip: AnimationClip = { name: "gltf", channels: [], samplers: [], duration: 1, frameRate: 60 };
+        const rest: NodeRest = { parentIdx: -1, tx: 0, ty: 0, tz: 0, rx: 0, ry: 0, rz: 0, rw: 1, sx: 1, sy: 1, sz: 1 };
+        const gltfGroup = {
+            name: "gltf",
+            duration: 1,
+            frameRate: 60,
+            isPlaying: true,
+            currentTime: 0,
+            targetedAnimations: [],
+            speedRatio: 1,
+            loopAnimation: false,
+            weight: 0.5,
+            _stopped: false,
+            _gltfMixer: [gltfClip, [rest], []],
+        } satisfies AnimationGroup;
+        addAnimationGroup(manager, gltfGroup);
+        enableAnimationBlending(manager);
+
+        updateAnimationManager(manager, 500);
+
+        expect(propertyGroup.currentTime).toBeCloseTo(0.5);
+        expect(target.value).toBeCloseTo(5);
+        expect(gltfGroup.currentTime).toBeCloseTo(0.5);
     });
 });
