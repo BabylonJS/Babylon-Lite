@@ -692,259 +692,119 @@ void options;
         expect(dts).not.toMatch(/^\s*_textureSlots:/m);
     });
 
-    it("exposes the complete root-only inspection contract and awaited rebuild overload", () => {
+    it("exposes root-only material and texture domain accessors", () => {
         const dts = readFileSync(DTS_PATH, "utf-8");
+        expect(dts).not.toMatch(/\b\w*Inspection\w*\b/);
+        expect(dts).not.toMatch(/\bMaterialTextureBinding\w*\b/);
+
         const requiredSymbols = [
-            "InspectionValue",
-            "InspectionDatum",
-            "InspectionNumberConstraint",
-            "MaterialMutationClass",
-            "AppliedMaterialMutationClass",
-            "MaterialPostMutation",
-            "MaterialInspectionEdit",
-            "MaterialInspectionReadOnly",
-            "MaterialInspectionAccess",
-            "MaterialInspectionSection",
-            "MaterialInspectionScalar",
-            "MaterialInspectionTuple",
-            "MaterialInspectionPropertyValue",
-            "MaterialInspectionPropertyId",
-            "MaterialInspectionProperty",
-            "MaterialInspection",
-            "TextureInspectionKind",
-            "TextureBindingKind",
-            "TextureSampleCategory",
-            "TextureViewCategory",
-            "TextureBindingDirection",
-            "MaterialTextureBindingId",
-            "MaterialInspectionTextureReference",
-            "MaterialTextureBinding",
-            "TextureInspectionOrigin",
-            "TextureColorSpace",
-            "TextureAddressMode",
-            "TextureFilterMode",
-            "TextureInspectionTransform",
-            "TextureSamplerInspection",
-            "TextureInspection",
-            "MaterialInspectionMutationScope",
-            "MaterialTextureMutation",
-            "MaterialInspectionMutationResult",
-            "AwaitedRebuildMaterialOptions",
-            "inspectMaterial",
-            "getMaterialTextureBindings",
-            "inspectTexture",
-            "setMaterialInspectionProperty",
-            "setMaterialInspectionTexture",
-            "setTextureInspectionTransform",
+            "getMaterialSource",
+            "isMaterialView",
+            "getMaterialFamily",
+            "getMaterialTextures",
+            "getStandardEmissiveTexture",
+            "getStandardBumpTexture",
+            "getStandardSpecularTexture",
+            "getStandardAmbientTexture",
+            "getStandardLightmapTexture",
+            "getStandardOpacityTexture",
+            "getStandardReflectionTexture",
+            "getStandardReflectionCubeTexture",
+            "getPbrAlphaCutoff",
+            "getPbrEmissiveColor",
+            "getPbrMetallicReflectance",
+            "getPbrClearCoat",
+            "getPbrSheen",
+            "getPbrIridescence",
+            "getPbrAnisotropy",
+            "getPbrSubsurface",
+            "getPbrTransmission",
+            "getPbrDispersion",
+            "isPbrGammaAlbedo",
+            "getPbrUnlit",
+            "isPbrSkybox",
+            "getShadowOnly",
+            "hasMaterialUvTransform",
+            "getShaderUniform",
+            "getShaderTexture",
+            "getTextureMetadata",
+            "getTextureTransform",
+            "setTextureTransform",
+            "getTextureCoordinateIndex",
+            "hasTextureTransform",
+            "TextureMetadata",
+            "TextureTransform",
         ] as const;
         const missingSymbols = requiredSymbols.filter((symbol) => !new RegExp(`\\b(?:function|interface|type) ${symbol}\\b`).test(dts));
-        expect(missingSymbols, "Missing approved P4 root exports").toEqual([]);
+        expect(missingSymbols, "Missing domain accessor root exports").toEqual([]);
 
-        const probePath = resolve(BUILD_DIR, "inspection-api.probe.ts");
+        const probePath = resolve(BUILD_DIR, "domain-accessor-api.probe.ts");
         try {
             writeFileSync(
                 probePath,
                 `import {
-    getMaterialTextureBindings,
-    inspectMaterial,
-    inspectTexture,
-    rebuildMaterial,
-    setMaterialInspectionProperty,
-    setMaterialInspectionTexture,
-    setTextureInspectionTransform,
-    type AppliedMaterialMutationClass,
-    type AwaitedRebuildMaterialOptions,
-    type InspectionDatum,
-    type InspectionNumberConstraint,
-    type InspectionValue,
-    type Material,
-    type MaterialInspection,
-    type MaterialInspectionAccess,
-    type MaterialInspectionEdit,
-    type MaterialInspectionMutationResult,
-    type MaterialInspectionMutationScope,
-    type MaterialInspectionProperty,
-    type MaterialInspectionPropertyId,
-    type MaterialInspectionPropertyValue,
-    type MaterialInspectionReadOnly,
-    type MaterialInspectionScalar,
-    type MaterialInspectionSection,
-    type MaterialInspectionTextureReference,
-    type MaterialInspectionTuple,
-    type MaterialMutationClass,
-    type MaterialPostMutation,
-    type MaterialTextureBinding,
-    type MaterialTextureBindingId,
-    type MaterialTextureMutation,
-    type MaterialView,
-    type SceneContext,
-    type TextureAddressMode,
-    type TextureBindingDirection,
-    type TextureBindingKind,
-    type TextureColorSpace,
-    type TextureFilterMode,
-    type TextureInspection,
-    type TextureInspectionKind,
-    type TextureInspectionOrigin,
-    type TextureInspectionTransform,
-    type TextureSampleCategory,
-    type TextureSamplerInspection,
-    type TextureViewCategory,
+    getMaterialSource, isMaterialView, getMaterialFamily, getMaterialTextures,
+    getStandardEmissiveTexture, getStandardReflectionCubeTexture,
+    getPbrClearCoat, getPbrSubsurface, getPbrUnlit, getShadowOnly,
+    hasMaterialUvTransform, getShaderUniform, getShaderTexture,
+    getTextureMetadata, getTextureTransform, setTextureTransform,
+    getTextureCoordinateIndex, hasTextureTransform,
+    type ClearCoatProps, type Material, type MaterialView, type PbrMaterialProps, type ShaderMaterial,
+    type SubSurfaceProps,
+    type StandardMaterialProps, type Texture2D, type TextureMetadata, type TextureTransform,
 } from "./index.js";
+// @ts-expect-error The Inspector-shaped dispatcher was removed from Lite.
+import { inspectMaterial } from "./index.js";
 
-type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
-type Expect<T extends true> = T;
-
-type _InspectionValue = Expect<
-    Equal<
-        InspectionValue<number>,
-        | { readonly state: "unsupported"; readonly reason: string }
-        | { readonly state: "absent" }
-        | { readonly state: "present"; readonly value: number }
-    >
->;
-type _InspectionDatum = Expect<
-    Equal<InspectionDatum<number>, { readonly state: "unknown"; readonly reason?: string } | { readonly state: "known"; readonly value: number }>
->;
-type _MaterialMutationClass = Expect<Equal<MaterialMutationClass, "U" | "R" | "A" | "U/R">>;
-type _AppliedMaterialMutationClass = Expect<Equal<AppliedMaterialMutationClass, "U" | "R" | "A">>;
-type _MaterialPostMutation = Expect<Equal<MaterialPostMutation, "none" | "rebuild-material" | "rebuild-material-and-frame-graph">>;
-type _TextureInspectionKind = Expect<Equal<TextureInspectionKind, "2d" | "2d-array" | "3d" | "cube" | "unknown">>;
-type _TextureBindingKind = Expect<Equal<TextureBindingKind, "2d" | "2d-array" | "3d" | "cube">>;
-type _TextureSampleCategory = Expect<Equal<TextureSampleCategory, "float" | "unfilterable-float" | "depth" | "sint" | "uint" | "unknown">>;
-type _TextureViewCategory = Expect<Equal<TextureViewCategory, "2d" | "2d-array" | "3d" | "cube">>;
-type _TextureBindingDirection = Expect<Equal<TextureBindingDirection, "assign" | "replace" | "clear" | "navigate">>;
-type _TextureInspectionOrigin = Expect<
-    Equal<
-        TextureInspectionOrigin,
-        "url-raster" | "ktx" | "basis" | "ktx2" | "solid" | "pixels" | "external-image" | "dynamic" | "html" | "render-target" | "sampled-depth" | "unknown"
-    >
->;
-type _TextureColorSpace = Expect<Equal<TextureColorSpace, "linear" | "srgb" | "unknown">>;
-type _TextureAddressMode = Expect<Equal<TextureAddressMode, "clamp-to-edge" | "repeat" | "mirror-repeat">>;
-type _TextureFilterMode = Expect<Equal<TextureFilterMode, "nearest" | "linear">>;
-type _TextureReferenceEntity = Expect<Equal<MaterialInspectionTextureReference["entity"], object>>;
-type _TextureMutation = Expect<
-    Equal<
-        MaterialTextureMutation,
-        { readonly direction: "assign" | "replace"; readonly texture: object } | { readonly direction: "clear" }
-    >
->;
-type _InspectMaterial = Expect<Equal<typeof inspectMaterial, (material: Material) => MaterialInspection>>;
-type _GetMaterialTextureBindings = Expect<Equal<typeof getMaterialTextureBindings, (material: Material) => readonly MaterialTextureBinding[]>>;
-type _InspectTexture = Expect<Equal<typeof inspectTexture, (texture: unknown) => TextureInspection | undefined>>;
-type _SetMaterialInspectionProperty = Expect<
-    Equal<
-        typeof setMaterialInspectionProperty,
-        (
-            scope: MaterialInspectionMutationScope,
-            material: Material,
-            property: MaterialInspectionPropertyId,
-            value: MaterialInspectionPropertyValue
-        ) => Promise<MaterialInspectionMutationResult>
-    >
->;
-type _SetMaterialInspectionTexture = Expect<
-    Equal<
-        typeof setMaterialInspectionTexture,
-        (
-            scope: MaterialInspectionMutationScope,
-            material: Material,
-            binding: MaterialTextureBindingId,
-            mutation: MaterialTextureMutation
-        ) => Promise<MaterialInspectionMutationResult>
-    >
->;
-type _SetTextureInspectionTransform = Expect<
-    Equal<
-        typeof setTextureInspectionTransform,
-        (
-            scope: MaterialInspectionMutationScope,
-            texture: object,
-            transform: TextureInspectionTransform
-        ) => Promise<MaterialInspectionMutationResult>
-    >
->;
-
-declare const scene: SceneContext;
 declare const material: Material;
 declare const view: MaterialView;
-declare const texture: unknown;
-declare const textureEntity: object;
-declare const propertyId: MaterialInspectionPropertyId;
-declare const propertyValue: MaterialInspectionPropertyValue;
-declare const bindingId: MaterialTextureBindingId;
-declare const textureMutation: MaterialTextureMutation;
-declare const transform: TextureInspectionTransform;
-declare const awaitedOptions: AwaitedRebuildMaterialOptions;
-declare const textureReference: MaterialInspectionTextureReference;
+declare const standard: StandardMaterialProps;
+declare const pbr: PbrMaterialProps;
+declare const shader: ShaderMaterial;
+declare const texture: Texture2D;
+declare const transform: TextureTransform;
 
-const scope: MaterialInspectionMutationScope = { scenes: [scene] };
-const materialInspection: MaterialInspection = inspectMaterial(material);
-const viewInspection: MaterialInspection = inspectMaterial(view);
-const materialBindings: readonly MaterialTextureBinding[] = getMaterialTextureBindings(material);
-const viewBindings: readonly MaterialTextureBinding[] = getMaterialTextureBindings(view);
-const textureInspection: TextureInspection | undefined = inspectTexture(texture);
-const propertyMutation: Promise<MaterialInspectionMutationResult> = setMaterialInspectionProperty(scope, view, propertyId, propertyValue);
-const bindingMutation: Promise<MaterialInspectionMutationResult> = setMaterialInspectionTexture(scope, view, bindingId, textureMutation);
-const transformMutation: Promise<MaterialInspectionMutationResult> = setTextureInspectionTransform(scope, textureEntity, transform);
-
-const legacyDefault: void = rebuildMaterial(scene, material);
-const legacyOptions: void = rebuildMaterial(scene, view, { rebuildViews: true, rebuildFrameGraph: false });
-const awaitedMaterial: Promise<void> = rebuildMaterial(scene, material, { awaitCompletion: true });
-const awaitedView: Promise<void> = rebuildMaterial(scene, view, {
-    awaitCompletion: true,
-    rebuildViews: true,
-    rebuildFrameGraph: true,
-});
-const awaitedVariable: Promise<void> = rebuildMaterial(scene, view, awaitedOptions);
-// @ts-expect-error The legacy overload remains synchronous.
-const legacyIsNotAwaited: Promise<void> = rebuildMaterial(scene, material);
-// @ts-expect-error The awaited overload returns Promise<void>, never void.
-const awaitedIsNotLegacy: void = rebuildMaterial(scene, material, { awaitCompletion: true });
-
-textureReference.entity satisfies object;
-// @ts-expect-error Inspection texture identity is opaque and exposes no raw handle.
-textureReference.entity.texture;
-// @ts-expect-error Inspection texture identity is not a raw WebGPU texture.
-const rawTexture: GPUTexture = textureReference.entity;
-
-type PublicInspectionTypes = [
-    InspectionNumberConstraint,
-    MaterialInspectionEdit,
-    MaterialInspectionReadOnly,
-    MaterialInspectionAccess,
-    MaterialInspectionSection,
-    MaterialInspectionScalar,
-    MaterialInspectionTuple,
-    MaterialInspectionPropertyValue,
-    MaterialInspectionPropertyId,
-    MaterialInspectionProperty,
-    MaterialTextureBindingId,
-    TextureSamplerInspection,
-    TextureInspection,
-    MaterialInspectionMutationResult,
-];
-declare const publicInspectionTypes: PublicInspectionTypes;
+const source: Material = getMaterialSource(view);
+const viewFlag: boolean = isMaterialView(material);
+const family: string | undefined = getMaterialFamily(material);
+const materialTextures: readonly Texture2D[] = getMaterialTextures(view);
+const standardTexture: Texture2D | null | undefined = getStandardEmissiveTexture(standard);
+getStandardReflectionCubeTexture(standard);
+const clearCoat: Readonly<ClearCoatProps> | undefined = getPbrClearCoat(pbr);
+const subsurface: Readonly<SubSurfaceProps> | undefined = getPbrSubsurface(pbr);
+const unlit: readonly [number, number, number] | undefined = getPbrUnlit(pbr);
+const shadowOnly = getShadowOnly(pbr);
+const hasUv: boolean = hasMaterialUvTransform(view);
+const uniform: number | Readonly<Float32Array> = getShaderUniform(shader, "color");
+const shaderTexture: Texture2D | null = getShaderTexture(shader, "colorMap");
+const metadata: TextureMetadata | undefined = getTextureMetadata(texture);
+const textureTransform: TextureTransform | undefined = getTextureTransform(texture);
+const changed: boolean = setTextureTransform(texture, transform);
+const coordinateIndex: 0 | 1 = getTextureCoordinateIndex(texture);
+const hasTransform: boolean = hasTextureTransform(texture);
+if (clearCoat) {
+    // @ts-expect-error Getter configuration objects are compile-time readonly.
+    clearCoat.roughness = 1;
+}
+if (unlit) {
+    // @ts-expect-error Getter tuples are compile-time readonly.
+    unlit[0] = 1;
+}
+if (typeof uniform !== "number") {
+    // @ts-expect-error Getter uniform arrays are compile-time readonly.
+    uniform[0] = 1;
+}
+// @ts-expect-error Metadata never exposes the backing GPU texture.
+metadata?.texture;
+// @ts-expect-error Metadata never exposes the backing texture view.
+metadata?.view;
 void [
-    materialInspection,
-    viewInspection,
-    materialBindings,
-    viewBindings,
-    textureInspection,
-    propertyMutation,
-    bindingMutation,
-    transformMutation,
-    legacyDefault,
-    legacyOptions,
-    awaitedMaterial,
-    awaitedView,
-    awaitedVariable,
-    publicInspectionTypes,
+    inspectMaterial, source, viewFlag, family, materialTextures, standardTexture,
+    clearCoat, subsurface, unlit, shadowOnly, hasUv, uniform, shaderTexture,
+    metadata, textureTransform, changed, coordinateIndex, hasTransform,
 ];
 `
             );
-
             const result = spawnSync(
                 NODE,
                 [
@@ -964,14 +824,9 @@ void [
                     "webxr",
                     probePath,
                 ],
-                {
-                    cwd: PACKAGE_DIR,
-                    encoding: "utf-8",
-                }
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
             );
-
-            const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-            expect(result.status, output).toBe(0);
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
         } finally {
             rmSync(probePath, { force: true });
         }

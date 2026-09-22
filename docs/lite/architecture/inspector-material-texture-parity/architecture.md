@@ -1,8 +1,22 @@
 # Inspector Material and Texture Parity Architecture
 
 > Feature: `inspector-material-texture-parity` (P4 of BabylonJS/Babylon-Lite issue #55)  
-> Status: proposed for approval  
-> Scope: Babylon Lite public inspection/mutation contracts plus Inspector v2 material and metadata-only texture UI
+> Status: implemented, with an approved pre-landing API correction
+> Scope: Babylon Lite runtime-domain accessors plus Inspector v2-owned descriptors and metadata UI
+
+## Approved Pre-Landing Architecture Correction
+
+T-06–T-29 implemented the architecture documented below, including Lite-owned descriptors and mutation dispatch. Before landing, API review approved a narrower boundary. This correction is authoritative wherever the historical architecture conflicts with it.
+
+| Babylon Lite owns                                                                                                                                                                   | Inspector owns                                                                                                                                    |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Side-effect-free material source/family getters, optional Standard/PBR state getters, Shader declaration/value getters, safe texture metadata and exact-wrapper transform accessors | Descriptor construction, property IDs, sections, labels, read/write directions, validation messages, mutation classification and rebuild planning |
+| Existing domain setters, Node input handles, `markMaterialUboDirty`, `enableMaterialUvTransform`, and `rebuildMaterial`                                                             | Scene-consumer discovery, source/view indexing, selection/navigation, errors, pending generations, refresh, and lifecycle                         |
+| Direct legacy-order `getMaterialTextures()` enumeration from domain state                                                                                                           | Inspector-specific semantic binding IDs and candidate filtering                                                                                   |
+
+Lite publishes no `Inspection*` symbol and no generic Inspector mutation dispatcher. Stored PBR configuration objects, tuples, and Shader uniform arrays are returned by identity through compile-time readonly types, without defensive copies or runtime freezing. `TextureMetadata` is a handle-free optional-fact snapshot. `setTextureTransform` changes only the exact wrapper and returns a boolean; Inspector decides which materials must opt into UV transforms, be dirtied, or be rebuilt. Node materials continue to expose their public input handles without a parallel descriptor layer.
+
+The `packages/babylon-lite/src/inspection/` implementation described later in this document was removed rather than retained as a hidden duplicate descriptor system. The remainder of this document is the historical design and completion record for the first implementation; its Inspector UI behavior remains useful, but its Lite ownership and public signatures are non-normative.
 
 ## 1. Executive Summary
 

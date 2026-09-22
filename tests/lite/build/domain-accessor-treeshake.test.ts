@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { rollup, type OutputChunk, type Plugin } from "rollup";
@@ -9,50 +9,47 @@ import { ensureLibBuilt, isExternalRequest, LIB_ENTRY, PACKAGE_DIR } from "./bun
 
 const DTS_PATH = resolve(PACKAGE_DIR, "build/index.d.ts");
 const VITE_JS = resolve(PACKAGE_DIR, "node_modules/vite/bin/vite.js");
-const VIRTUAL_ENTRY = "\0inspection-treeshake-entry";
-const PUBLIC_INSPECTION_SYMBOLS = [
-    "InspectionValue",
-    "InspectionDatum",
-    "InspectionNumberConstraint",
-    "MaterialMutationClass",
-    "AppliedMaterialMutationClass",
-    "MaterialPostMutation",
-    "MaterialInspectionEdit",
-    "MaterialInspectionReadOnly",
-    "MaterialInspectionAccess",
-    "MaterialInspectionSection",
-    "MaterialInspectionScalar",
-    "MaterialInspectionTuple",
-    "MaterialInspectionPropertyValue",
-    "MaterialInspectionPropertyId",
-    "MaterialInspectionProperty",
-    "MaterialInspection",
-    "TextureInspectionKind",
-    "TextureBindingKind",
-    "TextureSampleCategory",
-    "TextureViewCategory",
-    "TextureBindingDirection",
-    "MaterialTextureBindingId",
-    "MaterialInspectionTextureReference",
-    "MaterialTextureBinding",
-    "TextureInspectionOrigin",
-    "TextureColorSpace",
-    "TextureAddressMode",
-    "TextureFilterMode",
-    "TextureInspectionTransform",
-    "TextureSamplerInspection",
-    "TextureInspection",
-    "MaterialInspectionMutationScope",
-    "MaterialTextureMutation",
-    "MaterialInspectionMutationResult",
-    "AwaitedRebuildMaterialOptions",
-    "inspectMaterial",
-    "getMaterialTextureBindings",
-    "inspectTexture",
-    "setMaterialInspectionProperty",
-    "setMaterialInspectionTexture",
-    "setTextureInspectionTransform",
-    "rebuildMaterial",
+const VIRTUAL_ENTRY = "\0domain-accessor-treeshake-entry";
+const PUBLIC_DOMAIN_SYMBOLS = [
+    "getMaterialSource",
+    "isMaterialView",
+    "getMaterialFamily",
+    "getMaterialTextures",
+    "getStandardEmissiveTexture",
+    "getStandardBumpTexture",
+    "getStandardSpecularTexture",
+    "getStandardAmbientTexture",
+    "getStandardLightmapTexture",
+    "getStandardOpacityTexture",
+    "getStandardReflectionTexture",
+    "getStandardReflectionCubeTexture",
+    "getPbrAlphaCutoff",
+    "getPbrEmissiveColor",
+    "getPbrMetallicReflectance",
+    "getPbrClearCoat",
+    "getPbrSheen",
+    "getPbrIridescence",
+    "getPbrAnisotropy",
+    "getPbrSubsurface",
+    "getPbrTransmission",
+    "getPbrDispersion",
+    "isPbrGammaAlbedo",
+    "getPbrUnlit",
+    "isPbrSkybox",
+    "getShadowOnly",
+    "hasMaterialUvTransform",
+    "getShaderUniform",
+    "getShaderTexture",
+    "getTextureMetadata",
+    "getTextureTransform",
+    "setTextureTransform",
+    "getTextureCoordinateIndex",
+    "hasTextureTransform",
+    "TextureMetadata",
+    "TextureTransform",
+    "TextureSamplerMetadata",
+    "TextureCapabilities",
+    "PbrShadowOnly",
 ] as const;
 
 interface BundleSnapshot {
@@ -67,7 +64,7 @@ interface BundleSnapshot {
     }[];
 }
 
-function ensureInspectionArtifacts(): void {
+function ensureDomainAccessorArtifacts(): void {
     const dist = spawnSync(process.execPath, [VITE_JS, "build", "--mode", "dist"], {
         cwd: PACKAGE_DIR,
         encoding: "utf-8",
@@ -82,7 +79,7 @@ async function bundleVirtualEntry(source: string): Promise<BundleSnapshot> {
     const warnings: string[] = [];
     const errors: string[] = [];
     const virtualEntryPlugin: Plugin = {
-        name: "inspection-virtual-entry",
+        name: "domain-accessor-virtual-entry",
         resolveId(id) {
             return id === VIRTUAL_ENTRY ? VIRTUAL_ENTRY : null;
         },
@@ -136,50 +133,57 @@ function getDeclarationName(statement: ts.Statement): string | undefined {
     return undefined;
 }
 
-beforeAll(ensureInspectionArtifacts, 300_000);
+beforeAll(ensureDomainAccessorArtifacts, 300_000);
 
-describe("inspection package isolation", () => {
-    it("emits byte-identical code and no extra chunks when inspection imports are unused", async () => {
+describe("domain accessor package isolation", () => {
+    it("emits byte-identical code and no extra chunks when domain accessor imports are unused", async () => {
         const usedEntry = `import { createSceneContext } from ${JSON.stringify(LIB_ENTRY)};
 console.log(createSceneContext);
 `;
         const baseline = await bundleVirtualEntry(usedEntry);
-        const withUnusedInspectionImports = await bundleVirtualEntry(`import {
-    inspectMaterial,
-    getMaterialTextureBindings,
-    inspectTexture,
-    setMaterialInspectionProperty,
-    setMaterialInspectionTexture,
-    setTextureInspectionTransform,
+        const withUnusedDomainImports = await bundleVirtualEntry(`import {
+    getMaterialSource,
+    getStandardEmissiveTexture,
+    getPbrClearCoat,
+    getShaderUniform,
+    getTextureMetadata,
+    getTextureTransform,
+    setTextureTransform,
 } from ${JSON.stringify(LIB_ENTRY)};
 ${usedEntry}`);
 
         expect(baseline.errors).toEqual([]);
         expect(baseline.warnings).toEqual([]);
-        expect(withUnusedInspectionImports.errors).toEqual([]);
-        expect(withUnusedInspectionImports.warnings).toEqual([]);
-        expect(withUnusedInspectionImports.chunks).toEqual(baseline.chunks);
-        expect(withUnusedInspectionImports.chunks.map(({ code }) => Buffer.byteLength(code))).toEqual(baseline.chunks.map(({ code }) => Buffer.byteLength(code)));
+        expect(withUnusedDomainImports.errors).toEqual([]);
+        expect(withUnusedDomainImports.warnings).toEqual([]);
+        expect(withUnusedDomainImports.chunks).toEqual(baseline.chunks);
+        expect(withUnusedDomainImports.chunks.map(({ code }) => Buffer.byteLength(code))).toEqual(baseline.chunks.map(({ code }) => Buffer.byteLength(code)));
     }, 120_000);
 
-    it("keeps raw WebGPU handles and package-private members out of inspection declarations", () => {
+    it("exports the domain API without Inspector vocabulary or metadata handle leaks", () => {
         const dts = readFileSync(DTS_PATH, "utf-8");
         const sourceFile = ts.createSourceFile(DTS_PATH, dts, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
         const declarations = new Map<string, string[]>();
 
         for (const statement of sourceFile.statements) {
             const name = getDeclarationName(statement);
-            if (name && (PUBLIC_INSPECTION_SYMBOLS as readonly string[]).includes(name)) {
+            if (name && (PUBLIC_DOMAIN_SYMBOLS as readonly string[]).includes(name)) {
                 const current = declarations.get(name) ?? [];
                 current.push(statement.getText(sourceFile));
                 declarations.set(name, current);
             }
         }
 
-        expect([...declarations.keys()].sort()).toEqual([...PUBLIC_INSPECTION_SYMBOLS].sort());
+        expect([...declarations.keys()].sort()).toEqual([...PUBLIC_DOMAIN_SYMBOLS].sort());
+        expect(dts).not.toMatch(/\b\w*Inspection\w*\b/);
+        expect(dts).not.toMatch(/\bMaterialTextureBinding\w*\b/);
+        expect(existsSync(resolve(PACKAGE_DIR, "build/lib/inspection"))).toBe(false);
 
-        const publicInspectionDeclarations = [...declarations.values()].flat().join("\n");
-        expect(publicInspectionDeclarations).not.toMatch(/\b(?:GPUTexture|GPUTextureView|GPUSampler|GPUBuffer|GPUDevice)\b/);
-        expect(publicInspectionDeclarations).not.toMatch(/\b_[A-Za-z]\w*\b/);
+        const metadataDeclarations = ["TextureMetadata", "TextureTransform", "TextureSamplerMetadata", "TextureCapabilities"]
+            .flatMap((name) => declarations.get(name) ?? [])
+            .join("\n");
+        expect(metadataDeclarations).not.toMatch(/\b(?:GPUTexture|GPUTextureView|GPUSampler|GPUBuffer|GPUDevice)\b/);
+        expect(metadataDeclarations).not.toMatch(/\b_[A-Za-z]\w*\b/);
+        expect(metadataDeclarations).not.toMatch(/\b(?:label|section|propertyId|direction|mutation|state)\b/i);
     });
 });

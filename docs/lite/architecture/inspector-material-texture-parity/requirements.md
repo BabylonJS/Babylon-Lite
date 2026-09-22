@@ -13,6 +13,19 @@ The requirements are grounded in the current Babylon Lite root public API:
 
 The words **MUST**, **SHOULD**, and **MAY** are normative.
 
+## 0. Approved Pre-Landing API Correction
+
+This section supersedes every conflicting public-contract or ownership statement below. The detailed matrices remain the Inspector product requirements and the record used to implement T-06–T-29; they no longer prescribe an Inspector-shaped Lite API.
+
+- **REQ-CORR-1:** The Lite root MUST expose narrow domain accessors for material source/family state, Standard optional texture slots, PBR optional families/modes, declared Shader uniform/sampler values, and safe texture metadata/transforms. Stored configuration objects and tuples MUST be returned by identity through compile-time readonly contracts; getters MUST NOT defensively copy or freeze them. Texture wrapper identity is likewise preserved.
+- **REQ-CORR-2:** The Lite root declaration MUST expose no `Inspection` type/function, material texture-binding descriptor, UI section/label/property ID, direction/access state, mutation class, post-mutation result, or generic Inspector mutation dispatcher.
+- **REQ-CORR-3:** Inspector MUST construct all descriptors and own labels, sections, supported access/directions, mutation and rebuild planning, scene-consumer discovery, selection identity, error and pending state, refresh, and lifecycle.
+- **REQ-CORR-4:** `setTextureTransform` MUST validate and write only the exact supplied wrapper and report whether its effective transform changed. It MUST NOT discover consumers, enable material features, dirty UBOs, or rebuild scenes.
+- **REQ-CORR-5:** Existing material setters, Node input handles, `setShaderUniform`, `setShaderTexture`, `markMaterialUboDirty`, `enableMaterialUvTransform`, and `rebuildMaterial` remain the public mutation building blocks. Lite MUST NOT replace them with a generic dispatcher.
+- **REQ-CORR-6:** `getMaterialTextures()` MUST unwrap `MaterialView` and enumerate public fields/domain getters, Shader declarations, and Node input handles directly in legacy order. It MUST NOT depend on optional-extension registries, descriptors, or raw GPU scans.
+- **REQ-CORR-7:** `TextureMetadata` MUST contain only safe optional runtime facts. Unknown facts are omitted; raw GPU handles, private field names, UI state, labels, directions, and mutation semantics are forbidden.
+- **REQ-CORR-8:** Domain accessor modules MUST be side-effect-free and unused root imports MUST emit byte-identical code.
+
 ### Capability legend
 
 The coverage matrices use:

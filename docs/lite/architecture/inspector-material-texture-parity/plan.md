@@ -2,8 +2,39 @@
 
 > Feature: `inspector-material-texture-parity` (P4 of BabylonJS/Babylon-Lite issue #55)  
 > Inputs: approved `goals.md`, `requirements.md`, `architecture.md`, and `task-board.md` in this directory  
-> Status: ready for implementation approval  
+> Status: completed, followed by an approved pre-landing API correction
 > Scope of this artifact: implementation sequencing only; do not update `task-board.md` until a separately approved execution phase
+
+## Post-Implementation API Correction
+
+T-01–T-29 below accurately record the originally approved implementation. API review then approved a pre-landing correction that removes Lite-owned Inspector descriptors and dispatchers while preserving the completed Inspector behavior as adapter responsibility.
+
+The correction:
+
+1. Deletes `packages/babylon-lite/src/inspection/`.
+2. Root-exports domain getters for material source, optional Standard/PBR state, Shader declarations/values, and safe texture metadata/transforms. Stored configuration objects, tuples, uniform arrays, and texture wrappers are returned by identity through readonly TypeScript contracts rather than defensive copies or runtime freezing.
+3. Rewrites `getMaterialTextures()` directly from material family state, preserving MaterialView unwrapping, duplicates, and legacy family ordering without extension registries.
+4. Keeps existing setters plus `markMaterialUboDirty`, `enableMaterialUvTransform`, and `rebuildMaterial`; Inspector performs consumer discovery and invalidation planning.
+5. Replaces descriptor/mutation tests with `material-accessors`, `texture-accessors`, material-family compatibility, public declaration, and domain tree-shaking coverage.
+
+Corrected focused Lite validation uses:
+
+```bash
+pnpm exec vitest run --project unit \
+  tests/lite/unit/material-accessors.test.ts \
+  tests/lite/unit/material-family.test.ts \
+  tests/lite/unit/texture-accessors.test.ts \
+  tests/lite/unit/runtime-material-rebuild.test.ts
+pnpm exec vitest run --project build \
+  tests/lite/build/public-api-types.test.ts \
+  tests/lite/build/domain-accessor-treeshake.test.ts
+pnpm exec tsc -p packages/babylon-lite/tsconfig.json --noEmit
+pnpm exec tsc -p tests/lite/tsconfig.json --noEmit
+pnpm build:lib
+pnpm exec tsx scripts/build-bundle-scenes.ts --scenes scene1,scene26,scene28
+```
+
+The historical public API and task details below are non-normative where they conflict with this correction.
 
 ## 1. Outcome and Non-Negotiable Boundaries
 

@@ -2,18 +2,15 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { getMaterialTextureBindings, inspectMaterial, setMaterialInspectionProperty } from "../../../packages/babylon-lite/src/inspection/material-inspection";
 import { getMaterialFamily } from "../../../packages/babylon-lite/src/material/material-family";
 import { getMaterialTextures } from "../../../packages/babylon-lite/src/material/material-textures";
-import { createMaterialView } from "../../../packages/babylon-lite/src/material/material-view";
-import { isPbrMaterial, isStandardMaterial, isShaderMaterial, isNodeMaterial } from "../../../packages/babylon-lite/src/material/material-guards";
+import { createMaterialView, getMaterialSource, isMaterialView } from "../../../packages/babylon-lite/src/material/material-view";
+import { isNodeMaterial, isPbrMaterial, isShaderMaterial, isStandardMaterial } from "../../../packages/babylon-lite/src/material/material-guards";
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
 import { createShaderMaterial, setShaderTexture } from "../../../packages/babylon-lite/src/material/shader/shader-material";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
 
-/** Device-free material stub: getMaterialFamily only reads `_buildGroup._materialFamily`
- *  (unwrapping a view to its source first). */
 function fakeMaterial(family?: string): Material {
     return {
         _buildGroup: { _materialFamily: family } as unknown as Material["_buildGroup"],
@@ -32,228 +29,120 @@ function texture2d(seed: number): Texture2D {
     };
 }
 
-describe("getMaterialFamily", () => {
-    it("returns the core family strings", () => {
+describe("material family and source", () => {
+    it("reports built-in, custom, and missing families", () => {
         expect(getMaterialFamily(fakeMaterial("pbr"))).toBe("pbr");
         expect(getMaterialFamily(fakeMaterial("standard"))).toBe("standard");
         expect(getMaterialFamily(fakeMaterial("shader"))).toBe("shader");
         expect(getMaterialFamily(fakeMaterial("node"))).toBe("node");
+        expect(getMaterialFamily(fakeMaterial("custom"))).toBe("custom");
+        expect(getMaterialFamily(fakeMaterial())).toBeUndefined();
+        expect(getMaterialFamily({ name: "plain" } as Material)).toBeUndefined();
     });
 
-    it("returns undefined when a material declares no family", () => {
-        expect(getMaterialFamily(fakeMaterial(undefined))).toBeUndefined();
-    });
-
-    it("returns undefined (no throw) for a plain material-like object with no builder", () => {
-        // _buildGroup is @internal / trimmed from the public d.ts, so callers can legally
-        // pass a bare { name, metadata } typed as Material.
-        expect(getMaterialFamily({ name: "plain" } as unknown as Material)).toBeUndefined();
-    });
-
-    it("reports a custom builder's own family string", () => {
-        expect(getMaterialFamily(fakeMaterial("myCustomType"))).toBe("myCustomType");
-    });
-
-    it("reports the source family through a material view", () => {
+    it("unwraps views and publicly identifies them", () => {
         const source = fakeMaterial("pbr");
         const view = createMaterialView(source, { features: 0 });
+
+        expect(isMaterialView(source)).toBe(false);
+        expect(isMaterialView(view)).toBe(true);
+        expect(getMaterialSource(source)).toBe(source);
+        expect(getMaterialSource(view)).toBe(source);
         expect(getMaterialFamily(view)).toBe("pbr");
     });
-});
 
-describe("material type guards", () => {
-    it("each guard matches only its own family", () => {
-        const pbr = fakeMaterial("pbr");
-        const standard = fakeMaterial("standard");
-        const shader = fakeMaterial("shader");
-        const node = fakeMaterial("node");
-
-        expect(isPbrMaterial(pbr)).toBe(true);
-        expect(isPbrMaterial(standard)).toBe(false);
-
-        expect(isStandardMaterial(standard)).toBe(true);
-        expect(isStandardMaterial(pbr)).toBe(false);
-
-        expect(isShaderMaterial(shader)).toBe(true);
-        expect(isShaderMaterial(node)).toBe(false);
-
-        expect(isNodeMaterial(node)).toBe(true);
-        expect(isNodeMaterial(shader)).toBe(false);
-    });
-
-    it("returns false for a family-less material", () => {
-        const unknown = fakeMaterial(undefined);
-        expect(isPbrMaterial(unknown)).toBe(false);
-        expect(isStandardMaterial(unknown)).toBe(false);
-        expect(isShaderMaterial(unknown)).toBe(false);
-        expect(isNodeMaterial(unknown)).toBe(false);
-    });
-
-    it("matches through a material view over a typed source", () => {
-        const view = createMaterialView(fakeMaterial("pbr"), { features: 0 });
-        expect(isPbrMaterial(view)).toBe(true);
-        expect(isStandardMaterial(view)).toBe(false);
+    it("keeps family guards narrow and view-aware", () => {
+        const pbrView = createMaterialView(fakeMaterial("pbr"), { features: 0 });
+        expect(isPbrMaterial(pbrView)).toBe(true);
+        expect(isStandardMaterial(pbrView)).toBe(false);
+        expect(isShaderMaterial(fakeMaterial("shader"))).toBe(true);
+        expect(isNodeMaterial(fakeMaterial("node"))).toBe(true);
+        expect(isPbrMaterial(fakeMaterial())).toBe(false);
     });
 });
 
 describe("getMaterialTextures", () => {
-    const texture = texture2d(1);
-    const otherTexture = texture2d(2);
+    const textures = Array.from({ length: 24 }, (_, index) => texture2d(index));
 
-    it("preserves canonical Standard/PBR ordering and duplicate bindings while omitting absent and cube slots", () => {
-        const cube = {};
-        const standard = {
+    it("preserves Standard slot order, duplicates, and cube exclusion", () => {
+        const material = {
             ...fakeMaterial("standard"),
-            diffuseTexture: texture,
-            _emissiveTexture: texture,
+            diffuseTexture: textures[0],
+            _emissiveTexture: textures[0],
             _bumpTexture: null,
-            _specularTexture: otherTexture,
-            _reflectionCubeTexture: cube,
-        };
-        const pbr = {
-            ...fakeMaterial("pbr"),
-            baseColorTexture: texture,
-            normalTexture: otherTexture,
-            ormTexture: texture,
-            lightmapTexture: otherTexture,
-            _clearCoat: {
-                texture,
-                roughnessTexture: null,
-                bumpTexture: otherTexture,
-            },
+            _specularTexture: textures[1],
+            _ambientTexture: textures[2],
+            _lightmapTexture: textures[3],
+            _opacityTexture: textures[4],
+            _reflectionTexture: textures[5],
+            _reflectionCubeTexture: {},
         };
 
-        expect(getMaterialTextures(standard)).toEqual([texture, texture, otherTexture]);
-        expect(getMaterialTextures(pbr)).toEqual([texture, otherTexture, texture, otherTexture, texture, otherTexture]);
+        expect(getMaterialTextures(material)).toEqual([textures[0], textures[0], textures[1], textures[2], textures[3], textures[4], textures[5]]);
     });
 
-    it("uses Shader declaration order and Node lexical input order", () => {
+    it("preserves PBR core and optional-family order", () => {
+        const material = {
+            ...fakeMaterial("pbr"),
+            baseColorTexture: textures[0],
+            normalTexture: textures[1],
+            ormTexture: textures[2],
+            occlusionTexture: textures[3],
+            emissiveTexture: textures[4],
+            specGlossTexture: textures[5],
+            lightmapTexture: textures[6],
+            _metallicReflectanceTexture: textures[7],
+            _reflectanceTexture: textures[8],
+            _clearCoat: { texture: textures[9], roughnessTexture: textures[10], bumpTexture: textures[11] },
+            _sheen: { isEnabled: true, texture: textures[12], roughnessTexture: textures[13] },
+            _iridescence: { texture: textures[14], thicknessTexture: textures[15] },
+            _anisotropy: { isEnabled: true, texture: textures[16] },
+            _subsurface: {
+                translucency: { colorTexture: textures[17], intensityTexture: textures[18] },
+                thickness: { texture: textures[19] },
+                refraction: { texture: textures[20] },
+            },
+            _transmissive: true,
+        };
+
+        expect(getMaterialTextures(material)).toEqual(textures.slice(0, 21));
+    });
+
+    it("uses Shader declaration order and Node own-property insertion order", () => {
         const shader = createShaderMaterial({
             vertexSource: wgsl`@vertex fn mainVertex() -> @builtin(position) vec4f { return vec4f(); }`,
             fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(); }`,
             attributes: ["position"],
             samplers: ["zeta", "empty", "alpha"],
         });
-        setShaderTexture(shader, "zeta", texture);
-        setShaderTexture(shader, "alpha", otherTexture);
+        setShaderTexture(shader, "zeta", textures[0]!);
+        setShaderTexture(shader, "alpha", textures[1]!);
         const node = {
             ...fakeMaterial("node"),
             inputs: {
-                zeta: { type: "texture2d", texture },
-                alpha: { type: "texture2d", texture: otherTexture },
+                zeta: { type: "texture2d", texture: textures[0] },
+                alpha: { type: "texture2d", texture: textures[1] },
                 value: { type: "f32", value: 1 },
             },
         };
-        Object.setPrototypeOf(node.inputs, { inherited: { type: "texture2d", texture: otherTexture } });
+        Object.setPrototypeOf(node.inputs, { inherited: { type: "texture2d", texture: textures[2] } });
 
-        expect(getMaterialTextures(shader)).toEqual([texture, otherTexture]);
-        expect(getMaterialTextures(node)).toEqual([otherTexture, texture]);
+        expect(getMaterialTextures(shader)).toEqual([textures[0], textures[1]]);
+        expect(getMaterialTextures(node)).toEqual([textures[0], textures[1]]);
     });
 
     it("unwraps material views and returns no textures for unknown families", () => {
-        const source = {
-            ...fakeMaterial("standard"),
-            diffuseTexture: texture,
-        };
-
-        expect(getMaterialTextures(createMaterialView(source, { features: 0 }))).toEqual([texture]);
+        const source = { ...fakeMaterial("standard"), diffuseTexture: textures[0] };
+        expect(getMaterialTextures(createMaterialView(source, { features: 0 }))).toEqual([textures[0]]);
         expect(getMaterialTextures(fakeMaterial("unknown"))).toEqual([]);
     });
 
-    it("projects directly from the canonical binding seam without legacy family scanners", () => {
+    it("uses domain accessors without extension registries or private slot scans", () => {
         const source = readFileSync(resolve(__dirname, "../../../packages/babylon-lite/src/material/material-textures.ts"), "utf-8");
 
-        expect(source).toMatch(/\bgetMaterialTextureBindings\s*\(/);
-        expect(source).not.toMatch(/_getStdTextureCollectors|_getPbrTextureCollectors|_textureSlots|\.inputs\b/);
-    });
-});
-
-describe("canonical material inspection dispatch", () => {
-    const texture = texture2d(3);
-    const shader = createShaderMaterial({
-        vertexSource: wgsl`@vertex fn mainVertex() -> @builtin(position) vec4f { return vec4f(); }`,
-        fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(); }`,
-        attributes: ["position"],
-        samplers: ["color"],
-    });
-    setShaderTexture(shader, "color", texture);
-    const node = {
-        ...fakeMaterial("node"),
-        inputs: {
-            color: { type: "texture2d", texture },
-        },
-    };
-
-    it("selects each core family by canonical identity and keeps MaterialView source identity", () => {
-        const materials = [fakeMaterial("standard"), fakeMaterial("pbr"), shader, node as unknown as Material];
-
-        expect(materials.map((material) => inspectMaterial(material).family)).toEqual(["standard", "pbr", "shader", "node"]);
-        expect(materials.map((material) => inspectMaterial(material).source)).toEqual(materials);
-        expect(materials.map((material) => inspectMaterial(material).textureBindings[0]?.id)).toEqual([
-            "standard.diffuse",
-            "pbr.baseColor",
-            "shader.sampler:color",
-            "node.texture:color",
-        ]);
-
-        const view = createMaterialView(shader, { features: 0 });
-        const snapshot = inspectMaterial(view);
-        expect(snapshot).toMatchObject({ source: shader, family: "shader", isView: true });
-        expect(getMaterialTextureBindings(view).map(({ id }) => id)).toEqual(["shader.sampler:color"]);
-    });
-
-    it("keeps dispatcher descriptors static and free of eager registries", () => {
-        const source = readFileSync(resolve(__dirname, "../../../packages/babylon-lite/src/inspection/material-inspection.ts"), "utf-8");
-
-        expect(source).toMatch(/standardMaterialInspectionDescriptor/);
-        expect(source).toMatch(/pbrMaterialInspectionDescriptor/);
-        expect(source).toMatch(/shaderMaterialInspectionDescriptor/);
-        expect(source).toMatch(/nodeMaterialInspectionDescriptor/);
-        expect(source).not.toMatch(/\bnew (?:Map|Set|WeakMap)\s*\(/);
-        expect(source).not.toMatch(/\bregister[A-Z]\w*Descriptor\s*\(/);
-    });
-
-    it("routes property mutations through every core family descriptor", async () => {
-        const standard = {
-            ...fakeMaterial("standard"),
-            alphaCutOff: 0.1,
-        };
-        const pbr = {
-            ...fakeMaterial("pbr"),
-            environmentIntensity: 1,
-        };
-        const mutableShader = createShaderMaterial({
-            vertexSource: wgsl`@vertex fn mainVertex() -> @builtin(position) vec4f { return vec4f(); }`,
-            fragmentSource: wgsl`@fragment fn mainFragment() -> @location(0) vec4f { return vec4f(); }`,
-            attributes: ["position"],
-            uniforms: [{ name: "amount", type: "f32", defaultValue: 1 }],
-        });
-        const amount = { type: "f32" as const, value: 1 };
-        const mutableNode = {
-            ...fakeMaterial("node"),
-            inputs: { amount },
-        };
-
-        await expect(setMaterialInspectionProperty({ scenes: [] }, standard, "standard.alphaCutOff", 0.2)).resolves.toMatchObject({
-            changed: true,
-            mutation: "U",
-        });
-        await expect(setMaterialInspectionProperty({ scenes: [] }, pbr, "pbr.environmentIntensity", 0.5)).resolves.toMatchObject({
-            changed: true,
-            mutation: "U",
-        });
-        await expect(setMaterialInspectionProperty({ scenes: [] }, mutableShader, "shader.uniform:amount", 2)).resolves.toMatchObject({
-            changed: true,
-            mutation: "A",
-        });
-        await expect(setMaterialInspectionProperty({ scenes: [] }, mutableNode as unknown as Material, "node.input:amount", 3)).resolves.toMatchObject({
-            changed: true,
-            mutation: "A",
-        });
-
-        expect(standard.alphaCutOff).toBe(0.2);
-        expect(pbr.environmentIntensity).toBe(0.5);
-        expect(mutableShader._uniformValues.get("amount")?.value[0]).toBe(2);
-        expect(amount.value).toBe(3);
+        expect(source).toMatch(/\bgetStandardEmissiveTexture\s*\(/);
+        expect(source).toMatch(/\bgetPbrClearCoat\s*\(/);
+        expect(source).toMatch(/\bgetShaderTexture\s*\(/);
+        expect(source).not.toMatch(/_getStdTextureCollectors|_getPbrTextureCollectors|_getStdExts|_getPbrExts|_textureSlots/);
     });
 });
