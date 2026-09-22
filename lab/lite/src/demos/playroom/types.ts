@@ -12,11 +12,13 @@ import type {
     PhysicsConstraint,
     PhysicsShape,
     PhysicsWorld,
+    Quat,
     SceneContext,
     SceneNode,
     ShadowGenerator,
     Skeleton,
     Texture2D,
+    Vec3,
 } from "babylon-lite";
 
 export type Vec3Tuple = readonly [number, number, number];
@@ -114,6 +116,12 @@ export interface RagdollState {
         readonly position: { readonly x: number; readonly y: number; readonly z: number };
         readonly rotation: { readonly x: number; readonly y: number; readonly z: number; readonly w: number };
     }>;
+    readonly jointBindPoses: ReadonlyArray<{
+        readonly rotation: Quat;
+        readonly colliderOffset: Vec3;
+    }>;
+    readonly poseOffsetScratch: Vec3;
+    readonly poseRotationScratch: Quat;
     launched: boolean;
 }
 

@@ -52,6 +52,7 @@ function makeMockHknp() {
         MotionType: { STATIC: 0, KINEMATIC: 1, DYNAMIC: 2 },
         ActivationState: { ACTIVE: 0, INACTIVE: 1 },
         Result: { RESULT_OK: 0 },
+        MaterialCombine: { MINIMUM: 0, MAXIMUM: 1 },
         HP_World_Create: vi.fn(() => [0, { id: "world" }]),
         HP_World_SetGravity: vi.fn(),
         HP_World_AddBody: vi.fn(),
@@ -72,6 +73,7 @@ function makeMockHknp() {
         HP_Shape_CreateBox: vi.fn(() => [0, ["shape"]]),
         HP_Shape_CreateContainer: vi.fn(() => [0, ["scaled-shape"]]),
         HP_Shape_AddChild: vi.fn(),
+        HP_Shape_SetMaterial: vi.fn(),
         HP_Body_SetShape: vi.fn((body: number[], shape: string[]) => bodyShapes.set(body[0]!, shape)),
         HP_Body_GetShape: vi.fn((body: number[]) => [0, bodyShapes.get(body[0]!) ?? ["shape"]]),
         HP_Shape_BuildMassProperties: vi.fn((shape: string[]) => [0, shapeMassProperties(shape)]),
@@ -107,6 +109,7 @@ function makeThinMesh(): Mesh {
         worldMatrixVersion: 0,
         position: { x: 50, y: 60, z: 70, set: vi.fn() },
         rotationQuaternion: { x: 0, y: 0, z: 0, w: 1, set: vi.fn() },
+        scaling: { x: 1, y: 1, z: 1 },
         thinInstances: {
             matrices,
             count: 2,
@@ -452,6 +455,39 @@ describe("thin-instance physics bodies", () => {
             ]
         );
         expect(hknp.HP_Body_SetShape).toHaveBeenCalledWith([1], ["scaled-shape"]);
+    });
+
+    it.each([
+        { name: "uniform", scale: [2, 2, 2], nativeScale: [2, 2, 2] },
+        { name: "non-uniform", scale: [2, 3, 4], nativeScale: [2, 3, 4] },
+        { name: "mirrored", scale: [-2, 3, 4], nativeScale: [2, -3, 4] },
+    ])("applies $name carrier scale exactly once for aggregate primitives", async ({ scale, nativeScale }) => {
+        const hknp = makeMockHknp();
+        const world = createHavokWorld(makeScene(), hknp);
+        await enableHavokThinInstancePhysics(world);
+        const mesh = makeThinMesh();
+        mesh.thinInstances!.count = 1;
+        Object.assign(mesh.scaling, { x: scale[0]!, y: scale[1]!, z: scale[2]! });
+        Object.defineProperty(mesh, "worldMatrix", {
+            value: new Float32Array([scale[0]!, 0, 0, 0, 0, scale[1]!, 0, 0, 0, 0, scale[2]!, 0, 0, 0, 0, 1]),
+        });
+
+        createPhysicsAggregate(world, mesh, PhysicsShapeType.BOX, { mass: 0 });
+
+        expect(hknp.HP_Shape_CreateBox).toHaveBeenCalledWith([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]);
+        expect(hknp.HP_Shape_AddChild).toHaveBeenCalledWith(["scaled-shape"], ["shape"], [[0, 0, 0], [0, 0, 0, 1], nativeScale]);
+    });
+
+    it("keeps carrier scale baked when advanced support is enabled without thin-instance physics", () => {
+        const hknp = makeMockHknp();
+        const world = createHavokWorld(makeScene(), hknp);
+        const mesh = makeThinMesh();
+        Object.assign(mesh.scaling, { x: 2, y: 3, z: 4 });
+
+        createPhysicsAggregate(world, mesh, PhysicsShapeType.BOX, { mass: 0 });
+
+        expect(hknp.HP_Shape_CreateBox).toHaveBeenCalledWith([0, 0, 0], [0, 0, 0, 1], [2, 3, 4]);
+        expect(hknp.HP_Shape_CreateContainer).not.toHaveBeenCalled();
     });
 
     it("fans direct body controls only for a thin primary handle", async () => {

@@ -1332,7 +1332,7 @@ export function createPhysicsAggregate(world: PhysicsWorld, node: Mesh, type: Ph
     let shape = options.shape;
     if (!shape) {
         // Build shape parameters, auto-sizing from bounding box if needed
-        const shapeParams = _buildShapeParams(node, type, options);
+        const shapeParams = _buildShapeParams(node, type, options, !(world._thin && world._thinAdvanced && node.thinInstances));
         const hkShape = createPrimitivePhysicsShapeHandle(world._hknp, type, shapeParams);
         if (hkShape === null) {
             throw new Error("createPhysicsAggregate supports only primitive physics shapes.");
@@ -1358,12 +1358,16 @@ export function createPhysicsAggregate(world: PhysicsWorld, node: Mesh, type: Ph
     return { body, shape };
 }
 
-function _buildShapeParams(node: Mesh, type: PhysicsShapeType, options: PhysicsAggregateOptions): PhysicsShapeParameters {
+function _buildShapeParams(node: Mesh, type: PhysicsShapeType, options: PhysicsAggregateOptions, applyNodeScale: boolean): PhysicsShapeParameters {
     const params: PhysicsShapeParameters = {};
-    const scaleX = Math.abs(node.scaling.x);
-    const scaleYMagnitude = Math.abs(node.scaling.y);
-    const scaleZ = Math.abs(node.scaling.z);
-    const scaleY = node.scaling.x * node.scaling.y * node.scaling.z < 0 ? -scaleYMagnitude : scaleYMagnitude;
+    let { x: scaleX, y: scaleY, z: scaleZ } = node.scaling;
+    if (!applyNodeScale) {
+        scaleX = scaleY = scaleZ = 1;
+    }
+    const scaleYMagnitude = Math.abs(scaleY);
+    scaleY = scaleX * scaleY * scaleZ < 0 ? -scaleYMagnitude : scaleYMagnitude;
+    scaleX = Math.abs(scaleX);
+    scaleZ = Math.abs(scaleZ);
     const min = node.boundMin ?? [-0.5, -0.5, -0.5];
     const max = node.boundMax ?? [0.5, 0.5, 0.5];
     const extents = {
@@ -1372,12 +1376,8 @@ function _buildShapeParams(node: Mesh, type: PhysicsShapeType, options: PhysicsA
         z: (max[2] - min[2]) * scaleZ,
     };
 
-    if (options.center) {
-        params.center = options.center;
-    }
-    if (options.rotation) {
-        params.rotation = options.rotation;
-    }
+    params.center = options.center;
+    params.rotation = options.rotation;
 
     switch (type) {
         case PhysicsShapeType.SPHERE: {

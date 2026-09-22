@@ -137,6 +137,22 @@ function writeAimingPositions(target: Float32Array, paths: readonly Vec3[][]): v
     }
 }
 
+function writeAimingCurve(target: Float32Array, angle: number): void {
+    const cosine = Math.cos(angle);
+    const tangent = Math.tan(angle);
+    const pointDistance = (2 * AIMING_SPEED * AIMING_SPEED * cosine * cosine * tangent) / AIMING_GRAVITY / AIMING_SEGMENTS;
+    let offset = 0;
+    for (let pathIndex = 0; pathIndex < 2; pathIndex++) {
+        const z = (pathIndex - 0.5) * AIMING_WIDTH;
+        for (let index = 0; index <= AIMING_SEGMENTS; index++) {
+            const x = index * pointDistance;
+            target[offset++] = x;
+            target[offset++] = x * tangent - (AIMING_GRAVITY * x * x) / (2 * AIMING_SPEED * AIMING_SPEED * cosine * cosine);
+            target[offset++] = z;
+        }
+    }
+}
+
 function createAimingUvs(paths: readonly Vec3[][]): Float32Array | null {
     const pointCount = paths[0]!.length;
     const distances = new Float32Array(pointCount);
@@ -222,15 +238,15 @@ export function updateAimingEffect(effects: PlayroomEffects, origin: Vec3, camer
     const targetYaw = -camera.alpha + Math.PI;
     effects.aimingPitch += (targetPitch - effects.aimingPitch) * 0.1;
     effects.aimingYaw += (targetYaw - effects.aimingYaw) * 0.1;
-    const paths = computeAimingPath(effects.aimingPitch);
     if (!effects.aimingUvsReady) {
+        const paths = computeAimingPath(effects.aimingPitch);
         const uvs = createAimingUvs(paths);
         if (uvs) {
             updateMeshUvs(effects.engine, effects.aiming, uvs);
             effects.aimingUvsReady = true;
         }
     }
-    writeAimingPositions(effects.aimingPositions, paths);
+    writeAimingCurve(effects.aimingPositions, effects.aimingPitch);
     updateMeshPositions(effects.engine, effects.aiming, effects.aimingPositions);
     const horizontal = Math.cos(targetPitch);
     effects.aiming.position.set(origin.x - Math.cos(camera.alpha) * horizontal * 0.5, origin.y, origin.z - Math.sin(camera.alpha) * horizontal * 0.5);

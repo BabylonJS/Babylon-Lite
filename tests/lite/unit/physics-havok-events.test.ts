@@ -203,6 +203,34 @@ describe("Havok body-aware event indexing", () => {
         expect(first[0]!.point).toEqual({ x: 1, y: 2, z: 3 });
     });
 
+    it("defers observers registered during dispatch until the next complete event stream", () => {
+        const hknp = makeHknp();
+        installCollisionStream(hknp, [
+            { type: 1, bodyA: 1, bodyB: 2, pointX: 1 },
+            { type: 2, bodyA: 1, bodyB: 2, pointX: 2 },
+            { type: 4, bodyA: 1, bodyB: 2, pointX: 3 },
+        ]);
+        const scene = makeScene();
+        const world = createHavokWorld(scene, hknp);
+        createPhysicsBody(world, makeNode(), PhysicsMotionType.STATIC);
+        createPhysicsBody(world, makeNode(), PhysicsMotionType.STATIC);
+        const first: string[] = [];
+        const addedDuringDispatch: string[] = [];
+        onPhysicsCollision(world, (info) => {
+            first.push(info.type);
+            if (first.length === 1) {
+                onPhysicsCollision(world, (next) => addedDuringDispatch.push(next.type));
+            }
+        });
+
+        step(scene);
+        expect(first).toEqual(["STARTED", "CONTINUED", "FINISHED"]);
+        expect(addedDuringDispatch).toEqual([]);
+
+        step(scene);
+        expect(addedDuringDispatch).toEqual(["STARTED", "CONTINUED", "FINISHED"]);
+    });
+
     it("keeps removed identities through the current drain and replaces them after native ID reuse", () => {
         const hknp = makeHknp();
         const reusableIds: number[] = [];

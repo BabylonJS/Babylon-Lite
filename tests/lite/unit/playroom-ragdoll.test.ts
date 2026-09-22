@@ -152,7 +152,13 @@ describe("The Playroom ragdoll bind conversion", () => {
             records,
             bones: Object.fromEntries(bones.map((bone) => [bone.name, bone])),
             root: records[rig.joints.findIndex((joint) => joint.name === rig.root)]!,
-        } as RagdollState;
+            jointBindPoses: rig.joints.map((joint) => ({
+                rotation: bindWorldRotation(joint),
+                colliderOffset: colliderOffsetWorld(joint),
+            })),
+            poseOffsetScratch: { x: 0, y: 0, z: 0 },
+            poseRotationScratch: { x: 0, y: 0, z: 0, w: 1 },
+        } as unknown as RagdollState;
         const assets = { rig, bunnySkeleton: skeleton } as unknown as PlayroomAssets;
 
         syncBunnyPose(assets, ragdoll);

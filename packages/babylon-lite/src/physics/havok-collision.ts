@@ -83,6 +83,7 @@ export function onPhysicsCollision(world: PhysicsWorld, cb: (info: PhysicsCollis
     world._collision = collision;
 
     onPhysicsAfterStep(world, () => {
+        const callbackCount = collision.callbacks.length;
         let addr = hknp.HP_World_GetCollisionEvents(world._hkWorld)[1];
         while (addr) {
             const intBuf = new Int32Array(hknp.HEAPU8.buffer, addr);
@@ -110,7 +111,6 @@ export function onPhysicsCollision(world: PhysicsWorld, cb: (info: PhysicsCollis
                 impulse: floatBuf[offB + 13 + 3]!,
                 distance: (pointB.x - pointA.x) * normal.x + (pointB.y - pointA.y) * normal.y + (pointB.z - pointA.z) * normal.z,
             };
-            const callbackCount = collision.callbacks.length;
             for (let index = 0; index < callbackCount; index++) {
                 collision.callbacks[index]!(info);
                 if (world._disposed) {

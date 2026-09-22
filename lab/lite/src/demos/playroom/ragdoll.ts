@@ -50,6 +50,31 @@ function normalizeQuaternion(q: Quat): Quat {
     return { x: q.x * inverseLength, y: q.y * inverseLength, z: q.z * inverseLength, w: q.w * inverseLength };
 }
 
+function multiplyQuaternionToRef(a: Quat, b: Quat, result: Quat): void {
+    result.x = a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y;
+    result.y = a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x;
+    result.z = a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w;
+    result.w = a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z;
+    const inverseLength = 1 / Math.max(1e-12, Math.hypot(result.x, result.y, result.z, result.w));
+    result.x *= inverseLength;
+    result.y *= inverseLength;
+    result.z *= inverseLength;
+    result.w *= inverseLength;
+}
+
+function rotateVectorToRef(rotation: Quat, vector: Vec3, result: Vec3): void {
+    const { x, y, z, w } = rotation;
+    const inverseLengthSquared = 1 / Math.max(1e-12, x * x + y * y + z * z + w * w);
+    const dot = x * vector.x + y * vector.y + z * vector.z;
+    const crossX = y * vector.z - z * vector.y;
+    const crossY = z * vector.x - x * vector.z;
+    const crossZ = x * vector.y - y * vector.x;
+    const vectorScale = w * w - x * x - y * y - z * z;
+    result.x = (2 * dot * x + vectorScale * vector.x + 2 * w * crossX) * inverseLengthSquared;
+    result.y = (2 * dot * y + vectorScale * vector.y + 2 * w * crossY) * inverseLengthSquared;
+    result.z = (2 * dot * z + vectorScale * vector.z + 2 * w * crossZ) * inverseLengthSquared;
+}
+
 export function bindWorldRotation(joint: BunnyRigJoint): Quat {
     const matrix = joint.bindWorldMatrix;
     const m00 = matrix[0]!;
@@ -211,6 +236,12 @@ export function createBunnyRagdoll(scene: SceneContext, physics: PhysicsWorld, a
                 w: record.mesh.rotationQuaternion.w,
             },
         })),
+        jointBindPoses: assets.rig.joints.map((joint) => ({
+            rotation: bindWorldRotation(joint),
+            colliderOffset: colliderOffsetWorld(joint),
+        })),
+        poseOffsetScratch: { x: 0, y: 0, z: 0 },
+        poseRotationScratch: { x: 0, y: 0, z: 0, w: 1 },
         launched: false,
     };
     syncBunnyPose(assets, ragdoll);
@@ -226,8 +257,11 @@ export function syncBunnyPose(assets: PlayroomAssets, ragdoll: RagdollState): vo
             continue;
         }
         const bodyRotation = record.mesh.rotationQuaternion;
-        const colliderOffset = currentColliderOffsetWorld(joint, bodyRotation);
-        const rotation = normalizeQuaternion(quaternionMultiply(bodyRotation, bindWorldRotation(joint)));
+        const bindPose = ragdoll.jointBindPoses[index]!;
+        const colliderOffset = ragdoll.poseOffsetScratch;
+        const rotation = ragdoll.poseRotationScratch;
+        rotateVectorToRef(bodyRotation, bindPose.colliderOffset, colliderOffset);
+        multiplyQuaternionToRef(bodyRotation, bindPose.rotation, rotation);
         setBoneWorldPoseDeferred(
             assets.bunnySkeleton,
             bone,
