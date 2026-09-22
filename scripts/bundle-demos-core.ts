@@ -35,6 +35,7 @@ import {
     measurePage,
     LITE_BUNDLE_TARGET,
     NAME_POLYFILL,
+    litePackageResolverPlugin,
 } from "./bundle-scenes-core";
 import { wgslMinifyPlugin } from "./wgsl-minify-plugin";
 import { fetchDemoAssets } from "./demo-fetchers";
@@ -339,7 +340,7 @@ export async function buildDemo(slug: string, options: { debug?: boolean } = {})
         base: "./",
         publicDir: false,
         logLevel: "warn",
-        plugins: [...(debug ? [] : [wgslMinifyPlugin(), terserPropertyManglePlugin()]), minimalVitePreloadPlugin()],
+        plugins: [litePackageResolverPlugin(srcDir), ...(debug ? [] : [wgslMinifyPlugin(), terserPropertyManglePlugin()]), minimalVitePreloadPlugin()],
         resolve: {
             // Demos resolve `babylon-lite` to the TS SOURCE (not `build/lib`) on purpose:
             // demos have no bundle-size ceilings, and using source keeps the dev iteration
@@ -374,8 +375,11 @@ export async function buildDemo(slug: string, options: { debug?: boolean } = {})
         // logic below picks them up alongside the main entry.
         worker: {
             format: "es",
-            plugins: () => (debug ? [] : [wgslMinifyPlugin(), terserPropertyManglePlugin()]),
+            plugins: () => [litePackageResolverPlugin(srcDir), ...(debug ? [] : [wgslMinifyPlugin(), terserPropertyManglePlugin()])],
             rollupOptions: {
+                // Match the parent demo graph: optional vendor runtimes stay external unless
+                // the demo explicitly opts into the inline Havok alias above.
+                external: (id: string) => id !== "@babylonjs/havok" && isLiteBundleExternal(id),
                 output: {
                     entryFileNames: `${slug}-worker-[hash].js`,
                     chunkFileNames: `${slug}-worker-[name]-[hash].js`,
