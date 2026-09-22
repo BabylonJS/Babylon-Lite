@@ -160,6 +160,40 @@ describe("scheduled compute dispatch", () => {
         expect(device.createBindGroupLayout).not.toHaveBeenCalled();
     });
 
+    it("keeps inferred layouts paired with a synchronous pipeline created during preparation", async () => {
+        const { engine, device, computePasses } = makeEngine();
+        const layout = {} as GPUBindGroupLayout;
+        const synchronousPipeline = { getBindGroupLayout: vi.fn(() => layout) } as unknown as GPUComputePipeline;
+        const asynchronousPipeline = { getBindGroupLayout: vi.fn(() => ({})) } as unknown as GPUComputePipeline;
+        let resolvePreparation!: (pipeline: GPUComputePipeline) => void;
+        vi.mocked(device.createComputePipeline).mockReturnValueOnce(synchronousPipeline);
+        vi.mocked(device.createComputePipelineAsync).mockReturnValueOnce(
+            new Promise((resolve) => {
+                resolvePreparation = resolve;
+            })
+        );
+        const shader = createComputeShader(engine, {
+            computeSource: SOURCE,
+            automaticLayout: true,
+            bindings: [computeUniformBufferBinding("params", { group: 0, binding: 0 }), computeStorageBufferBinding("output", { group: 0, binding: 1 })],
+        });
+        const preparation = prepareComputeShader(shader);
+        const params = createComputeUniformArena(createComputeTask(engine), 16, 1).buffer;
+        const output = createStorageBuffer(engine, 16, { writable: true });
+        const bindings = createComputeBindingSet(shader, { params, output });
+
+        resolvePreparation(asynchronousPipeline);
+        await preparation;
+        const task = createComputeTask(engine);
+        addComputeDispatch(task, createComputeDispatch(shader, bindings, { size: { x: 1 } }));
+        task.record();
+        task._passes[0]!._execute();
+
+        expect(computePasses[0]!.pipelines).toEqual([synchronousPipeline]);
+        expect(synchronousPipeline.getBindGroupLayout).toHaveBeenCalledWith(0);
+        expect(asynchronousPipeline.getBindGroupLayout).not.toHaveBeenCalled();
+    });
+
     it("rejects dynamic offsets with automatic layouts", () => {
         const { engine } = makeEngine();
 

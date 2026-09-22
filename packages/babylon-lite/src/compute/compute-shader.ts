@@ -270,7 +270,7 @@ export async function prepareComputeShader(shader: ComputeShader): Promise<void>
         promise.then(
             (pipeline: GPUComputePipeline) => {
                 if (!shader._destroyed && shader._engine._device === device) {
-                    shader._pipeline = pipeline;
+                    shader._pipeline ??= pipeline;
                 }
                 if (shader._pending === promise) {
                     shader._pending = null;
