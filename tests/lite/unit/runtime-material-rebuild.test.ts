@@ -232,7 +232,7 @@ describe("runtime material rebuild ownership", () => {
         expect(oldDispose).toHaveBeenCalledOnce();
     });
 
-    it("reports an asynchronous material rebuild failure", async () => {
+    it("returns and reports an asynchronous material rebuild failure", async () => {
         const failure = new Error("async material rebuild failed");
         const report = vi.fn();
         const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -254,8 +254,8 @@ describe("runtime material rebuild ownership", () => {
 
         const result = rebuildMaterial(scene, material);
 
-        expect(result).toBeUndefined();
-        await vi.waitFor(() => expect(report).toHaveBeenCalledWith(failure));
+        await expect(result).rejects.toBe(failure);
+        expect(report).toHaveBeenCalledWith(failure);
         expect(log).toHaveBeenCalledWith(failure);
         log.mockRestore();
     });
@@ -279,17 +279,19 @@ describe("runtime material rebuild ownership", () => {
         const mesh = { _gpu: {}, material, children: [] } as unknown as Mesh;
         scene.meshes.push(mesh);
 
-        const completion = rebuildMaterial(scene, material, { awaitCompletion: true, rebuildFrameGraph: true }).then(() => events.push("resolved"));
+        const completion = rebuildMaterial(scene, material, { rebuildFrameGraph: true });
+        expect(completion).toBeInstanceOf(Promise);
+        const resolved = completion!.then(() => events.push("resolved"));
 
         expect(events).toEqual([]);
         expect(scene._frameGraph.build).not.toHaveBeenCalled();
         finish();
-        await completion;
+        await resolved;
 
         expect(events).toEqual(["mesh", "frame graph", "resolved"]);
     });
 
-    it("rebuilds a source material and its MaterialView through the awaited overload", async () => {
+    it("rebuilds a source material and its MaterialView through the returned completion", async () => {
         const scene = createScene({ _retirements: [] } as unknown as EngineContext);
         const rebuild = vi.fn((_target: SceneContext, target: Mesh) => renderable(target));
         const builder = Object.assign(vi.fn(), { _materialFamily: "standard", _rebuildSingle: rebuild }) as unknown as MeshGroupBuilder;
@@ -300,15 +302,15 @@ describe("runtime material rebuild ownership", () => {
         scene.meshes.push(sourceMesh, viewMesh);
         scene._groups.set(builder, Object.assign([sourceMesh, viewMesh], { r: rebuild }));
 
-        await expect(rebuildMaterial(scene, view, { awaitCompletion: true })).resolves.toBeUndefined();
+        await rebuildMaterial(scene, view);
 
         expect(rebuild).toHaveBeenCalledTimes(2);
         expect(rebuild).toHaveBeenNthCalledWith(1, scene, sourceMesh);
         expect(rebuild).toHaveBeenNthCalledWith(2, scene, viewMesh);
     });
 
-    it("rejects awaited rebuild failures without legacy reporting", async () => {
-        const failure = new Error("awaited material rebuild failed");
+    it("rejects and reports returned rebuild failures", async () => {
+        const failure = new Error("material rebuild failed");
         const report = vi.fn();
         const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
         const scene = createScene({} as EngineContext);
@@ -327,9 +329,9 @@ describe("runtime material rebuild ownership", () => {
         const mesh = { _gpu: {}, material, children: [] } as unknown as Mesh;
         scene.meshes.push(mesh);
 
-        await expect(rebuildMaterial(scene, material, { awaitCompletion: true })).rejects.toBe(failure);
-        expect(report).not.toHaveBeenCalled();
-        expect(log).not.toHaveBeenCalled();
+        await expect(rebuildMaterial(scene, material)).rejects.toBe(failure);
+        expect(report).toHaveBeenCalledWith(failure);
+        expect(log).toHaveBeenCalledWith(failure);
         log.mockRestore();
     });
 

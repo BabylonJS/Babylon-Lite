@@ -647,7 +647,7 @@ export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { enableMaterialUvTransform } from "./material/enable-material-uv-transform.js";
 export { hasMaterialUvTransform } from "./material/material-uv-transform.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
-export type { RebuildMaterialOptions, AwaitedRebuildMaterialOptions } from "./material/material-rebuild.js";
+export type { RebuildMaterialOptions } from "./material/material-rebuild.js";
 export { setSceneImageProcessing } from "./scene/scene-image-processing.js";
 export type { ImageProcessingUpdate } from "./scene/scene-image-processing.js";
 export { rebuildScenePbrPipelines, rebuildSceneRenderables } from "./scene/scene-rebuild.js";

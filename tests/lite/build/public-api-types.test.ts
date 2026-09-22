@@ -35,45 +35,38 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
-    it("exposes synchronous and awaited material rebuild overloads", () => {
+    it("exposes conditional material rebuild completion", () => {
         const probePath = resolve(BUILD_DIR, "material-rebuild-api.probe.ts");
         try {
             writeFileSync(
                 probePath,
                 `import {
     rebuildMaterial,
-    type AwaitedRebuildMaterialOptions,
     type Material,
     type MaterialView,
     type RebuildMaterialOptions,
     type SceneContext,
 } from "./index.js";
-
-type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
-type Expect<T extends true> = T;
-type _AwaitedExtendsLegacy = Expect<AwaitedRebuildMaterialOptions extends RebuildMaterialOptions ? true : false>;
-type _AwaitCompletionLiteral = Expect<Equal<AwaitedRebuildMaterialOptions["awaitCompletion"], true>>;
+// @ts-expect-error Completion policy is represented by the return value, not an options type.
+import type { AwaitedRebuildMaterialOptions } from "./index.js";
 
 declare const scene: SceneContext;
 declare const material: Material;
 declare const view: MaterialView;
-declare const awaitedOptions: AwaitedRebuildMaterialOptions;
+declare const options: RebuildMaterialOptions;
 
-const legacyDefault: void = rebuildMaterial(scene, material);
-const legacyOptions: void = rebuildMaterial(scene, view, { rebuildViews: true, rebuildFrameGraph: false });
-const awaitedMaterial: Promise<void> = rebuildMaterial(scene, material, { awaitCompletion: true });
-const awaitedView: Promise<void> = rebuildMaterial(scene, view, {
-    awaitCompletion: true,
+const defaultResult: void | Promise<void> = rebuildMaterial(scene, material);
+const configuredResult: void | Promise<void> = rebuildMaterial(scene, view, {
     rebuildViews: true,
     rebuildFrameGraph: true,
 });
-const awaitedVariable: Promise<void> = rebuildMaterial(scene, view, awaitedOptions);
-// @ts-expect-error The legacy overload remains synchronous.
-const legacyIsNotAwaited: Promise<void> = rebuildMaterial(scene, material);
-// @ts-expect-error The awaited overload returns Promise<void>, never void.
-const awaitedIsNotLegacy: void = rebuildMaterial(scene, material, { awaitCompletion: true });
+const variableResult: void | Promise<void> = rebuildMaterial(scene, view, options);
+// @ts-expect-error Rebuild completion is conditional.
+const promiseOnly: Promise<void> = rebuildMaterial(scene, material);
+// @ts-expect-error Rebuild completion is conditional.
+const voidOnly: void = rebuildMaterial(scene, material);
 
-void [legacyDefault, legacyOptions, awaitedMaterial, awaitedView, awaitedVariable];
+void [defaultResult, configuredResult, variableResult, promiseOnly, voidOnly];
 `
             );
             const result = spawnSync(

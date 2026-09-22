@@ -12,10 +12,6 @@ export interface RebuildMaterialOptions {
     rebuildFrameGraph?: boolean;
 }
 
-export interface AwaitedRebuildMaterialOptions extends RebuildMaterialOptions {
-    readonly awaitCompletion: true;
-}
-
 interface DetachablePacket {
     _disposed?: boolean;
     _owner?: DetachablePacket[];
@@ -26,27 +22,15 @@ type DetachableDisposer = (() => void) & { p?: DetachablePacket };
 /** Rebuild renderables whose pipeline/bind-group feature state depends on a material.
  *  Use after texture, sampler, bind-group layout, culling, or feature changes.
  *  UBO-only scalar/vector changes should use markMaterialUboDirty instead. */
-export function rebuildMaterial(scene: SceneContext, materialOrView: Material, options: AwaitedRebuildMaterialOptions): Promise<void>;
-export function rebuildMaterial(scene: SceneContext, materialOrView: Material, options?: RebuildMaterialOptions): void;
-export function rebuildMaterial(scene: SceneContext, materialOrView: Material, options?: RebuildMaterialOptions | AwaitedRebuildMaterialOptions): void | Promise<void> {
-    const awaitCompletion = !!options && "awaitCompletion" in options && options.awaitCompletion;
-    try {
-        const completion = rebuildMaterialRenderables(scene, materialOrView, options);
-        if (awaitCompletion) {
-            return completion ?? Promise.resolve();
-        }
-        if (completion) {
-            void completion.catch((error) => {
-                scene._runtimeBuilds?._x(error);
-                console.error(error);
-            });
-        }
-    } catch (error) {
-        if (awaitCompletion) {
-            return Promise.reject(error instanceof Error ? error : new Error("Material rebuild failed", { cause: error }));
-        }
-        throw error;
+export function rebuildMaterial(scene: SceneContext, materialOrView: Material, options?: RebuildMaterialOptions): void | Promise<void> {
+    const completion = rebuildMaterialRenderables(scene, materialOrView, options);
+    if (completion) {
+        void completion.catch((error) => {
+            scene._runtimeBuilds?._x(error);
+            console.error(error);
+        });
     }
+    return completion;
 }
 
 function rebuildMaterialRenderables(scene: SceneContext, materialOrView: Material, options?: RebuildMaterialOptions): Promise<void> | undefined {
