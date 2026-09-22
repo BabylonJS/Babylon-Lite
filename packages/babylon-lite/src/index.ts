@@ -644,6 +644,7 @@ export { enableMaterialTracking } from "./material/observable-material.js";
 // ─── Loaders ─────────────────────────────────────────────────────────
 export { loadGltf } from "./loader-gltf/load-gltf.js";
 export { enableGltfCameras } from "./loader-gltf/gltf-feature-camera.js";
+export { enableGltfCpuTangents } from "./loader-gltf/gltf-feature-cpu-tangents.js";
 export type { AssetContainer } from "./asset-container.js";
 export { getContainerMeshes } from "./asset-container.js";
 export { selectVariant, getVariantNames, resetVariant } from "./loader-gltf/material-variants.js";
@@ -736,6 +737,7 @@ export {
     setBoneScaling,
     setBoneVisible,
     setBonePoseDeferred,
+    setBoneWorldPoseDeferred,
     bakeSkeleton,
     clearBoneOverride,
 } from "./skeleton/bone-control.js";
@@ -1189,14 +1191,11 @@ export {
     setPhysicsShapeFilterCollideMask,
     setPhysicsShapeMaterial,
     setPhysicsBodyMass,
-    setPhysicsBodyMassProperties,
     applyPhysicsImpulse,
     setPhysicsBodyLinearVelocity,
     getPhysicsBodyLinearVelocity,
     getPhysicsBodyAngularVelocity,
     setPhysicsBodyAngularVelocity,
-    lockPhysicsBodyRotationAxes,
-    unlockPhysicsBodyRotationAxes,
     setPhysicsBodyMotionType,
     setPhysicsBodyTransform,
     removePhysicsBody,
@@ -1209,7 +1208,10 @@ export {
     PhysicsConstraintType,
     PhysicsConstraintAxis,
 } from "./physics/havok.js";
+export { setPhysicsBodyMassProperties } from "./physics/havok-body-mass-properties.js";
+export { lockPhysicsBodyRotationAxes, unlockPhysicsBodyRotationAxes } from "./physics/havok-rotation-locks.js";
 export { enableHavokThinInstancePhysicsSync } from "./physics/enable-havok-thin-instance-physics-sync.js";
+export { enableHavokThinInstanceAdvancedPhysics } from "./physics/havok-thin-instance-advanced.js";
 export type {
     PhysicsWorld,
     PhysicsBody,

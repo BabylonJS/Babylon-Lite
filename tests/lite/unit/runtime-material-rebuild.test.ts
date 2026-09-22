@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { Material } from "../../../packages/babylon-lite/src/material/material";
 import { rebuildMaterial } from "../../../packages/babylon-lite/src/material/material-rebuild";
+import type { NodeMaterial } from "../../../packages/babylon-lite/src/material/node/node-material";
+import { buildNodeMeshRenderables } from "../../../packages/babylon-lite/src/material/node/node-renderable";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { setThinInstances } from "../../../packages/babylon-lite/src/mesh/thin-instance";
 import type { MeshGroupBuilder, MeshRebuilder, MeshRebuildResources, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
@@ -11,6 +13,7 @@ import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/s
 import { rebuildScenePbrPipelines } from "../../../packages/babylon-lite/src/scene/scene-rebuild";
 import { B as startRuntimeMeshBuild } from "../../../packages/babylon-lite/src/scene/scene-runtime-mesh-build";
 import { _t } from "../../../packages/babylon-lite/src/frame-graph/transmission";
+import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 
 function createScene(engine: EngineContext): SceneContext {
     return {
@@ -34,6 +37,72 @@ function createScene(engine: EngineContext): SceneContext {
 
 function renderable(mesh: Mesh): Renderable {
     return { mesh, order: 100, isTransparent: false } as Renderable;
+}
+
+function createNodeRebuildFixture() {
+    const buffers: Array<GPUBuffer & { label?: string; destroy: ReturnType<typeof vi.fn> }> = [];
+    const engine = {
+        format: "bgra8unorm",
+        _retirements: [],
+        _device: {
+            createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => {
+                const buffer = { label: descriptor.label, size: descriptor.size, destroy: vi.fn() } as unknown as GPUBuffer & {
+                    label?: string;
+                    destroy: ReturnType<typeof vi.fn>;
+                };
+                buffers.push(buffer);
+                return buffer;
+            }),
+            createBindGroup: vi.fn(() => ({}) as GPUBindGroup),
+            queue: { writeBuffer: vi.fn() },
+        },
+    } as unknown as EngineContext;
+    const scene = createScene(engine);
+    const builder = Object.assign(vi.fn(), { _materialFamily: "node" }) as unknown as MeshGroupBuilder;
+    const material = {
+        _buildGroup: builder,
+        _compile: {
+            _meshBGL: {},
+            _nodeUboBinding: 1,
+            _nodeUboSpec: { _totalBytes: 16, _offsets: new Map(), _structBody: "" },
+            _meshUboFloats: 20,
+            _usesMeshAttributeFlags: false,
+            _textureBindings: [],
+            _envBindings: null,
+            _shadowBindings: [],
+            _esmShadowParamsBinding: null,
+            _pipelineForMesh: () => ({}),
+        },
+        _renderFeatures: null,
+        _vertexAttrNames: ["position"],
+        _needsAlphaBlending: false,
+        _uboDirty: false,
+        _uniformValues: new Map(),
+    } as unknown as NodeMaterial;
+    const meshes = Array.from({ length: 2 }, () => {
+        return {
+            material,
+            visible: true,
+            worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+            worldMatrixVersion: 1,
+            receiveShadows: false,
+            _gpu: {
+                _vbKey: "shared",
+                _baseVertex: 0,
+                indexCount: 3,
+                indexBuffer: {} as GPUBuffer,
+                indexFormat: "uint16",
+                positionBuffer: { size: 12 } as GPUBuffer,
+                vertexBuffers: new Map([["position", {} as GPUBuffer]]),
+            },
+        } as unknown as Mesh;
+    });
+    const built = buildNodeMeshRenderables(scene, meshes);
+    scene.meshes.push(...meshes);
+    scene._renderables.push(...built.renderables);
+    const group = Object.assign(meshes, { r: built.rebuildSingle, o: built.renderables });
+    scene._groups.set(builder, group);
+    return { buffers, engine, group, material, meshes, scene };
 }
 
 describe("runtime material rebuild ownership", () => {
@@ -340,6 +409,28 @@ describe("runtime material rebuild ownership", () => {
         expect(oldDisposeB).toHaveBeenCalledOnce();
     });
 
+    it("removes an emptied Node packet group before binding synchronous material rebuild outputs", () => {
+        const { buffers, engine, group, material, scene } = createNodeRebuildFixture();
+        const oldBuffers = buffers.slice();
+
+        rebuildMaterial(scene, material);
+
+        expect(scene._renderables).toHaveLength(2);
+        expect(group.o).toEqual([]);
+        expect(() => {
+            for (const output of scene._renderables) {
+                output.bind(engine, { _colorFormat: "bgra8unorm", _depthStencilFormat: "depth32float", _sampleCount: 1 });
+            }
+        }).not.toThrow();
+        expect(oldBuffers.every((buffer) => !buffer.destroy.mock.calls.length)).toBe(true);
+
+        disposeGpuResourceRetirements(engine);
+
+        expect(oldBuffers.every((buffer) => buffer.destroy.mock.calls.length === 1)).toBe(true);
+        expect(buffers.slice(oldBuffers.length).every((buffer) => !buffer.destroy.mock.calls.length)).toBe(true);
+        expect(scene._renderables).toHaveLength(2);
+    });
+
     it("routes a PBR material swap that gains gamma albedo through the asynchronous scene rebuild", async () => {
         const scene = createScene({ _retirements: [] } as unknown as EngineContext);
         scene._built = true;
@@ -566,9 +657,26 @@ describe("runtime material rebuild ownership", () => {
         const engine = { _retirements: [] } as unknown as EngineContext;
         const scene = createScene(engine);
         scene._built = true;
-        const packet = { _disposed: false, _owner: [] as unknown[] };
-        packet._owner.push(packet);
-        const oldDispose = Object.assign(vi.fn(), { p: packet });
+        const onOwnerEmpty = vi.fn();
+        const sibling = { _disposed: false };
+        const owner: unknown[] = [];
+        const packet: { _disposed: boolean; _owner?: unknown[]; _onOwnerEmpty?: () => void } = { _disposed: false, _owner: owner, _onOwnerEmpty: onOwnerEmpty };
+        owner.push(packet, sibling);
+        const oldDispose = Object.assign(
+            vi.fn(() => {
+                packet._disposed = true;
+                if (packet._owner) {
+                    const index = packet._owner.indexOf(packet);
+                    if (index >= 0) {
+                        packet._owner.splice(index, 1);
+                    }
+                    packet._owner = undefined;
+                } else {
+                    packet._onOwnerEmpty?.();
+                }
+            }),
+            { p: packet }
+        );
         const builder = (async (ctx: SceneContext, meshes: Mesh[]) => {
             const rebuild = (_target: SceneContext, mesh: Mesh): Renderable => renderable(mesh);
             for (const mesh of meshes) {
@@ -590,8 +698,14 @@ describe("runtime material rebuild ownership", () => {
 
         expect(packet._disposed).toBe(true);
         expect(packet._owner).toBeUndefined();
+        expect(owner).toEqual([sibling]);
+        expect(onOwnerEmpty).not.toHaveBeenCalled();
         expect(oldDispose).not.toHaveBeenCalled();
         expect(engine._retirements).toHaveLength(1);
+
+        disposeGpuResourceRetirements(engine);
+        expect(oldDispose).toHaveBeenCalledOnce();
+        expect(onOwnerEmpty).not.toHaveBeenCalled();
     });
 
     it("keeps a removed disposer packet reachable while an async runtime build is active", async () => {

@@ -335,6 +335,7 @@ function serveReferenceImages(): Plugin {
                         ".bin": "application/octet-stream",
                         ".glb": "model/gltf-binary",
                         ".env": "application/octet-stream",
+                        ".mp3": "audio/mpeg",
                         ".wad": "application/octet-stream",
                         ".txt": "text/plain; charset=utf-8",
                         ".md": "text/markdown; charset=utf-8",

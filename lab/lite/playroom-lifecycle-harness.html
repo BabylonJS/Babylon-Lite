@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="icon" href="data:," />
+        <title>Playroom lifecycle harness</title>
+        <style>
+            html,
+            body,
+            canvas {
+                width: 100%;
+                height: 100%;
+                margin: 0;
+                overflow: hidden;
+            }
+            canvas {
+                display: block;
+            }
+            .playroom-ui {
+                position: fixed;
+                inset: 0;
+                pointer-events: none;
+            }
+            button {
+                pointer-events: auto;
+            }
+            .controls {
+                position: absolute;
+                bottom: 0;
+            }
+            [hidden],
+            #playroom-lifecycle-output {
+                display: none;
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="renderCanvas"></canvas>
+        <main class="playroom-ui">
+            <section id="playroom-startup">
+                <button id="playroom-startup-action" type="button">Play</button>
+            </section>
+            <section class="playroom-hud">
+                <span id="playroom-score">0</span>
+                <span id="playroom-throw-count">1 / 3</span>
+                <span id="playroom-audio">Loading audio</span>
+                <nav class="controls">
+                    <button id="playroom-kick" type="button" hidden>Kick</button>
+                    <button id="playroom-next" type="button" hidden>Next</button>
+                    <button id="playroom-replay" type="button" hidden>Replay</button>
+                    <button id="playroom-free" type="button" aria-pressed="false">Free</button>
+                </nav>
+            </section>
+        </main>
+        <script id="playroom-lifecycle-output" type="application/json"></script>
+        <script type="module" src="./src/tests/playroom-lifecycle-harness.ts"></script>
+    </body>
+</html>
