@@ -25,7 +25,7 @@ This section supersedes every conflicting public-contract or ownership statement
 - **REQ-CORR-6:** `getMaterialTextures()` MUST unwrap `MaterialView` and enumerate public fields/domain getters, Shader declarations, and Node input handles directly in legacy order. It MUST NOT depend on optional-extension registries, descriptors, or raw GPU scans.
 - **REQ-CORR-7:** `TextureMetadata` MUST contain only safe optional runtime facts. Unknown facts are omitted; raw GPU handles, private field names, UI state, labels, directions, and mutation semantics are forbidden.
 - **REQ-CORR-8:** Domain accessor modules MUST be side-effect-free and unused root imports MUST emit byte-identical code.
-- **REQ-CORR-9:** `rebuildMaterial` MUST return `void | Promise<void>` according to whether the rebuild schedules asynchronous work. Synchronous setup failures MUST throw. Asynchronous failures MUST reject the returned promise and MUST also be observed by the existing scene runtime error channel so fire-and-forget calls do not create unhandled rejections.
+- **REQ-CORR-9:** `rebuildMaterial` MUST return `void | Promise<void>` according to whether the rebuild schedules asynchronous work. Synchronous setup failures MUST throw. Asynchronous failures MUST reject the returned promise without being consumed internally.
 
 ### Capability legend
 

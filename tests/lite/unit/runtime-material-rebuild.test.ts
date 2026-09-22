@@ -232,7 +232,7 @@ describe("runtime material rebuild ownership", () => {
         expect(oldDispose).toHaveBeenCalledOnce();
     });
 
-    it("returns and reports an asynchronous material rebuild failure", async () => {
+    it("returns an asynchronous material rebuild failure", async () => {
         const failure = new Error("async material rebuild failed");
         const report = vi.fn();
         const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -255,8 +255,8 @@ describe("runtime material rebuild ownership", () => {
         const result = rebuildMaterial(scene, material);
 
         await expect(result).rejects.toBe(failure);
-        expect(report).toHaveBeenCalledWith(failure);
-        expect(log).toHaveBeenCalledWith(failure);
+        expect(report).not.toHaveBeenCalled();
+        expect(log).not.toHaveBeenCalled();
         log.mockRestore();
     });
 
@@ -309,7 +309,7 @@ describe("runtime material rebuild ownership", () => {
         expect(rebuild).toHaveBeenNthCalledWith(2, scene, viewMesh);
     });
 
-    it("rejects and reports returned rebuild failures", async () => {
+    it("does not consume returned rebuild failures", async () => {
         const failure = new Error("material rebuild failed");
         const report = vi.fn();
         const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -330,8 +330,8 @@ describe("runtime material rebuild ownership", () => {
         scene.meshes.push(mesh);
 
         await expect(rebuildMaterial(scene, material)).rejects.toBe(failure);
-        expect(report).toHaveBeenCalledWith(failure);
-        expect(log).toHaveBeenCalledWith(failure);
+        expect(report).not.toHaveBeenCalled();
+        expect(log).not.toHaveBeenCalled();
         log.mockRestore();
     });
 
