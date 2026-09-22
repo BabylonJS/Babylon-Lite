@@ -94,6 +94,10 @@ function loadRagdollBindLandmarks(): RagdollBindLandmark[] {
 }
 
 const ragdollBindLandmarks = loadRagdollBindLandmarks();
+const ragdollRig = JSON.parse(readFileSync(resolve(process.cwd(), "lab", "public", "playroom", "gltf", "bunny-rig.json"), "utf8")) as {
+    root: string;
+    joints: Array<{ name: string; nearestConfiguredParent: string | null }>;
+};
 
 function quaternionMultiply(left: readonly number[], right: readonly number[]): number[] {
     return [
@@ -134,8 +138,32 @@ function expectFinalSkinAligned(before: RagdollSkinSnapshot, current: RagdollSki
     expect(current.gpu.jointsBufferId).toBe(before.gpu.jointsBufferId);
     expect(current.gpu.weightsBufferId).toBe(before.gpu.weightsBufferId);
 
+    const expectedPositions = new Map<string, readonly number[]>();
+    const unresolved = new Set(ragdollRig.joints.map((joint) => joint.name));
+    while (unresolved.size > 0) {
+        let resolved = false;
+        for (const joint of ragdollRig.joints) {
+            if (!unresolved.has(joint.name) || (joint.nearestConfiguredParent !== null && !expectedPositions.has(joint.nearestConfiguredParent))) {
+                continue;
+            }
+            if (joint.nearestConfiguredParent === null) {
+                expectedPositions.set(joint.name, current.bodies[joint.name]!.jointPosition);
+            } else {
+                const parentName = joint.nearestConfiguredParent;
+                const parentDelta = quaternionMultiply(current.bodies[parentName]!.rotation, inverseQuaternion(before.bodies[parentName]!.rotation));
+                expectedPositions.set(
+                    joint.name,
+                    add(expectedPositions.get(parentName)!, rotate(parentDelta, subtract(before.bones[joint.name]!.position, before.bones[parentName]!.position)))
+                );
+            }
+            unresolved.delete(joint.name);
+            resolved = true;
+        }
+        expect(resolved, "ragdoll configured-joint hierarchy").toBe(true);
+    }
+
     for (const configuredName of Object.keys(current.bodies)) {
-        expect(distance(current.bones[configuredName]!.position, current.bodies[configuredName]!.jointPosition), `${configuredName} palette joint`).toBeLessThan(0.001);
+        expect(distance(current.bones[configuredName]!.position, expectedPositions.get(configuredName)!), `${configuredName} source hierarchy`).toBeLessThan(0.001);
         const delta = quaternionMultiply(current.bodies[configuredName]!.rotation, inverseQuaternion(before.bodies[configuredName]!.rotation));
         for (let axis = 0; axis < 3; axis++) {
             expect(distance(current.bones[configuredName]!.axes[axis]!, rotate(delta, before.bones[configuredName]!.axes[axis]!)), `${configuredName} axis ${axis}`).toBeLessThan(
@@ -152,7 +180,10 @@ function expectFinalSkinAligned(before: RagdollSkinSnapshot, current: RagdollSki
         const beforeBody = before.bodies[configuredName]!;
         const currentBody = current.bodies[configuredName]!;
         const delta = quaternionMultiply(currentBody.rotation, inverseQuaternion(beforeBody.rotation));
-        const expectedPosition = add(currentBody.jointPosition, rotate(delta, subtract(before.bones[landmark.name]!.position, beforeBody.jointPosition)));
+        const expectedPosition = add(
+            current.bones[configuredName]!.position,
+            rotate(delta, subtract(before.bones[landmark.name]!.position, before.bones[configuredName]!.position))
+        );
         expect(distance(current.bones[landmark.name]!.position, expectedPosition), `${landmark.name} inherited position`).toBeLessThan(0.002);
         for (let axis = 0; axis < 3; axis++) {
             expect(

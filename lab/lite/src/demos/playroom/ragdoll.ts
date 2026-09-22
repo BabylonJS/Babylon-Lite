@@ -200,6 +200,7 @@ function cloneBunny(scene: SceneContext, assets: PlayroomAssets): SceneNode {
 export function createBunnyRagdoll(scene: SceneContext, physics: PhysicsWorld, assets: PlayroomAssets, world: WorldState, launch: Vec3): RagdollState {
     const visualRoot = cloneBunny(scene, assets);
     const records = assets.rig.joints.map((joint) => addBody(scene, physics, world, joint, launch));
+    const jointIndexByName = new Map(assets.rig.joints.map((joint, index) => [joint.name, index]));
     const byName = new Map(assets.rig.joints.map((joint, index) => [joint.name, { joint, record: records[index]! }]));
     const constraints = [];
     for (const joint of assets.rig.joints) {
@@ -221,6 +222,27 @@ export function createBunnyRagdoll(scene: SceneContext, physics: PhysicsWorld, a
     }
     const bones = Object.fromEntries(assets.rig.joints.map((joint) => [joint.name, getBoneByName(assets.bunnySkeleton, joint.name)]));
     const root = byName.get(assets.rig.root)!.record;
+    const jointBindPoses = assets.rig.joints.map((joint) => {
+        const parentIndex = joint.nearestConfiguredParent === null ? -1 : jointIndexByName.get(joint.nearestConfiguredParent)!;
+        const parent = parentIndex < 0 ? null : assets.rig.joints[parentIndex]!;
+        return {
+            rotation: bindWorldRotation(joint),
+            colliderOffset: colliderOffsetWorld(joint),
+            parentIndex,
+            parentLocalOffset:
+                parent === null
+                    ? { x: 0, y: 0, z: 0 }
+                    : rotateVector(quaternionInverse(bindWorldRotation(parent)), {
+                          x: joint.bindWorldPosition[0] - parent.bindWorldPosition[0],
+                          y: joint.bindWorldPosition[1] - parent.bindWorldPosition[1],
+                          z: joint.bindWorldPosition[2] - parent.bindWorldPosition[2],
+                      }),
+        };
+    });
+    const jointDepth = (index: number): number => {
+        const parentIndex = jointBindPoses[index]!.parentIndex;
+        return parentIndex < 0 ? 0 : jointDepth(parentIndex) + 1;
+    };
     const ragdoll: RagdollState = {
         records,
         constraints,
@@ -236,12 +258,10 @@ export function createBunnyRagdoll(scene: SceneContext, physics: PhysicsWorld, a
                 w: record.mesh.rotationQuaternion.w,
             },
         })),
-        jointBindPoses: assets.rig.joints.map((joint) => ({
-            rotation: bindWorldRotation(joint),
-            colliderOffset: colliderOffsetWorld(joint),
-        })),
-        poseOffsetScratch: { x: 0, y: 0, z: 0 },
-        poseRotationScratch: { x: 0, y: 0, z: 0, w: 1 },
+        jointBindPoses,
+        poseOrder: assets.rig.joints.map((_, index) => index).sort((left, right) => jointDepth(left) - jointDepth(right)),
+        posePositions: assets.rig.joints.map(() => ({ x: 0, y: 0, z: 0 })),
+        poseRotations: assets.rig.joints.map(() => ({ x: 0, y: 0, z: 0, w: 1 })),
         launched: false,
     };
     syncBunnyPose(assets, ragdoll);
@@ -249,7 +269,7 @@ export function createBunnyRagdoll(scene: SceneContext, physics: PhysicsWorld, a
 }
 
 export function syncBunnyPose(assets: PlayroomAssets, ragdoll: RagdollState): void {
-    for (let index = 0; index < assets.rig.joints.length; index++) {
+    for (const index of ragdoll.poseOrder) {
         const joint = assets.rig.joints[index]!;
         const bone = ragdoll.bones[joint.name];
         const record = ragdoll.records[index]!;
@@ -258,16 +278,27 @@ export function syncBunnyPose(assets: PlayroomAssets, ragdoll: RagdollState): vo
         }
         const bodyRotation = record.mesh.rotationQuaternion;
         const bindPose = ragdoll.jointBindPoses[index]!;
-        const colliderOffset = ragdoll.poseOffsetScratch;
-        const rotation = ragdoll.poseRotationScratch;
-        rotateVectorToRef(bodyRotation, bindPose.colliderOffset, colliderOffset);
+        const position = ragdoll.posePositions[index]!;
+        const rotation = ragdoll.poseRotations[index]!;
         multiplyQuaternionToRef(bodyRotation, bindPose.rotation, rotation);
+        if (bindPose.parentIndex < 0) {
+            rotateVectorToRef(bodyRotation, bindPose.colliderOffset, position);
+            position.x = record.mesh.position.x - position.x;
+            position.y = record.mesh.position.y - position.y;
+            position.z = record.mesh.position.z - position.z;
+        } else {
+            const parentPosition = ragdoll.posePositions[bindPose.parentIndex]!;
+            rotateVectorToRef(ragdoll.poseRotations[bindPose.parentIndex]!, bindPose.parentLocalOffset, position);
+            position.x += parentPosition.x;
+            position.y += parentPosition.y;
+            position.z += parentPosition.z;
+        }
         setBoneWorldPoseDeferred(
             assets.bunnySkeleton,
             bone,
-            (record.mesh.position.x - colliderOffset.x) / assets.rig.gameScale,
-            (record.mesh.position.y - colliderOffset.y) / assets.rig.gameScale,
-            (record.mesh.position.z - colliderOffset.z) / assets.rig.gameScale,
+            position.x / assets.rig.gameScale,
+            position.y / assets.rig.gameScale,
+            position.z / assets.rig.gameScale,
             rotation.x,
             rotation.y,
             rotation.z,

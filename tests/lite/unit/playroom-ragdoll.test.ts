@@ -15,7 +15,6 @@ import type { Bone, PhysicsWorld, Quat, SceneContext, Skeleton } from "../../../
 import {
     bindWorldRotation,
     colliderOffsetWorld,
-    currentColliderOffsetWorld,
     launchBunny,
     ragdollBodyPosition,
     ragdollJointPivots,
@@ -152,12 +151,38 @@ describe("The Playroom ragdoll bind conversion", () => {
             records,
             bones: Object.fromEntries(bones.map((bone) => [bone.name, bone])),
             root: records[rig.joints.findIndex((joint) => joint.name === rig.root)]!,
-            jointBindPoses: rig.joints.map((joint) => ({
-                rotation: bindWorldRotation(joint),
-                colliderOffset: colliderOffsetWorld(joint),
-            })),
-            poseOffsetScratch: { x: 0, y: 0, z: 0 },
-            poseRotationScratch: { x: 0, y: 0, z: 0, w: 1 },
+            jointBindPoses: rig.joints.map((joint) => {
+                const parentIndex = joint.nearestConfiguredParent === null ? -1 : rig.joints.findIndex((candidate) => candidate.name === joint.nearestConfiguredParent);
+                const parent = parentIndex < 0 ? null : rig.joints[parentIndex]!;
+                const parentRotation = parent === null ? identity : bindWorldRotation(parent);
+                return {
+                    rotation: bindWorldRotation(joint),
+                    colliderOffset: colliderOffsetWorld(joint),
+                    parentIndex,
+                    parentLocalOffset:
+                        parent === null
+                            ? { x: 0, y: 0, z: 0 }
+                            : rotateByQuaternion(
+                                  { x: -parentRotation.x, y: -parentRotation.y, z: -parentRotation.z, w: parentRotation.w },
+                                  {
+                                      x: joint.bindWorldPosition[0] - parent.bindWorldPosition[0],
+                                      y: joint.bindWorldPosition[1] - parent.bindWorldPosition[1],
+                                      z: joint.bindWorldPosition[2] - parent.bindWorldPosition[2],
+                                  }
+                              ),
+                };
+            }),
+            poseOrder: rig.joints
+                .map((_, index) => index)
+                .sort((left, right) => {
+                    const depth = (index: number): number => {
+                        const parent = rig.joints[index]!.nearestConfiguredParent;
+                        return parent === null ? 0 : depth(rig.joints.findIndex((joint) => joint.name === parent)) + 1;
+                    };
+                    return depth(left) - depth(right);
+                }),
+            posePositions: rig.joints.map(() => ({ x: 0, y: 0, z: 0 })),
+            poseRotations: rig.joints.map(() => ({ x: 0, y: 0, z: 0, w: 1 })),
         } as unknown as RagdollState;
         const assets = { rig, bunnySkeleton: skeleton } as unknown as PlayroomAssets;
 
@@ -167,16 +192,10 @@ describe("The Playroom ragdoll bind conversion", () => {
         expect(skeleton._overrides.size).toBe(0);
         expect(skeleton._worldOverrides.size).toBe(rig.joints.length);
         for (const [index, joint] of rig.joints.entries()) {
-            const record = records[index]!;
-            const bodyRotation = record.mesh.rotationQuaternion;
-            const offset = currentColliderOffsetWorld(joint, bodyRotation);
             const matrix = skeleton._worldOverrides.get(index)!;
-            const expectedPosition = [
-                (record.mesh.position.x - offset.x) / rig.gameScale,
-                (record.mesh.position.y - offset.y) / rig.gameScale,
-                (record.mesh.position.z - offset.z) / rig.gameScale,
-            ];
-            expectedPosition.forEach((value, axis) => expect(matrix[12 + axis]).toBeCloseTo(value, 5));
+            const expectedPosition = ragdoll.posePositions[index]!;
+            [expectedPosition.x, expectedPosition.y, expectedPosition.z].forEach((value, axis) => expect(matrix[12 + axis]).toBeCloseTo(value / rig.gameScale, 5));
+            const bodyRotation = records[index]!.mesh.rotationQuaternion;
             const desiredRotation = multiplyQuaternions(bodyRotation, bindWorldRotation(joint));
             const expectedAxes = [
                 rotateByQuaternion(desiredRotation, { x: -1, y: 0, z: 0 }),
@@ -190,6 +209,9 @@ describe("The Playroom ragdoll bind conversion", () => {
                 expect(matrix[offset + 2]).toBeCloseTo(axis.z, 5);
             });
         }
+        const armIndex = rig.joints.findIndex((joint) => joint.name === "arm_r");
+        const armMatrix = skeleton._worldOverrides.get(armIndex)!;
+        expect(armMatrix[12]).not.toBeCloseTo(records[armIndex]!.mesh.position.x / rig.gameScale, 2);
     });
 
     it("keeps joint anchors coincident and uses source joint axes", () => {

@@ -119,9 +119,12 @@ export interface RagdollState {
     readonly jointBindPoses: ReadonlyArray<{
         readonly rotation: Quat;
         readonly colliderOffset: Vec3;
+        readonly parentIndex: number;
+        readonly parentLocalOffset: Vec3;
     }>;
-    readonly poseOffsetScratch: Vec3;
-    readonly poseRotationScratch: Quat;
+    readonly poseOrder: readonly number[];
+    readonly posePositions: Vec3[];
+    readonly poseRotations: Quat[];
     launched: boolean;
 }
 

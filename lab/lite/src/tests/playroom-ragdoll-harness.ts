@@ -17,7 +17,7 @@ import {
 import type { Mesh, PhysicsBody, PhysicsWorld, SceneContext, SceneNode } from "babylon-lite";
 import { resetGameplayCounters } from "../demos/playroom/game.js";
 import { loadPlayroomAssets } from "../demos/playroom/assets.js";
-import { createBunnyRagdoll, currentColliderOffsetWorld, installBunnyPoseSync, launchBunny, relocateBunny } from "../demos/playroom/ragdoll.js";
+import { createBunnyRagdoll, installBunnyPoseSync, launchBunny, relocateBunny } from "../demos/playroom/ragdoll.js";
 import type { PlayroomAssets, RagdollState } from "../demos/playroom/types.js";
 import { buildPlayroomWorld } from "../demos/playroom/world.js";
 
@@ -166,9 +166,8 @@ function skeletonPaletteMatchesPhysics(assets: PlayroomAssets, ragdoll: RagdollS
         const sourceBindPoint = inverseAffinePoint(mesh.worldMatrix, [-joint.bindWorldPosition[0], joint.bindWorldPosition[1], joint.bindWorldPosition[2]]);
         const palettePoint = transformPoint(mesh.skeleton!.boneMatrices.subarray(boneIndex * 16, boneIndex * 16 + 16), sourceBindPoint);
         const renderedJoint = transformPoint(mesh.worldMatrix, palettePoint);
-        const record = ragdoll.records[recordIndex]!;
-        const colliderOffset = currentColliderOffsetWorld(joint, record.mesh.rotationQuaternion);
-        return closeNumbers(renderedJoint, [record.mesh.position.x - colliderOffset.x, record.mesh.position.y - colliderOffset.y, record.mesh.position.z - colliderOffset.z], 1e-4);
+        const expected = ragdoll.posePositions[recordIndex]!;
+        return closeNumbers(renderedJoint, [expected.x, expected.y, expected.z], 1e-4);
     });
 }
 
