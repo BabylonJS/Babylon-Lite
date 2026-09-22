@@ -1,5 +1,5 @@
 import { TU } from "../engine/gpu-flags.js";
-import type { Texture2D, Texture2DRecoverySource } from "./texture-2d.js";
+import type { Texture2D } from "./texture-2d.js";
 
 export interface TextureTransform {
     readonly uOffset: number;
@@ -72,7 +72,7 @@ export function getTextureMetadata(texture: unknown): TextureMetadata | undefine
         const origin = readOrigin(shape);
         const format = readString(shape.gpuTexture?.format);
         const sampleType = readSampleType(shape, format);
-        const sampler = readSamplerMetadata(readRetainedSampler(shape));
+        const sampler = readSamplerMetadata(readKnownSampler(shape));
         return {
             kind: shape.kind,
             name: readName(shape),
@@ -197,24 +197,7 @@ function readOrigin(shape: TextureShape): TextureMetadata["origin"] {
     if (shape.wrapper._sampleType === "depth") {
         return "sampled-depth";
     }
-    const source = shape.wrapper._recoverySource as Texture2DRecoverySource | undefined;
-    switch (source?.kind) {
-        case "url":
-            return "url-raster";
-        case "solid":
-            return "solid";
-        case "pixels":
-            return "pixels";
-        case "external":
-        case "bitmap":
-            return "external-image";
-        case "render":
-            return "render-target";
-        case "dynamic":
-            return "dynamic";
-        default:
-            return undefined;
-    }
+    return undefined;
 }
 
 function readString(value: unknown): string | undefined {
@@ -248,41 +231,11 @@ function readColorSpace(format: string | undefined, sampleType: TextureMetadata[
     return format.endsWith("-srgb") ? "srgb" : "linear";
 }
 
-function readRetainedSampler(shape: TextureShape): RetainedSampler | undefined {
+function readKnownSampler(shape: TextureShape): RetainedSampler | undefined {
     if (shape.kind === "cube") {
         return { magFilter: "linear", minFilter: "linear", mipmapFilter: "linear" };
     }
-    const source = shape.wrapper._recoverySource as Texture2DRecoverySource | undefined;
-    switch (source?.kind) {
-        case "url": {
-            const mipmaps = source.opts?.mipMaps !== false;
-            const minFilter = source.opts?.minFilter ?? "linear";
-            const magFilter = source.opts?.magFilter ?? "linear";
-            return {
-                addressModeU: source.opts?.addressModeU ?? "repeat",
-                addressModeV: source.opts?.addressModeV ?? "repeat",
-                minFilter,
-                magFilter,
-                mipmapFilter: mipmaps ? "linear" : "nearest",
-                maxAnisotropy: mipmaps && minFilter === "linear" && magFilter === "linear" ? 4 : 1,
-            };
-        }
-        case "solid":
-            return { magFilter: "linear", minFilter: "linear" };
-        case "pixels":
-            return {
-                addressModeU: source.options?.addressModeU,
-                addressModeV: source.options?.addressModeV,
-                minFilter: source.options?.minFilter,
-                magFilter: source.options?.magFilter,
-            };
-        case "external":
-        case "render":
-        case "dynamic":
-            return source.samplerDesc;
-        default:
-            return undefined;
-    }
+    return undefined;
 }
 
 function readSamplerMetadata(sampler: RetainedSampler | undefined): TextureSamplerMetadata | undefined {
@@ -314,8 +267,10 @@ function readRenderAttachment(shape: TextureShape): boolean | undefined {
 }
 
 function supportsTransform(shape: TextureShape): boolean {
-    const origin = readOrigin(shape);
-    return shape.kind === "2d" && origin !== "render-target" && origin !== "sampled-depth";
+    if (shape.kind !== "2d" || shape.wrapper._uvTransformDisabled === true) {
+        return false;
+    }
+    return readSampleType(shape, readString(shape.gpuTexture?.format)) !== "depth";
 }
 
 function readTransform(wrapper: Record<string, unknown>): TextureTransform | undefined {

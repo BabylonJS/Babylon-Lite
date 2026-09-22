@@ -36,7 +36,7 @@ function transform(overrides: Partial<TextureTransform> = {}): TextureTransform 
 }
 
 describe("texture metadata", () => {
-    it("returns safe retained facts without backing handles, private origins, or UI state", () => {
+    it("returns observable facts without recovery-only provenance, backing handles, or UI state", () => {
         const texture = texture2d({
             name: "Albedo",
             _recoverySource: {
@@ -52,7 +52,7 @@ describe("texture metadata", () => {
         expect(metadata).toEqual({
             kind: "2d",
             name: "Albedo",
-            origin: "url-raster",
+            origin: undefined,
             width: 32,
             height: 16,
             layers: undefined,
@@ -62,18 +62,10 @@ describe("texture metadata", () => {
             sampleType: "float",
             colorSpace: "srgb",
             invertY: true,
-            sampler: {
-                addressModeU: "mirror-repeat",
-                addressModeV: "repeat",
-                addressModeW: "clamp-to-edge",
-                magFilter: "linear",
-                minFilter: "linear",
-                mipmapFilter: "linear",
-                maxAnisotropy: 4,
-            },
+            sampler: undefined,
             capabilities: {
                 renderAttachment: true,
-                dynamicUpdate: false,
+                dynamicUpdate: undefined,
                 sampledDepth: false,
             },
         });
@@ -177,7 +169,7 @@ describe("texture transforms", () => {
 
     it("validates complete finite values and rejects unsupported wrappers", () => {
         const texture = texture2d();
-        const renderTarget = texture2d({ _recoverySource: { kind: "render", width: 32, height: 16, format: "rgba8unorm", samplerDesc: {} } });
+        const renderTarget = texture2d({ _uvTransformDisabled: true });
         const depth = texture2d({ _sampleType: "depth" });
         const array = { ...texture2d(), layers: 2 } as Texture2DArray;
 

@@ -42,6 +42,8 @@ export interface Texture2D {
     invertY?: boolean;
     /** @internal Depth textures require texture_depth_2d shader bindings. */
     _sampleType?: "float" | "depth";
+    /** @internal This texture cannot participate in material UV transforms. */
+    _uvTransformDisabled?: true;
     /** @internal Retained source for opt-in device-lost recovery. */
     _recoverySource?: Texture2DRecoverySource;
 }

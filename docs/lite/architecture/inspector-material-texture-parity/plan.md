@@ -12,7 +12,7 @@ T-01–T-29 below accurately record the originally approved implementation. API 
 The correction:
 
 1. Deletes `packages/babylon-lite/src/inspection/`.
-2. Root-exports domain getters for material source, optional Standard/PBR state, Shader declarations/values, and safe texture metadata/transforms. Stored configuration objects, tuples, uniform arrays, and texture wrappers are returned by identity through readonly TypeScript contracts rather than defensive copies or runtime freezing.
+2. Root-exports domain getters for material source, optional Standard/PBR state, Shader declarations/values, and safe texture metadata/transforms. Stored configuration objects, tuples, uniform arrays, and texture wrappers are returned by identity through readonly TypeScript contracts rather than defensive copies or runtime freezing. Texture metadata uses only observable wrapper/GPU facts and never device-recovery sources; unknown provenance and opaque sampler descriptors remain omitted.
 3. Rewrites `getMaterialTextures()` directly from material family state, preserving MaterialView unwrapping, duplicates, and legacy family ordering without extension registries.
 4. Keeps existing setters plus `markMaterialUboDirty`, `enableMaterialUvTransform`, and `rebuildMaterial`; Inspector performs consumer discovery and invalidation planning. `rebuildMaterial` exposes its conditional `void | Promise<void>` completion directly and does not consume asynchronous failures internally.
 5. Replaces descriptor/mutation tests with `material-accessors`, `texture-accessors`, material-family compatibility, public declaration, and domain tree-shaking coverage.

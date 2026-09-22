@@ -1062,7 +1062,7 @@ All requirements are architecturally satisfied. “Verified by” identifies the
 5. Treat `U/R` as a before/after feature-boundary decision, not a static control property.
 6. Keep unsupported directions absent. In particular, PBR lightmap/metallic-reflectance clear and reversible one-way PBR modes are not invented.
 7. Include Standard `CubeTexture` in discovery and selection but keep its P4 page metadata-only.
-8. Report unknown provenance/sampler details honestly instead of adding always-on metadata or guessing.
+8. Report unknown provenance/sampler details honestly instead of adding always-on metadata or guessing. Texture metadata never reads the optional device-recovery source; transform eligibility uses an intrinsic wrapper capability plus observable sample type.
 9. Reuse controlled vector/color and existing pane/selection/watcher conventions, but introduce a runtime-neutral binding adapter rather than reusing Babylon.js `BaseTexture` selectors.
 10. Defer the entire preview/editor boundary and every Lite texture action to P11b.
 
