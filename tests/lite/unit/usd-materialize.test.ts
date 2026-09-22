@@ -12,6 +12,9 @@ import { disposeUsd } from "../../../packages/babylon-lite/src/loader-usd/load-u
 import { materializeUsd } from "../../../packages/babylon-lite/src/loader-usd/usd-materialize";
 import { getContainerMeshes } from "../../../packages/babylon-lite/src/asset-container";
 import { createPbrMaterial, type PbrMaterialProps } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
+import { _computePbrMaterialFeatures } from "../../../packages/babylon-lite/src/material/pbr/pbr-material-features";
+import { createPbrComposer } from "../../../packages/babylon-lite/src/material/pbr/pbr-compose";
+import { setPbrMetallicReflectance } from "../../../packages/babylon-lite/src/material/pbr/set-metallic-reflectance";
 import type { MaterialPlugin } from "../../../packages/babylon-lite/src/material/plugin/material-plugin";
 import { createSceneNode, type SceneNode } from "../../../packages/babylon-lite/src/scene/scene-node";
 import { setParent } from "../../../packages/babylon-lite/src/scene/set-parent";
@@ -216,6 +219,43 @@ describe("USD command materialization", () => {
 
         disposeUsd(container);
         expect(textures.every((texture) => vi.mocked(texture.destroy).mock.calls.length === 1)).toBe(true);
+    });
+
+    it("composes USD occlusion after mutable reflectance initialization", async () => {
+        vi.stubGlobal(
+            "createImageBitmap",
+            vi.fn(async () => ({ width: 1, height: 1, close: vi.fn() }))
+        );
+        const fixture = usdFixture({ textures: true });
+        const { engine } = usdTestEngine();
+        const container = usdTestContainer(fixture);
+
+        await materializeUsd(engine, fixture, container);
+        const material = getContainerMeshes(container)[0]!.material as PbrMaterialProps;
+        setPbrMetallicReflectance(material, { f0Factor: 0.5 });
+        const features = _computePbrMaterialFeatures(material);
+        const composePbr = createPbrComposer({
+            _singleLightWGSL: "",
+            _getSingleLightBlock: null,
+            _multiLightWGSL: "",
+            _multiLightLoop: "",
+            _tm: undefined,
+            _fogHelper: "",
+            _fogBlock: "",
+            _createPbrTemplateExt: null,
+            _flatNormalWgsl: "",
+            _createPbrShadowFragment: null,
+            _shadowLights: [],
+            _createThinInstanceFragment: null,
+        });
+        const wgsl = composePbr(features.features, features.features2, 0, 0, 0, "", "", undefined, "", 0, material._pi)._fragmentWGSL;
+        const initialization = wgsl.search(/var\s+occlusion\s*=\s*mix\(/);
+        const usdOverride = wgsl.search(/occlusion\s*=\s*clamp\(s\s*\*\s*material\.usdOcclusionScale\.x/);
+
+        expect(initialization).toBeGreaterThanOrEqual(0);
+        expect(usdOverride).toBeGreaterThan(initialization);
+        expect(wgsl).not.toMatch(/let\s+occlusion\s*=\s*mix\(/);
+        disposeUsd(container);
     });
 
     it("keeps existing PBR plugin signatures stable when USD registers the bridge", () => {

@@ -66,13 +66,14 @@ function materialCode(bindings: UsdMaterialBindings): WgslSource {
     if (bindings.roughness) {
         code = wgsl`${code}{let s=${scalarExpression("roughness", bindings.roughness.channel)};roughness=clamp(s*material.usdRoughnessScale.x+material.usdRoughnessBias.x,0.0,1.0);}`;
     }
-    if (bindings.occlusion) {
-        code = wgsl`${code}{let s=${scalarExpression("occlusion", bindings.occlusion.channel)};occlusion=clamp(s*material.usdOcclusionScale.x+material.usdOcclusionBias.x,0.0,1.0);}`;
-    }
     if (bindings.emissive) {
         code = wgsl`${code}{let s=${sampleExpression("emissive")};emissive=s.rgb*material.usdEmissiveScale.rgb+material.usdEmissiveBias.rgb;}`;
     }
     return code;
+}
+
+function occlusionCode(binding: UsdTextureBinding | undefined): WgslSource {
+    return binding ? wgsl`{let s=${scalarExpression("occlusion", binding.channel)};occlusion=clamp(s*material.usdOcclusionScale.x+material.usdOcclusionBias.x,0.0,1.0);}` : wgsl``;
 }
 
 function normalCode(binding: UsdTextureBinding | undefined): WgslSource {
@@ -136,6 +137,7 @@ export function createUsdMaterialPlugin(bindings: UsdMaterialBindings): Material
         ];
     });
     const code = materialCode(bindings);
+    const occlusion = occlusionCode(bindings.occlusion);
     const normal = normalCode(bindings.normal);
     return {
         name: "usd-preview-surface",
@@ -144,6 +146,7 @@ export function createUsdMaterialPlugin(bindings: UsdMaterialBindings): Material
                 ? {
                       CUSTOM_FRAGMENT_UPDATE_ALPHA: code,
                       ...(normal ? { CUSTOM_FRAGMENT_UPDATE_DIFFUSE: normal } : undefined),
+                      ...(occlusion ? { CUSTOM_FRAGMENT_BEFORE_LIGHTS: occlusion } : undefined),
                   }
                 : null;
         },

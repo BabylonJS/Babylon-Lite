@@ -124,8 +124,10 @@ USD's seven independent Preview Surface bindings are represented by a
 loader-owned PBR material plugin. The plugin samples each authored output
 channel independently, applies its float4 scale/bias and UV transform, and
 overrides base color, opacity, metallic, roughness, occlusion and emissive
-values before lighting. Normal bindings apply their authored transform in
-Lite's cotangent-frame normal path. Plugin registration occurs only when a
+values before lighting. The occlusion override runs after the native PBR path
+initializes its mutable occlusion value, including metallic-reflectance variants,
+so plugin composition never assigns before declaration. Normal bindings apply
+their authored transform in Lite's cotangent-frame normal path. Plugin registration occurs only when a
 loaded USD material needs it, so non-USD and untextured USD scenes retain no
 plugin bridge. The process-wide plugin signature table is append-only:
 registering a USD plugin cannot invalidate the cached signature of a material
