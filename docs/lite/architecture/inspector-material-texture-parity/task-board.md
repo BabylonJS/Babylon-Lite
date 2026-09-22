@@ -4,7 +4,6 @@
 
 | M | ID | Task | Skill | Notes |
 |---|----|------|-------|-------|
-| P6 | T-25 | Add lazy Lite material family adapters and Properties integration | execute-implementation-plan | plan T20 |
 | P6 | T-26 | Add Lite metadata-only texture adapter and Properties integration | execute-implementation-plan | plan T21 |
 | P6 | T-27 | Add adapter operation generations, refresh, errors, and cleanup | execute-implementation-plan | plan T22 |
 | P7 | T-28 | Close the focused behavior, accessibility, and refresh matrix | execute-implementation-plan | plan T23 |
@@ -38,5 +37,6 @@
 | P4 | T-22 | Add metadata-only texture core and accessible operation errors | execute-implementation-plan | done 2026-09-21 · BabylonJS/Babylon.js commit ed06d5cd · safe metadata rows, navigation, and no preview/editor coupling |
 | P5 | T-23 | Adapt Babylon.js material fields and bindings to shared P4 cores | execute-implementation-plan | done 2026-09-21 · BabylonJS/Babylon.js commit ed06d5cd · existing runtime behavior adapted to shared contracts |
 | P5 | T-24 | Adapt Babylon.js metadata rows without touching preview/editor | execute-implementation-plan | done 2026-09-21 · BabylonJS/Babylon.js commit ed06d5cd · metadata adapters preserve existing preview/editor ownership |
+| P6 | T-25 | Add lazy Lite material family adapters and Properties integration | execute-implementation-plan | done 2026-09-21 · BabylonJS/Babylon.js commit ef36dd5b · lazy Standard/PBR/Shader/Node adapters, index-scoped mutations, exact-wrapper navigation, and focused integration coverage |
 
 ## Untriaged
