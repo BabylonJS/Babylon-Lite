@@ -148,6 +148,9 @@ export function createComputeShader(engine: EngineContext, options: ComputeShade
         }
         let dynamicIndex = -1;
         if (decl._layout.buffer?.hasDynamicOffset) {
+            if (options.automaticLayout) {
+                throw new Error(`ComputeShader: automatic layouts do not support dynamic offset binding "${decl.name}".`);
+            }
             dynamicIndex = dynamicCounts[decl.group] ?? 0;
             dynamicCounts[decl.group] = dynamicIndex + 1;
         }

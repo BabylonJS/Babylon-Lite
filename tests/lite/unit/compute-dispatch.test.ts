@@ -160,6 +160,18 @@ describe("scheduled compute dispatch", () => {
         expect(device.createBindGroupLayout).not.toHaveBeenCalled();
     });
 
+    it("rejects dynamic offsets with automatic layouts", () => {
+        const { engine } = makeEngine();
+
+        expect(() =>
+            createComputeShader(engine, {
+                computeSource: SOURCE,
+                automaticLayout: true,
+                bindings: [computeStorageBufferBinding("output", { group: 0, binding: 1, dynamicOffset: true })],
+            })
+        ).toThrow(/automatic layouts do not support dynamic offset binding "output"/);
+    });
+
     it("rejects pipeline variants for shaders with automatic layouts", () => {
         const { engine } = makeEngine();
         const shader = createComputeShader(engine, {
