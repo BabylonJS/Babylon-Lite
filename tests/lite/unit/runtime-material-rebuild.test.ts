@@ -291,7 +291,7 @@ describe("runtime material rebuild ownership", () => {
         const pending = processMaterialSwaps(scene) as Promise<void>;
         await started;
 
-        rebuildMaterial(scene, standardMaterial);
+        void rebuildMaterial(scene, standardMaterial);
         expect(oldDispose).not.toHaveBeenCalled();
 
         finishBuild();
@@ -301,7 +301,7 @@ describe("runtime material rebuild ownership", () => {
         expect(oldDispose).toHaveBeenCalledOnce();
     });
 
-    it("returns an asynchronous material rebuild failure", async () => {
+    it("returns and reports an asynchronous material rebuild failure", async () => {
         const failure = new Error("async material rebuild failed");
         const report = vi.fn();
         const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -324,8 +324,8 @@ describe("runtime material rebuild ownership", () => {
         const result = rebuildMaterial(scene, material);
 
         await expect(result).rejects.toBe(failure);
-        expect(report).not.toHaveBeenCalled();
-        expect(log).not.toHaveBeenCalled();
+        expect(report).toHaveBeenCalledWith(failure);
+        expect(log).toHaveBeenCalledWith(failure);
         log.mockRestore();
     });
 
@@ -378,7 +378,7 @@ describe("runtime material rebuild ownership", () => {
         expect(rebuild).toHaveBeenNthCalledWith(2, scene, viewMesh);
     });
 
-    it("does not consume returned rebuild failures", async () => {
+    it("rejects and reports returned rebuild failures", async () => {
         const failure = new Error("material rebuild failed");
         const report = vi.fn();
         const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -399,8 +399,8 @@ describe("runtime material rebuild ownership", () => {
         scene.meshes.push(mesh);
 
         await expect(rebuildMaterial(scene, material)).rejects.toBe(failure);
-        expect(report).not.toHaveBeenCalled();
-        expect(log).not.toHaveBeenCalled();
+        expect(report).toHaveBeenCalledWith(failure);
+        expect(log).toHaveBeenCalledWith(failure);
         log.mockRestore();
     });
 
@@ -409,7 +409,7 @@ describe("runtime material rebuild ownership", () => {
         const builder = (async () => ({ renderables: [], rebuildSingle: (_target: SceneContext, target: Mesh) => renderable(target) })) as MeshGroupBuilder;
         const material = { _buildGroup: builder, _renderFeatures: { features: 0, features2: 0 } } as Material & { _renderFeatures?: unknown };
 
-        rebuildMaterial(scene, material);
+        void rebuildMaterial(scene, material);
 
         expect(material._renderFeatures).toBeUndefined();
     });
@@ -434,7 +434,7 @@ describe("runtime material rebuild ownership", () => {
         scene._renderables.push(previous);
         scene._meshDisposables.set(mesh, [oldDispose]);
 
-        rebuildMaterial(scene, material);
+        void rebuildMaterial(scene, material);
 
         expect(oldDispose).not.toHaveBeenCalled();
         expect(engine._retirements).toHaveLength(1);
@@ -470,7 +470,7 @@ describe("runtime material rebuild ownership", () => {
         scene._meshDisposables.set(meshA, [oldDisposeA]);
         scene._meshDisposables.set(meshB, [oldDisposeB]);
 
-        rebuildMaterial(scene, material);
+        void rebuildMaterial(scene, material);
 
         expect(packetA._disposed).toBe(true);
         expect(packetB._disposed).toBe(true);
@@ -490,7 +490,7 @@ describe("runtime material rebuild ownership", () => {
         const { buffers, engine, group, material, scene } = createNodeRebuildFixture();
         const oldBuffers = buffers.slice();
 
-        rebuildMaterial(scene, material);
+        void rebuildMaterial(scene, material);
 
         expect(scene._renderables).toHaveLength(2);
         expect(group.o).toEqual([]);

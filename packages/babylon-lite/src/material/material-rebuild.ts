@@ -24,7 +24,14 @@ type DetachableDisposer = (() => void) & { p?: DetachablePacket };
  *  Use after texture, sampler, bind-group layout, culling, or feature changes.
  *  UBO-only scalar/vector changes should use markMaterialUboDirty instead. */
 export function rebuildMaterial(scene: SceneContext, materialOrView: Material, options?: RebuildMaterialOptions): void | Promise<void> {
-    return rebuildMaterialRenderables(scene, materialOrView, options);
+    const completion = rebuildMaterialRenderables(scene, materialOrView, options);
+    if (completion) {
+        void completion.catch((error) => {
+            scene._runtimeBuilds?._x(error);
+            console.error(error);
+        });
+    }
+    return completion;
 }
 
 function rebuildMaterialRenderables(scene: SceneContext, materialOrView: Material, options?: RebuildMaterialOptions): Promise<void> | undefined {
