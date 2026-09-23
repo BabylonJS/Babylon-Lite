@@ -132,14 +132,23 @@ describe("UniformBuffer compute subset", () => {
         expect(buffer.isSync).toBe(true);
     });
 
-    it("bit-casts integer updates and forwards disposal", () => {
+    it("preserves exact signed and unsigned integer bits for scalar and array updates", () => {
         const buffer = new UniformBuffer(engine);
-        buffer.addUniform("value", 1);
-        buffer.updateInt("value", -2);
+        buffer.addUniform("signed", 1);
+        buffer.addUniform("unsigned", 1);
+        buffer.addUniform("signedArray", 1, 2);
+        buffer.addUniform("unsignedArray", 1, 2);
+        buffer.updateInt("signed", -2147483648);
+        buffer.updateUInt("unsigned", 0x80000000);
+        buffer.updateIntArray("signedArray", new Int32Array([-2147483648, 1]));
+        buffer.updateUIntArray("unsignedArray", new Uint32Array([0x80000000, 2]));
         buffer.update();
 
         const uploaded = mocks.updateUniformBuffer.mock.calls[0]![2] as Float32Array;
-        expect(new Int32Array(uploaded.buffer)[0]).toBe(-2);
+        expect(Array.from(new Int32Array(uploaded.buffer).subarray(0, 1))).toEqual([-2147483648]);
+        expect(Array.from(new Uint32Array(uploaded.buffer).subarray(1, 2))).toEqual([0x80000000]);
+        expect(Array.from(new Int32Array(uploaded.buffer).subarray(4, 9))).toEqual([-2147483648, 0, 0, 0, 1]);
+        expect(Array.from(new Uint32Array(uploaded.buffer).subarray(12, 17))).toEqual([0x80000000, 0, 0, 0, 2]);
         buffer.dispose();
         expect(mocks.disposeUniformBuffer).toHaveBeenCalledWith(mocks.createUniformBuffer.mock.results[0]!.value);
     });
@@ -270,6 +279,20 @@ describe("ComputeShader forwarding", () => {
         expect(shader.isReady()).toBe(true);
         expect(compiled).toHaveBeenCalledWith({ name: "lite-shader" });
         expect(mocks.submitComputeTasks).not.toHaveBeenCalled();
+    });
+
+    it("reconciles bindings initialized by onCompiled before the first dispatch", () => {
+        const shader = new ComputeShader("compiled-bindings", engine, { computeSource: "source" }, { bindingsMapping: { uniforms: { group: 0, binding: 0 } } });
+        const initialized = { byteLength: 16 };
+        const compiled = vi.fn(() => shader.setUniformBuffer("uniforms", initialized as never));
+        shader.onCompiled = compiled;
+
+        expect(shader.dispatch(1)).toBe(true);
+        expect(compiled).toHaveBeenCalledTimes(1);
+        expect(mocks.createComputeShader).toHaveBeenCalledTimes(2);
+        expect(mocks.createComputeBindingSet).toHaveBeenCalledTimes(1);
+        expect(mocks.createComputeBindingSet).toHaveBeenCalledWith({ name: "lite-shader" }, { uniforms: initialized });
+        expect(mocks.createComputeDispatch).toHaveBeenCalledWith({ name: "lite-shader" }, { name: "lite-bindings" }, { size: { x: 1, y: 1, z: 1 } });
     });
 
     it("forwards indirect dispatch and preserves its default byte offset", () => {

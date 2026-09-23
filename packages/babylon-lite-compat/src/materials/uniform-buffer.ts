@@ -37,15 +37,6 @@ interface UniformArrayLayout {
     readonly arraySize: number;
 }
 
-function bitCast(values: readonly number[], unsigned: boolean): Float32Array {
-    const result = new Float32Array(values.length);
-    const view = unsigned ? new Uint32Array(result.buffer) : new Int32Array(result.buffer);
-    for (let i = 0; i < values.length; i++) {
-        view[i] = values[i]!;
-    }
-    return result;
-}
-
 /** Minimum Babylon.js UniformBuffer surface needed to author compute bindings. */
 export class UniformBuffer {
     private readonly _data: number[];
@@ -101,10 +92,8 @@ export class UniformBuffer {
     public readonly updateFloat4 = (name: string, x: number, y: number, z: number, w: number, _suffix?: string): void => this.updateUniform(name, [x, y, z, w], 4);
     public readonly updateFloatArray = (name: string, array: Float32Array, _suffix?: string): void => this.updateUniformArray(name, array, array.length);
     public readonly updateArray = (name: string, array: number[]): void => this.updateUniformArray(name, array, array.length);
-    public readonly updateIntArray = (name: string, array: Int32Array): void =>
-        this.updateUniformArray(name, new Float32Array(array.buffer, array.byteOffset, array.length), array.length);
-    public readonly updateUIntArray = (name: string, array: Uint32Array): void =>
-        this.updateUniformArray(name, new Float32Array(array.buffer, array.byteOffset, array.length), array.length);
+    public readonly updateIntArray = (name: string, array: Int32Array): void => this._updateIntegerUniformArray(name, array, false);
+    public readonly updateUIntArray = (name: string, array: Uint32Array): void => this._updateIntegerUniformArray(name, array, true);
     public readonly updateMatrix = (name: string, matrix: MatrixLike): void => this.updateUniform(name, Array.from(matrix.asArray()), 16);
     public readonly updateMatrices = (name: string, matrices: Float32Array): void => this.updateUniform(name, matrices, matrices.length);
     public readonly updateVector3 = (name: string, vector: Vector3Like): void => this.updateFloat3(name, vector.x, vector.y, vector.z);
@@ -112,14 +101,14 @@ export class UniformBuffer {
     public readonly updateColor3 = (name: string, color: Color3Like, suffix?: string): void => this.updateFloat3(name, color.r, color.g, color.b, suffix);
     public readonly updateColor4 = (name: string, color: Color3Like, alpha: number, suffix?: string): void => this.updateFloat4(name, color.r, color.g, color.b, alpha, suffix);
     public readonly updateDirectColor4 = (name: string, color: Color4Like, suffix?: string): void => this.updateFloat4(name, color.r, color.g, color.b, color.a, suffix);
-    public readonly updateInt = (name: string, x: number, _suffix?: string): void => this.updateUniform(name, bitCast([x], false), 1);
-    public readonly updateInt2 = (name: string, x: number, y: number, _suffix?: string): void => this.updateUniform(name, bitCast([x, y], false), 2);
-    public readonly updateInt3 = (name: string, x: number, y: number, z: number, _suffix?: string): void => this.updateUniform(name, bitCast([x, y, z], false), 3);
-    public readonly updateInt4 = (name: string, x: number, y: number, z: number, w: number, _suffix?: string): void => this.updateUniform(name, bitCast([x, y, z, w], false), 4);
-    public readonly updateUInt = (name: string, x: number, _suffix?: string): void => this.updateUniform(name, bitCast([x], true), 1);
-    public readonly updateUInt2 = (name: string, x: number, y: number, _suffix?: string): void => this.updateUniform(name, bitCast([x, y], true), 2);
-    public readonly updateUInt3 = (name: string, x: number, y: number, z: number, _suffix?: string): void => this.updateUniform(name, bitCast([x, y, z], true), 3);
-    public readonly updateUInt4 = (name: string, x: number, y: number, z: number, w: number, _suffix?: string): void => this.updateUniform(name, bitCast([x, y, z, w], true), 4);
+    public readonly updateInt = (name: string, x: number, _suffix?: string): void => this._updateIntegerUniform(name, [x], false);
+    public readonly updateInt2 = (name: string, x: number, y: number, _suffix?: string): void => this._updateIntegerUniform(name, [x, y], false);
+    public readonly updateInt3 = (name: string, x: number, y: number, z: number, _suffix?: string): void => this._updateIntegerUniform(name, [x, y, z], false);
+    public readonly updateInt4 = (name: string, x: number, y: number, z: number, w: number, _suffix?: string): void => this._updateIntegerUniform(name, [x, y, z, w], false);
+    public readonly updateUInt = (name: string, x: number, _suffix?: string): void => this._updateIntegerUniform(name, [x], true);
+    public readonly updateUInt2 = (name: string, x: number, y: number, _suffix?: string): void => this._updateIntegerUniform(name, [x, y], true);
+    public readonly updateUInt3 = (name: string, x: number, y: number, z: number, _suffix?: string): void => this._updateIntegerUniform(name, [x, y, z], true);
+    public readonly updateUInt4 = (name: string, x: number, y: number, z: number, w: number, _suffix?: string): void => this._updateIntegerUniform(name, [x, y, z, w], true);
 
     public get useUbo(): boolean {
         return true;
@@ -337,6 +326,47 @@ export class UniformBuffer {
             const padding = alignment - (this._uniformLocationPointer % alignment);
             this._data.push(...new Array<number>(padding).fill(0));
             this._uniformLocationPointer += padding;
+        }
+    }
+
+    private _updateIntegerUniform(uniformName: string, data: ArrayLike<number>, unsigned: boolean): void {
+        let location = this._uniformLocations.get(uniformName);
+        if (location === undefined) {
+            this.addUniform(uniformName, data.length);
+            location = this._uniformLocations.get(uniformName)!;
+        }
+        this.create();
+        if (data.length > (this._uniformSizes.get(uniformName) ?? 0)) {
+            throw new RangeError(`Uniform "${uniformName}" has room for ${this._uniformSizes.get(uniformName)} values, not ${data.length}.`);
+        }
+        const view = unsigned ? new Uint32Array(this._bufferData!.buffer) : new Int32Array(this._bufferData!.buffer);
+        for (let i = 0; i < data.length; i++) {
+            this._setInteger(view, location + i, data[i]!, unsigned);
+        }
+    }
+
+    private _updateIntegerUniformArray(uniformName: string, data: ArrayLike<number>, unsigned: boolean): void {
+        const location = this._uniformLocations.get(uniformName);
+        const layout = this._uniformArraySizes.get(uniformName);
+        if (location === undefined || !layout) {
+            throw new Error(`Uniform array "${uniformName}" must be declared with addUniform before it can be updated.`);
+        }
+        this.create();
+        if (data.length > layout.strideSize * layout.arraySize) {
+            throw new RangeError(`Uniform array "${uniformName}" accepts at most ${layout.strideSize * layout.arraySize} values, not ${data.length}.`);
+        }
+        const view = unsigned ? new Uint32Array(this._bufferData!.buffer) : new Int32Array(this._bufferData!.buffer);
+        for (let i = 0; i < data.length; i++) {
+            const destination = location + Math.floor(i / layout.strideSize) * 4 + (i % layout.strideSize);
+            this._setInteger(view, destination, data[i]!, unsigned);
+        }
+    }
+
+    private _setInteger(view: Int32Array | Uint32Array, index: number, input: number, unsigned: boolean): void {
+        const value = unsigned ? input >>> 0 : input | 0;
+        if (view[index] !== value) {
+            view[index] = value;
+            this._needSync = true;
         }
     }
 }

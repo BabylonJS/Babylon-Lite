@@ -241,8 +241,27 @@ export class ComputeShader {
     }
 
     private _createGraph(): { shader: LiteComputeShader; bindings: LiteComputeBindingSet } {
+        const shader = this._createShader();
+        let compiledNow = false;
+        if (!this._compiled) {
+            this._compiled = true;
+            compiledNow = true;
+            this.onCompiled?.(shader);
+        }
+        if (compiledNow && this._bindingsDirty) {
+            const recreateShader = this._shaderDirty;
+            this._invalidateBindings(recreateShader);
+            this._bindingsDirty = false;
+            this._shaderDirty = false;
+            const finalShader = recreateShader ? this._createShader() : shader;
+            this._compiled = true;
+            return { shader: finalShader, bindings: this._createBindingSet(finalShader) };
+        }
+        return { shader, bindings: this._createBindingSet(shader) };
+    }
+
+    private _createShader(): LiteComputeShader {
         const declarations: ComputeBindingDecl[] = [];
-        const resources: Record<string, unknown> = {};
         for (const [name, binding] of this._bindings) {
             const location = this._options.bindingsMapping[name];
             if (!location) {
@@ -256,21 +275,25 @@ export class ComputeShader {
                           access: this._options.useExplicitComputePipelineLayout === true ? "read-write" : "read",
                       })
             );
-            resources[name] = binding.resource;
         }
-        const shader = (this._shader ??= createComputeShader(this._engine._lite, {
+        return (this._shader ??= createComputeShader(this._engine._lite, {
             name: this.name,
             computeSource: this._source,
             entryPoint: this._options.entryPoint,
             bindings: declarations,
             automaticLayout: this._options.useExplicitComputePipelineLayout !== true,
         }));
-        const bindings = (this._bindingSet ??= createComputeBindingSet(shader, resources as ComputeBindingResources));
-        if (!this._compiled) {
-            this._compiled = true;
-            this.onCompiled?.(shader);
+    }
+
+    private _createBindingSet(shader: LiteComputeShader): LiteComputeBindingSet {
+        if (!this._bindingSet) {
+            const resources: Record<string, unknown> = {};
+            for (const [name, binding] of this._bindings) {
+                resources[name] = binding.resource;
+            }
+            this._bindingSet = createComputeBindingSet(shader, resources as ComputeBindingResources);
         }
-        return { shader, bindings };
+        return this._bindingSet;
     }
 
     private _submit(graph: { shader: LiteComputeShader; bindings: LiteComputeBindingSet }, dispatch: ReturnType<typeof createComputeDispatch>): void {
