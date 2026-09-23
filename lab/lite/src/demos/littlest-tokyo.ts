@@ -162,7 +162,7 @@ async function main(): Promise<void> {
     const metalMat = scene.meshes.map((m) => m.material).find((mat): mat is PbrMaterialProps => !!mat && mat.name === "metalmat");
     if (metalMat?.occlusionTexture) {
         metalMat.occlusionTexture = createSolidTexture2D(engine, 1, 1, 1);
-        rebuildMaterial(scene, metalMat, { rebuildFrameGraph: true });
+        void rebuildMaterial(scene, metalMat, { rebuildFrameGraph: true });
     }
 
     progress.done();

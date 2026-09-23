@@ -427,6 +427,16 @@ export { setStandardLightmapTexture } from "./material/standard/set-std-lightmap
 export { setStandardOpacityTexture } from "./material/standard/set-std-opacity.js";
 export { setStandardReflectionTexture } from "./material/standard/set-std-reflection.js";
 export { setStandardReflectionCubeTexture } from "./material/standard/set-std-cube-reflection.js";
+export {
+    getStandardEmissiveTexture,
+    getStandardBumpTexture,
+    getStandardSpecularTexture,
+    getStandardAmbientTexture,
+    getStandardLightmapTexture,
+    getStandardOpacityTexture,
+    getStandardReflectionTexture,
+    getStandardReflectionCubeTexture,
+} from "./material/standard/standard-material-accessors.js";
 export { enableMirroredMeshes } from "./mesh/enable-mirrored-meshes.js";
 export { createPbrMaterial } from "./material/pbr/pbr-material.js";
 export { setShadowOnly } from "./material/pbr/set-shadow-only.js";
@@ -444,6 +454,23 @@ export { setPbrAlphaCutoff } from "./material/pbr/set-alpha-cutoff.js";
 export { setPbrTransmission } from "./material/pbr/set-transmission.js";
 export { setPbrDispersion } from "./material/pbr/set-dispersion.js";
 export { setPbrEmissive } from "./material/pbr/set-emissive.js";
+export {
+    getPbrAlphaCutoff,
+    getPbrEmissiveColor,
+    getPbrMetallicReflectance,
+    getPbrClearCoat,
+    getPbrSheen,
+    getPbrIridescence,
+    getPbrAnisotropy,
+    getPbrSubsurface,
+    getPbrTransmission,
+    getPbrDispersion,
+    isPbrGammaAlbedo,
+    getPbrUnlit,
+    isPbrSkybox,
+    getShadowOnly,
+} from "./material/pbr/pbr-material-accessors.js";
+export type { PbrShadowOnly } from "./material/pbr/pbr-material-accessors.js";
 export { enablePbrLightmap, setPbrLightmap } from "./material/pbr/enable-pbr-lightmap.js";
 export type { PbrLightmapOptions } from "./material/pbr/enable-pbr-lightmap.js";
 export {
@@ -470,6 +497,8 @@ export type {
 export type { MetallicReflectanceOptions } from "./material/pbr/set-metallic-reflectance.js";
 export {
     createShaderMaterial,
+    getShaderUniform,
+    getShaderTexture,
     setShaderUniform,
     setShaderTexture,
     setShaderStorageBuffer,
@@ -609,14 +638,16 @@ export {
 export { loadNodeBlockEmitterWithGeometry } from "./material/node/node-geometry-block-loader.js";
 export { createNodeNoColorMaterialView } from "./material/node/no-color-view.js";
 export type { NodeMaterial, NodeInputHandle, ParseNodeMaterialOptions } from "./material/node/node-material.js";
-export { createMaterialView } from "./material/material-view.js";
+export { createMaterialView, getMaterialSource, isMaterialView } from "./material/material-view.js";
 export { releaseMaterialViewGpu } from "./material/shader/shader-material-view-gpu.js";
 export { getMaterialFamily } from "./material/material-family.js";
 export { getMaterialTextures } from "./material/material-textures.js";
 export { isPbrMaterial, isStandardMaterial, isShaderMaterial, isNodeMaterial } from "./material/material-guards.js";
 export { markMaterialUboDirty } from "./material/material-dirty.js";
 export { enableMaterialUvTransform } from "./material/enable-material-uv-transform.js";
+export { hasMaterialUvTransform } from "./material/material-uv-transform.js";
 export { rebuildMaterial } from "./material/material-rebuild.js";
+export type { RebuildMaterialOptions } from "./material/material-rebuild.js";
 export { setSceneImageProcessing } from "./scene/scene-image-processing.js";
 export type { ImageProcessingUpdate } from "./scene/scene-image-processing.js";
 export { rebuildScenePbrPipelines, rebuildSceneRenderables } from "./scene/scene-rebuild.js";
@@ -904,6 +935,7 @@ export type {
     ShaderUniformOption,
     ShaderUniformDecl,
     ShaderUniformValue,
+    ReadonlyShaderUniformArray,
     ShaderSamplerOption,
     ShaderSamplerDecl,
     ShaderDefineValue,
@@ -927,6 +959,8 @@ export type { PointLight } from "./light/point-light.js";
 export type { DirectionalLight } from "./light/directional-light.js";
 export type { SpotLight } from "./light/spot-light.js";
 export type { Texture2D, Texture2DOptions } from "./texture/texture-2d.js";
+export { getTextureMetadata, getTextureTransform, setTextureTransform, getTextureCoordinateIndex, hasTextureTransform } from "./texture/texture-metadata.js";
+export type { TextureMetadata, TextureTransform, TextureSamplerMetadata, TextureCapabilities } from "./texture/texture-metadata.js";
 export type { ShadowGenerator } from "./shadow/shadow-generator.js";
 export type { EsmDirectionalShadowGeneratorConfig } from "./shadow/esm-directional-shadow-generator.js";
 export type { PcfSpotlightShadowGeneratorConfig } from "./shadow/pcf-spotlight-shadow-generator.js";

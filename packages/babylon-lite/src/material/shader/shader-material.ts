@@ -23,6 +23,8 @@ export type ShaderSystemUniformName = "world" | "view" | "projection" | "viewPro
 export type ShaderUniformOption = ShaderSystemUniformName | ShaderUniformDecl;
 /** Accepted value shape when setting a ShaderMaterial uniform. */
 export type ShaderUniformValue = number | readonly number[] | Float32Array;
+/** Stored vector/matrix uniform allocation without mutators or access to its backing buffer. */
+export type ReadonlyShaderUniformArray = Omit<Readonly<Float32Array>, "buffer" | "copyWithin" | "fill" | "reverse" | "set" | "sort" | "subarray">;
 /** A sampler entry: either a bare sampler name or an explicit declaration. */
 export type ShaderSamplerOption = string | ShaderSamplerDecl;
 /** A storage-buffer entry: a read-only WGSL storage binding declaration. */
@@ -489,6 +491,17 @@ export function setShaderUniform(material: ShaderMaterial, name: string, value: 
     setUniformValue(material, name, value);
 }
 
+/** Get a declared uniform's current value.
+ *  Scalars are returned as numbers; vector and matrix values expose the stored
+ *  allocation through a compile-time readonly contract. */
+export function getShaderUniform(material: ShaderMaterial, name: string): number | ReadonlyShaderUniformArray {
+    const slot = material._uniformValues.get(name);
+    if (!slot) {
+        throw new Error(`ShaderMaterial: uniform "${name}" was not declared.`);
+    }
+    return slot.value.length === 1 ? slot.value[0]! : slot.value;
+}
+
 /** Bind (or clear) the texture for a declared sampler, enforcing that depth and
  *  non-depth samplers receive a matching `Texture2D`.
  *  @param material - Target material.
@@ -521,6 +534,15 @@ export function setShaderTexture(material: ShaderMaterial, name: string, texture
         material._resourceVersion++;
         bumpVisibilityEpoch();
     }
+}
+
+/** Get the texture currently bound to a declared sampler, preserving wrapper identity. */
+export function getShaderTexture(material: ShaderMaterial, name: string): Texture2D | null {
+    const slot = material._textureSlots.get(name);
+    if (!slot) {
+        throw new Error(`ShaderMaterial: sampler "${name}" was not declared.`);
+    }
+    return slot.current;
 }
 
 /** Bind (or clear) a declared read-only storage buffer. */
