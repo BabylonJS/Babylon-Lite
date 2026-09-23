@@ -1,8 +1,11 @@
+import type { Material } from "./material.js";
+import type { NodeMaterial } from "./node/node-material.js";
+import type { PbrMaterialProps } from "./pbr/pbr-material.js";
+import { getShaderTexture, type ShaderMaterial } from "./shader/shader-material.js";
+import type { StandardMaterialProps } from "./standard/standard-material.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import { getMaterialFamily } from "./material-family.js";
-import type { Material } from "./material.js";
 import { getMaterialSource } from "./material-view.js";
-import type { NodeMaterial } from "./node/node-material.js";
 import {
     getPbrAnisotropy,
     getPbrClearCoat,
@@ -12,8 +15,6 @@ import {
     getPbrSubsurface,
     getPbrTransmission,
 } from "./pbr/pbr-material-accessors.js";
-import type { PbrMaterialProps } from "./pbr/pbr-material.js";
-import { getShaderTexture, type ShaderMaterial } from "./shader/shader-material.js";
 import {
     getStandardAmbientTexture,
     getStandardBumpTexture,
@@ -23,20 +24,19 @@ import {
     getStandardReflectionTexture,
     getStandardSpecularTexture,
 } from "./standard/standard-material-accessors.js";
-import type { StandardMaterialProps } from "./standard/standard-material.js";
 
 /**
  * Gets the non-null 2D textures currently bound by a material.
  * @param material - Material or material view to inspect.
- * @returns A newly allocated readonly array. Unknown material families return an empty array.
+ * @returns A newly allocated readonly array of bound texture handles. Unknown material families return an empty array.
  */
 export function getMaterialTextures(material: Material): readonly Texture2D[] {
     const source = getMaterialSource(material);
     switch (getMaterialFamily(source)) {
-        case "standard":
-            return getStandardTextures(source as StandardMaterialProps);
         case "pbr":
             return getPbrTextures(source as PbrMaterialProps);
+        case "standard":
+            return getStandardTextures(source as StandardMaterialProps);
         case "shader":
             return getShaderTextures(source as ShaderMaterial);
         case "node":
@@ -46,16 +46,24 @@ export function getMaterialTextures(material: Material): readonly Texture2D[] {
     }
 }
 
-function getStandardTextures(material: StandardMaterialProps): readonly Texture2D[] {
+function getNodeTextures(inputs: NodeMaterial["inputs"]): readonly Texture2D[] {
     const textures: Texture2D[] = [];
-    pushTexture(textures, material.diffuseTexture);
-    pushTexture(textures, getStandardEmissiveTexture(material));
-    pushTexture(textures, getStandardBumpTexture(material));
-    pushTexture(textures, getStandardSpecularTexture(material));
-    pushTexture(textures, getStandardAmbientTexture(material));
-    pushTexture(textures, getStandardLightmapTexture(material));
-    pushTexture(textures, getStandardOpacityTexture(material));
-    pushTexture(textures, getStandardReflectionTexture(material));
+    for (const name in inputs) {
+        if (Object.hasOwn(inputs, name)) {
+            const input = inputs[name]!;
+            if (input.type === "texture2d") {
+                pushTexture(textures, input.texture);
+            }
+        }
+    }
+    return textures;
+}
+
+function getShaderTextures(material: ShaderMaterial): readonly Texture2D[] {
+    const textures: Texture2D[] = [];
+    for (const declaration of material.samplerDecls) {
+        pushTexture(textures, getShaderTexture(material, declaration.name));
+    }
     return textures;
 }
 
@@ -100,24 +108,16 @@ function getPbrTextures(material: PbrMaterialProps): readonly Texture2D[] {
     return textures;
 }
 
-function getShaderTextures(material: ShaderMaterial): readonly Texture2D[] {
+function getStandardTextures(material: StandardMaterialProps): readonly Texture2D[] {
     const textures: Texture2D[] = [];
-    for (const declaration of material.samplerDecls) {
-        pushTexture(textures, getShaderTexture(material, declaration.name));
-    }
-    return textures;
-}
-
-function getNodeTextures(inputs: NodeMaterial["inputs"]): readonly Texture2D[] {
-    const textures: Texture2D[] = [];
-    for (const name in inputs) {
-        if (Object.hasOwn(inputs, name)) {
-            const input = inputs[name]!;
-            if (input.type === "texture2d") {
-                pushTexture(textures, input.texture);
-            }
-        }
-    }
+    pushTexture(textures, material.diffuseTexture);
+    pushTexture(textures, getStandardEmissiveTexture(material));
+    pushTexture(textures, getStandardBumpTexture(material));
+    pushTexture(textures, getStandardSpecularTexture(material));
+    pushTexture(textures, getStandardAmbientTexture(material));
+    pushTexture(textures, getStandardLightmapTexture(material));
+    pushTexture(textures, getStandardOpacityTexture(material));
+    pushTexture(textures, getStandardReflectionTexture(material));
     return textures;
 }
 
