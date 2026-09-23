@@ -726,7 +726,6 @@ void options;
             "getShadowOnly",
             "hasMaterialUvTransform",
             "getShaderUniform",
-            "ReadonlyShaderUniformArray",
             "getShaderTexture",
             "getTextureMetadata",
             "getTextureTransform",
@@ -751,7 +750,7 @@ void options;
     getTextureMetadata, getTextureTransform, setTextureTransform,
     getTextureCoordinateIndex, hasTextureTransform,
     type ClearCoatProps, type Material, type MaterialView, type PbrMaterialProps, type ShaderMaterial,
-    type ReadonlyShaderUniformArray, type SubSurfaceProps,
+    type SubSurfaceProps,
     type StandardMaterialProps, type Texture2D, type TextureMetadata, type TextureTransform,
 } from "./index.js";
 // @ts-expect-error The Inspector-shaped dispatcher was removed from Lite.
@@ -764,6 +763,7 @@ declare const pbr: PbrMaterialProps;
 declare const shader: ShaderMaterial;
 declare const texture: Texture2D;
 declare const transform: TextureTransform;
+declare function consumeFloat32Array(value: Float32Array): void;
 
 const source: Material = getMaterialSource(view);
 const viewFlag: boolean = isMaterialView(material);
@@ -776,7 +776,7 @@ const subsurface: Readonly<SubSurfaceProps> | undefined = getPbrSubsurface(pbr);
 const unlit: readonly [number, number, number] | undefined = getPbrUnlit(pbr);
 const shadowOnly = getShadowOnly(pbr);
 const hasUv: boolean = hasMaterialUvTransform(view);
-const uniform: number | ReadonlyShaderUniformArray = getShaderUniform(shader, "color");
+const uniform: number | Float32Array = getShaderUniform(shader, "color");
 const shaderTexture: Texture2D | null = getShaderTexture(shader, "colorMap");
 const metadata: TextureMetadata | undefined = getTextureMetadata(texture);
 const textureTransform: TextureTransform | undefined = getTextureTransform(texture);
@@ -792,16 +792,10 @@ if (unlit) {
     unlit[0] = 1;
 }
 if (typeof uniform !== "number") {
-    // @ts-expect-error Getter uniform arrays are compile-time readonly.
-    uniform[0] = 1;
-    // @ts-expect-error Getter uniform arrays do not expose typed-array mutators.
-    uniform.set([1]);
-    // @ts-expect-error Getter uniform arrays do not expose typed-array mutators.
-    uniform.fill(1);
-    // @ts-expect-error Getter uniform arrays cannot create mutable views into their storage.
-    uniform.subarray();
-    // @ts-expect-error Getter uniform arrays do not expose their mutable backing buffer.
-    uniform.buffer;
+    const nativeArray: Float32Array = uniform;
+    const view: Float32Array = uniform.subarray();
+    consumeFloat32Array(uniform);
+    void [nativeArray, view, uniform.buffer];
 }
 // @ts-expect-error Metadata never exposes the backing GPU texture.
 metadata?.texture;

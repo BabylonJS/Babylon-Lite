@@ -23,8 +23,6 @@ export type ShaderSystemUniformName = "world" | "view" | "projection" | "viewPro
 export type ShaderUniformOption = ShaderSystemUniformName | ShaderUniformDecl;
 /** Accepted value shape when setting a ShaderMaterial uniform. */
 export type ShaderUniformValue = number | readonly number[] | Float32Array;
-/** Stored vector/matrix uniform allocation without mutators or access to its backing buffer. */
-export type ReadonlyShaderUniformArray = Omit<Readonly<Float32Array>, "buffer" | "copyWithin" | "fill" | "reverse" | "set" | "sort" | "subarray">;
 /** A sampler entry: either a bare sampler name or an explicit declaration. */
 export type ShaderSamplerOption = string | ShaderSamplerDecl;
 /** A storage-buffer entry: a read-only WGSL storage binding declaration. */
@@ -492,9 +490,12 @@ export function setShaderUniform(material: ShaderMaterial, name: string, value: 
 }
 
 /** Get a declared uniform's current value.
- *  Scalars are returned as numbers; vector and matrix values expose the stored
- *  allocation through a compile-time readonly contract. */
-export function getShaderUniform(material: ShaderMaterial, name: string): number | ReadonlyShaderUniformArray {
+ *  Scalars are returned as numbers. Vector and matrix values are returned as the material's live backing
+ *  `Float32Array`, with stable identity and no copy. Do not mutate this array directly: doing so bypasses material
+ *  versioning and GPU invalidation. Passing an already-mutated backing array to `setShaderUniform` will not trigger
+ *  an update because the setter cannot detect a difference. To update the uniform, prepare the new values in separate
+ *  storage and pass that separate value to `setShaderUniform`. */
+export function getShaderUniform(material: ShaderMaterial, name: string): number | Float32Array {
     const slot = material._uniformValues.get(name);
     if (!slot) {
         throw new Error(`ShaderMaterial: uniform "${name}" was not declared.`);
