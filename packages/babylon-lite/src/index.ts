@@ -935,7 +935,6 @@ export type {
     ShaderUniformOption,
     ShaderUniformDecl,
     ShaderUniformValue,
-    ReadonlyShaderUniformArray,
     ShaderSamplerOption,
     ShaderSamplerDecl,
     ShaderDefineValue,

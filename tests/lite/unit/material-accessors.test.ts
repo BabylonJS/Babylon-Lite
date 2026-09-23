@@ -209,6 +209,12 @@ describe("Shader material accessors", () => {
         expect(getShaderUniform(material, "scalar")).toBe(2);
         const color = getShaderUniform(material, "color");
         expect(color).toEqual(new Float32Array([4, 5, 6]));
+        expect(color).toBeInstanceOf(Float32Array);
+        if (typeof color === "number") {
+            throw new Error("Expected a vector uniform to return a Float32Array.");
+        }
+        const colorArray: Float32Array = color;
+        expect(colorArray.subarray(1)).toEqual(new Float32Array([5, 6]));
         expect(color).toBe(material._uniformValues.get("color")?.value);
         expect(getShaderUniform(material, "color")).toBe(color);
         expect(getShaderTexture(material, "colorMap")).toBe(colorMap);
