@@ -58,6 +58,9 @@ function descriptor(variant: ComputePipelineVariant): GPUComputePipelineDescript
 /** Create a reusable override-constant pipeline variant. */
 export function createComputePipelineVariant(shader: ComputeShader, constants: ComputePipelineConstants): ComputePipelineVariant {
     _assertComputeShaderLive(shader);
+    if (shader._automaticLayout) {
+        throw new Error("Compute pipeline variants require explicit binding layouts.");
+    }
     return { shader, constants: normalize(constants), _device: shader._engine._device, _pipeline: null, _pending: null };
 }
 

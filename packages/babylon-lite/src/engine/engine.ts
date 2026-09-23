@@ -87,8 +87,8 @@ export interface EngineContext extends SurfaceContext {
     _gpuTaskTimingResult?: RenderTaskGpuTimings;
     /** @internal Restores frame graphs wrapped by the optional task GPU profiler. */
     _gpuTaskTimerDisable?: () => void;
-    /** @internal Optional task-profiler resolver included in `_gpuTimerResolve` after the frame command buffer is submitted. */
-    _gpuTaskTimerResolve?: () => void;
+    /** @internal Optional task-profiler and frame-work resolver included in `_gpuTimerResolve` after the frame command buffer is submitted. */
+    _gpuTaskTimerResolve?: (encoder?: GPUCommandEncoder, submitted?: boolean) => void;
 
     /**
      * When true, world matrices are computed using Float64 intermediate precision
@@ -154,8 +154,6 @@ export interface EngineContext extends SurfaceContext {
     _flushGpuRetirements?: (engine: EngineContext) => void;
     /** @internal GPU resource disposers waiting for the next frame command buffer to be submitted. */
     _retirements?: Array<() => void> | null;
-    /** @internal Installed only while compute one-shots are armed or reusable. */
-    _computeOneShotSubmitted?: (encoder: GPUCommandEncoder) => void;
     /** @internal Retirement batches whose queue fence has not resolved yet. Kept reachable so engine
      *  teardown and device-lost recovery can still claim and run them synchronously. */
     _retiring?: Set<Array<() => void>> | null;

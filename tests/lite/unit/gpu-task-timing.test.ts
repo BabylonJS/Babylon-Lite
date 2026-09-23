@@ -260,6 +260,12 @@ describe("GPU task timing installer", () => {
         const restore = installGpuTaskTimer(timer, engine, (snapshot) => snapshots.push(snapshot));
 
         expect(fg.execute()).toBe(5);
+        const canvasEncoder = engine._currentEncoder;
+        engine._gpuTaskTimerResolve?.({} as GPUCommandEncoder);
+        await Promise.resolve();
+        expect(snapshots).toEqual([]);
+
+        engine._gpuTaskTimerResolve?.(canvasEncoder);
         engine._gpuTimerResolve?.();
         await Promise.resolve();
         await Promise.resolve();

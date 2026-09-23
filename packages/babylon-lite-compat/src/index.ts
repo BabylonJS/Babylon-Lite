@@ -37,6 +37,13 @@ export { PickingInfo } from "./culling/picking-info.js";
 // ─── Engine ──────────────────────────────────────────────────────────
 export { AbstractEngine, ThinEngine, WebGPUEngine, Engine, NullEngine } from "./engine/engine.js";
 
+// ─── Compute and buffers ─────────────────────────────────────────────
+export { ComputeShader, ComputeShaderParse, RegisterComputeShader } from "./compute/compute-shader.js";
+export type { ComputeBindingLocation, ComputeBindingMapping, IComputeShaderOptions, IComputeShaderPath } from "./compute/compute-shader.js";
+export { StorageBuffer } from "./buffers/storage-buffer.js";
+export type { DataArray } from "./buffers/storage-buffer.js";
+export { UniformBuffer } from "./materials/uniform-buffer.js";
+
 // ─── Scene graph ─────────────────────────────────────────────────────
 export { Node } from "./node/node.js";
 export { AbstractScene } from "./scene/abstract-scene.js";

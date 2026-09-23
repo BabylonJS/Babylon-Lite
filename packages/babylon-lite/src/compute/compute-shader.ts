@@ -7,6 +7,8 @@ export interface ComputeShaderOptions {
     readonly computeSource: string;
     readonly entryPoint?: string;
     readonly bindings?: readonly ComputeBindingDecl[];
+    /** Use WebGPU's shader-derived bind-group layouts instead of explicit declarations. */
+    readonly automaticLayout?: boolean;
 }
 
 /** @internal Pre-resolved declaration lookup. */
@@ -35,6 +37,8 @@ export interface ComputeShader {
     readonly _slots: Map<string, ComputeBindingSlot>;
     /** @internal Dynamic binding count per group. */
     readonly _dynamicCounts: readonly number[];
+    /** @internal */
+    readonly _automaticLayout: boolean;
     /** @internal Immediate-data capacity installed only by the opt-in immediate shader factory. */
     _immediateByteLength?: number;
     /** @internal */
@@ -144,6 +148,9 @@ export function createComputeShader(engine: EngineContext, options: ComputeShade
         }
         let dynamicIndex = -1;
         if (decl._layout.buffer?.hasDynamicOffset) {
+            if (options.automaticLayout) {
+                throw new Error(`ComputeShader: automatic layouts do not support dynamic offset binding "${decl.name}".`);
+            }
             dynamicIndex = dynamicCounts[decl.group] ?? 0;
             dynamicCounts[decl.group] = dynamicIndex + 1;
         }
@@ -175,6 +182,7 @@ export function createComputeShader(engine: EngineContext, options: ComputeShade
         _decls: decls,
         _slots: slots,
         _dynamicCounts: dynamicCounts,
+        _automaticLayout: options.automaticLayout === true,
         _device: engine._device,
         _module: null,
         _layouts: null,
@@ -206,6 +214,12 @@ export function _getComputeGroupLayouts(shader: ComputeShader): readonly GPUBind
         return shader._layouts;
     }
     const highestGroup = shader._decls.at(-1)?.group ?? -1;
+    if (shader._automaticLayout) {
+        const pipeline = _getComputePipeline(shader);
+        const layouts = Array.from({ length: highestGroup + 1 }, (_, group) => pipeline.getBindGroupLayout(group));
+        shader._layouts = layouts;
+        return layouts;
+    }
     const layouts: GPUBindGroupLayout[] = [];
     for (let group = 0; group <= highestGroup; group++) {
         const entries = shader._decls.filter((decl) => decl.group === group).map(layoutEntry);
@@ -221,12 +235,14 @@ export function _getComputeGroupLayouts(shader: ComputeShader): readonly GPUBind
 }
 
 function pipelineDescriptor(shader: ComputeShader): GPUComputePipelineDescriptor {
-    _getComputeGroupLayouts(shader);
+    if (!shader._automaticLayout) {
+        _getComputeGroupLayouts(shader);
+    }
     const device = shader._engine._device;
     shader._module ??= device.createShaderModule({ label: `${shader.name}-module`, code: shader._source });
     return {
         label: shader.name,
-        layout: shader._pipelineLayout!,
+        layout: shader._automaticLayout ? "auto" : shader._pipelineLayout!,
         compute: {
             module: shader._module,
             entryPoint: shader._entryPoint,
@@ -254,7 +270,7 @@ export async function prepareComputeShader(shader: ComputeShader): Promise<void>
         promise.then(
             (pipeline: GPUComputePipeline) => {
                 if (!shader._destroyed && shader._engine._device === device) {
-                    shader._pipeline = pipeline;
+                    shader._pipeline ??= pipeline;
                 }
                 if (shader._pending === promise) {
                     shader._pending = null;

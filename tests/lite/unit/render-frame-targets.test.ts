@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { renderFrame, type EngineContext, type RenderingContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { addFramePostSubmitHook } from "../../../packages/babylon-lite/src/engine/frame-post-submit";
 import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { disposeSurface, type SurfaceContext } from "../../../packages/babylon-lite/src/engine/surface";
 
@@ -15,8 +16,7 @@ function makeEngine(surfaceNames: readonly string[]): { engine: EngineContext; s
     const events: string[] = [];
     const commandBuffer = {} as GPUCommandBuffer;
     const finish = vi.fn(() => commandBuffer);
-    const encoder = { finish } as unknown as GPUCommandEncoder;
-    const createCommandEncoder = vi.fn(() => encoder);
+    const createCommandEncoder = vi.fn(() => ({ finish }) as unknown as GPUCommandEncoder);
     const submit = vi.fn();
     const engine = {} as EngineContext;
 
@@ -153,6 +153,34 @@ describe("renderFrame targets", () => {
         expect(probe.finish).not.toHaveBeenCalled();
         expect(probe.submit).not.toHaveBeenCalled();
         expect(probe.events).toEqual(["aux:pre", "aux:update"]);
+    });
+
+    it("cancels abandoned frame-bound work without another submission", async () => {
+        const { engine, surfaces } = makeEngine(["primary"]);
+        const run = vi.fn();
+        const cancel = vi.fn();
+        vi.mocked(surfaces[0]!._renderingContexts[0]!._update).mockImplementationOnce(() => {
+            addFramePostSubmitHook(engine, "frame", run, cancel);
+            throw new Error("frame failed");
+        });
+        expect(() => renderFrame(engine, 8)).toThrow(/frame failed/);
+        await Promise.resolve();
+
+        expect(cancel).toHaveBeenCalledOnce();
+        expect(run).not.toHaveBeenCalled();
+    });
+
+    it("notifies opt-in post-submit work for every submitted canvas frame", () => {
+        const { engine } = makeEngine(["primary"]);
+        const submitted = vi.fn();
+        addFramePostSubmitHook(engine, "persistent", submitted);
+
+        renderFrame(engine, 8);
+        renderFrame(engine, 8);
+
+        expect(submitted).toHaveBeenCalledTimes(2);
+        expect(submitted.mock.calls[0]![0]).toBeDefined();
+        expect(submitted.mock.calls[1]![0]).toBeDefined();
     });
 
     it("stops at the live engine surface count when an update disposes a later surface", () => {

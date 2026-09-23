@@ -417,6 +417,17 @@ export abstract class AbstractEngine {
     }
 
     /**
+     * Babylon.js `engine.isOcclusionQueryVisible(query)` — Lite does not expose
+     * occlusion-query allocation, render-pass encoding, or asynchronous result state.
+     */
+    public isOcclusionQueryVisible(_query: unknown): never {
+        return unsupported(
+            "AbstractEngine.isOcclusionQueryVisible",
+            "Lite has no occlusion-query subsystem; supporting this requires query allocation, render-pass encoding, and asynchronous result-lifetime policy."
+        );
+    }
+
+    /**
      * Babylon.js `engine.updateTextureArrayLayerFromImageSource(texture, source, layer, invertY, premultiplyAlpha)`
      * — the engine extension that uploads a decoded image source into one layer of a 2D array
      * texture. Forwards to Babylon Lite's `uploadImageToArrayLayer`.
