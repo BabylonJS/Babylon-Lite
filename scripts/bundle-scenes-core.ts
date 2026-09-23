@@ -9,7 +9,7 @@
  * chunks that are never loaded (e.g. animation for a static model) are
  * correctly excluded from the manifest numbers.
  */
-import { build, type Plugin, type Rollup } from "vite";
+import { build, normalizePath, type Plugin, type Rollup } from "vite";
 import { execFileSync } from "child_process";
 import { createHash } from "crypto";
 import { resolve, dirname, join, extname, isAbsolute, win32 } from "path";
@@ -234,7 +234,7 @@ export function resolveLitePackageSpecifier(source: string, aliasDir: string): s
     for (const candidate of candidates) {
         const file = resolve(aliasDir, candidate);
         if (existsSync(file) && statSync(file).isFile()) {
-            return file + query;
+            return normalizePath(file) + query;
         }
     }
     return null;
@@ -1081,6 +1081,7 @@ const MIME: Record<string, string> = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
+    ".mp3": "audio/mpeg",
     ".css": "text/css",
     ".wasm": "application/wasm",
 };

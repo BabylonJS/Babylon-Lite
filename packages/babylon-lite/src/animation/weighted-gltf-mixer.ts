@@ -13,6 +13,24 @@ import type { Mat4Storage } from "../math/types.js";
 import { _boneApplier } from "../skeleton/bone-control-hooks.js";
 import type { BoneOverride } from "../skeleton/bone-control.js";
 
+type PropertyMixerHandler = (manager: AnimationManager, deltaMs: number, onlyPropertyGroups: boolean) => boolean;
+type PropertyMixerDirectHandler = (manager: AnimationManager, group: AnimationGroup) => void;
+type PropertyMixerFinishHandler = (manager: AnimationManager) => void;
+let _propertyMixerHandler: PropertyMixerHandler | null = null;
+let _propertyMixerDirectHandler: PropertyMixerDirectHandler | null = null;
+let _propertyMixerFinishHandler: PropertyMixerFinishHandler | null = null;
+
+/** @internal Install opt-in property-track handling for the skeletal blend manager. */
+export function _installPropertyMixerHandler(
+    handler: PropertyMixerHandler | null,
+    directHandler: PropertyMixerDirectHandler | null = null,
+    finishHandler: PropertyMixerFinishHandler | null = null
+): void {
+    _propertyMixerHandler = handler;
+    _propertyMixerDirectHandler = directHandler;
+    _propertyMixerFinishHandler = finishHandler;
+}
+
 const GLTF_CLIP = 0;
 const GLTF_NODES = 1;
 const GLTF_SKELETONS = 2;
@@ -102,6 +120,7 @@ function getScratch(manager: AnimationManager): WeightedGltfScratch {
 }
 
 function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number): boolean {
+    const handledPropertyGroups = _propertyMixerHandler?.(manager, deltaMs, true) ?? false;
     const scratch = getScratch(manager);
     const keys = scratch.keys;
     keys.clear();
@@ -117,7 +136,21 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
     }
 
     if (keys.size === 0) {
-        return false;
+        if (handledPropertyGroups) {
+            for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+                const group = groups[groupIndex]!;
+                if (group._stopped) {
+                    continue;
+                }
+                if (group._propertyMixerHandled) {
+                    _propertyMixerDirectHandler?.(manager, group);
+                } else {
+                    tickAnimationCore(group, deltaMs, manager.engine);
+                }
+            }
+            _propertyMixerFinishHandler?.(manager);
+        }
+        return handledPropertyGroups;
     }
 
     scratch.targets.forEach(resetWeightedGltfTarget);
@@ -125,6 +158,10 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
     for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
         const group = groups[groupIndex]!;
         if (group._stopped) {
+            continue;
+        }
+        if (handledPropertyGroups && group._propertyMixerHandled) {
+            _propertyMixerDirectHandler?.(manager, group);
             continue;
         }
 
@@ -155,6 +192,9 @@ function updateWeightedGltfAnimations(manager: AnimationManager, deltaMs: number
             uploadTarget(manager, target);
         }
     });
+    if (handledPropertyGroups) {
+        _propertyMixerFinishHandler?.(manager);
+    }
 
     return true;
 }
@@ -376,22 +416,25 @@ function accumulateGroup(manager: AnimationManager, scratch: WeightedGltfScratch
 
 function advanceGroupTime(group: AnimationGroup, mixer: AnimationGltfMixer, deltaMs: number): number {
     const clip = mixer[GLTF_CLIP];
+    const startTime = clip._startTime ?? 0;
+    const endTime = startTime + clip.duration;
     const isPlaying = group.isPlaying;
     if (isPlaying) {
         group.currentTime += (deltaMs / 1000) * group.speedRatio;
     }
 
     if (clip.duration <= 0) {
-        return 0;
+        group.currentTime = startTime;
+        return group.currentTime;
     }
 
     if (group.loopAnimation && isPlaying) {
-        group.currentTime %= clip.duration;
-        if (group.currentTime < 0) {
+        group.currentTime = startTime + ((group.currentTime - startTime) % clip.duration);
+        if (group.currentTime < startTime) {
             group.currentTime += clip.duration;
         }
     } else {
-        group.currentTime = Math.min(Math.max(group.currentTime, 0), clip.duration);
+        group.currentTime = Math.min(Math.max(group.currentTime, startTime), endTime);
     }
     return group.currentTime;
 }

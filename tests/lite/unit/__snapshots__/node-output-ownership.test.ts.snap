@@ -2,7 +2,7 @@
 
 exports[`Node output ownership > preserves cold synchronous color output (extended=false) 1`] = `"821b11455a9f4a3a44d4c98ad240ecee261d1aab685c64f13a147dad7bed983b"`;
 
-exports[`Node output ownership > preserves cold synchronous color output (extended=true) 1`] = `"8d070cae538f701462def17dcdb655b8b6feb0f54d86a82bf835693e6f2d7248"`;
+exports[`Node output ownership > preserves cold synchronous color output (extended=true) 1`] = `"92a2668749b1a3f71f07018e87298c52f0c49ce0f9ffc1dc2cda73b5ca2073ca"`;
 
 exports[`Node output ownership > preserves cold synchronous depth output (extended=false) 1`] = `"31b4e4d48077789de6e43fe13a121f10556670ea03b376823ccc4d7931d8a7c5"`;
 

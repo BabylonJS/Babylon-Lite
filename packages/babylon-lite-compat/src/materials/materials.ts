@@ -170,7 +170,7 @@ export abstract class Material {
             return;
         }
         this._ensureRenderable(scene.getEngine()._lite);
-        rebuildMaterial(scene._lite, this._lite);
+        void rebuildMaterial(scene._lite, this._lite);
     }
 
     /**

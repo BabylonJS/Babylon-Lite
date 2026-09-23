@@ -166,6 +166,7 @@ function createPointerAnimationGroup(
             const track = tracks[trackIndex]!;
             evaluatePropertySampler(track.sampler, time, track.stride, track.quaternion, track.easing, _pointerScratch, 0);
             track.writer(_pointerScratch, 0);
+            track._afterWrite?.();
         }
     };
     const ctrl: AnimationController = {
@@ -205,6 +206,7 @@ function createPointerAnimationGroup(
         frameRate: frameRate || DEFAULT_FRAME_RATE,
         isPlaying: false,
         currentTime: fromTime,
+        _startTime: fromTime || undefined,
         targetedAnimations: tracks.map((track) => ({ target: track.mixTarget(), path: track.mixProperty })),
         speedRatio: options?.speedRatio ?? 1,
         loopAnimation: options?.loop ?? true,

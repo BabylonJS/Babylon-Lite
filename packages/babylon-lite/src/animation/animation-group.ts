@@ -13,6 +13,12 @@ import { _setTickAnimationImpl } from "./animation-tick.js";
 
 const DEFAULT_FRAME_RATE = 60;
 
+/** @internal Custom accumulation for non-scalar property values such as affine matrices. */
+export interface AnimationPropertyMixStrategy {
+    readonly accumulate: (output: Float32Array, sample: Float32Array, weight: number, accumulatedWeight: number) => void;
+    readonly finish: (output: Float32Array, accumulatedWeight: number) => void;
+}
+
 export interface AnimationPropertyRuntimeTrack {
     readonly sampler: AnimationSampler;
     readonly stride: number;
@@ -21,8 +27,14 @@ export interface AnimationPropertyRuntimeTrack {
     readonly writer: (output: Float32Array, offset: number) => void;
     readonly mixTarget: () => object;
     readonly mixProperty: string;
+    /** @internal Optional transform-aware accumulation in the weighted property mixer. */
+    readonly _mix?: AnimationPropertyMixStrategy;
+    /** @internal Target name used by AnimationGroupMask. */
+    readonly _targetName?: string;
+    /** @internal Deduplicated publication step after weighted property writes. */
+    readonly _afterWrite?: () => void;
 }
-export type AnimationPropertyMixer = readonly [readonly AnimationPropertyRuntimeTrack[], number, number, number];
+export type AnimationPropertyMixer = readonly [readonly AnimationPropertyRuntimeTrack[], number, number, number, number?];
 export type AnimationGltfMixer = readonly [AnimationClip, readonly NodeRest[], readonly SkeletonBinding[]];
 export interface AnimationAdditiveMixer {
     readonly referenceTime: number;
@@ -52,6 +64,8 @@ export interface AnimationGroup {
     isPlaying: boolean;
     /** Current playback time in seconds. */
     currentTime: number;
+    /** @internal Authored playback start in seconds. */
+    readonly _startTime?: number;
     /** Lightweight list of targets affected by this group. */
     readonly targetedAnimations: readonly TargetedAnimation[];
     /** User metadata bag. */
@@ -72,6 +86,8 @@ export interface AnimationGroup {
     readonly _ctrl?: AnimationController;
     /** @internal Manual property animation metadata used by the optional weighted mixer. */
     _propertyMixer?: AnimationPropertyMixer;
+    /** @internal True only for the current manager tick when the property mixer consumed this group. */
+    _propertyMixerHandled?: boolean;
     /** @internal glTF skeleton metadata used by the optional weighted mixer. */
     _gltfMixer?: AnimationGltfMixer;
     /** @internal Additive animation metadata used by the optional blending mixer. */
@@ -82,6 +98,8 @@ export interface AnimationGroup {
      *  {@link addAnimationGroup}. Type-only import, so it is erased at build — no runtime cycle
      *  and no bundle cost for always-loaded consumers (e.g. scene-core's render-loop tick). */
     _animationManager?: AnimationManager;
+    /** @internal Optional mixer scratch cleanup invoked when this group leaves its manager. */
+    _mixerCleanup?: (manager: AnimationManager) => void;
     /** @internal Stable first-attachment order within `_animationOrderManager`. */
     _animationOrder?: number;
     /** @internal Manager for which `_animationOrder` was allocated. */
@@ -101,10 +119,10 @@ export function pauseAnimation(group: AnimationGroup): void {
     group.isPlaying = false;
 }
 
-/** Stop playback and reset to frame 0. */
+/** Stop playback and reset to the first authored frame. */
 export function stopAnimation(group: AnimationGroup): void {
     group.isPlaying = false;
-    group.currentTime = 0;
+    group.currentTime = group._startTime ?? 0;
     group._stopped = true;
 }
 
@@ -177,12 +195,14 @@ export function createAnimationGroups(animData: GltfAnimationData): AnimationGro
     return clips.map((clip, clipIndex) => {
         const ctrl: AnimationController = createAnimationController(clip, nodes, skeletons, morphBindings, nodeTargets, excludedNodeIndices, boneOverrides, nodeNames);
         const started = clipIndex === 0;
+        const startTime = clip._startTime ?? 0;
         const group: AnimationGroup = {
             name: clip.name || `animation_${clipIndex}`,
             duration: clip.duration,
             frameRate: clip.frameRate || DEFAULT_FRAME_RATE,
             isPlaying: started,
-            currentTime: 0,
+            currentTime: startTime,
+            _startTime: startTime || undefined,
             targetedAnimations: clip.channels.map((ch) => {
                 const nodeIndex = ch.nodeIdx >= 0 ? ch.nodeIdx : undefined;
                 return {
