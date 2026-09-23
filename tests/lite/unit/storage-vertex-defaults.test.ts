@@ -273,12 +273,12 @@ return vec4f(input.position.xyz * getFinalColor(input).rgb, 1);
     });
 
     it.each([
-        [0, undefined, undefined],
-        [1, "src-alpha", "one"],
-        [2, "src-alpha", "one-minus-src-alpha"],
-        [7, "one", "one-minus-src-alpha"],
-        [9, undefined, undefined],
-    ] as const)("preserves Node blend, depth and entry points in canonical and packed variants (mode %s)", (mode, srcFactor, dstFactor) => {
+        [0, undefined, undefined, undefined],
+        [1, "src-alpha", "one", "one"],
+        [2, "src-alpha", "one-minus-src-alpha", "one"],
+        [7, "one", "one-minus-src-alpha", "one-minus-src-alpha"],
+        [9, undefined, undefined, undefined],
+    ] as const)("preserves Node blend, depth and entry points in canonical and packed variants (mode %s)", (mode, srcFactor, colorDstFactor, alphaDstFactor) => {
         const f = fixture();
         const mesh = createMeshFromStorageBuffer(f.engine, "node-state", {
             storage: createStorageBuffer(f.engine, 64, { vertex: true }),
@@ -299,10 +299,10 @@ return vec4f(input.position.xyz * getFinalColor(input).rgb, 1);
             _backFaceCulling: false,
         });
         const target: GPUColorTargetState = { format: "rgba8unorm" };
-        if (srcFactor && dstFactor) {
+        if (srcFactor && colorDstFactor && alphaDstFactor) {
             target.blend = {
-                color: { srcFactor, dstFactor, operation: "add" },
-                alpha: { srcFactor: "one", dstFactor, operation: "add" },
+                color: { srcFactor, dstFactor: colorDstFactor, operation: "add" },
+                alpha: { srcFactor: "one", dstFactor: alphaDstFactor, operation: "add" },
             };
         }
         for (const pipeline of [compiled._pipeline, compiled._pipelineForMesh(mesh._gpu)]) {

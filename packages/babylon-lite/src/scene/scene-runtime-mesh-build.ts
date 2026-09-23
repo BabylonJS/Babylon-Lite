@@ -31,6 +31,7 @@ type RuntimeRebuild = NonNullable<MeshGroupBuilder["_rebuildSingle"]>;
 interface DetachablePacket {
     _disposed: boolean;
     _owner?: DetachablePacket[];
+    _onOwnerEmpty?: () => void;
 }
 type DetachableDisposer = (() => void) & { p?: DetachablePacket };
 
@@ -359,6 +360,10 @@ async function materializeRuntimeMesh(scene: SceneContext, state: RuntimeBuildSt
     }
     if (previousDisposers) {
         for (const dispose of previousDisposers) {
+            const lifetimeIndex = scene._disposables.indexOf(dispose);
+            if (lifetimeIndex >= 0) {
+                scene._disposables.splice(lifetimeIndex, 1);
+            }
             const packet = (dispose as DetachableDisposer).p;
             if (packet) {
                 packet._disposed = true;
@@ -369,6 +374,14 @@ async function materializeRuntimeMesh(scene: SceneContext, state: RuntimeBuildSt
                         owner.splice(index, 1);
                     }
                     packet._owner = undefined;
+                    if (owner.length === 0) {
+                        packet._onOwnerEmpty?.();
+                    }
+                } else {
+                    packet._onOwnerEmpty?.();
+                }
+                if (packet._onOwnerEmpty) {
+                    packet._onOwnerEmpty = undefined;
                 }
             }
         }

@@ -178,7 +178,7 @@ let surfaceAlbedo = baseColor * (vec3<f32>(1.0) - vec3<f32>(dielectricF0) * surf
 
         _fragmentSlots: {
             MF: f0Code,
-            AT: wgsl`let occlusion = mix(1.0, ${occlusionSample}, material.occlusionStrength);`,
+            AT: wgsl`var occlusion = mix(1.0, ${occlusionSample}, material.occlusionStrength);`,
         },
     };
 }

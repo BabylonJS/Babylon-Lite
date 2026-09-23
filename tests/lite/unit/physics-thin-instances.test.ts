@@ -5,11 +5,12 @@ import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scen
 import { CharacterCollisionObservable, PhysicsCharacterController } from "../../../packages/babylon-lite/src/physics/character-controller";
 import { onPhysicsCollision, setPhysicsBodyCollisionEventsEnabled } from "../../../packages/babylon-lite/src/physics/havok-collision";
 import { physicsRaycast } from "../../../packages/babylon-lite/src/physics/havok-queries";
+import { lockPhysicsBodyRotationAxes, unlockPhysicsBodyRotationAxes } from "../../../packages/babylon-lite/src/physics/havok-rotation-locks";
 import { onPhysicsTriggerBodies } from "../../../packages/babylon-lite/src/physics/havok-trigger";
 import {
     applyPhysicsBodyImpulse,
     applyPhysicsImpulse,
-    createHavokWorld,
+    createHavokWorld as createBaseHavokWorld,
     createPhysicsAggregate,
     createPhysicsBody,
     disposePhysics,
@@ -28,15 +29,30 @@ import {
     setPhysicsBodyShape,
     setPhysicsBodyTransform,
 } from "../../../packages/babylon-lite/src/physics/havok";
+import { setPhysicsBodyMassProperties } from "../../../packages/babylon-lite/src/physics/havok-body-mass-properties";
+import { enableHavokThinInstanceAdvancedPhysics } from "../../../packages/babylon-lite/src/physics/havok-thin-instance-advanced";
+import { capturePhysicsBodyInstanceResetState, resetPhysicsBodyInstances } from "../../../lab/lite/src/demos/playroom/physics-instances";
 import type { PhysicsBody, PhysicsShape } from "../../../packages/babylon-lite/src/physics/havok";
+
+function createHavokWorld(...args: Parameters<typeof createBaseHavokWorld>): ReturnType<typeof createBaseHavokWorld> {
+    const world = createBaseHavokWorld(...args);
+    enableHavokThinInstanceAdvancedPhysics(world);
+    return world;
+}
 
 function makeMockHknp() {
     let nextBody = 1;
     const transforms = new Map<number, [number[], number[]]>();
+    const bodyShapes = new Map<number, string[]>();
+    const massProperties = new Map<number, any[]>();
+    const shapeMassProperties = (shape: string[]): any[] =>
+        shape[0] === "scaled-shape" ? [[0, 2, 0], 1, [2 / 3, 2 / 3, 2 / 3], [0, 0, 0, 1]] : [[0, 1, 0], 1, [1 / 6, 1 / 6, 1 / 6], [0, 0, 0, 1]];
     return {
         transforms,
         MotionType: { STATIC: 0, KINEMATIC: 1, DYNAMIC: 2 },
+        ActivationState: { ACTIVE: 0, INACTIVE: 1 },
         Result: { RESULT_OK: 0 },
+        MaterialCombine: { MINIMUM: 0, MAXIMUM: 1 },
         HP_World_Create: vi.fn(() => [0, { id: "world" }]),
         HP_World_SetGravity: vi.fn(),
         HP_World_AddBody: vi.fn(),
@@ -47,6 +63,7 @@ function makeMockHknp() {
         HP_Body_SetMotionType: vi.fn(),
         HP_Body_SetLinearVelocity: vi.fn(),
         HP_Body_SetAngularVelocity: vi.fn(),
+        HP_Body_SetActivationState: vi.fn(),
         HP_Body_ApplyImpulse: vi.fn(),
         HP_Body_SetQTransform: vi.fn((body: number[], transform: [number[], number[]]) => {
             transforms.set(body[0]!, [transform[0].slice(), transform[1].slice()]);
@@ -54,10 +71,19 @@ function makeMockHknp() {
         HP_Body_SetTargetQTransform: vi.fn(),
         HP_Body_GetQTransform: vi.fn((body: number[]) => [0, transforms.get(body[0]!)!]),
         HP_Shape_CreateBox: vi.fn(() => [0, ["shape"]]),
-        HP_Body_SetShape: vi.fn(),
-        HP_Body_GetShape: vi.fn(() => [0, ["shape"]]),
-        HP_Shape_BuildMassProperties: vi.fn(() => [0, [[0, 0, 0], 1, [1, 1, 1], [0, 0, 0, 1]]]),
-        HP_Body_SetMassProperties: vi.fn(),
+        HP_Shape_CreateContainer: vi.fn(() => [0, ["scaled-shape"]]),
+        HP_Shape_AddChild: vi.fn(),
+        HP_Shape_SetMaterial: vi.fn(),
+        HP_Body_SetShape: vi.fn((body: number[], shape: string[]) => bodyShapes.set(body[0]!, shape)),
+        HP_Body_GetShape: vi.fn((body: number[]) => [0, bodyShapes.get(body[0]!) ?? ["shape"]]),
+        HP_Shape_BuildMassProperties: vi.fn((shape: string[]) => [0, shapeMassProperties(shape)]),
+        HP_Body_SetMassProperties: vi.fn((body: number[], properties: any[]) => {
+            massProperties.set(
+                body[0]!,
+                properties.map((value) => (Array.isArray(value) ? [...value] : value))
+            );
+        }),
+        HP_Body_GetMassProperties: vi.fn((body: number[]) => [0, massProperties.get(body[0]!) ?? shapeMassProperties(bodyShapes.get(body[0]!) ?? ["shape"])]),
         HP_Body_Release: vi.fn(),
         HP_Shape_Release: vi.fn(),
         HP_QueryCollector_Release: vi.fn(),
@@ -79,8 +105,11 @@ function makeThinMesh(): Mesh {
     return {
         _gpu: {},
         _cpuPositions: new Float32Array(),
+        worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+        worldMatrixVersion: 0,
         position: { x: 50, y: 60, z: 70, set: vi.fn() },
         rotationQuaternion: { x: 0, y: 0, z: 0, w: 1, set: vi.fn() },
+        scaling: { x: 1, y: 1, z: 1 },
         thinInstances: {
             matrices,
             count: 2,
@@ -105,6 +134,24 @@ function stepFrame(scene: SceneContext): void {
     for (const cb of [...scene._beforeRender]) {
         cb(1000 / 60);
     }
+}
+
+function multiplyMatrices(a: ArrayLike<number>, b: ArrayLike<number>): number[] {
+    const result = new Array<number>(16);
+    for (let column = 0; column < 4; column++) {
+        for (let row = 0; row < 4; row++) {
+            result[column * 4 + row] = a[row]! * b[column * 4]! + a[row + 4]! * b[column * 4 + 1]! + a[row + 8]! * b[column * 4 + 2]! + a[row + 12]! * b[column * 4 + 3]!;
+        }
+    }
+    return result;
+}
+
+function determinant3(matrix: ArrayLike<number>): number {
+    return (
+        matrix[0]! * (matrix[5]! * matrix[10]! - matrix[6]! * matrix[9]!) +
+        matrix[1]! * (matrix[6]! * matrix[8]! - matrix[4]! * matrix[10]!) +
+        matrix[2]! * (matrix[4]! * matrix[9]! - matrix[5]! * matrix[8]!)
+    );
 }
 
 describe("thin-instance physics bodies", () => {
@@ -185,6 +232,59 @@ describe("thin-instance physics bodies", () => {
         expect(mirroredRotation[1]).toBeCloseTo(0);
         expect(mirroredRotation[2]).toBeCloseTo(1);
         expect(mirroredRotation[3]).toBeCloseTo(0);
+    });
+
+    it("preserves carrier-world placement and signed instance scale across native write-back", async () => {
+        const hknp = makeMockHknp();
+        const scene = makeScene();
+        const mesh = makeThinMesh();
+        mesh.thinInstances!.count = 1;
+        Object.defineProperty(mesh, "worldMatrix", { value: new Float32Array([0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 10, 20, 30, 1]) });
+        mesh.thinInstances!.matrices.set([-2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 4, 0, 5, 6, 7, 1]);
+        const world = createHavokWorld(scene, hknp);
+        await enableHavokThinInstancePhysics(world);
+        const body = createPhysicsBody(world, mesh, PhysicsMotionType.DYNAMIC);
+        const nativeIdentity = world._thin!.instance(body, 0);
+
+        expect(hknp.transforms.get(1)![0]).toEqual([4, 25, 37]);
+
+        hknp.transforms.set(1, [
+            [8, 9, 10],
+            [0, Math.SQRT1_2, 0, Math.SQRT1_2],
+        ]);
+        stepFrame(scene);
+
+        const effective = multiplyMatrices(mesh.worldMatrix, mesh.thinInstances!.matrices);
+        expect(effective.slice(12, 15)).toEqual([8, 9, 10]);
+        expect(Math.hypot(effective[0]!, effective[1]!, effective[2]!)).toBeCloseTo(2);
+        expect(Math.hypot(effective[4]!, effective[5]!, effective[6]!)).toBeCloseTo(3);
+        expect(Math.hypot(effective[8]!, effective[9]!, effective[10]!)).toBeCloseTo(4);
+        expect(determinant3(effective)).toBeCloseTo(-24);
+        expect([
+            effective[0]! + 2 * effective[4]! + 3 * effective[8]! + effective[12]!,
+            effective[1]! + 2 * effective[5]! + 3 * effective[9]! + effective[13]!,
+            effective[2]! + 2 * effective[6]! + 3 * effective[10]! + effective[14]!,
+        ]).toEqual([20, 3, 8]);
+        expect(world._thin!.instance(body, 0)).toBe(nativeIdentity);
+    });
+
+    it("retains authored sub-picoradian basis components during native write-back", async () => {
+        const hknp = makeMockHknp();
+        const scene = makeScene();
+        const mesh = makeThinMesh();
+        mesh.thinInstances!.count = 1;
+        const world = createHavokWorld(scene, hknp);
+        await enableHavokThinInstancePhysics(world);
+        createPhysicsBody(world, mesh, PhysicsMotionType.DYNAMIC);
+        hknp.transforms.set(1, [
+            [0, 0, 0],
+            [0, 0, 2.5e-13, 1],
+        ]);
+
+        stepFrame(scene);
+
+        expect(Math.abs(mesh.thinInstances!.matrices[1]!)).toBeGreaterThan(4.9e-13);
+        expect(Math.abs(mesh.thinInstances!.matrices[4]!)).toBeGreaterThan(4.9e-13);
     });
 
     it("activates thin detection only after explicit enable and validates in the installed seam", async () => {
@@ -277,6 +377,119 @@ describe("thin-instance physics bodies", () => {
         expect(hknp.HP_Body_SetMassProperties.mock.calls.map((call) => call[1][1])).toEqual([2, 2]);
     });
 
+    it("derives mass properties from each attached differently scaled shape", async () => {
+        const hknp = makeMockHknp();
+        const world = createHavokWorld(makeScene(), hknp);
+        await enableHavokThinInstancePhysics(world);
+        const mesh = makeThinMesh();
+        mesh.thinInstances!.matrices[16] = 2;
+        mesh.thinInstances!.matrices[21] = 2;
+        mesh.thinInstances!.matrices[26] = 2;
+        const body = createPhysicsBody(world, mesh, PhysicsMotionType.DYNAMIC);
+        const shape = { _hkShape: ["shape"], _type: PhysicsShapeType.BOX } as PhysicsShape;
+        setPhysicsBodyShape(world, body, shape);
+
+        setPhysicsBodyMass(world, body, 1);
+
+        const properties = hknp.HP_Body_SetMassProperties.mock.calls.slice(-2).map((call) => call[1]);
+        expect(properties[0]).toEqual([[0, 1, 0], 1, [1 / 6, 1 / 6, 1 / 6], [0, 0, 0, 1]]);
+        expect(properties[1]).toEqual([[0, 2, 0], 1, [2 / 3, 2 / 3, 2 / 3], [0, 0, 0, 1]]);
+    });
+
+    it("applies explicit overrides and rotation locks to each instance's derived properties", async () => {
+        const hknp = makeMockHknp();
+        const world = createHavokWorld(makeScene(), hknp);
+        await enableHavokThinInstancePhysics(world);
+        const mesh = makeThinMesh();
+        mesh.thinInstances!.matrices[16] = 2;
+        mesh.thinInstances!.matrices[21] = 2;
+        mesh.thinInstances!.matrices[26] = 2;
+        const body = createPhysicsBody(world, mesh, PhysicsMotionType.DYNAMIC);
+        setPhysicsBodyShape(world, body, { _hkShape: ["shape"], _type: PhysicsShapeType.BOX } as PhysicsShape);
+
+        setPhysicsBodyMassProperties(world, body, {
+            centerOfMass: { x: 7, y: 8, z: 9 },
+            mass: 3,
+            inertia: { x: 4, y: 5, z: 6 },
+        });
+        expect(hknp.HP_Body_SetMassProperties.mock.calls.slice(-2).map((call) => call[1])).toEqual([
+            [[7, 8, 9], 3, [4, 5, 6], [0, 0, 0, 1]],
+            [[7, 8, 9], 3, [4, 5, 6], [0, 0, 0, 1]],
+        ]);
+
+        lockPhysicsBodyRotationAxes(world, body, ["z"]);
+        setPhysicsBodyMassProperties(world, body, { mass: 4 });
+        expect(hknp.HP_Body_SetMassProperties.mock.calls.slice(-2).map((call) => call[1])).toEqual([
+            [[0, 1, 0], 4, [1 / 6, 1 / 6, 0], [0, 0, 0, 1]],
+            [[0, 2, 0], 4, [2 / 3, 2 / 3, 0], [0, 0, 0, 1]],
+        ]);
+
+        unlockPhysicsBodyRotationAxes(world, body, ["z"]);
+        expect(hknp.HP_Body_SetMassProperties.mock.calls.slice(-2).map((call) => call[1])).toEqual([
+            [[0, 1, 0], 4, [1 / 6, 1 / 6, 1 / 6], [0, 0, 0, 1]],
+            [[0, 2, 0], 4, [2 / 3, 2 / 3, 2 / 3], [0, 0, 0, 1]],
+        ]);
+    });
+
+    it("scales shared collider geometry to each effective non-unit instance basis", async () => {
+        const hknp = makeMockHknp();
+        const world = createHavokWorld(makeScene(), hknp);
+        await enableHavokThinInstancePhysics(world);
+        const mesh = makeThinMesh();
+        mesh.thinInstances!.count = 1;
+        Object.defineProperty(mesh, "worldMatrix", { value: new Float32Array([0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 10, 20, 30, 1]) });
+        mesh.thinInstances!.matrices.set([-2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 4, 0, 5, 6, 7, 1]);
+        const body = createPhysicsBody(world, mesh, PhysicsMotionType.DYNAMIC);
+        const shape = { _hkShape: ["shape"], _type: PhysicsShapeType.BOX } as PhysicsShape;
+
+        setPhysicsBodyShape(world, body, shape);
+
+        expect(hknp.HP_Shape_CreateContainer).toHaveBeenCalledTimes(1);
+        expect(hknp.HP_Shape_AddChild).toHaveBeenCalledWith(
+            ["scaled-shape"],
+            ["shape"],
+            [
+                [0, 0, 0],
+                [0, 0, 0, 1],
+                [2, -3, 4],
+            ]
+        );
+        expect(hknp.HP_Body_SetShape).toHaveBeenCalledWith([1], ["scaled-shape"]);
+    });
+
+    it.each([
+        { name: "uniform", scale: [2, 2, 2], nativeScale: [2, 2, 2] },
+        { name: "non-uniform", scale: [2, 3, 4], nativeScale: [2, 3, 4] },
+        { name: "mirrored", scale: [-2, 3, 4], nativeScale: [2, -3, 4] },
+    ])("applies $name carrier scale exactly once for aggregate primitives", async ({ scale, nativeScale }) => {
+        const hknp = makeMockHknp();
+        const world = createHavokWorld(makeScene(), hknp);
+        await enableHavokThinInstancePhysics(world);
+        const mesh = makeThinMesh();
+        mesh.thinInstances!.count = 1;
+        Object.assign(mesh.scaling, { x: scale[0]!, y: scale[1]!, z: scale[2]! });
+        Object.defineProperty(mesh, "worldMatrix", {
+            value: new Float32Array([scale[0]!, 0, 0, 0, 0, scale[1]!, 0, 0, 0, 0, scale[2]!, 0, 0, 0, 0, 1]),
+        });
+
+        createPhysicsAggregate(world, mesh, PhysicsShapeType.BOX, { mass: 0 });
+
+        expect(hknp.HP_Shape_CreateBox).toHaveBeenCalledWith([0, 0, 0], [0, 0, 0, 1], [1, 1, 1]);
+        expect(hknp.HP_Shape_AddChild).toHaveBeenCalledWith(["scaled-shape"], ["shape"], [[0, 0, 0], [0, 0, 0, 1], nativeScale]);
+    });
+
+    it("keeps carrier scale baked when advanced support is enabled without thin-instance physics", () => {
+        const hknp = makeMockHknp();
+        const world = createHavokWorld(makeScene(), hknp);
+        const mesh = makeThinMesh();
+        Object.assign(mesh.scaling, { x: 2, y: 3, z: 4 });
+
+        createPhysicsAggregate(world, mesh, PhysicsShapeType.BOX, { mass: 0 });
+
+        expect(hknp.HP_Shape_CreateBox).toHaveBeenCalledWith([0, 0, 0], [0, 0, 0, 1], [2, 3, 4]);
+        expect(hknp.HP_Shape_CreateContainer).not.toHaveBeenCalled();
+    });
+
     it("fans direct body controls only for a thin primary handle", async () => {
         const hknp = makeMockHknp();
         const world = createHavokWorld(makeScene(), hknp);
@@ -336,6 +549,102 @@ describe("thin-instance physics bodies", () => {
         expect(mesh.rotationQuaternion).toMatchObject({ x: 0, y: 0, z: 0, w: 1 });
         expect(mesh.position.set).not.toHaveBeenCalled();
         expect(mesh.rotationQuaternion.set).not.toHaveBeenCalled();
+    });
+
+    it("restores captured thin transforms and velocities without replacing resources", async () => {
+        const hknp = makeMockHknp();
+        const scene = makeScene();
+        const mesh = makeThinMesh();
+        const matrices = mesh.thinInstances!.matrices;
+        const world = createHavokWorld(scene, hknp);
+        await enableHavokThinInstancePhysics(world);
+        const body = createPhysicsBody(world, mesh, PhysicsMotionType.DYNAMIC);
+        capturePhysicsBodyInstanceResetState(world, body);
+        hknp.transforms.set(1, [
+            [20, 21, 22],
+            [0, 0, 0, 1],
+        ]);
+        hknp.transforms.set(2, [
+            [30, 31, 32],
+            [0, 0, 0, 1],
+        ]);
+        stepFrame(scene);
+
+        resetPhysicsBodyInstances(world, body);
+
+        expect(hknp.HP_Body_Create).toHaveBeenCalledTimes(2);
+        expect(hknp.HP_Body_Release).not.toHaveBeenCalled();
+        expect(mesh.thinInstances!.matrices).toBe(matrices);
+        expect(Array.from(hknp.transforms.values())).toEqual([
+            [
+                [-2, 5, 0],
+                [0, 0, 0, 1],
+            ],
+            [
+                [3, 8, 0],
+                [0, 0, 0, 1],
+            ],
+        ]);
+        expect(hknp.HP_Body_SetLinearVelocity.mock.calls.slice(-2).map((call) => call[1])).toEqual([
+            [0, 0, 0],
+            [0, 0, 0],
+        ]);
+        expect(hknp.HP_Body_SetAngularVelocity.mock.calls.slice(-2).map((call) => call[1])).toEqual([
+            [0, 0, 0],
+            [0, 0, 0],
+        ]);
+        expect(hknp.HP_Body_SetActivationState).toHaveBeenCalledTimes(2);
+        expect(hknp.HP_Body_SetActivationState).toHaveBeenLastCalledWith([2], 1);
+    });
+
+    it("restores multiple signed-scale instances through an unchanged carrier", async () => {
+        const hknp = makeMockHknp();
+        const scene = makeScene();
+        const mesh = makeThinMesh();
+        Object.defineProperty(mesh, "worldMatrix", { value: new Float32Array([0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1, 0, 10, 20, 30, 1]) });
+        mesh.thinInstances!.matrices.set([-2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 4, 0, 5, 6, 7, 1], 0);
+        mesh.thinInstances!.matrices.set([2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 4, 0, -5, -6, -7, 1], 16);
+        const authoredMatrices = mesh.thinInstances!.matrices.slice();
+        const world = createHavokWorld(scene, hknp);
+        await enableHavokThinInstancePhysics(world);
+        const body = createPhysicsBody(world, mesh, PhysicsMotionType.DYNAMIC);
+        capturePhysicsBodyInstanceResetState(world, body);
+        const authoredNative = [...hknp.transforms.values()].map(([position, rotation]) => [position.slice(), rotation.slice()]);
+        hknp.transforms.set(1, [
+            [20, 21, 22],
+            [0, 0, 0, 1],
+        ]);
+        hknp.transforms.set(2, [
+            [30, 31, 32],
+            [0, 0, 0, 1],
+        ]);
+        stepFrame(scene);
+        hknp.HP_Body_SetQTransform.mockClear();
+
+        resetPhysicsBodyInstances(world, body);
+
+        expect(hknp.HP_Body_SetQTransform).toHaveBeenCalledTimes(2);
+        expect([...hknp.transforms.values()]).toEqual(authoredNative);
+        expect(mesh.thinInstances!.matrices).not.toBe(authoredMatrices);
+        expect(mesh.thinInstances!.matrices).toEqual(authoredMatrices);
+
+        (mesh.worldMatrix as unknown as Float32Array)[12] = 11;
+        expect(() => resetPhysicsBodyInstances(world, body)).toThrow("carrier world transform");
+    });
+
+    it("rejects reset capture for ordinary and disposed bodies", async () => {
+        const hknp = makeMockHknp();
+        const world = createHavokWorld(makeScene(), hknp);
+        await enableHavokThinInstancePhysics(world);
+        const ordinaryMesh = makeThinMesh();
+        ordinaryMesh.thinInstances = undefined;
+        const ordinary = createPhysicsBody(world, ordinaryMesh, PhysicsMotionType.DYNAMIC);
+        expect(() => capturePhysicsBodyInstanceResetState(world, ordinary)).toThrow("thin-instance physics body");
+
+        const thin = createPhysicsBody(world, makeThinMesh(), PhysicsMotionType.DYNAMIC);
+        capturePhysicsBodyInstanceResetState(world, thin);
+        removePhysicsBody(world, thin);
+        expect(() => resetPhysicsBodyInstances(world, thin)).toThrow("does not belong");
     });
 
     it("writes every simulated transform back to the matrix slab once per step", async () => {
@@ -429,9 +738,11 @@ describe("thin-instance physics bodies", () => {
 
         setPhysicsBodyCollisionEventsEnabled(world, body, true);
         onPhysicsCollision(world, received);
+        const thinScan = vi.spyOn(world._thin!, "resolve");
         world._afterStep![0]!(1 / 60);
 
         expect(setEventMask).toHaveBeenCalledTimes(2);
+        expect(thinScan).not.toHaveBeenCalled();
         expect(received).toHaveBeenCalledWith({
             collider: body,
             colliderIndex: 1,

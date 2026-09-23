@@ -1508,7 +1508,7 @@ describe("Mesh-blending geometry shader contracts", () => {
         const transparentPipeline = createPipeline.mock.calls.at(-1)![0];
         const geometryBlend = {
             color: { srcFactor: "src-alpha", dstFactor: "one-minus-src-alpha", operation: "add" },
-            alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
+            alpha: { srcFactor: "one", dstFactor: "one", operation: "add" },
         };
         expect(transparentPipeline.fragment!.targets[0]).toEqual({ format: "r16float", blend: geometryBlend });
         expect(transparentPipeline.fragment!.targets[1]).toEqual({ format: "rgba8unorm", blend: geometryBlend });

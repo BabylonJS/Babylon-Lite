@@ -666,6 +666,13 @@ void options;
         expect(dts).toMatch(/unlockPhysicsBodyRotationAxes\(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis\[\]\): void/);
     });
 
+    it("exposes deferred absolute world-space bone poses", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).toMatch(/setBoneWorldPoseDeferred\(skeleton: Skeleton, bone: Bone, px: number, py: number, pz: number, rx: number, ry: number, rz: number, rw: number\): void/);
+        expect(dts).toMatch(/@public\s*\*\/\s*export declare function setBoneWorldPoseDeferred/);
+    });
+
     it("exposes readonly rendering-context introspection without internal registries", () => {
         const dts = readFileSync(DTS_PATH, "utf-8");
 

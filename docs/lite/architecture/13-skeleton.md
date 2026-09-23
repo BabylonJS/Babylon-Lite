@@ -238,6 +238,9 @@ export function setBonePosition(skeleton: Skeleton, bone: Bone, x, y, z): void;
 export function setBoneRotationQuaternion(skeleton: Skeleton, bone: Bone, x, y, z, w): void;
 export function setBoneScaling(skeleton: Skeleton, bone: Bone, x, y, z): void;
 export function setBoneVisible(skeleton: Skeleton, bone: Bone, visible: boolean): void; // scale→0 hide, beats animation
+export function setBonePoseDeferred(skeleton: Skeleton, bone: Bone, px, py, pz, rx, ry, rz, rw): void;
+export function setBoneWorldPoseDeferred(skeleton: Skeleton, bone: Bone, px, py, pz, rx, ry, rz, rw): void;
+export function bakeSkeleton(skeleton: Skeleton): void;
 export function clearBoneOverride(skeleton: Skeleton, bone: Bone): void;
 export interface Skeleton {
     readonly bones: readonly Bone[]; /* +@internal */
@@ -261,6 +264,12 @@ if (head) setBoneVisible(skel, head, false); // hide the head + everything under
 - **Eager bake.** Each `setBone*` immediately recomputes the asset's bone matrices from
   the rest pose + overrides and uploads the bone textures, so overrides apply even with
   **no** animation playing (static models).
+- **Deferred pose batches.** `setBonePoseDeferred` writes local translation and
+  rotation, while `setBoneWorldPoseDeferred` writes an absolute Lite world-space
+  pose and applies the loader's handedness reflection internally. Neither
+  uploads immediately; callers update the complete set of driven bones and
+  invoke `bakeSkeleton` once. This is the supported public path for per-frame
+  multi-joint drivers such as physics ragdolls.
 - **Animation wins per-component — except visibility.** When a clip plays, the per-frame
   tick re-applies the `setBonePosition` / `setBoneRotationQuaternion` / `setBoneScaling`
   overrides right after the rest reset and **before** channel evaluation, so any component
@@ -320,11 +329,11 @@ The internal `BoneOverride` map type is kept off the public API surface: public 
 
 ## File Manifest
 
-| File                    | Purpose                                                                                                                         |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `create-skeleton.ts`    | GPU resource factory: creates bone texture + joint/weight vertex buffers from parsed glTF skin data                             |
-| `update-skeleton-bone-matrices.ts` | High-level programmatic bone-matrix update that keeps the CPU mirror and GPU texture synchronized                |
-| `skeleton-updater.ts`   | Per-frame animation evaluation: keyframe interpolation → hierarchy traversal → bone matrix computation → GPU upload             |
-| `skeleton-pose.ts`      | Shared bake primitives (topo order, rest reset, world matrices, bone-texture upload) used by the opt-in eager bone-control bake |
-| `bone-control.ts`       | Opt-in bone-control API: `enableBoneControl`, `getBoneByName`, `setBone*`, eager bake + per-frame override applier              |
-| `bone-control-hooks.ts` | Two null hooks (`_boneBuilder`, `_boneApplier`) so the always-fetched chunk references bone control without bundling it         |
+| File                               | Purpose                                                                                                                         |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `create-skeleton.ts`               | GPU resource factory: creates bone texture + joint/weight vertex buffers from parsed glTF skin data                             |
+| `update-skeleton-bone-matrices.ts` | High-level programmatic bone-matrix update that keeps the CPU mirror and GPU texture synchronized                               |
+| `skeleton-updater.ts`              | Per-frame animation evaluation: keyframe interpolation → hierarchy traversal → bone matrix computation → GPU upload             |
+| `skeleton-pose.ts`                 | Shared bake primitives (topo order, rest reset, world matrices, bone-texture upload) used by the opt-in eager bone-control bake |
+| `bone-control.ts`                  | Opt-in bone-control API: `enableBoneControl`, `getBoneByName`, `setBone*`, eager bake + per-frame override applier              |
+| `bone-control-hooks.ts`            | Two null hooks (`_boneBuilder`, `_boneApplier`) so the always-fetched chunk references bone control without bundling it         |
