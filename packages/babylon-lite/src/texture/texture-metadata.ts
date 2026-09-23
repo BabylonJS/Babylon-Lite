@@ -52,14 +52,14 @@ interface TextureShape {
     readonly depth?: number;
 }
 
-interface RetainedSampler {
-    readonly addressModeU?: unknown;
-    readonly addressModeV?: unknown;
-    readonly addressModeW?: unknown;
-    readonly magFilter?: unknown;
-    readonly minFilter?: unknown;
-    readonly mipmapFilter?: unknown;
-    readonly maxAnisotropy?: unknown;
+interface KnownSampler {
+    readonly addressModeU?: GPUAddressMode;
+    readonly addressModeV?: GPUAddressMode;
+    readonly addressModeW?: GPUAddressMode;
+    readonly magFilter?: GPUFilterMode;
+    readonly minFilter?: GPUFilterMode;
+    readonly mipmapFilter?: GPUMipmapFilterMode;
+    readonly maxAnisotropy?: number;
 }
 
 /** Return a side-effect-free, handle-free metadata snapshot for a supported Lite texture. */
@@ -231,14 +231,14 @@ function readColorSpace(format: string | undefined, sampleType: TextureMetadata[
     return format.endsWith("-srgb") ? "srgb" : "linear";
 }
 
-function readKnownSampler(shape: TextureShape): RetainedSampler | undefined {
+function readKnownSampler(shape: TextureShape): KnownSampler | undefined {
     if (shape.kind === "cube") {
         return { magFilter: "linear", minFilter: "linear", mipmapFilter: "linear" };
     }
     return undefined;
 }
 
-function readSamplerMetadata(sampler: RetainedSampler | undefined): TextureSamplerMetadata | undefined {
+function readSamplerMetadata(sampler: KnownSampler | undefined): TextureSamplerMetadata | undefined {
     if (!sampler) {
         return undefined;
     }
