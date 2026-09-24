@@ -4,7 +4,10 @@ import type { Texture2D } from "../../texture/texture-2d.js";
 import type { StorageBuffer } from "../../resource/storage-buffer.js";
 import type { Mat4 } from "../../math/types.js";
 import type { WgslSource } from "../../shader/wgsl.js";
+import type { EngineContext } from "../../engine/engine.js";
+import type { MeshGPU } from "../../mesh/mesh.js";
 import { getShaderGroupBuilder } from "./shader-group-builder.js";
+import { _attributeInfo } from "./shader-vb-support.js";
 import { bumpVisibilityEpoch } from "../../engine/engine.js";
 
 /** Vertex attribute names a ShaderMaterial can bind. `joints`/`weights` (and `joints1`/`weights1`
@@ -24,6 +27,15 @@ export type ShaderUniformValue = number | readonly number[] | Float32Array;
 export type ShaderSamplerOption = string | ShaderSamplerDecl;
 /** A storage-buffer entry: a read-only WGSL storage binding declaration. */
 export type ShaderStorageBufferOption = ShaderStorageBufferDecl;
+/** Per-attribute vertex FORMAT overrides, applied with `setShaderAttributeFormats`.
+ *  Omitted attributes keep the canonical format.
+ *
+ *  A format is part of the shader's own signature — it decides the WGSL type of
+ *  `input.<attribute>` — so it belongs to the material. WHERE those bytes sit (byte
+ *  stride and per-attribute offset) is a property of the geometry and lives on the
+ *  mesh, as `MeshGPU._vbLayout`. Keeping the two apart is what lets one material draw
+ *  both a tightly-packed CPU mesh and an interleaved GPU-produced one. */
+export type ShaderAttributeFormats = Partial<Record<ShaderAttributeName, GPUVertexFormat>>;
 /** Value of a WGSL preprocessor define — boolean toggle or numeric constant. */
 export type ShaderDefineValue = boolean | number;
 /** Map of WGSL preprocessor define names to their values. */
@@ -78,6 +90,9 @@ export interface ShaderMaterialOptions {
     /** Slope-scaled depth bias — extra bias proportional to the depth gradient, so steeply-angled (grazing)
      *  surfaces get more bias. Pairs with `depthBias` to kill z-fighting at oblique angles. Default 0. */
     readonly depthBiasSlopeScale?: number;
+    /** Primitive topology for this material. Defaults to `triangle-list`.
+     *  Strip topologies are not supported because their required index format is mesh-specific. */
+    readonly topology?: "point-list" | "line-list" | "triangle-list";
 }
 
 /** A custom uniform declaration: WGSL identifier, type, and optional default. */
@@ -126,6 +141,10 @@ export interface ShaderUniformSlot {
 export interface ShaderTextureSlot {
     readonly decl: ShaderSamplerDecl;
     current: Texture2D | null;
+    /** @internal Last resources observed by `setShaderTexture`, including replaceable facade backing. */
+    _view?: GPUTextureView | null;
+    /** @internal */
+    _sampler?: GPUSampler | null;
 }
 
 export interface ShaderStorageBufferSlot {
@@ -138,6 +157,8 @@ export interface ShaderStorageBufferSlot {
  *  via `setShaderUniform()` / `setShaderTexture()` and friends. */
 export interface ShaderMaterial extends Material {
     readonly name?: string;
+    /** @internal Non-canonical vertex formats installed by `setShaderAttributeFormats`. */
+    _attributeFormats?: ShaderAttributeFormats;
     readonly vertexSource: WgslSource;
     readonly fragmentSource: WgslSource;
     readonly attributes: readonly ShaderAttributeName[];
@@ -147,6 +168,8 @@ export interface ShaderMaterial extends Material {
     readonly defines: readonly ShaderDefine[];
     /** @internal Explicit thin-instance color preference; numeric zero is reserved for compact runtime checks. */
     readonly _tic?: boolean | 0;
+    /** @internal Optional neutral buffer provider installed by the final-color helper. */
+    _colorFallback?: (engine: EngineContext, gpu: MeshGPU) => GPUBuffer;
     readonly needAlphaBlending: boolean;
     readonly blendMode: "alpha" | "additive";
     /** Explicit blend-state override (see `ShaderMaterialOptions.blend`). */
@@ -161,7 +184,7 @@ export interface ShaderMaterial extends Material {
     readonly depthBias: number;
     readonly depthBiasSlopeScale: number;
     /** @internal Primitive topology override. Undefined means triangle-list. */
-    readonly _topology?: GPUPrimitiveTopology;
+    readonly _topology?: ShaderMaterialOptions["topology"];
     /** Optional stencil-test state baked into the main-pass pipeline (mask write / discard). Set after
      *  creation (`mat.stencil = { ... }`) and call `enableMaterialStencil()` before `registerScene`. Default
      *  none. See `StencilState`. */
@@ -176,6 +199,16 @@ export interface ShaderMaterial extends Material {
     _uniformVersion: number;
     /** @internal */
     _resourceVersion: number;
+    /** @internal Private custom UBO owned by this material or view. */
+    _shaderCustomUbo?: GPUBuffer | null;
+    /** @internal Engine that allocated the private custom UBO. */
+    _shaderCustomEngine?: EngineContext;
+    /** @internal CPU-side storage for the private custom UBO. */
+    _shaderCustomData?: ArrayBuffer | null;
+    /** @internal Byte view over the private custom UBO data. */
+    _shaderCustomBytes?: Uint8Array<ArrayBuffer> | null;
+    /** @internal Uniform version last written to the private custom UBO. */
+    _shaderCustomVersion?: number;
 }
 
 function isIdentifier(name: string): boolean {
@@ -189,18 +222,7 @@ function assertIdentifier(kind: string, name: string): void {
 }
 
 function isSupportedAttribute(name: string): name is ShaderAttributeName {
-    return (
-        name === "position" ||
-        name === "normal" ||
-        name === "uv" ||
-        name === "uv2" ||
-        name === "tangent" ||
-        name === "color" ||
-        name === "joints" ||
-        name === "weights" ||
-        name === "joints1" ||
-        name === "weights1"
-    );
+    return !!_attributeInfo(name);
 }
 
 function isSystemUniform(name: string): name is ShaderSystemUniformName {
@@ -241,6 +263,10 @@ export function _isShaderSystemUniform(name: string): name is ShaderSystemUnifor
 export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMaterial {
     if (!options.vertexSource || !options.fragmentSource) {
         throw new Error("ShaderMaterial: vertexSource and fragmentSource must be non-empty WGSL strings.");
+    }
+    const topology = options.topology as GPUPrimitiveTopology | undefined;
+    if (topology?.endsWith("-strip")) {
+        throw new Error("ShaderMaterial: strip topologies are unsupported because indexed draws require a mesh-specific stripIndexFormat.");
     }
 
     const attributes: ShaderAttributeName[] = [];
@@ -338,6 +364,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         depthOnlyFragment: options.depthOnlyFragment ?? false,
         depthBias: options.depthBias ?? 0,
         depthBiasSlopeScale: options.depthBiasSlopeScale ?? 0,
+        _topology: topology as ShaderMaterialOptions["topology"],
         _buildGroup: getShaderGroupBuilder(),
         _uboVersion: 0,
         _uniformValues: uniformValues,
@@ -462,6 +489,20 @@ export function setShaderUniform(material: ShaderMaterial, name: string, value: 
     setUniformValue(material, name, value);
 }
 
+/** Get a declared uniform's current value.
+ *  Scalars are returned as numbers. Vector and matrix values are returned as the material's live backing
+ *  `Float32Array`, with stable identity and no copy. Do not mutate this array directly: doing so bypasses material
+ *  versioning and GPU invalidation. Passing an already-mutated backing array to `setShaderUniform` will not trigger
+ *  an update because the setter cannot detect a difference. To update the uniform, prepare the new values in separate
+ *  storage and pass that separate value to `setShaderUniform`. */
+export function getShaderUniform(material: ShaderMaterial, name: string): number | Float32Array {
+    const slot = material._uniformValues.get(name);
+    if (!slot) {
+        throw new Error(`ShaderMaterial: uniform "${name}" was not declared.`);
+    }
+    return slot.value.length === 1 ? slot.value[0]! : slot.value;
+}
+
 /** Bind (or clear) the texture for a declared sampler, enforcing that depth and
  *  non-depth samplers receive a matching `Texture2D`.
  *  @param material - Target material.
@@ -482,18 +523,27 @@ export function setShaderTexture(material: ShaderMaterial, name: string, texture
             throw new Error(`ShaderMaterial: sampler "${name}" cannot use a depth Texture2D.`);
         }
     }
-    // Only invalidate the cached bind groups when the bound texture HANDLE actually changes. The bind group
-    // references the texture's view + sampler (see createShaderBindGroup), so re-binding the SAME Texture2D (the
-    // common "keep my shadow map / scene-depth bound every frame" pattern) leaves those identical. Bumping the
-    // resource version unconditionally therefore forced a BRAND-NEW bind group every frame (per material, for every
-    // packet using it), churning the D3D12 descriptor heap until it OOMed on content-heavy scenes (e.g. reloading
-    // a big save). A texture's CONTENTS can change freely without a new bind group (the bound view is live), so
-    // identity comparison is correct.
-    if (slot.current !== texture) {
+    const view = texture?.view ?? null;
+    const sampler = texture?.sampler ?? null;
+    // Stable render-target facades replace their view in place on resize. Comparing both the public handle and the
+    // resources captured by the bind group keeps repeated ordinary sets free while allowing a resize subscriber to
+    // call this setter again and rebuild exactly once for the new attachment generation.
+    if (slot.current !== texture || (texture && (slot._view !== view || slot._sampler !== sampler))) {
         slot.current = texture;
+        slot._view = view;
+        slot._sampler = sampler;
         material._resourceVersion++;
         bumpVisibilityEpoch();
     }
+}
+
+/** Get the texture currently bound to a declared sampler, preserving wrapper identity. */
+export function getShaderTexture(material: ShaderMaterial, name: string): Texture2D | null {
+    const slot = material._textureSlots.get(name);
+    if (!slot) {
+        throw new Error(`ShaderMaterial: sampler "${name}" was not declared.`);
+    }
+    return slot.current;
 }
 
 /** Bind (or clear) a declared read-only storage buffer. */

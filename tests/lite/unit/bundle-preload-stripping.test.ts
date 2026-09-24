@@ -10,6 +10,7 @@ describe("bundle preload stripping", () => {
 
     it("collapses async one-export projections to the module import", () => {
         expect(stripNoopPreloadWrappers('await p(async()=>{const{load:l}=await import("./a.js");return{load:l}},[])')).toBe('await import("./a.js")');
+        expect(stripNoopPreloadWrappers('await p(async()=>{const{load:l}=await(import("./a.js"));return{load:l}},[])')).toBe('await import("./a.js")');
     });
 
     it("preserves unrelated empty arrays", () => {

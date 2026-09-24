@@ -10,7 +10,8 @@
  *   or: LEAK_SCENES=1,2 npx playwright test --config playwright.perf.config.ts memory-leak
  *
  * How it works:
- *   1. Opens leak-test.html?scene=N (a harness that exposes window.__leakTest)
+ *   1. Opens /lite/leak-test.html?scene=N through Vite's HTML transform so
+ *      the harness's bare babylon-lite import resolves (exposes window.__leakTest)
  *   2. For each cycle: calls __leakTest.runCycle() then forces GC via CDP
  *   3. Reads JSHeapUsedSize after each cycle
  *   4. Asserts heap growth from cycle 2→N is within tolerance
@@ -41,6 +42,18 @@ const SELECTED = process.env.LEAK_SCENES ? process.env.LEAK_SCENES.split(",").ma
 
 const SCENES = SELECTED ? ALL_SCENES.filter((s) => SELECTED.includes(s.num)) : ALL_SCENES;
 
+if (SCENES.some((scene) => scene.num === 1)) {
+    test("Scene 1 leak harness resolves its engine import", async ({ page }) => {
+        const pageErrors: string[] = [];
+        page.on("pageerror", (error) => pageErrors.push(error.message));
+
+        await page.goto("/lite/leak-test.html?scene=1", { waitUntil: "domcontentloaded" });
+        await expect(page.locator("#renderCanvas")).toHaveAttribute("data-ready", "true", { timeout: 15_000 });
+        expect(pageErrors).toEqual([]);
+        expect(await page.evaluate(() => (window as any).__leakTest?.ready)).toBe(true);
+    });
+}
+
 // ── CDP helpers ────────────────────────────────────────────────────
 
 async function forceGC(cdp: CDPSession): Promise<void> {
@@ -67,10 +80,10 @@ test.describe("Memory Leak Detection", () => {
             await cdp.send("Performance.enable");
             await cdp.send("HeapProfiler.enable");
 
-            await page.goto(`/leak-test.html?scene=${scene.num}`, { waitUntil: "domcontentloaded" });
+            await page.goto(`/lite/leak-test.html?scene=${scene.num}`, { waitUntil: "domcontentloaded" });
 
             // Wait for harness to be ready
-            await page.waitForFunction(() => (window as any).__leakTest?.ready === true, { timeout: 15_000 });
+            await page.waitForFunction(() => (window as any).__leakTest?.ready === true, null, { timeout: 15_000 });
 
             const heapSizes: number[] = [];
 

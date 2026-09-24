@@ -69,6 +69,12 @@ function walkTsFiles(root: string): string[] {
     return out;
 }
 
+function isDeferredFeatureFile(root: string, file: string): boolean {
+    const relative = path.relative(root, file).replace(/\\/g, "/");
+    // Opt-in compute errors must not renumber core errors and grow scenes that never import compute.
+    return relative.startsWith("compute/") || relative.startsWith("resource/compute-storage-");
+}
+
 /** Re-escape already-cooked template text so it can be embedded inside a new template literal. */
 function escapeForTemplate(cooked: string): string {
     return cooked.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
@@ -150,7 +156,7 @@ export function liteErrorPlugin(): Plugin {
 
         buildStart() {
             plans.clear();
-            const files = walkTsFiles(srcRoot).sort((a, b) => a.localeCompare(b));
+            const files = walkTsFiles(srcRoot).sort((a, b) => Number(isDeferredFeatureFile(srcRoot, a)) - Number(isDeferredFeatureFile(srcRoot, b)) || a.localeCompare(b));
             const tableEntries: string[] = [];
             let nextCode = 0;
 

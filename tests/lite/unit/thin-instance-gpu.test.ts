@@ -5,6 +5,7 @@ import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import { syncThinInstanceDrawArgs, syncThinInstanceForDraw, syncThinInstanceGpuData } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu";
 import {
     enableThinInstanceDynamicDrawCount,
+    enableThinInstanceGpuCulling,
     setThinInstanceCount,
     setThinInstanceDrawCount,
     setThinInstanceMatrix,
@@ -24,7 +25,6 @@ function makeThinInstances(count: number): ThinInstanceData {
         _capacity: count,
         _version: 1,
         _gpuBuffer: null,
-        _gpuBufferStorage: false,
         _gpuVersion: 0,
         _dirtyMin: 0,
         _dirtyMax: count,
@@ -38,7 +38,88 @@ function makeThinInstances(count: number): ThinInstanceData {
     };
 }
 
+function makeGpu(baseVertex = 0): Mesh["_gpu"] {
+    return { indexCount: 36, _baseVertex: baseVertex } as Mesh["_gpu"];
+}
+
 describe("thin-instance stable draw arguments", () => {
+    it("does not recreate or re-upload storage-capable matrices when GPU culling changes", () => {
+        const matrix = { size: 128 } as GPUBuffer;
+        const color = { size: 32, destroy: vi.fn() } as unknown as GPUBuffer;
+        const createBuffer = vi.fn((descriptor: GPUBufferDescriptor) => ({ size: descriptor.size, destroy: vi.fn() }) as unknown as GPUBuffer);
+        const engine = { _device: { createBuffer, queue: { writeBuffer: vi.fn() } }, _retirements: [] } as unknown as EngineContext;
+        const ti = makeThinInstances(2);
+        ti._gpuBuffer = matrix;
+        ti._gpuVersion = ti._version;
+        ti._dirtyMin = ti.count;
+        ti._dirtyMax = 0;
+        enableThinInstanceGpuCulling({ thinInstances: ti } as Mesh);
+
+        expect(syncThinInstanceGpuData(engine, ti, false)).toBe(false);
+        expect(ti._gpuBuffer).toBe(matrix);
+        expect(createBuffer).not.toHaveBeenCalled();
+        expect(engine._device.queue.writeBuffer).not.toHaveBeenCalled();
+
+        ti.colors = new Float32Array(8);
+        ti._colorGpuBuffer = color;
+        ti._colorVersion = ti._colorGpuVersion = 1;
+        expect(syncThinInstanceGpuData(engine, ti, true)).toBe(true);
+        expect(ti._gpuBuffer).toBe(matrix);
+        expect(createBuffer).toHaveBeenCalledOnce();
+        expect(createBuffer).toHaveBeenCalledWith(expect.objectContaining({ label: "thin-instance-colors", usage: 0xa8 }));
+    });
+
+    it("uses the argument snapshot for signed base vertices, index changes and zero-initialized generations", () => {
+        const writes: number[][] = [];
+        const engine = {
+            _device: {
+                createBuffer: vi.fn(() => ({})),
+                queue: {
+                    writeBuffer: vi.fn((_buffer: GPUBuffer, _offset: number, data: ArrayBuffer, byteOffset: number, byteLength: number) => {
+                        writes.push(Array.from(new Uint32Array(data, byteOffset, byteLength / 4)));
+                    }),
+                },
+            },
+        } as unknown as EngineContext;
+        const ti = makeThinInstances(0);
+        const empty = { indexCount: 0, _baseVertex: 0 } as Mesh["_gpu"];
+        syncThinInstanceDrawArgs(engine, ti, empty);
+        expect(writes).toEqual([[0, 0, 0, 0, 0]]);
+
+        const gpu = makeGpu(-12);
+        ti.count = 3;
+        syncThinInstanceDrawArgs(engine, ti, gpu);
+        syncThinInstanceDrawArgs(engine, ti, gpu);
+        expect(writes).toEqual([
+            [0, 0, 0, 0, 0],
+            [36, 3, 0, 0xfffffff4, 0],
+        ]);
+        syncThinInstanceDrawArgs(engine, ti, { ...gpu, indexCount: 12 });
+        expect(writes[2]).toEqual([12, 3, 0, 0xfffffff4, 0]);
+        syncThinInstanceDrawArgs(engine, ti, makeGpu(12));
+        expect(writes[3]).toEqual([36, 3, 0, 12, 0]);
+
+        ti._drawArgsBuffer = undefined;
+        syncThinInstanceDrawArgs(engine, ti, gpu);
+        expect(writes[4]).toEqual([36, 3, 0, 0xfffffff4, 0]);
+        expect(engine._device.createBuffer).toHaveBeenCalledTimes(2);
+    });
+
+    it("retries a failed argument upload even when its CPU words already match", () => {
+        const writeBuffer = vi.fn();
+        const engine = { _device: { createBuffer: vi.fn(() => ({})), queue: { writeBuffer } } } as unknown as EngineContext;
+        const ti = makeThinInstances(3);
+        syncThinInstanceDrawArgs(engine, ti, makeGpu(0));
+        writeBuffer.mockImplementationOnce(() => {
+            throw new Error("upload failed");
+        });
+        expect(() => syncThinInstanceDrawArgs(engine, ti, makeGpu(8))).toThrow("upload failed");
+        syncThinInstanceDrawArgs(engine, ti, makeGpu(8));
+        syncThinInstanceDrawArgs(engine, ti, makeGpu(8));
+        expect(writeBuffer).toHaveBeenCalledTimes(3);
+        expect(Array.from(ti._drawArgsData!)).toEqual([36, 3, 0, 8, 0]);
+    });
+
     it("queues replaced instance buffers for frame-gated retirement", () => {
         const oldMatrix = { size: 64, destroy: vi.fn() } as unknown as GPUBuffer;
         const oldColor = { size: 16, destroy: vi.fn() } as unknown as GPUBuffer;
@@ -94,10 +175,11 @@ describe("thin-instance stable draw arguments", () => {
         } as unknown as EngineContext;
         const ti = makeThinInstances(12);
 
-        const first = syncThinInstanceDrawArgs(engine, ti, 36);
+        const gpu = makeGpu();
+        const first = syncThinInstanceDrawArgs(engine, ti, gpu);
         ti.count = 7;
-        const second = syncThinInstanceDrawArgs(engine, ti, 36);
-        syncThinInstanceDrawArgs(engine, ti, 36);
+        const second = syncThinInstanceDrawArgs(engine, ti, gpu);
+        syncThinInstanceDrawArgs(engine, ti, gpu);
 
         expect(first).toBe(buffer);
         expect(second).toBe(buffer);
@@ -118,9 +200,10 @@ describe("thin-instance stable draw arguments", () => {
             },
         } as unknown as EngineContext;
         const ti = makeThinInstances(12);
+        const gpu = makeGpu();
 
-        expect(syncThinInstanceForDraw(engine, ti, false, 36)).toBeNull();
-        expect(syncThinInstanceForDraw(engine, ti, false, 36)).toBeNull();
+        expect(syncThinInstanceForDraw(engine, ti, false, gpu)).toBeNull();
+        expect(syncThinInstanceForDraw(engine, ti, false, gpu)).toBeNull();
         expect(ti._drawArgsBuffer).toBeFalsy();
 
         ti.count = 7;
@@ -128,10 +211,10 @@ describe("thin-instance stable draw arguments", () => {
         ti._dirtyMin = 0;
         ti._dirtyMax = ti.count;
 
-        const indirect = syncThinInstanceForDraw(engine, ti, false, 36);
+        const indirect = syncThinInstanceForDraw(engine, ti, false, gpu);
         expect(indirect).toBe(ti._drawArgsBuffer);
         expect(indirect).toBeTruthy();
-        expect(syncThinInstanceForDraw(engine, ti, false, 36)).toBe(indirect);
+        expect(syncThinInstanceForDraw(engine, ti, false, gpu)).toBe(indirect);
     });
 
     it("updates only draw arguments when the count-only setter changes the active prefix", () => {
@@ -149,16 +232,16 @@ describe("thin-instance stable draw arguments", () => {
         ti._gpuVersion = ti._version;
         ti._dirtyMin = 12;
         ti._dirtyMax = 0;
-        const mesh = { thinInstances: ti, _gpu: {} as Mesh["_gpu"] } as unknown as Mesh;
+        const mesh = { thinInstances: ti, _gpu: makeGpu() } as unknown as Mesh;
 
-        expect(syncThinInstanceForDraw(engine, ti, false, 36)).toBeNull();
+        expect(syncThinInstanceForDraw(engine, ti, false, mesh._gpu)).toBeNull();
         setThinInstanceDrawCount(mesh, 7);
 
         expect(ti.count).toBe(7);
         expect(ti._version).toBe(2);
         expect(ti._dirtyMin).toBe(12);
         expect(ti._dirtyMax).toBe(0);
-        expect(syncThinInstanceForDraw(engine, ti, false, 36)).toBe(indirectBuffer);
+        expect(syncThinInstanceForDraw(engine, ti, false, mesh._gpu)).toBe(indirectBuffer);
         expect(writeBuffer).toHaveBeenCalledTimes(1);
     });
 
@@ -166,7 +249,7 @@ describe("thin-instance stable draw arguments", () => {
         const ti = makeThinInstances(12);
         ti._gpuBuffer = { size: 12 * 64 } as GPUBuffer;
         ti._gpuVersion = ti._version;
-        const mesh = { thinInstances: ti, _gpu: {} as Mesh["_gpu"] } as unknown as Mesh;
+        const mesh = { thinInstances: ti, _gpu: makeGpu() } as unknown as Mesh;
 
         setThinInstanceDrawCount(mesh, 7);
         setThinInstanceDrawCount(mesh, 9);
@@ -188,10 +271,10 @@ describe("thin-instance stable draw arguments", () => {
         const ti = makeThinInstances(4);
         ti._gpuBuffer = { size: 4 * 64 } as GPUBuffer;
         ti._gpuVersion = ti._version;
-        const mesh = { thinInstances: ti, _gpu: {} as Mesh["_gpu"] } as unknown as Mesh;
+        const mesh = { thinInstances: ti, _gpu: makeGpu() } as unknown as Mesh;
 
         enableThinInstanceDynamicDrawCount(mesh);
-        const args = syncThinInstanceForDraw(engine, ti, false, 36);
+        const args = syncThinInstanceForDraw(engine, ti, false, mesh._gpu);
 
         expect(args).toBe(indirectBuffer);
         expect(ti._drawArgsBuffer).toBe(indirectBuffer);
@@ -212,7 +295,7 @@ describe("thin-instance stable draw arguments", () => {
             },
         } as unknown as EngineContext;
         const ti = makeThinInstances(2);
-        const mesh = { thinInstances: ti, _gpu: {} as Mesh["_gpu"] } as unknown as Mesh;
+        const mesh = { thinInstances: ti, _gpu: makeGpu() } as unknown as Mesh;
 
         setThinInstanceCount(mesh, 0);
         setThinInstanceMatrix(mesh, 0, new Float32Array(16) as unknown as Mat4);

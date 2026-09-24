@@ -19,7 +19,7 @@
 import { F32 } from "../engine/typed-arrays.js";
 import { SS } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
-import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
+import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
 import type { Texture2D } from "../texture/texture-2d.js";
 import { wgsl } from "../shader/wgsl.js";
 

@@ -43,6 +43,7 @@ function createCsmDirectionalShadowGenerator(engine: EngineContext, light: Direc
 interface CsmStaticCacheOptions {
     refitAngle: number;
     refitMaxIntervalMs?: number;
+    staticCascadesPerFrame?: number; // 0 or omitted: every cascade re-renders in the refit frame
 }
 
 function enableCsmStaticCache(engine: EngineContext, shadowGenerator: ShadowGenerator, options: CsmStaticCacheOptions): Promise<void>;
@@ -159,9 +160,25 @@ light is paused so GPU-clock-animated static casters continue refreshing. Genera
 that are not explicitly enabled preserve the original single-task path, allocate no
 cache texture, and do not load the cache implementation.
 
+With `options.staticCascadesPerFrame` above zero, a refit whose only cause is light drift
+re-renders at most that many static cascades per frame, round-robin, so the periodic refresh
+costs a slice of every frame instead of one long frame. Each selected cascade advances
+atomically: its shadow camera and receiver transform are updated together, its static layer is
+rendered, only that array layer is copied to the live shadow map, and only that layer's dynamic
+overlay is rendered. Cascades still waiting retain both their previous depth and previous
+receiver transform, so the sampled data remains coherent throughout the spread.
+
+A refit caused by the camera, scene content, caster set, promotion or demotion updates every
+cascade in its own frame, as without the option. A drift refit that lands while a spread is
+still draining also updates every cascade immediately, preventing a fast-moving light from
+continually replacing the pending generation. If a dynamic caster changes during a spread,
+the cache is copied and the dynamic overlay is redrawn for every cascade, while each static
+layer remains paired with its currently published transform.
+
 `createCsmRefitGate` exposes the CPU-only partition/refit state machine for consumers
-that need the same policy without engine or WebGPU dependencies. Re-supplying a new
-array with identical caster membership does not invalidate the cache.
+that need the same policy without engine or WebGPU dependencies. The spread scheduler and its
+drift classification are internal cache-orchestration details. Re-supplying a new array with
+identical caster membership does not invalidate the cache.
 
 ### Receiver UBO layout (`_shadowUBO`, 320 bytes / 80 f32)
 

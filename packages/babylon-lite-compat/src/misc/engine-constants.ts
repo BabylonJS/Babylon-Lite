@@ -115,6 +115,12 @@ export function RegisterImageProcessingConfiguration(): void {
  */
 export function RegisterAbstractEngineTextureLoaders(): void {}
 
+/** Pure-build registration shim; compat wires the Lite array upload directly. */
+export function RegisterEnginesExtensionsEngineTexture2DArrayImageSource(): void {}
+
+/** WebGPU pure-build registration shim; Babylon Lite is WebGPU-only. */
+export function RegisterEnginesWebGPUExtensionsEngineTexture2DArrayImageSource(): void {}
+
 /**
  * Babylon.js `Constants` — the small subset of numeric constants referenced by
  * the ported scenes. Extend as needed.
@@ -142,4 +148,12 @@ export const Constants = {
     TEXTURE_TRILINEAR_SAMPLINGMODE: 3,
     TEXTUREFORMAT_RGBA: 5,
     TEXTURETYPE_UNSIGNED_BYTE: 0,
+    BUFFER_CREATIONFLAG_READ: 1,
+    BUFFER_CREATIONFLAG_WRITE: 2,
+    BUFFER_CREATIONFLAG_READWRITE: 3,
+    BUFFER_CREATIONFLAG_UNIFORM: 4,
+    BUFFER_CREATIONFLAG_VERTEX: 8,
+    BUFFER_CREATIONFLAG_INDEX: 16,
+    BUFFER_CREATIONFLAG_STORAGE: 32,
+    BUFFER_CREATIONFLAG_INDIRECT: 64,
 } as const;

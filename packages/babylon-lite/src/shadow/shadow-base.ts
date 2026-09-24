@@ -10,7 +10,7 @@ import type { Mat4Storage } from "../math/types.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import type { DirectionalLight } from "../light/directional-light.js";
 import type { Mesh } from "../mesh/mesh.js";
-import { createUniformBuffer } from "../resource/gpu-buffers.js";
+import { createUniformBuffer } from "../resource/uniform-buffer.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
 import { packMat4IntoF32 } from "../math/pack-mat4-into-f32.js";
 import { allocateMat4 } from "../math/_matrix-allocator.js";
@@ -88,7 +88,12 @@ export function computeDirectionalLightMatrix(
     offY = 0,
     offZ = 0
 ): { _view: Float32Array; _viewProj: Float32Array; _near: number; _far: number } {
-    const view = buildLightViewMatrix(light.direction.x, light.direction.y, light.direction.z, light.position.x - offX, light.position.y - offY, light.position.z - offZ);
+    const lightWorld = light.worldMatrix;
+    const direction = light.direction;
+    const dx = lightWorld[0]! * direction.x + lightWorld[4]! * direction.y + lightWorld[8]! * direction.z;
+    const dy = lightWorld[1]! * direction.x + lightWorld[5]! * direction.y + lightWorld[9]! * direction.z;
+    const dz = lightWorld[2]! * direction.x + lightWorld[6]! * direction.y + lightWorld[10]! * direction.z;
+    const view = buildLightViewMatrix(dx, dy, dz, lightWorld[12]! - offX, lightWorld[13]! - offY, lightWorld[14]! - offZ);
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
@@ -154,8 +159,8 @@ export function createShadowRenderTarget(sg: ShadowGenerator, colorTexture: GPUT
             size: { width: mapSize, height: mapSize },
             format: colorTexture ? "rgba16float" : undefined,
             dFormat: "depth32float",
-            _depthClearValue: 1,
-            _depthCompare: "less-equal",
+            depthClearValue: 1,
+            depthCompare: "less-equal",
             samples: 1,
         },
         _colorTexture: colorTexture,
@@ -210,7 +215,7 @@ export function createShadowCamera(sg: Pick<ShadowGenerator, "_light">): Camera 
         },
         get worldMatrixVersion() {
             const state = (this as Camera & { _shadowCameraVersion?: number })._shadowCameraVersion;
-            return state ?? sg._light.worldMatrixVersion;
+            return state ?? sg._light._lightVersion;
         },
     } as Camera;
 }

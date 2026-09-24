@@ -1,4 +1,6 @@
 import type { Mat4, Vec3 } from "../math/types.js";
+import { multiplyMat4 } from "../math/multiply-mat4.js";
+import { transformCoordinatesToRef } from "../math/mat4-transform.js";
 import type { PixelViewport } from "./viewport.js";
 
 /** Dimensions and active backing-pixel viewport used by world-to-screen projection. */
@@ -32,6 +34,19 @@ export interface ScreenProjectionResult extends Vec3 {
     clipped: boolean;
     /** True when the point cannot appear inside the viewport's 2D rectangle, including negative clip W. */
     offscreen: boolean;
+}
+
+/**
+ * Project a point through an explicit world and view-projection transform into
+ * viewport pixels. Unlike the canvas-oriented helpers below, zero-sized
+ * viewports are valid and collapse the corresponding output coordinate.
+ */
+export function projectPointToViewportToRef<T extends Vec3>(point: Vec3, world: Mat4, transform: Mat4, viewport: PixelViewport, result: T): T {
+    const worldViewProjection = multiplyMat4(transform, world);
+    transformCoordinatesToRef(point.x, point.y, point.z, worldViewProjection, result);
+    result.x = viewport.x + (result.x + 1) * viewport.width * 0.5;
+    result.y = viewport.y + (1 - result.y) * viewport.height * 0.5;
+    return result;
 }
 
 function validateOptions(options: ScreenProjectionOptions): void {

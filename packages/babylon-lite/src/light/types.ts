@@ -4,15 +4,12 @@
  *  PBR + Standard both consume the shared lights UBO (render/lights-ubo.ts);
  *  light type is encoded in vLightData.w (1=dir, 2=spot, 3=hemi, other=point). */
 
-import type { Mat4 } from "../math/types.js";
-import type { IWorldMatrixProvider, IParentable } from "../scene/parentable.js";
 import type { SceneNode } from "../scene/scene-node.js";
 
 /** Shared base for all light types.
  *  Provides pipeline integration callbacks so render pipelines are light-agnostic. */
-export interface LightBase extends IWorldMatrixProvider, IParentable {
+export interface LightBase extends SceneNode {
     readonly lightType: string;
-    children: SceneNode[];
     /** Mesh IDs excluded from this light. If set, these meshes are NOT lit by this light. */
     excludedMeshIds?: ReadonlySet<string>;
     /** If non-empty, ONLY these mesh IDs are lit by this light. Takes priority over excludedMeshIds. */
@@ -20,9 +17,6 @@ export interface LightBase extends IWorldMatrixProvider, IParentable {
     /** Shadow generator attached to this light. Set this to make the light cast shadows. */
     shadowGenerator?: import("../shadow/shadow-generator.js").ShadowGenerator;
 
-    parent: IWorldMatrixProvider | null;
-    readonly worldMatrix: Mat4;
-    readonly worldMatrixVersion: number;
     /** @internal Write this light's 64-byte entry into the shared lights UBO.
      *  Positions are written precision-only (raw world space); under floating
      *  origin the active-camera offset is subtracted afterwards by

@@ -525,6 +525,7 @@ function handleContextRestored(engine: GLEngineContext): void {
             if (newHandle !== null) {
                 tex.handle = newHandle;
                 tex._upload(engine);
+                tex._initializeParameters?.(engine);
                 tex.isReady = tex._wasReady;
             }
         }

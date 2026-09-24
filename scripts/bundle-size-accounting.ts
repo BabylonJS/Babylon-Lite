@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from "fs";
-import { resolve } from "path";
+import { existsSync, readFileSync, realpathSync } from "fs";
+import { dirname, relative, resolve } from "path";
 import { gzipSync } from "zlib";
+import { buildSync } from "esbuild";
 
 /** Human-readable label for the ignored-module set used in test/log output. */
 export const IGNORED_BUNDLE_MODULE_PATTERN = "*-nme.ts, *-npe.ts + vendor runtimes (text-shaper, manifold, recast-navigation)";
@@ -49,9 +50,59 @@ export interface RuntimeBundleSummary {
  *       not using that feature pays zero). Matches BOTH the source form
  *       (`node_modules/<name>/…`) AND the built-package form, where the lib build has
  *       pre-bundled each runtime into `build/lib/_chunks/vendor/<name>-<hash>.js`. */
+export function isIgnoredScenePayloadModule(id: string): boolean {
+    const clean = id.replace(/\\/g, "/").split("?")[0]!;
+    return /(?:^|\/)[^/]+-(?:nme|npe)\.ts$/.test(clean);
+}
+
+/** Stable pre-minifier byte weight for a checked-in scene graph payload.
+ *
+ * The bundle ceilings were established from Rollup's rendered module length before
+ * Vite 6 ran its final esbuild minifier. Rolldown applies Oxc during code generation,
+ * so its module length is already compacted and is not comparable. Transpile the data
+ * module without minification to preserve the established accounting stage across the
+ * bundler migration; the payload remains excluded, and no ceiling needs redefining. */
+export function ignoredScenePayloadCompatibilityBytes(id: string, renderedExports: readonly string[]): number {
+    if (!isIgnoredScenePayloadModule(id)) {
+        return 0;
+    }
+    const clean = id.split("?")[0]!;
+    const exportNames = renderedExports.filter((name) => name === "default" || /^[$A-Z_a-z][$\w]*$/.test(name));
+    if (!existsSync(clean) || exportNames.length === 0) {
+        return 0;
+    }
+    const relativeSpecifier = relative(dirname(clean), clean).replace(/\\/g, "/");
+    const importSpecifier = relativeSpecifier.startsWith(".") ? relativeSpecifier : `./${relativeSpecifier}`;
+    const result = buildSync({
+        stdin: {
+            contents: `export { ${exportNames.join(", ")} } from ${JSON.stringify(importSpecifier)};`,
+            loader: "js",
+            resolveDir: dirname(clean),
+        },
+        bundle: true,
+        write: false,
+        format: "esm",
+        platform: "browser",
+        minify: false,
+        treeShaking: true,
+        metafile: true,
+        logLevel: "silent",
+    });
+    const target = realpathSync(clean);
+    for (const output of Object.values(result.metafile.outputs)) {
+        for (const [input, contribution] of Object.entries(output.inputs)) {
+            const resolvedInput = resolve(input);
+            if (existsSync(resolvedInput) && realpathSync(resolvedInput) === target) {
+                return contribution.bytesInOutput;
+            }
+        }
+    }
+    return 0;
+}
+
 function isIgnoredBundleModule(id: string): boolean {
     const clean = id.replace(/\\/g, "/").split("?")[0]!;
-    if (/(?:^|\/)[^/]+-(?:nme|npe)\.ts$/.test(clean)) {
+    if (isIgnoredScenePayloadModule(clean)) {
         return true;
     }
     // `<name>-<hash>.js` is the built-package vendor-chunk form; `<name>/…` is the

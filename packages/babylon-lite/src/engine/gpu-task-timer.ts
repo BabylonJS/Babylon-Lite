@@ -2,6 +2,7 @@ import type { EngineContext, RenderingContext } from "./engine.js";
 import type { FrameGraph } from "../frame-graph/frame-graph.js";
 import type { Task } from "../frame-graph/task.js";
 import type { SurfaceContext } from "./surface.js";
+import { addFramePostSubmitHook } from "./frame-post-submit.js";
 import { makeTimingSnapshot, type RenderTaskGpuTiming, type RenderTaskGpuTimings } from "./gpu-task-timing.js";
 
 const INITIAL_TASK_CAPACITY = 64;
@@ -93,11 +94,14 @@ export function installGpuTaskTimer(timer: GpuTaskTimer, engine: EngineContext, 
     for (const surface of engine.surfaces) {
         patchSurface(timer, surface);
     }
-    const resolveTaskTiming = () => finishTaskTimingFrame(timer, publish);
-    engine._gpuTaskTimerResolve = resolveTaskTiming;
-    engine._gpuTimerResolve ??= resolveTaskTiming;
+    const resolveTaskTiming = (encoder: GPUCommandEncoder) => {
+        if (timer.currentEncoder === encoder) {
+            finishTaskTimingFrame(timer, publish);
+        }
+    };
+    const removePostSubmit = addFramePostSubmitHook(engine, "persistent", resolveTaskTiming);
     return () => {
-        restoreWrappedFrameGraphs(timer, engine, resolveTaskTiming);
+        restoreWrappedFrameGraphs(timer, removePostSubmit);
         disposeGpuTaskTimer(timer);
     };
 }
@@ -162,7 +166,7 @@ function wrapFrameGraph(timer: GpuTaskTimer, graph: FrameGraph): void {
     timer.wrappedGraphs.push({ graph, execute: original });
 }
 
-function restoreWrappedFrameGraphs(timer: GpuTaskTimer, engine: EngineContext, resolveTaskTiming: () => void): void {
+function restoreWrappedFrameGraphs(timer: GpuTaskTimer, removePostSubmit: () => void): void {
     for (const patched of timer.patchedSurfaceLists) {
         patched.list.push = patched.push;
     }
@@ -176,12 +180,7 @@ function restoreWrappedFrameGraphs(timer: GpuTaskTimer, engine: EngineContext, r
     }
     timer.wrappedGraphs.length = 0;
     timer.currentEncoder = null;
-    if (engine._gpuTaskTimerResolve === resolveTaskTiming) {
-        engine._gpuTaskTimerResolve = undefined;
-    }
-    if (engine._gpuTimerResolve === resolveTaskTiming) {
-        engine._gpuTimerResolve = undefined;
-    }
+    removePostSubmit();
 }
 
 function getFrameGraphFromContext(context: RenderingContext): FrameGraph | null {

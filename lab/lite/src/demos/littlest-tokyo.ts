@@ -71,7 +71,7 @@ async function main(): Promise<void> {
 
     // Point the glTF decoders at the demo-local files so they resolve under any
     // base path (e.g. /lite-demos/) rather than the site root.
-    await configureDemoDecoderBases(import.meta.url);
+    configureDemoDecoderBases(import.meta.url);
 
     await Promise.all([
         loadGltf(engine, demoAssetUrl("./littlest-tokyo/LittlestTokyo.glb", import.meta.url)).then((asset) => {
@@ -162,7 +162,7 @@ async function main(): Promise<void> {
     const metalMat = scene.meshes.map((m) => m.material).find((mat): mat is PbrMaterialProps => !!mat && mat.name === "metalmat");
     if (metalMat?.occlusionTexture) {
         metalMat.occlusionTexture = createSolidTexture2D(engine, 1, 1, 1);
-        rebuildMaterial(scene, metalMat, { rebuildFrameGraph: true });
+        void rebuildMaterial(scene, metalMat, { rebuildFrameGraph: true });
     }
 
     progress.done();

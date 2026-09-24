@@ -25,6 +25,7 @@ import {
     addToScene,
     createAnimationManager,
     addAnimationGroup,
+    clearAnimationManager,
     enableAnimationBlending,
     updateAnimationManager,
     pickMeshesWithRay as litePickWithRay,
@@ -32,6 +33,7 @@ import {
     resolveCameraViewport,
     invertMat4,
     multiplyMat4,
+    onPhysicsAfterStep,
 } from "babylon-lite";
 import type {
     SceneContext,
@@ -42,6 +44,7 @@ import type {
     Mesh as LiteMesh,
     PickingInfo as LitePickingInfo,
     Mat4,
+    Material as LiteMaterial,
 } from "babylon-lite";
 
 import { Color3, Color4 } from "../math/color.js";
@@ -66,7 +69,7 @@ import { Ray } from "../math/ray.js";
 import { Vector3 } from "../math/vector.js";
 import { PickingInfo } from "../culling/picking-info.js";
 import { AbstractMesh, Mesh } from "../meshes/meshes.js";
-import type { TransformNode } from "../meshes/meshes.js";
+import { PointerEventTypes, PointerInfo } from "../events/pointer-events.js";
 
 /** Babylon.js EnvironmentHelper default skybox/ground assets (match the Lite ports). */
 const DEFAULT_SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
@@ -121,17 +124,25 @@ export class Scene extends AbstractScene {
     public readonly onBeforeAnimationsObservable = new Observable<Scene>();
     /** Fires after each scene render. */
     public readonly onAfterRenderObservable = new Observable<Scene>();
+    /** Fires after each Lite Havok simulation step. */
+    public readonly onAfterPhysicsObservable = new Observable<Scene>();
     /** Fires once when the scene is disposed. */
     public readonly onDisposeObservable = new Observable<Scene>();
+    /** Babylon.js scene-level pointer events from the engine rendering canvas. */
+    public readonly onPointerObservable = new Observable<PointerInfo>();
     /** @internal Callbacks that must run after Babylon.js-compatible before-render observers. */
     private readonly _beforeRenderFlushCallbacks = new Set<() => void>();
+    /** @internal Canvas target that owns this scene's pointer listeners. */
+    private _pointerEventTarget: EventTarget | null = null;
+    /** @internal Shared listener registered for each supported DOM pointer event. */
+    private _pointerEventListener: EventListener | null = null;
 
     /**
      * Babylon.js `scene.animationGroups` / `scene.animatables`. Loaded glTF /
      * `.babylon` animation clips live on the Lite scene; `animationGroups` returns
      * BJS-shaped `AnimationGroup`s over them (so scenes can `goToFrame`/`pause`/`stop`
-     * to freeze a model at a deterministic frame). `animatables` surfaces the running
-     * CPU `Animatable`s started via `beginDirectAnimation`.
+     * to freeze a model at a deterministic frame). `animatables` surfaces the
+     * native-backed and fallback `Animatable`s started through the scene.
      */
     public get animationGroups(): AnimationGroup[] {
         const liteGroups = this._lite.animationGroups ?? [];
@@ -179,7 +190,11 @@ export class Scene extends AbstractScene {
     private readonly _pendingTextures: Array<Promise<void>> = [];
     private readonly _pendingGroundBakes: Array<() => void> = [];
     private readonly _pendingMorphBuilds: Array<{ mesh: { _lite: unknown }; manager: { _build(mesh: never, engine: import("babylon-lite").EngineContext): void } }> = [];
+    private _materialPluginsRequested = false;
+    private readonly _pendingMaterialPluginReconciliations = new Set<LiteMaterial>();
     private readonly _runningAnimatables: Animatable[] = [];
+    /** @internal Lite manager that owns supported compat property animations. */
+    private _propertyAnimationManager: AnimationManager | null = null;
     private readonly _animationGroupCache = new WeakMap<object, AnimationGroup>();
     /** @internal Structural `AnimationGroup`s stepped + weight-blended each frame. */
     private readonly _structuralGroups: AnimationGroup[] = [];
@@ -201,6 +216,7 @@ export class Scene extends AbstractScene {
     public constructor(engine: WebGPUEngine) {
         super();
         this._engine = engine;
+        this._attachPointerEvents();
         if (engine._headless) {
             // Headless (`NullEngine`): back the scene with a real Lite context that has
             // NO frame-graph render task (`defaultRenderTask: false`), so no swapchain or
@@ -223,6 +239,50 @@ export class Scene extends AbstractScene {
         engine._registerScene(this);
     }
 
+    private _attachPointerEvents(): void {
+        const canvas = this._engine.getRenderingCanvas() as Partial<EventTarget>;
+        if (typeof canvas.addEventListener !== "function" || typeof canvas.removeEventListener !== "function") {
+            return;
+        }
+
+        this._pointerEventTarget = canvas as EventTarget;
+        this._pointerEventListener = (event) => {
+            let type: number;
+            switch (event.type) {
+                case "pointerdown":
+                    type = PointerEventTypes.POINTERDOWN;
+                    break;
+                case "pointermove":
+                    type = PointerEventTypes.POINTERMOVE;
+                    break;
+                case "pointerup":
+                    type = PointerEventTypes.POINTERUP;
+                    break;
+                case "wheel":
+                    type = PointerEventTypes.POINTERWHEEL;
+                    break;
+                default:
+                    return;
+            }
+            this.onPointerObservable.notifyObservers(new PointerInfo(type, event as PointerEvent | WheelEvent, null), type);
+        };
+
+        for (const type of ["pointerdown", "pointermove", "pointerup", "wheel"]) {
+            this._pointerEventTarget.addEventListener(type, this._pointerEventListener);
+        }
+    }
+
+    private _detachPointerEvents(): void {
+        if (!this._pointerEventTarget || !this._pointerEventListener) {
+            return;
+        }
+        for (const type of ["pointerdown", "pointermove", "pointerup", "wheel"]) {
+            this._pointerEventTarget.removeEventListener(type, this._pointerEventListener);
+        }
+        this._pointerEventTarget = null;
+        this._pointerEventListener = null;
+    }
+
     /**
      * @internal Per-frame update: advance CPU animations and fire the render
      * observables. Driven by Babylon Lite's before-render hook for GPU engines, or
@@ -235,6 +295,9 @@ export class Scene extends AbstractScene {
         this.onBeforeAnimationsObservable.notifyObservers(this);
         if (this._blendManager) {
             updateAnimationManager(this._blendManager, deltaMs);
+        }
+        if (this._propertyAnimationManager) {
+            updateAnimationManager(this._propertyAnimationManager, deltaMs);
         }
         for (const a of this._runningAnimatables) {
             a._tick(deltaMs);
@@ -376,6 +439,49 @@ export class Scene extends AbstractScene {
         this._pendingMorphBuilds.length = 0;
     }
 
+    /**
+     * @internal Request Lite's opt-in material-plugin bridges for this scene.
+     * Once the engine is live, reconcile the changed material through Lite's
+     * runtime rebuild path rather than leaving the startup-only request stranded.
+     */
+    public _requestMaterialPlugins(material?: LiteMaterial): void {
+        this._materialPluginsRequested = true;
+        if (material && this._engine._hasStarted) {
+            this._engine._registerLateWork(async () => {
+                const { reconcileMaterialPlugins } = await import("babylon-lite");
+                await reconcileMaterialPlugins(this._lite, material);
+            });
+        } else if (material && this._started) {
+            this._pendingMaterialPluginReconciliations.add(material);
+        }
+    }
+
+    /** @internal Enable requested material plugins after meshes are added and before scene registration. */
+    public async _enableMaterialPlugins(): Promise<void> {
+        if (this._materialPluginsRequested) {
+            const { enableMaterialPlugins } = await import("babylon-lite");
+            enableMaterialPlugins(this._lite);
+            this._materialPluginsRequested = false;
+            this._pendingMaterialPluginReconciliations.clear();
+        }
+    }
+
+    /** @internal Reconcile plugin requests raised by first-frame callbacks before engine startup completes. */
+    public async _reconcilePendingMaterialPlugins(): Promise<void> {
+        while (this._pendingMaterialPluginReconciliations.size > 0) {
+            const materials = [...this._pendingMaterialPluginReconciliations];
+            this._pendingMaterialPluginReconciliations.clear();
+            const { reconcileMaterialPlugins } = await import("babylon-lite");
+            await Promise.all(materials.map((material) => reconcileMaterialPlugins(this._lite, material)));
+        }
+        this._materialPluginsRequested = false;
+    }
+
+    /** @internal Whether this scene queued plugin changes during the engine startup transition. */
+    public get _hasPendingMaterialPluginReconciliations(): boolean {
+        return this._pendingMaterialPluginReconciliations.size > 0;
+    }
+
     /** @internal Clustered light containers to register on the Lite scene at engine start. */
     private readonly _pendingClusteredContainers: Array<{ _build(): void; isDisposed(): boolean }> = [];
 
@@ -465,6 +571,9 @@ export class Scene extends AbstractScene {
     }
     public set defaultMaterial(value: StandardMaterial) {
         this._defaultMaterial = value;
+        // A replacement built Babylon.js-style with no scene is owned by this scene from now on: it is the
+        // effective material of every mesh without its own, none of which goes through a material setter.
+        value?._adoptScene(this);
     }
 
     public get clearColor(): Color4 {
@@ -860,12 +969,28 @@ export class Scene extends AbstractScene {
         return true;
     }
 
-    /** Synchronous CPU picking — unsupported. Babylon Lite uses async GPU picking. */
-    public pick(): never {
-        return unsupported(
-            "Scene.pick",
-            "Babylon Lite uses asynchronous GPU picking. Use the compat `GPUPicker` class (Babylon.js parity) or the native `createGpuPicker` + `pickAsync` API."
-        );
+    /** Babylon.js synchronous screen-coordinate picking over Lite's CPU ray picker. */
+    public pick(
+        x: number,
+        y: number,
+        predicate?: (mesh: AbstractMesh) => boolean,
+        fastCheck = false,
+        camera: Camera | null = null,
+        trianglePredicate?: (p0: Vector3, p1: Vector3, p2: Vector3, ray: Ray) => boolean
+    ): PickingInfo {
+        if (fastCheck || trianglePredicate) {
+            return unsupported(
+                "Scene.pick",
+                "Babylon Lite's synchronous picker returns the nearest bounding-box hit and does not expose fast-first-hit or per-triangle predicate modes."
+            );
+        }
+
+        const cameraToUse = camera ?? this.activeCamera ?? this.cameraToUseForPointers;
+        if (!cameraToUse) {
+            return new PickingInfo();
+        }
+
+        return this.pickWithRay(this.createPickingRay(x, y, null, cameraToUse), predicate);
     }
 
     /**
@@ -908,7 +1033,7 @@ export class Scene extends AbstractScene {
     /** Synchronous CPU ray picking over Babylon Lite's scene-mesh picker. */
     public pickWithRay(
         ray: Ray,
-        predicate?: (mesh: TransformNode) => boolean,
+        predicate?: (mesh: AbstractMesh) => boolean,
         fastCheck = false,
         trianglePredicate?: (p0: Vector3, p1: Vector3, p2: Vector3, ray: Ray) => boolean
     ): PickingInfo {
@@ -979,6 +1104,7 @@ export class Scene extends AbstractScene {
         }
         const g = gravity ?? { x: 0, y: -9.81, z: 0 };
         plugin._attachToLiteScene(this._lite, g);
+        onPhysicsAfterStep(plugin.world!, () => this.onAfterPhysicsObservable.notifyObservers(this));
         this._physicsEngine = new PhysicsEngine(plugin, g);
         return true;
     }
@@ -1003,11 +1129,29 @@ export class Scene extends AbstractScene {
 
     /**
      * Babylon.js `scene.beginDirectAnimation(target, animations, from, to, loop, speedRatio?)`.
-     * Drives the given `Animation`s on the CPU each frame, writing onto the target's
-     * (dotted) property path. Returns an `Animatable` with `goToFrame`/`pause`/`stop`.
+     * Delegates supported tracks to Babylon Lite property animation and retains
+     * explicit compat evaluation only for unsupported tracks. Returns one facade
+     * coordinating both subsets.
      */
     public beginDirectAnimation(target: unknown, animations: Animation[], from: number, to: number, loop = false, speedRatio = 1): Animatable {
-        const animatable = new Animatable(target, animations, from, to, loop, speedRatio);
+        if (speedRatio < 0) {
+            [from, to] = [to, from];
+            speedRatio = -speedRatio;
+        }
+        if (from > to) {
+            speedRatio = -speedRatio;
+        }
+        const blockedNativeBindings = this._runningAnimatables.flatMap((animatable) => animatable._getBlockingFallbackBindings());
+        const animatable = Animatable._create(
+            () => (this._propertyAnimationManager ??= createAnimationManager()),
+            target,
+            animations,
+            from,
+            to,
+            loop,
+            speedRatio,
+            blockedNativeBindings
+        );
         this._runningAnimatables.push(animatable);
         return animatable;
     }
@@ -1061,8 +1205,17 @@ export class Scene extends AbstractScene {
     }
 
     public dispose(): void {
+        this._detachPointerEvents();
         this.onDisposeObservable.notifyObservers(this);
+        this.onPointerObservable.clear();
         this._beforeRenderFlushCallbacks.clear();
+        if (this._propertyAnimationManager) {
+            clearAnimationManager(this._propertyAnimationManager);
+        }
+        if (this._blendManager) {
+            clearAnimationManager(this._blendManager);
+        }
+        this._runningAnimatables.length = 0;
         disposeScene(this._lite);
     }
 }

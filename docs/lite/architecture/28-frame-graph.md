@@ -13,8 +13,8 @@ The first implementation is intentionally small:
 - `RenderTask` is the default scene-render task type; `EffectRenderTask` is also a frame-graph task for fullscreen RTT effects
 - `ShadowTask` is an internal adapter task, installed only by `registerSceneWithShadowSupport()`, that schedules shadow generators through `Task.execute()` before the default scene render
 - the `Task` interface is intentionally open so later work can add other task types
-- a task records one or more `Pass` instances during `record()`; only `RenderPass` exists today
-- a task may optionally implement `execute()` for legacy or non-recorded GPU work while that work is migrated into recorded passes
+- pass-backed tasks record one or more `Pass` instances during `record()`; only `RenderPass` exists today
+- built-in tasks may implement `execute()` directly; `RenderTask`, `ShadowTask`, and several fullscreen/effect tasks use this fast path
 - render targets are explicit objects, not virtual graph resources yet
 - the default scene render is itself a `RenderTask`
 
@@ -34,7 +34,8 @@ export type { RenderPass } from "./frame-graph/render-pass.js";
 export type { RenderPassExecuteFunc } from "./frame-graph/pass.js";
 
 export type { RenderTask, RenderTaskConfig } from "./frame-graph/render-task.js";
-export { createRenderTask, removeMeshFromTask } from "./frame-graph/render-task.js";
+export { createRenderTask, addMeshToTask, removeMeshFromTask } from "./frame-graph/render-task.js";
+export { enableRenderTaskMeshRefresh } from "./frame-graph/render-task-mesh-refresh.js";
 export type { OverdrawCostMeasure } from "./engine/gpu-task-timing.js";
 export { measureRenderTaskOverdrawCost } from "./engine/gpu-task-timing.js";
 export type { ImageProcessingSource, ImageProcessingTaskConfig } from "./frame-graph/image-processing-task.js";
@@ -42,7 +43,10 @@ export { createImageProcessingTask } from "./frame-graph/image-processing-task.j
 
 export type { RenderTarget, RenderTargetDescriptor } from "./engine/render-target.js";
 export { createRenderTarget } from "./engine/render-target.js";
-export { createRenderTargetTexture } from "./texture/rtt.js";
+export type { RenderTargetDepthSampler, RenderTargetTextureResult } from "./texture/rtt.js";
+export { createRenderTargetTexture, disposeRenderTargetTexture } from "./texture/rtt.js";
+export { createSurfaceRenderTargetTexture, onRenderTargetTextureResize } from "./texture/rtt-surface.js";
+export { withSampledDepthTexture } from "./texture/rtt-depth.js";
 ```
 
 ### `FrameGraph`
@@ -50,8 +54,6 @@ export { createRenderTargetTexture } from "./texture/rtt.js";
 ```typescript
 export interface FrameGraph {
     _tasks: Task[];
-    _engine: EngineContextInternal;
-    _scene: SceneContextInternal;
     _currentProcessedTask: Task | null;
     build(): void;
     execute(): number;
@@ -73,11 +75,12 @@ export interface FrameGraph {
 ```typescript
 export interface Task {
     readonly name: string;
-    executionEnabled?: boolean;
-    readonly engine: EngineContextInternal;
-    readonly scene: SceneContextInternal;
+    readonly engine: EngineContext;
+    readonly scene?: SceneContext;
     _passes: Pass[];
     record(): void;
+    _preload?(): Promise<void>;
+    _removeMesh?(mesh: object): void;
     execute?(): number;
     dispose(): void;
 }
@@ -85,23 +88,21 @@ export interface Task {
 
 Task lifecycle:
 
-| Method      | Called by                      | Purpose                                                                                                                                                                                                |
-| ----------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `record()`  | `FrameGraph.build()` (phase 1) | Allocate/rebuild GPU resources, register `Pass` instances onto `_passes` (typically via `addRenderPass(fg, name)` and friends), and finalize anything that needs the final canvas / target size. Sync. |
-| `execute()` | `FrameGraph.execute()`         | Optional task-level execution hook. If present, the frame graph calls it instead of draining `_passes`. Used only for adapter tasks while legacy GPU work is moved under frame-graph scheduling.       |
-| `dispose()` | `FrameGraph.dispose()`         | Release task-owned GPU resources. Should call `_dispose()` on each owned pass.                                                                                                                         |
+| Method      | Called by                      | Purpose                                                                                                                                                |
+| ----------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `record()`  | `FrameGraph.build()` (phase 1) | Allocate/rebuild GPU resources and optionally register `Pass` instances onto `_passes`. Direct tasks instead prepare their own descriptor/state. Sync. |
+| `execute()` | `FrameGraph.execute()`         | Optional direct task-level execution hook. When present, the frame graph calls it instead of draining `_passes`.                                       |
+| `dispose()` | `FrameGraph.dispose()`         | Release task-owned GPU resources; pass-backed tasks also dispose their owned passes.                                                                   |
 
 `RenderTask` is the primary scene-render implementation of `Task`, and `EffectRenderTask` uses the same task/pass contract for fullscreen RTT effects. The interface exists so future frame-graph work can add other ordered task types without changing `FrameGraph` itself, for example compute tasks, copy/resolve tasks, object-list tasks, or resource-transition/helper tasks.
 
-The `_passes` list is the per-task view of recorded passes. `FrameGraph.build()` clears it at the start of each task's record and the task is responsible for re-pushing its passes during `record()`. Today every `RenderTask` records exactly one `RenderPass`; the surface is shaped to support multi-pass tasks (e.g. shadow cascades) later without changing the `Task` interface again.
+The `_passes` list is the per-task view of recorded passes. `FrameGraph.build()` clears it at the start of each task's record and the task is responsible for re-pushing its passes during `record()`. `RenderTask` is a direct task: `_passes` remains empty, `record()` prepares its descriptor/bindings, and `execute()` opens and closes the GPU render pass itself. User-defined pass-backed tasks and helpers created through `addRenderPass()` still use `_passes` plus the phase-2 `_initialize()` walk.
 
-`Task.execute()` is a migration escape hatch, not the final shape for new rendering work. `FrameGraph.execute()` sums the draw count returned by `task.execute()` when present; otherwise it drains the recorded passes. Per-task GPU timing is opt-in: the public timing API dynamic-imports a profiler that wraps registered `FrameGraph.execute()` functions at runtime, so non-profiling bundles do not fetch profiler code or carry a static task-timing branch here. The built-in `ShadowTask` uses this path for shadow scheduling: ESM generators expose depth/blur resources that `ShadowTask` encodes, while PCF generators are rendered through ShadowTask-owned depth-only `RenderTask`s that use Standard/PBR/Node no-color shadow material views. These PCF variants keep a void fragment stage when needed so material `discard` logic still affects the depth attachment without binding a color target.
-
-`Task.executionEnabled` is a runtime-only gate that defaults to enabled. When set to `false`, `FrameGraph.execute()` skips both the task-level `execute()` hook and every recorded pass while preserving the task's recorded state and allocated resources. Task-specific fields such as `enabled` retain their own semantics and are not interpreted as this scheduling gate.
+`FrameGraph.execute()` sums the draw count returned by `task.execute()` when present; otherwise it drains the recorded passes. Direct execution is the deliberate built-in fast path, not only a migration escape hatch. Per-task GPU timing is opt-in: the public timing API dynamic-imports a profiler that wraps registered `FrameGraph.execute()` functions at runtime, so non-profiling bundles do not fetch profiler code or carry a static task-timing branch here. The built-in `ShadowTask` uses this path for shadow scheduling: ESM generators expose depth/blur resources that `ShadowTask` encodes, while PCF generators are rendered through ShadowTask-owned depth-only `RenderTask`s that use Standard/PBR/Node no-color shadow material views. These PCF variants keep a void fragment stage when needed so material `discard` logic still affects the depth attachment without binding a color target.
 
 ## `Pass` and `RenderPass`
 
-A `Pass` is a unit of GPU work owned by exactly one task. A `Task` records one or more passes during its `record()`, and the shared internal `_executeTask()` helper drains those passes by calling `pass._execute()`. The split mirrors Babylon.js' `IFrameGraphPass` / `FrameGraphRenderPass`, with two intentional Lite-flavoured differences described below.
+A `Pass` is a unit of GPU work owned by exactly one pass-backed task. When a task has no direct `execute()`, `FrameGraph.execute()` drains its passes by calling `pass._execute()`. The split mirrors Babylon.js' `IFrameGraphPass` / `FrameGraphRenderPass`, with two intentional Lite-flavoured differences described below.
 
 ### `Pass` base interface
 
@@ -118,11 +119,11 @@ export interface Pass {
 }
 ```
 
-| Method          | Called by                      | Purpose                                                                                                                                                                            |
-| --------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `_initialize()` | `FrameGraph.build()` (phase 2) | Build any caches that need other tasks' RTs to already be allocated. `RenderPass` builds its `GPURenderPassDescriptor` here. May be a no-op for passes that don't need this stage. |
-| `_execute()`    | `_executeTask()` per frame     | Performs the concrete pass GPU work. Returns the number of draw calls issued (summed into the engine's draw counter).                                                              |
-| `_dispose()`    | The owning task's `dispose()`  | Free pass-owned GPU/CPU state. Idempotent.                                                                                                                                         |
+| Method          | Called by                        | Purpose                                                                                                                                                                            |
+| --------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `_initialize()` | `FrameGraph.build()` (phase 2)   | Build any caches that need other tasks' RTs to already be allocated. `RenderPass` builds its `GPURenderPassDescriptor` here. May be a no-op for passes that don't need this stage. |
+| `_execute()`    | `FrameGraph.execute()` per frame | Performs the concrete pass GPU work. Returns the number of draw calls issued (summed into the engine's draw counter).                                                              |
+| `_dispose()`    | The owning task's `dispose()`    | Free pass-owned GPU/CPU state. Idempotent.                                                                                                                                         |
 
 `addPassDependencies(pass, deps)` adds one or more `RenderTarget`s to `pass._dependencies` (`Set` semantics, idempotent). Lifted onto the base `Pass` (BJS keeps it on `FrameGraphRenderPass`) because it is a texture-graph-wide concept that future compute / copy / object-list passes will want without re-introducing per pass type. Today it is informational only; the upcoming texture-virtualization step will read it to compute lifetimes / aliasing.
 
@@ -137,15 +138,13 @@ export interface RenderPass extends Pass {
     _depthAttachment: GPURenderPassDepthStencilAttachment | null;
     clearColor: GPUColorDict;
     clear: boolean;
-    _swapchain: boolean;
-    _sampleCount: number;
 }
 ```
 
 A `RenderPass` brackets a single `encoder.beginRenderPass(...)` / `pass.end()` and delegates the body to the base `Pass._executeFunc`. The cached descriptor is built once in `_initialize()` (phase 2 of `FrameGraph.build()`) from `_renderTarget` / `_renderTargetDepth`. Per-frame, `_execute()`:
 
-1. Patches the cached color attachment with the live `clearColor` and the live `clear` flag (`loadOp = clear ? "clear" : "load"`). Parent tasks mutate `clearColor` / `clear` on the pass before iterating to mirror live scene state.
-2. In swapchain mode (`_renderTarget.descriptor.resolveToSwapchain === true`), patches the per-frame swap view into either `resolveTarget` (MSAA) or `view` (no MSAA).
+1. Runs `_beforeExecute`, if present.
+2. Patches the cached color attachment with live `clearColor`, `clear`, and the target's current `_colorView`.
 3. `enc = engine._currentEncoder.beginRenderPass(_renderPassDescriptor)`.
 4. `draws = _executeFunc?.(enc) ?? 0`.
 5. `enc.end()` and returns `draws`.
@@ -161,7 +160,7 @@ User task code creates and configures passes through public actions:
 | `addRenderPass(target, name)`     | Create a `RenderPass`, associate it with the currently-recording task (via `FrameGraph._currentProcessedTask`), push it onto `task._passes`, return it. Must be called from inside `Task.record()`. |
 | `addPassDependencies(pass, deps)` | Add one or more `RenderTarget`s the pass reads from (idempotent).                                                                                                                                   |
 
-Lower-level `setRenderPass*` helpers live beside the state they mutate: render-target / clear-state setters live in `frame-graph/render-pass.ts`, while generic pass callbacks (`setRenderPassExecuteFunc`, `setRenderPassBeforeExecute`) live in `frame-graph/pass.ts`. `setRenderPassClear(pass, clear, clearColor)` updates the clear/load flag and clear color together without allocating a state object. These helpers are intentionally **not** re-exported from the package today. Built-in tasks use `createRenderPass(...)`, which atomically creates the pass and appends it to `task._passes`, then configure it through the setters. That keeps the public action and helpers fully tree-shakable for scenes that only use built-in tasks. The setters become public the moment a user-defined task type needs them.
+Lower-level `setRenderPass*` helpers live beside the state they mutate: render-target / clear-state setters live in `frame-graph/render-pass.ts`, while generic pass callbacks (`setRenderPassExecuteFunc`, `setRenderPassBeforeExecute`) live in `frame-graph/pass.ts`. `setRenderPassClear(pass, clear, clearColor)` updates the clear/load flag and clear color together without allocating a state object. These helpers are intentionally **not** re-exported from the package today. Pass-backed helpers use `createRenderPass(...)`, which atomically creates the pass and appends it to `task._passes`, then configure it through the setters. Direct built-in tasks such as `RenderTask` retain none of this pass-object orchestration.
 
 ### Two intentional Lite-flavoured differences from BJS
 
@@ -184,7 +183,7 @@ Rules:
 - `addTaskBefore()` appends if the `beforeTask` is not found.
 - `addTaskAfter()` inserts immediately after `afterTask`, and appends if it is not found.
 - If tasks are added or inserted outside the startup/resize path, caller code must rebuild the graph before the next frame.
-- If a task uses `addMesh()` before `registerScene()`, defer the explicit `build()` call until after `registerScene()` so deferred material builders have run.
+- If a task uses `addMeshToTask()` before `registerScene()`, defer the explicit `build()` call until after `registerScene()` so deferred material builders have run.
 
 ### Internal Shadow Adapter Task
 
@@ -212,24 +211,46 @@ Per frame, `execute()` iterates the scene's lights, renders each light's shadow 
 
 ```typescript
 export interface RenderTargetDescriptor {
-    label?: string;
-    colorFormat: GPUTextureFormat;
-    depthStencilFormat?: GPUTextureFormat;
-    sampleCount: number;
-    size: "canvas" | { width: number; height: number };
-    resolveToSwapchain?: boolean;
+    lbl?: string;
+    format?: GPUTextureFormat;
+    dFormat?: GPUTextureFormat;
+    depthClearValue?: number;
+    depthCompare?: GPUCompareFunction;
+    samples: number;
+    size: SurfaceContext | RenderTargetSurfaceSize | { width: number; height: number };
+}
+
+export interface RenderTargetSurfaceSize {
+    readonly surface: SurfaceContext;
+    readonly scale: number;
 }
 ```
 
 Render targets are pure-state descriptors plus owned GPU texture handles. `buildRenderTarget(rt, engine)` allocates textures during `RenderTask.record()`.
 
-| Field                | Meaning                                                                                                                         |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `colorFormat`        | Color attachment format; use `engine.format` for swapchain-compatible output.                                                   |
-| `depthStencilFormat` | Optional depth/stencil attachment format. Most 3D passes use `"depth24plus-stencil8"`.                                          |
-| `sampleCount`        | `1` or `4`, matching WebGPU limits. Pipelines key on this value.                                                                |
-| `size`               | `"canvas"` follows canvas backing-store size; fixed `{ width, height }` is used for stable RTTs.                                |
-| `resolveToSwapchain` | True for swapchain passes. With MSAA, the task uses an owned MSAA color texture and resolves into the per-frame swapchain view. |
+| Field             | Meaning                                                                                                                                                                                                         |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lbl`             | Optional GPU debug label.                                                                                                                                                                                       |
+| `format`          | Optional color format. Omit for a depth-only target.                                                                                                                                                            |
+| `dFormat`         | Optional depth/stencil format. Omit for a color-only target such as the surface swapchain wrapper.                                                                                                              |
+| `depthClearValue` | Optional clear depth; reverse-Z targets default to `0`, while standard-Z targets normally use `1`.                                                                                                              |
+| `depthCompare`    | Optional pass-wide pipeline depth compare; defaults to reverse-Z `"greater-equal"` and overrides material defaults when supplied.                                                                               |
+| `samples`         | Attachment sample count (`1` or `4`).                                                                                                                                                                           |
+| `size`            | A `SurfaceContext` for full live dimensions, `{ surface, scale }` for scaled live dimensions, or fixed `{ width, height }` device pixels. Passing `EngineContext` is valid because it extends `SurfaceContext`. |
+
+A scaled surface size applies a positive finite `scale` to each live canvas dimension, floors the
+result, and clamps each axis to at least one pixel. The scale is fixed by the descriptor while canvas
+dimensions remain live:
+
+```typescript
+const halfResolution = { surface: scene.surface, scale: 0.5 };
+```
+
+The surface owns `scRT`, an eager single-sample color-only wrapper around the current swapchain
+texture. A single-sample default `RenderTask` writes directly to `scRT` and owns a separate depth
+target. With MSAA, the task writes to an owned multisample color/depth target and uses
+`RenderTaskConfig.rst = surface.scRT` as the explicit single-sample resolve target. There is no
+`resolveToSwapchain` descriptor flag.
 
 ### Target Signature
 
@@ -239,47 +260,153 @@ export interface RenderTargetSignature {
     readonly _depthStencilFormat?: GPUTextureFormat;
     readonly _depthCompare?: GPUCompareFunction;
     readonly _sampleCount: number;
-    readonly _flipY?: boolean;
+    readonly _transmissionTexture?: Texture2D | null;
+    _collectBatches?: (state: DrawBatchState | undefined, binding: DrawBinding) => DrawBatchState | undefined;
 }
 ```
 
-Material pipelines are cached by target signature. `_flipY` is derived at task creation from `desc.flipY ?? !resolveToSwapchain` — offscreen RTs render with a Y-flipped projection so their texture samples upright in later passes; swapchain RTs render upright directly. Pipeline builders flip `frontFace` (`"ccw"` → `"cw"`) when `_flipY` is set so back-face culling stays correct.
-
-`RenderTargetDescriptor.flipY` is a public override. Most scenes leave it unset and get the right convention from `resolveToSwapchain`. Known cases that set it:
-
-- **Shadow-map RTs** (`shadow-base.ts`): `flipY: false`. Shadow maps are sampled in light-space, not screen-space, so Y-flip would invert sampling.
-- **Transmission retargeting** (`transmission.ts`): forces `flipY = false` on the linear-offscreen color target so the transmission blit/sample chain stays upright through MSAA + image-processing.
-- **Pipelined post-process chains** with a directionally-Y-asymmetric pass (Scene 143's chromatic aberration): set `flipY: false` on the scene-source RT so the asymmetric shift is computed in screen-correct orientation rather than mirrored.
+Material pipelines are cached by target signature. The attachment-key serializer lives in
+`engine/render-target-signature.ts`, separate from allocation/disposal in `render-target.ts`, so
+attachment-only consumers do not retain key construction. `_transmissionTexture` is installed only
+for scene-color transmission, and `_collectBatches` is installed only by binding-update features.
+All color targets render upright with the same projection and counter-clockwise front-face
+convention; no descriptor or signature flip flag exists.
 
 ### Eager RTT Texture
 
 ```typescript
-export function createRenderTargetTexture(engine: EngineContext, descriptor: RenderTargetDescriptor): { rt: RenderTarget; texture: Texture2D };
+export interface RenderTargetTextureResult {
+    readonly rt: RenderTarget;
+    readonly texture: Texture2D;
+    readonly depthTexture: Texture2D | null;
+}
+
+export type RenderTargetDepthSampler = (engine: EngineContext, target: RenderTarget) => Texture2D;
+export function withSampledDepthTexture(engine: EngineContext, target: RenderTarget): Texture2D;
+export function createRenderTargetTexture(engine: EngineContext, descriptor: RenderTargetDescriptor, sampleDepth?: RenderTargetDepthSampler): RenderTargetTextureResult;
+export function createSurfaceRenderTargetTexture(
+    engine: EngineContext,
+    descriptor: RenderTargetDescriptor & { size: SurfaceContext | RenderTargetSurfaceSize },
+    sampleDepth?: RenderTargetDepthSampler
+): RenderTargetTextureResult;
+export function disposeRenderTargetTexture(result: RenderTargetTextureResult): void;
+export function onRenderTargetTextureResize(result: RenderTargetTextureResult, callback: () => void): () => void;
 ```
 
-Use this when a pass output must be wired into a material before the frame graph is built. It eagerly allocates the render target and exposes the color attachment as a `Texture2D`.
+Use this when a pass output must be wired into a material or compute binding before the frame graph is built. It eagerly allocates the render target and exposes the color attachment as `texture`. On a color target, a `dFormat` creates an owned depth-test attachment but no sampled depth facade by default. Pass `withSampledDepthTexture` as the third argument to opt into the additional `depthTexture`. A depth-only fixed or surface target must pass the helper; its `texture` and `depthTexture` then alias one sampled-depth wrapper.
+
+```typescript
+const output = createSurfaceRenderTargetTexture(engine, { format: engine.format, dFormat: "depth32float", samples: 1, size: engine }, withSampledDepthTexture);
+const halfDepth = createSurfaceRenderTargetTexture(engine, { dFormat: "depth32float", samples: 1, size: { surface: engine, scale: 0.5 } }, withSampledDepthTexture);
+```
+
+**Breaking migration:** depth-only `createRenderTargetTexture(engine, descriptor)` calls that previously received sampled depth as the primary `texture` must now pass `withSampledDepthTexture` as the third argument. The same requirement applies to `createSurfaceRenderTargetTexture`. Missing helpers are rejected before attachment allocation. Color targets, including color targets with a depth-test attachment, do not retain the depth helper or sampled-depth facade unless explicitly requested. Requesting sampled depth without a depth attachment throws and releases partially constructed attachments.
+
+The sampled-depth helper requires the actual depth allocation to be single-sampled. MSAA depth
+cannot be exposed as `texture_depth_2d`; requesting the helper for multisampled depth throws
+before creating a sampling view or sampler, and both RTT factories release the failed allocation.
+Use a separate single-sample depth target for sampling. Unsampled depth-test attachments may
+remain multisampled.
+Surface resizing also rejects attachment sample-count changes before publication, retaining the
+previous facade generation and releasing the failed replacement.
+
+Every attachment has one render-target ownership reference in addition to references held by sampled
+consumers. Removing the last sampler cannot destroy a live writer's attachment. The owning render task
+releases the target references on disposal; remaining sampled consumers keep the last image alive.
+Targets not handed to an owning task can be released with `disposeRenderTargetTexture`.
+Disposal is idempotent and prevents subsequent rebuilding. `sharedRt` tasks and eager external
+`depth` attachments are borrowers, not additional owners.
+
+Eager allocation and disposal ownership are distinct: sampled targets install an attachment-release
+hook, while engine swapchain and geometry/shadow wrappers retain their existing external owners.
+Resize prepares replacement attachments before publishing them, transfers both writer and sampled
+references, and retains the old allocation until resize consumers have rebuilt their bindings.
+Only then is the old allocation retired after submitted GPU work drains.
+
+Surface-sized RTT-derived `cloneTexture2D` wrappers share an attachment backing record with their source,
+including clones of clones. Replacing its allocation generation updates texture, view, width,
+and height for every wrapper atomically. UV transforms and sampler choices remain wrapper-local.
+Ordinary texture clones retain snapshot semantics. Clone creation does not acquire a reference:
+each sampled owner must still pair `acquireTexture` and `releaseTexture`. Cached bind groups
+still require the existing resize callback to rebuild their captured views.
+
+`createRenderTargetTexture` is the fixed-size factory. It retains attachment ownership and disposal
+guards, but imports neither resize support nor replaceable clone backing. Surface-sized descriptors
+require the separate `createSurfaceRenderTargetTexture` import; passing one to the fixed factory is
+an explicit error, not a silently frozen target.
+
+The surface factory lives in `texture/rtt-surface.ts`. Its target reallocates during a frame-graph
+rebuild when resolved dimensions or the owning `GPUDevice` change, updates shared facades, and
+retires the old allocation. Register `onRenderTargetTextureResize(result, callback)` when consumers
+cache bind groups; the callback runs after facade replacement so callers can rebuild before the
+resized frame draws. Shader-material consumers can call `setShaderTexture` again from that callback:
+the setter detects changed views and samplers behind a stable facade without rebuilding on ordinary
+repeated sets.
+
+Resize delivery is synchronous and retryable. Each subscription has an independent pending flag:
+
+- Publishing a replacement marks all current subscriptions pending and attempts every one, even when another throws.
+- Successful subscriptions are acknowledged and are not repeated on an unchanged-size rebuild. Failed subscriptions retry on the next `buildRenderTarget` or frame-graph build even when dimensions and device already match.
+- One failure is rethrown unchanged; multiple failures produce an `AggregateError` containing every thrown value. Callback failures never silently report success.
+- Replaced color and depth allocations stay owned while delivery is pending. A later resize notifies all subscribers of the newest facade generation and keeps all older allocations alive until delivery succeeds. Releases then pass through the GPU retirement fence.
+- Unregistration cancels that subscription's retry and immediately settles delivery bookkeeping. When no pending observers remain, held generations enter GPU-fenced retirement without another target build or target disposal. Unregistration never invokes another observer; a consumer canceling a pending retry must stop using its superseded views.
+- If cancellation occurs inside a running callback, settlement waits until the current delivery pass returns. Duplicate subscriptions of the same function remain independent. Registrations added during delivery begin observing subsequent resizes.
+- Disposing the target cancels delivery and fences all held replacements, including when releasing the current attachments throws.
+- An unchanged-size nested target build does not recursively deliver callbacks. A callback attempting another physical resize receives an explicit error and can be retried by a later outer build.
+
+The subscription registry, pending deliveries, and held-replacement list are owned entirely by
+the surface RTT extension. Fixed-size targets and consumers that do not import surface RTT support
+retain none of the callback-delivery machinery.
+
+Completed retirement batches start the engine's microtask-delayed GPU fence immediately, so an
+inactive target does not need another frame/build to release obsolete allocations. The microtask
+still runs after the current synchronous frame submission when cancellation occurs inside a frame.
+
+Callers of the branch's earlier automatic surface-size support must switch to this factory when
+restacking. Fixed targets keep snapshot clone semantics and never retain the surface implementation.
+Calls that used the branch's earlier implicit additional depth facade on a color target must pass
+`withSampledDepthTexture`; ordinary depth-tested color targets need no sampling helper. Depth-only
+calls must also pass the helper and migrate as described above.
 
 Constraints:
 
-- `descriptor.size` must be fixed, not `"canvas"`.
-- The render target must own a color texture; `resolveToSwapchain: true` with `sampleCount: 1` is invalid.
-- The target is marked eager, so later `buildRenderTarget()` calls do not reallocate and invalidate already-created bind groups.
+- The target must own a color texture, or explicitly request sampled depth from a depth attachment; a borrowed swapchain view is not an RTT attachment.
+- Fixed-size targets are marked eager and never reallocate. Surface-sized targets rebuild only when their backing-store dimensions change.
 
 ## `RenderTask`
 
-`RenderTask` is currently the primary concrete frame-graph task. During `record()` it allocates its `RenderTarget`, builds bucketed bindings, and registers exactly one `RenderPass`. Per-frame pre-pass work (UBO writes, light refresh, per-binding updates, and live `clearColor` / `clear` mirroring) is installed as a render-pass before-execute hook, so shared task execution only drains `_passes`.
+Pipeline signature keys live in `engine/render-target-signature.ts`, separate from attachment
+allocation and disposal in `engine/render-target.ts`. Material and effect builders import the key
+function directly, so attachment-only consumers do not retain pipeline cache-key construction.
+
+Target disposal snapshots and detaches both attachments before releasing either allocation.
+Sampled targets receive those captured handles through their ownership hook; ordinary targets
+destroy them directly. Reentrant disposal therefore observes an empty target, while a failing color
+release still attempts depth cleanup. Sampled facades can keep independently acquired references
+to the detached allocations.
+
+The target also owns its disposed-state marker. Fixed RTTs install shared release/readiness
+callbacks on that owner rather than closures retaining the result facade; surface resize
+wrappers preserve the target receiver when forwarding attachment release.
+
+`RenderTask` is the primary concrete frame-graph task and uses direct `Task.execute()`. During
+`record()` it allocates targets, stages bucketed bindings, refreshes the task-owned scene bind group,
+and builds its cached `GPURenderPassDescriptor`; `_passes` remains empty. Per frame, `execute()` runs
+UBO/light/binding updates, patches live clear/resolve views, opens the render pass, draws, and ends it.
 
 ```typescript
 export interface RenderTaskConfig {
     name: string;
     rt: RenderTarget;
+    rst?: RenderTarget;
+    depth?: RenderTarget;
     clrColor?: GPUColorDict;
     clr?: boolean;
     depthClear?: boolean;
     sharedRt?: boolean;
     cam?: Camera | null;
     cs?: boolean;
-    transmission?: { copyCount?: number; generateMipmaps?: boolean };
+    transmission?: { copyCount?: number; generateMipmaps?: boolean; mipLevelCount?: number; grabDepth?: boolean };
     autoMirror?: boolean;
 }
 ```
@@ -288,6 +415,8 @@ export interface RenderTaskConfig {
 | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `name`         | Used for labels and diagnostics.                                                                                                                                                                                                                          |
 | `rt`           | Concrete render target for this pass.                                                                                                                                                                                                                     |
+| `rst`          | Optional single-sample resolve target used when `rt` is multisampled.                                                                                                                                                                                     |
+| `depth`        | Optional separate depth target. Eager targets are borrowed; non-eager targets are task-managed.                                                                                                                                                           |
 | `clrColor`     | Clear color. The object may be mutated between frames.                                                                                                                                                                                                    |
 | `clr`          | Defaults to clear. Set `false` to use color `loadOp: "load"` for overlays or multi-scene composition.                                                                                                                                                     |
 | `depthClear`   | Controls rt-owned depth independently. Defaults to clear; set `false` to load existing depth. Ignored for external `depth` targets, which retain their eager/task-managed ownership policy.                                                               |
@@ -295,7 +424,7 @@ export interface RenderTaskConfig {
 | `cam`          | Optional per-pass camera. Defaults to `scene.camera`.                                                                                                                                                                                                     |
 | `cs`           | Canvas-sized aspect flag. When true, scene UBO aspect uses canvas dimensions instead of RTT dimensions. This is useful for RTTs that are later sampled as a material texture but should preserve canvas aspect.                                           |
 | `transmission` | Optional scene-texture transmission settings. `copyCount: 0` refreshes before every transmissive draw; otherwise the default is one refresh. `generateMipmaps` defaults to `true`; set `false` to allocate only mip 0 and skip refraction mip generation. |
-| `autoMirror`   | Set `false` for an explicit render list that remains empty until populated with `addMesh()`.                                                                                                                                                              |
+| `autoMirror`   | Set `false` for an explicit render list that remains empty until populated with `addMeshToTask()`.                                                                                                                                                        |
 
 ### Image Processing Task
 
@@ -353,19 +482,22 @@ This keeps the refraction texture and all bind groups stable between graph rebui
 `createSceneContext(engine)` creates this task by default; `createSceneContext(engine, { defaultRenderTask: false })` skips it for scenes that provide their own final swapchain task:
 
 ```typescript
-const swapRT = createRenderTarget({
-    label: "scene-swapchain",
-    colorFormat: engine.format,
-    depthStencilFormat: "depth24plus-stencil8",
-    sampleCount: engine.msaaSamples,
-    size: "canvas",
-    resolveToSwapchain: true,
-});
+const msaa = surface.msaaSamples > 1;
+const rt = msaa
+    ? createRenderTarget({
+          lbl: "scene-color",
+          format: surface.format,
+          dFormat: "depth24plus-stencil8",
+          samples: surface.msaaSamples,
+          size: surface,
+      })
+    : surface.scRT;
+const depth = msaa ? undefined : createRenderTarget({ lbl: "scene-depth", dFormat: "depth24plus-stencil8", samples: 1, size: surface });
 
-createRenderTask({ name: "scene", rt: swapRT, clrColor: scene.clearColor }, engine, scene);
+_createAutomaticRenderTask({ name: "scene", rt, rst: msaa ? surface.scRT : undefined, depth }, engine, scene);
 ```
 
-This task auto-mirrors `scene._renderables` when its own `_renderables` list is empty unless `autoMirror: false`. If the scene renderable version changes because of mesh add/remove/material swap, an auto-mirroring task re-syncs and rebinds its draw lists.
+This task starts in scene-mirroring mode unless `autoMirror: false`. `addMeshToTask` selects explicit population when its additions commit. If the scene renderable version changes because of mesh add/remove/material swap, a scene-mirroring task re-syncs and rebinds its draw lists. An intentionally empty non-mirroring list remains empty across recordings; internal callers supplying borrowed renderables select `autoMirror: false`.
 
 `RenderTask.enabled` defaults to `true`. A disabled task exits before per-pass updates and does not load attachments, resolve MSAA, or issue draws.
 
@@ -374,15 +506,171 @@ This task auto-mirrors `scene._renderables` when its own `_renderables` list is 
 A render task can be explicitly populated with:
 
 ```typescript
-task.addMesh(mesh);
-task.addMesh(mesh, { material: overrideMaterialOrView });
+addMeshToTask(task, mesh);
+addMeshToTask(task, mesh, { material: overrideMaterialOrView });
 ```
 
-`addMesh()` accepts a source material or `MaterialView` and resolves through the source material family's `_buildGroup._rebuildSingle` hook. The mesh's material family must already be registered with the scene so the builder has run. Passing a material view lets a pass reuse source material state with pass-specific render feature bits, for example Standard/PBR/Node no-color shadow variants used by PCF shadow render tasks.
+**Breaking API migration:** replace `task.addMesh(mesh, options)` with
+`addMeshToTask(task, mesh, options)`, imported from `@babylonjs/lite`. The constructor and
+synchronous queue/live-add behavior are unchanged. Scene-mirroring passes no longer retain
+auxiliary mesh construction, ownership, or transaction code merely by importing `createRenderTask`.
 
-Adds made **before** the task's first `record()` are queued and drained at `record()` time. A **runtime** add (after `record()`, once the task is live) resolves the mesh and re-buckets it into that task immediately, so it renders on the next frame without a `frameGraph.build()` — a full rebuild would reallocate the shared scene UBO and every task's render target mid-frame. The task tracks this via its internal `_recorded` flag.
+`addMeshToTask()` accepts a source material or `MaterialView`. Rebuild resolution uses the completed
+scene-local material group's `r` closure. An existing group without `r` is not ready: it must never
+fall back to a builder-wide closure cached by another scene. Only builders explicitly marked
+`_sceneIndependentRebuild` (standalone geometry-view factories) may use `_rebuildSingle` without a
+scene group. Ordinary task population, refresh, and explicit material rebuilds share
+`material/resolve-mesh-rebuild.ts`'s `resolveMeshRebuild(scene, builder)` resolver.
+Passing a material view lets a pass reuse source material state with pass-specific render feature
+bits, for example Standard/PBR/Node no-color shadow variants used by PCF shadow render tasks.
+
+Adds made **before** the task's first `record()` are queued and drained at `record()` time. The queue
+is allocated only when explicit population is enabled; `createRenderTask()` and idempotent removal
+alone retain no queue. A **runtime** add (after `record()`, once the task has published its scene bind
+group) resolves the mesh and re-buckets it into that task immediately, so it renders on the next
+frame without a `frameGraph.build()` — a full rebuild would reallocate the shared scene UBO and every
+task's render target mid-frame.
 
 If a task has explicit renderables, it does **not** auto-mirror the scene.
+
+The scene's automatic render task borrows renderables and uses the lightweight
+`render-task-base.ts` path. It has no explicit mesh-population API and no static dependency on
+auxiliary ownership or `render-task-transaction.ts`. Shared pass execution, target handling,
+binding buckets, removal, and GPU retirement stay in that base path. Public `createRenderTask`
+also uses this path. `addMeshToTask` installs one optional explicit-record seam and the queueing
+strategy on first use, leaving the task's stable `record` function intact. Transmission and other
+wrappers therefore compose regardless of whether population happens before or after they are
+installed, while `createRenderTask`-only bundles retain no transaction code. Public removal and scene
+removal use the same base list eviction. The base removal and disposal paths retire only renderables
+carrying the owner-provided lifetime-disposer sink, so automatic borrowed renderables remain
+untouched and an earlier captured `dispose` function observes ownership added later.
+Target ownership is captured from `sharedRt` at creation and used consistently by recording and
+disposal; later edits to the configuration cannot silently change which task owns the attachments.
+The stable scene UBO is task-owned from creation. Its scene bind group and shared light-buffer
+binding are resolved on first recording, through the same refresh path used when lights change.
+Material bindings are built first because `Renderable.bind` does not consume group 0. Scene
+bind-group refresh is the final fallible recording step: it creates the new bind group before
+assigning task-owned `_lightsUBO` / `_sceneBG`, so failure preserves both the old root bindings and
+the old draw generation. Pass dimensions and descriptors update only after that succeeds.
+
+Public and refresh-enabled explicit tasks share `render-task-transaction.ts`. Each auxiliary
+renderable has a task-owned lifetime disposer list. The material-family
+`MeshRebuilder(scene, mesh, materialOverride?, resources?)` receives those lists explicitly through
+`MeshRebuildResources`. When `resources` is present, builders register allocation releases in
+`resources._lifetimeDisposers` before subsequent fallible work and never register them in the scene's
+main mesh disposer map. Cached resources created during binding also use the lifetime list
+when they belong to the renderable. Binding-generation work is represented by `DrawUpdateBatch`
+and its feature-owned `DrawBatchState`; there is no second, unused callback-generation ledger.
+Fallible producers release unpublished private allocations before throwing.
+Calls without a resource owner preserve ordinary scene-owned construction. Rebuilder wrappers must
+forward the owner unchanged. Main-scene material swaps therefore cannot release an explicit task's
+UBOs or texture leases, and explicit tasks no longer rewrite scene disposer maps temporarily.
+Auxiliary ownership is stored directly on each task-owned `Renderable`; its existing `mesh` and
+`_lifetimeDisposers` fields provide membership and cleanup without a parallel ownership list.
+`autoMirror` is a construction mode; the first successfully committed explicit addition switches the
+task permanently to explicit mode, including after its last owned renderable is removed. Each
+resolution attempt collects its exact new renderables separately, so
+rollback releases only unpublished allocations while transferred renderables remain untouched.
+Every material rebuilder returns a fresh renderable identity for its supplied lifetime sink;
+shared pipeline and view caches do not share the renderable itself. Population therefore appends
+each rebuilt entry directly instead of doing a quadratic identity scan over previously resolved meshes.
+
+Pending additions and source renderables are staged in a typed `RenderTaskPopulation` that has no
+task methods, gates, wrappers, descriptors, or context. Binding produces a separate
+`RenderTaskBindingGeneration` containing the source list, opaque/direct/transparent buckets, bundle
+cache, batch state, and version keys. It is an off-task staged value, not persistent nested state.
+Binding fills that candidate directly, without a second tuple container. Its source-version
+snapshot is captured before target preparation and material binding, so a callback that changes
+the scene cannot falsely mark those new renderables as already synchronized.
+Only a complete rebuild, scene-BG refresh, and descriptor/context update publishes its known draw
+fields to the task with `Object.assign`. Scene bindings and update context remain task-owned because
+they have independent lifetimes. There are no mirrored or nested authoritative copies.
+
+Failed attempts release only the disposer sinks created by that population, preserve the previous
+draw-field identities, and retain pending requests for retry. Wrapper and gate mutations target the
+live task throughout and are never copied from a candidate. Mesh refresh stages exact replacements
+only for a real rebuild and retires them after draw-field publication; asynchronous preparation
+constructs the same typed population but never publishes it. CSM transfers prepare one population and
+generation per source/destination, assign every task's staged draw fields before retiring prior batch
+states, and retain all source batch states during rollback. Rebinding retained renderables replaces
+only their binding batch state; cached renderable-lifetime resources survive. Removing a mesh or
+disposing a task retires its owned callbacks after submitted GPU work drains. Scene-mirrored
+renderables remain borrowed.
+Geometry tasks use the same explicit lifetime sinks. A sink is staged before each geometry
+rebuild and is attached to the renderable before binding; rollback releases every unpublished
+sink, including one whose rebuild or bind failed. Published geometry batches retire behind
+the queue fence. The task's mesh-removal hook immediately evicts and retires all matching
+entries even while rendering is stopped. Shared geometry-view resources are reference-counted
+only by their renderable owners; there is no implicit view lease or scene auxiliary registry.
+The lightweight automatic path still publishes complete binding buckets rather than retaining
+partially constructed draw lists after a binding failure. It does not acquire auxiliary ownership.
+The explicit population enabler installs the renderable-retirement seam. Automatic rendering
+only calls that optional seam during removal/disposal and does not retain lifetime-list handling
+or the resource-generation snapshot helper for borrowed renderables.
+Standard and PBR register UBO releases as each allocation completes, before bind-group creation.
+Standard's optional UV UBO joins the same ownership list. A failed initial uniform upload destroys
+its just-created buffer before propagating the error.
+Task cleanup snapshots callback/destroyable batches through the engine retirement service.
+Immediate rollback and fenced cleanup share its error-reporting runner; destroy methods retain
+their receiver, and callbacks appended after retirement wait for a later batch.
+
+Update-batch collection and lifetime handling belong to `render/draw-update-batches.ts`, activated
+by the uniform-copy and compute-dispatch batch factories. They install `_collectBatches` on the
+task's target signature. Ordinary tasks carry no update-batch arrays or batch-difference algorithms.
+When a binding exposes update batches, the collector builds a task-local `DrawBatchState` containing
+the deduplicated active batch references and reset, flush, selection, and release operations.
+That state is immutable after collection: removal builds a new selection rather than mutating a
+published state. Candidate rollback releases only batches absent from retained states; successful
+commit retires only batches absent from the new live states. Multi-task transfers supply all live
+states so a batch borrowed from a source is not destroyed if destination binding fails.
+No state is created for bindings without update batches, and inactive features perform no batch
+reset/flush work. The ordinary renderer invokes optional hooks without importing their implementation.
+
+Transfers move the ownership entry together with its renderable. Destination binding is transactional
+across the affected tasks; failure leaves the source ownership and draw lists intact. Batched CSM
+transfers stage all moves and bind each destination once. Async shader preparation uses temporary
+auxiliary renderables without consuming the task's pending requests. That preparation helper is
+imported by the asynchronous shader opt-in, not attached to every render task. Automatic and
+explicit recording share target, descriptor, and dimension preparation; the explicit transaction
+updates the task-owned context only after binding and scene-BG refresh succeed.
+
+An explicit task normally keeps the renderables resolved by `addMeshToTask()`. Applications that replace
+mesh geometry or change mesh materials at runtime can opt a task into following the corresponding
+scene-renderable rebuilds:
+
+```typescript
+const task = createRenderTask({ name: "dynamic", rt, autoMirror: false }, engine, scene);
+enableRenderTaskMeshRefresh(task);
+addMeshToTask(task, dynamicMesh);
+```
+
+`enableRenderTaskMeshRefresh()` must run before the task is recorded. It tracks only scene-owned
+meshes added without a per-task material override. It builds one auxiliary single-mesh renderable
+per tracked mesh through the registered material-family rebuild hook, so an explicit task never
+inherits untracked siblings from a merged scene renderable. The task claims and owns those auxiliary
+disposers, rebuilds them when `scene._renderableVersion` changes, and retires replaced resources and
+binding-update batches after submitted GPU work drains. The enabler wraps only the selected task;
+applications that do not import it retain the base render-task and material-renderable bundle
+footprint.
+
+Refresh is a build-then-commit transaction. All tracked replacements, their explicit lifetime
+disposer sinks, and their draw bindings are prepared before publishing new draw fields. If any
+rebuild or binding throws, temporary resources are cleaned up and the previous task lists, bindings,
+ownership, and version remain unchanged for retry. Only a complete replacement retires the
+previous generation. Scene-owned main disposer lists are untouched throughout task construction.
+An unfinished scene-local material build raises a synchronous readiness error. The tracked or
+pending addition remains queued for a later `record()` / refresh retry after that build completes;
+it neither publishes partial bindings nor starts another asynchronous material build.
+Pending material overrides participate in the same transaction, including overrides queued before
+enabling refresh and live `addMeshToTask(task, mesh, { material })` calls. Failed attempts leave the pending queue
+intact and clean up only newly created resources. Committed overrides remain task-owned until mesh
+removal or task disposal; later binding attempts stage their feature-owned batch resources.
+
+Renderable lifetime resources are separate from binding-generation batch resources. A successful
+rebind of a retained override retires its previous binding generation and keeps only the new one.
+A failed attempt destroys only candidate bindings and restores the prior generation. Renderable
+construction and lazily cached renderable resources remain alive until that renderable is replaced
+or removed; cached culling state uses the explicit lifetime-disposer sink.
 
 ### Buckets and Draw Execution
 
@@ -392,16 +680,13 @@ At record/re-sync time, `RenderTask` converts renderables into `DrawBinding`s by
 const binding = renderable.bind(engine, targetSignature);
 ```
 
-During `record()`, the task also builds/refreshes its `RenderTarget`, stores an update context from the resolved dimensions, and registers its `RenderPass`. The task wires the pass's render target, before-execute preparation, and an `_executeFunc` closure that holds the per-pass-encoder body (set viewport / scissor, bind scene group 0, replay the cached opaque bundle, draw direct + transparent bindings):
+During `record()`, the task builds/refreshes its targets, stages bindings, refreshes the scene bind
+group, and then publishes descriptor/dimension and draw-generation state:
 
 ```typescript
 task._updateContext.targetWidth = rt._width;
 task._updateContext.targetHeight = rt._height;
-
-const pass = createRenderPass(task.name, task);
-setRenderPassRenderTarget(pass, task._config.rt);
-setRenderPassBeforeExecute(pass, () => prepareRenderTaskPass(task));
-setRenderPassExecuteFunc(pass, (enc) => executePassBody(task, enc));
+Object.assign(task, generation);
 ```
 
 Bindings are partitioned into:
@@ -416,15 +701,26 @@ Opaque and direct buckets currently sort by `renderable.order`. Transparent is s
 
 `DrawBinding.pipeline` is mandatory. The per-pass-encoder body owns `setPipeline()` and deduplicates consecutive bindings with the same pipeline before calling the binding's `draw()` closure.
 
-Before opening the pass each frame, the `RenderPass` before-execute hook installed by `RenderTask` runs pre-pass work outside the encoder:
+`_lastVersion` is exclusively the scene renderable version captured before the active binding
+generation is built. `prepareRenderTaskPass()` compares it with `scene._renderableVersion` for
+auto-mirroring source synchronization, while `enableRenderTaskMeshRefresh()` uses the same snapshot
+to detect changes affecting its tracked meshes. Neither the ordinary nor transmission draw body
+overwrites it. Opaque bundle invalidation is separate: a new binding generation publishes a fresh
+`_ob`, explicit invalidation clears `_ob`, and `_lastVis !== _vis` handles global
+visibility/resource changes. Replacing only the task's group-0 lights buffer clears `_ob` so the next
+bundle captures the new scene bind group, but leaves `_lastVersion` and all material bindings intact.
+It therefore does not trigger a redundant automatic rebind or explicit mesh refresh.
+
+Before opening the pass each frame, `RenderTask.execute()` runs pre-pass work outside the encoder:
 
 1. Auto-resync the renderable list if the scene's `_renderableVersion` has changed.
-2. Refresh the task's scene bind group (the scene-wide lights buffer can be resized after this task was first recorded).
+2. Refresh the task's scene bind group if the scene-wide lights buffer was replaced. This clears only `_ob`; source/material bindings remain synchronized.
 3. Write the per-task scene UBO, refresh the scene-wide lights UBO, set `_updateContext._camera`, and call `binding.update?.(_updateContext)` for opaque, direct, and transparent bindings. This refreshes dirty per-binding UBOs with the pass target dimensions while allowing opaque render bundles to stay cached.
 4. Sort transparent bindings back-to-front from the active camera, after updates so renderables can refresh `_worldCenter` first.
-5. Mirror live `scene.clearColor` (auto-filled tasks) or `_config.clrColor` plus `_config.clr !== false` onto every owned pass — so the pass picks them up when patching its color attachment.
+5. Patch the task-owned color attachment with the live target view, optional resolve view, clear color, and clear/load operation.
 
-Then the task iterates `_passes` calling `_execute()`. Each `RenderPass._execute()` patches the swapchain view + clearColor + loadOp, calls `beginRenderPass`, runs `executePassBody(task, enc)` (the closure captured at record time), and ends the pass.
+`RenderTask.execute()` then calls `beginRenderPass(task._renderPassDescriptor)`, runs the opaque
+bundle plus direct and transparent draw lists, and ends the pass. Its `_passes` array is not involved.
 
 ### On-Demand Overdraw Cost Probe
 
@@ -456,8 +752,10 @@ Each `RenderTask` owns:
 
 - `_sceneUBO`
 - `_sceneBG`
+- `_lightsUBO`
+- `_updateContext`
 - `_suData` scratch
-- `_su` dirty-check cache
+- `_sceneUboCacheKey` dirty-check cache
 
 `writePassSceneUBO()` writes the canonical 352-byte `SceneUniforms` layout:
 
@@ -476,7 +774,9 @@ Each `RenderTask` owns:
 
 The writer bails before touching scratch/GPU when camera, fog, aspect, exposure, contrast, and environment texture identity are unchanged. Environment rotation is written by the opt-in environment contributor; `setEnvironmentRotation` explicitly invalidates the task-local cache before a dynamic update.
 
-Offscreen targets use `targetSignature._flipY` and negate the projection row so downstream texture sampling is upright. Swapchain targets do not flip. See "Target Signature" above for the descriptor-side `flipY` override and the known overriding cases.
+Offscreen and swapchain targets use the same upright projection and counter-clockwise front-face
+convention. There is no target-signature or descriptor flip flag; downstream copy/post-process
+sampling handles the texture-coordinate convention uniformly.
 
 ## Usage: Offscreen Pass Feeding a Material
 
@@ -484,10 +784,10 @@ Scene 110 demonstrates the core pattern:
 
 ```typescript
 const { rt, texture } = createRenderTargetTexture(engine, {
-    label: "r1",
-    colorFormat: engine.format,
-    depthStencilFormat: "depth24plus-stencil8",
-    sampleCount: 1,
+    lbl: "r1",
+    format: engine.format,
+    dFormat: "depth24plus-stencil8",
+    samples: 1,
     size: { width: 512, height: 512 },
 });
 
@@ -498,7 +798,7 @@ const rttCamera = createFreeCamera({ x: 0, y: 0, z: -3 }, { x: 0, y: 0, z: 0 });
 const task = createRenderTask({ name: "r1", rt, cam: rttCamera, clrColor: { r: 0.1, g: 0.1, b: 0.3, a: 1 }, cs: true }, engine, scene);
 
 addTaskAtStart(scene, task);
-task.addMesh(sourceMesh, { material: overrideMaterial });
+addMeshToTask(task, sourceMesh, { material: overrideMaterial });
 
 await registerScene(scene);
 await getFrameGraph(scene).build();
@@ -509,14 +809,14 @@ Why this works:
 
 1. `createRenderTargetTexture()` eagerly creates the texture so `consumerMaterial` can capture it in its bind group.
 2. `addTaskAtStart()` runs the RTT pass before the default scene pass.
-3. `addMesh()` renders only the selected mesh into the RTT.
+3. `addMeshToTask()` renders only the selected mesh into the RTT.
 4. The default scene pass later samples the produced texture.
 
 ## Scene Removal and Material Swaps
 
 `removeMeshFromTask(task, mesh)` removes a mesh from a task's source renderables and bucketed bindings. Scene removal calls this for frame-graph render-pass tasks so removed meshes do not continue drawing.
 
-Material swaps use the scene material-swap queue and each material builder's `_rebuildSingle` hook. Auto-mirrored render-pass tasks notice `_renderableVersion` changes and rebind their draw lists.
+Material swaps use the scene material-swap queue and each material builder's `_rebuildSingle` hook. Auto-mirrored `RenderTask`s notice `_renderableVersion` changes and rebind their draw lists.
 
 ## Resize and Rebuild
 
@@ -529,10 +829,10 @@ Fixed-size eager RTTs are not reallocated by graph rebuilds because their GPU te
 - The frame graph is intentionally ordered, not dependency-solved. Callers must insert producers before consumers.
 - A future node render graph, if implemented in Lite, would be a separate higher-level DAG that emits this ordered task list.
 - `RenderTask` is the primary concrete scene-render task, and `EffectRenderTask` is the fullscreen-effect RTT task. New `Task` implementations are expected as frame-graph coverage expands.
-- `RenderPass` is the only concrete pass today; the `Pass` base interface is shaped so future compute / copy / object-list passes plug in without re-flowing the `Task` contract.
+- `RenderPass` is the only concrete pass today, used by pass-backed tasks. `RenderTask` executes directly and does not synthesize a pass object.
 - Render targets are concrete objects. There is no virtual resource aliasing or automatic lifetime analysis yet. `Pass._dependencies` is recorded for the future texture manager but not yet read by anything in Lite.
 - `pass._renderTarget` and `RenderTaskConfig.rt` intentionally take a `RenderTarget` directly rather than a numeric `TextureHandle`. Handles + virtualization arrive as a follow-on step; the pass surface will absorb them as a typed-parameter change at known call sites.
-- `addMesh()` relies on material family rebuild hooks and therefore requires the mesh/material family to be part of the scene build.
+- `addMeshToTask()` relies on material family rebuild hooks and therefore requires the mesh/material family to be part of the scene build.
 - Transparent bindings sort by camera distance only; they are not pipeline-batched.
 
 ## Babylon.js FrameGraph Mapping
@@ -549,24 +849,31 @@ Fixed-size eager RTTs are not reallocated by graph rebuilds because their GPU te
 | Texture/resource handle         | Concrete `RenderTarget` for now                            |
 | Task record/build phase         | `Task.record()` via `FrameGraph.build()` (phase 1)         |
 | Pass post-record initialization | `Pass._initialize()` via `FrameGraph.build()` (phase 2)    |
-| Per-frame execute phase         | `_executeTask()` → iterates `_passes` calling `_execute()` |
-| Legacy/non-recorded task work   | Optional `Task.execute()`                                  |
+| Per-frame execute phase         | `Task.execute()` when present; otherwise iterate `_passes` |
+| Built-in direct task work       | Optional `Task.execute()`                                  |
 | Render target texture           | `createRenderTargetTexture()`                              |
 | Pass-specific camera/scene UBO  | `RenderTaskConfig.cam` + task-owned `_sceneUBO`            |
 
 ## File Manifest
 
-| File                                       | Purpose                                                                                      |
-| ------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| `src/frame-graph/task.ts`                  | Polymorphic task interface (now with `_passes: Pass[]`)                                      |
-| `src/frame-graph/pass.ts`                  | `Pass` base interface, `addPassDependencies`                                                 |
-| `src/frame-graph/render-pass.ts`           | `RenderPass` interface, `createRenderPass`, `setRenderPass*` setters                         |
-| `src/frame-graph/frame-graph.ts`           | Ordered task list and two-phase build/execute/dispose lifecycle                              |
-| `src/frame-graph/frame-graph-actions.ts`   | Public task-insertion + `addRenderPass` actions                                              |
-| `src/frame-graph/render-task.ts`           | Render task, per-pass scene UBO, target binding, draw buckets, per-pass-encoder body         |
-| `src/frame-graph/overdraw-probe-run.ts`    | Timestamp-query replay implementation loaded only by the public GPU timing diagnostics probe |
-| `src/frame-graph/image-processing-task.ts` | Reusable fullscreen image-processing task for swapchain output                               |
-| `src/frame-graph/shadow-task.ts`           | Internal adapter task that schedules existing shadow generators through `Task.execute()`     |
-| `src/engine/render-target.ts`              | Render target descriptors, allocation, disposal, target signatures                           |
-| `src/texture/rtt.ts`                       | Eager render-target texture helper                                                           |
-| `src/render/renderable.ts`                 | `Renderable`, `DrawBinding`, and `DrawUpdateContext` contracts consumed by render-pass tasks |
+| File                                         | Purpose                                                                                       |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `src/frame-graph/task.ts`                    | Polymorphic task interface (now with `_passes: Pass[]`)                                       |
+| `src/frame-graph/pass.ts`                    | `Pass` base interface, `addPassDependencies`                                                  |
+| `src/frame-graph/render-pass.ts`             | `RenderPass` interface, `createRenderPass`, `setRenderPass*` setters                          |
+| `src/frame-graph/frame-graph.ts`             | Ordered task list and two-phase build/execute/dispose lifecycle                               |
+| `src/frame-graph/frame-graph-actions.ts`     | Public task-insertion + `addRenderPass` actions                                               |
+| `src/frame-graph/render-task-base.ts`        | Direct RenderTask target preparation, scene UBO/bindings, draw buckets, descriptor, execution |
+| `src/frame-graph/render-task.ts`             | Public task factory plus lazily installed explicit mesh population seam                       |
+| `src/frame-graph/render-task-transaction.ts` | Typed off-task population/binding staging, rollback, and known-field publication              |
+| `src/frame-graph/overdraw-probe-run.ts`      | Timestamp-query replay implementation loaded only by the public GPU timing diagnostics probe  |
+| `src/frame-graph/image-processing-task.ts`   | Reusable fullscreen image-processing task for swapchain output                                |
+| `src/frame-graph/shadow-task.ts`             | Internal adapter task that schedules existing shadow generators through `Task.execute()`      |
+| `src/engine/render-target.ts`                | Render target/signature state plus attachment allocation and disposal                         |
+| `src/engine/render-target-signature.ts`      | Pipeline-cache key serialization for a `RenderTargetSignature`                                |
+| `src/texture/rtt.ts`                         | Eager render-target texture helper                                                            |
+| `src/render/renderable.ts`                   | `Renderable`, `DrawBinding`, and `DrawUpdateContext` contracts consumed by render-pass tasks  |
+| `src/render/lights-ubo.ts`                   | Compatibility facade for split scene-light, mesh-layout, and mesh-selection helpers           |
+| `src/render/scene-lights-ubo.ts`             | Scene-owned light GPU state, upload refresh, and task-camera light-data writer                |
+| `src/render/mesh-light-layout.ts`            | Mesh-light UBO fields and WGSL packed-index accessor                                          |
+| `src/render/mesh-light-selection.ts`         | Per-mesh light filtering and packed index writes                                              |

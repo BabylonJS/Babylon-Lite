@@ -26,7 +26,7 @@
  *  the lit `color` written to the optional real-colour attachment. */
 
 import type { ComposedShader, ShaderFragment, Varying } from "../../shader/fragment-types.js";
-import { GeometryTextureType } from "../../frame-graph/geometry-types.js";
+import { GeometryTextureType, _geometryOutputExtension } from "../../frame-graph/geometry-types.js";
 import { PBR_HAS_ALPHA_BLEND, PBR_HAS_ENV, _registerPbrExt, type _PbrBindCtx, type _PbrFragCtx, type PbrExt } from "./pbr-flags.js";
 import type { createPbrComposer, PbrLightMode } from "./pbr-compose.js";
 import type { MeshVbLayout } from "../../mesh/mesh.js";
@@ -172,6 +172,7 @@ function attachmentExpr(type: GeometryTextureType, wg: string, hasIbl: boolean):
             return wgsl`vec4<f32>(0.5 * (${prev} - ${cur}), 0.0, ${wg})`;
         }
     }
+    return wgsl``;
 }
 
 // ─── Composer entry ────────────────────────────────────────────────────
@@ -237,8 +238,9 @@ export function composePbrGeometryShader(
     //    real lit colour (matches BJS `targetTexture`).
     const colorSlot = attachments.length;
     const extraColorLine = emitColor ? wgsl`\n@location(${colorSlot}) color: vec4<f32>,` : wgsl``;
+    const extension = _geometryOutputExtension && attachments.includes(_geometryOutputExtension.type) ? _geometryOutputExtension : null;
     const outputStruct = wgsl`struct FragmentOutput {
-${attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`).join("\n")}${extraColorLine}
+${attachments.map((type, i) => (type === extension?.type ? extension.field(i) : wgsl`@location(${i}) f${i}: vec4<f32>,`)).join("\n")}${extraColorLine}
 };
 `;
     frag = frag.replace("@fragment fn main", wgsl`${outputStruct}@fragment fn main`);
@@ -246,7 +248,9 @@ ${attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`).join("\n")}
     // 3) Replace the alpha-block return with MRT writes. With ALPHA_BLEND
     //    stripped, the template emits the simpler return form.
     const wg = `select(0.0, 1.0, alpha > 0.4)`;
-    const writes = wgsl`${attachments.map((type, i) => wgsl`out.f${i} = ${attachmentExpr(type, wg, hasIbl)};`).join("\n")}`;
+    const writes = wgsl`${attachments
+        .map((type, i) => (type === extension?.type ? extension.pbrWrite(i, features) : wgsl`out.f${i} = ${attachmentExpr(type, wg, hasIbl)};`))
+        .join("\n")}`;
     const extraColorWrite = emitColor ? wgsl`\nout.color = vec4<f32>(color, alpha * material.materialAlpha);` : wgsl``;
     const replacement = wgsl`var out: FragmentOutput;
 ${writes}${extraColorWrite}

@@ -11,8 +11,7 @@
 
 import type { ShaderTemplate, UboField, VertexAttribute, Varying, BindingDecl } from "../../shader/fragment-types.js";
 import type { PbrTemplateExt } from "./pbr-template-ext.js";
-import type { MeshVbLayout } from "../../mesh/mesh.js";
-import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/lights-ubo.js";
+import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/mesh-light-layout.js";
 import { wgsl } from "../../shader/wgsl.js";
 
 type GammaBaseColorFn = (baseColorFactorRgb: string, baseColorFactorAlpha: string, vertexColorMod: string) => string;
@@ -146,10 +145,6 @@ export interface PbrTemplateConfig {
     /** ESM shadow depth output code. Supplied by the ESM material view so normal PBR bundles don't retain it. */
     /** @internal */
     readonly _esmShadowDepthCode?: string;
-    /** @internal Per-attribute vertex-buffer interleave layout. Undefined (or per-attribute
-     *  undefined) → canonical tight strides (12/12/16/8). Only set for meshes
-     *  sourcing attributes from a strided bufferView. */
-    readonly _vbStrides?: MeshVbLayout;
 }
 
 /**
@@ -192,33 +187,20 @@ export function createPbrTemplate(config: PbrTemplateConfig): ShaderTemplate {
         _noColorOutput = false,
         _esmShadowOutput = false,
         _esmShadowDepthCode = "",
-        _vbStrides,
     } = config;
     const hasNormal = _normalMode === "tangent";
     const hasCotangentNormal = _normalMode === "cotangent";
     const hasAnyNormal = hasNormal || hasCotangentNormal;
 
     // ── Base vertex attributes ──────────────────────────────────
-    // arrayStride defaults to the canonical tight element size; interleaved meshes
-    // override it (e.g. 48 for POSITION+NORMAL+UV+TANGENT sharing one stride-48
-    // bufferView). `_offset` is the attribute's byte offset WITHIN that shared
-    // buffer (0 for tight meshes); it is baked into the pipeline vertex layout so
-    // the draw can bind the shared buffer at offset 0 (matches Babylon.js WebGPU —
-    // a non-zero setVertexBuffer bind offset corrupts vertex fetch on some AMD/Dawn paths).
     const _baseVertexAttributes: VertexAttribute[] = [
-        { _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: _vbStrides?._p?._stride ?? 12, _offset: _vbStrides?._p?._offset ?? 0 },
-        { _name: "normal", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: _vbStrides?._n?._stride ?? 12, _offset: _vbStrides?._n?._offset ?? 0 },
+        { _name: "position", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
+        { _name: "normal", _type: "vec3<f32>", _gpuFormat: "float32x3", _arrayStride: 12 },
     ];
     if (hasNormal) {
-        _baseVertexAttributes.push({
-            _name: "tangent",
-            _type: "vec4<f32>",
-            _gpuFormat: "float32x4",
-            _arrayStride: _vbStrides?._t?._stride ?? 16,
-            _offset: _vbStrides?._t?._offset ?? 0,
-        });
+        _baseVertexAttributes.push({ _name: "tangent", _type: "vec4<f32>", _gpuFormat: "float32x4", _arrayStride: 16 });
     }
-    _baseVertexAttributes.push({ _name: "uv", _type: "vec2<f32>", _gpuFormat: "float32x2", _arrayStride: _vbStrides?._u?._stride ?? 8, _offset: _vbStrides?._u?._offset ?? 0 });
+    _baseVertexAttributes.push({ _name: "uv", _type: "vec2<f32>", _gpuFormat: "float32x2", _arrayStride: 8 });
     if (_ext) {
         _baseVertexAttributes.push(..._ext.extraVertexAttributes);
     }
@@ -381,10 +363,10 @@ var alpha=baseColorSample.a${baseColorFactorAlpha};${vertexColorMod}`;
     const specGlossUV = _ext?.uvForSpecGloss ?? "input.uv";
     const roughnessMetallic = _hasSpecGloss
         ? wgsl`let specGloss=textureSample(specGlossTexture,specGlossSampler,${specGlossUV});
-let roughness=clamp(1.0-specGloss.a,0.0,1.0);
-let metallic=0.0;`
-        : wgsl`let roughness=clamp(orm.g*material.roughnessFactor,0.0,1.0);
-let metallic=orm.b*material.metallicFactor;`;
+var roughness=clamp(1.0-specGloss.a,0.0,1.0);
+var metallic=0.0;`
+        : wgsl`var roughness=clamp(orm.g*material.roughnessFactor,0.0,1.0);
+var metallic=orm.b*material.metallicFactor;`;
 
     // Material-view / pass variants can skip extension slots while still compiling the colour path.
     const emissiveUV = _ext?.uvForEmissive ?? "input.uv";
@@ -392,7 +374,7 @@ let metallic=orm.b*material.metallicFactor;`;
         _hasEmissiveColor || !_hasEmissiveTexture ? wgsl`var emissive:vec3f;` : wgsl`let emissive=textureSample(emissiveTexture,emissiveSampler,${emissiveUV}).rgb;`;
 
     // Occlusion default (overridden by reflectance fragment's AT slot or ext occlusion override)
-    const occlusionDefault = _hasReflectanceExt ? `` : _ext?.occlusionOverride ? _ext.occlusionOverride : _hasOcclusion ? wgsl`let occlusion=orm.r;` : wgsl`let occlusion=1.0;`;
+    const occlusionDefault = _hasReflectanceExt ? `` : _ext?.occlusionOverride ? _ext.occlusionOverride : _hasOcclusion ? wgsl`var occlusion=orm.r;` : wgsl`var occlusion=1.0;`;
     // F0 computation (overridden by reflectance fragment's MF slot)
     const f0Default = _hasReflectanceExt
         ? ``
@@ -400,11 +382,11 @@ let metallic=orm.b*material.metallicFactor;`;
           ? wgsl`var colorF0=specGloss.rgb;
 let colorF90=vec3<f32>(1.0);
 let maxSpecular=max(colorF0.r,max(colorF0.g,colorF0.b));
-let surfaceAlbedo=baseColor*(1.0-maxSpecular);`
+var surfaceAlbedo=baseColor*(1.0-maxSpecular);`
           : wgsl`let dielectricF0=material.reflectance;
 var colorF0=mix(vec3<f32>(dielectricF0),baseColor,metallic);
 let colorF90=vec3<f32>(1.0);
-let surfaceAlbedo=baseColor*(1.0-dielectricF0)*(1.0-metallic);`;
+var surfaceAlbedo=baseColor*(1.0-dielectricF0)*(1.0-metallic);`;
 
     // Specular AA + geometric-curvature roughness factors (BJS getAARoughnessFactors).
     // AA_factor_x is the direct-light roughness floor (matches BJS `computeSheenLighting`
@@ -523,8 +505,8 @@ ${doubleSidedFlip}
 ${anisotropyTBBlock}
 /*AC*/
 let V=normalize(scene.vEyePosition.xyz-input.worldPos);
-let NdotVUnclamped=dot(N,V);
-let NdotV=abs(NdotVUnclamped)+0.0000001;
+var NdotVUnclamped=dot(N,V);
+var NdotV=abs(NdotVUnclamped)+0.0000001;
 ${f0Default}
 /*MF*/
 var alphaG=roughness*roughness+0.0005;

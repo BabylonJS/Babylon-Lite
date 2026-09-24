@@ -14,6 +14,7 @@ import type { BlockEmitter, NodeExpr } from "../node-types.js";
 import { NME_LIGHTING_HELPER_KEY, NME_LIGHTING_HELPER_WGSL } from "./_lighting-helper.js";
 import { MAX_LIGHTS } from "../../../light/types.js";
 import { wgsl } from "../../../shader/wgsl.js";
+import { createNodeLightingFeature } from "../node-lighting.js";
 
 const SHADOW_FACTORS_ONE = wgsl`array<f32, ${MAX_LIGHTS}>(${/* @__PURE__ */ new Array(MAX_LIGHTS).fill("1.0").join(", ")})`;
 
@@ -40,6 +41,7 @@ export const emitter: BlockEmitter = {
         // Inject helper + mark the lights UBO as required.
         state.fragment.helpers.set(NME_LIGHTING_HELPER_KEY, NME_LIGHTING_HELPER_WGSL);
         state.usesLightsUbo = true;
+        state._meshFeature = createNodeLightingFeature;
 
         const memoKey = `_light_${block.id}_call`;
         const callExpr = state.fragment.memo.get(memoKey);

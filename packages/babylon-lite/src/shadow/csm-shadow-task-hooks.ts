@@ -14,7 +14,7 @@ import type { Material, MaterialView } from "../material/material.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
-import { createRenderTask, removeMeshFromTask, type RenderTask } from "../frame-graph/render-task.js";
+import { addMeshToTask, createRenderTask, removeMeshFromTask, type RenderTask } from "../frame-graph/render-task.js";
 import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } from "../camera/camera.js";
 import { invertMat4ToRefOrIdentity } from "../math/invert-mat4-to-ref-or-identity.js";
 import { casterVersionSum, createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
@@ -55,8 +55,6 @@ export interface CsmTaskState extends ShadowTaskInternalState {
     _cameras: Camera[];
     /** @internal */
     _scene: SceneContext;
-    /** @internal */
-    _cameraVersion: number;
     /** @internal */
     _lastCasterVersion: number;
     /** @internal */
@@ -200,7 +198,7 @@ export function ensureCsmShadowTaskState(
                     const view = getNoColorView(m.material, views);
                     for (let c = 0; c < tasks.length; c++) {
                         if (c <= (maxCascade ?? c)) {
-                            tasks[c]!.addMesh(m, { material: view });
+                            addMeshToTask(tasks[c]!, m, { material: view });
                         }
                     }
                     snapshotShadowCasterMaterial(m.material, materials, gens);
@@ -210,6 +208,7 @@ export function ensureCsmShadowTaskState(
             // Force each cascade to re-resolve its newly-added pending casters + re-bucket its binding lists.
             for (const t of tasks) {
                 t._lastVersion = -1;
+                t._ob.length = 0;
             }
             existing._casterMeshes = casterMeshes;
             existing._renderableVersion = scene._renderableVersion;
@@ -235,8 +234,8 @@ export function ensureCsmShadowTaskState(
             _descriptor: {
                 size: { width: cfg._mapSize, height: cfg._mapSize },
                 dFormat: "depth32float",
-                _depthClearValue: 1,
-                _depthCompare: "less-equal",
+                depthClearValue: 1,
+                depthCompare: "less-equal",
                 samples: 1,
             },
             _colorTexture: null,
@@ -249,13 +248,17 @@ export function ensureCsmShadowTaskState(
             _ownsDepthTexture: false, // borrowed: the shared CSM depth array is owned by the generator
         };
         const camera = createShadowCamera(sg);
-        const task = createRenderTask({ name: `csm${i}`, rt, clr: true, cam: camera, _skipClusteredLights: true }, engine, scene);
+        // `autoMirror: false`: a shadow task's render list is its caster set and nothing else. With the default
+        // auto-mirror an EMPTY caster set makes the task copy every scene renderable at record() time, so the
+        // receivers — whose bind groups sample this very depth array — are drawn INTO it ("usage
+        // (TextureBinding|RenderAttachment) … in the same synchronization scope", an invalid frame every frame).
+        const task = createRenderTask({ name: `csm${i}`, rt, clr: true, cam: camera, autoMirror: false, _skipClusteredLights: true }, engine, scene);
         for (const mesh of casterMeshes) {
             const material = mesh.material;
             // Per-caster cascade cap: a capped caster renders only into layers 0..maxCascade (its far-layer
             // shadow is sub-texel anyway), saving the excluded layers' draws + pipeline switches.
             if (material && i <= (mesh._shadowMaxCascade ?? i)) {
-                task.addMesh(mesh, { material: getNoColorView(material, materialViews) });
+                addMeshToTask(task, mesh, { material: getNoColorView(material, materialViews) });
             }
         }
         tasks.push(task);
@@ -298,7 +301,6 @@ export function ensureCsmShadowTaskState(
         _tasks: tasks,
         _cameras: cameras,
         _scene: scene,
-        _cameraVersion: 0,
         _lastCasterVersion: -1,
         _lastLightVersion: -1,
         _lastCamVersion: -1,
@@ -323,7 +325,7 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
         return 0;
     }
     const casterVersion = casterVersionSum(casterMeshes);
-    const lightVersion = sg._light.worldMatrixVersion;
+    const lightVersion = sg._light._lightVersion;
     const camVersion = _cameraChangeKey(camera);
     // Effective aspect is part of the key: a viewport or surface resize changes the camera
     // frustum the cascades are fit to while every version above stays put.
@@ -351,13 +353,12 @@ export function renderCsmShadowMap(engine: EngineContext, sg: ShadowGenerator, s
         }
     }
 
-    state._cameraVersion++;
     for (let i = 0; i < cascades._transforms.length; i++) {
         const cam = state._cameras[i]!;
         cam.fov = 1;
         const clipBias = cfg._worldSpaceBias === null ? cfg._bias * 0.5 : csmWorldBiasClipOffset(cfg._worldSpaceBias, cascades._near[i]!, cascades._far[i]!);
         _biasViewProjection(cascades._transforms[i]!, clipBias);
-        updateShadowCameraBase(cam, state._cameraVersion, cascades._near[i]!, cascades._far[i]!, cascades._views[i]!, cascades._transforms[i]!);
+        updateShadowCameraBase(cam, cam.worldMatrixVersion + 1, cascades._near[i]!, cascades._far[i]!, cascades._views[i]!, cascades._transforms[i]!);
     }
 
     state._lastCasterVersion = casterVersion;
@@ -517,9 +518,11 @@ export function _computeCsmCascades(
     }
 
     // Light direction (normalized), avoiding a perfectly vertical degenerate case.
-    let dx = light.direction.x;
-    let dy = light.direction.y;
-    let dz = light.direction.z;
+    const lightWorld = light.worldMatrix;
+    const direction = light.direction;
+    let dx = lightWorld[0]! * direction.x + lightWorld[4]! * direction.y + lightWorld[8]! * direction.z;
+    let dy = lightWorld[1]! * direction.x + lightWorld[5]! * direction.y + lightWorld[9]! * direction.z;
+    let dz = lightWorld[2]! * direction.x + lightWorld[6]! * direction.y + lightWorld[10]! * direction.z;
     const dl = Math.hypot(dx, dy, dz) || 1;
     dx /= dl;
     dy /= dl;

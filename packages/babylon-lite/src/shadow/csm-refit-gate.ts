@@ -7,7 +7,7 @@
  *
  *  Deliberately free of GPU and engine types so consumers can unit-test the gate with
  *  plain objects. The GPU orchestration (task membership moves, texture copies, camera
- *  updates) lives in `csm-shadow-task-hooks.ts`, which drives this gate through the
+ *  updates) lives in `csm-shadow-cache.ts`, which drives this gate through the
  *  promote/demote callbacks.
  *
  *  Correctness invariant owned by the caller: cascade matrices, the receiver UBO and
@@ -58,6 +58,10 @@ export interface CsmRefitGate<M extends CsmRefitCaster> {
     markDynamic(caster: M): void;
     /** Current classification, for callers that build task membership from a carried gate. */
     isDynamic(caster: M): boolean;
+    /** @internal Whether the latest refit was caused by light drift alone. */
+    _lastRefitDriftOnly(): boolean;
+    /** @internal Whether the dynamic partition changed on the latest update. */
+    _lastDynamicChanged(): boolean;
     /** One walk over the synced casters: computes the static/dynamic version sums, promotes
      *  churning static casters (via `onPromote`, immediately), counts quiet frames, and decides
      *  refit/overlay. Pending demotions are applied (via `onDemote`) only inside a refit; they
@@ -109,6 +113,8 @@ export function createCsmRefitGate<M extends CsmRefitCaster>(options: CsmRefitGa
     let refitDirZ = 0;
     let lastRefitMs = 0;
     let framesSinceRefit = 0;
+    let lastDriftOnly = false;
+    let lastDynamicChanged = false;
 
     return {
         syncCasters(next: readonly M[]): void {
@@ -146,6 +152,12 @@ export function createCsmRefitGate<M extends CsmRefitCaster>(options: CsmRefitGa
         },
         isDynamic(caster: M): boolean {
             return slots.get(caster)?._dynamic ?? true;
+        },
+        _lastRefitDriftOnly(): boolean {
+            return lastDriftOnly;
+        },
+        _lastDynamicChanged(): boolean {
+            return lastDynamicChanged;
         },
         update(
             lightDirX: number,
@@ -216,7 +228,9 @@ export function createCsmRefitGate<M extends CsmRefitCaster>(options: CsmRefitGa
             // threshold so an oscillating caster costs at most one extra refit per quiet period.
             const demotionOverdue = pendingDemotions > 0 && framesSinceRefit >= demoteQuietFrames;
 
-            const refit = force || !hasRefit || casterSetChanged || promoted || staticSum !== lastStaticSum || cameraChanged || angleExceeded || intervalElapsed || demotionOverdue;
+            const membershipCause = force || !hasRefit || casterSetChanged || promoted || staticSum !== lastStaticSum || cameraChanged || demotionOverdue;
+            const refit = membershipCause || angleExceeded || intervalElapsed;
+            let demoted = 0;
 
             if (refit) {
                 // Demotions ride refits that happen anyway: moving a caster into the static
@@ -227,6 +241,7 @@ export function createCsmRefitGate<M extends CsmRefitCaster>(options: CsmRefitGa
                     if (slot._dynamic && slot._quiet >= demoteQuietFrames) {
                         slot._dynamic = false;
                         onDemote(m);
+                        demoted++;
                         // Keep the recorded sums consistent with the new partition, or the
                         // next frame would read the membership change as fresh churn and
                         // refit again.
@@ -243,10 +258,77 @@ export function createCsmRefitGate<M extends CsmRefitCaster>(options: CsmRefitGa
                 framesSinceRefit = 0;
             }
 
-            const renderDynamic = refit || dynamicChanged || dynamicSum !== lastDynamicSum;
+            lastDynamicChanged = dynamicChanged || dynamicSum !== lastDynamicSum;
+            const renderDynamic = refit || lastDynamicChanged;
+            // A demotion applied inside a drift refit moves a caster between the dynamic and static layers,
+            // which is a membership change for the static render: it disqualifies the spread as well.
+            lastDriftOnly = refit && !membershipCause && demoted === 0;
             lastStaticSum = staticSum;
             lastDynamicSum = dynamicSum;
             return { refit, renderDynamic };
+        },
+    };
+}
+
+/** @internal Which static cascades to re-render this frame when a refit is spread over several frames. */
+export interface CsmStaticRefitScheduler {
+    /** A refit decision landed. `spread` true keeps the per-frame budget (a drift-only refit);
+     *  false re-renders every cascade in the very next `take()` (any other refit cause). */
+    arm(spread: boolean): void;
+    /** Some cascade still waits for its static re-render. */
+    pending(): boolean;
+    /** The cascades to re-render now, in round-robin order so no cascade can starve when refits
+     *  arrive faster than the budget drains; each returned cascade leaves the pending set. */
+    take(): number[];
+    /** The largest number of frames a cascade can lag behind the refit that armed it: 0 when the
+     *  spread is disabled, ceil(cascades / budget) - 1 otherwise. */
+    maxLagFrames(): number;
+}
+
+/** @internal Create the scheduler for `cascadeCount` cascades and a per-frame budget of `cascadesPerFrame`
+ *  static re-renders. A budget of 0 (or one that covers every cascade) disables the spread: every
+ *  refit re-renders all cascades in its own frame, the historical behaviour. */
+export function createCsmStaticRefitScheduler(cascadeCount: number, cascadesPerFrame: number): CsmStaticRefitScheduler {
+    const count = Math.max(0, Math.floor(cascadeCount));
+    const budget = Number.isFinite(cascadesPerFrame) && cascadesPerFrame > 0 && cascadesPerFrame < count ? Math.floor(cascadesPerFrame) : 0;
+    const waiting: boolean[] = new Array<boolean>(count).fill(false);
+    const out: number[] = [];
+    let waitingCount = 0;
+    let immediate = false;
+    let cursor = 0;
+    return {
+        arm(spread: boolean): void {
+            waiting.fill(true);
+            waitingCount = count;
+            immediate = budget === 0 || !spread;
+        },
+        pending(): boolean {
+            return waitingCount > 0;
+        },
+        take(): number[] {
+            out.length = 0;
+            if (waitingCount === 0) {
+                return out;
+            }
+            const limit = immediate ? count : budget;
+            for (let step = 0; step < count && out.length < limit; step++) {
+                const cascade = (cursor + step) % count;
+                if (waiting[cascade]) {
+                    waiting[cascade] = false;
+                    waitingCount--;
+                    out.push(cascade);
+                }
+            }
+            if (out.length > 0) {
+                cursor = (out[out.length - 1]! + 1) % count;
+            }
+            if (waitingCount === 0) {
+                immediate = false;
+            }
+            return out;
+        },
+        maxLagFrames(): number {
+            return budget === 0 ? 0 : Math.ceil(count / budget) - 1;
         },
     };
 }

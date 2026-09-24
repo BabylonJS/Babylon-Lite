@@ -1,8 +1,9 @@
 import type { EngineContext } from "../../engine/engine.js";
-import { targetSignatureKey } from "../../engine/render-target.js";
+import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import type { Mesh } from "../../mesh/mesh.js";
 import type { ShaderMaterial } from "./shader-material.js";
 import type { ShaderPipelineBindings, ShaderPipelineCache } from "./shader-pipeline.js";
+import { _getShaderVbSupport } from "./shader-vb-support.js";
 
 interface ShaderModuleEntry {
     readonly id: number;
@@ -18,6 +19,7 @@ interface DeviceCache extends ShaderPipelineCache {
 
 interface CacheMaterial extends ShaderMaterial {
     _shaderPipelineCache?: ShaderPipelineCache;
+    _shaderModuleMemo?: readonly [ShaderMaterial, ShaderPipelineBindings, Map<string, readonly [ShaderModuleEntry, ShaderModuleEntry | null]>];
 }
 
 let _deviceCaches: WeakMap<GPUDevice, DeviceCache> | null = null;
@@ -78,6 +80,22 @@ function getDeviceCache(device: GPUDevice): DeviceCache {
             }
             return entry;
         },
+        _getModules(gpu, material, currentBindings, key, label, createCodes) {
+            const state = material as CacheMaterial;
+            let memo = state._shaderModuleMemo;
+            if (!memo || memo[0] !== material || memo[1] !== currentBindings) {
+                state._shaderModuleMemo = memo = [material, currentBindings, new Map()];
+            }
+            let resolved = memo[2].get(key);
+            if (!resolved) {
+                const [vertexCode, fragmentCode] = createCodes();
+                const vert = cache!.getModule(gpu, vertexCode, `${label}-vertex`);
+                const frag = fragmentCode === null ? null : cache!.getModule(gpu, fragmentCode, `${label}-fragment`);
+                resolved = [vert, frag];
+                memo[2].set(key, resolved);
+            }
+            return resolved;
+        },
         getPipelineKey(sig, variantKey, vertexModuleId, fragmentModuleId, vertexBuffers, material, stencilKey): string {
             return JSON.stringify([
                 targetSignatureKey(sig),
@@ -121,6 +139,7 @@ function refresh(cache: DeviceCache): void {
 function bindingsKey(material: ShaderMaterial): string {
     return JSON.stringify([
         material.attributes,
+        _getShaderVbSupport()?._layouts(material) ?? null,
         material.uniformDecls.map((decl) => [decl.name, decl.type]),
         material.samplerDecls.map((decl) => [decl.name, decl.sampleType ?? "float", decl.viewDimension ?? "2d", decl.comparison === true]),
         material.storageBufferDecls.map((decl) => [decl.name, decl.type]),

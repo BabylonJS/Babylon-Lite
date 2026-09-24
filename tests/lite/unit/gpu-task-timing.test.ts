@@ -170,7 +170,7 @@ describe("render-task GPU timing public state", () => {
             _gpuTimerResolve: resolveGpuTimers,
             _gpuTaskTimerResolve: taskResolve,
         } as unknown as EngineContext;
-        Object.assign(engine, { surfaces: [engine], _surfaces: [engine] });
+        Object.assign(engine, { engine, surfaces: [engine], _surfaces: [engine] });
 
         renderFrame(engine, 16);
 
@@ -213,9 +213,7 @@ describe("GPU task timing installer", () => {
 
         const fg = createFrameGraph(engine);
         const originalExecute = fg.execute;
-        const disabledTask = makeTask(engine, "disabled-pass", 7, log, false);
-        disabledTask.executionEnabled = false;
-        fg._tasks.push(makeTask(engine, "task-execute", 2, log, true), disabledTask, makeTask(engine, "pass-execute", 3, log, false));
+        fg._tasks.push(makeTask(engine, "task-execute", 2, log, true), makeTask(engine, "pass-execute", 3, log, false));
         const surface = { _renderingContexts: [{ frameGraph: fg }] };
         Object.assign(engine, { surfaces: [surface], _surfaces: [surface] });
 
@@ -262,6 +260,12 @@ describe("GPU task timing installer", () => {
         const restore = installGpuTaskTimer(timer, engine, (snapshot) => snapshots.push(snapshot));
 
         expect(fg.execute()).toBe(5);
+        const canvasEncoder = engine._currentEncoder;
+        engine._gpuTaskTimerResolve?.({} as GPUCommandEncoder);
+        await Promise.resolve();
+        expect(snapshots).toEqual([]);
+
+        engine._gpuTaskTimerResolve?.(canvasEncoder);
         engine._gpuTimerResolve?.();
         await Promise.resolve();
         await Promise.resolve();

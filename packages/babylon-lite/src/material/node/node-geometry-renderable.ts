@@ -23,19 +23,17 @@ import { F32 } from "../../engine/typed-arrays.js";
 import { BU, SS } from "../../engine/gpu-flags.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
-import { targetSignatureKey } from "../../engine/render-target.js";
+import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import type { Mesh } from "../../mesh/mesh.js";
-import type { MeshGroupBuilder, Renderable } from "../../render/renderable.js";
-import { writeMeshLightSelection } from "../../render/lights-ubo.js";
-import { MAX_LIGHTS } from "../../light/types.js";
+import type { MeshGroupBuilder, MeshRebuildResources, Renderable } from "../../render/renderable.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 import type { SceneContext } from "../../scene/scene-core.js";
 import type { Material } from "../material.js";
-import { GeometryTextureType } from "../../frame-graph/geometry-types.js";
-import type { NodeExpr, NodeBuildState, NodeGraph } from "./node-types.js";
+import { GeometryTextureType, _geometryOutputExtension } from "../../frame-graph/geometry-types.js";
+import type { NodeExpr, NodeBuildState, NodeGraph, NodeMeshFeatureWriter } from "./node-types.js";
 import { emitGraph } from "./node-emitter.js";
 import { findBlockByClassName } from "./node-parser.js";
-import { compileNodePipeline, type NodeCompileResult, type MrtOutputOpts } from "./node-pipeline.js";
+import { _nodeAlphaModeToBlend, compileNodePipeline, type NodeCompileResult, type MrtOutputOpts } from "./node-pipeline.js";
 import type { NodeMaterial } from "./node-material.js";
 import { sanitize, bjsTypeToNodeType, floatCount, extractDefault } from "./node-material.js";
 import { getAttrBuffer, writeAttributeFlags } from "./node-renderable.js";
@@ -57,9 +55,13 @@ export function getNodeGeometryGroupBuilder(): MeshGroupBuilder {
         throw new Error("node-geometry view does not support scene group building");
     }) as MeshGroupBuilder;
     builder._materialFamily = "node";
-    builder._rebuildSingle = (scene: SceneContext, mesh: Mesh, materialOverride?: Material): Renderable => {
+    builder._sceneIndependentRebuild = true;
+    builder._rebuildSingle = (scene: SceneContext, mesh: Mesh, materialOverride?: Material, resources?: MeshRebuildResources): Renderable => {
         const view = (materialOverride ?? mesh.material) as NodeGeometryMaterialView;
-        return buildNodeGeometryRenderable(scene, mesh, view);
+        if (!resources) {
+            throw new Error("node-geometry rebuild requires task-owned resources");
+        }
+        return buildNodeGeometryRenderable(scene, mesh, view, resources);
     };
     return (_nodeGeometryGroupBuilder = builder);
 }
@@ -81,9 +83,24 @@ interface NodeGeometryViewResources {
     /** Shared node UBO (one per material, format-independent). Allocated on first compile. */
     _nodeUBO: GPUBuffer | null;
     _nodeUBOReady: boolean;
+    /** Renderable/task entries currently retaining this view cache. */
+    _owners: number;
 }
 
 const ZERO = (wg: string): string => wgsl`vec4<f32>(0.0, 0.0, 0.0, ${wg})`;
+
+function geometryColorTarget(format: GPUTextureFormat, blend: GPUBlendState | undefined, device: GPUDevice): GPUColorTargetState {
+    if (!blend) {
+        return { format };
+    }
+    if (format.endsWith("uint") || format.endsWith("sint")) {
+        throw new Error(`Transparent geometry output cannot blend integer format "${format}".`);
+    }
+    if (format.endsWith("32float") && !device.features.has("float32-blendable")) {
+        throw new Error(`Transparent geometry output format "${format}" requires the float32-blendable WebGPU feature or a blendable format override.`);
+    }
+    return { format, blend };
+}
 
 /** Build the per-attachment WGSL write for one geometry texture type, reading a
  *  connected graph input when present and falling back to the engine default. */
@@ -127,6 +144,7 @@ function geomWrite(type: GeometryTextureType, inputs: Map<GeometryTextureType, N
             // Stored as vec3 — node materials do not compute velocity, default 0.
             return v ? wgsl`vec4<f32>(${v.expr}, ${wg})` : ZERO(wg);
     }
+    return wgsl``;
 }
 
 /** Re-emit the graph from the GeometryTextureOutputBlock terminal and build the
@@ -157,13 +175,18 @@ function ensureGeometryResources(view: NodeGeometryMaterialView): NodeGeometryVi
     if (state.usesMorphTargets || state.usesEnv || state.shadowLights.length > 0) {
         throw new Error("NodeMaterial geometry view: morph / env / shadow inputs are not supported in the geometry pass");
     }
+    if (state.usesLightsUbo && !state._meshFeature) {
+        state._meshFeature = source._state._meshFeature;
+    }
 
     const inputs = state._geometryInputs ?? new Map<GeometryTextureType, NodeExpr>();
     const attachments = view._geometryAttachments;
+    const extension = _geometryOutputExtension && attachments.includes(_geometryOutputExtension.type) ? _geometryOutputExtension : null;
+    extension?.validateNode(source);
     const gpRef = { needsGp: false };
-    const structLines = attachments.map((_, i) => wgsl`@location(${i}) f${i}: vec4<f32>,`);
+    const structLines = attachments.map((type, i) => (type === extension?.type ? extension.field(i) : wgsl`@location(${i}) f${i}: vec4<f32>,`));
     const struct = wgsl`struct FragmentOutput {\n${structLines.join("\n")}\n};`;
-    const writeLines = attachments.map((type, i) => wgsl`out.f${i} = ${geomWrite(type, inputs, gpRef)};`);
+    const writeLines = attachments.map((type, i) => (type === extension?.type ? extension.nodeWrite(i) : wgsl`out.f${i} = ${geomWrite(type, inputs, gpRef)};`));
     // Pre-indent the full return body here (one level + trailing newline) so the
     // node pipeline just splices the string — no geometry WGSL assembly in the
     // always-loaded compileNodePipeline.
@@ -180,6 +203,7 @@ function ensureGeometryResources(view: NodeGeometryMaterialView): NodeGeometryVi
         _compileBySig: new Map(),
         _nodeUBO: null,
         _nodeUBOReady: false,
+        _owners: 0,
     };
     Object.defineProperty(view, "_geometry", { value: res, enumerable: false, configurable: true });
     return res;
@@ -198,6 +222,9 @@ function ensureGeometryCompile(view: NodeGeometryMaterialView, res: NodeGeometry
         throw new Error("node-geometry: render target has no color attachments");
     }
     const cullMode: GPUCullMode = source._graph.backFaceCulling ? (view._reverseCulling ? "front" : "back") : "none";
+    // Geometry attachments store data, so transparent Node materials use opacity/replacement blending even when their forward color pass is additive.
+    const alphaMode = source._needsAlphaBlending ? 2 : 0;
+    const blend = _nodeAlphaModeToBlend(alphaMode);
     // All geometry-specific WGSL object-literals + the MRT pipeline descriptor
     // live here (lazy module). compileNodePipeline only splices strings + calls
     // these callbacks, so non-geometry node scenes bundle none of it.
@@ -205,7 +232,7 @@ function ensureGeometryCompile(view: NodeGeometryMaterialView, res: NodeGeometry
         _struct: res._struct,
         _fsReturnType: " -> FragmentOutput",
         _fsReturn: res._fsReturn,
-        _cacheKey: `3|mrt:${colorFormats.join()}:${cullMode}`,
+        _cacheKey: `3|mrt:${colorFormats.join()}:${cullMode}:${alphaMode}`,
         _needsGpUbo: res._needsGpUbo,
         _buildGeomUbo: (binding) => ({
             _wgsl: wgsl`struct NmeGeomParams { previousViewProjection: mat4x4<f32>, cameraNearFar: vec4<f32> };\n@group(1) @binding(${binding}) var<uniform> nmeGeom: NmeGeomParams;`,
@@ -213,16 +240,15 @@ function ensureGeometryCompile(view: NodeGeometryMaterialView, res: NodeGeometry
         }),
         // Geometry MRT renders upright into offscreen targets (the task packs an
         // un-flipped scene UBO), matching the Standard/PBR geometry renderables.
-        _buildPipeline: (device, a) =>
-            device.createRenderPipeline({
-                label: "node-material-geometry",
-                layout: device.createPipelineLayout({ bindGroupLayouts: [a._sceneBGL, a._meshBGL] }),
-                vertex: { module: a._shaderModule, entryPoint: "vs_main", buffers: [...a._vertexBuffers] },
-                fragment: { module: a._shaderModule, entryPoint: "fs_main", targets: colorFormats.map((f) => ({ format: f })) },
-                depthStencil: { format: a._depthFormat, depthCompare: a._depthCompare, depthWriteEnabled: true },
-                multisample: { count: a._msaaSamples },
-                primitive: { topology: "triangle-list", cullMode, frontFace: "ccw" },
-            }),
+        _buildPipelineDescriptor: (device, a) => ({
+            label: "node-material-geometry",
+            layout: device.createPipelineLayout({ bindGroupLayouts: [a._sceneBGL, a._meshBGL] }),
+            vertex: { module: a._shaderModule, entryPoint: "vs_main", buffers: [...a._vertexBuffers] },
+            fragment: { module: a._shaderModule, entryPoint: "fs_main", targets: colorFormats.map((format) => geometryColorTarget(format, blend, device)) },
+            depthStencil: { format: a._depthFormat, depthCompare: a._depthCompare, depthWriteEnabled: !source._needsAlphaBlending },
+            multisample: { count: a._msaaSamples },
+            primitive: { topology: "triangle-list", cullMode, frontFace: "ccw" },
+        }),
     };
     const compile = compileNodePipeline(res._geomState, res._vertexWgsl, res._fragmentWgsl, {
         _engine: engine,
@@ -231,7 +257,7 @@ function ensureGeometryCompile(view: NodeGeometryMaterialView, res: NodeGeometry
         _depthCompare: sig._depthCompare ?? "greater-equal",
         _msaaSamples: sig._sampleCount,
         _backFaceCulling: source._graph.backFaceCulling,
-        _alphaMode: 0,
+        _alphaMode: alphaMode,
         _mrtOutput: mrtOutput,
     });
     res._compileBySig.set(key, compile);
@@ -273,11 +299,12 @@ function ensureGeometryNodeUBO(res: NodeGeometryViewResources, compile: NodeComp
         return res._nodeUBO;
     }
     res._nodeUBOReady = true;
-    if (compile._nodeUboBinding === null || compile._nodeUboSize === 0) {
+    const spec = compile._nodeUboSpec;
+    if (!spec || spec._totalBytes === 0) {
         return null;
     }
-    const scratch = new F32(compile._nodeUboSize / 4);
-    for (const [name, offsetBytes] of compile._nodeUboOffsets) {
+    const scratch = new F32(spec._totalBytes / 4);
+    for (const [name, offsetBytes] of spec._offsets) {
         const live = source._uniformValues.get(name);
         if (live) {
             scratch.set(live._values, offsetBytes >> 2);
@@ -288,7 +315,7 @@ function ensureGeometryNodeUBO(res: NodeGeometryViewResources, compile: NodeComp
             scratch.set(def, offsetBytes >> 2);
         }
     }
-    const ubo = engine._device.createBuffer({ label: "node-geom-ubo", size: compile._nodeUboSize, usage: BU.UNIFORM | BU.COPY_DST });
+    const ubo = engine._device.createBuffer({ label: "node-geom-ubo", size: spec._totalBytes, usage: BU.UNIFORM | BU.COPY_DST });
     engine._device.queue.writeBuffer(ubo, 0, scratch);
     res._nodeUBO = ubo;
     return ubo;
@@ -323,16 +350,21 @@ function buildGeometryBindGroup(
 }
 
 /** Build a {@link Renderable} for one mesh drawn through a NodeMaterial geometry view. */
-export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, view: NodeGeometryMaterialView): Renderable {
+export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, view: NodeGeometryMaterialView, resources: MeshRebuildResources): Renderable {
     const engine = scene.surface.engine;
     const device = engine._device;
     const source = view.source as NodeMaterial;
     const res = ensureGeometryResources(view);
+    retainGeometryResources(view, res, resources);
 
-    // Per-mesh UBO: world (64B) + receivesShadow (vec4) + light count/indices.
-    const meshUboBytes = (96 + 16 * Math.ceil(MAX_LIGHTS / 4) + 15) & ~15;
-    const meshUBO = device.createBuffer({ label: "node-geom-mesh-ubo", size: meshUboBytes, usage: BU.UNIFORM | BU.COPY_DST });
-    const meshScratch = new F32(meshUboBytes / 4);
+    const extension = _geometryOutputExtension && view._geometryAttachments.includes(_geometryOutputExtension.type) ? _geometryOutputExtension : null;
+    let meshUBO: GPUBuffer | null = null;
+    let meshScratch: Float32Array<ArrayBuffer> | null = null;
+    let writeMeshFeature: NodeMeshFeatureWriter | undefined;
+    const _disposePerMesh = (): void => {
+        meshUBO?.destroy();
+    };
+    resources._lifetimeDisposers.push(_disposePerMesh);
     // Floating-origin: pack world against the EFFECTIVE task camera (a `config.camera`
     // override, else the scene camera) so Node meshes share the same origin as the
     // task view/projection + positional lights. `view._camera` is a stable ref whose
@@ -342,54 +374,45 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
 
     let needsAttrFlags = false;
     const writeMesh = (): void => {
-        packMeshWorld(meshScratch, mesh.worldMatrix, 0, 0);
-        meshScratch[16] = mesh.receiveShadows ? 1 : 0;
+        packMeshWorld(meshScratch!, mesh.worldMatrix, 0, 0);
+        meshScratch![16] = extension ? extension.value(mesh) : mesh.receiveShadows ? 1 : 0;
         if (needsAttrFlags) {
-            writeAttributeFlags(mesh, meshScratch);
+            writeAttributeFlags(mesh, meshScratch!);
         }
-        writeMeshLightSelection(mesh, scene.lights, meshScratch.subarray(4));
-        device.queue.writeBuffer(meshUBO, 0, meshScratch as Float32Array<ArrayBuffer>);
+        writeMeshFeature?.(mesh, scene.lights, meshScratch!);
+        device.queue.writeBuffer(meshUBO!, 0, meshScratch!);
     };
 
     let bindGroup: GPUBindGroup | null = null;
     let lastWorldVersion = -1;
     let lastLightsCount = -1;
+    let extensionValue = -1;
 
     const sortCenter: [number, number, number] = [mesh.worldMatrix[12]!, mesh.worldMatrix[13]!, mesh.worldMatrix[14]!];
-
-    // Per-mesh geometry mesh UBO is an AUX/override packet owned by the geometry TASK,
-    // not the mesh's main material. Registering it on `_meshAuxDisposables` (NOT
-    // `_meshDisposables`) means a MAIN-material swap cannot destroy this live buffer
-    // mid-flight; a real `removeFromScene` still frees it, and the owning task retires
-    // the SAME closure on re-record/dispose. Idempotent WITHOUT a guard flag —
-    // `GPUBuffer.destroy()` is a no-op when already destroyed — but MUST NOT self-remove
-    // from the aux array (the scene drains iterate it live). The shared node UBO is
-    // per-VIEW and freed via `disposeNodeGeometryViewResources`.
-    const _disposePerMesh = (): void => {
-        meshUBO.destroy();
-    };
-    const auxList = scene._meshAuxDisposables.get(mesh) ?? [];
-    auxList.push(_disposePerMesh);
-    scene._meshAuxDisposables.set(mesh, auxList);
-
+    const isTransparent = source._needsAlphaBlending;
     const r: Renderable = {
-        order: mesh.renderOrder ?? 100,
-        isTransparent: false,
+        order: mesh.renderOrder ?? (isTransparent ? 200 : 100),
+        isTransparent,
         mesh,
         bind(eng: EngineContext, sig: RenderTargetSignature) {
             const compile = ensureGeometryCompile(view, res, eng as EngineContext, sig);
             needsAttrFlags = compile._usesMeshAttributeFlags;
+            writeMeshFeature = compile._writeMeshFeature;
+            meshScratch ??= new F32(compile._meshUboFloats);
+            meshUBO ??= device.createBuffer({ label: "node-geom-mesh-ubo", size: meshScratch.byteLength, usage: BU.UNIFORM | BU.COPY_DST });
             const nodeUBO = ensureGeometryNodeUBO(res, compile, eng as EngineContext, source);
             bindGroup = buildGeometryBindGroup(eng as EngineContext, source, compile, meshUBO, nodeUBO, view);
 
             const _baseUpdate = (): void => {
-                if (mesh.worldMatrixVersion !== lastWorldVersion || scene.lights.length !== lastLightsCount) {
+                const nextExtensionValue = extension ? extension.value(mesh) : extensionValue;
+                if (mesh.worldMatrixVersion !== lastWorldVersion || scene.lights.length !== lastLightsCount || nextExtensionValue !== extensionValue) {
                     writeMesh();
                     sortCenter[0] = mesh.worldMatrix[12]!;
                     sortCenter[1] = mesh.worldMatrix[13]!;
                     sortCenter[2] = mesh.worldMatrix[14]!;
                     lastWorldVersion = mesh.worldMatrixVersion;
                     lastLightsCount = scene.lights.length;
+                    extensionValue = nextExtensionValue;
                 }
             };
             // Floating origin bakes the effective-camera offset into the world UBO, so
@@ -410,31 +433,36 @@ export function buildNodeGeometryRenderable(scene: SceneContext, mesh: Mesh, vie
                 }
                 pass.setIndexBuffer(g.indexBuffer, g.indexFormat);
                 pass.setBindGroup(1, bindGroup!);
-                pass.drawIndexed(g.indexCount);
+                pass.drawIndexed(g.indexCount, 1, 0, g._baseVertex);
                 return 1;
             };
-            return { renderable: r, pipeline: compile._pipeline, update, draw };
+            return { renderable: r, pipeline: compile._pipelineForMesh(mesh._gpu), update, draw };
         },
     };
     r._worldCenter = sortCenter;
-    r._geometryDispose = _disposePerMesh;
     return r;
 }
 
-/** @internal Retire a Node geometry view's shared per-view resources cached on
- *  `view._geometry`: the shared node UBO (a GPUBuffer that must be explicitly
- *  destroyed) plus the per-signature compile cache (pipelines/BGLs reclaimed by GC).
- *  Called by the owning geometry task when it discards the view on re-record/dispose.
- *  Idempotent — the cache reference is dropped and the UBO nulled so a double call
- *  (task retirement) is a no-op. */
-export function disposeNodeGeometryViewResources(view: NodeGeometryMaterialView): void {
-    const res = view._geometry as NodeGeometryViewResources | undefined;
-    if (!res) {
-        return;
-    }
+function retainGeometryResources(view: NodeGeometryMaterialView, res: NodeGeometryViewResources, resources: MeshRebuildResources): void {
+    res._owners++;
+    let retained = true;
+    resources._lifetimeDisposers.push(() => {
+        if (!retained) {
+            return;
+        }
+        retained = false;
+        if (--res._owners === 0) {
+            disposeGeometryResources(view, res);
+        }
+    });
+}
+
+function disposeGeometryResources(view: NodeGeometryMaterialView, res: NodeGeometryViewResources): void {
     res._nodeUBO?.destroy();
     res._nodeUBO = null;
     res._nodeUBOReady = false;
     res._compileBySig.clear();
-    Object.defineProperty(view, "_geometry", { value: undefined, enumerable: false, configurable: true });
+    if (view._geometry === res) {
+        Object.defineProperty(view, "_geometry", { value: undefined, enumerable: false, configurable: true });
+    }
 }

@@ -91,6 +91,11 @@ export abstract class AbstractEngine {
     protected _initialized = false;
     private _startupComplete = false;
     private _startPromise: Promise<void> | null = null;
+
+    /** @internal Whether scene registration and the first engine start have completed. */
+    public get _hasStarted(): boolean {
+        return this._startupComplete;
+    }
     /** @internal Active `requestAnimationFrame` id for the scene-less loop, if any. */
     protected _rafId: number | null = null;
 
@@ -412,6 +417,17 @@ export abstract class AbstractEngine {
     }
 
     /**
+     * Babylon.js `engine.isOcclusionQueryVisible(query)` — Lite does not expose
+     * occlusion-query allocation, render-pass encoding, or asynchronous result state.
+     */
+    public isOcclusionQueryVisible(_query: unknown): never {
+        return unsupported(
+            "AbstractEngine.isOcclusionQueryVisible",
+            "Lite has no occlusion-query subsystem; supporting this requires query allocation, render-pass encoding, and asynchronous result-lifetime policy."
+        );
+    }
+
+    /**
      * Babylon.js `engine.updateTextureArrayLayerFromImageSource(texture, source, layer, invertY, premultiplyAlpha)`
      * — the engine extension that uploads a decoded image source into one layer of a 2D array
      * texture. Forwards to Babylon Lite's `uploadImageToArrayLayer`.
@@ -447,6 +463,7 @@ export abstract class AbstractEngine {
             scene._flushPendingAdds();
             scene._buildMorphTargets();
             scene._buildClusteredContainers();
+            await scene._enableMaterialPlugins();
             await scene._loadPendingEnvironment();
             // Babylon.js reverses triangle winding for negative-determinant (mirrored) world
             // transforms so a `scaling.x = -1` mesh renders upright rather than inside-out. Enable
@@ -464,6 +481,9 @@ export abstract class AbstractEngine {
         // layers are overlays and can join on a subsequent frame; awaiting them
         // here would deadlock any registration path that depends on the first frame.
         await startEngine(this._lite);
+        do {
+            await Promise.all(this._scenes.map((scene) => scene._reconcilePendingMaterialPlugins()));
+        } while (this._scenes.some((scene) => scene._hasPendingMaterialPluginReconciliations));
         this._startupComplete = true;
         // Late work now runs after the main render loop has started.
         // Late work is explicitly allowed to fail without taking startup with it: a rejection here

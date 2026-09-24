@@ -3,16 +3,13 @@
 
 import { BU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
-import { createMappedBuffer } from "../resource/gpu-buffers.js";
+import { createMappedBuffer } from "../resource/mapped-buffer.js";
 import type { Material } from "../material/material.js";
 import type { SkeletonData, MorphTargetData, VatData } from "../animation/types.js";
-import { ObservableVec3 } from "../math/observable-vec3.js";
-import { ObservableQuat } from "../math/observable-quat.js";
 import type { ThinInstanceData } from "./thin-instance.js";
 import type { WorldAabbAcc } from "./mesh-world-bounds.js";
-import { createWorldMatrixState, attachWorldMatrixState, composeTrsLocalMatrix } from "../scene/world-matrix-state.js";
 import type { SceneNode } from "../scene/scene-node.js";
-import { createEulerProxy } from "../scene/scene-node.js";
+import { initSceneNodeTransform } from "../scene/scene-node.js";
 import { eulerXYZToQuatTuple } from "../math/quat-euler.js";
 
 // ─── Mesh GPU Geometry ───────────────────────────────────────────────
@@ -30,23 +27,14 @@ export interface MeshVbAttr {
     /** @internal Byte offset within the shared buffer, encoded in the pipeline vertex
      *  layout `attributes[].offset` (the buffer is bound at offset 0). */
     readonly _offset: number;
+    /** @internal Accessor vertex count when this attribute comes from an interleaved bufferView. */
+    readonly _count?: number;
 }
 
-/** Optional per-attribute interleave layout. Only set for meshes that source one
- *  or more attributes from a strided (interleaved) glTF bufferView. */
+/** Null-prototype packing dictionary keyed by material attribute name. */
 export interface MeshVbLayout {
     /** @internal */
-    readonly _p?: MeshVbAttr;
-    /** @internal */
-    readonly _n?: MeshVbAttr;
-    /** @internal */
-    readonly _t?: MeshVbAttr;
-    /** @internal */
-    readonly _u?: MeshVbAttr;
-    /** @internal */
-    readonly _u2?: MeshVbAttr;
-    /** @internal */
-    readonly _c?: MeshVbAttr;
+    readonly [attributeName: string]: MeshVbAttr | undefined;
 }
 
 /** Opaque GPU geometry handle (user never touches these). */
@@ -57,6 +45,8 @@ export interface MeshGPU {
     readonly uvBuffer: GPUBuffer;
     readonly uv2Buffer?: GPUBuffer | null;
     readonly colorBuffer?: GPUBuffer | null;
+    /** @internal Mesh-owned neutral color buffer installed by opt-in material helpers. */
+    _shaderColorFallback?: GPUBuffer;
     readonly hasUv?: boolean;
     readonly hasUv2?: boolean;
     readonly hasTangent?: boolean;
@@ -64,6 +54,21 @@ export interface MeshGPU {
     readonly indexBuffer: GPUBuffer;
     readonly indexCount: number;
     readonly indexFormat: GPUIndexFormat;
+    /** @internal First vertex of this mesh within a shared vertex allocation, applied as the
+     *  draw call's `baseVertex`. Lets many meshes take slots in one GPU-resident slab without
+     *  a non-zero `setVertexBuffer` bind offset. Undefined/0 → canonical behaviour. */
+    readonly _baseVertex?: number;
+    /** @internal Logical vertex count in a GPU-produced mesh's slot. Does not include
+     *  `_baseVertex` or unused capacity elsewhere in its shared allocation. */
+    readonly _vertexCount?: number;
+    /** @internal When false, disposing the mesh does NOT destroy its vertex-side buffers —
+     *  they are BORROWED from a longer-lived allocation (a GPU-resident slab shared by many
+     *  meshes) and must outlive this mesh. Without it, retiring one slot destroys the slab
+     *  every other slot is still drawing from. Defaults to owning. */
+    readonly _ownsVertexBuffers?: boolean;
+    /** @internal When false, disposing the mesh does NOT destroy `indexBuffer` — the topology
+     *  is shared across meshes and owned by the caller. Defaults to owning. */
+    readonly _ownsIndexBuffer?: boolean;
     /** @internal Reserved vertex capacity for grow-only procedural geometry. */
     _vertexCapacity?: number;
     /** @internal Reserved index capacity for grow-only procedural geometry. */
@@ -154,6 +159,11 @@ export interface Mesh extends SceneNode {
     /** When `false`, the GPU picker skips this mesh.  Defaults to `true`
      *  (undefined behaves as pickable).  Mirrors BJS `AbstractMesh.isPickable`. */
     pickable?: boolean;
+    /**
+     * Packed mesh-blending tag. Undefined is equivalent to zero/disabled.
+     * Bits 0..5 are the group and bits 6..7 are the radius class.
+     */
+    meshBlendingTag?: number;
     // name, children, position, rotation, rotationQuaternion, scaling,
     // parent, worldMatrix, worldMatrixVersion — all inherited from SceneNode
 
@@ -207,47 +217,9 @@ export interface Mesh extends SceneNode {
 /** Wire ObservableVec3/ObservableQuat TRS and children onto a partially-built mesh object.
  *  Used by all mesh creation paths (factories, loaders). */
 export function initMeshTransform(partialMesh: Partial<Mesh> & { _flatNormal?: boolean }, px = 0, py = 0, pz = 0, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1): Mesh {
-    const wm = createWorldMatrixState(() => composeTrsLocalMatrix(mesh.position, mesh.rotationQuaternion, mesh.scaling));
-    const onWmDirty = () => wm.markLocalDirty();
-
     const [iqx, iqy, iqz, iqw] = eulerXYZToQuatTuple(rx, ry, rz);
-    const rq = new ObservableQuat(iqx, iqy, iqz, iqw, onWmDirty);
-    const rotationQuaternion = rq;
-    const rotation = createEulerProxy(rq);
-    const position = new ObservableVec3(px, py, pz, onWmDirty);
-    const scaling = new ObservableVec3(sx, sy, sz, onWmDirty);
-
-    const mesh = { ...partialMesh, position, rotationQuaternion, rotation, scaling } as Mesh;
-
-    if (!(mesh as unknown as Record<string, unknown>).children) {
-        (mesh as unknown as Record<string, unknown>).children = [];
-    }
-
-    Object.defineProperty(mesh, "parent", {
-        get() {
-            return wm.parent;
-        },
-        set(v) {
-            wm.parent = v;
-        },
-        configurable: true,
-        enumerable: true,
-    });
-    Object.defineProperty(mesh, "worldMatrix", {
-        get() {
-            return wm.getWorldMatrix();
-        },
-        configurable: true,
-        enumerable: false,
-    });
-    Object.defineProperty(mesh, "worldMatrixVersion", {
-        get() {
-            return wm.getWorldMatrixVersion();
-        },
-        configurable: true,
-        enumerable: false,
-    });
-    attachWorldMatrixState(mesh, wm);
+    const mesh = initSceneNodeTransform({ children: [], ...partialMesh }, px, py, pz, iqx, iqy, iqz, iqw, sx, sy, sz);
+    Object.defineProperties(mesh, { worldMatrix: { enumerable: false }, worldMatrixVersion: { enumerable: false } });
     return mesh;
 }
 

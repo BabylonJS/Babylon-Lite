@@ -6,16 +6,17 @@
  */
 
 import { F32 } from "../engine/typed-arrays.js";
+import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { TU, SS } from "../engine/gpu-flags.js";
 import type { Camera } from "../camera/camera.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { DirectionalLight } from "../light/directional-light.js";
 import type { Material, MaterialView } from "../material/material.js";
 import type { Mesh } from "../mesh/mesh.js";
-import { createUniformBuffer } from "../resource/gpu-buffers.js";
+import { createUniformBuffer } from "../resource/uniform-buffer.js";
 import { getBilinearSampler } from "../resource/samplers.js";
 import type { SceneContext } from "../scene/scene-core.js";
-import { createRenderTask, type RenderTask } from "../frame-graph/render-task.js";
+import { addMeshToTask, createRenderTask, type RenderTask } from "../frame-graph/render-task.js";
 import {
     casterVersionSum,
     computeDirectionalLightMatrix,
@@ -69,6 +70,10 @@ export interface EsmShadowTaskResources {
     _blurScale: number;
 }
 
+interface EsmShadowGenerator extends ShadowGenerator {
+    _esmResources?: EsmShadowTaskResources;
+}
+
 /** Configuration for a directional-light ESM shadow generator: map size, depth scale, blur kernel, darkness, and ortho projection bounds. */
 export interface EsmDirectionalShadowGeneratorConfig {
     mapSize?: number;
@@ -90,7 +95,6 @@ export interface EsmDirectionalShadowGeneratorConfig {
 interface EsmTaskState extends ShadowTaskInternalState {
     _task: RenderTask;
     _camera: Camera;
-    _cameraVersion: number;
     _lastCasterVersion: number;
     _lastLightVersion: number;
     /** @internal Floating-origin offset version (active camera worldMatrixVersion) at last shadow-map render; -1 when never rendered. */
@@ -104,15 +108,9 @@ type StandardEsmFactory = typeof import("../material/standard/esm-shadow-view.js
 type PbrEsmFactory = typeof import("../material/pbr/esm-shadow-view.js").createPbrEsmShadowMaterialView;
 type NodeEsmFactory = typeof import("../material/node/esm-shadow-view.js").createNodeEsmShadowMaterialView;
 
-let esmShadowTaskResources: WeakMap<ShadowGenerator, EsmShadowTaskResources> | null = null;
 let createStandardEsmShadowMaterialView: StandardEsmFactory;
 let createPbrEsmShadowMaterialView: PbrEsmFactory;
 let createNodeEsmShadowMaterialView: NodeEsmFactory;
-
-function getEsmShadowTaskResourceMap(): WeakMap<ShadowGenerator, EsmShadowTaskResources> {
-    esmShadowTaskResources ??= new WeakMap<ShadowGenerator, EsmShadowTaskResources>();
-    return esmShadowTaskResources;
-}
 
 /**
  * @internal
@@ -124,12 +122,12 @@ function getEsmShadowTaskResourceMap(): WeakMap<ShadowGenerator, EsmShadowTaskRe
  * builds only. Same hazard previously hit `_runDeviceLostRecovery`; do not re-add the underscore.
  */
 export function setEsmShadowTaskResources(sg: ShadowGenerator, resources: EsmShadowTaskResources): void {
-    getEsmShadowTaskResourceMap().set(sg, resources);
+    (sg as EsmShadowGenerator)._esmResources = resources;
 }
 
 /** @internal See {@link setEsmShadowTaskResources} for why this is not `_`-prefixed. */
 export function getEsmShadowTaskResources(sg: ShadowGenerator): EsmShadowTaskResources | null {
-    return esmShadowTaskResources?.get(sg) ?? null;
+    return (sg as EsmShadowGenerator)._esmResources ?? null;
 }
 
 async function preloadEsmShadowTaskState(casterMeshes: readonly Mesh[]): Promise<void> {
@@ -241,7 +239,8 @@ function createShadowBlurFragmentWGSL(blurKernel: number): string {
     return wgsl`struct BlurParams{delta:vec2<f32>,_pad:vec2<f32>,};@group(0) @binding(0) var<uniform> params:BlurParams;@group(0) @binding(1) var srcTex:texture_2d<f32>;@group(0) @binding(2) var srcSampler:sampler;const OFFSETS=array<f32,${count}>(${offsets.map(wgslFloat).join(",")});const WEIGHTS=array<f32,${count}>(${weights.map(wgslFloat).join(",")});@fragment fn main(@location(0) sampleCenter:vec2<f32>)->@location(0) vec4<f32>{var blend=vec4<f32>(0.0);for(var i=0u;i<${count}u;i=i+1u){blend+=textureSample(srcTex,srcSampler,sampleCenter+params.delta*OFFSETS[i])*WEIGHTS[i];}return blend;}`;
 }
 
-function ensureEsmShadowTaskState(
+/** @internal Exported for the shadow-task lifetime tests; reached at runtime through `sg._ensureShadowTaskState`. */
+export function ensureEsmShadowTaskState(
     engine: EngineContext,
     scene: SceneContext,
     sg: ShadowGenerator,
@@ -253,7 +252,9 @@ function ensureEsmShadowTaskState(
         if (existing._casterMeshes === casterMeshes) {
             return existing;
         }
-        existing._task.dispose();
+        // Same lifetime rule as the PCF and CSM hooks: the frame being recorded may still reference the
+        // old task's buffers, so retire them behind the queue fence instead of destroying them here.
+        retireGpuResources(engine, existing._task.dispose);
     }
     const resources = getEsmShadowTaskResources(sg);
     if (!resources) {
@@ -269,13 +270,15 @@ function ensureEsmShadowTaskState(
                 clr: true,
                 clrColor: { r: 0, g: 0, b: 0, a: 0 },
                 cam: camera,
+                // The render list is the caster set only: with no casters the scene must not be mirrored into the
+                // map, or every mesh — receivers included — would cast (see the CSM hooks).
+                autoMirror: false,
                 _skipClusteredLights: true,
             },
             engine,
             scene
         ),
         _camera: camera,
-        _cameraVersion: 0,
         _lastCasterVersion: -1,
         _lastLightVersion: -1,
         _lastFoVersion: -1,
@@ -286,7 +289,7 @@ function ensureEsmShadowTaskState(
     for (const mesh of casterMeshes) {
         const material = mesh.material;
         if (material) {
-            taskState._task.addMesh(mesh, { material: getEsmShadowView(material, materialViews, sg._shadowParamsUBO) });
+            addMeshToTask(taskState._task, mesh, { material: getEsmShadowView(material, materialViews, sg._shadowParamsUBO) });
         }
     }
 
@@ -300,7 +303,7 @@ function renderEsmShadowMap(engine: EngineContext, sg: ShadowGenerator, state: E
     }
     const casterMeshes = state._casterMeshes;
     const casterVersion = casterVersionSum(casterMeshes);
-    const lightVersion = sg._light.worldMatrixVersion;
+    const lightVersion = sg._light._lightVersion;
     const foCam = engine.useFloatingOrigin ? state._scene.camera : null;
     const foVersion = foCam ? foCam.worldMatrixVersion : 0;
     const offX = foCam ? foCam.worldMatrix[12]! : 0;
@@ -322,44 +325,33 @@ function renderEsmShadowMap(engine: EngineContext, sg: ShadowGenerator, state: E
     state._lastLightVersion = lightVersion;
     state._lastFoVersion = foVersion;
 
-    let draws = state._task.execute?.() ?? 0;
+    const draws = state._task.execute?.() ?? 0;
     const encoder = engine._currentEncoder;
-    const bh = encoder.beginRenderPass({
-        colorAttachments: [
-            {
-                view: resources._blurTexH.createView(),
-                loadOp: "clear",
-                storeOp: "store",
-                clearValue: { r: 0, g: 0, b: 0, a: 0 },
-            },
-        ],
-    });
-    bh.setPipeline(resources._blurPipeline);
-    bh.setBindGroup(0, resources._blurHBG);
-    bh.draw(3);
-    bh.end();
+    renderBlurPass(encoder, resources._blurPipeline, resources._blurTexH, resources._blurHBG);
+    renderBlurPass(encoder, resources._blurPipeline, sg._depthTexture, resources._blurVBG);
+    return draws + 2;
+}
 
-    const bv = encoder.beginRenderPass({
+function renderBlurPass(encoder: GPUCommandEncoder, pipeline: GPURenderPipeline, target: GPUTexture, binding: GPUBindGroup): void {
+    const pass = encoder.beginRenderPass({
         colorAttachments: [
             {
-                view: sg._depthTexture.createView(),
+                view: target.createView(),
                 loadOp: "clear",
                 storeOp: "store",
                 clearValue: { r: 0, g: 0, b: 0, a: 0 },
             },
         ],
     });
-    bv.setPipeline(resources._blurPipeline);
-    bv.setBindGroup(0, resources._blurVBG);
-    bv.draw(3);
-    bv.end();
-    draws += 2;
-    return draws;
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, binding);
+    pass.draw(3);
+    pass.end();
 }
 
 function updateShadowCamera(state: EsmTaskState, matrix: EsmLightMatrix): void {
-    state._cameraVersion++;
-    updateShadowCameraBase(state._camera, state._cameraVersion, matrix._near, matrix._far, matrix._view, matrix._viewProj);
+    const camera = state._camera;
+    updateShadowCameraBase(camera, camera.worldMatrixVersion + 1, matrix._near, matrix._far, matrix._view, matrix._viewProj);
 }
 
 function getEsmShadowView(material: Material, cache: Map<Material, MaterialView>, shadowParamsUBO: GPUBuffer): MaterialView {

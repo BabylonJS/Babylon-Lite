@@ -34,7 +34,6 @@ import {
     EdgesRenderer,
     OutlineRenderer,
     MirrorTexture,
-    HtmlTexture,
     HtmlInteractionManager,
     HtmlRaycastInteractionManager,
     IsHtmlInCanvasUploadSupported,
@@ -47,6 +46,8 @@ import {
     GaussianSplattingStream,
     AddGaussianSplattingStreamPart,
     AddGaussianSplattingStreamPartAsync,
+    USDFileLoader,
+    RegisterUSDFileLoader,
     Sound,
     PointerDragBehavior,
     BaseSixDofDragBehavior,
@@ -60,10 +61,6 @@ import {
     InterpolatingBehavior,
     GeospatialClippingBehavior,
     SceneSerializer,
-    MinTemperatureKelvin,
-    MaxTintMagnitude,
-    TemperatureTintToXyz,
-    GetWhiteBalanceMatrix,
     FluidRenderingObject,
     FluidRenderingObjectParticleSystem,
     FluidRenderingObjectCustomParticles,
@@ -71,6 +68,7 @@ import {
     FluidRenderer,
     FluidRendererSceneComponent,
     RegisterFluidRenderer,
+    DitheredTileFadeMaterialPlugin,
 } from "../src/unsupported/unsupported-apis";
 import {
     GLTF1,
@@ -78,12 +76,13 @@ import {
     ImageProcessingConfiguration,
     RegisterAbstractEngineTextureLoaders,
     RegisterImageProcessingConfiguration,
+    registerBuiltInLoaders,
     OpenPBRMaterialLoadingAdapter as RootOpenPBRMaterialLoadingAdapter,
     RegisterOpenpbrMaterial as RootRegisterOpenpbrMaterial,
 } from "../src/index";
 import { MeshBuilder, CreateTiledBox, CreateTiledPlane } from "../src/meshes/meshes";
 import { SceneLoader } from "../src/loading/scene-loader";
-import { Material, PushMaterial } from "../src/materials/materials";
+import { Material, PushMaterial, StandardMaterial } from "../src/materials/materials";
 import { NullEngine } from "../src/engine/engine";
 import { Scene } from "../src/scene/scene";
 
@@ -108,6 +107,7 @@ describe("LiteCompatError", () => {
 describe("Unsupported API stubs throw on construction", () => {
     const cases: Array<[string, () => unknown]> = [
         ["MultiMaterial", () => new MultiMaterial()],
+        ["DitheredTileFadeMaterialPlugin", () => new DitheredTileFadeMaterialPlugin(new StandardMaterial("material"))],
         ["ShaderMaterial", () => new ShaderMaterial()],
         ["OpenPBRMaterial", () => new OpenPBRMaterial("openpbr", undefined, true)],
         ["OpenPBRMaterialDefines", () => new OpenPBRMaterialDefines({ CUSTOM: { type: "boolean", default: false } })],
@@ -128,7 +128,6 @@ describe("Unsupported API stubs throw on construction", () => {
         ["EdgesRenderer", () => new EdgesRenderer()],
         ["OutlineRenderer", () => new OutlineRenderer()],
         ["MirrorTexture", () => new MirrorTexture()],
-        ["HtmlTexture", () => new HtmlTexture()],
         ["HtmlInteractionManager", () => new HtmlInteractionManager()],
         ["HtmlRaycastInteractionManager", () => new HtmlRaycastInteractionManager()],
         ["Sound", () => new Sound()],
@@ -251,6 +250,14 @@ describe("Gaussian Splatting LOD streaming stubs throw", () => {
         expect(() => new GaussianSplattingStream()).toThrow(/GaussianSplattingStream/);
     });
 
+    describe("OpenUSD loader stubs", () => {
+        it("resolves the new loader symbols and reports the subsystem blocker", () => {
+            expect(() => new USDFileLoader()).toThrow(LiteCompatError);
+            expect(() => new USDFileLoader()).toThrow(/OpenUSD WebAssembly worker/);
+            expect(() => RegisterUSDFileLoader()).toThrow(LiteCompatError);
+        });
+    });
+
     it.each([
         ["AddGaussianSplattingStreamPart", () => AddGaussianSplattingStreamPart()],
         ["AddGaussianSplattingStreamPartAsync", () => AddGaussianSplattingStreamPartAsync()],
@@ -306,10 +313,6 @@ describe("image-processing additions", () => {
 
     it("exposes constants and fails loudly for the unsupported white-balance subsystem", () => {
         const config = new ImageProcessingConfiguration();
-        expect(MinTemperatureKelvin).toBe(1e6 / 600);
-        expect(MaxTintMagnitude).toBe(150);
-        expect(() => TemperatureTintToXyz(6500, 0)).toThrow(LiteCompatError);
-        expect(() => GetWhiteBalanceMatrix(6500, 0)).toThrow(LiteCompatError);
         expect(config.whiteBalanceEnabled).toBe(false);
         expect(config.temperature).toBe(6500);
         expect(config.tint).toBe(0);
@@ -333,6 +336,11 @@ describe("image-processing additions", () => {
     it("treats Lite's direct texture loader dispatch as already registered", () => {
         expectTypeOf(RegisterAbstractEngineTextureLoaders).returns.toEqualTypeOf<void>();
         expect(RegisterAbstractEngineTextureLoaders()).toBeUndefined();
+    });
+
+    it("treats compat's direct built-in loader dispatch as already registered", () => {
+        expectTypeOf(registerBuiltInLoaders).returns.toEqualTypeOf<void>();
+        expect(registerBuiltInLoaders()).toBeUndefined();
     });
 });
 

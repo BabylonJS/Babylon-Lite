@@ -147,3 +147,84 @@ describe("CSM refit gate", () => {
         ).toBe(true);
     });
 });
+
+describe("CSM refit gate: _lastRefitDriftOnly", () => {
+    const step = (gate: ReturnType<typeof createCsmRefitGate<MutableCaster>>, x: number, nowMs: number, camera = false) =>
+        gate.update(
+            x,
+            -1,
+            0,
+            nowMs,
+            camera,
+            false,
+            () => undefined,
+            () => undefined
+        );
+
+    it("is true only for a refit caused by the angle epsilon or the wall-time floor", () => {
+        const caster = { worldMatrixVersion: 1 };
+        const gate = createCsmRefitGate<MutableCaster>({ refitAngle: 0.05, refitMaxIntervalMs: 100, demoteQuietFrames: 100 });
+        gate.syncCasters([caster]);
+        expect(step(gate, 0, 0).refit).toBe(true);
+        expect(gate._lastRefitDriftOnly()).toBe(false); // the very first refit is a full render
+        expect(step(gate, 0, 10).refit).toBe(false);
+        expect(gate._lastRefitDriftOnly()).toBe(false); // no refit, no drift-only claim
+        expect(step(gate, 0.2, 20).refit).toBe(true); // angle epsilon crossed
+        expect(gate._lastRefitDriftOnly()).toBe(true);
+        expect(step(gate, 0.2, 130).refit).toBe(true); // wall-time floor, frozen sun
+        expect(gate._lastRefitDriftOnly()).toBe(true);
+        expect(step(gate, 0.2, 140).refit).toBe(false);
+        expect(gate._lastRefitDriftOnly()).toBe(false);
+    });
+
+    it("is false when the camera, a promotion or a demotion took part in the refit, even with drift", () => {
+        const caster = { worldMatrixVersion: 1 };
+        const gate = createCsmRefitGate<MutableCaster>({ refitAngle: 0.05, refitMaxIntervalMs: 0, demoteQuietFrames: 2 });
+        gate.syncCasters([caster]);
+        step(gate, 0, 0); // first refit; the caster starts dynamic
+        step(gate, 0, 1); // quiet frame 1
+        // Quiet frame 2 with drift: the refit is drift-caused, but it APPLIES the pending demotion, so the
+        // static partition changes inside it and the spread is refused.
+        expect(step(gate, 0.2, 2).refit).toBe(true);
+        expect(gate.isDynamic(caster)).toBe(false);
+        expect(gate._lastRefitDriftOnly()).toBe(false);
+        // Drift alone on the settled partition: spreadable.
+        expect(step(gate, 0.4, 3).refit).toBe(true);
+        expect(gate._lastRefitDriftOnly()).toBe(true);
+        // Drift plus a camera change: full.
+        expect(step(gate, 0.6, 4, true).refit).toBe(true);
+        expect(gate._lastRefitDriftOnly()).toBe(false);
+        // Drift plus a promotion (the static caster moved): full.
+        caster.worldMatrixVersion++;
+        expect(step(gate, 0.8, 5).refit).toBe(true);
+        expect(gate._lastRefitDriftOnly()).toBe(false);
+    });
+});
+
+describe("CSM refit gate: demotion applied inside a drift refit", () => {
+    it("refuses the spread when a floor refit applies a demotion, even though demotionOverdue is unreachable", () => {
+        // Production regime: the wall-time floor refits every few frames, so framesSinceRefit never reaches
+        // demoteQuietFrames and demotionOverdue can never fire; a caster that went quiet is demoted INSIDE a
+        // drift refit, and that refit must not be spread (the caster would vanish from the cascades not yet
+        // re-rendered). Frames every 30 ms, floor 100 ms, demoteQuietFrames 5.
+        const caster = { worldMatrixVersion: 1 };
+        const gate = createCsmRefitGate<MutableCaster>({ refitAngle: 1, refitMaxIntervalMs: 100, demoteQuietFrames: 5 });
+        gate.syncCasters([caster]);
+        const onDemote = vi.fn();
+        const step = (nowMs: number) => gate.update(0, -1, 0, nowMs, false, false, () => undefined, onDemote);
+        expect(step(0).refit).toBe(true); // first refit: full
+        let demotedAt = -1;
+        for (let t = 30; t <= 600; t += 30) {
+            const r = step(t);
+            if (onDemote.mock.calls.length === 1 && demotedAt < 0) {
+                demotedAt = t;
+                expect(r.refit).toBe(true); // the demotion is applied by a floor refit...
+                expect(gate._lastRefitDriftOnly()).toBe(false); // ...which therefore must not be spread
+            } else if (r.refit) {
+                expect(gate._lastRefitDriftOnly()).toBe(true); // every other floor refit is drift-only
+            }
+        }
+        expect(demotedAt).toBeGreaterThan(0);
+        expect(gate.isDynamic(caster)).toBe(false);
+    });
+});

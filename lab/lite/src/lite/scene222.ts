@@ -19,6 +19,7 @@ import {
     createArcRotateCamera,
     createBox,
     createEngine,
+    createGpuPicker,
     createGround,
     createHemisphericLight,
     createPositionGizmo,
@@ -32,6 +33,7 @@ import {
     isGizmoDragging,
     isGizmoPickPending,
     onBeforeRender,
+    pickAsync,
     registerScene,
     registerUtilityLayer,
     setPositionGizmoLocalCoordinates,
@@ -151,7 +153,6 @@ async function main(): Promise<void> {
             useLocal: positionGizmo.xGizmo.useLocalCoordinates,
         }),
         probePick: async (x: number, y: number) => {
-            const { createGpuPicker, pickAsync } = await import("babylon-lite");
             const picker = createGpuPicker(utilityLayer.scene);
             const info = await pickAsync(picker, x, y);
             return info.hit ? (info.pickedMesh?.name ?? "<unnamed>") : "miss";

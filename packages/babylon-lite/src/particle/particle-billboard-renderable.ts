@@ -2,7 +2,7 @@ import { F32 } from "../engine/typed-arrays.js";
 import type { EngineContext } from "../engine/engine.js";
 import type { Renderable } from "../render/renderable.js";
 import { getSceneBindGroupLayout } from "../render/scene-helpers.js";
-import { createEmptyUniformBuffer } from "../resource/gpu-buffers.js";
+import { createEmptyUniformBuffer } from "../resource/empty-uniform-buffer.js";
 import { SCENE_UBO_WGSL } from "../shader/scene-uniforms.js";
 import type { BillboardCustomShader } from "../sprite/billboard-custom-shader.js";
 import type { buildBillboardRenderable } from "../sprite/billboard-renderable.js";
@@ -181,7 +181,8 @@ export function buildParticleBlendBillboardRenderable(
             sampleCount,
             addSystem,
             target._depthStencilFormat,
-            getSceneBindGroupLayout(bindEngine)
+            getSceneBindGroupLayout(bindEngine),
+            target._depthCompare ?? "greater-equal"
         );
         let addBindGroup = bindGroups.get(addPipeline);
         if (!addBindGroup) {

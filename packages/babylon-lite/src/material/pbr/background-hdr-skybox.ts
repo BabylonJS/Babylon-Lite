@@ -13,7 +13,8 @@ import { createCubemapSkyboxMaterial } from "./cubemap-skybox-material.js";
 import skyboxVertSrc from "../../../shaders/skybox.vertex.wgsl?raw";
 import skyboxHdrFragSrc from "../../../shaders/skybox-hdr.fragment.wgsl?raw";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
-import { createMappedBuffer, createUniformBuffer } from "../../resource/gpu-buffers.js";
+import { createMappedBuffer } from "../../resource/mapped-buffer.js";
+import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 
 const SKY_HDR_UNIFORM_SIZE = 112; // mat4x4 + primaryColor vec3 + pad + skyOutputColor vec3 + pad + exposure + contrast + pad2
 

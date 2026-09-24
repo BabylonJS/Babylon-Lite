@@ -6,8 +6,8 @@ import { _enableDeviceLostRecovery } from "../engine/device-lost-recovery.js";
 import type { DeviceLostRecoveryHandle } from "../engine/device-lost-recovery-types.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import { createRenderTarget } from "../engine/render-target.js";
-import type { RenderTask } from "../frame-graph/render-task.js";
-import { createRenderTask } from "../frame-graph/render-task.js";
+import type { RenderTaskBase } from "../frame-graph/render-task-base.js";
+import { _createAutomaticRenderTask } from "../frame-graph/render-task-base.js";
 import type { NormalizedViewport } from "../camera/camera.js";
 import type { XrCamera } from "./xr-camera.js";
 import { createXrCamera, updateXrCameraForView } from "./xr-camera.js";
@@ -59,7 +59,7 @@ export interface XrSessionOptions {
 interface XrEyeUnit {
     rt: RenderTarget;
     camera: XrCamera;
-    task: RenderTask;
+    task: RenderTaskBase;
     recorded: boolean;
 }
 
@@ -284,7 +284,7 @@ function ensureUnit(ctx: XrSessionContext, index: number, eye: XREye): XrEyeUnit
     // frame graph must neither allocate nor destroy them (disposeRenderTarget no-ops).
     rt._eager = true;
     const camera = createXrCamera(eye);
-    const task = createRenderTask({ name: `xr-eye-${index}`, rt, clr: true, cam: camera }, ctx.engine, ctx.scene);
+    const task = _createAutomaticRenderTask({ name: `xr-eye-${index}`, rt, clr: true, cam: camera }, ctx.engine, ctx.scene);
     const unit: XrEyeUnit = { rt, camera, task, recorded: false };
     ctx._units[index] = unit;
     return unit;
@@ -336,63 +336,66 @@ function onXrFrame(ctx: XrSessionContext, time: DOMHighResTimeStamp, frame: XRFr
     const prevDelta = eng._currentDelta;
     eng._currentEncoder = encoder;
     eng._currentDelta = ctx.scene.fixedDeltaMs > 0 ? ctx.scene.fixedDeltaMs : delta;
+    try {
+        // Scene-wide per-frame work (animations, pre-passes, uniform updaters) — once,
+        // shared by both eyes. Records into the XR command encoder.
+        ctx.scene._update();
 
-    // Scene-wide per-frame work (animations, pre-passes, uniform updaters) — once,
-    // shared by both eyes. Records into the XR command encoder.
-    ctx.scene._update();
+        const views = pose.views;
+        const texW = ctx.layer.textureWidth;
+        const texH = ctx.layer.textureHeight;
+        const seenColorAttachments: SeenXrAttachment[] = [];
+        const seenDepthAttachments: SeenXrAttachment[] = [];
+        for (let i = 0; i < views.length; i++) {
+            const view = views[i]!;
+            const subImage = ctx.binding.getViewSubImage(ctx.layer, view);
+            const unit = ensureUnit(ctx, i, view.eye);
 
-    const views = pose.views;
-    const texW = ctx.layer.textureWidth;
-    const texH = ctx.layer.textureHeight;
-    const seenColorAttachments: SeenXrAttachment[] = [];
-    const seenDepthAttachments: SeenXrAttachment[] = [];
-    for (let i = 0; i < views.length; i++) {
-        const view = views[i]!;
-        const subImage = ctx.binding.getViewSubImage(ctx.layer, view);
-        const unit = ensureUnit(ctx, i, view.eye);
+            const viewDesc = subImage.getViewDescriptor();
+            const colorView = subImage.colorTexture.createView(viewDesc);
+            const depthTex = subImage.depthStencilTexture;
+            const depthView = depthTex ? depthTex.createView(viewDesc) : null;
 
-        const viewDesc = subImage.getViewDescriptor();
-        const colorView = subImage.colorTexture.createView(viewDesc);
-        const depthTex = subImage.depthStencilTexture;
-        const depthView = depthTex ? depthTex.createView(viewDesc) : null;
+            const rt = unit.rt;
+            rt._colorTexture = subImage.colorTexture;
+            rt._colorView = colorView;
+            rt._depthTexture = depthTex;
+            rt._depthView = depthView;
+            rt._width = texW;
+            rt._height = texH;
 
-        const rt = unit.rt;
-        rt._colorTexture = subImage.colorTexture;
-        rt._colorView = colorView;
-        rt._depthTexture = depthTex;
-        rt._depthView = depthView;
-        rt._width = texW;
-        rt._height = texH;
-
-        // Build the task once (after the first frame's views/targets exist). Subsequent
-        // frames only swap the per-frame attachment views — the compositor returns fresh
-        // GPUTextures each frame from a double/triple-buffered swap chain.
-        if (!unit.recorded) {
-            unit.task.record();
-            unit.recorded = true;
-        }
-        unit.task._colorAttachment.view = colorView;
-        unit.task._config.clr = !isSharedXrAttachment(seenColorAttachments, subImage.colorTexture, viewDesc);
-        const dsa = unit.task._renderPassDescriptor.depthStencilAttachment;
-        if (dsa && depthView && depthTex) {
-            dsa.view = depthView;
-            const depthShared = isSharedXrAttachment(seenDepthAttachments, depthTex, viewDesc);
-            dsa.depthLoadOp = depthShared ? "load" : "clear";
-            if (dsa.stencilLoadOp !== undefined) {
-                dsa.stencilLoadOp = depthShared ? "load" : "clear";
+            // Build the task once (after the first frame's views/targets exist). Subsequent
+            // frames only swap the per-frame attachment views — the compositor returns fresh
+            // GPUTextures each frame from a double/triple-buffered swap chain.
+            if (!unit.recorded) {
+                unit.task.record();
+                unit.recorded = true;
             }
+            unit.task._colorAttachment.view = colorView;
+            unit.task._config.clr = !isSharedXrAttachment(seenColorAttachments, subImage.colorTexture, viewDesc);
+            const dsa = unit.task._renderPassDescriptor.depthStencilAttachment;
+            if (dsa && depthView && depthTex) {
+                dsa.view = depthView;
+                const depthShared = isSharedXrAttachment(seenDepthAttachments, depthTex, viewDesc);
+                dsa.depthLoadOp = depthShared ? "load" : "clear";
+                if (dsa.stencilLoadOp !== undefined) {
+                    dsa.stencilLoadOp = depthShared ? "load" : "clear";
+                }
+            }
+
+            const vp = subImage.viewport;
+            const viewport: NormalizedViewport = { x: vp.x / texW, y: vp.y / texH, width: vp.width / texW, height: vp.height / texH };
+            updateXrCameraForView(unit.camera, view, texW, texH, viewport);
+            unit.task.execute?.();
         }
 
-        const vp = subImage.viewport;
-        const viewport: NormalizedViewport = { x: vp.x / texW, y: vp.y / texH, width: vp.width / texW, height: vp.height / texH };
-        updateXrCameraForView(unit.camera, view, texW, texH, viewport);
-        unit.task.execute?.();
+        eng._device.queue.submit([encoder.finish()]);
+        eng._gpuTaskTimerResolve?.(encoder);
+        flushGpuResourceRetirements(eng);
+    } finally {
+        eng._currentEncoder = prevEncoder;
+        eng._currentDelta = prevDelta;
     }
-
-    eng._device.queue.submit([encoder.finish()]);
-    flushGpuResourceRetirements(eng);
-    eng._currentEncoder = prevEncoder;
-    eng._currentDelta = prevDelta;
 }
 
 /** @internal Report a teardown failure without preventing the remaining cleanup. */

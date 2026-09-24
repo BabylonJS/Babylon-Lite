@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { VERSION } from "babylon-lite";
-import { AbstractEngine, Engine, ThinEngine, WebGPUEngine } from "../src/engine/engine";
+import { AbstractEngine, Engine, NullEngine, ThinEngine, WebGPUEngine } from "../src/engine/engine";
+import { LiteCompatError } from "../src/error";
+import { PointerEventTypes, PointerInfo } from "../src/events/pointer-events";
 import type { TransformNode } from "../src/meshes/meshes";
 import { Scene } from "../src/scene/scene";
 
@@ -42,6 +44,12 @@ function fakeEngine(canvas: { width: number; height: number }, deltaMs: number):
     engine._lastDeltaMs = deltaMs;
     (engine as unknown as { _lite: unknown })._lite = { msaaSamples: 4 };
     return engine;
+}
+
+function sceneWithCanvas(canvas: EventTarget): Scene {
+    const engine = new NullEngine();
+    (engine as unknown as { _canvas: EventTarget })._canvas = canvas;
+    return new Scene(engine);
 }
 
 describe("WebGPUEngine scalar getters", () => {
@@ -99,6 +107,12 @@ describe("WebGPUEngine scalar getters", () => {
         const engine = fakeEngine({ width: 1, height: 1 }, 16) as WebGPUEngine & { _lite: unknown };
         (engine as unknown as { _lite: unknown })._lite = {};
         expect(engine.getCaps().maxUniformBuffersPerShaderStage).toBeUndefined();
+    });
+
+    it("exposes the normalized occlusion-query API with Lite's structural blocker", () => {
+        const engine = fakeEngine({ width: 1, height: 1 }, 16);
+        expect(() => engine.isOcclusionQueryVisible({})).toThrow(LiteCompatError);
+        expect(() => engine.isOcclusionQueryVisible({})).toThrow(/occlusion-query subsystem/);
     });
 
     it("reports all compressed caps off when there is no device (NullEngine)", () => {
@@ -246,6 +260,61 @@ describe("Scene entity registries", () => {
         expect(a.getClassName()).toBe("Scene");
         expect(a.getUniqueId()).toBe(1);
         expect(b.getUniqueId()).toBe(2);
+    });
+});
+
+describe("Scene pointer observable", () => {
+    it("maps canvas pointer and wheel events to Babylon.js payloads", () => {
+        const canvas = new EventTarget();
+        const scene = sceneWithCanvas(canvas);
+        const seen: PointerInfo[] = [];
+        scene.onPointerObservable.add((info) => seen.push(info));
+        const events = [new Event("pointerdown"), new Event("pointermove"), new Event("pointerup"), new Event("wheel")];
+
+        for (const event of events) {
+            canvas.dispatchEvent(event);
+        }
+
+        expect(seen.map((info) => info.type)).toEqual([PointerEventTypes.POINTERDOWN, PointerEventTypes.POINTERMOVE, PointerEventTypes.POINTERUP, PointerEventTypes.POINTERWHEEL]);
+        expect(seen.map((info) => info.event)).toEqual(events);
+        expect(seen.every((info) => info.pickInfo === null)).toBe(true);
+        expect(seen.every((info) => info instanceof PointerInfo)).toBe(true);
+        scene.dispose();
+    });
+
+    it("filters masked observers while unmasked observers receive every event", () => {
+        const canvas = new EventTarget();
+        const scene = sceneWithCanvas(canvas);
+        const downOnly = vi.fn<(info: PointerInfo) => void>();
+        const allEvents = vi.fn<(info: PointerInfo) => void>();
+        scene.onPointerObservable.add(downOnly, PointerEventTypes.POINTERDOWN);
+        scene.onPointerObservable.add(allEvents);
+
+        canvas.dispatchEvent(new Event("pointermove"));
+        canvas.dispatchEvent(new Event("pointerdown"));
+
+        expect(downOnly).toHaveBeenCalledOnce();
+        expect(downOnly.mock.calls[0]?.[0].type).toBe(PointerEventTypes.POINTERDOWN);
+        expect(allEvents).toHaveBeenCalledTimes(2);
+        scene.dispose();
+    });
+
+    it("removes only scene-owned listeners and clears observers on disposal", () => {
+        const canvas = new EventTarget();
+        const unrelated = vi.fn();
+        canvas.addEventListener("pointerdown", unrelated);
+        const removeListener = vi.spyOn(canvas, "removeEventListener");
+        const scene = sceneWithCanvas(canvas);
+        const observer = vi.fn<(info: PointerInfo) => void>();
+        scene.onPointerObservable.add(observer);
+
+        scene.dispose();
+        canvas.dispatchEvent(new Event("pointerdown"));
+
+        expect(removeListener).toHaveBeenCalledTimes(4);
+        expect(observer).not.toHaveBeenCalled();
+        expect(scene.onPointerObservable.hasObservers()).toBe(false);
+        expect(unrelated).toHaveBeenCalledOnce();
     });
 });
 

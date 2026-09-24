@@ -3,11 +3,12 @@
  * instead of rebuilding every demo via `build-bundle-demos.ts`.
  *
  * Usage:
- *   npx tsx scripts/build-bundle-demo.ts <slug> [--measure]
- *   pnpm build:bundle-demo <slug> [--measure]
+ *   npx tsx scripts/build-bundle-demo.ts <slug> [--measure] [--debug]
+ *   pnpm build:bundle-demo <slug> [--measure] [--debug]
  *
  * Examples:
  *   pnpm build:bundle-demo platformer            # build just the platformer bundle
+ *   pnpm build:bundle-demo platformer --debug    # unminified bundle + source map
  *   pnpm build:bundle-demo platformer --measure  # also refresh its manifest size
  *
  * The `--measure` flag runs the headless size measurement (slow; needs a
@@ -18,14 +19,15 @@ import { buildSingleDemo } from "./bundle-demos-core";
 
 const args = process.argv.slice(2);
 const measure = args.includes("--measure");
+const debug = args.includes("--debug");
 const slug = args.find((a) => !a.startsWith("--"));
 
 if (!slug) {
-    console.error("Usage: tsx scripts/build-bundle-demo.ts <slug> [--measure]");
+    console.error("Usage: tsx scripts/build-bundle-demo.ts <slug> [--measure] [--debug]");
     process.exit(1);
 }
 
-buildSingleDemo(slug, { measure }).catch((err) => {
+buildSingleDemo(slug, { measure, debug }).catch((err) => {
     console.error(err);
     process.exit(1);
 });

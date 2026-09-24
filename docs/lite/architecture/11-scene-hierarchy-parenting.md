@@ -6,8 +6,8 @@
 
 Live parent-child hierarchy where **any entity** (TransformNode, Mesh, Camera, Light)
 can be parented to any other via two interfaces: `IWorldMatrixProvider` (parent contract)
-and `IParentable` (child contract). World matrices propagate lazily via version-based
-caching — O(1) for static scenes, O(depth) for dynamic changes.
+and `IParentable` (child contract). Transform writes push version invalidation through
+the subtree; matrix composition remains lazy. Unchanged engine-node reads are O(1).
 
 ---
 
@@ -56,7 +56,7 @@ reproduces exactly the matrix it replaces, so the node does not move beyond the 
 
 **Parent links come from `addToScene`.** The glTF loader fills `children` arrays but leaves `parent`
 unset; `addToScene` walks the tree and assigns it. `setParent` needs the real parent chain to read a
-node's world transform, so reparent a *nested* loaded node only after its container has been added.
+node's world transform, so reparent a _nested_ loaded node only after its container has been added.
 Reparenting the container's own root beforehand is fine — its parent is null either way.
 
 ### TransformNode (`scene/transform-node.ts`)
@@ -102,14 +102,18 @@ Camera `worldMatrix` is the camera-to-world transform (inverse of view matrix).
 
 ### Lights
 
-`LightBase` extends `IWorldMatrixProvider, IParentable`. All 4 light types
-(point, directional, spot, hemispheric) use `createWorldMatrixState` with
-push-based dirty tracking via `ObservableVec3`.
+`LightBase` extends `SceneNode`. All 4 light types (point, directional, spot,
+hemispheric) therefore expose the standard position, quaternion/Euler rotation,
+scaling, parent, children, and world-matrix state. Setting a light's local `direction`
+updates its lighting data, while direct SceneNode rotation writes orient that local
+direction through the world matrix. `setParent` uses the same path for lights and every other SceneNode,
+including normal child-array traversal. Light UBO and shadow consumers read the world
+matrix, so ancestor motion and scaling affect both paths consistently.
 
 UBO writers read world-space values from `worldMatrix` columns:
 
 - Position = column 3: `[w[12], w[13], w[14]]`
-- Direction = column 2: `[w[8], w[9], w[10]]`
+- Direction = normalized `worldMatrix * localDirection` (with `w = 0`)
 
 ---
 
@@ -122,15 +126,59 @@ function createWorldMatrixState(getLocalMatrix: () => Mat4): WorldMatrixAccessor
 ```
 
 Factory that returns `{ getWorldMatrix, getWorldMatrixVersion, markLocalDirty, parent }`.
-Each entity provides a `getLocalMatrix()` closure. The helper handles:
+Each entity provides a `getLocalMatrix()` closure. The helper owns:
 
-- Version tracking (`_localVersion`, `_worldVersion`, `_lastParentVersion`)
-- Parent chain validation (recursive `parent.worldMatrix` call)
-- Caching with `multiplyMat4IntoBuffer` for GC-free buffer reuse
+- `_worldVersion`, bumped on every local write, ancestor invalidation or reparent.
+- `_cachedLocal`, the latest local matrix, cleared only by `markLocalDirty()`.
+- `_cachedWorld`, cleared by either local or world invalidation.
+- `_ownedWorld`, allocated once through `allocateMat4()` and reused by
+  `multiplyMat4IntoBuffer` for parented results.
+- A private child registry maintained by the `parent` setter independently of the
+  host's public `children` array. A symbol attached by `attachWorldMatrixState`
+  identifies engine parents and connects their invalidation state.
+- `_lastSeenParentVersion`, used only to poll a direct foreign parent (a provider
+  without that symbol). Reads of either the world matrix or version poll that
+  parent's public version and push world-only invalidation if it changed.
+
+`markLocalDirty()` clears the local cache, then unconditionally invalidates the node
+and every descendant's world cache/version. `_invalidate()` is world-only: ancestor
+motion and reparenting do not change the node's local transform. Neither traversal
+may stop at an already-dirty node: a consumer may read only a leaf version while
+intermediate nodes remain unread across successive ancestor moves.
+
+`_markWorldMatrixDirty(host)` is world-only: geometry updates need fresh world
+versions without recomposing unchanged local transforms. `_markLocalMatrixDirty(host)`
+calls `markLocalDirty()` for mutable local inputs outside the usual TRS callbacks.
+The banked camera uses the latter for its up vector, which changes the local look-at
+basis without writing position/rotation/scaling.
+
+### SceneNode local storage (`scene/scene-node.ts`)
+
+`initSceneNodeTransform` lazily allocates one private TRS matrix through `allocateMat4()`.
+Its local factory fills that matrix with
+`composeTrsLocalMatrixIntoBuffer(local: Mat4Storage, position: Vec3, rotation: Quat, scaling: Vec3): void`
+only when the shared local cache is invalid; subsequent local edits reuse the same storage.
+This writer uses `composeMat4IntoBuffer` for nonidentity TRS. For the default transform
+it fills the storage with zero and writes diagonal ones, preserving the existing fast
+path and signed-zero normalization without allocating. Parent-only
+movement/reparenting neither recomposes nor allocates a local matrix. Storage is F32
+by default and F64 when the HPM allocator is installed before node creation/use.
+
+An explicit `_localMatrix` takes precedence without composing or mutating its values.
+Locked glTF matrices still ignore TRS writes; unlocked TRS writes clear the override
+and invalidate the local cache. `setParent` seeds TRS and preserves the exact affine
+matrix using its existing path, including shear/reflections.
+
+`worldMatrix` is borrowed read-only storage, not a snapshot: copy its values if they
+must survive future matrix reads after an edit. Root nodes return their local matrix;
+parented nodes return `_ownedWorld`. No public factory changes its ownership contract:
+`composeMat4` and `composeTrsLocalMatrix` still return fresh independent matrices.
+The latter allocates once and delegates to the shared TRS writer.
 
 ### Push-Based Dirty Tracking
 
-All entities use push-based dirty notification — no polling or `checkDirty()` functions:
+Engine entities use push-based dirty notification; direct foreign parents retain the
+version-polling fallback described above:
 
 | Entity          | Property                  | Mechanism                                           |
 | --------------- | ------------------------- | --------------------------------------------------- |
@@ -164,29 +212,39 @@ importing `createIdentityMat4`.
 
 ```
 get worldMatrix():
-    if cached AND localVersion unchanged:
-        if no parent → return cached           ← O(1)
-        walk parent chain (triggers lazy recompute)
-        if parent version unchanged → return cached  ← O(1)
-
-    local = getLocalMatrix()
+    poll direct foreign parent, if any
+    if cachedWorld exists → return cachedWorld
+    if cachedLocal is null → cachedLocal = getLocalMatrix()
     if parent:
-        cached = multiplyMat4(parent.worldMatrix, local)  // multiplyMat4IntoBuffer if cached exists
+        multiplyMat4IntoBuffer(ownedWorld, parent.worldMatrix, cachedLocal)
+        cachedWorld = ownedWorld
     else:
-        cached = local
-
-    update version snapshots
-    worldVersion++
-    return cached
+        cachedWorld = cachedLocal
+    return cachedWorld
 ```
 
 ### Performance characteristics
 
 | Scenario                    | Cost per frame                               |
 | --------------------------- | -------------------------------------------- |
-| Static scene (no changes)   | O(1) per entity — integer comparison         |
-| Root changes, N descendants | O(N) — each descendant recomputes once       |
-| Single leaf changes         | O(depth) — walk to root, recompute back down |
+| Static scene (no changes)   | O(1) per entity — cached matrix/version read |
+| Root changes, N descendants | O(N) version push; lazy world products, only root local composition |
+| Single leaf changes         | O(1) invalidation; one local composition/product against cached parent |
+
+These structural costs are not universal performance measurements. The CPU benefit
+depends on hierarchy shape, local versus ancestor movement, and matrix precision.
+Required world products and unconditional descendant version propagation remain.
+
+### Focused Test Specification
+
+`tests/lite/unit/world-matrix-parent-propagation.test.ts` separates compatibility
+assertions (must pass before/after) from optimization assertions (expected red before):
+local TRS edits, repeated ancestor movement through unread intermediates, direct foreign
+parent polling, reparent/detach, explicit local invalidation, raw matrix hand-off, F32/F64
+values and fresh math-factory outputs. Spies on the existing allocator/composition kernel
+and supplied local factories prove storage/composition reuse without runtime counters.
+`engine-matrix-policy`, `banked-free-camera`, `mat4-decompose-mirrored` and `light-parenting`
+tests cover the related precision, local look-at invalidation and affine consumers.
 
 ---
 

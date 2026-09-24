@@ -53,7 +53,7 @@ import { BoundingInfo } from "../culling/bounding.js";
 import { unsupported } from "../error.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
-import { Material as CompatMaterialBase } from "../materials/materials.js";
+import { adoptMaterialScene, attachMaterialToScene, Material as CompatMaterialBase } from "../materials/materials.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
 import type { NodeMaterial } from "../materials/node-material.js";
 import type { PhysicsBody } from "../physics/physics.js";
@@ -284,6 +284,23 @@ export class TransformNode extends Node {
         // preserves world). Mirror that with Babylon Lite's raw parent assignment.
         this._node.parent = liteNodeOf(parent);
     }
+
+    /** @internal Remove this wrapper's node without letting Lite recurse for `dispose(true)`. */
+    protected override _disposeSelf(doNotRecurse: boolean): void {
+        if (!this._scene) {
+            return;
+        }
+        if (!doNotRecurse) {
+            removeFromScene(this._scene._lite, this._node);
+            return;
+        }
+
+        for (const child of this._node.children) {
+            child.parent = null;
+        }
+        this._node.children.length = 0;
+        removeFromScene(this._scene._lite, this._node);
+    }
 }
 
 /**
@@ -295,6 +312,7 @@ export class AbstractMesh extends TransformNode {
     public readonly _lite: LiteMesh;
 
     private _material: CompatMaterial | null = null;
+    private _meshBlendingTag = 0;
     protected _visible = true;
 
     public constructor(name: string, lite: LiteMesh, scene?: Scene) {
@@ -329,16 +347,21 @@ export class AbstractMesh extends TransformNode {
         this._material = value;
         const scene = this._scene;
         const renderMaterial = value ?? scene?.defaultMaterial;
-        if (renderMaterial && scene?._hasStarted) {
-            // The mesh already entered the scene, so the boot-time build (which
-            // normally calls `_ensureRenderable` via `addPrimitive`) has run. Finalize
-            // the material's GPU-facing resources now — PBR solid textures and any
-            // resolved texture handles — before rebinding, so Lite's material-swap
-            // rebuild (enqueued by the `_lite.material` reassignment below) sees
-            // complete props. Adopt the scene so a still-loading texture assigned to
-            // this material can reconcile itself on readiness.
-            (renderMaterial as { _adoptScene?: (s: Scene) => void })._adoptScene?.(scene);
-            renderMaterial._ensureRenderable(engineOf(scene));
+        if (renderMaterial && scene) {
+            if (scene._hasStarted) {
+                // The mesh already entered the scene, so the boot-time build (which
+                // normally calls `_ensureRenderable` via `registerMeshAtStart`) has run. Finalize
+                // the material's GPU-facing resources now — PBR solid textures and any
+                // resolved texture handles — before rebinding, so Lite's material-swap
+                // rebuild (enqueued by the `_lite.material` reassignment below) sees
+                // complete props.
+                attachMaterialToScene(renderMaterial, scene);
+            } else {
+                // Before startup only ownership is settled here; finalization waits for the engine. Not every
+                // pre-start assignment is followed by a registration callback that sees this material (an
+                // imported mesh has none at all), so ownership cannot wait for one.
+                adoptMaterialScene(renderMaterial, scene);
+            }
         }
         if (renderMaterial?._lite) {
             this._lite.material = renderMaterial._lite as never;
@@ -368,6 +391,17 @@ export class AbstractMesh extends TransformNode {
     }
     public set receiveShadows(value: boolean) {
         this._lite.receiveShadows = value;
+    }
+
+    public get meshBlendingTag(): number {
+        return this._meshBlendingTag ?? 0;
+    }
+    public set meshBlendingTag(value: number) {
+        if (!Number.isInteger(value) || value < 0 || value > 0xff || (value !== 0 && (value & 0x3f) === 0)) {
+            throw new RangeError("Mesh-blending tag must be 0 or contain a group ID between 1 and 63.");
+        }
+        this._meshBlendingTag = value;
+        this._lite.meshBlendingTag = value;
     }
 
     protected override _onEffectiveEnabledStateChanged(enabled: boolean): void {
@@ -693,13 +727,6 @@ export class AbstractMesh extends TransformNode {
         this._bakeMatrix(transform);
         return this;
     }
-
-    public override dispose(): void {
-        if (this._scene) {
-            removeFromScene(this._scene._lite, this._lite);
-        }
-        super.dispose();
-    }
 }
 
 /** Babylon.js `Mesh` — a concrete renderable mesh with geometry. */
@@ -896,6 +923,7 @@ export class Mesh extends AbstractMesh {
             if (wrapper instanceof Mesh && source instanceof Mesh) {
                 wrapper.material = source.material;
                 wrapper.isVisible = source.isVisible;
+                wrapper.meshBlendingTag = source.meshBlendingTag;
             }
         }
         if (!skipChildren) {
@@ -1302,12 +1330,23 @@ function engineOf(scene: Scene): EngineContext {
  * (via `scene._deferAdd`) to let those assignments settle.
  */
 function addPrimitive(mesh: Mesh, scene: Scene, afterAdd?: () => void): Mesh {
+    return registerMeshAtStart(mesh, scene, afterAdd);
+}
+
+/**
+ * @internal The deferred registration shared by every compat path that builds a mesh before engine start
+ * (primitives, legacy CSG results, the navigation debug mesh): at startup, finalize the mesh's EFFECTIVE
+ * material — its own, or `scene.defaultMaterial` as it is by then — rebind its Lite handle and add the mesh.
+ */
+export function registerMeshAtStart(mesh: Mesh, scene: Scene, afterAdd?: () => void): Mesh {
     scene._deferAdd(() => {
         if (mesh.isDisposed()) {
             return;
         }
-        const mat = mesh.material;
-        mat?._ensureRenderable(engineOf(scene));
+        const mat = mesh.material ?? scene.defaultMaterial;
+        if (mat) {
+            attachMaterialToScene(mat, scene);
+        }
         // Re-bind in case the material's Lite handle resolved late (async-parsed
         // NodeMaterial, or a texture map that loaded after `mesh.material = …`).
         if (mat?._lite) {

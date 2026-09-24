@@ -31,6 +31,7 @@ type RuntimeRebuild = NonNullable<MeshGroupBuilder["_rebuildSingle"]>;
 interface DetachablePacket {
     _disposed: boolean;
     _owner?: DetachablePacket[];
+    _onOwnerEmpty?: () => void;
 }
 type DetachableDisposer = (() => void) & { p?: DetachablePacket };
 
@@ -359,6 +360,10 @@ async function materializeRuntimeMesh(scene: SceneContext, state: RuntimeBuildSt
     }
     if (previousDisposers) {
         for (const dispose of previousDisposers) {
+            const lifetimeIndex = scene._disposables.indexOf(dispose);
+            if (lifetimeIndex >= 0) {
+                scene._disposables.splice(lifetimeIndex, 1);
+            }
             const packet = (dispose as DetachableDisposer).p;
             if (packet) {
                 packet._disposed = true;
@@ -369,6 +374,14 @@ async function materializeRuntimeMesh(scene: SceneContext, state: RuntimeBuildSt
                         owner.splice(index, 1);
                     }
                     packet._owner = undefined;
+                    if (owner.length === 0) {
+                        packet._onOwnerEmpty?.();
+                    }
+                } else {
+                    packet._onOwnerEmpty?.();
+                }
+                if (packet._onOwnerEmpty) {
+                    packet._onOwnerEmpty = undefined;
                 }
             }
         }
@@ -395,7 +408,7 @@ async function materializeRuntimeMesh(scene: SceneContext, state: RuntimeBuildSt
     if (builder._materialFamily === "pbr" && hadBuiltGroup && builtPbrContext) {
         (pbrState._pbrMeshGeomContexts ??= new WeakMap()).set(mesh, builtPbrContext);
     }
-    installRuntimeRebuild(scene, state, builder, mesh, result.rebuildSingle, hadBuiltGroup ? (previousSceneBase ?? previousRebuild) : result.rebuildSingle);
+    installRuntimeRebuild(scene, state, builder, mesh, result.rebuildSingle, hadBuiltGroup ? previousSceneBase : result.rebuildSingle);
     (mesh.material as { _csmGen?: number })._csmGen = ((mesh.material as { _csmGen?: number })._csmGen ?? 0) + 1;
     const group = scene._groups.get(builder);
     if (group && !hadBuiltGroup) {
@@ -418,14 +431,14 @@ function installRuntimeRebuild(
     if (!runtime) {
         const scenes = new WeakMap<SceneContext, WeakMap<Mesh, RuntimeRebuild>>();
         const bases = new WeakMap<SceneContext, RuntimeRebuild>();
-        const dispatch: RuntimeRebuild = (targetScene, targetMesh, override) => {
+        const dispatch: RuntimeRebuild = (targetScene, targetMesh, override, resources) => {
             const specialized = scenes.get(targetScene)?.get(targetMesh);
             if (specialized) {
-                return specialized(targetScene, targetMesh, override);
+                return specialized(targetScene, targetMesh, override, resources);
             }
             const base = bases.get(targetScene) ?? targetScene._groups.get(builder)?.r;
             if (base) {
-                return base(targetScene, targetMesh, override);
+                return base(targetScene, targetMesh, override, resources);
             }
             throw new Error("Material group has not completed its initial build");
         };
