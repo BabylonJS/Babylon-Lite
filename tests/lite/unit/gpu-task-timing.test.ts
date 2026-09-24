@@ -127,11 +127,11 @@ describe("render-task GPU timing public state", () => {
         const engine = makeEngineWithFeatures([]);
 
         expect(isRenderTaskGpuTimingSupported(engine)).toBe(false);
-        expect(getRenderTaskGpuTimings(engine)).toMatchObject({ status: "unsupported", supported: false, enabled: false, tasks: [] });
+        expect(getRenderTaskGpuTimings(engine)).toMatchObject({ status: "unsupported", supported: false, enabled: false, tasks: [], totalDurationMs: 0 });
 
         const enabled = await setRenderTaskGpuTimingEnabled(engine, true);
 
-        expect(enabled).toMatchObject({ status: "unsupported", supported: false, enabled: false, tasks: [] });
+        expect(enabled).toMatchObject({ status: "unsupported", supported: false, enabled: false, tasks: [], totalDurationMs: 0 });
         expect(engine._gpuTaskTimerDisable).toBeUndefined();
     });
 
@@ -142,7 +142,7 @@ describe("render-task GPU timing public state", () => {
 
         const snapshot = await setRenderTaskGpuTimingEnabled(engine, true);
 
-        expect(snapshot).toMatchObject({ status: "pending", supported: true, enabled: true, tasks: [] });
+        expect(snapshot).toMatchObject({ status: "pending", supported: true, enabled: true, tasks: [], totalDurationMs: 0 });
         expect(engine._gpuTaskTimerEpoch).toBe(7);
     });
 
@@ -256,7 +256,7 @@ describe("render-task GPU timing public state", () => {
 });
 
 describe("GPU task timing installer", () => {
-    it("wraps registered frame graphs, publishes task durations, and restores on disable", async () => {
+    it("publishes overlapping task durations with an envelope total and restores on disable", async () => {
         const log: string[] = [];
         const engine = makeEngineWithFeatures(["timestamp-query"]);
         const passDescriptors: Array<{ kind: "render" | "compute"; descriptor: GPURenderPassDescriptor | GPUComputePassDescriptor | undefined }> = [];
@@ -280,7 +280,7 @@ describe("GPU task timing installer", () => {
         const surface = { _renderingContexts: [{ frameGraph: fg }] };
         Object.assign(engine, { surfaces: [surface], _surfaces: [surface] });
 
-        const timestamps = new BigUint64Array([0n, 1_000_000n, 2_000_000n, 4_500_000n]);
+        const timestamps = new BigUint64Array([0n, 4_000_000n, 2_000_000n, 4_500_000n]);
         const readback = {
             mapAsync: () => Promise.resolve(),
             getMappedRange: () => timestamps.buffer,
@@ -336,9 +336,10 @@ describe("GPU task timing installer", () => {
                 enabled: true,
                 frameIndex: 1,
                 tasks: [
-                    { index: 0, name: "task-execute", durationMs: 1 },
+                    { index: 0, name: "task-execute", durationMs: 4 },
                     { index: 1, name: "pass-execute", durationMs: 2.5 },
                 ],
+                totalDurationMs: 4.5,
                 droppedTaskCount: 0,
                 error: undefined,
             },
@@ -432,6 +433,7 @@ describe("GPU task timing installer", () => {
                 enabled: true,
                 frameIndex: 1,
                 tasks: [{ index: 1, name: "measured", durationMs: 2 }],
+                totalDurationMs: 2,
                 droppedTaskCount: 0,
                 error: undefined,
             },

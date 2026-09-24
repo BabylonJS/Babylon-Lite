@@ -382,18 +382,23 @@ async function finishTaskTimingReadback(timer: GpuTaskTimer, pending: PendingTas
         }
         const raw = new BigUint64Array(buffer.getMappedRange(0, pending.byteLength));
         const tasks: RenderTaskGpuTiming[] = [];
+        let earliestBegin: bigint | null = null;
+        let latestEnd: bigint | null = null;
         for (const record of pending.records) {
             const begin = raw[record.beginQueryIndex]!;
             const end = raw[record.endQueryIndex]!;
             if (end >= begin) {
                 tasks.push({ index: record.index, name: record.name, durationMs: Number(end - begin) / 1e6 });
+                earliestBegin = earliestBegin === null || begin < earliestBegin ? begin : earliestBegin;
+                latestEnd = latestEnd === null || end > latestEnd ? end : latestEnd;
             }
         }
+        const totalDurationMs = earliestBegin === null || latestEnd === null ? 0 : Number(latestEnd - earliestBegin) / 1e6;
         buffer.unmap();
         timer.pendingReadbacks.delete(buffer);
         timer.readbackPool.push(buffer);
         timer.inFlight--;
-        pending.publish(makeTimingSnapshot("available", true, true, pending.frameIndex, tasks, pending.droppedTaskCount));
+        pending.publish(makeTimingSnapshot("available", true, true, pending.frameIndex, tasks, pending.droppedTaskCount, totalDurationMs));
     } catch (error) {
         if (timer.disposed) {
             return;
@@ -401,7 +406,7 @@ async function finishTaskTimingReadback(timer: GpuTaskTimer, pending: PendingTas
         timer.pendingReadbacks.delete(buffer);
         timer.inFlight--;
         buffer.destroy();
-        pending.publish(makeTimingSnapshot("error", true, true, pending.frameIndex, [], pending.droppedTaskCount, readbackErrorMessage(error)));
+        pending.publish(makeTimingSnapshot("error", true, true, pending.frameIndex, [], pending.droppedTaskCount, 0, readbackErrorMessage(error)));
     }
 }
 
