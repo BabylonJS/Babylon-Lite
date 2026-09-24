@@ -153,8 +153,7 @@ describe("USDFileLoader", () => {
         const lite = { entities: [], diagnostics: { timings: {}, statistics: {}, missingAssets: [] }, _usdMeshes: [], _usdTextures: [] };
         loadUsd.mockResolvedValueOnce(lite);
         const scene = fakeScene();
-        let loader: USDFileLoader;
-        loader = new USDFileLoader({ onComplete: () => loader.dispose() });
+        const loader = new USDFileLoader({ onComplete: () => loader.dispose() });
 
         await expect(loader.loadAsync(scene, new ArrayBuffer(1), "")).rejects.toThrow("USDFileLoader was disposed.");
         expect(removeFromScene).toHaveBeenCalledWith(scene._lite, lite);
