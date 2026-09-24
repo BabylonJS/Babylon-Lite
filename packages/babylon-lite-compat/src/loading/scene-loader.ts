@@ -9,8 +9,8 @@
  * mesh list is not reconstructed in this initial pass.
  */
 
-import { addToScene, enableBoneControlForSkinnedAssets, loadGltf, loadBabylon, loadUsd, disposeUsd, removeFromScene } from "babylon-lite";
-import type { AssetContainer as LiteAssetContainer, AnimationGroup } from "babylon-lite";
+import { addToScene, enableBoneControlForSkinnedAssets, loadGltf, loadBabylon, loadUsd, disposeUsd, removeFromScene, setParent as setLiteParent } from "babylon-lite";
+import type { AssetContainer as LiteAssetContainer, AnimationGroup, Mesh as LiteMesh } from "babylon-lite";
 
 import { unsupported } from "../error.js";
 import { collectLoadedMeshes, type LoadedMeshRegistry } from "./loaded-mesh.js";
@@ -66,12 +66,15 @@ export class AssetContainer {
     private _skeletons: Skeleton[] | undefined;
 
     private readonly _dispose: (() => void) | undefined;
+    /** @internal Original USD mesh ownership, independent of later hierarchy changes. */
+    private readonly _ownedMeshes: readonly LiteMesh[] | undefined;
     private _sceneDisposeObserver: ((scene: Scene) => void) | undefined;
     private _disposed = false;
 
-    public constructor(lite: LiteAssetContainer, dispose?: () => void) {
+    public constructor(lite: LiteAssetContainer, dispose?: () => void, ownedMeshes?: readonly LiteMesh[]) {
         this._lite = lite;
         this._dispose = dispose;
+        this._ownedMeshes = ownedMeshes ? [...ownedMeshes] : undefined;
     }
 
     public get animationGroups(): AnimationGroup[] {
@@ -109,7 +112,7 @@ export class AssetContainer {
             this._sceneDisposeObserver = scene.onDisposeObservable.addOnce(() => {
                 this._scene = undefined;
                 this._sceneDisposeObserver = undefined;
-                this._disposeOnce();
+                this._detachFromScene(scene);
             });
         }
         // Build/bind the canonical wrappers now that the container belongs to a
@@ -126,12 +129,34 @@ export class AssetContainer {
             this._sceneDisposeObserver = undefined;
         }
         this._scene = undefined;
+        if (scene) {
+            this._detachFromScene(scene);
+        } else {
+            this._disposeOnce();
+        }
+    }
+
+    private _detachFromScene(scene: Scene): void {
         try {
-            if (scene) {
-                removeFromScene(scene._lite, this._lite);
+            if (this._ownedMeshes) {
+                for (const mesh of this._ownedMeshes) {
+                    setLiteParent(mesh, null);
+                }
+            }
+            removeFromScene(scene._lite, this._lite);
+            if (this._ownedMeshes) {
+                for (const mesh of this._ownedMeshes) {
+                    removeFromScene(scene._lite, mesh);
+                }
             }
         } finally {
-            this._disposeOnce();
+            try {
+                for (const wrapper of this._meshRegistry.values()) {
+                    wrapper._disposeWrapperOnly();
+                }
+            } finally {
+                this._disposeOnce();
+            }
         }
     }
 
@@ -339,7 +364,7 @@ async function loadUsdContainer(
     onProgress?: (event: ISceneLoaderProgressEvent) => void
 ): Promise<AssetContainer> {
     const lite = await loadUsd(engine, source, toLiteUsdOptions(resolveUsdOptions(options), undefined, onProgress));
-    const container = new AssetContainer(lite, () => disposeUsd(lite));
+    const container = new AssetContainer(lite, () => disposeUsd(lite), lite._usdMeshes);
     try {
         options.onComplete?.(lite.diagnostics);
         return container;

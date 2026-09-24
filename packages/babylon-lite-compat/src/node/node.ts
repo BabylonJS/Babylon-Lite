@@ -205,6 +205,19 @@ export abstract class Node {
 
     /** @internal Dispose this compat wrapper tree in post-order. */
     public _disposeWrapperTree(doNotRecurse = false): void {
+        this._disposeWrapperTreeInternal(doNotRecurse, true);
+    }
+
+    /**
+     * @internal Retire a loader-owned wrapper without disposing its Lite node.
+     * Asset-container teardown removes the native nodes as one ownership unit.
+     */
+    public _disposeWrapperOnly(): void {
+        this._disposeWrapperTreeInternal(true, false);
+    }
+
+    /** @internal Shared wrapper lifecycle for ordinary and container-owned disposal. */
+    private _disposeWrapperTreeInternal(doNotRecurse: boolean, disposeSelf: boolean): void {
         if (this._disposed) {
             return;
         }
@@ -214,10 +227,12 @@ export abstract class Node {
             }
         } else {
             for (const child of [...this._children]) {
-                child._disposeWrapperTree();
+                child._disposeWrapperTreeInternal(false, disposeSelf);
             }
         }
-        this._disposeSelf(doNotRecurse);
+        if (disposeSelf) {
+            this._disposeSelf(doNotRecurse);
+        }
         this._disposed = true;
         this.onDisposeObservable.notifyObservers(this);
         this.onDisposeObservable.clear();
