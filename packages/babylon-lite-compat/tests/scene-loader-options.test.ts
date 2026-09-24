@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
-const { loadGltf } = vi.hoisted(() => ({
+const { loadGltf, loadUsd } = vi.hoisted(() => ({
     loadGltf: vi.fn(async () => ({ animationGroups: [] })),
+    loadUsd: vi.fn(async () => ({ entities: [], diagnostics: { timings: {}, statistics: {}, missingAssets: [] }, _usdMeshes: [], _usdTextures: [] })),
 }));
 
 vi.mock("babylon-lite", async (importOriginal) => ({
     ...(await importOriginal<typeof import("babylon-lite")>()),
     loadGltf,
+    loadUsd,
 }));
 
 import { AppendSceneAsync, ImportMeshAsync, LoadAssetContainerAsync } from "../src/loading/scene-loader.js";
@@ -32,5 +34,23 @@ describe("function-style scene loader options", () => {
         await LoadAssetContainerAsync("model.glb", loaderScene, { rootUrl: "https://cdn.example/assets/" });
 
         expect(loadGltf).toHaveBeenCalledWith({}, "https://cdn.example/assets/model.glb");
+    });
+
+    it("dispatches USD URLs and forwards plugin runtime options", async () => {
+        const loaderScene = { getEngine: () => ({ _lite: {} }) } as Scene;
+        const runtime = "https://cdn.example/usd/";
+
+        await LoadAssetContainerAsync("model.usdz", loaderScene, {
+            pluginOptions: {
+                usd: {
+                    workerUrl: `${runtime}babylon-usd-importer.worker.js`,
+                    glueUrl: `${runtime}babylon-usd-importer.js`,
+                    wasmUrl: `${runtime}babylon-usd-importer.wasm`,
+                    dataUrl: `${runtime}babylon-usd-importer.data`,
+                },
+            },
+        });
+
+        expect(loadUsd).toHaveBeenCalledWith({}, "model.usdz", expect.objectContaining({ resolveByFileName: true, runtimeBaseUrl: runtime }));
     });
 });

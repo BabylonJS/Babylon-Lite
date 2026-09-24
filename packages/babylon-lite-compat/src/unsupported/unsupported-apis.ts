@@ -22,73 +22,16 @@ import type { ShaderLanguage } from "../misc/engine-constants.js";
 import type { StandardMaterial, PBRMaterial } from "../materials/materials.js";
 import type { Mesh, InstancedMesh } from "../meshes/meshes.js";
 import { MaterialPluginBase } from "../materials/material-plugin.js";
+import type { AnimationGroup } from "../animations/animation.js";
+import type { Bone } from "../bones/skeleton.js";
+import type { TransformNode } from "../meshes/meshes.js";
+import type { Vector3 } from "../math/vector.js";
+import type { Observable } from "../misc/observable.js";
 
 const FLUID_RENDERER_UNSUPPORTED =
     "Fluid rendering requires dedicated depth, thickness, and diffuse passes plus render-target lifecycle and composition policies that Babylon Lite does not define.";
-const USD_LOADER_UNSUPPORTED =
-    "OpenUSD loading requires an OpenUSD WebAssembly worker, virtual-file staging, command-buffer extraction, and a USD-to-Lite scene/material materializer; those form a new loader subsystem with unresolved ownership and material-mapping design.";
 const DITHERED_TILE_FADE_UNSUPPORTED =
     "Lite's material-plugin bridge supports shared shader injection, but not Babylon.js per-draw mesh uniforms, hardware-instance bounds, or custom thin-instance attributes/varyings. Adding those requires an opt-in per-renderable plugin-data design.";
-
-// ─── OpenUSD loading ─────────────────────────────────────────────────
-export type USDBinaryInput = ArrayBuffer | ArrayBufferView;
-export type USDVirtualFiles = Readonly<Record<string, USDBinaryInput>>;
-
-export interface USDLoadProgress {
-    phase: "initializing" | "staging" | "extracting" | "materializing";
-    message: string;
-}
-
-export interface USDImportTimings {
-    totalMs: number;
-    stageOpenMs: number;
-    stageReadMs: number;
-    preparationMs: number;
-    packingMs: number;
-    heapCopyMs: number;
-    materializeMs: number;
-}
-
-export interface USDImportStatistics {
-    nodes: number;
-    meshes: number;
-    analyticPrimitives: number;
-    instances: number;
-    materials: number;
-    vertices: number;
-    triangles: number;
-    commandBytes: number;
-    dataBytes: number;
-}
-
-export interface USDImportDiagnostics {
-    timings: USDImportTimings;
-    statistics: USDImportStatistics;
-    missingAssets: readonly string[];
-}
-
-export interface USDFileLoaderOptions {
-    rootFileName?: string;
-    files?: USDVirtualFiles;
-    resolveByFileName?: boolean;
-    workerUrl?: string | URL;
-    glueUrl?: string;
-    wasmUrl?: string;
-    dataUrl?: string;
-    onProgress?: (progress: USDLoadProgress) => void;
-    onLog?: (level: "info" | "warning" | "error", message: string) => void;
-    onComplete?: (diagnostics: USDImportDiagnostics) => void;
-}
-
-export class USDFileLoader {
-    public constructor(_options: Partial<USDFileLoaderOptions> = {}) {
-        unsupported("USDFileLoader", USD_LOADER_UNSUPPORTED);
-    }
-}
-
-export function RegisterUSDFileLoader(): never {
-    return unsupported("RegisterUSDFileLoader", USD_LOADER_UNSUPPORTED);
-}
 
 // ─── Flow graph validation ───────────────────────────────────────────
 const FLOW_GRAPH_UNSUPPORTED =
@@ -163,6 +106,136 @@ export class FluidRendererSceneComponent {
 
 export function RegisterFluidRenderer(): void {
     unsupported("RegisterFluidRenderer", FLUID_RENDERER_UNSUPPORTED);
+}
+
+// ─── Root motion ─────────────────────────────────────────────────────
+const ROOT_MOTION_UNSUPPORTED =
+    "Babylon.js root motion analyzes animation hierarchies, rewrites in-place clips, journals mixer writes, and applies blended per-frame travel. Lite exposes animation playback but not that analysis and mixer-journal subsystem; its lifecycle and ownership require a Lite-level design.";
+
+export enum RootMotionSource {
+    None = 0,
+    Root = 1,
+    FootContact = 2,
+}
+
+export interface IRootMotionClipOptions {
+    rootNode?: TransformNode | Bone;
+    characterNode?: TransformNode;
+    contactNodes?: Array<TransformNode | Bone>;
+    source?: RootMotionSource;
+    extractRotation?: boolean;
+    samplesPerSecond?: number;
+    minimumTravel?: number;
+    minimumTurn?: number;
+    directionSnapAngle?: number;
+    extractLateralMotion?: boolean;
+    upAxis?: Vector3;
+    name?: string;
+    cloneAnimations?: boolean;
+}
+
+export class RootMotionClip {
+    public constructor(_animationGroup: AnimationGroup, _options: IRootMotionClipOptions = {}) {
+        unsupported("RootMotionClip", ROOT_MOTION_UNSUPPORTED);
+    }
+
+    public get sourceAnimationGroup(): AnimationGroup {
+        return unsupported("RootMotionClip.sourceAnimationGroup", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get animationGroup(): AnimationGroup {
+        return unsupported("RootMotionClip.animationGroup", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get controller(): RootMotionController | null {
+        return unsupported("RootMotionClip.controller", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get source(): RootMotionSource {
+        return unsupported("RootMotionClip.source", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get rootNode(): TransformNode | null {
+        return unsupported("RootMotionClip.rootNode", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get characterNode(): TransformNode {
+        return unsupported("RootMotionClip.characterNode", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get contactNodes(): ReadonlyArray<TransformNode> {
+        return unsupported("RootMotionClip.contactNodes", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get upAxis(): Vector3 {
+        return unsupported("RootMotionClip.upAxis", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get fromFrame(): number {
+        return unsupported("RootMotionClip.fromFrame", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get toFrame(): number {
+        return unsupported("RootMotionClip.toFrame", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get travelDirection(): Vector3 {
+        return unsupported("RootMotionClip.travelDirection", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get cycleOffset(): Vector3 {
+        return unsupported("RootMotionClip.cycleOffset", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get cycleDistance(): number {
+        return unsupported("RootMotionClip.cycleDistance", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get cycleRotation(): number {
+        return unsupported("RootMotionClip.cycleRotation", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get extractsRotation(): boolean {
+        return unsupported("RootMotionClip.extractsRotation", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get duration(): number {
+        return unsupported("RootMotionClip.duration", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get averageSpeed(): number {
+        return unsupported("RootMotionClip.averageSpeed", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get characterHeight(): number {
+        return unsupported("RootMotionClip.characterHeight", ROOT_MOTION_UNSUPPORTED);
+    }
+    public getOffsetAtFrame(_frame: number, _result: Vector3): Vector3 {
+        return unsupported("RootMotionClip.getOffsetAtFrame", ROOT_MOTION_UNSUPPORTED);
+    }
+    public getRotationAtFrame(_frame: number): number {
+        return unsupported("RootMotionClip.getRotationAtFrame", ROOT_MOTION_UNSUPPORTED);
+    }
+    public dispose(): void {
+        unsupported("RootMotionClip.dispose", ROOT_MOTION_UNSUPPORTED);
+    }
+}
+
+export class RootMotionController {
+    public applyToCharacter = true;
+    public readonly onRootMotionObservable!: Observable<RootMotionController>;
+
+    public constructor(_characterNode: TransformNode, _clips: RootMotionClip[] = []) {
+        unsupported("RootMotionController", ROOT_MOTION_UNSUPPORTED);
+    }
+
+    public get characterNode(): TransformNode {
+        return unsupported("RootMotionController.characterNode", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get clips(): ReadonlyArray<RootMotionClip> {
+        return unsupported("RootMotionController.clips", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get deltaPosition(): Vector3 {
+        return unsupported("RootMotionController.deltaPosition", ROOT_MOTION_UNSUPPORTED);
+    }
+    public get deltaRotation(): number {
+        return unsupported("RootMotionController.deltaRotation", ROOT_MOTION_UNSUPPORTED);
+    }
+    public addClip(_clip: RootMotionClip): void {
+        unsupported("RootMotionController.addClip", ROOT_MOTION_UNSUPPORTED);
+    }
+    public removeClip(_clip: RootMotionClip): void {
+        unsupported("RootMotionController.removeClip", ROOT_MOTION_UNSUPPORTED);
+    }
+    public reset(): void {
+        unsupported("RootMotionController.reset", ROOT_MOTION_UNSUPPORTED);
+    }
+    public dispose(): void {
+        unsupported("RootMotionController.dispose", ROOT_MOTION_UNSUPPORTED);
+    }
 }
 
 // ─── Materials ───────────────────────────────────────────────────────
