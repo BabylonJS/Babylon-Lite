@@ -27,7 +27,8 @@ export interface RenderTaskGpuTimings {
     readonly enabled: boolean;
     /** Monotonic profiler frame index for the snapshot. `0` means no measured frame has completed yet. */
     readonly frameIndex: number;
-    /** Measured tasks in frame execution order. Empty until `status === "available"`. */
+    /** Measured tasks in frame execution order. Empty until `status === "available"`.
+     * Tasks that issue no render or compute pass are omitted because standard WebGPU timestamps attach to passes. */
     readonly tasks: readonly RenderTaskGpuTiming[];
     /** Number of tasks skipped in that frame because the profiler's query-set capacity was exceeded. */
     readonly droppedTaskCount: number;
