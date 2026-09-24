@@ -84,7 +84,7 @@ describe("function-style scene loader options", () => {
             onProgress,
             pluginOptions: { usd: { onProgress: onUsdProgress } },
         });
-        const liteOptions = loadUsd.mock.calls[0]![2] as LoadUsdOptions;
+        const liteOptions = (loadUsd.mock.calls as unknown as Array<[unknown, unknown, LoadUsdOptions]>)[0]![2];
 
         liteOptions.onProgress?.({ phase: "fetching", message: "Reading USD files..." });
         liteOptions.onProgress?.({ phase: "staging", message: "Opening stage..." });
