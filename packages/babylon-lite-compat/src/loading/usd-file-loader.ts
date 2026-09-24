@@ -46,7 +46,7 @@ export class USDFileLoader {
     private readonly _activeLoads = new Set<AbortController>();
 
     public constructor(options: Partial<USDFileLoaderOptions> = {}) {
-        this._options = { ...options };
+        this._options = { ...getUsdDefaultConfiguration(), ...options };
     }
 
     public createPlugin(options: { usd?: Partial<USDFileLoaderOptions> }): USDFileLoader {

@@ -90,10 +90,10 @@ describe("USDFileLoader", () => {
     it("rejects partial runtime overrides rather than silently relocating defaults", async () => {
         await expect(
             new USDFileLoader({ workerUrl: "https://example.test/usd/babylon-usd-importer.worker.js" }).loadAssetContainerAsync(fakeScene(), new ArrayBuffer(1), "")
-        ).rejects.toThrow(/all four standard files/);
+        ).rejects.toThrow(/one runtime directory/);
     });
 
-    it("applies mutable default configuration while preserving explicit options", async () => {
+    it("snapshots mutable default configuration at construction while preserving explicit options", async () => {
         const original = { ...USDFileLoader.DefaultConfiguration };
         USDFileLoader.DefaultConfiguration = {
             workerUrl: "https://defaults.test/usd/babylon-usd-importer.worker.js",
@@ -101,10 +101,17 @@ describe("USDFileLoader", () => {
             wasmUrl: "https://defaults.test/usd/babylon-usd-importer.wasm",
             dataUrl: "https://defaults.test/usd/babylon-usd-importer.data",
         };
+        const loader = new USDFileLoader({ resolveByFileName: false });
+        USDFileLoader.DefaultConfiguration = {
+            workerUrl: "https://later.test/usd/babylon-usd-importer.worker.js",
+            glueUrl: "https://later.test/usd/babylon-usd-importer.js",
+            wasmUrl: "https://later.test/usd/babylon-usd-importer.wasm",
+            dataUrl: "https://later.test/usd/babylon-usd-importer.data",
+        };
         loadUsd.mockResolvedValueOnce({ entities: [], diagnostics: { timings: {}, statistics: {}, missingAssets: [] }, _usdMeshes: [], _usdTextures: [] });
 
         try {
-            await new USDFileLoader({ resolveByFileName: false }).loadAssetContainerAsync(fakeScene(), new ArrayBuffer(1), "");
+            await loader.loadAssetContainerAsync(fakeScene(), new ArrayBuffer(1), "");
             expect(loadUsd).toHaveBeenCalledWith(
                 { id: "engine" },
                 expect.any(ArrayBuffer),

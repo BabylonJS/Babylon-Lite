@@ -279,7 +279,7 @@ export async function ImportMeshAsync(source: string, scene: Scene, options?: Im
         return loadSplatResult(url, scene);
     }
     validateGltfOptions(url, options);
-    const container = await loadFromSource(url, scene, options?.pluginOptions?.usd);
+    const container = await loadFromSource(url, scene, options?.pluginOptions?.usd, options?.onProgress);
     container.addAllToScene(scene);
     return {
         meshes: container.meshes,
@@ -300,7 +300,7 @@ export async function AppendSceneAsync(source: string, scene: Scene, options?: A
         return scene;
     }
     validateGltfOptions(url, options);
-    const container = await loadFromSource(url, scene, options?.pluginOptions?.usd);
+    const container = await loadFromSource(url, scene, options?.pluginOptions?.usd, options?.onProgress);
     container.addAllToScene(scene);
     return scene;
 }
@@ -309,11 +309,16 @@ export async function AppendSceneAsync(source: string, scene: Scene, options?: A
 export async function LoadAssetContainerAsync(source: string, scene: Scene, options?: LoadAssetContainerOptions): Promise<AssetContainer> {
     const url = joinUrl(options?.rootUrl ?? "", source);
     validateGltfOptions(url, options);
-    return loadFromSource(url, scene, options?.pluginOptions?.usd);
+    return loadFromSource(url, scene, options?.pluginOptions?.usd, options?.onProgress);
 }
 
 /** @internal Load a glTF/.babylon asset from a single source URL (function-loader form). */
-async function loadFromSource(source: string, scene: Scene, usdOptions?: Partial<USDFileLoaderOptions>): Promise<AssetContainer> {
+async function loadFromSource(
+    source: string,
+    scene: Scene,
+    usdOptions?: Partial<USDFileLoaderOptions>,
+    onProgress?: (event: ISceneLoaderProgressEvent) => void
+): Promise<AssetContainer> {
     const engine = scene.getEngine()._lite;
     // Detect the format from the path (ignoring query/hash), but pass the full URL
     // to the loader so any query string is preserved.
@@ -321,14 +326,19 @@ async function loadFromSource(source: string, scene: Scene, usdOptions?: Partial
         enableBoneControlForSkinnedAssets();
     }
     if (isUsdUrl(source)) {
-        return loadUsdContainer(engine, source, usdOptions);
+        return loadUsdContainer(engine, source, usdOptions, onProgress);
     }
     const lite = isBabylonUrl(source) ? await loadBabylon(engine, source) : await loadGltf(engine, source);
     return new AssetContainer(lite);
 }
 
-async function loadUsdContainer(engine: Parameters<typeof loadUsd>[0], source: string, options: Partial<USDFileLoaderOptions> = {}): Promise<AssetContainer> {
-    const lite = await loadUsd(engine, source, toLiteUsdOptions(resolveUsdOptions(options)));
+async function loadUsdContainer(
+    engine: Parameters<typeof loadUsd>[0],
+    source: string,
+    options: Partial<USDFileLoaderOptions> = {},
+    onProgress?: (event: ISceneLoaderProgressEvent) => void
+): Promise<AssetContainer> {
+    const lite = await loadUsd(engine, source, toLiteUsdOptions(resolveUsdOptions(options), undefined, onProgress));
     const container = new AssetContainer(lite, () => disposeUsd(lite));
     try {
         options.onComplete?.(lite.diagnostics);

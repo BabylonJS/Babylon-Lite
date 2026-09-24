@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { LoadUsdOptions } from "babylon-lite";
 
 const { addToScene, disposeUsd, loadGltf, loadUsd, removeFromScene } = vi.hoisted(() => ({
     addToScene: vi.fn(),
@@ -73,6 +74,25 @@ describe("function-style scene loader options", () => {
         });
 
         expect(loadUsd).toHaveBeenCalledWith({}, "model.usdz", expect.objectContaining({ resolveByFileName: true, runtimeBaseUrl: runtime }));
+    });
+
+    it("forwards both SceneLoader and USD plugin progress callbacks", async () => {
+        const onProgress = vi.fn();
+        const onUsdProgress = vi.fn();
+
+        await LoadAssetContainerAsync("model.usdz", fakeScene(), {
+            onProgress,
+            pluginOptions: { usd: { onProgress: onUsdProgress } },
+        });
+        const liteOptions = loadUsd.mock.calls[0]![2] as LoadUsdOptions;
+
+        liteOptions.onProgress?.({ phase: "fetching", message: "Reading USD files..." });
+        liteOptions.onProgress?.({ phase: "staging", message: "Opening stage..." });
+
+        expect(onProgress).toHaveBeenNthCalledWith(1, { lengthComputable: false, loaded: 0, total: 4 });
+        expect(onProgress).toHaveBeenNthCalledWith(2, { lengthComputable: false, loaded: 2, total: 4 });
+        expect(onUsdProgress).toHaveBeenCalledOnce();
+        expect(onUsdProgress).toHaveBeenCalledWith({ phase: "staging", message: "Opening stage..." });
     });
 
     it("applies mutable USD defaults to classic and function-style entry points", async () => {
