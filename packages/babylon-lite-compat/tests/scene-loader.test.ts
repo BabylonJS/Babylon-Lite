@@ -2,16 +2,23 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("babylon-lite", async (importActual) => {
     const actual = await importActual<typeof import("babylon-lite")>();
-    return { ...actual, addToScene: vi.fn(), removeFromScene: vi.fn(), setParent: vi.fn((mesh: { parent: unknown }, parent: unknown) => (mesh.parent = parent)) };
+    return {
+        ...actual,
+        addToScene: vi.fn(),
+        disposeScene: vi.fn(actual.disposeScene),
+        removeFromScene: vi.fn(),
+        setParent: vi.fn((mesh: { parent: unknown }, parent: unknown) => (mesh.parent = parent)),
+    };
 });
 
-import { addToScene, removeFromScene, setParent } from "babylon-lite";
+import { addToScene, disposeScene, removeFromScene, setParent } from "babylon-lite";
 import type { AssetContainer as LiteAssetContainer, Mesh as LiteMesh } from "babylon-lite";
 
+import { NullEngine } from "../src/engine/engine";
 import { AssetContainer } from "../src/loading/scene-loader";
 import { Observable } from "../src/misc/observable";
 import { AbstractScene } from "../src/scene/abstract-scene";
-import type { Scene } from "../src/scene/scene";
+import { Scene } from "../src/scene/scene";
 
 interface FakeMesh {
     name: string;
@@ -26,6 +33,15 @@ class TestScene extends AbstractScene {
     public readonly onDisposeObservable = new Observable<Scene>();
 
     public _surfaceLoadedCamera(): void {}
+}
+
+function captureThrown(callback: () => void): { threw: boolean; value: unknown } {
+    try {
+        callback();
+        return { threw: false, value: undefined };
+    } catch (value) {
+        return { threw: true, value };
+    }
 }
 
 describe("AssetContainer.addAllToScene", () => {
@@ -132,6 +148,47 @@ describe("AssetContainer.addAllToScene", () => {
         expect(testScene.meshes).toEqual([]);
         expect(testScene.getMeshByName("First")).toBeNull();
         expect(testScene.getMeshById("Second")).toBeNull();
+    });
+
+    it.each([null, undefined])("preserves a first nullish disposal error of %s", (firstError) => {
+        const mesh: FakeMesh = { name: "Cube", children: [], parent: null, _gpu: {}, material: {} };
+        const root = { name: "__root__", children: [mesh] };
+        const lite = { entities: [root] } as unknown as LiteAssetContainer;
+        const disposeUsd = vi.fn();
+        const container = new AssetContainer(lite, disposeUsd, [mesh as unknown as LiteMesh]);
+        const wrappers = container.meshes;
+        wrappers[0]!.onDisposeObservable.add(() => {
+            throw firstError;
+        });
+        wrappers[1]!.onDisposeObservable.add(() => {
+            throw new Error("later observer failed");
+        });
+
+        const thrown = captureThrown(() => container.dispose());
+
+        expect(thrown).toEqual({ threw: true, value: firstError });
+        expect(disposeUsd).toHaveBeenCalledOnce();
+        expect(wrappers.every((wrapper) => wrapper.isDisposed())).toBe(true);
+    });
+
+    it("finishes all adopted-container and native teardown before rethrowing a scene observer error", () => {
+        const scene = new Scene(new NullEngine());
+        const firstDisposeUsd = vi.fn();
+        const secondDisposeUsd = vi.fn();
+        const first = new AssetContainer({ entities: [{ name: "FirstRoot", children: [] }] } as unknown as LiteAssetContainer, firstDisposeUsd);
+        const second = new AssetContainer({ entities: [{ name: "SecondRoot", children: [] }] } as unknown as LiteAssetContainer, secondDisposeUsd);
+        first.addAllToScene(scene);
+        second.addAllToScene(scene);
+        first.meshes[0]!.onDisposeObservable.add(() => {
+            throw null;
+        });
+
+        const thrown = captureThrown(() => scene.dispose());
+
+        expect(thrown).toEqual({ threw: true, value: null });
+        expect(firstDisposeUsd).toHaveBeenCalledOnce();
+        expect(secondDisposeUsd).toHaveBeenCalledOnce();
+        expect(disposeScene).toHaveBeenCalledWith(scene._lite);
     });
 
     it("does not create wrappers after disposing an unread asset container", () => {

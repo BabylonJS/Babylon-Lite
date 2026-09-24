@@ -234,10 +234,12 @@ export abstract class Node {
             this._disposeSelf(doNotRecurse);
         }
         this._disposed = true;
+        let hasError = false;
         let firstError: unknown;
         try {
             this.onDisposeObservable.notifyObservers(this);
         } catch (error) {
+            hasError = true;
             firstError = error;
         } finally {
             this.onDisposeObservable.clear();
@@ -245,14 +247,20 @@ export abstract class Node {
         try {
             this._linkParent(null);
         } catch (error) {
-            firstError ??= error;
+            if (!hasError) {
+                hasError = true;
+                firstError = error;
+            }
         }
         try {
             this._scene?._unregisterNode(this);
         } catch (error) {
-            firstError ??= error;
+            if (!hasError) {
+                hasError = true;
+                firstError = error;
+            }
         }
-        if (firstError !== undefined) {
+        if (hasError) {
             throw firstError;
         }
     }
