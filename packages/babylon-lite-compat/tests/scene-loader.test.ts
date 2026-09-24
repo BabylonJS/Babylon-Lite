@@ -83,4 +83,33 @@ describe("AssetContainer.addAllToScene", () => {
         expect(wrappers.every((wrapper) => wrapper.isDisposed())).toBe(true);
         expect(disposed.every((observer) => observer.mock.calls.length === 1)).toBe(true);
     });
+
+    it("retires canonical wrappers when an asset container was never added to a scene", () => {
+        const mesh: FakeMesh = { name: "Cube", children: [], parent: null, _gpu: {}, material: {} };
+        const root = { name: "__root__", children: [mesh] };
+        const lite = { entities: [root] } as unknown as LiteAssetContainer;
+        const disposeUsd = vi.fn();
+        const container = new AssetContainer(lite, disposeUsd, [mesh as unknown as LiteMesh]);
+        const wrappers = container.meshes;
+        const disposed = wrappers.map(() => vi.fn(() => undefined));
+        wrappers.forEach((wrapper, index) => wrapper.onDisposeObservable.add(disposed[index]!));
+
+        container.dispose();
+
+        expect(disposeUsd).toHaveBeenCalledOnce();
+        expect(wrappers.every((wrapper) => wrapper.isDisposed())).toBe(true);
+        expect(disposed.every((observer) => observer.mock.calls.length === 1)).toBe(true);
+        expect(container.meshes).toEqual(wrappers);
+    });
+
+    it("does not create wrappers after disposing an unread asset container", () => {
+        const mesh: FakeMesh = { name: "Cube", children: [], parent: null, _gpu: {}, material: {} };
+        const root = { name: "__root__", children: [mesh] };
+        const lite = { entities: [root] } as unknown as LiteAssetContainer;
+        const container = new AssetContainer(lite, vi.fn(), [mesh as unknown as LiteMesh]);
+
+        container.dispose();
+
+        expect(container.meshes).toEqual([]);
+    });
 });

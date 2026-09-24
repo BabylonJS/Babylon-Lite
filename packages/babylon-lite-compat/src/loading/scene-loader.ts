@@ -88,6 +88,9 @@ export class AssetContainer {
      * same handles `scene.meshes` exposes.
      */
     public get meshes(): Mesh[] {
+        if (this._disposed) {
+            return [...this._meshRegistry.values()];
+        }
         return collectLoadedMeshes(this._lite, this._meshRegistry, this._scene);
     }
 
@@ -132,7 +135,11 @@ export class AssetContainer {
         if (scene) {
             this._detachFromScene(scene);
         } else {
-            this._disposeOnce();
+            try {
+                this._retireMeshWrappers();
+            } finally {
+                this._disposeOnce();
+            }
         }
     }
 
@@ -151,12 +158,16 @@ export class AssetContainer {
             }
         } finally {
             try {
-                for (const wrapper of this._meshRegistry.values()) {
-                    wrapper._disposeWrapperOnly();
-                }
+                this._retireMeshWrappers();
             } finally {
                 this._disposeOnce();
             }
+        }
+    }
+
+    private _retireMeshWrappers(): void {
+        for (const wrapper of this._meshRegistry.values()) {
+            wrapper._disposeWrapperOnly();
         }
     }
 
