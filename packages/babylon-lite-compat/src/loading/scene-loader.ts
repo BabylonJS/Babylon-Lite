@@ -9,8 +9,8 @@
  * mesh list is not reconstructed in this initial pass.
  */
 
-import { addToScene, enableBoneControlForSkinnedAssets, loadGltf, loadBabylon } from "babylon-lite";
-import type { AssetContainer as LiteAssetContainer, AnimationGroup } from "babylon-lite";
+import { addToScene, enableBoneControlForSkinnedAssets, loadGltf, loadBabylon, loadUsd, disposeUsd, removeFromScene, setParent as setLiteParent } from "babylon-lite";
+import type { AssetContainer as LiteAssetContainer, AnimationGroup, Mesh as LiteMesh } from "babylon-lite";
 
 import { unsupported } from "../error.js";
 import { collectLoadedMeshes, type LoadedMeshRegistry } from "./loaded-mesh.js";
@@ -18,6 +18,8 @@ import { GaussianSplattingMesh } from "../meshes/gaussian-splatting.js";
 import type { Mesh, TransformNode } from "../meshes/meshes.js";
 import type { Scene } from "../scene/scene.js";
 import { Skeleton } from "../bones/skeleton.js";
+import type { USDFileLoaderOptions } from "./usd-file-loader.js";
+import { resolveUsdOptions, toLiteUsdOptions } from "./usd-options.js";
 
 /**
  * Babylon.js registers built-in loader factories through a global plugin
@@ -42,6 +44,10 @@ function isBabylonUrl(url: string): boolean {
     return urlPath(url).toLowerCase().endsWith(".babylon");
 }
 
+function isUsdUrl(url: string): boolean {
+    return /\.(?:usd|usda|usdc|usdz)$/i.test(urlPath(url));
+}
+
 /** Last path segment of a URL, used to name a loaded Gaussian-Splatting mesh. */
 function baseName(url: string): string {
     const path = urlPath(url);
@@ -59,8 +65,16 @@ export class AssetContainer {
     /** @internal Canonical loaded-skeleton wrappers. */
     private _skeletons: Skeleton[] | undefined;
 
-    public constructor(lite: LiteAssetContainer) {
+    private readonly _dispose: (() => void) | undefined;
+    /** @internal Original USD mesh ownership, independent of later hierarchy changes. */
+    private readonly _ownedMeshes: readonly LiteMesh[] | undefined;
+    private _sceneDisposeObserver: ((scene: Scene) => void) | undefined;
+    private _disposed = false;
+
+    public constructor(lite: LiteAssetContainer, dispose?: () => void, ownedMeshes?: readonly LiteMesh[]) {
         this._lite = lite;
+        this._dispose = dispose;
+        this._ownedMeshes = ownedMeshes ? [...ownedMeshes] : undefined;
     }
 
     public get animationGroups(): AnimationGroup[] {
@@ -74,6 +88,9 @@ export class AssetContainer {
      * same handles `scene.meshes` exposes.
      */
     public get meshes(): Mesh[] {
+        if (this._disposed) {
+            return [...this._meshRegistry.values()];
+        }
         return collectLoadedMeshes(this._lite, this._meshRegistry, this._scene);
     }
 
@@ -84,7 +101,23 @@ export class AssetContainer {
     /** Add every entity, animation group, camera, and clear colour to the scene. */
     public addAllToScene(scene: Scene): void {
         addToScene(scene._lite, this._lite);
+        this._adoptScene(scene);
+    }
+
+    /** @internal Associate an already-added Lite container with its compat scene. */
+    public _adoptScene(scene: Scene): void {
+        if (this._sceneDisposeObserver && this._scene && this._scene !== scene) {
+            this._scene.onDisposeObservable.remove(this._sceneDisposeObserver);
+            this._sceneDisposeObserver = undefined;
+        }
         this._scene = scene;
+        if (this._dispose && !this._sceneDisposeObserver) {
+            this._sceneDisposeObserver = scene.onDisposeObservable.addOnce(() => {
+                this._scene = undefined;
+                this._sceneDisposeObserver = undefined;
+                this._detachFromScene(scene);
+            });
+        }
         // Build/bind the canonical wrappers now that the container belongs to a
         // scene, so `scene.meshes` lists the loaded meshes and later
         // `container.meshes` reads share the same scene-aware handles.
@@ -93,8 +126,68 @@ export class AssetContainer {
     }
 
     public dispose(): void {
-        // Lite owns container GPU resources through the scene; explicit container
-        // disposal is a no-op until removed from the scene.
+        const scene = this._scene;
+        if (scene && this._sceneDisposeObserver) {
+            scene.onDisposeObservable.remove(this._sceneDisposeObserver);
+            this._sceneDisposeObserver = undefined;
+        }
+        this._scene = undefined;
+        if (scene) {
+            this._detachFromScene(scene);
+        } else {
+            try {
+                this._retireMeshWrappers();
+            } finally {
+                this._disposeOnce();
+            }
+        }
+    }
+
+    private _detachFromScene(scene: Scene): void {
+        try {
+            if (this._ownedMeshes) {
+                for (const mesh of this._ownedMeshes) {
+                    setLiteParent(mesh, null);
+                }
+            }
+            removeFromScene(scene._lite, this._lite);
+            if (this._ownedMeshes) {
+                for (const mesh of this._ownedMeshes) {
+                    removeFromScene(scene._lite, mesh);
+                }
+            }
+        } finally {
+            try {
+                this._retireMeshWrappers();
+            } finally {
+                this._disposeOnce();
+            }
+        }
+    }
+
+    private _retireMeshWrappers(): void {
+        let hasError = false;
+        let firstError: unknown;
+        for (const wrapper of this._meshRegistry.values()) {
+            try {
+                wrapper._disposeWrapperOnly();
+            } catch (error) {
+                if (!hasError) {
+                    hasError = true;
+                    firstError = error;
+                }
+            }
+        }
+        if (hasError) {
+            throw firstError;
+        }
+    }
+
+    private _disposeOnce(): void {
+        if (!this._disposed) {
+            this._disposed = true;
+            this._dispose?.();
+        }
     }
 }
 
@@ -125,6 +218,7 @@ export interface ISceneLoaderOptions {
             preprocessUrlAsync?: (url: string) => Promise<string>;
             [option: string]: unknown;
         };
+        usd?: Partial<USDFileLoaderOptions>;
     };
 }
 
@@ -162,13 +256,16 @@ function joinUrl(rootUrl: string, fileName: string): string {
     return rootUrl.endsWith("/") || rootUrl === "" ? rootUrl + fileName : rootUrl + "/" + fileName;
 }
 
-async function load(rootUrl: string, fileName: string, scene: Scene): Promise<AssetContainer> {
+async function load(rootUrl: string, fileName: string, scene: Scene, usdOptions?: Partial<USDFileLoaderOptions>): Promise<AssetContainer> {
     const url = joinUrl(rootUrl, fileName);
     const engine = scene.getEngine()._lite;
     // Detect the format from the path (ignoring query/hash), but hand the full URL
     // to the loader so any query string is preserved.
-    if (!isBabylonUrl(url)) {
+    if (!isBabylonUrl(url) && !isUsdUrl(url)) {
         enableBoneControlForSkinnedAssets();
+    }
+    if (isUsdUrl(url)) {
+        return loadUsdContainer(engine, url, usdOptions);
     }
     const lite = isBabylonUrl(url) ? await loadBabylon(engine, url) : await loadGltf(engine, url);
     return new AssetContainer(lite);
@@ -230,7 +327,7 @@ export async function ImportMeshAsync(source: string, scene: Scene, options?: Im
         return loadSplatResult(url, scene);
     }
     validateGltfOptions(url, options);
-    const container = await loadFromSource(url, scene);
+    const container = await loadFromSource(url, scene, options?.pluginOptions?.usd, options?.onProgress);
     container.addAllToScene(scene);
     return {
         meshes: container.meshes,
@@ -251,7 +348,7 @@ export async function AppendSceneAsync(source: string, scene: Scene, options?: A
         return scene;
     }
     validateGltfOptions(url, options);
-    const container = await loadFromSource(url, scene);
+    const container = await loadFromSource(url, scene, options?.pluginOptions?.usd, options?.onProgress);
     container.addAllToScene(scene);
     return scene;
 }
@@ -260,17 +357,42 @@ export async function AppendSceneAsync(source: string, scene: Scene, options?: A
 export async function LoadAssetContainerAsync(source: string, scene: Scene, options?: LoadAssetContainerOptions): Promise<AssetContainer> {
     const url = joinUrl(options?.rootUrl ?? "", source);
     validateGltfOptions(url, options);
-    return loadFromSource(url, scene);
+    return loadFromSource(url, scene, options?.pluginOptions?.usd, options?.onProgress);
 }
 
 /** @internal Load a glTF/.babylon asset from a single source URL (function-loader form). */
-async function loadFromSource(source: string, scene: Scene): Promise<AssetContainer> {
+async function loadFromSource(
+    source: string,
+    scene: Scene,
+    usdOptions?: Partial<USDFileLoaderOptions>,
+    onProgress?: (event: ISceneLoaderProgressEvent) => void
+): Promise<AssetContainer> {
     const engine = scene.getEngine()._lite;
     // Detect the format from the path (ignoring query/hash), but pass the full URL
     // to the loader so any query string is preserved.
-    if (!isBabylonUrl(source)) {
+    if (!isBabylonUrl(source) && !isUsdUrl(source)) {
         enableBoneControlForSkinnedAssets();
+    }
+    if (isUsdUrl(source)) {
+        return loadUsdContainer(engine, source, usdOptions, onProgress);
     }
     const lite = isBabylonUrl(source) ? await loadBabylon(engine, source) : await loadGltf(engine, source);
     return new AssetContainer(lite);
+}
+
+async function loadUsdContainer(
+    engine: Parameters<typeof loadUsd>[0],
+    source: string,
+    options: Partial<USDFileLoaderOptions> = {},
+    onProgress?: (event: ISceneLoaderProgressEvent) => void
+): Promise<AssetContainer> {
+    const lite = await loadUsd(engine, source, toLiteUsdOptions(resolveUsdOptions(options), undefined, onProgress));
+    const container = new AssetContainer(lite, () => disposeUsd(lite), lite._usdMeshes);
+    try {
+        options.onComplete?.(lite.diagnostics);
+        return container;
+    } catch (error) {
+        container.dispose();
+        throw error;
+    }
 }

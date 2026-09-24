@@ -1205,17 +1205,38 @@ export class Scene extends AbstractScene {
     }
 
     public dispose(): void {
-        this._detachPointerEvents();
-        this.onDisposeObservable.notifyObservers(this);
-        this.onPointerObservable.clear();
-        this._beforeRenderFlushCallbacks.clear();
+        let hasError = false;
+        let firstError: unknown;
+        const runCleanup = (cleanup: () => void): void => {
+            try {
+                cleanup();
+            } catch (error) {
+                if (!hasError) {
+                    hasError = true;
+                    firstError = error;
+                }
+            }
+        };
+
+        runCleanup(() => this._detachPointerEvents());
+        const observerResult = this.onDisposeObservable._notifyObserversSafely(this);
+        if (observerResult.hasError && !hasError) {
+            hasError = true;
+            firstError = observerResult.error;
+        }
+        runCleanup(() => this.onDisposeObservable.clear());
+        runCleanup(() => this.onPointerObservable.clear());
+        runCleanup(() => this._beforeRenderFlushCallbacks.clear());
         if (this._propertyAnimationManager) {
-            clearAnimationManager(this._propertyAnimationManager);
+            runCleanup(() => clearAnimationManager(this._propertyAnimationManager!));
         }
         if (this._blendManager) {
-            clearAnimationManager(this._blendManager);
+            runCleanup(() => clearAnimationManager(this._blendManager!));
         }
         this._runningAnimatables.length = 0;
-        disposeScene(this._lite);
+        runCleanup(() => disposeScene(this._lite));
+        if (hasError) {
+            throw firstError;
+        }
     }
 }

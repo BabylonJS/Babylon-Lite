@@ -146,6 +146,16 @@ export { SceneLoader, AssetContainer, ImportMeshAsync, AppendSceneAsync, LoadAss
 export type { ISceneLoaderProgressEvent, ISceneLoaderOptions, ImportMeshOptions, AppendOptions, LoadAssetContainerOptions } from "./loading/scene-loader.js";
 export { AssetsManager, AbstractAssetTask, CustomAssetTask } from "./loading/assets-manager.js";
 export { KHR_materials_variants } from "./loading/material-variants.js";
+export { USDFileLoader, RegisterUSDFileLoader } from "./loading/usd-file-loader.js";
+export type {
+    USDBinaryInput,
+    USDVirtualFiles,
+    USDLoadProgress,
+    USDImportTimings,
+    USDImportStatistics,
+    USDImportDiagnostics,
+    USDFileLoaderOptions,
+} from "./loading/usd-file-loader.js";
 
 // ─── Picking ─────────────────────────────────────────────────────────
 export { GPUPicker } from "./picking/gpu-picker.js";
@@ -358,9 +368,10 @@ export {
     FluidRenderer,
     FluidRendererSceneComponent,
     RegisterFluidRenderer,
-    USDFileLoader,
-    RegisterUSDFileLoader,
     DitheredTileFadeMaterialPlugin,
+    RootMotionSource,
+    RootMotionClip,
+    RootMotionController,
     FlowGraphValidationSeverity,
     ValidateFlowGraph,
     ValidateFlowGraphWithBlockList,
@@ -379,18 +390,12 @@ export type {
     IGaussianSplattingStreamOptions,
     ISOGLODMetadata,
     IGaussianSplattingStreamingPart,
-    USDBinaryInput,
-    USDVirtualFiles,
-    USDLoadProgress,
-    USDImportTimings,
-    USDImportStatistics,
-    USDImportDiagnostics,
-    USDFileLoaderOptions,
     DitheredTileFadeSupportedMaterial,
     DitheredTileFadeMesh,
     IDitheredTileFadeBounds,
     IFlowGraphValidationIssue,
     IFlowGraphValidationResult,
+    IRootMotionClipOptions,
 } from "./unsupported/unsupported-apis.js";
 export {
     ReflectionProbe,

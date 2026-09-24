@@ -46,8 +46,6 @@ import {
     GaussianSplattingStream,
     AddGaussianSplattingStreamPart,
     AddGaussianSplattingStreamPartAsync,
-    USDFileLoader,
-    RegisterUSDFileLoader,
     Sound,
     PointerDragBehavior,
     BaseSixDofDragBehavior,
@@ -68,6 +66,9 @@ import {
     FluidRenderer,
     FluidRendererSceneComponent,
     RegisterFluidRenderer,
+    RootMotionSource,
+    RootMotionClip,
+    RootMotionController,
     DitheredTileFadeMaterialPlugin,
 } from "../src/unsupported/unsupported-apis";
 import {
@@ -250,20 +251,22 @@ describe("Gaussian Splatting LOD streaming stubs throw", () => {
         expect(() => new GaussianSplattingStream()).toThrow(/GaussianSplattingStream/);
     });
 
-    describe("OpenUSD loader stubs", () => {
-        it("resolves the new loader symbols and reports the subsystem blocker", () => {
-            expect(() => new USDFileLoader()).toThrow(LiteCompatError);
-            expect(() => new USDFileLoader()).toThrow(/OpenUSD WebAssembly worker/);
-            expect(() => RegisterUSDFileLoader()).toThrow(LiteCompatError);
-        });
-    });
-
     it.each([
         ["AddGaussianSplattingStreamPart", () => AddGaussianSplattingStreamPart()],
         ["AddGaussianSplattingStreamPartAsync", () => AddGaussianSplattingStreamPartAsync()],
     ] as Array<[string, () => unknown]>)("%s throws LiteCompatError naming the API", (name, call) => {
         expect(call).toThrow(LiteCompatError);
         expect(call).toThrow(new RegExp(name));
+    });
+});
+
+describe("root motion stubs", () => {
+    it("exports the BJS enum values and names the animation-system blocker", () => {
+        expect(RootMotionSource.None).toBe(0);
+        expect(RootMotionSource.Root).toBe(1);
+        expect(RootMotionSource.FootContact).toBe(2);
+        expect(() => new RootMotionClip({} as never)).toThrow(/mixer writes/);
+        expect(() => new RootMotionController({} as never)).toThrow(/mixer writes/);
     });
 });
 

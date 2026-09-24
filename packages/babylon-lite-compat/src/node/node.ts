@@ -205,6 +205,19 @@ export abstract class Node {
 
     /** @internal Dispose this compat wrapper tree in post-order. */
     public _disposeWrapperTree(doNotRecurse = false): void {
+        this._disposeWrapperTreeInternal(doNotRecurse, true);
+    }
+
+    /**
+     * @internal Retire a loader-owned wrapper without disposing its Lite node.
+     * Asset-container teardown removes the native nodes as one ownership unit.
+     */
+    public _disposeWrapperOnly(): void {
+        this._disposeWrapperTreeInternal(true, false);
+    }
+
+    /** @internal Shared wrapper lifecycle for ordinary and container-owned disposal. */
+    private _disposeWrapperTreeInternal(doNotRecurse: boolean, disposeSelf: boolean): void {
         if (this._disposed) {
             return;
         }
@@ -214,17 +227,42 @@ export abstract class Node {
             }
         } else {
             for (const child of [...this._children]) {
-                child._disposeWrapperTree();
+                child._disposeWrapperTreeInternal(false, disposeSelf);
             }
         }
-        this._disposeSelf(doNotRecurse);
+        if (disposeSelf) {
+            this._disposeSelf(doNotRecurse);
+        }
         this._disposed = true;
-        this.onDisposeObservable.notifyObservers(this);
-        this.onDisposeObservable.clear();
-        // Detach from the parent's child registry, then drop this node from its
-        // scene's camera / light / mesh registries.
-        this._linkParent(null);
-        this._scene?._unregisterNode(this);
+        let hasError = false;
+        let firstError: unknown;
+        try {
+            this.onDisposeObservable.notifyObservers(this);
+        } catch (error) {
+            hasError = true;
+            firstError = error;
+        } finally {
+            this.onDisposeObservable.clear();
+        }
+        try {
+            this._linkParent(null);
+        } catch (error) {
+            if (!hasError) {
+                hasError = true;
+                firstError = error;
+            }
+        }
+        try {
+            this._scene?._unregisterNode(this);
+        } catch (error) {
+            if (!hasError) {
+                hasError = true;
+                firstError = error;
+            }
+        }
+        if (hasError) {
+            throw firstError;
+        }
     }
 
     /** @internal Hook for subclasses to wire the parent link into the Lite scene graph. */
