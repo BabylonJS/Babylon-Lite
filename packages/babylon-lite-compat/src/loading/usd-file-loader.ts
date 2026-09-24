@@ -5,7 +5,7 @@ import type { Mesh } from "../meshes/meshes.js";
 import type { Scene } from "../scene/scene.js";
 import type { Skeleton } from "../bones/skeleton.js";
 import { AssetContainer, type ISceneLoaderProgressEvent } from "./scene-loader.js";
-import { toLiteUsdOptions, USD_RUNTIME_BASE_URL, USD_RUNTIME_NAMES } from "./usd-options.js";
+import { getUsdDefaultConfiguration, resolveUsdOptions, setUsdDefaultConfiguration, toLiteUsdOptions } from "./usd-options.js";
 import type { USDFileLoaderOptions } from "./usd-options.js";
 export type { USDBinaryInput, USDVirtualFiles, USDLoadProgress, USDImportTimings, USDImportStatistics, USDImportDiagnostics, USDFileLoaderOptions } from "./usd-options.js";
 
@@ -26,12 +26,13 @@ interface USDImportResult {
 }
 
 export class USDFileLoader {
-    public static DefaultConfiguration = {
-        glueUrl: `${USD_RUNTIME_BASE_URL}${USD_RUNTIME_NAMES.glueUrl}`,
-        wasmUrl: `${USD_RUNTIME_BASE_URL}${USD_RUNTIME_NAMES.wasmUrl}`,
-        dataUrl: `${USD_RUNTIME_BASE_URL}${USD_RUNTIME_NAMES.dataUrl}`,
-        workerUrl: `${USD_RUNTIME_BASE_URL}${USD_RUNTIME_NAMES.workerUrl}`,
-    };
+    public static get DefaultConfiguration(): Required<Pick<USDFileLoaderOptions, "workerUrl" | "glueUrl" | "wasmUrl" | "dataUrl">> {
+        return getUsdDefaultConfiguration();
+    }
+
+    public static set DefaultConfiguration(configuration: Required<Pick<USDFileLoaderOptions, "workerUrl" | "glueUrl" | "wasmUrl" | "dataUrl">>) {
+        setUsdDefaultConfiguration(configuration);
+    }
 
     public readonly name = "usd";
     public readonly extensions = {
@@ -106,15 +107,22 @@ export class USDFileLoader {
             const lite = await loadUsd(
                 scene.getEngine()._lite,
                 requireBinary(data),
-                toLiteUsdOptions({ ...this._options, rootFileName: this._options.rootFileName ?? fileName }, controller.signal, onProgress)
+                toLiteUsdOptions(resolveUsdOptions({ ...this._options, rootFileName: this._options.rootFileName ?? fileName }), controller.signal, onProgress)
             );
             const container = new AssetContainer(lite, () => disposeUsd(lite));
-            if (add) {
-                addToScene(scene._lite, lite);
-                container._adoptScene(scene);
+            try {
+                controller.signal.throwIfAborted();
+                if (add) {
+                    addToScene(scene._lite, lite);
+                    container._adoptScene(scene);
+                }
+                this._options.onComplete?.(lite.diagnostics);
+                controller.signal.throwIfAborted();
+                return container;
+            } catch (error) {
+                container.dispose();
+                throw error;
             }
-            this._options.onComplete?.(lite.diagnostics);
-            return container;
         } finally {
             this._activeLoads.delete(controller);
         }

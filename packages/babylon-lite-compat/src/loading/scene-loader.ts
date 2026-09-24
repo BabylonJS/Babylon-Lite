@@ -19,7 +19,7 @@ import type { Mesh, TransformNode } from "../meshes/meshes.js";
 import type { Scene } from "../scene/scene.js";
 import { Skeleton } from "../bones/skeleton.js";
 import type { USDFileLoaderOptions } from "./usd-file-loader.js";
-import { toLiteUsdOptions } from "./usd-options.js";
+import { resolveUsdOptions, toLiteUsdOptions } from "./usd-options.js";
 
 /**
  * Babylon.js registers built-in loader factories through a global plugin
@@ -66,6 +66,8 @@ export class AssetContainer {
     private _skeletons: Skeleton[] | undefined;
 
     private readonly _dispose: (() => void) | undefined;
+    private _sceneDisposeObserver: ((scene: Scene) => void) | undefined;
+    private _disposed = false;
 
     public constructor(lite: LiteAssetContainer, dispose?: () => void) {
         this._lite = lite;
@@ -98,7 +100,18 @@ export class AssetContainer {
 
     /** @internal Associate an already-added Lite container with its compat scene. */
     public _adoptScene(scene: Scene): void {
+        if (this._sceneDisposeObserver && this._scene && this._scene !== scene) {
+            this._scene.onDisposeObservable.remove(this._sceneDisposeObserver);
+            this._sceneDisposeObserver = undefined;
+        }
         this._scene = scene;
+        if (this._dispose && !this._sceneDisposeObserver) {
+            this._sceneDisposeObserver = scene.onDisposeObservable.addOnce(() => {
+                this._scene = undefined;
+                this._sceneDisposeObserver = undefined;
+                this._disposeOnce();
+            });
+        }
         // Build/bind the canonical wrappers now that the container belongs to a
         // scene, so `scene.meshes` lists the loaded meshes and later
         // `container.meshes` reads share the same scene-aware handles.
@@ -107,11 +120,26 @@ export class AssetContainer {
     }
 
     public dispose(): void {
-        if (this._scene) {
-            removeFromScene(this._scene._lite, this._lite);
-            this._scene = undefined;
+        const scene = this._scene;
+        if (scene && this._sceneDisposeObserver) {
+            scene.onDisposeObservable.remove(this._sceneDisposeObserver);
+            this._sceneDisposeObserver = undefined;
         }
-        this._dispose?.();
+        this._scene = undefined;
+        try {
+            if (scene) {
+                removeFromScene(scene._lite, this._lite);
+            }
+        } finally {
+            this._disposeOnce();
+        }
+    }
+
+    private _disposeOnce(): void {
+        if (!this._disposed) {
+            this._disposed = true;
+            this._dispose?.();
+        }
     }
 }
 
@@ -189,9 +217,7 @@ async function load(rootUrl: string, fileName: string, scene: Scene, usdOptions?
         enableBoneControlForSkinnedAssets();
     }
     if (isUsdUrl(url)) {
-        const lite = await loadUsd(engine, url, toLiteUsdOptions(usdOptions ?? {}));
-        usdOptions?.onComplete?.(lite.diagnostics);
-        return new AssetContainer(lite, () => disposeUsd(lite));
+        return loadUsdContainer(engine, url, usdOptions);
     }
     const lite = isBabylonUrl(url) ? await loadBabylon(engine, url) : await loadGltf(engine, url);
     return new AssetContainer(lite);
@@ -295,10 +321,20 @@ async function loadFromSource(source: string, scene: Scene, usdOptions?: Partial
         enableBoneControlForSkinnedAssets();
     }
     if (isUsdUrl(source)) {
-        const lite = await loadUsd(engine, source, toLiteUsdOptions(usdOptions ?? {}));
-        usdOptions?.onComplete?.(lite.diagnostics);
-        return new AssetContainer(lite, () => disposeUsd(lite));
+        return loadUsdContainer(engine, source, usdOptions);
     }
     const lite = isBabylonUrl(source) ? await loadBabylon(engine, source) : await loadGltf(engine, source);
     return new AssetContainer(lite);
+}
+
+async function loadUsdContainer(engine: Parameters<typeof loadUsd>[0], source: string, options: Partial<USDFileLoaderOptions> = {}): Promise<AssetContainer> {
+    const lite = await loadUsd(engine, source, toLiteUsdOptions(resolveUsdOptions(options)));
+    const container = new AssetContainer(lite, () => disposeUsd(lite));
+    try {
+        options.onComplete?.(lite.diagnostics);
+        return container;
+    } catch (error) {
+        container.dispose();
+        throw error;
+    }
 }
