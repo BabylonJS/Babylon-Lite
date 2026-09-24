@@ -102,6 +102,38 @@ describe("AssetContainer.addAllToScene", () => {
         expect(container.meshes).toEqual(wrappers);
     });
 
+    it("finishes wrapper and USD teardown before rethrowing the first disposal observer error", () => {
+        const firstMesh: FakeMesh = { name: "First", children: [], parent: null, _gpu: {}, material: {} };
+        const secondMesh: FakeMesh = { name: "Second", children: [], parent: null, _gpu: {}, material: {} };
+        const root = { name: "__root__", children: [firstMesh, secondMesh] };
+        const lite = { entities: [root] } as unknown as LiteAssetContainer;
+        const disposeUsd = vi.fn();
+        const container = new AssetContainer(lite, disposeUsd, [firstMesh as unknown as LiteMesh, secondMesh as unknown as LiteMesh]);
+        const testScene = new TestScene();
+        const scene = testScene as unknown as Scene;
+
+        container.addAllToScene(scene);
+        const wrappers = container.meshes;
+        const laterWrapperObserver = vi.fn();
+        wrappers[0]!.onDisposeObservable.add(() => {
+            throw new Error("first observer failed");
+        });
+        wrappers[1]!.onDisposeObservable.add(() => {
+            throw new Error("second observer failed");
+        });
+        wrappers[2]!.onDisposeObservable.add(laterWrapperObserver);
+
+        expect(() => container.dispose()).toThrow("first observer failed");
+
+        expect(disposeUsd).toHaveBeenCalledOnce();
+        expect(wrappers.every((wrapper) => wrapper.isDisposed())).toBe(true);
+        expect(wrappers.every((wrapper) => !wrapper.onDisposeObservable.hasObservers())).toBe(true);
+        expect(laterWrapperObserver).toHaveBeenCalledOnce();
+        expect(testScene.meshes).toEqual([]);
+        expect(testScene.getMeshByName("First")).toBeNull();
+        expect(testScene.getMeshById("Second")).toBeNull();
+    });
+
     it("does not create wrappers after disposing an unread asset container", () => {
         const mesh: FakeMesh = { name: "Cube", children: [], parent: null, _gpu: {}, material: {} };
         const root = { name: "__root__", children: [mesh] };

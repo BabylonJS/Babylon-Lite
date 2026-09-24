@@ -166,8 +166,16 @@ export class AssetContainer {
     }
 
     private _retireMeshWrappers(): void {
+        let firstError: unknown;
         for (const wrapper of this._meshRegistry.values()) {
-            wrapper._disposeWrapperOnly();
+            try {
+                wrapper._disposeWrapperOnly();
+            } catch (error) {
+                firstError ??= error;
+            }
+        }
+        if (firstError !== undefined) {
+            throw firstError;
         }
     }
 

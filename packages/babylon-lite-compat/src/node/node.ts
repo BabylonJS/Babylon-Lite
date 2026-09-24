@@ -234,12 +234,27 @@ export abstract class Node {
             this._disposeSelf(doNotRecurse);
         }
         this._disposed = true;
-        this.onDisposeObservable.notifyObservers(this);
-        this.onDisposeObservable.clear();
-        // Detach from the parent's child registry, then drop this node from its
-        // scene's camera / light / mesh registries.
-        this._linkParent(null);
-        this._scene?._unregisterNode(this);
+        let firstError: unknown;
+        try {
+            this.onDisposeObservable.notifyObservers(this);
+        } catch (error) {
+            firstError = error;
+        } finally {
+            this.onDisposeObservable.clear();
+        }
+        try {
+            this._linkParent(null);
+        } catch (error) {
+            firstError ??= error;
+        }
+        try {
+            this._scene?._unregisterNode(this);
+        } catch (error) {
+            firstError ??= error;
+        }
+        if (firstError !== undefined) {
+            throw firstError;
+        }
     }
 
     /** @internal Hook for subclasses to wire the parent link into the Lite scene graph. */
