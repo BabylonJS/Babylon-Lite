@@ -168,6 +168,28 @@ describe("SPLATFileLoader", () => {
         expect(child._node.worldMatrix[12]).toBeCloseTo(7);
     });
 
+    it("ignores stale Lite children after a public reparent between bakes", () => {
+        const target = new GaussianSplattingMesh("target", null, fakeScene());
+        target.position.x = 5;
+        target._adopt(fakeLiteMesh());
+        const child = new TransformNode("child");
+        child.position.x = 2;
+        child.parent = target;
+
+        target.bakeCurrentTransformIntoVertices();
+
+        const otherParent = new TransformNode("otherParent");
+        otherParent.position.x = 10;
+        child.parent = otherParent;
+        const reparentedWorldX = child._node.worldMatrix[12]!;
+
+        target.bakeCurrentTransformIntoVertices();
+
+        expect(child.parent).toBe(otherParent);
+        expect(child._node.parent).toBe(otherParent._node);
+        expect(child._node.worldMatrix[12]).toBeCloseTo(reparentedWorldX);
+    });
+
     it("rejects an already-loaded target before creating another Lite mesh", async () => {
         const target = { _pickLiteNode: fakeLiteMesh(), _adopt: vi.fn(), name: "target" };
         const loader = new SPLATFileLoader({ gaussianSplattingMesh: target as never });
