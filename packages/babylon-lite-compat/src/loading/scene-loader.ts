@@ -14,11 +14,11 @@ import type { AssetContainer as LiteAssetContainer, AnimationGroup, Mesh as Lite
 
 import { unsupported } from "../error.js";
 import { collectLoadedMeshes, type LoadedMeshRegistry } from "./loaded-mesh.js";
-import { GaussianSplattingMesh } from "../meshes/gaussian-splatting.js";
 import type { Mesh, TransformNode } from "../meshes/meshes.js";
 import type { Scene } from "../scene/scene.js";
 import { Skeleton } from "../bones/skeleton.js";
 import type { USDFileLoaderOptions } from "./usd-file-loader.js";
+import { SPLATFileLoader, type SPLATLoadingOptions } from "./splat-file-loader.js";
 import { resolveUsdOptions, toLiteUsdOptions } from "./usd-options.js";
 
 /**
@@ -36,7 +36,7 @@ function urlPath(url: string): string {
 /** Splat asset extensions Babylon Lite can parse (`loadSplat` / `loadSOG` / `loadSPZ`). */
 function isSplatUrl(url: string): boolean {
     const u = urlPath(url).toLowerCase();
-    return u.endsWith(".ply") || u.endsWith(".splat") || u.endsWith(".sog") || u.endsWith(".spz");
+    return u.endsWith(".ply") || u.endsWith(".splat") || u.endsWith(".sog") || u.endsWith(".spz") || u.endsWith(".json");
 }
 
 /** True when a URL points at a `.babylon` file, ignoring any query string or hash. */
@@ -46,12 +46,6 @@ function isBabylonUrl(url: string): boolean {
 
 function isUsdUrl(url: string): boolean {
     return /\.(?:usd|usda|usdc|usdz)$/i.test(urlPath(url));
-}
-
-/** Last path segment of a URL, used to name a loaded Gaussian-Splatting mesh. */
-function baseName(url: string): string {
-    const path = urlPath(url);
-    return path.slice(path.lastIndexOf("/") + 1) || "splat";
 }
 
 export class AssetContainer {
@@ -218,6 +212,7 @@ export interface ISceneLoaderOptions {
             preprocessUrlAsync?: (url: string) => Promise<string>;
             [option: string]: unknown;
         };
+        splat?: Partial<Readonly<SPLATLoadingOptions>>;
         usd?: Partial<USDFileLoaderOptions>;
     };
 }
@@ -240,9 +235,8 @@ function validateGltfOptions(source: string, options: ISceneLoaderOptions | unde
 }
 
 /** @internal Load a splat URL into a `GaussianSplattingMesh` (shared by every loader entry point). */
-async function loadSplatResult(url: string, scene: Scene): Promise<ImportResult> {
-    const gs = new GaussianSplattingMesh(baseName(url), null, scene);
-    await gs.loadFileAsync(url);
+async function loadSplatResult(url: string, scene: Scene, options?: Partial<Readonly<SPLATLoadingOptions>>): Promise<ImportResult> {
+    const gs = await new SPLATFileLoader(options)._loadUrlAsync(scene, url);
     return { meshes: [gs], particleSystems: [], skeletons: [], animationGroups: [], transformNodes: [], lights: [] };
 }
 
@@ -306,6 +300,9 @@ export const SceneLoader = {
 
     /** Load an asset into a container without adding it to the scene. */
     async LoadAssetContainerAsync(rootUrl: string, sceneFilename: string, scene: Scene): Promise<AssetContainer> {
+        if (isSplatUrl(joinUrl(rootUrl, sceneFilename))) {
+            return new SPLATFileLoader().loadAssetContainerAsync(scene, "", rootUrl);
+        }
         return load(rootUrl, sceneFilename, scene);
     },
 
@@ -324,7 +321,7 @@ export const SceneLoader = {
 export async function ImportMeshAsync(source: string, scene: Scene, options?: ImportMeshOptions): Promise<ImportResult> {
     const url = joinUrl(options?.rootUrl ?? "", source);
     if (isSplatUrl(url)) {
-        return loadSplatResult(url, scene);
+        return loadSplatResult(url, scene, options?.pluginOptions?.splat);
     }
     validateGltfOptions(url, options);
     const container = await loadFromSource(url, scene, options?.pluginOptions?.usd, options?.onProgress);
@@ -344,7 +341,7 @@ export async function ImportMeshAsync(source: string, scene: Scene, options?: Im
 export async function AppendSceneAsync(source: string, scene: Scene, options?: AppendOptions): Promise<Scene> {
     const url = joinUrl(options?.rootUrl ?? "", source);
     if (isSplatUrl(url)) {
-        await loadSplatResult(url, scene);
+        await loadSplatResult(url, scene, options?.pluginOptions?.splat);
         return scene;
     }
     validateGltfOptions(url, options);
@@ -356,6 +353,9 @@ export async function AppendSceneAsync(source: string, scene: Scene, options?: A
 /** Babylon.js `LoadAssetContainerAsync(source, scene, options?)` — loads into a container without adding. */
 export async function LoadAssetContainerAsync(source: string, scene: Scene, options?: LoadAssetContainerOptions): Promise<AssetContainer> {
     const url = joinUrl(options?.rootUrl ?? "", source);
+    if (isSplatUrl(url)) {
+        return new SPLATFileLoader(options?.pluginOptions?.splat).loadAssetContainerAsync(scene, "", options?.rootUrl ?? "");
+    }
     validateGltfOptions(url, options);
     return loadFromSource(url, scene, options?.pluginOptions?.usd, options?.onProgress);
 }

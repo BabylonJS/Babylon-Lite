@@ -155,8 +155,8 @@ export class GaussianSplattingMesh extends TransformNode {
         return this;
     }
 
-    /** @internal Adopt a loaded Lite splat node: carry over placeholder transforms + name, and register on the scene. */
-    private _adopt(lite: LiteGsMesh): void {
+    /** @internal Adopt a loaded Lite splat node from either the mesh or loader-plugin API. */
+    public _adopt(lite: LiteGsMesh): void {
         const placeholder = this._node;
         lite.position.set(placeholder.position.x, placeholder.position.y, placeholder.position.z);
         lite.scaling.set(placeholder.scaling.x, placeholder.scaling.y, placeholder.scaling.z);

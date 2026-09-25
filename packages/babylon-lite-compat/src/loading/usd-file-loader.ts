@@ -130,3 +130,6 @@ export class USDFileLoader {
 }
 
 export function RegisterUSDFileLoader(): void {}
+
+/** @internal Babylon.js pure-registration hook; Lite has no global loader dependency registry. */
+export function _RegisterUSDLoaderDependencies(): void {}
