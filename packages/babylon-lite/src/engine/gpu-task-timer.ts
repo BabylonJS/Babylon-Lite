@@ -39,6 +39,19 @@ interface PatchedSurfaceList {
     readonly push: (...items: SurfaceContext[]) => number;
 }
 
+interface ActiveTaskTiming {
+    readonly beginQueryIndex: number;
+    readonly endQueryIndex: number;
+    passCount: number;
+    conflicted: boolean;
+}
+
+interface PatchedEncoderMethods {
+    readonly encoder: GPUCommandEncoder;
+    readonly beginRenderPass: PropertyDescriptor | undefined;
+    readonly beginComputePass: PropertyDescriptor | undefined;
+}
+
 /** @internal GPU resources/state for opt-in per-frame-graph-task timestamp queries. */
 export interface GpuTaskTimer {
     readonly device: GPUDevice;
@@ -52,6 +65,9 @@ export interface GpuTaskTimer {
     readonly patchedSurfaceLists: PatchedSurfaceList[];
     readonly taskCapacity: number;
     currentEncoder: GPUCommandEncoder | null;
+    patchedEncoderMethods: PatchedEncoderMethods | null;
+    activeTaskTiming: ActiveTaskTiming | null;
+    nextTaskIndex: number;
     frameIndex: number;
     droppedTaskCount: number;
     inFlight: number;
@@ -80,6 +96,9 @@ export function createGpuTaskTimer(device: GPUDevice): GpuTaskTimer | null {
         patchedSurfaceLists: [],
         taskCapacity: INITIAL_TASK_CAPACITY,
         currentEncoder: null,
+        patchedEncoderMethods: null,
+        activeTaskTiming: null,
+        nextTaskIndex: 0,
         frameIndex: 0,
         droppedTaskCount: 0,
         inFlight: 0,
@@ -179,7 +198,7 @@ function restoreWrappedFrameGraphs(timer: GpuTaskTimer, removePostSubmit: () => 
         wrapped.graph.execute = wrapped.execute;
     }
     timer.wrappedGraphs.length = 0;
-    timer.currentEncoder = null;
+    restoreTimingEncoder(timer);
     removePostSubmit();
 }
 
@@ -204,29 +223,36 @@ function executeTimedFrameGraph(timer: GpuTaskTimer, graph: FrameGraph): number 
     return drawCalls;
 }
 
-/** Execute one frame-graph task bracketed by timestamp writes. */
+/** Execute one frame-graph task with timestamps attached to its real GPU passes. */
 function gpuTaskTimerExecute(timer: GpuTaskTimer, task: Task): number {
-    const encoder = task.engine._currentEncoder;
+    const engine = task.engine;
+    const encoder = engine._currentEncoder;
     if (timer.currentEncoder !== encoder) {
         beginTaskTimingFrame(timer, encoder);
     }
+    const taskIndex = timer.nextTaskIndex++;
     if (timer.skipFrame) {
         return executeTask(task);
     }
 
     const measuredCount = timer.records.length;
-    const taskIndex = measuredCount + timer.droppedTaskCount;
     if (measuredCount >= timer.taskCapacity) {
         timer.droppedTaskCount++;
         return executeTask(task);
     }
     const beginQueryIndex = measuredCount * 2;
     const endQueryIndex = beginQueryIndex + 1;
-    encoder.beginComputePass({ timestampWrites: { querySet: timer.querySet, beginningOfPassWriteIndex: beginQueryIndex } }).end();
-    const drawCalls = executeTask(task);
-    encoder.beginComputePass({ timestampWrites: { querySet: timer.querySet, endOfPassWriteIndex: endQueryIndex } }).end();
-    timer.records.push({ index: taskIndex, name: task.name, beginQueryIndex, endQueryIndex });
-    return drawCalls;
+    const timing: ActiveTaskTiming = { beginQueryIndex, endQueryIndex, passCount: 0, conflicted: false };
+    timer.activeTaskTiming = timing;
+    try {
+        const drawCalls = executeTask(task);
+        if (timing.passCount > 0 && !timing.conflicted) {
+            timer.records.push({ index: taskIndex, name: task.name, beginQueryIndex, endQueryIndex });
+        }
+        return drawCalls;
+    } finally {
+        timer.activeTaskTiming = null;
+    }
 }
 
 function executeTask(task: Task): number {
@@ -241,10 +267,66 @@ function executeTask(task: Task): number {
 }
 
 function beginTaskTimingFrame(timer: GpuTaskTimer, encoder: GPUCommandEncoder): void {
+    restoreTimingEncoder(timer);
     timer.currentEncoder = encoder;
+    timer.patchedEncoderMethods = patchTimingEncoder(timer, encoder);
     timer.records.length = 0;
+    timer.nextTaskIndex = 0;
     timer.droppedTaskCount = 0;
     timer.skipFrame = timer.inFlight > MAX_IN_FLIGHT_READBACKS;
+}
+
+function patchTimingEncoder(timer: GpuTaskTimer, encoder: GPUCommandEncoder): PatchedEncoderMethods {
+    const beginRenderPass = encoder.beginRenderPass.bind(encoder);
+    const beginComputePass = encoder.beginComputePass.bind(encoder);
+    const renderDescriptor = Object.getOwnPropertyDescriptor(encoder, "beginRenderPass");
+    const computeDescriptor = Object.getOwnPropertyDescriptor(encoder, "beginComputePass");
+    if (!Reflect.set(encoder, "beginRenderPass", (descriptor: GPURenderPassDescriptor) => beginRenderPass(withTaskTimestamps(timer, descriptor)), encoder)) {
+        throw new Error("GPU task timing could not instrument render passes on this command encoder.");
+    }
+    if (!Reflect.set(encoder, "beginComputePass", (descriptor?: GPUComputePassDescriptor) => beginComputePass(withTaskTimestamps(timer, descriptor)), encoder)) {
+        restoreEncoderMethod(encoder, "beginRenderPass", renderDescriptor);
+        throw new Error("GPU task timing could not instrument compute passes on this command encoder.");
+    }
+    return { encoder, beginRenderPass: renderDescriptor, beginComputePass: computeDescriptor };
+}
+
+function withTaskTimestamps<T extends GPURenderPassDescriptor | GPUComputePassDescriptor | undefined>(timer: GpuTaskTimer, descriptor: T): T {
+    const timing = timer.activeTaskTiming;
+    if (!timing || timing.conflicted) {
+        return descriptor;
+    }
+    if (descriptor?.timestampWrites !== undefined) {
+        timing.conflicted = true;
+        return descriptor;
+    }
+    const timestampWrites: NonNullable<GPUComputePassDescriptor["timestampWrites"]> = {
+        querySet: timer.querySet,
+        endOfPassWriteIndex: timing.endQueryIndex,
+    };
+    if (timing.passCount++ === 0) {
+        timestampWrites.beginningOfPassWriteIndex = timing.beginQueryIndex;
+    }
+    return { ...descriptor, timestampWrites } as T;
+}
+
+function restoreTimingEncoder(timer: GpuTaskTimer): void {
+    const patched = timer.patchedEncoderMethods;
+    if (patched) {
+        restoreEncoderMethod(patched.encoder, "beginRenderPass", patched.beginRenderPass);
+        restoreEncoderMethod(patched.encoder, "beginComputePass", patched.beginComputePass);
+    }
+    timer.currentEncoder = null;
+    timer.patchedEncoderMethods = null;
+    timer.activeTaskTiming = null;
+}
+
+function restoreEncoderMethod(encoder: GPUCommandEncoder, property: "beginRenderPass" | "beginComputePass", descriptor: PropertyDescriptor | undefined): void {
+    if (descriptor) {
+        Object.defineProperty(encoder, property, descriptor);
+    } else {
+        Reflect.deleteProperty(encoder, property);
+    }
 }
 
 /** Resolve this frame's task timestamps after renderFrame has submitted the command buffer. */
@@ -253,7 +335,12 @@ function finishTaskTimingFrame(timer: GpuTaskTimer, publish: (snapshot: RenderTa
         return;
     }
     timer.frameIndex++;
-    const taskCount = timer.records.length;
+    const records = timer.records.slice();
+    const taskCount = records.length;
+    const droppedTaskCount = timer.droppedTaskCount;
+    timer.records.length = 0;
+    timer.droppedTaskCount = 0;
+    restoreTimingEncoder(timer);
     if (timer.skipFrame || taskCount === 0 || timer.inFlight > MAX_IN_FLIGHT_READBACKS) {
         return;
     }
@@ -271,8 +358,8 @@ function finishTaskTimingFrame(timer: GpuTaskTimer, publish: (snapshot: RenderTa
         buffer: readback,
         byteLength,
         frameIndex: timer.frameIndex,
-        records: timer.records.slice(),
-        droppedTaskCount: timer.droppedTaskCount,
+        records,
+        droppedTaskCount,
         publish,
     });
 }
@@ -295,18 +382,23 @@ async function finishTaskTimingReadback(timer: GpuTaskTimer, pending: PendingTas
         }
         const raw = new BigUint64Array(buffer.getMappedRange(0, pending.byteLength));
         const tasks: RenderTaskGpuTiming[] = [];
+        let earliestBegin: bigint | null = null;
+        let latestEnd: bigint | null = null;
         for (const record of pending.records) {
             const begin = raw[record.beginQueryIndex]!;
             const end = raw[record.endQueryIndex]!;
             if (end >= begin) {
                 tasks.push({ index: record.index, name: record.name, durationMs: Number(end - begin) / 1e6 });
+                earliestBegin = earliestBegin === null || begin < earliestBegin ? begin : earliestBegin;
+                latestEnd = latestEnd === null || end > latestEnd ? end : latestEnd;
             }
         }
+        const totalDurationMs = earliestBegin === null || latestEnd === null ? 0 : Number(latestEnd - earliestBegin) / 1e6;
         buffer.unmap();
         timer.pendingReadbacks.delete(buffer);
         timer.readbackPool.push(buffer);
         timer.inFlight--;
-        pending.publish(makeTimingSnapshot("available", true, true, pending.frameIndex, tasks, pending.droppedTaskCount));
+        pending.publish(makeTimingSnapshot("available", true, true, pending.frameIndex, tasks, pending.droppedTaskCount, totalDurationMs));
     } catch (error) {
         if (timer.disposed) {
             return;
@@ -314,7 +406,7 @@ async function finishTaskTimingReadback(timer: GpuTaskTimer, pending: PendingTas
         timer.pendingReadbacks.delete(buffer);
         timer.inFlight--;
         buffer.destroy();
-        pending.publish(makeTimingSnapshot("error", true, true, pending.frameIndex, [], pending.droppedTaskCount, readbackErrorMessage(error)));
+        pending.publish(makeTimingSnapshot("error", true, true, pending.frameIndex, [], pending.droppedTaskCount, 0, readbackErrorMessage(error)));
     }
 }
 
