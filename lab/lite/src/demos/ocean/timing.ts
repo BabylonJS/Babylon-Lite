@@ -71,16 +71,12 @@ export function createOceanTimingPanel(engine: EngineContext): OceanTimingPanel 
             const merge = taskDuration(snapshot, "ocean-merge");
             const mipmaps =
                 taskDuration(snapshot, "ocean-derivative-mipmaps") + taskDuration(snapshot, "ocean-turbulence-a-mipmaps") + taskDuration(snapshot, "ocean-turbulence-b-mipmaps");
-            let total = 0;
-            for (const task of snapshot.tasks) {
-                total += task.durationMs;
-            }
             spectrumValue.textContent = formatMs(spectrum);
             fftValue.textContent = formatMs(fft);
             mergeValue.textContent = formatMs(merge);
             mipmapsValue.textContent = formatMs(mipmaps);
             computeValue.textContent = formatMs(spectrum + fft + merge);
-            totalValue.textContent = formatMs(total);
+            totalValue.textContent = formatMs(snapshot.totalDurationMs);
             statusValue.textContent = snapshot.droppedTaskCount > 0 ? `${snapshot.droppedTaskCount} task(s) not timed` : `GPU frame ${snapshot.frameIndex}`;
         },
     };
