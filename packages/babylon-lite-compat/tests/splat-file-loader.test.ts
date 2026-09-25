@@ -10,21 +10,19 @@ vi.mock("babylon-lite", async (importActual) => {
     };
 });
 
-import { loadSOG, loadSPZ, loadSplat } from "babylon-lite";
+import { createTransformNode, loadSOG, loadSPZ, loadSplat } from "babylon-lite";
 import type { GaussianSplattingMesh as LiteGaussianSplattingMesh } from "babylon-lite";
 
 import { LiteCompatError } from "../src/error";
 import { SPLATFileLoader, RegisterSPLATFileLoader } from "../src/loading/splat-file-loader";
+import { GaussianSplattingMesh } from "../src/meshes/gaussian-splatting";
 import type { Scene } from "../src/scene/scene";
 
-function fakeLiteMesh(): LiteGaussianSplattingMesh {
-    return {
-        name: "loaded",
-        position: { x: 0, y: 0, z: 0, set: vi.fn() },
-        rotation: { x: 0, y: 0, z: 0, set: vi.fn() },
-        scaling: { x: 1, y: 1, z: 1, set: vi.fn() },
-        _orderPool: [],
-    } as unknown as LiteGaussianSplattingMesh;
+function fakeLiteMesh(rotationX = 0): LiteGaussianSplattingMesh {
+    const node = createTransformNode("loaded");
+    node.rotation.x = rotationX;
+    (node as unknown as { _orderPool: unknown[] })._orderPool = [];
+    return node as unknown as LiteGaussianSplattingMesh;
 }
 
 function fakeScene(): Scene {
@@ -124,6 +122,24 @@ describe("SPLATFileLoader", () => {
 
         expect(target._adopt).toHaveBeenCalledWith(loaded);
         expect(result.meshes).toEqual([target]);
+    });
+
+    it.each([
+        ["SOG", new Uint8Array([0x50, 0x4b, 0x03, 0x04]), loadSOG],
+        ["SPZ", new Uint8Array([0x4e, 0x47, 0x53, 0x50]), loadSPZ],
+    ] as const)("composes an existing target transform with the native %s orientation", async (_format, data, expectedLoader) => {
+        const scene = fakeScene();
+        const target = new GaussianSplattingMesh("target", null, scene);
+        target.rotation.x = 0.25;
+        const loaded = fakeLiteMesh(Math.PI);
+        vi.mocked(expectedLoader).mockResolvedValue(loaded);
+
+        const result = await new SPLATFileLoader({ gaussianSplattingMesh: target }).importMeshAsync(null, scene, data, "");
+
+        expect(result.meshes).toEqual([target]);
+        expect(loaded.rotation.x).toBeCloseTo(Math.PI);
+        expect(loaded.parent).toBe(target._node);
+        expect(target.rotation.x).toBeCloseTo(0.25);
     });
 
     it("rejects an already-loaded target before creating another Lite mesh", async () => {
