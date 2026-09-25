@@ -1,10 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LoadUsdOptions } from "babylon-lite";
 
-const { addToScene, disposeUsd, loadGltf, loadUsd, removeFromScene } = vi.hoisted(() => ({
+const { addToScene, disposeUsd, loadGltf, loadSplat, loadUsd, removeFromScene } = vi.hoisted(() => ({
     addToScene: vi.fn(),
     disposeUsd: vi.fn(),
     loadGltf: vi.fn(async () => ({ animationGroups: [] })),
+    loadSplat: vi.fn(async () => ({
+        name: "loaded",
+        position: { x: 0, y: 0, z: 0, set: vi.fn() },
+        rotation: { x: 0, y: 0, z: 0, set: vi.fn() },
+        scaling: { x: 1, y: 1, z: 1, set: vi.fn() },
+        _orderPool: [],
+    })),
     loadUsd: vi.fn(async () => ({ entities: [], diagnostics: { timings: {}, statistics: {}, missingAssets: [] }, _usdMeshes: [], _usdTextures: [] })),
     removeFromScene: vi.fn(),
 }));
@@ -14,6 +21,7 @@ vi.mock("babylon-lite", async (importOriginal) => ({
     addToScene,
     disposeUsd,
     loadGltf,
+    loadSplat,
     loadUsd,
     removeFromScene,
 }));
@@ -38,6 +46,7 @@ function fakeScene(): Scene {
         getEngine: () => ({ _lite: { id: "engine" } }),
         onDisposeObservable: new Observable<Scene>(),
         _surfaceLoadedCamera: vi.fn(),
+        _registerMesh: vi.fn(),
     } as unknown as Scene;
 }
 
@@ -74,6 +83,24 @@ describe("function-style scene loader options", () => {
         });
 
         expect(loadUsd).toHaveBeenCalledWith({}, "model.usdz", expect.objectContaining({ resolveByFileName: true, runtimeBaseUrl: runtime }));
+    });
+
+    it("dispatches splat URLs through plugin options", async () => {
+        const target = { _adopt: vi.fn() };
+        const loaderScene = fakeScene();
+
+        const result = await ImportMeshAsync("cloud.splat", loaderScene, {
+            pluginOptions: { splat: { gaussianSplattingMesh: target as never } },
+        });
+
+        expect(loadSplat).toHaveBeenCalledWith(loaderScene._lite, "cloud.splat");
+        expect(target._adopt).toHaveBeenCalledOnce();
+        expect(result.meshes).toEqual([target]);
+    });
+
+    it("rejects detached splat containers instead of falling through to glTF", async () => {
+        await expect(LoadAssetContainerAsync("cloud.splat", fakeScene())).rejects.toThrow(/asset-container lifecycle/);
+        expect(loadGltf).not.toHaveBeenCalled();
     });
 
     it("forwards both SceneLoader and USD plugin progress callbacks", async () => {

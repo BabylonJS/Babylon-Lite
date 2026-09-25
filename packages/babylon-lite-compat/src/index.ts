@@ -147,6 +147,7 @@ export type { ISceneLoaderProgressEvent, ISceneLoaderOptions, ImportMeshOptions,
 export { AssetsManager, AbstractAssetTask, CustomAssetTask } from "./loading/assets-manager.js";
 export { KHR_materials_variants } from "./loading/material-variants.js";
 export { USDFileLoader, RegisterUSDFileLoader } from "./loading/usd-file-loader.js";
+export { _RegisterUSDLoaderDependencies } from "./loading/usd-file-loader.js";
 export type {
     USDBinaryInput,
     USDVirtualFiles,
@@ -156,6 +157,8 @@ export type {
     USDImportDiagnostics,
     USDFileLoaderOptions,
 } from "./loading/usd-file-loader.js";
+export { SPLATFileLoader, RegisterSPLATFileLoader } from "./loading/splat-file-loader.js";
+export type { SPLATLoadingOptions } from "./loading/splat-file-loader.js";
 
 // ─── Picking ─────────────────────────────────────────────────────────
 export { GPUPicker } from "./picking/gpu-picker.js";
