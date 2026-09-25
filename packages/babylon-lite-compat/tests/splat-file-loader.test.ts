@@ -135,6 +135,42 @@ describe("SPLATFileLoader", () => {
         expect(target._adopt).not.toHaveBeenCalled();
     });
 
+    it("reserves an unloaded target across concurrent plugin instances", async () => {
+        let resolveLoad: ((mesh: LiteGaussianSplattingMesh) => void) | undefined;
+        vi.mocked(loadSplat).mockReturnValue(
+            new Promise((resolve) => {
+                resolveLoad = resolve;
+            })
+        );
+        const target = { _adopt: vi.fn(), name: "target" };
+        const first = new SPLATFileLoader({ gaussianSplattingMesh: target as never });
+        const second = new SPLATFileLoader({ gaussianSplattingMesh: target as never });
+
+        const firstLoad = first.importMeshAsync(null, fakeScene(), new Uint8Array(32), "", undefined, "first.splat");
+        await expect(second.importMeshAsync(null, fakeScene(), new Uint8Array(32), "", undefined, "second.splat")).rejects.toThrow(/one in-flight load/);
+        expect(loadSplat).toHaveBeenCalledOnce();
+
+        const loaded = fakeLiteMesh();
+        resolveLoad!(loaded);
+        await expect(firstLoad).resolves.toMatchObject({ meshes: [target] });
+        expect(target._adopt).toHaveBeenCalledOnce();
+        expect(target._adopt).toHaveBeenCalledWith(loaded);
+    });
+
+    it("releases an unloaded target reservation when loading fails", async () => {
+        const target = { _adopt: vi.fn(), name: "target" };
+        vi.mocked(loadSplat).mockRejectedValueOnce(new Error("load failed")).mockResolvedValueOnce(fakeLiteMesh());
+
+        await expect(
+            new SPLATFileLoader({ gaussianSplattingMesh: target as never }).importMeshAsync(null, fakeScene(), new Uint8Array(32), "", undefined, "first.splat")
+        ).rejects.toThrow("load failed");
+        await expect(
+            new SPLATFileLoader({ gaussianSplattingMesh: target as never }).importMeshAsync(null, fakeScene(), new Uint8Array(32), "", undefined, "retry.splat")
+        ).resolves.toMatchObject({ meshes: [target] });
+        expect(loadSplat).toHaveBeenCalledTimes(2);
+        expect(target._adopt).toHaveBeenCalledOnce();
+    });
+
     it("accepts the BJS flipY default and rejects the unsupported override", () => {
         expect(() => new SPLATFileLoader({ flipY: false })).not.toThrow();
         expect(() => new SPLATFileLoader({ flipY: true })).toThrow(/flipY/);

@@ -1,5 +1,5 @@
 import { loadSOG, loadSPZ, loadSplat } from "babylon-lite";
-import type { GaussianSplattingMesh as LiteGaussianSplattingMesh, GsShaderFragment } from "babylon-lite";
+import type { GaussianSplattingMesh as LiteGaussianSplattingMesh, GsShaderFragment, SceneContext } from "babylon-lite";
 
 import { unsupported } from "../error.js";
 import { GaussianSplattingMesh } from "../meshes/gaussian-splatting.js";
@@ -29,7 +29,7 @@ interface SPLATImportResult {
     spriteManagers: unknown[];
 }
 
-type LiteSplatLoader = (scene: import("babylon-lite").SceneContext, url: string, fragments?: readonly GsShaderFragment[]) => Promise<LiteGaussianSplattingMesh>;
+type LiteSplatLoader = (scene: SceneContext, url: string, fragments?: readonly GsShaderFragment[]) => Promise<LiteGaussianSplattingMesh>;
 
 const SPLAT_ASSET_CONTAINER_UNSUPPORTED =
     "Lite's splat loaders attach the GPU-backed cloud directly to a scene. They do not expose a detached Gaussian-Splatting asset-container lifecycle that can preserve the BJS mesh type.";
@@ -39,6 +39,9 @@ const SPLAT_DIRECTORY_UNSUPPORTED =
     "Directory SOG JSON requires a loader contract for resolving and decoding external texture resources relative to rootUrl; Lite's SOG loader accepts only self-contained archives.";
 const SPLAT_RELOAD_UNSUPPORTED =
     "Lite does not expose an atomic Gaussian-Splatting replacement lifecycle that detaches the old renderable and picker while retiring its worker and GPU resources.";
+const SPLAT_CONCURRENT_TARGET_UNSUPPORTED = "An unloaded GaussianSplattingMesh target can only be populated by one in-flight load.";
+
+let loadingTargets: WeakSet<GaussianSplattingMesh> | undefined;
 
 function bytesOf(data: unknown): Uint8Array {
     if (data instanceof ArrayBuffer) {
@@ -158,26 +161,39 @@ export class SPLATFileLoader {
 
     /** @internal Load a URL through Lite while preserving this plugin's Babylon.js options. */
     public async _loadUrlAsync(scene: Scene, url: string): Promise<GaussianSplattingMesh> {
-        this._assertTargetCanLoad();
-        const lite = await loaderForUrl(url)(scene._lite, url);
-        return this._adoptLoaded(scene, lite);
+        return this._loadReserved(scene, () => loaderForUrl(url)(scene._lite, url));
     }
 
     private async _load(scene: Scene, data: unknown): Promise<GaussianSplattingMesh> {
-        this._assertTargetCanLoad();
-        const loader = loaderFor(data);
-        const url = URL.createObjectURL(new Blob([binaryData(data)]));
-        try {
-            const lite = await loader(scene._lite, url);
-            return this._adoptLoaded(scene, lite);
-        } finally {
-            URL.revokeObjectURL(url);
-        }
+        return this._loadReserved(scene, async () => {
+            const loader = loaderFor(data);
+            const url = URL.createObjectURL(new Blob([binaryData(data)]));
+            try {
+                return await loader(scene._lite, url);
+            } finally {
+                URL.revokeObjectURL(url);
+            }
+        });
     }
 
-    private _assertTargetCanLoad(): void {
-        if (this._loadingOptions.gaussianSplattingMesh?._pickLiteNode) {
+    private async _loadReserved(scene: Scene, load: () => Promise<LiteGaussianSplattingMesh>): Promise<GaussianSplattingMesh> {
+        const target = this._loadingOptions.gaussianSplattingMesh;
+        if (target?._pickLiteNode) {
             unsupported("SPLATLoadingOptions.gaussianSplattingMesh", SPLAT_RELOAD_UNSUPPORTED);
+        }
+        if (target) {
+            loadingTargets ??= new WeakSet();
+            if (loadingTargets.has(target)) {
+                unsupported("SPLATLoadingOptions.gaussianSplattingMesh", SPLAT_CONCURRENT_TARGET_UNSUPPORTED);
+            }
+            loadingTargets.add(target);
+        }
+        try {
+            return this._adoptLoaded(scene, await load());
+        } finally {
+            if (target) {
+                loadingTargets?.delete(target);
+            }
         }
     }
 
