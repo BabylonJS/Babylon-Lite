@@ -4,6 +4,11 @@ vi.mock("babylon-lite", async (importActual) => {
     const actual = await importActual<typeof import("babylon-lite")>();
     return {
         ...actual,
+        bakeCurrentTransformIntoVertices: vi.fn((mesh: LiteGaussianSplattingMesh) => {
+            mesh.position.set(0, 0, 0);
+            mesh.rotationQuaternion.set(0, 0, 0, 1);
+            mesh.scaling.set(1, 1, 1);
+        }),
         loadSplat: vi.fn(),
         loadSOG: vi.fn(),
         loadSPZ: vi.fn(),
@@ -140,6 +145,26 @@ describe("SPLATFileLoader", () => {
         expect(loaded.rotation.x).toBeCloseTo(Math.PI);
         expect(loaded.parent).toBe(target._node);
         expect(target.rotation.x).toBeCloseTo(0.25);
+    });
+
+    it("preserves ordinary child world transforms when baking an adopted target", () => {
+        const target = new GaussianSplattingMesh("target", null, fakeScene());
+        target.position.x = 5;
+        const loaded = fakeLiteMesh();
+        target._adopt(loaded);
+        const child = createTransformNode("child");
+        child.position.x = 2;
+        child.parent = target._node;
+        target._node.children.push(child);
+
+        expect(child.worldMatrix[12]).toBeCloseTo(7);
+
+        target.bakeCurrentTransformIntoVertices();
+
+        expect(target.position.x).toBe(0);
+        expect(loaded.parent).toBe(target._node);
+        expect(child.parent).toBe(target._node);
+        expect(child.worldMatrix[12]).toBeCloseTo(7);
     });
 
     it("rejects an already-loaded target before creating another Lite mesh", async () => {

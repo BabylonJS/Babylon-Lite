@@ -15,7 +15,7 @@
  * transforms set in the meantime, then adopting the loaded Lite node.
  */
 
-import { loadSplat, loadSOG, loadSPZ, bakeCurrentTransformIntoVertices, createTransformNode } from "babylon-lite";
+import { loadSplat, loadSOG, loadSPZ, bakeCurrentTransformIntoVertices, createTransformNode, setParent } from "babylon-lite";
 import type { GaussianSplattingMesh as LiteGsMesh, GsShaderFragment, SceneNode } from "babylon-lite";
 
 import { TransformNode } from "./meshes.js";
@@ -204,9 +204,16 @@ export class GaussianSplattingMesh extends TransformNode {
         if (this._gs) {
             bakeCurrentTransformIntoVertices(this._gs);
             if (this._gs.parent === this._node) {
+                const userChildren = this._node.children.filter((child) => child !== this._gs);
+                for (const child of userChildren) {
+                    setParent(child, null);
+                }
                 this._node.position.set(0, 0, 0);
                 this._node.rotation.set(0, 0, 0);
                 this._node.scaling.set(1, 1, 1);
+                for (const child of userChildren) {
+                    setParent(child, this._node);
+                }
             }
         }
     }
