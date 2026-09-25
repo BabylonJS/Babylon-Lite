@@ -21,6 +21,7 @@ import type { GaussianSplattingMesh as LiteGaussianSplattingMesh } from "babylon
 import { LiteCompatError } from "../src/error";
 import { SPLATFileLoader, RegisterSPLATFileLoader } from "../src/loading/splat-file-loader";
 import { GaussianSplattingMesh } from "../src/meshes/gaussian-splatting";
+import { TransformNode } from "../src/meshes/meshes";
 import type { Scene } from "../src/scene/scene";
 
 function fakeLiteMesh(rotationX = 0): LiteGaussianSplattingMesh {
@@ -152,19 +153,19 @@ describe("SPLATFileLoader", () => {
         target.position.x = 5;
         const loaded = fakeLiteMesh();
         target._adopt(loaded);
-        const child = createTransformNode("child");
+        const child = new TransformNode("child");
         child.position.x = 2;
-        child.parent = target._node;
-        target._node.children.push(child);
+        child.parent = target;
 
-        expect(child.worldMatrix[12]).toBeCloseTo(7);
+        expect(child._node.worldMatrix[12]).toBeCloseTo(7);
 
         target.bakeCurrentTransformIntoVertices();
 
         expect(target.position.x).toBe(0);
         expect(loaded.parent).toBe(target._node);
-        expect(child.parent).toBe(target._node);
-        expect(child.worldMatrix[12]).toBeCloseTo(7);
+        expect(child.parent).toBe(target);
+        expect(child._node.parent).toBe(target._node);
+        expect(child._node.worldMatrix[12]).toBeCloseTo(7);
     });
 
     it("rejects an already-loaded target before creating another Lite mesh", async () => {

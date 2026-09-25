@@ -205,6 +205,11 @@ export class GaussianSplattingMesh extends TransformNode {
             bakeCurrentTransformIntoVertices(this._gs);
             if (this._gs.parent === this._node) {
                 const userChildren = this._node.children.filter((child) => child !== this._gs);
+                for (const child of this.getChildren(undefined, true)) {
+                    if (child instanceof TransformNode && child._node !== this._gs && !userChildren.includes(child._node)) {
+                        userChildren.push(child._node);
+                    }
+                }
                 for (const child of userChildren) {
                     setParent(child, null);
                 }
