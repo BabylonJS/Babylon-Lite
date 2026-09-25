@@ -37,6 +37,8 @@ const SPLAT_STREAMING_UNSUPPORTED =
     "PlayCanvas lod-meta.json requires Babylon.js's Gaussian-Splatting streaming residency, download scheduling, and GPU work-buffer subsystem, which Babylon Lite does not define.";
 const SPLAT_DIRECTORY_UNSUPPORTED =
     "Directory SOG JSON requires a loader contract for resolving and decoding external texture resources relative to rootUrl; Lite's SOG loader accepts only self-contained archives.";
+const SPLAT_RELOAD_UNSUPPORTED =
+    "Lite does not expose an atomic Gaussian-Splatting replacement lifecycle that detaches the old renderable and picker while retiring its worker and GPU resources.";
 
 function bytesOf(data: unknown): Uint8Array {
     if (data instanceof ArrayBuffer) {
@@ -156,11 +158,13 @@ export class SPLATFileLoader {
 
     /** @internal Load a URL through Lite while preserving this plugin's Babylon.js options. */
     public async _loadUrlAsync(scene: Scene, url: string): Promise<GaussianSplattingMesh> {
+        this._assertTargetCanLoad();
         const lite = await loaderForUrl(url)(scene._lite, url);
         return this._adoptLoaded(scene, lite);
     }
 
     private async _load(scene: Scene, data: unknown): Promise<GaussianSplattingMesh> {
+        this._assertTargetCanLoad();
         const loader = loaderFor(data);
         const url = URL.createObjectURL(new Blob([binaryData(data)]));
         try {
@@ -168,6 +172,12 @@ export class SPLATFileLoader {
             return this._adoptLoaded(scene, lite);
         } finally {
             URL.revokeObjectURL(url);
+        }
+    }
+
+    private _assertTargetCanLoad(): void {
+        if (this._loadingOptions.gaussianSplattingMesh?._pickLiteNode) {
+            unsupported("SPLATLoadingOptions.gaussianSplattingMesh", SPLAT_RELOAD_UNSUPPORTED);
         }
     }
 

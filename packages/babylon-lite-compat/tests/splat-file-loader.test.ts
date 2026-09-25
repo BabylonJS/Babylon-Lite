@@ -126,6 +126,15 @@ describe("SPLATFileLoader", () => {
         expect(result.meshes).toEqual([target]);
     });
 
+    it("rejects an already-loaded target before creating another Lite mesh", async () => {
+        const target = { _pickLiteNode: fakeLiteMesh(), _adopt: vi.fn(), name: "target" };
+        const loader = new SPLATFileLoader({ gaussianSplattingMesh: target as never });
+
+        await expect(loader.importMeshAsync(null, fakeScene(), new Uint8Array(32), "", undefined, "cloud.splat")).rejects.toThrow(/replacement lifecycle/);
+        expect(loadSplat).not.toHaveBeenCalled();
+        expect(target._adopt).not.toHaveBeenCalled();
+    });
+
     it("accepts the BJS flipY default and rejects the unsupported override", () => {
         expect(() => new SPLATFileLoader({ flipY: false })).not.toThrow();
         expect(() => new SPLATFileLoader({ flipY: true })).toThrow(/flipY/);
