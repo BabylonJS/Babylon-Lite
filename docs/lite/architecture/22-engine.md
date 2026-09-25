@@ -57,6 +57,7 @@ export type RenderTaskGpuTimingStatus = "unsupported" | "disabled" | "pending" |
 export interface RenderTaskGpuTiming {
     readonly index: number;
     readonly name: string;
+    /** Raw task interval; intervals can overlap and are not additive. */
     readonly durationMs: number;
 }
 export interface RenderTaskGpuTimings {
@@ -65,6 +66,8 @@ export interface RenderTaskGpuTimings {
     readonly enabled: boolean;
     readonly frameIndex: number;
     readonly tasks: readonly RenderTaskGpuTiming[];
+    /** Envelope from the earliest measured task begin to the latest measured task end. */
+    readonly totalDurationMs: number;
     readonly droppedTaskCount: number;
     readonly error?: string;
 }

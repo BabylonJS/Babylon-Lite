@@ -47,8 +47,10 @@ function makeTimer(
         currentEncoder: null,
         patchedEncoderMethods: null,
         activeTaskTiming: null,
+        nextQueryIndex: 0,
         nextTaskIndex: 0,
         frameIndex: 0,
+        lastPublishedFrameIndex: 0,
         droppedTaskCount: 0,
         inFlight: options.inFlight ?? 0,
         skipFrame: false,
@@ -280,7 +282,8 @@ describe("GPU task timing installer", () => {
         const surface = { _renderingContexts: [{ frameGraph: fg }] };
         Object.assign(engine, { surfaces: [surface], _surfaces: [surface] });
 
-        const timestamps = new BigUint64Array([0n, 4_000_000n, 2_000_000n, 4_500_000n]);
+        const timestamps = new BigUint64Array([0n, 4_000_000n, 2_000_000n, 3_000_000n, 4_500_000n]);
+        let resolvedQueryCount = 0;
         const readback = {
             mapAsync: () => Promise.resolve(),
             getMappedRange: () => timestamps.buffer,
@@ -291,7 +294,9 @@ describe("GPU task timing installer", () => {
             device: {
                 createCommandEncoder: () =>
                     ({
-                        resolveQuerySet: () => undefined,
+                        resolveQuerySet: (_querySet: GPUQuerySet, _firstQuery: number, queryCount: number) => {
+                            resolvedQueryCount = queryCount;
+                        },
                         copyBufferToBuffer: () => undefined,
                         finish: () => ({}) as GPUCommandBuffer,
                     }) as unknown as GPUCommandEncoder,
@@ -327,8 +332,9 @@ describe("GPU task timing installer", () => {
         expect(passDescriptors.map(({ kind, descriptor }) => ({ kind, timestampWrites: descriptor?.timestampWrites }))).toEqual([
             { kind: "compute", timestampWrites: { querySet: timer.querySet, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } },
             { kind: "render", timestampWrites: { querySet: timer.querySet, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 } },
-            { kind: "compute", timestampWrites: { querySet: timer.querySet, endOfPassWriteIndex: 3 } },
+            { kind: "compute", timestampWrites: { querySet: timer.querySet, endOfPassWriteIndex: 4 } },
         ]);
+        expect(resolvedQueryCount).toBe(5);
         expect(snapshots).toEqual([
             {
                 status: "available",
@@ -466,6 +472,163 @@ describe("GPU task timing installer", () => {
         expect(descriptors[1]?.timestampWrites).toBeUndefined();
         expect(timer.records).toEqual([{ index: 0, name: "measured", beginQueryIndex: 0, endQueryIndex: 1 }]);
         expect(timer.droppedTaskCount).toBe(1);
+        restore();
+    });
+
+    it("does not reuse slots consumed before a task timestamp conflict", () => {
+        const engine = makeEngineWithFeatures(["timestamp-query"]);
+        const descriptors: GPUComputePassDescriptor[] = [];
+        const foreignQuerySet = {} as GPUQuerySet;
+        engine._currentEncoder = {
+            beginRenderPass: () => ({ end: () => undefined }) as unknown as GPURenderPassEncoder,
+            beginComputePass: (descriptor?: GPUComputePassDescriptor) => {
+                descriptors.push(descriptor!);
+                return { end: () => undefined } as unknown as GPUComputePassEncoder;
+            },
+        } as unknown as GPUCommandEncoder;
+        const conflicted = makeTask(engine, "conflicted", 1, [], true, ["none"]);
+        conflicted.execute = () => {
+            engine._currentEncoder.beginComputePass().end();
+            engine._currentEncoder.beginComputePass({ timestampWrites: { querySet: foreignQuerySet, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } }).end();
+            return 1;
+        };
+        const measured = makeTask(engine, "measured", 1, [], true, ["compute"]);
+        const fg = createFrameGraph(engine);
+        fg._tasks.push(conflicted, measured);
+        const surface = { _renderingContexts: [{ frameGraph: fg }] };
+        Object.assign(engine, { surfaces: [surface], _surfaces: [surface] });
+        const timer = makeTimer();
+        const restore = installGpuTaskTimer(timer, engine, () => undefined);
+
+        expect(fg.execute()).toBe(2);
+
+        expect(descriptors.map((descriptor) => descriptor.timestampWrites)).toEqual([
+            { querySet: timer.querySet, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 },
+            { querySet: foreignQuerySet, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 },
+            { querySet: timer.querySet, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 },
+        ]);
+        expect(timer.records).toEqual([{ index: 1, name: "measured", beginQueryIndex: 2, endQueryIndex: 3 }]);
+        expect(timer.nextQueryIndex).toBe(4);
+        restore();
+    });
+
+    it("publishes a dropped multi-pass task when no unique end slot remains", async () => {
+        const engine = makeEngineWithFeatures(["timestamp-query"]);
+        const descriptors: GPUComputePassDescriptor[] = [];
+        engine._currentEncoder = {
+            beginRenderPass: () => ({ end: () => undefined }) as unknown as GPURenderPassEncoder,
+            beginComputePass: (descriptor?: GPUComputePassDescriptor) => {
+                descriptors.push(descriptor!);
+                return { end: () => undefined } as unknown as GPUComputePassEncoder;
+            },
+        } as unknown as GPUCommandEncoder;
+        const fg = createFrameGraph(engine);
+        fg._tasks.push(makeTask(engine, "too-many-passes", 1, [], true, ["compute", "compute"]));
+        const surface = { _renderingContexts: [{ frameGraph: fg }] };
+        Object.assign(engine, { surfaces: [surface], _surfaces: [surface] });
+        const timer = makeTimer({ taskCapacity: 1 });
+        const snapshots: unknown[] = [];
+        const restore = installGpuTaskTimer(timer, engine, (snapshot) => snapshots.push(snapshot));
+
+        expect(fg.execute()).toBe(1);
+
+        expect(descriptors[0]?.timestampWrites).toEqual({ querySet: timer.querySet, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 });
+        expect(descriptors[1]?.timestampWrites).toBeUndefined();
+        expect(timer.records).toEqual([]);
+        expect(timer.nextQueryIndex).toBe(2);
+        expect(timer.droppedTaskCount).toBe(1);
+        engine._gpuTaskTimerResolve?.(engine._currentEncoder);
+        await Promise.resolve();
+
+        expect(snapshots).toEqual([
+            {
+                status: "available",
+                supported: true,
+                enabled: true,
+                frameIndex: 1,
+                tasks: [],
+                totalDurationMs: 0,
+                droppedTaskCount: 1,
+                error: undefined,
+            },
+        ]);
+        restore();
+    });
+
+    it("does not let an older readback overwrite a newer dropped-task snapshot", async () => {
+        const engine = makeEngineWithFeatures(["timestamp-query"]);
+        engine._currentEncoder = {
+            beginRenderPass: () => ({ end: () => undefined }) as unknown as GPURenderPassEncoder,
+            beginComputePass: () => ({ end: () => undefined }) as unknown as GPUComputePassEncoder,
+        } as unknown as GPUCommandEncoder;
+        const fg = createFrameGraph(engine);
+        fg._tasks.push(makeTask(engine, "first-frame", 1, [], true, ["compute"]));
+        const surface = { _renderingContexts: [{ frameGraph: fg }] };
+        Object.assign(engine, { surfaces: [surface], _surfaces: [surface] });
+        let finishMap!: () => void;
+        const mapAsync = vi.fn(
+            () =>
+                new Promise<void>((resolve) => {
+                    finishMap = resolve;
+                })
+        );
+        const readback = {
+            mapAsync,
+            getMappedRange: () => new BigUint64Array([0n, 2_000_000n]).buffer,
+            unmap: () => undefined,
+            destroy: () => undefined,
+        } as unknown as GPUBuffer;
+        const timer = makeTimer({
+            device: {
+                createCommandEncoder: () =>
+                    ({
+                        resolveQuerySet: () => undefined,
+                        copyBufferToBuffer: () => undefined,
+                        finish: () => ({}) as GPUCommandBuffer,
+                    }) as unknown as GPUCommandEncoder,
+                queue: { submit: () => undefined },
+            } as unknown as GPUDevice,
+            readbackPool: [readback],
+            taskCapacity: 1,
+        });
+        const snapshots: unknown[] = [];
+        const restore = installGpuTaskTimer(timer, engine, (snapshot) => snapshots.push(snapshot));
+
+        fg.execute();
+        engine._gpuTaskTimerResolve?.(engine._currentEncoder);
+        await Promise.resolve();
+        expect(mapAsync).toHaveBeenCalledOnce();
+
+        fg._tasks.length = 0;
+        fg._tasks.push(makeTask(engine, "dropped-frame", 1, [], true, ["compute", "compute"]));
+        engine._currentEncoder = {
+            beginRenderPass: () => ({ end: () => undefined }) as unknown as GPURenderPassEncoder,
+            beginComputePass: () => ({ end: () => undefined }) as unknown as GPUComputePassEncoder,
+        } as unknown as GPUCommandEncoder;
+        fg.execute();
+        engine._gpuTaskTimerResolve?.(engine._currentEncoder);
+
+        expect(snapshots).toEqual([
+            {
+                status: "available",
+                supported: true,
+                enabled: true,
+                frameIndex: 2,
+                tasks: [],
+                totalDurationMs: 0,
+                droppedTaskCount: 1,
+                error: undefined,
+            },
+        ]);
+
+        finishMap();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(snapshots).toHaveLength(1);
+        expect(timer.inFlight).toBe(0);
+        expect(timer.pendingReadbacks).not.toContain(readback);
+        expect(timer.readbackPool).toContain(readback);
         restore();
     });
 
