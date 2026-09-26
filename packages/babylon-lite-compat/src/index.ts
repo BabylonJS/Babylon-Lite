@@ -86,6 +86,11 @@ export {
     CreateDashedLines,
     CreateTiledBox,
     CreateTiledPlane,
+    CreatePolygon,
+    ExtrudePolygon,
+    CreatePolygonVertexData,
+    PolygonBuilder,
+    RegisterPolygonBuilder,
 } from "./meshes/meshes.js";
 export { CSG, CSG2, InitializeCSG2Async } from "./meshes/csg.js";
 export { MeshoptCompression } from "./meshes/compression.js";
