@@ -46,6 +46,7 @@ import {
 import type { Mesh as LiteMesh, SceneNode, EngineContext, AssetContainer as LiteAssetContainer, LineMaterial as LiteLineMaterial } from "babylon-lite";
 
 import { Vector3, liteBackedVector3 } from "../math/vector.js";
+import type { Vector4 } from "../math/vector.js";
 import { Quaternion } from "../math/quaternion.js";
 import { Matrix } from "../math/matrix.js";
 import { Color3, Color4 } from "../math/color.js";
@@ -844,6 +845,39 @@ export class Mesh extends AbstractMesh {
         return MeshBuilder.CreateTorus(name, { diameter, thickness, tessellation }, scene);
     }
 
+    /** Legacy `Mesh.CreatePolygon(name, shape, scene, holes?, updatable?, sideOrientation?, earcutInjection?)`. */
+    public static CreatePolygon(
+        _name: string,
+        _shape: Vector3[],
+        _scene: Scene,
+        _holes?: Vector3[][],
+        _updatable?: boolean,
+        _sideOrientation?: number,
+        _earcutInjection?: unknown
+    ): never {
+        return unsupported(
+            "Mesh.CreatePolygon",
+            "Polygon creation requires a triangulation dependency plus hole, side-orientation, UV, and normal-generation policies that Babylon Lite does not model; adding that geometry subsystem is not a small mechanical Lite extension."
+        );
+    }
+
+    /** Legacy `Mesh.ExtrudePolygon(name, shape, depth, scene, holes?, updatable?, sideOrientation?, earcutInjection?)`. */
+    public static ExtrudePolygon(
+        _name: string,
+        _shape: Vector3[],
+        _depth: number,
+        _scene: Scene,
+        _holes?: Vector3[][],
+        _updatable?: boolean,
+        _sideOrientation?: number,
+        _earcutInjection?: unknown
+    ): never {
+        return unsupported(
+            "Mesh.ExtrudePolygon",
+            "Polygon extrusion requires a triangulation dependency plus hole, cap, side-wall, UV, and smoothing policies that Babylon Lite does not model; adding that geometry subsystem is not a small mechanical Lite extension."
+        );
+    }
+
     /** Hardware-instanced copy — unsupported. Use native thin instances instead. */
     public createInstance(): never {
         return unsupported("Mesh.createInstance", "Babylon Lite has no hardware-instance object. Use the native thin-instance API (`setThinInstances`).");
@@ -1221,6 +1255,11 @@ export class VertexData {
     public colors: number[] | Float32Array | null = null;
     public indices: number[] | Uint32Array | Uint16Array | null = null;
 
+    /** Deprecated Babylon.js polygon vertex-data entry point. */
+    public static CreatePolygon(polygon: Mesh, sideOrientation: number, faceUV?: Vector4[], faceColors?: Color4[], frontUVs?: Vector4, backUVs?: Vector4, wrap?: boolean): never {
+        return CreatePolygonVertexData(polygon, sideOrientation, faceUV, faceColors, frontUVs, backUVs, wrap);
+    }
+
     /**
      * Babylon.js `VertexData.applyToMesh(mesh)` — upload this CPU geometry onto a
      * mesh (typically one created via `new Mesh(name, scene)`). Replaces the Lite
@@ -1573,6 +1612,20 @@ export const MeshBuilder = {
             "Tiled plane geometry is not implemented in Babylon Lite. Its per-tile UV layout (tile size, alignment, per-tile flip/rotate patterns) is a non-trivial vertex-data generator with pattern design choices — not a mechanical addition — so it needs a Lite core mesh-builder decision."
         );
     },
+
+    CreatePolygon(_name: string, _options: PolygonBuilderOptions, _scene?: Scene | null, _earcutInjection?: unknown): never {
+        return unsupported(
+            "MeshBuilder.CreatePolygon",
+            "Polygon creation requires a triangulation dependency plus hole, side-orientation, UV, and normal-generation policies that Babylon Lite does not model; adding that geometry subsystem is not a small mechanical Lite extension."
+        );
+    },
+
+    ExtrudePolygon(_name: string, _options: PolygonBuilderOptions, _scene?: Scene | null, _earcutInjection?: unknown): never {
+        return unsupported(
+            "MeshBuilder.ExtrudePolygon",
+            "Polygon extrusion requires a triangulation dependency plus hole, cap, side-wall, UV, and smoothing policies that Babylon Lite does not model; adding that geometry subsystem is not a small mechanical Lite extension."
+        );
+    },
 };
 
 // ── Standalone builder functions (Babylon.js `@babylonjs/core/Meshes/Builders/*`) ──
@@ -1639,3 +1692,55 @@ export function CreateTiledBox(name?: string, options?: object, scene?: Scene): 
 export function CreateTiledPlane(name?: string, options?: object, scene?: Scene): never {
     return MeshBuilder.CreateTiledPlane(name, options, scene);
 }
+
+interface PolygonBuilderOptions {
+    shape: Vector3[];
+    holes?: Vector3[][];
+    depth?: number;
+    smoothingThreshold?: number;
+    faceUV?: Vector4[];
+    faceColors?: Color4[];
+    updatable?: boolean;
+    sideOrientation?: number;
+    frontUVs?: Vector4;
+    backUVs?: Vector4;
+    wrap?: boolean;
+}
+
+/** Babylon.js `CreatePolygon(name, options, scene?, earcutInjection?)` — throwing stub (see `MeshBuilder.CreatePolygon`). */
+export function CreatePolygon(name: string, options: PolygonBuilderOptions, scene?: Scene | null, earcutInjection?: unknown): never {
+    return MeshBuilder.CreatePolygon(name, options, scene, earcutInjection);
+}
+
+/** Babylon.js `ExtrudePolygon(name, options, scene?, earcutInjection?)` — throwing stub (see `MeshBuilder.ExtrudePolygon`). */
+export function ExtrudePolygon(name: string, options: PolygonBuilderOptions, scene?: Scene | null, earcutInjection?: unknown): never {
+    return MeshBuilder.ExtrudePolygon(name, options, scene, earcutInjection);
+}
+
+/** Babylon.js `CreatePolygonVertexData` — the polygon geometry generator requires the unsupported polygon subsystem. */
+export function CreatePolygonVertexData(
+    _polygon: Mesh,
+    _sideOrientation: number,
+    _faceUV?: Vector4[],
+    _faceColors?: Color4[],
+    _frontUVs?: Vector4,
+    _backUVs?: Vector4,
+    _wrap?: boolean
+): never {
+    return unsupported(
+        "CreatePolygonVertexData",
+        "Polygon vertex generation requires triangulated polygon topology and its cap, side-wall, UV, and normal policies; Babylon Lite has no polygon geometry subsystem to supply that input."
+    );
+}
+
+/** Babylon.js polygon-builder namespace object. */
+export const PolygonBuilder = {
+    ExtrudePolygon,
+    CreatePolygon,
+};
+
+/**
+ * Babylon.js side-effect registration shim. Compat defines the corresponding
+ * methods directly, so importing or calling this function requires no mutation.
+ */
+export function RegisterPolygonBuilder(): void {}

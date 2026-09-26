@@ -441,13 +441,19 @@ export class RawTexture3D extends BaseTexture {
         /** Babylon.js texture format (recorded for parity; Lite uploads RGBA8). */
         public format: number,
         scene: Scene,
-        _generateMipMaps = true,
+        generateMipMaps = true,
         _invertY = false,
         _samplingMode = 3,
         _textureType?: number,
         _creationFlags?: number
     ) {
         super();
+        if (generateMipMaps) {
+            unsupported(
+                "RawTexture3D(generateMipMaps)",
+                "Babylon.js 3D mip generation renders every depth slice of every level and requires a mip-capable 3D allocation plus a dedicated shader/pipeline. Babylon Lite's public 3D texture factory allocates only one level; adding this GPU subsystem is not a small mechanical extension. Pass false to create a base-level texture."
+            );
+        }
         this._scene = scene;
         const bytes = toRgbaBytes(data, width, height, depth);
         this._lite = createTexture3DFromPixels(scene.getEngine()._lite, bytes, width, height, depth) as Texture3D;
