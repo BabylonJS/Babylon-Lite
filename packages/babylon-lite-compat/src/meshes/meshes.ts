@@ -1255,6 +1255,11 @@ export class VertexData {
     public colors: number[] | Float32Array | null = null;
     public indices: number[] | Uint32Array | Uint16Array | null = null;
 
+    /** Deprecated Babylon.js polygon vertex-data entry point. */
+    public static CreatePolygon(polygon: Mesh, sideOrientation: number, faceUV?: Vector4[], faceColors?: Color4[], frontUVs?: Vector4, backUVs?: Vector4, wrap?: boolean): never {
+        return CreatePolygonVertexData(polygon, sideOrientation, faceUV, faceColors, frontUVs, backUVs, wrap);
+    }
+
     /**
      * Babylon.js `VertexData.applyToMesh(mesh)` — upload this CPU geometry onto a
      * mesh (typically one created via `new Mesh(name, scene)`). Replaces the Lite

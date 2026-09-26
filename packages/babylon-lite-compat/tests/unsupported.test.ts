@@ -91,6 +91,7 @@ import {
     CreatePolygonVertexData,
     PolygonBuilder,
     RegisterPolygonBuilder,
+    VertexData,
 } from "../src/meshes/meshes";
 import { SceneLoader } from "../src/loading/scene-loader";
 import { Material, PushMaterial, StandardMaterial } from "../src/materials/materials";
@@ -126,6 +127,7 @@ describe("Unsupported polygon builder exports", () => {
             ["MeshBuilder.CreatePolygon", () => CreatePolygon("polygon", options)],
             ["MeshBuilder.ExtrudePolygon", () => ExtrudePolygon("polygon", options)],
             ["CreatePolygonVertexData", () => CreatePolygonVertexData(polygon, 0)],
+            ["CreatePolygonVertexData", () => VertexData.CreatePolygon(polygon, 0)],
             ["Mesh.CreatePolygon", () => Mesh.CreatePolygon("polygon", [], {} as Scene)],
             ["Mesh.ExtrudePolygon", () => Mesh.ExtrudePolygon("polygon", [], 1, {} as Scene)],
             ["MeshBuilder.CreatePolygon", () => PolygonBuilder.CreatePolygon("polygon", options)],
