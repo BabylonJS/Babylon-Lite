@@ -45,7 +45,8 @@ import {
 } from "babylon-lite";
 import type { Mesh as LiteMesh, SceneNode, EngineContext, AssetContainer as LiteAssetContainer, LineMaterial as LiteLineMaterial } from "babylon-lite";
 
-import { Vector3, Vector4, liteBackedVector3 } from "../math/vector.js";
+import { Vector3, liteBackedVector3 } from "../math/vector.js";
+import type { Vector4 } from "../math/vector.js";
 import { Quaternion } from "../math/quaternion.js";
 import { Matrix } from "../math/matrix.js";
 import { Color3, Color4 } from "../math/color.js";
