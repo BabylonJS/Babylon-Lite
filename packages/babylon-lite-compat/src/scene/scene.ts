@@ -973,14 +973,7 @@ export class Scene extends AbstractScene {
     }
 
     /** Babylon.js synchronous screen-coordinate picking over Lite's CPU ray picker. */
-    public pick(
-        x: number,
-        y: number,
-        predicate?: MeshPredicate,
-        fastCheck = false,
-        camera: Camera | null = null,
-        trianglePredicate?: TrianglePickingPredicate
-    ): PickingInfo {
+    public pick(x: number, y: number, predicate?: MeshPredicate, fastCheck = false, camera: Camera | null = null, trianglePredicate?: TrianglePickingPredicate): PickingInfo {
         const cameraToUse = camera ?? this.activeCamera ?? this.cameraToUseForPointers;
         if (!cameraToUse) {
             return new PickingInfo();
@@ -1027,12 +1020,7 @@ export class Scene extends AbstractScene {
     }
 
     /** Synchronous CPU ray picking over Babylon Lite's scene-mesh picker. */
-    public pickWithRay(
-        ray: Ray,
-        predicate?: MeshPredicate,
-        fastCheck = false,
-        trianglePredicate?: TrianglePickingPredicate
-    ): PickingInfo {
+    public pickWithRay(ray: Ray, predicate?: MeshPredicate, fastCheck = false, trianglePredicate?: TrianglePickingPredicate): PickingInfo {
         const candidates = new Set<LiteMesh>(this._lite.meshes);
         for (const wrapper of this.meshes) {
             if (wrapper instanceof AbstractMesh) {

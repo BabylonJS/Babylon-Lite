@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Mat4 } from "../../../packages/babylon-lite/src/math/types";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { getPickedNormal, getPickedUV } from "../../../packages/babylon-lite/src/picking/picking-helpers";
-import { pickMeshesWithRayPrecise } from "../../../packages/babylon-lite/src/picking/precise-ray-pick";
+import { pickMeshesWithRayPrecise, type TrianglePickingPredicate } from "../../../packages/babylon-lite/src/picking/precise-ray-pick";
 import type { Ray } from "../../../packages/babylon-lite/src/picking/ray";
 
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) as unknown as Mat4;
@@ -52,7 +52,7 @@ describe("pickMeshesWithRayPrecise", () => {
 
     it("filters triangles and fills face, barycentric, normal, and UV detail", () => {
         const triangle = mesh([-1, -1, 0, 1, -1, 0, -1, 1, 0], [0, 1, 2]);
-        const predicate = vi.fn(() => true);
+        const predicate = vi.fn<TrianglePickingPredicate>(() => true);
         const hit = pickMeshesWithRayPrecise([triangle], { origin: [-0.5, -0.5, -2], direction: [0, 0, 1], length: 100 }, { trianglePredicate: predicate });
 
         expect(predicate).toHaveBeenCalledWith([-1, -1, 0], [1, -1, 0], [-1, 1, 0], expect.objectContaining({ origin: [-0.5, -0.5, -2] }), 0, 1, 2);
@@ -85,7 +85,7 @@ describe("pickMeshesWithRayPrecise", () => {
 
     it("normalizes and rescales the local predicate ray", () => {
         const triangle = mesh([-1, -1, 0, 1, -1, 0, 0, 1, 0], [0, 1, 2], scaling(2, 1, 0.5));
-        const predicate = vi.fn(() => true);
+        const predicate = vi.fn<TrianglePickingPredicate>(() => true);
 
         expect(pickMeshesWithRayPrecise([triangle], RAY, { trianglePredicate: predicate }).hit).toBe(true);
         const localRay = predicate.mock.calls[0]![3] as Ray;
@@ -115,9 +115,10 @@ describe("pickMeshesWithRayPrecise", () => {
         const triangle = mesh([-1, -1, 0, 1, -1, 0, 0, 1, 0], [0, 1, 2]);
         triangle.pickable = false;
         const singular = mesh([-1, -1, 0, 1, -1, 0, 0, 1, 0], [0, 1, 2], new Float32Array(16) as unknown as Mat4);
+        const absentGeometry = { pickable: true, worldMatrix: IDENTITY } as Mesh;
 
         expect(pickMeshesWithRayPrecise([triangle], RAY).hit).toBe(false);
         expect(pickMeshesWithRayPrecise([triangle], RAY, { skipPickableCheck: true }).hit).toBe(true);
-        expect(pickMeshesWithRayPrecise([singular, {} as Mesh], RAY).hit).toBe(false);
+        expect(pickMeshesWithRayPrecise([singular, absentGeometry], RAY).hit).toBe(false);
     });
 });

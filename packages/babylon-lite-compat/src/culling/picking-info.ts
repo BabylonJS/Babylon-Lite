@@ -52,13 +52,7 @@ export class PickingInfo {
     }
 
     public getNormal(useWorldCoordinates = false, useVerticesNormals = true): Vector3 | null {
-        const normal = useVerticesNormals
-            ? useWorldCoordinates
-                ? this._worldNormal
-                : this._normal
-            : useWorldCoordinates
-              ? this._faceWorldNormal
-              : this._faceNormal;
+        const normal = useVerticesNormals ? (useWorldCoordinates ? this._worldNormal : this._normal) : useWorldCoordinates ? this._faceWorldNormal : this._faceNormal;
         return normal?.clone() ?? null;
     }
 

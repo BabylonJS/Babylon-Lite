@@ -51,11 +51,7 @@ function transformDirection(matrix: Mat4, direction: Point3): [number, number, n
     const x = direction[0];
     const y = direction[1];
     const z = direction[2];
-    return [
-        matrix[0]! * x + matrix[4]! * y + matrix[8]! * z,
-        matrix[1]! * x + matrix[5]! * y + matrix[9]! * z,
-        matrix[2]! * x + matrix[6]! * y + matrix[10]! * z,
-    ];
+    return [matrix[0]! * x + matrix[4]! * y + matrix[8]! * z, matrix[1]! * x + matrix[5]! * y + matrix[9]! * z, matrix[2]! * x + matrix[6]! * y + matrix[10]! * z];
 }
 
 function intersectsBounds(positions: Float32Array, ray: Ray, maxDistance: number): boolean {
@@ -276,11 +272,7 @@ function populateHit(info: PickingInfo, mesh: Mesh, thinInstanceIndex: number, h
     info.hit = true;
     info.distance = hit.distance;
     info.pickedMesh = mesh;
-    info.pickedPoint = [
-        ray.origin[0] + ray.direction[0] * hit.distance,
-        ray.origin[1] + ray.direction[1] * hit.distance,
-        ray.origin[2] + ray.direction[2] * hit.distance,
-    ];
+    info.pickedPoint = [ray.origin[0] + ray.direction[0] * hit.distance, ray.origin[1] + ray.direction[1] * hit.distance, ray.origin[2] + ray.direction[2] * hit.distance];
     info.thinInstanceIndex = thinInstanceIndex;
     populateSurfaceDetail(info, mesh, thinInstanceIndex, hit);
     return info;
