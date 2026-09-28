@@ -37,10 +37,11 @@ function boundTextures3D(engine: GLEngineContext): (WebGLTexture | null | undefi
     if (state._boundTextures3D !== undefined) {
         return state._boundTextures3D;
     }
-    const bound = new Array<WebGLTexture | null | undefined>(state.boundTextures.length).fill(null);
+    const bound = new Array<WebGLTexture | null | undefined>(state.boundTextures.length).fill(undefined);
     state._boundTextures3D = bound;
     const invalidate = (): void => {
         bound.fill(undefined);
+        state._unpack3DLayoutKnown = false;
     };
     onContextLost(engine, invalidate);
     (engine._stateCacheInvalidators ??= []).push(invalidate);
@@ -54,7 +55,7 @@ function bindTexture3DRaw(engine: GLEngineContext, unit: number, handle: WebGLTe
         return;
     }
     const gl = engine.gl;
-    if (state.activeTextureUnit !== unit) {
+    if (state.activeTextureUnit !== unit || bound[unit] === undefined) {
         gl.activeTexture(gl.TEXTURE0 + unit);
         state.activeTextureUnit = unit;
     }
@@ -62,6 +63,19 @@ function bindTexture3DRaw(engine: GLEngineContext, unit: number, handle: WebGLTe
         gl.bindTexture(gl.TEXTURE_3D, handle);
         bound[unit] = handle;
     }
+}
+
+function setUnpack3DLayout(engine: GLEngineContext): void {
+    if (engine._state._unpack3DLayoutKnown) {
+        return;
+    }
+    const gl = engine.gl;
+    gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
+    gl.pixelStorei(gl.UNPACK_IMAGE_HEIGHT, 0);
+    gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0);
+    gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
+    gl.pixelStorei(gl.UNPACK_SKIP_IMAGES, 0);
+    engine._state._unpack3DLayoutKnown = true;
 }
 
 /** Bind a 3D texture to one sampler unit. `null` unbinds only `TEXTURE_3D`; repeated binds are elided. */
@@ -135,6 +149,7 @@ export function createTexture3DFromPixels(
     const upload = (target: GLEngineContext): void => {
         const g = target.gl;
         setUnpackState(target, false, false, 4);
+        setUnpack3DLayout(target);
         bindTexture3DRaw(target, 0, tex.handle, true);
         g.texImage3D(g.TEXTURE_3D, 0, format, width, height, depth, 0, g.RGBA, g.UNSIGNED_BYTE, data);
         if (tex._hasMipMaps) {

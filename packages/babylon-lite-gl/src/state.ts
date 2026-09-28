@@ -83,6 +83,8 @@ export interface GLState {
     boundTextures: (WebGLTexture | null)[];
     /** Per-unit TEXTURE_3D binding, allocated only when first used. @internal */
     _boundTextures3D?: (WebGLTexture | null | undefined)[];
+    /** Cached zero WebGL2 unpack row/image/skip layout for 3D uploads. @internal */
+    _unpack3DLayoutKnown?: boolean;
     boundArrayBuffer: WebGLBuffer | null;
     boundElementBuffer: WebGLBuffer | null;
     boundVao: WebGLVertexArrayObject | null;

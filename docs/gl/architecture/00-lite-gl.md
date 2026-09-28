@@ -354,7 +354,7 @@ export interface GLTexture {
      *  placeholder upload AND the final image upload — bindings made before
      *  `isReady=true` remain valid. */
     handle: WebGLTexture;
-    readonly target: typeof WebGL2RenderingContext.TEXTURE_2D;
+    readonly target: GLenum; // normally gl.TEXTURE_2D; retained for source compatibility
     width: number;
     height: number;
     isReady: boolean;
@@ -430,7 +430,7 @@ export function disposeTexture3D(engine: GLEngineContext, tex: GLTexture3D): voi
 WebGL2 counterpart to lite's `createTexture3DFromPixels`. It returns a
 `GLTexture3D` with a `depth` field and `target = gl.TEXTURE_3D`. Use the
 dedicated `setEffectTexture3D` / `bindTexture3D` / `disposeTexture3D` APIs;
-the generic 2D APIs do not accept 3D textures. This deliberate difference
+the generic 2D APIs do not support 3D textures. This deliberate difference
 keeps every 2D-only bundle free of 3D cache and binding code. GLSL consumers
 declare `uniform highp sampler3D lut;` and use `texture(lut, rgb)`; unlike a
 flattened 2D atlas, hardware performs trilinear interpolation on the original
@@ -445,7 +445,9 @@ context restoration can replay the exact uploaded data.
 `LINEAR`; default `LINEAR` on min/mag, without mipmaps), and `srgb` (default false, `RGBA8`; true uses
 `SRGB8_ALPHA8`). For color-grading LUTs use the linear default unless the
 source explicitly requires sRGB decoding. Creation sets the cached unpack
-state to alignment 4, flipY false, premultiply false, uploads via
+state to alignment 4, flipY false, premultiply false; the optional 3D upload
+cache also zeros `UNPACK_ROW_LENGTH`, `UNPACK_IMAGE_HEIGHT`, and every
+`UNPACK_SKIP_*` field before its first upload and after a cache wipe. It uploads via
 `texImage3D(TEXTURE_3D, 0, format, width, height, depth, 0, RGBA,
 UNSIGNED_BYTE, data)`, and sets five texture parameters including `WRAP_R`.
 The engine registry replays pixels and parameters into a new handle on context
@@ -453,7 +455,8 @@ restoration. Calling `generateTexture3DMipMaps` retains the generated-chain
 intent, so restore regenerates the mip levels from the retained level-0 pixels
 before applying the saved minification filter. The optional module owns an independent 3D per-unit binding cache,
 invalidated to an unknown sentinel on context loss and on `wipeGLStateCache`
-so the first subsequent bind (including a null unbind) reaches GL; null unbinds only the
+so the first subsequent bind explicitly selects its texture unit and reaches GL
+(including a null unbind); null unbinds only the
 target used by the matching 2D or 3D binder. The module's sampling/wrap
 updates persist across restoration and elide unchanged `texParameteri` calls
 without rebinding. Update setters reject invalid WebGL filter or wrap enums
@@ -827,7 +830,8 @@ interface GLState {
     currentProgram: WebGLProgram | null;
     activeTextureUnit: number; // last gl.activeTexture(...)
     boundTextures: (WebGLTexture | null)[]; // 2D per-unit, length = caps.maxTextureUnits
-    _boundTextures3D?: (WebGLTexture | null)[]; // owned by optional texture-3d module
+    _boundTextures3D?: (WebGLTexture | null | undefined)[]; // undefined means unknown after wipe
+    _unpack3DLayoutKnown?: boolean; // owned by optional texture-3d module
     boundArrayBuffer: WebGLBuffer | null;
     boundElementBuffer: WebGLBuffer | null;
     boundVao: WebGLVertexArrayObject | null;

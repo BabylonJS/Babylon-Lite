@@ -120,11 +120,36 @@ describe("lite-gl native 3D pixel textures", () => {
         });
         mock.clear();
         createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
-        expect(mock.log.filter((c) => c.name === "pixelStorei").map((c) => c.args)).toEqual([
+        const unpackFlags: GLenum[] = [engine.gl.UNPACK_FLIP_Y_WEBGL, engine.gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, engine.gl.UNPACK_ALIGNMENT];
+        expect(mock.log.filter((c) => c.name === "pixelStorei" && unpackFlags.includes(c.args[0] as number)).map((c) => c.args)).toEqual([
             [engine.gl.UNPACK_FLIP_Y_WEBGL, 0],
             [engine.gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 0],
             [engine.gl.UNPACK_ALIGNMENT, 4],
         ]);
+    });
+
+    it("resets WebGL2 3D unpack strides and skips after raw-GL interop while eliding repeat setup", () => {
+        const { mock, engine } = makeEngine();
+        const gl = engine.gl;
+        const layoutFlags: GLenum[] = [gl.UNPACK_ROW_LENGTH, gl.UNPACK_IMAGE_HEIGHT, gl.UNPACK_SKIP_PIXELS, gl.UNPACK_SKIP_ROWS, gl.UNPACK_SKIP_IMAGES];
+        for (const flag of layoutFlags) {
+            gl.pixelStorei(flag, 1);
+        }
+        wipeGLStateCache(engine);
+        mock.clear();
+        createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
+        expect(mock.log.filter((c) => c.name === "pixelStorei" && layoutFlags.includes(c.args[0] as number)).map((c) => c.args)).toEqual(layoutFlags.map((flag) => [flag, 0]));
+        mock.clear();
+        createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
+        expect(mock.log.filter((c) => c.name === "pixelStorei" && layoutFlags.includes(c.args[0] as number))).toEqual([]);
+
+        for (const flag of layoutFlags) {
+            gl.pixelStorei(flag, 1);
+        }
+        wipeGLStateCache(engine);
+        mock.clear();
+        createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
+        expect(mock.log.filter((c) => c.name === "pixelStorei" && layoutFlags.includes(c.args[0] as number)).map((c) => c.args)).toEqual(layoutFlags.map((flag) => [flag, 0]));
     });
 
     it("disposing a 3D texture leaves a 2D texture on the same unit bound", () => {
@@ -276,6 +301,27 @@ describe("lite-gl native 3D pixel textures", () => {
         wipeGLStateCache(engine);
         bindTexture3D(engine, 1, tex);
         expect(mock.log.find((c) => c.name === "bindTexture")?.args).toEqual([engine.gl.TEXTURE_3D, tex.handle]);
+    });
+
+    it("selects the correct active unit after a wipe, including an initial upload on unit zero", () => {
+        const { mock, engine } = makeEngine();
+        const gl = engine.gl;
+        gl.activeTexture(gl.TEXTURE0 + 3);
+        wipeGLStateCache(engine);
+        mock.clear();
+        const tex = createTexture3DFromPixels(engine, new Uint8Array(4), 1, 1, 1);
+        expect(mock.log.filter((c) => c.name === "activeTexture").map((c) => c.args)).toEqual([[gl.TEXTURE0]]);
+        expect(mock.log.findIndex((c) => c.name === "activeTexture")).toBeLessThan(mock.log.findIndex((c) => c.name === "texImage3D"));
+
+        gl.activeTexture(gl.TEXTURE0 + 3);
+        wipeGLStateCache(engine);
+        mock.clear();
+        bindTexture3D(engine, 0, tex);
+        expect(mock.log.filter((c) => c.name === "activeTexture").map((c) => c.args)).toEqual([[gl.TEXTURE0]]);
+        expect(mock.log.filter((c) => c.name === "bindTexture").map((c) => c.args)).toEqual([[gl.TEXTURE_3D, tex.handle]]);
+        mock.clear();
+        bindTexture3D(engine, 0, tex);
+        expect(mock.log).toEqual([]);
     });
 
     it("unbinds a 3D texture after a cache wipe even when the previous binding is unknown", () => {
