@@ -91,6 +91,7 @@ export function createMockGL(): MockGL {
         RED: 0x1903,
         LUMINANCE: 0x1909,
         RGBA8: 0x8058,
+        SRGB8_ALPHA8: 0x8c43,
         RGB8: 0x8051,
         RG8: 0x822b,
         R8: 0x8229,
@@ -99,11 +100,14 @@ export function createMockGL(): MockGL {
         RGBA16F: 0x881a,
         RGB16F: 0x881b,
         TEXTURE_2D: 0x0de1,
+        TEXTURE_3D: 0x806f,
+        MAX_3D_TEXTURE_SIZE: 0x8073,
         TEXTURE0: 0x84c0,
         TEXTURE_MIN_FILTER: 0x2801,
         TEXTURE_MAG_FILTER: 0x2800,
         TEXTURE_WRAP_S: 0x2802,
         TEXTURE_WRAP_T: 0x2803,
+        TEXTURE_WRAP_R: 0x8072,
         LINEAR: 0x2601,
         LINEAR_MIPMAP_LINEAR: 0x2703,
         NEAREST: 0x2600,
@@ -171,6 +175,9 @@ export function createMockGL(): MockGL {
         getParameter: (p: number): number => {
             if (p === ENUMS.MAX_TEXTURE_SIZE) {
                 return 4096;
+            }
+            if (p === ENUMS.MAX_3D_TEXTURE_SIZE) {
+                return 256;
             }
             if (p === ENUMS.MAX_COMBINED_TEXTURE_IMAGE_UNITS) {
                 return 16;
@@ -283,6 +290,9 @@ export function createMockGL(): MockGL {
         },
         texImage2D: (...args: unknown[]): void => {
             rec("texImage2D", ...args);
+        },
+        texImage3D: (...args: unknown[]): void => {
+            rec("texImage3D", ...args);
         },
         texParameteri: (target: number, p: number, v: number): void => {
             rec("texParameteri", target, p, v);

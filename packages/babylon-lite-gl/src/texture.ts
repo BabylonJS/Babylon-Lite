@@ -42,8 +42,8 @@ export interface GLTexture {
     /** The live `WebGLTexture`. MUTABLE — swapped for a fresh handle on
      *  `webglcontextrestored` while consumers keep the same `GLTexture` reference. */
     handle: WebGLTexture;
-    /** GL texture target (always `gl.TEXTURE_2D` for this package). */
-    readonly target: GLenum;
+    /** GL texture target (`gl.TEXTURE_2D`); 3D textures use their own API. */
+    readonly target: WebGL2RenderingContext["TEXTURE_2D"];
     /** Texture width in texels. Updated once an async upload resolves. */
     width: number;
     /** Texture height in texels. Updated once an async upload resolves. */

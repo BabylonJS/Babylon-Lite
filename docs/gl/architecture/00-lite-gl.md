@@ -354,7 +354,7 @@ export interface GLTexture {
      *  placeholder upload AND the final image upload — bindings made before
      *  `isReady=true` remain valid. */
     handle: WebGLTexture;
-    readonly target: GLenum; // gl.TEXTURE_2D
+    readonly target: typeof WebGL2RenderingContext.TEXTURE_2D;
     width: number;
     height: number;
     isReady: boolean;
@@ -394,7 +394,7 @@ export function loadTexture2D(engine: GLEngineContext, url: string, options?: GL
 export function bindTexture(engine: GLEngineContext, unit: number, tex: GLTexture | null): void;
 
 /** Sets `tex._disposed=true`, calls `gl.deleteTexture(tex.handle)`, walks
- *  `_state.boundTextures` and clears every unit that still references the
+ *  the matching target's binding cache and clears every unit that still references the
  *  handle (so a later `bindTexture(..., otherTex)` to the same unit is NOT
  *  incorrectly elided). Removes the texture from `engine._textures`. */
 export function disposeTexture(engine: GLEngineContext, tex: GLTexture): void;
@@ -405,7 +405,76 @@ export function disposeTexture(engine: GLEngineContext, tex: GLTexture): void;
 export function generateTextureMipMaps(engine: GLEngineContext, tex: GLTexture): void;
 ```
 
-#### 3.4.1 HTML element textures
+#### 3.4.1 Native 3D pixel textures (optional)
+
+```ts
+export interface GLPixelsTexture3DOptions {
+    addressMode?: GLenum; // CLAMP_TO_EDGE (default), REPEAT, MIRRORED_REPEAT
+    filter?: GLenum; // LINEAR (default) or NEAREST, for min and mag
+    srgb?: boolean; // false (RGBA8) by default; true = SRGB8_ALPHA8
+}
+export interface GLTexture3D extends Omit<GLTexture, "target"> {
+    readonly target: typeof WebGL2RenderingContext.TEXTURE_3D;
+    depth: number;
+}
+export function createTexture3DFromPixels(engine: GLEngineContext, data: Uint8Array, width: number, height: number, depth: number, options?: GLPixelsTexture3DOptions): GLTexture3D;
+export function bindTexture3D(engine: GLEngineContext, unit: number, tex: GLTexture3D | null): void;
+export function setEffectTexture3D(engine: GLEngineContext, effect: GLEffect, samplerName: string, tex: GLTexture3D | null): void;
+export function generateTexture3DMipMaps(engine: GLEngineContext, tex: GLTexture3D): void;
+export function updateTexture3DSamplingMode(engine: GLEngineContext, tex: GLTexture3D, minFilter: GLenum, magFilter: GLenum): void;
+export function updateTexture3DWrapMode(engine: GLEngineContext, tex: GLTexture3D, wrapS: GLenum, wrapT: GLenum, wrapR: GLenum): void;
+export function disposeTexture3D(engine: GLEngineContext, tex: GLTexture3D): void;
+```
+
+`createTexture3DFromPixels(engine, data, width, height, depth, options?)` is the
+WebGL2 counterpart to lite's `createTexture3DFromPixels`. It returns a
+`GLTexture3D` with a `depth` field and `target = gl.TEXTURE_3D`. Use the
+dedicated `setEffectTexture3D` / `bindTexture3D` / `disposeTexture3D` APIs;
+the generic 2D APIs do not accept 3D textures. This deliberate difference
+keeps every 2D-only bundle free of 3D cache and binding code. GLSL consumers
+declare `uniform highp sampler3D lut;` and use `texture(lut, rgb)`; unlike a
+flattened 2D atlas, hardware performs trilinear interpolation on the original
+cube. Source bytes are tightly packed RGBA8 with
+x fastest, then y, then z (one slice = width * height * 4 bytes). Dimensions
+must be positive integers within `MAX_3D_TEXTURE_SIZE`; a too-short buffer is
+rejected. The source must remain unchanged while the texture is live so
+context restoration can replay the exact uploaded data.
+
+`GLPixelsTexture3DOptions` has `addressMode` (`CLAMP_TO_EDGE`, `REPEAT` or
+`MIRRORED_REPEAT`; default `CLAMP_TO_EDGE` on S/T/R), `filter` (`NEAREST` or
+`LINEAR`; default `LINEAR` on min/mag, without mipmaps), and `srgb` (default false, `RGBA8`; true uses
+`SRGB8_ALPHA8`). For color-grading LUTs use the linear default unless the
+source explicitly requires sRGB decoding. Creation sets the cached unpack
+state to alignment 4, flipY false, premultiply false, uploads via
+`texImage3D(TEXTURE_3D, 0, format, width, height, depth, 0, RGBA,
+UNSIGNED_BYTE, data)`, and sets five texture parameters including `WRAP_R`.
+The engine registry replays pixels and parameters into a new handle on context
+restoration. Calling `generateTexture3DMipMaps` retains the generated-chain
+intent, so restore regenerates the mip levels from the retained level-0 pixels
+before applying the saved minification filter. The optional module owns an independent 3D per-unit binding cache,
+invalidated to an unknown sentinel on context loss and on `wipeGLStateCache`
+so the first subsequent bind (including a null unbind) reaches GL; null unbinds only the
+target used by the matching 2D or 3D binder. The module's sampling/wrap
+updates persist across restoration and elide unchanged `texParameteri` calls
+without rebinding. Update setters reject invalid WebGL filter or wrap enums
+before modifying cached or GL state. All 3D creation, binding, disposal and
+parameter logic lives in its own side-effect-free module so 2D-only users do
+not ship 3D code.
+
+This supports Lumina's native 3D filter LUTs without repacking into a 2D
+atlas; consumers can retain the same shader coordinates and interpolation.
+The consumer migration and browser pixel/performance comparison remain separate
+from the LiteGL API change.
+
+**Source test:** `/gl/texture-3d-test.html` runs
+`lab/gl/src/texture-3d-test.ts`, which uploads eight distinct RGBA8 texels in
+x-fastest / y-next / z-last order. A fullscreen `sampler3D` effect samples
+their texel centers and the trilinear midpoint. The source test reads back
+each rendered result, reports PASS/FAIL on the page and rechecks after context
+restoration. It has no gallery card or parity golden; the mock-based unit
+tests cover upload calls, state caching, validation and restore replay.
+
+#### 3.4.2 HTML element textures
 
 Dynamic-importable so only InputGlow pulls it in:
 
@@ -757,7 +826,8 @@ from any bundle that doesn't use it.
 interface GLState {
     currentProgram: WebGLProgram | null;
     activeTextureUnit: number; // last gl.activeTexture(...)
-    boundTextures: (WebGLTexture | null)[]; // per-unit, length = caps.maxTextureUnits
+    boundTextures: (WebGLTexture | null)[]; // 2D per-unit, length = caps.maxTextureUnits
+    _boundTextures3D?: (WebGLTexture | null)[]; // owned by optional texture-3d module
     boundArrayBuffer: WebGLBuffer | null;
     boundElementBuffer: WebGLBuffer | null;
     boundVao: WebGLVertexArrayObject | null;
@@ -833,12 +903,13 @@ interface GLState {
 The cache is the source of truth for **what is currently bound**. It must be
 kept in sync with actual GL state. Two protocols enforce that:
 
-- **Disposal:** `disposeTexture` walks `_state.boundTextures` and nulls any unit
-  that held the disposed handle; `disposeEffect` clears `_state.currentProgram`
+- **Disposal:** `disposeTexture` walks the 2D binding cache, while
+  `disposeTexture3D` walks the optional module's independent 3D cache; each
+  clears any slot that held the disposed handle. `disposeEffect` clears `_state.currentProgram`
   iff it pointed at the disposed program. This prevents the next-bind to the
   same slot from being elided as a no-op.
 - **Context lost:** the `webglcontextlost` handler sets `_isLost=true` and
-  clears the entire `_state` (program=null, boundTextures filled with null,
+  clears the core `_state` (program=null, 2D texture binding cache filled with null,
   buffers=null, vao=null, boundFramebuffer=null, quad* = null, viewport=0, and
   the whole `rs` array — BOTH its actual half AND its desired twins — back to the
   unset sentinels with `statesDirty=false`). Resetting both halves means the
@@ -846,7 +917,9 @@ kept in sync with actual GL state. Two protocols enforce that:
   `applyGLStates` re-issues from scratch. The `_flush*` reconciler slots are NOT
   cleared (they are pure function refs; a post-restore setter re-installs the
   same ref idempotently, and `statesDirty=false` gates the flush until then).
-  Setters become no-ops while `_isLost`. See §4.7.
+  The optional 3D module clears its own cache through a context-lost callback
+  (and a cache invalidator when the host calls `wipeGLStateCache`). Setters
+  become no-ops while `_isLost`. See §4.7.
 
 ### 4.2 Cache contract — which GL calls are elided
 
@@ -854,7 +927,8 @@ kept in sync with actual GL state. Two protocols enforce that:
 | ------------------------------------------ | ----------------------------------------- | ----------------------------------------------------------------------------- |
 | `gl.useProgram`                            | `_state.currentProgram`                   | Same program already current                                                  |
 | `gl.activeTexture`                         | `_state.activeTextureUnit`                | Already on that unit                                                          |
-| `gl.bindTexture`                           | `_state.boundTextures[unit]`              | Same texture already on that unit                                             |
+| `gl.bindTexture` (2D)                      | `_state.boundTextures[unit]`              | Same 2D texture already on that unit                                          |
+| `gl.bindTexture` (optional 3D)             | `_state._boundTextures3D[unit]`           | Same 3D texture already on that unit                                          |
 | `gl.uniform1i(samplerLoc, unit)`           | Done **once at link time**                | Always — never re-issued per frame                                            |
 | `gl.uniform1f / 2f / 3f / 4f`              | `effect._lastF1[name]` / `_lastVec`       | Value bit-equal to last                                                       |
 | `gl.uniform1i` (non-sampler)               | `effect._lastI1[name]`                    | Value equal to last                                                           |

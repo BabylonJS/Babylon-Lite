@@ -36,6 +36,7 @@
         "test:unit": "vitest run --project unit",
         "test:unit:gl": "vitest run --project gl-unit",
         "test:build:gl": "vitest run --project gl-build",
+        "test:integration:gl": "playwright test tests/gl/integration",
         "test:build": "vitest run --project build",
         "test:no-webgpu": "vitest run --project no-webgpu",
         "test:audio-offline": "vitest run --project audio-offline",

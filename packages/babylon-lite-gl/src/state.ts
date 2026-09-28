@@ -79,8 +79,10 @@ export const RS_DESIRED = 21;
 export interface GLState {
     currentProgram: WebGLProgram | null;
     activeTextureUnit: number;
-    /** Per-unit binding; length === caps.maxTextureUnits. */
+    /** Per-unit TEXTURE_2D binding; length === caps.maxTextureUnits. */
     boundTextures: (WebGLTexture | null)[];
+    /** Per-unit TEXTURE_3D binding, allocated only when first used. @internal */
+    _boundTextures3D?: (WebGLTexture | null | undefined)[];
     boundArrayBuffer: WebGLBuffer | null;
     boundElementBuffer: WebGLBuffer | null;
     boundVao: WebGLVertexArrayObject | null;

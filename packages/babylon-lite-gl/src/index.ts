@@ -79,6 +79,16 @@ export {
     createTextureFromHandle,
 } from "./texture.js";
 export type { GLTextureOptions, GLFloatTextureOptions, GLTexture } from "./texture.js";
+export {
+    createTexture3DFromPixels,
+    bindTexture3D,
+    setEffectTexture3D,
+    generateTexture3DMipMaps,
+    updateTexture3DSamplingMode,
+    updateTexture3DWrapMode,
+    disposeTexture3D,
+} from "./texture-3d.js";
+export type { GLPixelsTexture3DOptions, GLTexture3D } from "./texture-3d.js";
 
 // ─── Dynamic textures ────────────────────────────────────────────────
 export { createDynamicTexture, updateDynamicTexture, clearDynamicTextureSource } from "./dynamic-texture.js";
