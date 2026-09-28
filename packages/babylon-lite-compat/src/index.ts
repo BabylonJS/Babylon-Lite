@@ -48,6 +48,7 @@ export { UniformBuffer } from "./materials/uniform-buffer.js";
 export { Node } from "./node/node.js";
 export { AbstractScene } from "./scene/abstract-scene.js";
 export { Scene } from "./scene/scene.js";
+export type { MeshPredicate, TrianglePickingPredicate } from "./scene/scene.js";
 export { PointerEventTypes, PointerInfo } from "./events/pointer-events.js";
 
 // ─── Cameras ─────────────────────────────────────────────────────────

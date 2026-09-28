@@ -28,7 +28,7 @@ import {
     clearAnimationManager,
     enableAnimationBlending,
     updateAnimationManager,
-    pickMeshesWithRay as litePickWithRay,
+    pickMeshesWithRayPrecise as litePickWithRay,
     createPickingRay as liteCreatePickingRay,
     resolveCameraViewport,
     invertMat4,
@@ -78,6 +78,9 @@ const DEFAULT_GROUND_URL = "https://assets.babylonjs.com/core/environments/backg
 const DEFAULT_ENV_URL = "https://assets.babylonjs.com/environments/environmentSpecular.env";
 const FLUID_RENDERER_UNSUPPORTED =
     "Fluid rendering requires dedicated depth, thickness, and diffuse passes plus render-target lifecycle and composition policies that Babylon Lite does not define.";
+
+export type MeshPredicate = (mesh: AbstractMesh, thinInstanceIndex: number) => boolean;
+export type TrianglePickingPredicate = (p0: Vector3, p1: Vector3, p2: Vector3, ray: Ray, i0: number, i1: number, i2: number) => boolean;
 
 /**
  * Babylon.js resolves the BRDF lookup texture from an embedded Base64 PNG rather than a
@@ -973,24 +976,17 @@ export class Scene extends AbstractScene {
     public pick(
         x: number,
         y: number,
-        predicate?: (mesh: AbstractMesh) => boolean,
+        predicate?: MeshPredicate,
         fastCheck = false,
         camera: Camera | null = null,
-        trianglePredicate?: (p0: Vector3, p1: Vector3, p2: Vector3, ray: Ray) => boolean
+        trianglePredicate?: TrianglePickingPredicate
     ): PickingInfo {
-        if (fastCheck || trianglePredicate) {
-            return unsupported(
-                "Scene.pick",
-                "Babylon Lite's synchronous picker returns the nearest bounding-box hit and does not expose fast-first-hit or per-triangle predicate modes."
-            );
-        }
-
         const cameraToUse = camera ?? this.activeCamera ?? this.cameraToUseForPointers;
         if (!cameraToUse) {
             return new PickingInfo();
         }
 
-        return this.pickWithRay(this.createPickingRay(x, y, null, cameraToUse), predicate);
+        return this.pickWithRay(this.createPickingRay(x, y, null, cameraToUse), predicate, fastCheck, trianglePredicate);
     }
 
     /**
@@ -1033,16 +1029,10 @@ export class Scene extends AbstractScene {
     /** Synchronous CPU ray picking over Babylon Lite's scene-mesh picker. */
     public pickWithRay(
         ray: Ray,
-        predicate?: (mesh: AbstractMesh) => boolean,
+        predicate?: MeshPredicate,
         fastCheck = false,
-        trianglePredicate?: (p0: Vector3, p1: Vector3, p2: Vector3, ray: Ray) => boolean
+        trianglePredicate?: TrianglePickingPredicate
     ): PickingInfo {
-        if (fastCheck || trianglePredicate) {
-            return unsupported(
-                "Scene.pickWithRay",
-                "Babylon Lite's synchronous picker returns the nearest bounding-box hit and does not expose fast-first-hit or per-triangle predicate modes."
-            );
-        }
         const candidates = new Set<LiteMesh>(this._lite.meshes);
         for (const wrapper of this.meshes) {
             if (wrapper instanceof AbstractMesh) {
@@ -1052,12 +1042,6 @@ export class Scene extends AbstractScene {
 
         const wrappers = new Map<NonNullable<LitePickingInfo["pickedMesh"]>, AbstractMesh>();
         for (const candidate of candidates) {
-            if (candidate.thinInstances && candidate.thinInstances.count > 0) {
-                return unsupported(
-                    "Scene.pickWithRay",
-                    "Thin-instance transforms are not represented by Lite's AABB ray picker; pick the source mesh before adding thin instances or use Lite's GPU picker."
-                );
-            }
             const registered = this._meshWrappers.get(candidate);
             const wrapper = registered instanceof AbstractMesh ? registered : Mesh._fromLite(candidate, undefined, this);
             wrappers.set(candidate, wrapper);
@@ -1071,11 +1055,24 @@ export class Scene extends AbstractScene {
                 length: ray.length,
             },
             {
-                predicate: (mesh) => {
+                predicate: (mesh, thinInstanceIndex) => {
                     const wrapper = wrappers.get(mesh);
-                    return !!wrapper && (predicate ? predicate(wrapper) : wrapper.isEnabled() && wrapper.isVisible && wrapper.isPickable);
+                    return !!wrapper && (predicate ? predicate(wrapper, thinInstanceIndex) : wrapper.isEnabled() && wrapper.isVisible && wrapper.isPickable);
                 },
                 skipPickableCheck: !!predicate,
+                fastCheck,
+                trianglePredicate: trianglePredicate
+                    ? (p0, p1, p2, localRay, i0, i1, i2) =>
+                          trianglePredicate(
+                              Vector3.FromArray(p0),
+                              Vector3.FromArray(p1),
+                              Vector3.FromArray(p2),
+                              new Ray(Vector3.FromArray(localRay.origin), Vector3.FromArray(localRay.direction), localRay.length),
+                              i0,
+                              i1,
+                              i2
+                          )
+                    : undefined,
             }
         );
         return PickingInfo._fromLite(info, info.pickedMesh ? (wrappers.get(info.pickedMesh) ?? null) : null, ray);
