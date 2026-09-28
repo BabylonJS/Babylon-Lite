@@ -266,8 +266,14 @@ pass-through scalar observer and publishes no native objects.
 The room uses `childRoom_ibl.env` at intensity `0.6`, the six separate
 `childRoom_1K_*.jpg` skybox faces, directional light `(0,-2,-2)` at intensity
 `0.85`, hemispheric light `(0,1,0.5)` at intensity `0.1`, and a 2048 PCF shadow
-map. The source image-processing defaults are restored after environment load:
-tone mapping off, exposure `1`, contrast `1`.
+map. After environment load, tone mapping is disabled, exposure is `1`, and
+contrast is `1`, preserving the original lighting of the rug and props.
+A 40×40 shadow-only receiver sits `0.001` above the rug as a child of the
+ground. It uses the existing `setShadowOnly` PBR material at black opacity
+`0.65`: fully lit fragments are transparent, while cast shadows darken the rug
+without changing its textures, exposure, or ambient lighting. It is not a
+caster, pick target, or physics body, and is disposed with its ground parent.
+No custom shaders or node-material graph modifications are applied.
 
 Ground rendering is 40×40 at Y `0.05`; collision extents are `(600,0.1,600)`
 around `(0,-0.05,0)`. Four invisible walls are centred at X/Z `±18`, Y `18`.
@@ -302,6 +308,24 @@ ball-and-socket constraints connect each body to its nearest configured
 ancestor. `bunny-rig.json` records source joint indices, rest local transforms,
 bind world transforms, dimensions, offsets, and nearest configured parents.
 
+The original application sets `scene.useRightHandedSystem = true`; Lite uses
+left-handed world space. The metadata remains in the original right-handed
+coordinates. The ragdoll reflects source positions, collider offsets, and
+constraint axes across X, and conjugates bind rotations by that reflection
+(`F * R * F`, quaternion `(x, -y, -z, w)`). The spawn translation is already in
+Lite world space and is not reflected. Parent-relative joint offsets use the
+same converted frame. `setBoneWorldPoseDeferred` supplies the final reflection
+needed by the glTF skeleton, so the resulting bone matrix is `F * R_source`
+rather than `R_source * F`; these differ for the head's quarter-turn bind pose.
+
+`tests/lite/fixtures/playroom-source-ragdoll.json` records native body and joint
+measurements from Babylon.js 6.0.0 / Havok 1.0.0 using the pinned source
+configuration. `playroom-ragdoll-handedness.test.ts` verifies all ten native
+body positions, dimensions, inertia tensors, materials, nine constraint
+frames, and both rest and rotated bone poses against that source. The source
+uses unconstrained angular motion: its angular-limit calls are commented out.
+Handedness conversion does not add limits or alter the solver configuration.
+
 One world-lifetime post-physics callback rotates each collider offset through
 the joint's current body rotation to recover the joint position, and derives
 the desired joint rotation from the body delta and bind-world rotation. Every
@@ -322,7 +346,11 @@ inverse bind data, mesh world matrix, JOINTS, and WEIGHTS consumed by the
 main draw. Those world positions and rotations must match the corresponding
 Havok joints throughout flight and contact without changing the body
 trajectory, camera-follow target, or the scene's independently cached main and
-shadow tasks. The bunny is not registered as a shadow caster.
+shadow tasks. The visible ragdoll clone is registered as a shadow caster,
+with `enableSkeletonShadows` providing live deformed bounds as it moves.
+The depth-only shadow draw binds the same bone texture and joint/weight buffers
+as the main draw. Next Kick and replay retain this mesh and its caster membership;
+the physics proxy boxes and the unloaded source template are not casters.
 
 All ten bodies remain `DYNAMIC` with node-to-body prestep disabled from
 creation through startup, aiming, flight, Next Kick, and replay. Gravity and
@@ -527,6 +555,14 @@ uses the subsystem reset path described above. The shared demo bundler copies
 the entire `playroom` directory beside the flat bundle, so both
 `/lite/demo-playroom.html` and arbitrary nested flat deployments resolve JS,
 WASM, models, graphs, images, environment faces, and MP3 files locally.
+When emitting the standalone HTML, it rewrites the lab's `./bundle/demos/`,
+`/bundle/demos/`, and `/lite/bundle/demos/` prefixes to `./`, including CSS
+background images and both responsive splash-image data attributes. The source
+HTML keeps its lab-relative paths. `tests/lite/build/demo-site.test.ts` builds
+Playroom and checks the emitted HTML's assets over HTTP at root and nested
+deployment paths without the lab's route aliases. Run it with
+`pnpm test:build tests/lite/build/demo-site.test.ts`.
+
 Replay performs no scene or GPU retirement. During construction, each batch
 captures its authored thin-instance matrix slab and native-pose checkpoint
 before physics stepping begins; replay uses them to update the existing native

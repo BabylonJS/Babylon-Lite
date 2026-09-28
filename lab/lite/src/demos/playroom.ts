@@ -11,6 +11,8 @@ import {
     disposeScene,
     enableHavokThinInstanceAdvancedPhysics,
     enableHavokThinInstancePhysics,
+    enableSkeletonShadows,
+    getContainerMeshes,
     loadEnvironment,
     loadSkybox,
     registerSceneWithShadowSupport,
@@ -59,6 +61,7 @@ async function main(): Promise<void> {
             orthoMaxZ: 30,
             forceRefreshEveryFrame: true,
         });
+        enableSkeletonShadows(shadow);
         sun.shadowGenerator = shadow;
 
         await loadEnvironment(scene, asset("env/childRoom_ibl.env"), {
@@ -100,7 +103,7 @@ async function main(): Promise<void> {
         window.addEventListener("pagehide", disposeGame, { once: true });
         setShadowTaskCasterMeshes(
             shadow,
-            world.meshes.filter((mesh) => mesh.visible !== false)
+            [...world.meshes, ...getContainerMeshes({ entities: [game.ragdoll.visualRoot] })].filter((mesh) => mesh.visible !== false)
         );
         await registerSceneWithShadowSupport(scene);
         await startEngine(engine);

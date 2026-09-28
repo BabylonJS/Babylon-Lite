@@ -122,7 +122,7 @@ function escapeHtml(value: string): string {
 }
 
 function rewriteDemoHtmlForBundle(html: string): string {
-    return html.replace(/(["'])\/(?:lite\/)?bundle\/demos\//g, "$1./");
+    return html.replace(/(["'])\.?\/(?:lite\/)?bundle\/demos\//g, "$1./");
 }
 
 /**

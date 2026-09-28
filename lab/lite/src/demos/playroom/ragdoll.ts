@@ -101,7 +101,8 @@ export function bindWorldRotation(joint: BunnyRigJoint): Quat {
         const s = Math.sqrt(1 + m22 - m00 - m11) * 2;
         rotation = { x: (m02 + m20) / s, y: (m12 + m21) / s, z: s * 0.25, w: (m10 - m01) / s };
     }
-    return normalizeQuaternion(rotation);
+    // Conjugate the source rotation by Lite's X reflection: F * R * F.
+    return normalizeQuaternion({ x: rotation.x, y: -rotation.y, z: -rotation.z, w: rotation.w });
 }
 
 function rotateVector(rotation: Quat, vector: Vec3): Vec3 {
@@ -112,7 +113,7 @@ function rotateVector(rotation: Quat, vector: Vec3): Vec3 {
 
 export function colliderOffsetWorld(joint: BunnyRigJoint): Vec3 {
     return rotateVector(bindWorldRotation(joint), {
-        x: joint.axis[0] * joint.boxOffset,
+        x: -joint.axis[0] * joint.boxOffset,
         y: joint.axis[1] * joint.boxOffset,
         z: joint.axis[2] * joint.boxOffset,
     });
@@ -134,7 +135,7 @@ function scaledDimensions(joint: BunnyRigJoint): Vec3 {
 export function ragdollBodyPosition(joint: BunnyRigJoint, launch: Vec3): Vec3 {
     const offset = colliderOffsetWorld(joint);
     return {
-        x: launch.x + joint.bindWorldPosition[0] + offset.x,
+        x: launch.x - joint.bindWorldPosition[0] + offset.x,
         y: launch.y + joint.bindWorldPosition[1] + offset.y,
         z: launch.z + joint.bindWorldPosition[2] + offset.z,
     };
@@ -142,7 +143,7 @@ export function ragdollBodyPosition(joint: BunnyRigJoint, launch: Vec3): Vec3 {
 
 export function ragdollJointPivots(parent: BunnyRigJoint, child: BunnyRigJoint, launch: Vec3): { pivotA: Vec3; pivotB: Vec3 } {
     const anchor = {
-        x: launch.x + child.bindWorldPosition[0],
+        x: launch.x - child.bindWorldPosition[0],
         y: launch.y + child.bindWorldPosition[1],
         z: launch.z + child.bindWorldPosition[2],
     };
@@ -213,8 +214,8 @@ export function createBunnyRagdoll(scene: SceneContext, physics: PhysicsWorld, a
         const constraint = createPhysicsConstraint(physics, parent.record.body, child.record.body, PhysicsConstraintType.BALL_AND_SOCKET, {
             pivotA: pivots.pivotA,
             pivotB: pivots.pivotB,
-            axisA: { x: (joint.jointAxis ?? joint.axis)[0], y: (joint.jointAxis ?? joint.axis)[1], z: (joint.jointAxis ?? joint.axis)[2] },
-            axisB: { x: (joint.jointAxis ?? joint.axis)[0], y: (joint.jointAxis ?? joint.axis)[1], z: (joint.jointAxis ?? joint.axis)[2] },
+            axisA: { x: -(joint.jointAxis ?? joint.axis)[0], y: (joint.jointAxis ?? joint.axis)[1], z: (joint.jointAxis ?? joint.axis)[2] },
+            axisB: { x: -(joint.jointAxis ?? joint.axis)[0], y: (joint.jointAxis ?? joint.axis)[1], z: (joint.jointAxis ?? joint.axis)[2] },
             collision: false,
         });
         constraints.push(constraint);
@@ -233,7 +234,7 @@ export function createBunnyRagdoll(scene: SceneContext, physics: PhysicsWorld, a
                 parent === null
                     ? { x: 0, y: 0, z: 0 }
                     : rotateVector(quaternionInverse(bindWorldRotation(parent)), {
-                          x: joint.bindWorldPosition[0] - parent.bindWorldPosition[0],
+                          x: parent.bindWorldPosition[0] - joint.bindWorldPosition[0],
                           y: joint.bindWorldPosition[1] - parent.bindWorldPosition[1],
                           z: joint.bindWorldPosition[2] - parent.bindWorldPosition[2],
                       }),

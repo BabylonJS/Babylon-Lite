@@ -1,5 +1,7 @@
 import { writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import type * as BabylonLite from "../../../../packages/babylon-lite/src/index.js";
 import {
     installTemporalPlayroomRoute,
     matrixPosition,
@@ -14,6 +16,54 @@ import { installWebGpuRenderBundleObserver } from "./webgpu-render-bundle-observ
 import type { ObservedBuffer, ObservedBundleDraw } from "./webgpu-render-bundle-observer.js";
 
 const labTestPort = Number(process.env.LAB_TEST_PORT ?? 5179);
+
+test("preserves original ground lighting and darkens only shadows with a nonphysical receiver", async ({ page }) => {
+    await installTemporalPlayroomRoute(page);
+    await waitForTemporalPlayroom(page, labTestPort);
+    const settings = await page.evaluate(
+        async (moduleUrl) => {
+            const lite = (await import(moduleUrl)) as typeof BabylonLite;
+            const state = window.__playroomTemporalState!;
+            const ground = state.world.meshes.find((mesh) => mesh.name === "playroom-ground")!;
+            const receiver = lite.getContainerMeshes({ entities: [ground] }).find((mesh) => mesh.name === "playroom-ground-shadows")!;
+            if (!receiver || !lite.isPbrMaterial(receiver.material)) {
+                throw new Error("The ground is missing its PBR shadow-only receiver.");
+            }
+            return {
+                exposure: state.scene.imageProcessing.exposure,
+                contrast: state.scene.imageProcessing.contrast,
+                lightIntensities: state.scene.lights.map((light) => {
+                    if (!("intensity" in light)) {
+                        throw new Error(`Unexpected Playroom light type: ${light.lightType}`);
+                    }
+                    return light.intensity;
+                }),
+                sourceRugMaterial: ground.material === state.assets.rugMaterial,
+                shadow: lite.getShadowOnly(receiver.material),
+                heightAboveGround: receiver.worldMatrix[13]! - ground.worldMatrix[13]!,
+                receivesShadows: receiver.receiveShadows,
+                pickable: receiver.pickable,
+                parentedToGround: receiver.parent === ground,
+                inCasterInventory: state.world.meshes.includes(receiver),
+                hasPhysicsBody: state.world.records.some((record) => record.mesh === receiver),
+            };
+        },
+        `/@fs/${resolve("packages/babylon-lite/src/index.ts").replaceAll("\\", "/")}`
+    );
+    expect(settings).toMatchObject({
+        exposure: 1,
+        contrast: 1,
+        lightIntensities: [0.85, 0.1],
+        sourceRugMaterial: true,
+        shadow: { color: [0, 0, 0], opacity: 0.65 },
+        receivesShadows: true,
+        pickable: false,
+        parentedToGround: true,
+        inCasterInventory: false,
+        hasPhysicsBody: false,
+    });
+    expect(settings.heightAboveGround).toBeCloseTo(0.001, 6);
+});
 
 function expectPositionsToMatch(actual: readonly number[], expected: readonly number[]): void {
     expect(actual[0]).toBeCloseTo(expected[0]!, 3);

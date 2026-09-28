@@ -127,9 +127,9 @@ describe("The Playroom ragdoll bind conversion", () => {
     it("rotates configured collider offsets by each bone bind-world orientation", () => {
         const armRight = rig.joints.find((joint) => joint.name === "arm_r")!;
         const armLeft = rig.joints.find((joint) => joint.name === "arm_l")!;
-        expect(colliderOffsetWorld(armRight).x).toBeCloseTo(-0.06, 5);
-        expect(colliderOffsetWorld(armLeft).x).toBeCloseTo(0.06, 5);
-        expect(ragdollBodyPosition(armRight, { x: 0, y: 0.9, z: 0 }).x).toBeCloseTo(armRight.bindWorldPosition[0] - 0.06, 5);
+        expect(colliderOffsetWorld(armRight).x).toBeCloseTo(0.06, 5);
+        expect(colliderOffsetWorld(armLeft).x).toBeCloseTo(-0.06, 5);
+        expect(ragdollBodyPosition(armRight, { x: 0, y: 0.9, z: 0 }).x).toBeCloseTo(-armRight.bindWorldPosition[0] + 0.06, 5);
     });
 
     it("submits every configured joint as one absolute world-pose batch", () => {
@@ -165,7 +165,7 @@ describe("The Playroom ragdoll bind conversion", () => {
                             : rotateByQuaternion(
                                   { x: -parentRotation.x, y: -parentRotation.y, z: -parentRotation.z, w: parentRotation.w },
                                   {
-                                      x: joint.bindWorldPosition[0] - parent.bindWorldPosition[0],
+                                      x: parent.bindWorldPosition[0] - joint.bindWorldPosition[0],
                                       y: joint.bindWorldPosition[1] - parent.bindWorldPosition[1],
                                       z: joint.bindWorldPosition[2] - parent.bindWorldPosition[2],
                                   }

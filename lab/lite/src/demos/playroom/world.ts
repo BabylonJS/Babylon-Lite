@@ -11,12 +11,14 @@ import {
     PhysicsMotionType,
     PhysicsPrestepType,
     PhysicsShapeType,
+    setParent,
     setPhysicsBodyCollisionEventsEnabled,
     setPhysicsBodyMotionType,
     setPhysicsBodyMass,
     setPhysicsBodyPrestepType,
     setPhysicsBodyShape,
     setPhysicsShapeMaterial,
+    setShadowOnly,
     setThinInstanceColors,
     setThinInstanceCount,
     setThinInstances,
@@ -192,6 +194,14 @@ function addGroundAndWalls(engine: EngineContext, scene: SceneContext, world: Ph
     ground.position.y = 0.05;
     ground.material = assets.rugMaterial;
     ground.receiveShadows = true;
+    const shadowReceiver = createGround(engine, { width: 40, height: 40 });
+    shadowReceiver.name = "playroom-ground-shadows";
+    shadowReceiver.position.y = ground.position.y + 0.001;
+    shadowReceiver.receiveShadows = true;
+    shadowReceiver.pickable = false;
+    shadowReceiver.material = createPbrMaterial({});
+    setShadowOnly(shadowReceiver.material, { opacity: 0.65 });
+    setParent(shadowReceiver, ground);
     addToScene(scene, ground);
     state.meshes.push(ground);
     const groundShape = createPhysicsShape(world, {

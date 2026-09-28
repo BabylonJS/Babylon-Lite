@@ -69,6 +69,7 @@ export interface RagdollSkinSnapshot {
         readonly weightsBufferId: number;
         readonly finishCount: number;
         readonly main: { readonly id: number; readonly executionCount: number };
+        readonly shadow: { readonly id: number; readonly executionCount: number };
     };
 }
 
@@ -102,6 +103,10 @@ export async function waitForTemporalPlayroom(page: Page, labTestPort: number): 
         undefined,
         { timeout: 60_000 }
     );
+    const error = await page.locator("#renderCanvas").getAttribute("data-error");
+    if (error) {
+        throw new Error(`The Playroom failed to start: ${error}`);
+    }
 }
 
 export async function prepareFreeModeTarget(page: Page, bodyName: string, index: number): Promise<TemporalTarget> {
@@ -351,6 +356,7 @@ export async function readRagdollSkinSnapshot(page: Page, landmarks: readonly Ra
                 const position = Array.from(native[0]);
                 const rotation = Array.from(native[1]);
                 const bindOffset = rotate(bindRotation(joint.bindWorldMatrix), [joint.axis[0] * joint.boxOffset, joint.axis[1] * joint.boxOffset, joint.axis[2] * joint.boxOffset]);
+                bindOffset[0] = -bindOffset[0]!;
                 const currentOffset = rotate(rotation, bindOffset);
                 bodies[joint.name] = {
                     position,
@@ -400,10 +406,10 @@ export async function readRagdollSkinSnapshot(page: Page, landmarks: readonly Ra
             const rootVertexPosition = multiplyPoint(meshWorld, skinnedX, skinnedY, skinnedZ, skinnedW);
 
             const observation = window.__playroomRenderBundleObservation!();
-            const selectBoundBundle = () => {
+            const selectBoundBundle = (shadow: boolean) => {
                 const candidates = observation.executedBundles.filter(
                     (bundle) =>
-                        bundle.descriptor.colorFormats.length > 0 &&
+                        (bundle.descriptor.colorFormats.length === 0) === shadow &&
                         bundle.draws.some((draw) => {
                             const buffers = draw.vertexBuffers.map((binding) => binding.bufferId);
                             return buffers.includes(jointsBufferId) && buffers.includes(weightsBufferId) && draw.textureIds.includes(textureId);
@@ -418,7 +424,7 @@ export async function readRagdollSkinSnapshot(page: Page, landmarks: readonly Ra
                             .reduce((sum, membership) => sum + membership.callCount, 0),
                     };
                 }
-                throw new Error("No executed main bundle binds the bunny skin resources.");
+                throw new Error(`No executed ${shadow ? "shadow" : "main"} bundle binds the bunny skin resources.`);
             };
 
             return {
@@ -433,7 +439,8 @@ export async function readRagdollSkinSnapshot(page: Page, landmarks: readonly Ra
                     jointsBufferId,
                     weightsBufferId,
                     finishCount: observation.finishCount,
-                    main: selectBoundBundle(),
+                    main: selectBoundBundle(false),
+                    shadow: selectBoundBundle(true),
                 },
             };
         },

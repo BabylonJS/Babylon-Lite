@@ -10,6 +10,8 @@ import {
     decomposeMat4,
     enableHavokThinInstancePhysics,
     enableHavokThinInstanceAdvancedPhysics,
+    enableSkeletonShadows,
+    getContainerMeshes,
     getPhysicsBodyInstanceCount,
     loadEnvironment,
     loadSkybox,
@@ -803,9 +805,10 @@ async function main(): Promise<void> {
     document.addEventListener("playroom-popper", () => popperEvents++);
     const rebuildResolutionMap = installResolutionObserver(physics);
     installFrameObserver(engine, state, effects);
+    enableSkeletonShadows(shadow);
     setShadowTaskCasterMeshes(
         shadow,
-        world.meshes.filter((mesh) => mesh.visible !== false)
+        [...world.meshes, ...getContainerMeshes({ entities: [state.ragdoll.visualRoot] })].filter((mesh) => mesh.visible !== false)
     );
     await registerSceneWithShadowSupport(scene);
     await startEngine(engine);

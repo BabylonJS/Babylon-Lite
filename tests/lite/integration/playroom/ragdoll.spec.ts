@@ -137,6 +137,7 @@ function expectFinalSkinAligned(before: RagdollSkinSnapshot, current: RagdollSki
     expect(current.gpu.textureId).toBe(before.gpu.textureId);
     expect(current.gpu.jointsBufferId).toBe(before.gpu.jointsBufferId);
     expect(current.gpu.weightsBufferId).toBe(before.gpu.weightsBufferId);
+    expect(current.gpu.shadow.executionCount).toBeGreaterThan(0);
 
     const expectedPositions = new Map<string, readonly number[]>();
     const unresolved = new Set(ragdollRig.joints.map((joint) => joint.name));
@@ -306,6 +307,10 @@ for (const launch of [
             const current = await readRagdollSkinSnapshot(page, ragdollBindLandmarks);
             expectFinalSkinAligned(before, current);
             expect(current.gpu.main.executionCount).toBeGreaterThan(0);
+            // Exploding props can rebuild the scene's shared shadow bundle.
+            if (current.gpu.shadow.id === prior.gpu.shadow.id) {
+                expect(current.gpu.shadow.executionCount).toBeGreaterThan(prior.gpu.shadow.executionCount);
+            }
             prior = current;
             elapsed = targetElapsed;
         }
