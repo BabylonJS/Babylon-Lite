@@ -129,6 +129,64 @@ test("computes stable bitset ranks for arbitrary uint keys and lane-word tails",
     expect(result!.failures).toEqual([]);
 });
 
+test("protects the mandatory bootstrap readback before exact-budget source admission", async ({ page }) => {
+    const result = await page.evaluate(
+        async ({ moduleUrl, retirementUrl }) => {
+            const adapter = await navigator.gpu.requestAdapter();
+            if (!adapter) {
+                return null;
+            }
+            const device = await adapter.requestDevice();
+            device.pushErrorScope("validation");
+            const gpu = await import(moduleUrl);
+            const retirement = await import(retirementUrl);
+            const engine = { _device: device, _currentEncoder: device.createCommandEncoder() };
+            const state = gpu.createSplatStreamGpuState(engine, 1, 150_664);
+            gpu.holdSplatStreamGatherParameters(state, 1);
+            const sourceBytes = 83_968;
+            const sourceAdmitted = state.ledger.tryReserve(sourceBytes);
+            const canonical = new Float32Array(16);
+            canonical[2] = 0.2;
+            canonical[3] = 1;
+            canonical[4] = canonical[7] = canonical[9] = 0.001;
+            canonical[12] = canonical[13] = canonical[14] = 1;
+            device.queue.writeBuffer(state.canonical, 0, canonical);
+            state.count = 1;
+            state.contentGeneration = state.gatheredGeneration = 1;
+            const batch = gpu.createSplatStreamDrawBatch(state, { _sampleCount: 1 });
+            const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+            batch.reset();
+            batch.queue({ count: 1, key: "bootstrap-exact-budget", worldView: identity, projection: identity, width: 64, height: 64, near: 0.01 });
+            batch.flush(engine);
+            const signal = batch.takeBootstrapSignal();
+            const accounting = {
+                allocated: state.ledger.allocatedBytes,
+                held: state.ledger.heldBytes,
+                max: state.ledger.maxBytes,
+                readbackHold: state.bootstrapReadbackHoldBytes,
+            };
+            device.queue.submit([engine._currentEncoder.finish()]);
+            retirement.flushGpuResourceRetirements(engine);
+            const nonempty = signal ? await signal : null;
+            state.ledger.release(sourceBytes);
+            batch.destroy();
+            gpu.retireSplatStreamGpuState(state);
+            await device.queue.onSubmittedWorkDone();
+            retirement.flushGpuResourceRetirements(engine);
+            await Promise.resolve();
+            const error = await device.popErrorScope();
+            return { sourceAdmitted, signalCreated: !!signal, nonempty, accounting, error: error?.message };
+        },
+        { moduleUrl: gpuModuleUrl, retirementUrl: retirementModuleUrl }
+    );
+    test.skip(result === null, "A WebGPU adapter is unavailable");
+    expect(result!.error).toBeUndefined();
+    expect(result!.sourceAdmitted).toBe(true);
+    expect(result!.signalCreated).toBe(true);
+    expect(result!.nonempty).toBe(true);
+    expect(result!.accounting).toEqual({ allocated: 150_408, held: 256, max: 150_664, readbackHold: 0 });
+});
+
 test("compiles shaders and gathers canonical SOG records without clamping color", async ({ page }) => {
     const result = await page.evaluate(async (moduleUrl) => {
         const adapter = await navigator.gpu.requestAdapter();
@@ -864,8 +922,8 @@ test("accounts and retires compaction resources while preserving the demo capaci
     expect(result!.budgetedDemoCapacity).toBe(4_010_000);
     expect(result!.beforeBatch.allocated).toBeGreaterThan(0);
     expect(result!.beforeBatch.held).toBeGreaterThan(0);
-    expect(result!.afterBatch.allocated).toBe(result!.beforeBatch.allocated + result!.beforeBatch.held);
-    expect(result!.afterBatch.held).toBe(0);
+    expect(result!.afterBatch.allocated).toBe(result!.beforeBatch.allocated + result!.beforeBatch.held - 16);
+    expect(result!.afterBatch.held).toBe(16);
     expect(result!.retired).toEqual({ allocated: 0, held: 0 });
 });
 
@@ -1091,5 +1149,5 @@ test("protects gather descriptors under a full source ledger until the prior sub
     expect(result!.before).not.toBe(result!.after);
     expect(result!.inFlight).toBe(1);
     expect(result!.heldBytes).toBe(0);
-    expect(result!.allocatedBytes).toBe(result!.maxBytes);
+    expect(result!.allocatedBytes).toBe(result!.maxBytes - 16);
 });

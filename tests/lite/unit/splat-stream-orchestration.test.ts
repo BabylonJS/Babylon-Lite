@@ -79,6 +79,23 @@ function twoCoolingLeavesManifest(): unknown {
     };
 }
 
+function sharedSourceLodsManifest(): unknown {
+    return {
+        version: 1,
+        lodLevels: 2,
+        lodErrors: true,
+        filenames: ["shared/meta.json"],
+        tree: {
+            bound: { min: [-0.4, -0.4, -0.8], max: [0.4, 0.4, -0.1] },
+            lods: {
+                "0": { file: 0, offset: 0, count: 1 },
+                "1": { file: 0, offset: 1, count: 2 },
+            },
+            errors: [1, 0],
+        },
+    };
+}
+
 function offscreenBootstrapManifest(): unknown {
     return {
         version: 1,
@@ -357,6 +374,41 @@ async function attachAndBuild(h: ReturnType<typeof harness>, environment = false
 }
 
 describe("Gaussian splat stream orchestration", () => {
+    it("keeps shared-source fine data behind the coarse draw barrier and starts cooldown only after refinement publishes", async () => {
+        const h = harness(sharedSourceLodsManifest());
+        h.setNow(10);
+        const stream = await loadGaussianSplatStream(h.engine, "https://assets.test/lod-meta.json", {
+            maxSplats: 20,
+            screenError: 0.001,
+            lodCooldownMs: 250,
+            _runtime: {
+                fetch: h.fetch,
+                prepareSource: h.prepareSource,
+                createGpuState: () => h.gpu,
+                buildRenderable: h.buildRenderable,
+                queueDone: () => h.queueGate.promise,
+                now: h.now,
+            },
+        });
+        attachGaussianSplatStream(h.scene, stream);
+        await h.scene._deferredBuilders[0]!();
+        h.calls[0]!.gate.resolve(prepared(h.calls[0]!.source, h.calls[0]!.generation));
+        await vi.waitFor(() => expect(stream._leafStates[0]!.displayed?.count).toBe(1));
+
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream._leafStates[0]!.target.count).toBe(2);
+        expect(stream._leafStates[0]!.displayed?.count).toBe(1);
+        expect(stream._leafStates[0]!.lodCooldownUntil).toBe(0);
+        expect(stream._generationPressure).toBe(false);
+
+        h.setNow(20);
+        h.getDraw()(Promise.resolve(true));
+        await vi.waitFor(() => expect(stream._refinementEnabled).toBe(true));
+        expect(stream._leafStates[0]!.displayed?.count).toBe(2);
+        expect(stream._leafStates[0]!.lodCooldownUntil).toBe(270);
+        expect(stream._generationPressure).toBe(false);
+    });
+
     it("holds an accepted replacement until the exact per-leaf deadline without duplicate source work", async () => {
         const h = harness(twoCoolingLeavesManifest());
         const stream = await attachAndBuild(h, false, 250);

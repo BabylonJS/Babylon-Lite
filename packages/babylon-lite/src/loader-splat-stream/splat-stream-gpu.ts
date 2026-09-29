@@ -71,6 +71,7 @@ export interface SplatStreamGpuState {
     readonly ledger: SplatStreamGpuLedger;
     readonly gpuBytes: number;
     passHoldBytes: number;
+    bootstrapReadbackHoldBytes: number;
     intervals: readonly SplatStreamGpuInterval[];
     count: number;
     contentGeneration: number;
@@ -229,7 +230,7 @@ export function getSplatStreamGpuCapacity(device: GPUDevice, requested: number, 
     const dispatchCapacity = device.limits.maxComputeWorkgroupsPerDimension * WORKGROUP_SIZE;
     const storageCapacity = Math.floor(Math.min(device.limits.maxBufferSize, device.limits.maxStorageBufferBindingSize) / RECORD_BYTES);
     const workingBudget = Math.floor(maxGpuBytes * 0.75);
-    const fits = (capacity: number): boolean => streamStateBytes(capacity) + passStateBytes(capacity) <= workingBudget;
+    const fits = (capacity: number): boolean => streamStateBytes(capacity) + passStateBytes(capacity) + INDIRECT_BYTES <= workingBudget;
     let low = 0;
     let high = Math.min(requested, dispatchCapacity, storageCapacity);
     while (low < high) {
@@ -288,7 +289,12 @@ export function createSplatStreamGpuState(engine: EngineContext, requestedCapaci
     const gpuBytes = streamStateBytes(capacity);
     const initialPassBytes = passStateBytes(capacity);
     const stateReserved = ledger.tryReserve(gpuBytes);
-    if (!stateReserved || !ledger.tryHold(initialPassBytes)) {
+    const passHeld = stateReserved && ledger.tryHold(initialPassBytes);
+    const readbackHeld = passHeld && ledger.tryHold(INDIRECT_BYTES);
+    if (!stateReserved || !passHeld || !readbackHeld) {
+        if (passHeld) {
+            ledger.releaseHold(initialPassBytes);
+        }
         if (stateReserved) {
             ledger.release(gpuBytes);
         }
@@ -309,6 +315,7 @@ export function createSplatStreamGpuState(engine: EngineContext, requestedCapaci
             ledger,
             gpuBytes,
             passHoldBytes: initialPassBytes,
+            bootstrapReadbackHoldBytes: INDIRECT_BYTES,
             intervals: [],
             count: 0,
             contentGeneration: 0,
@@ -320,6 +327,7 @@ export function createSplatStreamGpuState(engine: EngineContext, requestedCapaci
         };
     } catch (reason) {
         canonical?.destroy();
+        ledger.releaseHold(INDIRECT_BYTES);
         ledger.releaseHold(initialPassBytes);
         ledger.release(gpuBytes);
         throw reason;
@@ -955,7 +963,9 @@ export function createSplatStreamDrawBatch(state: SplatStreamGpuState, signature
             }
             if (pending.key !== passGpu.lastKey) {
                 recordProjectionAndSort(state, passGpu, pending, engine._currentEncoder);
-                if (state.count > 0 && !passGpu.bootstrapClaimed && !passGpu.bootstrapReadback && state.ledger.tryReserve(INDIRECT_BYTES)) {
+                if (state.count > 0 && !passGpu.bootstrapClaimed && !passGpu.bootstrapReadback && state.bootstrapReadbackHoldBytes === INDIRECT_BYTES) {
+                    state.ledger.commitHold(INDIRECT_BYTES);
+                    state.bootstrapReadbackHoldBytes = 0;
                     try {
                         const readback = engine._device.createBuffer({ size: INDIRECT_BYTES, usage: BU.COPY_DST | BU.MAP_READ });
                         engine._currentEncoder.copyBufferToBuffer(passGpu.indirect, 0, readback, 0, INDIRECT_BYTES);
@@ -1056,6 +1066,10 @@ export function retireSplatStreamGpuState(state: SplatStreamGpuState): void {
     if (state.passHoldBytes) {
         state.ledger.releaseHold(state.passHoldBytes);
         state.passHoldBytes = 0;
+    }
+    if (state.bootstrapReadbackHoldBytes) {
+        state.ledger.releaseHold(state.bootstrapReadbackHoldBytes);
+        state.bootstrapReadbackHoldBytes = 0;
     }
     state.ledger.retire(state.gpuBytes, () => {
         state.canonical.destroy();

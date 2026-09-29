@@ -158,6 +158,10 @@ function sameRepresentation(left: StreamRepresentation | null, right: StreamRepr
     return !!left && left.fileId === right.fileId && left.offset === right.offset && left.count === right.count;
 }
 
+function coarseRepresentation(stream: GaussianSplatStream, state: StreamLeafRuntime): StreamRepresentation {
+    return stream._manifest.leaves[state.target.leafId]!.alternatives[0]!;
+}
+
 function now(stream: GaussianSplatStream): number {
     return stream._runtime.now?.() ?? performance.now();
 }
@@ -322,6 +326,13 @@ function commitDisplayed(stream: GaussianSplatStream, force = false): void {
     const hardPressure =
         displayedCount > foregroundCapacity || stream._generationPressure || stream._sourceStates.some((state) => state.state === "blocked" && state.demandCount > 0);
     const currentTime = now(stream);
+    if (!stream._refinementEnabled) {
+        for (const state of stream._leafStates) {
+            if (state.pending && !sameRepresentation(state.pending, coarseRepresentation(stream, state))) {
+                state.pending = null;
+            }
+        }
+    }
     if (!hardPressure && stream._options.lodCooldownMs > 0) {
         for (const state of stream._leafStates) {
             if (state.cooldownHeld && state.displayed && state.pending && !sameRepresentation(state.displayed, state.pending)) {
@@ -381,6 +392,9 @@ function commitDisplayed(stream: GaussianSplatStream, force = false): void {
                 return false;
             }
             if (state.cooldownHeld) {
+                return false;
+            }
+            if (!stream._refinementEnabled && state.displayed) {
                 return false;
             }
             const targetSource = stream._sourceStates[state.target.fileId]!;
@@ -794,12 +808,13 @@ function updateSelection(stream: GaussianSplatStream, context: DrawUpdateContext
         }
         for (const [leafId] of aggregateTargets) {
             const state = stream._leafStates[leafId]!;
-            const source = stream._sourceStates[state.target.fileId]!;
-            if (!sameRepresentation(state.displayed, state.target) && source.state === "resident") {
-                state.pending = state.target;
+            const publicationTarget = stream._refinementEnabled ? state.target : coarseRepresentation(stream, state);
+            const source = stream._sourceStates[publicationTarget.fileId]!;
+            if (!sameRepresentation(state.displayed, publicationTarget) && source.state === "resident") {
+                state.pending = publicationTarget;
             } else if (!state.displayed) {
-                const alternatives = stream._manifest.leaves[state.target.leafId]!.alternatives;
-                const targetIndex = alternatives.indexOf(state.target);
+                const alternatives = stream._manifest.leaves[publicationTarget.leafId]!.alternatives;
+                const targetIndex = alternatives.indexOf(publicationTarget);
                 for (let index = targetIndex - 1; index >= 0; index--) {
                     const fallback = alternatives[index]!;
                     const fallbackSource = stream._sourceStates[fallback.fileId]!;
@@ -836,6 +851,13 @@ function coarseDrawn(stream: GaussianSplatStream, nonemptySignal: Promise<boolea
             stream._refinementEnabled = true;
             invalidateSelection(stream);
             stream.stats._values.phase = "streaming";
+            for (const state of stream._leafStates) {
+                const source = stream._sourceStates[state.target.fileId]!;
+                if (state.visible && !sameRepresentation(state.displayed, state.target) && source.state === "resident") {
+                    state.pending = state.target;
+                }
+            }
+            commitDisplayed(stream);
             scheduleTargets(stream);
             const wait = stream._runtime.queueDone?.(stream._engine) ?? stream._engine._device.queue.onSubmittedWorkDone();
             void wait.then(
@@ -982,6 +1004,7 @@ export async function loadGaussianSplatStream(engine: EngineContext, metadataUrl
         testableGpu.ledger ??= ledger;
         testableGpu.gpuBytes ??= 0;
         testableGpu.gatherParameterHoldBytes ??= 0;
+        testableGpu.bootstrapReadbackHoldBytes ??= 0;
         testableGpu.gatherParametersInFlight ??= 0;
         testableGpu.gatherHoldReleasePending ??= false;
         holdSplatStreamGatherParameters(gpu, manifest.leaves.length + (manifest.environmentUrl ? 1 : 0));
