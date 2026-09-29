@@ -2,9 +2,9 @@
  * MeshLoD demo — standalone workflow verification (REQ-VERIFY-6, REQ-DEMO-1..7).
  *
  * Drives the PRODUCTION-BUNDLED demo (`/lite/bundle/demos/mesh-lod.js`, built by
- * `pnpm build:bundle-demo mesh-lod`) in real WebGPU and asserts every required
- * control, diagnostic, debug view, camera state, loading/error state, and
- * coarse-fallback scenario. No golden images, no performance test.
+ * `pnpm build:bundle-demo mesh-lod`) in real WebGPU and asserts the shipped
+ * controls, diagnostics, debug views, camera pose, and loading/error state.
+ * No golden images, no performance test.
  *
  * Run: pnpm build:bundle-demo mesh-lod && npx playwright test tests/lite/demo/mesh-lod-demo.spec.ts
  */
@@ -39,8 +39,6 @@ test.describe("MeshLoD demo workflow", () => {
         page = await browser.newPage();
         await page.goto(URL, { waitUntil: "domcontentloaded" });
         await waitReady(page);
-        // Let default (throttled) streaming refine past the coarse bound.
-        await page.waitForFunction(() => Number((document.querySelector('[data-metric="rendered"]')?.textContent ?? "0").replace(/[^\d]/g, "")) > 46, { timeout: 30_000 });
     });
 
     test.afterAll(async () => {
@@ -48,6 +46,9 @@ test.describe("MeshLoD demo workflow", () => {
     });
 
     test("REQ-DEMO-1/2: ready state, three instances, streamed .mlod", async () => {
+        await page.waitForFunction(() => Number((document.querySelector('[data-metric="rendered"]')?.textContent ?? "0").replace(/[^\d]/g, "")) > 46, null, { timeout: 30_000 });
+        expect(await metric(page, "selection")).toBe("GPU");
+        expect(await metricNumber(page, "visible")).toBeGreaterThan(0);
         expect(await page.evaluate(() => document.getElementById("renderCanvas")?.dataset.ready)).toBe("true");
         expect(await page.evaluate(() => document.getElementById("renderCanvas")?.dataset.instanceCount)).toBe("3");
         expect(
@@ -106,12 +107,13 @@ test.describe("MeshLoD demo workflow", () => {
         });
     });
 
-    test("REQ-DEMO-6: every debug view recolors with a legend and keeps the statue complete", async () => {
+    test("REQ-DEMO-6: shipped debug views recolor with a legend and keep the statue complete", async () => {
         const none = await canvasShot(page);
-        for (const view of ["meshlet-id", "lod-depth", "selected-group", "page-residency", "requested-pages", "meshlet-cone"]) {
+        await expect(page.locator("#mlod-debug option")).toHaveCount(3);
+        for (const view of ["meshlet-id", "lod-depth"]) {
             await page.selectOption("#mlod-debug", view);
             await page.waitForTimeout(700);
-            expect((await page.textContent("#meshLodLegend"))?.toLowerCase()).toContain("legend");
+            await expect(page.locator("#meshLodLegend .hud-section-title")).toHaveText(view === "meshlet-id" ? "Meshlet ID" : "LOD depth");
             expect(Buffer.compare(await canvasShot(page), none)).not.toBe(0); // recolored
             expect(await metricNumber(page, "rendered")).toBeGreaterThan(COARSE_MIN); // still complete
             expect(await metric(page, "selection")).toBe("CPU"); // debug uses reference selection
@@ -121,27 +123,32 @@ test.describe("MeshLoD demo workflow", () => {
         expect(((await page.textContent("#meshLodLegend")) ?? "").trim()).toBe("");
     });
 
-    test("REQ-DEMO-7: fallback scenarios keep the coarse surface complete", async () => {
-        await page.click("#mlod-scn-paused");
-        await page.waitForTimeout(800);
-        expect(await metric(page, "streaming")).toBe("paused");
-        expect(await metricNumber(page, "rendered")).toBeGreaterThan(COARSE_MIN);
-
-        await page.click("#mlod-scn-reset");
-        await page.click("#mlod-scn-offline");
-        await page.waitForTimeout(1500);
-        expect(await metricNumber(page, "rendered")).toBeGreaterThan(COARSE_MIN);
-
-        await page.click("#mlod-scn-corrupt");
-        await page.waitForTimeout(1500);
-        expect(await metricNumber(page, "rendered")).toBeGreaterThan(COARSE_MIN);
-
-        await page.click("#mlod-scn-reset");
-        await page.waitForTimeout(500);
-        expect(await metric(page, "streaming")).toBe("active");
+    test("short desktop viewport keeps the debug selector clear of the legend", async () => {
+        const viewport = page.viewportSize()!;
+        try {
+            await page.setViewportSize({ width: 1024, height: 600 });
+            await page.selectOption("#mlod-debug", "meshlet-id");
+            const controls = (await page.locator("#meshLodControls").boundingBox())!;
+            const legend = (await page.locator("#meshLodLegend").boundingBox())!;
+            expect(controls.y + controls.height).toBeLessThanOrEqual(legend.y);
+            await page.locator("#mlod-debug").scrollIntoViewIfNeeded();
+            await expect(page.locator("#mlod-debug")).toBeInViewport();
+            await page.selectOption("#mlod-debug", "none");
+        } finally {
+            await page.setViewportSize(viewport);
+        }
     });
 
-    test("REQ-DEMO-3: orbit and zoom change the view; manual interaction pauses the path", async () => {
+    test("REQ-DEMO-7: pausing streaming keeps resident geometry visible", async () => {
+        await page.check("#mlod-pause");
+        await expect(page.locator('[data-metric="streaming"]')).toHaveText("paused");
+        expect(await metricNumber(page, "rendered")).toBeGreaterThan(COARSE_MIN);
+
+        await page.uncheck("#mlod-pause");
+        await expect(page.locator('[data-metric="streaming"]')).toHaveText("active");
+    });
+
+    test("REQ-DEMO-3: orbit and zoom change the view", async () => {
         const box = (await page.locator("#renderCanvas").boundingBox())!;
         const before = await canvasShot(page);
         // Orbit (drag).
@@ -153,32 +160,11 @@ test.describe("MeshLoD demo workflow", () => {
         await page.mouse.wheel(0, -500);
         await page.waitForTimeout(500);
         expect(Buffer.compare(await canvasShot(page), before)).not.toBe(0);
-
-        // Enable the path and confirm it drives the camera (live camAlpha advances).
-        const camAlpha = (): Promise<number> => page.evaluate(() => Number(document.getElementById("renderCanvas")!.dataset.camAlpha));
-        await page.click("#mlod-path-toggle");
-        await page.waitForTimeout(400);
-        const a1 = await camAlpha();
-        await page.waitForTimeout(900);
-        const a2 = await camAlpha();
-        expect(Math.abs(a2 - a1)).toBeGreaterThan(1e-3); // path animates
-
-        // A manual gesture pauses the path: camAlpha then stops advancing.
-        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-        await page.mouse.down();
-        await page.mouse.move(box.x + box.width / 2 - 120, box.y + box.height / 2 + 20, { steps: 6 });
-        await page.mouse.up();
-        await page.waitForTimeout(300);
-        const b1 = await camAlpha();
-        await page.waitForTimeout(900);
-        const b2 = await camAlpha();
-        expect(b2).toBe(b1); // paused → path no longer drives the camera
     });
 
-    test("model selector only lists shipped assets and displays their attribution", async () => {
-        await expect(page.locator("#meshLodModel option")).toHaveCount(1);
-        await expect(page.locator("#meshLodModel")).toHaveValue("harvard");
-        await expect(page.locator("#meshLodModel")).toBeDisabled();
+    test("the single shipped model is named and credited without an inactive selector", async () => {
+        await expect(page.locator("#meshLodModel")).toHaveCount(0);
+        await expect(page.locator("#meshLodControls .hud-heading")).toContainText("Harvard-Yenching Institute statue");
         expect(await page.evaluate(() => document.getElementById("renderCanvas")?.dataset.sourceGlb)).toBe("harvard-yenching_institute_statue.glb");
         await expect(page.locator(".credit")).toBeVisible();
     });

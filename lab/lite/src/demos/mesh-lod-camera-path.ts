@@ -1,12 +1,8 @@
 // MeshLoD demo — deterministic camera path.
 //
-// A 20-second looping fly-around of the statue in two 10-second smooth-stepped
-// segments (architecture §15.6). The path is a PURE function of a bounding sphere
-// and a path time — it holds no engine reference — so it is trivially unit-tested
-// and produces byte-repeatable poses at any timestamp. The stateful controller
-// advances a FIXED 60 Hz sample clock (never wall-clock), so a given rendered
-// frame count always maps to the same pose; manual interaction pauses it and
-// reset returns to t = 0.
+// A pure 20-second looping orbit around the statue in two smooth-stepped
+// segments. A ?pathTime= URL samples one reproducible pose without adding
+// animation controls to the viewer.
 
 /** Aggregate bounding sphere of the placed statue (world space). */
 export interface MeshLoDPathBounds {
@@ -27,7 +23,6 @@ const DEG = Math.PI / 180;
 /** Total loop duration and the boundary between the two segments (seconds). */
 export const MESH_LOD_PATH_DURATION_S = 20;
 const SEGMENT_S = MESH_LOD_PATH_DURATION_S / 2;
-const FIXED_DELTA_S = 1 / 60;
 
 // Keyframes at t = 0, 10, 20 s: azimuth (rad), elevation above horizon (deg),
 // radius as a multiple of the bounding-sphere radius.
@@ -67,74 +62,5 @@ export function sampleMeshLoDCameraPath(bounds: MeshLoDPathBounds, timeSeconds: 
         beta: (90 - elevation) * DEG,
         radius: radiusMultiple * bounds.radius,
         target: { x: bounds.center.x, y: bounds.center.y, z: bounds.center.z },
-    };
-}
-
-/** Stateful driver over {@link sampleMeshLoDCameraPath}. */
-export interface MeshLoDCameraPathController {
-    /** Whether path mode is active (the toggle). */
-    enabled: boolean;
-    /** True while a manual interaction has paused auto-advance, or a frozen pose is held. */
-    readonly paused: boolean;
-    /** Current path time in seconds. */
-    readonly timeSeconds: number;
-    /** Enable/disable path mode. Enabling clears the paused/frozen state. */
-    setEnabled(enabled: boolean): void;
-    /** Return to t = 0 and resume auto-advance (clears paused/frozen). */
-    reset(): void;
-    /** Pause auto-advance because the user is driving the camera manually. */
-    notifyInteraction(): void;
-    /** Freeze at a fixed time for deterministic capture (`?pathTime=`), holding the pose. */
-    freezeAt(timeSeconds: number): void;
-    /** Advance the FIXED 60 Hz clock one frame and return the new pose, or null when
-     *  the path should not drive the camera this frame (disabled/paused/frozen). */
-    advance(): MeshLoDCameraPose | null;
-    /** The pose at the current time, regardless of enabled/paused state. */
-    currentPose(): MeshLoDCameraPose;
-}
-
-export function createMeshLoDCameraPath(bounds: MeshLoDPathBounds): MeshLoDCameraPathController {
-    let enabled = false;
-    let paused = false;
-    let time = 0;
-    return {
-        get enabled() {
-            return enabled;
-        },
-        set enabled(value: boolean) {
-            this.setEnabled(value);
-        },
-        get paused() {
-            return paused;
-        },
-        get timeSeconds() {
-            return time;
-        },
-        setEnabled(value: boolean): void {
-            enabled = value;
-            paused = false;
-        },
-        reset(): void {
-            time = 0;
-            paused = false;
-        },
-        notifyInteraction(): void {
-            paused = true;
-        },
-        freezeAt(timeSeconds: number): void {
-            enabled = true;
-            paused = true;
-            time = timeSeconds;
-        },
-        advance(): MeshLoDCameraPose | null {
-            if (!enabled || paused) {
-                return null;
-            }
-            time = (time + FIXED_DELTA_S) % MESH_LOD_PATH_DURATION_S;
-            return sampleMeshLoDCameraPath(bounds, time);
-        },
-        currentPose(): MeshLoDCameraPose {
-            return sampleMeshLoDCameraPath(bounds, time);
-        },
     };
 }

@@ -84,36 +84,24 @@ describe("createMeshLoDNetworkSimulator", () => {
         expect(called).toBe(0);
     });
 
-    it("reflects live bandwidth/latency/failure updates", () => {
-        const baseFetch = (async () => fakeResponse(bytes(1))) as unknown as typeof fetch;
-        const sim = createMeshLoDNetworkSimulator(baseFetch, { bandwidthBytesPerSecond: 8 * 1024 * 1024, latencyMs: 100 });
-        expect(sim.getSettings()).toEqual({ bandwidthBytesPerSecond: 8 * 1024 * 1024, latencyMs: 100, failureMode: "none" });
+    it("applies live bandwidth and latency changes to later requests", async () => {
+        const baseFetch = (async () => fakeResponse(bytes(10))) as unknown as typeof fetch;
+        const waits: number[] = [];
+        const sim = createMeshLoDNetworkSimulator(baseFetch, {
+            bandwidthBytesPerSecond: 1000,
+            latencyMs: 100,
+            chunkBytes: 10,
+            wait: (ms) => {
+                waits.push(ms);
+                return Promise.resolve();
+            },
+        });
+        await (await sim.fetch("https://host/statue.mlod")).arrayBuffer();
+        expect(waits).toEqual([100, 10]);
         sim.setBandwidthBytesPerSecond(Infinity);
         sim.setLatencyMs(0);
-        sim.setFailureMode("unavailable");
-        expect(sim.getSettings()).toEqual({ bandwidthBytesPerSecond: Infinity, latencyMs: 0, failureMode: "unavailable" });
-    });
-
-    it("rejects .mlod fetches with a network error in 'unavailable' failure mode", async () => {
-        let called = 0;
-        const baseFetch = (async () => {
-            called++;
-            return fakeResponse(bytes(10));
-        }) as unknown as typeof fetch;
-        const sim = createMeshLoDNetworkSimulator(baseFetch, { latencyMs: 0, failureMode: "unavailable" });
-        await expect(sim.fetch("https://host/statue.mesh000.prim000.mlod")).rejects.toBeInstanceOf(TypeError);
-        expect(called).toBe(0);
-    });
-
-    it("corrupts the body (preserving status/headers) in 'corrupt' failure mode", async () => {
-        const data = bytes(64);
-        const baseFetch = (async () => fakeResponse(data, 206, { "content-range": "bytes 0-63/1000" })) as unknown as typeof fetch;
-        const sim = createMeshLoDNetworkSimulator(baseFetch, { latencyMs: 0, failureMode: "corrupt" });
-        const resp = await sim.fetch("https://host/statue.mesh000.prim000.mlod");
-        expect(resp.status).toBe(206);
-        expect(resp.headers.get("content-range")).toBe("bytes 0-63/1000");
-        const roundTrip = new Uint8Array(await resp.arrayBuffer());
-        expect(roundTrip.length).toBe(64);
-        expect([...roundTrip]).not.toEqual([...data]); // at least one byte flipped
+        waits.length = 0;
+        await (await sim.fetch("https://host/statue.mlod")).arrayBuffer();
+        expect(waits).toEqual([]);
     });
 });

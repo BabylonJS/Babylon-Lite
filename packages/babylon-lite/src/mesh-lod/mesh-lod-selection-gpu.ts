@@ -18,6 +18,7 @@
 import { BU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
+import { enableDrawBatchCollection } from "../render/draw-update-batches.js";
 import type { DrawUpdateBatch } from "../render/renderable.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import { createMeshLoDError } from "./mesh-lod-errors.js";
@@ -1483,6 +1484,7 @@ let _updateBatches: WeakMap<RenderTargetSignature, MeshLoDUpdateBatch> | null = 
 
 /** Return the task-local MeshLoD update batch for one render-target signature. */
 export function getMeshLoDUpdateBatch(signature: RenderTargetSignature): MeshLoDUpdateBatch {
+    enableDrawBatchCollection(signature);
     _updateBatches ??= new WeakMap();
     const existing = _updateBatches.get(signature);
     if (existing) {

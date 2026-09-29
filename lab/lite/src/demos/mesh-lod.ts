@@ -1,7 +1,7 @@
 // Demo — MeshLoD models (streaming clustered level-of-detail)
 //
-// Showcase-only page. Streams selectable glTF models as `.mlod` clustered-LOD
-// primitives through Babylon Lite's public, opt-in MeshLoD
+// Showcase-only page. Streams the statue as `.mlod` clustered-LOD primitives
+// through Babylon Lite's public, opt-in MeshLoD
 // path: `loadMeshLoD` → `createMeshLoDInstance` → `addMeshLoDToScene`. Selection,
 // streaming, caching, and material-owned indirect rendering are all the
 // production runtime — the demo adds no loader, selector, cache, or renderer of
@@ -29,7 +29,6 @@ import {
     loadEnvironment,
     loadGltf,
     loadMeshLoD,
-    onBeforeRender,
     registerScene,
     setCameraLimits,
     setMeshLoDSelectionMode,
@@ -45,13 +44,12 @@ import {
 import { configureDemoDecoderBases, demoAssetUrl } from "./demo-asset-url.js";
 import { installFetchProgress } from "./loading-progress.js";
 import { createMeshLoDNetworkSimulator } from "./mesh-lod-network-simulator.js";
-import { createMeshLoDCameraPath, type MeshLoDCameraPose } from "./mesh-lod-camera-path.js";
+import { sampleMeshLoDCameraPath } from "./mesh-lod-camera-path.js";
 import { installMeshLoDControls } from "./mesh-lod-controls.js";
 import { installMeshLoDDiagnostics } from "./mesh-lod-diagnostics.js";
 
 interface MeshLoDModel {
     id: string;
-    label: string;
     sourceGlb: string;
     mlodFiles: readonly string[];
     estimatedBytes: number;
@@ -61,15 +59,12 @@ function primitiveFiles(base: string, count: number): string[] {
     return Array.from({ length: count }, (_, index) => `${base}.mesh${String(index).padStart(3, "0")}.prim000.mlod`);
 }
 
-const MODELS: readonly MeshLoDModel[] = [
-    {
-        id: "harvard",
-        label: "Harvard-Yenching Institute statue",
-        sourceGlb: "harvard-yenching_institute_statue.glb",
-        mlodFiles: primitiveFiles("harvard-yenching_institute_statue", 3),
-        estimatedBytes: 20_000_000,
-    },
-];
+const MODEL: MeshLoDModel = {
+    id: "harvard",
+    sourceGlb: "harvard-yenching_institute_statue.glb",
+    mlodFiles: primitiveFiles("harvard-yenching_institute_statue", 3),
+    estimatedBytes: 20_000_000,
+};
 const ENV_URL = "https://assets.babylonjs.com/core/environments/environmentSpecular.env";
 const GROUND_TEXTURE_URL = "https://assets.babylonjs.com/core/environments/backgroundGround.png";
 const SKYBOX_URL = "https://assets.babylonjs.com/core/environments/backgroundSkybox.dds";
@@ -160,14 +155,10 @@ function computeStatueBounds(instances: readonly MeshLoDInstance[], assets: read
 async function main(): Promise<void> {
     const canvas = document.getElementById("renderCanvas") as HTMLCanvasElement;
     const requestedModel = new URLSearchParams(location.search).get("model");
-    const model = requestedModel ? MODELS.find((candidate) => candidate.id === requestedModel) : MODELS[0];
-    if (!model) {
+    if (requestedModel && requestedModel !== MODEL.id) {
         throw new Error(`MeshLoD model "${requestedModel}" is not bundled with this demo`);
     }
-    const credit = document.querySelector<HTMLElement>(".credit");
-    if (credit) {
-        credit.hidden = model.id !== "harvard";
-    }
+    const model = MODEL;
 
     // Capture the pristine fetch BEFORE installing the loading-progress wrapper,
     // then route MeshLoD's range traffic through the network simulator (which
@@ -223,9 +214,7 @@ async function main(): Promise<void> {
     // brightly against the dark background.
     scene.imageProcessing.exposure = 1.15;
 
-    // Frame the camera from the aggregate world bounds. The default pose is an
-    // establishing 3/4 view; the deterministic camera path (when enabled) drives
-    // its own azimuth/elevation/radius from the same bounds.
+    // Frame the camera from the aggregate world bounds.
     const bounds = computeStatueBounds(instances, assets);
     const cam = createArcRotateCamera(-0.8 * Math.PI, 58 * DEG, bounds.radius * 1.85, bounds.center);
     cam.fov = 0.8;
@@ -234,32 +223,6 @@ async function main(): Promise<void> {
     scene.camera = cam;
     attachControl(cam, canvas, scene);
     setCameraLimits(cam, { lowerRadiusLimit: bounds.radius * 0.35 }, scene);
-
-    // Deterministic camera path + runtime controls. The path drives the camera on
-    // a fixed 60 Hz clock when enabled; any manual gesture pauses it (the user then
-    // orbits/zooms via attachControl), and reset returns it to t = 0.
-    const cameraPath = createMeshLoDCameraPath(bounds);
-    const applyPose = (pose: MeshLoDCameraPose): void => {
-        // The target is the constant aggregate-bounds center (set at creation);
-        // the path only orbits/zooms, so only alpha/beta/radius change per frame.
-        cam.alpha = pose.alpha;
-        cam.beta = pose.beta;
-        cam.radius = pose.radius;
-        // Publish the live path pose so verification can detect path-driven motion
-        // (advancing) vs. a manual pause (frozen) without pixel comparison.
-        canvas.dataset.camAlpha = String(pose.alpha);
-        canvas.dataset.camBeta = String(pose.beta);
-        canvas.dataset.camRadius = String(pose.radius);
-    };
-    for (const event of ["pointerdown", "wheel", "touchstart"] as const) {
-        canvas.addEventListener(event, () => cameraPath.notifyInteraction(), { passive: true });
-    }
-    onBeforeRender(scene, () => {
-        const pose = cameraPath.advance();
-        if (pose) {
-            applyPose(pose);
-        }
-    });
 
     // Opt into per-render-task GPU timing so the diagnostics panel can report a
     // real duration (or an explicit "unsupported"/"pending" status — never a fake 0).
@@ -277,18 +240,6 @@ async function main(): Promise<void> {
             container: controlsContainer,
             assets,
             networkSim,
-            cameraPath,
-            models: MODELS,
-            selectedModelId: model.id,
-            onModelChange: (modelId) => {
-                if (modelId === model.id) {
-                    return;
-                }
-                const url = new URL(location.href);
-                url.searchParams.set("model", modelId);
-                url.searchParams.delete("pathTime");
-                location.href = url.href;
-            },
             onDebugViewChange: (view: MeshLoDDebugView) => {
                 diagnostics?.setLegend(view);
                 // Debug views render through the CPU reference selection path (which
@@ -304,9 +255,15 @@ async function main(): Promise<void> {
     // `?pathTime=<seconds>` freezes the camera at a deterministic path pose for
     // repeatable capture/verification (mirrors the scenes' `?seekTime=`).
     const pathTimeParam = new URLSearchParams(location.search).get("pathTime");
-    if (pathTimeParam !== null && Number.isFinite(Number(pathTimeParam))) {
-        cameraPath.freezeAt(Number(pathTimeParam));
-        applyPose(cameraPath.currentPose());
+    if (pathTimeParam !== null) {
+        const pathTime = Number(pathTimeParam);
+        if (!Number.isFinite(pathTime)) {
+            throw new Error(`Invalid MeshLoD pathTime "${pathTimeParam}"`);
+        }
+        const pose = sampleMeshLoDCameraPath(bounds, pathTime);
+        cam.alpha = pose.alpha;
+        cam.beta = pose.beta;
+        cam.radius = pose.radius;
         canvas.dataset.cameraPathFrozen = "true";
     }
 

@@ -299,11 +299,17 @@ function ensureCpuDrawCapacity(engine: EngineContext, batch: MeshLoDSceneBatch, 
     packet.drawScratch = new Uint32Array(capacity * 4);
     packet.maxDrawVertices = capacity;
     packet.bindGroup = buildBindGroup(engine, packet.bindGroupLayout, batch.material, packet.drawVertexBuffer, packet.instanceBuffer, runtime.gpu.arena.buffer, packet.materialUbo);
-    // The opaque draw is baked into a cached render bundle; force it to re-record this
-    // frame with the new bind group (this runs in the update phase, before the render
-    // pass) so the retired buffer is never replayed after destruction.
-    invalidateRenderBundles(engine);
     retireGpuResources(engine, () => oldBuffer.destroy());
+}
+
+/** The opaque render bundle bakes both resources, so a mode switch or buffer
+ *  replacement must re-record it before the next draw. */
+function setActiveDraw(engine: EngineContext, packet: MeshLoDBatchPacket, bindGroup: GPUBindGroup | null, indirectBuffer: GPUBuffer | null): void {
+    if (packet.activeBindGroup !== bindGroup || packet.activeIndirectBuffer !== indirectBuffer) {
+        packet.activeBindGroup = bindGroup;
+        packet.activeIndirectBuffer = indirectBuffer;
+        invalidateRenderBundles(engine);
+    }
 }
 
 /** Sync the debug-view mode into the material UBO's misc.y on change (a 4-byte
@@ -405,8 +411,7 @@ function updatePacketCpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet
     packet.lastVertexCount = vertexCount;
     // An empty batch (no visible instances / no expanded vertices) is non-drawable, so the
     // draw closure issues zero draw calls — matching the GPU path and architecture §13.4.
-    packet.activeBindGroup = vertexCount > 0 ? packet.bindGroup : null;
-    packet.activeIndirectBuffer = vertexCount > 0 ? packet.indirectBuffer : null;
+    setActiveDraw(engine, packet, vertexCount > 0 ? packet.bindGroup : null, vertexCount > 0 ? packet.indirectBuffer : null);
 
     const diag = runtime.diagnostics as { renderedTriangleCount: number; selectedMeshletCount: number };
     diag.renderedTriangleCount = vertexCount / 3;
@@ -439,8 +444,7 @@ function buildGpuFrame(batch: MeshLoDSceneBatch, camera: Camera, context: DrawUp
 function updatePacketGpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet: MeshLoDBatchPacket, context: DrawUpdateContext, updateBatch: MeshLoDUpdateBatch): void {
     const camera = context._camera;
     if (!camera || batch.instances.length === 0) {
-        packet.activeBindGroup = null;
-        packet.activeIndirectBuffer = null;
+        setActiveDraw(engine, packet, null, null);
         return;
     }
     const runtime = batch.asset._runtime;
@@ -458,37 +462,31 @@ function updatePacketGpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet
         buildGpuFrame(batch, camera, context)
     );
     if (!handles) {
-        packet.activeBindGroup = null;
-        packet.activeIndirectBuffer = null;
+        setActiveDraw(engine, packet, null, null);
         return;
     }
     if (!packet.gpuBindGroup || packet.gpuBoundDrawVertices !== handles.drawVertexBuffer || packet.gpuBoundInstances !== handles.instanceBuffer) {
         packet.gpuBindGroup = buildBindGroup(engine, packet.bindGroupLayout, batch.material, handles.drawVertexBuffer, handles.instanceBuffer, packet.arena, packet.materialUbo);
         packet.gpuBoundDrawVertices = handles.drawVertexBuffer;
         packet.gpuBoundInstances = handles.instanceBuffer;
-        // The cached opaque render bundle bakes this bind group; re-record it this frame
-        // when the GPU draw/instance buffers grow (make-before-break).
-        invalidateRenderBundles(engine);
     }
-    packet.activeBindGroup = packet.gpuBindGroup;
-    packet.activeIndirectBuffer = handles.drawArgsBuffer;
+    setActiveDraw(engine, packet, packet.gpuBindGroup, handles.drawArgsBuffer);
 }
 
 /** Dispatch the per-frame update to the CPU reference or GPU production path. A disposed
- *  asset is non-drawable immediately: clear the resolved binding and re-record the cached
- *  render bundle once so the retired arena/draw buffers are never replayed (§14.2). */
-function updatePacket(engine: EngineContext, batch: MeshLoDSceneBatch, packet: MeshLoDBatchPacket, context: DrawUpdateContext, updateBatch: MeshLoDUpdateBatch | undefined): void {
+ *  asset is non-drawable immediately; the cached render bundle must not replay retired
+ *  arena/draw buffers (§14.2). */
+function updatePacket(engine: EngineContext, batch: MeshLoDSceneBatch, packet: MeshLoDBatchPacket, context: DrawUpdateContext, updateBatch: MeshLoDUpdateBatch): void {
     const runtime = batch.asset._runtime;
     if (runtime.disposed) {
-        packet.activeBindGroup = null;
-        packet.activeIndirectBuffer = null;
+        setActiveDraw(engine, packet, null, null);
         if (!packet.disposedHandled) {
             packet.disposedHandled = true;
             invalidateRenderBundles(engine);
         }
         return;
     }
-    if (updateBatch && runtime.selectionMode === "gpu") {
+    if (runtime.selectionMode === "gpu") {
         updatePacketGpu(engine, batch, packet, context, updateBatch);
     } else {
         updatePacketCpu(engine, batch, packet, context);
@@ -572,7 +570,7 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
         isTransparent: false,
         bind(eng: EngineContext, sig: RenderTargetSignature): DrawBinding {
             const pipeline = getPipeline(eng, packet, sig);
-            const updateBatch = batch.asset._runtime.selectionMode === "gpu" ? getMeshLoDUpdateBatch(sig) : undefined;
+            const updateBatch = getMeshLoDUpdateBatch(sig);
             return {
                 renderable,
                 pipeline,
@@ -585,7 +583,7 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
                     pass.drawIndirect(packet.activeIndirectBuffer, 0);
                     return 1;
                 },
-                _updateBatches: updateBatch ? [updateBatch] : undefined,
+                _updateBatches: [updateBatch],
             };
         },
     };

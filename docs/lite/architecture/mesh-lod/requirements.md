@@ -608,12 +608,12 @@ The demo MUST load the statue `.mlod` through the same public and lazy path inte
 
 ### REQ-DEMO-3 — Camera behavior
 
-The demo MUST provide orbit and zoom controls and SHOULD provide an optional deterministic camera path for repeatable observation.
+The demo MUST provide orbit and zoom controls and SHOULD support deterministic camera poses for repeatable observation.
 
 **Acceptance criteria**
 
 - A user can orbit and zoom around the statue.
-- If enabled, the deterministic path produces repeatable camera state over time and can be disabled for manual control.
+- `?pathTime=<seconds>` produces a repeatable frozen camera pose without adding camera-animation controls to the viewer.
 
 ### REQ-DEMO-4 — Runtime controls
 
@@ -637,21 +637,21 @@ The demo MUST make source triangle count, rendered triangle count, selected mesh
 
 ### REQ-DEMO-6 — Debug views
 
-The demo MUST provide debug views for meshlet ID, LOD depth, selected group, page residency, and requested pages.
+The demo MUST provide debug views for meshlet ID and LOD depth. The runtime MAY expose additional programmatic debug views independently of the demo UI.
 
 **Acceptance criteria**
 
 - Each view can be enabled without changing the hierarchy or streaming correctness.
 - The active view and legend or value interpretation are visible to the user.
 
-### REQ-DEMO-7 — Coarse fallback demonstration
+### REQ-DEMO-7 — Coarse fallback resilience
 
-The demo MUST visibly demonstrate uninterrupted coarse fallback while fine pages are delayed, paused, unavailable, or terminally failed.
+The demo MUST keep coarse geometry visible while fine pages are delayed or streaming is paused. Runtime integration tests MUST cover unavailable and terminally failed fine pages without injecting faults through viewer controls.
 
 **Acceptance criteria**
 
-- The statue remains completely represented during each simulated condition.
-- Diagnostics identify the fallback depth and failed or pending pages.
+- The statue remains completely represented during delayed and paused streaming.
+- The runtime tests verify coarse coverage for unavailable and failed pages.
 
 ## 12. Verification Requirements
 

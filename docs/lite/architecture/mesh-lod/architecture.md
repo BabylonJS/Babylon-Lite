@@ -516,7 +516,7 @@ interface MeshLoDUpdateBatch extends DrawUpdateBatch {
 }
 ```
 
-The update batch is resolved by the material binding for the active render-target signature, not stored on the scene batch.
+The update batch is resolved by the material binding for the active render-target signature, not stored on the scene batch. `getMeshLoDUpdateBatch(signature)` enables the renderer's `DrawUpdateBatch` collection seam before returning a batch; without that opt-in, updates are queued but the compute passes are never flushed before the indirect draw.
 
 `SceneContext` stores the registry lazily; the existing renderable rebuild seam handles device loss:
 
@@ -1336,10 +1336,9 @@ Future asset packaging may separate textures/material metadata, but no new manif
 - streaming pause;
 - simulated bandwidth: unlimited or 0.5–64 MiB/s, default 8 MiB/s;
 - simulated latency: 0–2,000 ms, default 100 ms;
-- deterministic camera path toggle/reset;
-- debug-view selector.
+- debug-view selector with material, meshlet ID, and LOD depth.
 
-The network simulator is a custom fetch wrapper supplied through `MeshLoDRequestOptions.fetch`. It delays and throttles only `.mlod` range responses.
+The single shipped model is identified as text rather than a disabled selector. A compact viewer panel groups LOD, streaming, and display settings; a separate telemetry panel groups geometry, streaming, and GPU metrics. The network simulator is a custom fetch wrapper supplied through `MeshLoDRequestOptions.fetch`. It delays and throttles only `.mlod` range responses and does not inject fault scenarios.
 
 ### 15.4 Diagnostics
 
@@ -1366,24 +1365,18 @@ GPU timing uses Babylon Lite's task timing API. Unsupported devices show `GPU ti
 | --- | --- |
 | meshlet ID | stable hash color of cluster ID |
 | LOD depth | palette indexed by owning group depth |
-| selected group | stable hash color of owning group ID |
-| page residency | green resident, yellow pinned, red terminal failure, gray unavailable |
-| requested pages | cyan currently demanded, orange queued/in-flight, normal material otherwise |
 
-A visible legend explains the active palette.
+A visible legend explains the active palette. Additional views supported by the runtime API are not exposed in this viewer.
 
 ### 15.6 Deterministic camera path
 
-The path is evaluated from a fixed path time, not wall-clock integration:
+The optional `?pathTime=<seconds>` URL parameter samples a fixed path time and freezes the camera for repeatable capture; the normal viewer uses manual orbit and zoom without path controls:
 
 - duration 20 seconds, looped;
-- sample clock advances by `fixedDeltaMs = 1000/60` during automated verification;
 - segment 0–10 s: azimuth `-0.8π` to `0.2π`, elevation 25° to 50°, radius 2.4 to 0.75 times the statue bounding-sphere radius;
 - segment 10–20 s: azimuth `0.2π` to `1.2π`, elevation 50° to 25°, radius 0.75 to 2.4;
 - cubic smoothstep interpolation at segment ends;
-- target is the transformed aggregate statue-bounds center;
-- pointer, wheel, or touch pauses the path;
-- reset sets time to zero and resumes.
+- target is the transformed aggregate statue-bounds center.
 
 ## 16. Error Handling
 
@@ -1592,11 +1585,11 @@ No golden reference or bundle ceiling may be changed. Local validation uses focu
 | `REQ-INT-8` | Full agent-allowed build/parity/bundle checks with unchanged ceilings and goldens |
 | `REQ-DEMO-1` | Production demo build, gallery card, progress overlay, ready/error datasets, JPG thumbnail |
 | `REQ-DEMO-2` | Demo import/load trace and removal of opt-in proving chunk absence |
-| `REQ-DEMO-3` | Manual orbit/zoom plus deterministic path timestamp assertions |
+| `REQ-DEMO-3` | Manual orbit/zoom plus frozen `?pathTime` timestamp assertions |
 | `REQ-DEMO-4` | Control checklist and network wrapper request logs |
 | `REQ-DEMO-5` | Diagnostics field checklist, unit labels, unsupported timing state |
-| `REQ-DEMO-6` | Screenshot/manual checklist for all five debug views and legends |
-| `REQ-DEMO-7` | Delay, pause, unavailable, and terminal-failure scenarios with complete statue coverage |
+| `REQ-DEMO-6` | Check meshlet ID and LOD depth debug views and legends |
+| `REQ-DEMO-7` | Delay/pause coverage in demo; unavailable/failed fine-page coverage in runtime integration tests |
 | `REQ-VERIFY-1` | Converter test inventory cross-referenced to tool/geometry rows above |
 | `REQ-VERIFY-2` | Binary/range mutation corpus cross-referenced to format rows above |
 | `REQ-VERIFY-3` | CPU/GPU fixture matrix: thresholds, frusta, residency, hysteresis, transforms |

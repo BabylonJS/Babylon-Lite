@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadMeshLoD, createMeshLoDInstance } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import { loadMeshLoD, createMeshLoDInstance, setMeshLoDSelectionMode } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { addMeshLoDInstanceToScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
 import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
 import { selectMeshLoDCpu } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-testing.js";
@@ -176,6 +176,35 @@ describe("MeshLoD render equivalence — GPU selection over the real statue hier
 });
 
 describe("MeshLoD render equivalence — one indirect draw per batch key", () => {
+    it.each(["gpu", "cpu"] as const)("re-records the cached draw when switching from %s and back", async (initialMode) => {
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: initialMode });
+        const scene = await build(asset, {} as PbrMaterialProps, 1);
+        scene._renderableVersion = 0;
+        engine._renderingContexts.push(scene);
+        const binding = scene._renderables[0]!.bind(engine, SIG);
+        expect(binding._updateBatches).toHaveLength(1);
+
+        flush(binding);
+        const firstPass = createMockRenderPass();
+        expect(binding.draw(firstPass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        const firstVersion = scene._renderableVersion;
+
+        setMeshLoDSelectionMode(asset, initialMode === "gpu" ? "cpu" : "gpu");
+        flush(binding);
+        const secondPass = createMockRenderPass();
+        expect(binding.draw(secondPass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        expect(scene._renderableVersion).toBeGreaterThan(firstVersion);
+        expect(secondPass.indirectDraws[0]!.buffer).not.toBe(firstPass.indirectDraws[0]!.buffer);
+        const secondVersion = scene._renderableVersion;
+
+        setMeshLoDSelectionMode(asset, initialMode);
+        flush(binding);
+        const thirdPass = createMockRenderPass();
+        expect(binding.draw(thirdPass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        expect(scene._renderableVersion).toBeGreaterThan(secondVersion);
+        expect(thirdPass.indirectDraws[0]!.buffer).toBe(firstPass.indirectDraws[0]!.buffer);
+    });
+
     it("issues exactly one indirect draw per distinct material key (GPU mode)", async () => {
         const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "gpu" });
         const scene = fakeScene(engine);

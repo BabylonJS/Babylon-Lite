@@ -31,6 +31,7 @@ import {
 import type { MeshLoDGpuFrameParams, MeshLoDGpuSelectionModelInput, MeshLoDGpuSelectionParams } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
 import type { MeshLoDAssetRuntime } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-runtime.js";
 import type { RenderTargetSignature } from "../../../../packages/babylon-lite/src/engine/render-target.js";
+import type { DrawBinding } from "../../../../packages/babylon-lite/src/render/renderable.js";
 import { createMockEngine } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
 
 const IDENTITY: readonly number[] = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
@@ -316,15 +317,24 @@ describe("GPU selection orchestration (mock device)", () => {
         const runtime = fakeRuntime(fixture.hierarchy);
         const instanceState = createMeshLoDGpuInstanceState(fixture.hierarchy.groups.length);
         const batchState = createMeshLoDGpuBatchState();
-        const updateBatch = getMeshLoDUpdateBatch({} as RenderTargetSignature);
-        updateBatch.reset();
+        const signature = {} as RenderTargetSignature;
+        const updateBatch = getMeshLoDUpdateBatch(signature);
+        const binding: DrawBinding = {
+            renderable: { order: 100, isTransparent: false, bind: () => binding },
+            pipeline: {} as GPURenderPipeline,
+            draw: () => 0,
+            _updateBatches: [updateBatch],
+        };
+        const collected = signature._collectBatches?.(undefined, binding);
+        expect(collected).toBeDefined();
+        collected!._reset();
         const handles = queueMeshLoDGpuSelection(engine, updateBatch, runtime, instanceState, batchState, [instance], 12, frame);
         expect(handles).not.toBeNull();
         expect(handles!.selectedBuffer).toBeTruthy();
         expect(handles!.controlBuffer).toBeTruthy();
         expect(handles!.drawVertexBuffer).toBeTruthy();
         expect(handles!.drawArgsBuffer).toBeTruthy();
-        updateBatch.flush(engine);
+        collected!._flush(engine);
         // Two compute passes: selection (traverse→evaluate→select→demand→clamp = 5 direct)
         // then expansion (expandClusters indirect + finalizeDraw direct = 2); 5 resets.
         expect(encoder.computePasses).toHaveLength(2);

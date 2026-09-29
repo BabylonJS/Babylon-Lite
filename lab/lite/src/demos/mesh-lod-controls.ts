@@ -1,34 +1,23 @@
 // MeshLoD demo — runtime controls panel.
 //
-// Builds the accessible control HUD and wires every control to a PUBLIC runtime
-// setter, the network-simulator seam, or the camera-path controller — never to
-// internal state (architecture §15.3, REQ-DEMO-3/4). Each control shows its
-// effective value; setter validation errors are surfaced in a status line.
+// Builds the accessible viewer controls around public runtime setters and the
+// network-simulator seam. Setter validation errors appear in the status line.
 
 import { setMeshLoDCacheBudget, setMeshLoDDebugView, setMeshLoDScreenSpaceError, setMeshLoDStreamingPaused, type MeshLoDAsset, type MeshLoDDebugView } from "babylon-lite";
 import type { MeshLoDNetworkSimulator } from "./mesh-lod-network-simulator.js";
-import type { MeshLoDCameraPathController } from "./mesh-lod-camera-path.js";
 
 const MIB = 1024 * 1024;
 
 const DEBUG_VIEWS: { value: MeshLoDDebugView; label: string }[] = [
-    { value: "none", label: "None (material)" },
+    { value: "none", label: "Material" },
     { value: "meshlet-id", label: "Meshlet ID" },
     { value: "lod-depth", label: "LOD depth" },
-    { value: "selected-group", label: "Selected group" },
-    { value: "page-residency", label: "Page residency" },
-    { value: "requested-pages", label: "Requested pages" },
-    { value: "meshlet-cone", label: "Meshlet cone" },
 ];
 
 export interface MeshLoDControlsOptions {
     container: HTMLElement;
     assets: readonly MeshLoDAsset[];
     networkSim: MeshLoDNetworkSimulator;
-    cameraPath: MeshLoDCameraPathController;
-    models: readonly { id: string; label: string }[];
-    selectedModelId: string;
-    onModelChange: (modelId: string) => void;
     /** Called when the debug-view selector changes (demo updates the legend and
      *  switches to CPU reference selection so all views render correctly). */
     onDebugViewChange?: (view: MeshLoDDebugView) => void;
@@ -55,12 +44,10 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, props: Partial<HTMLEl
 }
 
 export function installMeshLoDControls(options: MeshLoDControlsOptions): void {
-    const { container, assets, networkSim, cameraPath, models, selectedModelId, onModelChange, onDebugViewChange } = options;
+    const { container, assets, networkSim, onDebugViewChange } = options;
     container.replaceChildren();
 
     const status = el("div", { className: "hud-status", role: "status" });
-    status.style.minHeight = "1.1em";
-    status.style.color = "#e08a4b";
 
     const runValidated = (action: () => void): void => {
         try {
@@ -94,17 +81,9 @@ export function installMeshLoDControls(options: MeshLoDControlsOptions): void {
             value.textContent = spec.format(v);
             runValidated(() => spec.onInput(v));
         });
-        const label = el("label", { htmlFor: spec.id }, [spec.label, " ", value]);
+        const label = el("label", { htmlFor: spec.id }, [spec.label, value]);
         return el("div", { className: "hud-row" }, [label, input]);
     };
-
-    const modelSelect = el("select", { id: "meshLodModel" });
-    for (const model of models) {
-        modelSelect.append(el("option", { value: model.id, textContent: model.label, selected: model.id === selectedModelId }));
-    }
-    modelSelect.disabled = models.length < 2;
-    modelSelect.addEventListener("change", () => onModelChange(modelSelect.value));
-    const modelRow = el("div", { className: "hud-row" }, [el("label", { htmlFor: "meshLodModel" }, ["Model"]), modelSelect]);
 
     // Screen-space error: 0.5–16 px, default 2.
     const sseRow = makeSlider({
@@ -187,81 +166,18 @@ export function installMeshLoDControls(options: MeshLoDControlsOptions): void {
     );
     const debugRow = el("div", { className: "hud-row" }, [el("label", { htmlFor: "mlod-debug" }, ["Debug view"]), debugSelect]);
 
-    // Camera path: toggle + reset.
-    const pathToggle = el("button", { type: "button", id: "mlod-path-toggle", textContent: "▶ Camera path" });
-    pathToggle.setAttribute("aria-pressed", "false");
-    const pathReset = el("button", { type: "button", id: "mlod-path-reset", textContent: "⟲ Reset" });
-    const syncPathToggle = (): void => {
-        pathToggle.textContent = cameraPath.enabled ? "⏸ Camera path" : "▶ Camera path";
-        pathToggle.setAttribute("aria-pressed", String(cameraPath.enabled));
-    };
-    pathToggle.addEventListener("click", () => {
-        cameraPath.setEnabled(!cameraPath.enabled);
-        syncPathToggle();
-    });
-    pathReset.addEventListener("click", () => cameraPath.reset());
-    syncPathToggle();
-    const pathRow = el("div", { className: "hud-row hud-buttons" }, [pathToggle, pathReset]);
-
-    // Fallback scenarios: reproducible delayed / paused / unavailable / terminal
-    // conditions that keep the pinned coarse geometry rendering (REQ-DEMO-7). They
-    // drive the existing latency/pause controls (so the UI stays consistent) and the
-    // network simulator's fault injection.
-    const applyLatency = (ms: number): void => {
-        const s = document.getElementById("mlod-latency") as HTMLInputElement | null;
-        if (s) {
-            s.value = String(ms);
-            s.dispatchEvent(new Event("input", { bubbles: true }));
-        }
-    };
-    const applyPause = (on: boolean): void => {
-        if (pause.checked !== on) {
-            pause.checked = on;
-            pause.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-    };
-    const scenarioButton = (id: string, label: string, apply: () => void): HTMLButtonElement => {
-        const button = el("button", { type: "button", id, textContent: label });
-        button.addEventListener("click", () => runValidated(apply));
-        return button;
-    };
-    const scenarioRow = el("div", { className: "hud-row hud-buttons hud-scenarios" }, [
-        scenarioButton("mlod-scn-delayed", "Delayed", () => {
-            networkSim.setFailureMode("none");
-            applyPause(false);
-            applyLatency(2000);
-        }),
-        scenarioButton("mlod-scn-paused", "Paused", () => {
-            networkSim.setFailureMode("none");
-            applyPause(true);
-        }),
-        scenarioButton("mlod-scn-offline", "Offline", () => {
-            applyPause(false);
-            networkSim.setFailureMode("unavailable");
-        }),
-        scenarioButton("mlod-scn-corrupt", "Corrupt", () => {
-            applyPause(false);
-            networkSim.setFailureMode("corrupt");
-        }),
-        scenarioButton("mlod-scn-reset", "Reset", () => {
-            networkSim.setFailureMode("none");
-            applyPause(false);
-            applyLatency(100);
-        }),
-    ]);
+    const section = (title: string, rows: HTMLElement[]): HTMLElement =>
+        el("section", { className: "hud-section" }, [el("h2", { className: "hud-section-title", textContent: title }), ...rows]);
 
     container.append(
-        el("div", { className: "hud-title", textContent: "MeshLoD controls" }),
-        modelRow,
-        sseRow,
-        budgetRow,
-        bandwidthRow,
-        latencyRow,
-        pauseRow,
-        debugRow,
-        pathRow,
-        el("div", { className: "hud-sublabel", textContent: "Fallback scenarios" }),
-        scenarioRow,
+        el("header", { className: "hud-header" }, [
+            el("div", { className: "hud-eyebrow", textContent: "Babylon Lite / MeshLoD" }),
+            el("h1", { className: "hud-heading", textContent: "Harvard-Yenching Institute statue" }),
+            el("p", { className: "hud-intro", textContent: "Drag to orbit · Scroll to zoom" }),
+        ]),
+        section("Geometry", [sseRow, budgetRow]),
+        section("Streaming", [bandwidthRow, latencyRow, pauseRow]),
+        section("Display", [debugRow]),
         status
     );
 }

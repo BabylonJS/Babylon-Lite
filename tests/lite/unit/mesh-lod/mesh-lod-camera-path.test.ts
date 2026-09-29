@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createMeshLoDCameraPath, sampleMeshLoDCameraPath, MESH_LOD_PATH_DURATION_S, type MeshLoDPathBounds } from "../../../../lab/lite/src/demos/mesh-lod-camera-path.js";
+import { sampleMeshLoDCameraPath, MESH_LOD_PATH_DURATION_S, type MeshLoDPathBounds } from "../../../../lab/lite/src/demos/mesh-lod-camera-path.js";
 
 const BOUNDS: MeshLoDPathBounds = { center: { x: 1, y: 2, z: 3 }, radius: 10 };
 const DEG = Math.PI / 180;
@@ -37,46 +37,5 @@ describe("sampleMeshLoDCameraPath", () => {
 
     it("is a pure function — identical inputs produce identical output", () => {
         expect(sampleMeshLoDCameraPath(BOUNDS, 7.3)).toEqual(sampleMeshLoDCameraPath(BOUNDS, 7.3));
-    });
-});
-
-describe("createMeshLoDCameraPath controller", () => {
-    it("does not drive the camera until enabled", () => {
-        const path = createMeshLoDCameraPath(BOUNDS);
-        expect(path.enabled).toBe(false);
-        expect(path.advance()).toBeNull();
-    });
-
-    it("advances a fixed 60 Hz clock while enabled and running", () => {
-        const path = createMeshLoDCameraPath(BOUNDS);
-        path.setEnabled(true);
-        const first = path.advance();
-        expect(first).not.toBeNull();
-        expect(path.timeSeconds).toBeCloseTo(1 / 60, 10);
-        path.advance();
-        expect(path.timeSeconds).toBeCloseTo(2 / 60, 10);
-    });
-
-    it("pauses on interaction and resumes at t = 0 on reset", () => {
-        const path = createMeshLoDCameraPath(BOUNDS);
-        path.setEnabled(true);
-        path.advance();
-        path.notifyInteraction();
-        expect(path.paused).toBe(true);
-        expect(path.advance()).toBeNull();
-        path.reset();
-        expect(path.paused).toBe(false);
-        expect(path.timeSeconds).toBe(0);
-        expect(path.advance()).not.toBeNull();
-    });
-
-    it("freezes at a fixed time for deterministic capture", () => {
-        const path = createMeshLoDCameraPath(BOUNDS);
-        path.freezeAt(7);
-        expect(path.enabled).toBe(true);
-        expect(path.paused).toBe(true);
-        expect(path.timeSeconds).toBe(7);
-        expect(path.advance()).toBeNull();
-        expect(path.currentPose()).toEqual(sampleMeshLoDCameraPath(BOUNDS, 7));
     });
 });

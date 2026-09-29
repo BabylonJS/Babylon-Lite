@@ -18,7 +18,6 @@ export interface MeshLoDDiagnosticsOptions {
 }
 
 export interface MeshLoDDiagnosticsHandle {
-    stop(): void;
     setLegend(view: MeshLoDDebugView): void;
 }
 
@@ -33,23 +32,23 @@ function mib(bytes: number): string {
 }
 
 /** Row definitions: id → label. Values are filled each tick. */
-const ROWS: { id: string; label: string }[] = [
-    { id: "src", label: "Source triangles" },
-    { id: "rendered", label: "Rendered triangles" },
+const ROWS: { id: string; label: string; section?: string }[] = [
+    { id: "src", label: "Source triangles", section: "Geometry" },
+    { id: "rendered", label: "Drawn triangles" },
     { id: "meshlets", label: "Selected meshlets" },
     { id: "visible", label: "Visible groups" },
     { id: "fallback", label: "Fallback groups" },
     { id: "depth", label: "Hierarchy depth" },
-    { id: "sseSel", label: "Max selected SSE" },
-    { id: "sseUnmet", label: "Max unmet SSE" },
-    { id: "pagesReq", label: "Pages req / queued / in-flight" },
-    { id: "pagesRes", label: "Pages resident / pinned / failed" },
+    { id: "sseSel", label: "Selected SSE" },
+    { id: "sseUnmet", label: "Unmet SSE" },
+    { id: "pagesReq", label: "Requested / queued / in flight", section: "Streaming" },
+    { id: "pagesRes", label: "Resident / pinned / failed" },
     { id: "downloaded", label: "Downloaded" },
-    { id: "gpuCache", label: "GPU cache used / budget" },
+    { id: "gpuCache", label: "GPU cache / budget" },
     { id: "cpuCache", label: "CPU page cache" },
-    { id: "concurrency", label: "Max concurrent requests" },
-    { id: "streaming", label: "Streaming" },
-    { id: "selection", label: "Selection" },
+    { id: "concurrency", label: "Max requests" },
+    { id: "streaming", label: "State" },
+    { id: "selection", label: "Selection", section: "Frame" },
     { id: "gpuTiming", label: "GPU timing" },
 ];
 
@@ -81,27 +80,6 @@ function legendItems(view: MeshLoDDebugView): { title: string; items: HTMLElemen
                     swatch("rgb(255,0,0)", "fine (high depth)"),
                 ],
             };
-        case "selected-group":
-            return { title: "Selected group", items: [el("div", { className: "legend-note" }, ["Each selected group a stable random color."])] };
-        case "page-residency":
-            return {
-                title: "Page residency",
-                items: [swatch("rgb(51,230,89)", "resident"), swatch("rgb(242,209,51)", "pinned coarse"), swatch("rgb(242,56,51)", "terminal failure"), swatch("rgb(115,115,115)", "unavailable")],
-            };
-        case "requested-pages":
-            return {
-                title: "Requested pages",
-                items: [swatch("rgb(0,217,255)", "streamed in (on demand)"), swatch("rgb(255,140,0)", "queued / in-flight"), el("div", { className: "legend-note" }, ["normal material otherwise"])],
-            };
-        case "meshlet-cone":
-            return {
-                title: "Meshlet cone",
-                items: [
-                    swatch("rgb(0,255,0)", "front-facing / visible"),
-                    swatch("rgb(255,0,0)", "backfacing / culled (must not render)"),
-                    el("div", { className: "legend-note" }, ["Color is the conservative cone-culling margin."]),
-                ],
-            };
         default:
             return { title: "", items: [] };
     }
@@ -110,16 +88,23 @@ function legendItems(view: MeshLoDDebugView): { title: string; items: HTMLElemen
 export function installMeshLoDDiagnostics(options: MeshLoDDiagnosticsOptions): MeshLoDDiagnosticsHandle {
     const { container, legendContainer, engine, assets } = options;
     container.replaceChildren();
-    container.append(el("div", { className: "hud-title", textContent: "Diagnostics" }));
+    container.append(
+        el("header", { className: "hud-header" }, [
+            el("div", { className: "hud-eyebrow", textContent: "Live telemetry" }),
+            el("h2", { className: "hud-heading", textContent: "Renderer" }),
+        ])
+    );
 
     const values = new Map<string, HTMLElement>();
     for (const row of ROWS) {
+        if (row.section) {
+            container.append(el("h3", { className: "hud-section-title", textContent: row.section }));
+        }
         const value = el("span", { className: "hud-value" });
         value.dataset.metric = row.id;
         values.set(row.id, value);
-        container.append(el("div", { className: "hud-metric" }, [el("span", { className: "hud-metric-label", textContent: row.label + ": " }), value]));
+        container.append(el("div", { className: "hud-metric" }, [el("span", { className: "hud-metric-label", textContent: row.label }), value]));
     }
-    container.append(el("div", { className: "hud-note", textContent: "Bytes are MiB (1 MiB = 1,048,576 bytes)." }));
 
     const set = (id: string, text: string): void => {
         const node = values.get(id);
@@ -146,12 +131,8 @@ export function installMeshLoDDiagnostics(options: MeshLoDDiagnosticsOptions): M
         return t.status; // "disabled" or "available" with no tasks yet — never a fake 0 ms
     };
 
-    let running = true;
     let lastTick = 0;
     const tick = (now: number): void => {
-        if (!running) {
-            return;
-        }
         requestAnimationFrame(tick);
         if (now - lastTick < 120) {
             return; // throttle DOM writes to ~8 Hz
@@ -230,16 +211,11 @@ export function installMeshLoDDiagnostics(options: MeshLoDDiagnosticsOptions): M
             return;
         }
         const { title, items } = legendItems(view);
-        legendContainer.append(el("div", { className: "hud-title", textContent: "Legend — " + title }));
+        legendContainer.append(el("div", { className: "hud-section-title", textContent: title }));
         for (const item of items) {
             legendContainer.append(item);
         }
     };
 
-    return {
-        stop(): void {
-            running = false;
-        },
-        setLegend,
-    };
+    return { setLegend };
 }
