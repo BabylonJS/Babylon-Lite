@@ -169,6 +169,15 @@ for (const scene of SCENES) {
         const loadedFiles = jsPayloads.map((p) => p.file);
         const runtimeModules = getRuntimeModuleIds(`scene${scene.id}`, loadedFiles);
 
+        // MeshLoD is fully opt-in and tree-shaken away: no non-MeshLoD scene may fetch
+        // any /mesh-lod/ runtime module or the PBR MeshLoD renderable/compose chunks
+        // at runtime (REQ-INT-8, T-22). Emitted-but-never-fetched chunks are fine —
+        // this gates on runtime fetches only.
+        const meshLoDModules = runtimeModules.filter((id) => /\/mesh-lod\//.test(id) || /\/pbr-mesh-lod-/.test(id));
+        expect(meshLoDModules, `${scene.name} must not fetch MeshLoD modules at runtime; found: ${meshLoDModules.join(", ")}`).toEqual([]);
+        const meshLoDChunks = loadedFiles.filter((f) => /mesh-lod/.test(f));
+        expect(meshLoDChunks, `${scene.name} must not fetch MeshLoD chunks at runtime; found: ${meshLoDChunks.join(", ")}`).toEqual([]);
+
         expect(rawKB, `raw ${rawKB.toFixed(1)} KB exceeds ceiling ${scene.maxRawKB} KB (+${(rawKB - scene.maxRawKB!).toFixed(1)} KB over)`).toBeLessThanOrEqual(scene.maxRawKB!);
 
         // Pure-2D ceiling: scenes 50/51 must NOT pull any scene/* code, the depth-hosted

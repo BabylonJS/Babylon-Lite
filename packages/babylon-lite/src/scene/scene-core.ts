@@ -27,6 +27,7 @@ import type { FgRuntime } from "../flow-graph/runtime.js";
 import type { PickSource } from "../picking/pick-contributor.js";
 import type { ToneMapping } from "../material/pbr/tone-mapping.js";
 import type { FgEventBus } from "../flow-graph/event-bus.js";
+import type { MeshLoDSceneRegistry } from "../mesh-lod/mesh-lod-scene.js";
 
 /** Image processing configuration. */
 export interface ImageProcessingConfig {
@@ -262,6 +263,10 @@ export interface SceneContext extends RenderingContext {
     _flowGraphPointerCleanup?: () => void;
     /** @internal Refreshes the explicitly enabled Flow Graph pointer bridge. */
     _flowGraphPointerRefresh?: () => void;
+    /** @internal Optional scene-owned MeshLoD registry. Populated lazily by the
+     *  MeshLoD feature's `addMeshLoDToScene`; absent (and zero-cost) for every scene
+     *  that never uses MeshLoD. */
+    _meshLoDRegistry?: MeshLoDSceneRegistry;
 }
 
 /** Options passed to the scene-context factory. */

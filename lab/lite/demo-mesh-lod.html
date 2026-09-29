@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Disable the browser's pinch-to-zoom so two-finger gestures drive the camera (pinch zoom) instead. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Babylon Lite — Demo: MeshLoD</title>
+  <style>
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+    /* touch-action: none lets the canvas receive raw touch gestures (pinch/drag) for camera control
+       instead of the browser consuming them for page scroll/zoom. */
+    canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+    .loading-overlay {
+      position: fixed; inset: 0; z-index: 10000;
+      display: flex; align-items: center; justify-content: center;
+      background: #0b0809; color: #f4ece9;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      transition: opacity 0.5s ease;
+    }
+    .loading-overlay.is-hidden { opacity: 0; pointer-events: none; }
+    .loading-box { display: flex; flex-direction: column; align-items: center; gap: 1rem; text-align: center; padding: 0 1rem; }
+    .loading-spinner {
+      width: 54px; height: 54px; border-radius: 50%;
+      border: 4px solid rgba(224, 104, 75, 0.25); border-top-color: #e0684b;
+      animation: lite-spin 0.9s linear infinite;
+    }
+    .loading-label { font-size: 1.05rem; font-weight: 600; }
+    .loading-sub { font-size: 0.8rem; color: #b8a9a4; }
+    .loading-size { font-size: 0.78rem; color: #d8c9c4; margin-top: 0.4rem; min-height: 1em; letter-spacing: 0.01em; }
+    @keyframes lite-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .loading-spinner { animation-duration: 2.4s; } }
+    .loading-bar {
+      width: 240px; max-width: 62vw; height: 4px; margin-top: 0.55rem;
+      border-radius: 999px; overflow: hidden; background: rgba(255, 255, 255, 0.14);
+      opacity: 0; transition: opacity 0.25s ease;
+    }
+    .loading-overlay.has-progress .loading-bar { opacity: 1; }
+    .loading-bar-fill {
+      width: 0%; height: 100%; border-radius: inherit; background: #e0684b;
+      transition: width 0.25s ease;
+    }
+    /* Fatal-error banner — shown when the demo sets data-error. */
+    .demo-error {
+      position: fixed; inset: 0; z-index: 10002;
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+      gap: 0.75rem; text-align: center; padding: 1.5rem;
+      background: #140a09; color: #ffd9cf;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    .demo-error.is-visible { display: flex; }
+    .demo-error h1 { font-size: 1.1rem; margin: 0; font-weight: 600; }
+    .demo-error p { font-size: 0.85rem; margin: 0; max-width: 44ch; color: #e7b6ab; line-height: 1.45; }
+    /* Always-visible attribution required by the CC-BY 4.0 license. */
+    .credit {
+      position: fixed; right: 12px; bottom: 10px; z-index: 9000;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      font-size: 0.72rem; line-height: 1.3; color: #e9e2df;
+      background: rgba(0, 0, 0, 0.45); padding: 5px 9px; border-radius: 6px;
+      text-decoration: none; backdrop-filter: blur(3px);
+      transition: background 0.2s ease;
+    }
+    .credit:hover { background: rgba(0, 0, 0, 0.7); }
+    .credit b { font-weight: 600; }
+    .credit[hidden] { display: none; }
+    /* Diagnostic HUD panels. Populated by the demo module (T-35 controls, T-36
+       diagnostics/legend); an empty panel is collapsed so the shell shows nothing
+       until its content mounts. */
+    .hud {
+      position: fixed; z-index: 9000;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.72rem; line-height: 1.5; color: #eee6e3;
+      background: rgba(12, 9, 8, 0.72); border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px; padding: 10px 12px; backdrop-filter: blur(4px);
+      max-width: min(46vw, 340px);
+    }
+    .hud:empty { display: none; }
+    #meshLodControls { top: 12px; left: 12px; }
+    #meshLodDiagnostics { top: 12px; right: 12px; max-height: 88vh; overflow-y: auto; }
+    #meshLodLegend { left: 12px; bottom: 40px; }
+    /* Control HUD widgets (built by mesh-lod-controls.ts). */
+    .hud-title { font-weight: 600; margin-bottom: 8px; letter-spacing: 0.02em; }
+    .hud-row { margin: 7px 0; }
+    .hud-row label { display: block; margin-bottom: 2px; color: #d8cdc9; }
+    .hud-row label.hud-inline { display: flex; align-items: center; gap: 6px; }
+    .hud-value { color: #f0b49c; font-weight: 600; }
+    .hud-row input[type="range"] { width: 100%; accent-color: #e0684b; }
+    .hud-row select { width: 100%; background: #1a1210; color: #eee6e3; border: 1px solid rgba(255,255,255,0.16); border-radius: 5px; padding: 3px 5px; font: inherit; }
+    .hud-buttons { display: flex; gap: 8px; }
+    .hud-buttons button {
+      flex: 1; cursor: pointer; font: inherit; color: #eee6e3;
+      background: rgba(224,104,75,0.18); border: 1px solid rgba(224,104,75,0.45);
+      border-radius: 5px; padding: 5px 8px;
+    }
+    .hud-buttons button:hover { background: rgba(224,104,75,0.34); }
+    .hud-status:empty { display: none; }
+    .hud-metric { display: flex; justify-content: space-between; gap: 10px; margin: 2px 0; }
+    .hud-metric-label { color: #c9bdb8; }
+    .hud-note, .hud-sublabel { color: #b8a9a4; font-size: 0.66rem; }
+    .hud-note { margin-top: 6px; }
+    .hud-sublabel { margin-top: 9px; margin-bottom: 3px; font-weight: 600; letter-spacing: 0.02em; }
+    .hud-scenarios { flex-wrap: wrap; }
+    .hud-scenarios button { flex: 1 1 40%; }
+    .legend-item { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+    .legend-swatch { width: 14px; height: 14px; border-radius: 3px; display: inline-block; border: 1px solid rgba(255,255,255,0.25); }
+    .legend-note { color: #c9bdb8; }
+    @media (max-width: 720px) {
+      .hud { font-size: 0.66rem; max-width: 92vw; }
+      #meshLodControls, #meshLodDiagnostics { left: 8px; right: 8px; top: 8px; max-width: none; }
+      #meshLodDiagnostics { top: auto; bottom: 44px; max-height: 40vh; }
+    }
+  </style>
+</head>
+<body>
+  <!--
+    This page loads the production-BUNDLED demo (tree-shaken + minified) from
+    /bundle/demos/, NOT the raw TypeScript source. Run `pnpm build:bundle-demos`
+    (also part of `pnpm dev:lab`) to (re)generate the bundle this page references.
+  -->
+  <canvas id="renderCanvas"></canvas>
+
+  <!-- Accessible control + diagnostic mount points; filled by the demo module. -->
+  <aside id="meshLodControls" class="hud" role="group" aria-label="MeshLoD controls"></aside>
+  <section id="meshLodDiagnostics" class="hud" role="status" aria-live="off" aria-label="MeshLoD diagnostics"></section>
+  <div id="meshLodLegend" class="hud" role="note" aria-label="Debug view legend"></div>
+
+  <div id="loadingOverlay" class="loading-overlay" role="status" aria-live="polite">
+    <div class="loading-box">
+      <div class="loading-spinner" aria-hidden="true"></div>
+      <div class="loading-label">Loading MeshLoD model…</div>
+      <div class="loading-sub">Fetching source model, environment & streamed LOD pages…</div>
+      <div class="loading-bar" aria-hidden="true"><div id="loadingBarFill" class="loading-bar-fill"></div></div>
+      <div class="loading-size" aria-hidden="true">Estimated demo assets: 20 MB</div>
+    </div>
+  </div>
+
+  <div id="demoError" class="demo-error" role="alert" aria-live="assertive">
+    <h1>MeshLoD demo failed to load</h1>
+    <p id="demoErrorText">An unexpected error occurred.</p>
+  </div>
+
+  <a class="credit" href="https://sketchfab.com/3d-models/harvard-yenching-institute-statue-fc245710c4d64d0886a7f37dc522ff87" target="_blank" rel="noopener noreferrer">
+    <b>&ldquo;Harvard-Yenching Institute statue&rdquo;</b> by Alexandre Tokovinine · CC-BY 4.0
+  </a>
+
+  <script>
+    // Loading screen: hide once the demo signals ready (or errors) via the canvas
+    // data attributes it sets when its assets are loaded and the engine starts.
+    (function () {
+      var overlay = document.getElementById("loadingOverlay");
+      var canvas = document.getElementById("renderCanvas");
+      if (!overlay || !canvas) return;
+      var done = false;
+      function hide() {
+        if (done) return;
+        done = true;
+        overlay.classList.add("is-hidden");
+        setTimeout(function () { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 600);
+      }
+      function check() {
+        if (canvas.dataset.ready === "true" || canvas.dataset.error) { hide(); return true; }
+        return false;
+      }
+      if (!check()) {
+        new MutationObserver(check).observe(canvas, { attributes: true, attributeFilter: ["data-ready", "data-error"] });
+        setTimeout(hide, 60000);
+      }
+    })();
+  </script>
+  <script>
+    // Fatal-error banner: reveal it (with the demo-provided message) when the
+    // canvas reports data-error. Independent of the overlay hide logic above.
+    (function () {
+      var canvas = document.getElementById("renderCanvas");
+      var banner = document.getElementById("demoError");
+      var text = document.getElementById("demoErrorText");
+      if (!canvas || !banner) return;
+      function check() {
+        var err = canvas.dataset.error;
+        if (err) {
+          if (text && err !== "true") text.textContent = err;
+          banner.classList.add("is-visible");
+          return true;
+        }
+        return false;
+      }
+      if (!check()) {
+        new MutationObserver(check).observe(canvas, { attributes: true, attributeFilter: ["data-error"] });
+      }
+    })();
+  </script>
+  <script>
+    // Determinate progress + asset-amount detail: mirror canvas data-progress /
+    // data-loading-detail (set by installFetchProgress) into the overlay. Runs
+    // independently of the data-ready/data-error hide logic above.
+    (function () {
+      var canvas = document.getElementById("renderCanvas");
+      var overlay = document.getElementById("loadingOverlay");
+      if (!canvas || !overlay) return;
+      var fill = document.getElementById("loadingBarFill");
+      var sub = overlay.querySelector(".loading-sub");
+      var size = overlay.querySelector(".loading-size");
+      function sync() {
+        var p = canvas.dataset.progress;
+        if (p !== undefined && p !== "") {
+          overlay.classList.add("has-progress");
+          if (fill) fill.style.width = Math.max(0, Math.min(100, +p)) + "%";
+        } else {
+          overlay.classList.remove("has-progress");
+        }
+        var d = canvas.dataset.loadingDetail;
+        if (d !== undefined && d !== "" && sub) sub.textContent = d;
+        var sz = canvas.dataset.loadingSize;
+        if (sz !== undefined && sz !== "" && size) size.textContent = sz;
+      }
+      sync();
+      new MutationObserver(sync).observe(canvas, { attributes: true, attributeFilter: ["data-progress", "data-loading-detail", "data-loading-size"] });
+    })();
+  </script>
+  <script type="module" src="/lite/bundle/demos/mesh-lod.js"></script>
+</body>
+</html>
