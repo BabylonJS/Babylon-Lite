@@ -26,6 +26,8 @@ export function createStandardMaterial(): StandardMaterialProps {
         reflectionCoordMode: 1,
         uvScale: [1, 1],
         backFaceCulling: true,
+        depthBias: 0,
+        depthBiasSlopeScale: 0,
         disableLighting: false,
         _buildGroup: getStandardGroupBuilder(),
         _uboVersion: 0,

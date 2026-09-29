@@ -249,7 +249,9 @@ export function getOrCreateStandardPipeline(
     ensureDevice(engine);
     const alphaToCoverageResolver = _getAlphaToCoverageResolver();
     const useAlphaToCoverage = sig._sampleCount > 1 && !!alphaToCoverageResolver?.(material);
-    const key = `${targetSignatureKey(sig)}${useAlphaToCoverage ? ":a2c" : ""}`;
+    const depthBias = material.depthBias ?? 0;
+    const depthBiasSlopeScale = material.depthBiasSlopeScale ?? 0;
+    const key = `${targetSignatureKey(sig)}${useAlphaToCoverage ? ":a2c" : ""}${depthBias || depthBiasSlopeScale ? `:bias:${depthBias}:${depthBiasSlopeScale}` : ""}`;
     const cached = bindings._pipelines.get(key);
     if (cached) {
         return cached;
@@ -296,6 +298,8 @@ export function getOrCreateStandardPipeline(
                       format: sig._depthStencilFormat,
                       depthCompare: sig._depthCompare ?? REVERSE_DEPTH_COMPARE,
                       depthWriteEnabled: noColorOutput || esmShadowOutput || !needsBlend,
+                      ...(depthBias ? { depthBias } : {}),
+                      ...(depthBiasSlopeScale ? { depthBiasSlopeScale } : {}),
                       // Pre-baked stencil sub-fields, applied only on a stencil-capable target — the same
                       // material in the depth32float shadow/depth pass keeps plain depth state (no stencil → no
                       // format mismatch). Gated on `_stencilResolver` (the opt-in hook) so the entire branch —

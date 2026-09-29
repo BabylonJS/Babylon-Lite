@@ -90,6 +90,10 @@ export interface StandardMaterialProps extends Material {
     _uvTxExt?: Promise<void>;
     /** Back-face culling. Default true (BJS convention). False = double-sided. */
     backFaceCulling: boolean;
+    /** Constant depth bias. Positive values pull surfaces toward the camera with reverse-Z. Default 0. */
+    depthBias: number;
+    /** Depth bias scaled by the fragment's depth slope. Default 0. */
+    depthBiasSlopeScale: number;
     /** When true, skip all lighting and output emissive * diffuse * baseColor. Default false. */
     disableLighting: boolean;
 }
