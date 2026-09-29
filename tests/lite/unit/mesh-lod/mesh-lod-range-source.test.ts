@@ -116,6 +116,8 @@ describe("createMeshLoDRangeSource — URL source", () => {
     it.each<[string, (r: Request | string | URL, i?: RequestInit) => Response, MeshLoDErrorCode]>([
         ["404 status", () => new Response(null, { status: 404 }), "MLOD_HTTP_STATUS"],
         ["304 status", () => new Response(null, { status: 304 }), "MLOD_HTTP_STATUS"],
+        ["compressed 429 status", () => new Response(null, { status: 429, headers: { "Content-Encoding": "gzip" } }), "MLOD_HTTP_STATUS"],
+        ["compressed 503 status", () => new Response(null, { status: 503, headers: { "Content-Encoding": "gzip" } }), "MLOD_HTTP_STATUS"],
         [
             "non-identity encoding",
             () => new Response(bufferOf(file.subarray(0, 11)), { status: 206, headers: { "Content-Range": `bytes 0-10/${file.length}`, "Content-Encoding": "gzip" } }),

@@ -6,7 +6,7 @@
 // render-task timing API and is shown as an explicit status — never a fake zero.
 // The legend explains the active debug view's palette (REQ-DEMO-6).
 
-import { getMeshLoDDiagnostics, getRenderTaskGpuTimings, type EngineContext, type MeshLoDAsset, type MeshLoDDebugView } from "babylon-lite";
+import { getMeshLoDDiagnostics, getRenderTaskGpuTimings, type EngineContext, type MeshLoDAsset, type MeshLoDDebugView, type RenderTaskGpuTimings } from "babylon-lite";
 
 const MIB = 1024 * 1024;
 
@@ -29,6 +29,22 @@ function groupThousands(value: number): string {
 
 function mib(bytes: number): string {
     return (bytes / MIB).toFixed(1) + " MiB";
+}
+
+export function formatMeshLoDGpuTiming(t: RenderTaskGpuTimings): string {
+    if (!t.supported || t.status === "unsupported") {
+        return "unsupported";
+    }
+    if (t.status === "pending") {
+        return "pending…";
+    }
+    if (t.status === "error") {
+        return "error" + (t.error ? " (" + t.error + ")" : "");
+    }
+    if (t.status === "available" && t.tasks.length > 0) {
+        return t.totalDurationMs.toFixed(2) + " ms";
+    }
+    return t.status; // "disabled" or "available" with no tasks yet — never a fake 0 ms
 }
 
 /** Row definitions: id → label. Values are filled each tick. */
@@ -113,24 +129,6 @@ export function installMeshLoDDiagnostics(options: MeshLoDDiagnosticsOptions): M
         }
     };
 
-    const gpuTimingText = (): string => {
-        const t = getRenderTaskGpuTimings(engine);
-        if (!t.supported || t.status === "unsupported") {
-            return "unsupported";
-        }
-        if (t.status === "pending") {
-            return "pending…";
-        }
-        if (t.status === "error") {
-            return "error" + (t.error ? " (" + t.error + ")" : "");
-        }
-        if (t.status === "available" && t.tasks.length > 0) {
-            const total = t.tasks.reduce((sum, task) => sum + task.durationMs, 0);
-            return total.toFixed(2) + " ms";
-        }
-        return t.status; // "disabled" or "available" with no tasks yet — never a fake 0 ms
-    };
-
     let lastTick = 0;
     const tick = (now: number): void => {
         requestAnimationFrame(tick);
@@ -201,7 +199,7 @@ export function installMeshLoDDiagnostics(options: MeshLoDDiagnosticsOptions): M
         set("concurrency", String(concurrency));
         set("streaming", paused ? "paused" : "active");
         set("selection", mode.toUpperCase());
-        set("gpuTiming", gpuTimingText());
+        set("gpuTiming", formatMeshLoDGpuTiming(getRenderTaskGpuTimings(engine)));
     };
     requestAnimationFrame(tick);
 

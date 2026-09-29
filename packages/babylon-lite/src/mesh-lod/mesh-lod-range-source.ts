@@ -96,6 +96,12 @@ function createUrlSource(url: string, request: MeshLoDRequestOptions | undefined
             throw createMeshLoDError("MLOD_HTTP_STATUS", "range request failed", { url, cause });
         }
 
+        if (response.status !== 200 && response.status !== 206) {
+            throw createMeshLoDError("MLOD_HTTP_STATUS", response.status === 304 ? "unexpected 304 Not Modified" : "unexpected response status", {
+                url,
+                actual: response.status,
+            });
+        }
         const encoding = response.headers.get("Content-Encoding");
         if (encoding && encoding.toLowerCase() !== "identity") {
             throw createMeshLoDError("MLOD_HTTP_ENCODING", "response used a non-identity content encoding", { url, actual: encoding });
@@ -129,21 +135,14 @@ function createUrlSource(url: string, request: MeshLoDRequestOptions | undefined
             return body;
         }
 
-        if (response.status === 200) {
-            const body = new Uint8Array(await response.arrayBuffer());
-            downloadedBytes += body.length;
-            if (totalBytes !== null && totalBytes !== body.length) {
-                throw createMeshLoDError("MLOD_HTTP_RANGE", "full response length disagrees with the known total", { url, expected: totalBytes, actual: body.length });
-            }
-            totalBytes = body.length;
-            completeBytes = body;
-            return sliceRange(body, start, end);
+        const body = new Uint8Array(await response.arrayBuffer());
+        downloadedBytes += body.length;
+        if (totalBytes !== null && totalBytes !== body.length) {
+            throw createMeshLoDError("MLOD_HTTP_RANGE", "full response length disagrees with the known total", { url, expected: totalBytes, actual: body.length });
         }
-
-        if (response.status === 304) {
-            throw createMeshLoDError("MLOD_HTTP_STATUS", "unexpected 304 Not Modified", { url, actual: 304 });
-        }
-        throw createMeshLoDError("MLOD_HTTP_STATUS", "unexpected response status", { url, actual: response.status });
+        totalBytes = body.length;
+        completeBytes = body;
+        return sliceRange(body, start, end);
     }
 
     return {

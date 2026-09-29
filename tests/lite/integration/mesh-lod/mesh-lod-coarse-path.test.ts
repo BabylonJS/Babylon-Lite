@@ -9,8 +9,9 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadMeshLoD, createMeshLoDInstance, addMeshLoDToScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import { loadMeshLoD, createMeshLoDInstance, addMeshLoDToScene, setMeshLoDStreamingPaused } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
+import { STATUE_FINE_FLOOR } from "../../unit/mesh-lod/fake-range-server.js";
 import type { MeshLoDAsset } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
 import type { Camera } from "../../../../packages/babylon-lite/src/camera/camera.js";
@@ -96,13 +97,12 @@ afterEach(() => {
 describe("MeshLoD lazy coarse path", () => {
     it("bootstraps coarse-only over the wire — never fetching a fine page", async () => {
         const file = statueFile();
-        // The single pinned page ends well within the first ~300 KiB; everything after
-        // that is fine data the coarse path must never request.
-        const server = coarseOnlyServer(file, 400 * 1024);
+        const server = coarseOnlyServer(file, STATUE_FINE_FLOOR);
         const asset = await loadMeshLoD(engine, "https://cdn.test/statue.mlod", { request: { fetch: server.fetch } });
 
         expect(asset.state).toBe("ready");
         expect(server.fineRequests).toBe(0);
+        expect(server.maxEnd).toBeLessThan(STATUE_FINE_FLOOR);
         expect(server.maxEnd).toBeLessThan(file.length);
         expect(asset.diagnostics.downloadedBytes).toBeLessThan(file.length);
         // Every terminal-group (pinned) page is resident — the coarse geometry is whole.
@@ -111,7 +111,7 @@ describe("MeshLoD lazy coarse path", () => {
 
     it("renders the coarse fallback through the public facade with fine data unavailable", async () => {
         const file = statueFile();
-        const server = coarseOnlyServer(file, 400 * 1024);
+        const server = coarseOnlyServer(file, STATUE_FINE_FLOOR);
         const asset = await loadMeshLoD(engine, "https://cdn.test/statue.mlod", { request: { fetch: server.fetch }, selectionMode: "cpu" });
 
         const { drawCount } = await renderCoarse(asset, engine);
@@ -128,8 +128,9 @@ describe("MeshLoD lazy coarse path", () => {
 
     it("keeps coarse geometry usable across repeated frames without requesting fine pages", async () => {
         const file = statueFile();
-        const server = coarseOnlyServer(file, 400 * 1024);
-        const asset = await loadMeshLoD(engine, bufferOf(file), { selectionMode: "cpu" });
+        const server = coarseOnlyServer(file, STATUE_FINE_FLOOR);
+        const asset = await loadMeshLoD(engine, "https://cdn.test/statue.mlod", { request: { fetch: server.fetch }, selectionMode: "cpu" });
+        setMeshLoDStreamingPaused(asset, true);
         const { scene } = await renderCoarse(asset, engine);
         const binding = scene._renderables[0]!.bind(engine, SIG);
         const ctx = { targetWidth: 800, targetHeight: 600, _camera: fakeCamera() };
@@ -139,5 +140,6 @@ describe("MeshLoD lazy coarse path", () => {
         expect(asset.diagnostics.renderedTriangleCount).toBeGreaterThan(0);
         expect(asset.state).toBe("ready");
         expect(server.fineRequests).toBe(0);
+        expect(server.maxEnd).toBeLessThan(STATUE_FINE_FLOOR);
     });
 });

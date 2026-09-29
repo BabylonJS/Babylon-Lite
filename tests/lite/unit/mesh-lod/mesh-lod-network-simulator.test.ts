@@ -71,17 +71,44 @@ describe("createMeshLoDNetworkSimulator", () => {
         expect(waits).toEqual([]);
     });
 
-    it("rejects and never fetches when the request is already aborted", async () => {
+    it.each([0, 100])("rejects and never fetches an already-aborted request with %d ms latency", async (latencyMs) => {
         let called = 0;
         const baseFetch = (async () => {
             called++;
             return fakeResponse(bytes(10));
         }) as unknown as typeof fetch;
-        const sim = createMeshLoDNetworkSimulator(baseFetch, { bandwidthBytesPerSecond: 1000, latencyMs: 100 });
+        const sim = createMeshLoDNetworkSimulator(baseFetch, { bandwidthBytesPerSecond: 1000, latencyMs });
         const controller = new AbortController();
         controller.abort();
         await expect(sim.fetch("https://host/statue.mesh000.prim000.mlod", { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
         expect(called).toBe(0);
+    });
+
+    it("does not call a custom fetch when its delay ignores a later abort", async () => {
+        const controller = new AbortController();
+        let called = 0;
+        const baseFetch = (async () => {
+            called++;
+            return fakeResponse(bytes(10));
+        }) as unknown as typeof fetch;
+        const sim = createMeshLoDNetworkSimulator(baseFetch, {
+            latencyMs: 100,
+            wait: async () => {
+                controller.abort();
+            },
+        });
+        await expect(sim.fetch("https://host/statue.mlod", { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+        expect(called).toBe(0);
+    });
+
+    it("rejects if a custom fetch ignores an abort during the request", async () => {
+        const controller = new AbortController();
+        const baseFetch = (async () => {
+            controller.abort();
+            return fakeResponse(bytes(10));
+        }) as unknown as typeof fetch;
+        const sim = createMeshLoDNetworkSimulator(baseFetch);
+        await expect(sim.fetch("https://host/statue.mlod", { signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
     });
 
     it("applies live bandwidth and latency changes to later requests", async () => {

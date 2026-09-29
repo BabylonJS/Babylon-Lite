@@ -47,18 +47,23 @@ export function createFakeFrameClock(): FakeFrameClock {
             }
         },
         advanceMs(ms: number): void {
-            now += ms;
+            if (!Number.isFinite(ms) || ms < 0) {
+                throw new RangeError("Clock advance must be a finite non-negative duration");
+            }
+            const target = now + ms;
             for (;;) {
                 let next: Scheduled | undefined;
                 for (const s of scheduled) {
-                    if (s.fireAt <= now && (!next || s.fireAt < next.fireAt || (s.fireAt === next.fireAt && s.seq < next.seq))) {
+                    if (s.fireAt <= target && (!next || s.fireAt < next.fireAt || (s.fireAt === next.fireAt && s.seq < next.seq))) {
                         next = s;
                     }
                 }
                 if (!next) {
+                    now = target;
                     return;
                 }
                 scheduled.splice(scheduled.indexOf(next), 1);
+                now = Math.max(now, next.fireAt);
                 next.callback();
             }
         },

@@ -126,11 +126,20 @@ export function createMeshLoDNetworkSimulator(baseFetch: typeof fetch, options: 
             return baseFetch(input, init);
         }
         const signal = requestSignal(input, init);
+        if (signal?.aborted) {
+            throw abortError();
+        }
         const { bandwidthBytesPerSecond, latencyMs } = settings;
         if (latencyMs > 0) {
             await wait(latencyMs, signal);
         }
+        if (signal?.aborted) {
+            throw abortError();
+        }
         const response = await baseFetch(input, init);
+        if (signal?.aborted) {
+            throw abortError();
+        }
         if (!Number.isFinite(bandwidthBytesPerSecond) || !response.body) {
             return response;
         }

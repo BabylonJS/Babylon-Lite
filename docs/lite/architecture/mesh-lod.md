@@ -115,7 +115,8 @@ groups, maximum selected/unmet error, page demand and residency, downloaded
 bytes, cache use, and selection mode. Integration tests compare the CPU
 oracle to GPU selection, streaming, lifecycle, and indirect-draw behavior.
 The demo workflow test checks startup, controls, and source-asset loading
-without changing reference screenshots.
+without changing reference screenshots. Demo GPU timing uses the
+non-additive `totalDurationMs` from `getRenderTaskGpuTimings`.
 
 ## 10. Selection model
 
