@@ -20,7 +20,7 @@ struct Params {
 @group(0) @binding(7) var<storage, read> runtime: array<u32>;
 var<workgroup> histogram: array<atomic<u32>, 16>;
 var<workgroup> scanData: array<u32, 256>;
-var<workgroup> digits: array<u32, 256>;
+var<workgroup> digitLanes: array<atomic<u32>, 128>;
 
 fn runtimeCount() -> u32 {
     return runtime[0];
@@ -127,15 +127,26 @@ fn scatterMain(@builtin(local_invocation_id) local: vec3<u32>, @builtin(workgrou
     if (valid) {
         digit = (input[index].key >> params.shift) & 15u;
     }
-    digits[local.x] = digit;
+    if (local.x < 128u) {
+        atomicStore(&digitLanes[local.x], 0u);
+    }
+    workgroupBarrier();
+    if (valid) {
+        let word = local.x >> 5u;
+        atomicOr(&digitLanes[digit * 8u + word], 1u << (local.x & 31u));
+    }
     workgroupBarrier();
     if (!valid) {
         return;
     }
     var rank = 0u;
-    for (var lane = 0u; lane < local.x; lane++) {
-        rank += select(0u, 1u, digits[lane] == digit);
+    let word = local.x >> 5u;
+    for (var preceding = 0u; preceding < word; preceding++) {
+        rank += countOneBits(atomicLoad(&digitLanes[digit * 8u + preceding]));
     }
+    let bit = local.x & 31u;
+    let precedingMask = (1u << bit) - 1u;
+    rank += countOneBits(atomicLoad(&digitLanes[digit * 8u + word]) & precedingMask);
     let destination = digitBases[digit] + scanned[digit * params.stride + group.x] + rank;
     output[destination] = input[index];
 }

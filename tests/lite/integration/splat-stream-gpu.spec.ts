@@ -4,9 +4,129 @@ import { resolve } from "node:path";
 const gpuModuleUrl = `/@fs/${resolve(__dirname, "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-gpu.ts").replaceAll("\\", "/")}`;
 const materialModuleUrl = `/@fs/${resolve(__dirname, "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-material.ts").replaceAll("\\", "/")}`;
 const retirementModuleUrl = `/@fs/${resolve(__dirname, "../../../packages/babylon-lite/src/engine/gpu-resource-retirement.ts").replaceAll("\\", "/")}`;
+const radixShaderUrl = `/@fs/${resolve(__dirname, "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-radix.wgsl").replaceAll("\\", "/")}?raw`;
 
 test.beforeEach(async ({ page }) => {
     await page.goto("/");
+});
+
+test("computes stable bitset ranks for arbitrary uint keys and lane-word tails", async ({ page }) => {
+    const result = await page.evaluate(async (shaderUrl) => {
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) {
+            return null;
+        }
+        const device = await adapter.requestDevice();
+        device.pushErrorScope("validation");
+        const shader = (await import(shaderUrl)).default as string;
+        const layout = device.createBindGroupLayout({
+            entries: [
+                { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+                { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+                { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+                { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+                { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+                { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: "storage" } },
+                { binding: 6, visibility: GPUShaderStage.COMPUTE, buffer: { type: "uniform" } },
+                { binding: 7, visibility: GPUShaderStage.COMPUTE, buffer: { type: "read-only-storage" } },
+            ],
+        });
+        const pipeline = device.createComputePipeline({
+            layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
+            compute: { module: device.createShaderModule({ code: shader }), entryPoint: "scatterMain" },
+        });
+        const makeBuffer = (size: number, usage: GPUBufferUsageFlags, data?: ArrayBufferView): GPUBuffer => {
+            const buffer = device.createBuffer({ size: Math.max(4, size), usage });
+            if (data) {
+                device.queue.writeBuffer(buffer, 0, data);
+            }
+            return buffer;
+        };
+        const failures: string[] = [];
+        const counts = [1, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 257, 600];
+        for (const [caseIndex, count] of counts.entries()) {
+            const groups = Math.ceil(count / 256);
+            const shift = [0, 4, 12, 28][caseIndex % 4]!;
+            const inputWords = new Uint32Array(count * 2);
+            const pairs: Array<{ key: number; index: number; digit: number }> = [];
+            let random = (0x9e3779b9 ^ count) >>> 0;
+            for (let index = 0; index < count; index++) {
+                random ^= random << 13;
+                random ^= random >>> 17;
+                random ^= random << 5;
+                const key = count === 257 ? 0xdeadbeef : count === 256 ? ((random & 0x0fffffff) | ((index & 15) << 28)) >>> 0 : random >>> 0;
+                inputWords[index * 2] = key;
+                inputWords[index * 2 + 1] = index;
+                pairs.push({ key, index, digit: (key >>> shift) & 15 });
+            }
+            const scannedWords = new Uint32Array(16 * groups);
+            const totals = new Uint32Array(16);
+            for (let group = 0; group < groups; group++) {
+                for (let digit = 0; digit < 16; digit++) {
+                    scannedWords[digit * groups + group] = totals[digit]!;
+                }
+                const end = Math.min(count, (group + 1) * 256);
+                for (let index = group * 256; index < end; index++) {
+                    const digit = pairs[index]!.digit;
+                    totals[digit] = totals[digit]! + 1;
+                }
+            }
+            const bases = new Uint32Array(16);
+            let total = 0;
+            for (let digit = 0; digit < 16; digit++) {
+                bases[digit] = total;
+                total += totals[digit]!;
+            }
+            const params = new Uint32Array(64);
+            params.set([count, groups, shift, 0, groups, 0]);
+            const runtime = new Uint32Array([count]);
+            const storageUsage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
+            const input = makeBuffer(inputWords.byteLength, storageUsage, inputWords);
+            const output = makeBuffer(inputWords.byteLength, storageUsage | GPUBufferUsage.COPY_SRC);
+            const values = makeBuffer(64, storageUsage);
+            const scanned = makeBuffer(scannedWords.byteLength, storageUsage, scannedWords);
+            const sums = makeBuffer(64, storageUsage);
+            const digitBases = makeBuffer(bases.byteLength, storageUsage, bases);
+            const parameterBuffer = makeBuffer(params.byteLength, GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST, params);
+            const runtimeBuffer = makeBuffer(runtime.byteLength, storageUsage, runtime);
+            const read = makeBuffer(inputWords.byteLength, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
+            const encoder = device.createCommandEncoder();
+            const pass = encoder.beginComputePass();
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(
+                0,
+                device.createBindGroup({
+                    layout,
+                    entries: [input, output, values, scanned, sums, digitBases, parameterBuffer, runtimeBuffer].map((buffer, binding) => ({
+                        binding,
+                        resource: { buffer },
+                    })),
+                })
+            );
+            pass.dispatchWorkgroups(groups);
+            pass.end();
+            encoder.copyBufferToBuffer(output, 0, read, 0, inputWords.byteLength);
+            device.queue.submit([encoder.finish()]);
+            await read.mapAsync(GPUMapMode.READ);
+            const actual = new Uint32Array(read.getMappedRange());
+            const expected = [...pairs].sort((left, right) => left.digit - right.digit || left.index - right.index);
+            for (let slot = 0; slot < count; slot++) {
+                if (actual[slot * 2] !== expected[slot]!.key || actual[slot * 2 + 1] !== expected[slot]!.index) {
+                    failures.push(`count=${count} shift=${shift} slot=${slot}`);
+                    break;
+                }
+            }
+            read.unmap();
+            for (const buffer of [input, output, values, scanned, sums, digitBases, parameterBuffer, runtimeBuffer, read]) {
+                buffer.destroy();
+            }
+        }
+        const error = await device.popErrorScope();
+        return { failures, error: error?.message };
+    }, radixShaderUrl);
+    test.skip(result === null, "A WebGPU adapter is unavailable");
+    expect(result!.error).toBeUndefined();
+    expect(result!.failures).toEqual([]);
 });
 
 test("compiles shaders and gathers canonical SOG records without clamping color", async ({ page }) => {

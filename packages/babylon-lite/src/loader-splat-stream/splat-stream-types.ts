@@ -16,6 +16,8 @@ export interface GaussianSplatStreamOptions {
     maxConcurrentDecodes?: number;
     screenError?: number;
     lodHysteresis?: number;
+    /** Minimum dwell after an accepted displayed LOD replacement. Zero disables dwell. */
+    lodCooldownMs?: number;
     maxRetries?: number;
     signal?: AbortSignal;
     /** @internal Controlled runtime seams used by focused tests. */
@@ -67,11 +69,22 @@ export interface StreamLeafRuntime {
     pending: StreamRepresentation | null;
     lastVisibleFrame: number;
     selectionGeneration: number;
+    lodCooldownUntil: number;
+    cooldownHeld: boolean;
 }
 
 /** @internal One camera/target binding's latest planner result. */
 export interface StreamBindingSelection {
     frame: number;
+    readonly plan: StreamSelectionPlan;
+    readonly inputValues: readonly number[];
+}
+
+/** @internal Exact shared-solve cache. */
+export interface StreamAggregateSelectionCache {
+    readonly plans: readonly StreamSelectionPlan[];
+    readonly values: readonly number[];
+    readonly desiredPlan: StreamSelectionPlan;
     readonly plan: StreamSelectionPlan;
 }
 
@@ -144,6 +157,16 @@ export interface GaussianSplatStream extends SceneNode {
     /** @internal */
     readonly _bindingSelections: Map<object, StreamBindingSelection>;
     /** @internal */
+    _aggregateSelectionCache: StreamAggregateSelectionCache | null;
+    /** @internal */
+    _selectionStateVersion: number;
+    /** @internal */
+    _selectionMetricsComputations: number;
+    /** @internal */
+    _selectionAggregateComputations: number;
+    /** @internal */
+    _cooldownPending: boolean;
+    /** @internal */
     _generationPressure: boolean;
     /** @internal */
     _refinementEnabled: boolean;
@@ -173,6 +196,7 @@ export interface NormalizedSplatStreamOptions {
     readonly maxConcurrentDecodes: number;
     readonly screenError: number;
     readonly lodHysteresis: number;
+    readonly lodCooldownMs: number;
     readonly maxRetries: number;
     readonly signal: AbortSignal | undefined;
 }
@@ -272,6 +296,7 @@ export interface StreamSelectionInput {
     readonly screenError: number;
     readonly lodHysteresis: number;
     readonly previousTargets?: ReadonlyMap<number, StreamRepresentation>;
+    readonly heldTargets?: ReadonlyMap<number, StreamRepresentation>;
     readonly hardBudgetPressure?: boolean;
     readonly perspective?: boolean;
 }
@@ -290,6 +315,7 @@ export interface StreamSelectionPlan {
     readonly selections: readonly StreamSelection[];
     readonly visibleLeaves: number;
     readonly selectedSplats: number;
+    readonly holdsApplied?: boolean;
 }
 
 function positiveSafeInteger(value: number | undefined, fallback: number, name: string, max = Number.MAX_SAFE_INTEGER): number {
@@ -310,6 +336,10 @@ export function normalizeSplatStreamOptions(options: GaussianSplatStreamOptions 
     if (!Number.isFinite(lodHysteresis) || lodHysteresis < 0 || lodHysteresis > 1) {
         throw new RangeError("[GaussianSplatStream] lodHysteresis must be finite and in 0..1");
     }
+    const lodCooldownMs = options.lodCooldownMs ?? 0;
+    if (!Number.isFinite(lodCooldownMs) || lodCooldownMs < 0) {
+        throw new RangeError("[GaussianSplatStream] lodCooldownMs must be finite and nonnegative");
+    }
     const maxRetries = options.maxRetries ?? 2;
     if (!Number.isSafeInteger(maxRetries) || maxRetries < 0 || maxRetries > 8) {
         throw new RangeError("[GaussianSplatStream] maxRetries must be a safe integer in 0..8");
@@ -328,6 +358,7 @@ export function normalizeSplatStreamOptions(options: GaussianSplatStreamOptions 
         maxConcurrentDecodes: positiveSafeInteger(options.maxConcurrentDecodes, 2, "maxConcurrentDecodes", 8),
         screenError,
         lodHysteresis,
+        lodCooldownMs,
         maxRetries,
         signal: options.signal,
     };

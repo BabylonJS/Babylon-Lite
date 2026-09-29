@@ -126,6 +126,7 @@ interface CandidatePlanOptions {
     readonly screenError: number;
     readonly lodHysteresis: number;
     readonly previousTargets?: ReadonlyMap<number, StreamRepresentation>;
+    readonly heldTargets?: ReadonlyMap<number, StreamRepresentation>;
     readonly hardBudgetPressure?: boolean;
 }
 
@@ -146,7 +147,27 @@ function validateCandidatePlanOptions(input: CandidatePlanOptions): void {
 function planCandidates(candidates: Candidate[], input: CandidatePlanOptions): StreamSelectionPlan {
     validateCandidatePlanOptions(input);
     candidates.sort((left, right) => left.leaf.id - right.leaf.id);
-    const baselineSplats = candidates.reduce((sum, candidate) => sum + candidate.leaf.alternatives[0]!.count, 0);
+    const heldIndices = new Map<number, number>();
+    let heldBaseline = 0;
+    for (const candidate of candidates) {
+        const held = input.hardBudgetPressure ? undefined : input.heldTargets?.get(candidate.leaf.id);
+        const heldIndex = held
+            ? candidate.leaf.alternatives.findIndex(
+                  (representation) => representation.fileId === held.fileId && representation.offset === held.offset && representation.count === held.count
+              )
+            : -1;
+        heldBaseline += candidate.leaf.alternatives[Math.max(0, heldIndex)]!.count;
+        if (heldIndex >= 0) {
+            heldIndices.set(candidate.leaf.id, heldIndex);
+        }
+    }
+    const holdsApplied = heldIndices.size > 0 && heldBaseline <= input.maxSplats;
+    if (holdsApplied) {
+        for (const candidate of candidates) {
+            candidate.currentIndex = heldIndices.get(candidate.leaf.id) ?? 0;
+        }
+    }
+    const baselineSplats = candidates.reduce((sum, candidate) => sum + candidate.leaf.alternatives[candidate.currentIndex]!.count, 0);
     if (baselineSplats > input.maxSplats) {
         throw new Error(`${PREFIX} selection: visible coarse baseline (${baselineSplats} splats) exceeds maxSplats (${input.maxSplats})`);
     }
@@ -158,6 +179,9 @@ function planCandidates(candidates: Candidate[], input: CandidatePlanOptions): S
         let bestError = -Infinity;
         let bestAdded = 0;
         for (const candidate of candidates) {
+            if (holdsApplied && heldIndices.has(candidate.leaf.id)) {
+                continue;
+            }
             const alternatives = candidate.leaf.alternatives;
             const current = alternatives[candidate.currentIndex]!;
             const next = alternatives[candidate.currentIndex + 1];
@@ -214,7 +238,7 @@ function planCandidates(candidates: Candidate[], input: CandidatePlanOptions): S
             projectedRadius: candidate.projectedRadius,
         };
     });
-    return { selections, visibleLeaves: candidates.length, selectedSplats };
+    return { selections, visibleLeaves: candidates.length, selectedSplats, holdsApplied };
 }
 
 /** @internal Plans visible leaf alternatives under error, splat-budget, and hysteresis constraints. */
@@ -250,7 +274,8 @@ export function planMergedStreamSelection(
     screenError: number,
     lodHysteresis: number,
     previousTargets?: ReadonlyMap<number, StreamRepresentation>,
-    hardBudgetPressure = false
+    hardBudgetPressure = false,
+    heldTargets?: ReadonlyMap<number, StreamRepresentation>
 ): StreamSelectionPlan {
     const merged = new Map<number, Candidate>();
     for (const plan of plans) {
@@ -269,7 +294,7 @@ export function planMergedStreamSelection(
             }
         }
     }
-    return planCandidates([...merged.values()], { maxSplats, screenError, lodHysteresis, previousTargets, hardBudgetPressure });
+    return planCandidates([...merged.values()], { maxSplats, screenError, lodHysteresis, previousTargets, hardBudgetPressure, heldTargets });
 }
 
 /** @internal Chooses the coarse bootstrap source by coverage, aggregate cost, then stable file ID. */

@@ -156,6 +156,7 @@ test.describe("Trogir actual stream", () => {
                         maxGpuBytes: 256 * 1024 * 1024,
                         maxCpuBytes: 96 * 1024 * 1024,
                         screenError: 2,
+                        lodCooldownMs: 250,
                     });
                     stream.maxSplats = 750_000;
                     const target = placement.placeTrogirStream(stream);

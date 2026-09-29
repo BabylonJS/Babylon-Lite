@@ -55,6 +55,30 @@ function manifest(environment = false): unknown {
     };
 }
 
+function twoCoolingLeavesManifest(): unknown {
+    return {
+        version: 1,
+        lodLevels: 2,
+        lodErrors: true,
+        filenames: ["broad/meta.json", "sparse/meta.json", "fine/meta.json"],
+        tree: {
+            bound: { min: [-0.8, -0.4, -1], max: [0.8, 0.4, -0.1] },
+            children: [
+                {
+                    bound: { min: [-0.8, -0.2, -0.8], max: [-0.2, 0.2, -0.1] },
+                    lods: { "0": { file: 0, offset: 0, count: 1 }, "1": { file: 2, offset: 0, count: 2 } },
+                    errors: [1, 0],
+                },
+                {
+                    bound: { min: [0.2, -0.2, -0.8], max: [0.8, 0.2, -0.1] },
+                    lods: { "0": { file: 1, offset: 0, count: 1 }, "1": { file: 2, offset: 2, count: 2 } },
+                    errors: [1, 0],
+                },
+            ],
+        },
+    };
+}
+
 function offscreenBootstrapManifest(): unknown {
     return {
         version: 1,
@@ -233,6 +257,7 @@ function representation(leafId: number, lod: number, count: number): StreamRepre
 }
 
 function harness(sourceManifest = manifest(false), capacity = 20) {
+    let clock = 10;
     const queueGate = deferred<void>();
     const calls: Array<{ source: StreamSource; generation: number; gate: ReturnType<typeof deferred<PreparedSplatSource>> }> = [];
     let update: ((context: { targetWidth: number; targetHeight: number; _camera?: Camera | null }, binding?: object) => void) | undefined;
@@ -286,19 +311,36 @@ function harness(sourceManifest = manifest(false), capacity = 20) {
             return { order: 200, isTransparent: true, bind: vi.fn() } as unknown as Renderable;
         }
     );
-    return { engine, scene, camera, gpu, queueGate, calls, fetch, prepareSource, buildRenderable, getUpdate: () => update!, getDraw: () => draw! };
+    return {
+        engine,
+        scene,
+        camera,
+        gpu,
+        queueGate,
+        calls,
+        fetch,
+        prepareSource,
+        buildRenderable,
+        now: () => clock,
+        setNow: (value: number) => {
+            clock = value;
+        },
+        getUpdate: () => update!,
+        getDraw: () => draw!,
+    };
 }
 
-async function attachAndBuild(h: ReturnType<typeof harness>, environment = false) {
+async function attachAndBuild(h: ReturnType<typeof harness>, environment = false, lodCooldownMs = 0) {
     const stream = await loadGaussianSplatStream(h.engine, "https://assets.test/lod-meta.json", {
         maxSplats: 20,
+        lodCooldownMs,
         _runtime: {
             fetch: h.fetch,
             prepareSource: h.prepareSource,
             createGpuState: () => h.gpu,
             buildRenderable: h.buildRenderable,
             queueDone: () => h.queueGate.promise,
-            now: () => 10,
+            now: h.now,
         },
     });
     attachGaussianSplatStream(h.scene, stream);
@@ -315,6 +357,130 @@ async function attachAndBuild(h: ReturnType<typeof harness>, environment = false
 }
 
 describe("Gaussian splat stream orchestration", () => {
+    it("holds an accepted replacement until the exact per-leaf deadline without duplicate source work", async () => {
+        const h = harness(twoCoolingLeavesManifest());
+        const stream = await attachAndBuild(h, false, 250);
+        const sparse = h.calls.find((call) => call.source.url.includes("/sparse/"))!;
+        const fine = h.calls.find((call) => call.source.url.includes("/fine/"))!;
+        sparse.gate.resolve(prepared(sparse.source, sparse.generation));
+        fine.gate.resolve(prepared(fine.source, fine.generation));
+        await vi.waitFor(() => expect(stream._leafStates.map((state) => state.displayed?.fileId)).toEqual([fine.source.id, fine.source.id]));
+        expect(stream._leafStates.map((state) => state.lodCooldownUntil)).toEqual([260, 260]);
+
+        const requestCount = h.calls.length;
+        stream.screenError = 1_000_000;
+        h.setNow(200);
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream.stats.visibleLeaves).toBe(2);
+        expect(stream._leafStates.map((state) => state.cooldownHeld)).toEqual([true, true]);
+        expect(stream._leafStates.map((state) => state.lodCooldownUntil)).toEqual([260, 260]);
+
+        stream._leafStates[0]!.target = stream._manifest.leaves[0]!.alternatives[0]!;
+        stream._leafStates[0]!.pending = stream._manifest.leaves[0]!.alternatives[0]!;
+        h.setNow(201);
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream._leafStates[0]!.pending).toBeNull();
+        expect(stream._leafStates[0]!.displayed?.fileId).toBe(fine.source.id);
+        expect(stream._generationPressure).toBe(false);
+        expect(stream._leafStates.map((state) => state.lodCooldownUntil)).toEqual([260, 260]);
+
+        h.setNow(259);
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream._leafStates.map((state) => state.displayed?.fileId)).toEqual([fine.source.id, fine.source.id]);
+        expect(stream._leafStates.map((state) => state.target.fileId)).toEqual([fine.source.id, fine.source.id]);
+        expect(stream._leafStates.map((state) => state.lodCooldownUntil)).toEqual([260, 260]);
+        expect(stream.stats.phase).toBe("streaming");
+        expect(stream._generationPressure).toBe(false);
+        expect(h.calls).toHaveLength(requestCount);
+
+        const aggregateComputations = stream._selectionAggregateComputations;
+        h.setNow(260);
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream._leafStates.map((state) => state.displayed?.count)).toEqual([1, 1]);
+        expect(stream._leafStates.map((state) => state.lodCooldownUntil)).toEqual([510, 510]);
+        expect(stream._selectionAggregateComputations).toBeGreaterThan(aggregateComputations);
+        expect(h.calls).toHaveLength(requestCount);
+
+        void stream.firstFrameReady.catch(() => {});
+        disposeGaussianSplatStream(h.scene, stream);
+        expect(stream._leafStates.every((state) => state.lodCooldownUntil === 0 && state.pending === null)).toBe(true);
+    });
+
+    it("discards an active hold when the mutable shared budget requires an immediate reduction", async () => {
+        const h = harness(twoCoolingLeavesManifest());
+        const stream = await attachAndBuild(h, false, 250);
+        for (const call of h.calls.slice(1)) {
+            call.gate.resolve(prepared(call.source, call.generation));
+        }
+        await vi.waitFor(() => expect(stream._leafStates[0]!.displayed?.count).toBe(2));
+
+        stream.screenError = 1_000_000;
+        h.setNow(100);
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream._leafStates[0]!.cooldownHeld).toBe(true);
+
+        stream.maxSplats = 2;
+        h.setNow(101);
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream._leafStates.map((state) => state.displayed?.count)).toEqual([1, 1]);
+        expect(stream._generationPressure).toBe(false);
+    });
+
+    it("reuses exact per-view metrics and the aggregate solve while lifecycle updates continue", async () => {
+        const h = harness();
+        const stream = await attachAndBuild(h);
+        const update = (): void => h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        update();
+        update();
+        const metrics = stream._selectionMetricsComputations;
+        const aggregates = stream._selectionAggregateComputations;
+        for (let frame = 0; frame < 4; frame++) {
+            h.scene._beforeRender[0]!(16);
+            update();
+        }
+        expect(stream._selectionMetricsComputations).toBe(metrics);
+        expect(stream._selectionAggregateComputations).toBe(aggregates);
+
+        const mutableCamera = h.camera as Camera & { worldMatrix: Float32Array; worldMatrixVersion: number };
+        mutableCamera.worldMatrix[12] = 0.05;
+        mutableCamera.worldMatrixVersion++;
+        update();
+        expect(stream._selectionMetricsComputations).toBe(metrics + 1);
+        const cameraAggregates = stream._selectionAggregateComputations;
+
+        stream.position.x = 0.125;
+        update();
+        expect(stream._selectionMetricsComputations).toBe(metrics + 2);
+        expect(stream._selectionAggregateComputations).toBeGreaterThan(cameraAggregates);
+
+        const policyMetrics = stream._selectionMetricsComputations;
+        stream.screenError *= 2;
+        h.getUpdate()({ targetWidth: 100, targetHeight: 80, _camera: h.camera });
+        expect(stream._selectionMetricsComputations).toBe(policyMetrics + 1);
+
+        const extraBinding = {};
+        const beforeBinding = stream._selectionAggregateComputations;
+        h.getUpdate()({ targetWidth: 100, targetHeight: 80, _camera: h.camera }, extraBinding);
+        expect(stream._selectionAggregateComputations).toBeGreaterThan(beforeBinding);
+        h.scene._beforeRender[0]!(16);
+        h.scene._beforeRender[0]!(16);
+        const beforeRemoval = stream._selectionAggregateComputations;
+        h.getUpdate()({ targetWidth: 100, targetHeight: 80, _camera: h.camera });
+        expect(stream._selectionAggregateComputations).toBeGreaterThan(beforeRemoval);
+        const beforeReadditionMetrics = stream._selectionMetricsComputations;
+        h.getUpdate()({ targetWidth: 100, targetHeight: 80, _camera: h.camera }, extraBinding);
+        expect(stream._selectionMetricsComputations).toBe(beforeReadditionMetrics + 1);
+
+        const fine = h.calls.find((call) => call.source.url.includes("/fine/"))!;
+        const sourceMetrics = stream._selectionMetricsComputations;
+        const sourceAggregates = stream._selectionAggregateComputations;
+        fine.gate.resolve(prepared(fine.source, fine.generation));
+        await vi.waitFor(() => expect(stream._sourceStates[fine.source.id]!.state).toBe("resident"));
+        h.getUpdate()({ targetWidth: 100, targetHeight: 80, _camera: h.camera }, extraBinding);
+        expect(stream._selectionMetricsComputations).toBe(sourceMetrics);
+        expect(stream._selectionAggregateComputations).toBeGreaterThan(sourceAggregates);
+    });
+
     it("publishes a complete 80/10 to 10/80 replacement without transient overflow", () => {
         const states = [
             { visible: true, displayed: representation(0, 1, 80), pending: representation(0, 0, 10) },
@@ -353,6 +519,7 @@ describe("Gaussian splat stream orchestration", () => {
         const stream = await loadGaussianSplatStream(h.engine, "https://assets.test/lod-meta.json", {
             maxSplats: 100,
             screenError: 0.001,
+            lodCooldownMs: 250,
             _runtime: {
                 fetch: h.fetch,
                 prepareSource: h.prepareSource,

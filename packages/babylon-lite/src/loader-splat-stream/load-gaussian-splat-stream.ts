@@ -40,6 +40,7 @@ import type {
     StreamBindingSelection,
     StreamLeafRuntime,
     StreamRepresentation,
+    StreamSelectionPlan,
     StreamSourceRuntime,
 } from "./splat-stream-types.js";
 import { normalizeSplatStreamOptions } from "./splat-stream-types.js";
@@ -147,7 +148,7 @@ function updateStats(stream: GaussianSplatStream): void {
         values.phase =
             stream._generationPressure || stream._sourceStates.some((state) => state.state === "blocked" && state.demandCount > 0)
                 ? "budget-limited"
-                : values.queuedFiles || values.pendingRequests || stream._sourceStates.some((state) => state.request)
+                : values.queuedFiles || values.pendingRequests || stream._sourceStates.some((state) => state.request) || stream._cooldownPending
                   ? "streaming"
                   : "idle";
     }
@@ -155,6 +156,30 @@ function updateStats(stream: GaussianSplatStream): void {
 
 function sameRepresentation(left: StreamRepresentation | null, right: StreamRepresentation): boolean {
     return !!left && left.fileId === right.fileId && left.offset === right.offset && left.count === right.count;
+}
+
+function now(stream: GaussianSplatStream): number {
+    return stream._runtime.now?.() ?? performance.now();
+}
+
+function invalidateSelection(stream: GaussianSplatStream): void {
+    stream._selectionStateVersion++;
+    stream._aggregateSelectionCache = null;
+}
+
+function setGenerationPressure(stream: GaussianSplatStream, value: boolean): void {
+    if (stream._generationPressure !== value) {
+        stream._generationPressure = value;
+        invalidateSelection(stream);
+    }
+}
+
+function sameNumbers(left: readonly number[], right: readonly number[]): boolean {
+    return left.length === right.length && left.every((value, index) => Object.is(value, right[index]));
+}
+
+function samePlans(left: readonly StreamSelectionPlan[], right: readonly StreamSelectionPlan[]): boolean {
+    return left.length === right.length && left.every((plan, index) => plan === right[index]);
 }
 
 function sourceIntervals(stream: GaussianSplatStream, sourceId: number): { offset: number; count: number }[] {
@@ -217,6 +242,8 @@ export function forgetEvictedSplatStreamSource(stream: GaussianSplatStream, url:
     for (const leaf of stream._leafStates) {
         if (leaf.displayed?.fileId === state.source.id) {
             leaf.displayed = null;
+            leaf.lodCooldownUntil = 0;
+            leaf.cooldownHeld = false;
         }
         if (leaf.pending?.fileId === state.source.id) {
             leaf.pending = null;
@@ -229,6 +256,7 @@ export function forgetEvictedSplatStreamSource(stream: GaussianSplatStream, url:
     state.blockedAllocatedBytes = -1;
     state.blockedHeldBytes = -1;
     state.blockedAdmissionVersion = -1;
+    invalidateSelection(stream);
 }
 
 function synchronizeEvictedSources(stream: GaussianSplatStream): void {
@@ -289,6 +317,18 @@ function commitDisplayed(stream: GaussianSplatStream, force = false): void {
     if (foregroundCapacity < 0) {
         throw new Error(`${PREFIX} resident environment exceeds admitted GPU capacity`);
     }
+    const previousDisplayed = stream._leafStates.map((state) => state.displayed);
+    const displayedCount = stream._leafStates.reduce((count, state) => count + ((stream._frame === 0 || state.visible) && state.displayed ? state.displayed.count : 0), 0);
+    const hardPressure =
+        displayedCount > foregroundCapacity || stream._generationPressure || stream._sourceStates.some((state) => state.state === "blocked" && state.demandCount > 0);
+    const currentTime = now(stream);
+    if (!hardPressure && stream._options.lodCooldownMs > 0) {
+        for (const state of stream._leafStates) {
+            if (state.cooldownHeld && state.displayed && state.pending && !sameRepresentation(state.displayed, state.pending)) {
+                state.pending = null;
+            }
+        }
+    }
     let changed = commitSplatStreamPendingRepresentations(stream._leafStates, stream._frame, foregroundCapacity);
     const activeForegroundCount = stream._leafStates.reduce((count, state) => count + ((stream._frame === 0 || state.visible) && state.displayed ? state.displayed.count : 0), 0);
     if (activeForegroundCount > foregroundCapacity) {
@@ -297,7 +337,7 @@ function commitDisplayed(stream: GaussianSplatStream, force = false): void {
                 state.pending = null;
             }
         }
-        stream._generationPressure = true;
+        setGenerationPressure(stream, true);
         refreshProtections(stream);
         updateStats(stream);
         return;
@@ -334,13 +374,19 @@ function commitDisplayed(stream: GaussianSplatStream, force = false): void {
             state.pending = null;
         }
     }
-    stream._generationPressure = stream._leafStates.some((state) => {
-        if (!(stream._frame === 0 || state.visible)) {
-            return false;
-        }
-        const targetSource = stream._sourceStates[state.target.fileId]!;
-        return (targetSource.state === "resident" && !sameRepresentation(state.displayed, state.target)) || !!state.pending;
-    });
+    setGenerationPressure(
+        stream,
+        stream._leafStates.some((state) => {
+            if (!(stream._frame === 0 || state.visible)) {
+                return false;
+            }
+            if (state.cooldownHeld) {
+                return false;
+            }
+            const targetSource = stream._sourceStates[state.target.fileId]!;
+            return (targetSource.state === "resident" && !sameRepresentation(state.displayed, state.target)) || !!state.pending;
+        })
+    );
     if (!changed && !force) {
         refreshProtections(stream);
         updateStats(stream);
@@ -381,11 +427,21 @@ function commitDisplayed(stream: GaussianSplatStream, force = false): void {
     }
     stream._contentGeneration++;
     setSplatStreamGpuIntervals(stream._gpu, intervals, stream._contentGeneration);
+    for (let index = 0; index < stream._leafStates.length; index++) {
+        const state = stream._leafStates[index]!;
+        const previousRepresentation = previousDisplayed[index];
+        if (stream._options.lodCooldownMs > 0 && state.visible && previousRepresentation && state.displayed && !sameRepresentation(previousRepresentation, state.displayed)) {
+            state.lodCooldownUntil = currentTime + stream._options.lodCooldownMs;
+        }
+    }
+    invalidateSelection(stream);
     if (stream._frame !== 0) {
         for (const state of stream._leafStates) {
             if (!state.visible) {
                 state.displayed = null;
                 state.pending = null;
+                state.lodCooldownUntil = 0;
+                state.cooldownHeld = false;
             }
         }
     }
@@ -466,6 +522,7 @@ function requestSource(stream: GaussianSplatStream, sourceId: number, priority: 
             state.blockedAllocatedBytes = -1;
             state.blockedHeldBytes = -1;
             state.blockedAdmissionVersion = -1;
+            invalidateSelection(stream);
             for (const leafState of stream._leafStates) {
                 const alternatives = stream._manifest.leaves[leafState.target.leafId]?.alternatives ?? [];
                 const coarse = alternatives[0] ?? null;
@@ -610,55 +667,130 @@ function updateSelection(stream: GaussianSplatStream, context: DrawUpdateContext
         if (stream.maxSplats > stream._gpu.capacity) {
             throw new RangeError(`${PREFIX} maxSplats ${stream.maxSplats} exceeds immutable admitted capacity ${stream._gpu.capacity}`);
         }
+        if (!Number.isSafeInteger(stream.maxSplats) || stream.maxSplats <= 0) {
+            throw new RangeError(`${PREFIX} maxSplats must be a positive safe integer`);
+        }
+        if (!Number.isFinite(stream.screenError) || stream.screenError <= 0) {
+            throw new RangeError(`${PREFIX} screenError must be finite and greater than zero`);
+        }
+        const currentTime = now(stream);
+        let cooldownExpired = false;
+        for (const state of stream._leafStates) {
+            if (state.lodCooldownUntil > 0 && state.lodCooldownUntil <= currentTime) {
+                state.lodCooldownUntil = 0;
+                cooldownExpired = true;
+            }
+        }
+        if (cooldownExpired) {
+            invalidateSelection(stream);
+        }
         const previousTargets = new Map(stream._leafStates.map((state) => [state.target.leafId, state.target]));
-        const plan = planStreamSelection({
-            root: stream._manifest.root,
-            worldMatrix: stream.worldMatrix,
-            viewProjectionMatrix: getViewProjectionMatrix(camera, aspect),
-            projectionP11: projection[5]!,
-            cameraPosition: [cameraPosition.x, cameraPosition.y, cameraPosition.z],
-            targetHeight: context.targetHeight * (camera.viewport?.height ?? 1),
-            near: camera.nearPlane,
-            maxSplats: Math.min(stream.maxSplats, effectiveCapacity),
-            screenError: stream.screenError,
-            lodHysteresis: stream._options.lodHysteresis,
-            previousTargets,
-            perspective: !camera.ortho,
-        });
+        const viewProjection = getViewProjectionMatrix(camera, aspect);
+        const targetHeight = context.targetHeight * (camera.viewport?.height ?? 1);
+        const maxSplats = Math.min(stream.maxSplats, effectiveCapacity);
+        const inputValues = [
+            ...Array.from(stream.worldMatrix).slice(0, 16),
+            ...Array.from(viewProjection).slice(0, 16),
+            cameraPosition.x,
+            cameraPosition.y,
+            cameraPosition.z,
+            projection[5]!,
+            targetHeight,
+            camera.nearPlane,
+            maxSplats,
+            stream.screenError,
+            stream._options.lodHysteresis,
+            camera.ortho ? 0 : 1,
+        ];
+        const cachedBinding = stream._bindingSelections.get(binding);
+        let plan = cachedBinding?.plan;
+        if (!cachedBinding || !sameNumbers(cachedBinding.inputValues, inputValues)) {
+            plan = planStreamSelection({
+                root: stream._manifest.root,
+                worldMatrix: stream.worldMatrix,
+                viewProjectionMatrix: viewProjection,
+                projectionP11: projection[5]!,
+                cameraPosition: [cameraPosition.x, cameraPosition.y, cameraPosition.z],
+                targetHeight,
+                near: camera.nearPlane,
+                maxSplats,
+                screenError: stream.screenError,
+                lodHysteresis: stream._options.lodHysteresis,
+                previousTargets,
+                perspective: !camera.ortho,
+            });
+            stream._selectionMetricsComputations++;
+        }
         stream._bindingSelections.set(binding, {
             frame: stream._bindingFrame,
-            plan,
+            plan: plan!,
+            inputValues,
         });
-        const bindingPlans = [];
+        const bindingPlans: StreamSelectionPlan[] = [];
         for (const selection of stream._bindingSelections.values()) {
             if (selection.frame < stream._bindingFrame - 1) {
                 continue;
             }
             bindingPlans.push(selection.plan);
         }
-        const aggregatePlan = planMergedStreamSelection(
-            bindingPlans,
-            Math.min(stream.maxSplats, effectiveCapacity),
-            stream.screenError,
-            stream._options.lodHysteresis,
-            previousTargets,
-            stream._generationPressure
-        );
+        const hardPressure = stream._generationPressure || stream._sourceStates.some((state) => state.state === "blocked" && state.demandCount > 0);
+        const heldTargets = new Map<number, StreamRepresentation>();
+        if (!hardPressure && stream._options.lodCooldownMs > 0) {
+            for (const state of stream._leafStates) {
+                if (state.visible && state.displayed && state.lodCooldownUntil > currentTime) {
+                    heldTargets.set(state.target.leafId, state.displayed);
+                }
+            }
+        }
+        const aggregateValues = [maxSplats, stream.screenError, stream._options.lodHysteresis, hardPressure ? 1 : 0, stream._selectionStateVersion, stream._cache.admissionVersion];
+        let aggregateCache = stream._aggregateSelectionCache;
+        if (!aggregateCache || !samePlans(aggregateCache.plans, bindingPlans) || !sameNumbers(aggregateCache.values, aggregateValues)) {
+            const desiredPlan = planMergedStreamSelection(bindingPlans, maxSplats, stream.screenError, stream._options.lodHysteresis, previousTargets, hardPressure);
+            const aggregatePlan =
+                heldTargets.size > 0
+                    ? planMergedStreamSelection(bindingPlans, maxSplats, stream.screenError, stream._options.lodHysteresis, previousTargets, hardPressure, heldTargets)
+                    : desiredPlan;
+            aggregateCache = { plans: bindingPlans, values: aggregateValues, desiredPlan, plan: aggregatePlan };
+            stream._aggregateSelectionCache = aggregateCache;
+            stream._selectionAggregateComputations++;
+        }
+        const aggregatePlan = aggregateCache.plan;
+        const desiredTargets = new Map(aggregateCache.desiredPlan.selections.map((selection) => [selection.leaf.id, selection.target]));
+        stream._cooldownPending =
+            aggregatePlan.holdsApplied === true &&
+            aggregatePlan.selections.some((selection) => {
+                const desired = desiredTargets.get(selection.leaf.id);
+                return !!desired && !sameRepresentation(selection.target, desired);
+            });
         const aggregateTargets = new Map(aggregatePlan.selections.map((selection) => [selection.leaf.id, selection.target]));
         for (const state of stream._leafStates) {
             state.visible = false;
+            state.cooldownHeld = false;
         }
         stream.stats._values.visibleLeaves = aggregateTargets.size;
         stream.stats._values.selectedSplats = aggregatePlan.selectedSplats;
+        let targetChanged = false;
         for (const [leafId, target] of aggregateTargets) {
             const state = stream._leafStates[leafId]!;
             state.visible = true;
+            const held = heldTargets.get(leafId);
+            state.cooldownHeld = aggregatePlan.holdsApplied === true && !!held && sameRepresentation(target, held);
             state.lastVisibleFrame = stream._frame;
             if (!sameRepresentation(state.target, target)) {
                 state.target = target;
                 state.selectionGeneration++;
                 state.pending = null;
+                targetChanged = true;
             }
+        }
+        for (const state of stream._leafStates) {
+            if (!state.visible) {
+                state.lodCooldownUntil = 0;
+                state.cooldownHeld = false;
+            }
+        }
+        if (targetChanged) {
+            invalidateSelection(stream);
         }
         for (const [leafId] of aggregateTargets) {
             const state = stream._leafStates[leafId]!;
@@ -702,6 +834,7 @@ function coarseDrawn(stream: GaussianSplatStream, nonemptySignal: Promise<boolea
                 return;
             }
             stream._refinementEnabled = true;
+            invalidateSelection(stream);
             stream.stats._values.phase = "streaming";
             scheduleTargets(stream);
             const wait = stream._runtime.queueDone?.(stream._engine) ?? stream._engine._device.queue.onSubmittedWorkDone();
@@ -934,6 +1067,8 @@ export async function loadGaussianSplatStream(engine: EngineContext, metadataUrl
             pending: null,
             lastVisibleFrame: -1,
             selectionGeneration: 0,
+            lodCooldownUntil: 0,
+            cooldownHeld: false,
         })),
         _sourceStates: sourceStates,
         _requests: requests,
@@ -945,6 +1080,11 @@ export async function loadGaussianSplatStream(engine: EngineContext, metadataUrl
         _frame: 0,
         _bindingFrame: 0,
         _bindingSelections: new Map<object, StreamBindingSelection>(),
+        _aggregateSelectionCache: null,
+        _selectionStateVersion: 0,
+        _selectionMetricsComputations: 0,
+        _selectionAggregateComputations: 0,
+        _cooldownPending: false,
         _generationPressure: false,
         _refinementEnabled: false,
         _coarseSubmitted: false,
@@ -1048,6 +1188,13 @@ function disposeStream(stream: GaussianSplatStream): void {
         return;
     }
     stream._disposed = true;
+    stream._cooldownPending = false;
+    stream._aggregateSelectionCache = null;
+    for (const state of stream._leafStates) {
+        state.pending = null;
+        state.lodCooldownUntil = 0;
+        state.cooldownHeld = false;
+    }
     stream._generation++;
     stream.stats._values.phase = "disposed";
     for (const source of stream._sourceStates) {

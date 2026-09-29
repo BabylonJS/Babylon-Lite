@@ -287,6 +287,15 @@ describe("splat stream selection planner", () => {
         const plan = planMergedStreamSelection([cameraPlan(0, 10), cameraPlan(1, 1)], 100, 2, 0.15);
         expect(plan.selectedSplats).toBe(90);
         expect(plan.selections.map((selection) => selection.target.count)).toEqual([20, 70]);
+
+        const held = new Map([[parsed.leaves[0]!.id, parsed.leaves[0]!.alternatives[1]!]]);
+        const heldPlan = planMergedStreamSelection([cameraPlan(0, 10), cameraPlan(1, 1)], 110, 2, 0.15, undefined, false, held);
+        expect(heldPlan.holdsApplied).toBe(true);
+        expect(heldPlan.selections.map((selection) => selection.target.count)).toEqual([70, 40]);
+
+        const bypassed = planMergedStreamSelection([cameraPlan(0, 10), cameraPlan(1, 1)], 100, 2, 0.15, undefined, false, held);
+        expect(bypassed.holdsApplied).toBe(false);
+        expect(bypassed.selections.map((selection) => selection.target.count)).toEqual([20, 70]);
     });
 
     it("supports cameras inside bounds and rejects orthographic planning explicitly", () => {

@@ -129,6 +129,7 @@ describe("lod-meta v1", () => {
             maxConcurrentDecodes: 2,
             screenError: 2,
             lodHysteresis: 0.15,
+            lodCooldownMs: 0,
             maxRetries: 2,
         });
         expect(() => normalizeSplatStreamOptions({ maxConcurrentRequests: 33 })).toThrow(RangeError);
@@ -139,6 +140,9 @@ describe("lod-meta v1", () => {
         expect(() => normalizeSplatStreamOptions({ maxSplats: 750_000, maxCapacitySplats: 749_999 })).toThrow("at least maxSplats");
         expect(() => normalizeSplatStreamOptions({ maxConcurrentDecodes: 0 })).toThrow(RangeError);
         expect(() => normalizeSplatStreamOptions({ lodHysteresis: 1.1 })).toThrow(RangeError);
+        expect(normalizeSplatStreamOptions({ lodCooldownMs: 250 }).lodCooldownMs).toBe(250);
+        expect(() => normalizeSplatStreamOptions({ lodCooldownMs: -1 })).toThrow(RangeError);
+        expect(() => normalizeSplatStreamOptions({ lodCooldownMs: Number.NaN })).toThrow(RangeError);
         expect(() => normalizeSplatStreamOptions({ maxRetries: -1 })).toThrow(RangeError);
     });
 });

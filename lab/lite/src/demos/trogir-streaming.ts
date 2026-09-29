@@ -196,6 +196,7 @@ async function main(): Promise<void> {
             maxGpuBytes: 1024 * MB,
             maxCpuBytes: 96 * MB,
             screenError: 2,
+            lodCooldownMs: 250,
         });
         placeTrogirStream(stream);
         const startupOrbit = createTrogirStartupOrbitCamera(260);

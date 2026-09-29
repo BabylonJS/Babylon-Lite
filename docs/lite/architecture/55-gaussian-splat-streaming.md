@@ -31,6 +31,7 @@ export interface GaussianSplatStreamOptions {
     maxConcurrentDecodes?: number;
     screenError?: number;
     lodHysteresis?: number;
+    lodCooldownMs?: number;
     maxRetries?: number;
     signal?: AbortSignal;
 }
@@ -82,7 +83,10 @@ Defaults:
 | `maxConcurrentDecodes`  |         2 | safe integer in 1..8                         |
 | `screenError`           |  2 pixels | finite and greater than zero                 |
 | `lodHysteresis`         |      0.15 | finite in 0..1                               |
+| `lodCooldownMs`         |      0 ms | finite and nonnegative                       |
 | `maxRetries`            |         2 | safe integer in 0..8                         |
+
+The Trogir streaming demo explicitly sets `lodCooldownMs` to `250` ms while the library default remains zero for compatibility.
 
 The load promise resolves after the manifest is validated and stream state is initialized. It does not wait for a chunk. `attachGaussianSplatStream` is explicit, idempotence-guarded, and must run before or during scene registration. `firstFrameReady` resolves only after a nonempty coarse indirect draw has been submitted and `queue.onSubmittedWorkDone()` confirms completion. It rejects on bootstrap failure or disposal before that draw. Refinement failures remain visible through `stats.error` without rejecting an already-resolved readiness promise.
 
@@ -295,10 +299,14 @@ interface StreamLeafState {
     pending: StreamRepresentation | null;
     lastVisibleFrame: number;
     selectionGeneration: number;
+    lodCooldownUntil: number;
+    cooldownHeld: boolean;
 }
 ```
 
 `target`, `resident`, `displayed`, and `pending` are independent. A target change never removes `displayed`. At a frame boundary, pending replacements are evaluated against the complete currently displayed foreground generation and the environment reservation. A replacement publishes only when the resulting aggregate fits; downgrades can free space for later upgrades in the same boundary. No overflow path truncates intervals or drops valid displayed coverage. One active generation contains at most one interval per leaf.
+
+`lodCooldownUntil` is stamped from the injected monotonic clock only after `setSplatStreamGpuIntervals` accepts a generation in which an already displayed leaf is replaced by a different representation. `cooldownHeld` records that the current shared solve actually admitted that deadline's hold; publication and pressure classification consult this decision rather than treating every unexpired timestamp as affordable. Initial coverage does not stamp it. The first coarse-to-fine replacement is immediate and starts the first deadline; identical, rejected, pending-only, and retargeted work does not change the deadline. A zero `lodCooldownMs` disables the policy.
 
 `displayed` records the leaf's last successful fallback independently of camera visibility. After the first camera selection, active range generation contains only currently visible displayed leaves. Invisible historical leaves keep cache residency when otherwise useful, but contribute no active interval, no displayed protection/reference, and no splats to the indirect draw. Re-entering the region can reactivate the retained fallback without a request; eviction remains legal while it is invisible and unpinned.
 
@@ -310,6 +318,7 @@ bootstrap source queued + pipelines compiling
 bootstrap source resident -> coarse active generation
 coarse draw submitted/completed -> streaming
 no queued/pending useful work -> idle
+delayed desired LOD waiting for its deadline -> streaming
 new camera/budget/residency change -> streaming
 unmet refinement waits for protected-aware GPU retirement -> budget-limited
 terminal bootstrap/runtime failure -> error
@@ -350,6 +359,10 @@ Previous targets do not reserve budget before the solve. Hysteresis biases each 
 - steps beyond the previous target use `screenError * (1 + lodHysteresis)`;
 - steps without a previous target, and every step under hard pressure, use `screenError`;
 - no hysteresis value, including zero, can lock an old region's allocation when a moved camera makes another visible leaf's screen error worse.
+
+An unheld aggregate solve first determines current desired detail. During an active per-leaf cooldown, a second shared solve starts that visible leaf at its displayed alternative and forbids further refinement of that leaf. The held representations and every other visible leaf's coarse floor are admitted as one aggregate. If that complete baseline exceeds the effective foreground budget, no hold is applied and the normal solve runs. Generation/admission pressure, missing coverage, source eviction, visibility removal, and environment-driven or explicit budget reductions likewise bypass or clear holds. A cooldown wait alone is never generation pressure and never causes a request/cancel cycle. Resident completions and fallback publication pass through the same policy, so asynchronous arrival cannot replace a held visible LOD. Expired deadlines are detected from the monotonic clock during normal updates and invalidate the aggregate cache without browser timers; delayed desired work keeps phase `streaming` until reconsidered. Disposal clears all pending cooldown state.
+
+Per-binding geometry metrics are cached only for byte-for-byte identical numeric inputs: copied view-projection and world-matrix contents, camera position, projection scale and near plane, effective target dimensions, perspective mode, capacity, screen error, and hysteresis. Public option validation still runs before a cache hit. Mutable arrays are compared by contents, never identity. The shared aggregate result is reused only when the ordered binding-plan identities, effective allowance, policy settings, pressure/admission state, source/publication generation, and cooldown-expiry generation are unchanged. Source arrival or eviction, bootstrap release, environment allowance changes, accepted publication, pressure changes, cache-admission changes, binding addition/removal, and cooldown expiry invalidate the corresponding cache. Retirement, completion handling, retries, source scheduling, protection, and statistics continue on cached frames.
 
 File request priorities are:
 
@@ -521,13 +534,13 @@ Use 4 bits per pass, 16 digits, eight least-significant-digit passes, 256 items 
 2. **Hierarchical scan:** exclusive-scan each digit's group counts in 256-element blocks using Blelloch upsweep/downsweep in workgroup memory. Recursively scan block sums until one block remains, then add scanned block bases on the way down. Non-power-of-two tails load zero. A 16-element scan of digit totals supplies global digit bases.
    At every hierarchy level, digit rows use the allocation-capacity stride, not the active-count stride. Runtime-sized block sums are copied digit-by-digit into the next level's capacity-strided rows. The digit-base pass reads each root total at `digit * root.blocks`, where `root.blocks` is the selected level's allocation-capacity sum-row stride even when the active hierarchy collapses to level zero. This is required when capacity greatly exceeds the current active count, whether the active scan uses one hierarchy level or several.
 
-3. **Stable scatter:** each indirectly dispatched invocation computes its stable within-group rank by counting equal digits among earlier workgroup lanes from a shared digit array. It writes to:
+3. **Stable scatter:** workgroup memory contains 16 digit rows of eight `atomic<u32>` words (512 bytes). All 256 lanes uniformly clear the words, synchronize, and each valid lane atomically ORs its unique lane bit into its digit row. After a second barrier, a valid lane computes its stable rank from `countOneBits` over at most seven preceding words plus the current word masked below its lane bit. Invalid tail lanes participate in both barriers and only then return. It writes to:
 
 ```text
 digitBase[digit] + scannedGroupCount[group,digit] + localStableRank
 ```
 
-This bounded 256-lane local operation avoids nondeterministic atomic scatter, subgroup assumptions, inter-workgroup spin waiting, and a single-thread global scan. Ping-pong buffers alternate every pass. Stable compacted canonical-ID order plus stable passes makes equal keys deterministic.
+This bounded eight-popcount local operation replaces the quadratic 32,640 predecessor comparisons of a full group while avoiding nondeterministic atomic scatter, subgroup assumptions, inter-workgroup spin waiting, and a single-thread global scan. Bit 31 masks use unsigned shifts without overflowing the lane mask. Ping-pong buffers alternate every pass. All eight 4-bit passes remain intact, so arbitrary 32-bit keys retain stable compacted canonical-ID tie order and unchanged sort semantics.
 
 Every pass has an immutable parameter record at a distinct 256-byte uniform offset. Histogram, every hierarchy scan, every reverse add, and scatter use `dispatchWorkgroupsIndirect` with the GPU-produced survivor count; only compaction over the known active projection pool, the one-invocation runtime setup, and the 16-lane digit-base pass use direct dispatch. Histogram and scan buffer sizes derive from admitted capacity and are checked against device dispatch and storage limits. Zero, singleton, partial, non-multiple-of-256, and all-survivor counts use the same path. Zero survivors reset draw args and scan roots, while visible-to-zero-to-visible transitions cannot reuse stale rows or stale indirect dimensions.
 
@@ -687,6 +700,8 @@ Every cache is lazy and device-keyed. Importing the root exports performs no wor
 - bootstrap file chosen by broad coverage before fine requests;
 - request deduplication, HTTP semaphore, whole-preparation CPU/decode admission including the single-slot metadata/image cycle, cancellation, bounded retry, out-of-order stale generations, and disposal;
 - displayed fallback retained across delayed/failed/cancelled replacements, progressively cheaper resident admission, and below-capacity resident-target pressure;
+- fake-clock per-leaf cooldown covering immediate initial coverage/refinement, below/exact deadline transitions, oscillation, async arrival, shared views, pressure/budget bypass, missing coverage, disposal, zero compatibility, and option validation;
+- exact-input cache reuse and planner counters covering mutable matrix/camera/viewport/world changes plus every source, admission, binding, pressure, publication, environment, and cooldown-expiry invalidation while lifecycle scheduling continues;
 - cache accounting, pin/ref protections, LRU admission, partial upload cleanup, and retirement.
 
 ### Numerical/GPU tests
@@ -697,7 +712,7 @@ Every cache is lazy and device-keyed. Importing the root exports performs no wor
 - byte-preserving RGBA8 upload including low alpha/high RGB and first/last rows;
 - gather interval offset mapping and same-file multiple leaves;
 - projection using Lite's real reverse-Z perspective: negative/eye/near-boundary/positive depths, large behind-eye ellipses, camera/world translation and rotation, sentinel ordering, and indirect reset after an all-culled frame;
-- radix counts 0, 1, equal keys, sentinels, near-identical depths, non-power-of-two tails, 255/256/257 items, 65,536 hierarchy boundary, active-count collapse at capacity 500,000, stale-row recovery, and multiple passes;
+- radix counts 0, 1, equal keys, sentinels, near-identical depths, non-power-of-two tails, all 16 digits, lane/word boundaries 0/31/32/63/255, arbitrary random 32-bit keys, 255/256/257 items, 65,536 hierarchy boundary, active-count collapse at capacity 500,000, stale-row recovery, and all eight passes;
 - survivor compaction verifies dense prefixes without invalid sentinels, GPU count-driven dispatch dimensions, strict equal-depth canonical-ID ties across workgroups, and zero-to-many-to-one-to-zero transitions;
 - actual material `bind` calls preserve distinct stable selection identities for separate views;
 - actual WGSL pipeline compilation and GPU readback only in tests.
