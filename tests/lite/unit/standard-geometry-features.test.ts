@@ -8,6 +8,8 @@ import { preloadStandardGeometryFeatures, _getStandardGeometryThinInstanceHelper
 import { syncThinInstanceBuffers, syncThinInstanceForDraw } from "../../../packages/babylon-lite/src/mesh/thin-instance-gpu";
 import { createThinInstanceFragment } from "../../../packages/babylon-lite/src/shader/fragments/thin-instance-fragment";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
+import { enableStandardDepthBias } from "../../../packages/babylon-lite/src/index";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
 import { createStandardMaterial } from "../../../packages/babylon-lite/src/material/standard/create-standard-material";
 import { buildStandardMeshRenderables, type StandardGeometryContext, type StandardRebuildContext } from "../../../packages/babylon-lite/src/material/standard/standard-renderable";
@@ -248,8 +250,7 @@ function makeCamera(x: number, y: number, z: number, version = 1): Camera {
     return { worldMatrix: worldAt(x, y, z), worldMatrixVersion: version } as unknown as Camera;
 }
 
-function buildGeoRenderable(scene: SceneContext, camera: Camera | null) {
-    const source = createStandardMaterial();
+function buildGeoRenderable(scene: SceneContext, camera: Camera | null, source = createStandardMaterial()) {
     const view = createStandardGeometryMaterialView(source, {
         attachments: [GeometryTextureType.WORLD_POSITION],
         emitColor: false,
@@ -270,6 +271,30 @@ function buildGeoRenderable(scene: SceneContext, camera: Camera | null) {
     const renderable = buildStandardGeometryRenderable(scene, mesh, view, resources);
     return { renderable, mesh, resources };
 }
+
+describe("Standard geometry depth bias", () => {
+    it("uses the source material's opt-in bias and caches different depth states separately", () => {
+        const engine = makeMockEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
+        const source = createStandardMaterial();
+        source.depthBias = 7;
+        source.depthBiasSlopeScale = 1.25;
+        enableStandardDepthBias();
+        const { renderable } = buildGeoRenderable(scene, null, source);
+        const createPipeline = vi.spyOn(engine._device, "createRenderPipeline");
+        const sig = { _colorFormat: "rgba8unorm", _depthStencilFormat: "depth24plus", _sampleCount: 1 } as RenderTargetSignature;
+
+        const biased = renderable.bind(engine, sig).pipeline;
+        expect(createPipeline.mock.calls[0]![0].depthStencil).toMatchObject({ depthBias: 7, depthBiasSlopeScale: 1.25 });
+        source.depthBias = 0;
+        source.depthBiasSlopeScale = 0;
+        const unbiased = renderable.bind(engine, sig).pipeline;
+        expect(unbiased).not.toBe(biased);
+        expect(createPipeline.mock.calls[1]![0].depthStencil?.depthBias).toBeUndefined();
+        expect(renderable.bind(engine, sig).pipeline).toBe(unbiased);
+        expect(createPipeline).toHaveBeenCalledTimes(2);
+    });
+});
 
 describe("Standard geometry task-camera floating-origin", () => {
     it("packs world/previous-world and invalidates against the effective task camera override", () => {
