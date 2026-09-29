@@ -11,7 +11,6 @@ import { createEmptyUniformBuffer } from "../../resource/empty-uniform-buffer.js
 import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
-import { getOrCreateSampler } from "../../resource/texture-sampler-pool.js";
 import { getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix, getViewProjectionMatrix, _cameraChangeKey } from "../../camera/camera.js";
 import type { Camera } from "../../camera/camera.js";
 import { multiplyMat4IntoBuffer } from "../../math/multiply-mat4-into-buffer.js";
@@ -75,6 +74,15 @@ interface ShaderMaterialRenderState extends ShaderMaterial {
     _shaderCacheGeneration?: number;
     _shaderPipelineCache?: { readonly generation: number };
     _shaderCustomSpec?: UboSpec | null;
+}
+
+let _externalTextureResolver: ((engine: EngineContext, material: ShaderMaterial, entries: GPUBindGroupEntry[], nextBinding: number) => number) | null = null;
+
+/** @internal Install external-texture bind-group population. */
+export function _installShaderExternalTextureBindingResolver(
+    resolver: (engine: EngineContext, material: ShaderMaterial, entries: GPUBindGroupEntry[], nextBinding: number) => number
+): void {
+    _externalTextureResolver = resolver;
 }
 
 /** @internal */
@@ -317,7 +325,7 @@ function createOpaqueRenderable(
     const r: Renderable = {
         order,
         isTransparent: false,
-        _direct: material.externalTextureDecls.length > 0,
+        _direct: material._externalTextureCount > 0,
         mesh: packets.length === 1 ? packets[0]!.mesh : undefined,
         bind(eng, sig) {
             return createShaderBinding(eng, sig, material, r, update, draw, getUniformBatch, asyncVertexLayout);
@@ -469,7 +477,7 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
                 releaseTexture(tex);
             }
         }
-    } else if (material.externalTextureDecls.length > 0) {
+    } else if (material._externalTextureCount > 0) {
         packet._bindGroup = createShaderBindGroup(engine, material, packet.systemUBO);
     }
 }
@@ -603,19 +611,7 @@ function createShaderBindGroup(engine: EngineContext, material: ShaderMaterial, 
         }
         entries.push({ binding: nextBinding++, resource: tex.view }, { binding: nextBinding++, resource: tex.sampler });
     }
-    for (const name of material.externalTextureDecls) {
-        const texture = material._externalTextureSlots.get(name)?.current;
-        if (!texture) {
-            throw new Error(`ShaderMaterial: external texture "${name}" has no source. Call setShaderExternalTexture() before rendering.`);
-        }
-        if (texture.video.readyState < texture.video.HAVE_CURRENT_DATA) {
-            throw new Error(`ShaderMaterial: external texture "${name}" is not ready.`);
-        }
-        entries.push(
-            { binding: nextBinding++, resource: engine._device.importExternalTexture({ source: texture.video }) },
-            { binding: nextBinding++, resource: getOrCreateSampler(engine) }
-        );
-    }
+    nextBinding = _externalTextureResolver?.(engine, material, entries, nextBinding) ?? nextBinding;
     for (const storage of material.storageBufferDecls) {
         const slot = material._storageBufferSlots.get(storage.name);
         const storageBuffer = slot?.current;

@@ -171,7 +171,10 @@ export interface ShaderMaterial extends Material {
     readonly attributes: readonly ShaderAttributeName[];
     readonly uniformDecls: readonly ShaderUniformDecl[];
     readonly samplerDecls: readonly ShaderSamplerDecl[];
-    readonly externalTextureDecls: readonly string[];
+    /** @internal */
+    readonly _externalTextureCount: number;
+    /** @internal */
+    readonly _externalTextureDecls?: readonly string[];
     readonly storageBufferDecls: readonly ShaderStorageBufferDecl[];
     readonly defines: readonly ShaderDefine[];
     /** @internal Explicit thin-instance color preference; numeric zero is reserved for compact runtime checks. */
@@ -202,7 +205,7 @@ export interface ShaderMaterial extends Material {
     /** @internal */
     _textureSlots: Map<string, ShaderTextureSlot>;
     /** @internal */
-    _externalTextureSlots: Map<string, ShaderExternalTextureSlot>;
+    _externalTextureSlots?: Map<string, ShaderExternalTextureSlot>;
     /** @internal */
     _storageBufferSlots: Map<string, ShaderStorageBufferSlot>;
     /** @internal */
@@ -225,10 +228,24 @@ function isIdentifier(name: string): boolean {
     return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
 }
 
-function assertIdentifier(kind: string, name: string): void {
+/** @internal */
+export function _assertShaderIdentifier(kind: string, name: string): void {
     if (!isIdentifier(name)) {
         throw new Error(`ShaderMaterial: ${kind} name "${name}" is not a valid WGSL identifier.`);
     }
+}
+
+interface ShaderExternalTextureState {
+    readonly _externalTextureSlots: Map<string, ShaderExternalTextureSlot>;
+}
+
+let _externalTextureResolver: ((names: readonly string[] | undefined, usedNames: Set<string>) => ShaderExternalTextureState | undefined) | null = null;
+
+/** @internal Install external-texture declaration handling without charging ordinary ShaderMaterial bundles. */
+export function _installShaderExternalTextureResolver(
+    resolver: (names: readonly string[] | undefined, usedNames: Set<string>) => ShaderExternalTextureState | undefined
+): void {
+    _externalTextureResolver = resolver;
 }
 
 function isSupportedAttribute(name: string): name is ShaderAttributeName {
@@ -302,7 +319,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
     const usedNames = new Set<string>();
     for (const opt of options.uniforms ?? []) {
         const decl = typeof opt === "string" ? normalizeSystemUniform(opt) : normalizeCustomUniform(opt);
-        assertUniqueName(usedNames, "uniform", decl.name);
+        _assertUniqueShaderName(usedNames, "uniform", decl.name);
         uniformDecls.push(decl);
         uniformValues.set(decl.name, { decl, value: normalizeUniformValue(decl, decl.defaultValue ?? defaultUniformValue(decl)), _v: 0 });
     }
@@ -319,36 +336,29 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
                       viewDimension: opt.viewDimension ?? "2d",
                       comparison: opt.comparison ?? false,
                   };
-        assertIdentifier("sampler", decl.name);
-        assertUniqueName(usedNames, "sampler", decl.name);
-        assertUniqueName(usedNames, "sampler", `${decl.name}Sampler`);
+        _assertShaderIdentifier("sampler", decl.name);
+        _assertUniqueShaderName(usedNames, "sampler", decl.name);
+        _assertUniqueShaderName(usedNames, "sampler", `${decl.name}Sampler`);
         samplerDecls.push(decl);
         textureSlots.set(decl.name, { decl, current: null });
     }
 
-    const externalTextureDecls: string[] = [];
-    const externalTextureSlots = new Map<string, ShaderExternalTextureSlot>();
-    for (const name of options.externalTextures ?? []) {
-        assertIdentifier("external texture", name);
-        assertUniqueName(usedNames, "external texture", name);
-        assertUniqueName(usedNames, "external texture", `${name}Sampler`);
-        externalTextureDecls.push(name);
-        externalTextureSlots.set(name, { name, current: null });
-    }
+    const externalTextureDecls = options.externalTextures?.slice();
+    const externalTextureState = _externalTextureResolver?.(externalTextureDecls, usedNames);
 
     const storageBufferDecls: ShaderStorageBufferDecl[] = [];
     const storageBufferSlots = new Map<string, ShaderStorageBufferSlot>();
     for (const opt of options.storageBuffers ?? []) {
-        assertIdentifier("storage buffer", opt.name);
-        assertUniqueName(usedNames, "storage buffer", opt.name);
+        _assertShaderIdentifier("storage buffer", opt.name);
+        _assertUniqueShaderName(usedNames, "storage buffer", opt.name);
         storageBufferDecls.push(opt);
         storageBufferSlots.set(opt.name, { decl: opt, current: null });
     }
 
     const defines: ShaderDefine[] = [];
     for (const [name, value] of Object.entries(options.defines ?? {})) {
-        assertIdentifier("define", name);
-        assertUniqueName(usedNames, "define", name);
+        _assertShaderIdentifier("define", name);
+        _assertUniqueShaderName(usedNames, "define", name);
         if (typeof value !== "boolean" && typeof value !== "number") {
             throw new Error(`ShaderMaterial: define "${name}" must be a boolean or number.`);
         }
@@ -368,7 +378,9 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         attributes,
         uniformDecls,
         samplerDecls,
-        externalTextureDecls,
+        _externalTextureCount: externalTextureDecls?.length ?? 0,
+        _externalTextureDecls: externalTextureDecls,
+        ...externalTextureState,
         storageBufferDecls,
         defines,
         _tic: options.useThinInstanceColors,
@@ -390,7 +402,6 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         _uboVersion: 0,
         _uniformValues: uniformValues,
         _textureSlots: textureSlots,
-        _externalTextureSlots: externalTextureSlots,
         _storageBufferSlots: storageBufferSlots,
         _uniformVersion: 0,
         _resourceVersion: 0,
@@ -405,7 +416,7 @@ function normalizeSystemUniform(name: string): ShaderUniformDecl {
 }
 
 function normalizeCustomUniform(decl: ShaderUniformDecl): ShaderUniformDecl {
-    assertIdentifier("uniform", decl.name);
+    _assertShaderIdentifier("uniform", decl.name);
     if (!isUniformType(decl.type)) {
         throw new Error(`ShaderMaterial: unsupported uniform type "${String(decl.type)}" for "${decl.name}".`);
     }
@@ -416,7 +427,8 @@ function isUniformType(type: string): type is ShaderUniformType {
     return type === "f32" || type === "u32" || type === "i32" || type === "vec2<f32>" || type === "vec3<f32>" || type === "vec4<f32>" || type === "mat4x4<f32>";
 }
 
-function assertUniqueName(usedNames: Set<string>, kind: string, name: string): void {
+/** @internal */
+export function _assertUniqueShaderName(usedNames: Set<string>, kind: string, name: string): void {
     if (usedNames.has(name)) {
         throw new Error(`ShaderMaterial: duplicate generated identifier "${name}" while adding ${kind}.`);
     }
@@ -564,28 +576,6 @@ export function getShaderTexture(material: ShaderMaterial, name: string): Textur
     const slot = material._textureSlots.get(name);
     if (!slot) {
         throw new Error(`ShaderMaterial: sampler "${name}" was not declared.`);
-    }
-    return slot.current;
-}
-
-/** Bind (or clear) a caller-owned video external texture. */
-export function setShaderExternalTexture(material: ShaderMaterial, name: string, texture: ExternalTexture | null): void {
-    const slot = material._externalTextureSlots.get(name);
-    if (!slot) {
-        throw new Error(`ShaderMaterial: external texture "${name}" was not declared.`);
-    }
-    if (slot.current !== texture) {
-        slot.current = texture;
-        material._resourceVersion++;
-        bumpVisibilityEpoch();
-    }
-}
-
-/** Get the external texture currently bound to a declared external-texture slot. */
-export function getShaderExternalTexture(material: ShaderMaterial, name: string): ExternalTexture | null {
-    const slot = material._externalTextureSlots.get(name);
-    if (!slot) {
-        throw new Error(`ShaderMaterial: external texture "${name}" was not declared.`);
     }
     return slot.current;
 }

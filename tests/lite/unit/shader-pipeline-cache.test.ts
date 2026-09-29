@@ -4,6 +4,7 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
 import { enableShaderMaterialFinalColor } from "../../../packages/babylon-lite/src/material/shader/enable-shader-material-final-color";
 import { enableShaderMaterialInstanceWorld } from "../../../packages/babylon-lite/src/material/shader/enable-shader-material-instance-world";
+import "../../../packages/babylon-lite/src/material/shader/shader-external-texture";
 import { createShaderNoColorMaterialView } from "../../../packages/babylon-lite/src/material/shader/no-color-view";
 import { createShaderNormalMaterialView } from "../../../packages/babylon-lite/src/material/shader/normal-view";
 import { createShaderMaterial, type ShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";

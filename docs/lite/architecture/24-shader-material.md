@@ -71,7 +71,8 @@ export interface ShaderMaterial extends Material {
     readonly attributes: readonly ShaderAttributeName[];
     readonly uniformDecls: readonly ShaderUniformDecl[];
     readonly samplerDecls: readonly ShaderSamplerDecl[];
-    readonly externalTextureDecls: readonly string[];
+    readonly _externalTextureCount: number;
+    readonly _externalTextureDecls?: readonly string[];
     readonly defines: readonly ShaderDefine[];
     readonly needAlphaBlending: boolean;
     readonly blendMode: "alpha" | "additive";
@@ -82,11 +83,13 @@ export interface ShaderMaterial extends Material {
     readonly depthCompare: GPUCompareFunction;
     _uniformValues: Map<string, ShaderUniformSlot>;
     _textureSlots: Map<string, ShaderTextureSlot>;
-    _externalTextureSlots: Map<string, ShaderExternalTextureSlot>;
+    _externalTextureSlots?: Map<string, ShaderExternalTextureSlot>;
     _uniformVersion: number;
     _resourceVersion: number;
 }
 ```
+
+External texture layout, WGSL, validation, and binding behavior is installed by the tree-shakeable `shader-external-texture` module exported with `setShaderExternalTexture` / `getShaderExternalTexture`. Core material creation snapshots the declaration names and count, so caller mutation cannot desynchronize slots and a material created before a code-split binding module loads is hydrated and validated when that module is first used. Pipeline preparation rejects such a material until the binding module loads rather than caching an incomplete layout. ShaderMaterials without that API do not pull video binding and sampler-cache code. `_externalTextureCount` also keeps the render-bundle bypass check constant-time.
 
 `_uboVersion` from the base `Material` mirrors `_uniformVersion` for compatibility with existing dirty tracking. `_resourceVersion` is separate because texture/sampler changes require bind group rebuilds, not just UBO writes.
 
@@ -278,7 +281,7 @@ export function getShaderExternalTexture(material: ShaderMaterial, name: string)
 @group(1) @binding(N + 1) var videoSamplerSampler: sampler;
 ```
 
-External textures are sampled with `textureSampleBaseClampToEdge(videoSampler, videoSamplerSampler, uv)`. Lite binds the pooled default nearest clamp-to-edge sampler, matching Babylon.js `ExternalTexture`; raw GPU samplers remain internal. A resource name may not appear in both `samplers` and `externalTextures`; all declarations and generated `<name>Sampler` identifiers share the generated group-1 namespace.
+External textures are sampled with `textureSampleBaseClampToEdge(videoSampler, videoSamplerSampler, uv)`. Lite binds a device-cached default nearest clamp-to-edge sampler, matching Babylon.js `ExternalTexture`; raw GPU samplers remain internal. A resource name may not appear in both `samplers` and `externalTextures`; all declarations and generated `<name>Sampler` identifiers share the generated group-1 namespace.
 
 The wrapper is pure state around a caller-owned `HTMLVideoElement`. It owns no browser or GPU resources and has no disposal API. The application remains responsible for video playback, media-stream tracks, object URLs, and element lifetime. `isExternalTextureReady` reports whether the video has current frame data.
 

@@ -500,10 +500,8 @@ export type {
 export type { MetallicReflectanceOptions } from "./material/pbr/set-metallic-reflectance.js";
 export {
     createShaderMaterial,
-    getShaderExternalTexture,
     getShaderUniform,
     getShaderTexture,
-    setShaderExternalTexture,
     setShaderUniform,
     setShaderTexture,
     setShaderStorageBuffer,
@@ -511,6 +509,7 @@ export {
     setShaderVector3,
     setShaderMatrix,
 } from "./material/shader/shader-material.js";
+export { getShaderExternalTexture, setShaderExternalTexture } from "./material/shader/shader-external-texture.js";
 export { wgsl } from "./shader/wgsl.js";
 export { enableShaderUniformRangeUpdates } from "./material/shader/shader-uniform-range.js";
 export { enableShaderMaterialUniformCaching } from "./material/shader/enable-shader-material-uniform-caching.js";

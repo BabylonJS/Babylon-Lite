@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
-import { createShaderMaterial, getShaderExternalTexture, setShaderExternalTexture, setShaderTexture } from "../../../packages/babylon-lite/src/material/shader/shader-material";
+import { getShaderExternalTexture, setShaderExternalTexture } from "../../../packages/babylon-lite/src/material/shader/shader-external-texture";
+import { createShaderMaterial, setShaderTexture } from "../../../packages/babylon-lite/src/material/shader/shader-material";
 import { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/src/material/shader/shader-renderable";
 import { initMeshTransform, type Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { _textureOwners } from "../../../packages/babylon-lite/src/resource/gpu-pool";
@@ -36,6 +37,7 @@ function createFixture(): {
     createBindGroupLayout: ReturnType<typeof vi.fn>;
     createBindGroup: ReturnType<typeof vi.fn>;
     createShaderModule: ReturnType<typeof vi.fn>;
+    createSampler: ReturnType<typeof vi.fn>;
 } {
     const importExternalTexture = vi.fn((descriptor: GPUExternalTextureDescriptor) => descriptor as unknown as GPUExternalTexture);
     const createBindGroupLayout = vi.fn((descriptor: GPUBindGroupLayoutDescriptor) => descriptor as unknown as GPUBindGroupLayout);
@@ -93,7 +95,7 @@ function createFixture(): {
         camera: null,
         _meshDisposables: new Map(),
     } as unknown as SceneContext;
-    return { engine, scene, mesh, importExternalTexture, createBindGroupLayout, createBindGroup, createShaderModule };
+    return { engine, scene, mesh, importExternalTexture, createBindGroupLayout, createBindGroup, createShaderModule, createSampler };
 }
 
 describe("ShaderMaterial external textures", () => {
@@ -127,7 +129,7 @@ describe("ShaderMaterial external textures", () => {
     });
 
     it("emits texture_external bindings and imports a fresh frame without texture lease churn", () => {
-        const { engine, scene, mesh, importExternalTexture, createBindGroupLayout, createBindGroup, createShaderModule } = createFixture();
+        const { engine, scene, mesh, importExternalTexture, createBindGroupLayout, createBindGroup, createShaderModule, createSampler } = createFixture();
         const material = mesh.material as ReturnType<typeof createShaderMaterial>;
         const texture = createTexture();
         const firstVideo = createVideo();
@@ -159,6 +161,7 @@ describe("ShaderMaterial external textures", () => {
         binding.update!({ targetWidth: 64, targetHeight: 64 });
         expect(importExternalTexture).toHaveBeenCalledTimes(3);
         expect(createBindGroup).toHaveBeenCalledTimes(3);
+        expect(createSampler).toHaveBeenCalledOnce();
         expect(_textureOwners(texture)).toBe(1);
 
         const secondVideo = createVideo();
