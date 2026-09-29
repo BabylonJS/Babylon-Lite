@@ -40,8 +40,9 @@ The native glTF/GLB-to-`.mlod` converter is maintained separately in
 there with CMake.
 Conversion does not require this repository or a Babylon Lite installation.
 
-For the included Harvard-Yenching Institute statue, run the CLI from a
-MegameshCLI checkout after extracting/building the executable:
+For the Harvard-Yenching Institute statue, run the CLI from a MegameshCLI
+checkout after extracting/building the executable. Its `assets/` directory
+includes the [source GLB](https://raw.githubusercontent.com/BabylonJS/Assets/master/meshes/harvard-yenching/harvard-yenching_institute_statue.glb):
 
 ```sh
 mesh-lod-tool --input assets/harvard-yenching_institute_statue.glb \
@@ -68,9 +69,11 @@ const instance = createMeshLoDInstance(asset, sourcePrimitive.material);
 addMeshLoDToScene(scene, instance);
 ```
 
-The CLI converts **geometry**, not materials or textures. The included demo
-uses the original GLB for those properties and the three checked-in MLOD
-sidecars for streaming geometry. The model is
+The CLI converts **geometry**, not materials or textures. The demo fetches the
+original GLB from BabylonJS/Assets for those properties and uses the three
+checked-in MLOD sidecars for streaming geometry; the source GLB is not kept in
+this repository. See the [MeshLoD architecture](docs/lite/architecture/mesh-lod.md)
+for the runtime design. The model is
 [“Harvard-Yenching Institute statue” by Alexandre Tokovinine](https://sketchfab.com/3d-models/harvard-yenching-institute-statue-fc245710c4d64d0886a7f37dc522ff87),
 licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); credit
 the author and link the license when redistributing the source or converted

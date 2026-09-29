@@ -225,11 +225,8 @@ export interface MeshLoDGpuState {
     residentPageCount: number;
 }
 
-/** Mutable runtime state referenced by `MeshLoDAsset._runtime`.
- *
- *  Only the fields required so far exist today; the page cache, scheduler, and GPU
- *  state fields defined in the architecture are added by the Phase 4–6
- *  loading/streaming/GPU tasks. */
+/** Mutable runtime state referenced by `MeshLoDAsset._runtime`. GPU selection
+ *  buffers and the fine-page scheduler are initialized lazily. */
 export interface MeshLoDAssetRuntime {
     readonly engine: EngineContext;
     readonly source: MeshLoDRangeSource;

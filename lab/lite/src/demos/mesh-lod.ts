@@ -61,7 +61,7 @@ function primitiveFiles(base: string, count: number): string[] {
 
 const MODEL: MeshLoDModel = {
     id: "harvard",
-    sourceGlb: "harvard-yenching_institute_statue.glb",
+    sourceGlb: "https://raw.githubusercontent.com/BabylonJS/Assets/master/meshes/harvard-yenching/harvard-yenching_institute_statue.glb",
     mlodFiles: primitiveFiles("harvard-yenching_institute_statue", 3),
     estimatedBytes: 20_000_000,
 };
@@ -181,7 +181,7 @@ async function main(): Promise<void> {
     // and the streamed LOD primitives together. MeshLoD fetches through the
     // network simulator so bandwidth/latency controls affect only `.mlod` traffic.
     const [container, assets] = await Promise.all([
-        loadGltf(engine, demoAssetUrl(`./mesh-lod/${model.sourceGlb}`, import.meta.url)),
+        loadGltf(engine, model.sourceGlb),
         Promise.all(model.mlodFiles.map((file) => loadMeshLoD(engine, `${base}${file}`, { request: { fetch: networkSim.fetch } }))),
         loadEnvironment(scene, ENV_URL, {
             groundTextureUrl: GROUND_TEXTURE_URL,

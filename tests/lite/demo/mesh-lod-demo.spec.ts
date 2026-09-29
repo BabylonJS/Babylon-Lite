@@ -165,7 +165,9 @@ test.describe("MeshLoD demo workflow", () => {
     test("the single shipped model is named and credited without an inactive selector", async () => {
         await expect(page.locator("#meshLodModel")).toHaveCount(0);
         await expect(page.locator("#meshLodControls .hud-heading")).toContainText("Harvard-Yenching Institute statue");
-        expect(await page.evaluate(() => document.getElementById("renderCanvas")?.dataset.sourceGlb)).toBe("harvard-yenching_institute_statue.glb");
+        expect(await page.evaluate(() => document.getElementById("renderCanvas")?.dataset.sourceGlb)).toBe(
+            "https://raw.githubusercontent.com/BabylonJS/Assets/master/meshes/harvard-yenching/harvard-yenching_institute_statue.glb"
+        );
         await expect(page.locator(".credit")).toBeVisible();
     });
 });
