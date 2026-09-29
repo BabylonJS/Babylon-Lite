@@ -242,9 +242,7 @@ interface ShaderExternalTextureState {
 let _externalTextureResolver: ((names: readonly string[] | undefined, usedNames: Set<string>) => ShaderExternalTextureState | undefined) | null = null;
 
 /** @internal Install external-texture declaration handling without charging ordinary ShaderMaterial bundles. */
-export function _installShaderExternalTextureResolver(
-    resolver: (names: readonly string[] | undefined, usedNames: Set<string>) => ShaderExternalTextureState | undefined
-): void {
+export function _installShaderExternalTextureResolver(resolver: (names: readonly string[] | undefined, usedNames: Set<string>) => ShaderExternalTextureState | undefined): void {
     _externalTextureResolver = resolver;
 }
 

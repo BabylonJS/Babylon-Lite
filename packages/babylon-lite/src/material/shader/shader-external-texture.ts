@@ -2,13 +2,7 @@ import type { EngineContext } from "../../engine/engine.js";
 import { bumpVisibilityEpoch } from "../../engine/engine.js";
 import { wgsl } from "../../shader/wgsl.js";
 import type { ExternalTexture } from "../../texture/external-texture.js";
-import {
-    _assertShaderIdentifier,
-    _assertUniqueShaderName,
-    _installShaderExternalTextureResolver,
-    type ShaderExternalTextureSlot,
-    type ShaderMaterial,
-} from "./shader-material.js";
+import { _assertShaderIdentifier, _assertUniqueShaderName, _installShaderExternalTextureResolver, type ShaderExternalTextureSlot, type ShaderMaterial } from "./shader-material.js";
 import { _installShaderExternalTexturePipelineResolver } from "./shader-pipeline.js";
 import { _installShaderExternalTextureBindingResolver } from "./shader-renderable.js";
 
@@ -66,10 +60,7 @@ _installShaderExternalTexturePipelineResolver({
     layout(entries, nextBinding, visibility, material) {
         getExternalTextureSlots(material);
         for (const _name of material._externalTextureDecls ?? []) {
-            entries.push(
-                { binding: nextBinding++, visibility, externalTexture: {} },
-                { binding: nextBinding++, visibility, sampler: { type: "filtering" } }
-            );
+            entries.push({ binding: nextBinding++, visibility, externalTexture: {} }, { binding: nextBinding++, visibility, sampler: { type: "filtering" } });
         }
         return nextBinding;
     },
