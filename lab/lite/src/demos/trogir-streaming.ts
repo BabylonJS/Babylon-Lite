@@ -14,6 +14,7 @@ import type { EngineContext, GaussianSplatStream, SceneContext } from "babylon-l
 import { attachTrogirCameraControls, createTrogirCamera } from "./trogir-camera";
 import { formatTrogirCameraPose } from "./trogir-camera-pose";
 import { placeTrogirStream } from "./trogir-streaming-placement";
+import { acquireTrogirStartupResource, finishTrogirStartup, observeTrogirStartupReadiness } from "./trogir-streaming-lifecycle";
 
 const DEFAULT_METADATA_URL = "https://assets.babylonjs.com/splats/Trogir/lod-meta.json";
 const LOCAL_SETUP = 'GS_STREAM_ASSET_ROOT="<dataset-directory>" pnpm --dir lab dev';
@@ -183,21 +184,40 @@ async function main(): Promise<void> {
     window.addEventListener("pagehide", dispose, { once: true });
 
     try {
-        engine = await createEngine(canvas, {
-            requiredLimits: {
-                maxBufferSize: STREAM_CAPACITY * 64,
-                maxStorageBufferBindingSize: STREAM_CAPACITY * 64,
-            },
-        });
+        const createdEngine = await acquireTrogirStartupResource(
+            createEngine(canvas, {
+                requiredLimits: {
+                    maxBufferSize: STREAM_CAPACITY * 64,
+                    maxStorageBufferBindingSize: STREAM_CAPACITY * 64,
+                },
+            }),
+            () => disposed,
+            disposeEngine
+        );
+        if (!createdEngine) {
+            return;
+        }
+        engine = createdEngine;
         scene = createSceneContext(engine);
-        stream = await loadGaussianSplatStream(engine, metadataUrl(), {
-            maxSplats: 1_200_000,
-            maxCapacitySplats: STREAM_CAPACITY,
-            maxGpuBytes: 1024 * MB,
-            maxCpuBytes: 96 * MB,
-            screenError: 2,
-            lodCooldownMs: 250,
-        });
+        const loadedStream = await acquireTrogirStartupResource(
+            loadGaussianSplatStream(engine, metadataUrl(), {
+                maxSplats: 1_200_000,
+                maxCapacitySplats: STREAM_CAPACITY,
+                maxGpuBytes: 1024 * MB,
+                maxCpuBytes: 96 * MB,
+                screenError: 2,
+                lodCooldownMs: 250,
+            }).then((candidate) => {
+                observeTrogirStartupReadiness(candidate.firstFrameReady);
+                return candidate;
+            }),
+            () => disposed,
+            (lateStream) => disposeGaussianSplatStream(scene!, lateStream)
+        );
+        if (!loadedStream) {
+            return;
+        }
+        stream = loadedStream;
         placeTrogirStream(stream);
         const camera = createTrogirCamera();
         scene.camera = camera;
@@ -205,20 +225,30 @@ async function main(): Promise<void> {
 
         attachGaussianSplatStream(scene, stream);
         disposeHud = installHud(scene, stream, canvas);
-        await registerScene(scene);
-        await startEngine(engine);
-        await stream.firstFrameReady;
-
-        const coarseReadyAt = performance.now();
-        canvas.dataset.coarseSubmitted = "true";
-        canvas.dataset.coarseSubmittedAt = String(coarseReadyAt);
-        canvas.dataset.coarseReady = "true";
-        canvas.dataset.coarseReadyAt = String(coarseReadyAt);
-        canvas.dataset.ready = "true";
-        const overlay = document.getElementById("loading");
-        overlay?.classList.add("hidden");
-        window.setTimeout(() => overlay?.remove(), 450);
+        await finishTrogirStartup({
+            register: () => registerScene(scene!),
+            start: () => startEngine(engine!),
+            firstFrame: stream.firstFrameReady,
+            isDisposed: () => disposed,
+            dispose,
+            ready: () => {
+                const coarseReadyAt = performance.now();
+                canvas.dataset.coarseSubmitted = "true";
+                canvas.dataset.coarseSubmittedAt = String(coarseReadyAt);
+                canvas.dataset.coarseReady = "true";
+                canvas.dataset.coarseReadyAt = String(coarseReadyAt);
+                canvas.dataset.ready = "true";
+                const overlay = document.getElementById("loading");
+                overlay?.classList.add("hidden");
+                window.setTimeout(() => overlay?.remove(), 450);
+            },
+            fail: (reason) => showError(reason, canvas),
+        });
     } catch (reason) {
+        if (disposed) {
+            return;
+        }
+        dispose();
         showError(reason, canvas);
     }
 }

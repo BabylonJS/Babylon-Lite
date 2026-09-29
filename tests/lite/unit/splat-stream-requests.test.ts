@@ -294,7 +294,7 @@ describe("splat stream transport", () => {
             return Promise.resolve(response(webp(), 200, "image/webp"));
         }) as unknown as typeof fetch;
         const manager = createSplatStreamRequestManager(8, 1, 10_000, 0, { device: gpu().device, fetch: fetchMock, decode: async () => bitmap() });
-        const a = manager.request(request("https://a.test/a/meta.json", 0));
+        const a = manager.request(request("https://a.test/a/meta.json", 0, SplatRequestPriority.Bootstrap));
         const b = manager.request(request("https://a.test/b/meta.json", 1));
         const low = manager.request(request("https://a.test/low/meta.json", 2, SplatRequestPriority.Prefetch));
         const high = manager.request(request("https://a.test/high/meta.json", 3, SplatRequestPriority.Uncovered));
@@ -309,6 +309,93 @@ describe("splat stream transport", () => {
         void low.catch(() => undefined);
         void high.catch(() => undefined);
         manager.dispose();
+    });
+
+    it("preempts abortable fine transport so newly uncovered coarse work completes first", async () => {
+        const order: string[] = [];
+        let fineAttempts = 0;
+        const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+            const url = String(input);
+            order.push(url);
+            if (url.endsWith("/fine/meta.json") && fineAttempts++ === 0) {
+                return new Promise<Response>((_resolve, reject) => {
+                    init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
+                });
+            }
+            return Promise.resolve(url.endsWith("meta.json") ? response(metadata(url.includes("coarse") ? "coarse" : "fine")) : response(webp(), 200, "image/webp"));
+        }) as unknown as typeof fetch;
+        const manager = createSplatStreamRequestManager(1, 1, 10_000, 0, {
+            device: gpu().device,
+            fetch: fetchMock,
+            decode: async () => bitmap(),
+        });
+        const fine = manager.request(request("https://a.test/fine/meta.json", 0, SplatRequestPriority.Upgrade));
+        await vi.waitFor(() => expect(fineAttempts).toBe(1));
+        const coarse = manager.request(request("https://a.test/coarse/meta.json", 1, SplatRequestPriority.Uncovered));
+        await expect(coarse).resolves.toMatchObject({ fileId: 1 });
+        await expect(fine).resolves.toMatchObject({ fileId: 0 });
+        expect(order.filter((url) => url.endsWith("/fine/meta.json"))).toHaveLength(2);
+        expect(order.indexOf("https://a.test/coarse/meta.json")).toBeLessThan(order.lastIndexOf("https://a.test/fine/meta.json"));
+        expect(manager.cpuBytes).toBe(0);
+    });
+
+    it("waits for a nonabortable decode to settle before preemption cleanup or late upload", async () => {
+        const fakeGpu = gpu();
+        const decodeGate = deferred<ImageBitmap>();
+        let decodeCalls = 0;
+        const fetchMock = vi.fn(async (input: string | URL | Request) => {
+            const url = String(input);
+            return url.endsWith("meta.json") ? response(metadata(url.includes("coarse") ? "coarse" : "fine")) : response(webp(), 200, "image/webp");
+        }) as unknown as typeof fetch;
+        const manager = createSplatStreamRequestManager(2, 1, 10_000, 0, {
+            device: fakeGpu.device,
+            fetch: fetchMock,
+            decode: async () => {
+                decodeCalls++;
+                if (decodeCalls === 1) {
+                    return decodeGate.promise;
+                }
+                return bitmap();
+            },
+        });
+        const fine = manager.request(request("https://a.test/fine/meta.json", 0, SplatRequestPriority.Upgrade));
+        await vi.waitFor(() => expect(decodeCalls).toBe(1));
+        const retained = manager.cpuBytes;
+        const coarse = manager.request(request("https://a.test/coarse/meta.json", 1, SplatRequestPriority.Uncovered));
+        await Promise.resolve();
+        expect(manager.cpuBytes).toBe(retained);
+        expect(fakeGpu.textures).toHaveLength(0);
+        const late = bitmap();
+        decodeGate.resolve(late);
+        await expect(coarse).resolves.toMatchObject({ fileId: 1 });
+        await expect(fine).resolves.toMatchObject({ fileId: 0 });
+        expect(late.close).toHaveBeenCalledOnce();
+        expect(manager.cpuBytes).toBe(0);
+    });
+
+    it("retains decode accounting until a nonabortable decode settles after disposal", async () => {
+        const fakeGpu = gpu();
+        const decodeGate = deferred<ImageBitmap>();
+        const fetchMock = vi.fn(async (input: string | URL | Request) =>
+            String(input).endsWith("meta.json") ? response(metadata()) : response(webp(), 200, "image/webp")
+        ) as unknown as typeof fetch;
+        const manager = createSplatStreamRequestManager(1, 1, 10_000, 0, {
+            device: fakeGpu.device,
+            fetch: fetchMock,
+            decode: () => decodeGate.promise,
+        });
+        const pending = manager.request(request("https://a.test/fine/meta.json", 0));
+        await vi.waitFor(() => expect(manager.cpuBytes).toBeGreaterThan(0));
+        const retained = manager.cpuBytes;
+        manager.dispose();
+        expect(manager.cpuBytes).toBe(retained);
+        expect(fakeGpu.textures).toHaveLength(0);
+        const late = bitmap();
+        decodeGate.resolve(late);
+        await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+        expect(late.close).toHaveBeenCalledOnce();
+        expect(fakeGpu.textures).toHaveLength(0);
+        expect(manager.cpuBytes).toBe(0);
     });
 
     it("shares HTTP/decode semaphores and serializes CPU admission", async () => {

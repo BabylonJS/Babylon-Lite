@@ -96,6 +96,13 @@ function sharedSourceLodsManifest(): unknown {
     };
 }
 
+function sharedEnvironmentSourceManifest(): unknown {
+    return {
+        ...(sharedSourceLodsManifest() as object),
+        environment: "shared/meta.json",
+    };
+}
+
 function offscreenBootstrapManifest(): unknown {
     return {
         version: 1,
@@ -407,6 +414,64 @@ describe("Gaussian splat stream orchestration", () => {
         expect(stream._leafStates[0]!.displayed?.count).toBe(2);
         expect(stream._leafStates[0]!.lodCooldownUntil).toBe(270);
         expect(stream._generationPressure).toBe(false);
+    });
+
+    it("shares an aliased bootstrap environment source without publishing it before the coarse barrier", async () => {
+        const h = harness(sharedEnvironmentSourceManifest(), 20);
+        const stream = await loadGaussianSplatStream(h.engine, "https://assets.test/lod-meta.json", {
+            maxSplats: 20,
+            screenError: 0.001,
+            _runtime: {
+                fetch: h.fetch,
+                prepareSource: h.prepareSource,
+                createGpuState: () => h.gpu,
+                buildRenderable: h.buildRenderable,
+                queueDone: () => h.queueGate.promise,
+            },
+        });
+        attachGaussianSplatStream(h.scene, stream);
+        await h.scene._deferredBuilders[0]!();
+        expect(stream._environmentSourceId).toBe(stream._bootstrapSourceId);
+        h.calls[0]!.gate.resolve(prepared(h.calls[0]!.source, h.calls[0]!.generation, 4));
+        await vi.waitFor(() => expect(stream._leafStates[0]!.displayed?.count).toBe(1));
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(h.calls).toHaveLength(1);
+        expect(h.gpu.intervals).toHaveLength(1);
+        expect(h.gpu.intervals[0]).toMatchObject({ sourceOffset: 0, count: 1, destinationOffset: 0 });
+
+        h.getDraw()(Promise.resolve(true));
+        await vi.waitFor(() => expect(stream._refinementEnabled).toBe(true));
+        expect(h.calls).toHaveLength(1);
+        expect(h.gpu.intervals).toHaveLength(2);
+        expect(h.gpu.intervals[0]).toMatchObject({ sourceOffset: 1, count: 2, destinationOffset: 0 });
+        expect(h.gpu.intervals[1]).toMatchObject({ sourceOffset: 0, count: 4, destinationOffset: 2 });
+        expect(stream._cache.entries.size).toBe(1);
+        expect(stream._cache.entries.get(h.calls[0]!.source.url)).toMatchObject({ displayedRefs: 1, activeRefs: 2 });
+    });
+
+    it("rejects bootstrap when an aliased environment cannot fit after a successful coarse signal", async () => {
+        const h = harness(sharedEnvironmentSourceManifest(), 3);
+        const stream = await loadGaussianSplatStream(h.engine, "https://assets.test/lod-meta.json", {
+            maxSplats: 3,
+            screenError: 0.001,
+            _runtime: {
+                fetch: h.fetch,
+                prepareSource: h.prepareSource,
+                createGpuState: () => h.gpu,
+                buildRenderable: h.buildRenderable,
+                queueDone: () => h.queueGate.promise,
+            },
+        });
+        attachGaussianSplatStream(h.scene, stream);
+        await h.scene._deferredBuilders[0]!();
+        h.calls[0]!.gate.resolve(prepared(h.calls[0]!.source, h.calls[0]!.generation, 4));
+        await vi.waitFor(() => expect(stream._leafStates[0]!.displayed?.count).toBe(1));
+
+        h.getDraw()(Promise.resolve(true));
+        await expect(stream.firstFrameReady).rejects.toThrow("resident environment exceeds admitted GPU capacity");
+        expect(stream.stats.phase).toBe("error");
+        expect(stream.stats.error?.message).toContain("resident environment exceeds admitted GPU capacity");
+        expect(stream._disposed).toBe(true);
     });
 
     it("holds an accepted replacement until the exact per-leaf deadline without duplicate source work", async () => {
@@ -1153,6 +1218,29 @@ describe("Gaussian splat stream orchestration", () => {
         replacement.gate.reject(new Error("decode failed"));
         await vi.waitFor(() => expect(stream.stats.error?.message).toContain("decode failed"));
         expect(stream._leafStates[0]!.displayed?.lod).toBe(0);
+        stream.maxSplats = h.gpu.capacity + 1;
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream.stats.error?.message).toContain("decode failed");
+        stream.maxSplats = h.gpu.capacity;
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream.stats.error?.message).toContain("decode failed");
+    });
+
+    it("preserves a source failure that arrives while a transient selection error is visible", async () => {
+        const h = harness();
+        const stream = await attachAndBuild(h);
+        const fine = h.calls.find((call) => call.source.url.includes("fine"))!;
+
+        stream.maxSplats = h.gpu.capacity + 1;
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream.stats.error?.message).toContain("exceeds immutable admitted capacity");
+        fine.gate.reject(new Error("terminal decode failed"));
+        await vi.waitFor(() => expect(stream.stats.error?.message).toContain("terminal decode failed"));
+
+        stream.maxSplats = h.gpu.capacity;
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream.stats.error?.message).toContain("terminal decode failed");
+        expect(stream.stats.phase).toBe("error");
     });
 
     it("removes historical leaves from the active generation as the camera changes region", async () => {
@@ -1208,16 +1296,77 @@ describe("Gaussian splat stream orchestration", () => {
         expect(h.gpu.contentGeneration).toBe(generation);
     });
 
-    it("rejects a mutable target above effective capacity without replacing the valid display", async () => {
+    it("does not rescan leaf or interval protections on unchanged frames", async () => {
+        const h = harness();
+        const stream = await attachAndBuild(h);
+        const refreshes = stream._protectionRefreshes;
+        const leafScans = stream._protectionLeafScans;
+        const intervalScans = stream._protectionIntervalScans;
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream._protectionRefreshes).toBe(refreshes);
+        expect(stream._protectionLeafScans).toBe(leafScans);
+        expect(stream._protectionIntervalScans).toBe(intervalScans);
+    });
+
+    it("recovers a mutable selection error on the same cached view without replacing the valid display", async () => {
         const h = harness();
         const stream = await attachAndBuild(h);
         const intervals = [...h.gpu.intervals];
+        const computations = stream._selectionMetricsComputations;
         stream.maxSplats = h.gpu.capacity + 1;
         h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
         expect(stream.stats.phase).toBe("error");
         expect(stream.stats.error?.message).toContain("exceeds immutable admitted capacity");
         expect(h.gpu.intervals).toEqual(intervals);
         expect(h.gpu.count).toBeGreaterThan(0);
+        stream.maxSplats = h.gpu.capacity;
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream.stats.error).toBeNull();
+        expect(stream.stats.phase).not.toBe("error");
+        expect(stream._selectionMetricsComputations).toBe(computations);
+
+        h.queueGate.resolve();
+        await stream.firstFrameReady;
+        stream.screenError = 0;
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream.stats.error?.message).toContain("screenError must be finite and greater than zero");
+        stream.screenError = 2;
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream.stats.error).toBeNull();
+        expect(stream.stats.phase).not.toBe("error");
+    });
+
+    it("rejects readiness and disposes work for an orthographic startup selection", async () => {
+        const h = harness();
+        const stream = await loadGaussianSplatStream(h.engine, "https://assets.test/lod-meta.json", {
+            maxSplats: 20,
+            _runtime: {
+                fetch: h.fetch,
+                prepareSource: h.prepareSource,
+                createGpuState: () => h.gpu,
+                buildRenderable: h.buildRenderable,
+                queueDone: () => h.queueGate.promise,
+            },
+        });
+        attachGaussianSplatStream(h.scene, stream);
+        await h.scene._deferredBuilders[0]!();
+        const ready = stream.firstFrameReady.catch((reason: unknown) => reason);
+        h.getUpdate()({
+            targetWidth: 100,
+            targetHeight: 100,
+            _camera: { ...h.camera, ortho: { halfHeight: 1, left: null, right: null, bottom: null, top: null } } as Camera,
+        });
+        expect(await ready).toMatchObject({ message: expect.stringContaining("orthographic cameras are unsupported") });
+        expect(stream._disposed).toBe(true);
+        expect(stream.stats.phase).toBe("error");
+        expect(stream.stats.error?.message).toContain("orthographic cameras are unsupported");
+        expect(h.gpu.disposed).toBe(true);
+        const stale = prepared(h.calls[0]!.source, h.calls[0]!.generation);
+        h.calls[0]!.gate.resolve(stale);
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(stale.textures.every((texture) => vi.mocked(texture.destroy).mock.calls.length === 1)).toBe(true);
     });
 
     it("disposes an attached stream when the scene ends before deferred renderable construction", async () => {

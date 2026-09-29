@@ -101,6 +101,9 @@ export interface StreamSourceRuntime {
     blockedAllocatedBytes: number;
     blockedHeldBytes: number;
     blockedAdmissionVersion: number;
+    displayedRefs: number;
+    pendingRefs: number;
+    activeRefs: number;
 }
 
 /** @internal */
@@ -165,6 +168,16 @@ export interface GaussianSplatStream extends SceneNode {
     /** @internal */
     _selectionAggregateComputations: number;
     /** @internal */
+    _protectionRefreshes: number;
+    /** @internal */
+    _protectionLeafScans: number;
+    /** @internal */
+    _protectionIntervalScans: number;
+    /** @internal */
+    _protectionsDirty: boolean;
+    /** @internal */
+    readonly _activeSourceIds: Set<number>;
+    /** @internal */
     _cooldownPending: boolean;
     /** @internal */
     _generationPressure: boolean;
@@ -177,6 +190,8 @@ export interface GaussianSplatStream extends SceneNode {
     /** @internal */
     readonly _bootstrapSourceId: number;
     /** @internal */
+    readonly _environmentSourceId: number | null;
+    /** @internal */
     readonly _startedAt: number;
     /** @internal */
     readonly _manifestBytes: number;
@@ -184,6 +199,8 @@ export interface GaussianSplatStream extends SceneNode {
     readonly _runtime: SplatStreamRuntimeDependencies;
     /** @internal */
     _firstFrameSettled: boolean;
+    /** @internal */
+    _selectionError: Error | null;
 }
 
 /** @internal */

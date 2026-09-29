@@ -83,11 +83,13 @@ interface RequestJob {
     request: SplatSourceRequest;
     readonly intervals: SogInterval[];
     sequence: number;
-    controller: AbortController;
+    attemptController: AbortController;
     resolve: (source: PreparedSplatSource) => void;
     reject: (reason: unknown) => void;
     promise: Promise<PreparedSplatSource>;
     state: "queued" | "active";
+    cancelled: boolean;
+    preemptRequested: boolean;
     detachSignal?: () => void;
 }
 
@@ -107,6 +109,8 @@ interface CpuWaiter {
 function abortError(): DOMException {
     return new DOMException("The operation was aborted", "AbortError");
 }
+
+class PreparationPreemptedError extends Error {}
 
 function asError(reason: unknown): Error {
     return reason instanceof Error ? reason : abortError();
@@ -223,6 +227,7 @@ export function createSplatStreamRequestManager(
     const cpuWaiters: CpuWaiter[] = [];
     let sequence = 0;
     let activePreparations = 0;
+    let activeJob: RequestJob | null = null;
     let activeHttp = 0;
     let activeDecodes = 0;
     let activePayload = false;
@@ -615,19 +620,26 @@ export function createSplatStreamRequestManager(
             return;
         }
         queue.sort((a, b) => a.request.priority - b.request.priority || a.sequence - b.sequence);
+        const next = queue.find((candidate) => !candidate.cancelled && !activeUrls.has(candidate.request.url));
+        if (activeJob && next && next.request.priority < activeJob.request.priority && !activeJob.preemptRequested) {
+            activeJob.preemptRequested = true;
+            activeJob.attemptController.abort(new PreparationPreemptedError());
+        }
         while (activePreparations < 1 && queue.length > 0) {
             const index = queue.findIndex((candidate) => !activeUrls.has(candidate.request.url));
             if (index < 0) {
                 break;
             }
             const job = queue.splice(index, 1)[0]!;
-            if (job.controller.signal.aborted) {
+            if (job.cancelled) {
                 continue;
             }
             job.state = "active";
+            activeJob = job;
             activeUrls.add(job.request.url);
             activePreparations++;
-            void prepare(job, job.controller.signal)
+            let requeue = false;
+            void prepare(job, job.attemptController.signal)
                 .then((source) => {
                     if (jobs.get(job.request.url) !== job) {
                         destroyPrepared(source);
@@ -638,15 +650,32 @@ export function createSplatStreamRequestManager(
                     job.resolve(source);
                 })
                 .catch((error: unknown) => {
+                    if (error instanceof PreparationPreemptedError && jobs.get(job.request.url) === job && !job.cancelled && !disposed) {
+                        requeue = true;
+                        return;
+                    }
+                    const failure = error instanceof PreparationPreemptedError ? abortError() : asError(error);
                     if (jobs.get(job.request.url) === job) {
                         jobs.delete(job.request.url);
                     }
                     job.detachSignal?.();
-                    job.reject(asError(error));
+                    job.reject(failure);
                 })
                 .finally(() => {
                     activeUrls.delete(job.request.url);
+                    if (activeJob === job) {
+                        activeJob = null;
+                    }
                     activePreparations--;
+                    if (requeue && jobs.get(job.request.url) === job && !job.cancelled && !disposed) {
+                        job.state = "queued";
+                        job.preemptRequested = false;
+                        job.attemptController = new AbortController();
+                        queue.push(job);
+                    } else if (requeue) {
+                        job.detachSignal?.();
+                        job.reject(abortError());
+                    }
                     pump();
                 });
         }
@@ -691,7 +720,8 @@ export function createSplatStreamRequestManager(
                     pump();
                     return existing.promise;
                 }
-                existing.controller.abort(abortError());
+                existing.cancelled = true;
+                existing.attemptController.abort(abortError());
                 existing.detachSignal?.();
                 const queuedIndex = queue.indexOf(existing);
                 if (queuedIndex >= 0) {
@@ -710,11 +740,13 @@ export function createSplatStreamRequestManager(
                 request: normalized,
                 intervals: [...normalized.intervals],
                 sequence: sequence++,
-                controller: new AbortController(),
+                attemptController: new AbortController(),
                 resolve,
                 reject,
                 promise,
                 state: "queued",
+                cancelled: false,
+                preemptRequested: false,
             };
             if (request.signal) {
                 if (request.signal.aborted) {
@@ -724,7 +756,8 @@ export function createSplatStreamRequestManager(
                     if (jobs.get(url) !== job) {
                         return;
                     }
-                    job.controller.abort(abortError());
+                    job.cancelled = true;
+                    job.attemptController.abort(abortError());
                     if (job.state === "queued") {
                         queue.splice(queue.indexOf(job), 1);
                         jobs.delete(url);
@@ -751,7 +784,8 @@ export function createSplatStreamRequestManager(
             if (!job) {
                 return;
             }
-            job.controller.abort(abortError());
+            job.cancelled = true;
+            job.attemptController.abort(abortError());
             if (job.state === "queued") {
                 queue.splice(queue.indexOf(job), 1);
                 jobs.delete(url);
@@ -765,7 +799,8 @@ export function createSplatStreamRequestManager(
             }
             disposed = true;
             for (const job of jobs.values()) {
-                job.controller.abort(abortError());
+                job.cancelled = true;
+                job.attemptController.abort(abortError());
                 job.detachSignal?.();
                 if (job.state === "queued") {
                     job.reject(abortError());

@@ -214,26 +214,59 @@ function makeGpuSource(prepared: PreparedSplatSource) {
     };
 }
 
+function markProtectionsDirty(stream: GaussianSplatStream): void {
+    stream._protectionsDirty = true;
+}
+
+function setPending(stream: GaussianSplatStream, state: StreamLeafRuntime, pending: StreamRepresentation | null): void {
+    if (state.pending?.fileId !== pending?.fileId) {
+        markProtectionsDirty(stream);
+    }
+    state.pending = pending;
+}
+
 function refreshProtections(stream: GaussianSplatStream): void {
-    for (const sourceState of stream._sourceStates) {
-        let displayedRefs = 0;
-        let pendingRefs = 0;
+    if (stream._protectionsDirty) {
+        for (const source of stream._sourceStates) {
+            source.displayedRefs = 0;
+            source.pendingRefs = 0;
+            source.activeRefs = 0;
+        }
         for (const leaf of stream._leafStates) {
+            stream._protectionLeafScans++;
             const active = stream._frame === 0 || leaf.visible;
-            displayedRefs += active && leaf.displayed?.fileId === sourceState.source.id ? 1 : 0;
-            pendingRefs += leaf.visible && leaf.pending?.fileId === sourceState.source.id ? 1 : 0;
+            if (active && leaf.displayed) {
+                stream._sourceStates[leaf.displayed.fileId]!.displayedRefs++;
+            }
+            if (leaf.visible && leaf.pending) {
+                stream._sourceStates[leaf.pending.fileId]!.pendingRefs++;
+            }
         }
-        const activeRefs = sourceState.gpu ? stream._gpu.intervals.reduce((count, interval) => count + (interval.source === sourceState.gpu ? 1 : 0), 0) : 0;
-        const refs: Parameters<typeof setSplatSourceProtection>[2] = {
-            pinCount: sourceState.source.id === stream._bootstrapSourceId ? 1 : 0,
-            displayedRefs,
-            pendingRefs,
-            activeRefs,
-        };
-        if (activeRefs > 0) {
-            refs.lastUsedFrame = stream._frame;
+        stream._activeSourceIds.clear();
+        const sourcesByGpu = new Map(stream._sourceStates.filter((source) => source.gpu).map((source) => [source.gpu!, source]));
+        for (const interval of stream._gpu.intervals) {
+            stream._protectionIntervalScans++;
+            const source = sourcesByGpu.get(interval.source);
+            if (source) {
+                source.activeRefs++;
+                stream._activeSourceIds.add(source.source.id);
+            }
         }
-        setSplatSourceProtection(stream._cache, sourceState.source.url, refs);
+        for (const source of stream._sourceStates) {
+            setSplatSourceProtection(stream._cache, source.source.url, {
+                pinCount: source.source.id === stream._bootstrapSourceId ? 1 : 0,
+                displayedRefs: source.displayedRefs,
+                pendingRefs: source.pendingRefs,
+                activeRefs: source.activeRefs,
+                ...(source.activeRefs > 0 ? { lastUsedFrame: stream._frame } : {}),
+            });
+        }
+        stream._protectionsDirty = false;
+        stream._protectionRefreshes++;
+        return;
+    }
+    for (const sourceId of stream._activeSourceIds) {
+        setSplatSourceProtection(stream._cache, stream._sourceStates[sourceId]!.source.url, { lastUsedFrame: stream._frame });
     }
 }
 
@@ -250,7 +283,7 @@ export function forgetEvictedSplatStreamSource(stream: GaussianSplatStream, url:
             leaf.cooldownHeld = false;
         }
         if (leaf.pending?.fileId === state.source.id) {
-            leaf.pending = null;
+            setPending(stream, leaf, null);
         }
     }
     state.gpu = null;
@@ -260,6 +293,7 @@ export function forgetEvictedSplatStreamSource(stream: GaussianSplatStream, url:
     state.blockedAllocatedBytes = -1;
     state.blockedHeldBytes = -1;
     state.blockedAdmissionVersion = -1;
+    markProtectionsDirty(stream);
     invalidateSelection(stream);
 }
 
@@ -315,8 +349,8 @@ function commitDisplayed(stream: GaussianSplatStream, force = false): void {
     if (stream._disposed) {
         return;
     }
-    const environment = stream._sourceStates[stream._manifest.sources.length];
-    const environmentCount = environment?.gpu?.count ?? 0;
+    const environment = stream._environmentSourceId === null ? undefined : stream._sourceStates[stream._environmentSourceId];
+    const environmentCount = stream._refinementEnabled ? (environment?.gpu?.count ?? 0) : 0;
     const foregroundCapacity = stream._gpu.capacity - environmentCount;
     if (foregroundCapacity < 0) {
         throw new Error(`${PREFIX} resident environment exceeds admitted GPU capacity`);
@@ -329,23 +363,26 @@ function commitDisplayed(stream: GaussianSplatStream, force = false): void {
     if (!stream._refinementEnabled) {
         for (const state of stream._leafStates) {
             if (state.pending && !sameRepresentation(state.pending, coarseRepresentation(stream, state))) {
-                state.pending = null;
+                setPending(stream, state, null);
             }
         }
     }
     if (!hardPressure && stream._options.lodCooldownMs > 0) {
         for (const state of stream._leafStates) {
             if (state.cooldownHeld && state.displayed && state.pending && !sameRepresentation(state.displayed, state.pending)) {
-                state.pending = null;
+                setPending(stream, state, null);
             }
         }
     }
     let changed = commitSplatStreamPendingRepresentations(stream._leafStates, stream._frame, foregroundCapacity);
+    if (changed) {
+        markProtectionsDirty(stream);
+    }
     const activeForegroundCount = stream._leafStates.reduce((count, state) => count + ((stream._frame === 0 || state.visible) && state.displayed ? state.displayed.count : 0), 0);
     if (activeForegroundCount > foregroundCapacity) {
         for (const state of stream._leafStates) {
             if ((stream._frame === 0 || state.visible) && state.pending && state.pending.count > (state.displayed?.count ?? 0)) {
-                state.pending = null;
+                setPending(stream, state, null);
             }
         }
         setGenerationPressure(stream, true);
@@ -358,7 +395,7 @@ function commitDisplayed(stream: GaussianSplatStream, force = false): void {
         if (!(stream._frame === 0 || state.visible) || !state.pending || state.pending.count <= (state.displayed?.count ?? 0)) {
             continue;
         }
-        state.pending = null;
+        setPending(stream, state, null);
         if (state.displayed) {
             continue;
         }
@@ -371,18 +408,19 @@ function commitDisplayed(stream: GaussianSplatStream, force = false): void {
             const fallback = alternatives[index]!;
             const source = stream._sourceStates[fallback.fileId]!;
             if (source.state === "resident" && source.gpu && fallback.offset + fallback.count <= source.gpu.count) {
-                state.pending = fallback;
+                setPending(stream, state, fallback);
                 if (commitSplatStreamPendingRepresentations(stream._leafStates, stream._frame, foregroundCapacity)) {
                     changed = true;
+                    markProtectionsDirty(stream);
                     break;
                 }
-                state.pending = null;
+                setPending(stream, state, null);
             }
         }
     }
     for (const state of stream._leafStates) {
         if ((stream._frame === 0 || state.visible) && state.pending && state.pending.count > (state.displayed?.count ?? 0)) {
-            state.pending = null;
+            setPending(stream, state, null);
         }
     }
     setGenerationPressure(
@@ -420,7 +458,7 @@ function commitDisplayed(stream: GaussianSplatStream, force = false): void {
         intervals.push({ source, sourceOffset: representation.offset, count: representation.count, destinationOffset });
         destinationOffset += representation.count;
     }
-    if (environment?.gpu && destinationOffset + environment.gpu.count <= stream._gpu.capacity) {
+    if (stream._refinementEnabled && environment?.gpu && destinationOffset + environment.gpu.count <= stream._gpu.capacity) {
         intervals.push({ source: environment.gpu, sourceOffset: 0, count: environment.gpu.count, destinationOffset });
         destinationOffset += environment.gpu.count;
     }
@@ -441,6 +479,7 @@ function commitDisplayed(stream: GaussianSplatStream, force = false): void {
     }
     stream._contentGeneration++;
     setSplatStreamGpuIntervals(stream._gpu, intervals, stream._contentGeneration);
+    markProtectionsDirty(stream);
     for (let index = 0; index < stream._leafStates.length; index++) {
         const state = stream._leafStates[index]!;
         const previousRepresentation = previousDisplayed[index];
@@ -453,7 +492,7 @@ function commitDisplayed(stream: GaussianSplatStream, force = false): void {
         for (const state of stream._leafStates) {
             if (!state.visible) {
                 state.displayed = null;
-                state.pending = null;
+                setPending(stream, state, null);
                 state.lodCooldownUntil = 0;
                 state.cooldownHeld = false;
             }
@@ -474,6 +513,14 @@ function settleBootstrapFailure(stream: GaussianSplatStream, reason: unknown): v
         stream._firstFrameSettled = true;
         _firstFrames?.get(stream)?.reject(failure);
     }
+    const attachment = _attachments?.get(stream);
+    if (attachment) {
+        disposeAttachedStream(attachment.scene, stream, attachment, true);
+    } else {
+        disposeStream(stream);
+    }
+    stream.stats._values.error = failure;
+    stream.stats._values.phase = "error";
 }
 
 function requestSource(stream: GaussianSplatStream, sourceId: number, priority: SplatRequestPriority): void {
@@ -551,10 +598,10 @@ function requestSource(stream: GaussianSplatStream, sourceId: number, priority: 
                             ? leafState.target
                             : null;
                 if (target?.fileId === sourceId && target.offset + target.count <= prepared.count) {
-                    leafState.pending = target;
+                    setPending(stream, leafState, target);
                 }
             }
-            commitDisplayed(stream, sourceId >= stream._manifest.sources.length);
+            commitDisplayed(stream, sourceId === stream._environmentSourceId);
         })
         .catch((reason: unknown) => {
             if (stream._disposed || generation !== state.generation) {
@@ -622,7 +669,7 @@ function scheduleTargets(stream: GaussianSplatStream): void {
         }
     }
     for (const state of stream._sourceStates) {
-        const environmentDemand = stream._refinementEnabled && state.source.url === stream._manifest.environmentUrl ? 1 : 0;
+        const environmentDemand = stream._refinementEnabled && state.source.id === stream._environmentSourceId ? 1 : 0;
         const leafDemand = demand[state.source.id]!;
         state.demandCount = leafDemand + environmentDemand;
         if (state.demandCount > 0) {
@@ -667,16 +714,16 @@ function updateSelection(stream: GaussianSplatStream, context: DrawUpdateContext
         return;
     }
     stream._frame++;
-    commitDisplayed(stream);
-    const camera = context._camera;
-    if (!camera || context.targetWidth <= 0 || context.targetHeight <= 0) {
-        return;
-    }
     try {
+        commitDisplayed(stream);
+        const camera = context._camera;
+        if (!camera || context.targetWidth <= 0 || context.targetHeight <= 0) {
+            return;
+        }
         const aspect = getEffectiveAspectRatio(camera, context.targetWidth, context.targetHeight);
         const projection = getProjectionMatrix(camera, aspect);
         const cameraPosition = getCameraPosition(camera);
-        const environmentCount = stream._sourceStates[stream._manifest.sources.length]?.gpu?.count ?? 0;
+        const environmentCount = stream._refinementEnabled && stream._environmentSourceId !== null ? (stream._sourceStates[stream._environmentSourceId]!.gpu?.count ?? 0) : 0;
         const effectiveCapacity = stream._gpu.capacity - environmentCount;
         if (stream.maxSplats > stream._gpu.capacity) {
             throw new RangeError(`${PREFIX} maxSplats ${stream.maxSplats} exceeds immutable admitted capacity ${stream._gpu.capacity}`);
@@ -777,23 +824,26 @@ function updateSelection(stream: GaussianSplatStream, context: DrawUpdateContext
                 return !!desired && !sameRepresentation(selection.target, desired);
             });
         const aggregateTargets = new Map(aggregatePlan.selections.map((selection) => [selection.leaf.id, selection.target]));
-        for (const state of stream._leafStates) {
-            state.visible = false;
-            state.cooldownHeld = false;
-        }
         stream.stats._values.visibleLeaves = aggregateTargets.size;
         stream.stats._values.selectedSplats = aggregatePlan.selectedSplats;
         let targetChanged = false;
+        for (const state of stream._leafStates) {
+            const visible = aggregateTargets.has(state.target.leafId);
+            if (state.visible !== visible) {
+                state.visible = visible;
+                markProtectionsDirty(stream);
+            }
+            state.cooldownHeld = false;
+        }
         for (const [leafId, target] of aggregateTargets) {
             const state = stream._leafStates[leafId]!;
-            state.visible = true;
             const held = heldTargets.get(leafId);
             state.cooldownHeld = aggregatePlan.holdsApplied === true && !!held && sameRepresentation(target, held);
             state.lastVisibleFrame = stream._frame;
             if (!sameRepresentation(state.target, target)) {
                 state.target = target;
                 state.selectionGeneration++;
-                state.pending = null;
+                setPending(stream, state, null);
                 targetChanged = true;
             }
         }
@@ -811,7 +861,7 @@ function updateSelection(stream: GaussianSplatStream, context: DrawUpdateContext
             const publicationTarget = stream._refinementEnabled ? state.target : coarseRepresentation(stream, state);
             const source = stream._sourceStates[publicationTarget.fileId]!;
             if (!sameRepresentation(state.displayed, publicationTarget) && source.state === "resident") {
-                state.pending = publicationTarget;
+                setPending(stream, state, publicationTarget);
             } else if (!state.displayed) {
                 const alternatives = stream._manifest.leaves[publicationTarget.leafId]!.alternatives;
                 const targetIndex = alternatives.indexOf(publicationTarget);
@@ -819,7 +869,7 @@ function updateSelection(stream: GaussianSplatStream, context: DrawUpdateContext
                     const fallback = alternatives[index]!;
                     const fallbackSource = stream._sourceStates[fallback.fileId]!;
                     if (fallbackSource.state === "resident" && fallbackSource.gpu && fallback.offset + fallback.count <= fallbackSource.gpu.count) {
-                        state.pending = fallback;
+                        setPending(stream, state, fallback);
                         break;
                     }
                 }
@@ -827,8 +877,23 @@ function updateSelection(stream: GaussianSplatStream, context: DrawUpdateContext
         }
         commitDisplayed(stream, true);
         scheduleTargets(stream);
+        if (stream._selectionError && stream.stats._values.error === stream._selectionError) {
+            stream.stats._values.error = null;
+            stream.stats._values.phase = stream._refinementEnabled ? "streaming" : "bootstrap";
+        }
+        stream._selectionError = null;
     } catch (reason) {
-        stream.stats._values.error = error(reason, "selection failed");
+        const failure = error(reason, "selection failed");
+        const ownsCurrentError = stream.stats._values.error === null || stream.stats._values.error === stream._selectionError;
+        stream._selectionError = failure;
+        if (ownsCurrentError) {
+            stream.stats._values.error = failure;
+        }
+        const recoverableInput = reason instanceof RangeError;
+        if (!stream._firstFrameSettled && !recoverableInput) {
+            settleBootstrapFailure(stream, failure);
+            return;
+        }
         stream.stats._values.phase = "error";
     }
     updateStats(stream);
@@ -839,8 +904,8 @@ function coarseDrawn(stream: GaussianSplatStream, nonemptySignal: Promise<boolea
         return;
     }
     stream._coarseSubmitted = true;
-    void nonemptySignal.then(
-        (nonempty) => {
+    void nonemptySignal
+        .then(async (nonempty) => {
             if (!nonempty) {
                 settleBootstrapFailure(stream, new Error(`${PREFIX} bootstrap projection produced no drawable splats`));
                 return;
@@ -854,27 +919,22 @@ function coarseDrawn(stream: GaussianSplatStream, nonemptySignal: Promise<boolea
             for (const state of stream._leafStates) {
                 const source = stream._sourceStates[state.target.fileId]!;
                 if (state.visible && !sameRepresentation(state.displayed, state.target) && source.state === "resident") {
-                    state.pending = state.target;
+                    setPending(stream, state, state.target);
                 }
             }
             commitDisplayed(stream);
             scheduleTargets(stream);
             const wait = stream._runtime.queueDone?.(stream._engine) ?? stream._engine._device.queue.onSubmittedWorkDone();
-            void wait.then(
-                () => {
-                    if (stream._disposed || stream._firstFrameSettled) {
-                        return;
-                    }
-                    stream._firstFrameSettled = true;
-                    stream.stats._values.firstFrameMs = (stream._runtime.now?.() ?? performance.now()) - stream._startedAt;
-                    _firstFrames?.get(stream)?.resolve();
-                    updateStats(stream);
-                },
-                (reason: unknown) => settleBootstrapFailure(stream, reason)
-            );
-        },
-        (reason: unknown) => settleBootstrapFailure(stream, reason)
-    );
+            await wait;
+            if (stream._disposed || stream._firstFrameSettled) {
+                return;
+            }
+            stream._firstFrameSettled = true;
+            stream.stats._values.firstFrameMs = (stream._runtime.now?.() ?? performance.now()) - stream._startedAt;
+            _firstFrames?.get(stream)?.resolve();
+            updateStats(stream);
+        })
+        .catch((reason: unknown) => settleBootstrapFailure(stream, reason));
 }
 
 async function fetchManifest(metadataUrl: string, options: GaussianSplatStreamOptions): Promise<{ value: unknown; url: string; bytes: number }> {
@@ -1054,9 +1114,14 @@ export async function loadGaussianSplatStream(engine: EngineContext, metadataUrl
         blockedAllocatedBytes: -1,
         blockedHeldBytes: -1,
         blockedAdmissionVersion: -1,
+        displayedRefs: 0,
+        pendingRefs: 0,
+        activeRefs: 0,
     }));
-    if (manifest.environmentUrl && !sourceStates.some((state) => state.source.url === manifest.environmentUrl)) {
+    let environmentSourceId = manifest.environmentUrl ? (sourceStates.find((state) => state.source.url === manifest.environmentUrl)?.source.id ?? null) : null;
+    if (manifest.environmentUrl && environmentSourceId === null) {
         const id = sourceStates.length;
+        environmentSourceId = id;
         sourceStates.push({
             source: { id, url: manifest.environmentUrl, consumers: [] },
             generation: 0,
@@ -1069,6 +1134,9 @@ export async function loadGaussianSplatStream(engine: EngineContext, metadataUrl
             blockedAllocatedBytes: -1,
             blockedHeldBytes: -1,
             blockedAdmissionVersion: -1,
+            displayedRefs: 0,
+            pendingRefs: 0,
+            activeRefs: 0,
         });
     }
     const stream = initSceneNodeTransform<GaussianSplatStream>({
@@ -1107,16 +1175,23 @@ export async function loadGaussianSplatStream(engine: EngineContext, metadataUrl
         _selectionStateVersion: 0,
         _selectionMetricsComputations: 0,
         _selectionAggregateComputations: 0,
+        _protectionRefreshes: 0,
+        _protectionLeafScans: 0,
+        _protectionIntervalScans: 0,
+        _protectionsDirty: true,
+        _activeSourceIds: new Set<number>(),
         _cooldownPending: false,
         _generationPressure: false,
         _refinementEnabled: false,
         _coarseSubmitted: false,
         _disposed: false,
         _bootstrapSourceId: bootstrap.id,
+        _environmentSourceId: environmentSourceId,
         _startedAt: startedAt,
         _manifestBytes: loaded.bytes,
         _runtime: runtime,
         _firstFrameSettled: false,
+        _selectionError: null,
     });
     streamRef = stream;
     (_firstFrames ??= new WeakMap()).set(stream, { resolve: resolveFirst, reject: rejectFirst });
