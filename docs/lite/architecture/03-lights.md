@@ -11,7 +11,8 @@ Factory functions create light objects with sensible defaults; callers add them 
 - Push-based dirty tracking via `ObservableVec3` for positions/directions
 - World-matrix state with parent support (inherited from `light-base.ts`)
 - Shared UBO writer (`_writeLightUbo`) for the scene lights UBO system
-- Version tracking (`_lightVersion`) so per-frame light uploads can be guarded
+- Version tracking (`_lightVersion` plus `worldMatrixVersion`) so scalar and transform changes,
+  including inherited parent transforms, refresh the shared light UBO
 
 PBR no longer uses per-light extension registration or light fields in `SceneUniforms`. Standard, PBR, and NodeMaterial consume the scene-owned `LightsUniforms` UBO at `@group(0) @binding(1)`. Per-mesh UBOs carry material-independent light selection (`lc` plus packed `li: array<vec4<u32>, ceil(MAX_LIGHTS / 4)>`) computed from `LightBase.includedOnlyMeshIds` / `excludedMeshIds`; shaders index the scene lights array through those mesh indices. Exactly one eligible non-shadow PBR light uses `material/pbr/fragments/singlelight-wgsl.ts`; multiple lights or any shadow receiver use `material/pbr/fragments/multilight-wgsl.ts`.
 
@@ -44,6 +45,19 @@ export let MAX_LIGHTS = 16;
 export function setMaxLights(n: number): void;
 export const LIGHT_ENTRY_FLOATS = 16; // 4 × vec4 = 64 bytes per light
 ```
+
+### Runtime Intensity Updates (`set-light-intensity.ts`)
+
+```typescript
+export function setLightIntensity(light: LightBase & { intensity: number }, intensity: number): void;
+export function setLightDiffuseColor(light: LightBase & { diffuse: [number, number, number] }, color: readonly [number, number, number]): void;
+```
+
+Updates a finite scalar intensity and bumps the light-only version counter so the shared lights UBO
+is refreshed without invalidating the light's world matrix. Assigning an intensity during initial
+scene setup remains valid because the first UBO upload reads the final value; runtime changes use
+this setter. `setLightDiffuseColor()` provides the same invalidation for directional, point, and
+spot-light diffuse RGB changes.
 
 ### Light Base (`light-base.ts`)
 

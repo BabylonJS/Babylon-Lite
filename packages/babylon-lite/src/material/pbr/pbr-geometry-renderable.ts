@@ -32,7 +32,15 @@ import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { packMat4IntoF32 } from "../../math/pack-mat4-into-f32.js";
 import { _geometryOutputExtension } from "../../frame-graph/geometry-types.js";
-import { _computeMeshFeatures, MSH_HAS_INSTANCE_COLOR, MSH_HAS_THIN_INSTANCES, MSH_HAS_TANGENTS, MSH_HAS_UV2, MSH_HAS_VERTEX_COLOR } from "../mesh-features.js";
+import {
+    _computeMeshFeatures,
+    MSH_HAS_INSTANCE_COLOR,
+    MSH_HAS_THIN_INSTANCES,
+    MSH_HAS_TANGENTS,
+    MSH_HAS_UV2,
+    MSH_HAS_VERTEX_COLOR,
+    MSH_RECEIVE_SHADOWS,
+} from "../mesh-features.js";
 import type { Material } from "../material.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 
@@ -92,31 +100,44 @@ function _variantKey(meshFeatures: number, lightMode: number, singleLightType: s
     return `${meshFeatures}:${lightMode}:${singleLightType}:${pluginIndex}${meshVertexKey}`;
 }
 
-/** Build a {@link Renderable} for one mesh drawn through a PBR geometry view. */
-export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view: PbrGeometryMaterialView, resources: MeshRebuildResources): Renderable {
-    const engine = scene.surface.engine;
-    const device = engine._device;
-
+/**
+ * @internal What a PBR renderable of `mesh` asks of the forward PBR context, derived from the LIVE scene: the
+ * context it composes against, the mesh feature bits (receive-shadows included), the light mode and the
+ * single-light type. Light selection mirrors regular PBR `rebuildSingle`, gated by the same shadow rules, so
+ * the geometry-pass real-color attachment receives the same lighting as the regular PBR pass would have
+ * produced. `isPbrForwardBuildCurrent` compares this very derivation with the request the mesh's tracked
+ * forward renderable was built from, so the two cannot drift apart. `noShadows` drops shadow receiving.
+ */
+export function _pbrMeshRequest(scene: SceneContext, mesh: Mesh, noShadows: unknown): readonly [_PbrGeometryContext | undefined, number, 0 | 1 | 2, string] {
     const sceneState = scene as SceneContext & {
         _pbrGeomContext?: _PbrGeometryContext;
         _pbrMeshGeomContexts?: WeakMap<Mesh, _PbrGeometryContext>;
     };
     const ctx = sceneState._pbrMeshGeomContexts?.get(mesh) ?? sceneState._pbrGeomContext;
-    if (!ctx) {
-        throw new Error("buildPbrGeometryRenderable: scene has no PBR context. Ensure regular PBR meshes have been built before recording the geometry task.");
-    }
+    const lr = writeMeshLightSelection(mesh, scene.lights);
+    const lightCount = lr > 0 ? 1 : -lr;
+    const receiveShadows = !noShadows && mesh.receiveShadows && !!ctx?._shadowLights.length;
+    const lightMode = lightCount === 0 ? 0 : lightCount === 1 && !receiveShadows ? 1 : 2;
+    // Same fold as the forward pass (see pbr-renderable.ts): the primitive bits key the composed variant, so
+    // the Standard path must not pay to read them.
+    return [
+        ctx,
+        _computeMeshFeatures(mesh, receiveShadows) | ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0),
+        lightMode,
+        lightMode === 1 ? _getPackedSingleLightType(scene.lights, lr - 1) : "",
+    ];
+}
+
+/** Build a {@link Renderable} for one mesh drawn through a PBR geometry view. */
+export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view: PbrGeometryMaterialView, resources: MeshRebuildResources): Renderable {
+    const engine = scene.surface.engine;
+    const device = engine._device;
 
     const source = view.source as PbrMaterialProps;
     if (!source._renderFeatures) {
         source._renderFeatures = _computePbrMaterialFeatures(source);
     }
 
-    // Light selection mirrors regular PBR rebuildSingle, gated by the same
-    // shadow rules so the geometry-pass real-color attachment receives the
-    // same lighting as the regular PBR pass would have produced.
-    const lr = writeMeshLightSelection(mesh, scene.lights);
-    const lightCount = lr > 0 ? 1 : -lr;
-    const hasSomeShadows = ctx._shadowLights.length > 0;
     // ── Override-camera floating-origin shadow contract ───────────────────────
     // A geometry task can render with a `config.camera` override whose origin
     // differs from `scene.camera` (carried on `view._camera`). Under floating
@@ -142,12 +163,11 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     // scene exercises this combination. Tasks with no override (or with floating
     // origin inactive) keep full shadow receiving — the receiver world and shadow
     // matrices share `scene.camera`'s origin, so they stay coherent.
-    const receiveShadows = mesh.receiveShadows && hasSomeShadows && !(view._camera && engine.useFloatingOrigin);
-    const lightMode: 0 | 1 | 2 = lightCount === 0 ? 0 : lightCount === 1 && !receiveShadows ? 1 : 2;
-    const singleLightType = lightMode === 1 ? _getPackedSingleLightType(scene.lights, lr - 1) : "";
-    // Same fold as the forward pass (see pbr-renderable.ts): these bits key the composed variant, so
-    // the Standard path must not pay to read them.
-    const meshFeatures = _computeMeshFeatures(mesh, receiveShadows) | ((mesh as Mesh & { _primitiveFeatures?: number })._primitiveFeatures ?? 0);
+    const [ctx, meshFeatures, lightMode, singleLightType] = _pbrMeshRequest(scene, mesh, view._camera && engine.useFloatingOrigin);
+    if (!ctx) {
+        throw new Error("buildPbrGeometryRenderable: scene has no PBR context. Ensure regular PBR meshes have been built before recording the geometry task.");
+    }
+    const receiveShadows = (meshFeatures & MSH_RECEIVE_SHADOWS) !== 0;
     const pluginIndex = source._pi ?? 0;
 
     const variantKey = _variantKey(meshFeatures, lightMode, singleLightType, pluginIndex, mesh._gpu._vbKey ?? "");

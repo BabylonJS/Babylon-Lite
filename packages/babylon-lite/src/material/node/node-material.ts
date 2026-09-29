@@ -16,7 +16,8 @@ import { F32 } from "../../engine/typed-arrays.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import type { MeshGroupBuilder, MeshGroupBuildResult } from "../../render/renderable.js";
-import { parseNodeMaterialSource, findBlockByClassName } from "./node-parser.js";
+import type * as ThinInstanceGpu from "../../mesh/thin-instance-gpu.js";
+import { parseNodeMaterialSource, findBlockByClassName, nodeUniformName } from "./node-parser.js";
 import { bjsTypeToNodeType, loadGraphEmitters, emitGraph, sanitize } from "./node-emitter.js";
 import type { BlockEmitter, NodeBuildState, NodeGraph, NodeValueType } from "./node-types.js";
 import type { Material } from "../material.js";
@@ -71,6 +72,10 @@ export interface NodeMaterial extends Material {
     readonly _hasSkeleton: boolean;
     /** @internal */
     readonly _hasInstances: boolean;
+    /** @internal Lazily loaded only for node materials that opt into thin instances. */
+    readonly _syncThinInstances: typeof ThinInstanceGpu.syncThinInstanceGpuData | null;
+    /** @internal Lazily loaded only for node materials that opt into thin instances. */
+    readonly _syncThinInstanceForDraw: typeof ThinInstanceGpu.syncThinInstanceForDraw | null;
 }
 
 /** A live handle to one named Node Material input (uniform or texture). Set
@@ -170,6 +175,7 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         state._meshFeature = (await import("./node-lighting.js")).createNodeLightingFeature;
     }
     await resolvePbrMrHelpers(state);
+    const thinInstanceGpu = state.hasInstances ? await import("../../mesh/thin-instance-gpu.js") : null;
 
     // Dynamic import: env IBL helpers in node-env.ts are only loaded when the
     // graph emitted state.usesEnv. Scenes without ReflectionBlock+PBR-MR never
@@ -203,7 +209,7 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
     const uniformValues = new Map<string, UniformSlot>();
     for (const [name, blockId] of graph.namedInputs) {
         const block = graph.blocks.get(blockId)!;
-        const _name = sanitize(block.name || `input${block.id}`);
+        const _name = nodeUniformName(graph, block, sanitize);
         const _offsetBytes = compile._nodeUboSpec?._offsets.get(_name);
         if (_offsetBytes === undefined) {
             continue;
@@ -248,7 +254,7 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         if (block.className !== "InputBlock") {
             continue;
         }
-        const _name = sanitize(block.name || `input${block.id}`);
+        const _name = nodeUniformName(graph, block, sanitize);
         if (uniformValues.has(_name)) {
             continue;
         } // already handled above
@@ -314,6 +320,8 @@ export async function parseNodeMaterialFromSnippet(engine: EngineContext, snippe
         _emitters: emitters,
         _hasSkeleton: options.hasSkeleton ?? false,
         _hasInstances: options.hasInstances ?? false,
+        _syncThinInstances: thinInstanceGpu?.syncThinInstanceGpuData ?? null,
+        _syncThinInstanceForDraw: thinInstanceGpu?.syncThinInstanceForDraw ?? null,
     };
     return material;
 }

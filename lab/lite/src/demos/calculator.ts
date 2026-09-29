@@ -78,7 +78,7 @@ async function main(): Promise<void> {
 
     // The model is uncompressed, but configure the decoder bases anyway so the
     // demo stays subpath-safe if the asset is ever re-exported compressed.
-    await configureDemoDecoderBases(import.meta.url);
+    configureDemoDecoderBases(import.meta.url);
 
     const [asset] = await Promise.all([
         loadGltf(engine, demoAssetUrl("./Calculator.glb", import.meta.url)),

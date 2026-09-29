@@ -89,6 +89,9 @@ stages:
                 - script: pnpm exec playwright install chromium
                   displayName: "Install Playwright browsers"
 
+                - script: pnpm test:integration:gl
+                  displayName: "Run lite-gl source integration tests"
+
                 # Visual parity vs the Babylon ThinEngine reference (headless
                 # SwiftShader via the global CI/HEADLESS vars). Compares against the
                 # committed reference/gl/<slug>/babylon-ref-golden.png — a published

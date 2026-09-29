@@ -215,7 +215,7 @@ export function submitComputeTasks(tasks: readonly ComputeTask[]): void {
         engine._currentEncoder = undefined!;
     }
     engine._device.queue.submit([encoder.finish()]);
-    engine._computeOneShotSubmitted?.(encoder);
+    engine._gpuTaskTimerResolve?.(encoder);
 }
 
 /** Prepare every pipeline variant and binding set used by a task. */

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    BezierCurveEase,
     GLTF2,
     FlowGraphValidationSeverity,
+    PowerEase,
     RegisterEnginesExtensionsEngineTexture2DArrayImageSource,
     RegisterEnginesWebGPUExtensionsEngineTexture2DArrayImageSource,
     ValidateFlowGraph,
@@ -33,6 +35,11 @@ interface UpstreamConnection {
 }
 
 describe("upstream export coverage", () => {
+    it("exposes Babylon.js Power and Bezier easing classes", () => {
+        expect(new PowerEase(3).ease(0.5)).toBe(0.125);
+        expect(new BezierCurveEase(0.42, 0, 0.58, 1).ease(0.5)).toBe(0.5);
+    });
+
     it("exposes the texture-array pure registration shims", () => {
         expect(RegisterEnginesExtensionsEngineTexture2DArrayImageSource()).toBeUndefined();
         expect(RegisterEnginesWebGPUExtensionsEngineTexture2DArrayImageSource()).toBeUndefined();

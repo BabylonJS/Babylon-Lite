@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Babylon Lite — Ocean</title>
+        <link rel="icon" href="data:," />
+        <style>
+            html,
+            body {
+                margin: 0;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+                background: #3d6d9e;
+                color: #eef8ff;
+                font-family: system-ui, sans-serif;
+            }
+            canvas {
+                width: 100%;
+                height: 100%;
+                display: block;
+                touch-action: none;
+            }
+            .badge {
+                position: fixed;
+                left: 18px;
+                top: 18px;
+                padding: 10px 14px;
+                border: 1px solid rgba(220, 242, 255, 0.4);
+                border-radius: 10px;
+                background: rgba(8, 28, 48, 0.58);
+                backdrop-filter: blur(9px);
+                pointer-events: none;
+            }
+            .badge strong {
+                display: block;
+                font-size: 14px;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+            }
+            .badge span {
+                display: block;
+                margin-top: 3px;
+                font-size: 12px;
+                color: #b9d7e8;
+            }
+            .badge a {
+                pointer-events: auto;
+            }
+            .controls {
+                position: fixed;
+                top: 18px;
+                right: 18px;
+                z-index: 4;
+                width: min(310px, calc(100vw - 36px));
+                max-height: calc(100vh - 36px);
+                overflow-y: auto;
+                padding: 14px;
+                border: 1px solid rgba(220, 242, 255, 0.32);
+                border-radius: 12px;
+                background: rgba(8, 28, 48, 0.62);
+                backdrop-filter: blur(10px);
+            }
+            .controls label,
+            .controls .row {
+                display: grid;
+                grid-template-columns: 1fr auto;
+                align-items: center;
+                gap: 10px;
+                margin: 8px 0;
+                font-size: 12px;
+            }
+            .controls input[type="range"] {
+                grid-column: 1 / 3;
+                width: 100%;
+            }
+            .controls details {
+                margin-top: 8px;
+                border-top: 1px solid rgba(220, 242, 255, 0.15);
+                padding-top: 7px;
+            }
+            .controls summary {
+                cursor: pointer;
+                font-size: 13px;
+                font-weight: 650;
+                color: #d9f1ff;
+            }
+            .controls .check-row {
+                grid-template-columns: 1fr auto;
+            }
+            .controls select,
+            .controls button {
+                border: 1px solid rgba(220, 242, 255, 0.3);
+                border-radius: 7px;
+                padding: 6px 9px;
+                color: #eef8ff;
+                background: rgba(20, 52, 78, 0.9);
+            }
+            .controls button {
+                cursor: pointer;
+            }
+            .controls output {
+                min-width: 3em;
+                text-align: right;
+                color: #bdeeff;
+            }
+            .gpu-timing {
+                position: fixed;
+                left: 18px;
+                top: 109px;
+                z-index: 4;
+                min-width: 220px;
+                padding: 12px 14px;
+                border: 1px solid rgba(220, 242, 255, 0.32);
+                border-radius: 10px;
+                background: rgba(8, 28, 48, 0.62);
+                backdrop-filter: blur(10px);
+                font-size: 12px;
+            }
+            .gpu-timing h2 {
+                margin: 0 0 8px;
+                font-size: 13px;
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+            }
+            .gpu-timing dl {
+                display: grid;
+                grid-template-columns: 1fr auto;
+                gap: 5px 14px;
+                margin: 0;
+            }
+            .gpu-timing dt,
+            .gpu-timing dd {
+                margin: 0;
+            }
+            .gpu-timing dd {
+                color: #bdeeff;
+                font-variant-numeric: tabular-nums;
+            }
+            .gpu-timing .status {
+                margin-top: 8px;
+                color: #93b9ce;
+                font-size: 11px;
+            }
+            .gpu-timing .timing-child {
+                padding-left: 14px;
+                color: #c8ddea;
+            }
+            .loading-overlay {
+                position: fixed;
+                inset: 0;
+                z-index: 10;
+                display: grid;
+                place-items: center;
+                background: radial-gradient(circle at 50% 35%, #315e87, #071522 75%);
+                transition: opacity 0.35s ease;
+            }
+            .loading-overlay.is-hidden {
+                opacity: 0;
+                pointer-events: none;
+            }
+            .loading-box {
+                display: grid;
+                gap: 12px;
+                justify-items: center;
+            }
+            .loading-spinner {
+                width: 48px;
+                height: 48px;
+                border: 4px solid rgba(210, 239, 255, 0.2);
+                border-top-color: #c6efff;
+                border-radius: 50%;
+                animation: spin 0.9s linear infinite;
+            }
+            .loading-bar {
+                width: min(280px, 65vw);
+                height: 4px;
+                overflow: hidden;
+                border-radius: 99px;
+                background: rgba(255, 255, 255, 0.16);
+            }
+            .loading-bar-fill {
+                width: 15%;
+                height: 100%;
+                border-radius: inherit;
+                background: #bdeeff;
+            }
+            .loading-size {
+                min-height: 1em;
+                font-size: 12px;
+                color: #b9d7e8;
+            }
+            @keyframes spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <canvas id="renderCanvas"></canvas>
+        <div class="badge">
+            <strong>FFT Ocean</strong>
+            <span>Three cascades · clipmap · buoyancy · <a id="referenceLink" href="./demo-ocean-reference.html" style="color: #bdeeff">reference</a></span>
+            <span>F8: toggle UI</span>
+        </div>
+        <aside id="ocean-gpu-timing" class="gpu-timing">
+            <h2>GPU timing</h2>
+            <dl>
+                <dt>FPS</dt>
+                <dd data-timing="fps">—</dd>
+                <dt>Compute shaders</dt>
+                <dd data-timing="compute">—</dd>
+                <dt class="timing-child">Spectrum evolution</dt>
+                <dd data-timing="spectrum">—</dd>
+                <dt class="timing-child">Inverse FFT</dt>
+                <dd data-timing="fft">—</dd>
+                <dt class="timing-child">Merge + buoy probe</dt>
+                <dd data-timing="merge">—</dd>
+                <dt>Output mipmaps</dt>
+                <dd data-timing="mipmaps">—</dd>
+                <dt>All GPU tasks</dt>
+                <dd data-timing="total">—</dd>
+            </dl>
+            <div class="status" data-timing="status">Enabling timestamp queries…</div>
+        </aside>
+        <div id="ocean-controls" class="controls"></div>
+        <div id="loading" class="loading-overlay">
+            <div class="loading-box">
+                <div class="loading-spinner"></div>
+                <div>Preparing spectral ocean…</div>
+                <div class="loading-bar"><div class="loading-bar-fill"></div></div>
+                <div class="loading-size"></div>
+            </div>
+        </div>
+        <script>
+            (function () {
+                var canvas = document.getElementById("renderCanvas");
+                var loading = document.getElementById("loading");
+                document.getElementById("referenceLink").href = "./demo-ocean-reference.html" + location.search;
+                function check() {
+                    if (canvas.dataset.ready === "true" || canvas.dataset.error) {
+                        loading.classList.add("is-hidden");
+                        setTimeout(function () {
+                            loading.remove();
+                        }, 400);
+                    }
+                }
+                new MutationObserver(check).observe(canvas, { attributes: true, attributeFilter: ["data-ready", "data-error"] });
+            })();
+        </script>
+        <script type="module" src="/lite/bundle/demos/ocean.js"></script>
+    </body>
+</html>

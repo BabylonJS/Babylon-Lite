@@ -4,5 +4,5 @@
         "noEmit": true,
         "types": []
     },
-    "include": ["unit/**/*.ts", "build/**/*.ts", "parity/**/*.ts", "perf/**/*.ts"]
+    "include": ["unit/**/*.ts", "build/**/*.ts", "integration/**/*.ts", "parity/**/*.ts", "perf/**/*.ts"]
 }

@@ -98,7 +98,6 @@ export function composeStandardShader(
     meshVertexLayout?: MeshVbLayout
 ): ComposedShader {
     const has = (bit: number) => !!(features & bit);
-    const pc = fragments[0]?._pc;
     const template = createStandardTemplate(
         {
             _diffuse: has(HAS_DIFFUSE_TEXTURE),
@@ -112,10 +111,10 @@ export function composeStandardShader(
         },
         esmShadowDepthCode
     );
-    let composed = composeShader(template, sceneShader ? [...fragments, ...sceneShader._fragments] : fragments, meshVertexLayout);
-    pc && (composed = pc(composed));
-    fragments[1]?._pc && (composed = fragments[1]._pc(composed));
-    return composed;
+    return fragments.reduce(
+        (composed, fragment) => fragment._pc?.(composed) ?? composed,
+        composeShader(template, sceneShader ? [...fragments, ...sceneShader._fragments] : fragments, meshVertexLayout)
+    );
 }
 
 // ─── Shader Bindings (sig-independent) ──────────────────────────────

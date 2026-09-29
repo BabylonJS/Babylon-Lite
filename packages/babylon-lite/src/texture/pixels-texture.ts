@@ -127,7 +127,7 @@ export function createRenderTexture2D(engine: EngineContext, width: number, heig
         magFilter: options.magFilter ?? "linear",
     };
     const sampler = getOrCreateSampler(engine, samplerDesc);
-    const tex: Texture2D = { texture, view: texture.createView(), sampler, width, height };
+    const tex: Texture2D = { texture, view: texture.createView(), sampler, width, height, _uvTransformDisabled: true };
     engine._dlr?.r(tex, width, height, format, samplerDesc);
     acquireTexture(tex);
     return tex;

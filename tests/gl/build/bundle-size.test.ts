@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { build } from "esbuild";
+import { resolve } from "path";
 import { loadSceneConfig, liteGlAlias, measureSceneBundle, repoRoot } from "../../../scripts/bundle-scenes-gl-core";
 
 /**
@@ -21,6 +22,58 @@ describe("babylon-lite-gl bundle size ceilings", () => {
         const missing = allScenes.filter((s) => s.maxRawKB == null).map((s) => s.slug);
         expect(missing, `scenes missing a maxRawKB ceiling in scene-config-webgl.json: ${missing.join(", ")}`).toEqual([]);
     });
+
+    it("keeps 3D bindings out of byte-stable 2D-only texture bundles", async () => {
+        const bundle = async (name: string) =>
+            (
+                await build({
+                    stdin: { contents: `export { ${name} } from "babylon-lite-gl";`, resolveDir: repoRoot, sourcefile: "texture-entry.ts" },
+                    bundle: true,
+                    minify: true,
+                    treeShaking: true,
+                    format: "esm",
+                    target: "esnext",
+                    platform: "browser",
+                    legalComments: "none",
+                    alias: liteGlAlias,
+                    write: false,
+                })
+            ).outputFiles[0]!;
+
+        // Exact pre-3D sizes, measured with this same esbuild configuration at HEAD.
+        for (const [name, maxBytes] of [
+            ["createRawTexture", 1672],
+            ["bindTexture", 317],
+            ["setEffectTexture", 419],
+        ] as const) {
+            const output = await bundle(name);
+            expect(output.contents.byteLength, `${name} grew beyond its pre-3D bundle`).toBeLessThanOrEqual(maxBytes);
+            expect(output.text).not.toMatch(/texImage3D|TEXTURE_3D|_boundTextures3D/);
+        }
+        expect((await bundle("createTexture3DFromPixels")).text).toContain("texImage3D");
+    });
+
+    for (const [sceneId, baselineBytes] of [
+        [1, 11801],
+        [3, 16762],
+        [6, 14850],
+    ] as const) {
+        it(`keeps 2D-only scene${sceneId} at or below its pre-3D byte count`, async () => {
+            const result = await build({
+                entryPoints: [resolve(repoRoot, `lab/gl/src/scene${sceneId}.ts`)],
+                bundle: true,
+                minify: true,
+                treeShaking: true,
+                format: "esm",
+                target: "esnext",
+                platform: "browser",
+                legalComments: "none",
+                alias: liteGlAlias,
+                write: false,
+            });
+            expect(result.outputFiles[0]!.contents.byteLength).toBeLessThanOrEqual(baselineBytes);
+        });
+    }
 
     it("shared stencil consumers do not retain two-sided stencil code", async () => {
         const result = await build({

@@ -116,6 +116,18 @@ describe("scheduled compute dispatch", () => {
         expect(() => submitComputeTasks([task])).toThrow(/while a frame is being recorded/);
     });
 
+    it("replaces its recorded pass without retaining a disposed pass", () => {
+        const { engine } = makeEngine();
+        const task = createComputeTask(engine, "repeat-record");
+
+        task.record();
+        const firstPass = task._pass;
+        task.record();
+
+        expect(task._passes).toEqual([task._pass]);
+        expect(task._pass).not.toBe(firstPass);
+    });
+
     it("requires compute graphs to be recreated after the engine device changes", async () => {
         const { engine } = makeEngine();
         const shader = createComputeShader(engine, { computeSource: `@compute @workgroup_size(1) fn main() {}` });
@@ -126,6 +138,82 @@ describe("scheduled compute dispatch", () => {
 
         await expect(prepareComputeShader(shader)).rejects.toThrow(/recreate the compute graph/);
         expect(() => setComputeIndirectDispatch(indirectDispatch, indirect)).toThrow(/recreate the compute graph/);
+    });
+
+    it("uses shader-derived layouts when automatic layout is requested", () => {
+        const { engine, device } = makeEngine();
+        const layout = {} as GPUBindGroupLayout;
+        const pipeline = { getBindGroupLayout: vi.fn(() => layout) } as unknown as GPUComputePipeline;
+        vi.mocked(device.createComputePipeline).mockReturnValueOnce(pipeline);
+        const shader = createComputeShader(engine, {
+            computeSource: SOURCE,
+            automaticLayout: true,
+            bindings: [computeUniformBufferBinding("params", { group: 0, binding: 0 }), computeStorageBufferBinding("output", { group: 0, binding: 1 })],
+        });
+        const params = createComputeUniformArena(createComputeTask(engine), 16, 1).buffer;
+        const output = createStorageBuffer(engine, 16, { writable: true });
+
+        createComputeBindingSet(shader, { params, output });
+
+        expect(device.createComputePipeline).toHaveBeenCalledWith(expect.objectContaining({ layout: "auto" }));
+        expect(pipeline.getBindGroupLayout).toHaveBeenCalledWith(0);
+        expect(device.createBindGroupLayout).not.toHaveBeenCalled();
+    });
+
+    it("keeps inferred layouts paired with a synchronous pipeline created during preparation", async () => {
+        const { engine, device, computePasses } = makeEngine();
+        const layout = {} as GPUBindGroupLayout;
+        const synchronousPipeline = { getBindGroupLayout: vi.fn(() => layout) } as unknown as GPUComputePipeline;
+        const asynchronousPipeline = { getBindGroupLayout: vi.fn(() => ({})) } as unknown as GPUComputePipeline;
+        let resolvePreparation!: (pipeline: GPUComputePipeline) => void;
+        vi.mocked(device.createComputePipeline).mockReturnValueOnce(synchronousPipeline);
+        vi.mocked(device.createComputePipelineAsync).mockReturnValueOnce(
+            new Promise((resolve) => {
+                resolvePreparation = resolve;
+            })
+        );
+        const shader = createComputeShader(engine, {
+            computeSource: SOURCE,
+            automaticLayout: true,
+            bindings: [computeUniformBufferBinding("params", { group: 0, binding: 0 }), computeStorageBufferBinding("output", { group: 0, binding: 1 })],
+        });
+        const preparation = prepareComputeShader(shader);
+        const params = createComputeUniformArena(createComputeTask(engine), 16, 1).buffer;
+        const output = createStorageBuffer(engine, 16, { writable: true });
+        const bindings = createComputeBindingSet(shader, { params, output });
+
+        resolvePreparation(asynchronousPipeline);
+        await preparation;
+        const task = createComputeTask(engine);
+        addComputeDispatch(task, createComputeDispatch(shader, bindings, { size: { x: 1 } }));
+        task.record();
+        task._passes[0]!._execute();
+
+        expect(computePasses[0]!.pipelines).toEqual([synchronousPipeline]);
+        expect(synchronousPipeline.getBindGroupLayout).toHaveBeenCalledWith(0);
+        expect(asynchronousPipeline.getBindGroupLayout).not.toHaveBeenCalled();
+    });
+
+    it("rejects dynamic offsets with automatic layouts", () => {
+        const { engine } = makeEngine();
+
+        expect(() =>
+            createComputeShader(engine, {
+                computeSource: SOURCE,
+                automaticLayout: true,
+                bindings: [computeStorageBufferBinding("output", { group: 0, binding: 1, dynamicOffset: true })],
+            })
+        ).toThrow(/automatic layouts do not support dynamic offset binding "output"/);
+    });
+
+    it("rejects pipeline variants for shaders with automatic layouts", () => {
+        const { engine } = makeEngine();
+        const shader = createComputeShader(engine, {
+            computeSource: `override value: u32 = 1; @compute @workgroup_size(1) fn main() {}`,
+            automaticLayout: true,
+        });
+
+        expect(() => createComputePipelineVariant(shader, { value: 2 })).toThrow(/require explicit binding layouts/);
     });
 
     it("accepts named and numeric WGSL override identifiers", () => {

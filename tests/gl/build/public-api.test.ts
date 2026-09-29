@@ -89,6 +89,7 @@ describe("babylon-lite-gl build output", () => {
         }
         expect(dtsResult.status).toBe(0);
         expect(readFileSync(resolve(DIST, "index.d.ts"), "utf-8")).toMatch(/export type \{[^}]*\bGLStencilOpState\b[^}]*\} from "\.\/depth-stencil\.js";/);
+        expect(readFileSync(resolve(DIST, "index.d.ts"), "utf-8")).toMatch(/export type \{[^}]*\bGLTexture3D\b[^}]*\} from "\.\/texture-3d\.js";/);
 
         // ── The barrel exposes the full converged runtime surface ───────────
         const mod = (await import(pathToFileURL(resolve(DIST, "index.js")).href)) as Record<string, unknown>;
@@ -111,6 +112,13 @@ describe("babylon-lite-gl build output", () => {
             "setEffectMatrix3x3",
             // textures (LDR core + HDR opt-in + extensions)
             "createRawTexture",
+            "createTexture3DFromPixels",
+            "bindTexture3D",
+            "setEffectTexture3D",
+            "generateTexture3DMipMaps",
+            "updateTexture3DSamplingMode",
+            "updateTexture3DWrapMode",
+            "disposeTexture3D",
             "createFloatTexture",
             "generateTextureMipMaps",
             "loadTexture2D",

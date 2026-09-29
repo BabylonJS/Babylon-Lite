@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { VERSION } from "babylon-lite";
 import { AbstractEngine, Engine, NullEngine, ThinEngine, WebGPUEngine } from "../src/engine/engine";
+import { LiteCompatError } from "../src/error";
 import { PointerEventTypes, PointerInfo } from "../src/events/pointer-events";
 import type { TransformNode } from "../src/meshes/meshes";
 import { Scene } from "../src/scene/scene";
@@ -106,6 +107,12 @@ describe("WebGPUEngine scalar getters", () => {
         const engine = fakeEngine({ width: 1, height: 1 }, 16) as WebGPUEngine & { _lite: unknown };
         (engine as unknown as { _lite: unknown })._lite = {};
         expect(engine.getCaps().maxUniformBuffersPerShaderStage).toBeUndefined();
+    });
+
+    it("exposes the normalized occlusion-query API with Lite's structural blocker", () => {
+        const engine = fakeEngine({ width: 1, height: 1 }, 16);
+        expect(() => engine.isOcclusionQueryVisible({})).toThrow(LiteCompatError);
+        expect(() => engine.isOcclusionQueryVisible({})).toThrow(/occlusion-query subsystem/);
     });
 
     it("reports all compressed caps off when there is no device (NullEngine)", () => {

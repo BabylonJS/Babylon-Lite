@@ -28,6 +28,18 @@ Both generators return the same `ShadowGenerator` interface, so the downstream r
 
 ## Public API Surface
 
+### Runtime enablement (`shadow-enabled.ts`)
+
+```typescript
+export function setShadowGeneratorEnabled(generator: ShadowGenerator, enabled: boolean): void;
+```
+
+Runtime enablement preserves the generator attachment and every receiver bind group. Disabling
+writes effective darkness `1` to the existing receiver UBO, returns fully lit before texture
+sampling, and skips shadow-map rendering. Re-enabling restores the configured darkness and resumes
+the existing generator before the scene pass. The feature state is installed only when this setter
+is imported and called.
+
 ### Shared Base (`shadow-base.ts`)
 
 ```typescript

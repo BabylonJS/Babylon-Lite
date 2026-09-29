@@ -99,7 +99,7 @@ export interface PbrMaterialProps extends Material {
     _specularWeight?: number;
     /** @internal Tints dielectric reflectance (linear RGB, default [1,1,1]). Maps to BJS metallicReflectanceColor.
      *  Set via {@link setPbrMetallicReflectance}, which registers the extension. */
-    _metallicReflectanceColor?: [number, number, number];
+    _metallicReflectanceColor?: readonly [number, number, number];
     /** @internal Texture whose RGB tints reflectance and A scales F0. Maps to BJS metallicReflectanceTexture.
      *  Set via {@link setPbrMetallicReflectance}, which registers the extension. */
     _metallicReflectanceTexture?: Texture2D;
@@ -219,7 +219,7 @@ export interface SheenProps {
     /** Whether sheen is active. Default false. */
     isEnabled: boolean;
     /** Sheen color (linear RGB). Default [1, 1, 1]. */
-    color?: [number, number, number];
+    color?: readonly [number, number, number];
     /** Sheen roughness. Default 0.0. */
     roughness?: number;
     /** Sheen intensity (0=off, 1=full). Default 1.0. */
@@ -263,7 +263,7 @@ export interface AnisotropyProps {
     /** Anisotropy strength (0=isotropic, 1=fully anisotropic). Default 1.0. */
     intensity?: number;
     /** Anisotropy direction in tangent space (u, v). Default [1, 0]. */
-    direction?: [number, number];
+    direction?: readonly [number, number];
     /** KHR_materials_anisotropy anisotropyTexture (linear). RG = per-texel direction
      *  (×2-1, rotated by `direction`), B = per-texel strength (multiplies `intensity`).
      *  May carry a KHR_texture_transform that an animation pointer can drive. */
@@ -275,7 +275,7 @@ export interface TranslucencyProps {
     /** Translucency intensity (0=off, 1=full). Default 1.0. */
     intensity?: number;
     /** Translucency color (linear RGB). Tints the transmitted light. Default [1,1,1]. */
-    color?: [number, number, number];
+    color?: readonly [number, number, number];
     /** Translucency color texture (sampled sRGB). RGB multiplies `color`.
      *  KHR_materials_diffuse_transmission.diffuseTransmissionColorTexture. */
     colorTexture?: Texture2D;
@@ -284,14 +284,14 @@ export interface TranslucencyProps {
     intensityTexture?: Texture2D;
     /** Diffusion distance for the Burley transmittance BRDF. Controls how far
      *  light travels through the material per RGB channel. Default [1,1,1]. */
-    diffusionDistance?: [number, number, number];
+    diffusionDistance?: readonly [number, number, number];
 }
 
 /** Scattering sub-feature. Presence enables screen-space subsurface scattering.
  *  NOTE: PrePass/SSS pipeline is not yet implemented — this type is reserved. */
 export interface ScatteringProps {
     /** Per-channel scattering diffusion distance. */
-    diffusionDistance?: [number, number, number];
+    diffusionDistance?: readonly [number, number, number];
     /** World-space scale factor for the diffusion kernel. Default 1.0. */
     metersPerUnit?: number;
 }
@@ -334,7 +334,7 @@ export interface RefractionProps {
 /** Tint sub-feature. Controls absorption tint color for transmittance. */
 export interface TintProps {
     /** Tint color (linear RGB). Default [1,1,1]. */
-    color?: [number, number, number];
+    color?: readonly [number, number, number];
     /** Distance at which the tint color is reached. Default 1.0. */
     atDistance?: number;
 }

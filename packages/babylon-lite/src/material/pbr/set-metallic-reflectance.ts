@@ -14,7 +14,7 @@ import { _registerPbrExt } from "./pbr-flags.js";
  *  fields of `PbrMaterialProps` (BJS metallicReflectance* / KHR_materials_specular). */
 export interface MetallicReflectanceOptions {
     /** Linear-RGB tint for dielectric reflectance (BJS metallicReflectanceColor). */
-    color?: [number, number, number];
+    color?: readonly [number, number, number];
     /** RGB tints reflectance, A scales F0 (BJS metallicReflectanceTexture). */
     texture?: Texture2D;
     /** RGB tints reflectance only (BJS reflectanceTexture). */

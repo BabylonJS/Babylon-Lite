@@ -46,8 +46,6 @@ import {
     GaussianSplattingStream,
     AddGaussianSplattingStreamPart,
     AddGaussianSplattingStreamPartAsync,
-    USDFileLoader,
-    RegisterUSDFileLoader,
     Sound,
     PointerDragBehavior,
     BaseSixDofDragBehavior,
@@ -68,6 +66,9 @@ import {
     FluidRenderer,
     FluidRendererSceneComponent,
     RegisterFluidRenderer,
+    RootMotionSource,
+    RootMotionClip,
+    RootMotionController,
     DitheredTileFadeMaterialPlugin,
 } from "../src/unsupported/unsupported-apis";
 import {
@@ -80,7 +81,18 @@ import {
     OpenPBRMaterialLoadingAdapter as RootOpenPBRMaterialLoadingAdapter,
     RegisterOpenpbrMaterial as RootRegisterOpenpbrMaterial,
 } from "../src/index";
-import { MeshBuilder, CreateTiledBox, CreateTiledPlane } from "../src/meshes/meshes";
+import {
+    Mesh,
+    MeshBuilder,
+    CreateTiledBox,
+    CreateTiledPlane,
+    CreatePolygon,
+    ExtrudePolygon,
+    CreatePolygonVertexData,
+    PolygonBuilder,
+    RegisterPolygonBuilder,
+    VertexData,
+} from "../src/meshes/meshes";
 import { SceneLoader } from "../src/loading/scene-loader";
 import { Material, PushMaterial, StandardMaterial } from "../src/materials/materials";
 import { NullEngine } from "../src/engine/engine";
@@ -101,6 +113,35 @@ describe("LiteCompatError", () => {
 
     it("unsupported() throws a LiteCompatError and never returns", () => {
         expect(() => unsupported("X")).toThrow(LiteCompatError);
+    });
+});
+
+describe("Unsupported polygon builder exports", () => {
+    const options = { shape: [] };
+
+    it("exposes every upstream polygon builder entry point with a structural failure", () => {
+        const polygon = Object.create(Mesh.prototype) as Mesh;
+        const cases: Array<[string, () => unknown]> = [
+            ["MeshBuilder.CreatePolygon", () => MeshBuilder.CreatePolygon("polygon", options)],
+            ["MeshBuilder.ExtrudePolygon", () => MeshBuilder.ExtrudePolygon("polygon", options)],
+            ["MeshBuilder.CreatePolygon", () => CreatePolygon("polygon", options)],
+            ["MeshBuilder.ExtrudePolygon", () => ExtrudePolygon("polygon", options)],
+            ["CreatePolygonVertexData", () => CreatePolygonVertexData(polygon, 0)],
+            ["CreatePolygonVertexData", () => VertexData.CreatePolygon(polygon, 0)],
+            ["Mesh.CreatePolygon", () => Mesh.CreatePolygon("polygon", [], {} as Scene)],
+            ["Mesh.ExtrudePolygon", () => Mesh.ExtrudePolygon("polygon", [], 1, {} as Scene)],
+            ["MeshBuilder.CreatePolygon", () => PolygonBuilder.CreatePolygon("polygon", options)],
+            ["MeshBuilder.ExtrudePolygon", () => PolygonBuilder.ExtrudePolygon("polygon", options)],
+        ];
+
+        for (const [errorApi, call] of cases) {
+            expect(call).toThrow(LiteCompatError);
+            expect(call).toThrow(new RegExp(errorApi.replace(".", "\\.")));
+        }
+    });
+
+    it("keeps the registration shim side-effect free", () => {
+        expect(RegisterPolygonBuilder()).toBeUndefined();
     });
 });
 
@@ -250,20 +291,22 @@ describe("Gaussian Splatting LOD streaming stubs throw", () => {
         expect(() => new GaussianSplattingStream()).toThrow(/GaussianSplattingStream/);
     });
 
-    describe("OpenUSD loader stubs", () => {
-        it("resolves the new loader symbols and reports the subsystem blocker", () => {
-            expect(() => new USDFileLoader()).toThrow(LiteCompatError);
-            expect(() => new USDFileLoader()).toThrow(/OpenUSD WebAssembly worker/);
-            expect(() => RegisterUSDFileLoader()).toThrow(LiteCompatError);
-        });
-    });
-
     it.each([
         ["AddGaussianSplattingStreamPart", () => AddGaussianSplattingStreamPart()],
         ["AddGaussianSplattingStreamPartAsync", () => AddGaussianSplattingStreamPartAsync()],
     ] as Array<[string, () => unknown]>)("%s throws LiteCompatError naming the API", (name, call) => {
         expect(call).toThrow(LiteCompatError);
         expect(call).toThrow(new RegExp(name));
+    });
+});
+
+describe("root motion stubs", () => {
+    it("exports the BJS enum values and names the animation-system blocker", () => {
+        expect(RootMotionSource.None).toBe(0);
+        expect(RootMotionSource.Root).toBe(1);
+        expect(RootMotionSource.FootContact).toBe(2);
+        expect(() => new RootMotionClip({} as never)).toThrow(/mixer writes/);
+        expect(() => new RootMotionController({} as never)).toThrow(/mixer writes/);
     });
 });
 

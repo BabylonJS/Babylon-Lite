@@ -7,7 +7,7 @@
 declare const __BL_VERSION__: string;
 
 /** Babylon Lite version string. */
-export const VERSION: string = /* @__PURE__ */ (() => (typeof __BL_VERSION__ !== "undefined" ? __BL_VERSION__ : "0.1.0"))();
+export const VERSION = typeof __BL_VERSION__ !== "undefined" ? __BL_VERSION__ : "0.1.0";
 
 /** @internal Startup banner text, also stamped onto every DOM canvas Babylon Lite renders
  *  into as its `data-engine` attribute (see `_buildSurface`). It lives in this standalone

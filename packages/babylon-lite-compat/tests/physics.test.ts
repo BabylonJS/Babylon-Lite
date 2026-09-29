@@ -101,6 +101,8 @@ function makePhysicsNode(scene: Scene, overrides: Record<string, unknown> = {}):
             position: { x: 0, y: 0, z: 0 },
             rotationQuaternion: { x: 0, y: 0, z: 0, w: 1 },
             scaling: { x: 1, y: 1, z: 1 },
+            worldMatrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]),
+            worldMatrixVersion: 1,
             ...overrides,
         },
         getScene: () => scene,

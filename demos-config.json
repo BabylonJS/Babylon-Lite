@@ -1,5 +1,19 @@
 [
     {
+        "slug": "ocean",
+        "name": "Ocean",
+        "description": "A GPU spectral ocean driven by Babylon Lite compute tasks: JONSWAP spectrum generation, time-dependent amplitudes, multi-stage 2D inverse FFT, and a displaced water surface. Port of Playground YX6IB8#758.",
+        "tags": ["compute", "shader", "showcase"],
+        "mobile": false
+    },
+    {
+        "slug": "playroom",
+        "name": "The Playroom",
+        "description": "A full Babylon Lite port of BabylonJS/ThePlayroom: launch a skinned bunny ragdoll through 103 authored toy-puzzle placements, score collisions, trigger chain-reaction poppers, and use free mode to push individual physics instances.",
+        "tags": ["game", "physics", "showcase"],
+        "mobile": true
+    },
+    {
         "slug": "trogir-streaming",
         "name": "Trogir Gaussian Splat Streaming",
         "description": "Stream Paolo Tosolini’s public Trogir capture while Babylon Lite draws a coarse shared Gaussian-splat representation first, then refines visible detail under live screen-error and splat-budget controls. An asset-root override supports local or alternate hosted copies.",

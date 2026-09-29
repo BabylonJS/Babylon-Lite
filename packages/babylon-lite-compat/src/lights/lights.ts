@@ -6,11 +6,11 @@
  * wrappers do the same by calling `addToScene` when a scene is supplied. The
  * underlying Lite light is exposed as `_lite` for advanced interop.
  *
- * Colour properties (`diffuse`, `specular`, `groundColor`) are write-through on
- * assignment: `light.diffuse = new Color3(...)` propagates immediately. In-place
- * mutation of a returned colour (`light.diffuse.r = x`) does not propagate; assign
- * a new colour instead. Direction/position are backed by Lite's observable vectors
- * and propagate on `.x/.y/.z` writes.
+ * As in Babylon.js, the getters hand out the light's own live objects, so both assignment
+ * (`light.diffuse = new Color3(...)`) and in-place edits (`light.diffuse.copyFrom(c)`,
+ * `light.direction.set(x, y, z)`, `light.position.y = 2`) reach the Lite light. Direction and
+ * position are proxies over Lite's observable vectors; colours are proxies over the Lite colour
+ * tuples, and every colour write bumps the light version so it reaches the lights UBO.
  */
 
 import { addToScene, createHemisphericLight, createDirectionalLight, createPointLight, createSpotLight, removeFromScene } from "babylon-lite";
@@ -22,8 +22,10 @@ import type {
     LightBase,
 } from "babylon-lite";
 
-import { Color3 } from "../math/color.js";
-import { Vector3 } from "../math/vector.js";
+import { liteBackedColor3 } from "../math/color.js";
+import type { Color3 } from "../math/color.js";
+import { liteBackedVector3 } from "../math/vector.js";
+import type { Vector3 } from "../math/vector.js";
 import { Node } from "../node/node.js";
 import type { Scene } from "../scene/scene.js";
 
@@ -82,9 +84,26 @@ export abstract class Light extends Node {
      * scalar `intensity` writes. Since these wrappers mutate `intensity` directly
      * (both `intensity` and `setEnabled`), this makes those writes reach the GPU.
      */
-    private _bumpLiteVersion(): void {
+    protected _bumpLiteVersion(): void {
         this._liteVersionBump ??= ensureLightVersionBump(this._lite);
         this._liteVersionBump();
+    }
+
+    /**
+     * @internal Babylon.js hands out the light's own `Color3`, so `light.diffuse.copyFrom(c)` or
+     * `light.specular.set(0, 0, 0)` edits the light. Return a live proxy over the Lite tuple rather than a
+     * copy (whose edits were silently dropped); a colour write cannot notify Lite, so it bumps the version.
+     */
+    protected _liveColor(tuple: Tuple3): Color3 {
+        return liteBackedColor3(tuple, () => this._bumpLiteVersion());
+    }
+
+    /** @internal Assign a colour and publish it (a tuple write cannot notify Lite by itself). */
+    protected _writeColor(tuple: Tuple3, value: Color3): void {
+        tuple[0] = value.r;
+        tuple[1] = value.g;
+        tuple[2] = value.b;
+        this._bumpLiteVersion();
     }
 
     /**
@@ -165,20 +184,6 @@ function ensureLightVersionBump(lite: LightBase): () => void {
     return bump;
 }
 
-function readColor(tuple: Tuple3): Color3 {
-    return new Color3(tuple[0], tuple[1], tuple[2]);
-}
-
-function writeColor(tuple: Tuple3, value: Color3): void {
-    tuple[0] = value.r;
-    tuple[1] = value.g;
-    tuple[2] = value.b;
-}
-
-function readVector(vec: { x: number; y: number; z: number }): Vector3 {
-    return new Vector3(vec.x, vec.y, vec.z);
-}
-
 export class HemisphericLight extends Light {
     /** @internal Underlying Babylon Lite hemispheric light. */
     public readonly _lite: LiteHemisphericLight;
@@ -196,31 +201,31 @@ export class HemisphericLight extends Light {
     }
 
     public get direction(): Vector3 {
-        return readVector(this._lite.direction);
+        return liteBackedVector3(this._lite.direction);
     }
     public set direction(value: Vector3) {
         this._lite.direction.set(value.x, value.y, value.z);
     }
 
     public get diffuse(): Color3 {
-        return readColor(this._lite.diffuseColor);
+        return this._liveColor(this._lite.diffuseColor);
     }
     public set diffuse(value: Color3) {
-        writeColor(this._lite.diffuseColor, value);
+        this._writeColor(this._lite.diffuseColor, value);
     }
 
     public get specular(): Color3 {
-        return readColor(this._lite.specularColor);
+        return this._liveColor(this._lite.specularColor);
     }
     public set specular(value: Color3) {
-        writeColor(this._lite.specularColor, value);
+        this._writeColor(this._lite.specularColor, value);
     }
 
     public get groundColor(): Color3 {
-        return readColor(this._lite.groundColor);
+        return this._liveColor(this._lite.groundColor);
     }
     public set groundColor(value: Color3) {
-        writeColor(this._lite.groundColor, value);
+        this._writeColor(this._lite.groundColor, value);
     }
 }
 
@@ -241,31 +246,31 @@ export class DirectionalLight extends Light {
     }
 
     public get direction(): Vector3 {
-        return readVector(this._lite.direction);
+        return liteBackedVector3(this._lite.direction);
     }
     public set direction(value: Vector3) {
         this._lite.direction.set(value.x, value.y, value.z);
     }
 
     public get position(): Vector3 {
-        return readVector(this._lite.position);
+        return liteBackedVector3(this._lite.position);
     }
     public set position(value: Vector3) {
         this._lite.position.set(value.x, value.y, value.z);
     }
 
     public get diffuse(): Color3 {
-        return readColor(this._lite.diffuse);
+        return this._liveColor(this._lite.diffuse);
     }
     public set diffuse(value: Color3) {
-        writeColor(this._lite.diffuse, value);
+        this._writeColor(this._lite.diffuse, value);
     }
 
     public get specular(): Color3 {
-        return readColor(this._lite.specular);
+        return this._liveColor(this._lite.specular);
     }
     public set specular(value: Color3) {
-        writeColor(this._lite.specular, value);
+        this._writeColor(this._lite.specular, value);
     }
 }
 
@@ -293,24 +298,24 @@ export class PointLight extends Light {
     }
 
     public get position(): Vector3 {
-        return readVector(this._lite.position);
+        return liteBackedVector3(this._lite.position);
     }
     public set position(value: Vector3) {
         this._lite.position.set(value.x, value.y, value.z);
     }
 
     public get diffuse(): Color3 {
-        return readColor(this._lite.diffuse);
+        return this._liveColor(this._lite.diffuse);
     }
     public set diffuse(value: Color3) {
-        writeColor(this._lite.diffuse, value);
+        this._writeColor(this._lite.diffuse, value);
     }
 
     public get specular(): Color3 {
-        return readColor(this._lite.specular);
+        return this._liveColor(this._lite.specular);
     }
     public set specular(value: Color3) {
-        writeColor(this._lite.specular, value);
+        this._writeColor(this._lite.specular, value);
     }
 }
 
@@ -352,30 +357,30 @@ export class SpotLight extends Light {
     }
 
     public get position(): Vector3 {
-        return readVector(this._lite.position);
+        return liteBackedVector3(this._lite.position);
     }
     public set position(value: Vector3) {
         this._lite.position.set(value.x, value.y, value.z);
     }
 
     public get direction(): Vector3 {
-        return readVector(this._lite.direction);
+        return liteBackedVector3(this._lite.direction);
     }
     public set direction(value: Vector3) {
         this._lite.direction.set(value.x, value.y, value.z);
     }
 
     public get diffuse(): Color3 {
-        return readColor(this._lite.diffuse);
+        return this._liveColor(this._lite.diffuse);
     }
     public set diffuse(value: Color3) {
-        writeColor(this._lite.diffuse, value);
+        this._writeColor(this._lite.diffuse, value);
     }
 
     public get specular(): Color3 {
-        return readColor(this._lite.specular);
+        return this._liveColor(this._lite.specular);
     }
     public set specular(value: Color3) {
-        writeColor(this._lite.specular, value);
+        this._writeColor(this._lite.specular, value);
     }
 }

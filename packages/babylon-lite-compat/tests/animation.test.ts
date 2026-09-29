@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { Animation, AnimationGroup, AnimationKeyInterpolation } from "../src/animations/animation";
+import { QuadraticEase } from "../src/animations/easing";
+import type { IEasingFunction } from "../src/index";
+import { Quaternion } from "../src/math/quaternion";
+import { Vector3 } from "../src/math/vector";
 
 describe("Animation", () => {
     it("exposes Babylon.js data-type and loop-mode constants", () => {
@@ -38,6 +42,67 @@ describe("Animation", () => {
             { frame: 10, value: [10, 20, 30] },
         ]);
         expect(anim.evaluate(5)).toEqual([5, 10, 15]);
+    });
+
+    it("stores and applies a structural animation-level easing function with Babylon.js null semantics", () => {
+        const anim = new Animation("a", "position.x", 60);
+        const easing: IEasingFunction = { ease: (gradient) => gradient * gradient };
+        expect(anim.getEasingFunction()).toBeNull();
+        expect(anim.setEasingFunction(easing)).toBeUndefined();
+        anim.setKeys([
+            { frame: 0, value: 0 },
+            { frame: 10, value: 10 },
+        ]);
+
+        expect(anim.getEasingFunction()).toBe(easing);
+        expect(anim.evaluate(5)).toBeCloseTo(2.5);
+        anim.setEasingFunction(null);
+        expect(anim.getEasingFunction()).toBeNull();
+        expect(anim.evaluate(5)).toBeCloseTo(5);
+    });
+
+    it("applies easing to vector values while preserving exact endpoints and overshoot", () => {
+        const anim = new Animation("a", "position", 60, Animation.ANIMATIONTYPE_VECTOR3);
+        const easing = { ease: vi.fn((gradient: number) => (gradient === 0.5 ? 1.25 : 0.75)) };
+        anim.setEasingFunction(easing);
+        const start = new Vector3(0, 0, 0);
+        const end = new Vector3(4, 8, 12);
+        anim.setKeys([
+            { frame: 0, value: start },
+            { frame: 10, value: end },
+        ]);
+
+        expect(anim.evaluate(0)).toBe(start);
+        expect(anim.evaluate(10)).toBe(end);
+        expect(easing.ease).not.toHaveBeenCalled();
+        expect((anim.evaluate(5) as Vector3).asArray()).toEqual([5, 10, 15]);
+        expect(easing.ease).toHaveBeenCalledOnce();
+    });
+
+    it("matches Babylon.js quaternion slerp for near-parallel overshoot", () => {
+        const anim = new Animation("a", "rotationQuaternion", 60, Animation.ANIMATIONTYPE_QUATERNION);
+        anim.setEasingFunction({ ease: () => 1.25 });
+        anim.setKeys([
+            { frame: 0, value: [0, 0, 0, 1] },
+            { frame: 10, value: [0, 0, 0.015, Math.sqrt(1 - 0.015 * 0.015)] },
+        ]);
+
+        const value = anim.evaluate(5) as number[];
+        expect(value[2]).toBeCloseTo(0.018749604459090463, 12);
+        expect(value[3]).toBeCloseTo(0.9998242107153774, 12);
+    });
+
+    it("bypasses easing for STEP segments", () => {
+        const anim = new Animation("a", "position.x", 10);
+        const easing = { ease: vi.fn(() => 0.75) };
+        anim.setEasingFunction(easing);
+        anim.setKeys([
+            { frame: 0, value: -1.5, interpolation: AnimationKeyInterpolation.STEP },
+            { frame: 10, value: 1.5 },
+        ]);
+
+        expect(anim.evaluate(5)).toBe(-1.5);
+        expect(easing.ease).not.toHaveBeenCalled();
     });
 
     it("builds a one-shot animation via CreateAndStartAnimation", () => {
@@ -164,5 +229,47 @@ describe("AnimationGroup structural weighted blending", () => {
 
         // total weight 0.5 < 1 → 0 * 0.5 (original) + 2 * 0.5 = 1
         expect(box.position.x).toBeCloseTo(1, 6);
+    });
+
+    it("keeps structural vector and quaternion rest poses stable across repeated blends", () => {
+        const host = new TestHost();
+        const target = { position: new Vector3(0, 0, 0), rotationQuaternion: new Quaternion(0, 0, 0, 1) };
+        const position = new Animation("position", "position", 10, Animation.ANIMATIONTYPE_VECTOR3);
+        position.setKeys([
+            { frame: 0, value: new Vector3(0, 0, 0) },
+            { frame: 10, value: new Vector3(10, 0, 0) },
+        ]);
+        const rotation = new Animation("rotation", "rotationQuaternion", 10, Animation.ANIMATIONTYPE_QUATERNION);
+        rotation.setKeys([
+            { frame: 0, value: new Quaternion(0, 0, 0, 1) },
+            { frame: 10, value: new Quaternion(0, 0, 1, 0) },
+        ]);
+        const group = new AnimationGroup("stableRestPose", host);
+        group.addTargetedAnimation(position, target);
+        group.addTargetedAnimation(rotation, target);
+        group.weight = 0.5;
+        group.start(false, 1, 0, 10);
+
+        group.goToFrame(10);
+        expect(target.position.asArray()).toEqual([5, 0, 0]);
+        expect(target.rotationQuaternion.asArray()).toEqual([0, 0, 0.5, 0.5]);
+
+        group.goToFrame(10);
+        expect(target.position.asArray()).toEqual([5, 0, 0]);
+        expect(target.rotationQuaternion.asArray()).toEqual([0, 0, 0.5, 0.5]);
+    });
+
+    it("uses animation-level easing while evaluating structural groups", () => {
+        const host = new TestHost();
+        const box = { position: { x: 0 } };
+        const eased = slide("eased", 4);
+        eased.setEasingFunction(new QuadraticEase());
+        const group = new AnimationGroup("structuralEasing", host);
+        group.addTargetedAnimation(eased, box);
+        group.start(false, 1, 0, 20);
+
+        group.goToFrame(5);
+
+        expect(box.position.x).toBeCloseTo(1);
     });
 });

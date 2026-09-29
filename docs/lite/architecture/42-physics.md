@@ -57,11 +57,17 @@ Havok body per active matrix while retaining one Lite `PhysicsBody` handle:
 - Getter calls on the primary handle naturally read native instance zero.
   Instance resolution returns stable cloned handle tuples, including for index
   zero, so controller contact impulses affect only the struck instance.
+- Feature-specific consumers can address one native instance through the lazy
+  context's internal `instance(body, index)` seam. The Playroom keeps its
+  indexed impulse and velocity helpers in demo code so ordinary physics scenes
+  do not retain game-specific validation and control APIs.
 - Event-safe deferred release and controller native-transform math remain private
   to the lazy enabler.
-- Each native body is initialized from its corresponding matrix translation and
-  rotation. The carrier mesh transform is intentionally ignored, matching
-  Babylon.js Physics V2 thin-instance semantics.
+- Each native body is initialized from the rigid decomposition of the same
+  effective transform the renderer consumes:
+  `mesh.worldMatrix × thinInstanceMatrix`. The carrier is therefore applied
+  exactly once; it is neither discarded during creation nor multiplied into
+  the instance slab permanently.
 - Shape, mass, motion, velocity, impulse, force, event-mask, removal, and disposal
   operations that address the Lite body apply to every native instance. Getters
   and APIs that inherently accept one native body use instance zero.
@@ -75,9 +81,69 @@ Havok body per active matrix while retaining one Lite `PhysicsBody` handle:
 
 Dynamic thin-instance bodies synchronize Havok transforms directly into the
 existing matrix slab after every step, then dirty the matrix range once through
-`flushThinInstances(mesh)`. The update writes a rigid rotation/translation
-matrix; authored scale is not preserved after simulation. With TELEPORT
-pre-step enabled, every matrix is copied back to its matching Havok body.
+`flushThinInstances(mesh)`. Body creation retains the canonical signed scale of
+each effective rendered matrix, including a negative determinant. Write-back
+recomposes native translation/rotation with that retained scale in world space,
+then multiplies by the inverse of the carrier's current world matrix to restore
+the carrier-local instance matrix. Consequently
+`mesh.worldMatrix × thinInstanceMatrix` keeps its authored scale, determinant,
+and transformed vertices while native Havok receives only a rigid pose. With
+TELEPORT pre-step enabled, every current effective matrix is decomposed and
+copied back to its matching Havok body; its latest signed scale becomes the
+subsequent write-back scale.
+
+Collision shapes remain body-local geometry. A common non-rigid template scale
+must be baked into the shared geometry/shape before body construction. When an
+effective thin-instance matrix nevertheless has non-unit scale, the lazy thin
+context wraps the caller's shape in a scaled container, shared by instances
+with the same signed scale. Unit-scale instances keep the caller's shape
+directly. This preserves authored shape centers and convex/mesh geometry
+without mutating the shared source shape or treating rigid-body transforms as
+scale. The wrapper belongs to the thin context and is released when replaced
+or when the body is released.
+
+Shape-derived thin-instance mass properties are evaluated from each native
+body's actually attached shape. Differently scaled wrappers therefore retain
+their own scaled centre of mass, inertia, and inertia orientation; instance
+zero is not a template for those derived values. The caller's explicit
+mass/centre/inertia overrides and active angular-lock mask are then applied to
+each instance using the same public-body contract.
+
+Native shape derivation and explicit override application live in a
+side-effect-free mass-properties leaf shared by ordinary and thin bodies.
+Cloning and rotation-lock transforms occupy a separate leaf so importing mass
+derivation does not retain axis-lock machinery. Each caller retains only the modules it invokes.
+The lazy thin chunk imports those leaves directly rather than reaching back
+through `havok.ts`, which prevents thin-only lock machinery from becoming part
+of ordinary physics entry chunks.
+
+The generalized mass-properties setter is also an opt-in leaf. Core body
+creation and the scalar-mass convenience API retain their narrow
+shape-derived path, while callers that override inertia or its orientation
+load the generalized merge helper. Thin physics imports that merge helper in
+its existing lazy chunk; scalar mass supplies its mass-proportional
+shape-less inertia fallback explicitly.
+
+The rotation-lock API itself owns thin-body lock persistence. It uses the thin
+context's existing count and indexed native-handle access, stores one unlocked
+mass source per instance on the body, and installs the same mass-rebuild
+transform seam used by ordinary bodies. The base thin context therefore does
+not retain lock/unlock loops or inertia-axis math unless a caller imports the
+rotation-lock API.
+
+Carrier inversion and shape scaling stay implemented inside the lazy
+thin-instance chunk. Carrier composition reuses the math layer's offset-aware
+multiply helper, while inversion remains local so ordinary scenes do not retain
+an otherwise unused inverse kernel. Optional physics pays for this matrix work
+only after `enableHavokThinInstancePhysics`.
+
+Matrix write-back may canonicalize multiplication residue to exact zero only
+within a small machine-roundoff multiple relative to the affected basis
+column's magnitude. It must not apply a fixed world-space threshold: legitimate
+small authored rotations and basis components remain representable. Unit scale
+is likewise canonicalized only within one ULP of the matrix storage format;
+this removes norm error from quantized rotation bases without turning
+representable non-unit scale into unit scale.
 TELEPORT is the default. ACTION retains Babylon.js behavior and sends the
 carrier node's single target transform to every instance. Public body transform
 sets fan out through the facade and rewrite/flush every thin matrix. The core
@@ -86,24 +152,63 @@ dynamic body-to-matrix sync), while their algorithms stay in the lazy module.
 
 Bodies removed while after-step callbacks are draining remain resolvable until
 all callbacks complete. Body-aware collision or trigger registration installs a
-lazy event-lifetime seam whose begin/end hooks bracket the drain and defer native
-release for both ordinary and thin bodies. Removals outside the drain release
-immediately.
+lazy, per-world event-lifetime seam whose begin/end hooks bracket the drain and
+defer native release for both ordinary and thin bodies. Removals outside the drain
+release immediately.
+
+The same lazy seam owns one native-ID index for every tracked ordinary body and
+every native thin-instance body. Each entry stores a stable
+`[PhysicsBody, nativeHandle, instanceIndex]` identity, including a dedicated
+instance-zero handle for thin bodies. Installing the first body-aware event
+listener indexes bodies that already exist; later body creation adds identities
+directly. Removal outside a drain deletes identities before native release.
+Removal during a drain keeps both identities and native handles alive until the
+matching `end()`, then deletes before release. World disposal clears the index.
+Native IDs can therefore be reused only after the old identity is gone, and
+worlds never share index state. Collision and body-aware trigger resolution are
+one `Map.get` per participant; they never walk thin states, ordinary bodies, or
+deferred-removal lists.
+
+Collision subscriptions share one module-owned dispatcher per world. The first
+subscription installs one after-step drain; subsequent subscriptions append
+observers without adding another native stream iterator. Every native event is
+decoded once and delivered in native order to every observer registered before
+that step. STARTED, CONTINUED, FINISHED, and repeated same-pair events are all
+preserved. Each native event owns a fresh top-level info object and fresh contact
+vectors, so retaining one event cannot observe mutation from a later event.
+Disposal from an observer stops iteration before another native-world call; the
+remaining copied after-step callbacks are likewise skipped after world disposal.
 
 `getPhysicsBodyInstanceCount(body)` reports the native count (`1` for ordinary
 bodies). The active thin-instance count is fixed when the body is created:
 callers must populate matrices and explicitly enable thin-instance physics before
 body construction. Without the enabler, core body creation performs no
 thin-instance detection and follows the ordinary single-body path.
+The Playroom owns its reset checkpoint and restore helpers. They retain the
+body's local matrices, carrier transform, and native transforms without adding
+reset semantics to the core thin-instance module. Restore reuses the existing
+mesh slab and native bodies, clears velocities, sleeps each body, and dirties
+the retained matrix buffer once.
 Floating-origin multi-region simulation rejects thin-instance bodies explicitly
 until it can track one region per native instance.
+
+Native handle order is fixed at construction and matches render-instance order.
+Index zero has its own stable cloned native handle just like every later index,
+so indexed impulses, velocities, raycasts, and collision events never pass the
+primary facade handle and never broadcast accidentally. The existing
+non-indexed setters and impulses deliberately retain their generic broadcast
+behavior. Call the indexed operations only when gameplay or contact logic has a
+specific raycast/collision instance identity.
 
 ### Module files
 
 | File                                                   | Responsibility                                                            |
 | ------------------------------------------------------ | ------------------------------------------------------------------------- |
 | `havok.ts`                                             | Core: world create/step/dispose, bodies, shapes, aggregates, forces       |
+| `havok-mass-properties.ts`                             | Shared native mass derivation and explicit overrides                      |
+| `havok-rotation-locks.ts`                              | Mass cloning and shared body-axis inertia lock transforms                 |
 | `havok-thin-instances.ts`                              | Lazy native-body fan-out and matrix synchronization for thin instances    |
+| `havok-instance-access.ts`                             | Validated opt-in impulse/velocity access for one body instance            |
 | `havok-events.ts`                                      | Lazy body resolution and event-safe deferred release                      |
 | `havok-collision.ts`                                   | Opt-in collision-started/continued/finished events (`onPhysicsCollision`) |
 | `havok-trigger.ts`                                     | Opt-in trigger volume enter/exit events                                   |
@@ -276,7 +381,8 @@ last axis is unlocked.
     - `onPhysicsCollision` register an after-step drain on `world._afterStep`.
       Each event identifies `collider`, `colliderIndex`, `collidedAgainst`, and
       `collidedAgainstIndex`, and reports contact distance in addition to the point,
-      normal, and impulse.
+      normal, and impulse. All observers share one drain and receive every native
+      event in order, including duplicate pair/phase events.
 - **Triggers** (`havok-trigger.ts`): `setPhysicsShapeIsTrigger`, `onPhysicsTrigger`,
   and body-aware `onPhysicsTriggerBodies`; both subscriptions return a disposer.
   Body-aware events include `bodyAIndex` / `bodyBIndex` (`-1` when an event refers

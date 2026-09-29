@@ -24,7 +24,8 @@ export function getMeshGeometry(mesh: Mesh): {
 
 Positions, normals, and indices are the required geometry. The function returns `null` when any of
 them is not retained on the CPU. UV, UV2, tangent, and color arrays are included only when the mesh
-already retains them. The helper does not cause loaders or factories to retain additional data.
+already retains them. A zero-length tangent source is treated as absent, matching factory geometry
+that omitted tangents. The helper does not cause loaders or factories to retain additional data.
 
 ## Internal Architecture
 
@@ -50,7 +51,8 @@ None.
 1. A loader or factory creates a mesh and retains any CPU geometry needed by existing engine features.
 2. `getMeshGeometry(mesh)` checks for required retained arrays.
 3. If required data is unavailable, it returns `null`.
-4. Otherwise it returns copies of required arrays and every retained optional array.
+4. Otherwise it returns copies of required arrays and every present optional attribute; zero-length
+   tangents are omitted.
 5. Callers may mutate or pass those copies to another API without changing the source mesh.
 
 ## Babylon.js Equivalence Map
@@ -67,6 +69,7 @@ Babylon.js mesh vertex-data accessors, while presenting them as one tree-shakabl
 - Return exact copies of complete retained geometry.
 - Verify no returned typed array aliases its internal source.
 - Return `undefined` for unavailable optional attributes.
+- Preserve omitted tangent semantics for factory meshes given no tangent array or a zero-length array.
 - Return `null` when any required array is unavailable.
 - Exercise lazy getter-backed arrays used by interleaved glTF meshes.
 

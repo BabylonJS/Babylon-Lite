@@ -168,9 +168,20 @@ export function setBonePoseDeferred(skeleton: Skeleton, bone: Bone, px: number, 
     o.mask |= 3;
 }
 
-/** @internal Drive a non-animated glTF bone from an absolute Lite left-handed world pose
- *  without re-baking. The X reflection keeps the glTF-authored joint geometry in the
- *  same handedness convention as the loader's synthetic root. */
+/** Override a glTF bone from an absolute Lite world-space position and rotation
+ *  without re-baking. The loader's handedness reflection is applied internally.
+ *  Use this for world-space pose drivers such as physics ragdolls: update every
+ *  driven bone, then call {@link bakeSkeleton} once for the complete batch.
+ *  @param skeleton - Skeleton containing the bone.
+ *  @param bone - Bone to override.
+ *  @param px - World-space X position.
+ *  @param py - World-space Y position.
+ *  @param pz - World-space Z position.
+ *  @param rx - World-space quaternion X component.
+ *  @param ry - World-space quaternion Y component.
+ *  @param rz - World-space quaternion Z component.
+ *  @param rw - World-space quaternion W component.
+ *  @public */
 export function setBoneWorldPoseDeferred(skeleton: Skeleton, bone: Bone, px: number, py: number, pz: number, rx: number, ry: number, rz: number, rw: number): void {
     let world = skeleton._worldOverrides.get(bone._nodeIndex);
     if (!world) {

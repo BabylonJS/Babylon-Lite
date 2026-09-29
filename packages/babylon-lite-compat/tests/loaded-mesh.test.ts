@@ -54,6 +54,7 @@ function fakeScene(): { scene: Scene; registered: unknown[] } {
     const scene = {
         _lite: {
             _frameGraph: { _tasks: [] },
+            _disposables: [],
             _meshDisposables: new Map(),
             _meshAuxDisposables: new Map(),
             meshes: [],

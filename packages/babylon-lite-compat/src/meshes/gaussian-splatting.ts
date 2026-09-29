@@ -15,7 +15,7 @@
  * transforms set in the meantime, then adopting the loaded Lite node.
  */
 
-import { loadSplat, loadSOG, loadSPZ, bakeCurrentTransformIntoVertices, createTransformNode } from "babylon-lite";
+import { loadSplat, loadSOG, loadSPZ, bakeCurrentTransformIntoVertices, createTransformNode, setParent } from "babylon-lite";
 import type { GaussianSplattingMesh as LiteGsMesh, GsShaderFragment, SceneNode } from "babylon-lite";
 
 import { TransformNode } from "./meshes.js";
@@ -106,9 +106,9 @@ export class GaussianSplattingMesh extends TransformNode {
         return "GaussianSplattingMesh";
     }
 
-    /** @internal The transform-carrying Lite node: the loaded splat node once present, else the placeholder. */
+    /** @internal The wrapper's transform node; the loaded cloud is parented beneath it during deferred adoption. */
     private get _xform(): SceneNode {
-        return this._gs ?? this._node;
+        return this._gs?.parent === this._node ? this._node : (this._gs ?? this._node);
     }
 
     public override get position(): Vector3 {
@@ -155,12 +155,15 @@ export class GaussianSplattingMesh extends TransformNode {
         return this;
     }
 
-    /** @internal Adopt a loaded Lite splat node: carry over placeholder transforms + name, and register on the scene. */
-    private _adopt(lite: LiteGsMesh): void {
+    /**
+     * @internal Adopt a loaded Lite splat node from either the mesh or loader-plugin API.
+     * Parenting preserves the loader's format-specific local transform while composing it
+     * with transforms applied to the wrapper before loading.
+     */
+    public _adopt(lite: LiteGsMesh): void {
         const placeholder = this._node;
-        lite.position.set(placeholder.position.x, placeholder.position.y, placeholder.position.z);
-        lite.scaling.set(placeholder.scaling.x, placeholder.scaling.y, placeholder.scaling.z);
-        lite.rotation.set(placeholder.rotation.x, placeholder.rotation.y, placeholder.rotation.z);
+        lite.parent = placeholder;
+        placeholder.children.push(lite);
         lite.name = this.name;
         this._gs = lite;
         this._scene?._registerMesh(this);
@@ -200,6 +203,23 @@ export class GaussianSplattingMesh extends TransformNode {
     public bakeCurrentTransformIntoVertices(): void {
         if (this._gs) {
             bakeCurrentTransformIntoVertices(this._gs);
+            if (this._gs.parent === this._node) {
+                const userChildren = this._node.children.filter((child) => child !== this._gs && child.parent === this._node);
+                for (const child of this.getChildren(undefined, true)) {
+                    if (child instanceof TransformNode && child._node !== this._gs && !userChildren.includes(child._node)) {
+                        userChildren.push(child._node);
+                    }
+                }
+                for (const child of userChildren) {
+                    setParent(child, null);
+                }
+                this._node.position.set(0, 0, 0);
+                this._node.rotation.set(0, 0, 0);
+                this._node.scaling.set(1, 1, 1);
+                for (const child of userChildren) {
+                    setParent(child, this._node);
+                }
+            }
         }
     }
 

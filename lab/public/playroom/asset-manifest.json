@@ -1,0 +1,580 @@
+{
+  "sourceRepository": "BabylonJS/ThePlayroom",
+  "sourceRevision": "d22ce23ef308e28d1f8b6598b4c72ea944205925",
+  "authorization": "User explicitly authorized redistribution in Babylon-Lite on 2026-09-16; preserve existing notices and attribution.",
+  "sourcePackageLicenseDeclaration": "ISC (no license text or named copyright holder was present at the pinned revision)",
+  "assetLicenseStatement": "No per-asset license statement was present at the pinned revision; redistribution relies on the user-provided authorization above.",
+  "omitted": [
+    "env/childRoom_environment_exp.hdr",
+    "env/studio.env",
+    "gltf/table.glb",
+    "textures/rug_woven_height.png",
+    "textures/woodGrain_normal_1.png",
+    "sounds/snow-globe-wood-base-hard-1.mp3",
+    "sounds/snow-globe-wood-base-soft-1.mp3"
+  ],
+  "fileCount": 80,
+  "totalBytes": 26471680,
+  "files": [
+    {
+      "path": "shader-texture-bindings.json",
+      "bytes": 1940,
+      "sha256": "a226498f5edc2041b419f154b421b9c0ef908c3e3efe44701a58ffc427bc89ef",
+      "sourcePath": "derived from source Node Material graphs",
+      "derived": true
+    },
+    {
+      "path": "env/childRoom_ibl.env",
+      "bytes": 740862,
+      "sha256": "0e3974154c345954f5f555b55522475042fbb6e110e9a1335f5bd6e1c0f4048d",
+      "sourcePath": "docs/assets/env/childRoom_ibl.env",
+      "derived": false
+    },
+    {
+      "path": "env/skybox/childRoom_1K_nx.jpg",
+      "bytes": 170606,
+      "sha256": "e3b29ef53cccab5f48110d4b3372b5d7684f8dde31843443e87993733f66f6e1",
+      "sourcePath": "docs/assets/env/skybox/childRoom_1K_nx.jpg",
+      "derived": false
+    },
+    {
+      "path": "env/skybox/childRoom_1K_ny.jpg",
+      "bytes": 50785,
+      "sha256": "cedf64f9b50cfcd9a90783ce6f0f54ff33b7f011e48ac3002d64003b29c2b997",
+      "sourcePath": "docs/assets/env/skybox/childRoom_1K_ny.jpg",
+      "derived": false
+    },
+    {
+      "path": "env/skybox/childRoom_1K_nz.jpg",
+      "bytes": 157486,
+      "sha256": "75adb3e04d2da5521293c0f778bdc43b6bd588d525d42c1552a0ce80fe8a79a1",
+      "sourcePath": "docs/assets/env/skybox/childRoom_1K_nz.jpg",
+      "derived": false
+    },
+    {
+      "path": "env/skybox/childRoom_1K_px.jpg",
+      "bytes": 163977,
+      "sha256": "13bcafc777950ae959084d333b243b849041886228885b824cca65a8c8c475e8",
+      "sourcePath": "docs/assets/env/skybox/childRoom_1K_px.jpg",
+      "derived": false
+    },
+    {
+      "path": "env/skybox/childRoom_1K_py.jpg",
+      "bytes": 95405,
+      "sha256": "52ccec2b72249c129b1dcb0568d89d4273367723971274b872c54e8a806571d9",
+      "sourcePath": "docs/assets/env/skybox/childRoom_1K_py.jpg",
+      "derived": false
+    },
+    {
+      "path": "env/skybox/childRoom_1K_pz.jpg",
+      "bytes": 155631,
+      "sha256": "0223a9b9ce255ad6af3bb623c43af29f44bc8f21929f85873f9240e2cff1913b",
+      "sourcePath": "docs/assets/env/skybox/childRoom_1K_pz.jpg",
+      "derived": false
+    },
+    {
+      "path": "gltf/archStackArch.glb",
+      "bytes": 954756,
+      "sha256": "08e1956e428f831f6e19e6745fe5e7acc9dbc190d71567b0711dea00f6978250",
+      "sourcePath": "docs/assets/gltf/archStackArch.glb",
+      "derived": false
+    },
+    {
+      "path": "gltf/archStackCylinder.glb",
+      "bytes": 6552,
+      "sha256": "217241ae12f5193798e88e516a3e6fa24c9fd771e644cf2afdf7590aebc7611a",
+      "sourcePath": "docs/assets/gltf/archStackCylinder.glb",
+      "derived": false
+    },
+    {
+      "path": "gltf/archStackTop.glb",
+      "bytes": 945792,
+      "sha256": "a3861f1c8d6c53f4cfa5e9cbf12afbb9a55b73d6e8a6280483037a3514a19db7",
+      "sourcePath": "docs/assets/gltf/archStackTop.glb",
+      "derived": false
+    },
+    {
+      "path": "gltf/babylonBurster.glb",
+      "bytes": 216712,
+      "sha256": "ef76f1218ec0997b0ce9a515ea558688cda1cb2677118afa2c565c02669e53c9",
+      "sourcePath": "docs/assets/gltf/babylonBurster.glb",
+      "derived": false
+    },
+    {
+      "path": "gltf/bowlingBall.glb",
+      "bytes": 120372,
+      "sha256": "f1386c3433d91ee628b32eb42a634a18d6af556a1e0c3e8396331ba8debf8fdd",
+      "sourcePath": "docs/assets/gltf/bowlingBall.glb",
+      "derived": false
+    },
+    {
+      "path": "gltf/bowlingPin.glb",
+      "bytes": 74320,
+      "sha256": "a155a38a418542c84d8bd496f44ed3b543483180f4eed97a86924d198fd8c043",
+      "sourcePath": "docs/assets/gltf/bowlingPin.glb",
+      "derived": false
+    },
+    {
+      "path": "gltf/bunny_rigged.glb",
+      "bytes": 4914800,
+      "sha256": "6aca7d464dd4bf857ba032c1657f14c46253cf35a96e8baad2bcb35e6e89d963",
+      "sourcePath": "docs/assets/gltf/bunny_rigged.glb",
+      "derived": false
+    },
+    {
+      "path": "gltf/bunny-rig.json",
+      "bytes": 9853,
+      "sha256": "f237406f1cecaee9c98b6a6a6b74b57c7e929e8f2d5dc546ade11991d0960448",
+      "sourcePath": "derived from docs/assets/gltf/bunny_rigged.glb",
+      "derived": true
+    },
+    {
+      "path": "gltf/chessboard.glb",
+      "bytes": 62296,
+      "sha256": "25f8934d661b7d23b238cdc8d45753b12cffa62c1e3f74077d119ed8dc26296d",
+      "sourcePath": "docs/assets/gltf/chessboard.glb",
+      "derived": false
+    },
+    {
+      "path": "gltf/chesspiece.glb",
+      "bytes": 65484,
+      "sha256": "a9ef52ad6504df3d2d08f1170242abda0b8d4a215b53d771d1758bcdbbe6905d",
+      "sourcePath": "docs/assets/gltf/chesspiece.glb",
+      "derived": false
+    },
+    {
+      "path": "gltf/cubeBlock.glb",
+      "bytes": 4172,
+      "sha256": "97c63881bc871cfb706b92c1bbac75295ec8abdb2e3f5595bec3ea9a97d88923",
+      "sourcePath": "docs/assets/gltf/cubeBlock.glb",
+      "derived": false
+    },
+    {
+      "path": "gltf/cup.glb",
+      "bytes": 914232,
+      "sha256": "62cc65b41cd4cfb3b341631cc9048e901e59ae65678e63d216e805169e54b437",
+      "sourcePath": "docs/assets/gltf/cup.glb",
+      "derived": false
+    },
+    {
+      "path": "gltf/domino.glb",
+      "bytes": 13092,
+      "sha256": "5a4a1d97c07f50bc28a7b3fac4e725c991b1404afdcb8967423e3ac6c8bb21b7",
+      "sourcePath": "docs/assets/gltf/domino.glb",
+      "derived": false
+    },
+    {
+      "path": "gltf/ramp.glb",
+      "bytes": 9800,
+      "sha256": "35e2a373712d86a8b9e51a843c5e8c571be54d6eb52ee742c53270d419e1c191",
+      "sourcePath": "docs/assets/gltf/ramp.glb",
+      "derived": false
+    },
+    {
+      "path": "gltf/towerGameBlock.glb",
+      "bytes": 6120,
+      "sha256": "62702b8b33041e87344fe474cb364491a1b0483ec1891aa63d49976de6d51a1a",
+      "sourcePath": "docs/assets/gltf/towerGameBlock.glb",
+      "derived": false
+    },
+    {
+      "path": "gltf/transformedTowerGameBlock.glb",
+      "bytes": 4504,
+      "sha256": "c93f52f87f7f4935100caf7d5a68cc9d3b8b14787fd0058bf416a4a4a1109d31",
+      "sourcePath": "docs/assets/gltf/transformedTowerGameBlock.glb",
+      "derived": false
+    },
+    {
+      "path": "shaders/aiming.json",
+      "bytes": 30687,
+      "sha256": "446e8813b77ec4c497ee9e3f899f560779a7cb9c8db57c4c5c4b11c240d61131",
+      "sourcePath": "https://snippet.babylonjs.com/8FCL7N/8",
+      "derived": true
+    },
+    {
+      "path": "shaders/babylonBurster.json",
+      "bytes": 16263,
+      "sha256": "82b69c729db2a2be160feee5b7bcd4d516c6a57efc64f3e125697a873a35eef7",
+      "sourcePath": "docs/assets/shaders/babylonBurster.json",
+      "derived": true
+    },
+    {
+      "path": "shaders/domino.json",
+      "bytes": 35437,
+      "sha256": "c58562128330fa0b399ce186a9cbd01d51202bc51583413daf377cb3a67f4e9f",
+      "sourcePath": "docs/assets/shaders/domino.json",
+      "derived": true
+    },
+    {
+      "path": "shaders/rugShader.json",
+      "bytes": 61817,
+      "sha256": "5d009a50850b83c581444e2b9de56c2d0d9302438d9a9e9f99389b923fbf4b27",
+      "sourcePath": "docs/assets/shaders/rugShader.json",
+      "derived": false
+    },
+    {
+      "path": "shaders/towerGameBlockShader.json",
+      "bytes": 43746,
+      "sha256": "ceba3674477caf869ed7792901836c685e411bc1bdb6285f2f4d3a0e9cde21db",
+      "sourcePath": "docs/assets/shaders/towerGameBlockShader.json",
+      "derived": false
+    },
+    {
+      "path": "sounds/bowling-ball-carpet-thump.mp3",
+      "bytes": 8358,
+      "sha256": "2ac4d8f246fcab0b5ca3956bc5583fb1dc118a0b1bfabb186c404705bfdab23e",
+      "sourcePath": "docs/assets/sounds/bowling-ball-carpet-thump.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/bowling-pin-hard-1.mp3",
+      "bytes": 8358,
+      "sha256": "7f4d226fb85d68b33c2c4323a0b730ac2e5f93deafb618919a3647e0befcd9fc",
+      "sourcePath": "docs/assets/sounds/bowling-pin-hard-1.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/bowling-pin-soft-1.mp3",
+      "bytes": 6268,
+      "sha256": "5ca5e2cd38ccfeef594420f0029a93eb47dc46849e63d675f21a3f8c8ef7b0bd",
+      "sourcePath": "docs/assets/sounds/bowling-pin-soft-1.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/bowling-pin-soft-2.mp3",
+      "bytes": 6268,
+      "sha256": "1393786bd0cebb6753a3584a003e7562d2bf117a14f807324bfb9cdbe6d1d567",
+      "sourcePath": "docs/assets/sounds/bowling-pin-soft-2.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/chess-board-hard-1.mp3",
+      "bytes": 4800,
+      "sha256": "f726607d619d82934a1e183851ac2aef3f679fed9e12f62fe97c36984702701c",
+      "sourcePath": "docs/assets/sounds/chess-board-hard-1.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/chess-piece-hard-1.mp3",
+      "bytes": 5223,
+      "sha256": "70c4d056e74c475416c8dea4849719c4b4b80715c93e7bf992c01e04261bd6b7",
+      "sourcePath": "docs/assets/sounds/chess-piece-hard-1.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/chess-piece-hard-2.mp3",
+      "bytes": 5223,
+      "sha256": "7aa522ec89734b332605092c82f8886fbc582809a97dcc966b9d0bb7db3fab53",
+      "sourcePath": "docs/assets/sounds/chess-piece-hard-2.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/chess-piece-hard-3.mp3",
+      "bytes": 4178,
+      "sha256": "69fb73df6ba98bdc7636d3e54ae709e5d1575c3ad202210d8b9d810bc4ba482c",
+      "sourcePath": "docs/assets/sounds/chess-piece-hard-3.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/domino.mp3",
+      "bytes": 7313,
+      "sha256": "6fc0761dc9ff8d57691e9bff15723e425888f2423bda580d46cc85010d246e9e",
+      "sourcePath": "docs/assets/sounds/domino.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/plastic-block-hard-1.mp3",
+      "bytes": 25013,
+      "sha256": "6f74673e3a9469bd40401460446c5af47cbe988bb58211d59f084e02f15940e2",
+      "sourcePath": "docs/assets/sounds/plastic-block-hard-1.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/plastic-block-hard-2.mp3",
+      "bytes": 25013,
+      "sha256": "fbb9f2a7ebfb7813dedc4615d783d2addda4cbd258b12a83e13c1c5ad8bff097",
+      "sourcePath": "docs/assets/sounds/plastic-block-hard-2.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/plastic-block-hard-3.mp3",
+      "bytes": 25013,
+      "sha256": "43d4cc3b533c1d64a92f10aa1c636169a11b97dd3bc96d8c7f635138b063b8fe",
+      "sourcePath": "docs/assets/sounds/plastic-block-hard-3.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/plastic-block-soft-1.mp3",
+      "bytes": 25013,
+      "sha256": "fdfca17814f1ca7858d76c9167e66b57ee4e23901eeee917268676d96194d425",
+      "sourcePath": "docs/assets/sounds/plastic-block-soft-1.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/plastic-block-soft-2.mp3",
+      "bytes": 21173,
+      "sha256": "2e672a641d7000f983e51c32f9b4ed4d321e44bafdab9f3242404618f24ded04",
+      "sourcePath": "docs/assets/sounds/plastic-block-soft-2.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/plastic-block-soft-3.mp3",
+      "bytes": 25013,
+      "sha256": "cdc11a9cd5d43a0f6323385100e43f364324095f7271133a11761bd4f3c10f9f",
+      "sourcePath": "docs/assets/sounds/plastic-block-soft-3.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/plastic-cup-hard-1.mp3",
+      "bytes": 6771,
+      "sha256": "1ceed548201cb6c33653538d27e7a69daa2e35ef4c26be48332215f3f560ab87",
+      "sourcePath": "docs/assets/sounds/plastic-cup-hard-1.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/plastic-cup-hard-2.mp3",
+      "bytes": 6771,
+      "sha256": "df4902d916ca70f2305fc1fc4c7784a9e70b95476f77a22233d180428dd18d73",
+      "sourcePath": "docs/assets/sounds/plastic-cup-hard-2.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/plastic-cup-hard-3.mp3",
+      "bytes": 6771,
+      "sha256": "e6f591092d19b27aec11943522671aa1633421c2b037e121791cdb8879d96207",
+      "sourcePath": "docs/assets/sounds/plastic-cup-hard-3.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/plastic-cup-soft-1.mp3",
+      "bytes": 6772,
+      "sha256": "ba59013445b5157f101c0b632fb10c6252d1e0410fc5e35a6f46d4474eb0e0ca",
+      "sourcePath": "docs/assets/sounds/plastic-cup-soft-1.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/point-scored.mp3",
+      "bytes": 29806,
+      "sha256": "e9232b7470cc35e89a40975f59a2883710c798bf3924fe57d16e3bc5810a0fea",
+      "sourcePath": "docs/assets/sounds/point-scored.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/popper.mp3",
+      "bytes": 70120,
+      "sha256": "db15cbe0c406f90b4b4fd129e3cb9d21b54a3c722631a5962cd0490d6bb8e96c",
+      "sourcePath": "docs/assets/sounds/popper.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/projectile-carpet-thump.mp3",
+      "bytes": 17337,
+      "sha256": "f434447702df0c256870a737984d18ce7544054c2aba4687c8e6d917599b1fb3",
+      "sourcePath": "docs/assets/sounds/projectile-carpet-thump.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/projectile-flight.mp3",
+      "bytes": 2931,
+      "sha256": "898e4a826e97748848ba4488cfedbf648ac197de579d7837c5faf552c08f7db9",
+      "sourcePath": "docs/assets/sounds/projectile-flight.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/projectile-launch.mp3",
+      "bytes": 8691,
+      "sha256": "d002464ab9e60d27b3c22ccb6ac4ac0ca16f463325eb7278a97cc40731cf5009",
+      "sourcePath": "docs/assets/sounds/projectile-launch.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/wood-block-hard-1.mp3",
+      "bytes": 6771,
+      "sha256": "c670370ea5280fa4b90e40b3f3435e16d95d90facdcc9028cbecf8feb2ec70b6",
+      "sourcePath": "docs/assets/sounds/wood-block-hard-1.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/wood-block-hard-2.mp3",
+      "bytes": 2931,
+      "sha256": "a1b68dc7b0bc59bc377facee795a3f7b0637b353ab8d5e818da6c4aa0d6a2fd6",
+      "sourcePath": "docs/assets/sounds/wood-block-hard-2.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/wood-block-soft-1.mp3",
+      "bytes": 3891,
+      "sha256": "47610e1acf359dbeed6abc77b2dd6165cf0a3ef5ec452728f6cdc37f09855c87",
+      "sourcePath": "docs/assets/sounds/wood-block-soft-1.mp3",
+      "derived": false
+    },
+    {
+      "path": "sounds/wood-block-soft-2.mp3",
+      "bytes": 2931,
+      "sha256": "387546ef5a21c180e6c0a0b9e1180d6ee8be66a0e05cb3deb80615edc144109f",
+      "sourcePath": "docs/assets/sounds/wood-block-soft-2.mp3",
+      "derived": false
+    },
+    {
+      "path": "textures/colorGradient_baseColor.png",
+      "bytes": 15644,
+      "sha256": "f1ee942631465ab2b481a85fc8c4b79fc72a2c91dfa82dc5350569a7a461b6ab",
+      "sourcePath": "docs/assets/textures/colorGradient_baseColor.png",
+      "derived": false
+    },
+    {
+      "path": "textures/confetti.png",
+      "bytes": 1569,
+      "sha256": "02025f9ee4c58288f57df33353e349496e514de773000fd6c715f0d2ce8ffc9e",
+      "sourcePath": "docs/assets/textures/confetti.png",
+      "derived": false
+    },
+    {
+      "path": "textures/flare.png",
+      "bytes": 7556,
+      "sha256": "54450e62932b7b70d6f95ea6f858fa3836e7e1e4e75d441af51b40d3c69cb50d",
+      "sourcePath": "docs/assets/textures/flare.png",
+      "derived": false
+    },
+    {
+      "path": "textures/pointStar.png",
+      "bytes": 89533,
+      "sha256": "34d4f47e74f990e89cee34fe1c350028d6984006f4d96df81ab4dabebcce0327",
+      "sourcePath": "docs/assets/textures/pointStar.png",
+      "derived": false
+    },
+    {
+      "path": "textures/rug_woven_basecolor.png",
+      "bytes": 1285407,
+      "sha256": "95126dbe2710688faeb195b3a9adbbbd98f73f4d42429f676a7fe9212f09048a",
+      "sourcePath": "docs/assets/textures/rug_woven_basecolor.png",
+      "derived": false
+    },
+    {
+      "path": "textures/rug_woven_mask.png",
+      "bytes": 842705,
+      "sha256": "c018f067a7c1403e715eaeebb6c8f0c40ccf5bd33c6bc00afa2da14be6bb823e",
+      "sourcePath": "docs/assets/textures/rug_woven_mask.png",
+      "derived": false
+    },
+    {
+      "path": "textures/rug_woven_normal.png",
+      "bytes": 5884286,
+      "sha256": "0874965f20cbdd23cf7310b4b9b0f23651b40e3aeb65b33649b96191bdade2f0",
+      "sourcePath": "docs/assets/textures/rug_woven_normal.png",
+      "derived": false
+    },
+    {
+      "path": "textures/rug_woven_orm.png",
+      "bytes": 4363142,
+      "sha256": "f3b06fc6f2c3a3c7d996d1fe1029e6085eabf02cbda80245d4c6b61e06fbc94b",
+      "sourcePath": "docs/assets/textures/rug_woven_orm.png",
+      "derived": false
+    },
+    {
+      "path": "textures/woodGrain_baseColor.png",
+      "bytes": 2360463,
+      "sha256": "3c5269aa726d1a0bf1a45ff366aa323918703913b933ae771c6bb8a6235e0856",
+      "sourcePath": "docs/assets/textures/woodGrain_baseColor.png",
+      "derived": false
+    },
+    {
+      "path": "textures/woodGrain_normal.png",
+      "bytes": 258069,
+      "sha256": "884ce0302f65a915b6af17cba27b5d4c778447867a82a31855856e60b48409ad",
+      "sourcePath": "docs/assets/textures/woodGrain_normal.png",
+      "derived": false
+    },
+    {
+      "path": "textures/shader-embedded/babylonBurster-55.jpg",
+      "bytes": 178752,
+      "sha256": "a4d4e45c53ab3cdf6b501186cdf8dcf16e91d708adc8c88f19f1da5b9c27fbbb",
+      "sourcePath": "derived from source Node Material graphs",
+      "derived": true
+    },
+    {
+      "path": "textures/shader-embedded/babylonBurster-59.jpg",
+      "bytes": 4720,
+      "sha256": "9c7e42df2ef9686387cad8c78a190a23b673064c690cfd21cb7e3ba3a21f373e",
+      "sourcePath": "derived from source Node Material graphs",
+      "derived": true
+    },
+    {
+      "path": "textures/shader-embedded/babylonBurster-63.jpg",
+      "bytes": 164240,
+      "sha256": "030dc8fb9003be9a0f15675889c452cb98b564e03f41b7908e8b2f6462bb9804",
+      "sourcePath": "derived from source Node Material graphs",
+      "derived": true
+    },
+    {
+      "path": "textures/shader-embedded/domino-50.jpg",
+      "bytes": 91164,
+      "sha256": "b9f67ff9fb26275edf960e0c2ed8553f071ae5a0e5ab43985b2df9c2fd8a32f8",
+      "sourcePath": "derived from source Node Material graphs",
+      "derived": true
+    },
+    {
+      "path": "textures/shader-embedded/domino-84.jpg",
+      "bytes": 25609,
+      "sha256": "c0194f90c3cb70be942b4ce02c7a28ca7711e85f473f672d0b4e8907ad25827f",
+      "sourcePath": "derived from source Node Material graphs",
+      "derived": true
+    },
+    {
+      "path": "ui/freemode.png",
+      "bytes": 13500,
+      "sha256": "51ae5926919ee53be2ca6b2df7f79d4829380fe66457190cc54136cfaa5109db",
+      "sourcePath": "docs/assets/ui/freemode.png",
+      "derived": false
+    },
+    {
+      "path": "ui/havok_playButton_landscape_outlines.png",
+      "bytes": 14325,
+      "sha256": "0730cc118f0575ea3791b5846f29a6d760a8143fea6125fee60d938a04d2f412",
+      "sourcePath": "docs/assets/ui/havok_playButton_landscape_outlines.png",
+      "derived": false
+    },
+    {
+      "path": "ui/havok_splash_landscape_outlines.png",
+      "bytes": 157454,
+      "sha256": "1de3b409d2c896e4f564f57cd051cf48b36747c1fe43cb9e1e7bcad02ffa0776",
+      "sourcePath": "docs/assets/ui/havok_splash_landscape_outlines.png",
+      "derived": false
+    },
+    {
+      "path": "ui/havok_splash_portrait_outlines.png",
+      "bytes": 234130,
+      "sha256": "4307a3e23721a394ffabe120f53b1457e95dd79fb7f0e58a2aad86f4d69abd69",
+      "sourcePath": "docs/assets/ui/havok_splash_portrait_outlines.png",
+      "derived": false
+    },
+    {
+      "path": "ui/kick.png",
+      "bytes": 12542,
+      "sha256": "9cb57c83dd35c52aefbb366b79fb39e20320cb75cc7b21d07209d95c16573d89",
+      "sourcePath": "docs/assets/ui/kick.png",
+      "derived": false
+    },
+    {
+      "path": "ui/loading.png",
+      "bytes": 15620,
+      "sha256": "f53d13bf506f2a48d48e72386af38cd85b5c0a6bf765e147479b21f8df6b730e",
+      "sourcePath": "docs/assets/ui/loading.png",
+      "derived": false
+    },
+    {
+      "path": "ui/nextKickButton.png",
+      "bytes": 13459,
+      "sha256": "d8e5d4f65d6cc6ff269b05f19fdac4b1c6dbcf2509c1806f4c033b7e1b595e46",
+      "sourcePath": "docs/assets/ui/nextKickButton.png",
+      "derived": false
+    },
+    {
+      "path": "ui/playAgain.png",
+      "bytes": 15571,
+      "sha256": "9c9aaaff214a79adf74e891f7e790429519621dbcda8b358a2ca53b0b7ae5f6f",
+      "sourcePath": "docs/assets/ui/playAgain.png",
+      "derived": false
+    }
+  ]
+}

@@ -14,8 +14,8 @@ let linearSampler: GPUSampler | null = null;
 let bindGroupLayout: GPUBindGroupLayout | null = null;
 let cachedDevice: GPUDevice | null = null;
 
-/** Prepared state for one storage-texture mip level. */
-export interface ComputePreparedMipmapLevel {
+/** Prepared state for one reusable mip level. */
+export interface PreparedMipmapLevel {
     readonly pipeline: GPURenderPipeline;
     readonly bindGroup: GPUBindGroup;
     readonly descriptor: GPURenderPassDescriptor;
@@ -58,19 +58,20 @@ function getPipeline(engine: EngineContext, format: GPUTextureFormat): GPURender
     return pipeline;
 }
 
-/** Prebuild views, bind groups, and render-pass descriptors for repeated compute-output mip regeneration. */
-export function prepareComputeMipmaps(engine: EngineContext, texture: GPUTexture): ComputePreparedMipmapLevel[] {
+/** Prebuild views, bind groups, and render-pass descriptors for repeated mip regeneration. */
+export function prepareMipmaps(engine: EngineContext, texture: GPUTexture, face?: number): PreparedMipmapLevel[] {
     if (texture.mipLevelCount <= 1) {
         return [];
     }
     const device = engine._device;
     const pipeline = getPipeline(engine, texture.format);
-    const prepared: ComputePreparedMipmapLevel[] = [];
+    const prepared: PreparedMipmapLevel[] = [];
+    const viewOptions = face === undefined ? {} : { dimension: "2d" as const, baseArrayLayer: face, arrayLayerCount: 1 };
     for (let mip = 1; mip < texture.mipLevelCount; mip++) {
         const bindGroup = device.createBindGroup({
             layout: bindGroupLayout!,
             entries: [
-                { binding: 0, resource: texture.createView({ baseMipLevel: mip - 1, mipLevelCount: 1 }) },
+                { binding: 0, resource: texture.createView({ baseMipLevel: mip - 1, mipLevelCount: 1, ...viewOptions }) },
                 { binding: 1, resource: linearSampler! },
             ],
         });
@@ -80,7 +81,7 @@ export function prepareComputeMipmaps(engine: EngineContext, texture: GPUTexture
             descriptor: {
                 colorAttachments: [
                     {
-                        view: texture.createView({ baseMipLevel: mip, mipLevelCount: 1 }),
+                        view: texture.createView({ baseMipLevel: mip, mipLevelCount: 1, ...viewOptions }),
                         loadOp: "clear",
                         storeOp: "store",
                         clearValue: { r: 0, g: 0, b: 0, a: 0 },
@@ -92,8 +93,8 @@ export function prepareComputeMipmaps(engine: EngineContext, texture: GPUTexture
     return prepared;
 }
 
-/** Record a prepared compute-output mip chain without per-frame GPU object creation. */
-export function recordPreparedComputeMipmaps(encoder: GPUCommandEncoder, prepared: readonly ComputePreparedMipmapLevel[]): void {
+/** Record a prepared mip chain without per-frame GPU object creation. */
+export function recordPreparedMipmaps(encoder: GPUCommandEncoder, prepared: readonly PreparedMipmapLevel[]): void {
     for (const level of prepared) {
         const pass = encoder.beginRenderPass(level.descriptor);
         pass.setPipeline(level.pipeline);

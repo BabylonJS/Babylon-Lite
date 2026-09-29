@@ -5,6 +5,8 @@
  *  given file no matter which demo is being rebuilt. Omitting a slug lets a prefix-related demo claim,
  *  and therefore delete, chunks it does not own (e.g. `landing` claiming `landing-bg-<hash>.js`). */
 export function demoOwnsBundleFile(fileName: string, slug: string, knownSlugs: readonly string[]): boolean {
-    const owner = knownSlugs.filter((candidate) => fileName === `${candidate}.js` || fileName.startsWith(`${candidate}-`)).sort((first, second) => second.length - first.length)[0];
+    const owner = knownSlugs
+        .filter((candidate) => fileName === `${candidate}.js` || fileName === `${candidate}.js.map` || fileName.startsWith(`${candidate}-`))
+        .sort((first, second) => second.length - first.length)[0];
     return owner === slug;
 }

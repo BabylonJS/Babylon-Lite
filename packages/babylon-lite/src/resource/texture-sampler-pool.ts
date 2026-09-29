@@ -30,8 +30,7 @@ export function getOrCreateSampler(engine: EngineContext, descriptor: GPUSampler
     const caches = (samplerCaches ??= new WeakMap());
     let cache = caches.get(device);
     if (!cache) {
-        cache = new Map();
-        caches.set(device, cache);
+        caches.set(device, (cache = new Map()));
     }
     let key = extraKey;
     for (const property in textureSamplerDefaults) {
@@ -40,8 +39,7 @@ export function getOrCreateSampler(engine: EngineContext, descriptor: GPUSampler
     }
     let sampler = cache.get(key);
     if (!sampler) {
-        sampler = device.createSampler(descriptor);
-        cache.set(key, sampler);
+        cache.set(key, (sampler = device.createSampler(descriptor)));
     }
     return sampler;
 }

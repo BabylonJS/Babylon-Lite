@@ -145,6 +145,12 @@ stages:
                 - script: npx vitest run --project gl-build
                   displayName: "Run vitest lite-gl build-output tests"
 
+                - script: pnpm test:integration:gl
+                  displayName: "Run lite-gl source integration tests"
+                  env:
+                      HEADLESS: "true"
+                      CI: "true"
+
                 # lite-gl visual parity vs the Babylon ThinEngine reference. WebGL2
                 # runs headless (SwiftShader in CI, enabled by CI=true in
                 # playwright.config.ts), so no cloud browser is needed — unlike the
@@ -175,10 +181,12 @@ stages:
                       PERF_REGRESSION_PCT: "50"
 
                 - script: |
-                      npx playwright test tests/lite/plumbing/dispose.spec.ts
-                      npx playwright test tests/lite/plumbing/material-swap.spec.ts
-                      npx playwright test tests/lite/plumbing/memory-leak.spec.ts
-                      npx playwright test tests/lite/plumbing/picking.spec.ts
+                      npx playwright test \
+                          tests/lite/plumbing/compute-lifecycle.spec.ts \
+                          tests/lite/plumbing/dispose.spec.ts \
+                          tests/lite/plumbing/material-swap.spec.ts \
+                          tests/lite/plumbing/memory-leak.spec.ts \
+                          tests/lite/plumbing/picking.spec.ts
                   displayName: "Run plumbing tests"
                   env:
                       HEADLESS: "true"

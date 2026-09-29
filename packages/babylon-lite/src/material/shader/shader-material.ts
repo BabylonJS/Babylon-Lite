@@ -489,6 +489,20 @@ export function setShaderUniform(material: ShaderMaterial, name: string, value: 
     setUniformValue(material, name, value);
 }
 
+/** Get a declared uniform's current value.
+ *  Scalars are returned as numbers. Vector and matrix values are returned as the material's live backing
+ *  `Float32Array`, with stable identity and no copy. Do not mutate this array directly: doing so bypasses material
+ *  versioning and GPU invalidation. Passing an already-mutated backing array to `setShaderUniform` will not trigger
+ *  an update because the setter cannot detect a difference. To update the uniform, prepare the new values in separate
+ *  storage and pass that separate value to `setShaderUniform`. */
+export function getShaderUniform(material: ShaderMaterial, name: string): number | Float32Array {
+    const slot = material._uniformValues.get(name);
+    if (!slot) {
+        throw new Error(`ShaderMaterial: uniform "${name}" was not declared.`);
+    }
+    return slot.value.length === 1 ? slot.value[0]! : slot.value;
+}
+
 /** Bind (or clear) the texture for a declared sampler, enforcing that depth and
  *  non-depth samplers receive a matching `Texture2D`.
  *  @param material - Target material.
@@ -521,6 +535,15 @@ export function setShaderTexture(material: ShaderMaterial, name: string, texture
         material._resourceVersion++;
         bumpVisibilityEpoch();
     }
+}
+
+/** Get the texture currently bound to a declared sampler, preserving wrapper identity. */
+export function getShaderTexture(material: ShaderMaterial, name: string): Texture2D | null {
+    const slot = material._textureSlots.get(name);
+    if (!slot) {
+        throw new Error(`ShaderMaterial: sampler "${name}" was not declared.`);
+    }
+    return slot.current;
 }
 
 /** Bind (or clear) a declared read-only storage buffer. */

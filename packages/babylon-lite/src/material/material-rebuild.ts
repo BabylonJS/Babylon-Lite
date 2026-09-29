@@ -15,6 +15,7 @@ export interface RebuildMaterialOptions {
 interface DetachablePacket {
     _disposed?: boolean;
     _owner?: DetachablePacket[];
+    _onOwnerEmpty?: () => void;
 }
 
 type DetachableDisposer = (() => void) & { p?: DetachablePacket };
@@ -22,7 +23,18 @@ type DetachableDisposer = (() => void) & { p?: DetachablePacket };
 /** Rebuild renderables whose pipeline/bind-group feature state depends on a material.
  *  Use after texture, sampler, bind-group layout, culling, or feature changes.
  *  UBO-only scalar/vector changes should use markMaterialUboDirty instead. */
-export function rebuildMaterial(scene: SceneContext, materialOrView: Material, options?: RebuildMaterialOptions): void {
+export function rebuildMaterial(scene: SceneContext, materialOrView: Material, options?: RebuildMaterialOptions): void | Promise<void> {
+    const completion = rebuildMaterialRenderables(scene, materialOrView, options);
+    if (completion) {
+        void completion.catch((error) => {
+            scene._runtimeBuilds?._x(error);
+            console.error(error);
+        });
+    }
+    return completion;
+}
+
+function rebuildMaterialRenderables(scene: SceneContext, materialOrView: Material, options?: RebuildMaterialOptions): Promise<void> | undefined {
     const source = getMaterialSource(materialOrView);
     (source as { _renderFeatures?: unknown })._renderFeatures = undefined;
     const rebuildViews = options?.rebuildViews !== false;
@@ -48,16 +60,11 @@ export function rebuildMaterial(scene: SceneContext, materialOrView: Material, o
         scene._materialEpoch++; // material renderables (and their UBOs) were rebuilt → bump the material epoch
     }
     if (pending.length > 0) {
-        void Promise.all(pending)
-            .then(() => {
-                if (options?.rebuildFrameGraph) {
-                    scene._frameGraph.build();
-                }
-            })
-            .catch((error) => {
-                scene._runtimeBuilds?._x(error);
-                console.error(error);
-            });
+        return Promise.all(pending).then(() => {
+            if (options?.rebuildFrameGraph) {
+                scene._frameGraph.build();
+            }
+        });
     } else if (options?.rebuildFrameGraph) {
         scene._frameGraph.build();
     }
@@ -98,6 +105,10 @@ function rebuildSceneMesh(ctx: SceneContext, mesh: Mesh): boolean | Promise<void
     if (old) {
         ctx._meshDisposables.delete(mesh);
         for (const dispose of old) {
+            const lifetimeIndex = ctx._disposables.indexOf(dispose);
+            if (lifetimeIndex >= 0) {
+                ctx._disposables.splice(lifetimeIndex, 1);
+            }
             const packet = (dispose as DetachableDisposer).p;
             if (packet) {
                 packet._disposed = true;
@@ -108,6 +119,14 @@ function rebuildSceneMesh(ctx: SceneContext, mesh: Mesh): boolean | Promise<void
                         owner.splice(index, 1);
                     }
                     packet._owner = undefined;
+                    if (owner.length === 0) {
+                        packet._onOwnerEmpty?.();
+                    }
+                } else {
+                    packet._onOwnerEmpty?.();
+                }
+                if (packet._onOwnerEmpty) {
+                    packet._onOwnerEmpty = undefined;
                 }
             }
         }

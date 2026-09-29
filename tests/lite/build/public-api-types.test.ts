@@ -35,6 +35,67 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes conditional material rebuild completion", () => {
+        const probePath = resolve(BUILD_DIR, "material-rebuild-api.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    rebuildMaterial,
+    type Material,
+    type MaterialView,
+    type RebuildMaterialOptions,
+    type SceneContext,
+} from "./index.js";
+// @ts-expect-error Completion policy is represented by the return value, not an options type.
+import type { AwaitedRebuildMaterialOptions } from "./index.js";
+
+declare const scene: SceneContext;
+declare const material: Material;
+declare const view: MaterialView;
+declare const options: RebuildMaterialOptions;
+
+const defaultResult: void | Promise<void> = rebuildMaterial(scene, material);
+const configuredResult: void | Promise<void> = rebuildMaterial(scene, view, {
+    rebuildViews: true,
+    rebuildFrameGraph: true,
+});
+const variableResult: void | Promise<void> = rebuildMaterial(scene, view, options);
+// @ts-expect-error Rebuild completion is conditional.
+const promiseOnly: Promise<void> = rebuildMaterial(scene, material);
+// @ts-expect-error Rebuild completion is conditional.
+const voidOnly: void = rebuildMaterial(scene, material);
+
+void [defaultResult, configuredResult, variableResult, promiseOnly, voidOnly];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes graph-specific Node block loaders only through the root API", () => {
         const probePath = resolve(BUILD_DIR, "node-block-loader.probe.ts");
         try {
@@ -605,6 +666,13 @@ void options;
         expect(dts).toMatch(/unlockPhysicsBodyRotationAxes\(world: PhysicsWorld, body: PhysicsBody, axes: readonly PhysicsRotationAxis\[\]\): void/);
     });
 
+    it("exposes deferred absolute world-space bone poses", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).toMatch(/setBoneWorldPoseDeferred\(skeleton: Skeleton, bone: Bone, px: number, py: number, pz: number, rx: number, ry: number, rz: number, rw: number\): void/);
+        expect(dts).toMatch(/@public\s*\*\/\s*export declare function setBoneWorldPoseDeferred/);
+    });
+
     it("exposes readonly rendering-context introspection without internal registries", () => {
         const dts = readFileSync(DTS_PATH, "utf-8");
 
@@ -622,6 +690,149 @@ void options;
 
         expect(dts).toMatch(/getMaterialTextures\(material: Material(?:_\d+)?\): readonly Texture2D(?:_\d+)?\[\]/);
         expect(dts).not.toMatch(/^\s*_textureSlots:/m);
+    });
+
+    it("exposes root-only material and texture domain accessors", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+        expect(dts).not.toMatch(/\b\w*Inspection\w*\b/);
+        expect(dts).not.toMatch(/\bMaterialTextureBinding\w*\b/);
+
+        const requiredSymbols = [
+            "getMaterialSource",
+            "isMaterialView",
+            "getMaterialFamily",
+            "getMaterialTextures",
+            "getStandardEmissiveTexture",
+            "getStandardBumpTexture",
+            "getStandardSpecularTexture",
+            "getStandardAmbientTexture",
+            "getStandardLightmapTexture",
+            "getStandardOpacityTexture",
+            "getStandardReflectionTexture",
+            "getStandardReflectionCubeTexture",
+            "getPbrAlphaCutoff",
+            "getPbrEmissiveColor",
+            "getPbrMetallicReflectance",
+            "getPbrClearCoat",
+            "getPbrSheen",
+            "getPbrIridescence",
+            "getPbrAnisotropy",
+            "getPbrSubsurface",
+            "getPbrTransmission",
+            "getPbrDispersion",
+            "isPbrGammaAlbedo",
+            "getPbrUnlit",
+            "isPbrSkybox",
+            "getShadowOnly",
+            "hasMaterialUvTransform",
+            "getShaderUniform",
+            "getShaderTexture",
+            "getTextureMetadata",
+            "getTextureTransform",
+            "setTextureTransform",
+            "getTextureCoordinateIndex",
+            "hasTextureTransform",
+            "TextureMetadata",
+            "TextureTransform",
+        ] as const;
+        const missingSymbols = requiredSymbols.filter((symbol) => !new RegExp(`\\b(?:function|interface|type) ${symbol}\\b`).test(dts));
+        expect(missingSymbols, "Missing domain accessor root exports").toEqual([]);
+
+        const probePath = resolve(BUILD_DIR, "domain-accessor-api.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    getMaterialSource, isMaterialView, getMaterialFamily, getMaterialTextures,
+    getStandardEmissiveTexture, getStandardReflectionCubeTexture,
+    getPbrClearCoat, getPbrSubsurface, getPbrUnlit, getShadowOnly,
+    hasMaterialUvTransform, getShaderUniform, getShaderTexture,
+    getTextureMetadata, getTextureTransform, setTextureTransform,
+    getTextureCoordinateIndex, hasTextureTransform,
+    type ClearCoatProps, type Material, type MaterialView, type PbrMaterialProps, type ShaderMaterial,
+    type SubSurfaceProps,
+    type StandardMaterialProps, type Texture2D, type TextureMetadata, type TextureTransform,
+} from "./index.js";
+// @ts-expect-error The Inspector-shaped dispatcher was removed from Lite.
+import { inspectMaterial } from "./index.js";
+
+declare const material: Material;
+declare const view: MaterialView;
+declare const standard: StandardMaterialProps;
+declare const pbr: PbrMaterialProps;
+declare const shader: ShaderMaterial;
+declare const texture: Texture2D;
+declare const transform: TextureTransform;
+declare function consumeFloat32Array(value: Float32Array): void;
+
+const source: Material = getMaterialSource(view);
+const viewFlag: boolean = isMaterialView(material);
+const family: string | undefined = getMaterialFamily(material);
+const materialTextures: readonly Texture2D[] = getMaterialTextures(view);
+const standardTexture: Texture2D | null | undefined = getStandardEmissiveTexture(standard);
+getStandardReflectionCubeTexture(standard);
+const clearCoat: Readonly<ClearCoatProps> | undefined = getPbrClearCoat(pbr);
+const subsurface: Readonly<SubSurfaceProps> | undefined = getPbrSubsurface(pbr);
+const unlit: readonly [number, number, number] | undefined = getPbrUnlit(pbr);
+const shadowOnly = getShadowOnly(pbr);
+const hasUv: boolean = hasMaterialUvTransform(view);
+const uniform: number | Float32Array = getShaderUniform(shader, "color");
+const shaderTexture: Texture2D | null = getShaderTexture(shader, "colorMap");
+const metadata: TextureMetadata | undefined = getTextureMetadata(texture);
+const textureTransform: TextureTransform | undefined = getTextureTransform(texture);
+const changed: boolean = setTextureTransform(texture, transform);
+const coordinateIndex: 0 | 1 = getTextureCoordinateIndex(texture);
+const hasTransform: boolean = hasTextureTransform(texture);
+if (clearCoat) {
+    // @ts-expect-error Getter configuration objects are compile-time readonly.
+    clearCoat.roughness = 1;
+}
+if (unlit) {
+    // @ts-expect-error Getter tuples are compile-time readonly.
+    unlit[0] = 1;
+}
+if (typeof uniform !== "number") {
+    const nativeArray: Float32Array = uniform;
+    const view: Float32Array = uniform.subarray();
+    consumeFloat32Array(uniform);
+    void [nativeArray, view, uniform.buffer];
+}
+// @ts-expect-error Metadata never exposes the backing GPU texture.
+metadata?.texture;
+// @ts-expect-error Metadata never exposes the backing texture view.
+metadata?.view;
+void [
+    inspectMaterial, source, viewFlag, family, materialTextures, standardTexture,
+    clearCoat, subsurface, unlit, shadowOnly, hasUv, uniform, shaderTexture,
+    metadata, textureTransform, changed, coordinateIndex, hasTransform,
+];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
     });
 
     it("rejects invalid emitter fields while preserving extended provider options", () => {

@@ -518,9 +518,7 @@ export function disposeScene(scene: SceneContext): void {
             ctx._renderables.length = ctx._uniformUpdaters.length = 0;
             return 1;
         });
-        for (const fn of ctx._disposables) {
-            fn();
-        }
+        ctx._disposables.splice(0).forEach((fn) => fn());
         for (const fns of ctx._meshDisposables.values()) {
             for (const fn of fns) {
                 fn();

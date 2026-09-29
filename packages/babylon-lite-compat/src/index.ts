@@ -37,6 +37,13 @@ export { PickingInfo } from "./culling/picking-info.js";
 // ─── Engine ──────────────────────────────────────────────────────────
 export { AbstractEngine, ThinEngine, WebGPUEngine, Engine, NullEngine } from "./engine/engine.js";
 
+// ─── Compute and buffers ─────────────────────────────────────────────
+export { ComputeShader, ComputeShaderParse, RegisterComputeShader } from "./compute/compute-shader.js";
+export type { ComputeBindingLocation, ComputeBindingMapping, IComputeShaderOptions, IComputeShaderPath } from "./compute/compute-shader.js";
+export { StorageBuffer } from "./buffers/storage-buffer.js";
+export type { DataArray } from "./buffers/storage-buffer.js";
+export { UniformBuffer } from "./materials/uniform-buffer.js";
+
 // ─── Scene graph ─────────────────────────────────────────────────────
 export { Node } from "./node/node.js";
 export { AbstractScene } from "./scene/abstract-scene.js";
@@ -79,6 +86,11 @@ export {
     CreateDashedLines,
     CreateTiledBox,
     CreateTiledPlane,
+    CreatePolygon,
+    ExtrudePolygon,
+    CreatePolygonVertexData,
+    PolygonBuilder,
+    RegisterPolygonBuilder,
 } from "./meshes/meshes.js";
 export { CSG, CSG2, InitializeCSG2Async } from "./meshes/csg.js";
 export { MeshoptCompression } from "./meshes/compression.js";
@@ -139,6 +151,19 @@ export { SceneLoader, AssetContainer, ImportMeshAsync, AppendSceneAsync, LoadAss
 export type { ISceneLoaderProgressEvent, ISceneLoaderOptions, ImportMeshOptions, AppendOptions, LoadAssetContainerOptions } from "./loading/scene-loader.js";
 export { AssetsManager, AbstractAssetTask, CustomAssetTask } from "./loading/assets-manager.js";
 export { KHR_materials_variants } from "./loading/material-variants.js";
+export { USDFileLoader, RegisterUSDFileLoader } from "./loading/usd-file-loader.js";
+export { _RegisterUSDLoaderDependencies } from "./loading/usd-file-loader.js";
+export type {
+    USDBinaryInput,
+    USDVirtualFiles,
+    USDLoadProgress,
+    USDImportTimings,
+    USDImportStatistics,
+    USDImportDiagnostics,
+    USDFileLoaderOptions,
+} from "./loading/usd-file-loader.js";
+export { SPLATFileLoader, RegisterSPLATFileLoader } from "./loading/splat-file-loader.js";
+export type { SPLATLoadingOptions } from "./loading/splat-file-loader.js";
 
 // ─── Picking ─────────────────────────────────────────────────────────
 export { GPUPicker } from "./picking/gpu-picker.js";
@@ -176,7 +201,7 @@ export { GetSupportedSimultaneousLights } from "./materials/material-helpers.js"
 
 // ─── Animation ───────────────────────────────────────────────────────
 export { Animation, AnimationGroup, AnimationTypes, AnimationLoopModes, AnimationKeyInterpolation, Animatable } from "./animations/animation.js";
-export type { IAnimationKey, AnimationGroupState } from "./animations/animation.js";
+export type { AnimationGroupState, AnimationValue, IAnimationKey, IAnimationVectorValue } from "./animations/animation.js";
 export {
     EasingFunction,
     CircleEase,
@@ -189,10 +214,13 @@ export {
     BackEase,
     ElasticEase,
     BounceEase,
+    PowerEase,
+    BezierCurveEase,
     EASINGMODE_EASEIN,
     EASINGMODE_EASEOUT,
     EASINGMODE_EASEINOUT,
 } from "./animations/easing.js";
+export type { IEasingFunction } from "./animations/easing.js";
 
 // ─── Misc ────────────────────────────────────────────────────────────
 export { Observable } from "./misc/observable.js";
@@ -348,9 +376,10 @@ export {
     FluidRenderer,
     FluidRendererSceneComponent,
     RegisterFluidRenderer,
-    USDFileLoader,
-    RegisterUSDFileLoader,
     DitheredTileFadeMaterialPlugin,
+    RootMotionSource,
+    RootMotionClip,
+    RootMotionController,
     FlowGraphValidationSeverity,
     ValidateFlowGraph,
     ValidateFlowGraphWithBlockList,
@@ -369,18 +398,12 @@ export type {
     IGaussianSplattingStreamOptions,
     ISOGLODMetadata,
     IGaussianSplattingStreamingPart,
-    USDBinaryInput,
-    USDVirtualFiles,
-    USDLoadProgress,
-    USDImportTimings,
-    USDImportStatistics,
-    USDImportDiagnostics,
-    USDFileLoaderOptions,
     DitheredTileFadeSupportedMaterial,
     DitheredTileFadeMesh,
     IDitheredTileFadeBounds,
     IFlowGraphValidationIssue,
     IFlowGraphValidationResult,
+    IRootMotionClipOptions,
 } from "./unsupported/unsupported-apis.js";
 export {
     ReflectionProbe,
