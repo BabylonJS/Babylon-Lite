@@ -407,6 +407,8 @@ export { createDynamicTexture, updateDynamicTexture } from "./texture/dynamic-te
 export type { DynamicTexture2D, DynamicTexture2DOptions, DynamicTextureUpdateOptions } from "./texture/dynamic-texture.js";
 export { createTexture2DFromExternalImage } from "./texture/external-image-texture.js";
 export type { ExternalImageTexture2DOptions } from "./texture/external-image-texture.js";
+export { createExternalTexture, isExternalTextureReady } from "./texture/external-texture.js";
+export type { ExternalTexture } from "./texture/external-texture.js";
 export { createHtmlTexture, updateHtmlTexture, requestHtmlTextureUpdate, disposeHtmlTexture, isHtmlInCanvasSupported, whenHtmlTextureReady } from "./texture/html-texture.js";
 export type { HtmlTexture2D, HtmlTexture2DOptions } from "./texture/html-texture.js";
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
@@ -498,8 +500,10 @@ export type {
 export type { MetallicReflectanceOptions } from "./material/pbr/set-metallic-reflectance.js";
 export {
     createShaderMaterial,
+    getShaderExternalTexture,
     getShaderUniform,
     getShaderTexture,
+    setShaderExternalTexture,
     setShaderUniform,
     setShaderTexture,
     setShaderStorageBuffer,

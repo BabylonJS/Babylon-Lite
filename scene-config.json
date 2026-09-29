@@ -2717,6 +2717,16 @@
         "skipPerf": true
     },
     {
+        "id": 306,
+        "slug": "scene306-external-video-texture",
+        "name": "Scene 306 — External Video Texture",
+        "maxMad": 0.02,
+        "maxRawKB": 45,
+        "description": "A deterministic canvas-backed HTMLVideoElement is sampled directly as a WGSL texture_external by Babylon.js and Babylon Lite, without copying into Texture2D.",
+        "tags": ["shader", "texture", "video", "external-texture", "procedural"],
+        "skipPerf": true
+    },
+    {
         "id": 310,
         "slug": "scene310-mesh-blending-core",
         "name": "Scene 310 — Mesh Blending Core",

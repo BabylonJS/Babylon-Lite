@@ -6,6 +6,7 @@ import type { Mat4 } from "../../math/types.js";
 import type { WgslSource } from "../../shader/wgsl.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { MeshGPU } from "../../mesh/mesh.js";
+import type { ExternalTexture } from "../../texture/external-texture.js";
 import { getShaderGroupBuilder } from "./shader-group-builder.js";
 import { _attributeInfo } from "./shader-vb-support.js";
 import { bumpVisibilityEpoch } from "../../engine/engine.js";
@@ -42,7 +43,7 @@ export type ShaderDefineValue = boolean | number;
 export type ShaderDefineMap = Readonly<Record<string, ShaderDefineValue>>;
 
 /** Options describing a ShaderMaterial: WGSL sources, attributes, uniforms,
- *  samplers, defines, and blend/depth state. Passed to `createShaderMaterial()`. */
+ *  samplers, external textures, defines, and blend/depth state. Passed to `createShaderMaterial()`. */
 export interface ShaderMaterialOptions {
     readonly name?: string;
     readonly vertexSource: WgslSource;
@@ -50,6 +51,7 @@ export interface ShaderMaterialOptions {
     readonly attributes: readonly ShaderAttributeName[];
     readonly uniforms?: readonly ShaderUniformOption[];
     readonly samplers?: readonly ShaderSamplerOption[];
+    readonly externalTextures?: readonly string[];
     readonly storageBuffers?: readonly ShaderStorageBufferOption[];
     readonly defines?: ShaderDefineMap;
     /** Bind and inject the mesh's optional thin-instance RGBA stream for this material. Disable on
@@ -147,13 +149,18 @@ export interface ShaderTextureSlot {
     _sampler?: GPUSampler | null;
 }
 
+export interface ShaderExternalTextureSlot {
+    readonly name: string;
+    current: ExternalTexture | null;
+}
+
 export interface ShaderStorageBufferSlot {
     readonly decl: ShaderStorageBufferDecl;
     current: StorageBuffer | null;
 }
 
 /** A custom WGSL material: compiled from user-supplied vertex/fragment sources
- *  with declared attributes, uniforms, samplers, and defines. Update its values
+ *  with declared attributes, uniforms, samplers, external textures, and defines. Update its values
  *  via `setShaderUniform()` / `setShaderTexture()` and friends. */
 export interface ShaderMaterial extends Material {
     readonly name?: string;
@@ -164,6 +171,7 @@ export interface ShaderMaterial extends Material {
     readonly attributes: readonly ShaderAttributeName[];
     readonly uniformDecls: readonly ShaderUniformDecl[];
     readonly samplerDecls: readonly ShaderSamplerDecl[];
+    readonly externalTextureDecls: readonly string[];
     readonly storageBufferDecls: readonly ShaderStorageBufferDecl[];
     readonly defines: readonly ShaderDefine[];
     /** @internal Explicit thin-instance color preference; numeric zero is reserved for compact runtime checks. */
@@ -193,6 +201,8 @@ export interface ShaderMaterial extends Material {
     _uniformValues: Map<string, ShaderUniformSlot>;
     /** @internal */
     _textureSlots: Map<string, ShaderTextureSlot>;
+    /** @internal */
+    _externalTextureSlots: Map<string, ShaderExternalTextureSlot>;
     /** @internal */
     _storageBufferSlots: Map<string, ShaderStorageBufferSlot>;
     /** @internal */
@@ -257,8 +267,8 @@ export function _isShaderSystemUniform(name: string): name is ShaderSystemUnifor
 }
 
 /** Create a ShaderMaterial from WGSL sources and declarations, validating
- *  attributes, uniforms, samplers, and defines.
- *  @param options - Sources, attributes, uniforms, samplers, defines, and render state.
+ *  attributes, uniforms, samplers, external textures, and defines.
+ *  @param options - Sources, attributes, uniforms, resource declarations, defines, and render state.
  *  @returns The constructed `ShaderMaterial`. */
 export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMaterial {
     if (!options.vertexSource || !options.fragmentSource) {
@@ -316,6 +326,16 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         textureSlots.set(decl.name, { decl, current: null });
     }
 
+    const externalTextureDecls: string[] = [];
+    const externalTextureSlots = new Map<string, ShaderExternalTextureSlot>();
+    for (const name of options.externalTextures ?? []) {
+        assertIdentifier("external texture", name);
+        assertUniqueName(usedNames, "external texture", name);
+        assertUniqueName(usedNames, "external texture", `${name}Sampler`);
+        externalTextureDecls.push(name);
+        externalTextureSlots.set(name, { name, current: null });
+    }
+
     const storageBufferDecls: ShaderStorageBufferDecl[] = [];
     const storageBufferSlots = new Map<string, ShaderStorageBufferSlot>();
     for (const opt of options.storageBuffers ?? []) {
@@ -348,6 +368,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         attributes,
         uniformDecls,
         samplerDecls,
+        externalTextureDecls,
         storageBufferDecls,
         defines,
         _tic: options.useThinInstanceColors,
@@ -369,6 +390,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         _uboVersion: 0,
         _uniformValues: uniformValues,
         _textureSlots: textureSlots,
+        _externalTextureSlots: externalTextureSlots,
         _storageBufferSlots: storageBufferSlots,
         _uniformVersion: 0,
         _resourceVersion: 0,
@@ -542,6 +564,28 @@ export function getShaderTexture(material: ShaderMaterial, name: string): Textur
     const slot = material._textureSlots.get(name);
     if (!slot) {
         throw new Error(`ShaderMaterial: sampler "${name}" was not declared.`);
+    }
+    return slot.current;
+}
+
+/** Bind (or clear) a caller-owned video external texture. */
+export function setShaderExternalTexture(material: ShaderMaterial, name: string, texture: ExternalTexture | null): void {
+    const slot = material._externalTextureSlots.get(name);
+    if (!slot) {
+        throw new Error(`ShaderMaterial: external texture "${name}" was not declared.`);
+    }
+    if (slot.current !== texture) {
+        slot.current = texture;
+        material._resourceVersion++;
+        bumpVisibilityEpoch();
+    }
+}
+
+/** Get the external texture currently bound to a declared external-texture slot. */
+export function getShaderExternalTexture(material: ShaderMaterial, name: string): ExternalTexture | null {
+    const slot = material._externalTextureSlots.get(name);
+    if (!slot) {
+        throw new Error(`ShaderMaterial: external texture "${name}" was not declared.`);
     }
     return slot.current;
 }

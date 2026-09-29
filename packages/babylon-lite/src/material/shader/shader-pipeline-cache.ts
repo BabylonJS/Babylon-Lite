@@ -142,6 +142,7 @@ function bindingsKey(material: ShaderMaterial): string {
         _getShaderVbSupport()?._layouts(material) ?? null,
         material.uniformDecls.map((decl) => [decl.name, decl.type]),
         material.samplerDecls.map((decl) => [decl.name, decl.sampleType ?? "float", decl.viewDimension ?? "2d", decl.comparison === true]),
+        material.externalTextureDecls,
         material.storageBufferDecls.map((decl) => [decl.name, decl.type]),
     ]);
 }

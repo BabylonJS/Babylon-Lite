@@ -101,6 +101,31 @@ describe("ShaderMaterial pipeline cache", () => {
         expect(createRenderPipeline).toHaveBeenCalledTimes(2);
     });
 
+    it("keeps external-texture layouts separate from ordinary shader layouts", () => {
+        clearShaderPipelineCache();
+        clearSceneBGLCache();
+        const { engine } = makeEngine();
+        const ordinary = makeMaterial();
+        const external = createShaderMaterial({
+            vertexSource: ordinary.vertexSource,
+            fragmentSource: ordinary.fragmentSource,
+            attributes: ["position"],
+            uniforms: ["world", { name: "tint", type: "vec3<f32>" }],
+            externalTextures: ["videoSampler"],
+        });
+        enableShaderPipelineCache(engine, [{ material: ordinary }, { material: external }]);
+
+        const ordinaryBindings = getOrCreateShaderPipelineBindings(engine, ordinary);
+        const externalBindings = getOrCreateShaderPipelineBindings(engine, external);
+
+        expect(externalBindings).not.toBe(ordinaryBindings);
+        expect((externalBindings.group1BGL as unknown as GPUBindGroupLayoutDescriptor).entries).toContainEqual({
+            binding: 2,
+            visibility: 3,
+            externalTexture: {},
+        });
+    });
+
     it("does not reuse shared cache objects from a lost device", () => {
         clearShaderPipelineCache();
         clearSceneBGLCache();

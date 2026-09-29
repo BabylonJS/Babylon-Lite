@@ -4,7 +4,7 @@
 
 ## Purpose
 
-The ShaderMaterial module provides Lite's WGSL-only equivalent of Babylon.js `ShaderMaterial`: user-authored vertex and fragment shaders, explicit vertex attribute lists, typed custom uniforms, texture samplers, compile-time defines, and render-state hints such as alpha blending.
+The ShaderMaterial module provides Lite's WGSL-only equivalent of Babylon.js `ShaderMaterial`: user-authored vertex and fragment shaders, explicit vertex attribute lists, typed custom uniforms, texture samplers, video external textures, compile-time defines, and render-state hints such as alpha blending.
 
 This module is intentionally **not** a GLSL compatibility layer. Babylon.js documentation and playgrounds remain useful as reference scenes and API concepts, but Lite accepts WGSL source only. There is no GLSL parser, no GLSL-to-WGSL transpiler, and no `Effect.ShadersStore` global registry in core.
 
@@ -37,6 +37,7 @@ export interface ShaderMaterialOptions {
     readonly attributes: readonly ShaderAttributeName[];
     readonly uniforms?: readonly ShaderUniformOption[];
     readonly samplers?: readonly ShaderSamplerOption[];
+    readonly externalTextures?: readonly string[];
     readonly defines?: ShaderDefineMap;
     /** Bind/inject the mesh's optional thin-instance RGBA stream for this material. Default true. */
     readonly useThinInstanceColors?: boolean;
@@ -70,6 +71,7 @@ export interface ShaderMaterial extends Material {
     readonly attributes: readonly ShaderAttributeName[];
     readonly uniformDecls: readonly ShaderUniformDecl[];
     readonly samplerDecls: readonly ShaderSamplerDecl[];
+    readonly externalTextureDecls: readonly string[];
     readonly defines: readonly ShaderDefine[];
     readonly needAlphaBlending: boolean;
     readonly blendMode: "alpha" | "additive";
@@ -80,6 +82,7 @@ export interface ShaderMaterial extends Material {
     readonly depthCompare: GPUCompareFunction;
     _uniformValues: Map<string, ShaderUniformSlot>;
     _textureSlots: Map<string, ShaderTextureSlot>;
+    _externalTextureSlots: Map<string, ShaderExternalTextureSlot>;
     _uniformVersion: number;
     _resourceVersion: number;
 }
@@ -255,6 +258,32 @@ Each sampler name maps to a pair of WGSL bindings:
 
 Depth samplers use `texture_depth_2d` and a filtering sampler is not assumed. Public APIs accept `Texture2D` only, never raw GPU handles.
 
+### External texture declarations
+
+```typescript
+export interface ExternalTexture {
+    readonly video: HTMLVideoElement;
+}
+
+export function createExternalTexture(video: HTMLVideoElement): ExternalTexture;
+export function isExternalTextureReady(texture: ExternalTexture): boolean;
+export function setShaderExternalTexture(material: ShaderMaterial, name: string, texture: ExternalTexture | null): void;
+export function getShaderExternalTexture(material: ShaderMaterial, name: string): ExternalTexture | null;
+```
+
+`options.externalTextures` is a list of Babylon-style binding names. Each name maps to an external texture and its required filtering sampler:
+
+```wgsl
+@group(1) @binding(N) var videoSampler: texture_external;
+@group(1) @binding(N + 1) var videoSamplerSampler: sampler;
+```
+
+External textures are sampled with `textureSampleBaseClampToEdge(videoSampler, videoSamplerSampler, uv)`. Lite binds the pooled default nearest clamp-to-edge sampler, matching Babylon.js `ExternalTexture`; raw GPU samplers remain internal. A resource name may not appear in both `samplers` and `externalTextures`; all declarations and generated `<name>Sampler` identifiers share the generated group-1 namespace.
+
+The wrapper is pure state around a caller-owned `HTMLVideoElement`. It owns no browser or GPU resources and has no disposal API. The application remains responsible for video playback, media-stream tracks, object URLs, and element lifetime. `isExternalTextureReady` reports whether the video has current frame data.
+
+WebGPU external textures are ephemeral. Babylon Lite calls `GPUDevice.importExternalTexture({ source: texture.video })` whenever a ShaderMaterial bind group containing an external texture is refreshed for rendering, including every frame even when wrapper identity is unchanged. This per-frame import does not reacquire, release, or otherwise change ordinary `Texture2D` ownership. Public APIs never expose `GPUExternalTexture`.
+
 ### Defines
 
 ```typescript
@@ -283,6 +312,7 @@ export type ShaderUniformValue = number | readonly number[] | Float32Array;
 
 export function setShaderUniform(material: ShaderMaterial, name: string, value: ShaderUniformValue): void;
 export function setShaderTexture(material: ShaderMaterial, name: string, texture: Texture2D | null): void;
+export function setShaderExternalTexture(material: ShaderMaterial, name: string, texture: ExternalTexture | null): void;
 export function enableShaderMaterialUniformCaching(): void;
 export function enableShaderUniformRangeUpdates(scene: SceneContext, material: ShaderMaterial): void;
 ```
@@ -309,6 +339,10 @@ and the view/sampler captured by the bind group. It increments `_resourceVersion
 facade or those resources change. This keeps ordinary repeated sets allocation-free while allowing a
 surface RTT resize callback to pass the same stable facade again and rebuild against its replacement
 attachment. The renderable rebuilds the group-1 bind group when the resource version changes.
+
+`setShaderExternalTexture` validates that the external declaration exists and increments `_resourceVersion`
+only when wrapper identity changes. Renderables still rebuild group 1 every frame while the material has
+external declarations because imported external textures expire independently of material state.
 
 Convenience wrappers may be added if they stay small and tree-shakable:
 
@@ -340,22 +374,24 @@ Lite prepends a generated prelude before user source:
 2. `ShaderSystemUniforms` for requested per-mesh system values (`@group(1) @binding(0)`).
 3. Optional `ShaderUniforms` for custom uniforms (`@group(1) @binding(1)`).
 4. Texture/sampler declarations for `options.samplers`.
-5. WGSL const declarations for `options.defines`.
-6. `VertexInput` generated from `options.attributes`.
-7. Opt-in `getFinalWorld(input)` and `getFinalColor(input)` helpers, specialized for the active pipeline variant.
+5. External texture/sampler declarations for `options.externalTextures`.
+6. WGSL const declarations for `options.defines`.
+7. `VertexInput` generated from `options.attributes`.
+8. Opt-in `getFinalWorld(input)` and `getFinalColor(input)` helpers, specialized for the active pipeline variant.
 
 User WGSL must not declare:
 
 - `@group(0)` bindings.
 - `@group(1)` bindings using names generated by the material.
 - `struct VertexInput` unless an option explicitly opts out of generated input.
-- Duplicate uniform, sampler, or define identifiers.
+- Duplicate uniform, sampler, external texture, or define identifiers.
 
 Generated names intentionally match the names listed in the options where possible:
 
 - System matrix fields are available as `shaderSystem.world`, `shaderSystem.worldViewProjection`, etc.
 - Custom uniforms are available as `shaderUniforms.time`, `shaderUniforms.direction`, etc.
 - Texture samplers are available as `<name>` and `<name>Sampler`.
+- External textures are available as their declared names with generated `<name>Sampler` filtering samplers and are sampled with `textureSampleBaseClampToEdge`.
 - Scene fields remain available through `scene.viewProjection`, `scene.view`, `scene.vEyePosition`, etc.
 
 ## Internal Architecture
@@ -397,10 +433,10 @@ The group builder has no module-level registry and imports renderable code only 
 
 - Normalized source strings.
 - Normalized attributes.
-- Normalized uniform/sampler/define declarations.
+- Normalized uniform/sampler/external-texture/define declarations.
 - Pipeline variant cache for target signatures.
 - One custom UBO per material if custom uniforms exist.
-- Per-texture slots and resource version.
+- Per-texture and per-external-texture slots plus resource version.
 
 Opaque ShaderMaterials may batch multiple meshes under one renderable if they share one material instance and target pipeline. Transparent ShaderMaterials should emit one renderable per mesh so frame-graph sorting can use each mesh world center.
 
@@ -419,6 +455,7 @@ The cache key includes:
 - Attribute list/order.
 - Uniform layout.
 - Sampler layout.
+- External texture layout.
 - Define set.
 - Alpha/depth/cull state.
 - Render target signature: color format, depth/stencil format, sample count, flipY.
@@ -431,13 +468,14 @@ The pipeline layout is:
 | Group | Owner                   | Bindings                                            |
 | ----- | ----------------------- | --------------------------------------------------- |
 | 0     | Frame graph render task | `SceneUniforms`, scene lights UBO                   |
-| 1     | ShaderMaterial          | system UBO, optional custom UBO, textures, samplers |
+| 1     | ShaderMaterial          | system UBO, optional custom UBO, textures, samplers, external texture/sampler pairs |
 
 Group 1 binding order:
 
 1. `ShaderSystemUniforms` at binding 0. Always present so the layout is stable.
 2. `ShaderUniforms` at binding 1 if custom uniform declarations exist.
 3. Texture/sampler pairs in declaration order.
+4. External texture/sampler pairs in declaration order.
 
 ### UBO layout
 
@@ -555,10 +593,32 @@ fn mainFragment(input: VertexOutput) -> @location(0) vec4<f32> {
 }
 ```
 
+The video external texture equivalent:
+
+```wgsl
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn mainVertex(input: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    out.position = shaderSystem.worldViewProjection * vec4<f32>(input.position, 1.0);
+    out.uv = input.uv;
+    return out;
+}
+
+@fragment
+fn mainFragment(input: VertexOutput) -> @location(0) vec4<f32> {
+    return textureSampleBaseClampToEdge(videoSampler, videoSamplerSampler, input.uv);
+}
+```
+
 ## State Machine / Lifecycle
 
 1. User calls `createShaderMaterial(options)`.
-2. Factory validates attributes, normalizes uniform/sampler/define declarations, creates value slots, and attaches `_buildGroup`.
+2. Factory validates attributes, normalizes uniform/sampler/external-texture/define declarations, creates value slots, and attaches `_buildGroup`.
 3. User assigns the material to meshes and adds them to the scene.
 4. `registerScene` runs deferred builders; `shaderGroupBuilder` dynamically imports `shader-renderable.ts`.
 5. Renderable builder groups meshes by material instance.
@@ -567,7 +627,8 @@ fn mainFragment(input: VertexOutput) -> @location(0) vec4<f32> {
 8. Each frame, `DrawBinding.update(context)` refreshes system UBOs when world/camera/target data changes and custom UBOs when `_uboVersion` changes.
 9. Draw binds vertex buffers in material attribute order, sets index buffer and group 1, then issues an indexed draw with the mesh's optional storage-allocation `_baseVertex`.
 10. If `setShaderTexture` changes a texture, the next update recreates group 1 for affected mesh packets and updates acquired/released texture references.
-11. Material swaps use `shaderGroupBuilder._rebuildSingle`, matching Standard/PBR.
+11. If external textures are declared, every packet update reimports the current video frames and recreates group 1 without changing ordinary texture leases.
+12. Material swaps use `shaderGroupBuilder._rebuildSingle`, matching Standard/PBR.
 
 Auxiliary rebuilds receive an explicit `MeshRebuildResources` lifetime sink instead of registering
 their packet in scene-owned disposer maps. Storage-buffer allocations remain owned by their
@@ -613,6 +674,7 @@ identity guards while updating and drawing, not a second scene-owned auxiliary r
 | `uniforms: ["worldViewProjection"]`               | Same for known system uniforms                                             |
 | Custom `uniforms: ["time"]`                       | Use `{ name: "time", type: "f32" }`                                        |
 | `samplers: ["textureSampler"]`                    | Same name, bound with `setShaderTexture`                                   |
+| `externalTextures: ["videoSampler"]`              | Same name, bound with `setShaderExternalTexture`                           |
 | `defines: ["MyDefine"]`                           | `defines: { MyDefine: true }`, emitted as WGSL const                       |
 | `setFloat`, `setVector3`, `setTexture` methods    | `setShaderUniform`, `setShaderTexture` standalone functions                |
 | `needAlphaBlending`                               | Transparent renderable + blend pipeline                                    |
@@ -627,6 +689,7 @@ identity guards while updating and drawing, not a second scene-owned auxiliary r
 - `shader/scene-uniforms.ts` for shared scene UBO WGSL.
 - `shader/ubo-layout.ts` for typed UBO packing.
 - `texture/texture-2d.ts` for public texture resources.
+- `texture/external-texture.ts` for caller-owned video external-texture state.
 - `resource/gpu-pool.ts` for texture acquire/release and sampler reuse where appropriate.
 - `camera/camera.ts` for active pass view/projection data if a per-mesh system uniform requires projection.
 
@@ -638,6 +701,7 @@ Use Babylon.js doc playgrounds as BJS reference concepts while keeping Lite sour
 | ------------------------------ | --------------------------------- | ---------------------------------------------------------------------- |
 | ShaderMaterial basic color     | Doc playground `#5T8G3I`          | Position attribute, `worldViewProjection`, solid fragment color        |
 | ShaderMaterial texture sampler | Doc playground `#D8IDR8`          | `uv` attribute, `Texture2D`, sampler pair, `setShaderTexture`          |
+| ShaderMaterial external texture | Lite-authored video reference      | `texture_external`, per-frame import, `setShaderExternalTexture`       |
 | ShaderMaterial uniform update  | Doc playground `#5T8G3I#16`       | Custom scalar/vector/color uniform mutation through `setShaderUniform` |
 | ShaderMaterial defines variant | Derived from doc `defines` option | WGSL const define emitted into prelude and included in pipeline key    |
 | ShaderMaterial alpha           | Lite-authored WGSL reference      | `needAlphaBlending` and explicit shader-side discard for alpha testing |

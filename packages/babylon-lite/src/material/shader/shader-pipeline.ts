@@ -103,7 +103,7 @@ export function getOrCreateShaderPipelineBindings(engine: EngineContext, materia
         const customSpec = customFields.length > 0 ? computeUboLayout(customFields) : null;
         const group1BGL = engine._device.createBindGroupLayout({
             label: "shader-material-group1",
-            entries: buildBindGroupLayoutEntries(material.samplerDecls, material.storageBufferDecls, customSpec !== null),
+            entries: buildBindGroupLayoutEntries(material.samplerDecls, material.externalTextureDecls.length, material.storageBufferDecls, customSpec !== null),
         });
         const vbSupport = _getShaderVbSupport();
         bindings = {
@@ -248,6 +248,7 @@ export function _resolveShaderPipelineVariantKey(sig: RenderTargetSignature, mat
 
 function buildBindGroupLayoutEntries(
     samplers: readonly ShaderSamplerDecl[],
+    externalTextureCount: number,
     storageBuffers: readonly { name: string; type: string }[],
     hasCustomUbo: boolean
 ): GPUBindGroupLayoutEntry[] {
@@ -274,6 +275,18 @@ function buildBindGroupLayoutEntries(
             binding: nextBinding++,
             visibility: SHADER_STAGE_ALL,
             sampler: { type: sampler.comparison === true ? "comparison" : sampleType === "float" ? "filtering" : "non-filtering" },
+        });
+    }
+    for (let i = 0; i < externalTextureCount; i++) {
+        entries.push({
+            binding: nextBinding++,
+            visibility: SHADER_STAGE_ALL,
+            externalTexture: {},
+        });
+        entries.push({
+            binding: nextBinding++,
+            visibility: SHADER_STAGE_ALL,
+            sampler: { type: "filtering" },
         });
     }
     for (const _storage of storageBuffers) {
@@ -308,6 +321,11 @@ ${customSpec._structBody}
         const samplerType = sampler.comparison === true ? "sampler_comparison" : "sampler";
         source = wgsl`${source}@group(1) @binding(${nextBinding++}) var ${sampler.name}: ${texType};
 @group(1) @binding(${nextBinding++}) var ${sampler.name}Sampler: ${samplerType};
+`;
+    }
+    for (const name of material.externalTextureDecls) {
+        source = wgsl`${source}@group(1) @binding(${nextBinding++}) var ${name}: texture_external;
+@group(1) @binding(${nextBinding++}) var ${name}Sampler: sampler;
 `;
     }
     for (const storage of material.storageBufferDecls) {

@@ -11,6 +11,7 @@ import { createEmptyUniformBuffer } from "../../resource/empty-uniform-buffer.js
 import { createUniformBuffer } from "../../resource/uniform-buffer.js";
 import { acquireTexture } from "../../resource/texture-acquire.js";
 import { releaseTexture } from "../../resource/texture-release.js";
+import { getOrCreateSampler } from "../../resource/texture-sampler-pool.js";
 import { getEffectiveAspectRatio, getProjectionMatrix, getViewMatrix, getViewProjectionMatrix, _cameraChangeKey } from "../../camera/camera.js";
 import type { Camera } from "../../camera/camera.js";
 import { multiplyMat4IntoBuffer } from "../../math/multiply-mat4-into-buffer.js";
@@ -316,6 +317,7 @@ function createOpaqueRenderable(
     const r: Renderable = {
         order,
         isTransparent: false,
+        _direct: material.externalTextureDecls.length > 0,
         mesh: packets.length === 1 ? packets[0]!.mesh : undefined,
         bind(eng, sig) {
             return createShaderBinding(eng, sig, material, r, update, draw, getUniformBatch, asyncVertexLayout);
@@ -431,19 +433,24 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
         packet._lastAspect = aspect;
         packet._lastAlphaCutoff = alphaCutoff;
     }
-    if (packet._lastResourceVersion !== material._resourceVersion || packet._boundCustomUbo !== state._shaderCustomUbo) {
+    const resourcesChanged = packet._lastResourceVersion !== material._resourceVersion || packet._boundCustomUbo !== state._shaderCustomUbo;
+    if (resourcesChanged) {
         // Acquire the NEW bound textures BEFORE releasing the old set: a texture present in both (e.g. a material
         // that only swapped ONE of its textures) must never transiently drop to ref-count 0, or releaseTexture
         // would destroy a GPUTexture that the new bind group still uses. (Releasing first destroys a unique
         // ref-count-1 texture — exposed by a custom material binding a per-material texture nothing else shares.)
         const newTextures = collectShaderTextures(material);
+        const oldTextures = packet._boundTextures;
+        const sameTextures = newTextures.length === oldTextures.length && newTextures.every((texture, index) => texture === oldTextures[index]);
         const acquiredTextures: Texture2D[] = [];
         let bindGroup: GPUBindGroup;
         try {
             bindGroup = createShaderBindGroup(engine, material, packet.systemUBO);
-            for (const tex of newTextures) {
-                acquireTexture(tex);
-                acquiredTextures.push(tex);
+            if (!sameTextures) {
+                for (const tex of newTextures) {
+                    acquireTexture(tex);
+                    acquiredTextures.push(tex);
+                }
             }
         } catch (error) {
             for (const tex of acquiredTextures) {
@@ -451,14 +458,19 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
             }
             throw error;
         }
-        const oldTextures = packet._boundTextures;
         packet._bindGroup = bindGroup;
-        packet._boundTextures = acquiredTextures;
+        if (!sameTextures) {
+            packet._boundTextures = acquiredTextures;
+        }
         packet._lastResourceVersion = material._resourceVersion;
         packet._boundCustomUbo = state._shaderCustomUbo;
-        for (const tex of oldTextures) {
-            releaseTexture(tex);
+        if (!sameTextures) {
+            for (const tex of oldTextures) {
+                releaseTexture(tex);
+            }
         }
+    } else if (material.externalTextureDecls.length > 0) {
+        packet._bindGroup = createShaderBindGroup(engine, material, packet.systemUBO);
     }
 }
 
@@ -590,6 +602,19 @@ function createShaderBindGroup(engine: EngineContext, material: ShaderMaterial, 
             throw new Error(`ShaderMaterial: sampler "${sampler.name}" has no Texture2D. Call setShaderTexture() before rendering.`);
         }
         entries.push({ binding: nextBinding++, resource: tex.view }, { binding: nextBinding++, resource: tex.sampler });
+    }
+    for (const name of material.externalTextureDecls) {
+        const texture = material._externalTextureSlots.get(name)?.current;
+        if (!texture) {
+            throw new Error(`ShaderMaterial: external texture "${name}" has no source. Call setShaderExternalTexture() before rendering.`);
+        }
+        if (texture.video.readyState < texture.video.HAVE_CURRENT_DATA) {
+            throw new Error(`ShaderMaterial: external texture "${name}" is not ready.`);
+        }
+        entries.push(
+            { binding: nextBinding++, resource: engine._device.importExternalTexture({ source: texture.video }) },
+            { binding: nextBinding++, resource: getOrCreateSampler(engine) }
+        );
     }
     for (const storage of material.storageBufferDecls) {
         const slot = material._storageBufferSlots.get(storage.name);
