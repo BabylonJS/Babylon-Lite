@@ -9,7 +9,7 @@
 
 import { _preloadStdMeshExt } from "./standard-group-builder.js";
 import { _enableStandardGeometrySkeletonVelocity } from "./standard-geometry-feature-hooks.js";
-import { _installStandardUvOffsetResolver } from "./standard-pipeline.js";
+import { _installStandardDepthBiasResolver, _installStandardUvOffsetResolver } from "./standard-pipeline.js";
 
 let _skeletonEnabled = false;
 /** Enable four/eight-influence skeletal skinning for Standard meshes. */
@@ -34,4 +34,18 @@ export function enableStandardUvOffset(): void {
     }
     _uvOffsetEnabled = true;
     _installStandardUvOffsetResolver((material) => material.uvOffset ?? null);
+}
+
+let _depthBiasEnabled = false;
+/** Enable Standard material depth bias in forward and geometry passes. Call before rendering biased materials. */
+export function enableStandardDepthBias(): void {
+    if (_depthBiasEnabled) {
+        return;
+    }
+    _depthBiasEnabled = true;
+    _installStandardDepthBiasResolver((material) => {
+        const constant = material.depthBias ?? 0;
+        const slopeScale = material.depthBiasSlopeScale ?? 0;
+        return constant || slopeScale ? [constant, slopeScale] : null;
+    });
 }

@@ -47,6 +47,12 @@ import { _getAlphaToCoverageResolver } from "../../render/alpha-to-coverage-hook
  *  always null, and every stencil branch below folds away — stencil-free Standard scenes stay byte-identical. */
 let _stencilResolver: ((stencil: StencilState) => ResolvedStencil) | null = null;
 let _uvOffsetResolver: ((material: StandardMaterialProps) => readonly [number, number] | null) | null = null;
+/** @internal Installed only by enableStandardDepthBias; absent from ordinary Standard scene bundles. */
+export let _stdDepthBiasResolver: ((material: StandardMaterialProps) => readonly [number, number] | null) | null = null;
+/** @internal Install depth-bias resolution for Standard forward and geometry pipelines. */
+export function _installStandardDepthBiasResolver(resolve: (material: StandardMaterialProps) => readonly [number, number] | null): void {
+    _stdDepthBiasResolver = resolve;
+}
 /** @internal Install the stencil resolver into the Standard pipeline (called by `enableMaterialStencil`). */
 export function _installStandardStencilResolver(resolve: (stencil: StencilState) => ResolvedStencil): void {
     _stencilResolver = resolve;
@@ -249,9 +255,8 @@ export function getOrCreateStandardPipeline(
     ensureDevice(engine);
     const alphaToCoverageResolver = _getAlphaToCoverageResolver();
     const useAlphaToCoverage = sig._sampleCount > 1 && !!alphaToCoverageResolver?.(material);
-    const depthBias = material.depthBias ?? 0;
-    const depthBiasSlopeScale = material.depthBiasSlopeScale ?? 0;
-    const key = `${targetSignatureKey(sig)}${useAlphaToCoverage ? ":a2c" : ""}${depthBias || depthBiasSlopeScale ? `:bias:${depthBias}:${depthBiasSlopeScale}` : ""}`;
+    const bias = _stdDepthBiasResolver?.(material);
+    const key = `${targetSignatureKey(sig)}${useAlphaToCoverage ? ":a2c" : ""}${bias ? `:bias:${bias[0]}:${bias[1]}` : ""}`;
     const cached = bindings._pipelines.get(key);
     if (cached) {
         return cached;
@@ -298,8 +303,8 @@ export function getOrCreateStandardPipeline(
                       format: sig._depthStencilFormat,
                       depthCompare: sig._depthCompare ?? REVERSE_DEPTH_COMPARE,
                       depthWriteEnabled: noColorOutput || esmShadowOutput || !needsBlend,
-                      ...(depthBias ? { depthBias } : {}),
-                      ...(depthBiasSlopeScale ? { depthBiasSlopeScale } : {}),
+                      ...(bias?.[0] ? { depthBias: bias[0] } : {}),
+                      ...(bias?.[1] ? { depthBiasSlopeScale: bias[1] } : {}),
                       // Pre-baked stencil sub-fields, applied only on a stencil-capable target — the same
                       // material in the depth32float shadow/depth pass keeps plain depth state (no stencil → no
                       // format mismatch). Gated on `_stencilResolver` (the opt-in hook) so the entire branch —

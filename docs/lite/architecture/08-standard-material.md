@@ -47,7 +47,7 @@ standard-renderable.ts (buildStandardMeshRenderables):
 The deformation/vertex feature enablers are explicitly named exports from the root package entry:
 
 ```ts
-import { enableStandardSkeleton, enableMaterialUvTransform, enableStandardVertexColors } from "@babylonjs/lite";
+import { enableStandardSkeleton, enableMaterialUvTransform, enableStandardVertexColors, enableStandardDepthBias } from "@babylonjs/lite";
 ```
 
 Call each enabler before `registerScene()` when the scene creates matching Standard meshes/material state. Enablers are idempotent and have no import-time registration side effects:
@@ -56,6 +56,7 @@ Call each enabler before `registerScene()` when the scene creates matching Stand
 - `enableStandardVertexColors()` installs RGBA vertex-color composition and draw-time color-buffer binding.
 - `enableMaterialUvTransform(material)` marks a hand-built Standard material for independent texture transforms. Call it before `registerScene()`, then set `uScale`, `vScale`, `uOffset`, `vOffset`, or `uAng` on any bound `Texture2D`. The Standard group builder loads `std-uv-transform-fragment.ts` only when a marked material is present.
 - `enableStandardUvOffset()` remains the lightweight shared-material translation path for `material.uvOffset`; absent offsets always resolve to `[0, 0]`.
+- `enableStandardDepthBias()` installs an optional pipeline-state resolver for Standard forward and geometry/MRT passes. Call it before rendering materials with `depthBias` or `depthBiasSlopeScale`. Without the enabler, these optional fields are ignored and the resolver implementation is not included in ordinary Standard scene bundles. Positive constant bias pulls surfaces toward the camera with reverse-Z.
 
 The UV-transform fragment contributes one vertex-visible uniform buffer and only the varyings required by the material's active texture channels. Its fixed channel order is diffuse, emissive, bump, specular, ambient, lightmap, opacity. Each channel stores a 2x2 matrix plus translation; the matrix applies scale and `uAng` rotation around the UV origin, then translation. UV1 channels compose the existing `material.uvScale` / optional `material.uvOffset` first, while UV2 channels preserve the existing raw-UV2 behavior. `invertY` is folded into the channel transform. Texture transform fields are sampled when the renderable is built; later changes require `rebuildMaterial`.
 
@@ -155,6 +156,8 @@ export interface StandardMaterialProps extends Material {
     /** @internal True when enableMaterialUvTransform() enabled per-texture transforms. */
     _hasUvTx?: boolean;
     backFaceCulling: boolean;
+    depthBias?: number;
+    depthBiasSlopeScale?: number;
     disableLighting: boolean;
 }
 
@@ -243,7 +246,12 @@ export function getOrCreateStandardBindings(
     sceneShader?: StandardSceneShaderContext | null
 ): StandardShaderBindings;
 
-export function getOrCreateStandardPipeline(engine: EngineContextInternal, sig: RenderTargetSignature, bindings: StandardShaderBindings): GPURenderPipeline;
+export function getOrCreateStandardPipeline(
+    engine: EngineContextInternal,
+    sig: RenderTargetSignature,
+    bindings: StandardShaderBindings,
+    material: StandardMaterialProps
+): GPURenderPipeline;
 
 export function clearStandardPipelineCache(): void;
 export function releaseStandardPipelineVariant(variant: PipelineVariant): void;
@@ -333,10 +341,14 @@ The `rebuildSingle` closure returned from `buildStandardMeshRenderables()` is in
 | `reflectionLevel`        | `1`         |
 | `reflectionCoordMode`    | `1`         |
 | `uvScale`                | `[1, 1]`    |
+| `depthBias`              | absent      |
+| `depthBiasSlopeScale`    | absent      |
 | `backFaceCulling`        | `true`      |
 | `disableLighting`        | `false`     |
 
 The eight optional texture fields have **no default** — they are absent (`undefined`) until the corresponding `setStandardXTexture()` runs. Omitting the `null` initializers is what lets a scene that never imports a setter drop the field, its extension, and its shader fragment entirely.
+
+Depth-bias fields are also absent by default. They only affect GPU pipeline state after `enableStandardDepthBias()` is called; no shader variant or extra material fields are added to the default path.
 
 ## Pipeline Configuration
 
@@ -371,6 +383,7 @@ The eight optional texture fields have **no default** — they are absent (`unde
 | Depth format  | `depth24plus-stencil8`               |
 | Depth compare | `greater-equal`                      |
 | Depth write   | `true`                               |
+| Depth bias    | none by default                      |
 | MSAA          | `count = msaaSamples`                |
 | Color target  | Canvas preferred format, no blend    |
 
@@ -498,9 +511,11 @@ The eight optional texture fields have **no default** — they are absent (`unde
 
 **Per-instance color:** When `THIN_INSTANCE_COLOR` is set, a `vInstanceColor` varying passes from vertex to fragment. Applied after main composition in the `BC` slot as `color.rgb *= vInstanceColor.rgb`.
 
+When enabled, the depth-stencil descriptor includes nonzero `depthBias` and `depthBiasSlopeScale` values from the source material, in both forward and geometry/MRT pipelines.
+
 ### Pipeline Caching (`standard-pipeline.ts`)
 
-`getOrCreateStandardPipeline` keeps a per-`StandardShaderBindings` `Map<targetSignatureKey(sig), GPURenderPipeline>`. BGLs are stable across signatures (only the pipeline depends on `sig`), so meshBGs validate against any pipeline produced for the same `(features, meshFeatures, sceneFeatures, variants)` bindings instance.
+`getOrCreateStandardPipeline` keeps a per-`StandardShaderBindings` pipeline map keyed by `targetSignatureKey(sig)` plus optional alpha-to-coverage and nonzero depth-bias values. BGLs are stable across signatures (only the pipeline depends on `sig`), so meshBGs validate against any pipeline produced for the same `(features, meshFeatures, sceneFeatures, variants)` bindings instance. The Standard geometry-view pipeline similarly keys on the target signature plus nonzero bias from its source material, and applies that bias to its depth-stencil descriptor. Unbiased materials keep their original cache key and descriptor in both paths.
 
 Composed shaders are also cached with that full shader key to avoid recomposition when only format/MSAA differs. Fog presence is mandatory in the key because fog changes emitted WGSL without changing material or mesh bits. The group-0 scene bind group is owned by `RenderTask`; Standard renderables bind only material/mesh/shadow groups.
 

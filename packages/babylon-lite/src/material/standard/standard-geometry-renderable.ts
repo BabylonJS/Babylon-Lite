@@ -55,7 +55,7 @@ import {
     VERTEX_ALPHA,
 } from "./standard-flags.js";
 import type { StdExt } from "./standard-flags.js";
-import { isStandardUvInverted, writeStandardUvTransformData, writeStdMaterialData, _stdVertexColorFragment } from "./standard-pipeline.js";
+import { isStandardUvInverted, writeStandardUvTransformData, writeStdMaterialData, _stdVertexColorFragment, _stdDepthBiasResolver } from "./standard-pipeline.js";
 import { composeStandardGeometryShader } from "./standard-geometry-output-shader.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { collectStdBoundTextures } from "./collect-std-bound-textures.js";
@@ -616,7 +616,8 @@ function _getOrCreateGeometryPipeline(
     view: StandardGeometryMaterialView,
     res: StandardGeometryViewResources
 ): GPURenderPipeline {
-    const key = targetSignatureKey(sig);
+    const bias = _stdDepthBiasResolver?.(view.source as StandardMaterialProps);
+    const key = `${targetSignatureKey(sig)}${bias ? `:bias:${bias[0]}:${bias[1]}` : ""}`;
     const cached = res._pipelines.get(key);
     if (cached) {
         return cached;
@@ -649,6 +650,8 @@ function _getOrCreateGeometryPipeline(
                   // BJS disables depth-write for transparent/opacity meshes in the
                   // geometry pass so background depth survives partially-transparent pixels.
                   depthWriteEnabled: !alphaBlend,
+                  ...(bias?.[0] ? { depthBias: bias[0] } : {}),
+                  ...(bias?.[1] ? { depthBiasSlopeScale: bias[1] } : {}),
               }
             : undefined,
         multisample: { count: sig._sampleCount },

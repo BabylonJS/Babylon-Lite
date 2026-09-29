@@ -418,7 +418,7 @@ export type { Ktx2TextureArrayOptions } from "./texture/ktx2-texture-array.js";
 // ─── Materials ───────────────────────────────────────────────────────
 export { createStandardMaterial } from "./material/standard/create-standard-material.js";
 export { createStandardNoColorMaterialView } from "./material/standard/no-color-view.js";
-export { enableStandardSkeleton, enableStandardUvOffset } from "./material/standard/enable-standard-mesh-features.js";
+export { enableStandardSkeleton, enableStandardUvOffset, enableStandardDepthBias } from "./material/standard/enable-standard-mesh-features.js";
 export { enableStandardVertexColors } from "./material/standard/enable-standard-vertex-colors.js";
 export { setStandardBumpTexture } from "./material/standard/set-std-bump.js";
 export { setStandardEmissiveTexture } from "./material/standard/set-std-emissive.js";
