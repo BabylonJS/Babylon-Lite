@@ -39,7 +39,7 @@ function makeThinInstances(): ThinInstanceData {
 describe("ShaderMaterial thin instances", () => {
     it("captures generic packed layouts once and shares them with async registration and every target bind", () => {
         const engine = { _device: {} } as EngineContext;
-        const material = { attributes: ["position"], needAlphaBlending: false } as unknown as ShaderMaterial;
+        const material = { attributes: ["position"], externalTextureDecls: [], needAlphaBlending: false } as unknown as ShaderMaterial;
         const mesh = {
             material,
             thinInstances: makeThinInstances(),
@@ -114,10 +114,12 @@ describe("ShaderMaterial thin instances", () => {
         } as unknown as EngineContext;
         const material = {
             attributes: ["position"],
+            externalTextureDecls: [],
             needAlphaBlending: false,
         } as unknown as ShaderMaterial;
         const override = {
             attributes: ["position"],
+            externalTextureDecls: [],
             needAlphaBlending: false,
         } as unknown as ShaderMaterial;
         const mesh = {
@@ -183,10 +185,12 @@ describe("ShaderMaterial thin instances", () => {
         } as unknown as EngineContext;
         const material = {
             attributes: ["position"],
+            externalTextureDecls: [],
             needAlphaBlending: false,
         } as unknown as ShaderMaterial;
         const override = {
             attributes: ["position"],
+            externalTextureDecls: [],
             needAlphaBlending: false,
             _tic: false,
         } as unknown as ShaderMaterial;
@@ -264,6 +268,7 @@ describe("ShaderMaterial thin instances", () => {
         } as unknown as EngineContext;
         const material = {
             attributes: ["position"],
+            externalTextureDecls: [],
             needAlphaBlending: false,
         } as unknown as ShaderMaterial;
         const positionBuffer = {} as GPUBuffer;
