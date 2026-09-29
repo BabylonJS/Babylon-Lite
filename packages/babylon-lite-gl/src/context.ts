@@ -1,5 +1,6 @@
 import type { GLEffect } from "./effect.js";
 import type { GLTexture } from "./texture.js";
+import type { GLTexture3D } from "./texture-3d.js";
 import type { GLRenderTarget } from "./render-target.js";
 import { createGLState, resetGLState, resetGLStateCache, type GLState } from "./state.js";
 
@@ -136,7 +137,7 @@ export interface GLEngineContext {
      * context-restored protocol to replay uploads.
      * @internal
      */
-    _textures: GLTexture[];
+    _textures: (GLTexture | GLTexture3D)[];
     /**
      * Live render-target registry — populated by `createRenderTarget`. Used by
      * the context-restored protocol to rebuild framebuffers + attachments after

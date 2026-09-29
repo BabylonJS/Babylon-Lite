@@ -81,6 +81,8 @@ use.
 - **Fullscreen renderer** — `createEffectWrapper`, `applyEffectWrapper`,
   `drawEffect`, `setViewport`, `disposeEffectWrapper`.
 - **Textures** — `createRawTexture` (typed-array upload, LDR byte formats),
+  `createTexture3DFromPixels` + `setEffectTexture3D` (optional native RGBA8
+  LUT volumes with trilinear sampling and zero 2D-only bundle cost),
   `createFloatTexture` (float / half-float HDR opt-in), `generateTextureMipMaps`,
   `loadTexture2D` (async URL upload with a 1×1 placeholder), `bindTexture`,
   `disposeTexture`, plus `updateRawTexture`, `updateTextureSamplingMode`,
@@ -104,7 +106,9 @@ use.
 
 Runnable scenes for every feature live in the repo's GL **lab**
 (`lab/gl/`) — fullscreen effects, textures, sprites, blend modes,
-HTML-element textures and render-to-texture round-trips.
+HTML-element textures and render-to-texture round-trips. The standalone
+`/gl/texture-3d-test.html` source test (`lab/gl/src/texture-3d-test.ts`) checks
+native 3D texel addressing and trilinear filtering without a gallery demo.
 
 ## License
 

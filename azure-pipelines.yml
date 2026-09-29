@@ -145,6 +145,12 @@ stages:
                 - script: npx vitest run --project gl-build
                   displayName: "Run vitest lite-gl build-output tests"
 
+                - script: pnpm test:integration:gl
+                  displayName: "Run lite-gl source integration tests"
+                  env:
+                      HEADLESS: "true"
+                      CI: "true"
+
                 # lite-gl visual parity vs the Babylon ThinEngine reference. WebGL2
                 # runs headless (SwiftShader in CI, enabled by CI=true in
                 # playwright.config.ts), so no cloud browser is needed — unlike the
