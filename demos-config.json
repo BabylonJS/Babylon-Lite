@@ -104,7 +104,7 @@
     {
         "slug": "calculator",
         "name": "Calculator (KHR_interactivity)",
-        "description": "Interactive glTF showcase: the Khronos \"Calculator\" sample driven by Babylon Lite's flow-graph runtime (glTF KHR_interactivity). On load the embedded interactivity graph runs — resetting the display to \"00\" by scrolling the digit materials' texture-transform offset, hiding the minus sign via KHR_node_visibility, and seeding scene variables — exercising the ported math, pointer and event blocks. KHR_interactivity is an unratified draft; the runtime tracks the current spec. Khronos glTF-Test-Assets-Interactivity (CC0).",
+        "description": "The Khronos Calculator glTF running on Babylon Lite's KHR_interactivity flow-graph runtime, with clickable buttons and live material updates.",
         "tags": ["showcase", "interactivity", "gltf"],
         "mobile": true
     },
