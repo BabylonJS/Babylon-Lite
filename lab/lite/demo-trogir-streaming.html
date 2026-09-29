@@ -124,22 +124,6 @@
                 text-align: right;
                 font-variant-numeric: tabular-nums;
             }
-            .camera-mode {
-                width: 100%;
-                margin-top: 10px;
-                padding: 7px 10px;
-                border: 1px solid rgba(88, 198, 255, 0.55);
-                border-radius: 6px;
-                background: rgba(31, 74, 98, 0.72);
-                color: #fff;
-                font: inherit;
-                cursor: pointer;
-            }
-            .camera-mode:hover,
-            .camera-mode:focus-visible {
-                background: rgba(43, 103, 136, 0.9);
-                outline: 2px solid transparent;
-            }
             .camera-pose {
                 margin-top: 10px;
                 padding-top: 9px;
@@ -231,8 +215,7 @@
                     >1200k</output
                 ></label
             >
-            <button id="cameraMode" class="camera-mode" type="button" aria-pressed="true" aria-label="Switch to orbit camera">Camera: First person</button>
-            <div id="cameraHint" class="hint">Drag to look · WASD or arrows to move · Space / Shift to rise or lower</div>
+            <div class="hint">Drag to look · WASD or arrows to move · Space / Shift to rise or lower</div>
             <details id="cameraPose" class="camera-pose">
                 <summary>Camera pose</summary>
                 <div class="camera-pose-grid">

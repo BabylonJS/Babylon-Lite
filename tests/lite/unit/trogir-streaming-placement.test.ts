@@ -27,12 +27,16 @@ describe("Trogir streaming placement", () => {
             boundMax: [80.23741, 3.942674, 17.55537],
         });
 
-        const target = placeTrogirStream(stream);
+        placeTrogirStream(stream);
 
         expect(stream.rotation.z).toBe(Math.PI);
-        expect(target.x).toBeCloseTo(-3.2497, 4);
-        expect(target.y).toBeCloseTo(12.044698, 4);
-        expect(target.z).toBeCloseTo(-81.566315, 4);
+        const centerX = (stream.boundMin[0] + stream.boundMax[0]) * 0.5;
+        const centerY = (stream.boundMin[1] + stream.boundMax[1]) * 0.5;
+        const centerZ = (stream.boundMin[2] + stream.boundMax[2]) * 0.5;
+        const world = stream.worldMatrix;
+        expect(world[0]! * centerX + world[4]! * centerY + world[8]! * centerZ + world[12]!).toBeCloseTo(-3.2497, 4);
+        expect(world[1]! * centerX + world[5]! * centerY + world[9]! * centerZ + world[13]!).toBeCloseTo(12.044698, 4);
+        expect(world[2]! * centerX + world[6]! * centerY + world[10]! * centerZ + world[14]!).toBeCloseTo(-81.566315, 4);
         const transformed = transformCovariance(stream.worldMatrix, [4, 1, 2, 3, -0.5, 2]);
         expect(transformed[0]![0]).toBeCloseTo(4);
         expect(transformed[0]![1]).toBeCloseTo(1);

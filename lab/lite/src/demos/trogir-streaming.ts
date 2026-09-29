@@ -11,7 +11,7 @@ import {
     startEngine,
 } from "babylon-lite";
 import type { EngineContext, GaussianSplatStream, SceneContext } from "babylon-lite";
-import { attachTrogirFirstPersonCameraMode, createTrogirFirstPersonCamera, createTrogirStartupOrbitCamera } from "./trogir-camera-mode";
+import { attachTrogirCameraControls, createTrogirCamera } from "./trogir-camera";
 import { formatTrogirCameraPose } from "./trogir-camera-pose";
 import { placeTrogirStream } from "./trogir-streaming-placement";
 
@@ -158,7 +158,7 @@ async function main(): Promise<void> {
     let engine: EngineContext | null = null;
     let scene: SceneContext | null = null;
     let stream: GaussianSplatStream | null = null;
-    let disposeCameraMode: (() => void) | null = null;
+    let disposeCameraControls: (() => void) | null = null;
     let disposeHud: (() => void) | null = null;
     let disposed = false;
     const dispose = (): void => {
@@ -167,7 +167,7 @@ async function main(): Promise<void> {
         }
         disposed = true;
         disposeHud?.();
-        disposeCameraMode?.();
+        disposeCameraControls?.();
         if (scene && stream) {
             disposeGaussianSplatStream(scene, stream);
         }
@@ -199,19 +199,9 @@ async function main(): Promise<void> {
             lodCooldownMs: 250,
         });
         placeTrogirStream(stream);
-        const startupOrbit = createTrogirStartupOrbitCamera(260);
-        startupOrbit.nearPlane = 0.1;
-        startupOrbit.farPlane = 1500;
-        const camera = createTrogirFirstPersonCamera(startupOrbit);
+        const camera = createTrogirCamera();
         scene.camera = camera;
-        disposeCameraMode = attachTrogirFirstPersonCameraMode(
-            scene,
-            canvas,
-            document.getElementById("cameraMode") as HTMLButtonElement,
-            document.getElementById("cameraHint") as HTMLElement,
-            camera,
-            startupOrbit.radius
-        );
+        disposeCameraControls = attachTrogirCameraControls(camera, canvas, scene);
 
         attachGaussianSplatStream(scene, stream);
         disposeHud = installHud(scene, stream, canvas);
