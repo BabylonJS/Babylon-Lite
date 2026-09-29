@@ -172,8 +172,6 @@ export interface ShaderMaterial extends Material {
     readonly uniformDecls: readonly ShaderUniformDecl[];
     readonly samplerDecls: readonly ShaderSamplerDecl[];
     /** @internal */
-    readonly _externalTextureCount: number;
-    /** @internal */
     readonly _externalTextureDecls?: readonly string[];
     readonly storageBufferDecls: readonly ShaderStorageBufferDecl[];
     readonly defines: readonly ShaderDefine[];
@@ -235,17 +233,6 @@ export function _assertShaderIdentifier(kind: string, name: string): void {
     }
 }
 
-interface ShaderExternalTextureState {
-    readonly _externalTextureSlots: Map<string, ShaderExternalTextureSlot>;
-}
-
-let _externalTextureResolver: ((names: readonly string[] | undefined, usedNames: Set<string>) => ShaderExternalTextureState | undefined) | null = null;
-
-/** @internal Install external-texture declaration handling without charging ordinary ShaderMaterial bundles. */
-export function _installShaderExternalTextureResolver(resolver: (names: readonly string[] | undefined, usedNames: Set<string>) => ShaderExternalTextureState | undefined): void {
-    _externalTextureResolver = resolver;
-}
-
 function isSupportedAttribute(name: string): name is ShaderAttributeName {
     return !!_attributeInfo(name);
 }
@@ -282,7 +269,8 @@ export function _isShaderSystemUniform(name: string): name is ShaderSystemUnifor
 }
 
 /** Create a ShaderMaterial from WGSL sources and declarations, validating
- *  attributes, uniforms, samplers, external textures, and defines.
+ *  attributes, uniforms, samplers, and defines. External texture declarations
+ *  are snapshotted here and validated by their optional binding API.
  *  @param options - Sources, attributes, uniforms, resource declarations, defines, and render state.
  *  @returns The constructed `ShaderMaterial`. */
 export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMaterial {
@@ -341,9 +329,6 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         textureSlots.set(decl.name, { decl, current: null });
     }
 
-    const externalTextureDecls = options.externalTextures?.slice();
-    const externalTextureState = _externalTextureResolver?.(externalTextureDecls, usedNames);
-
     const storageBufferDecls: ShaderStorageBufferDecl[] = [];
     const storageBufferSlots = new Map<string, ShaderStorageBufferSlot>();
     for (const opt of options.storageBuffers ?? []) {
@@ -376,9 +361,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         attributes,
         uniformDecls,
         samplerDecls,
-        _externalTextureCount: externalTextureDecls?.length ?? 0,
-        _externalTextureDecls: externalTextureDecls,
-        ...externalTextureState,
+        _externalTextureDecls: options.externalTextures?.slice(),
         storageBufferDecls,
         defines,
         _tic: options.useThinInstanceColors,

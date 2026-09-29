@@ -76,12 +76,16 @@ interface ShaderMaterialRenderState extends ShaderMaterial {
     _shaderCustomSpec?: UboSpec | null;
 }
 
-let _externalTextureResolver: ((engine: EngineContext, material: ShaderMaterial, entries: GPUBindGroupEntry[], nextBinding: number) => number) | null = null;
+interface ShaderExternalTextureBindingResolver {
+    active(material: ShaderMaterial): boolean;
+    bind(engine: EngineContext, material: ShaderMaterial, entries: GPUBindGroupEntry[], nextBinding: number): number;
+    refresh(engine: EngineContext, material: ShaderMaterial, packet: ShaderPacket, createBindGroup: typeof createShaderBindGroup): void;
+}
 
-/** @internal Install external-texture bind-group population. */
-export function _installShaderExternalTextureBindingResolver(
-    resolver: (engine: EngineContext, material: ShaderMaterial, entries: GPUBindGroupEntry[], nextBinding: number) => number
-): void {
+let _externalTextureResolver: ShaderExternalTextureBindingResolver | null = null;
+
+/** @internal Install external-texture refresh and binding behavior on explicit binding API use. */
+export function _installShaderExternalTextureBindingResolver(resolver: ShaderExternalTextureBindingResolver): void {
     _externalTextureResolver = resolver;
 }
 
@@ -325,7 +329,7 @@ function createOpaqueRenderable(
     const r: Renderable = {
         order,
         isTransparent: false,
-        _direct: material._externalTextureCount > 0,
+        _direct: _externalTextureResolver?.active(material) ?? false,
         mesh: packets.length === 1 ? packets[0]!.mesh : undefined,
         bind(eng, sig) {
             return createShaderBinding(eng, sig, material, r, update, draw, getUniformBatch, asyncVertexLayout);
@@ -441,24 +445,19 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
         packet._lastAspect = aspect;
         packet._lastAlphaCutoff = alphaCutoff;
     }
-    const resourcesChanged = packet._lastResourceVersion !== material._resourceVersion || packet._boundCustomUbo !== state._shaderCustomUbo;
-    if (resourcesChanged) {
+    if (packet._lastResourceVersion !== material._resourceVersion || packet._boundCustomUbo !== state._shaderCustomUbo) {
         // Acquire the NEW bound textures BEFORE releasing the old set: a texture present in both (e.g. a material
         // that only swapped ONE of its textures) must never transiently drop to ref-count 0, or releaseTexture
         // would destroy a GPUTexture that the new bind group still uses. (Releasing first destroys a unique
         // ref-count-1 texture — exposed by a custom material binding a per-material texture nothing else shares.)
         const newTextures = collectShaderTextures(material);
-        const oldTextures = packet._boundTextures;
-        const sameTextures = newTextures.length === oldTextures.length && newTextures.every((texture, index) => texture === oldTextures[index]);
         const acquiredTextures: Texture2D[] = [];
         let bindGroup: GPUBindGroup;
         try {
             bindGroup = createShaderBindGroup(engine, material, packet.systemUBO);
-            if (!sameTextures) {
-                for (const tex of newTextures) {
-                    acquireTexture(tex);
-                    acquiredTextures.push(tex);
-                }
+            for (const tex of newTextures) {
+                acquireTexture(tex);
+                acquiredTextures.push(tex);
             }
         } catch (error) {
             for (const tex of acquiredTextures) {
@@ -466,19 +465,16 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
             }
             throw error;
         }
+        const oldTextures = packet._boundTextures;
         packet._bindGroup = bindGroup;
-        if (!sameTextures) {
-            packet._boundTextures = acquiredTextures;
-        }
+        packet._boundTextures = acquiredTextures;
         packet._lastResourceVersion = material._resourceVersion;
         packet._boundCustomUbo = state._shaderCustomUbo;
-        if (!sameTextures) {
-            for (const tex of oldTextures) {
-                releaseTexture(tex);
-            }
+        for (const tex of oldTextures) {
+            releaseTexture(tex);
         }
-    } else if (material._externalTextureCount > 0) {
-        packet._bindGroup = createShaderBindGroup(engine, material, packet.systemUBO);
+    } else {
+        _externalTextureResolver?.refresh(engine, material, packet, createShaderBindGroup);
     }
 }
 
@@ -611,7 +607,7 @@ function createShaderBindGroup(engine: EngineContext, material: ShaderMaterial, 
         }
         entries.push({ binding: nextBinding++, resource: tex.view }, { binding: nextBinding++, resource: tex.sampler });
     }
-    nextBinding = _externalTextureResolver?.(engine, material, entries, nextBinding) ?? nextBinding;
+    nextBinding = _externalTextureResolver?.bind(engine, material, entries, nextBinding) ?? nextBinding;
     for (const storage of material.storageBufferDecls) {
         const slot = material._storageBufferSlots.get(storage.name);
         const storageBuffer = slot?.current;

@@ -1,12 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
+import type { MaterialView } from "../../../packages/babylon-lite/src/material/material";
 import { getShaderExternalTexture, setShaderExternalTexture } from "../../../packages/babylon-lite/src/material/shader/shader-external-texture";
-import { createShaderMaterial, setShaderTexture } from "../../../packages/babylon-lite/src/material/shader/shader-material";
-import { buildShaderMaterialRenderables } from "../../../packages/babylon-lite/src/material/shader/shader-renderable";
+import { createShaderMaterial, setShaderTexture, type ShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
+import { createShaderNoColorMaterialView } from "../../../packages/babylon-lite/src/material/shader/no-color-view";
+import { getOrCreateShaderPipelineBindings } from "../../../packages/babylon-lite/src/material/shader/shader-pipeline";
+import { buildShaderGroup, buildShaderMaterialRenderables } from "../../../packages/babylon-lite/src/material/shader/shader-renderable";
 import { initMeshTransform, type Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
-import { _textureOwners } from "../../../packages/babylon-lite/src/resource/gpu-pool";
+import { setThinInstances } from "../../../packages/babylon-lite/src/mesh/thin-instance";
+import * as gpuPool from "../../../packages/babylon-lite/src/resource/gpu-pool";
+import * as textureAcquire from "../../../packages/babylon-lite/src/resource/texture-acquire";
+import * as textureRelease from "../../../packages/babylon-lite/src/resource/texture-release";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 import { createExternalTexture, isExternalTextureReady } from "../../../packages/babylon-lite/src/texture/external-texture";
@@ -99,6 +105,8 @@ function createFixture(): {
 }
 
 describe("ShaderMaterial external textures", () => {
+    afterEach(() => vi.restoreAllMocks());
+
     it("validates declarations and preserves wrapper identity", () => {
         const material = createShaderMaterial({
             vertexSource: wgsl`@vertex fn mainVertex(input: VertexInput) -> @builtin(position) vec4f { return vec4f(input.position, 1); }`,
@@ -117,30 +125,34 @@ describe("ShaderMaterial external textures", () => {
         setShaderExternalTexture(material, "videoSampler", texture);
         expect(getShaderExternalTexture(material, "videoSampler")).toBe(texture);
         expect(() => setShaderExternalTexture(material, "missing", texture)).toThrow('external texture "missing" was not declared');
-        expect(() =>
-            createShaderMaterial({
-                vertexSource: material.vertexSource,
-                fragmentSource: material.fragmentSource,
-                attributes: ["position"],
-                samplers: ["videoSampler"],
-                externalTextures: ["videoSampler"],
-            })
-        ).toThrow('duplicate generated identifier "videoSampler"');
+        const duplicate = createShaderMaterial({
+            vertexSource: material.vertexSource,
+            fragmentSource: material.fragmentSource,
+            attributes: ["position"],
+            samplers: ["videoSampler"],
+            externalTextures: ["videoSampler"],
+        });
+        expect(() => getShaderExternalTexture(duplicate, "videoSampler")).toThrow('duplicate generated identifier "videoSampler"');
     });
 
-    it("emits texture_external bindings and imports a fresh frame without texture lease churn", () => {
+    it.each([false, true])("imports and draws fresh external frames without lease churn (thin instances: %s)", async (instanced) => {
+        const acquireTexture = vi.spyOn(textureAcquire, "acquireTexture");
+        const releaseTexture = vi.spyOn(textureRelease, "releaseTexture");
         const { engine, scene, mesh, importExternalTexture, createBindGroupLayout, createBindGroup, createShaderModule, createSampler } = createFixture();
         const material = mesh.material as ReturnType<typeof createShaderMaterial>;
         const texture = createTexture();
         const firstVideo = createVideo();
         setShaderTexture(material, "textureSampler", texture);
         setShaderExternalTexture(material, "videoSampler", createExternalTexture(firstVideo));
+        if (instanced) {
+            setThinInstances(mesh, new Float32Array(mesh.worldMatrix), 1);
+        }
 
-        const built = buildShaderMaterialRenderables(scene, [mesh]);
+        const built = await buildShaderGroup(scene, [mesh]);
         const renderable = built.renderables[0]!;
         expect(renderable._direct).toBe(true);
         expect(importExternalTexture).toHaveBeenCalledOnce();
-        expect(_textureOwners(texture)).toBe(1);
+        expect(gpuPool._textureOwners(texture)).toBe(1);
 
         const binding = renderable.bind(engine, { _colorFormat: "rgba8unorm", _sampleCount: 1 } as RenderTargetSignature);
         const materialLayout = createBindGroupLayout.mock.calls.map((call) => call[0]).find((descriptor) => descriptor.label === "shader-material-group1")!;
@@ -157,23 +169,64 @@ describe("ShaderMaterial external textures", () => {
             )
         ).toBe(true);
 
+        const pass = { setVertexBuffer: vi.fn(), setIndexBuffer: vi.fn(), setBindGroup: vi.fn(), drawIndexed: vi.fn() };
         binding.update!({ targetWidth: 64, targetHeight: 64 });
+        binding.draw(pass as unknown as GPURenderPassEncoder, engine);
+        const firstFrameGroup = pass.setBindGroup.mock.calls.at(-1)![1] as GPUBindGroupDescriptor;
         binding.update!({ targetWidth: 64, targetHeight: 64 });
+        binding.draw(pass as unknown as GPURenderPassEncoder, engine);
+        const secondFrameGroup = pass.setBindGroup.mock.calls.at(-1)![1] as GPUBindGroupDescriptor;
+        expect(secondFrameGroup).not.toBe(firstFrameGroup);
+        expect(pass.drawIndexed).toHaveBeenCalledTimes(2);
+        expect(Array.from(secondFrameGroup.entries)[3]!.resource).toEqual({ source: firstVideo });
         expect(importExternalTexture).toHaveBeenCalledTimes(3);
         expect(createBindGroup).toHaveBeenCalledTimes(3);
         expect(createSampler).toHaveBeenCalledOnce();
-        expect(_textureOwners(texture)).toBe(1);
+        expect(gpuPool._textureOwners(texture)).toBe(1);
+        expect(acquireTexture).toHaveBeenCalledOnce();
+        expect(releaseTexture).not.toHaveBeenCalled();
 
         const secondVideo = createVideo();
         setShaderExternalTexture(material, "videoSampler", createExternalTexture(secondVideo));
         binding.update!({ targetWidth: 64, targetHeight: 64 });
+        binding.draw(pass as unknown as GPURenderPassEncoder, engine);
         expect(importExternalTexture).toHaveBeenLastCalledWith({ source: secondVideo });
-        expect(_textureOwners(texture)).toBe(1);
+        const replacedFrameGroup = pass.setBindGroup.mock.calls.at(-1)![1] as GPUBindGroupDescriptor;
+        expect(Array.from(replacedFrameGroup.entries)[3]!.resource).toEqual({ source: secondVideo });
+        expect(gpuPool._textureOwners(texture)).toBe(1);
 
         for (const dispose of scene._meshDisposables.get(mesh) ?? []) {
             dispose();
         }
-        expect(_textureOwners(texture)).toBe(0);
+        expect(gpuPool._textureOwners(texture)).toBe(0);
+    });
+
+    it("hydrates view-first declarations on the source and shares subsequent bindings", () => {
+        const { mesh: enabledMesh } = createFixture();
+        getShaderExternalTexture(enabledMesh.material as ReturnType<typeof createShaderMaterial>, "videoSampler");
+        const { engine, scene, mesh, importExternalTexture } = createFixture();
+        const material = mesh.material as ReturnType<typeof createShaderMaterial>;
+        const view = createShaderNoColorMaterialView(material) as MaterialView & ShaderMaterial;
+        getOrCreateShaderPipelineBindings(engine, view);
+        expect(Object.hasOwn(view, "_externalTextureSlots")).toBe(false);
+        expect(Object.hasOwn(material, "_externalTextureSlots")).toBe(true);
+        const texture = createExternalTexture(createVideo());
+        setShaderTexture(material, "textureSampler", createTexture());
+        setShaderExternalTexture(material, "videoSampler", texture);
+        expect(getShaderExternalTexture(view, "videoSampler")).toBe(texture);
+
+        mesh.material = view;
+        const renderable = buildShaderMaterialRenderables(scene, [mesh]).renderables[0]!;
+        expect(renderable._direct).toBe(true);
+        const binding = renderable.bind(engine, { _colorFormat: "rgba8unorm", _sampleCount: 1 });
+        const nextTexture = createExternalTexture(createVideo());
+        const version = material._resourceVersion;
+        setShaderExternalTexture(view, "videoSampler", nextTexture);
+        expect(material._resourceVersion).toBe(version + 1);
+        expect(Object.hasOwn(view, "_resourceVersion")).toBe(false);
+        expect(getShaderExternalTexture(material, "videoSampler")).toBe(nextTexture);
+        binding.update!({ targetWidth: 64, targetHeight: 64 });
+        expect(importExternalTexture).toHaveBeenLastCalledWith({ source: nextTexture.video });
     });
 
     it("rejects a video without current frame data before importing it", () => {

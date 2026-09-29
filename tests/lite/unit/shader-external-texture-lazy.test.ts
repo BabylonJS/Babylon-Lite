@@ -18,7 +18,6 @@ describe("ShaderMaterial lazy external texture API", () => {
         });
         externalTextures[0] = "otherVideo";
 
-        expect(material._externalTextureCount).toBe(1);
         expect(material._externalTextureDecls).toEqual(["videoSampler"]);
         expect(material._externalTextureSlots).toBeUndefined();
 
@@ -29,13 +28,15 @@ describe("ShaderMaterial lazy external texture API", () => {
                 createPipelineLayout: vi.fn((descriptor: GPUPipelineLayoutDescriptor) => descriptor as unknown as GPUPipelineLayout),
             },
         } as unknown as EngineContext;
-        expect(() => getOrCreateShaderPipelineBindings(engine, material)).toThrow("require importing setShaderExternalTexture");
+        expect(() => getOrCreateShaderPipelineBindings(engine, material)).toThrow("require setShaderExternalTexture");
         expect(createBindGroupLayout).not.toHaveBeenCalled();
 
         const [{ createExternalTexture }, { getShaderExternalTexture, setShaderExternalTexture }] = await Promise.all([
             import("../../../packages/babylon-lite/src/texture/external-texture"),
             import("../../../packages/babylon-lite/src/material/shader/shader-external-texture"),
         ]);
+        expect(() => getOrCreateShaderPipelineBindings(engine, material)).toThrow("require setShaderExternalTexture");
+        expect(createBindGroupLayout).not.toHaveBeenCalled();
         const video = { HAVE_CURRENT_DATA: 2, readyState: 2 } as HTMLVideoElement;
         const texture = createExternalTexture(video);
 

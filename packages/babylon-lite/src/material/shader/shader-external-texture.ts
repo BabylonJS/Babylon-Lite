@@ -1,8 +1,10 @@
 import type { EngineContext } from "../../engine/engine.js";
 import { bumpVisibilityEpoch } from "../../engine/engine.js";
 import { wgsl } from "../../shader/wgsl.js";
+import type { WgslSource } from "../../shader/wgsl.js";
 import type { ExternalTexture } from "../../texture/external-texture.js";
-import { _assertShaderIdentifier, _assertUniqueShaderName, _installShaderExternalTextureResolver, type ShaderExternalTextureSlot, type ShaderMaterial } from "./shader-material.js";
+import { getMaterialSource } from "../material-view.js";
+import { _assertShaderIdentifier, _assertUniqueShaderName, type ShaderExternalTextureSlot, type ShaderMaterial } from "./shader-material.js";
 import { _installShaderExternalTexturePipelineResolver } from "./shader-pipeline.js";
 import { _installShaderExternalTextureBindingResolver } from "./shader-renderable.js";
 
@@ -29,52 +31,47 @@ function createExternalTextureSlots(names: readonly string[], usedNames: Set<str
 }
 
 function getExternalTextureSlots(material: ShaderMaterial): Map<string, ShaderExternalTextureSlot> {
-    if (material._externalTextureSlots) {
-        return material._externalTextureSlots;
+    material = getMaterialSource(material) as ShaderMaterial;
+    let slots = material._externalTextureSlots;
+    if (!slots) {
+        const usedNames = new Set<string>();
+        for (const decl of material.uniformDecls) {
+            usedNames.add(decl.name);
+        }
+        for (const decl of material.samplerDecls) {
+            usedNames.add(decl.name);
+            usedNames.add(`${decl.name}Sampler`);
+        }
+        for (const decl of material.storageBufferDecls) {
+            usedNames.add(decl.name);
+        }
+        for (const define of material.defines) {
+            usedNames.add(define.name);
+        }
+        material._externalTextureSlots = slots = createExternalTextureSlots(material._externalTextureDecls ?? [], usedNames);
     }
-    const usedNames = new Set<string>();
-    for (const decl of material.uniformDecls) {
-        usedNames.add(decl.name);
-    }
-    for (const decl of material.samplerDecls) {
-        usedNames.add(decl.name);
-        usedNames.add(`${decl.name}Sampler`);
-    }
-    for (const decl of material.storageBufferDecls) {
-        usedNames.add(decl.name);
-    }
-    for (const define of material.defines) {
-        usedNames.add(define.name);
-    }
-    return (material._externalTextureSlots = createExternalTextureSlots(material._externalTextureDecls ?? [], usedNames));
+    installExternalTextureResolvers();
+    return slots;
 }
 
-_installShaderExternalTextureResolver((names, usedNames) => {
-    if (!names?.length) {
-        return undefined;
+function appendExternalTextureLayout(entries: GPUBindGroupLayoutEntry[], nextBinding: number, visibility: GPUShaderStageFlags, material: ShaderMaterial): number {
+    getExternalTextureSlots(material);
+    for (const _name of material._externalTextureDecls ?? []) {
+        entries.push({ binding: nextBinding++, visibility, externalTexture: {} }, { binding: nextBinding++, visibility, sampler: { type: "filtering" } });
     }
-    return { _externalTextureSlots: createExternalTextureSlots(names, usedNames) };
-});
+    return nextBinding;
+}
 
-_installShaderExternalTexturePipelineResolver({
-    layout(entries, nextBinding, visibility, material) {
-        getExternalTextureSlots(material);
-        for (const _name of material._externalTextureDecls ?? []) {
-            entries.push({ binding: nextBinding++, visibility, externalTexture: {} }, { binding: nextBinding++, visibility, sampler: { type: "filtering" } });
-        }
-        return nextBinding;
-    },
-    prelude(source, nextBinding, material) {
-        for (const name of material._externalTextureDecls ?? []) {
-            source = wgsl`${source}@group(1) @binding(${nextBinding++}) var ${name}: texture_external;
+function appendExternalTexturePrelude(source: WgslSource, nextBinding: number, material: ShaderMaterial): readonly [WgslSource, number] {
+    for (const name of material._externalTextureDecls ?? []) {
+        source = wgsl`${source}@group(1) @binding(${nextBinding++}) var ${name}: texture_external;
 @group(1) @binding(${nextBinding++}) var ${name}Sampler: sampler;
 `;
-        }
-        return [source, nextBinding];
-    },
-});
+    }
+    return [source, nextBinding];
+}
 
-_installShaderExternalTextureBindingResolver((engine: EngineContext, material, entries, nextBinding) => {
+function appendExternalTextureBindings(engine: EngineContext, material: ShaderMaterial, entries: GPUBindGroupEntry[], nextBinding: number): number {
     const slots = getExternalTextureSlots(material);
     for (const name of material._externalTextureDecls ?? []) {
         const texture = slots.get(name)?.current;
@@ -90,10 +87,30 @@ _installShaderExternalTextureBindingResolver((engine: EngineContext, material, e
         );
     }
     return nextBinding;
-});
+}
+
+let resolversInstalled = false;
+
+function installExternalTextureResolvers(): void {
+    if (resolversInstalled) {
+        return;
+    }
+    _installShaderExternalTexturePipelineResolver({ layout: appendExternalTextureLayout, prelude: appendExternalTexturePrelude });
+    _installShaderExternalTextureBindingResolver({
+        active: (material) => !!material._externalTextureDecls?.length,
+        bind: appendExternalTextureBindings,
+        refresh(engine, material, packet, createBindGroup) {
+            if (material._externalTextureDecls?.length) {
+                packet._bindGroup = createBindGroup(engine, material, packet.systemUBO);
+            }
+        },
+    });
+    resolversInstalled = true;
+}
 
 /** Bind (or clear) a caller-owned video external texture. */
 export function setShaderExternalTexture(material: ShaderMaterial, name: string, texture: ExternalTexture | null): void {
+    material = getMaterialSource(material) as ShaderMaterial;
     const slot = getExternalTextureSlots(material).get(name);
     if (!slot) {
         throw new Error(`ShaderMaterial: external texture "${name}" was not declared.`);

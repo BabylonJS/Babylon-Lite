@@ -71,7 +71,6 @@ export interface ShaderMaterial extends Material {
     readonly attributes: readonly ShaderAttributeName[];
     readonly uniformDecls: readonly ShaderUniformDecl[];
     readonly samplerDecls: readonly ShaderSamplerDecl[];
-    readonly _externalTextureCount: number;
     readonly _externalTextureDecls?: readonly string[];
     readonly defines: readonly ShaderDefine[];
     readonly needAlphaBlending: boolean;
@@ -89,7 +88,9 @@ export interface ShaderMaterial extends Material {
 }
 ```
 
-External texture layout, WGSL, validation, and binding behavior is installed by the tree-shakeable `shader-external-texture` module exported with `setShaderExternalTexture` / `getShaderExternalTexture`. Core material creation snapshots the declaration names and count, so caller mutation cannot desynchronize slots and a material created before a code-split binding module loads is hydrated and validated when that module is first used. Pipeline preparation rejects such a material until the binding module loads rather than caching an incomplete layout. ShaderMaterials without that API do not pull video binding and sampler-cache code. `_externalTextureCount` also keeps the render-bundle bypass check constant-time.
+External texture layout, WGSL, validation, and binding behavior lives in the tree-shakeable `shader-external-texture` module exported with `setShaderExternalTexture` / `getShaderExternalTexture`. Core material creation snapshots the declaration names, so caller mutation cannot desynchronize slots. The first binding API call hydrates and validates a material created before a code-split binding module loads and explicitly installs the optional pipeline and renderable resolver seams. Importing the module has no side effects. Pipeline preparation rejects an external material before those seams are installed rather than caching an incomplete layout. The optional renderable resolver identifies materials needing direct draws and per-frame group-1 refreshes. Refreshes rebuild only the bind group, without acquiring or releasing ordinary textures. ShaderMaterials without that API do not pull video binding or sampler-cache code.
+
+External slots belong to the underlying source material. Hydrating a material view first must populate the source rather than shadowing its slots. Binding through either a source or a view updates that same source map and resource version, so other views keep seeing subsequent video replacements.
 
 `_uboVersion` from the base `Material` mirrors `_uniformVersion` for compatibility with existing dirty tracking. `_resourceVersion` is separate because texture/sampler changes require bind group rebuilds, not just UBO writes.
 

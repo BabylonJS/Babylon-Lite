@@ -1962,7 +1962,7 @@
         "slug": "scene213-gridmaterial",
         "name": "Scene 213 — GridMaterial",
         "maxMad": 0.01,
-        "maxRawKB": 49.52,
+        "maxRawKB": 49.58,
         "description": "Four meshes shaded by the procedural unlit GridMaterial - an opaque anti-aliased teal ground, a useMaxLine orange sphere whose object-space grid wraps the curved surface, a transparent alpha-blended cyan box (opacity 0.6), and a hard-cutoff antialias:false pink box - validated against a Babylon.js GridMaterial oracle.",
         "tags": ["materials", "grid", "procedural"],
         "skipPerf": true,

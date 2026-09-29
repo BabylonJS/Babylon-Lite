@@ -45,7 +45,7 @@ interface ShaderExternalTexturePipelineResolver {
 
 let _externalTextureResolver: ShaderExternalTexturePipelineResolver | null = null;
 
-/** @internal Install external-texture layout/WGSL generation. */
+/** @internal Install the external-texture pipeline operations on explicit binding API use. */
 export function _installShaderExternalTexturePipelineResolver(resolver: ShaderExternalTexturePipelineResolver): void {
     _externalTextureResolver = resolver;
 }
@@ -98,8 +98,8 @@ interface ShaderMaterialPipelineState extends ShaderMaterial {
 }
 
 export function getOrCreateShaderPipelineBindings(engine: EngineContext, material: ShaderMaterial): ShaderPipelineBindings {
-    if (material._externalTextureCount > 0 && !_externalTextureResolver) {
-        throw new Error("ShaderMaterial external textures require importing setShaderExternalTexture before pipeline preparation.");
+    if (material._externalTextureDecls?.length && !_externalTextureResolver) {
+        throw new Error("ShaderMaterial external textures require setShaderExternalTexture before pipeline preparation.");
     }
     const state = material as ShaderMaterialPipelineState;
     const cache = state._shaderPipelineCache;

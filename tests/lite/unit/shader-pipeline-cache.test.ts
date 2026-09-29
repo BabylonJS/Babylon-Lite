@@ -4,7 +4,7 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
 import { enableShaderMaterialFinalColor } from "../../../packages/babylon-lite/src/material/shader/enable-shader-material-final-color";
 import { enableShaderMaterialInstanceWorld } from "../../../packages/babylon-lite/src/material/shader/enable-shader-material-instance-world";
-import "../../../packages/babylon-lite/src/material/shader/shader-external-texture";
+import { getShaderExternalTexture } from "../../../packages/babylon-lite/src/material/shader/shader-external-texture";
 import { createShaderNoColorMaterialView } from "../../../packages/babylon-lite/src/material/shader/no-color-view";
 import { createShaderNormalMaterialView } from "../../../packages/babylon-lite/src/material/shader/normal-view";
 import { createShaderMaterial, type ShaderMaterial } from "../../../packages/babylon-lite/src/material/shader/shader-material";
@@ -114,6 +114,7 @@ describe("ShaderMaterial pipeline cache", () => {
             uniforms: ["world", { name: "tint", type: "vec3<f32>" }],
             externalTextures: ["videoSampler"],
         });
+        getShaderExternalTexture(external, "videoSampler");
         enableShaderPipelineCache(engine, [{ material: ordinary }, { material: external }]);
 
         const ordinaryBindings = getOrCreateShaderPipelineBindings(engine, ordinary);
