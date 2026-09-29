@@ -34,6 +34,11 @@ interface TriangleHit {
     bv: number;
 }
 
+interface LocalBounds {
+    min: Point3;
+    max: Point3;
+}
+
 function transformPoint(matrix: Mat4, point: Point3): [number, number, number] {
     const x = point[0];
     const y = point[1];
@@ -54,7 +59,11 @@ function transformDirection(matrix: Mat4, direction: Point3): [number, number, n
     return [matrix[0]! * x + matrix[4]! * y + matrix[8]! * z, matrix[1]! * x + matrix[5]! * y + matrix[9]! * z, matrix[2]! * x + matrix[6]! * y + matrix[10]! * z];
 }
 
-function intersectsBounds(positions: Float32Array, ray: Ray, maxDistance: number): boolean {
+function getLocalBounds(mesh: Mesh, positions: Float32Array): LocalBounds {
+    if (mesh.boundMin && mesh.boundMax) {
+        return { min: mesh.boundMin, max: mesh.boundMax };
+    }
+
     let minX = Infinity;
     let minY = Infinity;
     let minZ = Infinity;
@@ -69,14 +78,17 @@ function intersectsBounds(positions: Float32Array, ray: Ray, maxDistance: number
         maxY = Math.max(maxY, positions[i + 1]!);
         maxZ = Math.max(maxZ, positions[i + 2]!);
     }
+    return { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] };
+}
 
+function intersectsBounds(bounds: LocalBounds, ray: Ray, maxDistance: number): boolean {
     let minimum = 0;
     let maximum = maxDistance;
     for (let axis = 0; axis < 3; axis++) {
         const origin = ray.origin[axis]!;
         const direction = ray.direction[axis]!;
-        const lower = axis === 0 ? minX : axis === 1 ? minY : minZ;
-        const upper = axis === 0 ? maxX : axis === 1 ? maxY : maxZ;
+        const lower = bounds.min[axis]!;
+        const upper = bounds.max[axis]!;
         if (Math.abs(direction) < 1e-12) {
             if (origin < lower || origin > upper) {
                 return false;
@@ -136,13 +148,16 @@ function intersectTriangle(ray: Ray, p0: Point3, p1: Point3, p2: Point3, maxDist
     return { distance, bu: 1 - vertex1Weight - vertex2Weight, bv: vertex1Weight };
 }
 
-function pickMeshTriangles(mesh: Mesh, localRay: Ray, directionScale: number, maxDistance: number, options: PreciseRayPickOptions): TriangleHit | null {
-    const positions = mesh._cpuPositions;
-    const indices = mesh._cpuIndices;
-    if (!positions || positions.length < 3 || !indices || indices.length < 3 || mesh._topology || mesh.skeleton || mesh.morphTargets || mesh.vat) {
-        return null;
-    }
-    if (!intersectsBounds(positions, localRay, maxDistance * directionScale)) {
+function pickMeshTriangles(
+    positions: Float32Array,
+    indices: Uint32Array,
+    bounds: LocalBounds,
+    localRay: Ray,
+    directionScale: number,
+    maxDistance: number,
+    options: PreciseRayPickOptions
+): TriangleHit | null {
+    if (!intersectsBounds(bounds, localRay, maxDistance * directionScale)) {
         return null;
     }
 
@@ -188,43 +203,15 @@ function instanceWorldMatrix(mesh: Mesh, thinInstanceIndex: number): Mat4 {
     return multiplyMat4(mesh.worldMatrix, instance as unknown as Mat4);
 }
 
-function transformNormal(matrix: Mat4, normal: Point3): [number, number, number] {
-    return [
-        matrix[0]! * normal[0] + matrix[4]! * normal[1] + matrix[8]! * normal[2],
-        matrix[1]! * normal[0] + matrix[5]! * normal[1] + matrix[9]! * normal[2],
-        matrix[2]! * normal[0] + matrix[6]! * normal[1] + matrix[10]! * normal[2],
-    ];
+function normalToWorld(inverseWorld: Mat4, normal: Point3): [number, number, number] {
+    return normalizeVec3TupleOrUp(
+        inverseWorld[0]! * normal[0] + inverseWorld[1]! * normal[1] + inverseWorld[2]! * normal[2],
+        inverseWorld[4]! * normal[0] + inverseWorld[5]! * normal[1] + inverseWorld[6]! * normal[2],
+        inverseWorld[8]! * normal[0] + inverseWorld[9]! * normal[1] + inverseWorld[10]! * normal[2]
+    );
 }
 
-function hasNonUniformScaling(matrix: Mat4): boolean {
-    const scaleX = Math.hypot(matrix[0]!, matrix[1]!, matrix[2]!);
-    const scaleY = Math.hypot(matrix[4]!, matrix[5]!, matrix[6]!);
-    const scaleZ = Math.hypot(matrix[8]!, matrix[9]!, matrix[10]!);
-    return Math.abs(scaleX - scaleY) > 1e-6 || Math.abs(scaleX - scaleZ) > 1e-6;
-}
-
-function normalToWorld(mesh: Mesh, thinInstanceIndex: number, normal: Point3): [number, number, number] {
-    let transformed: Point3 = normal;
-    if (thinInstanceIndex >= 0 && mesh.thinInstances) {
-        const offset = thinInstanceIndex * 16;
-        const matrix = mesh.thinInstances.matrices.subarray(offset, offset + 16) as unknown as Mat4;
-        transformed = transformNormal(matrix, transformed);
-    }
-    if (hasNonUniformScaling(mesh.worldMatrix)) {
-        const inverseWorld = invertMat4(mesh.worldMatrix);
-        if (inverseWorld) {
-            return normalizeVec3TupleOrUp(
-                inverseWorld[0]! * transformed[0] + inverseWorld[1]! * transformed[1] + inverseWorld[2]! * transformed[2],
-                inverseWorld[4]! * transformed[0] + inverseWorld[5]! * transformed[1] + inverseWorld[6]! * transformed[2],
-                inverseWorld[8]! * transformed[0] + inverseWorld[9]! * transformed[1] + inverseWorld[10]! * transformed[2]
-            );
-        }
-    }
-    transformed = transformNormal(mesh.worldMatrix, transformed);
-    return normalizeVec3TupleOrUp(transformed[0], transformed[1], transformed[2]);
-}
-
-function populateSurfaceDetail(info: PickingInfo, mesh: Mesh, thinInstanceIndex: number, hit: TriangleHit): void {
+function populateSurfaceDetail(info: PickingInfo, mesh: Mesh, inverseWorld: Mat4, hit: TriangleHit): void {
     const positions = mesh._cpuPositions!;
     const indices = mesh._cpuIndices!;
     const i0 = indices[hit.faceId * 3]!;
@@ -242,7 +229,7 @@ function populateSurfaceDetail(info: PickingInfo, mesh: Mesh, thinInstanceIndex:
             hit.bu * normals[i0 * 3 + 1]! + hit.bv * normals[i1 * 3 + 1]! + remainder * normals[i2 * 3 + 1]!,
             hit.bu * normals[i0 * 3 + 2]! + hit.bv * normals[i1 * 3 + 2]! + remainder * normals[i2 * 3 + 2]!
         );
-        let worldNormal = normalToWorld(mesh, thinInstanceIndex, localNormal);
+        let worldNormal = normalToWorld(inverseWorld, localNormal);
         if (info.ray && worldNormal[0] * info.ray.direction[0] + worldNormal[1] * info.ray.direction[1] + worldNormal[2] * info.ray.direction[2] > 0) {
             localNormal = [-localNormal[0], -localNormal[1], -localNormal[2]];
             worldNormal = [-worldNormal[0], -worldNormal[1], -worldNormal[2]];
@@ -258,7 +245,7 @@ function populateSurfaceDetail(info: PickingInfo, mesh: Mesh, thinInstanceIndex:
     const e2y = positions[i2 * 3 + 1]! - positions[i0 * 3 + 1]!;
     const e2z = positions[i2 * 3 + 2]! - positions[i0 * 3 + 2]!;
     let localFaceNormal = normalizeVec3TupleOrUp(e1y * e2z - e1z * e2y, e1z * e2x - e1x * e2z, e1x * e2y - e1y * e2x);
-    let worldFaceNormal = normalToWorld(mesh, thinInstanceIndex, localFaceNormal);
+    let worldFaceNormal = normalToWorld(inverseWorld, localFaceNormal);
     if (info.ray && worldFaceNormal[0] * info.ray.direction[0] + worldFaceNormal[1] * info.ray.direction[1] + worldFaceNormal[2] * info.ray.direction[2] > 0) {
         localFaceNormal = [-localFaceNormal[0], -localFaceNormal[1], -localFaceNormal[2]];
         worldFaceNormal = [-worldFaceNormal[0], -worldFaceNormal[1], -worldFaceNormal[2]];
@@ -267,14 +254,14 @@ function populateSurfaceDetail(info: PickingInfo, mesh: Mesh, thinInstanceIndex:
     info.pickedFaceNormalWorld = worldFaceNormal;
 }
 
-function populateHit(info: PickingInfo, mesh: Mesh, thinInstanceIndex: number, hit: TriangleHit): PickingInfo {
+function populateHit(info: PickingInfo, mesh: Mesh, thinInstanceIndex: number, inverseWorld: Mat4, hit: TriangleHit): PickingInfo {
     const ray = info.ray!;
     info.hit = true;
     info.distance = hit.distance;
     info.pickedMesh = mesh;
     info.pickedPoint = [ray.origin[0] + ray.direction[0] * hit.distance, ray.origin[1] + ray.direction[1] * hit.distance, ray.origin[2] + ray.direction[2] * hit.distance];
     info.thinInstanceIndex = thinInstanceIndex;
-    populateSurfaceDetail(info, mesh, thinInstanceIndex, hit);
+    populateSurfaceDetail(info, mesh, inverseWorld, hit);
     return info;
 }
 
@@ -290,6 +277,7 @@ export function pickMeshesWithRayPrecise(meshes: Iterable<Mesh>, ray: Ray, optio
     let bestDistance = ray.length;
     let bestMesh: Mesh | null = null;
     let bestThinInstanceIndex = -1;
+    let bestInverseWorld: Mat4 | null = null;
     let bestHit: TriangleHit | null = null;
 
     for (const mesh of meshes) {
@@ -299,8 +287,17 @@ export function pickMeshesWithRayPrecise(meshes: Iterable<Mesh>, ray: Ray, optio
         if (options.predicate && !options.predicate(mesh, -1)) {
             continue;
         }
-        const instanceCount = mesh.thinInstances ? Math.min(mesh.thinInstances.count, Math.floor(mesh.thinInstances.matrices.length / 16)) : 0;
-        const firstInstance = instanceCount > 0 ? 0 : -1;
+        const positions = mesh._cpuPositions;
+        const indices = mesh._cpuIndices;
+        if (!positions || positions.length < 3 || !indices || indices.length < 3 || mesh._topology || mesh.skeleton || mesh.morphTargets || mesh.vat) {
+            continue;
+        }
+        const bounds = getLocalBounds(mesh, positions);
+        const instanceCount = mesh.thinInstances ? Math.max(0, Math.min(mesh.thinInstances.count, Math.floor(mesh.thinInstances.matrices.length / 16))) : 0;
+        if (mesh.thinInstances && instanceCount === 0) {
+            continue;
+        }
+        const firstInstance = mesh.thinInstances ? 0 : -1;
         for (let thinInstanceIndex = firstInstance; thinInstanceIndex < instanceCount; thinInstanceIndex++) {
             if (thinInstanceIndex >= 0 && options.predicate && !options.predicate(mesh, thinInstanceIndex)) {
                 continue;
@@ -320,21 +317,22 @@ export function pickMeshesWithRayPrecise(meshes: Iterable<Mesh>, ray: Ray, optio
                 direction: [localDirection[0] / directionScale, localDirection[1] / directionScale, localDirection[2] / directionScale],
                 length: ray.length * directionScale,
             };
-            const hit = pickMeshTriangles(mesh, localRay, directionScale, bestDistance, options);
+            const hit = pickMeshTriangles(positions, indices, bounds, localRay, directionScale, bestDistance, options);
             if (!hit) {
                 continue;
             }
             if (options.fastCheck) {
-                return populateHit(info, mesh, thinInstanceIndex, hit);
+                return populateHit(info, mesh, thinInstanceIndex, inverseWorld, hit);
             }
             bestDistance = hit.distance;
             bestMesh = mesh;
             bestThinInstanceIndex = thinInstanceIndex;
+            bestInverseWorld = inverseWorld;
             bestHit = hit;
         }
     }
 
-    return bestMesh && bestHit ? populateHit(info, bestMesh, bestThinInstanceIndex, bestHit) : info;
+    return bestMesh && bestInverseWorld && bestHit ? populateHit(info, bestMesh, bestThinInstanceIndex, bestInverseWorld, bestHit) : info;
 }
 
 /** Triangle-precise synchronous ray pick over a scene's meshes. */

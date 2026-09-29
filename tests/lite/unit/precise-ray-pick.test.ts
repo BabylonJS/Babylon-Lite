@@ -18,9 +18,14 @@ function scaling(x: number, y: number, z: number): Mat4 {
 }
 
 function mesh(positions: number[], indices: number[], worldMatrix: Mat4 = IDENTITY): Mesh {
+    const xs = positions.filter((_, index) => index % 3 === 0);
+    const ys = positions.filter((_, index) => index % 3 === 1);
+    const zs = positions.filter((_, index) => index % 3 === 2);
     return {
         pickable: true,
         worldMatrix,
+        boundMin: [Math.min(...xs), Math.min(...ys), Math.min(...zs)],
+        boundMax: [Math.max(...xs), Math.max(...ys), Math.max(...zs)],
         _cpuPositions: new Float32Array(positions),
         _cpuIndices: new Uint32Array(indices),
         _cpuNormals: new Float32Array(Array.from({ length: positions.length / 3 }, () => [0, 0, -1]).flat()),
@@ -83,6 +88,16 @@ describe("pickMeshesWithRayPrecise", () => {
         expect(hit.thinInstanceIndex).toBe(1);
     });
 
+    it("does not pick a thin-instance prototype when the active count is zero", () => {
+        const triangle = mesh([-1, -1, 0, 1, -1, 0, 0, 1, 0], [0, 1, 2]);
+        triangle.thinInstances = {
+            matrices: new Float32Array(IDENTITY),
+            count: 0,
+        } as NonNullable<Mesh["thinInstances"]>;
+
+        expect(pickMeshesWithRayPrecise([triangle], RAY).hit).toBe(false);
+    });
+
     it("normalizes and rescales the local predicate ray", () => {
         const triangle = mesh([-1, -1, 0, 1, -1, 0, 0, 1, 0], [0, 1, 2], scaling(2, 1, 0.5));
         const predicate = vi.fn<TrianglePickingPredicate>(() => true);
@@ -96,6 +111,21 @@ describe("pickMeshesWithRayPrecise", () => {
     it("uses inverse-transpose world normals under non-uniform scaling", () => {
         const triangle = mesh([0, 0, 0, 1, 0, 1, 0, 1, 0], [0, 1, 2], scaling(2, 1, 1));
         triangle._cpuNormals = new Float32Array([-1, 0, 1, -1, 0, 1, -1, 0, 1]);
+        const hit = pickMeshesWithRayPrecise([triangle], { origin: [0.5, 0.25, -2], direction: [0, 0, 1], length: 100 });
+        const normal = getPickedNormal(hit, true)!;
+
+        expect(normal[0]).toBeCloseTo(1 / Math.sqrt(5));
+        expect(normal[1]).toBeCloseTo(0);
+        expect(normal[2]).toBeCloseTo(-2 / Math.sqrt(5));
+    });
+
+    it("uses the composed inverse-transpose for non-uniformly scaled thin-instance normals", () => {
+        const triangle = mesh([0, 0, 0, 1, 0, 1, 0, 1, 0], [0, 1, 2]);
+        triangle._cpuNormals = new Float32Array([-1, 0, 1, -1, 0, 1, -1, 0, 1]);
+        triangle.thinInstances = {
+            matrices: new Float32Array(scaling(2, 1, 1)),
+            count: 1,
+        } as NonNullable<Mesh["thinInstances"]>;
         const hit = pickMeshesWithRayPrecise([triangle], { origin: [0.5, 0.25, -2], direction: [0, 0, 1], length: 100 });
         const normal = getPickedNormal(hit, true)!;
 
