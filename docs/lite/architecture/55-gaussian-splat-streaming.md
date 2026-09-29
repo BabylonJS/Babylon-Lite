@@ -651,26 +651,6 @@ An initially collapsed native `details` section in the same panel reports the ac
 
 Attribution is always visible: “Get lost in the alleys of historical Trogir, Croatia” by Paolo Tosolini, source `https://superspl.at/scene/14bac5b2`, licensed CC BY 4.0.
 
-### Opt-in LOD convergence comparison
-
-`pnpm compare:splat-lod` is a development-only Playwright/localhost tool; it is not imported by the library or demo bundle and exposes no production globals. It uses a dedicated blank localhost page rather than the lab gallery, renders the same manifest in native engine adapters, and records deterministic convergence at named waypoints. The reference adapter is pinned to PlayCanvas `2.22.1`, revision `73787b3ba852728d04c8d5eabf2b5f773b3bf9da`; missing or changed native fields fail explicitly. Built-ins are `overview`, the reported user pose at eye `(15.8, 1.68, -70.5)` with yaw `75.83°`, pitch `-10.43°` and roll zero, `published-street` at eye `(14.7745447, 1.5231726, -42.5117302)` targeting `(16.2620824, 1.3343776, -43.8352073)`, then `overview-return` and `user-repeat` to expose warm-cache history. Every stop uses vertical FOV `0.8` radians, near `0.1`, far `1500`, viewport `900x1000`, DPR `1`, sample interval `250 ms`, quiet hold `2000 ms`, and timeout `60000 ms` unless overridden. The PlayCanvas adapter mirrors world Z and forward Z for its right-handed camera while both adapters retain the authored 180-degree scene-Z placement. Each report identifies adapter and engine version, repository revision and dirty state, actual settings, and requested plus actual camera matrices.
-
-The CLI flags are `--engine=lite|playcanvas|both`, `--profiles=matched|all`, `--asset-url=URL`, `--output=DIR`, `--poses=FILE`, `--waypoints=NAMES`, `--width=N`, `--height=N`, `--dpr=N`, `--splat-budget=N`, `--gpu-mib=N`, `--cpu-mib=N`, `--screen-error=N`, `--sample-ms=N`, `--hold-ms=N`, `--timeout-ms=N`, `--port=N`, and `--headed=true|false`. Defaults are both engines, all profiles, the Babylon-hosted Trogir URL, 750,000 splats, 256 MiB GPU, 96 MiB CPU, and screen error 2. The matched profile keeps both engines at the nominal 750,000 target and the normalized lens, but is not exact resource parity because only Lite enforces those byte budgets. The viewer-budget profile compares unchanged Lite 750,000 against PlayCanvas 4,000,000 and must not attribute that budget advantage to selection policy. This comparison profile remains distinct from the standalone demo's 4,010,000 capacity and 1 GiB ledger.
-
-```powershell
-pnpm compare:splat-lod --engine=both --profiles=all --asset-url=https://assets.babylonjs.com/splats/Trogir/lod-meta.json --output=.splat-lod-reports\trogir --width=900 --height=1000 --dpr=1 --splat-budget=750000 --gpu-mib=256 --cpu-mib=96 --screen-error=2 --sample-ms=250 --hold-ms=2000 --timeout-ms=60000 --port=5191
-```
-
-Each engine starts cold, then the built-in return/repeat waypoints measure authentic warm-cache/history behavior in the same native instance. The CLI owns and disposes its browser and dedicated HMR-disabled Vite server in `finally`, writes bounded JSON Lines, formatted JSON, and a human-readable text summary under ignored `.splat-lod-reports/`, and emits records only when the stable state fingerprint changes or the quiet heartbeat expires.
-
-Every sample contains elapsed time; native phase, queue, pressure and error state; requested and actual camera transforms; memory where the adapter can measure it; and stable leaf IDs with both the common transformed-AABB frustum result and the native planner visibility when that state is observable, distance to transformed bounds, target/requested LOD, resident alternatives, actual displayed/resolved LOD, splat counts, source state, and target-display gap. Lite resolves actual display only from the currently published canonical GPU intervals by source identity plus `(offset, count)`; PlayCanvas resolves it from the native current-world `(fileIndex, offset, count)` tuple. Neither adapter infers actual display from mutable target or pending state. Aggregates include `0-1m`, `1-5m`, `5-15m`, and `15m+` distance bins, nearest cross-engine displayed-LOD differences, displayed/target histograms, active/selected counts, and convergence disposition. A visible positive target with no resolved display counts as a gap in both per-bin and whole-waypoint metrics.
-
-An empty queue is not convergence. A stop is `converged` only after native readiness, zero queued files, zero pending requests/transitions, no pressure or error, every common-visible target being present in the native resolved intervals, and the quiet hold. It is `failed` and aborts the run when a native stream, source, browser runtime, page, console, or uncaptured WebGPU error occurs; `budget-limited` when native pressure is explicit and state remains unchanged for the hold; `stalled` for a ready, queue-free, unchanged non-pressure gap; or `timeout` at the deadline. Each adapter bounds its complete initialization sequence, including module/device/manifest/asset loading and first-frame readiness, with the configured timeout and disposes every partially constructed native object it owns. The parent runner independently bounds the whole page evaluation, records browser `pageerror` and error-console events, and always closes the browser and server. Lite creates immutable canonical capacity and required WebGPU buffer limits from the requested foreground budget plus the environment reserve; the CLI accepts at most 4,000,000 foreground splats and rejects larger values before browser launch rather than silently running a lower capacity.
-
-Browser/runtime failure is terminal and monotonic across page startup, navigation, adapter evaluation, and asynchronous browser closure. The runner installs listeners before exposing bindings or navigating, observes the failure promise immediately, writes exactly one terminal failed sample derived from the last accepted sample, rejects every later record, and chooses success only after browser closure completes without a competing runtime failure. A failure before the first adapter sample derives from an explicit `initializing` record rather than disappearing from JSONL. Manifest headers and body consumption share one absolute deadline and abort controller. Deadline observation is installed even when the deadline has already expired; a subsequently resolved resource is disposed exactly once and a late rejection is observed. Lite observes both uncaptured errors and unexpected `GPUDevice.lost`; teardown-induced loss is ignored only after disposal begins. Lite also observes `firstFrameReady` without blocking first-waypoint timing: genuine bootstrap rejection becomes native failure state, while the adapter marks teardown before disposing a timed-out pre-readiness stream so its own `disposed before first frame` rejection is consumed and ignored.
-
-Before either engine starts rendering, the first requested waypoint pose is installed. The first waypoint elapsed time includes equivalent initialization, bootstrap, and convergence work; later waypoints begin after the prior stop and are labeled warm from run history rather than from their names. `requestedLod` means a representation whose source currently has active native demand; when native request identity cannot be resolved it is `null`, never an alias of the target. Timing is diagnostic only and the report makes no cross-engine speed claim.
-
 Core stream correction invariants are stricter than diagnostic policy. CPU admission retains encoded bytes through decode and reserves the simultaneous encoded-plus-decoded peak; a source preparation that cannot progress without waiting on its own retained resources rejects cleanly and releases all reservations. Environment residency reduces the planner allowance but never invalidates an unchanged legal public `maxSplats`; only raising the mutable target above immutable foreground capacity is an error. Submission-local gather descriptors have protected ledger headroom before source admission and remain charged through overlapping retirement fences. Selection snapshots and demand are per draw binding and aggregated before source cancellation, so disjoint cameras cannot erase each other's requests. Scene disposers never mutate the live disposal array during `disposeScene`.
 
 Pending publication is transactional. All reductions are staged against a scratch aggregate even while intermediate totals remain above capacity, the complete reduced generation is validated, and only then are affordable upgrades admitted. A fine candidate rejected by aggregate capacity cannot suppress an available coarse representation; unpublished fine sources lose pending protection when that protection blocks required coverage or downgrade prerequisites, while canonical sources remain active-protected. Generation-admission pressure is explicit persistent state consumed by `updateStats` and clears only after successful publication.
@@ -691,7 +671,7 @@ This is a new Lite-only streaming transport/ownership path. It reuses Lite's exi
 
 Every cache is lazy and device-keyed. Importing the root exports performs no work.
 
-## Test Specification
+## Validation Requirements
 
 ### Unit tests
 
@@ -708,7 +688,7 @@ Every cache is lazy and device-keyed. Importing the root exports performs no wor
 - exact-input cache reuse and planner counters covering mutable matrix/camera/viewport/world changes plus every source, admission, binding, pressure, publication, environment, and cooldown-expiry invalidation while lifecycle scheduling continues;
 - cache accounting, pin/ref protections, LRU admission, partial upload cleanup, and retirement.
 
-### Numerical/GPU tests
+### Numerical/GPU behavior
 
 - exact mean endpoints/sign crossing and last/padding texel behavior;
 - all four quaternion selectors and covariance `S*C*S`;
@@ -719,18 +699,7 @@ Every cache is lazy and device-keyed. Importing the root exports performs no wor
 - radix counts 0, 1, equal keys, sentinels, near-identical depths, non-power-of-two tails, all 16 digits, lane/word boundaries 0/31/32/63/255, arbitrary random 32-bit keys, 255/256/257 items, 65,536 hierarchy boundary, active-count collapse at capacity 500,000, stale-row recovery, and all eight passes;
 - survivor compaction verifies dense prefixes without invalid sentinels, GPU count-driven dispatch dimensions, strict equal-depth canonical-ID ties across workgroups, and zero-to-many-to-one-to-zero transitions;
 - actual material `bind` calls preserve distinct stable selection identities for separate views;
-- actual WGSL pipeline compilation and GPU readback only in tests.
-
-### Integration
-
-- synthetic browser fixture proves coarse request/draw precedes refinement and environment, and repeated selection updates preserve one delayed environment request until residency;
-- real local Trogir smoke proves `6_0/meta.json` is first, a nonempty coarse draw completes before any finer request, and subsequent refinement occurs;
-- unavailable selected source shows local/hosted override instructions instead of hanging;
-- preserve scene 120 and 122 static behavior;
-- build library and only the Trogir demo plus filtered scene 120, 122, and scene 1 guard bundles;
-- no local parity, visual/MAD, performance, all-scene, ceiling, or golden changes.
-
-Spector.GPU inspection is attempted when tooling exists. Unavailable tooling is reported; no visual equivalence claim is made without CI.
+- WGSL pipelines must compile on WebGPU implementations, and diagnostic readback must never enter the production render path.
 
 ## File Manifest
 
@@ -758,6 +727,8 @@ demos-config.json
 tests/lite/unit/splat-stream-meta.test.ts
 tests/lite/unit/splat-stream-selection.test.ts
 tests/lite/unit/splat-stream-requests.test.ts
-tests/lite/unit/splat-stream-gpu.test.ts
-tests/lite/integration/splat-stream-trogir.test.ts
+tests/lite/unit/splat-stream-cache.test.ts
+tests/lite/unit/splat-stream-orchestration.test.ts
+tests/lite/unit/trogir-camera-mode.test.ts
+tests/lite/unit/trogir-streaming-placement.test.ts
 ```
