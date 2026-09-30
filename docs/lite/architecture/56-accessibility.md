@@ -22,17 +22,6 @@ setAccessibilityTag(centerBox, {
 addToScene(scene, centerBox);
 ```
 
-An application can attach scene-specific descriptions that match the meaning of an object:
-
-```ts
-setAccessibilityTag(mars, {
-    name: "Mars",
-    description: "The fourth planet from the Sun",
-    role: "img",
-    aria: { "aria-roledescription": "planet" },
-});
-```
-
 ## Public API Surface
 
 All public state uses interfaces. All behavior uses standalone functions exported from the package root.
