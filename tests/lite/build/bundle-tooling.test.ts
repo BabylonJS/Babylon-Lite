@@ -7,6 +7,7 @@ import { build, normalizePath, type Plugin } from "vite";
 
 import { demoOwnsBundleFile } from "../../../scripts/demo-bundle-name";
 import { createLiteCodeSplitting, litePackageResolverPlugin, resolveLitePackageSpecifier, terserPropertyManglePlugin } from "../../../scripts/bundle-scenes-core";
+import { compareLiteErrorFiles, isDeferredLiteErrorFile } from "../../../scripts/lite-error-plugin";
 
 const tempDirs: string[] = [];
 
@@ -17,6 +18,18 @@ afterEach(() => {
 });
 
 describe("bundle tooling correctness", () => {
+    it("assigns optional accessibility error codes after core errors", () => {
+        const root = join(tmpdir(), "lite-error-order");
+        const core = join(root, "scene/scene-core.ts");
+        const tree = join(root, "accessibility/accessibility-tree.ts");
+        const twin = join(root, "scene/scene-html-twin.ts");
+
+        expect(isDeferredLiteErrorFile(root, tree)).toBe(true);
+        expect(isDeferredLiteErrorFile(root, twin)).toBe(true);
+        expect(isDeferredLiteErrorFile(root, core)).toBe(false);
+        expect([tree, core, twin].sort((a, b) => compareLiteErrorFiles(root, a, b))[0]).toBe(core);
+    });
+
     it("keeps a loaded chunk byte-identical when an unrelated chunk is minified first", async () => {
         const root = mkdtempSync(join(tmpdir(), "lite-mangle-identifiers-"));
         tempDirs.push(root);

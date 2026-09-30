@@ -69,10 +69,14 @@ function walkTsFiles(root: string): string[] {
     return out;
 }
 
-function isDeferredFeatureFile(root: string, file: string): boolean {
+export function isDeferredLiteErrorFile(root: string, file: string): boolean {
     const relative = path.relative(root, file).replace(/\\/g, "/");
-    // Opt-in compute errors must not renumber core errors and grow scenes that never import compute.
-    return relative.startsWith("compute/") || relative.startsWith("resource/compute-storage-");
+    // Opt-in feature errors must not renumber core errors and grow consumers that never import them.
+    return relative.startsWith("accessibility/") || relative === "scene/scene-html-twin.ts" || relative.startsWith("compute/") || relative.startsWith("resource/compute-storage-");
+}
+
+export function compareLiteErrorFiles(root: string, a: string, b: string): number {
+    return Number(isDeferredLiteErrorFile(root, a)) - Number(isDeferredLiteErrorFile(root, b)) || a.localeCompare(b);
 }
 
 /** Re-escape already-cooked template text so it can be embedded inside a new template literal. */
@@ -156,7 +160,7 @@ export function liteErrorPlugin(): Plugin {
 
         buildStart() {
             plans.clear();
-            const files = walkTsFiles(srcRoot).sort((a, b) => Number(isDeferredFeatureFile(srcRoot, a)) - Number(isDeferredFeatureFile(srcRoot, b)) || a.localeCompare(b));
+            const files = walkTsFiles(srcRoot).sort((a, b) => compareLiteErrorFiles(srcRoot, a, b));
             const tableEntries: string[] = [];
             let nextCode = 0;
 
