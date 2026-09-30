@@ -12,9 +12,10 @@
  * references a decoding entry point — `enableErrorDecoding()` (global decoder) or `decodeError()`
  * (on-demand, single caught error) — so by default the bundle ships numeric codes, not prose.
  *
- * Determinism: codes are assigned in a stable order (relative file path, then source position)
- * during `buildStart`, independent of Vite's parallel per-module `transform` ordering, so the
- * same source always yields the same codes and table.
+ * Determinism: codes are assigned in a stable compatibility order during `buildStart`: core
+ * files, established compute files, then accessibility files; each tier uses relative file path
+ * and source position. This is independent of Vite's parallel per-module `transform` ordering,
+ * so the same source always yields the same codes and table.
  *
  * Safety guards:
  *   - Only `new Error(stringLiteral | template)` is rewritten (static messages); dynamic/`Error`
