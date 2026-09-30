@@ -1,4 +1,4 @@
-// Demo — MeshLoD models (streaming clustered level-of-detail)
+// Experimental MeshLoD demo — streaming clustered level-of-detail
 //
 // Showcase-only page. Streams the statue as `.mlod` clustered-LOD primitives
 // through Babylon Lite's public, opt-in MeshLoD
