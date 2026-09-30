@@ -502,7 +502,7 @@ function enumerateLibEntries(): Record<string, string> {
                 .slice(SRC_DIR.length + 1)
                 .replace(/\\/g, "/")
                 .replace(/\.ts$/, "");
-            if (key.startsWith("accessibility/") || key === "scene/scene-html-twin") {
+            if (key.startsWith("accessibility/")) {
                 extensionEntries[key] = full;
             } else {
                 entries[key] = full;

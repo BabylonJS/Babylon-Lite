@@ -1,6 +1,6 @@
 import type { Camera } from "../camera/camera.js";
-import { _setSceneAccessibilityHook } from "../scene/scene-core.js";
-import type { SceneContext } from "../scene/scene-core.js";
+import type { SceneChangeEvent, SceneContext } from "../scene/scene-core.js";
+import { onSceneChange, onSceneDispose } from "../scene/scene-change.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import {
     addAccessibilityNode,
@@ -42,6 +42,10 @@ export interface SceneAccessibility {
     /** @internal */
     _unobserveCamera: () => void;
     /** @internal */
+    _unsubscribeSceneChanges: () => void;
+    /** @internal */
+    _unsubscribeSceneDispose: () => void;
+    /** @internal */
     _pending: boolean;
     /** @internal */
     _disposed: boolean;
@@ -49,50 +53,25 @@ export interface SceneAccessibility {
 
 let tags: WeakMap<object, AccessibilityTag> | undefined;
 let tagListeners: WeakMap<object, Set<() => void>> | undefined;
+let sceneBindings: WeakMap<SceneContext, SceneAccessibility> | undefined;
 
 function isSceneSource(value: unknown): value is SceneSource {
     return typeof value === "object" && value !== null && "children" in value && Array.isArray(value.children) && "worldMatrix" in value;
 }
 
-function sceneAccessibilityHook(scene: SceneContext, sourceOrCleanup?: unknown, added?: boolean): void {
-    if (typeof sourceOrCleanup === "function") {
-        const accessibility = scene._accessibility;
-        let cleanupFailed = false;
-        let cleanupError: unknown;
-        let accessibilityFailed = false;
-        let accessibilityError: unknown;
-        try {
-            sourceOrCleanup();
-        } catch (error) {
-            cleanupFailed = true;
-            cleanupError = error;
-        }
-        try {
-            accessibility?.dispose();
-        } catch (error) {
-            accessibilityFailed = true;
-            accessibilityError = error;
-        }
-        if (cleanupFailed && accessibilityFailed) {
-            throw new AggregateError([cleanupError, accessibilityError], "Scene disposal failed.");
-        }
-        if (cleanupFailed) {
-            throw cleanupError;
-        }
-        if (accessibilityFailed) {
-            throw accessibilityError;
-        }
+function sceneChanged(adapter: SceneAccessibility, event: SceneChangeEvent): void {
+    const source = event.entity;
+    if (!isSceneSource(source)) {
         return;
     }
-    const accessibility = scene._accessibility;
-    if (!accessibility) {
-        return;
-    }
-    if (added === undefined) {
-        accessibility.dispose();
+    if (event.type === "added") {
+        if (!(("_gpu" in source && "material" in source) || "lightType" in source)) {
+            adapter._automatic.add(source);
+        }
     } else {
-        accessibility.nodeChanged(sourceOrCleanup, added);
+        adapter._automatic.delete(source);
     }
+    schedule(adapter);
 }
 
 function sourceParent(source: SceneSource): SceneSource | null {
@@ -335,10 +314,9 @@ export function createSceneAccessibility(scene: SceneContext, options: SceneAcce
     if (scene._z) {
         throw new Error("Cannot create accessibility for a disposed scene.");
     }
-    if (scene._accessibility) {
+    if (sceneBindings?.has(scene)) {
         throw new Error("The scene already has an accessibility projection.");
     }
-    _setSceneAccessibilityHook(sceneAccessibilityHook);
     const adapter: SceneAccessibility = {
         tree: createAccessibilityTree(),
         _scene: scene,
@@ -347,27 +325,16 @@ export function createSceneAccessibility(scene: SceneContext, options: SceneAcce
         _parents: new Map(),
         _bindings: new Map(),
         _unobserveCamera: () => {},
+        _unsubscribeSceneChanges: () => {},
+        _unsubscribeSceneDispose: () => {},
         _pending: false,
         _disposed: false,
     };
-    scene._accessibility = {
-        nodeChanged: (source, added) => {
-            if (!isSceneSource(source)) {
-                return;
-            }
-            if (added) {
-                if (!(("_gpu" in source && "material" in source) || "lightType" in source)) {
-                    adapter._automatic.add(source);
-                }
-            } else {
-                adapter._automatic.delete(source);
-            }
-            schedule(adapter);
-        },
-        dispose: () => disposeSceneAccessibility(adapter),
-    };
-    adapter._unobserveCamera = observeProperty(scene, "camera", () => schedule(adapter));
+    (sceneBindings ??= new WeakMap()).set(scene, adapter);
     try {
+        adapter._unsubscribeSceneChanges = onSceneChange(scene, (event) => sceneChanged(adapter, event));
+        adapter._unsubscribeSceneDispose = onSceneDispose(scene, () => disposeSceneAccessibility(adapter));
+        adapter._unobserveCamera = observeProperty(scene, "camera", () => schedule(adapter));
         updateSceneAccessibility(adapter);
         return adapter;
     } catch (error) {
@@ -382,6 +349,8 @@ export function disposeSceneAccessibility(adapter: SceneAccessibility): void {
         return;
     }
     adapter._disposed = true;
+    adapter._unsubscribeSceneChanges();
+    adapter._unsubscribeSceneDispose();
     adapter._unobserveCamera();
     for (const binding of adapter._bindings.values()) {
         disposeBinding(binding);
@@ -390,8 +359,8 @@ export function disposeSceneAccessibility(adapter: SceneAccessibility): void {
     adapter._automatic.clear();
     adapter._explicit.clear();
     adapter._parents.clear();
-    if (adapter._scene._accessibility?.dispose) {
-        adapter._scene._accessibility = undefined;
+    if (sceneBindings?.get(adapter._scene) === adapter) {
+        sceneBindings.delete(adapter._scene);
     }
     disposeAccessibilityTree(adapter.tree);
 }

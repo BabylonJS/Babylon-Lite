@@ -54,10 +54,12 @@ console.log(createSceneContext);`,
 
     it("exports the passive contract and omits retired interaction APIs", () => {
         const declarations = readFileSync(resolve(PACKAGE_DIR, "build/index.d.ts"), "utf-8");
-        for (const name of ["AccessibilityTag", "createSceneAccessibility", "setAccessibilityTag", "createSceneHtmlTwin", "createHtmlTwin"]) {
+        for (const name of ["AccessibilityTag", "createSceneAccessibility", "setAccessibilityTag", "createSceneHtmlTwin", "createHtmlTwin", "onSceneChange", "SceneChangeEvent"]) {
             expect(declarations).toMatch(new RegExp(`\\b${name}\\b`));
         }
         expect(declarations).toMatch(/createSceneHtmlTwin\(scene: SceneContext, options\?: SceneHtmlTwinOptions\)/);
+        expect(declarations).toMatch(/onSceneChange\(scene: SceneContext, listener: SceneChangeListener\): \(\) => void/);
+        expect(declarations).toMatch(/onSceneDispose\(scene: SceneContext, callback: \(\) => void\): \(\) => void/);
         expect(declarations).toMatch(/parent\?: HTMLElement/);
         for (const name of [
             "eventHandler",

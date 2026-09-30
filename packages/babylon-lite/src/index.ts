@@ -41,6 +41,7 @@ export {
     removeFromScene,
     setMeshVisible,
     onBeforeRender,
+    onSceneChange,
     onSceneDispose,
     addToScene,
     disposeScene,
@@ -49,7 +50,7 @@ export {
     unregisterScene,
 } from "./scene/scene.js";
 export { markMeshRenderableDirty } from "./scene/mesh-scene-registry.js";
-export type { SceneContextOptions } from "./scene/scene.js";
+export type { SceneContextOptions, SceneEntity, SceneChangeEvent, SceneChangeListener } from "./scene/scene.js";
 export { setFog, setClipPlane } from "./scene/scene-ubo-extras.js";
 export { setEnvironmentBlur } from "./scene/set-environment-blur.js";
 export { setEnvironmentRotation } from "./scene/set-environment-rotation.js";
@@ -1433,5 +1434,5 @@ export {
     disposeSceneAccessibility,
 } from "./accessibility/scene-accessibility.js";
 export type { SceneAccessibility, SceneAccessibilityOptions } from "./accessibility/scene-accessibility.js";
-export { createSceneHtmlTwin, disposeSceneHtmlTwin } from "./scene/scene-html-twin.js";
-export type { SceneHtmlTwin, SceneHtmlTwinOptions } from "./scene/scene-html-twin.js";
+export { createSceneHtmlTwin, disposeSceneHtmlTwin } from "./accessibility/scene-html-twin.js";
+export type { SceneHtmlTwin, SceneHtmlTwinOptions } from "./accessibility/scene-html-twin.js";

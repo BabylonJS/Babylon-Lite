@@ -3,15 +3,17 @@ import { createArcRotateCamera } from "../../../packages/babylon-lite/src/camera
 import { createNullEngine } from "../../../packages/babylon-lite/src/engine/null-engine";
 import { createHemisphericLight } from "../../../packages/babylon-lite/src/light/hemispheric";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
-import { addToScene, createSceneContext, disposeScene, onSceneDispose } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { addToScene, createSceneContext, disposeScene } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { onSceneDispose } from "../../../packages/babylon-lite/src/scene/scene-change";
 import { removeFromScene } from "../../../packages/babylon-lite/src/scene/scene-remove";
-import { createSceneHtmlTwin } from "../../../packages/babylon-lite/src/scene/scene-html-twin";
+import { createSceneHtmlTwin } from "../../../packages/babylon-lite/src/accessibility/scene-html-twin";
 import { createTransformNode } from "../../../packages/babylon-lite/src/scene/transform-node";
 import { setParent } from "../../../packages/babylon-lite/src/scene/set-parent";
 import { onAccessibilityTreeChanged } from "../../../packages/babylon-lite/src/accessibility/accessibility-tree";
 import { observeProperty } from "../../../packages/babylon-lite/src/accessibility/observe-property";
 import {
     createSceneAccessibility,
+    disposeSceneAccessibility,
     getAccessibilityNode,
     getAccessibilityTag,
     setAccessibilityParent,
@@ -25,14 +27,25 @@ describe("scene accessibility", () => {
         disposeScene(scene);
 
         expect(() => createSceneAccessibility(scene)).toThrow(/disposed/i);
-        expect(scene._accessibility).toBeUndefined();
     });
 
     it("rejects a missing DOM host before installing the scene binding", () => {
         const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
 
         expect(() => createSceneHtmlTwin(scene)).toThrow(/DOM canvas.*parent/i);
-        expect(scene._accessibility).toBeUndefined();
+        const accessibility = createSceneAccessibility(scene);
+
+        expect(accessibility.tree.disposed).toBe(false);
+        disposeScene(scene);
+    });
+
+    it("rejects a duplicate projection and allows a replacement after explicit disposal", () => {
+        const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+        const first = createSceneAccessibility(scene);
+
+        expect(() => createSceneAccessibility(scene)).toThrow(/already has/i);
+        disposeSceneAccessibility(first);
+        expect(() => createSceneAccessibility(scene)).not.toThrow();
 
         disposeScene(scene);
     });
@@ -207,8 +220,6 @@ describe("scene accessibility", () => {
         expect(getAccessibilityNode(firstAccessibility, secondSource)).toBeUndefined();
         expect(getAccessibilityNode(secondAccessibility, secondSource)).toBeDefined();
         expect(getAccessibilityNode(secondAccessibility, firstSource)).toBeUndefined();
-        expect(plainScene._accessibility).toBeUndefined();
-
         disposeScene(plainScene);
         disposeScene(firstScene);
         expect(firstAccessibility.tree.disposed).toBe(true);
@@ -426,7 +437,6 @@ describe("scene accessibility", () => {
 
         expect(() => disposeScene(scene)).toThrow(failure);
         expect(cleanup).toHaveBeenCalledOnce();
-        expect(scene._accessibility).toBeUndefined();
         expect(scene._disposables).toEqual([]);
         expect(scene.meshes).toEqual([]);
         expect(scene.lights).toEqual([]);
@@ -445,7 +455,6 @@ describe("scene accessibility", () => {
         expect(accessibility._disposed).toBe(true);
         expect(accessibility.tree.disposed).toBe(true);
         expect(accessibility._bindings.size).toBe(0);
-        expect(scene._accessibility).toBeUndefined();
         expect(scene._disposables).toEqual([]);
         expect(Object.getOwnPropertyDescriptor(source, "name")).toMatchObject({
             configurable: true,
@@ -474,10 +483,9 @@ describe("scene accessibility", () => {
         }
 
         expect(failure).toBeInstanceOf(AggregateError);
-        expect((failure as AggregateError).errors).toEqual([undefined, observerFailure]);
+        expect((failure as AggregateError).errors).toEqual([observerFailure, undefined]);
         expect(accessibility._disposed).toBe(true);
         expect(accessibility.tree.disposed).toBe(true);
-        expect(scene._accessibility).toBeUndefined();
         expect(scene._disposables).toEqual([]);
     });
 
@@ -495,8 +503,24 @@ describe("scene accessibility", () => {
         await Promise.resolve();
 
         expect(accessibility.tree.disposed).toBe(true);
-        expect(scene._accessibility).toBeUndefined();
         expect(update).toHaveBeenCalledOnce();
+    });
+
+    it("unsubscribes explicit projection disposal from later scene changes", async () => {
+        const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+        const accessibility = createSceneAccessibility(scene);
+        const source = createTransformNode("After disposal");
+        const update = vi.fn();
+        onAccessibilityTreeChanged(accessibility.tree, update);
+
+        disposeSceneAccessibility(accessibility);
+        expect(scene._sceneChanges).toBeUndefined();
+        addToScene(scene, source);
+        await Promise.resolve();
+
+        expect(update).toHaveBeenCalledOnce();
+        expect(getAccessibilityNode(accessibility, source)).toBeUndefined();
+        disposeScene(scene);
     });
 
     it("restores inherited accessors and retains ordinary data writes after observation", () => {

@@ -103,15 +103,15 @@ Object.assign(window, {
         dispose(): void {
             disposeScene(scene);
         },
-        createAfterDispose(): { error: string | null; hasBinding: boolean } {
+        createAfterDispose(): { error: string | null; hasLifecycleState: boolean } {
             try {
                 createSceneHtmlTwin(disposedScene, {
                     parent: document.querySelector<HTMLElement>("#disposed-accessibility")!,
                     label: "Disposed scene",
                 });
-                return { error: null, hasBinding: disposedScene._accessibility !== undefined };
+                return { error: null, hasLifecycleState: disposedScene._sceneChanges !== undefined };
             } catch (error) {
-                return { error: error instanceof Error ? error.message : String(error), hasBinding: disposedScene._accessibility !== undefined };
+                return { error: error instanceof Error ? error.message : String(error), hasLifecycleState: disposedScene._sceneChanges !== undefined };
             }
         },
         disposeAfterCleanupFailure(): {
@@ -119,7 +119,6 @@ Object.assign(window, {
             treeDisposed: boolean;
             adapterDisposed: boolean;
             bindingsReleased: boolean;
-            bindingRemoved: boolean;
             viewDisposed: boolean;
             htmlRemoved: boolean;
             descriptorRestored: boolean;
@@ -146,7 +145,6 @@ Object.assign(window, {
                 treeDisposed: failingTwin.accessibility.tree.disposed,
                 adapterDisposed: failingTwin.accessibility._disposed,
                 bindingsReleased: failingTwin.accessibility._bindings.size === 0,
-                bindingRemoved: failingScene._accessibility === undefined,
                 viewDisposed: failingTwin.view._disposed,
                 htmlRemoved: !failingTwin.view.element.isConnected,
                 descriptorRestored: descriptor?.get === undefined && descriptor?.set === undefined && descriptor?.writable === true,

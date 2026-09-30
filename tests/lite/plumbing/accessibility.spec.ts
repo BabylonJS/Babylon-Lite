@@ -61,18 +61,20 @@ test.describe("scene accessibility HTML", () => {
         await expect(page.locator("#scene-host")).toHaveCount(1);
     });
 
-    test("rejects an HTML twin after scene disposal without leaking DOM or a binding", async ({ page }) => {
+    test("rejects an HTML twin after scene disposal without DOM or lifecycle registration", async ({ page }) => {
         const result = await page.evaluate(() =>
-            (window as unknown as { accessibilityFixture: { createAfterDispose(): { error: string | null; hasBinding: boolean } } }).accessibilityFixture.createAfterDispose()
+            (
+                window as unknown as { accessibilityFixture: { createAfterDispose(): { error: string | null; hasLifecycleState: boolean } } }
+            ).accessibilityFixture.createAfterDispose()
         );
 
         expect(result.error).toMatch(/disposed/i);
-        expect(result.hasBinding).toBe(false);
+        expect(result.hasLifecycleState).toBe(false);
         await expect(page.getByRole("region", { name: "Disposed scene" })).toHaveCount(0);
         await expect(page.locator("#disposed-accessibility")).toBeEmpty();
     });
 
-    test("removes the HTML twin and scene binding when canonical cleanup throws", async ({ page }) => {
+    test("releases accessibility state when canonical cleanup throws", async ({ page }) => {
         const result = await page.evaluate(() =>
             (
                 window as unknown as {
@@ -82,7 +84,6 @@ test.describe("scene accessibility HTML", () => {
                             treeDisposed: boolean;
                             adapterDisposed: boolean;
                             bindingsReleased: boolean;
-                            bindingRemoved: boolean;
                             viewDisposed: boolean;
                             htmlRemoved: boolean;
                             descriptorRestored: boolean;
@@ -97,7 +98,6 @@ test.describe("scene accessibility HTML", () => {
             treeDisposed: true,
             adapterDisposed: true,
             bindingsReleased: true,
-            bindingRemoved: true,
             viewDisposed: true,
             htmlRemoved: true,
             descriptorRestored: true,

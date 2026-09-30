@@ -73,7 +73,7 @@ function walkTsFiles(root: string): string[] {
 function liteErrorFileRank(root: string, file: string): number {
     const relative = path.relative(root, file).replace(/\\/g, "/");
     // Opt-in feature errors must not renumber core errors and grow consumers that never import them.
-    if (relative.startsWith("accessibility/") || relative === "scene/scene-html-twin.ts") {
+    if (relative.startsWith("accessibility/") || relative === "scene/scene-change.ts") {
         return 2;
     }
     return relative.startsWith("compute/") || relative.startsWith("resource/compute-storage-") ? 1 : 0;

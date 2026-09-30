@@ -1,9 +1,9 @@
-import { createHtmlTwin, disposeHtmlTwin } from "../accessibility/html-twin.js";
-import type { HtmlTwin, HtmlTwinOptions } from "../accessibility/html-twin.js";
-import { createSceneAccessibility, disposeSceneAccessibility } from "../accessibility/scene-accessibility.js";
-import type { SceneAccessibility, SceneAccessibilityOptions } from "../accessibility/scene-accessibility.js";
 import { isDomCanvas } from "../engine/surface.js";
-import type { SceneContext } from "./scene-core.js";
+import type { SceneContext } from "../scene/scene-core.js";
+import { createHtmlTwin, disposeHtmlTwin } from "./html-twin.js";
+import type { HtmlTwin, HtmlTwinOptions } from "./html-twin.js";
+import { createSceneAccessibility, disposeSceneAccessibility } from "./scene-accessibility.js";
+import type { SceneAccessibility, SceneAccessibilityOptions } from "./scene-accessibility.js";
 
 /** Options for mounting a scene's HTML representation. */
 export interface SceneHtmlTwinOptions extends Omit<HtmlTwinOptions, "parent">, SceneAccessibilityOptions {
