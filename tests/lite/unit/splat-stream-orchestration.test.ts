@@ -13,7 +13,13 @@ import {
     forgetEvictedSplatStreamSource,
     loadGaussianSplatStream,
 } from "../../../packages/babylon-lite/src/loader-splat-stream/load-gaussian-splat-stream";
-import { SplatGpuBudgetPressureError, type PreparedSplatSource } from "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-requests";
+import {
+    SplatGpuBudgetPressureError,
+    SplatRequestPriority,
+    type PreparedSplatSource,
+    type SplatSourceRequest,
+    type SplatStreamRequestManager,
+} from "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-requests";
 import type { SplatStreamGpuState, SplatStreamSourceGpu } from "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-gpu";
 import { createSplatStreamSelectionUpdate } from "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-material";
 import type { GaussianSplatStream, StreamLeafRuntime, StreamRepresentation, StreamSource } from "../../../packages/babylon-lite/src/loader-splat-stream/splat-stream-types";
@@ -100,6 +106,30 @@ function sharedEnvironmentSourceManifest(): unknown {
     return {
         ...(sharedSourceLodsManifest() as object),
         environment: "shared/meta.json",
+    };
+}
+
+function promotionManifest(): unknown {
+    return {
+        version: 1,
+        lodLevels: 2,
+        lodErrors: true,
+        filenames: ["broad/meta.json", "shared/meta.json"],
+        tree: {
+            bound: { min: [-0.8, -0.2, -0.8], max: [0.8, 0.2, -0.1] },
+            children: [
+                {
+                    bound: { min: [-0.8, -0.2, -0.8], max: [-0.2, 0.2, -0.1] },
+                    lods: { "0": { file: 0, offset: 0, count: 1 }, "1": { file: 1, offset: 0, count: 2 } },
+                    errors: [1, 0],
+                },
+                {
+                    bound: { min: [0.2, -0.2, -0.8], max: [0.8, 0.2, -0.1] },
+                    lods: { "0": { file: 1, offset: 2, count: 1 } },
+                    errors: [0, 0],
+                },
+            ],
+        },
     };
 }
 
@@ -367,6 +397,7 @@ async function attachAndBuild(h: ReturnType<typeof harness>, environment = false
             now: h.now,
         },
     });
+    void stream.firstFrameReady.catch(() => undefined);
     attachGaussianSplatStream(h.scene, stream);
     attachGaussianSplatStream(h.scene, stream);
     await h.scene._deferredBuilders[0]!();
@@ -429,6 +460,7 @@ describe("Gaussian splat stream orchestration", () => {
                 queueDone: () => h.queueGate.promise,
             },
         });
+        void stream.firstFrameReady.catch(() => undefined);
         attachGaussianSplatStream(h.scene, stream);
         await h.scene._deferredBuilders[0]!();
         expect(stream._environmentSourceId).toBe(stream._bootstrapSourceId);
@@ -447,6 +479,69 @@ describe("Gaussian splat stream orchestration", () => {
         expect(h.gpu.intervals[1]).toMatchObject({ sourceOffset: 0, count: 4, destinationOffset: 2 });
         expect(stream._cache.entries.size).toBe(1);
         expect(stream._cache.entries.get(h.calls[0]!.source.url)).toMatchObject({ displayedRefs: 1, activeRefs: 2 });
+    });
+
+    it("promotes one existing same-generation source request when it becomes uncovered", async () => {
+        const h = harness(promotionManifest());
+        const gates = new Map<string, ReturnType<typeof deferred<PreparedSplatSource>>>();
+        const requests: SplatSourceRequest[] = [];
+        const request = vi.fn((value: SplatSourceRequest) => {
+            requests.push(value);
+            const gate = deferred<PreparedSplatSource>();
+            gates.set(value.url, gate);
+            return gate.promise;
+        });
+        const promote = vi.fn(() => true);
+        const requestManager: SplatStreamRequestManager = {
+            cpuBytes: 0,
+            fetchedBytes: 0,
+            pendingRequests: 0,
+            queuedFiles: 0,
+            disposed: false,
+            request,
+            promote,
+            cancel: vi.fn(),
+            dispose: vi.fn(),
+        };
+        const stream = await loadGaussianSplatStream(h.engine, "https://assets.test/lod-meta.json", {
+            maxSplats: 20,
+            screenError: 0.001,
+            _runtime: {
+                fetch: h.fetch,
+                requestManager,
+                createGpuState: () => h.gpu,
+                buildRenderable: h.buildRenderable,
+                queueDone: () => h.queueGate.promise,
+            },
+        });
+        void stream.firstFrameReady.catch(() => undefined);
+        attachGaussianSplatStream(h.scene, stream);
+        await h.scene._deferredBuilders[0]!();
+        const bootstrapRequest = requests[0]!;
+        gates.get(bootstrapRequest.url)!.resolve(prepared(stream._sourceStates[bootstrapRequest.fileId]!.source, bootstrapRequest.generation));
+        await vi.waitFor(() => expect(stream.stats.coveredLeaves).toBe(1));
+
+        h.camera.fov = 0.25;
+        const mutableCamera = h.camera as Camera & { worldMatrix: Float32Array; worldMatrixVersion: number };
+        mutableCamera.worldMatrix[12] = -0.5;
+        mutableCamera.worldMatrixVersion++;
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        h.getDraw()(Promise.resolve(true));
+        await vi.waitFor(() => expect(requests.some((value) => value.url.endsWith("/shared/meta.json"))).toBe(true));
+        const sharedRequest = requests.find((value) => value.url.endsWith("/shared/meta.json"))!;
+        expect(sharedRequest.priority).toBe(SplatRequestPriority.Upgrade);
+        const sharedState = stream._sourceStates[sharedRequest.fileId]!;
+        const generation = sharedState.generation;
+        const preparation = sharedState.request;
+
+        mutableCamera.worldMatrix[12] = 0.5;
+        mutableCamera.worldMatrixVersion++;
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(promote).toHaveBeenCalledWith(sharedRequest.url, generation, SplatRequestPriority.Uncovered);
+        expect(request.mock.calls.filter(([value]) => value.url === sharedRequest.url)).toHaveLength(1);
+        expect(sharedState.generation).toBe(generation);
+        expect(sharedState.request).toBe(preparation);
+        disposeGaussianSplatStream(h.scene, stream);
     });
 
     it("rejects bootstrap when an aliased environment cannot fit after a successful coarse signal", async () => {
@@ -1335,6 +1430,40 @@ describe("Gaussian splat stream orchestration", () => {
         h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
         expect(stream.stats.error).toBeNull();
         expect(stream.stats.phase).not.toBe("error");
+    });
+
+    it("recovers a coarse-baseline budget before readiness and then completes the coarse fence", async () => {
+        const h = harness();
+        const stream = await loadGaussianSplatStream(h.engine, "https://assets.test/lod-meta.json", {
+            maxSplats: 20,
+            _runtime: {
+                fetch: h.fetch,
+                prepareSource: h.prepareSource,
+                createGpuState: () => h.gpu,
+                buildRenderable: h.buildRenderable,
+                queueDone: () => h.queueGate.promise,
+            },
+        });
+        attachGaussianSplatStream(h.scene, stream);
+        await h.scene._deferredBuilders[0]!();
+        h.calls[0]!.gate.resolve(prepared(h.calls[0]!.source, h.calls[0]!.generation));
+        await vi.waitFor(() => expect(stream.stats.coveredLeaves).toBe(1));
+
+        stream.maxSplats = 1;
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream.stats.error).toMatchObject({ name: "RangeError", message: expect.stringContaining("visible coarse baseline") });
+        expect(stream.stats.phase).toBe("error");
+        expect(stream._disposed).toBe(false);
+        expect(stream._firstFrameSettled).toBe(false);
+
+        stream.maxSplats = 20;
+        h.getUpdate()({ targetWidth: 100, targetHeight: 100, _camera: h.camera });
+        expect(stream.stats.error).toBeNull();
+        expect(stream.stats.phase).toBe("bootstrap");
+        h.getDraw()(Promise.resolve(true));
+        h.queueGate.resolve();
+        await expect(stream.firstFrameReady).resolves.toBeUndefined();
+        expect(stream._disposed).toBe(false);
     });
 
     it("rejects readiness and disposes work for an orthographic startup selection", async () => {

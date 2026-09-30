@@ -525,7 +525,13 @@ function settleBootstrapFailure(stream: GaussianSplatStream, reason: unknown): v
 
 function requestSource(stream: GaussianSplatStream, sourceId: number, priority: SplatRequestPriority): void {
     const state = stream._sourceStates[sourceId]!;
-    if (stream._disposed || state.state === "resident" || state.state === "failed" || state.request) {
+    if (stream._disposed || state.state === "resident" || state.state === "failed") {
+        return;
+    }
+    if (state.request) {
+        if (!stream._runtime.prepareSource) {
+            stream._requests.promote(state.source.url, state.generation, priority);
+        }
         return;
     }
     const generation = ++state.generation;

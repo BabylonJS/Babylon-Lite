@@ -169,7 +169,7 @@ function planCandidates(candidates: Candidate[], input: CandidatePlanOptions): S
     }
     const baselineSplats = candidates.reduce((sum, candidate) => sum + candidate.leaf.alternatives[candidate.currentIndex]!.count, 0);
     if (baselineSplats > input.maxSplats) {
-        throw new Error(`${PREFIX} selection: visible coarse baseline (${baselineSplats} splats) exceeds maxSplats (${input.maxSplats})`);
+        throw new RangeError(`${PREFIX} selection: visible coarse baseline (${baselineSplats} splats) exceeds maxSplats (${input.maxSplats})`);
     }
     let selectedSplats = baselineSplats;
 

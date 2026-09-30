@@ -75,6 +75,7 @@ export interface SplatStreamRequestManager {
     readonly queuedFiles: number;
     readonly disposed: boolean;
     request(request: SplatSourceRequest): Promise<PreparedSplatSource>;
+    promote(url: string, generation: number, priority: SplatRequestPriority): boolean;
     cancel(url: string): void;
     dispose(): void;
 }
@@ -772,6 +773,21 @@ export function createSplatStreamRequestManager(
             queue.push(job);
             pump();
             return promise;
+        },
+        promote(rawUrl, generation, priority) {
+            let url: string;
+            try {
+                url = new URL(rawUrl).href;
+            } catch {
+                return false;
+            }
+            const job = jobs.get(url);
+            if (!job || job.cancelled || job.request.generation !== generation || priority >= job.request.priority) {
+                return false;
+            }
+            job.request = { ...job.request, priority };
+            pump();
+            return true;
         },
         cancel(rawUrl) {
             let url: string;

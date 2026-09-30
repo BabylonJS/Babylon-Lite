@@ -311,31 +311,35 @@ describe("splat stream transport", () => {
         manager.dispose();
     });
 
-    it("preempts abortable fine transport so newly uncovered coarse work completes first", async () => {
+    it("promotes an existing queued job so uncovered coverage preempts abortable fine transport", async () => {
         const order: string[] = [];
         let fineAttempts = 0;
         const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
             const url = String(input);
             order.push(url);
-            if (url.endsWith("/fine/meta.json") && fineAttempts++ === 0) {
+            if (url.endsWith("/active-fine/meta.json") && fineAttempts++ === 0) {
                 return new Promise<Response>((_resolve, reject) => {
                     init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true });
                 });
             }
-            return Promise.resolve(url.endsWith("meta.json") ? response(metadata(url.includes("coarse") ? "coarse" : "fine")) : response(webp(), 200, "image/webp"));
+            return Promise.resolve(url.endsWith("meta.json") ? response(metadata(url.includes("shared") ? "shared" : "fine")) : response(webp(), 200, "image/webp"));
         }) as unknown as typeof fetch;
         const manager = createSplatStreamRequestManager(1, 1, 10_000, 0, {
             device: gpu().device,
             fetch: fetchMock,
             decode: async () => bitmap(),
         });
-        const fine = manager.request(request("https://a.test/fine/meta.json", 0, SplatRequestPriority.Upgrade));
+        const fine = manager.request(request("https://a.test/active-fine/meta.json", 0, SplatRequestPriority.Upgrade));
         await vi.waitFor(() => expect(fineAttempts).toBe(1));
-        const coarse = manager.request(request("https://a.test/coarse/meta.json", 1, SplatRequestPriority.Uncovered));
-        await expect(coarse).resolves.toMatchObject({ fileId: 1 });
+        const shared = manager.request(request("https://a.test/shared/meta.json", 1, SplatRequestPriority.Upgrade));
+        expect(manager.promote("https://a.test/shared/meta.json", 2, SplatRequestPriority.Uncovered)).toBe(false);
+        expect(manager.promote("https://a.test/shared/meta.json", 1, SplatRequestPriority.Upgrade)).toBe(false);
+        expect(manager.promote("https://a.test/shared/meta.json", 1, SplatRequestPriority.Uncovered)).toBe(true);
+        await expect(shared).resolves.toMatchObject({ fileId: 1, generation: 1 });
         await expect(fine).resolves.toMatchObject({ fileId: 0 });
-        expect(order.filter((url) => url.endsWith("/fine/meta.json"))).toHaveLength(2);
-        expect(order.indexOf("https://a.test/coarse/meta.json")).toBeLessThan(order.lastIndexOf("https://a.test/fine/meta.json"));
+        expect(order.filter((url) => url.endsWith("/active-fine/meta.json"))).toHaveLength(2);
+        expect(order.filter((url) => url.endsWith("/shared/meta.json"))).toHaveLength(1);
+        expect(order.indexOf("https://a.test/shared/meta.json")).toBeLessThan(order.lastIndexOf("https://a.test/active-fine/meta.json"));
         expect(manager.cpuBytes).toBe(0);
     });
 

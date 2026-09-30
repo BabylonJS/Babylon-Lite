@@ -247,7 +247,9 @@ describe("splat stream selection planner", () => {
         const pressured = planStreamSelection(input(parsed, { maxSplats: 3, previousTargets: previous, hardBudgetPressure: true }));
         expect(pressured.selectedSplats).toBe(3);
         expect(pressured.selections.every((selection) => selection.target.lod === 0)).toBe(true);
-        expect(() => planStreamSelection(input(parsed, { maxSplats: 2 }))).toThrow("visible coarse baseline");
+        expect(() => planStreamSelection(input(parsed, { maxSplats: 2 }))).toThrow(
+            expect.objectContaining({ name: "RangeError", message: expect.stringContaining("visible coarse baseline") })
+        );
     });
 
     it("solves disjoint camera demand once against the shared capacity", () => {
