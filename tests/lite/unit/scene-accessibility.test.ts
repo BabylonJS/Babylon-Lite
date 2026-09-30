@@ -432,6 +432,55 @@ describe("scene accessibility", () => {
         expect(scene.lights).toEqual([]);
     });
 
+    it("disposes the accessibility projection when canonical scene cleanup throws", () => {
+        const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+        const source = createTransformNode("Observed");
+        const accessibility = createSceneAccessibility(scene, { roots: [source] });
+        const failure = new Error("canonical cleanup failed");
+        onSceneDispose(scene, () => {
+            throw failure;
+        });
+
+        expect(() => disposeScene(scene)).toThrow(failure);
+        expect(accessibility._disposed).toBe(true);
+        expect(accessibility.tree.disposed).toBe(true);
+        expect(accessibility._bindings.size).toBe(0);
+        expect(scene._accessibility).toBeUndefined();
+        expect(scene._disposables).toEqual([]);
+        expect(Object.getOwnPropertyDescriptor(source, "name")).toMatchObject({
+            configurable: true,
+            enumerable: true,
+            writable: true,
+            value: "Observed",
+        });
+    });
+
+    it("aggregates canonical and accessibility disposal failures without losing undefined", () => {
+        const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+        const accessibility = createSceneAccessibility(scene);
+        const observerFailure = new Error("observer failed");
+        onSceneDispose(scene, () => {
+            throw undefined;
+        });
+        onAccessibilityTreeChanged(accessibility.tree, () => {
+            throw observerFailure;
+        });
+
+        let failure: unknown;
+        try {
+            disposeScene(scene);
+        } catch (error) {
+            failure = error;
+        }
+
+        expect(failure).toBeInstanceOf(AggregateError);
+        expect((failure as AggregateError).errors).toEqual([undefined, observerFailure]);
+        expect(accessibility._disposed).toBe(true);
+        expect(accessibility.tree.disposed).toBe(true);
+        expect(scene._accessibility).toBeUndefined();
+        expect(scene._disposables).toEqual([]);
+    });
+
     it("does not reconcile property changes queued during canonical scene cleanup", async () => {
         const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
         const source = createTransformNode("Before cleanup");

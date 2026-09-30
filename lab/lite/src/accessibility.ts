@@ -6,6 +6,7 @@ import {
     createTransformNode,
     disposeScene,
     onAccessibilityTreeChanged,
+    onSceneDispose,
     removeFromScene,
     setAccessibilityTag,
     setParent,
@@ -48,6 +49,7 @@ setAccessibilityTag(status, {
 setParent(centerBox, group);
 setParent(leftBox, group);
 setParent(rightBox, group);
+rightBox.visible = false;
 
 const twin = createSceneHtmlTwin(scene);
 addToScene(scene, group);
@@ -112,9 +114,50 @@ Object.assign(window, {
                 return { error: error instanceof Error ? error.message : String(error), hasBinding: disposedScene._accessibility !== undefined };
             }
         },
+        disposeAfterCleanupFailure(): {
+            error: string | null;
+            treeDisposed: boolean;
+            adapterDisposed: boolean;
+            bindingsReleased: boolean;
+            bindingRemoved: boolean;
+            viewDisposed: boolean;
+            htmlRemoved: boolean;
+            descriptorRestored: boolean;
+        } {
+            const host = document.createElement("div");
+            document.body.append(host);
+            const failingScene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+            const source = createTransformNode("Cleanup failure");
+            const failingTwin = createSceneHtmlTwin(failingScene, { parent: host, roots: [source], label: "Cleanup failure" });
+            const failure = new Error("canonical cleanup failed");
+            onSceneDispose(failingScene, () => {
+                throw failure;
+            });
+
+            let error: string | null = null;
+            try {
+                disposeScene(failingScene);
+            } catch (caught) {
+                error = caught instanceof Error ? caught.message : String(caught);
+            }
+            const descriptor = Object.getOwnPropertyDescriptor(source, "name");
+            const result = {
+                error,
+                treeDisposed: failingTwin.accessibility.tree.disposed,
+                adapterDisposed: failingTwin.accessibility._disposed,
+                bindingsReleased: failingTwin.accessibility._bindings.size === 0,
+                bindingRemoved: failingScene._accessibility === undefined,
+                viewDisposed: failingTwin.view._disposed,
+                htmlRemoved: !failingTwin.view.element.isConnected,
+                descriptorRestored: descriptor?.get === undefined && descriptor?.set === undefined && descriptor?.writable === true,
+            };
+            host.remove();
+            return result;
+        },
         async measureSingleNodeUpdate(): Promise<{
             unrelatedMutations: number;
             unrelatedIdentityStable: boolean;
+            unrelatedHidden: boolean;
             level: string | null;
             busy: string | null;
             details: string | null;
@@ -172,6 +215,7 @@ Object.assign(window, {
             return {
                 unrelatedMutations,
                 unrelatedIdentityStable: unrelatedBefore === unrelatedAfter,
+                unrelatedHidden: unrelatedAfter.hidden === true,
                 level,
                 busy,
                 details,

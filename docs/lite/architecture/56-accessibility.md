@@ -307,7 +307,7 @@ Property observation preserves the original property shape. The last unsubscribe
 
 Each logical node maps to one `div` with `data-lite-accessibility-node` and one child `span` with `data-lite-accessibility-text`.
 
-On every update, the renderer compares generated attributes, text, parent, and sibling position with the desired state. It writes only changed values and moves an element only when its parent or order changed.
+On every update, the renderer compares generated attributes, text, parent, and sibling position with the desired state. It writes only changed values and moves an element only when its parent or order changed. Generic attribute cleanup excludes the reflected `hidden` attribute; the renderer updates visibility only through the existing `element.hidden` property comparison.
 
 | Source state                     | HTML result                                                       |
 | -------------------------------- | ----------------------------------------------------------------- |
@@ -363,7 +363,8 @@ live scene -> projection installed -> reconciled as scene changes -> scene or pr
 - The scene-specific binding is installed before the initial reconciliation so additions cannot be missed after ownership begins.
 - If initial reconciliation fails, creation disposes all installed state before rethrowing.
 - Explicit projection disposal removes observations and bindings, clears source and parent sets, clears the scene-specific `_accessibility` binding, and disposes the tree.
-- `disposeScene` completes canonical scene cleanup before it invokes the feature router. If an accessibility observer throws during projection disposal, the failure cannot prevent canonical resource cleanup.
+- `disposeScene` asks the installed feature router to run canonical scene cleanup first and accessibility teardown second. Both paths run even when either path throws. A single failure is rethrown directly, and failures from both paths are rethrown as an `AggregateError` in canonical-then-accessibility order.
+- Canonical cleanup keeps its existing fail-fast behavior within that path. Accessibility teardown does not claim to resume canonical disposers that follow a throwing disposer.
 - Property changes queued during canonical cleanup cannot reconcile after disposal because projection disposal marks the adapter disposed before the queued microtask runs.
 - Repeated projection disposal is a no-op.
 
@@ -432,6 +433,8 @@ The root package re-exports each public type and function from its single `"."` 
 - stable source bindings;
 - semantic parent override, final-order reversal, restoration, removal, and cycle rejection;
 - scene cleanup when a tree observer throws;
+- accessibility teardown after a canonical scene disposer throws;
+- ordered aggregation when canonical cleanup and accessibility teardown both throw;
 - cancellation of property changes queued during canonical scene cleanup;
 - reversible property observation.
 
@@ -446,9 +449,10 @@ The root package re-exports each public type and function from its single `"."` 
 - description-only naming;
 - text escaping through `textContent`;
 - metadata replacement and attribute removal;
-- single-node updates without unrelated attribute, text, or move mutations;
+- single-node updates without unrelated attribute, text, or move mutations, including unchanged hidden nodes;
 - no-op scene refreshes without tree notifications or DOM mutations;
 - visibility, reparenting, scene removal, and scene disposal;
+- HTML and observation teardown when a canonical scene disposer throws;
 - rejection after scene disposal without leaked DOM or a retained scene binding.
 
 ### Build and declaration tests

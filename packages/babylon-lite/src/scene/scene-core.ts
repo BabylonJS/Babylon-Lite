@@ -104,7 +104,7 @@ export interface SceneMeshGroup extends Array<Mesh> {
 }
 
 let _lateCleanup: WeakMap<SceneContext, () => 1> | null = null;
-type SceneAccessibilityHook = (scene: SceneContext, node?: unknown, added?: boolean) => void;
+type SceneAccessibilityHook = (scene: SceneContext, nodeOrCleanup?: unknown, added?: boolean) => void;
 let _sceneAccessibilityHook: SceneAccessibilityHook | undefined;
 
 /** @internal Install the optional accessibility lifecycle bridge. */
@@ -112,9 +112,9 @@ export function _setSceneAccessibilityHook(hook: SceneAccessibilityHook): void {
     _sceneAccessibilityHook = hook;
 }
 
-/** @internal Notify accessibility only after its opt-in module installed the bridge. */
-export function _notifySceneAccessibility(scene: SceneContext, node?: unknown, added?: boolean): void {
-    _sceneAccessibilityHook?.(scene, node, added);
+/** @internal Route lifecycle work only after the opt-in accessibility module installed the bridge. */
+export function _notifySceneAccessibility(scene: SceneContext, nodeOrCleanup?: unknown, added?: boolean): void {
+    _sceneAccessibilityHook?.(scene, nodeOrCleanup, added);
 }
 
 /** Top-level scene context — pure state, no attached methods. */
@@ -567,8 +567,11 @@ export function disposeScene(scene: SceneContext): void {
         ctx.shadowGenerators.length = 0;
         ctx.camera = null;
     };
-    cleanup();
-    _notifySceneAccessibility(ctx);
+    if (_sceneAccessibilityHook) {
+        _notifySceneAccessibility(ctx, cleanup);
+    } else {
+        cleanup();
+    }
 }
 
 /** @internal Run all deferred builders (called by registerScene's boot step before the first frame). */

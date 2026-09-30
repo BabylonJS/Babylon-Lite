@@ -54,7 +54,36 @@ function isSceneSource(value: unknown): value is SceneSource {
     return typeof value === "object" && value !== null && "children" in value && Array.isArray(value.children) && "worldMatrix" in value;
 }
 
-function sceneAccessibilityHook(scene: SceneContext, source?: unknown, added?: boolean): void {
+function sceneAccessibilityHook(scene: SceneContext, sourceOrCleanup?: unknown, added?: boolean): void {
+    if (typeof sourceOrCleanup === "function") {
+        const accessibility = scene._accessibility;
+        let cleanupFailed = false;
+        let cleanupError: unknown;
+        let accessibilityFailed = false;
+        let accessibilityError: unknown;
+        try {
+            sourceOrCleanup();
+        } catch (error) {
+            cleanupFailed = true;
+            cleanupError = error;
+        }
+        try {
+            accessibility?.dispose();
+        } catch (error) {
+            accessibilityFailed = true;
+            accessibilityError = error;
+        }
+        if (cleanupFailed && accessibilityFailed) {
+            throw new AggregateError([cleanupError, accessibilityError], "Scene disposal failed.");
+        }
+        if (cleanupFailed) {
+            throw cleanupError;
+        }
+        if (accessibilityFailed) {
+            throw accessibilityError;
+        }
+        return;
+    }
     const accessibility = scene._accessibility;
     if (!accessibility) {
         return;
@@ -62,7 +91,7 @@ function sceneAccessibilityHook(scene: SceneContext, source?: unknown, added?: b
     if (added === undefined) {
         accessibility.dispose();
     } else {
-        accessibility.nodeChanged(source, added);
+        accessibility.nodeChanged(sourceOrCleanup, added);
     }
 }
 

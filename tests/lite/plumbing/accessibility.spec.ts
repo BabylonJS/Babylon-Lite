@@ -72,6 +72,38 @@ test.describe("scene accessibility HTML", () => {
         await expect(page.locator("#disposed-accessibility")).toBeEmpty();
     });
 
+    test("removes the HTML twin and scene binding when canonical cleanup throws", async ({ page }) => {
+        const result = await page.evaluate(() =>
+            (
+                window as unknown as {
+                    accessibilityFixture: {
+                        disposeAfterCleanupFailure(): {
+                            error: string | null;
+                            treeDisposed: boolean;
+                            adapterDisposed: boolean;
+                            bindingsReleased: boolean;
+                            bindingRemoved: boolean;
+                            viewDisposed: boolean;
+                            htmlRemoved: boolean;
+                            descriptorRestored: boolean;
+                        };
+                    };
+                }
+            ).accessibilityFixture.disposeAfterCleanupFailure()
+        );
+
+        expect(result).toEqual({
+            error: "canonical cleanup failed",
+            treeDisposed: true,
+            adapterDisposed: true,
+            bindingsReleased: true,
+            bindingRemoved: true,
+            viewDisposed: true,
+            htmlRemoved: true,
+            descriptorRestored: true,
+        });
+    });
+
     test("updates one node without mutating unrelated DOM or publishing no-op refreshes", async ({ page }) => {
         const result = await page.evaluate(() =>
             (
@@ -80,6 +112,7 @@ test.describe("scene accessibility HTML", () => {
                         measureSingleNodeUpdate(): Promise<{
                             unrelatedMutations: number;
                             unrelatedIdentityStable: boolean;
+                            unrelatedHidden: boolean;
                             level: string | null;
                             busy: string | null;
                             details: string | null;
@@ -96,6 +129,7 @@ test.describe("scene accessibility HTML", () => {
         expect(result).toEqual({
             unrelatedMutations: 0,
             unrelatedIdentityStable: true,
+            unrelatedHidden: true,
             level: "2",
             busy: "false",
             details: null,

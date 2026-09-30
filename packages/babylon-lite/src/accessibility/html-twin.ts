@@ -77,7 +77,7 @@ function updateItem(item: HtmlTwinItem, node: AccessibilityNode): void {
         }
     }
     for (const attribute of [...element.attributes]) {
-        if (attribute.name !== "data-lite-accessibility-node" && !attributes.has(attribute.name)) {
+        if (attribute.name !== "data-lite-accessibility-node" && attribute.name !== "hidden" && !attributes.has(attribute.name)) {
             element.removeAttribute(attribute.name);
         }
     }
