@@ -80,6 +80,8 @@ export interface RenderTarget {
     _colorTexture: GPUTexture | null;
     /** @internal */
     _colorView: GPUTextureView | null;
+    /** @internal Optional full-chain sampling view when the color attachment view selects only mip 0. */
+    _colorSamplingView?: GPUTextureView | null;
     /** @internal */
     _depthTexture: GPUTexture | null;
     /** @internal */
@@ -138,8 +140,9 @@ export function createRenderTarget(descriptor: RenderTargetDescriptor): RenderTa
 /** Allocate GPU textures for the render target. Idempotent for fixed eager targets;
  *  surface-sized eager targets may synchronize through `_syncEager`. A
  *  color texture is allocated whenever the descriptor has a `format`; depth
- *  is allocated whenever it has a `depthStencilFormat`. */
-export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void {
+ *  is allocated whenever it has a `depthStencilFormat`. The optional color mip
+ *  count is supplied by the opt-in mipmapped-target factory; depth stays single-level. */
+export function buildRenderTarget(rt: RenderTarget, engine: EngineContext, colorMipLevelCount?: number): void {
     if (rt._eager) {
         rt._syncEager?.(engine);
         return;
@@ -158,6 +161,7 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void
             size: { width, height },
             format: desc.format,
             sampleCount: desc.samples,
+            mipLevelCount: colorMipLevelCount,
             usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.COPY_SRC | TU.COPY_DST,
         });
         rt._colorView = rt._colorTexture.createView();

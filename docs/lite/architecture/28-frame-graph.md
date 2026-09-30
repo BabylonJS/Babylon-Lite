@@ -426,6 +426,149 @@ export interface RenderTaskConfig {
 | `transmission` | Optional scene-texture transmission settings. `copyCount: 0` refreshes before every transmissive draw; otherwise the default is one refresh. `generateMipmaps` defaults to `true`; set `false` to allocate only mip 0 and skip refraction mip generation. |
 | `autoMirror`   | Set `false` for an explicit render list that remains empty until populated with `addMeshToTask()`.                                                                                                                                                        |
 
+### Clear and Generate Mipmaps Tasks
+
+```typescript
+export interface ClearTextureTaskConfig {
+    name?: string;
+    targetTexture?: RenderTarget | RenderTarget[];
+    depthTexture?: RenderTarget;
+    color?: GPUColorDict;
+    clearColor?: boolean;
+    convertColorToLinearSpace?: boolean;
+    clearDepth?: boolean;
+    clearStencil?: boolean;
+    stencilValue?: number;
+}
+
+export interface ClearTextureTask extends Task {
+    targetTexture: RenderTarget | RenderTarget[] | undefined;
+    depthTexture: RenderTarget | undefined;
+    color: GPUColorDict;
+    clearColor: boolean;
+    convertColorToLinearSpace: boolean;
+    clearDepth: boolean;
+    clearStencil: boolean;
+    stencilValue: number;
+    readonly outputTexture: RenderTarget | undefined;
+    readonly outputDepthTexture: RenderTarget | undefined;
+}
+
+export function createClearTextureTask(config: ClearTextureTaskConfig, engine: EngineContext, scene?: SceneContext): ClearTextureTask;
+
+export interface GenerateMipMapsTaskConfig<T extends RenderTarget | Texture2D = RenderTarget | Texture2D> {
+    name?: string;
+    targetTexture: T;
+}
+
+export interface GenerateMipMapsTask<T extends RenderTarget | Texture2D = RenderTarget | Texture2D> extends Task {
+    targetTexture: T;
+    readonly outputTexture: T;
+}
+
+export function createGenerateMipMapsTask<T extends RenderTarget | Texture2D>(
+    config: GenerateMipMapsTaskConfig<T>,
+    engine: EngineContext,
+    scene?: SceneContext
+): GenerateMipMapsTask<T>;
+export function createMipMappedRenderTarget(descriptor: RenderTargetDescriptor): RenderTarget;
+```
+
+These factories are root-package exports and require no scene for standalone frame graphs.
+Inputs and outputs follow `FrameGraphClearTextureTask` / `FrameGraphGenerateMipMapsTask`;
+Lite uses concrete resources instead of dangling texture handles. Outputs alias the inputs;
+the clear color output aliases the first target when clearing multiple color attachments.
+The tasks borrow all input textures and never dispose their allocations. Mipmap
+output typing preserves the concrete input type for wiring subsequent consumers.
+
+Clear defaults are `color = { r: 0.2, g: 0.2, b: 0.3, a: 1 }`,
+`clearColor = true`, `convertColorToLinearSpace = false`, `clearDepth = false`,
+`clearStencil = false`, and `stencilValue = 0`. At least one nonempty color-target
+list or explicit depth target is required. A color target's implicit depth attachment
+is not used: pass `depthTexture` explicitly. Each bound attachment must have matching
+dimensions and sample count. Depth-only, stencil-only, and combined formats are
+supported; absent aspects are ignored, and unselected aspects use `load` / `store`.
+Depth clears use the depth target's `depthClearValue`, defaulting to reverse-Z `0`.
+Color conversion applies Babylon.js's default gamma-2.2 linearization to RGB only;
+alpha and the input color object are preserved. Color state is read and converted
+only when a color attachment is actually selected for clearing.
+
+`record()` creates one pass with dependencies on all referenced render targets.
+Its phase-2 initializer synchronizes eager targets or allocates unbuilt attachments,
+then caches the render-pass descriptor. Initializing after all task records permits
+placing a clear before the render task that allocates its target.
+Execution patches live attachment views and scalar clear settings, begins and ends
+one drawless render pass, and returns zero draws. If no selected aspect exists,
+execution emits no GPU work. Runtime settings may change without rebuilding;
+changing target identities or attachment layouts requires a graph rebuild.
+MSAA clears do not resolve automatically.
+
+The mipmap pass also defers preparation to phase 2. It requires a single-sample,
+filterable, renderable color texture with `TEXTURE_BINDING | RENDER_ATTACHMENT`
+usage and allocated mip levels. Swapchain targets, depth/integer/compressed
+textures, and 1D/3D textures are rejected with explicit errors. A one-level 1x1
+texture is a valid no-op; larger one-level textures are rejected. Texture arrays
+and cube allocations regenerate each layer independently with 2D views.
+Preparation reuses `prepareMipmaps()` for mip-specific views, pipelines, bind
+groups, and descriptors. Execution calls `recordPreparedMipmaps()` on the current
+frame encoder, returns one draw per generated level per layer, and creates no
+views, bind groups, descriptors, shaders, or auxiliary command submissions.
+Rebuilding releases the previous prepared CPU state and rebinds the live allocation.
+Execution checks the recorded allocation identity once before encoding the chain.
+Replacing or disposing a render-target allocation, or replacing a Texture2D's
+backing texture, requires rebuilding; otherwise the task throws before encoding
+stale GPU bindings. Direct destruction of a GPU texture outside its owning API
+remains subject to WebGPU's own validation.
+
+`createMipMappedRenderTarget()` is an opt-in factory, not a flag added to ordinary
+targets. It requires a color format and `samples: 1`; optional depth remains single
+level. It uses the existing eager synchronization and attachment-disposal hooks,
+so ordinary targets retain none of its format validation or lifecycle policy.
+Resolved dimensions must be positive integers no larger than the current device's
+`maxTextureDimension2D`. Rejecting oversized dimensions before GPU allocation
+preserves rollback: WebGPU validation failures need not throw synchronously.
+Color/depth allocation is shared with ordinary targets and fixed/surface RTTs
+through the internal `buildRenderTarget(rt, engine, colorMipLevelCount?)` function.
+Its optional scalar sets only the color allocation's `mipLevelCount`; depth keeps
+one level and its existing sample count. The common allocator creates the texture's default view and imports no
+mipmap-generation code. Ordinary single-level targets use that one view for both
+rendering and sampling; no additional view descriptor is allocated for them.
+
+On first build or a size/device/format change, the mipmapped factory creates a
+temporary ordinary target and builds it with
+`floor(log2(max(width, height))) + 1` color levels. Its default, full-chain color
+view becomes `_colorSamplingView`; an additional mip-0-only view becomes
+`_colorView` for render attachments. Copy blits and generic post-process samplers
+use `_colorSamplingView ?? _colorView`, so explicit and derivative-based LODs
+can reach generated mips while attachment views remain valid. Extra post-process
+textures follow the same rule. Only a complete build publishes
+its attachments, views, and dimensions to the live target. Failure disposes the temporary
+target and preserves the previous allocation. Unchanged builds reuse the allocation.
+Disposal destroys the owned attachments once and prevents rebuilding. The factory
+returns a render target (not an RTT sampled facade); post-process and copy tasks can
+consume it directly. A rendering task normally owns its lifetime.
+
+```typescript
+const target = createMipMappedRenderTarget({
+    format: "rgba8unorm",
+    samples: 1,
+    size: scene.surface,
+});
+const clear = createClearTextureTask({ targetTexture: target }, engine, scene);
+const render = createRenderTask({ name: "producer", rt: target, clr: false }, engine, scene);
+const mips = createGenerateMipMapsTask({ targetTexture: target }, engine, scene);
+addTaskAtStart(scene, clear);
+addTaskAfter(scene, render, clear);
+addTaskAfter(scene, mips, render);
+```
+
+Focused tests cover defaults/output aliases, MRT/depth/stencil selection and
+preservation, live clear settings and swapchain views, attachment compatibility,
+phase-2 allocation ordering, execution gating, ownership/disposal, mip-level and
+array-layer coverage, current-encoder ordering, zero per-frame GPU-object
+creation, unsupported resources, stale-allocation rejection, full-chain consumer
+sampling, rebuilding, and opt-in allocation/tree-shaking.
+
 ### Image Processing Task
 
 ```typescript
@@ -846,6 +989,8 @@ Fixed-size eager RTTs are not reallocated by graph rebuilds because their GPU te
 | `frameGraph.addRenderPass`      | `addRenderPass(target, name)`                              |
 | `addDependencies`               | `addPassDependencies(pass, deps)` (lifted onto base)       |
 | Render pass task                | `RenderTask`                                               |
+| `FrameGraphClearTextureTask`    | `createClearTextureTask()`                                 |
+| `FrameGraphGenerateMipMapsTask` | `createGenerateMipMapsTask()`                              |
 | Texture/resource handle         | Concrete `RenderTarget` for now                            |
 | Task record/build phase         | `Task.record()` via `FrameGraph.build()` (phase 1)         |
 | Pass post-record initialization | `Pass._initialize()` via `FrameGraph.build()` (phase 2)    |
@@ -868,6 +1013,11 @@ Fixed-size eager RTTs are not reallocated by graph rebuilds because their GPU te
 | `src/frame-graph/render-task-transaction.ts` | Typed off-task population/binding staging, rollback, and known-field publication              |
 | `src/frame-graph/overdraw-probe-run.ts`      | Timestamp-query replay implementation loaded only by the public GPU timing diagnostics probe  |
 | `src/frame-graph/image-processing-task.ts`   | Reusable fullscreen image-processing task for swapchain output                                |
+| `src/frame-graph/clear-texture-task.ts`      | Drawless color/MRT, depth, and stencil clears with live settings                              |
+| `src/frame-graph/generate-mipmaps-task.ts`   | Prepared in-place mip generation in the frame encoder                                         |
+| `src/frame-graph/texture-task-pass.ts`       | Deferred texture-pass initialization and shared pass lifecycle                                |
+| `src/engine/render-target-mipmaps.ts`        | Opt-in full-mip-chain render-target allocation through existing target hooks                  |
+| `src/texture/mipmap-format.ts`               | Device-feature-aware filterable/renderable color-format predicate                             |
 | `src/frame-graph/shadow-task.ts`             | Internal adapter task that schedules existing shadow generators through `Task.execute()`      |
 | `src/engine/render-target.ts`                | Render target/signature state plus attachment allocation and disposal                         |
 | `src/engine/render-target-signature.ts`      | Pipeline-cache key serialization for a `RenderTargetSignature`                                |

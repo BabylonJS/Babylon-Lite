@@ -195,7 +195,7 @@ function createPostProcessGpuState(task: PostProcessTaskInternal, engine: Engine
     });
     const entries: GPUBindGroupEntry[] = [
         { binding: 0, resource: task.sourceSamplingMode === "nearest" ? getNearestSampler(engine) : getBilinearSampler(engine) },
-        { binding: 1, resource: source._colorView },
+        { binding: 1, resource: source._colorSamplingView ?? source._colorView },
     ];
     const extraTextures = task._shader.extraTextures ?? [];
     if (task._uniformBuffer) {
@@ -206,7 +206,7 @@ function createPostProcessGpuState(task: PostProcessTaskInternal, engine: Engine
         if (!texture._colorView) {
             throw new Error(`PostProcessTask "${task.name}": extra texture ${i} has no color texture.`);
         }
-        entries.push({ binding: 2 + i, resource: texture._colorView });
+        entries.push({ binding: 2 + i, resource: texture._colorSamplingView ?? texture._colorView });
     }
     task._bindGroup = engine._device.createBindGroup({
         label: `${task.name}-bind-group`,

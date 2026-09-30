@@ -151,6 +151,14 @@ console.log(createRenderTargetTexture(globalThis.engine, {
         ["createSurfaceRenderTargetTexture, onRenderTargetTextureResize", "_resizeCallbacks", true],
         ["createRenderTargetTexture, cloneTexture2D", "RenderTargetTexture resize callbacks failed.", false],
         ["createSurfaceRenderTargetTexture, onRenderTargetTextureResize", "RenderTargetTexture resize callbacks failed.", true],
+        ["createRenderTarget, createRenderTask", "function createMipMappedRenderTarget", false],
+        ["createRenderTarget, createRenderTask", "function createClearTextureTask", false],
+        ["createRenderTarget, createRenderTask", "function createGenerateMipMapsTask", false],
+        ["createClearTextureTask", "function createClearTextureTask", true],
+        ["createClearTextureTask", "function prepareMipmaps", false],
+        ["createGenerateMipMapsTask", "function prepareMipmaps", true],
+        ["createGenerateMipMapsTask", "function createMipMappedRenderTarget", false],
+        ["createMipMappedRenderTarget", "function createMipMappedRenderTarget", true],
     ] as const)("keeps only requested capabilities for %s", async (imports, marker, retained) => {
         const result = await runRollup({
             entrySource: `import { ${imports} } from ${JSON.stringify(LIB_ENTRY)};\nconsole.log(${imports});\n`,
