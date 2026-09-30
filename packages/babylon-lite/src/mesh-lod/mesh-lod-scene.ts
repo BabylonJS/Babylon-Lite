@@ -18,6 +18,7 @@ import { getCameraPosition } from "../camera/camera.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import type { MeshLoDAsset, MeshLoDInstance } from "./mesh-lod.js";
 import type { MeshLoDAssetRuntime, MeshLoDStreamSelectionStats } from "./mesh-lod-runtime.js";
+import type * as PbrMeshLoDModule from "../material/pbr/pbr-mesh-lod-renderable.js";
 import { stepMeshLoDStreaming, _recoverMeshLoDAsset } from "./mesh-lod-runtime.js";
 import type { MeshLoDPageDemand } from "./mesh-lod-scheduler.js";
 import { createMeshLoDError, isMeshLoDError } from "./mesh-lod-errors.js";
@@ -122,9 +123,9 @@ function getOrCreateBatch(registry: MeshLoDSceneRegistry, asset: MeshLoDAsset, m
 /** @internal Cached PBR MeshLoD material module — dynamically imported on the first
  *  scene build so this scene module never statically references the PBR MeshLoD
  *  chunk (and non-MeshLoD scenes fetch none of it). Nullable lazy cache only. */
-let _pbrMeshLoDModule: typeof import("../material/pbr/pbr-mesh-lod-renderable.js") | null = null;
+let _pbrMeshLoDModule: typeof PbrMeshLoDModule | null = null;
 
-async function getPbrMeshLoDModule(): Promise<typeof import("../material/pbr/pbr-mesh-lod-renderable.js")> {
+async function getPbrMeshLoDModule(): Promise<typeof PbrMeshLoDModule> {
     if (!_pbrMeshLoDModule) {
         _pbrMeshLoDModule = await import("../material/pbr/pbr-mesh-lod-renderable.js");
     }
@@ -214,6 +215,13 @@ function registerDeferredBuilder(scene: SceneContext): void {
  *  writes no scene reference into the instance. */
 export function addMeshLoDInstanceToScene(scene: SceneContext, instance: MeshLoDInstance): void {
     validateSupportedPbrSubset(instance._material);
+    const existingBatch = scene._meshLoDRegistry?.byAsset.get(instance._asset)?.get(instance._material);
+    if (scene._built && !existingBatch?.renderable) {
+        throw createMeshLoDError(
+            "MLOD_INVALID_OPTION",
+            "Add MeshLoD asset/material batches before registering the scene; only instances of existing batches can be added afterward"
+        );
+    }
     const registry = getOrCreateRegistry(scene);
     const batch = getOrCreateBatch(registry, instance._asset, instance._material);
     if (!batch.instances.includes(instance)) {
@@ -246,14 +254,17 @@ export interface MeshLoDInstanceSelection {
     readonly result: MeshLoDSelectionResult;
 }
 
-function toOracleCamera(camera: Camera, context: DrawUpdateContext): MeshLoDCamera {
+/** @internal Resolve the effective viewport and orthographic view height for both selectors. */
+export function getMeshLoDSelectionCamera(camera: Camera, context: DrawUpdateContext): MeshLoDCamera {
     const position = getCameraPosition(camera);
+    const ortho = camera.ortho;
     return {
         position: [position.x, position.y, position.z],
         verticalFov: camera.fov,
         near: camera.nearPlane,
-        targetWidth: context.targetWidth,
-        targetHeight: context.targetHeight,
+        targetWidth: context.targetWidth * (camera.viewport?.width ?? 1),
+        targetHeight: context.targetHeight * (camera.viewport?.height ?? 1),
+        orthographicHeight: ortho ? (ortho.top ?? ortho.halfHeight) - (ortho.bottom ?? -ortho.halfHeight) : undefined,
     };
 }
 
@@ -267,7 +278,7 @@ export function selectMeshLoDBatch(batch: MeshLoDSceneBatch, context: DrawUpdate
         return [];
     }
     const runtime: MeshLoDAssetRuntime = batch.asset._runtime;
-    const oracleCamera = toOracleCamera(camera, context);
+    const oracleCamera = getMeshLoDSelectionCamera(camera, context);
     const isPageResident = (pageId: number): boolean => runtime.gpu.pages[pageId]?.state === "gpu-resident";
     const groupCount = runtime.groups.length;
 

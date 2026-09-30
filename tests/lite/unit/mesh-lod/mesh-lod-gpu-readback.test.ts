@@ -12,7 +12,9 @@ import {
     CONTROL_FALLBACK_WORD,
     CONTROL_OVERFLOW_WORD,
     CONTROL_PAGE_DEMAND_OFFSET,
+    CONTROL_SELECTED_ERROR_WORD,
     CONTROL_TRIANGLE_WORD,
+    CONTROL_UNMET_ERROR_WORD,
     CONTROL_VISIBLE_GROUP_WORD,
     decodeMeshLoDGpuReadback,
 } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
@@ -57,11 +59,16 @@ describe("decodeMeshLoDGpuReadback", () => {
     });
 
     it("reads back the diagnostics counters and overflow flag", () => {
-        const decoded = decodeMeshLoDGpuReadback(control(2, { count: 7, visible: 12, triangles: 4900, overflow: 1, fallback: 3 }, {}), 2, () => 1);
+        const data = control(2, { count: 7, visible: 12, triangles: 4900, overflow: 1, fallback: 3 }, {});
+        data[CONTROL_SELECTED_ERROR_WORD] = new Uint32Array(new Float32Array([3.25]).buffer)[0]!;
+        data[CONTROL_UNMET_ERROR_WORD] = new Uint32Array(new Float32Array([8.5]).buffer)[0]!;
+        const decoded = decodeMeshLoDGpuReadback(data, 2, () => 1);
         expect(decoded.selectedClusterCount).toBe(7);
         expect(decoded.visibleGroupCount).toBe(12);
         expect(decoded.renderedTriangleCount).toBe(4900);
         expect(decoded.fallbackGroupCount).toBe(3);
+        expect(decoded.maximumSelectedErrorPixels).toBe(3.25);
+        expect(decoded.maximumUnmetErrorPixels).toBe(8.5);
         expect(decoded.overflow).toBe(true);
     });
 

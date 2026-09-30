@@ -6,12 +6,13 @@
  *  reference a scene. */
 
 import { describe, expect, it } from "vitest";
-import { addMeshLoDInstanceToScene, removeMeshLoDInstanceFromScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
+import { addMeshLoDInstanceToScene, getMeshLoDSelectionCamera, removeMeshLoDInstanceFromScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
 import { createMeshLoDInstance } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { isMeshLoDError } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-errors.js";
 import type { MeshLoDAsset } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
 import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
+import type { Camera } from "../../../../packages/babylon-lite/src/camera/camera.js";
 
 function fakeScene(): SceneContext {
     return { _deferredBuilders: [] } as unknown as SceneContext;
@@ -64,6 +65,51 @@ describe("MeshLoD scene registry — batching", () => {
         addMeshLoDInstanceToScene(scene, createMeshLoDInstance(fakeAsset(), supported()));
         expect(scene._deferredBuilders).toHaveLength(1);
         expect(scene._meshLoDRegistry!.builderRegistered).toBe(true);
+    });
+
+    it("rejects new asset/material batches after registration while accepting existing batches", () => {
+        const scene = fakeScene();
+        const asset = fakeAsset();
+        const material = supported();
+        addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+        const registry = scene._meshLoDRegistry!;
+        registry.batches[0]!.renderable = {} as NonNullable<(typeof registry.batches)[0]["renderable"]>;
+        scene._built = true;
+        addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+        expect(registry.batches[0]!.instances).toHaveLength(2);
+        for (const different of [createMeshLoDInstance(asset, supported()), createMeshLoDInstance(fakeAsset(), material)]) {
+            expect(() => addMeshLoDInstanceToScene(scene, different)).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_OPTION" }));
+        }
+        expect(registry.batches).toHaveLength(1);
+        expect(scene._deferredBuilders).toHaveLength(1);
+    });
+
+    it("rejects a pre-registered batch that had no renderable when its first instance arrives late", () => {
+        const scene = fakeScene();
+        const asset = fakeAsset();
+        const material = supported();
+        const first = createMeshLoDInstance(asset, material);
+        addMeshLoDInstanceToScene(scene, first);
+        removeMeshLoDInstanceFromScene(scene, first);
+        scene._built = true;
+        expect(() => addMeshLoDInstanceToScene(scene, first)).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_OPTION" }));
+    });
+});
+
+describe("MeshLoD selection camera", () => {
+    it("uses the effective orthographic vertical extent and viewport pixels", () => {
+        const camera = {
+            worldMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 4, 5, 6, 1],
+            fov: 1,
+            nearPlane: 0.1,
+            viewport: { x: 0, y: 0, width: 0.5, height: 0.75 },
+            ortho: { halfHeight: 20, top: 5, bottom: -15, left: null, right: null },
+        } as unknown as Camera;
+        const dimensions = { targetWidth: 800, targetHeight: 600 };
+        expect(getMeshLoDSelectionCamera(camera, dimensions as never)).toMatchObject({ position: [4, 5, 6], targetWidth: 400, targetHeight: 450, orthographicHeight: 20 });
+        camera.ortho!.top = null;
+        camera.ortho!.bottom = null;
+        expect(getMeshLoDSelectionCamera(camera, dimensions as never).orthographicHeight).toBe(40);
     });
 });
 

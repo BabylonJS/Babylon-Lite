@@ -15,11 +15,11 @@ struct Params {
   frustum: array<vec4<f32>, 6>,
   cameraPos: vec4<f32>,        // xyz, w = near
   targetInfo: vec4<f32>,       // targetWidth, targetHeight, pixelScale, orthographicHeight
-  thresholds: vec4<f32>,       // screenSpaceError, refineBoundary, coarsenBoundary, planeCount
+  thresholds: vec4<f32>,       // default screenSpaceError, refineMultiplier, coarsenMultiplier, planeCount
   counts: vec4<u32>,           // instanceCount, groupCount, clusterCount, nodeCount
   layout0: vec4<u32>,          // wordsPerInstance, selectedCapacity, pageCount, levelCount
   offsets: vec4<u32>,          // nodeWordOffset, groupWordOffset, clusterWordOffset, pageRefWordOffset
-  control: vec4<u32>,          // diagWordOffset, pageDemandWordOffset, reserved, reserved
+  control: vec4<u32>,          // diagWordOffset, pageDemandWordOffset, drawCapacity, coneCull
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -71,7 +71,7 @@ fn projectSphere(iBase: u32, worldScale: f32, center: vec3<f32>, radius: f32, er
   var projectedRadiusPx: f32;
   if (orthoHeight > 0.0) {
     let scale = params.targetInfo.y / orthoHeight;
-    errorPx = worldError * worldScale * scale;
+    errorPx = worldError * scale;
     projectedRadiusPx = worldRadius * scale;
   } else {
     let pixelScale = params.targetInfo.z;
@@ -161,6 +161,7 @@ fn evaluateGroups(@builtin(global_invocation_id) gid: vec3<u32>) {
   let inst = gid.x / params.counts.y;
   let iBase = inst * INSTANCE_WORDS;
   if (bitcast<u32>(instances[iBase + 29u]) == 0u) { return; }
+  let sse = select(params.thresholds.x, instances[iBase + 19u], instances[iBase + 19u] > 0.0);
   let gBase = params.offsets.y + group * GROUP_WORDS;
   let gsIdx = groupStateIndex(inst, group);
 
@@ -179,7 +180,8 @@ fn evaluateGroups(@builtin(global_invocation_id) gid: vec3<u32>) {
     let worldScale = instances[iBase + 28u];
     let errorPx = projectSphere(iBase, worldScale, center, metaF32(gBase + 3u), simplifiedError).errorPx;
     let wasFine = (atomicLoad(&priorState[pIdx]) & mask) != 0u;
-    if (wasFine) { fine = errorPx >= params.thresholds.z; } else { fine = errorPx > params.thresholds.y; }
+    if (wasFine) { fine = errorPx >= sse * params.thresholds.z; }
+    else { fine = errorPx > sse * params.thresholds.y; }
   }
   if (fine) {
     atomicOr(&groupState[gsIdx], GS_FINE);
@@ -219,6 +221,15 @@ fn selectClusters(@builtin(global_invocation_id) gid: vec3<u32>) {
     selectedList[idx * 2u] = cluster;
     selectedList[idx * 2u + 1u] = inst;
     atomicAdd(&control[params.control.x + 1u], metaBuf[cBase + 11u]); // renderedTriangleCount
+    let gBase = params.offsets.y + g * GROUP_WORDS;
+    let simplifiedError = metaF32(gBase + 4u);
+    if (simplifiedError >= 0.0 && simplifiedError <= 3.0e38) {
+      let center = vec3<f32>(metaF32(gBase), metaF32(gBase + 1u), metaF32(gBase + 2u));
+      let errorPx = projectSphere(iBase, instances[iBase + 28u], center, metaF32(gBase + 3u), simplifiedError).errorPx;
+      if (errorPx >= 0.0 && errorPx <= 3.0e38) {
+        atomicMax(&control[params.control.x + 4u], bitcast<u32>(errorPx)); // selected SSE maximum
+      }
+    }
   } else {
     atomicOr(&control[params.control.x + 2u], 1u); // overflow flag
   }
@@ -256,7 +267,8 @@ fn computeDemand(@builtin(global_invocation_id) gid: vec3<u32>) {
   let p = projectSphere(iBase, worldScale, center, metaF32(gBase + 3u), metaF32(gBase + 4u));
   let areaCap = params.targetInfo.x * params.targetInfo.y;
   let projectedAreaPx = min(3.14159265358979323846 * p.projectedRadiusPx * p.projectedRadiusPx, areaCap);
-  let qualityPressure = max(0.0, p.errorPx / params.thresholds.x - 1.0);
+  let sse = select(params.thresholds.x, instances[iBase + 19u], instances[iBase + 19u] > 0.0);
+  let qualityPressure = max(0.0, p.errorPx / sse - 1.0);
   let groupBenefit = projectedAreaPx * qualityPressure;
   let pageShare = groupBenefit / f32(missing);
   let demandBase = params.control.y;
@@ -267,6 +279,9 @@ fn computeDemand(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
   }
   atomicAdd(&control[params.control.x + 3u], 1u); // fallbackGroupCount diag
+  if (p.errorPx >= 0.0) {
+    atomicMax(&control[params.control.x + 5u], bitcast<u32>(p.errorPx)); // unmet SSE maximum
+  }
 }
 
 // ── Task 5.3 clamp — 1 invocation. Runs at the end of the SELECTION pass so the

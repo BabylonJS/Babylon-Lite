@@ -24,11 +24,12 @@ import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { createEmptyUniformBuffer } from "../../resource/gpu-buffers.js";
 import type { Camera } from "../../camera/camera.js";
 import { getCameraPosition, getViewProjectionMatrix } from "../../camera/camera.js";
+import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import { createSolidTexture2D } from "../../texture/solid-texture.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
 import type { MeshLoDSceneBatch } from "../../mesh-lod/mesh-lod-scene.js";
-import { driveMeshLoDStreaming, selectMeshLoDBatch } from "../../mesh-lod/mesh-lod-scene.js";
+import { driveMeshLoDStreaming, getMeshLoDSelectionCamera, selectMeshLoDBatch } from "../../mesh-lod/mesh-lod-scene.js";
 import { createMeshLoDError } from "../../mesh-lod/mesh-lod-errors.js";
 import type { MeshLoDGpuBatchState, MeshLoDGpuFrameParams, MeshLoDGpuInstanceState, MeshLoDUpdateBatch } from "../../mesh-lod/mesh-lod-selection-gpu.js";
 import { meshLoDConeCullMargin } from "../../mesh-lod/mesh-lod-selection-math.js";
@@ -75,7 +76,7 @@ function getFallbacks(engine: EngineContext): MeshLoDFallbacks {
 
 // ─── Feature detection + validation ──────────────────────────────────
 
-function detectFeatures(material: PbrMaterialProps): MeshLoDShaderFeatures {
+function detectFeatures(material: PbrMaterialProps, hasEnvironment: boolean): MeshLoDShaderFeatures {
     // The PBR module owns supported-material validation (architecture 13.2). Reject
     // anything outside the guaranteed opaque metallic-roughness subset even though
     // the scene registry validated it — this module is the authoritative gate.
@@ -100,6 +101,7 @@ function detectFeatures(material: PbrMaterialProps): MeshLoDShaderFeatures {
     return {
         hasNormalMap: !!material.normalTexture,
         hasEmissiveTexture: !!material.emissiveTexture,
+        hasIbl: hasEnvironment && material._unlit !== true,
         doubleSided: material.doubleSided === true,
         unlit: material._unlit === true,
     };
@@ -136,6 +138,7 @@ function packMaterialUbo(material: PbrMaterialProps, features: MeshLoDShaderFeat
 
 interface MeshLoDBatchPacket {
     readonly features: MeshLoDShaderFeatures;
+    readonly environment: EnvironmentTextures | null;
     readonly shaderModule: GPUShaderModule;
     readonly bindGroupLayout: GPUBindGroupLayout;
     /** CPU-path group-1 bind group. Rebuilt make-before-break when the draw-vertex
@@ -145,15 +148,15 @@ interface MeshLoDBatchPacket {
     /** Draw-vertex stream buffer. Grows (make-before-break) past the coarse bound as
      *  fine pages stream in and selection refines. */
     drawVertexBuffer: GPUBuffer;
-    readonly instanceBuffer: GPUBuffer;
+    instanceBuffer: GPUBuffer;
     readonly indirectBuffer: GPUBuffer;
     readonly materialUbo: GPUBuffer;
     readonly arena: GPUBuffer;
     drawScratch: Uint32Array;
-    readonly instanceScratch: Float32Array;
+    instanceScratch: Float32Array;
     readonly indirectScratch: Uint32Array;
     maxDrawVertices: number;
-    readonly maxInstances: number;
+    maxInstances: number;
     /** Per-instance coarse expanded-vertex bound, for GPU draw-vertex buffer sizing. */
     readonly coarseVertices: number;
     lastVertexCount: number;
@@ -180,33 +183,43 @@ function buildBindGroup(
     drawVertexBuffer: GPUBuffer,
     instanceBuffer: GPUBuffer,
     arena: GPUBuffer,
-    materialUbo: GPUBuffer
+    materialUbo: GPUBuffer,
+    environment: EnvironmentTextures | null
 ): GPUBindGroup {
     const fb = getFallbacks(engine);
     const base = material.baseColorTexture ?? fb.white;
     const normal = material.normalTexture ?? fb.normal;
     const orm = material.ormTexture ?? fb.white;
     const emissive = material.emissiveTexture ?? fb.black;
+    const entries: GPUBindGroupEntry[] = [
+        { binding: 0, resource: { buffer: materialUbo } },
+        { binding: 1, resource: base.view },
+        { binding: 2, resource: base.sampler },
+        { binding: 3, resource: normal.view },
+        { binding: 4, resource: normal.sampler },
+        { binding: 5, resource: orm.view },
+        { binding: 6, resource: orm.sampler },
+        { binding: 7, resource: emissive.view },
+        { binding: 8, resource: emissive.sampler },
+        { binding: 9, resource: { buffer: arena } },
+        { binding: 10, resource: { buffer: drawVertexBuffer } },
+        { binding: 11, resource: { buffer: instanceBuffer } },
+    ];
+    if (environment) {
+        entries.push(
+            { binding: 12, resource: environment.brdfLutView },
+            { binding: 13, resource: environment.brdfSampler },
+            { binding: 14, resource: environment.specularCubeView },
+            { binding: 15, resource: environment.cubeSampler }
+        );
+    }
     return engine._device.createBindGroup({
         layout,
-        entries: [
-            { binding: 0, resource: { buffer: materialUbo } },
-            { binding: 1, resource: base.view },
-            { binding: 2, resource: base.sampler },
-            { binding: 3, resource: normal.view },
-            { binding: 4, resource: normal.sampler },
-            { binding: 5, resource: orm.view },
-            { binding: 6, resource: orm.sampler },
-            { binding: 7, resource: emissive.view },
-            { binding: 8, resource: emissive.sampler },
-            { binding: 9, resource: { buffer: arena } },
-            { binding: 10, resource: { buffer: drawVertexBuffer } },
-            { binding: 11, resource: { buffer: instanceBuffer } },
-        ],
+        entries,
     });
 }
 
-function meshLoDBindGroupLayout(engine: EngineContext): GPUBindGroupLayout {
+function meshLoDBindGroupLayout(engine: EngineContext, hasIbl: boolean): GPUBindGroupLayout {
     const V = 0x1;
     const F = 0x2;
     const tex = (binding: number): GPUBindGroupLayoutEntry[] => [
@@ -224,6 +237,13 @@ function meshLoDBindGroupLayout(engine: EngineContext): GPUBindGroupLayout {
             { binding: 9, visibility: V, buffer: { type: "read-only-storage" } },
             { binding: 10, visibility: V, buffer: { type: "read-only-storage" } },
             { binding: 11, visibility: V, buffer: { type: "read-only-storage" } },
+            ...(hasIbl
+                ? [
+                      ...tex(12),
+                      { binding: 14, visibility: F, texture: { sampleType: "float" as const, viewDimension: "cube" as const } },
+                      { binding: 15, visibility: F, sampler: { type: "filtering" as const } },
+                  ]
+                : []),
         ],
     });
 }
@@ -298,7 +318,42 @@ function ensureCpuDrawCapacity(engine: EngineContext, batch: MeshLoDSceneBatch, 
     packet.drawVertexBuffer = engine._device.createBuffer({ label: "mesh-lod-draw-vertices", size: capacity * DRAW_VERTEX_STRIDE, usage: BU.STORAGE | BU.COPY_DST });
     packet.drawScratch = new Uint32Array(capacity * 4);
     packet.maxDrawVertices = capacity;
-    packet.bindGroup = buildBindGroup(engine, packet.bindGroupLayout, batch.material, packet.drawVertexBuffer, packet.instanceBuffer, runtime.gpu.arena.buffer, packet.materialUbo);
+    packet.bindGroup = buildBindGroup(
+        engine,
+        packet.bindGroupLayout,
+        batch.material,
+        packet.drawVertexBuffer,
+        packet.instanceBuffer,
+        runtime.gpu.arena.buffer,
+        packet.materialUbo,
+        packet.environment
+    );
+    retireGpuResources(engine, () => oldBuffer.destroy());
+}
+
+/** Grow CPU instance storage without invalidating the in-flight render bundle. */
+function ensureCpuInstanceCapacity(engine: EngineContext, batch: MeshLoDSceneBatch, packet: MeshLoDBatchPacket, neededInstances: number): void {
+    if (neededInstances <= packet.maxInstances) {
+        return;
+    }
+    let capacity = packet.maxInstances;
+    while (capacity < neededInstances) {
+        capacity *= 2;
+    }
+    const oldBuffer = packet.instanceBuffer;
+    packet.instanceBuffer = engine._device.createBuffer({ label: "mesh-lod-instances", size: capacity * INSTANCE_STRIDE, usage: BU.STORAGE | BU.COPY_DST });
+    packet.instanceScratch = new Float32Array(capacity * (INSTANCE_STRIDE / 4));
+    packet.maxInstances = capacity;
+    packet.bindGroup = buildBindGroup(
+        engine,
+        packet.bindGroupLayout,
+        batch.material,
+        packet.drawVertexBuffer,
+        packet.instanceBuffer,
+        batch.asset._runtime.gpu.arena.buffer,
+        packet.materialUbo,
+        packet.environment
+    );
     retireGpuResources(engine, () => oldBuffer.destroy());
 }
 
@@ -332,10 +387,11 @@ function updatePacketCpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet
     const selections = selectMeshLoDBatch(batch, context);
     // Feed this frame's fine-page demand + frame references to the streaming engine.
     driveMeshLoDStreaming(batch, selections);
+    ensureCpuInstanceCapacity(engine, batch, packet, selections.length);
     // Grow the draw-vertex buffer if streamed refinement expands past the coarse bound.
     let neededVertices = 0;
-    for (let i = 0; i < selections.length && i < packet.maxInstances; i++) {
-        for (const clusterId of selections[i]!.result.selectedClusterIds) {
+    for (const selection of selections) {
+        for (const clusterId of selection.result.selectedClusterIds) {
             neededVertices += runtime.clusters[clusterId]!.triangleCount * 3;
         }
     }
@@ -346,10 +402,7 @@ function updatePacketCpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet
     let instanceIndex = 0;
     let selectedMeshlets = 0;
 
-    outer: for (const selection of selections) {
-        if (instanceIndex >= packet.maxInstances) {
-            break;
-        }
+    for (const selection of selections) {
         const localInstance = instanceIndex;
         writeInstanceRecord(inst, localInstance * (INSTANCE_STRIDE / 4), selection.instance.worldMatrix);
         instanceIndex++;
@@ -383,9 +436,6 @@ function updatePacketCpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet
             const count = cluster.triangleCount * 3;
             selectedMeshlets++;
             for (let k = 0; k < count; k++) {
-                if (vertexCount >= packet.maxDrawVertices) {
-                    break outer; // capacity guard — never write out of bounds
-                }
                 const localVertex = indices[start + k]!;
                 const o = vertexCount * 4;
                 draw[o] = arenaWordBase + localVertex * VERTEX_WORDS;
@@ -420,15 +470,16 @@ function updatePacketCpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet
 
 function buildGpuFrame(batch: MeshLoDSceneBatch, camera: Camera, context: DrawUpdateContext): MeshLoDGpuFrameParams {
     const runtime = batch.asset._runtime;
-    const pos = getCameraPosition(camera);
+    const selectionCamera = getMeshLoDSelectionCamera(camera, context);
     const v = camera.viewport;
     const aspect = (context.targetWidth / context.targetHeight) * (v ? v.width / v.height : 1);
     return {
-        cameraPos: [pos.x, pos.y, pos.z],
-        verticalFov: camera.fov,
-        near: camera.nearPlane,
-        targetWidth: context.targetWidth,
-        targetHeight: context.targetHeight,
+        cameraPos: selectionCamera.position,
+        verticalFov: selectionCamera.verticalFov,
+        near: selectionCamera.near,
+        targetWidth: selectionCamera.targetWidth,
+        targetHeight: selectionCamera.targetHeight,
+        orthographicHeight: selectionCamera.orthographicHeight,
         viewProjection: getViewProjectionMatrix(camera, aspect),
         frustumCull: true, // GPU render path culls; CPU diagnostic mode keeps every cluster
         coneCull: batch.material.doubleSided !== true,
@@ -466,7 +517,16 @@ function updatePacketGpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet
         return;
     }
     if (!packet.gpuBindGroup || packet.gpuBoundDrawVertices !== handles.drawVertexBuffer || packet.gpuBoundInstances !== handles.instanceBuffer) {
-        packet.gpuBindGroup = buildBindGroup(engine, packet.bindGroupLayout, batch.material, handles.drawVertexBuffer, handles.instanceBuffer, packet.arena, packet.materialUbo);
+        packet.gpuBindGroup = buildBindGroup(
+            engine,
+            packet.bindGroupLayout,
+            batch.material,
+            handles.drawVertexBuffer,
+            handles.instanceBuffer,
+            packet.arena,
+            packet.materialUbo,
+            packet.environment
+        );
         packet.gpuBoundDrawVertices = handles.drawVertexBuffer;
         packet.gpuBoundInstances = handles.instanceBuffer;
     }
@@ -500,7 +560,8 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
         return null;
     }
     const runtime = batch.asset._runtime;
-    const features = detectFeatures(batch.material);
+    const environment = batch.material._unlit === true ? null : (_scene._envTextures ?? null);
+    const features = detectFeatures(batch.material, environment !== null);
 
     // Coarse capacity: total expanded vertices across every pinned (resident) cluster.
     let coarseVertices = 0;
@@ -520,14 +581,15 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
     const instanceBuffer = device.createBuffer({ label: "mesh-lod-instances", size: maxInstances * INSTANCE_STRIDE, usage: BU.STORAGE | BU.COPY_DST });
     const indirectBuffer = device.createBuffer({ label: "mesh-lod-indirect", size: 16, usage: BU.INDIRECT | BU.COPY_DST });
 
-    const bindGroupLayout = meshLoDBindGroupLayout(engine);
+    const bindGroupLayout = meshLoDBindGroupLayout(engine, features.hasIbl);
     const shaderModule = device.createShaderModule({ label: `mesh-lod-${meshLoDShaderKey(features)}`, code: composeMeshLoDWgsl(features) });
 
     const packet: MeshLoDBatchPacket = {
         features,
+        environment,
         shaderModule,
         bindGroupLayout,
-        bindGroup: buildBindGroup(engine, bindGroupLayout, batch.material, drawVertexBuffer, instanceBuffer, runtime.gpu.arena.buffer, materialUbo),
+        bindGroup: buildBindGroup(engine, bindGroupLayout, batch.material, drawVertexBuffer, instanceBuffer, runtime.gpu.arena.buffer, materialUbo, environment),
         pipelines: new Map(),
         drawVertexBuffer,
         instanceBuffer,
@@ -552,8 +614,8 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
         activeIndirectBuffer: null,
         dispose: () => {
             materialUbo.destroy();
-            drawVertexBuffer.destroy();
-            instanceBuffer.destroy();
+            packet.drawVertexBuffer.destroy();
+            packet.instanceBuffer.destroy();
             indirectBuffer.destroy();
             if (packet.gpuInstanceState) {
                 disposeMeshLoDGpuInstanceState(packet.gpuInstanceState);

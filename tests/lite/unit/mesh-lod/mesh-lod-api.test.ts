@@ -44,6 +44,7 @@ function makeFakeAsset(): MeshLoDAsset {
             selectionMode: "gpu",
             nextInstanceId: 0,
             disposed: false,
+            gpu: { arena: { pinnedCount: 2, capacityBytes: 4 * MIB, blockCount: 64 } },
         } as unknown as MeshLoDAsset["_runtime"],
     };
 }
@@ -137,6 +138,12 @@ describe("createMeshLoDInstance", () => {
             expect(isMeshLoDError(error) && error.code).toBe("MLOD_UNSUPPORTED_MATERIAL");
         }
     });
+
+    it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY])("rejects invalid instance SSE %s before incrementing ids", (screenSpaceError) => {
+        const asset = makeFakeAsset();
+        expect(() => createMeshLoDInstance(asset, {} as PbrMaterialProps, { screenSpaceError })).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_OPTION" }));
+        expect(asset._runtime.nextInstanceId).toBe(0);
+    });
 });
 
 describe("asset setters and lifecycle", () => {
@@ -159,6 +166,15 @@ describe("asset setters and lifecycle", () => {
         expect(() => setMeshLoDScreenSpaceError(asset, 0)).toThrowError();
         expect(() => setMeshLoDCacheBudget(asset, 999 * MIB)).toThrowError();
         expect(() => setMeshLoDSelectionMode(asset, "auto" as unknown as "cpu")).toThrowError();
+    });
+
+    it("rejects budgets below pinned residency without mutating the effective budget", () => {
+        const asset = makeFakeAsset();
+        const before = asset._runtime.settings.cacheBudgetBytes;
+        expect(() => setMeshLoDCacheBudget(asset, 2 * 65536 - 1)).toThrowError(expect.objectContaining({ code: "MLOD_BUDGET_TOO_SMALL" }));
+        expect(asset._runtime.settings.cacheBudgetBytes).toBe(before);
+        setMeshLoDCacheBudget(asset, 2 * 65536);
+        expect(asset._runtime.settings.cacheBudgetBytes).toBe(2 * 65536);
     });
 
     it("returns the live diagnostics object", () => {

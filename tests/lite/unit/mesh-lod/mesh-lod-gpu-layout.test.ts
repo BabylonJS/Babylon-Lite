@@ -177,12 +177,12 @@ describe("MeshLoD GPU metadata layout", () => {
         expect(out[6]).toBe(0);
     });
 
-    it("packs the 128-byte instance record: world, cofactor normal, max scale, visibility, id", () => {
+    it("packs the 128-byte instance record: world, cofactor normal, per-instance SSE, max scale, visibility, id", () => {
         const f32 = new Float32Array(INSTANCE_WORDS);
         const u32 = new Uint32Array(f32.buffer);
         // Uniform scale 2, translation (5,6,7), column-major.
         const world = [2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 5, 6, 7, 1];
-        packInstanceRecord(f32, u32, 0, world, true, 42);
+        packInstanceRecord(f32, u32, 0, world, true, 42, 0.75);
         expect(INSTANCE_BYTES).toBe(128);
         for (let i = 0; i < 16; i++) {
             expect(f32[i]).toBe(world[i]);
@@ -191,6 +191,7 @@ describe("MeshLoD GPU metadata layout", () => {
         expect([f32[16], f32[17], f32[18]]).toEqual([4, 0, 0]);
         expect([f32[20], f32[21], f32[22]]).toEqual([0, 4, 0]);
         expect([f32[24], f32[25], f32[26]]).toEqual([0, 0, 4]);
+        expect(f32[19]).toBe(0.75); // unused n0.w carries the per-instance SSE
         expect(f32[28]).toBe(2); // maximum world scale
         expect(u32[29]).toBe(1); // visible
         expect(u32[30]).toBe(42); // stable id
@@ -203,6 +204,7 @@ describe("MeshLoD GPU metadata layout", () => {
         packInstanceRecord(f32, u32, 0, [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], false, 3);
         expect(u32[29]).toBe(0);
         expect(f32[28]).toBe(1);
+        expect(f32[19]).toBe(0); // asset-level default
     });
 });
 
@@ -309,6 +311,20 @@ describe("MeshLoD GPU instance state", () => {
         const before = device.writes.filter((w) => w.buffer === instBuffer).length;
         uploadMeshLoDInstances(engine, state, [inst(0, 1, false)]);
         expect(device.writes.filter((w) => w.buffer === instBuffer).length).toBe(before + 1);
+    });
+
+    it("re-uploads a slot when its per-instance SSE override changes, even with a stable transform version", () => {
+        const { engine, device } = createMockEngine();
+        const state = createMeshLoDGpuInstanceState(8);
+        const original = inst(0, 1);
+        uploadMeshLoDInstances(engine, state, [original]);
+        const instBuffer = state.instanceBuffer! as unknown as MockBuffer;
+        const before = device.writes.filter((w) => w.buffer === instBuffer).length;
+        uploadMeshLoDInstances(engine, state, [{ ...original, screenSpaceError: 4 }]);
+        expect(device.writes.filter((w) => w.buffer === instBuffer)).toHaveLength(before + 1);
+        expect(state.scratchF32[19]).toBe(4);
+        uploadMeshLoDInstances(engine, state, [{ ...original, screenSpaceError: 4 }]);
+        expect(device.writes.filter((w) => w.buffer === instBuffer)).toHaveLength(before + 1);
     });
 
     it("grows make-before-break, copying prior-state bits and retiring old buffers", () => {

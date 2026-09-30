@@ -136,7 +136,7 @@ export function projectSphere(
     let projectedRadiusPx: number;
     if (ortho) {
         const scale = fdiv(targetHeight, orthographicHeight!);
-        errorPx = fmul(fmul(worldError, worldScale), scale);
+        errorPx = fmul(worldError, scale);
         projectedRadiusPx = fmul(worldRadius, scale);
     } else {
         errorPx = fdiv(fmul(worldError, pixelScale), surfaceDistance);

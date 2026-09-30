@@ -175,11 +175,11 @@ afterEach(() => {
     _setMeshLoDPageDecoder(null);
 });
 
-function flushBinding(binding: { update?: (c: typeof CONTEXT) => void; _updateBatches?: readonly DrawUpdateBatch[] }): void {
+function flushBinding(binding: { update?: (c: typeof CONTEXT) => void; _updateBatches?: readonly DrawUpdateBatch[] }, context = CONTEXT): void {
     const batch = binding._updateBatches?.[0];
     expect(batch).toBeTruthy();
     batch!.reset();
-    binding.update!(CONTEXT);
+    binding.update!(context);
     batch!.flush(engine);
 }
 
@@ -256,5 +256,17 @@ describe("MeshLoD GPU indirect rendering", () => {
         flushBinding(binding);
         const after = before.buffers.filter((b) => (b as { label?: string }).label === "mesh-lod-draw-vertices").length;
         expect(after).toBeGreaterThan(drawBufferCount);
+    });
+
+    it("passes an orthographic camera's effective vertical extent to the GPU selection UBO", async () => {
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "gpu" });
+        const scene = await buildGpuScene(asset, engine, {} as PbrMaterialProps, 1);
+        const camera = fakeCamera();
+        camera.ortho = { halfHeight: 10, top: 3, bottom: -7, left: null, right: null };
+        const binding = scene._renderables[0]!.bind(engine, SIG);
+        flushBinding(binding, { ...CONTEXT, _camera: camera });
+        const packet = scene._meshLoDRegistry!.batches[0]!._packet as { gpuBatchState: { paramsF32: Float32Array } };
+        expect(packet.gpuBatchState.paramsF32[31]).toBe(10);
+        expect(packet.gpuBatchState.paramsF32[29]).toBe(600);
     });
 });

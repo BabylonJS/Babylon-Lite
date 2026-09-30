@@ -615,6 +615,37 @@ function parseNodes(reader: Reader, entry: MeshLoDSectionEntry, header: MeshLoDH
             childCount,
         });
     }
+    if (nodes.length < header.levelCount) {
+        throw fail("MLOD_INVALID_HIERARCHY", "hierarchy has fewer nodes than levels");
+    }
+    // Each level starts at its own root (nodes 0..levelCount-1). Walk the
+    // resulting forest without recursion and reject shared/cyclic children.
+    const state = new Uint8Array(nodes.length);
+    const stack: number[] = [];
+    for (let level = header.levelCount - 1; level >= 0; level--) {
+        stack.push(level);
+    }
+    let visited = 0;
+    while (stack.length > 0) {
+        const id = stack.pop()!;
+        if (id < 0) {
+            state[~id] = 2;
+            continue;
+        }
+        if (state[id] !== 0) {
+            throw fail("MLOD_INVALID_HIERARCHY", "hierarchy contains a cycle or shared child", { byteOffset: entry.offset + id * HIERARCHY_NODE_SIZE });
+        }
+        state[id] = 1;
+        visited++;
+        stack.push(~id);
+        const node = nodes[id]!;
+        for (let child = node.childCount - 1; child >= 0; child--) {
+            stack.push(node.childOffset + child);
+        }
+    }
+    if (visited !== nodes.length) {
+        throw fail("MLOD_INVALID_HIERARCHY", "hierarchy contains unreachable nodes", { expected: nodes.length, actual: visited });
+    }
     return nodes;
 }
 
@@ -727,6 +758,36 @@ function parsePages(reader: Reader, pageTable: MeshLoDSectionEntry, pageData: Me
     return pages;
 }
 
+function validateRecordReferences(
+    groups: readonly MeshLoDGroup[],
+    clusters: readonly MeshLoDCluster[],
+    refs: Uint32Array,
+    pages: readonly MeshLoDPageRecord[],
+    groupOffset: number,
+    clusterOffset: number
+): void {
+    for (let g = 0; g < groups.length; g++) {
+        const group = groups[g]!;
+        if (group.firstPageRef + group.pageRefCount > refs.length) {
+            throw fail("MLOD_INVALID_HIERARCHY", "group page refs are out of range", { byteOffset: groupOffset + g * GROUP_RECORD_SIZE + GR.firstPageRef });
+        }
+    }
+    for (let c = 0; c < clusters.length; c++) {
+        const cluster = clusters[c]!;
+        const page = pages[cluster.pageId]!;
+        const base = clusterOffset + c * CLUSTER_RECORD_SIZE;
+        if (c < page.firstCluster || c >= page.firstCluster + page.clusterCount) {
+            throw fail("MLOD_INVALID_HIERARCHY", "cluster is not in its owning page range", { byteOffset: base + CR.pageId });
+        }
+        if (cluster.vertexOffset + cluster.vertexCount > page.vertexCount) {
+            throw fail("MLOD_INVALID_HIERARCHY", "cluster vertices exceed their page", { byteOffset: base + CR.firstVertex });
+        }
+        if (cluster.indexOffset + cluster.triangleCount * 3 > page.localIndexCount) {
+            throw fail("MLOD_INVALID_HIERARCHY", "cluster local indices exceed their page", { byteOffset: base + CR.firstLocalIndex });
+        }
+    }
+}
+
 function requireSection(entry: MeshLoDSectionEntry, count: number, stride: number, name: string): void {
     if (entry.elementCount !== count || entry.elementStride !== stride || entry.storedBytes !== count * stride) {
         throw fail("MLOD_INVALID_LAYOUT", `${name} section counts disagree with the header`, { sectionType: entry.type });
@@ -781,6 +842,7 @@ export function parseMeshLoDContainer(bytes: Uint8Array): ParsedMeshLoDContainer
     const hierarchyNodes = parseNodes(reader, sections[SECTION_HIERARCHY_NODES - 1]!, header);
     const groupPageRefs = parseGroupPageRefs(reader, sections[SECTION_GROUP_PAGE_REFS - 1]!, header);
     const pageRecords = parsePages(reader, sections[SECTION_PAGE_TABLE - 1]!, sections[SECTION_PAGE_DATA - 1]!, header);
+    validateRecordReferences(groups, clusters, groupPageRefs, pageRecords, sections[SECTION_GROUPS - 1]!.offset, sections[SECTION_CLUSTERS - 1]!.offset);
     return { header, sections, provenance, groups, clusters, hierarchyNodes, pageRecords, groupPageRefs };
 }
 

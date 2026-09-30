@@ -272,6 +272,45 @@ describe("MeshLoD selection equivalence — two transformed instances in one bat
         expect(modelFar).toEqual(Array.from(oracleFar.selectedClusterIds));
         expect(modelNear).not.toEqual(modelFar); // genuinely different cuts
     });
+
+    it("uses per-instance SSE overrides rather than one asset threshold for the entire GPU batch", () => {
+        const strict = scenario(near);
+        const base = modelInput(h, { ...strict, screenSpaceError: 2000, resident: [0] }, new Uint32Array(2));
+        const instances = new Float32Array(2 * INSTANCE_WORDS);
+        const instancesU32 = new Uint32Array(instances.buffer);
+        packInstanceRecord(instances, instancesU32, 0, near, true, 0, 1);
+        packInstanceRecord(instances, instancesU32, INSTANCE_WORDS, near, true, 1);
+        const model = runMeshLoDGpuSelection({ ...base, instances, instancesU32, priorState: new Uint32Array(2), instanceCount: 2 });
+        const strictCpu = selectMeshLoDCpu(oracleInput(h, { ...strict, screenSpaceError: 1, resident: [0] }));
+        const defaultCpu = selectMeshLoDCpu(oracleInput(h, { ...strict, screenSpaceError: 2000, resident: [0] }));
+        expect(Array.from(normalizeMeshLoDSelectedClusterIds(model.selected, 0))).toEqual(Array.from(strictCpu.selectedClusterIds));
+        expect(Array.from(normalizeMeshLoDSelectedClusterIds(model.selected, 1))).toEqual(Array.from(defaultCpu.selectedClusterIds));
+        expect(model.desiredPages.map((p) => p.pageId)).toEqual([1]);
+        expect(model.fallbackGroupCount).toBe(1);
+    });
+});
+
+describe("MeshLoD orthographic SSE scaling", () => {
+    const h = (load("selection-lod.json") as { hierarchy: FixtureHierarchy }).hierarchy;
+    it("applies world scale once and is independent of camera distance in both selectors", () => {
+        const world = [2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1];
+        for (const distance of [5, 500]) {
+            const s: Scenario = {
+                camera: { position: [0, 0, distance], verticalFov: 1, near: 0.1, targetWidth: 1000, targetHeight: 1000, orthographicHeight: 1000 },
+                frustumPlanes: [],
+                resident: [0, 1],
+                wasFineRequired: [0, 0],
+                screenSpaceError: 7,
+                lodHysteresis: 0,
+                world,
+            };
+            const oracle = selectMeshLoDCpu(oracleInput(h, s));
+            const model = runMeshLoDGpuSelection(modelInput(h, s, new Uint32Array(1)));
+            expect(sortedUnique(model.selected)).toEqual(Array.from(oracle.selectedClusterIds));
+            expect(model.maximumSelectedErrorPixels).toBe(10); // 5 world-error × 2 world-scale × 1000/1000
+            expect(model.maximumSelectedErrorPixels).toBe(oracle.maximumSelectedErrorPixels);
+        }
+    });
 });
 
 describe("MeshLoD selection equivalence — frustum boundary + incomplete residency", () => {

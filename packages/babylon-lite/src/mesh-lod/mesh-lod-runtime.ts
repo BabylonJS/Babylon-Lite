@@ -334,7 +334,9 @@ async function prepareCoarseResidency(
         throw createMeshLoDError("MLOD_BUDGET_TOO_SMALL", "cacheBudgetBytes cannot hold the pinned coarse pages", { expected: pinnedBytes, actual: settings.cacheBudgetBytes });
     }
 
-    const arena = createMeshLoDArena(engine, settings.cacheCapacityBytes, pinnedBytes);
+    const decoder = await getMeshLoDPageDecoder();
+    throwIfAborted(signal);
+
     const pages: MeshLoDPageRuntime[] = parsed.pageRecords.map((record, id) => ({
         id,
         state: "unrequested" as MeshLoDPageState,
@@ -346,40 +348,44 @@ async function prepareCoarseResidency(
         priority: 0,
         frameRefCount: 0,
     }));
-
-    const decoder = await getMeshLoDPageDecoder();
-    throwIfAborted(signal);
+    const arena = createMeshLoDArena(engine, settings.cacheCapacityBytes, pinnedBytes);
 
     let residentPageCount = 0;
-    for (let id = 0; id < parsed.pageRecords.length; id++) {
-        const record = parsed.pageRecords[id]!;
-        const page = pages[id]!;
-        if (!record.pinned) {
-            continue; // Fine pages stay unrequested until streaming.
+    try {
+        for (let id = 0; id < parsed.pageRecords.length; id++) {
+            throwIfAborted(signal);
+            const record = parsed.pageRecords[id]!;
+            const page = pages[id]!;
+            if (!record.pinned) {
+                continue; // Fine pages stay unrequested until streaming.
+            }
+            const stored = coarseBytes.subarray(record.offset, record.offset + record.storedBytes);
+            let decoded;
+            try {
+                decoded = decodeMeshLoDPage(stored, record, decoder);
+            } catch (cause) {
+                const error = cause as MeshLoDError;
+                page.state = "terminal-failed";
+                page.terminalError = error;
+                throw error; // A pinned failure fails initialization (architecture 11.3).
+            }
+            const arenaOffset = allocateArenaRun(arena, record.decodedBytes, true);
+            if (arenaOffset === null) {
+                throw createMeshLoDError("MLOD_BUDGET_TOO_SMALL", "pinned pages do not fit the geometry arena", { pageId: id, expected: pinnedBytes });
+            }
+            engine._device.queue.writeBuffer(arena.buffer, arenaOffset, decoded.decoded.buffer as ArrayBuffer, decoded.decoded.byteOffset, decoded.decoded.byteLength);
+            page.arenaOffset = arenaOffset;
+            page.arenaBytes = record.decodedBytes;
+            page.indices = new Uint16Array(decoded.decoded.buffer, decoded.decoded.byteOffset + record.indexByteOffset, record.localIndexCount).slice();
+            page.state = "gpu-resident";
+            residentPageCount++;
         }
-        const stored = coarseBytes.subarray(record.offset, record.offset + record.storedBytes);
-        let decoded;
-        try {
-            decoded = decodeMeshLoDPage(stored, record, decoder);
-        } catch (cause) {
-            const error = cause as MeshLoDError;
-            page.state = "terminal-failed";
-            page.terminalError = error;
-            throw error; // A pinned failure fails initialization (architecture 11.3).
-        }
-        const arenaOffset = allocateArenaRun(arena, record.decodedBytes, true);
-        if (arenaOffset === null) {
-            throw createMeshLoDError("MLOD_BUDGET_TOO_SMALL", "pinned pages do not fit the geometry arena", { pageId: id, expected: pinnedBytes });
-        }
-        engine._device.queue.writeBuffer(arena.buffer, arenaOffset, decoded.decoded.buffer as ArrayBuffer, decoded.decoded.byteOffset, decoded.decoded.byteLength);
-        page.arenaOffset = arenaOffset;
-        page.arenaBytes = record.decodedBytes;
-        page.indices = new Uint16Array(decoded.decoded.buffer, decoded.decoded.byteOffset + record.indexByteOffset, record.localIndexCount).slice();
-        page.state = "gpu-resident";
-        residentPageCount++;
+        throwIfAborted(signal);
+        return { arena, pages, residentPageCount };
+    } catch (cause) {
+        arena.buffer.destroy();
+        throw cause;
     }
-
-    return { arena, pages, residentPageCount };
 }
 
 /** Load and validate a MeshLoD asset from a resolved settings object.
@@ -429,62 +435,69 @@ export async function _loadMeshLoD(
 
     const diagnostics = createDiagnostics(parsed, settings, selectionMode, src.downloadedBytes);
     const gpu = await prepareCoarseResidency(engine, parsed, coarseBytes, settings, signal);
-    diagnostics.residentPageCount = gpu.residentPageCount;
-    diagnostics.gpuCacheUsedBytes = arenaUsedBytes(gpu.arena);
-    diagnostics.gpuCacheCapacityBytes = gpu.arena.capacityBytes;
-    diagnostics.downloadedBytes = src.downloadedBytes;
+    try {
+        throwIfAborted(signal);
+        diagnostics.residentPageCount = gpu.residentPageCount;
+        diagnostics.gpuCacheUsedBytes = arenaUsedBytes(gpu.arena);
+        diagnostics.gpuCacheCapacityBytes = gpu.arena.capacityBytes;
+        diagnostics.downloadedBytes = src.downloadedBytes;
 
-    // Retain the pinned coarse pages' encoded bytes so device recovery can re-decode
-    // without re-fetching; they always count toward the CPU-cache budget (§11.5).
-    const cpuPageCache = createMeshLoDCpuPageCache(settings.cpuPageCacheBytes);
-    for (let id = 0; id < parsed.pageRecords.length; id++) {
-        const record = parsed.pageRecords[id]!;
-        if (record.pinned) {
-            putMeshLoDCpuPage(cpuPageCache, id, coarseBytes.subarray(record.offset, record.offset + record.storedBytes).slice(), true, 0);
+        // Retain the pinned coarse pages' encoded bytes so device recovery can re-decode
+        // without re-fetching; they always count toward the CPU-cache budget (§11.5).
+        const cpuPageCache = createMeshLoDCpuPageCache(settings.cpuPageCacheBytes);
+        for (let id = 0; id < parsed.pageRecords.length; id++) {
+            const record = parsed.pageRecords[id]!;
+            if (record.pinned) {
+                putMeshLoDCpuPage(cpuPageCache, id, coarseBytes.subarray(record.offset, record.offset + record.storedBytes).slice(), true, 0);
+            }
         }
+        diagnostics.cpuPageCacheUsedBytes = cpuCacheUsedBytes(cpuPageCache);
+
+        // The coarse decoder is already resolved (prepareCoarseResidency awaited it and it
+        // is a cached singleton); retain it to decode streamed fine pages synchronously.
+        const decoderModule = await getMeshLoDPageDecoder();
+        throwIfAborted(signal);
+
+        const runtime: MeshLoDAssetRuntime = {
+            engine,
+            source: src,
+            coarseBytes,
+            header: parsed.header,
+            sections: parsed.sections,
+            groups: parsed.groups,
+            clusters: parsed.clusters,
+            hierarchyNodes: parsed.hierarchyNodes,
+            pageRecords: parsed.pageRecords,
+            groupPageRefs: parsed.groupPageRefs,
+            gpu,
+            gpuDevice: engine._device,
+            gpuSelection: null,
+            scheduler: null,
+            _schedulerTimers: null,
+            decoderModule,
+            cpuPageCache,
+            settings,
+            diagnostics,
+            abortController: new AbortController(),
+            generation: 0,
+            frameIndex: 0,
+            streamingPaused: false,
+            debugView: "none",
+            selectionMode,
+            nextInstanceId: 0,
+            disposed: false,
+        };
+
+        return {
+            metadata: toMeshLoDMetadata(parsed),
+            diagnostics,
+            state: "ready",
+            _runtime: runtime,
+        };
+    } catch (cause) {
+        gpu.arena.buffer.destroy();
+        throw cause;
     }
-    diagnostics.cpuPageCacheUsedBytes = cpuCacheUsedBytes(cpuPageCache);
-
-    // The coarse decoder is already resolved (prepareCoarseResidency awaited it and it
-    // is a cached singleton); retain it to decode streamed fine pages synchronously.
-    const decoderModule = await getMeshLoDPageDecoder();
-
-    const runtime: MeshLoDAssetRuntime = {
-        engine,
-        source: src,
-        coarseBytes,
-        header: parsed.header,
-        sections: parsed.sections,
-        groups: parsed.groups,
-        clusters: parsed.clusters,
-        hierarchyNodes: parsed.hierarchyNodes,
-        pageRecords: parsed.pageRecords,
-        groupPageRefs: parsed.groupPageRefs,
-        gpu,
-        gpuDevice: engine._device,
-        gpuSelection: null,
-        scheduler: null,
-        _schedulerTimers: null,
-        decoderModule,
-        cpuPageCache,
-        settings,
-        diagnostics,
-        abortController: new AbortController(),
-        generation: 0,
-        frameIndex: 0,
-        streamingPaused: false,
-        debugView: "none",
-        selectionMode,
-        nextInstanceId: 0,
-        disposed: false,
-    };
-
-    return {
-        metadata: toMeshLoDMetadata(parsed),
-        diagnostics,
-        state: "ready",
-        _runtime: runtime,
-    };
 }
 
 /** Register an instance into its scene-owned MeshLoD batch (delegates to the scene
@@ -810,7 +823,6 @@ export function _recoverMeshLoDAsset(engine: EngineContext, runtime: MeshLoDAsse
     _disposeMeshLoDScheduler(runtime);
 
     const pinnedBytes = pinnedAllocationBytes(runtime.pageRecords);
-    const arena = createMeshLoDArena(engine, runtime.settings.cacheCapacityBytes, pinnedBytes);
     const pages: MeshLoDPageRuntime[] = runtime.pageRecords.map((record, id) => ({
         id,
         state: "unrequested" as MeshLoDPageState,
@@ -822,36 +834,46 @@ export function _recoverMeshLoDAsset(engine: EngineContext, runtime: MeshLoDAsse
         priority: 0,
         frameRefCount: 0,
     }));
+    const arena = createMeshLoDArena(engine, runtime.settings.cacheCapacityBytes, pinnedBytes);
 
     let residentPageCount = 0;
-    for (let id = 0; id < runtime.pageRecords.length; id++) {
-        const record = runtime.pageRecords[id]!;
-        if (!record.pinned) {
-            continue; // Fine pages restore opportunistically through streaming.
+    try {
+        for (let id = 0; id < runtime.pageRecords.length; id++) {
+            const record = runtime.pageRecords[id]!;
+            if (!record.pinned) {
+                continue; // Fine pages restore opportunistically through streaming.
+            }
+            const encoded = getMeshLoDCpuPage(runtime.cpuPageCache, id, runtime.frameIndex);
+            if (!encoded) {
+                throw createMeshLoDError("MLOD_DEVICE_RECOVERY", "retained pinned coarse bytes are unavailable for device recovery", { pageId: id });
+            }
+            let decoded: DecodedMeshLoDPage;
+            try {
+                decoded = decodeMeshLoDPage(encoded, record, runtime.decoderModule);
+            } catch (cause) {
+                throw createMeshLoDError("MLOD_DEVICE_RECOVERY", "failed to re-decode a pinned coarse page during device recovery", {
+                    pageId: id,
+                    actual: (cause as MeshLoDError)?.message,
+                });
+            }
+            const offset = allocateArenaRun(arena, record.decodedBytes, true);
+            if (offset === null) {
+                throw createMeshLoDError("MLOD_DEVICE_RECOVERY", "recovered geometry arena cannot hold the pinned coarse pages", { pageId: id });
+            }
+            try {
+                engine._device.queue.writeBuffer(arena.buffer, offset, decoded.decoded.buffer as ArrayBuffer, decoded.decoded.byteOffset, decoded.decoded.byteLength);
+            } catch (cause) {
+                throw createMeshLoDError("MLOD_DEVICE_RECOVERY", "failed to upload a pinned coarse page during device recovery", { pageId: id, cause });
+            }
+            pages[id]!.arenaOffset = offset;
+            pages[id]!.arenaBytes = record.decodedBytes;
+            pages[id]!.indices = new Uint16Array(decoded.decoded.buffer, decoded.decoded.byteOffset + record.indexByteOffset, record.localIndexCount).slice();
+            pages[id]!.state = "gpu-resident";
+            residentPageCount++;
         }
-        const encoded = getMeshLoDCpuPage(runtime.cpuPageCache, id, runtime.frameIndex);
-        if (!encoded) {
-            throw createMeshLoDError("MLOD_DEVICE_RECOVERY", "retained pinned coarse bytes are unavailable for device recovery", { pageId: id });
-        }
-        let decoded: DecodedMeshLoDPage;
-        try {
-            decoded = decodeMeshLoDPage(encoded, record, runtime.decoderModule);
-        } catch (cause) {
-            throw createMeshLoDError("MLOD_DEVICE_RECOVERY", "failed to re-decode a pinned coarse page during device recovery", {
-                pageId: id,
-                actual: (cause as MeshLoDError)?.message,
-            });
-        }
-        const offset = allocateArenaRun(arena, record.decodedBytes, true);
-        if (offset === null) {
-            throw createMeshLoDError("MLOD_DEVICE_RECOVERY", "recovered geometry arena cannot hold the pinned coarse pages", { pageId: id });
-        }
-        engine._device.queue.writeBuffer(arena.buffer, offset, decoded.decoded.buffer as ArrayBuffer, decoded.decoded.byteOffset, decoded.decoded.byteLength);
-        pages[id]!.arenaOffset = offset;
-        pages[id]!.arenaBytes = record.decodedBytes;
-        pages[id]!.indices = new Uint16Array(decoded.decoded.buffer, decoded.decoded.byteOffset + record.indexByteOffset, record.localIndexCount).slice();
-        pages[id]!.state = "gpu-resident";
-        residentPageCount++;
+    } catch (cause) {
+        arena.buffer.destroy();
+        throw cause;
     }
 
     runtime.gpu = { arena, pages, residentPageCount };

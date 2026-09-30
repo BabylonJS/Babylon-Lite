@@ -16,6 +16,7 @@ import type { SceneContext } from "../scene/scene-core.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import type { MeshLoDAssetRuntime, MeshLoDEffectiveSettings } from "./mesh-lod-runtime.js";
+import type * as MeshLoDRuntimeModule from "./mesh-lod-runtime.js";
 import type { MeshLoDError } from "./mesh-lod-errors.js";
 import { createSceneNode } from "../scene/scene-node.js";
 import { createMeshLoDError } from "./mesh-lod-errors.js";
@@ -244,13 +245,11 @@ export function _resolveMeshLoDLoadOptions(options?: MeshLoDLoadOptions): MeshLo
 
 // ─── Lazy runtime plumbing ───────────────────────────────────────────
 
-type MeshLoDRuntimeModule = typeof import("./mesh-lod-runtime.js");
-
 /** Cached runtime module, populated on the first {@link loadMeshLoD}. Nullable
  *  lazy cache only — no module-level collection or eager import. */
-let _runtimeModule: MeshLoDRuntimeModule | null = null;
+let _runtimeModule: typeof MeshLoDRuntimeModule | null = null;
 
-function requireRuntime(): MeshLoDRuntimeModule {
+function requireRuntime(): typeof MeshLoDRuntimeModule {
     const runtime = _runtimeModule;
     if (!runtime) {
         // Unreachable in correct usage: a live asset/instance implies loadMeshLoD
@@ -276,6 +275,7 @@ export async function loadMeshLoD(engine: EngineContext, source: MeshLoDSource, 
 /** Create a placed instance of an asset using a supported opaque PBR material.
  *  Unsupported material state throws `MLOD_UNSUPPORTED_MATERIAL`. */
 export function createMeshLoDInstance(asset: MeshLoDAsset, material: PbrMaterialProps, options?: MeshLoDInstanceOptions): MeshLoDInstance {
+    const screenSpaceError = options?.screenSpaceError === undefined ? undefined : resolveFinitePositive(options.screenSpaceError, DEFAULT_SCREEN_SPACE_ERROR, "screenSpaceError");
     if (material.alphaBlend === true) {
         throw createMeshLoDError("MLOD_UNSUPPORTED_MATERIAL", "MeshLoD requires an opaque PBR material; alpha blending is not supported", {
             expected: "opaque",
@@ -290,7 +290,7 @@ export function createMeshLoDInstance(asset: MeshLoDAsset, material: PbrMaterial
     instance.material = material;
     instance._material = material;
     instance.visible = options?.visible ?? true;
-    instance.screenSpaceError = options?.screenSpaceError;
+    instance.screenSpaceError = screenSpaceError;
     instance._instanceId = asset._runtime.nextInstanceId;
     asset._runtime.nextInstanceId += 1;
     return instance as MeshLoDInstance;
@@ -325,6 +325,14 @@ export function setMeshLoDCacheBudget(asset: MeshLoDAsset, bytes: number): void 
     }
     if (bytes > asset._runtime.settings.cacheCapacityBytes) {
         throw invalidOption("cacheBudgetBytes", "<= cacheCapacityBytes", bytes);
+    }
+    const arena = asset._runtime.gpu.arena;
+    const pinnedBytes = arena.pinnedCount * (arena.capacityBytes / arena.blockCount);
+    if (bytes < pinnedBytes) {
+        throw createMeshLoDError("MLOD_BUDGET_TOO_SMALL", "cacheBudgetBytes cannot hold the pinned coarse pages", {
+            expected: pinnedBytes,
+            actual: bytes,
+        });
     }
     asset._runtime.settings.cacheBudgetBytes = bytes;
     (asset.diagnostics as { gpuCacheBudgetBytes: number }).gpuCacheBudgetBytes = bytes;

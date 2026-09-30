@@ -134,6 +134,55 @@ describe("parseMeshLoDContainer — mutation matrix", () => {
 
     const dv = (bytes: Uint8Array): DataView => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
 
+    function twoNodeHierarchy(bytes: Uint8Array, layout: FixtureLayout): void {
+        const view = dv(bytes);
+        const nodeEntry = layout.directoryOffset + 3 * 64;
+        view.setUint32(176, 2, true); // node count in header
+        view.setBigUint64(nodeEntry + 16, 64n, true); // section stored bytes
+        view.setBigUint64(nodeEntry + 24, 64n, true); // section decoded bytes
+        view.setUint32(nodeEntry + 32, 2, true); // section element count
+        view.setInt32(layout.nodeOffset + 20, -1, true); // root is an internal node
+        view.setUint32(layout.nodeOffset + 24, 1, true); // its child is node 1
+        view.setUint32(layout.nodeOffset + 28, 1, true);
+        bytes.set(bytes.subarray(layout.nodeOffset, layout.nodeOffset + 20), layout.nodeOffset + 32);
+        view.setInt32(layout.nodeOffset + 32 + 20, 0, true); // node 1 is the leaf
+    }
+
+    it("accepts a reachable internal node and leaf", () => {
+        const { bytes, layout } = buildMinimalContainer();
+        twoNodeHierarchy(bytes, layout);
+        resealContainer(bytes);
+        expect(parseMeshLoDContainer(bytes).hierarchyNodes).toHaveLength(2);
+    });
+
+    it("accepts one hierarchy root per level", () => {
+        const { bytes, layout } = buildMinimalContainer();
+        twoNodeHierarchy(bytes, layout);
+        const view = dv(bytes);
+        view.setUint32(188, 2, true);
+        view.setInt32(layout.nodeOffset + 20, 0, true);
+        view.setUint32(layout.nodeOffset + 28, 0, true);
+        resealContainer(bytes);
+        expect(parseMeshLoDContainer(bytes).hierarchyNodes).toHaveLength(2);
+    });
+
+    it("rejects a CRC-correct hierarchy cycle", () =>
+        expectParseError((b, layout) => {
+            twoNodeHierarchy(b, layout);
+            dv(b).setInt32(layout.nodeOffset + 32 + 20, -1, true);
+            dv(b).setUint32(layout.nodeOffset + 32 + 24, 0, true);
+            dv(b).setUint32(layout.nodeOffset + 32 + 28, 1, true);
+            resealContainer(b);
+        }, "MLOD_INVALID_HIERARCHY"));
+
+    it("rejects a CRC-correct unreachable node", () =>
+        expectParseError((b, layout) => {
+            twoNodeHierarchy(b, layout);
+            dv(b).setInt32(layout.nodeOffset + 20, 0, true);
+            dv(b).setUint32(layout.nodeOffset + 28, 0, true);
+            resealContainer(b);
+        }, "MLOD_INVALID_HIERARCHY"));
+
     it("bad magic", () => expectParseError((b) => void (b[0] = 0x58), "MLOD_BAD_MAGIC"));
 
     it("unsupported format major", () => expectParseError((b) => dv(b).setUint16(8, 2, true), "MLOD_UNSUPPORTED_VERSION"));
@@ -197,6 +246,31 @@ describe("parseMeshLoDContainer — mutation matrix", () => {
     it("group cluster range out of bounds", () =>
         expectParseError((b, layout) => {
             dv(b).setUint32(layout.groupOffset + 28, 99, true);
+            resealContainer(b);
+        }, "MLOD_INVALID_HIERARCHY"));
+
+    it.each([1, 0xffffffff])("group page ref offset %i exceeds the reference table", (firstRef) =>
+        expectParseError((b, layout) => {
+            dv(b).setUint32(layout.groupOffset + 32, firstRef, true);
+            resealContainer(b);
+        }, "MLOD_INVALID_HIERARCHY")
+    );
+
+    it("group page ref count exceeds the reference table", () =>
+        expectParseError((b, layout) => {
+            dv(b).setUint16(layout.groupOffset + 36, 2, true);
+            resealContainer(b);
+        }, "MLOD_INVALID_HIERARCHY"));
+
+    it("cluster local indices exceed their owning page", () =>
+        expectParseError((b, layout) => {
+            dv(b).setUint32(layout.clusterOffset + 64 + 36, 4, true);
+            resealContainer(b);
+        }, "MLOD_INVALID_HIERARCHY"));
+
+    it("cluster vertices exceed their owning page", () =>
+        expectParseError((b, layout) => {
+            dv(b).setUint32(layout.clusterOffset + 64 + 32, 4, true);
             resealContainer(b);
         }, "MLOD_INVALID_HIERARCHY"));
 

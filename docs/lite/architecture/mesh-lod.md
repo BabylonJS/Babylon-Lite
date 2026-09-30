@@ -61,6 +61,9 @@ Each batch owns one opaque renderable. Neither the asset nor an instance
 points back at a scene; the PBR MeshLoD module owns its shader, pipeline,
 bind group, and render packet. The generic frame graph only handles the
 feature through normal renderables and the opt-in draw-update batch seam.
+New asset/material batches must be added before scene registration; adding
+instances to an existing batch afterward is supported and grows its CPU/GPU
+instance capacity before drawing.
 
 ## 5. Lazy boundaries
 
@@ -81,7 +84,9 @@ source digest, and build fingerprint. Header, directory, metadata, and
 individual stored pages carry CRC32C checks; required unknown sections or
 incompatible versions fail explicitly. The reader's authoritative layout
 and validators are in `mesh-lod-format.ts`; the writer and conversion
-options are maintained in MegameshCLI.
+options are maintained in MegameshCLI. Hierarchy nodes begin with one root
+per level; the parser rejects cycles, shared children, unreachable nodes,
+and out-of-range group/page/cluster references before selection.
 
 One output file contains one primitive hierarchy. A multi-primitive
 conversion gives each output a deterministic `.meshNNN.primNNN.mlod`
@@ -213,14 +218,20 @@ without blocking the current draw.
 
 The PBR module composes a vertex variant that reads the arena, expanded
 draw vertices, and per-instance transforms. Its fragment variant uses the
-supported PBR/unlit material properties; debug color does not affect
+supported PBR/unlit material properties. With a scene environment, diffuse
+irradiance uses its spherical harmonics and specular IBL samples the
+prefiltered environment cubemap and BRDF LUT with the normal PBR material's
+roughness, horizon-occlusion, and energy-conservation math. Without a scene
+environment, only direct lighting contributes. Debug color does not affect
 selection or page residency.
 
 ### 13.2 Bind groups
 
 Scene bindings occupy group 0. The material's group 1 binds its UBO, four
 optional texture/sampler pairs, and three storage buffers (arena, draw
-vertices, instances); missing textures use the material fallbacks.
+vertices, instances); missing textures use the material fallbacks. The lit
+environment variant also binds the scene BRDF LUT/sampler and prefiltered
+cubemap/sampler at bindings 12–15.
 
 ### 13.3 Pipeline
 

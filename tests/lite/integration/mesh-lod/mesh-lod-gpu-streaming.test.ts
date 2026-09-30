@@ -20,7 +20,9 @@ import {
     CONTROL_COUNT_WORD,
     CONTROL_FALLBACK_WORD,
     CONTROL_PAGE_DEMAND_OFFSET,
+    CONTROL_SELECTED_ERROR_WORD,
     CONTROL_TRIANGLE_WORD,
+    CONTROL_UNMET_ERROR_WORD,
     CONTROL_VISIBLE_GROUP_WORD,
     applyMeshLoDGpuReadback,
 } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
@@ -33,7 +35,7 @@ import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/mat
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine.js";
 import type { RenderTargetSignature } from "../../../../packages/babylon-lite/src/engine/render-target.js";
 import { createFillDecoder, createMockEngine, createMockRenderPass } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
-import type { MockBuffer, MockEncoder } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
+import type { MockBuffer, MockDevice, MockEncoder } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
 
 const STATUE = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
 const statueSource = (): ArrayBuffer => new Uint8Array(readFileSync(STATUE)).slice().buffer as ArrayBuffer;
@@ -166,19 +168,18 @@ describe("MeshLoD GPU streaming — demand readback + adaptive draw growth", () 
         expect(finePageId).toBeGreaterThan(0);
 
         // Stand in for the async mapAsync resolution: demand the fine page, report diagnostics.
-        applyMeshLoDGpuReadback(
-            runtime,
-            state,
-            syntheticControl(state, finePageId, 4096, { count: 120, visible: 40, triangles: 6000, fallback: 5 }),
-            runtime.gpu.pages.length,
-            runtime.generation
-        );
+        const control = syntheticControl(state, finePageId, 4096, { count: 120, visible: 40, triangles: 6000, fallback: 5 });
+        control[CONTROL_SELECTED_ERROR_WORD] = new Uint32Array(new Float32Array([4.25]).buffer)[0]!;
+        control[CONTROL_UNMET_ERROR_WORD] = new Uint32Array(new Float32Array([9.5]).buffer)[0]!;
+        applyMeshLoDGpuReadback(runtime, state, control, runtime.gpu.pages.length, runtime.generation);
 
         // Diagnostics come straight from the control buffer readback.
         expect(runtime.diagnostics.selectedMeshletCount).toBe(120);
         expect(runtime.diagnostics.visibleGroupCount).toBe(40);
         expect(runtime.diagnostics.renderedTriangleCount).toBe(6000);
         expect(runtime.diagnostics.fallbackGroupCount).toBe(5);
+        expect(runtime.diagnostics.maximumSelectedErrorPixels).toBe(4.25);
+        expect(runtime.diagnostics.maximumUnmetErrorPixels).toBe(9.5);
 
         // The demanded fine page streams in over the in-memory source.
         await harness.settle();
@@ -215,6 +216,40 @@ describe("MeshLoD GPU streaming — demand readback + adaptive draw growth", () 
         harness.flush();
         expect(harness.drawBuffers()).toBeGreaterThan(drawBuffersBefore);
         expect(state.drawVertexCapacity).toBeGreaterThanOrEqual(60000 * 3);
+    });
+
+    it("reserves the full resident cut on the first frame after a fine page upload without waiting for readback", async () => {
+        harness = await setup();
+        harness.flush();
+        const runtime = harness.runtime;
+        const state = harness.batchState();
+        const priorCapacity = state.drawVertexCapacity;
+        const priorBuffer = state.drawVertexBuffer;
+        const pageId = runtime.pageRecords.findIndex((record, id) => !record.pinned && runtime.clusters.some((cluster) => cluster.pageId === id));
+        expect(pageId).toBeGreaterThan(0);
+        const page = runtime.gpu.pages[pageId]!;
+        page.state = "gpu-resident";
+        page.arenaOffset = runtime.gpu.arena.capacityBytes - runtime.pageRecords[pageId]!.decodedBytes;
+        harness.flush();
+        const required = runtime.clusters.reduce((total, cluster) => {
+            const p = runtime.gpu.pages[cluster.pageId]!;
+            return total + (p.state === "gpu-resident" && p.arenaOffset >= 0 ? cluster.triangleCount * 3 : 0);
+        }, 0);
+        expect(required).toBeGreaterThan(priorCapacity);
+        expect(state.residentDrawVertexBound).toBe(required);
+        expect(state.drawVertexCapacity).toBeGreaterThanOrEqual(required);
+        expect(state.drawVertexBuffer).not.toBe(priorBuffer);
+    });
+
+    it("reports the device limit rather than allocating an oversized resident draw buffer", async () => {
+        harness = await setup();
+        harness.flush();
+        const state = harness.batchState();
+        const device = harness.engine._device as unknown as MockDevice;
+        device.limits.maxStorageBufferBindingSize = state.drawVertexCapacity * 16;
+        state.growthDrawVertexBound = state.drawVertexCapacity + 1;
+
+        expect(() => harness.flush()).toThrowError(expect.objectContaining({ code: "MLOD_DEVICE_LIMIT" }));
     });
 
     it("drops a readback whose generation no longer matches (post-disposal / recovery)", async () => {

@@ -5,8 +5,8 @@
  *  vertex (position `f32x3`, octahedral `snorm16x2` normal, `f16x2` UV, reserved)
  *  from the raw geometry arena, and transforms it by the instance's world/normal
  *  matrices — no vertex/index buffers are bound. The fragment stage reuses the
- *  guaranteed opaque metallic-roughness PBR behaviour (SH irradiance IBL + direct
- *  lights from the scene lights UBO) or the unlit path. All MeshLoD WGSL lives here
+ *  guaranteed opaque metallic-roughness PBR behaviour (SH diffuse irradiance,
+ *  prefiltered cubemap specular IBL, and scene lights) or the unlit path. All MeshLoD WGSL lives here
  *  under `material/pbr`; the generic renderer never sees it. */
 
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
@@ -17,14 +17,20 @@ import { MAX_LIGHTS } from "../../light/types.js";
 export interface MeshLoDShaderFeatures {
     readonly hasNormalMap: boolean;
     readonly hasEmissiveTexture: boolean;
+    readonly hasIbl: boolean;
     readonly doubleSided: boolean;
     readonly unlit: boolean;
 }
 
 /** Stable pipeline cache key for a feature set. */
 export function meshLoDShaderKey(f: MeshLoDShaderFeatures): string {
-    return `${f.hasNormalMap ? "n" : ""}${f.hasEmissiveTexture ? "e" : ""}${f.doubleSided ? "d" : ""}${f.unlit ? "u" : ""}`;
+    return `${f.hasNormalMap ? "n" : ""}${f.hasEmissiveTexture ? "e" : ""}${f.hasIbl ? "i" : ""}${f.doubleSided ? "d" : ""}${f.unlit ? "u" : ""}`;
 }
+
+const IBL_DECLS = `@group(1) @binding(12) var brdfLUT: texture_2d<f32>;
+@group(1) @binding(13) var brdfSampler_: sampler;
+@group(1) @binding(14) var iblTexture: texture_cube<f32>;
+@group(1) @binding(15) var iblSampler: sampler;`;
 
 const COMMON_DECLS = `struct MeshLoDMaterial {
 baseColorFactor: vec4<f32>,
@@ -159,6 +165,14 @@ let c = cos(angle);
 let s = sin(angle);
 return vec3<f32>(v.x * c + v.z * s, v.y, -v.x * s + v.z * c);
 }
+fn environmentHorizonOcclusion(V: vec3<f32>, N: vec3<f32>, geoN: vec3<f32>) -> f32 {
+let R = reflect(V, N);
+let temp = saturate(1.0 + 1.1 * dot(R, geoN));
+return temp * temp;
+}
+fn getEnergyConservationFactor(F0: vec3<f32>, brdfY: f32) -> vec3<f32> {
+return 1.0 + F0 * (1.0 / brdfY - 1.0);
+}
 fn shIrradiance(n: vec3<f32>) -> vec3<f32> {
 return scene.vSphericalL00.rgb
 + scene.vSphericalL1_1.rgb * n.y + scene.vSphericalL10.rgb * n.z + scene.vSphericalL11.rgb * n.x
@@ -194,13 +208,31 @@ function litFragment(f: MeshLoDShaderFeatures): string {
         : `@fragment fn fs(input: VOut) -> @location(0) vec4<f32> {`;
     const flip = f.doubleSided ? `if (!frontFacing) { N = -N; Ngeom = -Ngeom; }` : ``;
     const emissiveTex = f.hasEmissiveTexture ? `emissive = emissive * textureSample(emissiveTexture, emissiveSampler, input.uv).rgb;` : ``;
+    const ibl = f.hasIbl
+        ? `let R = rotateY(reflect(-V, N), scene.envRotationY);
+let envN = rotateY(N, scene.envRotationY);
+let irradiance = shIrradiance(envN) * material.lighting.x;
+let diffuseIbl = irradiance * surfaceAlbedo * occlusion;
+let environmentBrdf = textureSample(brdfLUT, brdfSampler_, vec2<f32>(NdotV, roughness)).rgb;
+let specularEnvironmentReflectance = (colorF90 - colorF0) * environmentBrdf.x + colorF0 * environmentBrdf.y;
+let seo = clamp((NdotVUnclamped + occlusion) * (NdotVUnclamped + occlusion) - 1.0 + occlusion, 0.0, 1.0);
+let eho = ${f.hasNormalMap ? "environmentHorizonOcclusion(-V, N, Ngeom)" : "1.0"};
+let energyConservation = getEnergyConservationFactor(colorF0, max(environmentBrdf.y, 0.001));
+let specLod = log2(f32(textureDimensions(iblTexture).x) * alphaG) * scene.vImageInfos.z;
+let radiance = textureSampleLevel(iblTexture, iblSampler, R, clamp(specLod, 0.0, f32(textureNumLevels(iblTexture) - 1))).rgb * material.lighting.x;
+let environmentRadiance = mix(radiance, irradiance, alphaG);
+let specIbl = environmentRadiance * specularEnvironmentReflectance * seo * eho * energyConservation;`
+        : `let diffuseIbl = vec3<f32>(0.0);
+let specIbl = vec3<f32>(0.0);
+let energyConservation = vec3<f32>(1.0);`;
     return `${entry}
 let baseSample = textureSample(baseColorTexture, baseColorSampler, input.uv);
 var albedo = baseSample.rgb * material.baseColorFactor.rgb;
 ${normalBlock(f.hasNormalMap)}
 ${flip}
 let V = normalize(scene.vEyePosition.xyz - input.worldPos);
-let NdotV = max(abs(dot(N, V)), 1e-4);
+let NdotVUnclamped = dot(N, V);
+let NdotV = abs(NdotVUnclamped) + 1e-7;
 let orm = textureSample(ormTexture, ormSampler, input.uv);
 let roughness = clamp(orm.g * material.mrp.y, 0.045, 1.0);
 let metallic = clamp(orm.b * material.mrp.x, 0.0, 1.0);
@@ -210,12 +242,6 @@ let colorF0 = mix(vec3<f32>(reflectance), albedo, metallic);
 let colorF90 = vec3<f32>(1.0);
 let surfaceAlbedo = albedo * (1.0 - reflectance) * (1.0 - metallic);
 let alphaG = roughness * roughness + 0.0005;
-let envN = rotateY(N, scene.envRotationY);
-let irradiance = shIrradiance(envN) * material.lighting.x;
-let diffuseIbl = irradiance * surfaceAlbedo * occlusion;
-let R = rotateY(reflect(-V, N), scene.envRotationY);
-let specFresnel = fresnelSchlick(NdotV, colorF0, colorF90);
-let specIbl = shIrradiance(R) * specFresnel * occlusion * material.lighting.x * (1.0 - roughness);
 var directDiffuse = vec3<f32>(0.0);
 var directSpecular = vec3<f32>(0.0);
 let lightCount = min(lights.count, ${MAX_LIGHTS}u);
@@ -238,7 +264,8 @@ directSpecular = directSpecular + Fr * D * G * pl.NdotL * pl.specColor * pl.atte
 }
 var emissive = material.emissive.rgb;
 ${emissiveTex}
-var color = diffuseIbl + specIbl + directDiffuse + directSpecular + emissive;
+${ibl}
+var color = diffuseIbl + specIbl + directDiffuse + directSpecular * energyConservation + emissive;
 color = color * scene.vImageInfos.x;
 if (scene.vImageInfos.w >= 1.0) { color = vec3<f32>(1.0) - exp(-color); }
 // Debug-view override AFTER all texture sampling (textureSample requires uniform
@@ -265,7 +292,11 @@ export function composeMeshLoDWgsl(f: MeshLoDShaderFeatures): string {
     if (f.unlit) {
         parts.push(unlitFragment());
     } else {
-        parts.push(MULTI_LIGHT_STRUCTS(), `@group(0) @binding(1) var<uniform> lights: lightsUniforms;`, COMPUTE_PBR_LIGHT, PBR_HELPERS, litFragment(f));
+        parts.push(MULTI_LIGHT_STRUCTS(), `@group(0) @binding(1) var<uniform> lights: lightsUniforms;`, COMPUTE_PBR_LIGHT, PBR_HELPERS);
+        if (f.hasIbl) {
+            parts.push(IBL_DECLS);
+        }
+        parts.push(litFragment(f));
     }
     return parts.join("\n");
 }

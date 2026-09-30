@@ -9,7 +9,7 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadMeshLoD, createMeshLoDInstance } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { addMeshLoDInstanceToScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
 import { buildMeshLoDBatchRenderable } from "../../../../packages/babylon-lite/src/material/pbr/pbr-mesh-lod-renderable.js";
@@ -19,9 +19,11 @@ import type { MeshLoDAsset } from "../../../../packages/babylon-lite/src/mesh-lo
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
 import type { Camera } from "../../../../packages/babylon-lite/src/camera/camera.js";
 import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
+import type { EnvironmentTextures } from "../../../../packages/babylon-lite/src/loader-env/load-env.js";
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine.js";
 import type { RenderTargetSignature } from "../../../../packages/babylon-lite/src/engine/render-target.js";
 import { createFillDecoder, createMockEngine, createMockRenderPass } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
+import type { MockBuffer, MockDevice } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
 
 const STATUE = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
 
@@ -120,6 +122,33 @@ describe("MeshLoD coarse indirect rendering", () => {
         expect(scene._renderables[0]!.bind(engine, SIG).draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
     });
 
+    it("grows CPU instance storage and draw scratch before rendering instances added to an existing batch", async () => {
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "cpu" });
+        const material = {} as PbrMaterialProps;
+        const scene = await buildScene(asset, engine, material, 1);
+        const binding = scene._renderables[0]!.bind(engine, SIG);
+        binding.update!(CONTEXT);
+        const batch = scene._meshLoDRegistry!.batches[0]!;
+        const packet = batch._packet as { instanceBuffer: MockBuffer; drawVertexBuffer: MockBuffer; maxInstances: number; maxDrawVertices: number };
+        const previousInstance = packet.instanceBuffer;
+        const previousDraw = packet.drawVertexBuffer;
+        for (let i = 0; i < 2; i++) {
+            addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+        }
+        binding.update!(CONTEXT);
+        const device = engine._device as unknown as MockDevice;
+        expect(packet.maxInstances).toBeGreaterThanOrEqual(3);
+        expect(packet.maxDrawVertices).toBeGreaterThanOrEqual(coarseTriangleCount(asset) * 9);
+        expect(packet.instanceBuffer).not.toBe(previousInstance);
+        expect(packet.drawVertexBuffer).not.toBe(previousDraw);
+        expect(device.writes.some((w) => w.buffer === packet.instanceBuffer && w.byteLength === 3 * 128)).toBe(true);
+        expect(asset.diagnostics.renderedTriangleCount).toBe(coarseTriangleCount(asset) * 3);
+        expect(previousInstance.destroyed).toBe(false); // in-flight draw can still reference it
+        const pass = createMockRenderPass();
+        expect(binding.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        expect(pass.indirectDraws).toHaveLength(1);
+    });
+
     it("survives unavailable fine data by rendering the coarse fallback", async () => {
         const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "cpu" });
         // No fine pages are resident (Phase 4). Selection must still produce coarse output.
@@ -149,5 +178,60 @@ describe("MeshLoD coarse indirect rendering", () => {
             const scene = await buildScene(asset, engine, material, 1);
             expect(scene._renderables).toHaveLength(1);
         }
+    });
+
+    it("binds the scene BRDF LUT and prefiltered cubemap for lit MeshLoD materials", async () => {
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "cpu" });
+        const scene = fakeScene(engine);
+        const environment: EnvironmentTextures = {
+            brdfLut: {} as GPUTexture,
+            brdfLutView: {} as GPUTextureView,
+            brdfSampler: {} as GPUSampler,
+            specularCube: {} as GPUTexture,
+            specularCubeView: {} as GPUTextureView,
+            cubeSampler: {} as GPUSampler,
+            irradianceSH: new Float32Array(36),
+            sphericalHarmonics: new Float32Array(36),
+            lodGenerationScale: 0.8,
+        };
+        scene._envTextures = environment;
+        const device = engine._device as unknown as MockDevice;
+        const bindGroup = vi.spyOn(device, "createBindGroup");
+        const layout = vi.spyOn(device, "createBindGroupLayout");
+        const shader = vi.spyOn(device, "createShaderModule");
+        addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, {} as PbrMaterialProps));
+        for (const builder of scene._deferredBuilders) {
+            await builder();
+        }
+
+        expect(layout).toHaveBeenCalledWith(
+            expect.objectContaining({
+                entries: expect.arrayContaining([{ binding: 14, visibility: 2, texture: { sampleType: "float", viewDimension: "cube" } }]),
+            })
+        );
+        expect(bindGroup).toHaveBeenCalledWith(
+            expect.objectContaining({
+                entries: expect.arrayContaining([
+                    { binding: 12, resource: environment.brdfLutView },
+                    { binding: 13, resource: environment.brdfSampler },
+                    { binding: 14, resource: environment.specularCubeView },
+                    { binding: 15, resource: environment.cubeSampler },
+                ]),
+            })
+        );
+        expect(shader).toHaveBeenCalledWith(expect.objectContaining({ code: expect.stringContaining("textureSampleLevel(iblTexture, iblSampler, R") }));
+
+        bindGroup.mockClear();
+        layout.mockClear();
+        shader.mockClear();
+        const unlitScene = fakeScene(engine);
+        unlitScene._envTextures = environment;
+        addMeshLoDInstanceToScene(unlitScene, createMeshLoDInstance(asset, { _unlit: true } as PbrMaterialProps));
+        for (const builder of unlitScene._deferredBuilders) {
+            await builder();
+        }
+        expect(bindGroup).toHaveBeenCalledWith(expect.objectContaining({ entries: expect.not.arrayContaining([expect.objectContaining({ binding: 12 })]) }));
+        expect(layout).toHaveBeenCalledWith(expect.objectContaining({ entries: expect.not.arrayContaining([expect.objectContaining({ binding: 14 })]) }));
+        expect(shader).toHaveBeenCalledWith(expect.objectContaining({ code: expect.not.stringContaining("textureSampleLevel(iblTexture") }));
     });
 });

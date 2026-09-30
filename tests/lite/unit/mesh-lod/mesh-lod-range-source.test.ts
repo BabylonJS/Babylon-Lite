@@ -113,6 +113,38 @@ describe("createMeshLoDRangeSource — URL source", () => {
         await expectReadError(() => src.read(0, 10), "MLOD_ABORTED");
     });
 
+    it.each([200, 206])("maps an abort while reading the %i body to MLOD_ABORTED", async (status) => {
+        const response = new Response(bufferOf(file.subarray(0, 11)), {
+            status,
+            headers: status === 206 ? { "Content-Range": `bytes 0-10/${file.length}` } : {},
+        });
+        vi.spyOn(response, "arrayBuffer").mockRejectedValue(new DOMException("aborted", "AbortError"));
+        const src = await createMeshLoDRangeSource("https://cdn.test/a.mlod", { fetch: (async () => response) as typeof globalThis.fetch });
+        await expectReadError(() => src.read(0, 10), "MLOD_ABORTED");
+        expect(src.downloadedBytes).toBe(0);
+    });
+
+    it.each([200, 206])("maps a body read failure after signal abort on %i to MLOD_ABORTED", async (status) => {
+        const controller = new AbortController();
+        const response = new Response(bufferOf(file.subarray(0, 11)), {
+            status,
+            headers: status === 206 ? { "Content-Range": `bytes 0-10/${file.length}` } : {},
+        });
+        vi.spyOn(response, "arrayBuffer").mockImplementation(() => {
+            controller.abort();
+            return Promise.reject(new TypeError("body read stopped"));
+        });
+        const src = await createMeshLoDRangeSource("https://cdn.test/a.mlod", { fetch: (async () => response) as typeof globalThis.fetch });
+        await expectReadError(() => src.read(0, 10, controller.signal), "MLOD_ABORTED");
+    });
+
+    it("accepts a clipped final 206 range", async () => {
+        const server = rangeServer();
+        const src = await createMeshLoDRangeSource("https://cdn.test/a.mlod", { fetch: server.fetch });
+        const tail = await src.read(file.length - 5, file.length + 100);
+        expect(Array.from(tail)).toEqual(Array.from(file.subarray(file.length - 5)));
+    });
+
     it.each<[string, (r: Request | string | URL, i?: RequestInit) => Response, MeshLoDErrorCode]>([
         ["404 status", () => new Response(null, { status: 404 }), "MLOD_HTTP_STATUS"],
         ["304 status", () => new Response(null, { status: 304 }), "MLOD_HTTP_STATUS"],
@@ -127,6 +159,11 @@ describe("createMeshLoDRangeSource — URL source", () => {
         [
             "wrong content-range start",
             () => new Response(bufferOf(file.subarray(0, 11)), { status: 206, headers: { "Content-Range": `bytes 5-15/${file.length}` } }),
+            "MLOD_HTTP_RANGE",
+        ],
+        [
+            "short 206 range with internally consistent body",
+            () => new Response(bufferOf(file.subarray(0, 5)), { status: 206, headers: { "Content-Range": `bytes 0-4/${file.length}` } }),
             "MLOD_HTTP_RANGE",
         ],
         ["short body", () => new Response(bufferOf(file.subarray(0, 5)), { status: 206, headers: { "Content-Range": `bytes 0-10/${file.length}` } }), "MLOD_HTTP_RANGE"],

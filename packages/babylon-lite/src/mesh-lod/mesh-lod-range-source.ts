@@ -53,7 +53,10 @@ function parseContentRange(value: string | null): { start: number; end: number; 
     if (!match) {
         return null;
     }
-    return { start: Number(match[1]), end: Number(match[2]), total: Number(match[3]) };
+    const start = Number(match[1]);
+    const end = Number(match[2]);
+    const total = Number(match[3]);
+    return Number.isSafeInteger(start) && Number.isSafeInteger(end) && Number.isSafeInteger(total) && total > 0 ? { start, end, total } : null;
 }
 
 function createMemorySource(bytes: Uint8Array): MeshLoDRangeSource {
@@ -73,6 +76,17 @@ function createUrlSource(url: string, request: MeshLoDRequestOptions | undefined
     let totalBytes: number | null = null;
     let completeBytes: Uint8Array | null = null;
     let downloadedBytes = 0;
+
+    async function readBody(response: Response, signal: AbortSignal | undefined): Promise<Uint8Array> {
+        try {
+            return new Uint8Array(await response.arrayBuffer());
+        } catch (cause) {
+            if (isAbortError(cause) || signal?.aborted) {
+                throw createMeshLoDError("MLOD_ABORTED", "range response body aborted", { url, cause });
+            }
+            throw createMeshLoDError("MLOD_HTTP_STATUS", "range response body failed", { url, cause });
+        }
+    }
 
     async function read(start: number, end: number, signal?: AbortSignal): Promise<Uint8Array> {
         throwIfAborted(signal);
@@ -116,17 +130,18 @@ function createUrlSource(url: string, request: MeshLoDRequestOptions | undefined
             if (!range) {
                 throw createMeshLoDError("MLOD_HTTP_RANGE", "missing or malformed Content-Range", { url });
             }
-            if (range.start !== start || range.end > end || range.end < range.start) {
+            const expectedEnd = Math.min(end, range.total - 1);
+            if (range.start !== start || range.end !== expectedEnd || range.end < range.start) {
                 throw createMeshLoDError("MLOD_HTTP_RANGE", "Content-Range does not match the request", {
                     url,
-                    expected: `${start}-${end}`,
+                    expected: `${start}-${expectedEnd}`,
                     actual: `${range.start}-${range.end}`,
                 });
             }
             if (totalBytes !== null && totalBytes !== range.total) {
                 throw createMeshLoDError("MLOD_HTTP_RANGE", "Content-Range total changed between requests", { url, expected: totalBytes, actual: range.total });
             }
-            const body = new Uint8Array(await response.arrayBuffer());
+            const body = await readBody(response, signal);
             if (body.length !== range.end - range.start + 1) {
                 throw createMeshLoDError("MLOD_HTTP_RANGE", "response length disagrees with Content-Range", { url, expected: range.end - range.start + 1, actual: body.length });
             }
@@ -135,7 +150,7 @@ function createUrlSource(url: string, request: MeshLoDRequestOptions | undefined
             return body;
         }
 
-        const body = new Uint8Array(await response.arrayBuffer());
+        const body = await readBody(response, signal);
         downloadedBytes += body.length;
         if (totalBytes !== null && totalBytes !== body.length) {
             throw createMeshLoDError("MLOD_HTTP_RANGE", "full response length disagrees with the known total", { url, expected: totalBytes, actual: body.length });
