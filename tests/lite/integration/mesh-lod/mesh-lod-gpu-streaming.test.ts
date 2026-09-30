@@ -1,14 +1,14 @@
 /** MeshLoD GPU-selection streaming integration tests (Task 7 — architecture §12.3 step 8).
  *
  *  GPU selection mode reads the per-page demand + diagnostics back from the selection
- *  compute's control buffer and feeds the shared runtime streaming engine, and grows the
- *  draw-vertex buffer make-before-break so refined geometry renders past the coarse bound.
+ *  compute's control buffer and feeds the shared runtime streaming engine. Draw
+ *  storage grows before selecting newly resident fine geometry.
  *
  *  The real WGSL compute + `mapAsync` loop is browser-validated (a mock device has no
  *  compute or buffer mapping). Here the readback is driven deterministically: the update
  *  batch's control→staging copy is asserted structurally, then `applyMeshLoDGpuReadback`
  *  (the seam the real mapAsync resolution calls) is fed a synthetic control buffer to
- *  prove decode → demand → streaming → adaptive draw growth end-to-end on the mock. */
+ *  prove decode → demand → streaming → draw-capacity growth end-to-end on the mock. */
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -19,23 +19,33 @@ import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/me
 import {
     CONTROL_COUNT_WORD,
     CONTROL_FALLBACK_WORD,
+    CONTROL_OVERFLOW_WORD,
     CONTROL_PAGE_DEMAND_OFFSET,
     CONTROL_SELECTED_ERROR_WORD,
     CONTROL_TRIANGLE_WORD,
     CONTROL_UNMET_ERROR_WORD,
     CONTROL_VISIBLE_GROUP_WORD,
+    INSTANCE_WORDS,
+    PAGE_FLAG_RESIDENT,
+    PAGE_STATE_WORDS,
     applyMeshLoDGpuReadback,
+    packClusters,
+    packGroupPageRefs,
+    packGroups,
+    packHierarchyNodes,
+    packInstanceRecord,
+    runMeshLoDGpuSelection,
 } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
 import type { MeshLoDGpuBatchState } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
-import type { MeshLoDAsset } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import type { MeshLoDAsset, MeshLoDInstance } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import type { MeshLoDAssetRuntime } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-runtime.js";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
 import type { Camera } from "../../../../packages/babylon-lite/src/camera/camera.js";
 import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine.js";
 import type { RenderTargetSignature } from "../../../../packages/babylon-lite/src/engine/render-target.js";
-import { createFillDecoder, createMockEngine, createMockRenderPass } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
-import type { MockBuffer, MockDevice, MockEncoder } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
+import { createFillDecoder, createMockDevice, createMockEngine, createMockRenderPass } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
+import type { MockBuffer, MockEncoder } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
 
 const STATUE = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
 const statueSource = (): ArrayBuffer => new Uint8Array(readFileSync(STATUE)).slice().buffer as ArrayBuffer;
@@ -72,6 +82,7 @@ interface GpuHarness {
     encoder: MockEncoder;
     asset: MeshLoDAsset;
     runtime: MeshLoDAssetRuntime;
+    instances: MeshLoDInstance[];
     batchState(): MeshLoDGpuBatchState;
     flush(): void;
     submit(): void;
@@ -79,12 +90,18 @@ interface GpuHarness {
     drawBuffers(): number;
 }
 
-async function setup(): Promise<GpuHarness> {
-    const mock = createMockEngine();
+async function setup(options: { limitBytes?: number; instanceCount?: number; visibleCount?: number } = {}): Promise<GpuHarness> {
+    const mock = createMockEngine(options.limitBytes === undefined ? undefined : createMockDevice(options.limitBytes));
     const { engine, encoder } = mock;
     const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "gpu" });
     const scene = fakeScene(engine);
-    addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, {} as PbrMaterialProps));
+    const instances: MeshLoDInstance[] = [];
+    const material = {} as PbrMaterialProps;
+    for (let i = 0; i < (options.instanceCount ?? 1); i++) {
+        const instance = createMeshLoDInstance(asset, material, { visible: i < (options.visibleCount ?? options.instanceCount ?? 1) });
+        instances.push(instance);
+        addMeshLoDInstanceToScene(scene, instance);
+    }
     for (const builder of scene._deferredBuilders) {
         await builder();
     }
@@ -96,6 +113,7 @@ async function setup(): Promise<GpuHarness> {
         encoder,
         asset,
         runtime: asset._runtime,
+        instances,
         batchState: () => (batch as { _packet: { gpuBatchState: MeshLoDGpuBatchState } })._packet.gpuBatchState,
         flush(): void {
             updateBatch.reset();
@@ -188,15 +206,14 @@ describe("MeshLoD GPU streaming — demand readback + adaptive draw growth", () 
         expect(runtime.gpu.pages[finePageId]!.state).toBe("gpu-resident");
     });
 
-    it("grows the draw-vertex buffer make-before-break to fit the refined triangle count", async () => {
+    it("grows the draw-vertex buffer make-before-break as demanded fine pages become resident", async () => {
         harness = await setup();
         harness.flush();
         const state = harness.batchState();
         const runtime = harness.runtime;
         const drawBuffersBefore = harness.drawBuffers();
-        expect(state.growthDrawVertexBound).toBe(0);
+        const coarseCapacity = state.drawVertexCapacity;
 
-        // A refined selection reports far more triangles than the coarse capacity can hold.
         const finePageId = runtime.pageRecords.findIndex((r) => !r.pinned);
         applyMeshLoDGpuReadback(
             runtime,
@@ -208,14 +225,10 @@ describe("MeshLoD GPU streaming — demand readback + adaptive draw growth", () 
         await harness.settle();
         harness.submit();
 
-        // The growth bound ratcheted up past the coarse per-instance vertex bound.
-        expect(state.growthDrawVertexBound).toBeGreaterThan(0);
-        expect(state.growthDrawVertexBound).toBeGreaterThanOrEqual(60000 * 3);
-
-        // The next frame allocates a larger draw-vertex buffer (make-before-break).
         harness.flush();
         expect(harness.drawBuffers()).toBeGreaterThan(drawBuffersBefore);
-        expect(state.drawVertexCapacity).toBeGreaterThanOrEqual(60000 * 3);
+        expect(state.drawVertexCapacity).toBeGreaterThan(coarseCapacity);
+        expect(state.residentDrawVertexBound).toBe(state.drawVertexCapacity);
     });
 
     it("reserves the full resident cut on the first frame after a fine page upload without waiting for readback", async () => {
@@ -241,14 +254,89 @@ describe("MeshLoD GPU streaming — demand readback + adaptive draw growth", () 
         expect(state.drawVertexBuffer).not.toBe(priorBuffer);
     });
 
-    it("reports the device limit rather than allocating an oversized resident draw buffer", async () => {
+    it("caps an oversized resident envelope without rejecting a small selected cut or hidden instances", async () => {
+        const limitBytes = 128 * 1024 * 1024;
+        harness = await setup({ limitBytes, instanceCount: 20, visibleCount: 1 });
+        const initialDraw = (harness.engine._device as unknown as { buffers: MockBuffer[] }).buffers.find((buffer) => buffer.label === "mesh-lod-draw-vertices");
+        expect(initialDraw?.size).toBe(3 * 16); // the GPU packet does not allocate a coarse CPU draw stream
+        harness.flush();
+        const state = harness.batchState();
+        const runtime = harness.runtime;
+        for (let i = 0; i < runtime.gpu.pages.length; i++) {
+            const page = runtime.gpu.pages[i]!;
+            if (!runtime.pageRecords[i]!.pinned) {
+                page.state = "gpu-resident";
+                page.arenaOffset = runtime.gpu.arena.capacityBytes - runtime.pageRecords[i]!.decodedBytes;
+            }
+        }
+        harness.flush();
+        const residentVertices = runtime.clusters.reduce((count, cluster) => count + cluster.triangleCount * 3, 0);
+        expect(residentVertices * harness.instances.length * 16).toBeGreaterThan(limitBytes);
+        expect(state.drawVertexCapacity).toBe(residentVertices);
+
+        harness.instances[1]!.visible = true;
+        harness.flush();
+        expect(state.drawVertexCapacity).toBe(residentVertices * 2); // visibility changed without a residency change
+
+        for (const instance of harness.instances) {
+            instance.visible = true;
+        }
+        harness.flush(); // A coarse selected cut fits even though the resident envelope does not.
+        expect(state.drawVertexCapacity).toBe(Math.floor(limitBytes / 48) * 3);
+        expect((state.drawVertexBuffer as unknown as MockBuffer).size).toBeLessThanOrEqual(limitBytes);
+
+        const records = new Float32Array(harness.instances.length * INSTANCE_WORDS);
+        const words = new Uint32Array(records.buffer);
+        for (let i = 0; i < harness.instances.length; i++) {
+            const instance = harness.instances[i]!;
+            packInstanceRecord(records, words, i * INSTANCE_WORDS, instance.worldMatrix, instance.visible, instance._instanceId);
+        }
+        const pageState = new Uint32Array(runtime.gpu.pages.length * PAGE_STATE_WORDS);
+        for (let i = 0; i < runtime.gpu.pages.length; i++) {
+            pageState[i * PAGE_STATE_WORDS] = PAGE_FLAG_RESIDENT;
+        }
+        const wordsPerInstance = Math.max(Math.ceil(runtime.groups.length / 32), 1);
+        const cut = runMeshLoDGpuSelection({
+            nodes: packHierarchyNodes(runtime.hierarchyNodes),
+            groups: packGroups(runtime.groups),
+            clusters: packClusters(runtime.clusters),
+            groupPageRefs: packGroupPageRefs(runtime.groupPageRefs),
+            pageState,
+            pageStoredBytes: runtime.pageRecords.map((record) => record.storedBytes),
+            instances: records,
+            instancesU32: words,
+            priorState: new Uint32Array(wordsPerInstance * harness.instances.length),
+            instanceCount: harness.instances.length,
+            nodeCount: runtime.hierarchyNodes.length,
+            groupCount: runtime.groups.length,
+            clusterCount: runtime.clusters.length,
+            pageCount: runtime.pageRecords.length,
+            wordsPerInstance,
+            params: {
+                cameraPos: [0, 0, -10],
+                verticalFov: 0.8,
+                near: 0.1,
+                targetWidth: 800,
+                targetHeight: 600,
+                frustumPlanes: [],
+                screenSpaceError: runtime.settings.screenSpaceError,
+                lodHysteresis: runtime.settings.lodHysteresis,
+                levelCount: runtime.header.levelCount,
+            },
+        });
+        expect(cut.overflow).toBe(false);
+        expect(cut.renderedTriangleCount * 3).toBeGreaterThan(0);
+        expect(cut.renderedTriangleCount * 3).toBeLessThan(state.drawVertexCapacity);
+    });
+
+    it("surfaces a genuinely oversized selected cut instead of silently drawing a prefix", async () => {
         harness = await setup();
         harness.flush();
         const state = harness.batchState();
-        const device = harness.engine._device as unknown as MockDevice;
-        device.limits.maxStorageBufferBindingSize = state.drawVertexCapacity * 16;
-        state.growthDrawVertexBound = state.drawVertexCapacity + 1;
-
+        const runtime = harness.runtime;
+        const control = syntheticControl(state, 0, 0, { count: 0, visible: 1, triangles: 100, fallback: 0 });
+        control[CONTROL_OVERFLOW_WORD] = 2;
+        applyMeshLoDGpuReadback(runtime, state, control, runtime.gpu.pages.length, runtime.generation);
         expect(() => harness.flush()).toThrowError(expect.objectContaining({ code: "MLOD_DEVICE_LIMIT" }));
     });
 
@@ -268,6 +356,6 @@ describe("MeshLoD GPU streaming — demand readback + adaptive draw growth", () 
             runtime.generation + 1
         );
         expect(runtime.diagnostics.renderedTriangleCount).toBe(before);
-        expect(state.growthDrawVertexBound).toBe(0);
+        expect(state.pendingError).toBeNull();
     });
 });

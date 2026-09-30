@@ -3,7 +3,7 @@
  *  Two layers, both Node-hosted against a mock device:
  *  1. `runMeshLoDGpuExpansion` — the deterministic TS mirror of the WGSL
  *     `expandClusters` kernel — is checked for exact draw-vertex records over a tiny
- *     synthetic arena, meshlet-count scaling, and bounded overflow.
+ *     synthetic arena, meshlet-count scaling, and whole-cut overflow suppression.
  *  2. The PBR renderable in GPU mode is driven end-to-end: it queues one compute pass
  *     (selection + indirect expansion + finalize) into the shared MeshLoD update batch
  *     flushed before the render pass, then issues exactly one `drawIndirect` per batch
@@ -107,7 +107,7 @@ describe("MeshLoD GPU expansion model", () => {
         expect(result.vertexCount).toBe(9); // 3 meshlets × 3 indices
     });
 
-    it("flags overflow and clamps to capacity without OOB writes", () => {
+    it("flags overflow and suppresses a partial cut without OOB writes", () => {
         const result = runMeshLoDGpuExpansion({
             selected: [{ clusterId: 0, instanceId: 0 }],
             clusters: packClusters([cluster()]),
@@ -116,7 +116,7 @@ describe("MeshLoD GPU expansion model", () => {
             drawVertexCapacity: 2,
         });
         expect(result.overflow).toBe(true);
-        expect(result.vertexCount).toBe(2);
+        expect(result.vertexCount).toBe(0);
         expect(result.drawVertices.length).toBe(2 * 4);
     });
 });

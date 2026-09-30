@@ -199,7 +199,15 @@ These typed layouts are packed by `mesh-lod-selection-gpu.ts`.
 Selection work queues, group bitsets, selected-cluster pairs, page-demand
 words, expanded draw vertices, and 16-byte indirect draw arguments are
 transient. The renderer rebuilds storage bindings make-before-break when
-a draw buffer grows. Capacities are checked before GPU writes.
+a draw buffer grows. Before selection, the draw buffer reserves the sum of
+resident cluster vertices for the currently visible instances, capped at the
+device's storage-buffer limit. This envelope includes mutually exclusive LODs,
+but exceeding it alone is not an error: the selected cut can still fit the
+device. Selection checks the actual cut against the draw capacity; if it
+cannot fit, the whole draw is suppressed rather than drawing a partial cut,
+and a device-limit error is surfaced after GPU readback. In GPU mode, the
+material packet keeps only a minimal placeholder for its unused CPU draw
+stream; GPU selection owns the actual draw buffer.
 
 ### 12.3 Compute order
 

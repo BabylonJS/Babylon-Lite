@@ -157,8 +157,6 @@ interface MeshLoDBatchPacket {
     readonly indirectScratch: Uint32Array;
     maxDrawVertices: number;
     maxInstances: number;
-    /** Per-instance coarse expanded-vertex bound, for GPU draw-vertex buffer sizing. */
-    readonly coarseVertices: number;
     lastVertexCount: number;
     /** Debug-view mode (0 = off) last written into the material UBO's misc.y. */
     appliedDebugMode: number;
@@ -502,16 +500,7 @@ function updatePacketGpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet
     syncDebugMode(engine, packet, meshLoDDebugModeCode(runtime.debugView));
     packet.gpuInstanceState ??= createMeshLoDGpuInstanceState(runtime.groups.length);
     packet.gpuBatchState ??= createMeshLoDGpuBatchState();
-    const handles = queueMeshLoDGpuSelection(
-        engine,
-        updateBatch,
-        runtime,
-        packet.gpuInstanceState,
-        packet.gpuBatchState,
-        batch.instances,
-        packet.coarseVertices,
-        buildGpuFrame(batch, camera, context)
-    );
+    const handles = queueMeshLoDGpuSelection(engine, updateBatch, runtime, packet.gpuInstanceState, packet.gpuBatchState, batch.instances, buildGpuFrame(batch, camera, context));
     if (!handles) {
         setActiveDraw(engine, packet, null, null);
         return;
@@ -563,15 +552,17 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
     const environment = batch.material._unlit === true ? null : (_scene._envTextures ?? null);
     const features = detectFeatures(batch.material, environment !== null);
 
-    // Coarse capacity: total expanded vertices across every pinned (resident) cluster.
-    let coarseVertices = 0;
-    for (const cluster of runtime.clusters) {
-        if (runtime.pageRecords[cluster.pageId]?.pinned) {
-            coarseVertices += cluster.triangleCount * 3;
-        }
-    }
     const maxInstances = Math.max(batch.instances.length, 1);
-    const maxDrawVertices = Math.max(coarseVertices * maxInstances, 3);
+    let maxDrawVertices = 3;
+    if (runtime.selectionMode === "cpu") {
+        let coarseVertices = 0;
+        for (const cluster of runtime.clusters) {
+            if (runtime.pageRecords[cluster.pageId]?.pinned) {
+                coarseVertices += cluster.triangleCount * 3;
+            }
+        }
+        maxDrawVertices = Math.max(coarseVertices * maxInstances, 3);
+    }
 
     const device = engine._device;
     const materialUbo = createEmptyUniformBuffer(engine, MATERIAL_UBO_BYTES, "mesh-lod-material");
@@ -601,7 +592,6 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
         indirectScratch: new Uint32Array(4),
         maxDrawVertices,
         maxInstances,
-        coarseVertices,
         lastVertexCount: 0,
         appliedDebugMode: 0,
         disposedHandled: false,

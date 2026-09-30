@@ -328,7 +328,7 @@ describe("GPU selection orchestration (mock device)", () => {
         const collected = signature._collectBatches?.(undefined, binding);
         expect(collected).toBeDefined();
         collected!._reset();
-        const handles = queueMeshLoDGpuSelection(engine, updateBatch, runtime, instanceState, batchState, [instance], 12, frame);
+        const handles = queueMeshLoDGpuSelection(engine, updateBatch, runtime, instanceState, batchState, [instance], frame);
         expect(handles).not.toBeNull();
         expect(handles!.selectedBuffer).toBeTruthy();
         expect(handles!.controlBuffer).toBeTruthy();
@@ -353,7 +353,7 @@ describe("GPU selection orchestration (mock device)", () => {
         const batchState = createMeshLoDGpuBatchState();
         const updateBatch = getMeshLoDUpdateBatch({} as RenderTargetSignature);
         updateBatch.reset();
-        expect(queueMeshLoDGpuSelection(engine, updateBatch, runtime, instanceState, batchState, [], 12, frame)).toBeNull();
+        expect(queueMeshLoDGpuSelection(engine, updateBatch, runtime, instanceState, batchState, [], frame)).toBeNull();
         updateBatch.flush(engine);
         expect(encoder.computePasses).toHaveLength(0);
     });

@@ -22,6 +22,7 @@ import { enableDrawBatchCollection } from "../render/draw-update-batches.js";
 import type { DrawUpdateBatch } from "../render/renderable.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
 import { createMeshLoDError } from "./mesh-lod-errors.js";
+import type { MeshLoDError } from "./mesh-lod-errors.js";
 import type { MeshLoDFrustumPlane } from "./mesh-lod-selection-math.js";
 import {
     extractFrustumPlanes,
@@ -575,9 +576,8 @@ function readArenaU16(arena: Uint32Array, byteOffset: number): number {
 }
 
 /** Run the deterministic GPU expansion model — the exact TS mirror of the WGSL
- *  `expandClusters` kernel over the same packed buffers. Expands each selected cluster
- *  in order into absolute arena vertex-word offsets + IDs, bounded by capacity. Used by
- *  Node fixtures to prove exact expanded records; the WGSL is browser-validated. */
+ *  `expandClusters` kernel over the same packed buffers. An oversized cut is not
+ *  drawable: returning a partial prefix would leave holes. */
 export function runMeshLoDGpuExpansion(input: MeshLoDGpuExpansionInput): MeshLoDGpuExpansionResult {
     const cwo = input.clusterWordOffset ?? 0;
     const cap = input.drawVertexCapacity;
@@ -608,7 +608,7 @@ export function runMeshLoDGpuExpansion(input: MeshLoDGpuExpansionInput): MeshLoD
         }
         vertexCount += indexCount;
     }
-    return { drawVertices: draw, vertexCount: Math.min(vertexCount, cap), overflow };
+    return { drawVertices: draw, vertexCount: overflow ? 0 : vertexCount, overflow };
 }
 
 // ─── Device-limit-checked storage buffers ────────────────────────────
@@ -1072,19 +1072,16 @@ export interface MeshLoDGpuBatchState {
     drawArgsBuffer: GPUBuffer | null;
     expandBindGroup: GPUBindGroup | null;
     drawVertexCapacity: number;
-    /** Per-instance draw-vertex bound (coarse expanded vertices) the buffer is sized from. */
-    drawVertexBound: number;
     boundArena: GPUBuffer | null;
-    // ── Task 7 (GPU streaming) async demand readback + adaptive draw growth ──
+    // ── Task 7 (GPU streaming) async demand readback ──
     /** Small ring of MAP_READ staging buffers the control buffer is copied into each
      *  frame; each entry maps independently so the CPU→GPU→CPU demand loop never stalls. */
     readbackSlots: MeshLoDReadbackSlot[];
-    /** Per-instance draw-vertex bound ratcheted up by the async readback as streamed
-     *  refinement selects more triangles, so GPU mode renders past the coarse bound. */
-    growthDrawVertexBound: number;
-    /** Conservative complete-cut bound recomputed before selection when page residency changes. */
+    /** Resident vertex sum per visible instance, recomputed when page residency changes. */
     residentDrawVertexBound: number;
     residentDrawEpoch: number;
+    /** An actual selection overflow, reported by readback and surfaced on the next update. */
+    pendingError: MeshLoDError | null;
 }
 
 /** Create empty per-batch transient selection state. */
@@ -1115,23 +1112,21 @@ export function createMeshLoDGpuBatchState(): MeshLoDGpuBatchState {
         drawArgsBuffer: null,
         expandBindGroup: null,
         drawVertexCapacity: 0,
-        drawVertexBound: 0,
         boundArena: null,
         readbackSlots: [],
-        growthDrawVertexBound: 0,
         residentDrawVertexBound: 0,
         residentDrawEpoch: -1,
+        pendingError: null,
     };
 }
 
-/** Size the transient buffers for `instanceCapacity` instances of the asset. The
- *  group-state and selected-list scale with instance capacity; growth retires the old
- *  buffers after the next frame drains and invalidates the bind group. */
+/** Size transient selection buffers for allocated instance slots and the draw buffer
+ *  for a total batch vertex capacity. Growth retires old buffers after the frame drains. */
 function ensureMeshLoDBatchBuffers(
     engine: EngineContext,
     state: MeshLoDGpuBatchState,
     instanceCapacity: number,
-    drawVertexBound: number,
+    drawVertexCapacity: number,
     assetBuffers: MeshLoDGpuAssetBuffers
 ): void {
     const device = engine._device;
@@ -1145,16 +1140,15 @@ function ensureMeshLoDBatchBuffers(
             slot.buffer.destroy();
         }
         state.readbackSlots = [];
-        state.growthDrawVertexBound = 0;
         state.residentDrawVertexBound = 0;
         state.residentDrawEpoch = -1;
+        state.pendingError = null;
         state.device = device;
     }
     state.groupCount = assetBuffers.groupCount;
     state.clusterCount = assetBuffers.clusterCount;
     state.nodeCount = assetBuffers.nodeCount;
     state.pageCount = assetBuffers.pageCount;
-    state.drawVertexBound = drawVertexBound;
     const controlWords = CONTROL_PAGE_DEMAND_OFFSET + Math.max(assetBuffers.pageCount, 1);
     if (!state.controlBuffer) {
         state.controlBuffer = device.createBuffer({ label: "mesh-lod-control", size: controlWords * 4, usage: BU.STORAGE | BU.INDIRECT | BU.COPY_DST | BU.COPY_SRC });
@@ -1173,7 +1167,6 @@ function ensureMeshLoDBatchBuffers(
         state.paramsBuffer = device.createBuffer({ label: "mesh-lod-params", size: PARAMS_ALLOC, usage: BU.UNIFORM | BU.COPY_DST });
         state.bindGroup = state.expandBindGroup = null;
     }
-    const drawVertexCapacity = Math.max(drawVertexBound * Math.max(instanceCapacity, 1), 3);
     const growInstances = instanceCapacity > state.instanceCapacity || !state.groupStateBuffer || !state.selectedBuffer;
     const growDraw = drawVertexCapacity > state.drawVertexCapacity || !state.drawVertexBuffer;
     if (!growInstances && !growDraw) {
@@ -1280,7 +1273,9 @@ export function disposeMeshLoDGpuBatchState(state: MeshLoDGpuBatchState): void {
         slot.buffer.destroy();
     }
     state.readbackSlots = [];
-    state.growthDrawVertexBound = 0;
+    state.residentDrawVertexBound = 0;
+    state.residentDrawEpoch = -1;
+    state.pendingError = null;
     state.groupStateBuffer = state.selectedBuffer = state.controlBuffer = state.paramsBuffer = null;
     state.drawVertexBuffer = state.drawArgsBuffer = null;
     state.bindGroup = state.expandBindGroup = null;
@@ -1288,7 +1283,7 @@ export function disposeMeshLoDGpuBatchState(state: MeshLoDGpuBatchState): void {
     state.drawVertexCapacity = 0;
 }
 
-// ─── Async demand readback + adaptive draw growth (architecture §12.3 step 8) ──
+// ─── Async demand readback (architecture §12.3 step 8) ──
 
 const READBACK_RING = 3;
 
@@ -1343,28 +1338,10 @@ async function pumpMeshLoDReadback(job: MeshLoDReadbackJob): Promise<void> {
     }
 }
 
-/** Ratchet the draw-vertex growth bound up so `neededVertices` (the GPU-reported selected
- *  triangle count × 3, across all instances) fits next frame. Doubles for amortized growth
- *  and never shrinks, mirroring the CPU path's make-before-break growth. */
-function growMeshLoDDrawBound(state: MeshLoDGpuBatchState, neededVertices: number): void {
-    if (neededVertices <= state.drawVertexCapacity) {
-        return;
-    }
-    const cap = Math.max(state.instanceCapacity, 1);
-    const target = Math.ceil(neededVertices / cap);
-    let bound = Math.max(state.growthDrawVertexBound, state.drawVertexBound, 1);
-    while (bound < target) {
-        bound *= 2;
-    }
-    if (bound > state.growthDrawVertexBound) {
-        state.growthDrawVertexBound = bound;
-    }
-}
-
 /** Apply one frame's async GPU selection readback: decode per-page demand + diagnostics
- *  from the control buffer, drive the shared streaming engine (demand + resident frame
- *  references + diagnostics), and ratchet the draw-vertex growth bound so streamed
- *  refinement renders past the coarse bound. A stale readback (disposed asset, or a
+ *  from the control buffer and drive the shared streaming engine (demand + resident
+ *  frame references + diagnostics). A selected cut that cannot fit the device is
+ *  reported on the next synchronous update. A stale readback (disposed asset, or a
  *  generation bump from disposal/device recovery) is dropped. Exported as the internal
  *  test seam that stands in for the real mapAsync resolution. */
 export function applyMeshLoDGpuReadback(runtime: MeshLoDAssetRuntime, state: MeshLoDGpuBatchState, control: Uint32Array, pageCount: number, generation: number): void {
@@ -1373,6 +1350,12 @@ export function applyMeshLoDGpuReadback(runtime: MeshLoDAssetRuntime, state: Mes
     }
     const records = runtime.pageRecords;
     const decoded = decodeMeshLoDGpuReadback(control, pageCount, (pageId) => records[pageId]?.storedBytes ?? 1);
+    if (decoded.overflow) {
+        state.pendingError ??= createMeshLoDError("MLOD_DEVICE_LIMIT", "MeshLoD selected cut exceeds the GPU batch capacity", {
+            expected: state.drawVertexCapacity,
+        });
+        return;
+    }
     // Frame references: every currently gpu-resident page (pinned + streamed fine) may
     // be read by the in-flight command buffer, so hold it and keep its LRU age fresh.
     const referenced: number[] = [];
@@ -1392,7 +1375,6 @@ export function applyMeshLoDGpuReadback(runtime: MeshLoDAssetRuntime, state: Mes
         maximumUnmetErrorPixels: decoded.maximumUnmetErrorPixels,
     };
     stepMeshLoDStreaming(runtime, decoded.demand, referenced, stats);
-    growMeshLoDDrawBound(state, decoded.renderedTriangleCount * 3);
 }
 
 /** Camera + selection inputs for one frame's GPU selection, produced by the scene from
@@ -1590,9 +1572,8 @@ export interface MeshLoDGpuSelectionHandles {
 /** Prepare and queue one batch's GPU selection + expansion into the shared compute
  *  pass: sync page state, version-gate instance uploads, size transient buffers, write
  *  params, reset transient counters, and append traverse→evaluate→select→demand then
- *  the indirect expandClusters + finalizeDraw. `drawVertexBound` is the per-instance
- *  expanded-vertex bound the draw-vertex buffer is sized from. Returns the buffers the
- *  indirect draw consumes, or `null` for an empty batch. */
+ *  the indirect expandClusters + finalizeDraw. Returns the buffers the indirect draw
+ *  consumes, or `null` for an empty batch. */
 export function queueMeshLoDGpuSelection(
     engine: EngineContext,
     updateBatch: MeshLoDUpdateBatch,
@@ -1600,9 +1581,11 @@ export function queueMeshLoDGpuSelection(
     instanceState: MeshLoDGpuInstanceState,
     batchState: MeshLoDGpuBatchState,
     instances: readonly MeshLoDGpuInstanceInput[],
-    drawVertexBound: number,
     frame: MeshLoDGpuFrameParams
 ): MeshLoDGpuSelectionHandles | null {
+    if (batchState.pendingError && batchState.device === engine._device) {
+        throw batchState.pendingError;
+    }
     if (instances.length === 0) {
         return null;
     }
@@ -1610,9 +1593,9 @@ export function queueMeshLoDGpuSelection(
     const assetBuffers = getMeshLoDGpuAssetBuffers(engine, runtime);
     const instanceCount = uploadMeshLoDInstances(engine, instanceState, instances);
     syncMeshLoDPageState(engine, assetBuffers, runtime);
-    // A newly uploaded fine page can change the cut on this very frame, before an
-    // async readback can report its triangle count. Reserve all resident clusters'
-    // vertices up front: every possible selected cut fits without truncating any group.
+    // A newly uploaded fine page can change the cut on this frame. Every selected
+    // cluster belongs to a resident page, so the resident sum across visible
+    // instances covers the cut even though it includes mutually exclusive LODs.
     if (batchState.device !== engine._device || batchState.residentDrawEpoch !== assetBuffers.residencyEpoch) {
         let residentVertices = 0;
         for (const cluster of runtime.clusters) {
@@ -1624,8 +1607,11 @@ export function queueMeshLoDGpuSelection(
         batchState.residentDrawVertexBound = residentVertices;
         batchState.residentDrawEpoch = assetBuffers.residencyEpoch;
     }
-    const effectiveDrawBound = Math.max(drawVertexBound, batchState.residentDrawVertexBound, batchState.growthDrawVertexBound);
-    ensureMeshLoDBatchBuffers(engine, batchState, instanceState.capacity, effectiveDrawBound, assetBuffers);
+    const visibleCount = instances.reduce((count, instance) => count + (instance.visible ? 1 : 0), 0);
+    const limits = engine._device.limits;
+    const maxVertices = Math.min(Math.floor(Math.min(limits.maxStorageBufferBindingSize, limits.maxBufferSize) / 48) * 3, 0x3fffffff);
+    const drawVertexCapacity = Math.max(3, Math.min(batchState.residentDrawVertexBound * visibleCount, maxVertices));
+    ensureMeshLoDBatchBuffers(engine, batchState, instanceState.capacity, drawVertexCapacity, assetBuffers);
     ensureMeshLoDBindGroup(engine, batchState, pipelines, assetBuffers, instanceState, runtime.gpu.arena.buffer);
     writeSelectionParams(batchState, assetBuffers, instanceCount, instanceState.wordsPerInstance, frame);
     engine._device.queue.writeBuffer(batchState.paramsBuffer!, 0, batchState.paramsBytes, 0, PARAMS_BYTES);

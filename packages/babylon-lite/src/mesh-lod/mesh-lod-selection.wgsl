@@ -220,7 +220,12 @@ fn selectClusters(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (idx < params.layout0.y) {
     selectedList[idx * 2u] = cluster;
     selectedList[idx * 2u + 1u] = inst;
-    atomicAdd(&control[params.control.x + 1u], metaBuf[cBase + 11u]); // renderedTriangleCount
+    let triangles = metaBuf[cBase + 11u];
+    let previous = atomicAdd(&control[params.control.x + 1u], triangles);
+    let triangleCap = params.control.z / 3u;
+    if (triangles > triangleCap || previous > triangleCap - min(triangles, triangleCap)) {
+      atomicOr(&control[params.control.x + 2u], 2u); // selected cut exceeds the draw buffer
+    }
     let gBase = params.offsets.y + g * GROUP_WORDS;
     let simplifiedError = metaF32(gBase + 4u);
     if (simplifiedError >= 0.0 && simplifiedError <= 3.0e38) {
@@ -285,7 +290,7 @@ fn computeDemand(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 
 // ── Task 5.3 clamp — 1 invocation. Runs at the end of the SELECTION pass so the
-//    expansion dispatch (a separate pass) reads a within-capacity indirect count.
+//    expansion dispatch (a separate pass) skips the entire cut on overflow.
 //    Splitting the passes is required: a buffer cannot be writable storage and an
 //    indirect-dispatch source in the same synchronization scope. ──
 @compute @workgroup_size(1)
@@ -293,14 +298,16 @@ fn clampSelectedCount() {
   let c = atomicLoad(&control[0]);
   let cap = params.layout0.y;
   if (c > cap) {
-    atomicStore(&control[0], cap);
     atomicOr(&control[params.control.x + 2u], 1u); // selection overflow diag
+  }
+  if (atomicLoad(&control[params.control.x + 2u]) != 0u) {
+    atomicStore(&control[0], 0u); // never expand a partial cut
   }
 }
 
 // ── Task 5.3 expansion — its own bind-group layout {0,1,2,6,8,9,10} (no `control`,
 //    which is the indirect-dispatch source in this pass). One workgroup per selected
-//    cluster (the dispatch launches exactly the clamped selected count, so every
+//    cluster (the dispatch launches only when the entire cut fits, so every
 //    workgroup is active) reserves triangleCount*3 draw vertices atomically, then all
 //    lanes decode packed u16 local indices in the geometry arena into absolute vertex-
 //    word offsets and 16-byte draw-vertex records. No vertex/index buffer is bound. ──
@@ -345,15 +352,14 @@ fn expandClusters(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocati
   }
 }
 
-// Finalize the indirect draw: clamp the draw-vertex count to capacity (expansion
-// overflow flagged in drawArgs word 4, not control, which is indirect-only here),
-// keep instanceCount = 1.
+// Finalize the indirect draw: suppress the entire cut if expansion somehow exceeds
+// capacity (flagged in drawArgs word 4, not control, which is indirect-only here).
 @compute @workgroup_size(1)
 fn finalizeDraw() {
   let cap = params.control.z;
   let v = atomicLoad(&drawArgs[0]);
   if (v > cap) {
-    atomicStore(&drawArgs[0], cap);
+    atomicStore(&drawArgs[0], 0u);
     atomicStore(&drawArgs[4], 1u); // expansion overflow diag
   }
   atomicStore(&drawArgs[1], 1u); // instanceCount
