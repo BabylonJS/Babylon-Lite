@@ -68,6 +68,8 @@ iframeSceneHost.append(iframeCanvas);
 iframeDocument.body.append(iframeSceneHost);
 const iframeScene = createCanvasScene(iframeCanvas);
 const iframeTwin = createSceneHtmlTwin(iframeScene, { label: "Iframe scene" });
+const disposedScene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+disposeScene(disposedScene);
 
 Object.assign(window, {
     accessibilityFixture: {
@@ -89,6 +91,17 @@ Object.assign(window, {
         },
         dispose(): void {
             disposeScene(scene);
+        },
+        createAfterDispose(): { error: string | null; hasBinding: boolean } {
+            try {
+                createSceneHtmlTwin(disposedScene, {
+                    parent: document.querySelector<HTMLElement>("#disposed-accessibility")!,
+                    label: "Disposed scene",
+                });
+                return { error: null, hasBinding: disposedScene._accessibility !== undefined };
+            } catch (error) {
+                return { error: error instanceof Error ? error.message : String(error), hasBinding: disposedScene._accessibility !== undefined };
+            }
         },
         twin,
         secondTwin,

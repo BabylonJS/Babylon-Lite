@@ -60,4 +60,15 @@ test.describe("scene accessibility HTML", () => {
         await expect(page.locator("#renderCanvas")).toHaveCount(1);
         await expect(page.locator("#scene-host")).toHaveCount(1);
     });
+
+    test("rejects an HTML twin after scene disposal without leaking DOM or a binding", async ({ page }) => {
+        const result = await page.evaluate(() =>
+            (window as unknown as { accessibilityFixture: { createAfterDispose(): { error: string | null; hasBinding: boolean } } }).accessibilityFixture.createAfterDispose()
+        );
+
+        expect(result.error).toMatch(/disposed/i);
+        expect(result.hasBinding).toBe(false);
+        await expect(page.getByRole("region", { name: "Disposed scene" })).toHaveCount(0);
+        await expect(page.locator("#disposed-accessibility")).toBeEmpty();
+    });
 });

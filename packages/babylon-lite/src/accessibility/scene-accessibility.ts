@@ -270,6 +270,9 @@ export function setAccessibilityParent(adapter: SceneAccessibility, source: Scen
 
 /** Bind a scene to a headless accessibility tree. A scene can own one projection at a time. */
 export function createSceneAccessibility(scene: SceneContext, options: SceneAccessibilityOptions = {}): SceneAccessibility {
+    if (scene._z) {
+        throw new Error("Cannot create accessibility for a disposed scene.");
+    }
     if (scene._accessibility) {
         throw new Error("The scene already has an accessibility projection.");
     }

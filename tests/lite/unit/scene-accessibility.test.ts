@@ -20,6 +20,14 @@ import {
 } from "../../../packages/babylon-lite/src/accessibility/scene-accessibility";
 
 describe("scene accessibility", () => {
+    it("rejects a headless projection after scene disposal without installing a binding", () => {
+        const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+        disposeScene(scene);
+
+        expect(() => createSceneAccessibility(scene)).toThrow(/disposed/i);
+        expect(scene._accessibility).toBeUndefined();
+    });
+
     it("rejects a missing DOM host before installing the scene binding", () => {
         const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
 
