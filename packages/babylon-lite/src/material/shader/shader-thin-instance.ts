@@ -156,6 +156,7 @@ function createShaderInstancedRenderable(
     const r: Renderable = {
         order: mesh.renderOrder ?? (isTransparent ? 200 : 100),
         isTransparent,
+        _direct: !!material._externalTextureSlots?.size,
         mesh,
         _worldCenter: sortCenter,
         bind(eng, sig) {

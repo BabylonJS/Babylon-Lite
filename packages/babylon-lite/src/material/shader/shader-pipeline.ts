@@ -6,7 +6,7 @@ import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 import { computeUboLayout } from "../../shader/ubo-layout.js";
 import type { UboField, UboSpec } from "../../shader/fragment-types.js";
-import type { ShaderMaterial, ShaderSamplerDecl } from "./shader-material.js";
+import type { ShaderMaterial } from "./shader-material.js";
 import { _isShaderSystemUniform } from "./shader-material.js";
 import type { ResolvedStencil } from "../stencil-state.js";
 import type { StencilState } from "../material.js";
@@ -36,6 +36,18 @@ let _finalColorResolver: ((material: ShaderMaterial, hasInstanceColor: boolean) 
 /** @internal Install the opt-in ShaderMaterial final-color helper resolver. */
 export function _installShaderFinalColorResolver(resolve: (material: ShaderMaterial, hasInstanceColor: boolean) => WgslSource | undefined): void {
     _finalColorResolver = resolve;
+}
+
+interface ShaderExternalTexturePipelineResolver {
+    layout(entries: GPUBindGroupLayoutEntry[], nextBinding: number, visibility: GPUShaderStageFlags, material: ShaderMaterial): number;
+    prelude(source: WgslSource, nextBinding: number, material: ShaderMaterial): readonly [source: WgslSource, nextBinding: number];
+}
+
+let _externalTextureResolver: ShaderExternalTexturePipelineResolver | null = null;
+
+/** @internal Install the external-texture pipeline operations on explicit binding API use. */
+export function _installShaderExternalTexturePipelineResolver(resolver: ShaderExternalTexturePipelineResolver): void {
+    _externalTextureResolver = resolver;
 }
 
 export interface ShaderPipelineBindings {
@@ -86,6 +98,9 @@ interface ShaderMaterialPipelineState extends ShaderMaterial {
 }
 
 export function getOrCreateShaderPipelineBindings(engine: EngineContext, material: ShaderMaterial): ShaderPipelineBindings {
+    if (material._externalTextureDecls?.length && !_externalTextureResolver) {
+        throw new Error("ShaderMaterial external textures require setShaderExternalTexture before pipeline preparation.");
+    }
     const state = material as ShaderMaterialPipelineState;
     const cache = state._shaderPipelineCache;
     if (state._shaderBindings && state._shaderDevice === engine._device && state._shaderCacheGeneration === cache?.generation) {
@@ -103,7 +118,7 @@ export function getOrCreateShaderPipelineBindings(engine: EngineContext, materia
         const customSpec = customFields.length > 0 ? computeUboLayout(customFields) : null;
         const group1BGL = engine._device.createBindGroupLayout({
             label: "shader-material-group1",
-            entries: buildBindGroupLayoutEntries(material.samplerDecls, material.storageBufferDecls, customSpec !== null),
+            entries: buildBindGroupLayoutEntries(material, customSpec !== null),
         });
         const vbSupport = _getShaderVbSupport();
         bindings = {
@@ -246,11 +261,7 @@ export function _resolveShaderPipelineVariantKey(sig: RenderTargetSignature, mat
     return sig._sampleCount > 1 && !!alphaToCoverageResolver?.(material) ? `${variantKey}:a2c` : variantKey;
 }
 
-function buildBindGroupLayoutEntries(
-    samplers: readonly ShaderSamplerDecl[],
-    storageBuffers: readonly { name: string; type: string }[],
-    hasCustomUbo: boolean
-): GPUBindGroupLayoutEntry[] {
+function buildBindGroupLayoutEntries(material: ShaderMaterial, hasCustomUbo: boolean): GPUBindGroupLayoutEntry[] {
     // Local (not module-level): reading the WebGPU flag globals must be deferred until
     // first device/pipeline use so importing the engine never requires them to exist.
     const SHADER_STAGE_ALL = SS.VERTEX | SS.FRAGMENT;
@@ -259,7 +270,7 @@ function buildBindGroupLayoutEntries(
     if (hasCustomUbo) {
         entries.push({ binding: nextBinding++, visibility: SHADER_STAGE_ALL, buffer: { type: "uniform" } });
     }
-    for (const sampler of samplers) {
+    for (const sampler of material.samplerDecls) {
         const isArray = sampler.viewDimension === "2d-array";
         const sampleType = sampler.comparison === true ? "depth" : (sampler.sampleType ?? "float");
         entries.push({
@@ -276,7 +287,8 @@ function buildBindGroupLayoutEntries(
             sampler: { type: sampler.comparison === true ? "comparison" : sampleType === "float" ? "filtering" : "non-filtering" },
         });
     }
-    for (const _storage of storageBuffers) {
+    nextBinding = _externalTextureResolver?.layout(entries, nextBinding, SHADER_STAGE_ALL, material) ?? nextBinding;
+    for (const _storage of material.storageBufferDecls) {
         entries.push({
             binding: nextBinding++,
             visibility: SHADER_STAGE_ALL,
@@ -310,6 +322,7 @@ ${customSpec._structBody}
 @group(1) @binding(${nextBinding++}) var ${sampler.name}Sampler: ${samplerType};
 `;
     }
+    [source, nextBinding] = _externalTextureResolver?.prelude(source, nextBinding, material) ?? [source, nextBinding];
     for (const storage of material.storageBufferDecls) {
         source = wgsl`${source}@group(1) @binding(${nextBinding++}) var<storage, read> ${storage.name}: ${storage.type};
 `;

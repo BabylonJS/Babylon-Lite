@@ -6,6 +6,7 @@ import type { Mat4 } from "../../math/types.js";
 import type { WgslSource } from "../../shader/wgsl.js";
 import type { EngineContext } from "../../engine/engine.js";
 import type { MeshGPU } from "../../mesh/mesh.js";
+import type { ExternalTexture } from "../../texture/external-texture.js";
 import { getShaderGroupBuilder } from "./shader-group-builder.js";
 import { _attributeInfo } from "./shader-vb-support.js";
 import { bumpVisibilityEpoch } from "../../engine/engine.js";
@@ -42,7 +43,7 @@ export type ShaderDefineValue = boolean | number;
 export type ShaderDefineMap = Readonly<Record<string, ShaderDefineValue>>;
 
 /** Options describing a ShaderMaterial: WGSL sources, attributes, uniforms,
- *  samplers, defines, and blend/depth state. Passed to `createShaderMaterial()`. */
+ *  samplers, external textures, defines, and blend/depth state. Passed to `createShaderMaterial()`. */
 export interface ShaderMaterialOptions {
     readonly name?: string;
     readonly vertexSource: WgslSource;
@@ -50,6 +51,7 @@ export interface ShaderMaterialOptions {
     readonly attributes: readonly ShaderAttributeName[];
     readonly uniforms?: readonly ShaderUniformOption[];
     readonly samplers?: readonly ShaderSamplerOption[];
+    readonly externalTextures?: readonly string[];
     readonly storageBuffers?: readonly ShaderStorageBufferOption[];
     readonly defines?: ShaderDefineMap;
     /** Bind and inject the mesh's optional thin-instance RGBA stream for this material. Disable on
@@ -147,13 +149,18 @@ export interface ShaderTextureSlot {
     _sampler?: GPUSampler | null;
 }
 
+export interface ShaderExternalTextureSlot {
+    readonly name: string;
+    current: ExternalTexture | null;
+}
+
 export interface ShaderStorageBufferSlot {
     readonly decl: ShaderStorageBufferDecl;
     current: StorageBuffer | null;
 }
 
 /** A custom WGSL material: compiled from user-supplied vertex/fragment sources
- *  with declared attributes, uniforms, samplers, and defines. Update its values
+ *  with declared attributes, uniforms, samplers, external textures, and defines. Update its values
  *  via `setShaderUniform()` / `setShaderTexture()` and friends. */
 export interface ShaderMaterial extends Material {
     readonly name?: string;
@@ -164,6 +171,8 @@ export interface ShaderMaterial extends Material {
     readonly attributes: readonly ShaderAttributeName[];
     readonly uniformDecls: readonly ShaderUniformDecl[];
     readonly samplerDecls: readonly ShaderSamplerDecl[];
+    /** @internal */
+    readonly _externalTextureDecls?: readonly string[];
     readonly storageBufferDecls: readonly ShaderStorageBufferDecl[];
     readonly defines: readonly ShaderDefine[];
     /** @internal Explicit thin-instance color preference; numeric zero is reserved for compact runtime checks. */
@@ -194,6 +203,8 @@ export interface ShaderMaterial extends Material {
     /** @internal */
     _textureSlots: Map<string, ShaderTextureSlot>;
     /** @internal */
+    _externalTextureSlots?: Map<string, ShaderExternalTextureSlot>;
+    /** @internal */
     _storageBufferSlots: Map<string, ShaderStorageBufferSlot>;
     /** @internal */
     _uniformVersion: number;
@@ -215,7 +226,8 @@ function isIdentifier(name: string): boolean {
     return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
 }
 
-function assertIdentifier(kind: string, name: string): void {
+/** @internal */
+export function _assertShaderIdentifier(kind: string, name: string): void {
     if (!isIdentifier(name)) {
         throw new Error(`ShaderMaterial: ${kind} name "${name}" is not a valid WGSL identifier.`);
     }
@@ -257,8 +269,9 @@ export function _isShaderSystemUniform(name: string): name is ShaderSystemUnifor
 }
 
 /** Create a ShaderMaterial from WGSL sources and declarations, validating
- *  attributes, uniforms, samplers, and defines.
- *  @param options - Sources, attributes, uniforms, samplers, defines, and render state.
+ *  attributes, uniforms, samplers, and defines. External texture declarations
+ *  are snapshotted here and validated by their optional binding API.
+ *  @param options - Sources, attributes, uniforms, resource declarations, defines, and render state.
  *  @returns The constructed `ShaderMaterial`. */
 export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMaterial {
     if (!options.vertexSource || !options.fragmentSource) {
@@ -292,7 +305,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
     const usedNames = new Set<string>();
     for (const opt of options.uniforms ?? []) {
         const decl = typeof opt === "string" ? normalizeSystemUniform(opt) : normalizeCustomUniform(opt);
-        assertUniqueName(usedNames, "uniform", decl.name);
+        _assertUniqueShaderName(usedNames, "uniform", decl.name);
         uniformDecls.push(decl);
         uniformValues.set(decl.name, { decl, value: normalizeUniformValue(decl, decl.defaultValue ?? defaultUniformValue(decl)), _v: 0 });
     }
@@ -309,9 +322,9 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
                       viewDimension: opt.viewDimension ?? "2d",
                       comparison: opt.comparison ?? false,
                   };
-        assertIdentifier("sampler", decl.name);
-        assertUniqueName(usedNames, "sampler", decl.name);
-        assertUniqueName(usedNames, "sampler", `${decl.name}Sampler`);
+        _assertShaderIdentifier("sampler", decl.name);
+        _assertUniqueShaderName(usedNames, "sampler", decl.name);
+        _assertUniqueShaderName(usedNames, "sampler", `${decl.name}Sampler`);
         samplerDecls.push(decl);
         textureSlots.set(decl.name, { decl, current: null });
     }
@@ -319,16 +332,16 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
     const storageBufferDecls: ShaderStorageBufferDecl[] = [];
     const storageBufferSlots = new Map<string, ShaderStorageBufferSlot>();
     for (const opt of options.storageBuffers ?? []) {
-        assertIdentifier("storage buffer", opt.name);
-        assertUniqueName(usedNames, "storage buffer", opt.name);
+        _assertShaderIdentifier("storage buffer", opt.name);
+        _assertUniqueShaderName(usedNames, "storage buffer", opt.name);
         storageBufferDecls.push(opt);
         storageBufferSlots.set(opt.name, { decl: opt, current: null });
     }
 
     const defines: ShaderDefine[] = [];
     for (const [name, value] of Object.entries(options.defines ?? {})) {
-        assertIdentifier("define", name);
-        assertUniqueName(usedNames, "define", name);
+        _assertShaderIdentifier("define", name);
+        _assertUniqueShaderName(usedNames, "define", name);
         if (typeof value !== "boolean" && typeof value !== "number") {
             throw new Error(`ShaderMaterial: define "${name}" must be a boolean or number.`);
         }
@@ -348,6 +361,7 @@ export function createShaderMaterial(options: ShaderMaterialOptions): ShaderMate
         attributes,
         uniformDecls,
         samplerDecls,
+        _externalTextureDecls: options.externalTextures?.slice(),
         storageBufferDecls,
         defines,
         _tic: options.useThinInstanceColors,
@@ -383,7 +397,7 @@ function normalizeSystemUniform(name: string): ShaderUniformDecl {
 }
 
 function normalizeCustomUniform(decl: ShaderUniformDecl): ShaderUniformDecl {
-    assertIdentifier("uniform", decl.name);
+    _assertShaderIdentifier("uniform", decl.name);
     if (!isUniformType(decl.type)) {
         throw new Error(`ShaderMaterial: unsupported uniform type "${String(decl.type)}" for "${decl.name}".`);
     }
@@ -394,7 +408,8 @@ function isUniformType(type: string): type is ShaderUniformType {
     return type === "f32" || type === "u32" || type === "i32" || type === "vec2<f32>" || type === "vec3<f32>" || type === "vec4<f32>" || type === "mat4x4<f32>";
 }
 
-function assertUniqueName(usedNames: Set<string>, kind: string, name: string): void {
+/** @internal */
+export function _assertUniqueShaderName(usedNames: Set<string>, kind: string, name: string): void {
     if (usedNames.has(name)) {
         throw new Error(`ShaderMaterial: duplicate generated identifier "${name}" while adding ${kind}.`);
     }

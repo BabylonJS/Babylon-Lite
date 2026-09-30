@@ -37,9 +37,13 @@ function makeThinInstances(): ThinInstanceData {
 }
 
 describe("ShaderMaterial thin instances", () => {
-    it("captures generic packed layouts once and shares them with async registration and every target bind", () => {
+    it.each([false, true])("captures generic packed layouts once (external texture: %s)", (external) => {
         const engine = { _device: {} } as EngineContext;
-        const material = { attributes: ["position"], needAlphaBlending: false } as unknown as ShaderMaterial;
+        const material = {
+            attributes: ["position"],
+            _externalTextureSlots: external ? new Map([["videoSampler", { name: "videoSampler", current: null }]]) : undefined,
+            needAlphaBlending: false,
+        } as unknown as ShaderMaterial;
         const mesh = {
             material,
             thinInstances: makeThinInstances(),
@@ -90,6 +94,7 @@ describe("ShaderMaterial thin instances", () => {
             undefined,
             register
         );
+        expect(built.renderables[0]!._direct).toBe(external);
         built.renderables[0]!.bind(engine, { _colorFormat: "rgba8unorm", _sampleCount: 1 });
         built.renderables[0]!.bind(engine, { _colorFormat: "bgra8unorm", _sampleCount: 1 });
         const layouts = getPipeline.mock.calls[0]![5]!;

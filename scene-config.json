@@ -1962,7 +1962,7 @@
         "slug": "scene213-gridmaterial",
         "name": "Scene 213 — GridMaterial",
         "maxMad": 0.01,
-        "maxRawKB": 49.52,
+        "maxRawKB": 49.58,
         "description": "Four meshes shaded by the procedural unlit GridMaterial - an opaque anti-aliased teal ground, a useMaxLine orange sphere whose object-space grid wraps the curved surface, a transparent alpha-blended cyan box (opacity 0.6), and a hard-cutoff antialias:false pink box - validated against a Babylon.js GridMaterial oracle.",
         "tags": ["materials", "grid", "procedural"],
         "skipPerf": true,
@@ -2714,6 +2714,16 @@
         "maxRawKB": 45,
         "description": "Scene 262's deterministic NPE particle field with Teleport fan-out plus Elbow, Debug, and a Particle-scope LocalVariable around its per-particle size. Lite normalizes the graph before evaluator traversal and must preserve Babylon.js pixels.",
         "tags": ["npe", "particles", "billboards", "teleport", "local-variable", "graph-plumbing"],
+        "skipPerf": true
+    },
+    {
+        "id": 306,
+        "slug": "scene306-external-video-texture",
+        "name": "Scene 306 — External Video Texture",
+        "maxMad": 0.02,
+        "maxRawKB": 45,
+        "description": "A deterministic canvas-backed HTMLVideoElement is sampled directly as a WGSL texture_external by Babylon.js and Babylon Lite, without copying into Texture2D.",
+        "tags": ["shader", "texture", "video", "external-texture", "procedural"],
         "skipPerf": true
     },
     {

@@ -637,6 +637,78 @@ void options;
         }
     });
 
+    it("exposes external video textures without exposing WebGPU handles", () => {
+        const dts = readFileSync(DTS_PATH, "utf-8");
+
+        expect(dts).toContain("interface ExternalTexture");
+        expect(dts).toContain("readonly video: HTMLVideoElement;");
+        expect(dts).toContain("declare function createExternalTexture");
+        expect(dts).toContain("declare function setShaderExternalTexture");
+        expect(dts).not.toContain("GPUExternalTexture");
+
+        const probePath = resolve(BUILD_DIR, "external-texture-api.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createExternalTexture,
+    createShaderMaterial,
+    getShaderExternalTexture,
+    isExternalTextureReady,
+    setShaderExternalTexture,
+    type ExternalTexture,
+    type ShaderMaterialOptions,
+} from "./index.js";
+
+declare const video: HTMLVideoElement;
+const externalTexture: ExternalTexture = createExternalTexture(video);
+const options: ShaderMaterialOptions = {
+    vertexSource: "",
+    fragmentSource: "",
+    attributes: ["position"],
+    externalTextures: ["videoSampler"],
+};
+const material = createShaderMaterial(options);
+setShaderExternalTexture(material, "videoSampler", externalTexture);
+const current: ExternalTexture | null = getShaderExternalTexture(material, "videoSampler");
+const ready: boolean = isExternalTextureReady(externalTexture);
+// @ts-expect-error Browser video elements must be wrapped before binding.
+setShaderExternalTexture(material, "videoSampler", video);
+void [current, ready];
+`,
+                "utf-8"
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                {
+                    cwd: PACKAGE_DIR,
+                    encoding: "utf-8",
+                }
+            );
+            const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+            expect(result.status, output).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes only the build-time moving-emitter provider API", () => {
         const dts = readFileSync(DTS_PATH, "utf-8");
 

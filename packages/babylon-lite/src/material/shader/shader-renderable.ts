@@ -76,6 +76,19 @@ interface ShaderMaterialRenderState extends ShaderMaterial {
     _shaderCustomSpec?: UboSpec | null;
 }
 
+interface ShaderExternalTextureBindingResolver {
+    active(material: ShaderMaterial): boolean;
+    bind(engine: EngineContext, material: ShaderMaterial, entries: GPUBindGroupEntry[], nextBinding: number): number;
+    refresh(engine: EngineContext, material: ShaderMaterial, packet: ShaderPacket, createBindGroup: typeof createShaderBindGroup): void;
+}
+
+let _externalTextureResolver: ShaderExternalTextureBindingResolver | null = null;
+
+/** @internal Install external-texture refresh and binding behavior on explicit binding API use. */
+export function _installShaderExternalTextureBindingResolver(resolver: ShaderExternalTextureBindingResolver): void {
+    _externalTextureResolver = resolver;
+}
+
 /** @internal */
 export type ShaderSystemUniformWriter = (
     data: Float32Array,
@@ -316,6 +329,7 @@ function createOpaqueRenderable(
     const r: Renderable = {
         order,
         isTransparent: false,
+        _direct: _externalTextureResolver?.active(material) ?? false,
         mesh: packets.length === 1 ? packets[0]!.mesh : undefined,
         bind(eng, sig) {
             return createShaderBinding(eng, sig, material, r, update, draw, getUniformBatch, asyncVertexLayout);
@@ -459,6 +473,8 @@ function updatePacket(scene: SceneContext, material: ShaderMaterial, packet: Sha
         for (const tex of oldTextures) {
             releaseTexture(tex);
         }
+    } else {
+        _externalTextureResolver?.refresh(engine, material, packet, createShaderBindGroup);
     }
 }
 
@@ -591,6 +607,7 @@ function createShaderBindGroup(engine: EngineContext, material: ShaderMaterial, 
         }
         entries.push({ binding: nextBinding++, resource: tex.view }, { binding: nextBinding++, resource: tex.sampler });
     }
+    nextBinding = _externalTextureResolver?.bind(engine, material, entries, nextBinding) ?? nextBinding;
     for (const storage of material.storageBufferDecls) {
         const slot = material._storageBufferSlots.get(storage.name);
         const storageBuffer = slot?.current;
