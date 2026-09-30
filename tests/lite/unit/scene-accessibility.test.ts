@@ -187,6 +187,39 @@ describe("scene accessibility", () => {
         disposeScene(scene);
     });
 
+    it("routes the shared lifecycle hook to each scene projection", async () => {
+        const engine = createNullEngine();
+        const firstScene = createSceneContext(engine, { defaultRenderTask: false });
+        const secondScene = createSceneContext(engine, { defaultRenderTask: false });
+        const plainScene = createSceneContext(engine, { defaultRenderTask: false });
+        const firstAccessibility = createSceneAccessibility(firstScene);
+        const secondAccessibility = createSceneAccessibility(secondScene);
+        const firstSource = createTransformNode("First");
+        const secondSource = createTransformNode("Second");
+        const plainSource = createTransformNode("Plain");
+
+        addToScene(firstScene, firstSource);
+        addToScene(secondScene, secondSource);
+        addToScene(plainScene, plainSource);
+        await Promise.resolve();
+
+        expect(getAccessibilityNode(firstAccessibility, firstSource)).toBeDefined();
+        expect(getAccessibilityNode(firstAccessibility, secondSource)).toBeUndefined();
+        expect(getAccessibilityNode(secondAccessibility, secondSource)).toBeDefined();
+        expect(getAccessibilityNode(secondAccessibility, firstSource)).toBeUndefined();
+        expect(plainScene._accessibility).toBeUndefined();
+
+        disposeScene(plainScene);
+        disposeScene(firstScene);
+        expect(firstAccessibility.tree.disposed).toBe(true);
+        expect(secondAccessibility.tree.disposed).toBe(false);
+
+        removeFromScene(secondScene, secondSource);
+        await Promise.resolve();
+        expect(getAccessibilityNode(secondAccessibility, secondSource)).toBeUndefined();
+        disposeScene(secondScene);
+    });
+
     it("creates new hierarchy bindings at their final semantic parent", async () => {
         const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
         const accessibility = createSceneAccessibility(scene);
@@ -397,6 +430,24 @@ describe("scene accessibility", () => {
         expect(scene._disposables).toEqual([]);
         expect(scene.meshes).toEqual([]);
         expect(scene.lights).toEqual([]);
+    });
+
+    it("does not reconcile property changes queued during canonical scene cleanup", async () => {
+        const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+        const source = createTransformNode("Before cleanup");
+        const accessibility = createSceneAccessibility(scene, { roots: [source] });
+        const update = vi.fn();
+        onAccessibilityTreeChanged(accessibility.tree, update);
+        onSceneDispose(scene, () => {
+            source.name = "During cleanup";
+        });
+
+        disposeScene(scene);
+        await Promise.resolve();
+
+        expect(accessibility.tree.disposed).toBe(true);
+        expect(scene._accessibility).toBeUndefined();
+        expect(update).toHaveBeenCalledOnce();
     });
 
     it("restores inherited accessors and retains ordinary data writes after observation", () => {

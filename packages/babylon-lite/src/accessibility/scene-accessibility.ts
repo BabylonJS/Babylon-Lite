@@ -1,4 +1,5 @@
 import type { Camera } from "../camera/camera.js";
+import { _setSceneAccessibilityHook } from "../scene/scene-core.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { SceneNode } from "../scene/scene-node.js";
 import {
@@ -51,6 +52,18 @@ let tagListeners: WeakMap<object, Set<() => void>> | undefined;
 
 function isSceneSource(value: unknown): value is SceneSource {
     return typeof value === "object" && value !== null && "children" in value && Array.isArray(value.children) && "worldMatrix" in value;
+}
+
+function sceneAccessibilityHook(scene: SceneContext, source?: unknown, added?: boolean): void {
+    const accessibility = scene._accessibility;
+    if (!accessibility) {
+        return;
+    }
+    if (added === undefined) {
+        accessibility.dispose();
+    } else {
+        accessibility.nodeChanged(source, added);
+    }
 }
 
 function sourceParent(source: SceneSource): SceneSource | null {
@@ -296,6 +309,7 @@ export function createSceneAccessibility(scene: SceneContext, options: SceneAcce
     if (scene._accessibility) {
         throw new Error("The scene already has an accessibility projection.");
     }
+    _setSceneAccessibilityHook(sceneAccessibilityHook);
     const adapter: SceneAccessibility = {
         tree: createAccessibilityTree(),
         _scene: scene,

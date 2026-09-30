@@ -169,7 +169,7 @@ export function setAccessibilityParent(adapter: SceneAccessibility, source: Scen
 export function disposeSceneAccessibility(adapter: SceneAccessibility): void;
 ```
 
-A scene owns at most one `SceneAccessibility` projection. `createSceneAccessibility` rejects a disposed scene and rejects a scene that already owns a projection. Both checks run before the function creates the logical tree or installs scene hooks.
+A scene owns at most one `SceneAccessibility` projection. `createSceneAccessibility` rejects a disposed scene and rejects a scene that already owns a projection. Both checks run before the function installs the module-local lifecycle router or creates the logical tree.
 
 `updateSceneAccessibility` performs an immediate full reconciliation. Use it after direct edits to `scene.meshes`, `scene.lights`, or other retained state that bypass the normal scene helpers.
 
@@ -259,7 +259,7 @@ One `SceneAccessibility` adapter owns these source sets:
 
 - retained scene meshes and lights;
 - the active camera and its subtree;
-- sources reported through the scene's optional accessibility add/remove hook;
+- sources reported through the feature-owned scene lifecycle router;
 - explicit `roots` and their subtrees;
 - natural ancestors required to connect any desired source.
 
@@ -296,7 +296,7 @@ The adapter observes:
 - the scene's `camera` property;
 - each retained source's `name`, `visible`, `_disposed`, and `parent` properties;
 - metadata replacement through `setAccessibilityTag`;
-- scene additions and removals through `SceneContext._accessibility`;
+- scene additions and removals through the feature-owned core lifecycle hook;
 - explicit semantic parent changes.
 
 Direct observed writes schedule one microtask. Additional writes before that microtask reuse the pending update. Disposal cancels the pending reconciliation by marking the adapter disposed.
@@ -358,11 +358,13 @@ tree live + mounted -> synchronized -> tree disposed or explicit disposal -> rem
 live scene -> projection installed -> reconciled as scene changes -> scene or projection disposed
 ```
 
-- Creation rejects `scene._z` before tree creation, property observation, or hook installation.
-- The scene hook is installed before the initial reconciliation so additions cannot be missed after ownership begins.
+- Creation rejects `scene._z` and an existing `scene._accessibility` binding before tree creation, property observation, or lifecycle-router installation.
+- After those guards pass, creation installs the module-local lifecycle router before it creates the projection state. The router reads only the receiving scene's optional `_accessibility` binding, so projected scenes and unprojected scenes can coexist.
+- The scene-specific binding is installed before the initial reconciliation so additions cannot be missed after ownership begins.
 - If initial reconciliation fails, creation disposes all installed state before rethrowing.
-- Explicit projection disposal removes observations and bindings, clears source and parent sets, uninstalls the scene hook, and disposes the tree.
-- `disposeScene` invokes the installed projection disposer before canonical scene cleanup. If an accessibility observer throws during disposal, scene cleanup still completes and `disposeScene` then rethrows the observer failure.
+- Explicit projection disposal removes observations and bindings, clears source and parent sets, clears the scene-specific `_accessibility` binding, and disposes the tree.
+- `disposeScene` completes canonical scene cleanup before it invokes the feature router. If an accessibility observer throws during projection disposal, the failure cannot prevent canonical resource cleanup.
+- Property changes queued during canonical cleanup cannot reconcile after disposal because projection disposal marks the adapter disposed before the queued microtask runs.
 - Repeated projection disposal is a no-op.
 
 ### Owned scene HTML twin
@@ -392,7 +394,7 @@ Not applicable. The accessibility subsystem contains no WGSL and performs no sha
 Runtime dependencies are limited to:
 
 - `Camera`, `SceneNode`, and `SceneContext` types and state;
-- the scene's optional `_accessibility` add/remove/disposal seam;
+- the module-local core lifecycle hook and each projected scene's optional `_accessibility` binding;
 - `isDomCanvas` for default host resolution;
 - native `WeakMap`, `Map`, `Set`, `Object.freeze`, `queueMicrotask`, and `AggregateError`;
 - native DOM interfaces when an HTML twin is created.
@@ -421,6 +423,7 @@ The root package re-exports each public type and function from its single `"."` 
 
 - rejection after scene disposal without hook installation;
 - missing default DOM host without hook installation;
+- routing across multiple projected scenes while unprojected scenes coexist;
 - tag validation before publication;
 - source-name fallback and metadata replacement;
 - scene membership, camera, lights, explicit roots, and direct array reconciliation;
@@ -429,6 +432,7 @@ The root package re-exports each public type and function from its single `"."` 
 - stable source bindings;
 - semantic parent override, final-order reversal, restoration, removal, and cycle rejection;
 - scene cleanup when a tree observer throws;
+- cancellation of property changes queued during canonical scene cleanup;
 - reversible property observation.
 
 ### Browser plumbing tests
@@ -457,6 +461,8 @@ The root package re-exports each public type and function from its single `"."` 
 - unused accessibility imports producing no bundle change;
 - DOM synchronization code retained only when requested.
 
+`tests/lite/build/accessibility-core-boundary.test.ts` covers removal of the add, remove, and disposal lifecycle bridge when accessibility is unused.
+
 ## File Manifest
 
 | File                                                             | Responsibility                                                                                                               |
@@ -466,13 +472,14 @@ The root package re-exports each public type and function from its single `"."` 
 | `packages/babylon-lite/src/accessibility/observe-property.ts`    | Reversible direct-property observation used by the scene adapter                                                             |
 | `packages/babylon-lite/src/accessibility/scene-accessibility.ts` | Lazy object metadata, scene source discovery, logical projection, coalescing, semantic parent overrides, and scene lifecycle |
 | `packages/babylon-lite/src/scene/scene-html-twin.ts`             | Default/custom host resolution and owned scene-plus-HTML convenience API                                                     |
-| `packages/babylon-lite/src/scene/scene-core.ts`                  | Optional accessibility membership and disposal seam                                                                          |
-| `packages/babylon-lite/src/scene/scene-remove.ts`                | Optional scene-removal notification                                                                                          |
+| `packages/babylon-lite/src/scene/scene-core.ts`                  | Module-local optional accessibility lifecycle hook                                                                           |
+| `packages/babylon-lite/src/scene/scene-remove.ts`                | Optional scene-removal notification through the core hook                                                                    |
 | `packages/babylon-lite/src/index.ts`                             | Single root public exports                                                                                                   |
 | `tests/lite/unit/accessibility-tree.test.ts`                     | Logical tree unit coverage                                                                                                   |
 | `tests/lite/unit/scene-accessibility.test.ts`                    | Scene adapter and observation unit coverage                                                                                  |
 | `tests/lite/plumbing/accessibility.spec.ts`                      | Browser DOM and lifecycle coverage                                                                                           |
 | `tests/lite/build/accessibility-treeshake.test.ts`               | Declaration and tree-shaking coverage                                                                                        |
+| `tests/lite/build/accessibility-core-boundary.test.ts`           | Core bridge tree-shaking coverage                                                                                            |
 | `lab/lite/accessibility.html`                                    | Browser plumbing fixture page                                                                                                |
 | `lab/lite/src/accessibility.ts`                                  | Browser plumbing fixture behavior                                                                                            |
 | `docs/lite/architecture/56-accessibility.md`                     | One-shot subsystem reference                                                                                                 |
