@@ -27,8 +27,10 @@ export interface HtmlTwin {
 
 function setAttribute(element: HTMLElement, name: string, value: string | null): void {
     if (value === null) {
-        element.removeAttribute(name);
-    } else {
+        if (element.hasAttribute(name)) {
+            element.removeAttribute(name);
+        }
+    } else if (element.getAttribute(name) !== value) {
         element.setAttribute(name, value);
     }
 }
@@ -51,39 +53,56 @@ function itemFor(twin: HtmlTwin, node: AccessibilityNode): HtmlTwinItem {
 
 function updateItem(item: HtmlTwinItem, node: AccessibilityNode): void {
     const { element, text } = item;
-    for (const attribute of [...element.attributes]) {
-        if (attribute.name !== "data-lite-accessibility-node") {
-            element.removeAttribute(attribute.name);
-        }
-    }
     const tag = node.tag;
     const name = tag?.name ?? tag?.description;
     const description = tag?.name ? tag.description : undefined;
+    const attributes = new Map<string, string>();
     if (tag?.role) {
-        element.setAttribute("role", tag.role);
+        attributes.set("role", tag.role);
     }
     if (name) {
-        element.setAttribute("aria-label", name);
+        attributes.set("aria-label", name);
     }
     if (description) {
-        element.setAttribute("aria-description", description);
+        attributes.set("aria-description", description);
     }
-    element.hidden = node.hidden;
     if (node.disabled) {
-        element.setAttribute("aria-disabled", "true");
+        attributes.set("aria-disabled", "true");
     }
     for (const [key, value] of Object.entries(tag?.aria ?? {})) {
-        setAttribute(element, key, value == null ? null : String(value));
+        if (value == null) {
+            attributes.delete(key);
+        } else {
+            attributes.set(key, String(value));
+        }
     }
-    text.textContent = [name, description].filter(Boolean).join(". ");
+    for (const attribute of [...element.attributes]) {
+        if (attribute.name !== "data-lite-accessibility-node" && !attributes.has(attribute.name)) {
+            element.removeAttribute(attribute.name);
+        }
+    }
+    for (const [name, value] of attributes) {
+        setAttribute(element, name, value);
+    }
+    if (element.hidden !== node.hidden) {
+        element.hidden = node.hidden;
+    }
+    const content = [name, description].filter(Boolean).join(". ");
+    if (text.textContent !== content) {
+        text.textContent = content;
+    }
 }
 
 function renderChildren(twin: HtmlTwin, parent: HTMLElement, nodes: readonly AccessibilityNode[], active: Set<AccessibilityNode>): void {
+    let cursor = parent === twin.element ? parent.firstChild : (parent.firstChild?.nextSibling ?? null);
     for (const node of nodes) {
         active.add(node);
         const item = itemFor(twin, node);
         updateItem(item, node);
-        parent.append(item.element);
+        if (item.element !== cursor) {
+            parent.insertBefore(item.element, cursor);
+        }
+        cursor = item.element.nextSibling;
         renderChildren(twin, item.element, node.children, active);
     }
 }

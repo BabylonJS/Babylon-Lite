@@ -79,6 +79,18 @@ function stateValue(authored: boolean | undefined, tag: AccessibilityTag | null,
     return authored ?? tag?.[state] ?? String(tag?.aria?.[aria]) === "true";
 }
 
+function tagsEqual(a: AccessibilityTag | null, b: AccessibilityTag | null): boolean {
+    if (a === b) {
+        return true;
+    }
+    if (!a || !b || a.name !== b.name || a.description !== b.description || a.role !== b.role || a.hidden !== b.hidden || a.disabled !== b.disabled) {
+        return false;
+    }
+    const aEntries = Object.entries(a.aria ?? {});
+    const bAria = b.aria ?? {};
+    return aEntries.length === Object.keys(bAria).length && aEntries.every(([key, value]) => Object.hasOwn(bAria, key) && Object.is(value, bAria[key as `aria-${string}`]));
+}
+
 function validateState(options: AccessibilityNodeOptions, tag: AccessibilityTag | null): void {
     for (const [state, aria] of [
         ["hidden", "aria-hidden"],
@@ -208,6 +220,8 @@ export function updateAccessibilityNode(tree: AccessibilityTree, node: Accessibi
     const tag = "tag" in patch ? snapshotAccessibilityTag(patch.tag) : node.tag;
     const authoredHidden = patch.hidden === undefined ? node._authoredHidden : patch.hidden;
     const authoredDisabled = patch.disabled === undefined ? node._authoredDisabled : patch.disabled;
+    const hidden = stateValue(authoredHidden, tag, "hidden");
+    const disabled = stateValue(authoredDisabled, tag, "disabled");
     validateState({ hidden: authoredHidden, disabled: authoredDisabled }, tag);
     const parent = patch.parent === undefined ? node.parent : patch.parent;
     validatePosition(tree, parent, patch.before);
@@ -216,31 +230,46 @@ export function updateAccessibilityNode(tree: AccessibilityTree, node: Accessibi
             throw new Error("Accessibility parent would create a cycle.");
         }
     }
+    let changed =
+        ("tag" in patch && !tagsEqual(tag, node.tag)) ||
+        hidden !== node.hidden ||
+        disabled !== node.disabled ||
+        ("target" in patch && patch.target !== node.target) ||
+        parent !== node.parent;
     if (parent !== node.parent) {
         detach(tree, node);
         node.parent = parent;
-        siblings(tree, parent).push(node);
-    }
-    if (patch.before !== undefined && patch.before !== node) {
-        detach(tree, node);
         const items = siblings(tree, node.parent);
         items.splice(patch.before ? items.indexOf(patch.before) : items.length, 0, node);
+    } else if (patch.before !== undefined && patch.before !== node) {
+        const items = siblings(tree, node.parent);
+        const index = items.indexOf(node);
+        const positioned = patch.before ? index + 1 === items.indexOf(patch.before) : index === items.length - 1;
+        if (!positioned) {
+            detach(tree, node);
+            items.splice(patch.before ? items.indexOf(patch.before) : items.length, 0, node);
+            changed = true;
+        }
     }
     if ("tag" in patch) {
-        node.tag = tag;
+        if (!tagsEqual(tag, node.tag)) {
+            node.tag = tag;
+        }
     }
     if (patch.hidden !== undefined || "tag" in patch) {
         node._authoredHidden = authoredHidden;
-        node.hidden = stateValue(authoredHidden, tag, "hidden");
+        node.hidden = hidden;
     }
     if (patch.disabled !== undefined || "tag" in patch) {
         node._authoredDisabled = authoredDisabled;
-        node.disabled = stateValue(authoredDisabled, tag, "disabled");
+        node.disabled = disabled;
     }
     if ("target" in patch) {
         node.target = patch.target;
     }
-    notify(tree);
+    if (changed) {
+        notify(tree);
+    }
 }
 
 function release(tree: AccessibilityTree, node: AccessibilityNode): void {

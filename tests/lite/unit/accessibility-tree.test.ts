@@ -86,4 +86,27 @@ describe("accessibility tree", () => {
         expect(tree.disposed).toBe(true);
         expect(() => addAccessibilityNode(tree, {})).toThrow(/disposed/i);
     });
+
+    it("does not notify for an unchanged node update", () => {
+        const tree = createAccessibilityTree();
+        const target = {};
+        const node = addAccessibilityNode(tree, {
+            tag: { name: "Mars", role: "img", aria: { "aria-level": 2, "aria-busy": false } },
+            hidden: false,
+            disabled: true,
+            target,
+        });
+        let notifications = 0;
+        onAccessibilityTreeChanged(tree, () => notifications++);
+
+        updateAccessibilityNode(tree, node, {
+            tag: { name: "Mars", role: "img", aria: { "aria-level": 2, "aria-busy": false } },
+            parent: null,
+            hidden: false,
+            disabled: true,
+            target,
+        });
+
+        expect(notifications).toBe(0);
+    });
 });

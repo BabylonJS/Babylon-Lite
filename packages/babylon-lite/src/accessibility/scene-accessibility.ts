@@ -129,7 +129,9 @@ function collectAncestors(source: SceneSource, desired: Set<SceneSource>): void 
 function collectSubtree(source: SceneSource, desired: Set<SceneSource>): void {
     collectAncestors(source, desired);
     for (const child of source.children) {
-        collectSubtree(child, desired);
+        if (sourceParent(child) === source) {
+            collectSubtree(child, desired);
+        }
     }
 }
 
@@ -183,6 +185,28 @@ function disposeBinding(binding: SourceBinding): void {
     }
 }
 
+function reconcileBinding(adapter: SceneAccessibility, source: SceneSource, desired: Set<SceneSource>, reconciling: Set<SceneSource>, reconciled: Set<SceneSource>): void {
+    if (reconciled.has(source)) {
+        return;
+    }
+    if (reconciling.has(source)) {
+        throw new Error("Accessibility parent would create a cycle.");
+    }
+    reconciling.add(source);
+    const parent = semanticParent(adapter, source, desired);
+    if (parent) {
+        reconcileBinding(adapter, parent, desired, reconciling, reconciled);
+    }
+    const binding = adapter._bindings.get(source)!;
+    updateAccessibilityNode(adapter.tree, binding.node, {
+        ...sourceState(source),
+        parent: parent ? adapter._bindings.get(parent)!.node : null,
+        target: source,
+    });
+    reconciling.delete(source);
+    reconciled.add(source);
+}
+
 /** Synchronize the semantic tree immediately. Normal property writes are coalesced to a microtask. */
 export function updateSceneAccessibility(adapter: SceneAccessibility): void {
     if (adapter._disposed) {
@@ -199,14 +223,10 @@ export function updateSceneAccessibility(adapter: SceneAccessibility): void {
         for (const source of desired) {
             ensureBinding(adapter, source, desired, creating);
         }
+        const reconciling = new Set<SceneSource>();
+        const reconciled = new Set<SceneSource>();
         for (const source of desired) {
-            const binding = adapter._bindings.get(source)!;
-            const parent = semanticParent(adapter, source, desired);
-            updateAccessibilityNode(adapter.tree, binding.node, {
-                ...sourceState(source),
-                parent: parent ? adapter._bindings.get(parent)!.node : null,
-                target: source,
-            });
+            reconcileBinding(adapter, source, desired, reconciling, reconciled);
         }
         for (const [source, binding] of [...adapter._bindings]) {
             if (desired.has(source)) {

@@ -215,6 +215,35 @@ describe("scene accessibility", () => {
         disposeScene(scene);
     });
 
+    it("excludes detached children beneath explicit roots and the active camera", async () => {
+        const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+        const explicitRoot = createTransformNode("Explicit root");
+        const explicitChild = createTransformNode("Explicit child");
+        const camera = createArcRotateCamera(0, 1, 10, { x: 0, y: 0, z: 0 });
+        const cameraChild = createTransformNode("Camera child");
+        setParent(explicitChild, explicitRoot);
+        setParent(cameraChild, camera);
+        scene.camera = camera;
+        const accessibility = createSceneAccessibility(scene, { roots: [explicitRoot] });
+        addToScene(scene, explicitChild);
+        addToScene(scene, cameraChild);
+        await Promise.resolve();
+
+        removeFromScene(scene, explicitChild);
+        removeFromScene(scene, cameraChild);
+        await Promise.resolve();
+
+        expect(explicitRoot.children).toContain(explicitChild);
+        expect(camera.children).toContain(cameraChild);
+        expect(explicitChild.parent).toBeNull();
+        expect(cameraChild.parent).toBeNull();
+        expect(getAccessibilityNode(accessibility, explicitChild)).toBeUndefined();
+        expect(getAccessibilityNode(accessibility, cameraChild)).toBeUndefined();
+        expect(getAccessibilityNode(accessibility, explicitRoot)).toBeDefined();
+        expect(getAccessibilityNode(accessibility, camera)).toBeDefined();
+        disposeScene(scene);
+    });
+
     it("supports semantic grouping without changing transforms", async () => {
         const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
         const group = createTransformNode("Semantic group");
@@ -248,6 +277,66 @@ describe("scene accessibility", () => {
         addToScene(scene, child);
         await Promise.resolve();
         expect(getAccessibilityNode(accessibility, child)?.parent).toBeNull();
+        disposeScene(scene);
+    });
+
+    it("reconciles a coalesced semantic parent reversal in final-parent order", async () => {
+        const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+        const parent = createTransformNode("Parent");
+        const child = createTransformNode("Child");
+        const accessibility = createSceneAccessibility(scene);
+        addToScene(scene, parent);
+        addToScene(scene, child);
+        setAccessibilityParent(accessibility, child, parent);
+        await Promise.resolve();
+
+        setAccessibilityParent(accessibility, child, null);
+        setAccessibilityParent(accessibility, parent, child);
+        await Promise.resolve();
+
+        const parentNode = getAccessibilityNode(accessibility, parent)!;
+        const childNode = getAccessibilityNode(accessibility, child)!;
+        expect(accessibility.tree.roots).toEqual([childNode]);
+        expect(childNode.children).toEqual([parentNode]);
+        expect(parentNode.parent).toBe(childNode);
+
+        setAccessibilityTag(parent, { name: "Still usable" });
+        await Promise.resolve();
+        expect(parentNode.tag?.name).toBe("Still usable");
+        disposeScene(scene);
+    });
+
+    it("reconciles a multilevel reversal and retains nodes after an intermediate parent leaves", async () => {
+        const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+        const first = createTransformNode("First");
+        const second = createTransformNode("Second");
+        const third = createTransformNode("Third");
+        const accessibility = createSceneAccessibility(scene);
+        addToScene(scene, first);
+        addToScene(scene, second);
+        addToScene(scene, third);
+        setAccessibilityParent(accessibility, second, first);
+        setAccessibilityParent(accessibility, third, second);
+        await Promise.resolve();
+
+        setAccessibilityParent(accessibility, third, null);
+        setAccessibilityParent(accessibility, second, third);
+        setAccessibilityParent(accessibility, first, second);
+        await Promise.resolve();
+
+        const firstNode = getAccessibilityNode(accessibility, first)!;
+        const secondNode = getAccessibilityNode(accessibility, second)!;
+        const thirdNode = getAccessibilityNode(accessibility, third)!;
+        expect(accessibility.tree.roots).toEqual([thirdNode]);
+        expect(thirdNode.children).toEqual([secondNode]);
+        expect(secondNode.children).toEqual([firstNode]);
+
+        removeFromScene(scene, second);
+        await Promise.resolve();
+        expect(getAccessibilityNode(accessibility, second)).toBeUndefined();
+        expect(accessibility.tree.roots).toEqual([thirdNode, firstNode]);
+        expect(firstNode.parent).toBeNull();
+        expect(thirdNode.parent).toBeNull();
         disposeScene(scene);
     });
 

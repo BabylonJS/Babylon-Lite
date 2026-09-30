@@ -5,9 +5,11 @@ import {
     createSceneHtmlTwin,
     createTransformNode,
     disposeScene,
+    onAccessibilityTreeChanged,
     removeFromScene,
     setAccessibilityTag,
     setParent,
+    updateSceneAccessibility,
 } from "babylon-lite";
 
 function createCanvasScene(canvas: HTMLCanvasElement) {
@@ -71,6 +73,13 @@ const iframeTwin = createSceneHtmlTwin(iframeScene, { label: "Iframe scene" });
 const disposedScene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
 disposeScene(disposedScene);
 
+function mutationTouchesNode(mutation: MutationRecord, node: Node): boolean {
+    if (mutation.target === node || node.contains(mutation.target)) {
+        return true;
+    }
+    return [...mutation.addedNodes, ...mutation.removedNodes].some((changed) => changed === node || changed.contains(node));
+}
+
 Object.assign(window, {
     accessibilityFixture: {
         replace(): void {
@@ -102,6 +111,75 @@ Object.assign(window, {
             } catch (error) {
                 return { error: error instanceof Error ? error.message : String(error), hasBinding: disposedScene._accessibility !== undefined };
             }
+        },
+        async measureSingleNodeUpdate(): Promise<{
+            unrelatedMutations: number;
+            unrelatedIdentityStable: boolean;
+            level: string | null;
+            busy: string | null;
+            details: string | null;
+            removedLevel: string | null;
+            removedBusy: string | null;
+            noOpMutations: number;
+            noOpNotifications: number;
+        }> {
+            const unrelatedBefore = twin.view.element.querySelector<HTMLElement>('[aria-label="Right box"]')!;
+            const mutations: MutationRecord[] = [];
+            const observer = new MutationObserver((records) => mutations.push(...records));
+            observer.observe(twin.view.element, { attributes: true, childList: true, characterData: true, subtree: true });
+
+            setAccessibilityTag(centerBox, {
+                name: "Center box",
+                description: "The center item in the box group",
+                aria: {
+                    "aria-level": 2,
+                    "aria-busy": false,
+                    "aria-details": null,
+                },
+            });
+            await Promise.resolve();
+            await Promise.resolve();
+
+            const updated = twin.view.element.querySelector<HTMLElement>('[aria-label="Center box"]')!;
+            const unrelatedAfter = twin.view.element.querySelector<HTMLElement>('[aria-label="Right box"]')!;
+            const level = updated.getAttribute("aria-level");
+            const busy = updated.getAttribute("aria-busy");
+            const details = updated.getAttribute("aria-details");
+
+            setAccessibilityTag(centerBox, {
+                name: "Center box",
+                description: "The center item in the box group",
+                aria: {
+                    "aria-level": undefined,
+                    "aria-busy": null,
+                },
+            });
+            await Promise.resolve();
+            await Promise.resolve();
+            const removedLevel = updated.getAttribute("aria-level");
+            const removedBusy = updated.getAttribute("aria-busy");
+            const unrelatedMutations = mutations.filter((mutation) => mutationTouchesNode(mutation, unrelatedBefore)).length;
+
+            mutations.length = 0;
+            let noOpNotifications = 0;
+            const unsubscribe = onAccessibilityTreeChanged(twin.accessibility.tree, () => noOpNotifications++);
+            updateSceneAccessibility(twin.accessibility);
+            await Promise.resolve();
+            await Promise.resolve();
+            unsubscribe();
+            observer.disconnect();
+
+            return {
+                unrelatedMutations,
+                unrelatedIdentityStable: unrelatedBefore === unrelatedAfter,
+                level,
+                busy,
+                details,
+                removedLevel,
+                removedBusy,
+                noOpMutations: mutations.length,
+                noOpNotifications,
+            };
         },
         twin,
         secondTwin,

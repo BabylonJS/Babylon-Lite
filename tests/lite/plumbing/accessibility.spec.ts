@@ -71,4 +71,38 @@ test.describe("scene accessibility HTML", () => {
         await expect(page.getByRole("region", { name: "Disposed scene" })).toHaveCount(0);
         await expect(page.locator("#disposed-accessibility")).toBeEmpty();
     });
+
+    test("updates one node without mutating unrelated DOM or publishing no-op refreshes", async ({ page }) => {
+        const result = await page.evaluate(() =>
+            (
+                window as unknown as {
+                    accessibilityFixture: {
+                        measureSingleNodeUpdate(): Promise<{
+                            unrelatedMutations: number;
+                            unrelatedIdentityStable: boolean;
+                            level: string | null;
+                            busy: string | null;
+                            details: string | null;
+                            removedLevel: string | null;
+                            removedBusy: string | null;
+                            noOpMutations: number;
+                            noOpNotifications: number;
+                        }>;
+                    };
+                }
+            ).accessibilityFixture.measureSingleNodeUpdate()
+        );
+
+        expect(result).toEqual({
+            unrelatedMutations: 0,
+            unrelatedIdentityStable: true,
+            level: "2",
+            busy: "false",
+            details: null,
+            removedLevel: null,
+            removedBusy: null,
+            noOpMutations: 0,
+            noOpNotifications: 0,
+        });
+    });
 });

@@ -94,6 +94,8 @@ export function disposeAccessibilityTree(tree: AccessibilityTree): void;
 
 `batchAccessibilityUpdates` delays observer notification until the outermost synchronous batch completes. Nested batches are supported. A dirty batch emits one notification.
 
+An update that leaves metadata, availability, target, parent, and sibling position unchanged does not mark the tree dirty or notify observers.
+
 `onAccessibilityTreeChanged` observes completed mutations. The returned function removes the listener. Observer errors are collected: one error is rethrown directly, and multiple errors are rethrown as an `AggregateError`.
 
 ### HTML twin types
@@ -146,6 +148,8 @@ export interface SceneAccessibility {
 ```
 
 `roots` supplies transform-only or otherwise unretained source objects that cannot be discovered from the scene's retained arrays. Each explicit root includes its complete descendant subtree and the ancestors needed to connect it.
+
+Subtree discovery follows only current parent links. A stale entry in a source's `children` array does not retain a child whose `parent` points elsewhere.
 
 ### Scene projection functions
 
@@ -263,6 +267,8 @@ Meshes and lights are rediscovered from `scene.meshes` and `scene.lights` during
 
 The adapter stores one stable `AccessibilityNode` binding per desired source. Existing bindings are updated in place. Sources that are no longer desired are unobserved, removed from the binding map, and removed from the logical tree.
 
+Existing bindings reconcile in final-parent order. The adapter updates each desired parent before its descendants, so a coalesced hierarchy reversal cannot encounter a temporary cycle from the previous tree.
+
 ### Logical hierarchy
 
 Natural source parentage supplies the default logical parent. A valid explicit semantic parent override takes precedence. A parent participates only while both the source and parent are in the desired source set.
@@ -301,7 +307,7 @@ Property observation preserves the original property shape. The last unsubscribe
 
 Each logical node maps to one `div` with `data-lite-accessibility-node` and one child `span` with `data-lite-accessibility-text`.
 
-On every update, the renderer resets generated attributes and applies the current node state:
+On every update, the renderer compares generated attributes, text, parent, and sibling position with the desired state. It writes only changed values and moves an element only when its parent or order changed.
 
 | Source state                     | HTML result                                                       |
 | -------------------------------- | ----------------------------------------------------------------- |
@@ -318,7 +324,7 @@ The authored ARIA record is applied after derived attributes. Validation keeps `
 
 Readable text is assigned through `textContent`. Name and description are joined with `". "` when both are present. Text such as `<three>` remains text rather than markup.
 
-Children are appended in logical order, which also moves existing DOM elements into their current parent and order. Elements for inactive nodes are removed and deleted from the node-to-element map.
+Children are inserted in logical order relative to the current DOM cursor. Elements that already occupy the correct parent and position remain untouched. Elements for inactive nodes are removed and deleted from the node-to-element map.
 
 The generated region is visually clipped with inline styles while remaining in the document's accessibility representation.
 
@@ -407,6 +413,7 @@ The root package re-exports each public type and function from its single `"."` 
 - reparenting and metadata removal;
 - hidden and disabled derivation;
 - malformed ARIA and conflicting availability rejection;
+- suppression of unchanged update notifications;
 - batched notification;
 - subtree removal and tree disposal.
 
@@ -417,9 +424,10 @@ The root package re-exports each public type and function from its single `"."` 
 - tag validation before publication;
 - source-name fallback and metadata replacement;
 - scene membership, camera, lights, explicit roots, and direct array reconciliation;
+- exclusion of detached children from explicit-root and active-camera traversal;
 - microtask updates for visibility, name, parentage, and tags;
 - stable source bindings;
-- semantic parent override, restoration, removal, and cycle rejection;
+- semantic parent override, final-order reversal, restoration, removal, and cycle rejection;
 - scene cleanup when a tree observer throws;
 - reversible property observation.
 
@@ -434,6 +442,8 @@ The root package re-exports each public type and function from its single `"."` 
 - description-only naming;
 - text escaping through `textContent`;
 - metadata replacement and attribute removal;
+- single-node updates without unrelated attribute, text, or move mutations;
+- no-op scene refreshes without tree notifications or DOM mutations;
 - visibility, reparenting, scene removal, and scene disposal;
 - rejection after scene disposal without leaked DOM or a retained scene binding.
 
