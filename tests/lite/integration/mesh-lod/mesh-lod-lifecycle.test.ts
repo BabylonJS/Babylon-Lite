@@ -95,6 +95,7 @@ async function setup(options?: { residencyHoldFrames?: number }): Promise<Harnes
         frame(dist: number): void {
             binding.update!({ targetWidth: 1280, targetHeight: 720, _camera: cameraAt(dist) });
             binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine);
+            engine._finishOptionalFrame?.(true);
         },
         submit(): void {
             const retirements = engine._retirements;

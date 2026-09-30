@@ -19,7 +19,7 @@ import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
 import type { MeshLoDAsset, MeshLoDInstance } from "./mesh-lod.js";
 import type { MeshLoDAssetRuntime, MeshLoDStreamSelectionStats } from "./mesh-lod-runtime.js";
 import type * as PbrMeshLoDModule from "../material/pbr/pbr-mesh-lod-renderable.js";
-import { stepMeshLoDStreaming, _recoverMeshLoDAsset } from "./mesh-lod-runtime.js";
+import { holdMeshLoDPages, queueMeshLoDFrame, _recoverMeshLoDAsset } from "./mesh-lod-runtime.js";
 import type { MeshLoDPageDemand } from "./mesh-lod-scheduler.js";
 import { createMeshLoDError, isMeshLoDError } from "./mesh-lod-errors.js";
 import type { MeshLoDCamera, MeshLoDSelectionResult } from "./mesh-lod-selection-cpu.js";
@@ -348,5 +348,6 @@ export function driveMeshLoDStreaming(batch: MeshLoDSceneBatch, selections: read
     }
     demand.sort((a, b) => (b.priority !== a.priority ? b.priority - a.priority : a.pageId - b.pageId));
     const stats: MeshLoDStreamSelectionStats = { visibleGroupCount, fallbackGroupCount, maximumSelectedErrorPixels, maximumUnmetErrorPixels };
-    stepMeshLoDStreaming(runtime, demand, [...referenced], stats);
+    const frame = queueMeshLoDFrame(runtime, batch, "cpu", demand, stats);
+    holdMeshLoDPages(runtime, [...referenced], frame, true);
 }

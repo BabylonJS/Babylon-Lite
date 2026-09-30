@@ -353,7 +353,12 @@ export function setMeshLoDDebugView(asset: MeshLoDAsset, view: MeshLoDDebugView)
 
 /** Choose CPU (reference/diagnostic) or GPU (production) selection. */
 export function setMeshLoDSelectionMode(asset: MeshLoDAsset, mode: MeshLoDSelectionMode): void {
-    asset._runtime.selectionMode = resolveSelectionMode(mode);
+    const resolved = resolveSelectionMode(mode);
+    if (asset._runtime.selectionMode !== resolved) {
+        asset._runtime.selectionMode = resolved;
+        asset._runtime._selectionEpoch++;
+        asset._runtime._frameSnapshots.clear();
+    }
 }
 
 /** Return the asset's live, read-only diagnostics object. */

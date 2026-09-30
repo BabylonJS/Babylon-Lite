@@ -39,6 +39,8 @@ function makeFakeAsset(): MeshLoDAsset {
             abortController: new AbortController(),
             generation: 0,
             frameIndex: 0,
+            _selectionEpoch: 0,
+            _frameSnapshots: new Map(),
             streamingPaused: false,
             debugView: "none",
             selectionMode: "gpu",

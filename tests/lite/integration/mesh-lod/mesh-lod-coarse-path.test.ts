@@ -81,6 +81,7 @@ async function renderCoarse(asset: MeshLoDAsset, engine: EngineContext): Promise
     binding.update!({ targetWidth: 800, targetHeight: 600, _camera: fakeCamera() });
     const pass = createMockRenderPass();
     const drawCount = binding.draw(pass as unknown as GPURenderPassEncoder, engine);
+    engine._finishOptionalFrame?.(true);
     return { scene, drawCount };
 }
 

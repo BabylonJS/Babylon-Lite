@@ -42,7 +42,7 @@ import type {
     MeshLoDPageRuntime,
     MeshLoDStreamSelectionStats,
 } from "./mesh-lod-runtime.js";
-import { stepMeshLoDStreaming } from "./mesh-lod-runtime.js";
+import { holdMeshLoDPages, publishMeshLoDGpuReadback, queueMeshLoDFrame } from "./mesh-lod-runtime.js";
 import type { MeshLoDPageDemand } from "./mesh-lod-scheduler.js";
 import selectionWgsl from "./mesh-lod-selection.wgsl?raw";
 
@@ -1288,7 +1288,7 @@ export function disposeMeshLoDGpuBatchState(state: MeshLoDGpuBatchState): void {
 const READBACK_RING = 3;
 
 interface MeshLoDReadbackSlot {
-    readonly buffer: GPUBuffer;
+    buffer: GPUBuffer;
     busy: boolean;
 }
 
@@ -1296,9 +1296,11 @@ interface MeshLoDReadbackSlot {
  *  the decode/apply closure run once the frame submits. */
 interface MeshLoDReadbackJob {
     readonly control: GPUBuffer;
+    readonly selected: GPUBuffer;
     readonly slot: MeshLoDReadbackSlot;
     readonly bytes: number;
-    readonly apply: (control: Uint32Array) => void;
+    readonly controlBytes: number;
+    readonly apply: (control: Uint32Array, selected: Uint32Array) => void;
 }
 
 /** Reserve a free MAP_READ staging slot from the batch's small ring (growing it up to
@@ -1307,6 +1309,10 @@ interface MeshLoDReadbackJob {
 function acquireMeshLoDReadbackSlot(engine: EngineContext, state: MeshLoDGpuBatchState, bytes: number): MeshLoDReadbackSlot | null {
     for (const slot of state.readbackSlots) {
         if (!slot.busy) {
+            if (slot.buffer.size < bytes) {
+                slot.buffer.destroy();
+                slot.buffer = engine._device.createBuffer({ label: "mesh-lod-readback", size: bytes, usage: BU.MAP_READ | BU.COPY_DST });
+            }
             slot.busy = true;
             return slot;
         }
@@ -1328,9 +1334,9 @@ async function pumpMeshLoDReadback(job: MeshLoDReadbackJob): Promise<void> {
     try {
         await Promise.resolve();
         await slot.buffer.mapAsync(GPUMapMode.READ, 0, job.bytes);
-        const control = new Uint32Array(slot.buffer.getMappedRange(0, job.bytes).slice(0));
+        const contents = new Uint32Array(slot.buffer.getMappedRange(0, job.bytes).slice(0));
         slot.buffer.unmap();
-        job.apply(control);
+        job.apply(contents.subarray(0, job.controlBytes / 4), contents.subarray(job.controlBytes / 4));
     } catch {
         // Device lost / disposed / destroyed staging — drop this frame's readback.
     } finally {
@@ -1344,8 +1350,27 @@ async function pumpMeshLoDReadback(job: MeshLoDReadbackJob): Promise<void> {
  *  reported on the next synchronous update. A stale readback (disposed asset, or a
  *  generation bump from disposal/device recovery) is dropped. Exported as the internal
  *  test seam that stands in for the real mapAsync resolution. */
-export function applyMeshLoDGpuReadback(runtime: MeshLoDAssetRuntime, state: MeshLoDGpuBatchState, control: Uint32Array, pageCount: number, generation: number): void {
-    if (runtime.disposed || runtime.generation !== generation) {
+export function applyMeshLoDGpuReadback(
+    runtime: MeshLoDAssetRuntime,
+    state: MeshLoDGpuBatchState,
+    control: Uint32Array,
+    pageCount: number,
+    generation: number,
+    selected: Uint32Array = new Uint32Array(0),
+    sourceFrame = runtime.frameIndex,
+    selectionEpoch = runtime._selectionEpoch
+): void {
+    const snapshot = runtime._frameSnapshots.get(state);
+    if (
+        runtime.disposed ||
+        runtime.generation !== generation ||
+        state.device !== runtime.engine._device ||
+        runtime.selectionMode !== "gpu" ||
+        selectionEpoch !== runtime._selectionEpoch ||
+        snapshot?.mode !== "gpu" ||
+        sourceFrame > snapshot.frame ||
+        sourceFrame < snapshot.lastReadbackFrame
+    ) {
         return;
     }
     const records = runtime.pageRecords;
@@ -1356,25 +1381,24 @@ export function applyMeshLoDGpuReadback(runtime: MeshLoDAssetRuntime, state: Mes
         });
         return;
     }
-    // Frame references: every currently gpu-resident page (pinned + streamed fine) may
-    // be read by the in-flight command buffer, so hold it and keep its LRU age fresh.
-    const referenced: number[] = [];
-    const pages = runtime.gpu.pages;
-    for (let i = 0; i < pages.length; i++) {
-        if (pages[i]!.state === "gpu-resident") {
-            referenced.push(i);
+    const used = new Set<number>();
+    for (let i = 0; i < Math.min(decoded.selectedClusterCount, selected.length / 2); i++) {
+        const pageId = runtime.clusters[selected[i * 2]!]?.pageId;
+        if (pageId !== undefined) {
+            used.add(pageId);
         }
     }
-    const diag = runtime.diagnostics as { renderedTriangleCount: number; selectedMeshletCount: number };
-    diag.renderedTriangleCount = decoded.renderedTriangleCount;
-    diag.selectedMeshletCount = decoded.selectedClusterCount;
     const stats: MeshLoDStreamSelectionStats = {
         visibleGroupCount: decoded.visibleGroupCount,
         fallbackGroupCount: decoded.fallbackGroupCount,
         maximumSelectedErrorPixels: decoded.maximumSelectedErrorPixels,
         maximumUnmetErrorPixels: decoded.maximumUnmetErrorPixels,
     };
-    stepMeshLoDStreaming(runtime, decoded.demand, referenced, stats);
+    if (publishMeshLoDGpuReadback(runtime, state, sourceFrame, decoded.demand, stats, [...used])) {
+        const diag = runtime.diagnostics as { renderedTriangleCount: number; selectedMeshletCount: number };
+        diag.renderedTriangleCount = decoded.renderedTriangleCount;
+        diag.selectedMeshletCount = decoded.selectedClusterCount;
+    }
 }
 
 /** Camera + selection inputs for one frame's GPU selection, produced by the scene from
@@ -1539,7 +1563,8 @@ export function getMeshLoDUpdateBatch(signature: RenderTargetSignature): MeshLoD
             for (let i = 0; i < count; i++) {
                 const rb = jobs[i]!.readback;
                 if (rb) {
-                    encoder.copyBufferToBuffer(rb.control, 0, rb.slot.buffer, 0, rb.bytes);
+                    encoder.copyBufferToBuffer(rb.control, 0, rb.slot.buffer, 0, rb.controlBytes);
+                    encoder.copyBufferToBuffer(rb.selected, 0, rb.slot.buffer, rb.controlBytes, rb.bytes - rb.controlBytes);
                     void pumpMeshLoDReadback(rb);
                 }
             }
@@ -1591,6 +1616,9 @@ export function queueMeshLoDGpuSelection(
     }
     const pipelines = getMeshLoDSelectionPipelines(engine);
     const assetBuffers = getMeshLoDGpuAssetBuffers(engine, runtime);
+    const sourceFrame = queueMeshLoDFrame(runtime, batchState, "gpu", null);
+    const advertised = runtime.gpu.pages.filter((page) => page.state === "gpu-resident").map((page) => page.id);
+    holdMeshLoDPages(runtime, advertised, sourceFrame, false);
     const instanceCount = uploadMeshLoDInstances(engine, instanceState, instances);
     syncMeshLoDPageState(engine, assetBuffers, runtime);
     // A newly uploaded fine page can change the cut on this frame. Every selected
@@ -1624,16 +1652,20 @@ export function queueMeshLoDGpuSelection(
 
     // Reserve a staging slot and build the demand/diagnostics readback for this frame.
     // Skipped only when every ring slot still has a map in flight.
-    const readbackBytes = batchState.controlWords * 4;
+    const controlBytes = batchState.controlWords * 4;
+    const readbackBytes = controlBytes + batchState.selectedCapacity * 8;
     const readbackSlot = acquireMeshLoDReadbackSlot(engine, batchState, readbackBytes);
     const generation = runtime.generation;
+    const selectionEpoch = runtime._selectionEpoch;
     const pageCount = assetBuffers.pageCount;
     const readback: MeshLoDReadbackJob | undefined = readbackSlot
         ? {
               control: batchState.controlBuffer!,
+              selected: batchState.selectedBuffer!,
               slot: readbackSlot,
               bytes: readbackBytes,
-              apply: (control) => applyMeshLoDGpuReadback(runtime, batchState, control, pageCount, generation),
+              controlBytes,
+              apply: (control, selected) => applyMeshLoDGpuReadback(runtime, batchState, control, pageCount, generation, selected, sourceFrame, selectionEpoch),
           }
         : undefined;
 

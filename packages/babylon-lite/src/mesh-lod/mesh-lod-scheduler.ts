@@ -296,7 +296,7 @@ function onRetryTimer(scheduler: MeshLoDRequestScheduler, request: MeshLoDPageRe
 function pruneObsolete(scheduler: MeshLoDRequestScheduler): void {
     const cutoff = scheduler.frame - scheduler.obsoleteRequestGraceFrames;
     for (const request of [...scheduler.requests.values()]) {
-        if (request.lastDemandFrame <= cutoff) {
+        if (request.lastDemandFrame < scheduler.frame && request.lastDemandFrame <= cutoff) {
             cancelRequest(scheduler, request);
         }
     }

@@ -108,7 +108,9 @@ async function buildBinding(engine: EngineContext, scene: SceneContext): Promise
 
 function frame(engine: EngineContext, binding: DrawBinding, dist: number): number {
     binding.update!({ targetWidth: 1280, targetHeight: 720, _camera: cameraAt(dist) });
-    return binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine);
+    const draws = binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine);
+    engine._finishOptionalFrame?.(true);
+    return draws;
 }
 
 function submit(engine: EngineContext): void {

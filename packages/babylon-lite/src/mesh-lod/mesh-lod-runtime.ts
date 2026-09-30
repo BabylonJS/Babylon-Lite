@@ -27,12 +27,13 @@ import {
     createMeshLoDCpuPageCache,
     clearMeshLoDCpuPageCache,
     cpuCacheUsedBytes,
-    evictMeshLoDToBudget,
+    evictMeshLoDPage,
     floorToBlocks,
     getMeshLoDCpuPage,
     pinnedAllocationBytes,
     putMeshLoDCpuPage,
     reserveMeshLoDArenaRun,
+    retireMeshLoDToBudget,
     setMeshLoDCpuCacheBudget,
 } from "./mesh-lod-cache.js";
 import { decodeMeshLoDPage, getMeshLoDPageDecoder } from "./mesh-lod-page-decoder.js";
@@ -41,7 +42,7 @@ import type { MeshoptDecoderModule } from "../loader-gltf/meshopt-decode.js";
 import { addMeshLoDInstanceToScene, removeMeshLoDInstanceFromScene } from "./mesh-lod-scene.js";
 import type { MeshLoDGpuAssetBuffers, MeshLoDGpuSelectedPair } from "./mesh-lod-selection-gpu.js";
 import type { MeshLoDPageDemand, MeshLoDRequestScheduler, MeshLoDSchedulerTimers } from "./mesh-lod-scheduler.js";
-import { createMeshLoDRequestScheduler, disposeMeshLoDRequestScheduler, schedulerQueuedCount, setMeshLoDSchedulerConcurrency, submitMeshLoDDemand } from "./mesh-lod-scheduler.js";
+import { createMeshLoDRequestScheduler, disposeMeshLoDRequestScheduler, schedulerQueuedCount, submitMeshLoDDemand } from "./mesh-lod-scheduler.js";
 import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 /** Effective, fully-resolved runtime settings (defaults applied, values validated). */
 export interface MeshLoDEffectiveSettings {
@@ -269,12 +270,25 @@ export interface MeshLoDAssetRuntime {
     generation: number;
     /** Monotonic frame counter used by selection/streaming hysteresis. */
     frameIndex: number;
+    /** @internal Invalidates readbacks recorded under a different CPU/GPU selection mode. */
+    _selectionEpoch: number;
+    /** @internal Feature-owned per-producer streaming observations; entries expire when a
+     *  producer stops contributing to rendered frames. */
+    _frameSnapshots: Map<object, MeshLoDFrameSnapshot>;
     streamingPaused: boolean;
     debugView: MeshLoDDebugView;
     selectionMode: MeshLoDSelectionMode;
     /** Next id handed to `createMeshLoDInstance`. */
     nextInstanceId: number;
     disposed: boolean;
+}
+
+interface MeshLoDFrameSnapshot {
+    frame: number;
+    mode: MeshLoDSelectionMode;
+    demand: MeshLoDPageDemand[];
+    stats: MeshLoDStreamSelectionStats | undefined;
+    lastReadbackFrame: number;
 }
 
 /** Writable diagnostics view used while updating the live snapshot. */
@@ -481,6 +495,8 @@ export async function _loadMeshLoD(
             abortController: new AbortController(),
             generation: 0,
             frameIndex: 0,
+            _selectionEpoch: 0,
+            _frameSnapshots: new Map(),
             streamingPaused: false,
             debugView: "none",
             selectionMode,
@@ -696,43 +712,25 @@ export function stepMeshLoDStreaming(
     runtime: MeshLoDAssetRuntime,
     demand: readonly MeshLoDPageDemand[],
     referencedPages: readonly number[],
-    selectionStats?: MeshLoDStreamSelectionStats
+    selectionStats?: MeshLoDStreamSelectionStats,
+    advanceFrame = true
 ): void {
     if (runtime.disposed) {
         return;
     }
-    const frame = ++runtime.frameIndex;
+    const frame = advanceFrame ? ++runtime.frameIndex : runtime.frameIndex;
 
     // Apply control changes that may have arrived via the public setters since the
     // previous frame.
     setMeshLoDCpuCacheBudget(runtime.cpuPageCache, runtime.settings.cpuPageCacheBytes);
     if (runtime.scheduler) {
-        setMeshLoDSchedulerConcurrency(runtime.scheduler, runtime.settings.maxConcurrentRequests);
+        runtime.scheduler.maxConcurrentRequests = runtime.settings.maxConcurrentRequests;
     }
 
     // Frame references: a page that contributed a rendered cluster is protected from
     // eviction until this frame's command buffer has been submitted (§14.1).
     if (referencedPages.length > 0) {
-        const held: number[] = [];
-        for (const id of referencedPages) {
-            const page = runtime.gpu.pages[id];
-            if (!page) {
-                continue;
-            }
-            page.frameRefCount++;
-            page.lastUsedFrame = frame;
-            held.push(id);
-        }
-        if (held.length > 0) {
-            retireGpuResources(runtime.engine, () => {
-                for (const id of held) {
-                    const page = runtime.gpu.pages[id];
-                    if (page && page.frameRefCount > 0) {
-                        page.frameRefCount--;
-                    }
-                }
-            });
-        }
+        holdMeshLoDPages(runtime, referencedPages, frame, true);
     }
 
     // Record demand priority for the eviction tie-break, then feed the scheduler.
@@ -753,8 +751,10 @@ export function stepMeshLoDStreaming(
         residencyHoldFrames: runtime.settings.residencyHoldFrames,
     };
     const evicted: number[] = [];
-    evictMeshLoDToBudget(runtime.gpu.arena, runtime.gpu.pages, runtime.pageRecords, policy, evicted);
-    applyStreamedEvictions(runtime, evicted);
+    if (advanceFrame) {
+        retireMeshLoDToBudget(runtime.gpu.arena, runtime.gpu.pages, runtime.pageRecords, policy, evicted);
+        applyStreamedEvictions(runtime, evicted);
+    }
 
     if (selectionStats) {
         const d = runtime.diagnostics as MeshLoDMutableDiagnostics;
@@ -767,6 +767,235 @@ export function stepMeshLoDStreaming(
         (runtime.diagnostics as MeshLoDMutableDiagnostics).frameIndex = frame;
     }
     refreshMeshLoDStreamingDiagnostics(runtime);
+}
+
+/** Keep allocations used by this submission alive until its fence drains. GPU work
+ *  initially protects every advertised resident page, but only feedback from actual
+ *  selected clusters (or synchronous CPU selection) updates LRU age. */
+export function holdMeshLoDPages(runtime: MeshLoDAssetRuntime, ids: readonly number[], frame: number, selected: boolean): void {
+    const held: MeshLoDPageRuntime[] = [];
+    const generation = runtime.generation;
+    const coordinator = _meshLoDFrameCoordinators?.get(runtime.engine);
+    for (const id of new Set(ids)) {
+        const page = runtime.gpu.pages[id];
+        if (page?.state !== "gpu-resident") {
+            continue;
+        }
+        page.frameRefCount++;
+        if (selected) {
+            if (frame === runtime.frameIndex + 1 && coordinator?.pending.has(runtime)) {
+                let prior = coordinator.priorUsage.get(runtime);
+                if (!prior) {
+                    prior = new Map();
+                    coordinator.priorUsage.set(runtime, prior);
+                }
+                if (!prior.has(page)) {
+                    prior.set(page, page.lastUsedFrame);
+                }
+            }
+            page.lastUsedFrame = Math.max(page.lastUsedFrame, frame);
+        }
+        held.push(page);
+    }
+    if (held.length === 0) {
+        return;
+    }
+    retireGpuResources(runtime.engine, () => {
+        for (const page of held) {
+            if (page.frameRefCount > 0) {
+                page.frameRefCount--;
+            }
+            if (page.frameRefCount === 0 && page.state === "evicting" && !runtime.disposed && runtime.generation === generation && runtime.gpu.pages[page.id] === page) {
+                const evicted: number[] = [];
+                evictMeshLoDPage(runtime.gpu.arena, page, evicted);
+                applyStreamedEvictions(runtime, evicted);
+                refreshMeshLoDStreamingDiagnostics(runtime);
+            }
+        }
+    });
+}
+
+/** Collect one producer's demand until the enclosing engine frame submits. A missing
+ *  GPU readback retains its last snapshot, whereas an explicit empty result clears it. */
+export function queueMeshLoDFrame(
+    runtime: MeshLoDAssetRuntime,
+    producer: object,
+    mode: MeshLoDSelectionMode,
+    demand: readonly MeshLoDPageDemand[] | null,
+    stats?: MeshLoDStreamSelectionStats
+): number {
+    const frame = runtime.frameIndex + 1;
+    if (runtime.disposed) {
+        return frame;
+    }
+    const engine = runtime.engine;
+    const coordinators = (_meshLoDFrameCoordinators ??= new WeakMap());
+    let coordinator = coordinators.get(engine);
+    if (!coordinator) {
+        coordinator = { pending: new Set(), tracked: new Set(), priorUsage: new Map(), priorSnapshots: new Map() };
+        coordinators.set(engine, coordinator);
+        engine._finishOptionalFrame = (submitted) => (submitted ? finishMeshLoDFrame(engine) : abortMeshLoDFrame(engine));
+    }
+    const existing = runtime._frameSnapshots.get(producer);
+    let prior = coordinator.priorSnapshots.get(runtime);
+    if (!prior) {
+        prior = new Map();
+        coordinator.priorSnapshots.set(runtime, prior);
+    }
+    if (!prior.has(producer)) {
+        prior.set(producer, existing);
+    }
+    const combined = demand && existing?.frame === frame && existing.mode === mode ? mergeMeshLoDDemand([existing.demand, demand]) : demand;
+    runtime._frameSnapshots.set(producer, {
+        frame,
+        mode,
+        demand: combined ? [...combined] : existing?.mode === mode ? existing.demand : [],
+        stats: stats ?? (existing?.mode === mode ? existing.stats : undefined),
+        lastReadbackFrame: mode === "gpu" && demand !== null ? frame : existing?.mode === mode ? existing.lastReadbackFrame : 0,
+    });
+    coordinator.pending.add(runtime);
+    coordinator.tracked.add(runtime);
+    return frame;
+}
+
+interface MeshLoDFrameCoordinator {
+    readonly pending: Set<MeshLoDAssetRuntime>;
+    readonly tracked: Set<MeshLoDAssetRuntime>;
+    readonly priorUsage: Map<MeshLoDAssetRuntime, Map<MeshLoDPageRuntime, number>>;
+    readonly priorSnapshots: Map<MeshLoDAssetRuntime, Map<object, MeshLoDFrameSnapshot | undefined>>;
+}
+
+let _meshLoDFrameCoordinators: WeakMap<EngineContext, MeshLoDFrameCoordinator> | null = null;
+
+function mergeMeshLoDDemand(snapshots: readonly (readonly MeshLoDPageDemand[])[]): MeshLoDPageDemand[] {
+    const priorityByPage = new Map<number, number>();
+    for (const demand of snapshots) {
+        for (const { pageId, priority } of demand) {
+            const old = priorityByPage.get(pageId);
+            if (old === undefined || priority > old) {
+                priorityByPage.set(pageId, priority);
+            }
+        }
+    }
+    return [...priorityByPage].map(([pageId, priority]) => ({ pageId, priority })).sort((a, b) => b.priority - a.priority || a.pageId - b.pageId);
+}
+
+function mergedMeshLoDFrame(runtime: MeshLoDAssetRuntime, frame: number): { demand: MeshLoDPageDemand[]; stats: MeshLoDStreamSelectionStats } {
+    const demanded: MeshLoDPageDemand[][] = [];
+    const stats = {
+        visibleGroupCount: 0,
+        fallbackGroupCount: 0,
+        maximumSelectedErrorPixels: 0,
+        maximumUnmetErrorPixels: 0,
+    };
+    for (const snapshot of runtime._frameSnapshots.values()) {
+        if (snapshot.frame !== frame || snapshot.mode !== runtime.selectionMode) {
+            continue;
+        }
+        demanded.push(snapshot.demand);
+        if (snapshot.stats) {
+            stats.visibleGroupCount = Math.max(stats.visibleGroupCount, snapshot.stats.visibleGroupCount);
+            stats.fallbackGroupCount = Math.max(stats.fallbackGroupCount, snapshot.stats.fallbackGroupCount);
+            stats.maximumSelectedErrorPixels = Math.max(stats.maximumSelectedErrorPixels, snapshot.stats.maximumSelectedErrorPixels);
+            stats.maximumUnmetErrorPixels = Math.max(stats.maximumUnmetErrorPixels, snapshot.stats.maximumUnmetErrorPixels);
+        }
+    }
+    return {
+        demand: mergeMeshLoDDemand(demanded).filter(({ pageId }) => {
+            const page = runtime.gpu.pages[pageId];
+            return (
+                page &&
+                !runtime.pageRecords[pageId]!.pinned &&
+                (page.state === "unrequested" || page.state === "queued" || page.state === "fetching" || page.state === "retry-wait")
+            );
+        }),
+        stats,
+    };
+}
+
+/** Called once after each successful engine/XR submit, not per batch/readback. */
+export function finishMeshLoDFrame(engine: EngineContext): void {
+    const coordinator = _meshLoDFrameCoordinators?.get(engine);
+    if (!coordinator) {
+        return;
+    }
+    for (const runtime of coordinator.tracked) {
+        if (runtime.disposed) {
+            runtime._frameSnapshots.clear();
+            coordinator.tracked.delete(runtime);
+            continue;
+        }
+        const frame = runtime.frameIndex + 1;
+        for (const [key, snapshot] of runtime._frameSnapshots) {
+            if (snapshot.frame !== frame || snapshot.mode !== runtime.selectionMode) {
+                runtime._frameSnapshots.delete(key);
+            }
+        }
+        const merged = mergedMeshLoDFrame(runtime, frame);
+        stepMeshLoDStreaming(runtime, merged.demand, [], merged.stats);
+        if (!coordinator.pending.has(runtime) && !runtime.scheduler?.requests.size) {
+            coordinator.tracked.delete(runtime);
+        }
+    }
+    coordinator.pending.clear();
+    coordinator.priorUsage.clear();
+    coordinator.priorSnapshots.clear();
+}
+
+function abortMeshLoDFrame(engine: EngineContext): void {
+    const coordinator = _meshLoDFrameCoordinators?.get(engine);
+    if (!coordinator) {
+        return;
+    }
+    for (const runtime of coordinator.pending) {
+        for (const [page, age] of coordinator.priorUsage.get(runtime) ?? []) {
+            page.lastUsedFrame = age;
+        }
+        for (const [producer, previous] of coordinator.priorSnapshots.get(runtime) ?? []) {
+            if (previous) {
+                runtime._frameSnapshots.set(producer, previous);
+            } else {
+                runtime._frameSnapshots.delete(producer);
+            }
+        }
+        if (!runtime.scheduler?.requests.size) {
+            coordinator.tracked.delete(runtime);
+        }
+    }
+    coordinator.pending.clear();
+    coordinator.priorUsage.clear();
+    coordinator.priorSnapshots.clear();
+}
+
+/** Accept a GPU observation without incrementing the frame clock. A completion from
+ *  an older frame may renew demand for a still-active producer, but never overwrites a
+ *  newer observation or updates LRU age using completion time. */
+export function publishMeshLoDGpuReadback(
+    runtime: MeshLoDAssetRuntime,
+    producer: object,
+    sourceFrame: number,
+    demand: readonly MeshLoDPageDemand[],
+    stats: MeshLoDStreamSelectionStats,
+    selectedPages: readonly number[]
+): boolean {
+    const snapshot = runtime._frameSnapshots.get(producer);
+    if (runtime.disposed || runtime.selectionMode !== "gpu" || !snapshot || snapshot.mode !== "gpu" || sourceFrame > snapshot.frame || sourceFrame < snapshot.lastReadbackFrame) {
+        return false;
+    }
+    snapshot.demand = sourceFrame === snapshot.lastReadbackFrame ? mergeMeshLoDDemand([snapshot.demand, demand]) : [...demand];
+    snapshot.lastReadbackFrame = sourceFrame;
+    snapshot.stats = stats;
+    for (const id of new Set(selectedPages)) {
+        const page = runtime.gpu.pages[id];
+        if (page?.state === "gpu-resident") {
+            page.lastUsedFrame = Math.max(page.lastUsedFrame, sourceFrame);
+        }
+    }
+    if (snapshot.frame === runtime.frameIndex) {
+        const merged = mergedMeshLoDFrame(runtime, runtime.frameIndex);
+        stepMeshLoDStreaming(runtime, merged.demand, [], merged.stats, false);
+    }
+    return true;
 }
 
 /** @internal Cancel every outstanding fine-page request and drop the scheduler. Called
@@ -785,6 +1014,11 @@ export function _disposeMeshLoDScheduler(runtime: MeshLoDAssetRuntime): void {
  *  non-drawable), so retained CPU page bytes and decoded indices are released now.
  *  Idempotent-safe: repeated disposal is guarded by the caller. */
 export function _disposeMeshLoDResources(runtime: MeshLoDAssetRuntime): void {
+    runtime._frameSnapshots.clear();
+    const coordinator = _meshLoDFrameCoordinators?.get(runtime.engine);
+    coordinator?.tracked.delete(runtime);
+    coordinator?.priorUsage.delete(runtime);
+    coordinator?.priorSnapshots.delete(runtime);
     const engine = runtime.engine;
     const arenaBuffer = runtime.gpu?.arena.buffer;
     const selection = runtime.gpuSelection;
@@ -820,6 +1054,7 @@ export function _recoverMeshLoDAsset(engine: EngineContext, runtime: MeshLoDAsse
     }
     // Invalidate any in-flight completion from the lost device, then drop the stale scheduler.
     runtime.generation += 1;
+    runtime._frameSnapshots.clear();
     _disposeMeshLoDScheduler(runtime);
 
     const pinnedBytes = pinnedAllocationBytes(runtime.pageRecords);

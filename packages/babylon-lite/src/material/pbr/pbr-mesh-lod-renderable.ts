@@ -30,6 +30,7 @@ import { createSolidTexture2D } from "../../texture/solid-texture.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
 import type { MeshLoDSceneBatch } from "../../mesh-lod/mesh-lod-scene.js";
 import { driveMeshLoDStreaming, getMeshLoDSelectionCamera, selectMeshLoDBatch } from "../../mesh-lod/mesh-lod-scene.js";
+import { queueMeshLoDFrame } from "../../mesh-lod/mesh-lod-runtime.js";
 import { createMeshLoDError } from "../../mesh-lod/mesh-lod-errors.js";
 import type { MeshLoDGpuBatchState, MeshLoDGpuFrameParams, MeshLoDGpuInstanceState, MeshLoDUpdateBatch } from "../../mesh-lod/mesh-lod-selection-gpu.js";
 import { meshLoDConeCullMargin } from "../../mesh-lod/mesh-lod-selection-math.js";
@@ -493,6 +494,14 @@ function buildGpuFrame(batch: MeshLoDSceneBatch, camera: Camera, context: DrawUp
 function updatePacketGpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet: MeshLoDBatchPacket, context: DrawUpdateContext, updateBatch: MeshLoDUpdateBatch): void {
     const camera = context._camera;
     if (!camera || batch.instances.length === 0) {
+        if (packet.gpuBatchState) {
+            queueMeshLoDFrame(batch.asset._runtime, packet.gpuBatchState, "gpu", [], {
+                visibleGroupCount: 0,
+                fallbackGroupCount: 0,
+                maximumSelectedErrorPixels: 0,
+                maximumUnmetErrorPixels: 0,
+            });
+        }
         setActiveDraw(engine, packet, null, null);
         return;
     }
@@ -603,6 +612,10 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
         activeBindGroup: null,
         activeIndirectBuffer: null,
         dispose: () => {
+            runtime._frameSnapshots.delete(batch);
+            if (packet.gpuBatchState) {
+                runtime._frameSnapshots.delete(packet.gpuBatchState);
+            }
             materialUbo.destroy();
             packet.drawVertexBuffer.destroy();
             packet.instanceBuffer.destroy();

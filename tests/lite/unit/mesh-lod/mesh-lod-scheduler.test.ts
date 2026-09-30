@@ -287,6 +287,25 @@ describe("MeshLoD scheduler — concurrency, dedup, priority", () => {
 });
 
 describe("MeshLoD scheduler — cancellation & staleness", () => {
+    it("keeps current-frame queued and fetching requests with zero grace, then removes undemanded work on the next frame", async () => {
+        const h = setup({ maxConcurrentRequests: 1, obsoleteRequestGraceFrames: 0 });
+        submitMeshLoDDemand(
+            h.scheduler,
+            demand([
+                [10, 2],
+                [11, 1],
+            ]),
+            1
+        );
+        expect(h.fetch.order).toEqual([10]);
+        expect(h.scheduler.requests.has(10)).toBe(true);
+        expect(h.scheduler.requests.has(11)).toBe(true);
+        submitMeshLoDDemand(h.scheduler, [], 2);
+        expect(h.scheduler.requests.size).toBe(0);
+        await flush();
+        expect(h.fetch.active()).toBe(0);
+    });
+
     it("removes a queued page after two undemanded frames", async () => {
         const h = setup({ maxConcurrentRequests: 1, obsoleteRequestGraceFrames: 2 });
         submitMeshLoDDemand(

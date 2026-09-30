@@ -30,6 +30,7 @@ import {
 } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
 import type { MeshLoDGpuFrameParams, MeshLoDGpuSelectionModelInput, MeshLoDGpuSelectionParams } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
 import type { MeshLoDAssetRuntime } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-runtime.js";
+import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine.js";
 import type { RenderTargetSignature } from "../../../../packages/babylon-lite/src/engine/render-target.js";
 import type { DrawBinding } from "../../../../packages/babylon-lite/src/render/renderable.js";
 import { createMockEngine } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
@@ -272,7 +273,7 @@ describe("GPU selection model — bounded transient capacity", () => {
     });
 });
 
-function fakeRuntime(h: FixtureHierarchy): MeshLoDAssetRuntime {
+function fakeRuntime(h: FixtureHierarchy, engine: EngineContext): MeshLoDAssetRuntime {
     const pages = h.pageStoredBytes.map((_, id) => ({
         id,
         state: "gpu-resident" as const,
@@ -285,6 +286,11 @@ function fakeRuntime(h: FixtureHierarchy): MeshLoDAssetRuntime {
         frameRefCount: 0,
     }));
     return {
+        engine,
+        frameIndex: 0,
+        _selectionEpoch: 0,
+        _frameSnapshots: new Map(),
+        selectionMode: "gpu",
         hierarchyNodes: h.nodes.map(toNode),
         groups: h.groups.map(toGroup),
         clusters: h.clusters.map(toCluster),
@@ -314,7 +320,7 @@ describe("GPU selection orchestration (mock device)", () => {
 
     it("submits one compute pass with selection + expansion dispatches and resets", () => {
         const { engine, encoder } = createMockEngine();
-        const runtime = fakeRuntime(fixture.hierarchy);
+        const runtime = fakeRuntime(fixture.hierarchy, engine);
         const instanceState = createMeshLoDGpuInstanceState(fixture.hierarchy.groups.length);
         const batchState = createMeshLoDGpuBatchState();
         const signature = {} as RenderTargetSignature;
@@ -348,7 +354,7 @@ describe("GPU selection orchestration (mock device)", () => {
 
     it("returns null and queues nothing for an empty batch", () => {
         const { engine, encoder } = createMockEngine();
-        const runtime = fakeRuntime(fixture.hierarchy);
+        const runtime = fakeRuntime(fixture.hierarchy, engine);
         const instanceState = createMeshLoDGpuInstanceState(fixture.hierarchy.groups.length);
         const batchState = createMeshLoDGpuBatchState();
         const updateBatch = getMeshLoDUpdateBatch({} as RenderTargetSignature);

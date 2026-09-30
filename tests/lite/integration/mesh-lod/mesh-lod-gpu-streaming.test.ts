@@ -13,7 +13,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadMeshLoD, createMeshLoDInstance } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import { loadMeshLoD, createMeshLoDInstance, setMeshLoDCacheBudget } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import { arenaUsedBytes } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-cache.js";
 import { addMeshLoDInstanceToScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
 import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
 import {
@@ -90,10 +91,10 @@ interface GpuHarness {
     drawBuffers(): number;
 }
 
-async function setup(options: { limitBytes?: number; instanceCount?: number; visibleCount?: number } = {}): Promise<GpuHarness> {
+async function setup(options: { limitBytes?: number; instanceCount?: number; visibleCount?: number; residencyHoldFrames?: number } = {}): Promise<GpuHarness> {
     const mock = createMockEngine(options.limitBytes === undefined ? undefined : createMockDevice(options.limitBytes));
     const { engine, encoder } = mock;
-    const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "gpu" });
+    const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: "gpu", residencyHoldFrames: options.residencyHoldFrames });
     const scene = fakeScene(engine);
     const instances: MeshLoDInstance[] = [];
     const material = {} as PbrMaterialProps;
@@ -120,6 +121,7 @@ async function setup(options: { limitBytes?: number; instanceCount?: number; vis
             binding.update!(CONTEXT);
             updateBatch.flush(engine);
             binding.draw(createMockRenderPass() as unknown as GPURenderPassEncoder, engine);
+            engine._finishOptionalFrame?.(true);
         },
         submit(): void {
             const retirements = engine._retirements;
@@ -163,6 +165,51 @@ afterEach(() => {
 });
 
 describe("MeshLoD GPU streaming — demand readback + adaptive draw growth", () => {
+    it("ages only selected fine pages and retires unused GPU-resident pages after the last in-flight fence", async () => {
+        harness = await setup({ residencyHoldFrames: 1 });
+        const runtime = harness.runtime;
+        const pinnedBytes = arenaUsedBytes(runtime.gpu.arena);
+        harness.flush();
+        const state = harness.batchState();
+        const finePageId = runtime.pageRecords.findIndex((record) => !record.pinned);
+        applyMeshLoDGpuReadback(
+            runtime,
+            state,
+            syntheticControl(state, finePageId, 2048, { count: 0, visible: 1, triangles: 1, fallback: 0 }),
+            runtime.gpu.pages.length,
+            runtime.generation
+        );
+        await harness.settle();
+        harness.submit();
+        const page = runtime.gpu.pages[finePageId]!;
+        expect(page.state).toBe("gpu-resident");
+        const usedAtUpload = page.lastUsedFrame;
+        const fineClusterId = runtime.clusters.findIndex((cluster) => cluster.pageId === finePageId);
+        expect(fineClusterId).toBeGreaterThanOrEqual(0);
+
+        harness.flush();
+        expect(page.lastUsedFrame).toBe(usedAtUpload);
+        applyMeshLoDGpuReadback(
+            runtime,
+            state,
+            syntheticControl(state, finePageId, 0, { count: 1, visible: 1, triangles: 1, fallback: 0 }),
+            runtime.gpu.pages.length,
+            runtime.generation,
+            new Uint32Array([fineClusterId, 0]),
+            runtime.frameIndex
+        );
+        expect(page.lastUsedFrame).toBe(runtime.frameIndex);
+        harness.submit();
+
+        setMeshLoDCacheBudget(harness.asset, pinnedBytes);
+        harness.flush();
+        expect(page.state).toBe("evicting");
+        expect(arenaUsedBytes(runtime.gpu.arena)).toBeGreaterThan(pinnedBytes);
+        harness.submit();
+        expect(page.state).toBe("unrequested");
+        expect(arenaUsedBytes(runtime.gpu.arena)).toBe(pinnedBytes);
+    });
+
     it("copies the control buffer to a MAP_READ staging slot after the compute passes", async () => {
         harness = await setup();
         harness.flush();
@@ -171,9 +218,10 @@ describe("MeshLoD GPU streaming — demand readback + adaptive draw growth", () 
         expect(copy).toBeTruthy();
         expect(copy!.src).toBe(state.controlBuffer);
         expect(copy!.size).toBe(state.controlWords * 4);
+        expect(harness.encoder.copies.some((c) => c.src.label === "mesh-lod-selected" && c.dst === copy!.dst && c.dstOffset === copy!.size)).toBe(true);
         // The staging ring holds a MAP_READ | COPY_DST buffer sized to the control buffer.
         const staging = (harness.engine._device as unknown as { buffers: MockBuffer[] }).buffers.find((b) => b.label === "mesh-lod-readback")!;
-        expect(staging.size).toBe(state.controlWords * 4);
+        expect(staging.size).toBe(state.controlWords * 4 + state.selectedCapacity * 8);
     });
 
     it("feeds decoded demand into the streaming engine and refines resident pages", async () => {

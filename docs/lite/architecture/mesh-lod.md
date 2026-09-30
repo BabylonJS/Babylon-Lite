@@ -155,6 +155,18 @@ then page ID to break ties, rather than fetching every missing page.
 
 `mesh-lod-scheduler.ts` deduplicates requests by page, bounds concurrency
 (default four), and cancels obsolete work after a two-frame grace period.
+Each rendered engine frame contributes one merged demand snapshot per asset,
+regardless of the number of scene/material batches or GPU readbacks. Per-page
+priority is the maximum from all active batches; page-ID order breaks ties.
+An asynchronous GPU readback updates its batch's latest snapshot and may
+refresh scheduling at the already submitted frame index, but never advances
+the asset clock. While readback is pending, the last successful snapshot is
+retained for batches that still render; an explicit empty result clears it.
+Frames without a contributing batch submit empty demand until outstanding
+requests have aged out; removed batches never renew a stale snapshot.
+Only frames *after* the last demanded frame may count toward obsolescence:
+zero grace retains demand for the current frame and cancels it on the next
+undemanded frame. Positive grace retains its existing cutoff.
 Transient network/408/429/5xx failures receive up to two retries with
 250 ms and 1,000 ms delays; protocol, integrity, and other permanent
 errors remain terminal for that fine page. Abort and generation tokens
@@ -175,8 +187,15 @@ The immutable allocation has a default 128 MiB capacity and budget.
 Decoded page data occupies rounded 64 KiB slots. Pinned coarse pages
 cannot be evicted. Fine pages follow age/priority eviction after the
 120-frame hold, but pages referenced by an in-flight frame cannot be
-reclaimed. Capacity and effective budget cannot be smaller than the
-pinned allocation.
+reclaimed. Protection is acquired while recording GPU selection (before
+the page-state buffer is consumed), and released behind that submission's
+fence; it does not update the page's last-used frame. Only pages actually
+selected by a completed GPU pass update LRU age, using the source frame
+rather than readback completion time. A cold page still referenced by prior
+GPU submissions can be marked evicting under a lowered budget: future
+selection excludes it, but its allocation is reclaimed only after the last
+in-flight reference drains. Capacity and effective budget cannot be smaller
+than the pinned allocation.
 
 ### 11.5 CPU page cache
 
@@ -217,8 +236,10 @@ evaluates group error/residency; selects clusters; prepares an indirect
 dispatch; then expands selected triangles into draw-vertex records and
 publishes `drawIndirect` arguments. Selection and expansion are ordered
 in two compute passes before the opaque render pass. Async readback of
-page demand and counters drives subsequent streaming and diagnostics
-without blocking the current draw.
+page demand, selected-cluster pairs, and counters drives subsequent
+streaming, actual page-use aging, and diagnostics without blocking the
+current draw. Readback completion is an observation of its source
+selection, not an additional rendered frame.
 
 ## 13. Material-owned drawing
 
@@ -258,8 +279,11 @@ the cached bundle before the next draw.
 
 ### 14.1 Frame references
 
-Frame references protect pages in use. Buffer replacement retires old
-resources only after submitted frames drain.
+Frame references protect pages in use. CPU selection holds selected pages;
+GPU selection temporarily holds all pages advertised as resident until
+readback identifies the selected subset, without refreshing unused pages'
+LRU age. Holds and buffer replacement retire only after submitted frames
+drain. Recovery and disposal invalidate late readbacks.
 
 ### 14.2 Disposal
 

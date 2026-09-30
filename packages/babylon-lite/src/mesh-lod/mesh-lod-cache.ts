@@ -281,6 +281,48 @@ export function evictMeshLoDToBudget(
     }
 }
 
+/** Stop advertising cold pages when a lowered budget cannot reclaim their arena runs
+ *  yet. A page still held by submitted GPU work remains allocated until its last
+ *  frame reference retires; it must not be selected by any subsequent frame. */
+export function retireMeshLoDToBudget(
+    arena: MeshLoDArena,
+    pages: readonly MeshLoDPageRuntime[],
+    records: readonly MeshLoDPageRecord[],
+    policy: MeshLoDEvictionPolicy,
+    evicted: number[]
+): void {
+    let retiringBytes = 0;
+    for (const page of pages) {
+        if (page.state === "evicting") {
+            retiringBytes += page.arenaBytes;
+        }
+    }
+    while (arenaUsedBytes(arena) - retiringBytes > policy.budgetBytes) {
+        let victim: MeshLoDPageRuntime | null = null;
+        for (const page of pages) {
+            if (
+                page.state === "gpu-resident" &&
+                !records[page.id]!.pinned &&
+                page.arenaOffset >= 0 &&
+                page.lastUsedFrame < policy.currentFrame &&
+                policy.currentFrame - page.lastUsedFrame >= policy.residencyHoldFrames &&
+                (!victim || victimBefore(page, victim))
+            ) {
+                victim = page;
+            }
+        }
+        if (!victim) {
+            return;
+        }
+        if (victim.frameRefCount > 0) {
+            victim.state = "evicting";
+            retiringBytes += victim.arenaBytes;
+        } else {
+            evictMeshLoDPage(arena, victim, evicted);
+        }
+    }
+}
+
 // ─── CPU encoded-page cache (architecture §11.5) ─────────────────────
 
 interface CpuCacheEntry {
