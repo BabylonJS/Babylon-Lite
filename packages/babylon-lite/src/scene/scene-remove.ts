@@ -1,3 +1,4 @@
+import { _notifySceneAccessibility } from "./scene-core.js";
 import type { addToScene, SceneContext } from "./scene-core.js";
 import { unregisterMeshScene } from "./mesh-scene-registry.js";
 import type { Mesh } from "../mesh/mesh.js";
@@ -62,7 +63,7 @@ export function removeFromScene(scene: SceneContext, entity: Mesh | LightBase | 
         }
         return;
     }
-    scene._accessibility?.nodeChanged(entity, false);
+    _notifySceneAccessibility(scene, entity, false);
     // Mesh — carries GPU geometry + material. Owns the only heavy removal path.
     if ("_gpu" in entity && "material" in entity) {
         removeMeshFromScene(scene, entity as unknown as Mesh);

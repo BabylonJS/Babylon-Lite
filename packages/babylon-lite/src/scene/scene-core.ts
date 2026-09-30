@@ -104,6 +104,18 @@ export interface SceneMeshGroup extends Array<Mesh> {
 }
 
 let _lateCleanup: WeakMap<SceneContext, () => 1> | null = null;
+type SceneAccessibilityHook = (scene: SceneContext, node?: unknown, added?: boolean) => void;
+let _sceneAccessibilityHook: SceneAccessibilityHook | undefined;
+
+/** @internal Install the optional accessibility lifecycle bridge. */
+export function _setSceneAccessibilityHook(hook: SceneAccessibilityHook): void {
+    _sceneAccessibilityHook = hook;
+}
+
+/** @internal Notify accessibility only after its opt-in module installed the bridge. */
+export function _notifySceneAccessibility(scene: SceneContext, node?: unknown, added?: boolean): void {
+    _sceneAccessibilityHook?.(scene, node, added);
+}
 
 /** Top-level scene context — pure state, no attached methods. */
 export interface SceneContext extends RenderingContext {
@@ -493,7 +505,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
     } else if ("lightType" in entity) {
         ctx.lights.push(entity as LightBase);
     }
-    ctx._accessibility?.nodeChanged(entity, true);
+    _notifySceneAccessibility(ctx, entity, true);
     // Recurse into children of meshes, lights, cameras — set parent links
     const kids = (entity as unknown as SceneNode).children;
     if (kids?.length) {
@@ -511,12 +523,6 @@ export function disposeScene(scene: SceneContext): void {
         return;
     }
     ctx._z = true;
-    let accessibilityFailure: { error: unknown } | undefined;
-    try {
-        ctx._accessibility?.dispose();
-    } catch (error) {
-        accessibilityFailure = { error };
-    }
     const lateCleanup = (_lateCleanup ??= new WeakMap());
     lateCleanup.set(ctx, () => 1);
     unregisterRenderingContext(ctx.surface, ctx);
@@ -562,9 +568,7 @@ export function disposeScene(scene: SceneContext): void {
         ctx.camera = null;
     };
     cleanup();
-    if (accessibilityFailure) {
-        throw accessibilityFailure.error;
-    }
+    _notifySceneAccessibility(ctx);
 }
 
 /** @internal Run all deferred builders (called by registerScene's boot step before the first frame). */
