@@ -42,7 +42,7 @@ Conversion does not require this repository or a Babylon Lite installation.
 
 For the Harvard-Yenching Institute statue, run the CLI from a MegameshCLI
 checkout after extracting/building the executable. Its `assets/` directory
-includes the [source GLB](https://raw.githubusercontent.com/BabylonJS/Assets/master/meshes/harvard-yenching/harvard-yenching_institute_statue.glb):
+includes the [source GLB](https://assets.babylonjs.com/meshes/harvard-yenching/harvard-yenching_institute_statue.glb):
 
 ```sh
 mesh-lod-tool --input assets/harvard-yenching_institute_statue.glb \

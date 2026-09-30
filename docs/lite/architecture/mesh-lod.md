@@ -265,7 +265,7 @@ them through a byte-range-capable `/mesh-lod/` route.
 ### 15.2 Material and transform source
 
 The demo fetches the original statue GLB from
-[BabylonJS/Assets](https://raw.githubusercontent.com/BabylonJS/Assets/master/meshes/harvard-yenching/harvard-yenching_institute_statue.glb)
+[BabylonJS Assets](https://assets.babylonjs.com/meshes/harvard-yenching/harvard-yenching_institute_statue.glb)
 solely for material and node-transform data. The source GLB is not stored
 in this repository or copied into the standalone demo bundle.
 
