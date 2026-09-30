@@ -262,6 +262,11 @@ export interface SceneContext extends RenderingContext {
     _flowGraphPointerCleanup?: () => void;
     /** @internal Refreshes the explicitly enabled Flow Graph pointer bridge. */
     _flowGraphPointerRefresh?: () => void;
+    /** @internal Optional passive accessibility projection installed by the accessibility module. */
+    _accessibility?: {
+        nodeChanged(node: unknown, added: boolean): void;
+        dispose(): void;
+    };
 }
 
 /** Options passed to the scene-context factory. */
@@ -488,6 +493,7 @@ export function addToScene(scene: SceneContext, entity: Mesh | LightBase | Camer
     } else if ("lightType" in entity) {
         ctx.lights.push(entity as LightBase);
     }
+    ctx._accessibility?.nodeChanged(entity, true);
     // Recurse into children of meshes, lights, cameras — set parent links
     const kids = (entity as unknown as SceneNode).children;
     if (kids?.length) {
@@ -505,6 +511,12 @@ export function disposeScene(scene: SceneContext): void {
         return;
     }
     ctx._z = true;
+    let accessibilityFailure: { error: unknown } | undefined;
+    try {
+        ctx._accessibility?.dispose();
+    } catch (error) {
+        accessibilityFailure = { error };
+    }
     const lateCleanup = (_lateCleanup ??= new WeakMap());
     lateCleanup.set(ctx, () => 1);
     unregisterRenderingContext(ctx.surface, ctx);
@@ -550,6 +562,9 @@ export function disposeScene(scene: SceneContext): void {
         ctx.camera = null;
     };
     cleanup();
+    if (accessibilityFailure) {
+        throw accessibilityFailure.error;
+    }
 }
 
 /** @internal Run all deferred builders (called by registerScene's boot step before the first frame). */

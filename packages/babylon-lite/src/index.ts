@@ -1409,3 +1409,29 @@ export {
     stillPending,
     tickFlowGraph,
 } from "./flow-graph/index.js";
+
+// Accessibility (optional scene descriptions, roles, and ARIA attributes).
+export {
+    createAccessibilityTree,
+    addAccessibilityNode,
+    updateAccessibilityNode,
+    removeAccessibilityNode,
+    disposeAccessibilityTree,
+    onAccessibilityTreeChanged,
+    batchAccessibilityUpdates,
+} from "./accessibility/accessibility-tree.js";
+export type { AccessibilityTag, AccessibilityNode, AccessibilityNodeOptions, AccessibilityTree } from "./accessibility/accessibility-tree.js";
+export { createHtmlTwin, updateHtmlTwin, getHtmlTwinElement, disposeHtmlTwin } from "./accessibility/html-twin.js";
+export type { HtmlTwin, HtmlTwinOptions } from "./accessibility/html-twin.js";
+export {
+    createSceneAccessibility,
+    updateSceneAccessibility,
+    getAccessibilityNode,
+    getAccessibilityTag,
+    setAccessibilityTag,
+    setAccessibilityParent,
+    disposeSceneAccessibility,
+} from "./accessibility/scene-accessibility.js";
+export type { SceneAccessibility, SceneAccessibilityOptions } from "./accessibility/scene-accessibility.js";
+export { createSceneHtmlTwin, disposeSceneHtmlTwin } from "./scene/scene-html-twin.js";
+export type { SceneHtmlTwin, SceneHtmlTwinOptions } from "./scene/scene-html-twin.js";
