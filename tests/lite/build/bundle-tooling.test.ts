@@ -21,13 +21,15 @@ describe("bundle tooling correctness", () => {
     it("assigns optional accessibility error codes after core errors", () => {
         const root = join(tmpdir(), "lite-error-order");
         const core = join(root, "scene/scene-core.ts");
+        const compute = join(root, "compute/compute-binding.ts");
         const tree = join(root, "accessibility/accessibility-tree.ts");
         const twin = join(root, "scene/scene-html-twin.ts");
 
+        expect(isDeferredLiteErrorFile(root, compute)).toBe(true);
         expect(isDeferredLiteErrorFile(root, tree)).toBe(true);
         expect(isDeferredLiteErrorFile(root, twin)).toBe(true);
         expect(isDeferredLiteErrorFile(root, core)).toBe(false);
-        expect([tree, core, twin].sort((a, b) => compareLiteErrorFiles(root, a, b))[0]).toBe(core);
+        expect([tree, core, twin, compute].sort((a, b) => compareLiteErrorFiles(root, a, b))).toEqual([core, compute, tree, twin]);
     });
 
     it("keeps a loaded chunk byte-identical when an unrelated chunk is minified first", async () => {

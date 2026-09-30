@@ -69,14 +69,21 @@ function walkTsFiles(root: string): string[] {
     return out;
 }
 
-export function isDeferredLiteErrorFile(root: string, file: string): boolean {
+function liteErrorFileRank(root: string, file: string): number {
     const relative = path.relative(root, file).replace(/\\/g, "/");
     // Opt-in feature errors must not renumber core errors and grow consumers that never import them.
-    return relative.startsWith("accessibility/") || relative === "scene/scene-html-twin.ts" || relative.startsWith("compute/") || relative.startsWith("resource/compute-storage-");
+    if (relative.startsWith("accessibility/") || relative === "scene/scene-html-twin.ts") {
+        return 2;
+    }
+    return relative.startsWith("compute/") || relative.startsWith("resource/compute-storage-") ? 1 : 0;
+}
+
+export function isDeferredLiteErrorFile(root: string, file: string): boolean {
+    return liteErrorFileRank(root, file) !== 0;
 }
 
 export function compareLiteErrorFiles(root: string, a: string, b: string): number {
-    return Number(isDeferredLiteErrorFile(root, a)) - Number(isDeferredLiteErrorFile(root, b)) || a.localeCompare(b);
+    return liteErrorFileRank(root, a) - liteErrorFileRank(root, b) || a.localeCompare(b);
 }
 
 /** Re-escape already-cooked template text so it can be embedded inside a new template literal. */
