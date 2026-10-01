@@ -14,7 +14,7 @@ import type { Material, MaterialView } from "../material/material.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
-import { addMeshToTask, createRenderTask, removeMeshFromTask, type RenderTask } from "../frame-graph/render-task.js";
+import { _enableTaskMeshPopulation, addMeshToTask, createRenderTask, type RenderTask } from "../frame-graph/render-task.js";
 import { getViewProjectionMatrix, getEffectiveAspectRatio, _cameraChangeKey } from "../camera/camera.js";
 import { invertMat4ToRefOrIdentity } from "../math/invert-mat4-to-ref-or-identity.js";
 import { casterVersionSum, createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
@@ -27,7 +27,6 @@ import {
     snapshotShadowCasterMaterial,
 } from "./pcf-shadow-task-hooks.js";
 import type { ShadowGenerator, ShadowTaskInternalState } from "./shadow-generator.js";
-import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
 import { resolveMeshRebuild } from "../material/resolve-mesh-rebuild.js";
 import { _getShadowTaskCasterMeshes, setShadowTaskCasterMeshes } from "../frame-graph/shadow-inputs.js";
 
@@ -76,27 +75,24 @@ export interface CsmTaskState extends ShadowTaskInternalState {
     _uboData: Float32Array;
     /** @internal */
     _casterMeshes: readonly Mesh[];
-    /** @internal Scene renderable version the cascade material views were built against. A material
-     *  swap (plugin/receiver variant change) rebuilds the swapped mesh's renderable + UBOs but leaves
-     *  this task's cached no-color material views pointing at the now-destroyed UBOs, so we rebuild when
-     *  the MATERIAL EPOCH changes — not on every renderable-version bump (a geometry resize bumps the
-     *  renderable version without touching materials, and is handled by a cheap re-record instead). */
-    _renderableVersion: number;
-    /** @internal Scene material epoch the cascade material views were built against (see `_renderableVersion`). */
-    _materialEpoch: number;
-    /** @internal Cached per-material no-color depth views, reused when a caster is added incrementally so a pure
+    /** @internal Cached per-material no-color depth views, reused when a caster is added incrementally so a
      *  caster-set change updates the existing cascade tasks instead of rebuilding and re-resolving every caster
-     *  (which leaked ~casters×cascades UBO handles each time the caster list was re-supplied). */
+     *  (which leaked ~casters×cascades UBO handles each time the caster list was re-supplied). Only the views of
+     *  rebuilt or re-pointed caster materials are replaced, and views no live caster reaches are dropped (see
+     *  `_reconcileCsmCasters`). */
     _materialViews: Map<Material, MaterialView>;
     /** @internal Terminal caster material identity snapshot for each receive material. */
     _casterMaterials: Map<Material, Material>;
-    /** @internal Per-caster-material generation (`_csmGen`) snapshot at build. With `_casterMaterials` it tells
-     *  `scanCsmCasterMaterials` whether a caster's cached no-color view is stale: its material was rebuilt or
-     *  re-pointed since the snapshot, or a registered caster's material is missing from it. This is precise, unlike
-     *  the global `_materialEpoch` which also bumps for swaps of unrelated (non-caster) materials. */
+    /** @internal Per-caster-material generation (`_csmGen`) snapshot, taken when the material's casters were last
+     *  queued. With `_casterMaterials` it tells `_reconcileCsmCasters` whether a caster's cached no-color view is stale:
+     *  its material was rebuilt (the view would dangle) or re-pointed since the snapshot, or a registered caster's
+     *  material is missing from it. Only those casters are requeued. This is precise, unlike the global
+     *  `_materialEpoch`, which also bumps for swaps of unrelated (non-caster) materials. */
     _casterMatGens: Map<Material, number | undefined>;
     /** @internal Per-caster cascade-cap snapshot used to update task membership incrementally. */
     _casterMaxCascades: Map<Mesh, number | undefined>;
+    /** @internal Set while a held caster has not joined or taken its cap (see `_reconcileCsmCasters`). */
+    _unapplied?: boolean;
     /** @internal Pre-allocated scratch storage for per-frame cascade computation, sized for `_numCascades`. */
     _cascadeScratch: CsmCascadeScratch;
 }
@@ -141,7 +137,8 @@ export function _createCascadeScratch(n: number): CsmCascadeScratch {
     };
 }
 
-/** Build (or reuse) the CSM task state: N per-layer depth render targets + cameras + tasks. */
+/** Build (or reuse) the CSM task state: N per-layer depth render targets + cameras + tasks. They are built once;
+ *  later caster-set and caster-material changes are reconciled into the same tasks (`_reconcileCsmCasters`). */
 export function ensureCsmShadowTaskState(
     engine: EngineContext,
     scene: SceneContext,
@@ -152,91 +149,8 @@ export function ensureCsmShadowTaskState(
 ): CsmTaskState {
     const existing = existingState as CsmTaskState | null;
     if (existing) {
-        // `true` when the cascades rebuild now, else the casters the incremental path leaves alone (`scanCsmCasterMaterials`).
-        const deferred = scanCsmCasterMaterials(scene, sg, existing, casterMeshes);
-        const casterMatChanged = deferred === true;
-        if (!casterMatChanged && existing._casterMeshes === casterMeshes && existing._renderableVersion === scene._renderableVersion) {
-            return existing;
-        }
-        // The caster set is unchanged and NO material was rebuilt/swapped since these tasks were built (the
-        // material epoch matches): the only thing that changed is geometry (e.g. resizeMeshGeometry reallocated
-        // a caster's GPU buffers, bumping the renderable version). The cascade tasks' cached no-color material
-        // views are still valid — only the bundles need refreshing to pick up the new buffer handles, which the
-        // shadow scheduler's execute() already does (it re-records when the renderable version moves). So adopt
-        // the new state markers and REUSE the existing tasks instead of recreating them — recreating tasks every
-        // geometry edit re-compiles pipelines + churns bind-groups/bundles for the whole caster set (multi-MB,
-        // never returned by the GPU allocator). Only a real material change (epoch bump) needs a full rebuild,
-        // because that destroys the caster UBOs the cached views point at.
-        if (!casterMatChanged && existing._casterMeshes === casterMeshes && existing._materialEpoch === scene._materialEpoch) {
-            existing._renderableVersion = scene._renderableVersion;
-            return existing;
-        }
-        // The caster SET changed (different array). Decide INCREMENTAL vs full rebuild by whether any CURRENT
-        // caster's cached no-color view is stale (`scanCsmCasterMaterials`): its material was rebuilt or re-pointed
-        // since we built, or a registered caster switched to a material missing from the snapshot — tracked via
-        // a precise per-material snapshot, NOT the global `_materialEpoch` (which also bumps when an UNRELATED, non-
-        // caster material is swapped, e.g. a lit scene mesh added near a caster set re-supply). If NO caster
-        // material changed, update the cascade tasks IN PLACE: keep the unchanged casters' resolved depth packets
-        // (so nothing is destroyed — no "buffer used in submit while destroyed" — and nothing leaks — the old
-        // code re-resolved EVERY caster into fresh per-cascade UBO packets and never freed the prior ones,
-        // leaking ~casters×cascades handles every time the caster list was re-supplied, which a consumer may do
-        // per frame). Only add the new casters / drop departed ones (a regenerated caster's old packet is freed
-        // by removeFromScene when its mesh is disposed; a persistent caster simply keeps its packet).
-        if (!casterMatChanged) {
-            const nextSet = new Set(casterMeshes);
-            const views = existing._materialViews;
-            const materials = existing._casterMaterials;
-            const gens = existing._casterMatGens;
-            const caps = existing._casterMaxCascades;
-            const tasks = existing._tasks;
-            for (const m of existing._casterMeshes) {
-                if (!nextSet.has(m) || (m._shadowMaxCascade !== caps.get(m) && !deferred?.has(m))) {
-                    caps.delete(m);
-                    for (const t of tasks) {
-                        removeMeshFromTask(t, m);
-                    }
-                }
-            }
-            let unapplied = false;
-            for (const m of casterMeshes) {
-                if (deferred?.has(m)) {
-                    unapplied ||= !caps.has(m) || m._shadowMaxCascade !== caps.get(m);
-                    continue;
-                }
-                const maxCascade = m._shadowMaxCascade;
-                if (!caps.has(m) && m.material) {
-                    const view = getNoColorView(m.material, views);
-                    for (let c = 0; c < tasks.length; c++) {
-                        if (c <= (maxCascade ?? c)) {
-                            addMeshToTask(tasks[c]!, m, { material: view });
-                        }
-                    }
-                    snapshotShadowCasterMaterial(m.material, materials, gens);
-                }
-                caps.set(m, maxCascade);
-            }
-            // Force each cascade to re-resolve its newly-added pending casters + re-bucket its binding lists.
-            for (const t of tasks) {
-                t._lastVersion = -1;
-                t._ob.length = 0;
-            }
-            existing._casterMeshes = casterMeshes;
-            existing._renderableVersion = scene._renderableVersion;
-            if (unapplied) {
-                // A held caster has not joined or taken its new cap yet. A hold can lift without a rebuild or a version
-                // bump (a view factory import lands, the change is reverted), so the next ensure must run the diff again.
-                existing._renderableVersion = existing._materialEpoch = -1;
-            }
-            return existing;
-        }
-        // A CASTER material was actually rebuilt or switched (a material swap rebuilds its renderable + UBOs but
-        // leaves our cached no-color material views dangling at the destroyed UBOs — the
-        // "Buffer used in submit while destroyed" flood seen when a caster's material swaps variant on first
-        // render). Rebuild the cascade tasks below with the casters' CURRENT materials and return the NEW
-        // state — the caller swaps to it, so the OLD task is never recorded again. Its GPU buffers may still
-        // be referenced by the next frame command buffer, especially during async pre-first-frame construction,
-        // so retire it only after that frame has submitted and drained. Mirrors resizeMeshGeometry.
-        retireGpuResources(engine, existing._task.dispose);
+        _reconcileCsmCasters(scene, sg, existing, casterMeshes);
+        return existing;
     }
 
     const materialViews = new Map<Material, MaterialView>();
@@ -300,8 +214,8 @@ export function ensureCsmShadowTaskState(
         },
     };
 
-    // Snapshot each caster material's gen so the next caster-set change can tell whether a CASTER material was
-    // rebuilt (→ full rebuild) or only the set changed (→ incremental, keeping unchanged casters' packets).
+    // Snapshot each caster material's gen so a later reconcile can tell which CASTER materials were rebuilt (→ requeue
+    // their casters) from a pure caster-set change (→ add/remove only, keeping unchanged casters' packets).
     const casterMatGens = new Map<Material, number | undefined>();
     const casterMaterials = new Map<Material, Material>();
     const casterMaxCascades = new Map<Mesh, number | undefined>();
@@ -322,8 +236,6 @@ export function ensureCsmShadowTaskState(
         _lastCamAspect: -1,
         _uboData: new Float32Array(80),
         _casterMeshes: casterMeshes,
-        _renderableVersion: scene._renderableVersion,
-        _materialEpoch: scene._materialEpoch,
         _materialViews: materialViews,
         _casterMaterials: casterMaterials,
         _casterMatGens: casterMatGens,
@@ -332,35 +244,177 @@ export function ensureCsmShadowTaskState(
     };
 }
 
-/** @internal Compare the casters' materials with the snapshot of a live CSM task state. Returns `true` when the cascades
- *  must rebuild now: a caster's material was rebuilt or re-pointed since the snapshot, or a registered caster's material
- *  is missing from it (it switched material or got its first one, so it casts through a stale view or none). A caster new
- *  to the set with an unseen material is expected: the incremental diff builds its view.
+/** @internal Reconcile a live CSM task state with the current caster array and caster materials.
  *
- *  The rebuild records every caster, so while any changed caster's view cannot be built yet (`holdCsmCasterRebuild`) it
- *  is held, and this returns the changed casters for the incremental diff to leave alone: a registered one keeps its old
- *  packets and cap, and a new one stays out. Adding a new one through the cached view would snapshot its material, and
- *  a registered caster sharing that material would then never rebuild. Returns `undefined` when nothing changed. */
-export function scanCsmCasterMaterials(scene: SceneContext, sg: ShadowGenerator, state: CsmTaskState, casterMeshes: readonly Mesh[]): Set<Mesh> | true | undefined {
+ *  Every cascade task, target and camera is kept. Only casters that left the set, changed their cascade cap, or cast
+ *  through a stale no-colour view are dropped, in one pass per task; unchanged casters keep their resolved packets. The
+ *  dropped casters that are still in the set are queued again: through a fresh view when theirs was stale, and through
+ *  the cached view of their material when only their cap changed. A view is stale when the caster's material was
+ *  rebuilt (`_csmGen`) or re-pointed (`setShadowCasterMaterial`) since the snapshot, or when a registered caster's
+ *  material is missing from it: the caster switched material or got its first one. A caster new to the set with an
+ *  unseen material is queued like any new caster.
+ *
+ *  A changed caster whose view cannot be built yet (`holdCsmCaster`) is held instead, without holding back any other
+ *  caster: a registered one keeps its old packets and cap, a new one stays out, and its material is not snapshotted, so
+ *  it still reads as changed on the next reconcile. The hold is decided per material, so every caster of a held
+ *  material waits: queueing a new one would snapshot the material, and a registered caster sharing it would then never
+ *  be requeued. While a held caster has not joined or taken its cap, `_unapplied` runs the next reconcile even for the
+ *  same caster array, since a hold can lift with nothing else changing (a view factory import lands, the change is
+ *  reverted). The reconcile that applies the last held caster clears it, and later ones with that array return at once.
+ *
+ *  Nothing is resolved here: when a caster was queued, the shadow scheduler records each cascade once (forced through
+ *  `_recordedVersion`), so K requeued casters cost one transaction per cascade instead of one whole-task rebind per
+ *  caster. A drop alone needs no record, only a redraw. When a caster was dropped or queued, the material snapshots and
+ *  views are pruned to what the live casters reach, and the dropped casters (possibly none) are returned so a caller
+ *  with more tasks can update them too; a new array with the same members and unchanged materials only clears the
+ *  bundles and returns undefined. */
+export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, state: CsmTaskState, casterMeshes: readonly Mesh[]): ReadonlySet<Mesh> | undefined {
+    const views = state._materialViews;
     const materials = state._casterMaterials;
-    let rebuild = false;
-    let hold = false;
-    let deferred: Set<Mesh> | undefined;
+    const gens = state._casterMatGens;
+    const caps = state._casterMaxCascades;
+    const tasks = state._tasks;
+    let stale: Set<Material> | undefined;
+    let held: Set<Mesh> | undefined;
     for (const mesh of casterMeshes) {
         const material = mesh.material;
-        if (!material || !shadowCasterMaterialChanged(material, materials, state._casterMatGens)) {
-            continue;
+        if (material && shadowCasterMaterialChanged(material, materials, gens)) {
+            if (holdCsmCaster(scene, sg, material)) {
+                (held ??= new Set()).add(mesh);
+            } else if (caps.has(mesh) || materials.has(material)) {
+                (stale ??= new Set()).add(material);
+            }
         }
-        if (holdCsmCasterRebuild(scene, sg, material)) {
-            hold = true;
-        } else if (state._casterMaxCascades.has(mesh) || materials.has(material)) {
-            rebuild = true;
-        } else {
-            continue;
-        }
-        (deferred ??= new Set()).add(mesh);
     }
-    return rebuild && !hold ? true : deferred;
+    if (!stale && !state._unapplied && state._casterMeshes === casterMeshes) {
+        return undefined;
+    }
+    // `getNoColorView` caches an override's view under every link of its chain, and receive materials may share links:
+    // forget every stale chain before building any view, so materials casting through the same rebuilt terminal share
+    // one fresh view.
+    for (const material of stale ?? []) {
+        for (let link: Material | undefined = material; link; link = link._shadowCasterMaterial) {
+            views.delete(link);
+        }
+    }
+    const next = new Set(casterMeshes);
+    const drop = new Set<Mesh>();
+    for (const mesh of state._casterMeshes) {
+        const material = mesh.material;
+        if (!next.has(mesh) || (material && stale?.has(material)) || (mesh._shadowMaxCascade !== caps.get(mesh) && !held?.has(mesh))) {
+            caps.delete(mesh);
+            drop.add(mesh);
+        }
+    }
+    if (drop.size) {
+        for (const task of tasks) {
+            _dropTaskMeshes(task, drop);
+        }
+    }
+    let queued = false;
+    let unapplied = false;
+    for (const mesh of casterMeshes) {
+        const material = mesh.material;
+        const maxCascade = mesh._shadowMaxCascade;
+        if (held?.has(mesh)) {
+            unapplied ||= !caps.has(mesh) || maxCascade !== caps.get(mesh);
+            continue;
+        }
+        if (!caps.has(mesh) && material) {
+            queued = true;
+            const view = getNoColorView(material, views);
+            // Queue only. `addMeshToTask` on a recorded task would rebind the whole task once per added caster. Like it,
+            // fall back to the caster's own material when its family has no no-colour view (`getNoColorView` returns
+            // none), as the first build does; an empty request would be skipped at record.
+            for (let c = 0; c < tasks.length && c <= (maxCascade ?? c); c++) {
+                const task = tasks[c]!;
+                _enableTaskMeshPopulation(task);
+                task._pendingMeshes!.push({ mesh, material: view ?? material });
+            }
+            snapshotShadowCasterMaterial(material, materials, gens);
+        }
+        caps.set(mesh, maxCascade);
+    }
+    for (const task of tasks) {
+        task._lastVersion = -1;
+        task._ob.length = 0;
+    }
+    state._casterMeshes = casterMeshes;
+    state._unapplied = unapplied;
+    if (!drop.size && !queued) {
+        return undefined;
+    }
+    // Forget the snapshots of materials no live caster uses and the views of materials no live caster chain reaches:
+    // the state lives as long as the generator, and a material that casts again later (possibly rebuilt meanwhile
+    // through a non-caster mesh, which no snapshot sees) must start from a fresh view.
+    const used = new Set<Material>();
+    const links = new Set<Material>();
+    for (const mesh of casterMeshes) {
+        const material = mesh.material;
+        if (material) {
+            used.add(material);
+        }
+        for (let link: Material | undefined = material; link; link = link._shadowCasterMaterial) {
+            links.add(link);
+        }
+    }
+    for (const material of materials.keys()) {
+        if (!used.has(material)) {
+            materials.delete(material);
+            gens.delete(material);
+        }
+    }
+    for (const material of views.keys()) {
+        if (!links.has(material)) {
+            views.delete(material);
+        }
+    }
+    // A rebuilt or re-pointed caster material changes depth with nothing moving, and a new caster array bumps no scene
+    // version: redraw the map, and record the cascades first when they hold queued casters.
+    state._lastCasterVersion = -1;
+    if (queued) {
+        state._recordedVersion = -1;
+    }
+    return drop;
+}
+
+/** @internal Remove every mesh in `drop` from one task with one pass over each of its lists, instead of one
+ *  `removeMeshFromTask` scan and draw-batch re-selection per removed mesh. Like `_removeMeshFromRenderTask`, it
+ *  re-selects the batches and invalidates the bundle only when something was removed. The task's `_removeMesh`
+ *  hook is deliberately not called: CSM cascade tasks are internal and never wrapped by
+ *  `enableRenderTaskMeshRefresh`. */
+export function _dropTaskMeshes(task: RenderTask, drop: ReadonlySet<Mesh | undefined>): void {
+    let removed = false;
+    // Compact `list` in place, keeping the entries whose mesh is not dropped.
+    const prune = <T>(list: T[], meshOf: (entry: T) => Mesh | undefined, onDrop?: (entry: T) => void): void => {
+        let kept = 0;
+        for (const entry of list) {
+            if (drop.has(meshOf(entry))) {
+                onDrop?.(entry);
+                removed = true;
+            } else {
+                list[kept++] = entry;
+            }
+        }
+        list.length = kept;
+    };
+    prune(task._pendingMeshes ?? [], (request) => request.mesh);
+    // Fenced: a frame that is still in flight may reference the dropped packet.
+    prune(
+        task._renderables,
+        (renderable) => renderable.mesh,
+        (renderable) => task._retireRenderable?.(task.engine, renderable)
+    );
+    for (const bindings of [task._opaqueBindings, task._directBindings, task._transparentBindings]) {
+        prune(bindings, (binding) => binding.renderable.mesh);
+    }
+    if (removed) {
+        const previous = task._batchState;
+        task._batchState = previous?._select([task._opaqueBindings, task._directBindings, task._transparentBindings]);
+        previous?._release(task.engine, [task._batchState]);
+        task._ob.length = 0;
+        task._lastVersion = -1;
+    }
 }
 
 /** Whether the no-colour view of a caster material cannot be built yet. When the view factory of the family the caster
@@ -371,7 +425,7 @@ export function scanCsmCasterMaterials(scene: SceneContext, sg: ShadowGenerator,
  *  A build that fails reports its own error, and the hold lasts until the caster's material is reassigned or the caster
  *  leaves the set. A `setShadowCasterMaterial` override does not wait for its group, since nothing in the caster's
  *  lifecycle builds it: recording it throws as before, naming the problem. */
-function holdCsmCasterRebuild(scene: SceneContext, sg: ShadowGenerator, material: Material): boolean {
+function holdCsmCaster(scene: SceneContext, sg: ShadowGenerator, material: Material): boolean {
     const terminal = resolveShadowCasterMaterial(material);
     if (!hasNoColorViewFactory(terminal)) {
         // The registered set, not the hooks' argument: a deformable-caster wrapper hands the hooks substitute meshes. One

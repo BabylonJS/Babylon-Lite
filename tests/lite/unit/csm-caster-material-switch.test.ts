@@ -4,7 +4,7 @@ import type { EngineContext } from "../../../packages/babylon-lite/src/engine/en
 import type { RenderTask, RenderTaskConfig } from "../../../packages/babylon-lite/src/frame-graph/render-task";
 import type { Material, MaterialView } from "../../../packages/babylon-lite/src/material/material";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
-import type { MeshGroupBuilder, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
+import type { MeshGroupBuilder, MeshRebuildResources, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import type { RuntimeSceneBuildHooks, SceneContext, SceneMeshGroup } from "../../../packages/babylon-lite/src/scene/scene-core";
 import type { ShadowGenerator } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
 import type { CsmConfig, CsmTaskState } from "../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks";
@@ -86,9 +86,11 @@ function material(name: string, buildGroup: MeshGroupBuilder): Material {
     return { name, _buildGroup: buildGroup } as unknown as Material;
 }
 
-/** Complete a group's first build in the scene: its rebuild turns a (mesh, view) pair into a packet. */
+/** Complete a group's first build in the scene: its rebuild turns a (mesh, view) pair into a packet. A cascade packet
+ *  owns one lifetime disposer, so each packet a cascade task retires counts once in the engine's retirements. */
 function build(scene: SceneContext, buildGroup: MeshGroupBuilder): void {
-    const rebuild = (_scene: SceneContext, mesh: Mesh, view?: Material) => {
+    const rebuild = (_scene: SceneContext, mesh: Mesh, view?: Material, resources?: MeshRebuildResources) => {
+        resources?._lifetimeDisposers.push(() => {});
         const packet = { mesh, _lastMaterial: view, order: 0, bind: () => ({ renderable: packet }) };
         return packet as unknown as Renderable;
     };
@@ -120,6 +122,12 @@ function casts(task: RenderTask): [Mesh, Material][] {
 function cascades(state: CsmTaskState): [Mesh, Material][][] {
     const statics = (state as { _staticTasks?: RenderTask[] })._staticTasks;
     return state._tasks.map((task, cascade) => [...casts(task), ...(statics ? casts(statics[cascade]!) : [])]);
+}
+
+/** The depth view each cascade draws a recorded caster with. */
+function cascadeViews(state: CsmTaskState, mesh: Mesh): (Material | undefined)[] {
+    const statics = (state as { _staticTasks?: RenderTask[] })._staticTasks;
+    return state._tasks.map((task, cascade) => [...task._renderables, ...(statics?.[cascade]!._renderables ?? [])].find((packet) => packet.mesh === mesh)?._lastMaterial);
 }
 
 const cfg = { _numCascades: 2, _mapSize: 64 } as CsmConfig;
@@ -189,43 +197,54 @@ async function loaded(sg: ShadowGenerator): Promise<void> {
 }
 
 describe("a registered CSM caster that switches to a material the snapshot has never seen", () => {
-    it("rebuilds the cascades through the new material instead of keeping the old depth view", async () => {
+    it("requeues the caster through the new material instead of keeping the old depth view", async () => {
         const { shaders, caster, register, frame, state, retired } = await setup("default");
         const after = material("after", shaders);
         const mesh = caster(material("before", shaders));
         await register([mesh]);
         frame();
         const first = state();
+        const tasks = created.tasks;
 
         mesh.material = after;
         frame();
 
-        expect(state()).not.toBe(first);
-        expect(retired()).toBe(1); // the old cascade tasks, behind the frame fence
+        // The cascade tasks stay; the caster's old packet in each of the two cascades retires behind the frame fence.
+        expect(state()).toBe(first);
+        expect(created.tasks).toBe(tasks);
+        expect(retired()).toBe(2);
         expect(state()._tasks.map(casts)).toEqual([[[mesh, after]], [[mesh, after]]]);
-        // The rebuild snapshotted the new material, so the next frame keeps the rebuilt state.
-        const rebuilt = state();
+        // The requeue snapshotted the new material, so the next frame neither requeues nor retires anything.
         frame();
-        expect(state()).toBe(rebuilt);
-        expect(retired()).toBe(1);
+        expect(state()).toBe(first);
+        expect(retired()).toBe(2);
+        expect(state()._tasks.map(casts)).toEqual([[[mesh, after]], [[mesh, after]]]);
     });
 
-    it("starts casting a registered caster that had no material when the set was supplied", async () => {
-        const { shaders, caster, register, frame, state } = await setup("default");
+    it.each(["default", "cache"] as const)("starts casting a registered caster that had no material when the %s set was supplied", async (hooks) => {
+        const { shaders, caster, register, frame, state, retired, createTexture } = await setup(hooks);
         const mesh = caster(null);
         await register([mesh]);
         frame();
         const first = state();
+        const tasks = created.tasks;
+        const textures = createTexture.mock.calls.length;
         const late = material("late", shaders);
 
         mesh.material = late;
         frame();
 
-        expect(state()).not.toBe(first);
-        expect(state()._tasks.map(casts)).toEqual([[[mesh, late]], [[mesh, late]]]);
+        expect(state()).toBe(first);
+        expect(created.tasks).toBe(tasks);
+        expect(createTexture).toHaveBeenCalledTimes(textures);
+        expect(retired()).toBe(0);
+        expect(cascades(state())).toEqual([[[mesh, late]], [[mesh, late]]]);
+        frame();
+        expect(retired()).toBe(0);
+        expect(cascades(state())).toEqual([[[mesh, late]], [[mesh, late]]]);
     });
 
-    it("keeps a caster that is new to the set on the incremental path", async () => {
+    it("queues a caster that is new to the set and leaves the registered one's packets alone", async () => {
         const { shaders, caster, register, frame, state, retired } = await setup("default");
         const shared = material("shared", shaders);
         const fresh = material("fresh", shaders);
@@ -245,44 +264,47 @@ describe("a registered CSM caster that switches to a material the snapshot has n
         expect(state()).toBe(first);
         expect(retired()).toBe(0);
         expect(first._tasks.map(casts)).toEqual([both, both]);
-        // Its material is snapshotted on the way in, so a later frame neither rebuilds nor queues it again.
+        // Its material is snapshotted on the way in, so a later frame does not queue it again.
         frame();
         expect(state()).toBe(first);
         expect(first._tasks.map(casts)).toEqual([both, both]);
     });
 
-    it("rebuilds the static-cache cascades too, keeping the caster's refit gate", async () => {
+    it("requeues it in the static-cache cascades too, keeping the cache texture and the caster's refit gate", async () => {
         const { shaders, caster, register, frame, state, retired, createTexture } = await setup("cache");
         const after = material("after", shaders);
         const mesh = caster(material("before", shaders));
         await register([mesh]);
         frame();
         const first = state();
+        const gate = (first as unknown as { _gate: { isDynamic(mesh: Mesh): boolean } })._gate;
 
         mesh.material = after;
         frame();
 
-        const gate = (s: CsmTaskState) => (s as unknown as { _gate: unknown })._gate;
-        expect(state()).not.toBe(first);
-        expect(gate(state())).toBe(gate(first));
-        expect(createTexture).toHaveBeenCalledTimes(2);
-        expect(retired()).toBe(1);
+        expect(state()).toBe(first);
+        expect(createTexture).toHaveBeenCalledOnce();
+        expect(retired()).toBe(2);
         // A caster the gate has not demoted yet is dynamic, so it casts through the overlay cascade tasks.
-        expect(state()._tasks.map(casts)).toEqual([[[mesh, after]], [[mesh, after]]]);
-        const rebuilt = state();
+        expect(gate.isDynamic(mesh)).toBe(true);
+        expect(cascades(state())).toEqual([[[mesh, after]], [[mesh, after]]]);
         frame();
-        expect(state()).toBe(rebuilt);
+        expect(retired()).toBe(2);
+        expect(cascades(state())).toEqual([[[mesh, after]], [[mesh, after]]]);
     });
 });
 
 describe("a CSM caster material change that cannot be built yet", () => {
     // Each case brings a family no caster used so far, so its no-colour view factory has not been imported.
     it.each([
-        ["gets its first material", null, "standard", "swap"],
-        ["switches to another material family", "shader", "node", "swap"],
-        ["has its caster override re-pointed to another family", "shader", "pbr", "override"],
-    ] as const)("parks the generator while the view factory imports when a registered caster %s", async (_, from, to, change) => {
-        const { lite, scene, sg, caster, register, frame, state, retired } = await setup("default");
+        ["default", "gets its first material", null, "standard", "swap"],
+        ["cache", "gets its first material", null, "standard", "swap"],
+        ["default", "switches to another material family", "shader", "node", "swap"],
+        ["cache", "switches to another material family", "shader", "node", "swap"],
+        ["default", "has its caster override re-pointed to another family", "shader", "pbr", "override"],
+        ["cache", "has its caster override re-pointed to another family", "shader", "pbr", "override"],
+    ] as const)("parks the generator and keeps the %s cascades while the view factory imports when a registered caster %s", async (hooks, _, from, to, change) => {
+        const { lite, scene, sg, caster, register, frame, state, retired } = await setup(hooks);
         const before = from && material("before", group(from));
         if (before) {
             build(scene, before._buildGroup);
@@ -314,12 +336,14 @@ describe("a CSM caster material change that cannot be built yet", () => {
         await loaded(sg);
         frame();
 
-        expect(state()).not.toBe(first);
-        expect(retired()).toBe(1);
-        expect(state()._tasks.map(casts)).toEqual([[[mesh, next]], [[mesh, next]]]);
-        const rebuilt = state();
+        // Requeued in the same cascade tasks: a caster that cast before retires its old packet in each cascade.
+        const retiredPackets = before ? 2 : 0;
+        expect(state()).toBe(first);
+        expect(retired()).toBe(retiredPackets);
+        expect(cascades(state())).toEqual([[[mesh, next]], [[mesh, next]]]);
         frame();
-        expect(state()).toBe(rebuilt);
+        expect(retired()).toBe(retiredPackets);
+        expect(cascades(state())).toEqual([[[mesh, next]], [[mesh, next]]]);
     });
 
     // A NodeMaterial instance has a group of its own: switching a caster to a new one hands the mesh to the runtime build.
@@ -350,12 +374,15 @@ describe("a CSM caster material change that cannot be built yet", () => {
         buildLanded(scene, mesh);
         frame();
 
-        expect(state()).not.toBe(first);
-        expect(retired()).toBe(1);
+        // Requeued: the old packet in each cascade retires, and still no task or texture is created.
+        expect(state()).toBe(first);
+        expect(retired()).toBe(2);
+        expect(created.tasks).toBe(tasks);
+        expect(createTexture).toHaveBeenCalledTimes(textures);
         expect(state()._tasks.map(casts)).toEqual([[[mesh, next]], [[mesh, next]]]);
-        const rebuilt = state();
         frame();
-        expect(state()).toBe(rebuilt);
+        expect(retired()).toBe(2);
+        expect(state()._tasks.map(casts)).toEqual([[[mesh, next]], [[mesh, next]]]);
     });
 
     it("does not wait for a caster override whose group is not built in the scene", async () => {
@@ -417,27 +444,30 @@ describe("caster-set changes while a CSM caster material change is held", () => 
         await register([building, added]);
         frame();
 
-        // The rebuild waits for `building`, which keeps its old packet; the set change does not wait.
+        // The requeue waits for `building`, which keeps its old packet; the set change does not wait, and the removed
+        // caster's packet in each cascade retires.
         const held = [
             [building, before],
             [added, addedMaterial],
         ];
         expect(state()).toBe(first);
-        expect(retired()).toBe(0);
+        expect(retired()).toBe(2);
         expect(cascades(state())).toEqual([held, held]);
 
         buildLanded(scene, building);
         frame();
 
-        const rebuilt = [
-            [building, next],
+        // `building` is requeued behind the packets the cascades kept.
+        const requeued = [
             [added, addedMaterial],
+            [building, next],
         ];
-        expect(retired()).toBe(1);
-        expect(cascades(state())).toEqual([rebuilt, rebuilt]);
+        expect(state()).toBe(first);
+        expect(retired()).toBe(4);
+        expect(cascades(state())).toEqual([requeued, requeued]);
     });
 
-    it.each(["default", "cache"] as const)("keeps a held caster on its old %s packets and cap until the rebuild", async (hooks) => {
+    it.each(["default", "cache"] as const)("keeps a held caster on its old %s packets and cap until it is requeued", async (hooks) => {
         const { lite, scene, caster, register, frame, record, state } = await setup(hooks);
         const before = material("before", group("node"));
         build(scene, before._buildGroup);
@@ -495,13 +525,14 @@ describe("caster-set changes while a CSM caster material change is held", () => 
             [registered, override],
             [added, override],
         ];
-        expect(retired()).toBe(1);
+        expect(state()).toBe(first);
+        expect(retired()).toBe(2); // the registered caster's old packet in each cascade
         expect(cascades(state())).toEqual([both, both]);
     });
 });
 
-describe("casters whose material changed while the CSM rebuild is held", () => {
-    it.each(["default", "cache"] as const)("rebuilds the %s cascades for a rebuilt material that a caster added during the hold shares", async (hooks) => {
+describe("casters whose material changed while a CSM caster change is held", () => {
+    it.each(["default", "cache"] as const)("requeues the %s casters of a rebuilt material at once, and a caster added during the hold shares its fresh view", async (hooks) => {
         const { lite, scene, shaders, caster, register, frame, state, retired } = await setup(hooks);
         const shared = material("shared", shaders);
         const before = material("before", group("node"));
@@ -511,25 +542,40 @@ describe("casters whose material changed while the CSM rebuild is held", () => {
         await register([kept, building]);
         frame();
         const first = state();
+        const staleView = first._materialViews.get(shared);
+        /** The depth view each cascade draws `mesh` with. */
+        const viewsOf = (mesh: Mesh) => cascadeViews(state(), mesh);
 
-        // `shared` is rebuilt while `building` switches to a NodeMaterial whose group is still building: the rebuild waits.
+        // `shared` is rebuilt while `building` switches to a NodeMaterial whose group is still building. Only `building`
+        // waits: the hold is per caster, so `kept` is requeued through a fresh view at once.
         lite.rebuildMaterial(scene, shared);
         building.material = material("next", group("node"));
         frame();
 
-        // A caster sharing the rebuilt material joins the set. Adding it through the cached view would also snapshot the
-        // rebuilt material, so the rebuild would never come once the held caster leaves the set.
+        const freshView = state()._materialViews.get(shared)!;
+        expect(freshView).not.toBe(staleView);
+        const requeued = [
+            [building, before],
+            [kept, shared],
+        ];
+        expect(state()).toBe(first);
+        expect(retired()).toBe(2); // `kept`'s old packet in each cascade
+        expect(cascades(state())).toEqual([requeued, requeued]);
+        expect(viewsOf(kept)).toEqual([freshView, freshView]);
+
+        // A caster sharing the rebuilt material joins the set: it is queued through the same fresh view.
         const added = caster(shared);
         await register([kept, building, added]);
         frame();
 
-        const held = [
-            [kept, shared],
+        const joined = [
             [building, before],
+            [kept, shared],
+            [added, shared],
         ];
-        expect(state()).toBe(first);
-        expect(retired()).toBe(0);
-        expect(cascades(state())).toEqual([held, held]);
+        expect(retired()).toBe(2);
+        expect(cascades(state())).toEqual([joined, joined]);
+        expect(viewsOf(added)).toEqual([freshView, freshView]);
 
         await register([kept, added]);
         frame();
@@ -538,9 +584,10 @@ describe("casters whose material changed while the CSM rebuild is held", () => {
             [kept, shared],
             [added, shared],
         ];
-        expect(state()).not.toBe(first);
-        expect(retired()).toBe(1);
+        expect(state()).toBe(first);
+        expect(retired()).toBe(4); // and now `building`'s old packets
         expect(cascades(state())).toEqual([both, both]);
+        expect(viewsOf(kept)).toEqual([freshView, freshView]);
     });
 
     it.each(["default", "cache"] as const)("keeps a caster new to the set out of the %s cascades while its material's group is building", async (hooks) => {
@@ -560,7 +607,7 @@ describe("casters whose material changed while the CSM rebuild is held", () => {
 
         expect(cascades(state())).toEqual([[[kept, keptMaterial]], [[kept, keptMaterial]]]);
 
-        // Once the build lands, the caster joins through the incremental path.
+        // Once the build lands, the caster is queued: while it waited, the same caster array still ran the reconcile.
         buildLanded(scene, added);
         frame();
 
@@ -601,7 +648,8 @@ describe("casters whose material changed while the CSM rebuild is held", () => {
             [switching, next],
             [added, next],
         ];
-        expect(retired()).toBe(1);
+        expect(state()).toBe(first);
+        expect(retired()).toBe(2); // `switching`'s old packet in each cascade
         expect(cascades(state())).toEqual([both, both]);
     });
 
@@ -639,7 +687,7 @@ describe("casters whose material changed while the CSM rebuild is held", () => {
         expect(cascades(state())).toEqual([both, both]);
     });
 
-    it.each(["default", "cache"] as const)("applies a held caster's new %s cap when its material change is reverted before the rebuild", async (hooks) => {
+    it.each(["default", "cache"] as const)("applies a held caster's new %s cap when its material change is reverted while held", async (hooks) => {
         const { lite, scene, caster, register, frame, state } = await setup(hooks);
         const before = material("before", group("node"));
         build(scene, before._buildGroup);
@@ -656,7 +704,7 @@ describe("casters whose material changed while the CSM rebuild is held", () => {
         await register([mesh]);
         expect(frame).not.toThrow();
 
-        // Reverting the switch ends the hold without a rebuild; the cap re-supplied meanwhile still applies.
+        // Reverting the switch ends the hold and keeps the old view; the cap re-supplied meanwhile still applies.
         mesh.material = before;
         frame();
 

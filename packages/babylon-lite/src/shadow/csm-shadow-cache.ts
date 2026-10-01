@@ -11,15 +11,7 @@ import type { Material, MaterialView } from "../material/material.js";
 import type { Mesh } from "../mesh/mesh.js";
 import type { RenderTarget } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
-import {
-    addMeshToTask,
-    _buildBindings,
-    _enableTaskMeshPopulation,
-    _resolvePendingMeshes,
-    createRenderTask,
-    removeMeshFromTask,
-    type RenderTask,
-} from "../frame-graph/render-task.js";
+import { addMeshToTask, _buildBindings, _enableTaskMeshPopulation, _resolvePendingMeshes, createRenderTask, type RenderTask } from "../frame-graph/render-task.js";
 import type { MeshRebuildResources } from "../render/renderable.js";
 import type { RenderTaskBindingGeneration, RenderTaskPopulation } from "../frame-graph/render-task-base.js";
 import { retireGpuResources, runGpuResourceCallbacks } from "../engine/gpu-resource-retirement.js";
@@ -30,10 +22,11 @@ import {
     _biasViewProjection,
     _computeCsmCascades,
     _createCascadeScratch,
+    _dropTaskMeshes,
+    _reconcileCsmCasters,
     _writeCsmUbo,
     csmCameraAspect,
     csmWorldBiasClipOffset,
-    scanCsmCasterMaterials,
     type CsmCascades,
     type CsmConfig,
     type CsmTaskState,
@@ -52,8 +45,8 @@ interface CsmCachedTaskState extends CsmTaskState {
     _onDemote: (mesh: Mesh) => void;
     /** Tasks the last gate decision moved meshes INTO, rebuilt once after the decision. */
     _pendingTransfers: Set<RenderTask>;
-    /** Scene renderable version the cached static layer was last RENDERED at. Distinct from
-     *  `_renderableVersion`, which records when the caster/task membership was last reconciled. */
+    /** Scene renderable version the cached static layer was last RENDERED at; -1 forces the next frame to refit
+     *  (set when a reconcile dropped or requeued a caster). */
     _cachedContentVersion: number;
 }
 
@@ -213,72 +206,35 @@ export function ensureCsmShadowCacheState(
         replacedDefaultState = true;
     }
     if (existing) {
-        // Same rules as the default hooks (`scanCsmCasterMaterials`).
-        const deferred = scanCsmCasterMaterials(scene, sg, existing, casterMeshes);
-        const casterMatChanged = deferred === true;
-        if (!casterMatChanged && existing._casterMeshes === casterMeshes && existing._renderableVersion === scene._renderableVersion) {
-            return existing;
-        }
-        if (!casterMatChanged && existing._casterMeshes === casterMeshes && existing._materialEpoch === scene._materialEpoch) {
-            existing._renderableVersion = scene._renderableVersion;
-            return existing;
-        }
-        if (!casterMatChanged) {
-            const nextSet = new Set(casterMeshes);
-            const views = existing._materialViews;
-            const materials = existing._casterMaterials;
-            const gens = existing._casterMatGens;
-            const caps = existing._casterMaxCascades;
-            existing._gate.syncCasters(casterMeshes);
-            for (const mesh of existing._casterMeshes) {
-                if (!nextSet.has(mesh) || (mesh._shadowMaxCascade !== caps.get(mesh) && !deferred?.has(mesh))) {
-                    caps.delete(mesh);
-                    for (const task of existing._tasks) {
-                        removeMeshFromTask(task, mesh);
-                    }
-                    for (const task of existing._staticTasks) {
-                        removeMeshFromTask(task, mesh);
-                    }
+        const gate = existing._gate;
+        gate.syncCasters(casterMeshes);
+        const dropped = _reconcileCsmCasters(scene, sg, existing, casterMeshes);
+        if (dropped) {
+            for (let cascade = 0; cascade < existing._tasks.length; cascade++) {
+                const staticTask = existing._staticTasks[cascade]!;
+                _dropTaskMeshes(staticTask, dropped);
+                // The reconcile queues into the dynamic overlay. A caster the gate holds static (one re-capped or
+                // requeued for a material change) goes back into the static layer, so it keeps its class. A caster
+                // that left the set earlier and returns is new to the gate (`syncCasters` forgot it): dynamic.
+                const task = existing._tasks[cascade]!;
+                const pending = task._pendingMeshes ?? [];
+                const requeued = pending.filter((request) => !gate.isDynamic(request.mesh));
+                if (requeued.length) {
+                    task._pendingMeshes = pending.filter((request) => gate.isDynamic(request.mesh));
+                    _enableTaskMeshPopulation(staticTask);
+                    staticTask._pendingMeshes!.push(...requeued);
                 }
             }
-            let unapplied = false;
-            for (const mesh of casterMeshes) {
-                if (deferred?.has(mesh)) {
-                    unapplied ||= !caps.has(mesh) || mesh._shadowMaxCascade !== caps.get(mesh);
-                    continue;
-                }
-                const maxCascade = mesh._shadowMaxCascade;
-                if (!caps.has(mesh) && mesh.material) {
-                    const view = getNoColorView(mesh.material, views);
-                    for (let cascade = 0; cascade < existing._tasks.length; cascade++) {
-                        if (cascade <= (maxCascade ?? cascade)) {
-                            addMeshToTask(existing._tasks[cascade]!, mesh, { material: view });
-                        }
-                    }
-                    snapshotShadowCasterMaterial(mesh.material, materials, gens);
-                    existing._gate.markDynamic(mesh);
-                }
-                caps.set(mesh, maxCascade);
-            }
-            for (const task of existing._tasks) {
-                task._lastVersion = -1;
-                task._ob.length = 0;
-            }
-            existing._casterMeshes = casterMeshes;
-            existing._renderableVersion = scene._renderableVersion;
-            if (unapplied) {
-                // As in the default hooks: run the diff again until every held caster has joined and taken its cap.
-                existing._renderableVersion = existing._materialEpoch = -1;
-            }
-            return existing;
+            // Force a full (non-drift) refit: every static cascade re-renders without the dropped casters' old depth.
+            existing._cachedContentVersion = -1;
         }
-        retireGpuResources(engine, existing._task.dispose);
+        return existing;
     }
 
     const materialViews = new Map<Material, MaterialView>();
     const cascadeCount = cfg._numCascades;
     const cache = sg._csmCache!;
-    const gate = existing?._gate ?? createCsmRefitGate<Mesh>({ refitAngle: cache._refitAngle, refitMaxIntervalMs: cache._refitMaxIntervalMs });
+    const gate = createCsmRefitGate<Mesh>({ refitAngle: cache._refitAngle, refitMaxIntervalMs: cache._refitMaxIntervalMs });
     gate.syncCasters(casterMeshes);
     const cacheTexture = engine._device.createTexture({
         label: "csm-static-cache",
@@ -388,8 +344,6 @@ export function ensureCsmShadowCacheState(
         _lastCamAspect: -1,
         _uboData: new Float32Array(80),
         _casterMeshes: casterMeshes,
-        _renderableVersion: scene._renderableVersion,
-        _materialEpoch: scene._materialEpoch,
         _materialViews: materialViews,
         _casterMaterials: casterMaterials,
         _casterMatGens: casterMatGens,

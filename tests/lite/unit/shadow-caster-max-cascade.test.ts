@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import type { RenderTask } from "../../../packages/babylon-lite/src/frame-graph/render-task";
@@ -7,6 +7,7 @@ import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 import { _getShadowCasterMaxCascade, setShadowCasterMaxCascade } from "../../../packages/babylon-lite/src/frame-graph/shadow-inputs";
 import { ensureCsmShadowTaskState, type CsmConfig, type CsmTaskState } from "../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks";
+import { preloadPcfShadowTaskState } from "../../../packages/babylon-lite/src/shadow/pcf-shadow-task-hooks";
 import type { ShadowGenerator } from "../../../packages/babylon-lite/src/shadow/shadow-generator";
 
 function makeMesh(material?: Material): Mesh {
@@ -23,17 +24,15 @@ function makeTask(mesh: Mesh): RenderTask {
         _ob: [{} as GPURenderBundle],
         _lastVersion: 0,
         _lastVis: 0,
-        _addMesh: vi.fn((added: Mesh, opts?: { material?: Material }) => {
-            task._pendingMeshes.push({ mesh: added, material: opts?.material ?? added.material });
-        }),
-        _removeMesh(removed: object) {
-            task._pendingMeshes = task._pendingMeshes.filter((entry) => entry.mesh !== removed);
-        },
     };
     return task as unknown as RenderTask;
 }
 
 describe("setShadowCasterMaxCascade", () => {
+    beforeAll(async () => {
+        await preloadPcfShadowTaskState([makeMesh({ _buildGroup: { _materialFamily: "shader" } } as unknown as Material)]);
+    });
+
     it("defaults every mesh to casting into all cascades (Infinity)", () => {
         expect(_getShadowCasterMaxCascade(makeMesh())).toBe(Infinity);
     });
@@ -61,38 +60,47 @@ describe("setShadowCasterMaxCascade", () => {
     });
 
     it("reassigns an existing caster when a re-supplied list changes its cap", () => {
-        const material = { _uboVersion: 0 } as Material;
+        // A ShaderMaterial-shaped caster, whose no-colour view needs no device.
+        const material = { _uboVersion: 0, _buildGroup: { _materialFamily: "shader" } } as unknown as Material;
         const view = {} as MaterialView;
         const mesh = makeMesh(material);
         const tasks = [makeTask(mesh), makeTask(mesh), makeTask(mesh)];
         const state = {
             _tasks: tasks,
             _casterMeshes: [mesh],
-            _renderableVersion: 1,
-            _materialEpoch: 1,
+            _recordedVersion: 2,
             _materialViews: new Map([[material, view]]),
             _casterMaterials: new Map([[material, material]]),
             _casterMatGens: new Map([[material, undefined]]),
             _casterMaxCascades: new Map([[mesh, undefined]]),
         } as unknown as CsmTaskState;
-        const scene = { _renderableVersion: 2, _materialEpoch: 1 } as SceneContext;
+        // Its group is built, so a caster joining with it is not held for it.
+        const scene = { _renderableVersion: 2, _materialEpoch: 1, _groups: new Map([[material._buildGroup, { r() {} }]]) } as unknown as SceneContext;
 
         setShadowCasterMaxCascade(mesh, 0);
         const result = ensureCsmShadowTaskState({} as EngineContext, scene, {} as ShadowGenerator, {} as CsmConfig, [mesh], state);
 
         expect(result).toBe(state);
-        expect(tasks[0]!._addMesh).toHaveBeenCalledOnce();
-        expect(tasks[1]!._addMesh).not.toHaveBeenCalled();
-        expect(tasks[2]!._addMesh).not.toHaveBeenCalled();
-        expect(tasks[0]!._pendingMeshes!.map((entry) => entry.mesh)).toEqual([mesh]);
+        expect(tasks[0]!._pendingMeshes).toEqual([{ mesh, material: view }]);
         expect(tasks[1]!._pendingMeshes).toHaveLength(0);
         expect(tasks[2]!._pendingMeshes).toHaveLength(0);
         expect(tasks.every((task) => task._lastVersion === -1 && task._ob.length === 0)).toBe(true);
         expect(state._casterMaxCascades.get(mesh)).toBe(0);
+        // Queued only: the shadow scheduler records the cascades once, so it must be forced to.
+        expect(state._recordedVersion).toBe(-1);
 
         ensureCsmShadowTaskState({} as EngineContext, scene, {} as ShadowGenerator, {} as CsmConfig, [], state);
         expect(state._casterMaxCascades.has(mesh)).toBe(false);
+        expect(tasks.every((task) => task._pendingMeshes!.length === 0)).toBe(true);
+        // The departed caster's material is forgotten, so adding it back builds a fresh view.
+        expect(state._materialViews.size).toBe(0);
+        expect(state._casterMaterials.size).toBe(0);
         ensureCsmShadowTaskState({} as EngineContext, scene, {} as ShadowGenerator, {} as CsmConfig, [mesh], state);
-        expect(tasks[0]!._addMesh).toHaveBeenCalledTimes(2);
+        const fresh = state._materialViews.get(material)!;
+        expect(fresh).not.toBe(view);
+        expect(fresh.source).toBe(material);
+        expect(tasks[0]!._pendingMeshes).toEqual([{ mesh, material: fresh }]);
+        expect(tasks[1]!._pendingMeshes).toHaveLength(0);
+        expect(tasks[2]!._pendingMeshes).toHaveLength(0);
     });
 });
