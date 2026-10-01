@@ -141,6 +141,34 @@ describe("API report breaking-change classifier", () => {
         expect(breakingApiLines(diff)).toEqual(["export declare function createMesh(name: string): Mesh;"]);
     });
 
+    it("treats a standalone function's void return becoming an unsubscribe callback as additive", () => {
+        const diff = apiDiff(
+            "export declare function onSceneDispose(scene: SceneContext, cb: () => void): void;",
+            "export declare function onSceneDispose(scene: SceneContext, callback: () => void): () => void;"
+        );
+
+        expect(breakingApiLines(diff)).toEqual([]);
+    });
+
+    it("does not excuse changed inputs when a void return becomes an unsubscribe callback", () => {
+        const removed = "export declare function onSceneDispose(scene: SceneContext, callback: () => void): void;";
+        const diff = apiDiff(removed, "export declare function onSceneDispose(scene: Scene, callback: () => void): () => void;");
+
+        expect(breakingApiLines(diff)).toEqual([removed]);
+    });
+
+    it("does not apply the unsubscribe-return rule to methods or unrelated returns", () => {
+        expect(breakingApiLines(apiDiff("onDispose(callback: () => void): void;", "onDispose(callback: () => void): () => void;"))).toEqual([
+            "onDispose(callback: () => void): void;",
+        ]);
+        expect(breakingApiLines(apiDiff("export declare function load(): Mesh;", "export declare function load(): () => void;"))).toEqual([
+            "export declare function load(): Mesh;",
+        ]);
+        expect(breakingApiLines(apiDiff("export declare function start(): void;", "export declare function start(): Promise<() => void>;"))).toEqual([
+            "export declare function start(): void;",
+        ]);
+    });
+
     it("treats a const literal widening to its primitive base as additive", () => {
         const diff = apiDiff('export const VERSION = "0.1.0";', "export const VERSION: string;");
 
@@ -332,6 +360,69 @@ describe("API report breaking-change classifier", () => {
 function apiReport(...declarations: string[]): string {
     return ['## API Report File for "@babylonjs/lite"', "", "```ts", ...declarations, "```", ""].join("\n");
 }
+
+describe("API report type-alias parameter classifier", () => {
+    const sceneEntity = "export type SceneEntity = Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer;";
+
+    it("treats an inline input union replaced by an equal non-generic alias as additive", () => {
+        const report = apiReport(sceneEntity);
+        const inline = "Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer";
+
+        expect(
+            breakingApiLines(
+                apiDiff(
+                    `export declare function addToScene(scene: SceneContext, entity: ${inline}): void;`,
+                    "export declare function addToScene(scene: SceneContext, entity: SceneEntity): void;"
+                ),
+                report
+            )
+        ).toEqual([]);
+    });
+
+    it("flags narrowed, unresolved, recursive, and generic aliases", () => {
+        const removed = "export declare function add(entity: Mesh | LightBase): void;";
+
+        expect(breakingApiLines(apiDiff(removed, "export declare function add(entity: SceneEntity): void;"), apiReport("export type SceneEntity = Mesh;"))).toEqual([removed]);
+        expect(breakingApiLines(apiDiff(removed, "export declare function add(entity: SceneEntity): void;"), apiReport("export type SceneEntity = MissingAlias;"))).toEqual([
+            removed,
+        ]);
+        expect(breakingApiLines(apiDiff(removed, "export declare function add(entity: SceneEntity): void;"), apiReport("export type SceneEntity = SceneEntity;"))).toEqual([
+            removed,
+        ]);
+        expect(
+            breakingApiLines(apiDiff(removed, "export declare function add(entity: SceneEntity<Mesh | LightBase>): void;"), apiReport("export type SceneEntity<T> = T;"))
+        ).toEqual([removed]);
+    });
+
+    it("does not apply alias equivalence to returns or excuse a pure rename", () => {
+        const report = apiReport(sceneEntity);
+        const removedReturn = "export declare function current(): Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer;";
+
+        expect(breakingApiLines(apiDiff(removedReturn, "export declare function current(): SceneEntity;"), report)).toEqual([removedReturn]);
+        expect(breakingApiLines(apiDiff("export declare function add(mesh: Mesh): void;", "export declare function add(entity: Mesh): void;"), report)).toEqual([
+            "export declare function add(mesh: Mesh): void;",
+        ]);
+    });
+
+    it("clears the exact scene lifecycle lines emitted by the current report", () => {
+        const report = apiReport(sceneEntity);
+        const inline = "Mesh | LightBase | Camera | ShadowGenerator | TransformNode | AssetContainer";
+        const diff = [
+            "diff --git a/target.api.md b/current.api.md",
+            "--- a/target.api.md",
+            "+++ b/current.api.md",
+            "@@",
+            `-export function addToScene(scene: SceneContext, entity: ${inline}): void;`,
+            "-export function onSceneDispose(scene: SceneContext, cb: () => void): void;",
+            `-export function removeFromScene(scene: SceneContext, entity: ${inline}): void;`,
+            "+export function addToScene(scene: SceneContext, entity: SceneEntity): void;",
+            "+export function onSceneDispose(scene: SceneContext, callback: () => void): () => void;",
+            "+export function removeFromScene(scene: SceneContext, entity: SceneEntity): void;",
+        ].join("\n");
+
+        expect(breakingApiLines(diff, report)).toEqual([]);
+    });
+});
 
 describe("API report interface-substitution classifier", () => {
     const baseOptions = ["export interface TextureArrayOptions {", "    mipMaps?: boolean;", "    srgb?: boolean;", "}"].join("\n");

@@ -112,11 +112,7 @@ function requireTree(tree: AccessibilityTree, node?: AccessibilityNode | null): 
     }
 }
 
-function notify(tree: AccessibilityTree): void {
-    if (tree._batchDepth) {
-        tree._dirty = true;
-        return;
-    }
+function notifyListeners(tree: AccessibilityTree): void {
     const errors: unknown[] = [];
     for (const listener of [...tree._listeners]) {
         try {
@@ -128,6 +124,14 @@ function notify(tree: AccessibilityTree): void {
     if (errors.length) {
         throw errors.length === 1 ? errors[0] : new AggregateError(errors, "Accessibility tree observers failed.");
     }
+}
+
+function notify(tree: AccessibilityTree): void {
+    if (tree._batchDepth) {
+        tree._dirty = true;
+        return;
+    }
+    notifyListeners(tree);
 }
 
 /** Create an empty accessibility tree. This function does not access the DOM. */
@@ -252,9 +256,7 @@ export function updateAccessibilityNode(tree: AccessibilityTree, node: Accessibi
         }
     }
     if ("tag" in patch) {
-        if (!tagsEqual(tag, node.tag)) {
-            node.tag = tag;
-        }
+        node.tag = tag;
     }
     if (patch.hidden !== undefined || "tag" in patch) {
         node._authoredHidden = authoredHidden;
@@ -303,8 +305,9 @@ export function disposeAccessibilityTree(tree: AccessibilityTree): void {
     }
     tree._roots.length = 0;
     tree._disposed = true;
+    tree._dirty = false;
     try {
-        notify(tree);
+        notifyListeners(tree);
     } finally {
         tree._listeners.clear();
     }

@@ -1,5 +1,6 @@
 import {
     addToScene,
+    batchAccessibilityUpdates,
     createNullEngine,
     createSceneContext,
     createSceneHtmlTwin,
@@ -148,6 +149,26 @@ Object.assign(window, {
                 viewDisposed: failingTwin.view._disposed,
                 htmlRemoved: !failingTwin.view.element.isConnected,
                 descriptorRestored: descriptor?.get === undefined && descriptor?.set === undefined && descriptor?.writable === true,
+            };
+            host.remove();
+            return result;
+        },
+        disposeDuringAccessibilityBatch(): {
+            treeDisposed: boolean;
+            viewDisposed: boolean;
+            htmlRemoved: boolean;
+        } {
+            const host = document.createElement("div");
+            document.body.append(host);
+            const batchedScene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+            const source = createTransformNode("Batched disposal");
+            const batchedTwin = createSceneHtmlTwin(batchedScene, { parent: host, roots: [source], label: "Batched disposal" });
+
+            batchAccessibilityUpdates(batchedTwin.accessibility.tree, () => disposeScene(batchedScene));
+            const result = {
+                treeDisposed: batchedTwin.accessibility.tree.disposed,
+                viewDisposed: batchedTwin.view._disposed,
+                htmlRemoved: !batchedTwin.view.element.isConnected,
             };
             host.remove();
             return result;

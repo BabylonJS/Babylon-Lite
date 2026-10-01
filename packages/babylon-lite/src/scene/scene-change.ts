@@ -157,14 +157,15 @@ export function onSceneChange(scene: SceneContext, listener: SceneChangeListener
 export function onSceneDispose(scene: SceneContext, callback: () => void): () => void {
     installDisposal();
     const disposables = scene._disposables;
-    disposables.push(callback);
+    const registered = (): void => callback();
+    disposables.push(registered);
     let active = true;
     return () => {
         if (!active) {
             return;
         }
         active = false;
-        const index = disposables.indexOf(callback);
+        const index = disposables.indexOf(registered);
         if (index >= 0) {
             disposables.splice(index, 1);
         }

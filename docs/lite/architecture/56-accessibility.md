@@ -92,9 +92,9 @@ export function disposeAccessibilityTree(tree: AccessibilityTree): void;
 
 `removeAccessibilityNode` removes the node and its descendants. Removed handles no longer belong to the tree. A later representation of the same target receives a new node.
 
-`batchAccessibilityUpdates` delays observer notification until the outermost synchronous batch completes. Nested batches are supported. A dirty batch emits one notification.
+`batchAccessibilityUpdates` delays observer notification until the outermost synchronous batch completes. Nested batches are supported. A dirty batch emits one notification. Tree disposal publishes its final disposed state immediately, even inside a batch, then consumes the pending dirty state so the batch does not emit a second notification.
 
-An update that leaves metadata, availability, target, parent, and sibling position unchanged does not mark the tree dirty or notify observers.
+An update that leaves metadata semantics, availability, target, parent, and sibling position unchanged does not mark the tree dirty or notify observers. Explicit metadata replacement still stores the latest immutable record shape, including the distinction between an omitted `aria` value and an empty `aria` record.
 
 `onAccessibilityTreeChanged` observes completed mutations. The returned function removes the listener. Observer errors are collected: one error is rethrown directly, and multiple errors are rethrown as an `AggregateError`.
 
@@ -192,7 +192,7 @@ export function onSceneChange(scene: SceneContext, listener: (event: SceneChange
 export function onSceneDispose(scene: SceneContext, callback: () => void): () => void;
 ```
 
-`SceneEntity` is the same union accepted by `addToScene` and `removeFromScene`. Notifications describe committed membership changes, including recursive hierarchy members, asset-container contents, and transform-only nodes. The returned callbacks remove their registrations and are idempotent.
+`SceneEntity` is the same union accepted by `addToScene` and `removeFromScene`. Notifications describe committed membership changes, including recursive hierarchy members, asset-container contents, and transform-only nodes. Each subscription has its own registration identity, so duplicate callbacks can be removed independently. The returned callbacks remove their registrations and are idempotent.
 
 Scene change listeners run after the outermost add or remove operation completes. Reentrant mutations append more events to the same dispatch. Listener removal takes effect before the next callback or event. All remaining listeners run after a failure; one failure is rethrown directly, and multiple failures use `AggregateError`.
 
@@ -442,6 +442,7 @@ The root package re-exports each public type and function from its single `"."` 
 - malformed ARIA and conflicting availability rejection;
 - suppression of unchanged update notifications;
 - batched notification;
+- final disposal notification during a batch, including observer failure cleanup;
 - subtree removal and tree disposal.
 
 `tests/lite/unit/scene-accessibility.test.ts` covers:
@@ -451,7 +452,7 @@ The root package re-exports each public type and function from its single `"."` 
 - duplicate projection rejection and replacement after explicit disposal;
 - routing across multiple projected scenes while unprojected scenes coexist;
 - tag validation before publication;
-- source-name fallback and metadata replacement;
+- source-name fallback and metadata record-shape replacement without redundant semantic notification;
 - scene membership, camera, lights, explicit roots, and direct array reconciliation;
 - exclusion of detached children from explicit-root and active-camera traversal;
 - microtask updates for visibility, name, parentage, and tags;
@@ -478,6 +479,7 @@ The root package re-exports each public type and function from its single `"."` 
 - single-node updates without unrelated attribute, text, or move mutations, including unchanged hidden nodes;
 - no-op scene refreshes without tree notifications or DOM mutations;
 - visibility, reparenting, scene removal, and scene disposal;
+- owned HTML removal when scene disposal occurs inside a tree batch;
 - HTML and observation teardown when a canonical scene disposer throws;
 - rejection after scene disposal without leaked DOM or a retained scene binding.
 

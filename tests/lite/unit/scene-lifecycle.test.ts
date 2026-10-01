@@ -141,6 +141,21 @@ describe("scene lifecycle", () => {
         expect(scene._disposables).toEqual([]);
     });
 
+    it("unsubscribes only the selected duplicate disposal registration", () => {
+        const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+        const calls: string[] = [];
+        const duplicate = () => calls.push("duplicate");
+
+        onSceneDispose(scene, duplicate);
+        onSceneDispose(scene, () => calls.push("middle"));
+        const unsubscribeLast = onSceneDispose(scene, duplicate);
+
+        unsubscribeLast();
+        disposeScene(scene);
+
+        expect(calls).toEqual(["duplicate", "middle"]);
+    });
+
     it("clears retained scene-change state during disposal without affecting other scenes", () => {
         const engine = createNullEngine();
         const disposedScene = createSceneContext(engine, { defaultRenderTask: false });

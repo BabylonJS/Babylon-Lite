@@ -87,6 +87,18 @@ describe("scene accessibility", () => {
         });
         expect(notifications).toBe(1);
 
+        setAccessibilityTag(source, { name: "Mars", aria: {} });
+        await Promise.resolve();
+        const emptyAriaSnapshot = getAccessibilityTag(source);
+        expect(getAccessibilityNode(accessibility, source)?.tag).toEqual(emptyAriaSnapshot);
+
+        setAccessibilityTag(source, { name: "Mars" });
+        await Promise.resolve();
+        const absentAriaSnapshot = getAccessibilityTag(source);
+        expect(getAccessibilityNode(accessibility, source)?.tag).toEqual(absentAriaSnapshot);
+        expect(absentAriaSnapshot).toEqual({ name: "Mars", aria: undefined });
+        expect(notifications).toBe(2);
+
         setAccessibilityTag(source, null);
         expect(getAccessibilityTag(source)).toBeNull();
         disposeScene(scene);

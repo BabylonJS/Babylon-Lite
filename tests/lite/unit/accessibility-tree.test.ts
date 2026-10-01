@@ -109,4 +109,28 @@ describe("accessibility tree", () => {
 
         expect(notifications).toBe(0);
     });
+
+    it("publishes the final disposed state to batched observers before releasing them", () => {
+        const tree = createAccessibilityTree();
+        addAccessibilityNode(tree, { tag: { name: "Before disposal" } });
+        const failure = new Error("observer failed");
+        const states: Array<{ disposed: boolean; roots: number }> = [];
+        onAccessibilityTreeChanged(tree, () => {
+            throw failure;
+        });
+        onAccessibilityTreeChanged(tree, () => {
+            states.push({ disposed: tree.disposed, roots: tree.roots.length });
+        });
+
+        expect(() =>
+            batchAccessibilityUpdates(tree, () => {
+                disposeAccessibilityTree(tree);
+            })
+        ).toThrow(failure);
+
+        expect(states).toEqual([{ disposed: true, roots: 0 }]);
+        expect(tree._listeners.size).toBe(0);
+        expect(tree._dirty).toBe(false);
+        expect(tree._batchDepth).toBe(0);
+    });
 });

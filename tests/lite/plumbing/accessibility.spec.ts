@@ -104,6 +104,29 @@ test.describe("scene accessibility HTML", () => {
         });
     });
 
+    test("removes an owned HTML twin when its scene is disposed inside a tree batch", async ({ page }) => {
+        const result = await page.evaluate(() =>
+            (
+                window as unknown as {
+                    accessibilityFixture: {
+                        disposeDuringAccessibilityBatch(): {
+                            treeDisposed: boolean;
+                            viewDisposed: boolean;
+                            htmlRemoved: boolean;
+                        };
+                    };
+                }
+            ).accessibilityFixture.disposeDuringAccessibilityBatch()
+        );
+
+        expect(result).toEqual({
+            treeDisposed: true,
+            viewDisposed: true,
+            htmlRemoved: true,
+        });
+        await expect(page.getByRole("region", { name: "Batched disposal" })).toHaveCount(0);
+    });
+
     test("updates one node without mutating unrelated DOM or publishing no-op refreshes", async ({ page }) => {
         const result = await page.evaluate(() =>
             (
