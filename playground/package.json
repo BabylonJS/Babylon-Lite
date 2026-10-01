@@ -18,10 +18,10 @@
         "fflate": "^0.8.3"
     },
     "devDependencies": {
-        "@webgpu/types": "^0.1.72",
+        "@webgpu/types": "^0.1.74",
         "esbuild-wasm": "^0.28.2",
         "monaco-editor": "^0.56.0",
         "typescript": "^6.0.3",
-        "vite": "^8.2.2"
+        "vite": "^8.3.0"
     }
 }

@@ -35,6 +35,72 @@ beforeAll(() => {
 }, 300_000);
 
 describe("build/index.d.ts", () => {
+    it("exposes frame graph texture tasks through the root API with typed output aliases", () => {
+        const probePath = resolve(BUILD_DIR, "frame-graph-texture-tasks.probe.ts");
+        try {
+            writeFileSync(
+                probePath,
+                `import {
+    createClearTextureTask, createGenerateMipMapsTask, createMipMappedRenderTarget,
+    type ClearTextureTask, type ClearTextureTaskConfig,
+    type GenerateMipMapsTask, type GenerateMipMapsTaskConfig,
+    type EngineContext, type RenderTarget, type Texture2D,
+} from "./index.js";
+declare const engine: EngineContext;
+declare const texture: Texture2D;
+const target = createMipMappedRenderTarget({ format: "rgba8unorm", samples: 1, size: engine });
+const config: ClearTextureTaskConfig = {
+    targetTexture: [target], depthTexture: target,
+    color: { r: 0.2, g: 0.2, b: 0.3, a: 1 },
+    clearColor: true, convertColorToLinearSpace: false,
+    clearDepth: true, clearStencil: false, stencilValue: 0,
+};
+const clear: ClearTextureTask = createClearTextureTask(config, engine);
+const colorOutput: RenderTarget | undefined = clear.outputTexture;
+const depthOutput: RenderTarget | undefined = clear.outputDepthTexture;
+const mipConfig: GenerateMipMapsTaskConfig<RenderTarget> = { targetTexture: target };
+const mips: GenerateMipMapsTask<RenderTarget> = createGenerateMipMapsTask(mipConfig, engine);
+const mipOutput: RenderTarget = mips.outputTexture;
+const sampledOutput: Texture2D = createGenerateMipMapsTask({ targetTexture: texture }, engine).outputTexture;
+clear.executionEnabled = false;
+// @ts-expect-error Outputs are read-only aliases.
+clear.outputTexture = target;
+// @ts-expect-error Outputs are read-only aliases.
+mips.outputTexture = target;
+// @ts-expect-error GPU allocation state is internal.
+target._colorTexture;
+// @ts-expect-error GPU sampling views are internal.
+target._colorSamplingView;
+void [colorOutput, depthOutput, mipOutput, sampledOutput];
+`
+            );
+            const result = spawnSync(
+                NODE,
+                [
+                    TSC_JS,
+                    "--ignoreConfig",
+                    "--noEmit",
+                    "--strict",
+                    "--target",
+                    "es2022",
+                    "--module",
+                    "esnext",
+                    "--moduleResolution",
+                    "bundler",
+                    "--lib",
+                    "es2022,dom,dom.iterable",
+                    "--types",
+                    "webxr",
+                    probePath,
+                ],
+                { cwd: PACKAGE_DIR, encoding: "utf-8" }
+            );
+            expect(result.status, `${result.stdout ?? ""}${result.stderr ?? ""}`).toBe(0);
+        } finally {
+            rmSync(probePath, { force: true });
+        }
+    });
+
     it("exposes conditional material rebuild completion", () => {
         const probePath = resolve(BUILD_DIR, "material-rebuild-api.probe.ts");
         try {
