@@ -194,14 +194,56 @@ tasks.
 Every geometry binding owns a `MeshRebuildResources` lifetime sink. The task creates it before
 calling the Standard/PBR/Node geometry rebuilder and stamps it onto the returned renderable
 before binding. Builders require that owner and register releases before later fallible work.
-The candidate list and view cache publish only after every rebuild and bind succeeds; a failure
-synchronously releases all candidate sinks, including the failing entry, without changing the
-previous draw list.
+The bound list publishes only after every rebuild and bind succeeds; a failure synchronously
+releases all candidate sinks, including the failing entry, without changing the previous draw
+list or any entry it carries. Views that a failed pass created can stay in the task's view cache
+(the released sinks already dropped their variants' buffers): a retry reuses them, and the next
+publish prunes any that no drawn material uses.
 
 Replaced or disposed live entries retire their detached lifetime batches behind submitted GPU
 work. Shared Standard/Node view resources are retained by each renderable and destroyed only
 when the last owner releases; an old callback cannot evict a replacement cache entry. There is
 no implicit view lease or scene auxiliary-disposer map.
+
+### Incremental re-sync
+
+`record()` and every `scene._renderableVersion` change re-sync the bound list, but only the
+entries a mutation touched are rebuilt, like the forward `RenderTask` resync. Each Standard or
+PBR entry remembers the forward renderable the scene tracked for its mesh when it was built
+(`scene._renderables` for Standard, the group's tracked output for PBR). While the mesh still
+draws the same source material through that same forward renderable, the entry is carried as
+is: same renderable, binding, update state (including velocity history) and lifetime sink.
+Everything an entry captures either forces a forward rebuild when it changes (material
+features and textures, mesh capabilities and vertex layout, the PBR context and light/shadow
+request), is constant for the task, or is read live each frame (world, light selection,
+material UBO version, vertex/index buffers, thin-instance counts). A resize or frame-graph
+rebuild therefore rebuilds nothing, and a Standard material swap, material rebuild or new mesh
+rebuilds only its meshes. PBR follows its forward pass: a per-mesh forward rebuild (a material
+swap through the group's rebuild closure, `markMeshRenderableDirty`) rebuilds only that entry,
+but a full PBR group rebuild (`rebuildMaterial` on a PBR material, a PBR mesh whose group must
+widen or be built at runtime, `rebuildScenePbrPipelines`) replaces every PBR forward renderable
+and publishes a new PBR context, so every PBR geometry entry is rebuilt and every PBR view
+composes a variant set for the new context; Standard entries are still carried. The PBR
+forward-generation gate (`isPbrForwardBuildCurrent`) runs first, so a PBR mesh whose forward
+rebuild is pending is dropped, never carried. Only superseded entries are retired.
+
+Standard/PBR views, with the variants compiled on them, persist across syncs while the source
+keeps its `_renderFeatures` object; the view map is pruned to the drawn materials at each
+publish. A new Standard mesh of an already drawn material compiles nothing. A PBR view keeps
+one variant set per forward PBR context it composed against, weakly keyed by the context: the
+context supplies the composer, scene features and shadow layout, while each entry binds env and
+shadow textures from its own mesh's context, so a variant is never shared across contexts.
+Several contexts can be live for one view: a full PBR group rebuild publishes a new scene
+context, and a PBR mesh runtime-built into a group that was built after it was requested
+(several meshes of a never-built PBR group built in one drain before the scene's first build
+completes) keeps its own context until the next full rebuild. Meshes on different contexts
+never evict each other's set, so a later rebuild of any of them compiles nothing. A new PBR
+mesh compiles nothing when its context already has a set on the view; otherwise it composes
+its own variant, as its forward build did. A batch that first binds K meshes on K per-mesh
+contexts therefore composes K variants, not one per material. Node entries and views are
+rebuilt on every sync, because a Node geometry resource snapshots the material's uniforms
+once. Off-scene meshes of an explicit list have no forward renderable and are rebuilt on every
+sync too. Device-loss recovery of the task must reset its views together with its bound list.
 
 The task's `_removeMesh` hook evicts every matching bound entry and queues its retirement
 immediately, including when rendering is stopped. Its weak exclusion set still rejects removed
@@ -461,6 +503,17 @@ matches BJS pixel-for-pixel (no lossy material-constants approximation).
 - Standard geometry composition with vertex color modulates albedo and alpha
   before discard/write masking and binds the color buffer.
 - Morph/skeleton/vertex-color bits participate in the geometry resource key.
+- A re-sync keeps the entries of meshes whose forward renderable is unchanged (new mesh,
+  re-record, unrelated swap) and rebuilds only the touched ones, including when driven by the
+  scene's own producers (material setter, `markMeshRenderableDirty`, `rebuildMaterial`,
+  `addToScene`); a new mesh of a drawn material reuses the cached view and variant; a shared
+  Standard variant's material UBO survives deferred retirements until its last owner releases
+  it; a failed replacement leaves every carried entry intact; Node entries rebuild on every
+  sync.
+- A PBR geometry variant composed against a superseded forward PBR context is not reused.
+- A PBR view keeps one variant set per live forward context: after meshes on a scene context
+  and on per-mesh runtime-build contexts are bound (one variant per context), per-mesh and
+  batch refreshes of any of them compile nothing.
 
 ## Future extensions
 

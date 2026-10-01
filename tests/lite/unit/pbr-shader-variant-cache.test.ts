@@ -276,6 +276,38 @@ describe("PBR shader variant caches", () => {
         ownerB._lifetimeDisposers.forEach((dispose) => dispose());
     });
 
+    it("does not reuse a geometry variant composed against a superseded forward PBR context", async () => {
+        // The geometry renderer keeps its views across scene PBR rebuilds. A rebuild publishes a new forward
+        // context — composer, scene features and shadow layout — while every mesh-side variant key stays the
+        // same, so a variant cached against the old context would keep the old shader under the new bindings.
+        const { engine, createShaderModule } = makeEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const toneMapping = (id: string): ToneMapping => ({ id, helpersWGSL: "", callWGSL: `color*=scene.vImageInfos.x;\ncolor+=vec3f(0.0); // ${id}` });
+        scene.imageProcessing.toneMappingEnabled = true;
+        scene.imageProcessing.toneMapping = toneMapping("tone-a");
+        const material = createPbrMaterial();
+        const mesh = makeMesh(material);
+        scene._groups.set(material._buildGroup, [mesh]);
+        await buildPbrRenderables(scene, [mesh], undefined);
+        const view = createPbrGeometryMaterialView(material, { attachments: [GeometryTextureType.WORLD_NORMAL], emitColor: true });
+        const first = { _lifetimeDisposers: [] as (() => void)[] };
+        buildPbrGeometryRenderable(scene, mesh, view, first).bind(engine, signature);
+
+        scene.imageProcessing.toneMapping = toneMapping("tone-b");
+        await buildPbrRenderables(scene, [mesh], undefined);
+        const context = (scene as unknown as { _pbrGeomContext: { _composePbr: (...args: unknown[]) => unknown } })._pbrGeomContext;
+        const compose = vi.spyOn(context, "_composePbr");
+        const second = { _lifetimeDisposers: [] as (() => void)[] };
+        buildPbrGeometryRenderable(scene, mesh, view, second).bind(engine, signature);
+
+        expect(compose).toHaveBeenCalled();
+        const geometryFragments = fragmentSources(createShaderModule).filter((code) => code.includes("struct FragmentOutput"));
+        expect(geometryFragments.some((code) => code.includes("// tone-a"))).toBe(true);
+        expect(geometryFragments.some((code) => code.includes("// tone-b"))).toBe(true);
+        first._lifetimeDisposers.forEach((dispose) => dispose());
+        second._lifetimeDisposers.forEach((dispose) => dispose());
+    });
+
     it("threads material-plugin variants through geometry-output composition and caches", async () => {
         const { engine, createShaderModule } = makeEngine();
         const scene = createSceneContext(engine, { defaultRenderTask: false });
@@ -305,7 +337,8 @@ describe("PBR shader variant caches", () => {
         const pipelineB = buildPbrGeometryRenderable(scene, mesh, view, ownerB).bind(engine, signature).pipeline;
 
         expect(pipelineB).not.toBe(pipelineA);
-        expect((view._geometry as Map<string, unknown>).size).toBe(2);
+        const context = (scene as unknown as { _pbrGeomContext: object })._pbrGeomContext;
+        expect((view._geometry as WeakMap<object, Map<string, unknown>>).get(context)!.size).toBe(2);
         const geometryFragments = fragmentSources(createShaderModule).filter((code) => code.includes("struct FragmentOutput"));
         expect(geometryFragments.some((code) => code.includes("material.materialAlpha < -3.0"))).toBe(true);
         expect(geometryFragments.some((code) => code.includes("material.materialAlpha < -4.0"))).toBe(true);

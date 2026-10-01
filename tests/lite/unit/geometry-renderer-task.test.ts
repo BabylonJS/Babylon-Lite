@@ -31,8 +31,11 @@ import { createStandardGeometryMaterialView } from "../../../packages/babylon-li
 import { HAS_DIFFUSE_TEXTURE } from "../../../packages/babylon-lite/src/material/standard/standard-flags";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
-import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
-import type { MeshRebuilder, MeshRebuildResources } from "../../../packages/babylon-lite/src/render/renderable";
+import { addToScene, buildScene, type SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { processMaterialSwaps } from "../../../packages/babylon-lite/src/scene/scene-material-swap";
+import { markMeshRenderableDirty } from "../../../packages/babylon-lite/src/scene/mesh-scene-registry";
+import { rebuildMaterial } from "../../../packages/babylon-lite/src/material/material-rebuild";
+import type { MeshRebuilder, MeshRebuildResources, Renderable } from "../../../packages/babylon-lite/src/render/renderable";
 import { createSurfaceRenderTargetTexture } from "../../../packages/babylon-lite/src/texture/rtt-surface";
 import { disposeRenderTargetTexture } from "../../../packages/babylon-lite/src/texture/rtt";
 
@@ -746,7 +749,12 @@ describe("GeometryRendererTask", () => {
     // removed mesh is never drawn against destroyed UBOs/vertex buffers and a swapped
     // material's view is rebuilt make-before-break. Uses real Standard geometry
     // renderables (like the FO test) so the binding/view/disposer wiring is exercised.
-    async function setupGeoTask(meshCount: number, explicitMeshes = false) {
+    // `forward` gives the scene meshes forward renderables, which lets the task tell the entries a
+    // mutation touched apart: "stub" pushes the renderable a scene build would track for each mesh
+    // (mutations are then simulated with `replaceForward` / `addMesh`), while "scene" adds the meshes
+    // with `addToScene` and boots the real Standard group build, so later mutations go through the
+    // scene's own producers.
+    async function setupGeoTask(meshCount: number, explicitMeshes = false, forward: "none" | "stub" | "scene" = "none") {
         const { createStandardMaterial } = await import("../../../packages/babylon-lite/src/material/standard/create-standard-material");
         const makeWorld = (x: number): Float32Array => {
             const m = new Float32Array(16);
@@ -790,11 +798,9 @@ describe("GeometryRendererTask", () => {
             _vpAspect: -1,
         };
         type M = import("../../../packages/babylon-lite/src/mesh/mesh").Mesh;
-        const meshes: M[] = [];
-        for (let i = 0; i < meshCount; i++) {
-            const material = createStandardMaterial();
+        const makeMesh = (i: number, material = createStandardMaterial()): M => {
             material.alpha = 1;
-            meshes.push({
+            return {
                 material,
                 worldMatrix: makeWorld(i),
                 worldMatrixVersion: 1,
@@ -805,9 +811,41 @@ describe("GeometryRendererTask", () => {
                 visible: true,
                 // Distinct indexCount per mesh so a draw can be attributed to a mesh.
                 _gpu: { positionBuffer: {}, normalBuffer: {}, indexBuffer: {}, indexCount: 10 + i, indexFormat: "uint32" },
-            } as unknown as M);
+            } as unknown as M;
+        };
+        const meshes: M[] = [];
+        for (let i = 0; i < meshCount; i++) {
+            meshes.push(makeMesh(i));
         }
-        scene.meshes.push(...meshes);
+        const forwardRenderable = (mesh: M): Renderable => ({ mesh, order: 100, isTransparent: false }) as unknown as Renderable;
+        if (forward === "scene") {
+            for (const mesh of meshes) {
+                addToScene(scene, mesh);
+            }
+            await buildScene(scene);
+        } else {
+            scene.meshes.push(...meshes);
+        }
+        if (forward === "stub") {
+            scene._renderables.push(...meshes.map(forwardRenderable));
+        }
+        /** "stub": a forward rebuild of `mesh` (material swap or rebuild, new capability) — the scene tracks a new renderable. */
+        const replaceForward = (mesh: M): void => {
+            scene._renderables.splice(
+                scene._renderables.findIndex((renderable) => renderable.mesh === mesh),
+                1,
+                forwardRenderable(mesh)
+            );
+            scene._renderableVersion++;
+        };
+        /** "stub": a Standard mesh added to the running scene and forward-built (with its own material by default). */
+        const addMesh = (material?: ReturnType<typeof createStandardMaterial>): M => {
+            const mesh = makeMesh(scene.meshes.length, material);
+            scene.meshes.push(mesh);
+            scene._renderables.push(forwardRenderable(mesh));
+            scene._renderableVersion++;
+            return mesh;
+        };
         const task = createGeometryRendererTask(
             {
                 textureDescriptions: [{ type: GeometryTextureType.WORLD_POSITION }],
@@ -820,6 +858,7 @@ describe("GeometryRendererTask", () => {
             _preload(): Promise<void>;
             record(): void;
             execute(): number;
+            dispose(): void;
             _removeMesh(mesh: object): void;
             _bound: Array<{
                 _mesh: M;
@@ -827,10 +866,23 @@ describe("GeometryRendererTask", () => {
                 _binding: { renderable: object };
                 _lifetimeDisposers: (() => void)[];
             }>;
+            _views: Map<unknown, unknown>;
+            _createNodeGeometryView: ((source: unknown, config: unknown) => unknown) | null;
         };
         await internal._preload();
         internal.record();
-        return { scene, internal, meshes, drawnIndexCounts, engine, createStandardMaterial };
+        return { scene, internal, meshes, drawnIndexCounts, engine, createStandardMaterial, makeMesh, replaceForward, addMesh };
+    }
+
+    /** Device and retirement probes for the reuse assertions below. */
+    function probeGpu(engine: EngineContext) {
+        const device = engine._device;
+        return {
+            createShaderModule: vi.spyOn(device, "createShaderModule"),
+            createRenderPipeline: vi.spyOn(device, "createRenderPipeline"),
+            createBindGroup: vi.spyOn(device, "createBindGroup"),
+            retirements: (engine as unknown as { _retirements: Array<() => void> })._retirements,
+        };
     }
 
     const idxCount = (m: Mesh): number => (m as unknown as { _gpu: { indexCount: number } })._gpu.indexCount;
@@ -905,6 +957,356 @@ describe("GeometryRendererTask", () => {
         expect(oldLifetime).toHaveLength(0);
     });
 
+    // ── Incremental re-sync: an entry lives as long as the forward build it was made alongside ──────
+    // Every scene mutation used to rebuild the whole pass: new views (so every variant recompiled), new
+    // per-mesh UBOs and bind groups, and the whole previous generation retired — for one added mesh, a
+    // resize, or an unrelated material swap. These pin which entries a sync may keep and which it rebuilds.
+
+    it("rebuilds only the entry each scene producer touched: material setter, markMeshRenderableDirty, rebuildMaterial, addToScene", async () => {
+        // Real producers over a real Standard group build. A carried entry relies on each of them replacing the
+        // one scene renderable of the mesh it touched and leaving every other mesh's renderable alone.
+        const { scene, internal, meshes, engine, createStandardMaterial, makeMesh } = await setupGeoTask(3, false, "scene");
+        const forwardOf = (mesh: Mesh): Renderable | undefined => scene._renderables.find((renderable) => renderable.mesh === mesh);
+        expect(internal._bound.map((entry) => entry._mesh)).toEqual(meshes);
+        const [a, b, c] = internal._bound;
+        const rebuild = vi.spyOn(a!._view._buildGroup, "_rebuildSingle");
+        const createShaderModule = vi.spyOn(engine._device, "createShaderModule");
+        /** Run one producer, drain the swap queue like the render loop, then re-sync the geometry pass. */
+        const sync = async (produce: () => unknown): Promise<{ forward: Mesh[]; geometry: unknown[] }> => {
+            const before = scene.meshes.map(forwardOf);
+            const version = scene._renderableVersion;
+            await produce();
+            await processMaterialSwaps(scene);
+            expect(scene._renderableVersion).toBeGreaterThan(version);
+            rebuild.mockClear();
+            createShaderModule.mockClear();
+            internal.execute();
+            return { forward: scene.meshes.filter((mesh, index) => forwardOf(mesh) !== before[index]), geometry: rebuild.mock.calls.map((call) => call[1]) };
+        };
+        try {
+            // Material setter, drained by processMaterialSwaps: the entry follows the new material.
+            const swapped = createStandardMaterial();
+            swapped.alpha = 1;
+            expect(await sync(() => ((meshes[1] as unknown as { material: unknown }).material = swapped))).toEqual({ forward: [meshes[1]], geometry: [meshes[1]] });
+            const b2 = internal._bound[1]!;
+            expect(b2).not.toBe(b);
+            expect(b2._view.source).toBe(swapped);
+            expect(internal._bound[0]).toBe(a);
+            expect(internal._bound[2]).toBe(c);
+
+            // markMeshRenderableDirty: a new entry on the same view, nothing compiled.
+            expect(await sync(() => markMeshRenderableDirty(meshes[2]!))).toEqual({ forward: [meshes[2]], geometry: [meshes[2]] });
+            const c2 = internal._bound[2]!;
+            expect(c2).not.toBe(c);
+            expect(c2._view).toBe(c!._view);
+            expect(createShaderModule).not.toHaveBeenCalled();
+            expect(internal._bound[0]).toBe(a);
+            expect(internal._bound[1]).toBe(b2);
+
+            // rebuildMaterial: the material's render features are recomputed, so its mesh gets a fresh view.
+            const material = meshes[0]!.material!;
+            expect(await sync(() => rebuildMaterial(scene, material))).toEqual({ forward: [meshes[0]], geometry: [meshes[0]] });
+            const a2 = internal._bound[0]!;
+            expect(a2).not.toBe(a);
+            expect(a2._view).not.toBe(a!._view);
+            expect(a2._view.source).toBe(material);
+            expect(internal._bound[1]).toBe(b2);
+            expect(internal._bound[2]).toBe(c2);
+
+            // addToScene on the running scene: only the newcomer is built, on the drawn material's cached view.
+            const sibling = makeMesh(3, material as Parameters<typeof makeMesh>[1]);
+            expect(await sync(() => addToScene(scene, sibling))).toEqual({ forward: [sibling], geometry: [sibling] });
+            expect(internal._bound[0]).toBe(a2);
+            expect(internal._bound[1]).toBe(b2);
+            expect(internal._bound[2]).toBe(c2);
+            expect(internal._bound[3]!._mesh).toBe(sibling);
+            expect(internal._bound[3]!._view).toBe(a2._view);
+            expect(createShaderModule).not.toHaveBeenCalled();
+        } finally {
+            rebuild.mockRestore();
+        }
+    });
+
+    it("keeps unchanged meshes' geometry entries when another mesh joins the scene", async () => {
+        const { internal, engine, addMesh } = await setupGeoTask(2, false, "stub");
+        const [a, b] = internal._bound;
+        const gpu = probeGpu(engine);
+        const rebuild = vi.spyOn(a!._view._buildGroup, "_rebuildSingle");
+        try {
+            const added = addMesh();
+            internal.execute();
+
+            expect(rebuild.mock.calls.map((call) => call[1])).toEqual([added]);
+            expect(internal._bound).toHaveLength(3);
+            expect(internal._bound[0]).toBe(a);
+            expect(internal._bound[1]).toBe(b);
+            expect(internal._bound[2]!._mesh).toBe(added);
+            // Only the newcomer compiles (one variant: vertex + fragment module) and binds.
+            expect(gpu.createShaderModule).toHaveBeenCalledTimes(2);
+            expect(gpu.createBindGroup).toHaveBeenCalledOnce();
+            // Nothing was superseded, so nothing is retired and the kept entries still own their resources.
+            expect(gpu.retirements).toHaveLength(0);
+            expect(a!._lifetimeDisposers.length).toBeGreaterThan(0);
+            expect(b!._lifetimeDisposers.length).toBeGreaterThan(0);
+        } finally {
+            rebuild.mockRestore();
+        }
+    });
+
+    it("rebuilds only the mesh whose forward renderable was replaced, retiring its old entry make-before-break", async () => {
+        const { internal, meshes, engine, replaceForward } = await setupGeoTask(2, false, "stub");
+        const [a, b] = internal._bound;
+        const gpu = probeGpu(engine);
+        const rebuild = vi.spyOn(a!._view._buildGroup, "_rebuildSingle");
+        try {
+            replaceForward(meshes[1]!);
+            internal.execute();
+
+            expect(rebuild.mock.calls.map((call) => call[1])).toEqual([meshes[1]]);
+            expect(internal._bound[0]).toBe(a);
+            const rebuilt = internal._bound[1]!;
+            expect(rebuilt).not.toBe(b);
+            expect(rebuilt._mesh).toBe(meshes[1]);
+            // Same material: the replacement reuses the view and its compiled variant.
+            expect(rebuilt._view).toBe(b!._view);
+            expect(gpu.createShaderModule).not.toHaveBeenCalled();
+            // The superseded entry stays intact until the submitted frame drains; the kept one is never touched.
+            expect(gpu.retirements).toHaveLength(1);
+            expect(b!._lifetimeDisposers.length).toBeGreaterThan(0);
+            gpu.retirements.forEach((retire) => retire());
+            expect(b!._lifetimeDisposers).toHaveLength(0);
+            expect(a!._lifetimeDisposers.length).toBeGreaterThan(0);
+            expect(rebuilt._lifetimeDisposers.length).toBeGreaterThan(0);
+        } finally {
+            rebuild.mockRestore();
+        }
+    });
+
+    it("keeps a shared Standard variant's material UBO alive across deferred retirements until its last owner is released", async () => {
+        // Two meshes of one material share one compiled variant and its material UBO, which now outlive the entries
+        // that created them. A replacement retains the variant before the superseded entry's deferred release, so
+        // the UBO is never destroyed while an entry still draws with it.
+        const { internal, meshes, engine, replaceForward, addMesh } = await setupGeoTask(1, false, "stub");
+        addMesh(meshes[0]!.material as Parameters<typeof addMesh>[0]);
+        internal.execute();
+        const [a, b] = internal._bound;
+        expect(b!._view).toBe(a!._view);
+        const variants = (a!._view as unknown as { _geometry: Map<string, { _matUBO: GPUBuffer }> })._geometry;
+        expect(variants.size).toBe(1);
+        const [key, variant] = [...variants][0]!;
+        const destroy = vi.spyOn(variant._matUBO, "destroy");
+        const retirements = (engine as unknown as { _retirements: Array<() => void> })._retirements;
+        const drain = (): void => retirements.splice(0).forEach((retire) => retire());
+        drain(); // settle whatever the setup retired, so each step below counts only its own retirement
+
+        for (const entry of [b!, a!]) {
+            replaceForward(entry._mesh);
+            internal.execute();
+            expect(retirements).toHaveLength(1);
+            drain();
+            expect(entry._lifetimeDisposers).toHaveLength(0);
+            expect(destroy).not.toHaveBeenCalled();
+            expect(variants.get(key)).toBe(variant);
+        }
+        expect(internal._bound).not.toContain(a);
+        expect(internal._bound).not.toContain(b);
+        expect(internal._bound).toHaveLength(2);
+        internal._bound.forEach((entry) => expect(entry._view).toBe(a!._view));
+
+        // Only the last owner's release destroys it.
+        internal.dispose();
+        drain();
+        expect(destroy).toHaveBeenCalledOnce();
+        expect(variants.has(key)).toBe(false);
+    });
+
+    it("shares the cached view and compiled variant with a later mesh of the same material", async () => {
+        const { internal, meshes, engine, addMesh } = await setupGeoTask(1, false, "stub");
+        const [a] = internal._bound;
+        const gpu = probeGpu(engine);
+
+        const sibling = addMesh(meshes[0]!.material as Parameters<typeof addMesh>[0]);
+        internal.execute();
+
+        expect(internal._bound[0]).toBe(a);
+        expect(internal._bound[1]!._mesh).toBe(sibling);
+        expect(internal._bound[1]!._view).toBe(a!._view);
+        expect(gpu.createShaderModule).not.toHaveBeenCalled();
+        expect(gpu.createRenderPipeline).not.toHaveBeenCalled();
+    });
+
+    it("keeps every current entry when the task re-records (resize / frame-graph rebuild), and still retires them on dispose", async () => {
+        const { internal, engine } = await setupGeoTask(2, false, "stub");
+        const before = [...internal._bound];
+        const gpu = probeGpu(engine);
+        const rebuild = vi.spyOn(before[0]!._view._buildGroup, "_rebuildSingle");
+        try {
+            internal.record();
+
+            expect(internal._bound).toHaveLength(2);
+            internal._bound.forEach((entry, index) => expect(entry).toBe(before[index]));
+            expect(rebuild).not.toHaveBeenCalled();
+            expect(gpu.createShaderModule).not.toHaveBeenCalled();
+            // The scene bind group is the only one a re-record creates.
+            expect(gpu.createBindGroup).toHaveBeenCalledOnce();
+            expect(gpu.retirements).toHaveLength(0);
+        } finally {
+            rebuild.mockRestore();
+        }
+
+        internal.dispose();
+        expect(gpu.retirements).toHaveLength(1);
+        gpu.retirements.forEach((retire) => retire());
+        for (const entry of before) {
+            expect(entry._lifetimeDisposers).toHaveLength(0);
+        }
+    });
+
+    it("keeps every carried entry when a replacement fails, and rebuilds only that mesh on retry", async () => {
+        const { internal, meshes, engine, replaceForward } = await setupGeoTask(2, false, "stub");
+        const previousBound = internal._bound;
+        const [a, b] = previousBound;
+        const gpu = probeGpu(engine);
+        const buildGroup = a!._view._buildGroup;
+        const originalRebuild = buildGroup._rebuildSingle;
+        const staged = vi.fn();
+        const attempted: unknown[] = [];
+        buildGroup._rebuildSingle = (_scene, mesh, _material, resources) => {
+            attempted.push(mesh);
+            resources!._lifetimeDisposers.push(staged);
+            throw new Error("replacement build failed");
+        };
+        replaceForward(meshes[1]!);
+        try {
+            expect(() => internal.execute()).toThrow("replacement build failed");
+            expect(internal._bound).toBe(previousBound);
+            expect(attempted).toEqual([meshes[1]]);
+            expect(staged).toHaveBeenCalledOnce();
+            expect(gpu.retirements).toHaveLength(0);
+            expect(a!._lifetimeDisposers.length).toBeGreaterThan(0);
+            expect(b!._lifetimeDisposers.length).toBeGreaterThan(0);
+        } finally {
+            buildGroup._rebuildSingle = originalRebuild;
+        }
+
+        internal.execute();
+        expect(internal._bound[0]).toBe(a);
+        expect(internal._bound[1]).not.toBe(b);
+        expect(internal._bound[1]!._mesh).toBe(meshes[1]);
+    });
+
+    it("rebuilds a swapped mesh against its new material while its neighbours keep their entries", async () => {
+        const { scene, internal, meshes, engine, createStandardMaterial, replaceForward } = await setupGeoTask(2, false, "stub");
+        const [a, b] = internal._bound;
+        const gpu = probeGpu(engine);
+
+        // processMaterialSwaps: the mesh takes the new material and its forward renderable is rebuilt.
+        const swapped = createStandardMaterial();
+        (meshes[1] as unknown as { material: unknown }).material = swapped;
+        replaceForward(meshes[1]!);
+        internal.execute();
+
+        expect(internal._bound[0]).toBe(a);
+        const rebuilt = internal._bound[1]!;
+        expect(rebuilt._view.source).toBe(swapped);
+        expect(rebuilt._view).not.toBe(b!._view);
+        expect(internal._views.get(meshes[0]!.material)).toBe(a!._view);
+        expect(internal._views.has(b!._view.source)).toBe(false);
+        gpu.retirements.forEach((retire) => retire());
+        expect(b!._lifetimeDisposers).toHaveLength(0);
+        expect(a!._lifetimeDisposers.length).toBeGreaterThan(0);
+
+        // A swap seen before its forward rebuild still rebuilds the entry: it must not draw the old material.
+        const original = b!._view.source;
+        (meshes[1] as unknown as { material: unknown }).material = original;
+        scene._renderableVersion++;
+        internal.execute();
+        expect(internal._bound[0]).toBe(a);
+        expect(internal._bound[1]!._view.source).toBe(original);
+    });
+
+    it("gives a material a fresh view once its render-feature object is replaced, keeping other materials' entries", async () => {
+        const { internal, meshes, replaceForward } = await setupGeoTask(2, false, "stub");
+        const [a, b] = internal._bound;
+
+        // `rebuildMaterial`: the render-feature object is dropped and the forward renderable rebuilt.
+        (meshes[1]!.material as { _renderFeatures?: unknown })._renderFeatures = undefined;
+        replaceForward(meshes[1]!);
+        internal.execute();
+
+        expect(internal._bound[0]).toBe(a);
+        const rebuilt = internal._bound[1]!;
+        expect(rebuilt).not.toBe(b);
+        expect(rebuilt._view.source).toBe(meshes[1]!.material);
+        expect(rebuilt._view).not.toBe(b!._view);
+        expect(internal._views.get(meshes[1]!.material)).toBe(rebuilt._view);
+        expect(internal._views.get(meshes[0]!.material)).toBe(a!._view);
+    });
+
+    it("retires the entry of a mesh that leaves the pass make-before-break, keeping the others", async () => {
+        for (const explicitMeshes of [false, true]) {
+            const { scene, internal, meshes, engine } = await setupGeoTask(3, explicitMeshes, "stub");
+            const [a, b, c] = internal._bound;
+            const gpu = probeGpu(engine);
+            // Material cleared (unresolvable) on one mesh; with an explicit list, another one leaves the list.
+            (meshes[1] as unknown as { material: unknown }).material = null;
+            if (explicitMeshes) {
+                meshes.splice(2, 1);
+            } else {
+                (meshes[2] as unknown as { material: unknown }).material = null;
+            }
+            scene._renderableVersion++;
+            internal.execute();
+
+            expect(internal._bound).toHaveLength(1);
+            expect(internal._bound[0]).toBe(a);
+            expect(gpu.retirements).toHaveLength(1);
+            expect(b!._lifetimeDisposers.length).toBeGreaterThan(0);
+            expect(c!._lifetimeDisposers.length).toBeGreaterThan(0);
+            gpu.retirements.forEach((retire) => retire());
+            expect(b!._lifetimeDisposers).toHaveLength(0);
+            expect(c!._lifetimeDisposers).toHaveLength(0);
+            expect(a!._lifetimeDisposers.length).toBeGreaterThan(0);
+        }
+    });
+
+    it("keeps rebuilding Node entries and views on every sync while carrying its Standard neighbours", async () => {
+        // A Node geometry resource snapshots the material's uniforms once; only a rebuild picks up later
+        // changes, so Node entries must not be carried even when the mesh has a forward renderable of its own.
+        const { scene, internal, meshes } = await setupGeoTask(1, false, "stub");
+        const [standard] = internal._bound;
+        const nodeMaterial = { _buildGroup: { _materialFamily: "node" }, _renderFeatures: { features: 0 } };
+        const nodeMesh = { ...(meshes[0] as unknown as Record<string, unknown>), material: nodeMaterial } as unknown as Mesh;
+        const views: unknown[] = [];
+        internal._createNodeGeometryView = (source) => {
+            const view = {
+                source,
+                _buildGroup: {
+                    _rebuildSingle: (_scene: unknown, mesh: unknown) => {
+                        const renderable = { mesh, isTransparent: false, order: 0, bind: () => ({ renderable, pipeline: {}, draw: () => 1 }) };
+                        return renderable;
+                    },
+                },
+            };
+            views.push(view);
+            return view;
+        };
+        scene.meshes.push(nodeMesh);
+        scene._renderables.push({ mesh: nodeMesh, order: 100, isTransparent: false } as unknown as Renderable);
+        scene._renderableVersion++;
+        internal.execute();
+        const first = internal._bound.find((entry) => entry._mesh === nodeMesh)!;
+
+        scene._renderableVersion++;
+        internal.execute();
+        const second = internal._bound.find((entry) => entry._mesh === nodeMesh)!;
+
+        expect(views).toHaveLength(2);
+        expect(second).not.toBe(first);
+        expect(second._view).not.toBe(first._view);
+        expect(internal._bound[0]).toBe(standard);
+    });
+
     it("binds a mesh whose material family first appears after the task was preloaded", async () => {
         // `_preload` imports a family bridge only for families present at that moment. A PBR mesh
         // added to a Standard-only scene later used to reach an unloaded bridge and throw on every
@@ -962,15 +1364,16 @@ describe("GeometryRendererTask", () => {
     function recordPbrGeometryBuilds(state: LateState): unknown[] {
         const realFactory = state._createPbrGeometryView!;
         const builtFor: unknown[] = [];
-        state._createPbrGeometryView = (source, viewConfig) => {
-            const view = realFactory(source, viewConfig);
-            view._buildGroup._rebuildSingle = (_scene: unknown, mesh: unknown) => {
+        // The views get a recording builder of their own: the real one is a module singleton, so patching it
+        // would leak the stub into every later test of this file.
+        const builder = {
+            _rebuildSingle: (_scene: unknown, mesh: unknown) => {
                 builtFor.push(mesh);
                 const renderable = { mesh, isTransparent: false, order: 0, bind: () => ({ renderable, pipeline: {}, draw: () => 1 }) };
                 return renderable;
-            };
-            return view;
+            },
         };
+        state._createPbrGeometryView = (source, viewConfig) => Object.create(realFactory(source, viewConfig), { _buildGroup: { value: builder } });
         return builtFor;
     }
 
@@ -1108,8 +1511,8 @@ describe("GeometryRendererTask", () => {
     });
 
     /** An existing single-light PBR scene whose mesh is forward-built, current, and bound by the geometry task. */
-    async function setupBoundSingleLightPbrMesh(shadowLights: unknown[]) {
-        const setup = await setupGeoTask(1);
+    async function setupBoundSingleLightPbrMesh(shadowLights: unknown[], withForward = false) {
+        const setup = await setupGeoTask(1, false, withForward ? "stub" : "none");
         const { scene, internal, meshes } = setup;
         const { createPbrMaterial } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material");
         const { _computePbrMaterialFeatures } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material-features");
@@ -1193,6 +1596,126 @@ describe("GeometryRendererTask", () => {
         completeForwardRebuild();
         internal.execute();
         expect(builtFor).toEqual([built]);
+    });
+
+    it("keeps a forward-current PBR entry across unrelated scene mutations and re-records", async () => {
+        const { scene, internal, late, completeForwardBuild } = await addLatePbrMesh(true);
+        internal.execute(); // the pending forward build keeps it out
+        // The factory runs once per cached view, so this first recorder sees every PBR build of the task.
+        const builtFor = completeForwardBuild();
+        internal.execute();
+        expect(builtFor).toEqual([late]);
+        const entry = internal._bound.find((bound) => bound._mesh === late);
+
+        scene._renderableVersion++;
+        internal.execute();
+        internal.record();
+
+        expect(builtFor).toEqual([late]);
+        expect(internal._bound.find((bound) => bound._mesh === late)).toBe(entry);
+    });
+
+    it("rebuilds a PBR entry once its forward renderable is superseded, carrying its Standard neighbour", async () => {
+        // A per-mesh forward refresh (material swap through the group's rebuild, markMeshRenderableDirty) or a
+        // group rebuild tracks a new renderable for the mesh: its geometry entry follows, nothing else does.
+        const { internal, built, builtFor, completeForwardRebuild } = await setupBoundSingleLightPbrMesh([], true);
+        const [standard, pbr] = internal._bound;
+
+        completeForwardRebuild();
+        internal.execute();
+
+        expect(builtFor).toEqual([built]);
+        expect(internal._bound[0]).toBe(standard);
+        expect(internal._bound[1]).not.toBe(pbr);
+        expect(internal._bound[1]!._mesh).toBe(built);
+    });
+
+    it.each([
+        { change: "starts receiving shadows", shadowLights: [{}] },
+        { change: "is reached by a second light", shadowLights: [] },
+        { change: "gains thin instances", shadowLights: [] },
+    ])("rebuilds a PBR entry whose mesh $change once its forward rebuild completes, carrying its Standard neighbour", async ({ change, shadowLights }) => {
+        const { scene, internal, built, builtFor, completeForwardRebuild } = await setupBoundSingleLightPbrMesh(shadowLights, true);
+        const { createHemisphericLight } = await import("../../../packages/babylon-lite/src/light/hemispheric");
+        const [standard, pbr] = internal._bound;
+
+        if (change === "starts receiving shadows") {
+            built.receiveShadows = true;
+        } else if (change === "is reached by a second light") {
+            scene.lights.push(createHemisphericLight([0, 1, 0]));
+        } else {
+            (built as unknown as { thinInstances: unknown }).thinInstances = { count: 4 };
+        }
+        scene._renderableVersion++;
+        internal.execute();
+        // Pending forward rebuild: the PBR entry is dropped, never carried with its stale request.
+        expect(builtFor).toEqual([]);
+        expect(internal._bound).toHaveLength(1);
+        expect(internal._bound[0]).toBe(standard);
+
+        completeForwardRebuild();
+        internal.execute();
+        expect(builtFor).toEqual([built]);
+        expect(internal._bound[0]).toBe(standard);
+        expect(internal._bound[1]).not.toBe(pbr);
+        expect(internal._bound[1]!._mesh).toBe(built);
+    });
+
+    it("keeps a PBR view's variants per forward context, so meshes on per-mesh and scene contexts do not recompose each other's", async () => {
+        // Several meshes of a never-built PBR group runtime-built in one drain, before the scene's first build
+        // completes: the first builds the group and publishes the scene context, every later one is built into
+        // the now-built group and keeps its OWN forward context (`_pbrMeshGeomContexts`) until the next full PBR
+        // rebuild. Driven by the real producers (material setter, processMaterialSwaps, markMeshRenderableDirty)
+        // and the real PBR forward and geometry builders.
+        const { scene, internal, meshes, engine, makeMesh } = await setupGeoTask(1, false, "stub");
+        const { createPbrMaterial } = await import("../../../packages/babylon-lite/src/material/pbr/pbr-material");
+        const material = createPbrMaterial();
+        const pbr = [1, 2, 3].map((i) => makeMesh(i));
+        for (const mesh of pbr) {
+            addToScene(scene, mesh);
+            (mesh as unknown as { material: unknown }).material = material;
+        }
+        await processMaterialSwaps(scene);
+        scene._runtimeBuilds?._e();
+        const pbrScene = scene as unknown as { _pbrGeomContext: object; _pbrMeshGeomContexts: WeakMap<Mesh, object> };
+        expect(pbrScene._pbrMeshGeomContexts.has(pbr[0]!)).toBe(false);
+        expect(new Set(pbr.map((mesh) => pbrScene._pbrMeshGeomContexts.get(mesh) ?? pbrScene._pbrGeomContext)).size).toBe(3);
+
+        const state = internal as unknown as LateState;
+        internal.execute();
+        await state._lateLoad;
+        const gpu = probeGpu(engine);
+        internal.execute();
+        expect(internal._bound.map((b) => b._mesh)).toEqual([meshes[0], ...pbr]);
+        const firstSyncModules = gpu.createShaderModule.mock.calls.length;
+        /** Per-mesh forward refresh of `refresh`, then a re-sync; returns the refreshed meshes bound again. */
+        const sync = async (refresh: Mesh[]): Promise<Mesh[]> => {
+            const before = [...internal._bound];
+            gpu.createShaderModule.mockClear();
+            gpu.createRenderPipeline.mockClear();
+            refresh.forEach(markMeshRenderableDirty);
+            await processMaterialSwaps(scene);
+            internal.execute();
+            // Every entry but the refreshed ones is carried.
+            internal._bound.forEach((entry, i) => expect(entry === before[i]).toBe(!refresh.includes(entry._mesh)));
+            return internal._bound.filter((entry) => refresh.includes(entry._mesh)).map((entry) => entry._mesh);
+        };
+
+        // A per-mesh refresh of the scene-context mesh, after the per-mesh contexts were composed last.
+        expect(await sync([pbr[0]!])).toEqual([pbr[0]]);
+        expect(gpu.createShaderModule).not.toHaveBeenCalled();
+        expect(gpu.createRenderPipeline).not.toHaveBeenCalled();
+        // ...of a per-mesh-context mesh right after it...
+        expect(await sync([pbr[1]!])).toEqual([pbr[1]]);
+        expect(gpu.createShaderModule).not.toHaveBeenCalled();
+        // ...and a batch refresh of all of them.
+        expect(await sync(pbr)).toEqual(pbr);
+        expect(gpu.createShaderModule).not.toHaveBeenCalled();
+        expect(gpu.createRenderPipeline).not.toHaveBeenCalled();
+
+        // The batch that first binds them composes one variant (vertex + fragment module) per forward context,
+        // as their forward builds did: a variant is never shared across contexts.
+        expect(firstSyncModules).toBe(2 * 3);
     });
 
     it("still binds an off-scene PBR mesh of an explicit list against the scene-level context", async () => {
