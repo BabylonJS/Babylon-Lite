@@ -85,14 +85,16 @@ export interface CsmTaskState extends ShadowTaskInternalState {
     _casterMaterials: Map<Material, Material>;
     /** @internal Per-caster-material generation (`_csmGen`) snapshot, taken when the material's casters were last
      *  queued. With `_casterMaterials` it tells `_reconcileCsmCasters` whether a caster's cached no-color view is stale:
-     *  its material was rebuilt (the view would dangle) or re-pointed since the snapshot, or a registered caster's
-     *  material is missing from it. Only those casters are requeued. This is precise, unlike the global
-     *  `_materialEpoch`, which also bumps for swaps of unrelated (non-caster) materials. */
+     *  its material was rebuilt (the view would dangle) or re-pointed since the snapshot, or is missing from it. Only
+     *  those casters are requeued. This is precise, unlike the global `_materialEpoch`, which also bumps for swaps of
+     *  unrelated (non-caster) materials. */
     _casterMatGens: Map<Material, number | undefined>;
     /** @internal Per-caster cascade-cap snapshot used to update task membership incrementally. */
     _casterMaxCascades: Map<Mesh, number | undefined>;
-    /** @internal Set while a held caster has not joined or taken its cap (see `_reconcileCsmCasters`). */
-    _unapplied?: boolean;
+    /** @internal The changed casters the last reconcile kept out of every task while their view could not be built
+     *  (`_reconcileCsmCasters`). While the held casters are unchanged the reconcile adopts this set, so an ensure with the
+     *  same caster array and no stale material touches no task. */
+    _held?: Set<Mesh>;
     /** @internal Pre-allocated scratch storage for per-frame cascade computation, sized for `_numCascades`. */
     _cascadeScratch: CsmCascadeScratch;
 }
@@ -250,24 +252,27 @@ export function ensureCsmShadowTaskState(
  *  through a stale no-colour view are dropped, in one pass per task; unchanged casters keep their resolved packets. The
  *  dropped casters that are still in the set are queued again: through a fresh view when theirs was stale, and through
  *  the cached view of their material when only their cap changed. A view is stale when the caster's material was
- *  rebuilt (`_csmGen`) or re-pointed (`setShadowCasterMaterial`) since the snapshot, or when a registered caster's
- *  material is missing from it: the caster switched material or got its first one. A caster new to the set with an
- *  unseen material is queued like any new caster.
+ *  rebuilt (`_csmGen`) or re-pointed (`setShadowCasterMaterial`) since the snapshot, or when its material is missing
+ *  from it: the caster switched material or got its first one, or it joins with an unseen material, whose chain may
+ *  hold a view another caster's chain cached before the terminal was rebuilt.
  *
  *  A changed caster whose view cannot be built yet (`holdCsmCaster`) is held instead, without holding back any other
- *  caster: a registered one keeps its old packets and cap, a new one stays out, and its material is not snapshotted, so
- *  it still reads as changed on the next reconcile. The hold is decided per material, so every caster of a held
- *  material waits: queueing a new one would snapshot the material, and a registered caster sharing it would then never
- *  be requeued. While a held caster has not joined or taken its cap, `_unapplied` runs the next reconcile even for the
- *  same caster array, since a hold can lift with nothing else changing (a view factory import lands, the change is
- *  reverted). The reconcile that applies the last held caster clears it, and later ones with that array return at once.
+ *  caster: it leaves every task once, its packets retired behind the frame fence, since they may reference per-mesh
+ *  resources retired with its previous material, possibly in a frame this reconcile did not see (the generator was
+ *  parked). A registered one keeps its cap entry, and its material is not snapshotted, so it still reads as changed and
+ *  is requeued through a fresh view once the hold lifts, or rejoins if its change is reverted. The hold is decided per
+ *  material, so every caster of a held material waits: queueing a new one would snapshot the material, and a
+ *  registered caster sharing it would then never be requeued. The held casters are kept as `_held`; while they are
+ *  unchanged, the same caster array with no stale material returns at once, so an unresolved hold costs a scan and no
+ *  task. A hold that lifts or changes runs the reconcile again, also when no scene version moves (a view factory
+ *  import lands, a change is reverted).
  *
  *  Nothing is resolved here: when a caster was queued, the shadow scheduler records each cascade once (forced through
  *  `_recordedVersion`), so K requeued casters cost one transaction per cascade instead of one whole-task rebind per
  *  caster. A drop alone needs no record, only a redraw. When a caster was dropped or queued, the material snapshots and
  *  views are pruned to what the live casters reach, and the dropped casters (possibly none) are returned so a caller
- *  with more tasks can update them too; a new array with the same members and unchanged materials only clears the
- *  bundles and returns undefined. */
+ *  with more tasks can update them too; a new array with the same members and unchanged materials, also while a caster
+ *  stays held, only clears the bundles and returns undefined. */
 export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, state: CsmTaskState, casterMeshes: readonly Mesh[]): ReadonlySet<Mesh> | undefined {
     const views = state._materialViews;
     const materials = state._casterMaterials;
@@ -281,17 +286,21 @@ export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, s
         if (material && shadowCasterMaterialChanged(material, materials, gens)) {
             if (holdCsmCaster(scene, sg, material)) {
                 (held ??= new Set()).add(mesh);
-            } else if (caps.has(mesh) || materials.has(material)) {
+            } else {
                 (stale ??= new Set()).add(material);
             }
         }
     }
-    if (!stale && !state._unapplied && state._casterMeshes === casterMeshes) {
+    const last = state._held;
+    if (last && held?.size === last.size && [...held].every((mesh) => last.has(mesh))) {
+        held = last;
+    }
+    if (!stale && held === last && state._casterMeshes === casterMeshes) {
         return undefined;
     }
     // `getNoColorView` caches an override's view under every link of its chain, and receive materials may share links:
     // forget every stale chain before building any view, so materials casting through the same rebuilt terminal share
-    // one fresh view.
+    // one fresh view. The prune below runs too late for a joining caster: it keeps any view a live chain reaches.
     for (const material of stale ?? []) {
         for (let link: Material | undefined = material; link; link = link._shadowCasterMaterial) {
             views.delete(link);
@@ -301,7 +310,13 @@ export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, s
     const drop = new Set<Mesh>();
     for (const mesh of state._casterMeshes) {
         const material = mesh.material;
-        if (!next.has(mesh) || (material && stale?.has(material)) || (mesh._shadowMaxCascade !== caps.get(mesh) && !held?.has(mesh))) {
+        // A caster leaves every task when it becomes held, but keeps its cap entry: it is still registered. One the last
+        // reconcile held has no packet left, and dropping it again would force a redraw and a refit for nothing.
+        if (held?.has(mesh)) {
+            if (!last?.has(mesh)) {
+                drop.add(mesh);
+            }
+        } else if (!next.has(mesh) || (material && stale?.has(material)) || mesh._shadowMaxCascade !== caps.get(mesh)) {
             caps.delete(mesh);
             drop.add(mesh);
         }
@@ -312,15 +327,14 @@ export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, s
         }
     }
     let queued = false;
-    let unapplied = false;
     for (const mesh of casterMeshes) {
         const material = mesh.material;
         const maxCascade = mesh._shadowMaxCascade;
         if (held?.has(mesh)) {
-            unapplied ||= !caps.has(mesh) || maxCascade !== caps.get(mesh);
             continue;
         }
-        if (!caps.has(mesh) && material) {
+        // A caster the last reconcile held rejoins here when its change was reverted.
+        if ((!caps.has(mesh) || last?.has(mesh)) && material) {
             queued = true;
             const view = getNoColorView(material, views);
             // Queue only. `addMeshToTask` on a recorded task would rebind the whole task once per added caster. Like it,
@@ -340,7 +354,7 @@ export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, s
         task._ob.length = 0;
     }
     state._casterMeshes = casterMeshes;
-    state._unapplied = unapplied;
+    state._held = held;
     if (!drop.size && !queued) {
         return undefined;
     }

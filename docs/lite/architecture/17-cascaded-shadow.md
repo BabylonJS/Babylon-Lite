@@ -340,11 +340,11 @@ The cache state (tasks, cache texture, gate) is created on the first ensure (or 
 replaces a default state built before the cache chunk loaded) and kept for the generator's
 lifetime; its initial camera key forces the new cache texture to be populated before use.
 Caster changes are reconciled into it like the default state. The cache also drops the
-removed casters from its static tasks and moves each requeued caster the gate holds static
-from the dynamic overlay back into the static tasks, so a static caster whose material was
-rebuilt or re-pointed, or whose cascade cap changed, stays static. A caster that leaves the set and
-returns later is new to the gate, which forgets departed casters, so it starts dynamic
-like any new caster. Any drop or requeue forces a full refit, so every static cascade
+removed and held casters from its static tasks and moves each requeued caster the gate
+holds static from the dynamic overlay back into the static tasks, so a static caster whose
+material was rebuilt or re-pointed, or whose cascade cap changed, stays static. A caster
+that leaves the set and returns later is new to the gate, which forgets departed casters,
+so it starts dynamic like any new caster. Any drop or requeue forces a full refit, so every static cascade
 re-renders without the old depth (a re-capped caster's depth leaves the cascades above its
 new cap at once); when a caster was queued, the scheduler's record also re-binds every
 static task. Besides the requeued casters' own packets, that refit and that re-bind are
@@ -368,37 +368,56 @@ Each CSM task state also snapshots every caster's maximum cascade and, per recei
 material, its terminal caster material and that material's `_csmGen`. Every ensure
 reconciles them with the live casters (`_reconcileCsmCasters`):
 
-- **Requeue.** Casters that left the set or were re-capped, and casters whose
-  no-colour view is stale, are removed from every cascade task in one pass per task,
-  their packets retiring behind the frame fence. The ones still in the set are queued
-  again: a caster with a stale view through a fresh one, a caster that was only
-  re-capped through the cached view of its material. A view is stale when the caster's
-  material was rebuilt (`_csmGen` bump) or re-pointed (`setShadowCasterMaterial`) since
-  the snapshot, or when a registered caster's material is missing from it, because it
-  switched material or got its first one. A caster new to the array with an unseen
-  material is not a change: it is queued like any new caster. A caster whose family has
-  no no-colour view is queued with its own material, as the first build queues it. All
-  other packets are kept, and so are the tasks, targets and cameras (with static caching,
-  the cache texture and refit gate).
+- **Requeue.** Casters that left the set or were re-capped, and casters whose no-colour
+  view is stale, are removed from every cascade task in one pass per task, their packets
+  retiring behind the frame fence. The ones still in the set are queued again: a caster
+  with a stale view through a fresh one, a caster that was only re-capped through the
+  cached view of its material. A view is stale when the caster's material was rebuilt
+  (`_csmGen` bump) or re-pointed (`setShadowCasterMaterial`) since the snapshot, or when
+  the caster's material is missing from it, because it switched material, got its first
+  one, or joins with an unseen material. A joining caster counts too: another caster's
+  chain may have cached a view on its chain before the terminal was rebuilt, and that
+  caster may leave or be re-pointed in the same ensure, so the prune would keep that
+  view (below). A caster whose family has no no-colour view is queued with its own
+  material, as the first build queues it. All other packets are kept, and so are the
+  tasks, targets and cameras (with static caching, the cache texture and refit gate).
 - **Hold.** A changed caster waits while its view cannot be built yet: the no-colour
   view factory of its family is not imported (the generator is parked once while it
   imports, as for a re-supplied set), or the material it casts through itself has no
   completed group build in this scene (its swap drain or runtime build provides one).
-  The hold is per caster: other changed casters are requeued and caster-set changes
-  apply meanwhile. A `setShadowCasterMaterial` override is not held for its group;
-  recording it throws as before.
-- **What a held caster draws.** A registered held caster keeps drawing its old packets
-  at its old cap, and a new one stays out. Its material is not snapshotted, so it still
-  reads as changed, and the hold is decided per material, so every caster of a held
-  material waits. While a held caster has not joined or taken its cap, `_unapplied`
-  makes the next ensure reconcile again even for the same array, so a hold that lifts
-  with nothing else changing (a factory import lands, the change is reverted) still
-  adds it. The reconcile that applies the last held caster clears the flag, and later
-  ensures with the same array return at once again.
-- **Not covered.** A registered caster whose material becomes `null` keeps casting
-  through its old packets. A group that never builds keeps the caster held until its
-  material is reassigned or it leaves the set: after a failed runtime build, which
-  reports its own error, or for a caster mesh outside the scene, which gets no build.
+  The hold is per caster: other changed casters are requeued at once (one whose
+  material was only rebuilt, through a fresh view), and caster-set changes apply
+  meanwhile. A `setShadowCasterMaterial` override is not held for its group; recording
+  it throws as before. The reconcile keeps the held casters (`_held`): while they are
+  unchanged, an ensure with the same caster array and no stale material returns
+  without touching any task. It runs again when the array changes, a caster material is
+  rebuilt or re-pointed, or the hold changes or lifts, also without a scene version
+  bump (a factory import lands, a change is reverted). A renderable version or material
+  epoch move alone changes nothing: a rebuilt caster material moves its `_csmGen`,
+  which the scan reads.
+- **What a held caster draws.** Nothing. It leaves every cascade task (and static-cache
+  task), its packets retired once behind the frame fence. Those packets were built
+  through its previous material and may reference per-mesh resources retired with it,
+  possibly in a frame the shadow task did not see because the generator was parked. A
+  registered held caster keeps its cap entry, and its material is not snapshotted, so
+  it still reads as changed: it is requeued through a fresh view once the hold lifts,
+  or rejoins if its change is reverted. A new one stays out until it can join. The hold
+  is decided per material, so every caster of a held material waits: queueing a new one
+  would snapshot the material, and a registered caster sharing it would then never be
+  requeued. The drop forces a redraw, so the depth a held caster last rendered leaves
+  the map with the next draw. It is dropped once, when it becomes held: a later
+  reconcile that still holds it has nothing to drop.
+- **Not covered.** Forgetting a stale chain's views can leave two views of an unchanged
+  link: another live caster drawing through it (the re-pointed material's new target, or
+  a link of a joining caster's chain) keeps its packets on the old view while the stale
+  chain's casters get a new one. Both are valid. A registered caster whose material
+  becomes `null` keeps casting through its old packets. A group that never builds keeps
+  the caster held, and out of the cascades, until its material is reassigned or it
+  leaves the set: after a failed runtime build, which reports its own error, or for a
+  caster mesh outside the scene, which gets no build. A caster that switches material
+  and back while the generator is parked, with the switch back still queued behind an
+  in-flight runtime build, keeps its packets: the scan sees the same material and
+  `_csmGen` (this also happens without a hold).
 
 The shadow scheduler resolves the queued casters in its next record, one transaction per
 cascade that re-binds the kept packets once without rebuilding them. Because neither a new
@@ -408,10 +427,13 @@ caster array nor a re-point bumps a scene version, the reconcile forces a redraw
 binding lists. If that record throws, the replaced casters are missing from the cascade
 until a later record succeeds. On the same change path the material snapshots and views are
 pruned to what the live casters reach (their receive materials and every link of their
-`_shadowCasterMaterial` chains), so the state does not retain materials of departed casters,
-and a material that casts again later, possibly rebuilt meanwhile through a non-caster mesh,
-gets a fresh view. A new array with the same members and unchanged materials only clears
-the cascade bundles, and a rebuilt material no caster uses changes nothing.
+`_shadowCasterMaterial` chains), so the state does not retain materials of departed casters.
+The prune runs after the queue and keeps every view a live chain reaches, so fresh views
+rest on the staleness rule: a material that casts again later, possibly rebuilt meanwhile
+through a non-caster mesh, is missing from the snapshot, so its chain's views are forgotten
+first. A new array with the same members and unchanged materials only clears the cascade
+bundles, also while a caster stays held, and a rebuilt material no caster uses changes
+nothing.
 
 ## Babylon.js Equivalence Map
 
@@ -485,11 +507,24 @@ modules per case so no view factory leaks between cases. For the default and
 static-cache hooks it proves that a registered caster switching to (or getting) an
 unseen material is requeued through it in the same cascade tasks, retiring only its
 old packets and keeping the cache texture and refit gate, that a new caster with an
-unseen material is simply queued, that a held caster neither throws nor retires
+unseen material is simply queued, that a held caster neither throws nor creates
 anything and parks the generator once, that set changes and the requeue of other
-casters apply during a hold while held casters keep their old packets and caps, and
-that held casters join when the hold lifts, or keep their old view when the change is reverted. An override
-whose group is not built still throws.
+casters apply during a hold while held casters stay out of every task with their caps
+kept, and that held casters join when the hold lifts with or without a version bump, or
+when their change is reverted (with an unchanged cap, back on the cached view of a
+material another caster still draws). An override whose group is not built still throws. With
+packets that own resources and per-mesh resources retired by `rebuildMaterial` or the
+swap drain, it proves that a caster rebuilt while another caster is held retires its old
+packets once behind the fence and casts again at once through a fresh view, also over
+many frames of a hold whose build never lands, with no draw submitting a released
+resource and no bundle touched; that a held caster whose previous material was rebuilt
+is dropped too; that a caster switched and reverted during a hold casts its old
+material again; and that no draw submits a released resource of a held caster whose
+material was switched while the generator was parked, whether it then waits for its
+view factory (the pass whose ensure parks the generator again still draws) or for its
+group. Frames of an unresolved hold leave every task's bundles and binding version
+alone and retire nothing, and a pending caster or cap is applied once when the hold
+lifts by a group build or, without a version bump, by a factory import.
 
 `tests/lite/unit/csm-caster-reconcile.test.ts` proves that a rebuilt or re-pointed caster
 material keeps the cascade tasks (and, with the static cache, the cache texture), requeues
@@ -499,15 +534,19 @@ rebuilt caster in the same reconcile that holds a joining caster whose group is 
 (and queues that one once the build lands, with the same caster array), removes stale
 casters with one batch selection per task (leaving tasks without them untouched), forces
 only a redraw for a drop, forgets the materials and views no live caster reaches (so a
-former override terminal rebuilt after a re-point gets a fresh view when a caster joins
-with it), ignores non-caster materials and same-member re-supplies, holds a re-pointed
-caster whose family factory is missing without touching any task, requeues a static-cache
-caster (rebuilt or re-capped) into the task set of its current class while the other
-packets are kept, requeues a caster whose family has no no-colour view through its own
-material, goes quiet again for the same caster array once the last held caster has joined
-or its change was reverted (no bundle clear, retirement or new view, in both hook sets),
-and, through the real shadow scheduler, publishes the replacement packet before the shadow
-map renders.
+former override terminal rebuilt after a re-point gets a fresh view when a caster joins with
+it), gives a caster joining with a rebuilt override terminal a fresh view when the chain
+that cached the terminal's view loses its caster or is re-pointed in the same ensure (in
+both hook sets), ignores non-caster materials and same-member re-supplies (also while a
+joining or registered caster stays held: no record, redraw or static refit, in both hook
+sets), keeps a re-pointed caster whose family factory is missing out of every task (the
+other packets kept, and no task touched again while the hold is unchanged), requeues a
+static-cache caster (rebuilt or re-capped) into the task set of its current class while the
+other packets are kept, requeues a caster whose family has no no-colour view through its own
+material, goes quiet again for the same caster array once the last held caster has joined or
+its change was reverted (no bundle clear, retirement or new view, in both hook sets), and,
+through the real shadow scheduler, publishes the replacement packet before the shadow map
+renders.
 
 `tests/lite/unit/csm-refit-gate.test.ts` validates stable re-supply, version-sum
 collision handling, promotion/demotion timing, angular drift, and interval refits.

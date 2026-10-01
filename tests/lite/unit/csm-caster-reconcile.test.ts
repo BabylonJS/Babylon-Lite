@@ -135,6 +135,20 @@ function setup(casters: readonly Mesh[]): { engine: EngineContext; scene: SceneC
     return { engine, scene, state };
 }
 
+/** A recorded state of either hook set; `ensure` re-supplies it, and `tasks` lists every cascade task it owns. */
+function start(hooks: "default" | "cache", casters: readonly Mesh[]) {
+    const engine = { _device: { createTexture: vi.fn(() => ({ createView: vi.fn(() => ({})), destroy: vi.fn() })) } } as unknown as EngineContext;
+    const scene = makeScene();
+    const hook = hooks === "default" ? ensureCsmShadowTaskState : ensureCsmShadowCacheState;
+    const state = hook(engine, scene, sg, cfg, casters, null) as Partial<CachedState> & CsmTaskState;
+    const tasks = (): RenderTask[] => [...(state._staticTasks ?? []), ...state._tasks];
+    record(state, scene, tasks());
+    const ensure = (meshes: readonly Mesh[]): void => {
+        expect(hook(engine, scene, sg, cfg, meshes, state)).toBe(state);
+    };
+    return { engine, scene, state, tasks, ensure };
+}
+
 describe("CSM caster reconcile", () => {
     beforeAll(async () => {
         await preloadPcfShadowTaskState([caster("preload", shaderMaterial("preload"))]);
@@ -539,7 +553,7 @@ describe("CSM caster reconcile", () => {
         expect(state._recordedVersion).toBe(-1);
         record(state, scene);
 
-        // The group's build lands with nothing else changing: the same array still runs the reconcile, which queues it.
+        // The group's build lands with nothing else changing: the hold lifts, so the same array runs the reconcile again.
         scene._groups.set(unbuiltGroup, { r: rebuild } as unknown as SceneMeshGroup);
         expect(ensureCsmShadowTaskState(engine, scene, sg, cfg, casters, state)).toBe(state);
 
@@ -554,18 +568,15 @@ describe("CSM caster reconcile", () => {
         });
     });
 
-    it("holds a re-pointed caster whose family factory is missing without touching any task", () => {
+    it("holds a re-pointed caster whose family factory is missing out of every task, keeping the other packets", () => {
         const terminal = shaderMaterial("caster");
         const visible = shaderMaterial("visible", terminal);
         const meshV = caster("v", visible);
         const meshB = caster("b", shaderMaterial("B"));
         const casters = [meshV, meshB];
         const { engine, scene, state } = setup(casters);
-        const before = state._tasks.map((task) => ({
-            renderables: task._renderables.slice(),
-            bindings: task._opaqueBindings.slice(),
-            pending: task._pendingMeshes!.slice(),
-        }));
+        const keptB = state._tasks.map((task) => packet(task, meshB));
+        const oldV = state._tasks.map((task) => packet(task, meshV));
         const recorded = state._recordedVersion;
         // The node no-colour factory is never imported in this file, like a family no caster had at preload.
         const nodeCaster = { name: "node", _buildGroup: { _materialFamily: "node" }, _uboVersion: 0 } as unknown as Material;
@@ -573,17 +584,38 @@ describe("CSM caster reconcile", () => {
 
         expect(ensureCsmShadowTaskState(engine, scene, sg, cfg, casters, state)).toBe(state);
 
-        // The caster keeps casting through its old view until the factory imports; its change is still pending.
+        // Its old packets may reference resources retired with its previous caster material, so it leaves every task until
+        // the factory imports; it stays registered and its change pending. A drop needs a redraw, no record.
         expect(createdTasks).toHaveLength(2);
-        expect(engine._retirements ?? []).toHaveLength(0);
         expect(state._recordedVersion).toBe(recorded);
+        expect(state._lastCasterVersion).toBe(-1);
         expect(state._casterMaxCascades.has(meshV)).toBe(true);
         expect(state._casterMaterials.get(visible)).toBe(terminal);
+        expect(state._held).toEqual(new Set([meshV]));
         state._tasks.forEach((task, c) => {
-            expect(task._renderables).toEqual(before[c]!.renderables);
-            expect(task._opaqueBindings).toEqual(before[c]!.bindings);
-            expect(task._pendingMeshes).toEqual(before[c]!.pending);
+            expect(task._renderables).toEqual([keptB[c]]);
+            expect(task._opaqueBindings.map((binding) => binding.renderable)).toEqual([keptB[c]]);
+            expect(task._pendingMeshes).toHaveLength(0);
         });
+        runRetirements(engine);
+        oldV.forEach((renderable) => expect(disposer(renderable)).toHaveBeenCalledOnce());
+        keptB.forEach((renderable) => expect(disposer(renderable)).not.toHaveBeenCalled());
+
+        // While the hold is unchanged, the same caster array touches no task.
+        const held = state._held;
+        const bundles = state._tasks.map((task) => {
+            const bundle = {} as GPURenderBundle;
+            task._ob.push(bundle);
+            task._lastVersion = scene._renderableVersion;
+            return bundle;
+        });
+        expect(ensureCsmShadowTaskState(engine, scene, sg, cfg, casters, state)).toBe(state);
+        expect(state._held).toBe(held);
+        state._tasks.forEach((task, c) => {
+            expect(task._ob).toEqual([bundles[c]]);
+            expect(task._lastVersion).toBe(scene._renderableVersion);
+        });
+        expect(engine._retirements).toHaveLength(0);
     });
 
     it("requeues a caster whose family has no no-colour view through its own material, as the first build queues it", () => {
@@ -760,7 +792,7 @@ describe("CSM static-cache caster reconcile", () => {
     });
 });
 
-describe("CSM caster reconcile once a held caster is applied", () => {
+describe("CSM caster reconcile of the same caster array around a hold", () => {
     beforeAll(async () => {
         await preloadPcfShadowTaskState([caster("preload", shaderMaterial("preload"))]);
     });
@@ -768,20 +800,6 @@ describe("CSM caster reconcile once a held caster is applied", () => {
     beforeEach(() => {
         createdTasks.length = 0;
     });
-
-    /** A recorded state of either hook set; `ensure` re-supplies it, and `tasks` lists every cascade task it owns. */
-    function start(hooks: "default" | "cache", casters: readonly Mesh[]) {
-        const engine = { _device: { createTexture: vi.fn(() => ({ createView: vi.fn(() => ({})), destroy: vi.fn() })) } } as unknown as EngineContext;
-        const scene = makeScene();
-        const hook = hooks === "default" ? ensureCsmShadowTaskState : ensureCsmShadowCacheState;
-        const state = hook(engine, scene, sg, cfg, casters, null) as Partial<CachedState> & CsmTaskState;
-        const tasks = (): RenderTask[] => [...(state._staticTasks ?? []), ...state._tasks];
-        record(state, scene, tasks());
-        const ensure = (meshes: readonly Mesh[]): void => {
-            expect(hook(engine, scene, sg, cfg, meshes, state)).toBe(state);
-        };
-        return { engine, scene, state, tasks, ensure };
-    }
 
     it.each([
         ["default", "joined"],
@@ -803,7 +821,7 @@ describe("CSM caster reconcile once a held caster is applied", () => {
             // A caster joins with the unbuilt material; its build then lands with nothing else changing.
             casters = [meshA, caster("n", unbuilt)];
             ensure(casters);
-            expect(state._unapplied).toBe(true);
+            expect(state._held).toEqual(new Set([casters[1]]));
             scene._groups.set(unbuiltGroup, { r: rebuild } as unknown as SceneMeshGroup);
         } else {
             // A registered caster switches to the unbuilt material and is re-capped meanwhile; the switch is reverted.
@@ -811,11 +829,11 @@ describe("CSM caster reconcile once a held caster is applied", () => {
             meshB._shadowMaxCascade = 0;
             casters = [meshA, meshB];
             ensure(casters);
-            expect(state._unapplied).toBe(true);
+            expect(state._held).toEqual(new Set([meshB]));
             meshB.material = matB;
         }
         ensure(casters);
-        expect(state._unapplied).toBe(false);
+        expect(state._held).toBeUndefined();
         record(state, scene, tasks());
         // Applied: the joined caster casts into both cascades, the reverted one at its new cap only.
         expect(state._tasks.map((task) => task._renderables.some((renderable) => renderable.mesh === casters[1]))).toEqual(joined ? [true, true] : [true, false]);
@@ -850,5 +868,87 @@ describe("CSM caster reconcile once a held caster is applied", () => {
         expect(state._lastCasterVersion).toBe(3);
         expect(state._cachedContentVersion).toBe(scene._renderableVersion);
         expect(createdTasks).toHaveLength(hooks === "default" ? 2 : 4);
+    });
+
+    it.each([
+        ["default", "joining"],
+        ["cache", "joining"],
+        ["default", "registered"],
+        ["cache", "registered"],
+    ] as const)("forces no %s record, redraw or refit when the same casters are re-supplied in new arrays while a %s caster stays held", (hooks, kind) => {
+        const meshA = caster("a", shaderMaterial("A"));
+        const meshB = caster("b", shaderMaterial("B"));
+        // A material whose group is never built in this scene: its caster stays held.
+        const unbuilt = { name: "unbuilt", _buildGroup: { _materialFamily: "shader" }, _uboVersion: 0 } as unknown as Material;
+        const { engine, scene, state, tasks, ensure } = start(hooks, kind === "joining" ? [meshA] : [meshA, meshB]);
+        meshB.material = unbuilt;
+        ensure([meshA, meshB]);
+        const held = state._held;
+        expect(held).toEqual(new Set([meshB]));
+        // As left by rendered frames: recorded cascades, a drawn map, and with static caching a rendered refit.
+        record(state, scene, tasks());
+        state._cachedContentVersion = scene._renderableVersion;
+        runRetirements(engine);
+        const packets = tasks().map((task) => task._renderables.slice());
+
+        for (let frame = 0; frame < 3; frame++) {
+            ensure([meshA, meshB]);
+        }
+
+        expect(state._held).toBe(held);
+        expect(state._recordedVersion).toBe(scene._renderableVersion);
+        expect(state._lastCasterVersion).toBe(3);
+        expect(state._cachedContentVersion).toBe(scene._renderableVersion);
+        expect(engine._retirements ?? []).toHaveLength(0);
+        tasks().forEach((task, t) => {
+            expect(task._renderables).toEqual(packets[t]);
+            expect(task._pendingMeshes ?? []).toHaveLength(0);
+        });
+    });
+});
+
+describe("CSM caster reconcile of a caster joining with a rebuilt override terminal", () => {
+    beforeAll(async () => {
+        await preloadPcfShadowTaskState([caster("preload", shaderMaterial("preload"))]);
+    });
+
+    /** The views `mesh` casts through in `tasks`, one per packet. */
+    function castViews(tasks: readonly RenderTask[], mesh: Mesh): (Material | undefined)[] {
+        return tasks.flatMap((task) => task._renderables.filter((renderable) => renderable.mesh === mesh).map((renderable) => (renderable as CasterPacket).material));
+    }
+
+    it.each([
+        ["default", "lost its caster"],
+        ["cache", "lost its caster"],
+        ["default", "was re-pointed"],
+        ["cache", "was re-pointed"],
+    ] as const)("gives a caster joining the %s cascades a fresh view of a rebuilt terminal another chain cached, when that chain %s in the same ensure", (hooks, end) => {
+        const terminal = shaderMaterial("caster");
+        const other = shaderMaterial("other");
+        const visible = shaderMaterial("visible", terminal);
+        const meshA = caster("a", visible);
+        const { scene, state, tasks, ensure } = start(hooks, [meshA]);
+        const oldView = state._materialViews.get(terminal)!;
+        expect(state._materialViews.get(visible)).toBe(oldView);
+
+        const departs = end === "lost its caster";
+        if (!departs) {
+            setShadowCasterMaterial(visible, other);
+        }
+        terminal._csmGen = 1; // rebuilt through a mesh outside the caster set
+        const meshN = caster("n", terminal);
+        ensure(departs ? [meshN] : [meshA, meshN]);
+        record(state, scene, tasks());
+
+        const view = state._materialViews.get(terminal)!;
+        expect(view).not.toBe(oldView);
+        expect(view.source).toBe(terminal);
+        const joined = castViews(tasks(), meshN);
+        expect(joined).toHaveLength(2);
+        joined.forEach((material) => expect(material).toBe(view));
+        const kept = castViews(tasks(), meshA);
+        expect(kept).toHaveLength(departs ? 0 : 2);
+        kept.forEach((material) => expect((material as MaterialView).source).toBe(other));
+        expect([...state._materialViews.values()]).not.toContain(oldView);
     });
 });

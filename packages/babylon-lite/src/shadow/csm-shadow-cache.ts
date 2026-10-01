@@ -212,6 +212,7 @@ export function ensureCsmShadowCacheState(
         if (dropped) {
             for (let cascade = 0; cascade < existing._tasks.length; cascade++) {
                 const staticTask = existing._staticTasks[cascade]!;
+                // Held casters are dropped too: they leave the static layer as well.
                 _dropTaskMeshes(staticTask, dropped);
                 // The reconcile queues into the dynamic overlay. A caster the gate holds static (one re-capped or
                 // requeued for a material change) goes back into the static layer, so it keeps its class. A caster
