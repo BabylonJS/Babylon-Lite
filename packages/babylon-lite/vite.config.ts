@@ -484,6 +484,10 @@ function exposeWgslSourceAsString(content: string): string {
  */
 function enumerateLibEntries(): Record<string, string> {
     const entries: Record<string, string> = {};
+    // Entry traversal also determines the emitted root barrel's import order.
+    // Append opt-in modules so their dependencies cannot reorder established output
+    // for applications that do not use those modules.
+    const extensionEntries: Record<string, string> = {};
     const walk = (dir: string): void => {
         for (const name of readdirSync(dir)) {
             const full = resolve(dir, name);
@@ -498,11 +502,15 @@ function enumerateLibEntries(): Record<string, string> {
                 .slice(SRC_DIR.length + 1)
                 .replace(/\\/g, "/")
                 .replace(/\.ts$/, "");
-            entries[key] = full;
+            if (key.startsWith("accessibility/")) {
+                extensionEntries[key] = full;
+            } else {
+                entries[key] = full;
+            }
         }
     };
     walk(SRC_DIR);
-    return entries;
+    return { ...entries, ...extensionEntries };
 }
 
 /**

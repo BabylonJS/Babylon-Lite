@@ -36,14 +36,14 @@ import { wgslMinifyPlugin } from "./wgsl-minify-plugin";
 
 /**
  * Vite plugin: mangle underscore-prefixed properties via Terser.
- * Runs in generateBundle (after esbuild minification) with a shared nameCache
- * so cross-chunk property names stay consistent.
+ * Runs in generateBundle (after esbuild minification) with a shared property cache
+ * so cross-chunk property names stay consistent. Identifier caches are chunk-local.
  */
 export function terserPropertyManglePlugin(): Plugin {
     return {
         name: "terser-property-mangle",
         async generateBundle(_options, bundle) {
-            const nameCache: Record<string, unknown> = {};
+            let propertyNameCache: unknown;
             // ESM export names are fixed, so namespace reads in another chunk must not be mangled.
             const exportedProperties = [...new Set(Object.values(bundle).flatMap((entry) => (entry.type === "chunk" ? entry.exports.filter((name) => /^_[a-z]/.test(name)) : [])))];
 
@@ -71,6 +71,9 @@ export function terserPropertyManglePlugin(): Plugin {
                     if (keys) wasmReserved.push(...keys.map((k) => k.replace(/\s*:/, "")));
                 }
 
+                // ESM chunks have separate lexical scopes. Sharing identifier names lets
+                // an unrelated, unloaded chunk change the minification of a loaded one.
+                const nameCache = { props: propertyNameCache };
                 const result = await terserMinify(chunk.code, {
                     // terser's published ECMA union stops at 2020 but accepts 2022 at runtime
                     ecma: 2022 as unknown as ECMA,
@@ -119,6 +122,7 @@ export function terserPropertyManglePlugin(): Plugin {
                     nameCache,
                     sourceMap: chunk.map ? ({ content: chunk.map as object, asObject: true } as SourceMapOptions) : false,
                 });
+                propertyNameCache = nameCache.props;
 
                 if (result.code) {
                     chunk.code = result.code;

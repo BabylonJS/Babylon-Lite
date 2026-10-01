@@ -12,9 +12,10 @@
  * references a decoding entry point — `enableErrorDecoding()` (global decoder) or `decodeError()`
  * (on-demand, single caught error) — so by default the bundle ships numeric codes, not prose.
  *
- * Determinism: codes are assigned in a stable order (relative file path, then source position)
- * during `buildStart`, independent of Vite's parallel per-module `transform` ordering, so the
- * same source always yields the same codes and table.
+ * Determinism: codes are assigned in a stable compatibility order during `buildStart`: core
+ * files, established compute files, then accessibility files; each tier uses relative file path
+ * and source position. This is independent of Vite's parallel per-module `transform` ordering,
+ * so the same source always yields the same codes and table.
  *
  * Safety guards:
  *   - Only `new Error(stringLiteral | template)` is rewritten (static messages); dynamic/`Error`
@@ -69,10 +70,21 @@ function walkTsFiles(root: string): string[] {
     return out;
 }
 
-function isDeferredFeatureFile(root: string, file: string): boolean {
+function liteErrorFileRank(root: string, file: string): number {
     const relative = path.relative(root, file).replace(/\\/g, "/");
-    // Opt-in compute errors must not renumber core errors and grow scenes that never import compute.
-    return relative.startsWith("compute/") || relative.startsWith("resource/compute-storage-");
+    // Opt-in feature errors must not renumber core errors and grow consumers that never import them.
+    if (relative.startsWith("accessibility/") || relative === "scene/scene-change.ts") {
+        return 2;
+    }
+    return relative.startsWith("compute/") || relative.startsWith("resource/compute-storage-") ? 1 : 0;
+}
+
+export function isDeferredLiteErrorFile(root: string, file: string): boolean {
+    return liteErrorFileRank(root, file) !== 0;
+}
+
+export function compareLiteErrorFiles(root: string, a: string, b: string): number {
+    return liteErrorFileRank(root, a) - liteErrorFileRank(root, b) || a.localeCompare(b);
 }
 
 /** Re-escape already-cooked template text so it can be embedded inside a new template literal. */
@@ -156,7 +168,7 @@ export function liteErrorPlugin(): Plugin {
 
         buildStart() {
             plans.clear();
-            const files = walkTsFiles(srcRoot).sort((a, b) => Number(isDeferredFeatureFile(srcRoot, a)) - Number(isDeferredFeatureFile(srcRoot, b)) || a.localeCompare(b));
+            const files = walkTsFiles(srcRoot).sort((a, b) => compareLiteErrorFiles(srcRoot, a, b));
             const tableEntries: string[] = [];
             let nextCode = 0;
 
