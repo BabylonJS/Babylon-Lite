@@ -243,7 +243,10 @@ its own variant, as its forward build did. A batch that first binds K meshes on 
 contexts therefore composes K variants, not one per material. Node entries and views are
 rebuilt on every sync, because a Node geometry resource snapshots the material's uniforms
 once. Off-scene meshes of an explicit list have no forward renderable and are rebuilt on every
-sync too. Device-loss recovery of the task must reset its views together with its bound list.
+sync too. A sync that sees a different device, `config.camera` or `config.reverseCulling` than
+the last publish carries nothing and drops every view, so a camera or culling change, or a
+device-loss recovery (whose `record()` also recreates the task's own buffers), rebuilds the
+whole pass as before.
 
 The task's `_removeMesh` hook evicts every matching bound entry and queues its retirement
 immediately, including when rendering is stopped. Its weak exclusion set still rejects removed

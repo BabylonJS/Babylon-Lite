@@ -195,9 +195,13 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
     _mrt: RenderTargetMrt;
     _attachments: AttachmentInfo[];
     /** One view per unique source material (Standard, PBR or Node). Kept across syncs together with the
-     *  variants compiled on it, and pruned to the materials still drawn whenever a sync publishes. Device-loss
-     *  recovery of this task must reset it together with `_bound`. */
+     *  variants compiled on it, and pruned to the materials still drawn whenever a sync publishes. */
     _views: Map<Material, GeometryView>;
+    /** @internal What the published views and entries were built against: device, `config.camera` and
+     *  `config.reverseCulling`. A sync that sees any of them changed carries nothing and drops every view. */
+    _cfg: unknown[];
+    /** @internal Device the task's own buffers live on; `record()` recreates them on a replacement device. */
+    _device: GPUDevice;
     /** Render bindings — opaque first then alpha-blended (sorted in record()). */
     _bound: BoundMesh[];
     _wrapperTargets: (RenderTarget | null)[];
@@ -373,6 +377,8 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         },
         _attachments: attachments,
         _views: new Map(),
+        _cfg: [],
+        _device: eng._device,
         _bound: [],
         _wrapperTargets: wrapperTargets,
         _ownedDepthWrapper: ownedDepthWrapper,
@@ -511,6 +517,14 @@ function recordTask(task: GeometryRendererTaskInternal, config: GeometryRenderer
         task._ownedDepthWrapper._height = mrt._height;
     }
 
+    if (task._device !== eng._device) {
+        // Device-loss recovery replaced the device: the task's own buffers went with the lost one. The views
+        // capture `_paramsUBO`, and the sync below rebuilds them all, as its stamp includes the device.
+        task._device = eng._device;
+        task._sceneUBO = createEmptyUniformBuffer(eng, SCENE_UBO_BYTES);
+        task._paramsUBO = task._needsParams ? createEmptyUniformBuffer(eng, 80) : null;
+        task._ownLightsUBO = null;
+    }
     const lightsUBO = _resolveTaskLightsUBO(task, eng, sc, config);
     task._sceneBG = eng._device.createBindGroup({
         layout: getSceneBindGroupLayout(eng),
@@ -522,7 +536,8 @@ function recordTask(task: GeometryRendererTaskInternal, config: GeometryRenderer
     // Re-sync the per-mesh bindings/views (make-before-break, retiring only the
     // superseded entries) then sync the render-pass descriptor. Entries never
     // capture the MRT, the scene bind group or the lights UBO, so current ones
-    // are carried across a resize / frame-graph rebuild.
+    // are carried across a resize / frame-graph rebuild with the same camera,
+    // culling and device.
     rebuildBoundMeshes(task, config, eng, sc);
     rebuildRenderPassDescriptor(task, config);
 }
@@ -540,20 +555,30 @@ function recordTask(task: GeometryRendererTaskInternal, config: GeometryRenderer
  *  scene-owned renderables. A Standard or PBR entry is derived from its mesh's forward build:
  *  everything it captures either forces a forward rebuild when it changes (material features
  *  and textures, mesh capabilities and vertex layout, the PBR context and light / shadow
- *  request), is constant for the task (attachments, camera, signature), or is read live
- *  (world, light selection, material UBO version, vertex/index buffers, thin-instance counts).
- *  So an entry whose mesh still draws the same source material through the forward renderable
- *  it was built alongside is carried as is — same renderable, binding, update state and
- *  lifetime sink — and only new or changed entries are built. Node entries, and meshes without
- *  a forward renderable of their own (off-scene meshes of an explicit list), are rebuilt on
- *  every sync. */
+ *  request), is constant for the task (attachments, signature), is stamped in `_cfg` (device,
+ *  camera, culling direction), or is read live (world, light selection, material UBO version,
+ *  vertex/index buffers, thin-instance counts). So an entry whose mesh still draws the same
+ *  source material through the forward renderable it was built alongside is carried as is —
+ *  same renderable, binding, update state and lifetime sink — and only new or changed entries
+ *  are built. Node entries, and meshes without a forward renderable of their own (off-scene
+ *  meshes of an explicit list), are rebuilt on every sync, and so is everything once the stamp
+ *  changes. */
 function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: GeometryRendererTaskConfig, eng: EngineContext, sc: SceneContext): void {
     // Make-before-break: build every new entry with its own resource batch, publish the
     // complete list atomically, then retire the superseded entries after the next submitted
     // frame drains. Unpublished candidate batches can be released synchronously; carried
     // entries are the same objects in both lists and are never retired here.
     const oldBound = task._bound;
-    const previous = new Map(oldBound.map((b) => [b._mesh, b]));
+    // Views and entries capture the device, the camera and the culling direction. When any changed since the
+    // last publish (`config.camera` / `reverseCulling` replaced before `frameGraph.build()`, or a replacement
+    // device after device loss), nothing is carried and every view is created afresh. The stamp is published
+    // with the list, so a failed sync is retried the same way.
+    const cfg = [task._device, config.camera, config.reverseCulling];
+    const fresh = cfg.some((value, index) => value !== task._cfg[index]);
+    if (fresh) {
+        task._views.clear();
+    }
+    const previous = new Map(fresh ? [] : oldBound.map((b) => [b._mesh, b]));
     const nextBound: BoundMesh[] = [];
     const created: MeshRebuildResources[] = [];
     const removed = task._removedMeshes;
@@ -636,6 +661,7 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
     task._bound = nextBound;
     // Keep the views of the materials still drawn; a view whose stamp went stale is replaced on its next use.
     task._views = new Map(nextBound.map((b) => [b._view.source, views.get(b._view.source) ?? b._view]));
+    task._cfg = cfg;
     task._boundVer = sc._renderableVersion;
 
     retireGeometryBindings(

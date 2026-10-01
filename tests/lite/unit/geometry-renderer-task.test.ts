@@ -14,7 +14,7 @@ vi.mock("../../../packages/babylon-lite/src/material/standard/geometry-view", as
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { createRenderTarget, type RenderTarget, type RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
 import { _installMeshBlendingGeometrySupport } from "../../../packages/babylon-lite/src/frame-graph/geometry-mesh-blending";
-import { createGeometryRendererTask } from "../../../packages/babylon-lite/src/frame-graph/geometry-renderer-task";
+import { createGeometryRendererTask, type GeometryRendererTaskConfig } from "../../../packages/babylon-lite/src/frame-graph/geometry-renderer-task";
 import { _computeMeshFeatures } from "../../../packages/babylon-lite/src/material/mesh-features";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 import { buildNodeGeometryRenderable } from "../../../packages/babylon-lite/src/material/node/node-geometry-renderable";
@@ -754,7 +754,7 @@ describe("GeometryRendererTask", () => {
     // (mutations are then simulated with `replaceForward` / `addMesh`), while "scene" adds the meshes
     // with `addToScene` and boots the real Standard group build, so later mutations go through the
     // scene's own producers.
-    async function setupGeoTask(meshCount: number, explicitMeshes = false, forward: "none" | "stub" | "scene" = "none") {
+    async function setupGeoTask(meshCount: number, explicitMeshes = false, forward: "none" | "stub" | "scene" = "none", type = GeometryTextureType.WORLD_POSITION) {
         const { createStandardMaterial } = await import("../../../packages/babylon-lite/src/material/standard/create-standard-material");
         const makeWorld = (x: number): Float32Array => {
             const m = new Float32Array(16);
@@ -846,14 +846,11 @@ describe("GeometryRendererTask", () => {
             scene._renderableVersion++;
             return mesh;
         };
-        const task = createGeometryRendererTask(
-            {
-                textureDescriptions: [{ type: GeometryTextureType.WORLD_POSITION }],
-                ...(explicitMeshes ? { meshes } : {}),
-            },
-            engine,
-            scene
-        );
+        const config: GeometryRendererTaskConfig = {
+            textureDescriptions: [{ type }],
+            ...(explicitMeshes ? { meshes } : {}),
+        };
+        const task = createGeometryRendererTask(config, engine, scene);
         const internal = task as unknown as {
             _preload(): Promise<void>;
             record(): void;
@@ -867,11 +864,14 @@ describe("GeometryRendererTask", () => {
                 _lifetimeDisposers: (() => void)[];
             }>;
             _views: Map<unknown, unknown>;
+            _sceneUBO: GPUBuffer;
+            _paramsUBO: GPUBuffer | null;
+            _sceneBG: GPUBindGroupDescriptor;
             _createNodeGeometryView: ((source: unknown, config: unknown) => unknown) | null;
         };
         await internal._preload();
         internal.record();
-        return { scene, internal, meshes, drawnIndexCounts, engine, createStandardMaterial, makeMesh, replaceForward, addMesh };
+        return { scene, internal, config, meshes, drawnIndexCounts, engine, createStandardMaterial, makeMesh, replaceForward, addMesh };
     }
 
     /** Device and retirement probes for the reuse assertions below. */
@@ -1160,6 +1160,105 @@ describe("GeometryRendererTask", () => {
         for (const entry of before) {
             expect(entry._lifetimeDisposers).toHaveLength(0);
         }
+    });
+
+    // Views and entries capture the task camera, the culling direction and the device, none of which the forward
+    // renderable they are carried by reflects: changing any of them must rebuild the whole pass, as before.
+    type GeoEntry = Awaited<ReturnType<typeof setupGeoTask>>["internal"]["_bound"][number];
+    const viewOf = (entry: GeoEntry) => entry._view as unknown as { _camera: unknown; _reverseCulling: boolean; _gpUBO: GPUBuffer | null };
+    const pipelineOf = (entry: GeoEntry) => (entry._binding as unknown as { pipeline: GPURenderPipelineDescriptor }).pipeline;
+
+    /** Every entry and its view were replaced, and the superseded generation is retired make-before-break. */
+    function expectRebuiltPass(bound: readonly GeoEntry[], before: readonly GeoEntry[], retirements: Array<() => void>): void {
+        expect(bound).toHaveLength(before.length);
+        bound.forEach((entry, index) => {
+            expect(entry).not.toBe(before[index]);
+            expect(entry._view).not.toBe(before[index]!._view);
+        });
+        expect(retirements).toHaveLength(1);
+        before.forEach((entry) => expect(entry._lifetimeDisposers.length).toBeGreaterThan(0));
+        retirements.splice(0).forEach((retire) => retire());
+        before.forEach((entry) => expect(entry._lifetimeDisposers).toHaveLength(0));
+    }
+
+    it("rebuilds every entry and view against a replaced config.camera on the next record", async () => {
+        const { scene, internal, config, engine } = await setupGeoTask(2, false, "stub");
+        const before = [...internal._bound];
+        expect(before.map((entry) => viewOf(entry)._camera)).toEqual([null, null]);
+        const gpu = probeGpu(engine);
+        const camera = { ...(scene.camera as object) } as GeometryRendererTaskConfig["camera"];
+
+        config.camera = camera;
+        internal.record();
+
+        expectRebuiltPass(internal._bound, before, gpu.retirements);
+        expect(internal._bound.map((entry) => viewOf(entry)._camera)).toEqual([camera, camera]);
+        // Unchanged again: the next re-record carries the rebuilt entries.
+        const rebuilt = [...internal._bound];
+        internal.record();
+        internal._bound.forEach((entry, index) => expect(entry).toBe(rebuilt[index]));
+    });
+
+    it("rebuilds every entry, view and pipeline with the flipped culling once config.reverseCulling changes", async () => {
+        const { internal, config, engine } = await setupGeoTask(2, false, "stub");
+        const before = [...internal._bound];
+        expect(before.map((entry) => pipelineOf(entry).primitive?.cullMode)).toEqual(["back", "back"]);
+        const gpu = probeGpu(engine);
+
+        config.reverseCulling = true;
+        internal.record();
+
+        expectRebuiltPass(internal._bound, before, gpu.retirements);
+        expect(internal._bound.map((entry) => viewOf(entry)._reverseCulling)).toEqual([true, true]);
+        expect(internal._bound.map((entry) => pipelineOf(entry).primitive?.cullMode)).toEqual(["front", "front"]);
+        expect(gpu.createRenderPipeline).toHaveBeenCalledTimes(2);
+    });
+
+    it("rebuilds the task's buffers, views and entries on a replacement device without reusing a lost-device object", async () => {
+        // NORMALIZED_VIEW_DEPTH gives the task a params UBO, which every view binds.
+        const { internal, meshes, engine, replaceForward } = await setupGeoTask(2, false, "stub", GeometryTextureType.NORMALIZED_VIEW_DEPTH);
+        const before = [...internal._bound];
+        const lostSceneUBO = internal._sceneUBO;
+        const lostParamsUBO = internal._paramsUBO;
+        expect(lostParamsUBO).not.toBeNull();
+        before.forEach((entry) => expect(viewOf(entry)._gpUBO).toBe(lostParamsUBO));
+        const lost = probeGpu(engine);
+
+        // Device-loss recovery: a replacement device, the scene's forward renderables rebuilt on it, then
+        // `frameGraph.build()` records the task again.
+        const device = makeMockEngine()._device;
+        (device as unknown as { queue: object }).queue = { writeBuffer: () => undefined, writeTexture: () => undefined };
+        engine._device = device;
+        const made = (method: "createBuffer" | "createBindGroupLayout" | "createShaderModule" | "createRenderPipeline") => {
+            const spy = vi.spyOn(device, method);
+            return () => spy.mock.results.map((result) => result.value as unknown);
+        };
+        const [buffers, layouts, modules, pipelines] = [made("createBuffer"), made("createBindGroupLayout"), made("createShaderModule"), made("createRenderPipeline")];
+        meshes.forEach(replaceForward);
+        internal.record();
+
+        // The task's own buffers and scene bind group live on the replacement device...
+        expect(internal._sceneUBO).not.toBe(lostSceneUBO);
+        expect(internal._paramsUBO).not.toBe(lostParamsUBO);
+        expect(buffers()).toContain(internal._sceneUBO);
+        expect(buffers()).toContain(internal._paramsUBO);
+        expect(((internal._sceneBG.entries as GPUBindGroupEntry[])[0]!.resource as GPUBufferBinding).buffer).toBe(internal._sceneUBO);
+        expect(layouts()).toContain(internal._sceneBG.layout);
+        // ...and so does every entry: fresh views whose variants composed their modules, layouts and pipelines on it.
+        expectRebuiltPass(internal._bound, before, lost.retirements);
+        for (const entry of internal._bound) {
+            expect(viewOf(entry)._gpUBO).toBe(internal._paramsUBO);
+            const pipeline = pipelineOf(entry);
+            expect(pipelines()).toContain(pipeline);
+            expect(modules()).toContain(pipeline.vertex.module);
+            expect(modules()).toContain(pipeline.fragment!.module);
+            const bindGroupLayouts = [...(pipeline.layout as unknown as GPUPipelineLayoutDescriptor).bindGroupLayouts];
+            expect(bindGroupLayouts.length).toBeGreaterThan(1);
+            bindGroupLayouts.forEach((layout) => expect(layouts()).toContain(layout));
+        }
+        expect(lost.createShaderModule).not.toHaveBeenCalled();
+        expect(lost.createRenderPipeline).not.toHaveBeenCalled();
+        expect(lost.createBindGroup).not.toHaveBeenCalled();
     });
 
     it("keeps every carried entry when a replacement fails, and rebuilds only that mesh on retry", async () => {
