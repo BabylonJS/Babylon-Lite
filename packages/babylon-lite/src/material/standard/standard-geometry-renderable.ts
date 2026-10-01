@@ -102,8 +102,6 @@ interface StandardGeometryViewResources {
     _sceneFeatures: number;
     _meshBGL: GPUBindGroupLayout;
     _pipelineLayout: GPUPipelineLayout;
-    _vertModule: GPUShaderModule;
-    _fragModule: GPUShaderModule;
     _pipelines: Map<string, GPURenderPipeline>;
     /** Ext fragments that contributed bindings — used by per-mesh bind groups. */
     _extFragments: readonly { _ext: ReturnType<typeof _getStdExtsSorted>[number] }[];
@@ -221,6 +219,8 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
             return;
         }
         _perMeshDisposed = true;
+        _refShaderModule(device, res._composed._vertexWGSL, -1);
+        _refShaderModule(device, res._composed._fragmentWGSL, -1);
         meshUBO.destroy();
         skeletonVelocity?._dispose();
         for (const dispose of bindingDisposers) {
@@ -231,6 +231,9 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         }
     };
     resources._lifetimeDisposers.push(_disposePerMesh);
+    // Counted references on the shared modules, released by `_disposePerMesh` with the rest of this renderable.
+    const vertModule = _refShaderModule(device, res._composed._vertexWGSL, 1);
+    const fragModule = _refShaderModule(device, res._composed._fragmentWGSL, 1);
 
     if (res._hasSkeletonVelocity && (!mesh.skeleton || !skeletonVelocityFactory)) {
         throw new Error("standard-geometry: skeletal velocity feature was not preloaded");
@@ -369,7 +372,7 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         bind(eng: EngineContext, sig: RenderTargetSignature) {
             return {
                 renderable: r,
-                pipeline: _getOrCreateGeometryPipeline(eng as EngineContext, sig, view, res),
+                pipeline: _getOrCreateGeometryPipeline(eng as EngineContext, sig, view, res, vertModule, fragModule),
                 update,
                 draw,
             };
@@ -384,26 +387,30 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
 /** Shader modules of composed Standard geometry WGSL, per device and exact code. The geometry task builds
  *  new views on every record and renderable-version change, yet the composed code rarely changes and
  *  materials with equal features compose equal code. A module is immutable and has no `destroy()`, so one
- *  module per code string can serve every view, generation and material. Keyed weakly by device: a replaced
- *  device compiles its own modules, and an entry is released once its device object becomes unreachable (the
- *  engine is dropped, or device-lost recovery replaced `engine._device`). Lazy, so the module keeps no
- *  top-level side effect. Same shape as the sprite `makeShaderModuleCache`, kept private so this lazy chunk
- *  imports nothing from sprite. */
-let _shaderModules: WeakMap<GPUDevice, Map<string, GPUShaderModule>> | null = null;
+ *  module per code string can serve every view, generation and material. Each entry counts the renderables
+ *  drawing with it, and a renderable releases its count with its per-mesh resources: a rebuild, built before
+ *  the old generation retires, still hits the entry, and the entry leaves the map with its last holder (a
+ *  retired variant, a disposed task). Keyed weakly by device: a replaced device compiles its own modules.
+ *  Lazy, so the module keeps no top-level side effect. */
+let _shaderModules: WeakMap<GPUDevice, Map<string, [GPUShaderModule, number]>> | null = null;
 
-function _getShaderModule(device: GPUDevice, code: string): GPUShaderModule {
+/** Acquire (`delta` 1, compiling on first use) or release (`delta` -1) the shared module of `code`. */
+function _refShaderModule(device: GPUDevice, code: string, delta: 1 | -1): GPUShaderModule {
     _shaderModules ??= new WeakMap();
     let modules = _shaderModules.get(device);
     if (!modules) {
         modules = new Map();
         _shaderModules.set(device, modules);
     }
-    let module = modules.get(code);
-    if (!module) {
-        module = device.createShaderModule({ code });
-        modules.set(code, module);
+    let entry = modules.get(code);
+    if (!entry) {
+        entry = [device.createShaderModule({ code }), 0];
+        modules.set(code, entry);
     }
-    return module;
+    if (!(entry[1] += delta)) {
+        modules.delete(code);
+    }
+    return entry[0];
 }
 
 function _ensureViewResources(
@@ -506,8 +513,6 @@ function _ensureViewResources(
     const pipelineLayout = device.createPipelineLayout({
         bindGroupLayouts: [sceneBGL, meshBGL],
     });
-    const vertModule = _getShaderModule(device, composed._vertexWGSL);
-    const fragModule = _getShaderModule(device, composed._fragmentWGSL);
 
     // Re-detect alpha-blend from the *source* material — the view masked
     // MATERIAL_ALPHA_BLEND out so the composer doesn't emit standard's source-over
@@ -544,8 +549,6 @@ function _ensureViewResources(
         _sceneFeatures: sceneFeatures,
         _meshBGL: meshBGL,
         _pipelineLayout: pipelineLayout,
-        _vertModule: vertModule,
-        _fragModule: fragModule,
         _pipelines: new Map(),
         _extFragments: usedExts,
         _vertexBufferBinders: vertexBufferBinders,
@@ -639,7 +642,9 @@ function _getOrCreateGeometryPipeline(
     engine: EngineContext,
     sig: RenderTargetSignature,
     view: StandardGeometryMaterialView,
-    res: StandardGeometryViewResources
+    res: StandardGeometryViewResources,
+    vertModule: GPUShaderModule,
+    fragModule: GPUShaderModule
 ): GPURenderPipeline {
     const key = targetSignatureKey(sig);
     const cached = res._pipelines.get(key);
@@ -665,8 +670,8 @@ function _getOrCreateGeometryPipeline(
     const cullMode = (res._features & DOUBLE_SIDED) !== 0 ? "none" : view._reverseCulling ? "front" : "back";
     const pipeline = device.createRenderPipeline({
         layout: res._pipelineLayout,
-        vertex: { module: res._vertModule, entryPoint: "main", buffers: res._composed._vertexBufferLayouts },
-        fragment: { module: res._fragModule, entryPoint: "main", targets: colorTargets },
+        vertex: { module: vertModule, entryPoint: "main", buffers: res._composed._vertexBufferLayouts },
+        fragment: { module: fragModule, entryPoint: "main", targets: colorTargets },
         depthStencil: sig._depthStencilFormat
             ? {
                   format: sig._depthStencilFormat,

@@ -90,8 +90,6 @@ interface PbrGeometryViewResources {
     _meshBGL: GPUBindGroupLayout;
     _shadowBGL: GPUBindGroupLayout | null;
     _pipelineLayout: GPUPipelineLayout;
-    _vertModule: GPUShaderModule;
-    _fragModule: GPUShaderModule;
     _pipelines: Map<string, GPURenderPipeline>;
     _alphaBlend: boolean;
 }
@@ -209,6 +207,8 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
             return;
         }
         perMeshDisposed = true;
+        _refShaderModule(device, composed._vertexWGSL, -1);
+        _refShaderModule(device, composed._fragmentWGSL, -1);
         meshUBO.destroy();
         materialUBO?.destroy();
         for (const texture of boundTextures) {
@@ -217,6 +217,9 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
         boundTextures.length = 0;
     };
     resources._lifetimeDisposers.push(_disposePerMesh);
+    // Counted references on the shared modules, released by `_disposePerMesh` with the rest of this renderable.
+    const vertModule = _refShaderModule(device, composed._vertexWGSL, 1);
+    const fragModule = _refShaderModule(device, composed._fragmentWGSL, 1);
 
     // ── Material UBO ───────────────────────────────────────────────────
     const materialSpec = composed._materialUboSpec!;
@@ -365,7 +368,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
         bind(eng: EngineContext, sig: RenderTargetSignature) {
             return {
                 renderable: r,
-                pipeline: _getOrCreateGeometryPipeline(eng as EngineContext, sig, view, res),
+                pipeline: _getOrCreateGeometryPipeline(eng as EngineContext, sig, view, res, vertModule, fragModule),
                 update,
                 draw,
             };
@@ -381,25 +384,30 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
  *  views on every record and renderable-version change, and a forward PBR rebuild publishes a new context
  *  for them to compose against, yet the composed code rarely changes and materials with equal features
  *  compose equal code. A module is immutable and has no `destroy()`, so one module per code string can serve
- *  every view, generation and material. Keyed weakly by device: a replaced device compiles its own modules,
- *  and an entry is released once its device object becomes unreachable (the engine is dropped, or device-lost
- *  recovery replaced `engine._device`). Lazy, so the module keeps no top-level side effect. Same shape as the
- *  sprite `makeShaderModuleCache`, kept private so this lazy chunk imports nothing from sprite. */
-let _shaderModules: WeakMap<GPUDevice, Map<string, GPUShaderModule>> | null = null;
+ *  every view, generation and material. Each entry counts the renderables drawing with it, and a renderable
+ *  releases its count with its per-mesh resources: a rebuild, built before the old generation retires, still
+ *  hits the entry, and the entry leaves the map with its last holder (a retired plugin variant, a disposed
+ *  task). Keyed weakly by device: a replaced device compiles its own modules. Lazy, so the module keeps no
+ *  top-level side effect. */
+let _shaderModules: WeakMap<GPUDevice, Map<string, [GPUShaderModule, number]>> | null = null;
 
-function _getShaderModule(device: GPUDevice, code: string): GPUShaderModule {
+/** Acquire (`delta` 1, compiling on first use) or release (`delta` -1) the shared module of `code`. */
+function _refShaderModule(device: GPUDevice, code: string, delta: 1 | -1): GPUShaderModule {
     _shaderModules ??= new WeakMap();
     let modules = _shaderModules.get(device);
     if (!modules) {
         modules = new Map();
         _shaderModules.set(device, modules);
     }
-    let module = modules.get(code);
-    if (!module) {
-        module = device.createShaderModule({ code });
-        modules.set(code, module);
+    let entry = modules.get(code);
+    if (!entry) {
+        entry = [device.createShaderModule({ code }), 0];
+        modules.set(code, entry);
     }
-    return module;
+    if (!(entry[1] += delta)) {
+        modules.delete(code);
+    }
+    return entry[0];
 }
 
 function _ensureViewResources(
@@ -463,8 +471,6 @@ function _ensureViewResources(
     const sceneBGL = (engine as unknown as { _getSceneBGL: () => GPUBindGroupLayout })._getSceneBGL?.() ?? _getSceneBindGroupLayoutLocal(engine, composed);
     const bgls: GPUBindGroupLayout[] = shadowBGL ? [sceneBGL, meshBGL, shadowBGL] : [sceneBGL, meshBGL];
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: bgls });
-    const vertModule = _getShaderModule(device, composed._vertexWGSL);
-    const fragModule = _getShaderModule(device, composed._fragmentWGSL);
 
     // The view's features have PBR_HAS_ALPHA_BLEND already stripped. Detect
     // alpha-blend from the SOURCE so transparent meshes get the right blend
@@ -481,8 +487,6 @@ function _ensureViewResources(
         _meshBGL: meshBGL,
         _shadowBGL: shadowBGL,
         _pipelineLayout: pipelineLayout,
-        _vertModule: vertModule,
-        _fragModule: fragModule,
         _pipelines: new Map(),
         _alphaBlend: alphaBlend,
     };
@@ -510,7 +514,14 @@ function _getSceneBindGroupLayoutLocal(engine: EngineContext, _composed: Compose
     return getSceneBindGroupLayout(engine);
 }
 
-function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSignature, view: PbrGeometryMaterialView, res: PbrGeometryViewResources): GPURenderPipeline {
+function _getOrCreateGeometryPipeline(
+    engine: EngineContext,
+    sig: RenderTargetSignature,
+    view: PbrGeometryMaterialView,
+    res: PbrGeometryViewResources,
+    vertModule: GPUShaderModule,
+    fragModule: GPUShaderModule
+): GPURenderPipeline {
     const key = targetSignatureKey(sig);
     const cached = res._pipelines.get(key);
     if (cached) {
@@ -544,8 +555,8 @@ function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSi
     };
     const pipeline = device.createRenderPipeline({
         layout: res._pipelineLayout,
-        vertex: { module: res._vertModule, entryPoint: "main", buffers: res._composed._vertexBufferLayouts },
-        fragment: { module: res._fragModule, entryPoint: "main", targets: colorTargets },
+        vertex: { module: vertModule, entryPoint: "main", buffers: res._composed._vertexBufferLayouts },
+        fragment: { module: fragModule, entryPoint: "main", targets: colorTargets },
         depthStencil: sig._depthStencilFormat
             ? {
                   format: sig._depthStencilFormat,

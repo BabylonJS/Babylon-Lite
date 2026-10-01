@@ -206,13 +206,15 @@ no implicit view lease or scene auxiliary-disposer map.
 Shader modules are not generation-owned. Standard and PBR geometry resolve them through a private
 per-family memo keyed weakly by device and by the exact composed WGSL, so a re-record, a
 renderable-version rebuild, a republished forward PBR context, and materials with identical
-composition reuse one module per code string instead of compiling it again. A `GPUShaderModule`
-has no `destroy()`: retiring a generation, rolling back a failed candidate, or disposing the task
-never invalidates a shared module, and older pipelines may keep referencing it. Composition, BGLs,
-pipeline layouts, and pipelines stay per view resource. There is no clear API: a device replaced
-by device-lost recovery compiles its own modules, and a memo entry is released once its device
-object becomes unreachable (the engine is dropped, or device-lost recovery replaced
-`engine._device`). Node geometry already shares modules through its code-keyed pipeline cache.
+composition reuse one module per code string instead of compiling it again. Each memo entry counts
+the renderables drawing with it: a renderable acquires its vertex and fragment entries when built
+and releases them in its idempotent per-mesh lifetime packet, so a candidate generation, built
+before the old one retires, still hits, and an entry leaves the memo with its last holder (a
+superseded plugin or material variant, a removed mesh, a rolled-back candidate, a disposed task).
+A `GPUShaderModule` has no `destroy()`, so dropping an entry never invalidates a module that older
+pipelines still reference. Composition, BGLs, pipeline layouts, and pipelines stay per view
+resource. A device replaced by device-lost recovery compiles its own modules. Node geometry
+already shares modules through its code-keyed pipeline cache.
 
 The task's `_removeMesh` hook evicts every matching bound entry and queues its retirement
 immediately, including when rendering is stopped. Its weak exclusion set still rejects removed
@@ -480,6 +482,9 @@ matches BJS pixel-for-pixel (no lossy material-constants approximation).
   one module pair; a task writing a different attachment compiles only its
   new fragment module and shares the identical vertex module; and a replaced
   device compiles its own.
+- Retired PBR plugin variants and Standard material variants leave the memo
+  while the live variant stays shared; a disposed task releases only the
+  modules no other task draws with, and its last holder empties the entry.
 
 ## Future extensions
 

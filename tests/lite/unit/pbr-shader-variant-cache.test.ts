@@ -76,16 +76,16 @@ function fragmentSources(createShaderModule: ReturnType<typeof vi.fn>): string[]
 
 /** What the geometry renderer task does for one PBR mesh on every record: a NEW geometry view of the material,
  *  a geometry renderable built and bound against it. Returns the bound pipeline (the mock device hands the
- *  descriptor back) and releases the renderable's task-owned resources. */
-function bindPbrGeometry(engine: EngineContext, scene: SceneContext, mesh: Mesh): GPURenderPipelineDescriptor {
+ *  descriptor back) and the release of the renderable's task-owned resources, which the task runs only once
+ *  the next generation is built (make-before-break) or the task is disposed. */
+function bindPbrGeometry(engine: EngineContext, scene: SceneContext, mesh: Mesh): [GPURenderPipelineDescriptor, () => void] {
     const view = createPbrGeometryMaterialView(mesh.material as PbrMaterialProps, {
         attachments: [GeometryTextureType.WORLD_NORMAL],
         emitColor: false,
     });
     const owner = { _lifetimeDisposers: [] as (() => void)[] };
     const pipeline = buildPbrGeometryRenderable(scene, mesh, view, owner).bind(engine, signature).pipeline as unknown as GPURenderPipelineDescriptor;
-    owner._lifetimeDisposers.forEach((dispose) => dispose());
-    return pipeline;
+    return [pipeline, () => owner._lifetimeDisposers.splice(0).forEach((dispose) => dispose())];
 }
 
 describe("PBR shader variant caches", () => {
@@ -337,11 +337,12 @@ describe("PBR shader variant caches", () => {
         await buildPbrRenderables(scene, [mesh], undefined);
 
         let calls = createShaderModule.mock.calls.length;
-        const first = bindPbrGeometry(engine, scene, mesh);
+        const [first, releaseFirst] = bindPbrGeometry(engine, scene, mesh);
         expect(createShaderModule.mock.calls.length - calls).toBe(2);
 
         calls = createShaderModule.mock.calls.length;
-        const second = bindPbrGeometry(engine, scene, mesh);
+        const [second] = bindPbrGeometry(engine, scene, mesh);
+        releaseFirst();
         expect(second).not.toBe(first);
         expect(createShaderModule.mock.calls.length - calls).toBe(0);
         expect(second.vertex.module).toBe(first.vertex.module);
@@ -355,7 +356,7 @@ describe("PBR shader variant caches", () => {
         const mesh = makeMesh(material);
         scene._groups.set(material._buildGroup, [mesh]);
         await buildPbrRenderables(scene, [mesh], undefined);
-        const first = bindPbrGeometry(engine, scene, mesh);
+        const [first, releaseFirst] = bindPbrGeometry(engine, scene, mesh);
         const firstContext = (scene as { _pbrGeomContext?: unknown })._pbrGeomContext;
 
         // A new context comes with a new composer, so the composed WGSL is a fresh string of the same code.
@@ -363,7 +364,8 @@ describe("PBR shader variant caches", () => {
         expect((scene as { _pbrGeomContext?: unknown })._pbrGeomContext).not.toBe(firstContext);
 
         const calls = createShaderModule.mock.calls.length;
-        const second = bindPbrGeometry(engine, scene, mesh);
+        const [second] = bindPbrGeometry(engine, scene, mesh);
+        releaseFirst();
         expect(createShaderModule.mock.calls.length - calls).toBe(0);
         expect(second.vertex.module).toBe(first.vertex.module);
         expect(second.fragment!.module).toBe(first.fragment!.module);
@@ -380,12 +382,97 @@ describe("PBR shader variant caches", () => {
         await buildPbrRenderables(scene, [meshA, meshB], undefined);
 
         const calls = createShaderModule.mock.calls.length;
-        const pipelineA = bindPbrGeometry(engine, scene, meshA);
-        const pipelineB = bindPbrGeometry(engine, scene, meshB);
+        const [pipelineA] = bindPbrGeometry(engine, scene, meshA);
+        const [pipelineB] = bindPbrGeometry(engine, scene, meshB);
 
         expect(pipelineB).not.toBe(pipelineA);
         expect(createShaderModule.mock.calls.length - calls).toBe(2);
         expect(pipelineB.vertex.module).toBe(pipelineA.vertex.module);
         expect(pipelineB.fragment!.module).toBe(pipelineA.fragment!.module);
+    });
+
+    it("evicts the geometry modules of retired PBR plugin variants while the live variant stays shared", async () => {
+        const { engine, createShaderModule } = makeEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        let marker = 0;
+        const plugin: MaterialPlugin = {
+            name: "edited",
+            getCustomCode: (shaderType) => (shaderType === "fragment" ? { CUSTOM_FRAGMENT_UPDATE_ALPHA: `if(material.materialAlpha < -${marker}.0){discard;}` } : null),
+        };
+        const material = createPbrMaterial({ plugins: [plugin] });
+        const mesh = makeMesh(material);
+        scene._groups.set(material._buildGroup, [mesh]);
+        enableMaterialPlugins(scene);
+        await buildPbrRenderables(scene, [mesh], undefined);
+        /** Edit the plugin code (a new variant) and bind the next generation; the caller retires the previous one. */
+        const bindEdit = (next: number): [GPURenderPipelineDescriptor, () => void] => {
+            marker = next;
+            material._renderFeatures = _computePbrMaterialFeatures(material);
+            return bindPbrGeometry(engine, scene, mesh);
+        };
+
+        let [live, releaseLive] = bindPbrGeometry(engine, scene, mesh);
+        const retiredFragments = [live.fragment!.module];
+        for (let edit = 1; edit <= 3; edit++) {
+            const calls = createShaderModule.mock.calls.length;
+            const [next, releaseNext] = bindEdit(edit);
+            // Only the edited fragment stage compiles; the vertex stage is shared with the generation it replaces.
+            expect(createShaderModule.mock.calls.length - calls).toBe(1);
+            expect(next.vertex.module).toBe(live.vertex.module);
+            releaseLive();
+            [live, releaseLive] = [next, releaseNext];
+            retiredFragments.push(live.fragment!.module);
+        }
+        retiredFragments.pop();
+
+        // The live variant is still shared by a later generation...
+        let calls = createShaderModule.mock.calls.length;
+        const [again, releaseAgain] = bindEdit(3);
+        expect(createShaderModule.mock.calls.length - calls).toBe(0);
+        expect(again.fragment!.module).toBe(live.fragment!.module);
+        releaseLive();
+        // ...while no retired variant stayed cached: editing the code back compiles its fragment stage again.
+        for (let edit = 0; edit < retiredFragments.length; edit++) {
+            calls = createShaderModule.mock.calls.length;
+            const [restored, releaseRestored] = bindEdit(edit);
+            expect(createShaderModule.mock.calls.length - calls).toBe(1);
+            expect(restored.fragment!.module).not.toBe(retiredFragments[edit]);
+            expect(restored.vertex.module).toBe(again.vertex.module);
+            releaseRestored();
+        }
+        releaseAgain();
+    });
+
+    it("releases shared PBR geometry modules with their last holder", async () => {
+        const { engine, createShaderModule } = makeEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const materialA = createPbrMaterial();
+        const meshA = makeMesh(materialA);
+        const meshB = makeMesh(createPbrMaterial());
+        scene._groups.set(materialA._buildGroup, [meshA, meshB]);
+        await buildPbrRenderables(scene, [meshA, meshB], undefined);
+
+        let calls = createShaderModule.mock.calls.length;
+        const [pipelineA, releaseA] = bindPbrGeometry(engine, scene, meshA);
+        const [pipelineB, releaseB] = bindPbrGeometry(engine, scene, meshB);
+        expect(createShaderModule.mock.calls.length - calls).toBe(2);
+
+        // A disposed holder leaves the pair to the material that still draws with it.
+        releaseA();
+        calls = createShaderModule.mock.calls.length;
+        const [pipelineC, releaseC] = bindPbrGeometry(engine, scene, meshA);
+        expect(createShaderModule.mock.calls.length - calls).toBe(0);
+        expect(pipelineC.vertex.module).toBe(pipelineB.vertex.module);
+        expect(pipelineC.fragment!.module).toBe(pipelineB.fragment!.module);
+
+        // Once every holder is disposed, nothing keeps the pair: the next geometry pass compiles it again.
+        releaseB();
+        releaseC();
+        calls = createShaderModule.mock.calls.length;
+        const [pipelineD, releaseD] = bindPbrGeometry(engine, scene, meshA);
+        expect(createShaderModule.mock.calls.length - calls).toBe(2);
+        expect(pipelineD.vertex.module).not.toBe(pipelineA.vertex.module);
+        expect(pipelineD.fragment!.module).not.toBe(pipelineA.fragment!.module);
+        releaseD();
     });
 });
