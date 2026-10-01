@@ -140,4 +140,50 @@ describe("scene lifecycle", () => {
         expect(completed).toHaveBeenCalledOnce();
         expect(scene._disposables).toEqual([]);
     });
+
+    it("clears retained scene-change state during disposal without affecting other scenes", () => {
+        const engine = createNullEngine();
+        const disposedScene = createSceneContext(engine, { defaultRenderTask: false });
+        const liveScene = createSceneContext(engine, { defaultRenderTask: false });
+        const disposedListener = vi.fn();
+        const liveListener = vi.fn();
+        const unsubscribe = onSceneChange(disposedScene, disposedListener);
+        onSceneChange(disposedScene, vi.fn());
+        onSceneChange(liveScene, liveListener);
+        const disposedState = disposedScene._sceneChanges!;
+        const liveEntity = createTransformNode("Live");
+
+        disposeScene(disposedScene);
+        unsubscribe();
+        unsubscribe();
+        addToScene(liveScene, liveEntity);
+
+        expect(disposedState.listeners.size).toBe(0);
+        expect(disposedState.pending).toEqual([]);
+        expect(disposedScene._sceneChanges).toBeUndefined();
+        expect(liveListener).toHaveBeenCalledWith({ type: "added", entity: liveEntity });
+
+        disposeScene(liveScene);
+    });
+
+    it("stops listeners and queued events when disposal occurs during dispatch", () => {
+        const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+        const first = createTransformNode("First");
+        const queued = createTransformNode("Queued");
+        const events: string[] = [];
+        const laterListener = vi.fn();
+
+        onSceneChange(scene, (event) => {
+            events.push("name" in event.entity ? (event.entity.name ?? "unnamed") : "container");
+            addToScene(scene, queued);
+            disposeScene(scene);
+        });
+        onSceneChange(scene, laterListener);
+
+        addToScene(scene, first);
+
+        expect(events).toEqual(["First"]);
+        expect(laterListener).not.toHaveBeenCalled();
+        expect(scene._sceneChanges).toBeUndefined();
+    });
 });

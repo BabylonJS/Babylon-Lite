@@ -1,4 +1,4 @@
-import { _setSceneChangeHook } from "./scene-core.js";
+import { _setSceneChangeHook, _setSceneDisposeHook } from "./scene-core.js";
 import type { SceneChangeEvent, SceneChangeListener, SceneContext } from "./scene-core.js";
 
 /** @internal Lazily allocated state for generic scene-change subscribers. */
@@ -9,7 +9,8 @@ export interface SceneChangeState {
     dispatching: boolean;
 }
 
-let installed = false;
+let changeInstalled = false;
+let disposalInstalled = false;
 
 function throwFailures(failures: unknown[]): void {
     if (failures.length === 1) {
@@ -61,40 +62,61 @@ function runSceneChange(scene: SceneContext, mutation: () => void): void {
         }
     } finally {
         state.dispatching = false;
-        if (!state.listeners.size) {
+        if (!state.listeners.size && scene._sceneChanges === state) {
             scene._sceneChanges = undefined;
         }
     }
     throwFailures(failures);
 }
 
-function install(): void {
-    if (installed) {
+function disposeSceneChanges(scene: SceneContext): void {
+    const state = scene._sceneChanges;
+    if (!state) {
         return;
     }
-    installed = true;
+    state.listeners.clear();
+    state.pending.length = 0;
+    if (scene._sceneChanges === state) {
+        scene._sceneChanges = undefined;
+    }
+}
+
+function disposeSceneCallbacks(scene: SceneContext, cleanup: () => void): void {
+    const failures: unknown[] = [];
+    for (const callback of scene._disposables.splice(0)) {
+        try {
+            callback();
+        } catch (error) {
+            failures.push(error);
+        }
+    }
+    scene._disposables.length = 0;
+    try {
+        cleanup();
+    } catch (error) {
+        failures.push(error);
+    }
+    throwFailures(failures);
+}
+
+function installDisposal(): void {
+    if (disposalInstalled) {
+        return;
+    }
+    disposalInstalled = true;
+    _setSceneDisposeHook(disposeSceneCallbacks);
+}
+
+function installChanges(): void {
+    if (changeInstalled) {
+        return;
+    }
+    changeInstalled = true;
+    installDisposal();
     _setSceneChangeHook({
         run: runSceneChange,
         record: (scene, entity, type) => scene._sceneChanges?.pending.push({ type, entity }),
-        dispose: (scene, cleanup) => {
-            const failures: unknown[] = [];
-            for (const callback of scene._disposables.splice(0)) {
-                try {
-                    callback();
-                } catch (error) {
-                    failures.push(error);
-                }
-            }
-            scene._disposables.length = 0;
-            try {
-                cleanup();
-            } catch (error) {
-                failures.push(error);
-            } finally {
-                scene._sceneChanges = undefined;
-            }
-            throwFailures(failures);
-        },
+        dispose: disposeSceneChanges,
     });
 }
 
@@ -107,7 +129,7 @@ export function onSceneChange(scene: SceneContext, listener: SceneChangeListener
     if (scene._z) {
         throw new Error("Cannot observe a disposed scene.");
     }
-    install();
+    installChanges();
     const state = (scene._sceneChanges ??= {
         listeners: new Set(),
         pending: [],
@@ -123,7 +145,7 @@ export function onSceneChange(scene: SceneContext, listener: SceneChangeListener
         }
         active = false;
         state.listeners.delete(subscribed);
-        if (!state.listeners.size && !state.depth && !state.dispatching) {
+        if (!state.listeners.size && !state.depth && !state.dispatching && scene._sceneChanges === state) {
             scene._sceneChanges = undefined;
         }
     };
@@ -133,7 +155,7 @@ export function onSceneChange(scene: SceneContext, listener: SceneChangeListener
  *  user-owned resources to the scene's lifetime. The returned callback removes
  *  only this registration and is idempotent. */
 export function onSceneDispose(scene: SceneContext, callback: () => void): () => void {
-    install();
+    installDisposal();
     const disposables = scene._disposables;
     disposables.push(callback);
     let active = true;

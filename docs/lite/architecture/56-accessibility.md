@@ -196,6 +196,8 @@ export function onSceneDispose(scene: SceneContext, callback: () => void): () =>
 
 Scene change listeners run after the outermost add or remove operation completes. Reentrant mutations append more events to the same dispatch. Listener removal takes effect before the next callback or event. All remaining listeners run after a failure; one failure is rethrown directly, and multiple failures use `AggregateError`.
 
+Membership registration and disposal registration install separate optional core seams. A consumer that uses only `onSceneDispose` does not retain scene-change event creation, queues, or dispatch.
+
 The scene lifecycle interface contains no accessibility semantics. Other independent consumers can subscribe to the same scene without sharing feature state.
 
 ### Owned scene HTML twin types
@@ -385,6 +387,7 @@ live scene -> projection installed -> reconciled as scene changes -> scene or pr
 - If initial reconciliation fails, creation disposes all installed state before rethrowing.
 - Explicit projection disposal removes both scene subscriptions, removes observations and bindings, clears source and parent sets, removes the feature-owned map entry, and disposes the tree.
 - `disposeScene` attempts every registered cleanup and then clears canonical scene collections. Accessibility teardown is one ordinary generic cleanup subscriber.
+- Scene disposal clears scene-change listeners and queued events before cleanup callbacks run. Disposal during a scene-change listener stops later listeners and queued events for that scene without affecting other scenes.
 - Cleanup failures do not prevent later callbacks or canonical collection cleanup. One failure is rethrown directly, and multiple failures use `AggregateError` in callback order.
 - Property changes queued during canonical cleanup cannot reconcile after disposal because projection disposal marks the adapter disposed before the queued microtask runs.
 - Repeated projection disposal is a no-op.
@@ -488,7 +491,7 @@ The root package re-exports each public type and function from its single `"."` 
 - unused accessibility imports producing no bundle change;
 - DOM synchronization code retained only when requested.
 
-`tests/lite/build/accessibility-core-boundary.test.ts` covers the generic scene lifecycle declarations, an accessibility-free generic subscriber bundle, and the absence of accessibility implementation from core scene bundles.
+`tests/lite/build/accessibility-core-boundary.test.ts` covers the generic scene lifecycle declarations, an accessibility-free generic subscriber bundle, a disposal-only emitted-library bundle without membership dispatch, and the absence of accessibility implementation from core scene bundles.
 
 ## File Manifest
 
@@ -499,8 +502,8 @@ The root package re-exports each public type and function from its single `"."` 
 | `packages/babylon-lite/src/accessibility/observe-property.ts`    | Reversible direct-property observation used by the scene adapter                                                                                |
 | `packages/babylon-lite/src/accessibility/scene-accessibility.ts` | Lazy object metadata, feature-owned scene binding state, logical projection, coalescing, semantic parent overrides, and lifecycle subscriptions |
 | `packages/babylon-lite/src/accessibility/scene-html-twin.ts`     | Default/custom host resolution and owned scene-plus-HTML convenience API                                                                        |
-| `packages/babylon-lite/src/scene/scene-change.ts`                | Optional generic scene change and disposal subscriptions, dispatch, unsubscription, and error aggregation                                       |
-| `packages/babylon-lite/src/scene/scene-core.ts`                  | Canonical scene mutation and disposal plus the optional generic lifecycle hook                                                                  |
+| `packages/babylon-lite/src/scene/scene-change.ts`                | Separately installed generic scene change and disposal subscriptions, dispatch, unsubscription, state release, and error aggregation            |
+| `packages/babylon-lite/src/scene/scene-core.ts`                  | Canonical scene mutation and disposal plus separate optional generic lifecycle seams                                                            |
 | `packages/babylon-lite/src/scene/scene-remove.ts`                | Canonical removal plus generic committed scene-removal notifications                                                                            |
 | `packages/babylon-lite/src/index.ts`                             | Single root public exports                                                                                                                      |
 | `tests/lite/unit/accessibility-tree.test.ts`                     | Logical tree unit coverage                                                                                                                      |

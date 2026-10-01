@@ -121,14 +121,20 @@ export type SceneChangeListener = (event: SceneChangeEvent) => void;
 interface SceneChangeHook {
     run(scene: SceneContext, mutation: () => void): void;
     record(scene: SceneContext, entity: SceneEntity, type: SceneChangeEvent["type"]): void;
-    dispose(scene: SceneContext, cleanup: () => void): void;
+    dispose(scene: SceneContext): void;
 }
 
 let _sceneChangeHook: SceneChangeHook | undefined;
+let _sceneDisposeHook: ((scene: SceneContext, cleanup: () => void) => void) | undefined;
 
 /** @internal Install the optional generic scene-change seam. */
 export function _setSceneChangeHook(hook: SceneChangeHook): void {
     _sceneChangeHook = hook;
+}
+
+/** @internal Install the optional generic scene-disposal seam. */
+export function _setSceneDisposeHook(hook: (scene: SceneContext, cleanup: () => void) => void): void {
+    _sceneDisposeHook = hook;
 }
 
 /** Top-level scene context — pure state, no attached methods. */
@@ -592,8 +598,9 @@ export function disposeScene(scene: SceneContext): void {
         ctx.shadowGenerators.length = 0;
         ctx.camera = null;
     };
-    if (_sceneChangeHook) {
-        _sceneChangeHook.dispose(ctx, cleanup);
+    _sceneChangeHook?.dispose(ctx);
+    if (_sceneDisposeHook) {
+        _sceneDisposeHook(ctx, cleanup);
     } else {
         cleanup();
     }

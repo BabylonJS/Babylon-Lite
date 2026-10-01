@@ -44,6 +44,26 @@ console.log(addToScene, createSceneContext, onSceneChange, removeFromScene);`,
         cleanupTempDirs();
     });
 
+    it("keeps a disposal-only emitted-library consumer free of membership dispatch", async () => {
+        ensureLibBuilt();
+        const result = await runRollup({
+            entrySource: `import { createNullEngine, createSceneContext, disposeScene, onSceneDispose } from ${JSON.stringify(LIB_ENTRY)};
+const scene = createSceneContext(createNullEngine(), { defaultRenderTask: false });
+onSceneDispose(scene, () => console.log("disposed"));
+disposeScene(scene);`,
+            format: "es",
+            minify: false,
+        });
+
+        expect(result.errors).toEqual([]);
+        expect(result.significantWarnings).toEqual([]);
+        expect(result.code).toContain("AggregateError");
+        for (const name of ["runSceneChange", "_sceneChanges", "pending.push", "pending.shift", "Cannot observe a disposed scene."]) {
+            expect(result.code).not.toContain(name);
+        }
+        cleanupTempDirs();
+    });
+
     it("keeps scene and runtime core source structurally accessibility-agnostic", () => {
         const root = resolve(import.meta.dirname, "../../../packages/babylon-lite/src");
         const files = ["scene/scene-core.ts", "scene/scene-remove.ts", "engine/engine.ts", "render/renderable.ts"];
