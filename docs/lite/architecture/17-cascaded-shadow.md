@@ -431,9 +431,9 @@ pruned to what the live casters reach (their receive materials and every link of
 The prune runs after the queue and keeps every view a live chain reaches, so fresh views
 rest on the staleness rule: a material that casts again later, possibly rebuilt meanwhile
 through a non-caster mesh, is missing from the snapshot, so its chain's views are forgotten
-first. A new array with the same members and unchanged materials only clears the cascade
-bundles, also while a caster stays held, and a rebuilt material no caster uses changes
-nothing.
+first. A new array with the same members, caps and unchanged materials, also while a caster
+stays held, is only adopted: no binding list changes, so every cascade bundle and binding
+version is kept, and a rebuilt material no caster uses changes nothing.
 
 ## Babylon.js Equivalence Map
 

@@ -127,6 +127,25 @@ function runRetirements(engine: EngineContext): void {
     }
 }
 
+/** Give every task a recorded bundle at the current binding version, as rendered frames leave them. */
+function stampBundles(tasks: readonly RenderTask[], scene: SceneContext): GPURenderBundle[] {
+    return tasks.map((task) => {
+        const bundle = {} as GPURenderBundle;
+        task._ob.push(bundle);
+        task._lastVersion = scene._renderableVersion;
+        return bundle;
+    });
+}
+
+/** Every task still holds the bundle `stampBundles` gave it, at the same binding version. */
+function expectBundlesKept(tasks: readonly RenderTask[], bundles: readonly GPURenderBundle[], scene: SceneContext): void {
+    tasks.forEach((task, t) => {
+        expect(task._ob).toHaveLength(1);
+        expect(task._ob[0]).toBe(bundles[t]);
+        expect(task._lastVersion).toBe(scene._renderableVersion);
+    });
+}
+
 function setup(casters: readonly Mesh[]): { engine: EngineContext; scene: SceneContext; state: CsmTaskState } {
     const engine = {} as EngineContext;
     const scene = makeScene();
@@ -603,18 +622,10 @@ describe("CSM caster reconcile", () => {
 
         // While the hold is unchanged, the same caster array touches no task.
         const held = state._held;
-        const bundles = state._tasks.map((task) => {
-            const bundle = {} as GPURenderBundle;
-            task._ob.push(bundle);
-            task._lastVersion = scene._renderableVersion;
-            return bundle;
-        });
+        const bundles = stampBundles(state._tasks, scene);
         expect(ensureCsmShadowTaskState(engine, scene, sg, cfg, casters, state)).toBe(state);
         expect(state._held).toBe(held);
-        state._tasks.forEach((task, c) => {
-            expect(task._ob).toEqual([bundles[c]]);
-            expect(task._lastVersion).toBe(scene._renderableVersion);
-        });
+        expectBundlesKept(state._tasks, bundles, scene);
         expect(engine._retirements).toHaveLength(0);
     });
 
@@ -838,12 +849,7 @@ describe("CSM caster reconcile of the same caster array around a hold", () => {
         // Applied: the joined caster casts into both cascades, the reverted one at its new cap only.
         expect(state._tasks.map((task) => task._renderables.some((renderable) => renderable.mesh === casters[1]))).toEqual(joined ? [true, true] : [true, false]);
         // As left by rendered frames: recorded bundles, and with static caching a rendered refit.
-        const bundles = tasks().map((task) => {
-            const bundle = {} as GPURenderBundle;
-            task._ob.push(bundle);
-            task._lastVersion = scene._renderableVersion;
-            return bundle;
-        });
+        const bundles = stampBundles(tasks(), scene);
         state._cachedContentVersion = scene._renderableVersion;
         const views = new Map(state._materialViews);
         const retirements = engine._retirements?.length ?? 0;
@@ -852,10 +858,8 @@ describe("CSM caster reconcile of the same caster array around a hold", () => {
         ensure(casters);
         ensure(casters);
 
+        expectBundlesKept(tasks(), bundles, scene);
         tasks().forEach((task, t) => {
-            expect(task._lastVersion).toBe(scene._renderableVersion);
-            expect(task._ob).toHaveLength(1);
-            expect(task._ob[0]).toBe(bundles[t]);
             expect(task._renderables).toEqual(packets[t]);
             expect(task._pendingMeshes ?? []).toHaveLength(0);
         });
@@ -875,7 +879,7 @@ describe("CSM caster reconcile of the same caster array around a hold", () => {
         ["cache", "joining"],
         ["default", "registered"],
         ["cache", "registered"],
-    ] as const)("forces no %s record, redraw or refit when the same casters are re-supplied in new arrays while a %s caster stays held", (hooks, kind) => {
+    ] as const)("keeps every %s bundle and forces no record, redraw or refit when the same casters are re-supplied in new arrays while a %s caster stays held", (hooks, kind) => {
         const meshA = caster("a", shaderMaterial("A"));
         const meshB = caster("b", shaderMaterial("B"));
         // A material whose group is never built in this scene: its caster stays held.
@@ -885,17 +889,23 @@ describe("CSM caster reconcile of the same caster array around a hold", () => {
         ensure([meshA, meshB]);
         const held = state._held;
         expect(held).toEqual(new Set([meshB]));
-        // As left by rendered frames: recorded cascades, a drawn map, and with static caching a rendered refit.
+        // As left by rendered frames: recorded bundles, a drawn map, and with static caching a rendered refit.
         record(state, scene, tasks());
+        const bundles = stampBundles(tasks(), scene);
         state._cachedContentVersion = scene._renderableVersion;
         runRetirements(engine);
         const packets = tasks().map((task) => task._renderables.slice());
 
+        let casters: readonly Mesh[] = [];
         for (let frame = 0; frame < 3; frame++) {
-            ensure([meshA, meshB]);
+            casters = [meshA, meshB];
+            ensure(casters);
         }
 
         expect(state._held).toBe(held);
+        // Adopted, so the next ensure with this array returns at once.
+        expect(state._casterMeshes).toBe(casters);
+        expectBundlesKept(tasks(), bundles, scene);
         expect(state._recordedVersion).toBe(scene._renderableVersion);
         expect(state._lastCasterVersion).toBe(3);
         expect(state._cachedContentVersion).toBe(scene._renderableVersion);
@@ -904,6 +914,97 @@ describe("CSM caster reconcile of the same caster array around a hold", () => {
             expect(task._renderables).toEqual(packets[t]);
             expect(task._pendingMeshes ?? []).toHaveLength(0);
         });
+    });
+});
+
+describe("CSM caster reconcile of a new caster array", () => {
+    beforeAll(async () => {
+        await preloadPcfShadowTaskState([caster("preload", shaderMaterial("preload"))]);
+    });
+
+    beforeEach(() => {
+        createdTasks.length = 0;
+    });
+
+    it.each(["default", "cache"] as const)("keeps every %s bundle when the same casters are re-supplied in new arrays", (hooks) => {
+        const meshA = caster("a", shaderMaterial("A"));
+        const meshB = caster("b", shaderMaterial("B"));
+        const { engine, scene, state, tasks, ensure } = start(hooks, [meshA, meshB]);
+        // As left by rendered frames: recorded bundles, a drawn map, and with static caching a rendered refit.
+        const bundles = stampBundles(tasks(), scene);
+        state._cachedContentVersion = scene._renderableVersion;
+        const packets = tasks().map((task) => task._renderables.slice());
+
+        let casters: readonly Mesh[] = [];
+        for (let frame = 0; frame < 3; frame++) {
+            casters = [meshA, meshB];
+            ensure(casters);
+        }
+
+        // Adopted, so the next ensure with this array returns at once.
+        expect(state._casterMeshes).toBe(casters);
+        expectBundlesKept(tasks(), bundles, scene);
+        tasks().forEach((task, t) => {
+            expect(task._renderables).toEqual(packets[t]);
+            expect(task._pendingMeshes ?? []).toHaveLength(0);
+        });
+        expect(engine._retirements ?? []).toHaveLength(0);
+        expect(state._recordedVersion).toBe(scene._renderableVersion);
+        expect(state._lastCasterVersion).toBe(3);
+        expect(state._cachedContentVersion).toBe(scene._renderableVersion);
+    });
+
+    it.each([
+        ["default", "joins"],
+        ["cache", "joins"],
+        ["default", "leaves"],
+        ["cache", "leaves"],
+    ] as const)("still clears every %s cascade bundle when a caster %s through a new array", (hooks, change) => {
+        const meshA = caster("a", shaderMaterial("A"));
+        const meshB = caster("b", shaderMaterial("B"));
+        const joins = change === "joins";
+        const { engine, scene, state, tasks, ensure } = start(hooks, joins ? [meshA] : [meshA, meshB]);
+        const oldB = joins ? [] : state._tasks.map((task) => packet(task, meshB));
+        const bundles = stampBundles(tasks(), scene);
+
+        ensure(joins ? [meshA, meshB] : [meshA]);
+
+        state._tasks.forEach((task) => {
+            expect(task._ob).toHaveLength(0);
+            expect(task._lastVersion).toBe(-1);
+            expect(task._renderables.some((renderable) => renderable.mesh === meshB)).toBe(false);
+            expect((task._pendingMeshes ?? []).map((request) => request.mesh)).toEqual(joins ? [meshB] : []);
+        });
+        // The static layer holds none of them (casters join dynamic), so its bundles are kept, as before.
+        expectBundlesKept(state._staticTasks ?? [], bundles, scene);
+        expect(state._recordedVersion).toBe(joins ? -1 : scene._renderableVersion);
+        expect(state._lastCasterVersion).toBe(-1);
+        runRetirements(engine);
+        oldB.forEach((renderable) => expect(disposer(renderable)).toHaveBeenCalledOnce());
+    });
+
+    it.each(["default", "cache"] as const)("still requeues a %s caster re-capped with the same members in a new array", (hooks) => {
+        const matB = shaderMaterial("B");
+        const meshA = caster("a", shaderMaterial("A"));
+        const meshB = caster("b", matB);
+        const { engine, scene, state, tasks, ensure } = start(hooks, [meshA, meshB]);
+        const oldB = state._tasks.map((task) => packet(task, meshB));
+        stampBundles(tasks(), scene);
+
+        meshB._shadowMaxCascade = 0;
+        ensure([meshA, meshB]);
+
+        const view = state._materialViews.get(matB)!;
+        expect(state._casterMaxCascades.get(meshB)).toBe(0);
+        expect(state._tasks.map((task) => task._pendingMeshes ?? [])).toEqual([[{ mesh: meshB, material: view }], []]);
+        state._tasks.forEach((task) => {
+            expect(task._renderables.some((renderable) => renderable.mesh === meshB)).toBe(false);
+            expect(task._ob).toHaveLength(0);
+            expect(task._lastVersion).toBe(-1);
+        });
+        expect(state._recordedVersion).toBe(-1);
+        runRetirements(engine);
+        oldB.forEach((renderable) => expect(disposer(renderable)).toHaveBeenCalledOnce());
     });
 });
 

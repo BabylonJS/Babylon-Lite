@@ -271,8 +271,8 @@ export function ensureCsmShadowTaskState(
  *  `_recordedVersion`), so K requeued casters cost one transaction per cascade instead of one whole-task rebind per
  *  caster. A drop alone needs no record, only a redraw. When a caster was dropped or queued, the material snapshots and
  *  views are pruned to what the live casters reach, and the dropped casters (possibly none) are returned so a caller
- *  with more tasks can update them too; a new array with the same members and unchanged materials, also while a caster
- *  stays held, only clears the bundles and returns undefined. */
+ *  with more tasks can update them too; a new array with the same members, caps and unchanged materials, also while a
+ *  caster stays held, is only adopted: no task or bundle is touched, and undefined is returned. */
 export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, state: CsmTaskState, casterMeshes: readonly Mesh[]): ReadonlySet<Mesh> | undefined {
     const views = state._materialViews;
     const materials = state._casterMaterials;
@@ -349,14 +349,16 @@ export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, s
         }
         caps.set(mesh, maxCascade);
     }
+    state._casterMeshes = casterMeshes;
+    state._held = held;
+    // Nothing dropped or queued leaves every binding list as recorded: keep the bundles, which replay those lists. What
+    // else they capture invalidates them on its own (a scene bind group refresh, the visibility epoch, a record).
+    if (!drop.size && !queued) {
+        return undefined;
+    }
     for (const task of tasks) {
         task._lastVersion = -1;
         task._ob.length = 0;
-    }
-    state._casterMeshes = casterMeshes;
-    state._held = held;
-    if (!drop.size && !queued) {
-        return undefined;
     }
     // Forget the snapshots of materials no live caster uses and the views of materials no live caster chain reaches:
     // the state lives as long as the generator, and a material that casts again later (possibly rebuilt meanwhile
