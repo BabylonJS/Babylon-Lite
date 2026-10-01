@@ -239,7 +239,10 @@ covers two distinct cases:
   enqueues; it never creates a group). These are handed to the runtime build path
   (`scene-runtime-mesh-build.ts`, dynamically imported so static scenes do not bundle it), which
   materializes the group: PBR rebuilds the whole group via `rebuildScenePbrPipelines`, other families
-  build the single mesh and install the group's rebuild function.
+  build the single mesh and install the group's rebuild function. Each PBR mesh first moves itself into
+  the group and then joins the PBR group rebuild that has not been dispatched yet, so the meshes of one
+  drain or one `rebuildMaterial` call share a single rebuild; requests that arrive while a rebuild runs
+  fold into one follow-up, dispatched after it settles.
 
 > **Introducing a material family at runtime is ASYNCHRONOUS.** It requires a dynamic module import plus
 > shader compilation and a full group build, so the mesh becomes visible some frames after `addToScene`

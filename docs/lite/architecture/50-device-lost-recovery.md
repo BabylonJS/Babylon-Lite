@@ -182,9 +182,9 @@ Recovery deduplicates generators referenced by `scene.lights` and
 `scene.shadowGenerators`, disposes their nested render-task state, recreates
 their device-owned textures, samplers, uniform buffers, pipelines, and bind
 groups, and preserves the public `ShadowGenerator` identity. This currently
-supports directional ESM generators, the shadow type used by Babylon Lite
-Viewer; recovery fails explicitly for PCF or CSM instead of resuming with stale
-device resources. ESM retains only the two blur scalars it cannot reconstruct —
+supports directional ESM and CSM generators; recovery fails explicitly for PCF
+instead of resuming with stale device resources. ESM retains only the two blur
+scalars it cannot reconstruct —
 `_blurKernel` and `_blurScale`, held as internal fields on the generator's
 `EsmShadowTaskResources` — and `shadow-recovery.ts` reads them from that object
 during the loss-only rebuild. `_blurScale` is retained rather than re-derived as
@@ -194,6 +194,16 @@ original value. Every remaining option is derived from steady-state runtime
 fields: `mapSize`, `bias`, `orthoMinZ`, `orthoMaxZ`, and `forceRefreshEveryFrame`
 from the generator's `_config`, and `darkness`, `depthScale`, and
 `frustumEdgeFalloff` from its `_shadowsInfo` array.
+CSM reallocates the depth array, comparison sampler, shadow-params UBO, and
+80-float receiver UBO directly on the original generator. Its configuration,
+CPU arrays, installed task hooks, receiver callbacks, and runtime enablement
+state remain attached to that object. The replacement depth array keeps the
+configured map size and cascade count; an enabled static cache also keeps
+`COPY_DST` usage. Clearing the nested task state makes the retained hooks build
+fresh cascade tasks on their next use. A previously borrowed receiver
+`Texture2D` keeps its identity while adopting the replacement texture, array
+view, sampler, and dimensions. Recovery acquires the generator's ownership
+reference on that replacement before rebuilt material groups acquire theirs.
 Rebuilding material groups afterward binds receivers and casters only to
 replacement-device resources.
 
@@ -425,6 +435,11 @@ module-level side effects; mutable caches remain null until an explicit call.
   and assert that its textures, sampler, UBOs, hidden blur resources, and nested
   render task are recreated while the generator identity remains stable and the
   PBR fallback is cleared before material groups rebuild.
+- CSM recovery unit tests cover the default and enabled static-cache paths,
+  replacement-device depth-array/sampler/UBO resources, retained configuration
+  and CPU/hook/callback/enablement references, a stable borrowed receiver wrapper,
+  cache copy-destination usage, nested task disposal, and the generator's
+  ownership surviving one rebuilt material acquire/release cycle.
 - A real-loss browser scene covers environment-lit PBR, a directional ESM
   caster, and a shadow-only receiver. It asserts replacement-device
   environment/fallback/shadow resources, preserved environment identity, no

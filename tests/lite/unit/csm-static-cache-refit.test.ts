@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type * as CsmShadowTaskHooks from "../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks";
+
 const taskMocks = vi.hoisted(() => ({
     record: vi.fn(),
     dispose: vi.fn(),
@@ -21,7 +23,8 @@ vi.mock("../../../packages/babylon-lite/src/shadow/shadow-base.js", () => ({
         camera.viewProjection = viewProjection;
     },
 }));
-vi.mock("../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks.js", () => ({
+vi.mock("../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks.js", async (importOriginal) => ({
+    ...(await importOriginal<typeof CsmShadowTaskHooks>()),
     csmCameraAspect: () => 1,
     csmWorldBiasClipOffset: () => 0,
     _biasViewProjection: () => {},

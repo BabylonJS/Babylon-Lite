@@ -604,9 +604,9 @@ export default defineConfig(({ mode }) => {
                 minifyBrowserChunks(),
                 stripInlinedWorkerSourcemap(),
                 dts({
-                    rollupTypes: !isWatch,
+                    bundleTypes: !isWatch,
                     tsconfigPath: resolve(__dirname, "tsconfig.json"),
-                    outDir: DIST_OUT_DIR,
+                    outDirs: DIST_OUT_DIR,
                 }),
                 ...(isWatch
                     ? []
