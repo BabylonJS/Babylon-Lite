@@ -211,6 +211,9 @@ the renderables drawing with it: a renderable acquires its vertex and fragment e
 and releases them in its idempotent per-mesh lifetime packet, so a candidate generation, built
 before the old one retires, still hits, and an entry leaves the memo with its last holder (a
 superseded plugin or material variant, a removed mesh, a rolled-back candidate, a disposed task).
+A renderable records only the acquisitions that succeeded, and a release never compiles or creates
+an entry, so a candidate whose vertex or fragment compile throws rolls back exactly what it holds
+and still destroys its mesh UBO.
 A `GPUShaderModule` has no `destroy()`, so dropping an entry never invalidates a module that older
 pipelines still reference. Composition, BGLs, pipeline layouts, and pipelines stay per view
 resource. A device replaced by device-lost recovery compiles its own modules. Node geometry
@@ -485,6 +488,10 @@ matches BJS pixel-for-pixel (no lossy material-constants approximation).
 - Retired PBR plugin variants and Standard material variants leave the memo
   while the live variant stays shared; a disposed task releases only the
   modules no other task draws with, and its last holder empties the entry.
+- A candidate whose vertex or fragment module fails to compile releases only
+  the modules it acquired, creates no entry, takes no count from a stage a
+  live generation holds, and destroys its mesh UBO; a retry compiles the
+  missing stages once.
 
 ## Future extensions
 

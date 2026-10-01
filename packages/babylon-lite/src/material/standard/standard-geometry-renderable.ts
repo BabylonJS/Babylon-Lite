@@ -213,14 +213,16 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
     const bindingDisposers: (() => void)[] = [];
     let skeletonVelocity: ReturnType<NonNullable<typeof skeletonVelocityFactory>> | null = null;
     let boundTextures: ReturnType<typeof collectStdBoundTextures> = [];
+    // Codes of the shared modules this renderable holds. Only a successful acquisition is recorded, so a
+    // candidate rolled back after a failed compile releases exactly what it acquired.
+    const heldModules: string[] = [];
     let _perMeshDisposed = false;
     const _disposePerMesh = (): void => {
         if (_perMeshDisposed) {
             return;
         }
         _perMeshDisposed = true;
-        _refShaderModule(device, res._composed._vertexWGSL, -1);
-        _refShaderModule(device, res._composed._fragmentWGSL, -1);
+        _releaseShaderModules(device, heldModules);
         meshUBO.destroy();
         skeletonVelocity?._dispose();
         for (const dispose of bindingDisposers) {
@@ -231,9 +233,8 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
         }
     };
     resources._lifetimeDisposers.push(_disposePerMesh);
-    // Counted references on the shared modules, released by `_disposePerMesh` with the rest of this renderable.
-    const vertModule = _refShaderModule(device, res._composed._vertexWGSL, 1);
-    const fragModule = _refShaderModule(device, res._composed._fragmentWGSL, 1);
+    const vertModule = _acquireShaderModule(device, res._composed._vertexWGSL, heldModules);
+    const fragModule = _acquireShaderModule(device, res._composed._fragmentWGSL, heldModules);
 
     if (res._hasSkeletonVelocity && (!mesh.skeleton || !skeletonVelocityFactory)) {
         throw new Error("standard-geometry: skeletal velocity feature was not preloaded");
@@ -390,12 +391,13 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
  *  module per code string can serve every view, generation and material. Each entry counts the renderables
  *  drawing with it, and a renderable releases its count with its per-mesh resources: a rebuild, built before
  *  the old generation retires, still hits the entry, and the entry leaves the map with its last holder (a
- *  retired variant, a disposed task). Keyed weakly by device: a replaced device compiles its own modules.
- *  Lazy, so the module keeps no top-level side effect. */
+ *  retired variant, a disposed task, a rolled-back candidate). Keyed weakly by device: a replaced device
+ *  compiles its own modules. Lazy, so the module keeps no top-level side effect. */
 let _shaderModules: WeakMap<GPUDevice, Map<string, [GPUShaderModule, number]>> | null = null;
 
-/** Acquire (`delta` 1, compiling on first use) or release (`delta` -1) the shared module of `code`. */
-function _refShaderModule(device: GPUDevice, code: string, delta: 1 | -1): GPUShaderModule {
+/** Acquire the shared module of `code`, compiling it on first use, and record the acquisition in `held`. A
+ *  compile that throws stores and records nothing. */
+function _acquireShaderModule(device: GPUDevice, code: string, held: string[]): GPUShaderModule {
     _shaderModules ??= new WeakMap();
     let modules = _shaderModules.get(device);
     if (!modules) {
@@ -407,10 +409,20 @@ function _refShaderModule(device: GPUDevice, code: string, delta: 1 | -1): GPUSh
         entry = [device.createShaderModule({ code }), 0];
         modules.set(code, entry);
     }
-    if (!(entry[1] += delta)) {
-        modules.delete(code);
-    }
+    entry[1]++;
+    held.push(code);
     return entry[0];
+}
+
+/** Release the acquisitions recorded in `held`. Never compiles or creates an entry, so it cannot throw. */
+function _releaseShaderModules(device: GPUDevice, held: readonly string[]): void {
+    const modules = _shaderModules?.get(device);
+    for (const code of held) {
+        const entry = modules?.get(code);
+        if (entry && !--entry[1]) {
+            modules!.delete(code);
+        }
+    }
 }
 
 function _ensureViewResources(

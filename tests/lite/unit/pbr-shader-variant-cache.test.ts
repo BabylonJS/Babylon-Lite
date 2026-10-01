@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
+import { runGpuResourceCallbacks } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import type { RenderTargetSignature } from "../../../packages/babylon-lite/src/engine/render-target";
 import { GeometryTextureType } from "../../../packages/babylon-lite/src/frame-graph/geometry-types";
 import type { MaterialPlugin } from "../../../packages/babylon-lite/src/material/plugin/material-plugin";
@@ -79,13 +80,27 @@ function fragmentSources(createShaderModule: ReturnType<typeof vi.fn>): string[]
  *  descriptor back) and the release of the renderable's task-owned resources, which the task runs only once
  *  the next generation is built (make-before-break) or the task is disposed. */
 function bindPbrGeometry(engine: EngineContext, scene: SceneContext, mesh: Mesh): [GPURenderPipelineDescriptor, () => void] {
-    const view = createPbrGeometryMaterialView(mesh.material as PbrMaterialProps, {
+    const owner = { _lifetimeDisposers: [] as (() => void)[] };
+    const pipeline = buildPbrGeometryRenderable(scene, mesh, geometryViewOf(mesh), owner).bind(engine, signature).pipeline as unknown as GPURenderPipelineDescriptor;
+    return [pipeline, () => owner._lifetimeDisposers.splice(0).forEach((dispose) => dispose())];
+}
+
+function geometryViewOf(mesh: Mesh): ReturnType<typeof createPbrGeometryMaterialView> {
+    return createPbrGeometryMaterialView(mesh.material as PbrMaterialProps, {
         attachments: [GeometryTextureType.WORLD_NORMAL],
         emitColor: false,
     });
+}
+
+/** A geometry candidate build for `mesh` that throws `error`, rolled back the way the geometry task rolls back a
+ *  failed generation. Returns the buffers the build created. */
+function failPbrGeometryCandidate(engine: EngineContext, scene: SceneContext, mesh: Mesh, error: string): GPUBuffer[] {
+    const createBuffer = engine._device.createBuffer as unknown as ReturnType<typeof vi.fn>;
+    const before = createBuffer.mock.results.length;
     const owner = { _lifetimeDisposers: [] as (() => void)[] };
-    const pipeline = buildPbrGeometryRenderable(scene, mesh, view, owner).bind(engine, signature).pipeline as unknown as GPURenderPipelineDescriptor;
-    return [pipeline, () => owner._lifetimeDisposers.splice(0).forEach((dispose) => dispose())];
+    expect(() => buildPbrGeometryRenderable(scene, mesh, geometryViewOf(mesh), owner)).toThrow(error);
+    runGpuResourceCallbacks(owner._lifetimeDisposers.splice(0));
+    return createBuffer.mock.results.slice(before).map((result) => result.value as GPUBuffer);
 }
 
 describe("PBR shader variant caches", () => {
@@ -474,5 +489,139 @@ describe("PBR shader variant caches", () => {
         expect(pipelineD.vertex.module).not.toBe(pipelineA.vertex.module);
         expect(pipelineD.fragment!.module).not.toBe(pipelineA.fragment!.module);
         releaseD();
+    });
+
+    it("rolls back a PBR geometry candidate whose fragment module fails to compile without creating an entry for it", async () => {
+        const { engine, createShaderModule } = makeEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        let marker = 0;
+        const plugin: MaterialPlugin = {
+            name: "edited",
+            getCustomCode: (shaderType) => (shaderType === "fragment" ? { CUSTOM_FRAGMENT_UPDATE_ALPHA: `if(material.materialAlpha < -${marker}.0){discard;}` } : null),
+        };
+        const material = createPbrMaterial({ plugins: [plugin] });
+        const mesh = makeMesh(material);
+        scene._groups.set(material._buildGroup, [mesh]);
+        enableMaterialPlugins(scene);
+        await buildPbrRenderables(scene, [mesh], undefined);
+        const [live, releaseLive] = bindPbrGeometry(engine, scene, mesh);
+
+        // The edited plugin composes a new fragment stage only, and that single compile throws once.
+        marker = 1;
+        material._renderFeatures = _computePbrMaterialFeatures(material);
+        const calls = createShaderModule.mock.calls.length;
+        createShaderModule.mockImplementationOnce(() => {
+            throw new Error("fragment compile failed");
+        });
+        const buffers = failPbrGeometryCandidate(engine, scene, mesh, "fragment compile failed");
+        // The rollback destroyed the candidate's mesh UBO and compiled nothing for the stage it never acquired.
+        expect(buffers.length).toBeGreaterThan(0);
+        for (const buffer of buffers) {
+            expect(buffer.destroy).toHaveBeenCalledOnce();
+        }
+        expect(createShaderModule.mock.calls.length - calls).toBe(1);
+
+        // The vertex entry still has the live hold, so the retried candidate compiles only its fragment stage...
+        const [retried, releaseRetried] = bindPbrGeometry(engine, scene, mesh);
+        expect(retried.vertex.module).toBe(live.vertex.module);
+        expect(createShaderModule.mock.calls.slice(calls + 1)).toEqual([[retried.fragment!.module]]);
+        // ...and nothing else holds either stage: once both holders are released, the next build compiles both again.
+        releaseLive();
+        releaseRetried();
+        const before = createShaderModule.mock.calls.length;
+        const [next, releaseNext] = bindPbrGeometry(engine, scene, mesh);
+        expect(createShaderModule.mock.calls.length - before).toBe(2);
+        expect(next.vertex.module).not.toBe(live.vertex.module);
+        expect(next.fragment!.module).not.toBe(retried.fragment!.module);
+        releaseNext();
+    });
+
+    it("rolls back a PBR geometry candidate whose vertex module fails to compile and still destroys its mesh UBO", async () => {
+        const { engine, createShaderModule } = makeEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const material = createPbrMaterial();
+        const mesh = makeMesh(material);
+        scene._groups.set(material._buildGroup, [mesh]);
+        await buildPbrRenderables(scene, [mesh], undefined);
+        const calls = createShaderModule.mock.calls.length;
+        // Compiling keeps failing, so releasing a stage the candidate never acquired would throw again.
+        createShaderModule.mockImplementation(() => {
+            throw new Error("vertex compile failed");
+        });
+        const reported = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+        try {
+            const buffers = failPbrGeometryCandidate(engine, scene, mesh, "vertex compile failed");
+            expect(buffers.length).toBeGreaterThan(0);
+            for (const buffer of buffers) {
+                expect(buffer.destroy).toHaveBeenCalledOnce();
+            }
+            expect(reported).not.toHaveBeenCalled();
+            expect(createShaderModule.mock.calls.length - calls).toBe(1);
+        } finally {
+            reported.mockRestore();
+        }
+
+        // Nothing was cached: the retried build compiles both stages once, and a later generation shares them.
+        createShaderModule.mockImplementation((descriptor: GPUShaderModuleDescriptor) => descriptor as unknown as GPUShaderModule);
+        const [first, releaseFirst] = bindPbrGeometry(engine, scene, mesh);
+        expect(createShaderModule.mock.calls.slice(calls + 1)).toEqual([[first.vertex.module], [first.fragment!.module]]);
+        const [second, releaseSecond] = bindPbrGeometry(engine, scene, mesh);
+        releaseFirst();
+        expect(createShaderModule.mock.calls.length - calls).toBe(3);
+        expect(second.vertex.module).toBe(first.vertex.module);
+        expect(second.fragment!.module).toBe(first.fragment!.module);
+        releaseSecond();
+    });
+
+    it("rolls back a PBR geometry candidate whose vertex module fails to compile without taking a count from the live fragment module", async () => {
+        const { engine, createShaderModule } = makeEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        let marker = 0;
+        const plugin: MaterialPlugin = {
+            name: "edited",
+            getCustomCode: (shaderType) => (shaderType === "vertex" ? { CUSTOM_VERTEX_MAIN_END: `// v${marker}` } : null),
+        };
+        const material = createPbrMaterial({ plugins: [plugin] });
+        const mesh = makeMesh(material);
+        scene._groups.set(material._buildGroup, [mesh]);
+        enableMaterialPlugins(scene);
+        await buildPbrRenderables(scene, [mesh], undefined);
+        const [live, releaseLive] = bindPbrGeometry(engine, scene, mesh);
+
+        // The edited plugin composes a new vertex stage only: the candidate's first acquisition compiles it and throws
+        // once, and its fragment code is the one the live holder draws with.
+        marker = 1;
+        material._renderFeatures = _computePbrMaterialFeatures(material);
+        const calls = createShaderModule.mock.calls.length;
+        createShaderModule.mockImplementationOnce(() => {
+            throw new Error("vertex compile failed");
+        });
+        const buffers = failPbrGeometryCandidate(engine, scene, mesh, "vertex compile failed");
+        expect(buffers.length).toBeGreaterThan(0);
+        for (const buffer of buffers) {
+            expect(buffer.destroy).toHaveBeenCalledOnce();
+        }
+        expect(createShaderModule.mock.calls.length - calls).toBe(1);
+
+        // The live fragment entry kept its count, so the retried candidate shares it and compiles only its vertex stage...
+        const [retried, releaseRetried] = bindPbrGeometry(engine, scene, mesh);
+        expect(retried.vertex.module).not.toBe(live.vertex.module);
+        expect(retried.fragment!.module).toBe(live.fragment!.module);
+        expect(createShaderModule.mock.calls.slice(calls + 1)).toEqual([[retried.vertex.module]]);
+        // ...the entry outlives the released live holder while the retried one still holds it...
+        releaseLive();
+        const [next, releaseNext] = bindPbrGeometry(engine, scene, mesh);
+        expect(next.vertex.module).toBe(retried.vertex.module);
+        expect(next.fragment!.module).toBe(live.fragment!.module);
+        expect(createShaderModule.mock.calls.length - calls).toBe(2);
+        // ...and leaves with its last holder: once both are released, the next build compiles both stages again.
+        releaseRetried();
+        releaseNext();
+        const before = createShaderModule.mock.calls.length;
+        const [again, releaseAgain] = bindPbrGeometry(engine, scene, mesh);
+        expect(createShaderModule.mock.calls.length - before).toBe(2);
+        expect(again.fragment!.module).not.toBe(live.fragment!.module);
+        releaseAgain();
     });
 });

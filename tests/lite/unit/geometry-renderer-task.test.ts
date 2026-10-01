@@ -1527,6 +1527,149 @@ describe("GeometryRendererTask", () => {
             expect(createShaderModule).toHaveBeenCalledTimes(1);
             expect(createShaderModule).toHaveBeenCalledWith({ code: normalFragment.code });
         });
+
+        /** Give every buffer the device creates from now on a destroy spy, and return them in creation order. */
+        function trackBuffers(engine: EngineContext): { destroy: ReturnType<typeof vi.fn> }[] {
+            const device = engine._device as unknown as { createBuffer(descriptor: GPUBufferDescriptor): object };
+            const create = device.createBuffer;
+            const buffers: { destroy: ReturnType<typeof vi.fn> }[] = [];
+            device.createBuffer = (descriptor) => {
+                const buffer = { ...create(descriptor), destroy: vi.fn() };
+                buffers.push(buffer);
+                return buffer;
+            };
+            return buffers;
+        }
+
+        it("a candidate whose fragment module fails to compile releases its vertex acquisition and creates no fragment entry", async () => {
+            const { scene, internal, engine } = await setupGeoTask(1);
+            const [positionVertex] = boundModules(internal._bound[0]!);
+            const normals = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.WORLD_NORMAL }] }, engine, scene) as unknown as typeof internal;
+            await normals._preload();
+            const buffers = trackBuffers(engine);
+            // The vertex stage hits the live task's entry, so the only compile, the new fragment stage, throws once.
+            const createShaderModule = vi.spyOn(engine._device, "createShaderModule").mockImplementationOnce(() => {
+                throw new Error("fragment compile failed");
+            });
+
+            expect(() => normals.record()).toThrow("fragment compile failed");
+            expect(normals._bound).toHaveLength(0);
+            // The rollback destroyed the candidate's mesh UBO and compiled nothing for the stage it never acquired.
+            expect(buffers.length).toBeGreaterThan(0);
+            for (const buffer of buffers) {
+                expect(buffer.destroy).toHaveBeenCalledOnce();
+            }
+            expect(createShaderModule).toHaveBeenCalledTimes(1);
+
+            // The vertex entry still has the live task's hold: a re-record keeps sharing it...
+            internal.record();
+            drainRetirements(engine);
+            expect(boundModules(internal._bound[0]!)[0]).toBe(positionVertex);
+            expect(createShaderModule).toHaveBeenCalledTimes(1);
+            // ...and only that hold: once the live task is disposed, the retried candidate compiles both stages.
+            (internal as unknown as { dispose(): void }).dispose();
+            drainRetirements(engine);
+            normals.record();
+            const [vertex, fragment] = boundModules(normals._bound[0]!);
+            expect(vertex).not.toBe(positionVertex);
+            expect(createShaderModule.mock.calls.slice(1)).toEqual([[{ code: positionVertex.code }], [{ code: fragment.code }]]);
+
+            // Both stages are held normally from then on: the next generation shares them.
+            normals.record();
+            drainRetirements(engine);
+            expect(boundModules(normals._bound[0]!)[0]).toBe(vertex);
+            expect(boundModules(normals._bound[0]!)[1]).toBe(fragment);
+            expect(createShaderModule).toHaveBeenCalledTimes(3);
+        });
+
+        it("a candidate whose vertex module fails to compile acquires nothing and still destroys its mesh UBO", async () => {
+            const { scene, internal, meshes, engine, createStandardMaterial } = await setupGeoTask(1);
+            const previous = internal._bound;
+            // The diffuse texture changes both stages, so the candidate's first acquisition compiles a new vertex module.
+            (meshes[0] as unknown as { material: unknown }).material = Object.assign(createStandardMaterial(), {
+                diffuseTexture: { texture: { createView: () => ({}), destroy: () => undefined }, sampler: {} },
+            });
+            scene._renderableVersion++;
+            const buffers = trackBuffers(engine);
+            let failing = true;
+            const createShaderModule = vi.spyOn(engine._device, "createShaderModule").mockImplementation((descriptor) => {
+                if (failing) {
+                    throw new Error("vertex compile failed");
+                }
+                return descriptor as unknown as GPUShaderModule;
+            });
+            const reported = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+            try {
+                // Compiling keeps failing, so releasing a stage the candidate never acquired would throw again.
+                expect(() => internal.execute()).toThrow("vertex compile failed");
+                expect(internal._bound).toBe(previous);
+                expect(buffers.length).toBeGreaterThan(0);
+                for (const buffer of buffers) {
+                    expect(buffer.destroy).toHaveBeenCalledOnce();
+                }
+                expect(reported).not.toHaveBeenCalled();
+                expect(createShaderModule).toHaveBeenCalledTimes(1);
+            } finally {
+                reported.mockRestore();
+            }
+
+            // Nothing was cached: the retried candidate compiles both stages once, and the next generation shares them.
+            failing = false;
+            internal.execute();
+            drainRetirements(engine);
+            const [vertex, fragment] = boundModules(internal._bound[0]!);
+            expect(createShaderModule.mock.calls.slice(1)).toEqual([[{ code: vertex.code }], [{ code: fragment.code }]]);
+            internal.record();
+            drainRetirements(engine);
+            expect(boundModules(internal._bound[0]!)[0]).toBe(vertex);
+            expect(boundModules(internal._bound[0]!)[1]).toBe(fragment);
+            expect(createShaderModule).toHaveBeenCalledTimes(3);
+        });
+
+        it("a candidate whose vertex module fails to compile takes no count from the live generation's fragment module", async () => {
+            const { scene, internal, meshes, engine } = await setupGeoTask(1);
+            const live = internal._bound;
+            const [liveVertex, liveFragment] = boundModules(live[0]!);
+            // Thin instances only add per-instance attributes to the vertex stage: the candidate's first acquisition
+            // compiles a new vertex stage, and its fragment code is the one the live generation holds.
+            (meshes[0] as unknown as { thinInstances: unknown }).thinInstances = { count: 4 };
+            await internal._preload();
+            const buffers = trackBuffers(engine);
+            const createShaderModule = vi.spyOn(engine._device, "createShaderModule").mockImplementationOnce(() => {
+                throw new Error("vertex compile failed");
+            });
+
+            expect(() => internal.record()).toThrow("vertex compile failed");
+            expect(internal._bound).toBe(live);
+            expect(buffers.length).toBeGreaterThan(0);
+            for (const buffer of buffers) {
+                expect(buffer.destroy).toHaveBeenCalledOnce();
+            }
+            expect(createShaderModule).toHaveBeenCalledTimes(1);
+
+            // The live fragment entry kept its count, so the retried candidate shares it and compiles only its vertex stage...
+            internal.record();
+            const [vertex, fragment] = boundModules(internal._bound[0]!);
+            expect(vertex.code).not.toBe(liveVertex.code);
+            expect(fragment).toBe(liveFragment);
+            expect(createShaderModule.mock.calls.slice(1)).toEqual([[{ code: vertex.code }]]);
+            // ...the entry outlives the retired live generation while the retried one still holds it...
+            drainRetirements(engine);
+            internal.record();
+            drainRetirements(engine);
+            expect(boundModules(internal._bound[0]!)[0]).toBe(vertex);
+            expect(boundModules(internal._bound[0]!)[1]).toBe(liveFragment);
+            expect(createShaderModule).toHaveBeenCalledTimes(2);
+            // ...and leaves with its last holder: once the task is disposed, a new task compiles both stages again.
+            (internal as unknown as { dispose(): void }).dispose();
+            drainRetirements(engine);
+            const next = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.WORLD_POSITION }] }, engine, scene) as unknown as typeof internal;
+            await next._preload();
+            next.record();
+            expect(boundModules(next._bound[0]!)[1]).not.toBe(liveFragment);
+            expect(createShaderModule.mock.calls.slice(2)).toEqual([[{ code: vertex.code }], [{ code: liveFragment.code }]]);
+        });
     });
 });
 
