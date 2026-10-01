@@ -355,6 +355,33 @@ Each CSM task state also snapshots every caster's maximum cascade. When a new ca
 array is supplied without material changes, the incremental diff removes and re-adds
 only new, removed, or re-capped casters, preserving all unchanged caster packets.
 
+Caster material changes are read from the task state's material snapshot
+(`scanCsmCasterMaterials`):
+
+- **Rebuild.** The cascade tasks rebuild (with static caching, the cache texture too;
+  the refit gate is kept) when a caster's material was rebuilt or re-pointed since the
+  snapshot, or a registered caster's material is missing from it, because it switched
+  material or got its first one. The rebuild records every caster through its current
+  material and snapshots it. A caster new to the array with an unseen material is not
+  a change: the incremental diff adds it.
+- **Hold.** The rebuild waits while any changed caster's view cannot be built yet:
+  the no-colour view factory of its family is not imported (the generator is parked
+  once while it imports, as for a re-supplied set), or the material it casts through
+  itself has no completed group build in this scene (its swap drain or runtime build
+  provides one). Nothing is retired or created while the rebuild is held. A
+  `setShadowCasterMaterial` override is not held for its group; recording it throws as
+  before.
+- **What a held caster draws.** Caster-set changes still apply through the incremental
+  diff, which leaves every caster with a changed material alone: a registered one
+  keeps drawing its old packets at its old cap, and a new one stays out. The diff stays
+  unapplied until those casters join or take their cap, so a hold that lifts without a
+  rebuild (a factory import lands, the change is reverted) still adds them.
+- **Not covered.** A registered caster whose material becomes `null` keeps casting
+  through its old packets. A group that never builds keeps the rebuild held until the
+  caster's material is reassigned or the caster leaves the set: after a failed runtime
+  build, which reports its own error, or for a caster mesh outside the scene, which
+  gets no build.
+
 ## Babylon.js Equivalence Map
 
 | Babylon.js                              | Babylon Lite                                |
@@ -420,6 +447,16 @@ survives a ShaderMaterial acquire/release cycle, and rejects ESM/PCF generators.
 `tests/lite/unit/shadow-caster-max-cascade.test.ts` validates cap input, default and
 reset behavior, and incremental reassignment of an existing caster across cascade
 tasks after a live cap change.
+
+`tests/lite/unit/csm-caster-material-switch.test.ts` drives the real shadow task,
+`mesh.material` setter, swap drain, `rebuildMaterial` and task transaction, with fresh
+modules per case so no view factory leaks between cases. For the default and
+static-cache hooks it proves that a registered caster switching to (or getting) an
+unseen material rebuilds through it and keeps the refit gate, that a new caster with an
+unseen material stays incremental, that a held rebuild neither throws nor retires
+anything and parks the generator once, that set changes apply during a hold while held
+casters keep their old packets and caps, and that held casters join when the hold lifts
+with or without a rebuild. An override whose group is not built still throws.
 
 `tests/lite/unit/csm-refit-gate.test.ts` validates stable re-supply, version-sum
 collision handling, promotion/demotion timing, angular drift, and interval refits.

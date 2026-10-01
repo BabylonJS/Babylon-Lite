@@ -24,7 +24,7 @@ import type { MeshRebuildResources } from "../render/renderable.js";
 import type { RenderTaskBindingGeneration, RenderTaskPopulation } from "../frame-graph/render-task-base.js";
 import { retireGpuResources, runGpuResourceCallbacks } from "../engine/gpu-resource-retirement.js";
 import { createShadowCamera, updateShadowCameraBase } from "./shadow-base.js";
-import { getNoColorView, shadowCasterMaterialChanged, snapshotShadowCasterMaterial } from "./pcf-shadow-task-hooks.js";
+import { getNoColorView, snapshotShadowCasterMaterial } from "./pcf-shadow-task-hooks.js";
 import { createCsmRefitGate, createCsmStaticRefitScheduler, type CsmRefitGate, type CsmStaticRefitScheduler } from "./csm-refit-gate.js";
 import {
     _biasViewProjection,
@@ -33,6 +33,7 @@ import {
     _writeCsmUbo,
     csmCameraAspect,
     csmWorldBiasClipOffset,
+    scanCsmCasterMaterials,
     type CsmCascades,
     type CsmConfig,
     type CsmTaskState,
@@ -212,14 +213,9 @@ export function ensureCsmShadowCacheState(
         replacedDefaultState = true;
     }
     if (existing) {
-        let casterMatChanged = false;
-        for (const mesh of casterMeshes) {
-            const material = mesh.material;
-            if (material && shadowCasterMaterialChanged(material, existing._casterMaterials, existing._casterMatGens)) {
-                casterMatChanged = true;
-                break;
-            }
-        }
+        // Same rules as the default hooks (`scanCsmCasterMaterials`).
+        const deferred = scanCsmCasterMaterials(scene, sg, existing, casterMeshes);
+        const casterMatChanged = deferred === true;
         if (!casterMatChanged && existing._casterMeshes === casterMeshes && existing._renderableVersion === scene._renderableVersion) {
             return existing;
         }
@@ -235,7 +231,7 @@ export function ensureCsmShadowCacheState(
             const caps = existing._casterMaxCascades;
             existing._gate.syncCasters(casterMeshes);
             for (const mesh of existing._casterMeshes) {
-                if (!nextSet.has(mesh) || mesh._shadowMaxCascade !== caps.get(mesh)) {
+                if (!nextSet.has(mesh) || (mesh._shadowMaxCascade !== caps.get(mesh) && !deferred?.has(mesh))) {
                     caps.delete(mesh);
                     for (const task of existing._tasks) {
                         removeMeshFromTask(task, mesh);
@@ -245,7 +241,12 @@ export function ensureCsmShadowCacheState(
                     }
                 }
             }
+            let unapplied = false;
             for (const mesh of casterMeshes) {
+                if (deferred?.has(mesh)) {
+                    unapplied ||= !caps.has(mesh) || mesh._shadowMaxCascade !== caps.get(mesh);
+                    continue;
+                }
                 const maxCascade = mesh._shadowMaxCascade;
                 if (!caps.has(mesh) && mesh.material) {
                     const view = getNoColorView(mesh.material, views);
@@ -265,6 +266,10 @@ export function ensureCsmShadowCacheState(
             }
             existing._casterMeshes = casterMeshes;
             existing._renderableVersion = scene._renderableVersion;
+            if (unapplied) {
+                // As in the default hooks: run the diff again until every held caster has joined and taken its cap.
+                existing._renderableVersion = existing._materialEpoch = -1;
+            }
             return existing;
         }
         retireGpuResources(engine, existing._task.dispose);

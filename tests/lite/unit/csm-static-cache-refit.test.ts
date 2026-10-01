@@ -47,6 +47,8 @@ vi.mock("../../../packages/babylon-lite/src/shadow/csm-shadow-task-hooks.js", ()
         };
     },
     _createCascadeScratch: () => ({}),
+    // No caster material changed: these cases cover caster-list and geometry changes only.
+    scanCsmCasterMaterials: () => undefined,
 }));
 vi.mock("../../../packages/babylon-lite/src/frame-graph/render-task.js", () => ({
     createRenderTask: () => ({
