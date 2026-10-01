@@ -31,6 +31,54 @@ Scene and demo pages are served live from source, so this is the loop for engine
 **Bundle** tab additionally needs the production bundles — build them with `pnpm dev:lab`
 (same server, preceded by a full bundle build) or with the tab's **Regenerate** button.
 
+## MeshLoD conversion
+
+The native glTF/GLB-to-`.mlod` converter is maintained separately in
+[MegameshCLI](https://github.com/CedricGuillemet/MegameshCLI). Download the
+`mesh-lod-tool` executable for your platform from its
+[releases](https://github.com/CedricGuillemet/MegameshCLI/releases), or build it
+there with CMake.
+Conversion does not require this repository or a Babylon Lite installation.
+
+For the Harvard-Yenching Institute statue, run the CLI from a MegameshCLI
+checkout after extracting/building the executable. Its `assets/` directory
+includes the [source GLB](https://assets.babylonjs.com/meshes/harvard-yenching/harvard-yenching_institute_statue.glb):
+
+```sh
+mesh-lod-tool --input assets/harvard-yenching_institute_statue.glb \
+  --output harvard-yenching_institute_statue.mlod \
+  --stats-json statue-stats.json
+```
+
+The source has three mesh primitives, so this produces
+`harvard-yenching_institute_statue.mesh000.prim000.mlod` through
+`...mesh002.prim000.mlod`; a single selected primitive uses the exact output
+path. On Windows use `mesh-lod-tool.exe` and join the command onto one line.
+See the [CLI README](https://github.com/CedricGuillemet/MegameshCLI#readme)
+for conversion options, supported inputs, installation, and validation.
+
+Serve `.mlod` files with **HTTP byte ranges** and `Content-Encoding: identity`
+(no compression that changes byte offsets). For each primitive, use its
+corresponding source glTF material and placement with the root package API:
+
+```ts
+import { addMeshLoDToScene, createMeshLoDInstance, loadMeshLoD } from "@babylonjs/lite";
+
+const asset = await loadMeshLoD(engine, "/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod");
+const instance = createMeshLoDInstance(asset, sourcePrimitive.material);
+addMeshLoDToScene(scene, instance);
+```
+
+The CLI converts **geometry**, not materials or textures. The demo fetches the
+original GLB from BabylonJS/Assets for those properties and uses the three
+checked-in MLOD sidecars for streaming geometry; the source GLB is not kept in
+this repository. See the [MeshLoD architecture](docs/lite/architecture/mesh-lod.md)
+for the runtime design. The model is
+[“Harvard-Yenching Institute statue” by Alexandre Tokovinine](https://sketchfab.com/3d-models/harvard-yenching-institute-statue-fc245710c4d64d0886a7f37dc522ff87),
+licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/); credit
+the author and link the license when redistributing the source or converted
+assets. Other models are not bundled with this demo.
+
 ## Available Scripts
 
 | Command                    | Description                                                         |
