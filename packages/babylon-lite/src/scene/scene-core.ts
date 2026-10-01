@@ -88,6 +88,11 @@ export interface RuntimeSceneBuildHooks {
     /** @internal */
     _d(): boolean;
     exclusive<T>(builder: MeshGroupBuilder, work: () => Promise<T>): Promise<T>;
+    /** @internal Completion of the full PBR group rebuild that has not been dispatched yet. PBR meshes moved into
+     *  their group before it is dispatched join it instead of starting an identical rebuild of their own. */
+    _n?: Promise<void>;
+    /** @internal The most recent full PBR group rebuild (never rejects); the next one is dispatched once it settles. */
+    _l?: Promise<void>;
 }
 
 /** @internal Scene-owned mesh group plus the rebuild closure captured by its completed build. */
