@@ -6,18 +6,20 @@ import { createMipMappedRenderTarget } from "../../../packages/babylon-lite/src/
 import { createClearTextureTask } from "../../../packages/babylon-lite/src/frame-graph/clear-texture-task";
 import { createCopyToTextureTask } from "../../../packages/babylon-lite/src/frame-graph/copy-to-texture-task";
 import { createFrameGraph } from "../../../packages/babylon-lite/src/frame-graph/frame-graph";
+import { createFrameGraphContext, disposeFrameGraphContext, registerFrameGraphContext } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-context";
 import { addTask } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-actions";
 import { createGenerateMipMapsTask } from "../../../packages/babylon-lite/src/frame-graph/generate-mipmaps-task";
 import { createPostProcessTask } from "../../../packages/babylon-lite/src/frame-graph/post-process-task";
 import type { Task } from "../../../packages/babylon-lite/src/frame-graph/task";
 import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
+import { setSurfaceSize } from "../../../packages/babylon-lite/src/engine/surface";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
 
 function mockGpu(features: GPUFeatureName[] = []) {
     const textures: GPUTexture[] = [];
     const pass = { setPipeline: vi.fn(), setBindGroup: vi.fn(), setViewport: vi.fn(), setScissorRect: vi.fn(), draw: vi.fn(), end: vi.fn() };
-    const encoder = { beginRenderPass: vi.fn((_descriptor: GPURenderPassDescriptor) => pass), finish: vi.fn() };
+    const encoder = { beginRenderPass: vi.fn((_descriptor: GPURenderPassDescriptor) => pass), copyTextureToTexture: vi.fn(), finish: vi.fn() };
     const device = {
         features: new Set(features),
         limits: { maxColorAttachments: 8, maxTextureDimension2D: 8192 },
@@ -52,8 +54,10 @@ function mockGpu(features: GPUFeatureName[] = []) {
         _currentEncoder: encoder,
         canvas: { width: 32, height: 16 },
         surfaces: [],
+        _renderingContexts: [],
         scRT: createRenderTarget({ format: "bgra8unorm", samples: 1, size: { width: 32, height: 16 } }),
     } as unknown as EngineContext;
+    Object.assign(engine, { engine });
     engine.scRT._eager = true;
     engine.scRT._width = 32;
     engine.scRT._height = 16;
@@ -219,7 +223,7 @@ describe("ClearTextureTask", () => {
         addTask(graph, clear);
         addTask(graph, { name: "producer", engine, _passes: [], record: () => buildRenderTarget(rt, engine), dispose: () => disposeRenderTarget(rt) });
         graph.build();
-        expect(device.createTexture).toHaveBeenCalledOnce();
+        expect(device.createTexture).toHaveBeenCalledTimes(2);
         graph.execute();
         const old = rt._colorTexture;
         engine.canvas.width = 64;
@@ -248,6 +252,119 @@ describe("ClearTextureTask", () => {
         color._syncEager = vi.fn();
         graphFor(createClearTextureTask({ targetTexture: color }, engine));
         expect(color._syncEager).toHaveBeenCalledWith(engine);
+    });
+
+    it("allocates ordinary clear outputs before the first downstream copy records", () => {
+        const { engine, encoder, device } = mockGpu();
+        const rt = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 32, height: 16 } });
+        const destination = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { width: 32, height: 16 } });
+        const clear = createClearTextureTask({ targetTexture: rt }, engine);
+        const copy = createCopyToTextureTask({ sourceTexture: clear.outputTexture!, targetTexture: destination }, engine, {} as SceneContext);
+        const graph = createFrameGraph(engine);
+        addTask(graph, clear);
+        addTask(graph, copy);
+
+        expect(rt._colorTexture).toBeNull();
+        graph.build();
+        expect(device.createTexture).toHaveBeenCalledTimes(2);
+        const source = rt._colorTexture!;
+        const output = destination._colorTexture!;
+        expect(graph.execute()).toBe(0);
+        expect(encoder.beginRenderPass).toHaveBeenCalledOnce();
+        expect(encoder.copyTextureToTexture).toHaveBeenCalledWith({ texture: source, mipLevel: 0 }, { texture: output }, { width: 32, height: 16 });
+        expect(encoder.beginRenderPass.mock.invocationCallOrder[0]).toBeLessThan(encoder.copyTextureToTexture.mock.invocationCallOrder[0]!);
+        graph.dispose();
+        expect(source.destroy).not.toHaveBeenCalled();
+        expect(output.destroy).not.toHaveBeenCalled();
+        disposeRenderTarget(rt);
+        disposeRenderTarget(destination);
+    });
+
+    it("refreshes a standalone swapchain clear's borrowed depth on surface resize", () => {
+        const { engine, encoder } = mockGpu();
+        engine.scRT._colorView = {} as GPUTextureView;
+        const depth = createRenderTarget({ dFormat: "depth32float", samples: 1, size: engine });
+        const clear = createClearTextureTask({ targetTexture: engine.scRT, depthTexture: depth, clearDepth: true }, engine);
+        const context = createFrameGraphContext(engine);
+        addTask(context.frameGraph, clear);
+        registerFrameGraphContext(context);
+        const original = depth._depthTexture!;
+        expect([depth._width, depth._height]).toEqual([32, 16]);
+        expect(context.frameGraph.execute()).toBe(0);
+
+        setSurfaceSize(engine, 64, 48);
+        expect([depth._width, depth._height]).toEqual([64, 48]);
+        expect(depth._depthTexture).not.toBe(original);
+        expect(original.destroy).toHaveBeenCalledOnce();
+        context.frameGraph.execute();
+        expect(encoder.beginRenderPass.mock.calls[1]![0].depthStencilAttachment!.view).toBe(depth._depthView);
+        const current = depth._depthTexture!;
+        disposeFrameGraphContext(context);
+        expect(current.destroy).not.toHaveBeenCalled();
+        disposeRenderTarget(depth);
+    });
+
+    it("rebinds a standalone clear-to-copy chain to resized ordinary color allocations", () => {
+        const { engine, encoder } = mockGpu();
+        const source = createRenderTarget({ format: "rgba8unorm", samples: 1, size: engine });
+        const output = createRenderTarget({ format: "rgba8unorm", samples: 1, size: engine });
+        const clear = createClearTextureTask({ targetTexture: source }, engine);
+        const copy = createCopyToTextureTask({ sourceTexture: clear.outputTexture!, targetTexture: output, ownsTargetTexture: true }, engine, {} as SceneContext);
+        const context = createFrameGraphContext(engine);
+        addTask(context.frameGraph, clear);
+        addTask(context.frameGraph, copy);
+        registerFrameGraphContext(context);
+        const firstSource = source._colorTexture!;
+        const firstOutput = output._colorTexture!;
+        expect(context.frameGraph.execute()).toBe(0);
+
+        setSurfaceSize(engine, 64, 48);
+        expect([source._width, source._height, output._width, output._height]).toEqual([64, 48, 64, 48]);
+        expect(firstSource.destroy).toHaveBeenCalledOnce();
+        expect(firstOutput.destroy).toHaveBeenCalledOnce();
+        expect(context.frameGraph.execute()).toBe(0);
+        expect(encoder.copyTextureToTexture).toHaveBeenLastCalledWith({ texture: source._colorTexture, mipLevel: 0 }, { texture: output._colorTexture }, { width: 64, height: 48 });
+        const currentSource = source._colorTexture!;
+        const currentOutput = output._colorTexture!;
+        disposeFrameGraphContext(context);
+        expect(currentSource.destroy).not.toHaveBeenCalled();
+        expect(currentOutput.destroy).toHaveBeenCalledOnce();
+        disposeRenderTarget(source);
+    });
+
+    it("refreshes scaled ordinary colors before standalone post-process consumers record on resize", () => {
+        const { engine, device, encoder } = mockGpu();
+        engine.scRT._colorView = {} as GPUTextureView;
+        const source = createRenderTarget({ format: "rgba8unorm", samples: 1, size: { surface: engine, scale: 0.5 } });
+        const clear = createClearTextureTask({ targetTexture: source }, engine);
+        const consumer = createPostProcessTask(
+            {
+                sourceTexture: clear.outputTexture!,
+                targetTexture: engine.scRT,
+                _shader: { fragmentWGSL: wgsl`fn applyPostProcess(c:vec4f,uv:vec2f)->vec4f{return c;}` },
+            },
+            engine
+        );
+        const context = createFrameGraphContext(engine);
+        addTask(context.frameGraph, clear);
+        addTask(context.frameGraph, consumer);
+        registerFrameGraphContext(context);
+        const original = source._colorTexture!;
+        const firstView = source._colorView;
+        expect([source._width, source._height]).toEqual([16, 8]);
+        expect(Array.from(device.createBindGroup.mock.calls[0]![0].entries)[1]!.resource).toBe(firstView);
+
+        setSurfaceSize(engine, 128, 64);
+        expect([source._width, source._height]).toEqual([64, 32]);
+        expect(source._colorTexture).not.toBe(original);
+        expect(original.destroy).toHaveBeenCalledOnce();
+        expect(Array.from(device.createBindGroup.mock.calls[1]![0].entries)[1]!.resource).toBe(source._colorView);
+        expect(context.frameGraph.execute()).toBe(1);
+        expect(Array.from(encoder.beginRenderPass.mock.calls[0]![0].colorAttachments)[0]!.view).toBe(source._colorView);
+        const current = source._colorTexture!;
+        disposeFrameGraphContext(context);
+        expect(current.destroy).not.toHaveBeenCalled();
+        disposeRenderTarget(source);
     });
 
     it("does not clear an absent aspect and reports detached live attachments", () => {
@@ -456,12 +573,27 @@ describe("GenerateMipMapsTask", () => {
     it.each([
         ["rgba32float", "float32-filterable"],
         ["rg11b10ufloat", "rg11b10ufloat-renderable"],
+        ["r8snorm", "texture-formats-tier1"],
+        ["rg8snorm", "texture-formats-tier1"],
         ["rgba8snorm", "texture-formats-tier1"],
     ] as const)("requires %s's explicit %s feature", (format, feature) => {
         const unsupported = mockGpu();
         expect(() => graphFor(createGenerateMipMapsTask({ targetTexture: texture(unsupported.engine, { format }) }, unsupported.engine))).toThrow(/filterable/);
         const supported = mockGpu([feature]);
         expect(graphFor(createGenerateMipMapsTask({ targetTexture: texture(supported.engine, { format }) }, supported.engine)).execute()).toBe(5);
+    });
+
+    it.each(["r16unorm", "r16snorm", "rg16unorm", "rg16snorm", "rgba16unorm", "rgba16snorm"] as const)("rejects unfilterable %s even with texture-formats-tier1", (format) => {
+        const { engine, device, encoder } = mockGpu(["texture-formats-tier1"]);
+        const tex = texture(engine, { format });
+        expect(() => graphFor(createGenerateMipMapsTask({ targetTexture: tex }, engine))).toThrow(/filterable/);
+        expect(device.createBindGroup).not.toHaveBeenCalled();
+        expect(device.createRenderPipeline).not.toHaveBeenCalled();
+        expect(encoder.beginRenderPass).not.toHaveBeenCalled();
+        const rt = createMipMappedRenderTarget({ format, samples: 1, size: engine });
+        const allocations = device.createTexture.mock.calls.length;
+        expect(() => buildRenderTarget(rt, engine)).toThrow(/filterable/);
+        expect(device.createTexture).toHaveBeenCalledTimes(allocations);
     });
 
     it("rejects missing inputs, swapchain targets, and non-mipmapped render targets", () => {
@@ -480,7 +612,7 @@ describe("Mipmapped render target allocation", () => {
         const mipmapped = createMipMappedRenderTarget(descriptor);
         buildRenderTarget(plain, engine);
         buildRenderTarget(mipmapped, engine);
-        const [plainColor, plainDepth, mipColor, mipDepth] = device.createTexture.mock.calls.map(([options]) => options);
+        const [plainColor, plainDepth, mipDepth, mipColor] = device.createTexture.mock.calls.map(([options]) => options);
         expect(mipColor).toEqual({ ...plainColor, mipLevelCount: 6 });
         expect(mipDepth).toEqual(plainDepth);
         expect(plain._colorTexture!.mipLevelCount).toBe(1);
@@ -499,6 +631,7 @@ describe("Mipmapped render target allocation", () => {
         expect(msaa._colorTexture!.sampleCount).toBe(4);
         expect(msaa._depthTexture!.sampleCount).toBe(4);
         expect(msaa._colorTexture!.mipLevelCount).toBe(1);
+        expect(device.createTexture.mock.calls[0]![0]).not.toHaveProperty("mipLevelCount");
         expect(msaa._depthTexture!.mipLevelCount).toBe(1);
         expect(depth._colorTexture).toBeNull();
         expect(depth._depthTexture!.mipLevelCount).toBe(1);
@@ -553,7 +686,7 @@ describe("Mipmapped render target allocation", () => {
         engine.canvas.width = 64;
         device.createTexture.mockImplementation((descriptor) => {
             const tex = createTexture(descriptor);
-            if (descriptor.format === "depth32float") {
+            if (descriptor.format === "rgba8unorm") {
                 vi.mocked(tex.createView).mockImplementation(() => {
                     throw new Error("view failed");
                 });

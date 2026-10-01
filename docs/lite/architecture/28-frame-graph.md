@@ -493,10 +493,15 @@ Color conversion applies Babylon.js's default gamma-2.2 linearization to RGB onl
 alpha and the input color object are preserved. Color state is read and converted
 only when a color attachment is actually selected for clearing.
 
-`record()` creates one pass with dependencies on all referenced render targets.
-Its phase-2 initializer synchronizes eager targets or allocates unbuilt attachments,
-then caches the render-pass descriptor. Initializing after all task records permits
-placing a clear before the render task that allocates its target.
+`record()` prepares borrowed targets before downstream consumers record: it
+synchronizes eager targets, allocates missing ordinary attachments, and rebuilds
+ordinary attachments when their resolved dimensions change. Allocation remains
+caller-owned; disposing the clear task never destroys its borrowed targets.
+The record phase then creates one pass with dependencies on all referenced targets.
+Its phase-2 initializer validates and caches the final attachment views after
+all producer records, including an owning render task that may replace an allocation.
+Standalone clear-to-copy chains therefore work on their first build and resize
+without a separate allocation task or manual target build.
 Execution patches live attachment views and scalar clear settings, begins and ends
 one drawless render pass, and returns zero draws. If no selected aspect exists,
 execution emits no GPU work. Runtime settings may change without rebuilding;
@@ -514,6 +519,9 @@ groups, and descriptors. Execution calls `recordPreparedMipmaps()` on the curren
 frame encoder, returns one draw per generated level per layer, and creates no
 views, bind groups, descriptors, shaders, or auxiliary command submissions.
 Rebuilding releases the previous prepared CPU state and rebinds the live allocation.
+The `texture-formats-tier1` feature enables render-based mip generation for 8-bit
+snorm formats only. Its six 16-bit normalized formats are not filterable and are
+rejected even when the feature is enabled.
 Execution checks the recorded allocation identity once before encoding the chain.
 Replacing or disposing a render-target allocation, or replacing a Texture2D's
 backing texture, requires rebuilding; otherwise the task throws before encoding
@@ -527,17 +535,21 @@ so ordinary targets retain none of its format validation or lifecycle policy.
 Resolved dimensions must be positive integers no larger than the current device's
 `maxTextureDimension2D`. Rejecting oversized dimensions before GPU allocation
 preserves rollback: WebGPU validation failures need not throw synchronously.
-Color/depth allocation is shared with ordinary targets and fixed/surface RTTs
-through the internal `buildRenderTarget(rt, engine, colorMipLevelCount?)` function.
-Its optional scalar sets only the color allocation's `mipLevelCount`; depth keeps
-one level and its existing sample count. The common allocator creates the texture's default view and imports no
-mipmap-generation code. Ordinary single-level targets use that one view for both
-rendering and sampling; no additional view descriptor is allocated for them.
+The attachment allocation descriptor is shared with ordinary targets and fixed/surface
+RTTs through `_createRenderTargetTextureDescriptor(descriptor, resolvedSize, format, usage)`.
+Both color and depth allocations reuse resolved dimensions rather than creating
+separate size dictionaries.
+The ordinary allocator uses that descriptor unchanged. Only the opt-in factory adds
+`mipLevelCount`, so ordinary scenes retain no optional mip-count parameter or
+descriptor property. Depth allocation uses `buildRenderTarget(rt, engine)` on a
+temporary depth-only descriptor and remains single-level. The common allocator
+creates default views and imports no mipmap-generation code. Ordinary single-level
+targets use one view for both rendering and sampling.
 
 On first build or a size/device/format change, the mipmapped factory creates a
-temporary ordinary target and builds it with
-`floor(log2(max(width, height))) + 1` color levels. Its default, full-chain color
-view becomes `_colorSamplingView`; an additional mip-0-only view becomes
+temporary ordinary depth target, then adds a color texture using the shared
+color descriptor with `floor(log2(max(width, height))) + 1` levels.
+Its default, full-chain color view becomes `_colorSamplingView`; an additional mip-0-only view becomes
 `_colorView` for render attachments. Copy blits and generic post-process samplers
 use `_colorSamplingView ?? _colorView`, so explicit and derivative-based LODs
 can reach generated mips while attachment views remain valid. Extra post-process

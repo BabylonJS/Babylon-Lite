@@ -171,6 +171,20 @@ console.log(createRenderTargetTexture(globalThis.engine, {
     });
 
     it.each([
+        ["createRenderTask", false],
+        ["createMipMappedRenderTarget", true],
+    ] as const)("retains render-target mip allocation only for %s", async (imports, retained) => {
+        const result = await runRollup({
+            entrySource: `import { ${imports} } from ${JSON.stringify(LIB_ENTRY)};\nconsole.log(${imports});\n`,
+            format: "es",
+            minify: false,
+        });
+        expect(result.errors).toEqual([]);
+        expect(result.significantWarnings).toEqual([]);
+        expect(result.code.includes("mipLevelCount")).toBe(retained);
+    });
+
+    it.each([
         ["createComputeShader, createComputeDispatch", false],
         ["createComputeImmediateShader, setComputeDispatchImmediates", true],
     ] as const)("keeps compute immediate-data support opt-in: %s", async (imports, retained) => {

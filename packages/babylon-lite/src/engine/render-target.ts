@@ -140,9 +140,8 @@ export function createRenderTarget(descriptor: RenderTargetDescriptor): RenderTa
 /** Allocate GPU textures for the render target. Idempotent for fixed eager targets;
  *  surface-sized eager targets may synchronize through `_syncEager`. A
  *  color texture is allocated whenever the descriptor has a `format`; depth
- *  is allocated whenever it has a `depthStencilFormat`. The optional color mip
- *  count is supplied by the opt-in mipmapped-target factory; depth stays single-level. */
-export function buildRenderTarget(rt: RenderTarget, engine: EngineContext, colorMipLevelCount?: number): void {
+ *  is allocated whenever it has a `depthStencilFormat`. */
+export function buildRenderTarget(rt: RenderTarget, engine: EngineContext): void {
     if (rt._eager) {
         rt._syncEager?.(engine);
         return;
@@ -150,33 +149,38 @@ export function buildRenderTarget(rt: RenderTarget, engine: EngineContext, color
     disposeRenderTarget(rt);
 
     const desc = rt._descriptor;
-    const { width, height } = (rt._resolveSize ?? resolveDirectRenderTargetSize)(desc);
-    rt._width = width;
-    rt._height = height;
+    const size = (rt._resolveSize ?? resolveDirectRenderTargetSize)(desc);
+    rt._width = size.width;
+    rt._height = size.height;
 
     const device = engine._device;
     if (desc.format) {
-        rt._colorTexture = device.createTexture({
-            label: desc.lbl,
-            size: { width, height },
-            format: desc.format,
-            sampleCount: desc.samples,
-            mipLevelCount: colorMipLevelCount,
-            usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.COPY_SRC | TU.COPY_DST,
-        });
+        rt._colorTexture = device.createTexture(
+            _createRenderTargetTextureDescriptor(desc, size, desc.format, TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.COPY_SRC | TU.COPY_DST)
+        );
         rt._colorView = rt._colorTexture.createView();
     }
 
     if (desc.dFormat) {
-        rt._depthTexture = device.createTexture({
-            label: desc.lbl,
-            size: { width, height },
-            format: desc.dFormat,
-            sampleCount: desc.samples,
-            usage: TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING,
-        });
+        rt._depthTexture = device.createTexture(_createRenderTargetTextureDescriptor(desc, size, desc.dFormat, TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING));
         rt._depthView = rt._depthTexture.createView();
     }
+}
+
+/** @internal Shared attachment allocation descriptor; opt-in factories add their own texture settings. */
+export function _createRenderTargetTextureDescriptor(
+    descriptor: RenderTargetDescriptor,
+    size: ResolvedRenderTargetSize,
+    format: GPUTextureFormat,
+    usage: GPUTextureUsageFlags
+): GPUTextureDescriptor {
+    return {
+        label: descriptor.lbl,
+        size,
+        format,
+        sampleCount: descriptor.samples,
+        usage,
+    };
 }
 
 /** Free owned attachments, including sampled eager targets with an explicit owner hook.

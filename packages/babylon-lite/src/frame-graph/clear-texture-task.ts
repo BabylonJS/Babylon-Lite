@@ -1,5 +1,5 @@
 import type { EngineContext } from "../engine/engine.js";
-import { buildRenderTarget, type RenderTarget } from "../engine/render-target.js";
+import { buildRenderTarget, _resolveRenderTargetSize, type RenderTarget } from "../engine/render-target.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import { addPassDependencies } from "./pass.js";
 import type { Task } from "./task.js";
@@ -69,6 +69,18 @@ export function createClearTextureTask(config: ClearTextureTaskConfig, engine: E
             if ((!targets.length && !depthTarget) || (Array.isArray(task.targetTexture) && !targets.length)) {
                 throw new Error(`ClearTextureTask "${task.name}": targetTexture or depthTexture is required; color target arrays must not be empty.`);
             }
+            for (const target of targets) {
+                if (!target._descriptor.format) {
+                    throw new Error(`ClearTextureTask "${task.name}": targetTexture must have a color attachment.`);
+                }
+                prepareTarget(target, target._colorView);
+            }
+            if (depthTarget) {
+                if (!depthTarget._descriptor.dFormat) {
+                    throw new Error(`ClearTextureTask "${task.name}": depthTexture must have a depth/stencil attachment.`);
+                }
+                prepareTarget(depthTarget, depthTarget._depthView);
+            }
             const pass = createTextureTaskPass(task, initialize, execute, reset);
             addPassDependencies(pass, targets);
             if (depthTarget) {
@@ -93,15 +105,23 @@ export function createClearTextureTask(config: ClearTextureTaskConfig, engine: E
         hasDepth = hasStencil = false;
     }
 
+    function prepareTarget(target: RenderTarget, view: GPUTextureView | null): void {
+        if (target._eager) {
+            buildRenderTarget(target, engine);
+            return;
+        }
+        const size = (target._resolveSize ?? _resolveRenderTargetSize)(target._descriptor);
+        if (!view || size.width !== target._width || size.height !== target._height) {
+            buildRenderTarget(target, engine);
+        }
+    }
+
     function initialize(): void {
         const first = targets[0] ?? depthTarget!;
         const colorTextures = new Set<GPUTexture>();
         for (const target of targets) {
             if (!target._descriptor.format) {
                 throw new Error(`ClearTextureTask "${task.name}": targetTexture must have a color attachment.`);
-            }
-            if (target._syncEager || !target._colorView) {
-                buildRenderTarget(target, engine);
             }
             const swapchain = target === engine.scRT || engine.surfaces?.some((surface) => target === surface.scRT);
             if (!target._colorView && !swapchain) {
@@ -118,9 +138,6 @@ export function createClearTextureTask(config: ClearTextureTaskConfig, engine: E
             const format = depthTarget._descriptor.dFormat;
             if (!format) {
                 throw new Error(`ClearTextureTask "${task.name}": depthTexture must have a depth/stencil attachment.`);
-            }
-            if (depthTarget._syncEager || !depthTarget._depthView) {
-                buildRenderTarget(depthTarget, engine);
             }
             if (!depthTarget._depthView) {
                 throw new Error(`ClearTextureTask "${task.name}": depthTexture must have a depth/stencil attachment.`);

@@ -1,6 +1,15 @@
 import type { EngineContext } from "./engine.js";
 import { runGpuResourceCallbacks } from "./gpu-resource-retirement.js";
-import { buildRenderTarget, createRenderTarget, disposeRenderTarget, _resolveRenderTargetSize, type RenderTarget, type RenderTargetDescriptor } from "./render-target.js";
+import { TU } from "./gpu-flags.js";
+import {
+    buildRenderTarget,
+    createRenderTarget,
+    disposeRenderTarget,
+    _createRenderTargetTextureDescriptor,
+    _resolveRenderTargetSize,
+    type RenderTarget,
+    type RenderTargetDescriptor,
+} from "./render-target.js";
 import { mipLevelCount } from "../texture/mip-count.js";
 import { supportsMipmapFormat } from "../texture/mipmap-format.js";
 
@@ -37,12 +46,20 @@ export function createMipMappedRenderTarget(descriptor: RenderTargetDescriptor):
         ) {
             return;
         }
-        const replacement = createRenderTarget(desc);
+        const replacement = createRenderTarget({ ...desc, format: undefined });
         let samplingView: GPUTextureView | null;
         try {
-            buildRenderTarget(replacement, engine, mipLevelCount(width, height));
-            samplingView = replacement._colorView;
-            replacement._colorView = replacement._colorTexture!.createView({ baseMipLevel: 0, mipLevelCount: 1 });
+            buildRenderTarget(replacement, engine);
+            const colorDescriptor = _createRenderTargetTextureDescriptor(
+                desc,
+                { width, height },
+                desc.format,
+                TU.RENDER_ATTACHMENT | TU.TEXTURE_BINDING | TU.COPY_SRC | TU.COPY_DST
+            );
+            colorDescriptor.mipLevelCount = mipLevelCount(width, height);
+            replacement._colorTexture = engine._device.createTexture(colorDescriptor);
+            samplingView = replacement._colorTexture.createView();
+            replacement._colorView = replacement._colorTexture.createView({ baseMipLevel: 0, mipLevelCount: 1 });
         } catch (error) {
             runGpuResourceCallbacks([() => disposeRenderTarget(replacement)]);
             throw error;

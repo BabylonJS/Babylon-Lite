@@ -23,12 +23,6 @@ export function supportsMipmapFormat(engine: EngineContext, format: GPUTextureFo
         case "r8snorm":
         case "rg8snorm":
         case "rgba8snorm":
-        case "r16unorm":
-        case "r16snorm":
-        case "rg16unorm":
-        case "rg16snorm":
-        case "rgba16unorm":
-        case "rgba16snorm":
             return engine._device.features.has("texture-formats-tier1");
         default:
             return false;
