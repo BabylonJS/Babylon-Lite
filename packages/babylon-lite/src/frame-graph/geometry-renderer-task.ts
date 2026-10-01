@@ -195,10 +195,10 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
     _mrt: RenderTargetMrt;
     _attachments: AttachmentInfo[];
     /** One view per unique source material (Standard, PBR or Node). Kept across syncs together with the
-     *  variants compiled on it, and pruned to the materials still drawn whenever a sync publishes. */
+     *  variants compiled on it, and replaced only when a sync publishes, pruned to the materials still drawn. */
     _views: Map<Material, GeometryView>;
     /** @internal What the published views and entries were built against: device, `config.camera` and
-     *  `config.reverseCulling`. A sync that sees any of them changed carries nothing and drops every view. */
+     *  `config.reverseCulling`. A sync that sees any of them changed carries nothing and reuses no view. */
     _cfg: unknown[];
     /** @internal Device the task's own buffers live on; `record()` recreates them on a replacement device. */
     _device: GPUDevice;
@@ -575,9 +575,9 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
     // with the list, so a failed sync is retried the same way.
     const cfg = [task._device, config.camera, config.reverseCulling];
     const fresh = cfg.some((value, index) => value !== task._cfg[index]);
-    if (fresh) {
-        task._views.clear();
-    }
+    // This sync's own copy of the view cache: the views it creates replace `_views` only when it publishes, so
+    // a failed sync never leaves a view built against another stamp for a later sync to reuse.
+    const views = new Map(fresh ? [] : task._views);
     const previous = new Map(fresh ? [] : oldBound.map((b) => [b._mesh, b]));
     const nextBound: BoundMesh[] = [];
     const created: MeshRebuildResources[] = [];
@@ -635,7 +635,7 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
             }
             const resources: MeshRebuildResources = { _lifetimeDisposers: [] };
             created.push(resources);
-            const view = ensureView(task, created, resolved, attachmentTypes, config);
+            const view = ensureView(task, views, created, resolved, attachmentTypes, config);
             // Natural dispatch — view._buildGroup is the standard or PBR geometry
             // builder, its _rebuildSingle returns the per-mesh geometry-MRT Renderable.
             const renderable: Renderable = view._buildGroup._rebuildSingle!(sc, mesh, view, resources);
@@ -644,9 +644,9 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
             nextBound.push({ _mesh: mesh, _binding: binding, _view: view, _lifetimeDisposers: resources._lifetimeDisposers, _fwd: fwd });
         }
     } catch (error) {
-        // Only this sync's candidates are released; `_bound` and every carried entry stay as they were. Views
-        // this pass created stay cached (their variants' buffers went with the released sinks) for the retry,
-        // and the next publish prunes the ones no drawn material uses.
+        // Only this sync's candidates are released; `_bound`, every carried entry and `_views` stay as they were.
+        // The views this sync created are dropped with its local cache (their variants' buffers went with the
+        // released sinks).
         releaseGeometryResources(created);
         throw error;
     }
@@ -656,7 +656,6 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
     // would overwrite its contribution with src-alpha=1.0.
     nextBound.sort((a, b) => (isAlphaBlend(a._binding.renderable) ? 1 : 0) - (isAlphaBlend(b._binding.renderable) ? 1 : 0));
 
-    const views = task._views;
     const kept = new Set(nextBound);
     task._bound = nextBound;
     // Keep the views of the materials still drawn; a view whose stamp went stale is replaced on its next use.
@@ -688,13 +687,15 @@ interface ResolvedMaterial {
     _family: "standard" | "pbr" | "node";
 }
 
-/** The task's view of `resolved`'s source material, shared by every mesh of that material. Standard / PBR
- *  views, with the variants compiled on them, persist across syncs for as long as the source keeps its
- *  `_renderFeatures` object: `rebuildMaterial`, transmission, clustered lights and plugins replace that
- *  object, which yields a fresh view. A Node view must not outlive the sync (`pass`) that created it, as its
- *  geometry resources snapshot the material's live uniforms once (`ensureGeometryNodeUBO`). */
+/** The view of `resolved`'s source material in `views`, the current sync's own view cache, shared by every mesh
+ *  of that material. Standard / PBR views, with the variants compiled on them, persist across syncs for as long
+ *  as the source keeps its `_renderFeatures` object: `rebuildMaterial`, transmission, clustered lights and
+ *  plugins replace that object, which yields a fresh view. A Node view must not outlive the sync (`pass`) that
+ *  created it, as its geometry resources snapshot the material's live uniforms once (`ensureGeometryNodeUBO`).
+ *  `pass` must not reference the view cache: a stamp holding the cache would keep every earlier view alive. */
 function ensureView(
     task: GeometryRendererTaskInternal,
+    views: Map<Material, GeometryView>,
     pass: object,
     resolved: ResolvedMaterial,
     attachmentTypes: readonly GeometryTextureType[],
@@ -702,7 +703,7 @@ function ensureView(
 ): GeometryView {
     const mat = resolved._mat as Material;
     const stamp = resolved._family === "node" ? pass : mat._renderFeatures;
-    const cached = task._views.get(mat);
+    const cached = views.get(mat);
     if (cached && cached._rf === stamp) {
         return cached;
     }
@@ -726,7 +727,7 @@ function ensureView(
               ? task._createPbrGeometryView!(resolved._mat as PbrMaterialProps, viewConfig)
               : task._createNodeGeometryView!(resolved._mat as NodeMaterial, viewConfig);
     view._rf = stamp;
-    task._views.set(mat, view);
+    views.set(mat, view);
     return view;
 }
 

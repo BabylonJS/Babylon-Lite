@@ -1294,6 +1294,119 @@ describe("GeometryRendererTask", () => {
         expect(internal._bound[1]!._mesh).toBe(meshes[1]);
     });
 
+    // A failed sync must leave the view cache exactly as the last publish left it: a view it created was built
+    // against that sync's configuration and material, and must not be picked up by a later sync.
+    /** `_views` still maps every published material to its published view, and nothing else. */
+    function expectPublishedViews(views: Map<unknown, unknown>, published: ReadonlyArray<readonly [unknown, unknown]>): void {
+        expect(views.size).toBe(published.length);
+        published.forEach(([material, view]) => expect(views.get(material)).toBe(view));
+    }
+
+    /** Makes the second mesh's rebuild throw, after the first one built its candidate entry and view. */
+    function failSecondRebuild(entry: GeoEntry, meshes: readonly Mesh[]) {
+        const buildGroup = entry._view._buildGroup;
+        const originalRebuild = buildGroup._rebuildSingle!;
+        const candidates: Array<{ view: unknown; resources: MeshRebuildResources }> = [];
+        buildGroup._rebuildSingle = (candidateScene, mesh, view, resources) => {
+            if (mesh === meshes[1]) {
+                throw new Error("replacement build failed");
+            }
+            candidates.push({ view, resources: resources! });
+            return originalRebuild(candidateScene, mesh, view, resources);
+        };
+        const restore = (): void => {
+            buildGroup._rebuildSingle = originalRebuild;
+        };
+        return { candidates, restore };
+    }
+
+    it("keeps the published views when a camera and culling switch fails, so a refresh after restoring them rebuilds on the restored view", async () => {
+        const { scene, internal, config, meshes, engine, replaceForward } = await setupGeoTask(2, false, "stub");
+        const previousBound = internal._bound;
+        const [a, b] = previousBound;
+        const published = [...internal._views];
+        const gpu = probeGpu(engine);
+
+        // Configuration B: the first mesh builds a B entry and view, then the second mesh's rebuild throws.
+        const camera = { ...(scene.camera as object) } as GeometryRendererTaskConfig["camera"];
+        config.camera = camera;
+        config.reverseCulling = true;
+        const failing = failSecondRebuild(a!, meshes);
+        try {
+            expect(() => internal.record()).toThrow("replacement build failed");
+        } finally {
+            failing.restore();
+        }
+        expect(failing.candidates).toHaveLength(1);
+        const [candidate] = failing.candidates;
+        const candidateView = candidate!.view as ReturnType<typeof viewOf> & { source: unknown };
+        expect(candidateView.source).toBe(meshes[0]!.material);
+        expect(candidateView._camera).toBe(camera);
+        expect(candidateView._reverseCulling).toBe(true);
+        expect(candidate!.resources._lifetimeDisposers).toHaveLength(0);
+        expect(gpu.retirements).toHaveLength(0);
+        expect(internal._bound).toBe(previousBound);
+        expectPublishedViews(internal._views, published);
+
+        // Configuration A again: the published entries are carried with their views.
+        delete config.camera;
+        delete config.reverseCulling;
+        internal.record();
+        expect(internal._bound[0]).toBe(a);
+        expect(internal._bound[1]).toBe(b);
+        expectPublishedViews(internal._views, published);
+
+        // A forward refresh of the first mesh rebuilds its entry on A's view: A's camera packing and culling.
+        replaceForward(meshes[0]!);
+        internal.execute();
+        const rebuilt = internal._bound[0]!;
+        expect(rebuilt).not.toBe(a);
+        expect(rebuilt._view).toBe(a!._view);
+        expect(rebuilt._view).not.toBe(candidateView);
+        expect(viewOf(rebuilt)._camera).toBeNull();
+        expect(viewOf(rebuilt)._reverseCulling).toBe(false);
+        expect(pipelineOf(rebuilt).primitive?.cullMode).toBe("back");
+        expect(internal._bound[1]).toBe(b);
+    });
+
+    it("keeps the published views when an incremental sync fails after creating a candidate view", async () => {
+        const { internal, meshes, engine, createStandardMaterial, replaceForward } = await setupGeoTask(2, false, "stub");
+        const previousBound = internal._bound;
+        const [a, b] = previousBound;
+        const published = [...internal._views];
+        const gpu = probeGpu(engine);
+
+        // Same camera, culling and device: the first mesh takes a new material, so the sync creates a view for it,
+        // then the second mesh's replacement throws.
+        const swapped = createStandardMaterial();
+        swapped.alpha = 1;
+        (meshes[0] as unknown as { material: unknown }).material = swapped;
+        replaceForward(meshes[0]!);
+        replaceForward(meshes[1]!);
+        const failing = failSecondRebuild(a!, meshes);
+        try {
+            expect(() => internal.execute()).toThrow("replacement build failed");
+        } finally {
+            failing.restore();
+        }
+        expect(failing.candidates).toHaveLength(1);
+        const [candidate] = failing.candidates;
+        expect((candidate!.view as { source: unknown }).source).toBe(swapped);
+        expect(candidate!.resources._lifetimeDisposers).toHaveLength(0);
+        expect(gpu.retirements).toHaveLength(0);
+        expect(internal._bound).toBe(previousBound);
+        expectPublishedViews(internal._views, published);
+        expect(internal._views.has(swapped)).toBe(false);
+
+        // The retry publishes its own view for the new material and reuses the published one of the other.
+        internal.execute();
+        expect(internal._bound[0]!._view.source).toBe(swapped);
+        expect(internal._bound[1]).not.toBe(b);
+        expect(internal._bound[1]!._view).toBe(b!._view);
+        expect(internal._views.get(swapped)).toBe(internal._bound[0]!._view);
+        expect(internal._views.has(a!._view.source)).toBe(false);
+    });
+
     it("rebuilds a swapped mesh against its new material while its neighbours keep their entries", async () => {
         const { scene, internal, meshes, engine, createStandardMaterial, replaceForward } = await setupGeoTask(2, false, "stub");
         const [a, b] = internal._bound;
@@ -1404,6 +1517,60 @@ describe("GeometryRendererTask", () => {
         expect(second).not.toBe(first);
         expect(second._view).not.toBe(first._view);
         expect(internal._bound[0]).toBe(standard);
+    });
+
+    it("does not keep earlier Node materials or views alive through the stamps of the published views", async () => {
+        // A Node view is stamped with the sync that created it. A stamp that held that sync's view cache would keep
+        // the previous Node view, its stamp, and so every earlier material and view alive after each swap.
+        const { scene, internal, meshes } = await setupGeoTask(1, false, "stub");
+        const nodeMesh = { ...(meshes[0] as unknown as Record<string, unknown>) } as unknown as Mesh;
+        const swap = nodeMesh as unknown as { material: unknown };
+        internal._createNodeGeometryView = (source) => ({
+            source,
+            _buildGroup: {
+                _rebuildSingle: (_scene: unknown, mesh: unknown) => {
+                    const renderable = { mesh, isTransparent: false, order: 0, bind: () => ({ renderable, pipeline: {}, draw: () => 1 }) };
+                    return renderable;
+                },
+            },
+        });
+        scene.meshes.push(nodeMesh);
+        /** Every view and material the published cache reaches through its views' stamps and sources. */
+        const reachable = (): Set<unknown> => {
+            const seen = new Set<unknown>();
+            const visit = (value: unknown): void => {
+                if (typeof value !== "object" || value === null || seen.has(value)) {
+                    return;
+                }
+                seen.add(value);
+                if (value instanceof Map) {
+                    value.forEach((item, key) => {
+                        visit(key);
+                        visit(item);
+                    });
+                } else if (Array.isArray(value)) {
+                    value.forEach(visit);
+                } else {
+                    visit((value as { _rf?: unknown })._rf);
+                    visit((value as { source?: unknown }).source);
+                }
+            };
+            internal._views.forEach(visit);
+            return seen;
+        };
+
+        const earlier: unknown[] = [];
+        for (let sync = 0; sync < 4; sync++) {
+            swap.material = { _buildGroup: { _materialFamily: "node" }, _renderFeatures: { features: 0 } };
+            scene._renderableVersion++;
+            internal.execute();
+            const entry = internal._bound.find((bound) => bound._mesh === nodeMesh)!;
+            expect(entry._view.source).toBe(swap.material);
+            expect(internal._views.size).toBe(2);
+            const kept = reachable();
+            expect(earlier.flatMap((value, index) => (kept.has(value) ? [index] : []))).toEqual([]);
+            earlier.push(swap.material, entry._view);
+        }
     });
 
     it("binds a mesh whose material family first appears after the task was preloaded", async () => {

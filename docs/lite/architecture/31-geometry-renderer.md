@@ -196,9 +196,10 @@ calling the Standard/PBR/Node geometry rebuilder and stamps it onto the returned
 before binding. Builders require that owner and register releases before later fallible work.
 The bound list publishes only after every rebuild and bind succeeds; a failure synchronously
 releases all candidate sinks, including the failing entry, without changing the previous draw
-list or any entry it carries. Views that a failed pass created can stay in the task's view cache
-(the released sinks already dropped their variants' buffers): a retry reuses them, and the next
-publish prunes any that no drawn material uses.
+list or any entry it carries. A sync builds views in its own copy of the task's view cache, which
+replaces the cache only when the list publishes, so a failed sync also leaves the cache as the last
+publish left it; the views it created are dropped with that copy (their variants' buffers went
+with the released sinks).
 
 Replaced or disposed live entries retire their detached lifetime batches behind submitted GPU
 work. Shared Standard/Node view resources are retained by each renderable and destroyed only
@@ -242,11 +243,13 @@ mesh compiles nothing when its context already has a set on the view; otherwise 
 its own variant, as its forward build did. A batch that first binds K meshes on K per-mesh
 contexts therefore composes K variants, not one per material. Node entries and views are
 rebuilt on every sync, because a Node geometry resource snapshots the material's uniforms
-once. Off-scene meshes of an explicit list have no forward renderable and are rebuilt on every
+once; a Node view is stamped with a per-sync token that holds no view, so a published Node view
+keeps no earlier Node material or view alive. Off-scene meshes of an explicit list have no forward renderable and are rebuilt on every
 sync too. A sync that sees a different device, `config.camera` or `config.reverseCulling` than
-the last publish carries nothing and drops every view, so a camera or culling change, or a
+the last publish carries nothing and reuses no view, so a camera or culling change, or a
 device-loss recovery (whose `record()` also recreates the task's own buffers), rebuilds the
-whole pass as before.
+whole pass as before. If such a sync fails and the previous configuration is restored, the next
+sync carries the published entries and views, none of the failed sync's views.
 
 The task's `_removeMesh` hook evicts every matching bound entry and queues its retirement
 immediately, including when rendering is stopped. Its weak exclusion set still rejects removed
@@ -511,8 +514,11 @@ matches BJS pixel-for-pixel (no lossy material-constants approximation).
   scene's own producers (material setter, `markMeshRenderableDirty`, `rebuildMaterial`,
   `addToScene`); a new mesh of a drawn material reuses the cached view and variant; a shared
   Standard variant's material UBO survives deferred retirements until its last owner releases
-  it; a failed replacement leaves every carried entry intact; Node entries rebuild on every
-  sync.
+  it; a failed replacement leaves every carried entry intact; a failed sync, incremental or
+  against a changed camera or culling direction, leaves the view cache as published, so a
+  restored configuration rebuilds a refreshed entry on its own view; Node entries rebuild on
+  every sync, and a Node material swapped over several syncs leaves no earlier material or view
+  reachable from the published views.
 - A PBR geometry variant composed against a superseded forward PBR context is not reused.
 - A PBR view keeps one variant set per live forward context: after meshes on a scene context
   and on per-mesh runtime-build contexts are bound (one variant per context), per-mesh and
