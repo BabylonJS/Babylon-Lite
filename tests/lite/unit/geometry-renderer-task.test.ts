@@ -1327,6 +1327,117 @@ describe("GeometryRendererTask", () => {
             buildGroup._rebuildSingle = originalRebuild;
         }
     });
+
+    // Every record and every renderable-version change builds NEW views, so a module cached per view would be
+    // compiled again for byte-identical WGSL. The Standard geometry family shares one module per device and code.
+    describe("geometry shader module sharing", () => {
+        type BoundEntry = { _binding: object; _view: { source: unknown } };
+
+        /** The vertex and fragment modules a bound geometry pipeline was created with (the mock device hands
+         *  descriptors back as GPU objects, so a module is its `{ code }` descriptor). */
+        function boundModules(entry: BoundEntry): [GPUShaderModuleDescriptor, GPUShaderModuleDescriptor] {
+            const pipeline = (entry._binding as { pipeline: GPURenderPipelineDescriptor }).pipeline;
+            return [pipeline.vertex.module as unknown as GPUShaderModuleDescriptor, pipeline.fragment!.module as unknown as GPUShaderModuleDescriptor];
+        }
+
+        it("reuses its geometry shader modules when the task re-records", async () => {
+            const { internal, engine } = await setupGeoTask(2);
+            const previous = internal._bound.slice();
+            const createShaderModule = vi.spyOn(engine._device, "createShaderModule");
+
+            internal.record();
+
+            // The views and bindings really were rebuilt...
+            expect(internal._bound).toHaveLength(2);
+            for (const entry of internal._bound) {
+                expect(previous.map((p) => p._binding)).not.toContain(entry._binding);
+                expect(previous.map((p) => p._view)).not.toContain(entry._view);
+            }
+            // ...yet no module was compiled again for the same WGSL.
+            expect(createShaderModule).not.toHaveBeenCalled();
+            const [vertex, fragment] = boundModules(previous[0]!);
+            for (const entry of internal._bound) {
+                expect(boundModules(entry)[0]).toBe(vertex);
+                expect(boundModules(entry)[1]).toBe(fragment);
+            }
+        });
+
+        it("does not recompile geometry shader modules on a renderable-version rebuild", async () => {
+            const { scene, internal, engine } = await setupGeoTask(2);
+            const previous = internal._bound.slice();
+            const createShaderModule = vi.spyOn(engine._device, "createShaderModule");
+
+            scene._renderableVersion++;
+            internal.execute();
+
+            expect(internal._bound).toHaveLength(2);
+            for (const entry of internal._bound) {
+                expect(previous.map((p) => p._binding)).not.toContain(entry._binding);
+                expect(previous.map((p) => p._view)).not.toContain(entry._view);
+            }
+            expect(createShaderModule).not.toHaveBeenCalled();
+            const [vertex, fragment] = boundModules(previous[0]!);
+            for (const entry of internal._bound) {
+                expect(boundModules(entry)[0]).toBe(vertex);
+                expect(boundModules(entry)[1]).toBe(fragment);
+            }
+        });
+
+        it("shares one module pair between Standard materials that compose identical WGSL", async () => {
+            const { internal } = await setupGeoTask(2);
+            const [first, second] = internal._bound;
+
+            expect(first!._view.source).not.toBe(second!._view.source);
+            expect(first!._binding).not.toBe(second!._binding);
+            const [vertexA, fragmentA] = boundModules(first!);
+            const [vertexB, fragmentB] = boundModules(second!);
+            expect(vertexB).toBe(vertexA);
+            expect(fragmentB).toBe(fragmentA);
+        });
+
+        it("a task writing a different attachment compiles only its new fragment stage and shares the identical vertex module", async () => {
+            const { scene, internal, engine } = await setupGeoTask(1);
+            const [positionVertex, positionFragment] = boundModules(internal._bound[0]!);
+            const createShaderModule = vi.spyOn(engine._device, "createShaderModule");
+
+            // Another task on the same device writing WORLD_NORMAL instead of WORLD_POSITION.
+            const normals = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.WORLD_NORMAL }] }, engine, scene) as unknown as typeof internal;
+            await normals._preload();
+            normals.record();
+            const [normalVertex, normalFragment] = boundModules(normals._bound[0]!);
+
+            // The attachment set only changes the fragment outputs: the vertex stage composes the same code and
+            // reuses the first task's module.
+            expect(normalVertex.code).toBe(positionVertex.code);
+            expect(normalVertex).toBe(positionVertex);
+            // The different fragment code gets its own module, and it is the only module compiled.
+            expect(normalFragment.code).not.toBe(positionFragment.code);
+            expect(normalFragment).not.toBe(positionFragment);
+            expect(createShaderModule).toHaveBeenCalledTimes(1);
+            expect(createShaderModule).toHaveBeenCalledWith({ code: normalFragment.code });
+        });
+
+        it("compiles fresh modules on a renewed device and never hands it the previous device's modules", async () => {
+            const { internal, engine } = await setupGeoTask(2);
+            const previous = internal._bound.map((entry) => boundModules(entry));
+            const createShaderModule = vi.fn((descriptor: GPUShaderModuleDescriptor) => descriptor as unknown as GPUShaderModule);
+            // What device-lost recovery does: the engine's device is replaced in place, then the task re-records.
+            engine._device = { ...(engine._device as unknown as Record<string, unknown>), createShaderModule } as unknown as GPUDevice;
+
+            internal.record();
+
+            // One shared pair for both materials, created by the new device.
+            expect(internal._bound).toHaveLength(2);
+            expect(createShaderModule).toHaveBeenCalledTimes(2);
+            const created = createShaderModule.mock.results.map((result) => result.value as unknown);
+            for (const entry of internal._bound) {
+                for (const module of boundModules(entry)) {
+                    expect(created).toContain(module);
+                    expect(previous.flat()).not.toContain(module);
+                }
+            }
+        });
+    });
 });
 
 describe("Mesh-blending geometry shader contracts", () => {

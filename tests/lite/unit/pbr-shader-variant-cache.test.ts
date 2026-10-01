@@ -8,12 +8,14 @@ import { enableMaterialPlugins, reconcileMaterialPlugins } from "../../../packag
 import { buildPbrGeometryRenderable } from "../../../packages/babylon-lite/src/material/pbr/pbr-geometry-renderable";
 import { createPbrGeometryMaterialView } from "../../../packages/babylon-lite/src/material/pbr/pbr-geometry-view";
 import { _computePbrMaterialFeatures, createPbrMaterial } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
+import type { PbrMaterialProps } from "../../../packages/babylon-lite/src/material/pbr/pbr-material";
 import { clearPbrPipelineCache } from "../../../packages/babylon-lite/src/material/pbr/pbr-pipeline";
 import { buildPbrRenderables } from "../../../packages/babylon-lite/src/material/pbr/pbr-renderable";
 import type { ToneMapping } from "../../../packages/babylon-lite/src/material/pbr/tone-mapping";
 import type { Mesh } from "../../../packages/babylon-lite/src/mesh/mesh";
 import { clearSceneBGLCache } from "../../../packages/babylon-lite/src/render/scene-helpers";
 import { createSceneContext } from "../../../packages/babylon-lite/src/scene/scene";
+import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scene-core";
 
 function makeEngine(): { engine: EngineContext; createShaderModule: ReturnType<typeof vi.fn> } {
     const createShaderModule = vi.fn((descriptor: GPUShaderModuleDescriptor) => descriptor as unknown as GPUShaderModule);
@@ -70,6 +72,20 @@ const signature = {
 
 function fragmentSources(createShaderModule: ReturnType<typeof vi.fn>): string[] {
     return createShaderModule.mock.calls.map((call) => (call[0] as GPUShaderModuleDescriptor).code).filter((code) => code.includes("@fragment fn main"));
+}
+
+/** What the geometry renderer task does for one PBR mesh on every record: a NEW geometry view of the material,
+ *  a geometry renderable built and bound against it. Returns the bound pipeline (the mock device hands the
+ *  descriptor back) and releases the renderable's task-owned resources. */
+function bindPbrGeometry(engine: EngineContext, scene: SceneContext, mesh: Mesh): GPURenderPipelineDescriptor {
+    const view = createPbrGeometryMaterialView(mesh.material as PbrMaterialProps, {
+        attachments: [GeometryTextureType.WORLD_NORMAL],
+        emitColor: false,
+    });
+    const owner = { _lifetimeDisposers: [] as (() => void)[] };
+    const pipeline = buildPbrGeometryRenderable(scene, mesh, view, owner).bind(engine, signature).pipeline as unknown as GPURenderPipelineDescriptor;
+    owner._lifetimeDisposers.forEach((dispose) => dispose());
+    return pipeline;
 }
 
 describe("PBR shader variant caches", () => {
@@ -309,5 +325,67 @@ describe("PBR shader variant caches", () => {
         const geometryFragments = fragmentSources(createShaderModule).filter((code) => code.includes("struct FragmentOutput"));
         expect(geometryFragments.some((code) => code.includes("material.materialAlpha < -3.0"))).toBe(true);
         expect(geometryFragments.some((code) => code.includes("material.materialAlpha < -4.0"))).toBe(true);
+    });
+
+    it("reuses PBR geometry shader modules for a later geometry generation", async () => {
+        const { engine, createShaderModule } = makeEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const material = createPbrMaterial();
+        const mesh = makeMesh(material);
+        scene._groups.set(material._buildGroup, [mesh]);
+        // Forward renderables are never bound here, so every compiled module comes from the geometry path.
+        await buildPbrRenderables(scene, [mesh], undefined);
+
+        let calls = createShaderModule.mock.calls.length;
+        const first = bindPbrGeometry(engine, scene, mesh);
+        expect(createShaderModule.mock.calls.length - calls).toBe(2);
+
+        calls = createShaderModule.mock.calls.length;
+        const second = bindPbrGeometry(engine, scene, mesh);
+        expect(second).not.toBe(first);
+        expect(createShaderModule.mock.calls.length - calls).toBe(0);
+        expect(second.vertex.module).toBe(first.vertex.module);
+        expect(second.fragment!.module).toBe(first.fragment!.module);
+    });
+
+    it("reuses PBR geometry shader modules after a forward rebuild republishes an equivalent context", async () => {
+        const { engine, createShaderModule } = makeEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const material = createPbrMaterial();
+        const mesh = makeMesh(material);
+        scene._groups.set(material._buildGroup, [mesh]);
+        await buildPbrRenderables(scene, [mesh], undefined);
+        const first = bindPbrGeometry(engine, scene, mesh);
+        const firstContext = (scene as { _pbrGeomContext?: unknown })._pbrGeomContext;
+
+        // A new context comes with a new composer, so the composed WGSL is a fresh string of the same code.
+        await buildPbrRenderables(scene, [mesh], undefined);
+        expect((scene as { _pbrGeomContext?: unknown })._pbrGeomContext).not.toBe(firstContext);
+
+        const calls = createShaderModule.mock.calls.length;
+        const second = bindPbrGeometry(engine, scene, mesh);
+        expect(createShaderModule.mock.calls.length - calls).toBe(0);
+        expect(second.vertex.module).toBe(first.vertex.module);
+        expect(second.fragment!.module).toBe(first.fragment!.module);
+    });
+
+    it("shares one PBR geometry module pair between materials with equal features", async () => {
+        const { engine, createShaderModule } = makeEngine();
+        const scene = createSceneContext(engine, { defaultRenderTask: false });
+        const materialA = createPbrMaterial();
+        const materialB = createPbrMaterial();
+        const meshA = makeMesh(materialA);
+        const meshB = makeMesh(materialB);
+        scene._groups.set(materialA._buildGroup, [meshA, meshB]);
+        await buildPbrRenderables(scene, [meshA, meshB], undefined);
+
+        const calls = createShaderModule.mock.calls.length;
+        const pipelineA = bindPbrGeometry(engine, scene, meshA);
+        const pipelineB = bindPbrGeometry(engine, scene, meshB);
+
+        expect(pipelineB).not.toBe(pipelineA);
+        expect(createShaderModule.mock.calls.length - calls).toBe(2);
+        expect(pipelineB.vertex.module).toBe(pipelineA.vertex.module);
+        expect(pipelineB.fragment!.module).toBe(pipelineA.fragment!.module);
     });
 });

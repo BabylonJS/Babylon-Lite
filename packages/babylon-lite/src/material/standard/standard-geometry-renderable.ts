@@ -381,6 +381,31 @@ export function buildStandardGeometryRenderable(scene: SceneContext, mesh: Mesh,
 
 // ─── Shared per-view resources ─────────────────────────────────────────────
 
+/** Shader modules of composed Standard geometry WGSL, per device and exact code. The geometry task builds
+ *  new views on every record and renderable-version change, yet the composed code rarely changes and
+ *  materials with equal features compose equal code. A module is immutable and has no `destroy()`, so one
+ *  module per code string can serve every view, generation and material. Keyed weakly by device: a replaced
+ *  device compiles its own modules, and an entry is released once its device object becomes unreachable (the
+ *  engine is dropped, or device-lost recovery replaced `engine._device`). Lazy, so the module keeps no
+ *  top-level side effect. Same shape as the sprite `makeShaderModuleCache`, kept private so this lazy chunk
+ *  imports nothing from sprite. */
+let _shaderModules: WeakMap<GPUDevice, Map<string, GPUShaderModule>> | null = null;
+
+function _getShaderModule(device: GPUDevice, code: string): GPUShaderModule {
+    _shaderModules ??= new WeakMap();
+    let modules = _shaderModules.get(device);
+    if (!modules) {
+        modules = new Map();
+        _shaderModules.set(device, modules);
+    }
+    let module = modules.get(code);
+    if (!module) {
+        module = device.createShaderModule({ code });
+        modules.set(code, module);
+    }
+    return module;
+}
+
 function _ensureViewResources(
     view: StandardGeometryMaterialView,
     engine: EngineContext,
@@ -481,8 +506,8 @@ function _ensureViewResources(
     const pipelineLayout = device.createPipelineLayout({
         bindGroupLayouts: [sceneBGL, meshBGL],
     });
-    const vertModule = device.createShaderModule({ code: composed._vertexWGSL });
-    const fragModule = device.createShaderModule({ code: composed._fragmentWGSL });
+    const vertModule = _getShaderModule(device, composed._vertexWGSL);
+    const fragModule = _getShaderModule(device, composed._fragmentWGSL);
 
     // Re-detect alpha-blend from the *source* material — the view masked
     // MATERIAL_ALPHA_BLEND out so the composer doesn't emit standard's source-over

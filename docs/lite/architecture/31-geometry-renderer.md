@@ -203,6 +203,17 @@ work. Shared Standard/Node view resources are retained by each renderable and de
 when the last owner releases; an old callback cannot evict a replacement cache entry. There is
 no implicit view lease or scene auxiliary-disposer map.
 
+Shader modules are not generation-owned. Standard and PBR geometry resolve them through a private
+per-family memo keyed weakly by device and by the exact composed WGSL, so a re-record, a
+renderable-version rebuild, a republished forward PBR context, and materials with identical
+composition reuse one module per code string instead of compiling it again. A `GPUShaderModule`
+has no `destroy()`: retiring a generation, rolling back a failed candidate, or disposing the task
+never invalidates a shared module, and older pipelines may keep referencing it. Composition, BGLs,
+pipeline layouts, and pipelines stay per view resource. There is no clear API: a device replaced
+by device-lost recovery compiles its own modules, and a memo entry is released once its device
+object becomes unreachable (the engine is dropped, or device-lost recovery replaced
+`engine._device`). Node geometry already shares modules through its code-keyed pipeline cache.
+
 The task's `_removeMesh` hook evicts every matching bound entry and queues its retirement
 immediately, including when rendering is stopped. Its weak exclusion set still rejects removed
 off-scene inputs and allows a mesh to rejoin after it is added back to the scene.
@@ -313,10 +324,12 @@ emitColor (owned by the view)
 
 `meshFeatures` includes morph, skeleton, 8-bone skeleton, vertex color, UV2,
 thin instances, and instance color. The resource stored under that key owns
-the composed shader, mesh BGL, shader modules, and its per-render-target
-pipeline map. The pipeline map remains keyed by the complete MRT target
-signature. A fog and non-fog scene sharing one device cannot reuse the same
-Standard geometry color shader when `targetTexture` requests lit color.
+the composed shader, mesh BGL, and its per-render-target pipeline map; its
+shader modules come from the per-device memo keyed by exact WGSL (see
+"Resource ownership and failed rebuilds"), so equal code shares one module.
+The pipeline map remains keyed by the complete MRT target signature. A fog
+and non-fog scene sharing one device cannot reuse the same Standard geometry
+color shader when `targetTexture` requests lit color.
 
 #### Standard geometry binding and draw order
 
@@ -461,6 +474,12 @@ matches BJS pixel-for-pixel (no lossy material-constants approximation).
 - Standard geometry composition with vertex color modulates albedo and alpha
   before discard/write masking and binds the color buffer.
 - Morph/skeleton/vertex-color bits participate in the geometry resource key.
+- Re-recording the task, a renderable-version rebuild, and a forward PBR
+  rebuild that republishes an equivalent context compile no new Standard or
+  PBR geometry shader modules; materials that compose identical WGSL share
+  one module pair; a task writing a different attachment compiles only its
+  new fragment module and shares the identical vertex module; and a replaced
+  device compiles its own.
 
 ## Future extensions
 
