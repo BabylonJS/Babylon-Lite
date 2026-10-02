@@ -17,6 +17,9 @@ export {
 } from "./engine/engine.js";
 export { createEngineWithFeatures } from "./compute/compute-engine-features.js";
 export type { EngineFeatureOptions } from "./compute/compute-engine-features.js";
+// Device-level signals and capabilities, so applications never need the GPUDevice itself.
+export { onEngineGpuError, onEngineDeviceLost, getEngineLimits, hasEngineFeature } from "./engine/engine-gpu-events.js";
+export type { EngineGpuErrorCallback, EngineDeviceLostCallback } from "./engine/engine-gpu-events.js";
 export { disposeEngine } from "./engine/engine-dispose.js";
 export { waitForGpuResourceRetirements } from "./engine/gpu-resource-retirement.js";
 export { VERSION } from "./engine/version.js";
@@ -388,6 +391,15 @@ export type {
     ComputeUniformVectorType,
     ComputeUniformWriter,
 } from "./compute/compute-uniform-writer.js";
+// User-facing render programs: the render-pass sibling of compute. Immutable program, reusable
+// draws and frame-graph scheduling through one render pass per task, without WebGPU handles.
+export { createRenderShader, prepareRenderShader, disposeRenderShader, createRenderBindingSet, disposeRenderBindingSet } from "./render-shader/render-shader.js";
+export type { RenderShader, RenderShaderOptions, RenderShaderTargetOptions, RenderShaderDepthOptions, RenderBindingSet } from "./render-shader/render-shader.js";
+export { createRenderDraw, setRenderDrawCount, setRenderDrawDynamicOffset } from "./render-shader/render-draw.js";
+export type { RenderDraw, RenderDrawOptions } from "./render-shader/render-draw.js";
+export { setRenderDrawIndirect } from "./render-shader/render-draw-indirect.js";
+export { createRenderDrawTask, addRenderDraw, removeRenderDraw, setRenderDrawTaskTarget } from "./render-shader/render-draw-task.js";
+export type { RenderDrawTask, RenderDrawTaskConfig } from "./render-shader/render-draw-task.js";
 
 // ─── Textures ────────────────────────────────────────────────────────
 export { createSolidTexture2D } from "./texture/solid-texture.js";
@@ -395,6 +407,12 @@ export { createTexture2DFromPixels, updateTexture2DFromPixels, createRenderTextu
 export { createTexture3DFromPixels } from "./texture/pixels-texture.js";
 export type { Texture3D, PixelsTexture3DOptions } from "./texture/pixels-texture.js";
 export type { PixelsTexture2DOptions, RenderTexture2DOptions } from "./texture/pixels-texture.js";
+// Any-format texture data paths: render into one layer/mip of an existing texture, and upload a box of
+// texels in the texture's own format without allocating per call.
+export { createTextureRenderTarget } from "./texture/texture-render-target.js";
+export type { TextureRenderTargetOptions } from "./texture/texture-render-target.js";
+export { updateTextureRegion } from "./texture/texture-region.js";
+export type { TextureRegion } from "./texture/texture-region.js";
 export {
     createTexture2DArray,
     createTexture2DArrayFromPixels,
