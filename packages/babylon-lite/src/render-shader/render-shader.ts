@@ -120,9 +120,7 @@ export function _assertRenderShaderLive(shader: RenderShader): void {
 
 function pipelineDepthCompare(shader: RenderShader, target: RenderTarget): GPUCompareFunction | undefined {
     const descriptor = target._descriptor;
-    return descriptor.dFormat && descriptor.dFormat !== "stencil8"
-        ? (shader._options.depth?.depthCompare ?? descriptor.depthCompare ?? REVERSE_DEPTH_COMPARE)
-        : undefined;
+    return descriptor.dFormat && descriptor.dFormat !== "stencil8" ? (shader._options.depth?.depthCompare ?? descriptor.depthCompare ?? REVERSE_DEPTH_COMPARE) : undefined;
 }
 
 function pipelineKey(shader: RenderShader, target: RenderTarget): string {
@@ -216,7 +214,7 @@ export async function prepareRenderShader(shader: RenderShader, target: RenderTa
         promise = device.createRenderPipelineAsync(pipelineDescriptor(shader, target));
         pending.set(key, promise);
         void promise.then(
-            (pipeline) => {
+            (pipeline: GPURenderPipeline) => {
                 if (!shader._program._destroyed && shader._program._engine._device === device && shader._pipelines === pipelines && !pipelines.has(key)) {
                     pipelines.set(key, pipeline);
                 }
