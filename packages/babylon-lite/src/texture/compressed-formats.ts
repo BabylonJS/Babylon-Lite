@@ -24,6 +24,7 @@ export interface CompressedFormatInfo {
 
 // Lazy-initialized lookup table (no module-level side effects).
 let _table: Map<number, CompressedFormatInfo> | null = null;
+let _copyTable: Map<string, Pick<CompressedFormatInfo, "blockW" | "blockH" | "blockBytes">> | null = null;
 
 function getTable(): Map<number, CompressedFormatInfo> {
     if (_table) {
@@ -98,6 +99,36 @@ function getTable(): Map<number, CompressedFormatInfo> {
 /** Look up compressed format info from a KTX1 glInternalFormat value. Returns undefined if unknown/unsupported. */
 export function getCompressedFormat(glInternalFormat: number): CompressedFormatInfo | undefined {
     return getTable().get(glInternalFormat);
+}
+
+/** Copy footprints by GPU format; opaque, CPU-unwritable, and combined depth/stencil formats have no entry. */
+export function getTextureFormatBlockInfo(format: GPUTextureFormat): Pick<CompressedFormatInfo, "blockW" | "blockH" | "blockBytes"> | undefined {
+    if (!_copyTable) {
+        const table = new Map<string, Pick<CompressedFormatInfo, "blockW" | "blockH" | "blockBytes">>();
+        for (const info of getTable().values()) {
+            table.set(info.gpuFormat, info);
+            if (info.gpuFormat === "bc1-rgba-unorm" || info.gpuFormat === "bc2-rgba-unorm" || info.gpuFormat === "bc3-rgba-unorm") {
+                table.set(`${info.gpuFormat}-srgb`, info);
+            }
+        }
+        const add = (blockBytes: number, formats: string): void => {
+            const info = { blockW: 1, blockH: 1, blockBytes };
+            for (const name of formats.split(" ")) {
+                table.set(name, info);
+            }
+        };
+        add(1, "r8unorm r8snorm r8uint r8sint stencil8");
+        add(2, "r16unorm r16snorm r16uint r16sint r16float rg8unorm rg8snorm rg8uint rg8sint depth16unorm");
+        add(
+            4,
+            "r32uint r32sint r32float rg16unorm rg16snorm rg16uint rg16sint rg16float " +
+                "rgba8unorm rgba8unorm-srgb rgba8snorm rgba8uint rgba8sint bgra8unorm bgra8unorm-srgb rgb9e5ufloat rgb10a2uint rgb10a2unorm rg11b10ufloat"
+        );
+        add(8, "rg32uint rg32sint rg32float rgba16unorm rgba16snorm rgba16uint rgba16sint rgba16float");
+        add(16, "rgba32uint rgba32sint rgba32float");
+        _copyTable = table;
+    }
+    return _copyTable.get(format);
 }
 
 /** Map a KTX suffix string to the required WebGPU device feature. Returns undefined for unsupported (e.g. PVRTC). */

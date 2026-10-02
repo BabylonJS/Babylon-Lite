@@ -1,6 +1,6 @@
 import { SS } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
-import type { RenderTarget } from "../engine/render-target.js";
+import type { RenderTarget, RenderTargetSignature } from "../engine/render-target.js";
 import { REVERSE_DEPTH_COMPARE } from "../engine/render-target.js";
 import { targetSignatureKey } from "../engine/render-target-signature.js";
 import type { ComputeBindingDecl } from "../compute/compute-binding.js";
@@ -56,8 +56,10 @@ export interface RenderShader {
     _module: GPUShaderModule | null;
     /** @internal Pipelines by render-target signature key. */
     _pipelines: Map<string, GPURenderPipeline> | null;
+    /** @internal In-flight compilations by render-target signature key. */
+    _pending: Map<string, Promise<GPURenderPipeline>> | null;
     /** @internal Allocation-free per-target lookup in front of `_pipelines`. */
-    _byTarget: WeakMap<RenderTarget, GPURenderPipeline> | null;
+    _byTarget: WeakMap<RenderTarget, RenderTargetSignature & { readonly pipeline: GPURenderPipeline }> | null;
 }
 
 declare const renderBindingSetBrand: unique symbol;
@@ -106,6 +108,7 @@ export function createRenderShader(engine: EngineContext, options: RenderShaderO
         _options: options,
         _module: null,
         _pipelines: null,
+        _pending: null,
         _byTarget: null,
     } as unknown as RenderShader;
 }
@@ -115,12 +118,19 @@ export function _assertRenderShaderLive(shader: RenderShader): void {
     _assertComputeShaderLive(shader._program);
 }
 
+function pipelineDepthCompare(shader: RenderShader, target: RenderTarget): GPUCompareFunction | undefined {
+    const descriptor = target._descriptor;
+    return descriptor.dFormat && descriptor.dFormat !== "stencil8"
+        ? (shader._options.depth?.depthCompare ?? descriptor.depthCompare ?? REVERSE_DEPTH_COMPARE)
+        : undefined;
+}
+
 function pipelineKey(shader: RenderShader, target: RenderTarget): string {
     const descriptor = target._descriptor;
     return targetSignatureKey({
         _colorFormat: descriptor.format,
         _depthStencilFormat: descriptor.dFormat,
-        _depthCompare: descriptor.dFormat ? (shader._options.depth?.depthCompare ?? descriptor.depthCompare ?? REVERSE_DEPTH_COMPARE) : undefined,
+        _depthCompare: pipelineDepthCompare(shader, target),
         _sampleCount: descriptor.samples,
     });
 }
@@ -146,8 +156,12 @@ function pipelineDescriptor(shader: RenderShader, target: RenderTarget): GPURend
         depthStencil: depth
             ? {
                   format: depth,
-                  depthWriteEnabled: options.depth?.depthWriteEnabled ?? false,
-                  depthCompare: options.depth?.depthCompare ?? descriptor.depthCompare ?? REVERSE_DEPTH_COMPARE,
+                  ...(depth !== "stencil8"
+                      ? {
+                            depthWriteEnabled: options.depth?.depthWriteEnabled ?? false,
+                            depthCompare: pipelineDepthCompare(shader, target),
+                        }
+                      : {}),
               }
             : undefined,
         multisample: { count: descriptor.samples },
@@ -157,10 +171,18 @@ function pipelineDescriptor(shader: RenderShader, target: RenderTarget): GPURend
 /** @internal Resolve the pipeline for `target`, compiling it synchronously on first use. Allocation-free once cached. */
 export function _getRenderPipeline(shader: RenderShader, target: RenderTarget): GPURenderPipeline {
     _assertRenderShaderLive(shader);
+    const descriptor = target._descriptor;
+    const depthCompare = pipelineDepthCompare(shader, target);
     const byTarget = (shader._byTarget ??= new WeakMap());
     const hit = byTarget.get(target);
-    if (hit) {
-        return hit;
+    if (
+        hit &&
+        hit._colorFormat === descriptor.format &&
+        hit._depthStencilFormat === descriptor.dFormat &&
+        hit._depthCompare === depthCompare &&
+        hit._sampleCount === descriptor.samples
+    ) {
+        return hit.pipeline;
     }
     const pipelines = (shader._pipelines ??= new Map());
     const key = pipelineKey(shader, target);
@@ -169,7 +191,13 @@ export function _getRenderPipeline(shader: RenderShader, target: RenderTarget): 
         pipeline = shader._program._engine._device.createRenderPipeline(pipelineDescriptor(shader, target));
         pipelines.set(key, pipeline);
     }
-    byTarget.set(target, pipeline);
+    byTarget.set(target, {
+        pipeline,
+        _colorFormat: descriptor.format,
+        _depthStencilFormat: descriptor.dFormat,
+        _depthCompare: depthCompare,
+        _sampleCount: descriptor.samples,
+    });
     return pipeline;
 }
 
@@ -182,11 +210,34 @@ export async function prepareRenderShader(shader: RenderShader, target: RenderTa
         return;
     }
     const device = shader._program._engine._device;
-    const pipeline = await device.createRenderPipelineAsync(pipelineDescriptor(shader, target));
-    _assertRenderShaderLive(shader);
-    if (shader._program._engine._device === device && !pipelines.has(key)) {
-        pipelines.set(key, pipeline);
+    const pending = (shader._pending ??= new Map());
+    let promise = pending.get(key);
+    if (!promise) {
+        promise = device.createRenderPipelineAsync(pipelineDescriptor(shader, target));
+        pending.set(key, promise);
+        void promise.then(
+            (pipeline) => {
+                if (!shader._program._destroyed && shader._program._engine._device === device && shader._pipelines === pipelines && !pipelines.has(key)) {
+                    pipelines.set(key, pipeline);
+                }
+                if (pending.get(key) === promise) {
+                    pending.delete(key);
+                }
+            },
+            () => {
+                if (pending.get(key) === promise) {
+                    pending.delete(key);
+                }
+            }
+        );
     }
+    try {
+        await promise;
+    } catch (error) {
+        _assertRenderShaderLive(shader);
+        throw error;
+    }
+    _assertRenderShaderLive(shader);
 }
 
 /** Dispose program caches. Binding sets, draws and resources remain caller-owned. */
@@ -194,6 +245,7 @@ export function disposeRenderShader(shader: RenderShader): void {
     disposeComputeShader(shader._program);
     shader._module = null;
     shader._pipelines = null;
+    shader._pending = null;
     shader._byTarget = null;
 }
 

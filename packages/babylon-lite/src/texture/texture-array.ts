@@ -289,9 +289,16 @@ export function createTexture2DArrayFromPixels(
     layers: number,
     options: TextureArrayOptions = {}
 ): Texture2DArray {
+    assertRgba8ArrayFormat(options.format ?? "rgba8unorm");
     const tex = createTexture2DArray(engine, width, height, layers, options);
     updateTexture2DArrayFromPixels(engine, tex, data);
     return tex;
+}
+
+function assertRgba8ArrayFormat(format: GPUTextureFormat): void {
+    if (format !== "rgba8unorm" && format !== "rgba8unorm-srgb") {
+        throw new Error(`Texture array pixel uploads require rgba8unorm or rgba8unorm-srgb, received ${format}.`);
+    }
 }
 
 /**
@@ -309,6 +316,7 @@ export function createTexture2DArrayFromPixels(
  * @param mipLevel - Destination mip level (default 0). Level dimensions are `max(1, size >> mipLevel)`.
  */
 export function updateTexture2DArrayFromPixels(engine: EngineContext, tex: Texture2DArray, data: Uint8Array, mipLevel = 0): void {
+    assertRgba8ArrayFormat(tex.texture.format);
     if (mipLevel < 0 || mipLevel >= tex.texture.mipLevelCount || (mipLevel | 0) !== mipLevel) {
         throw new Error(`updateTexture2DArrayFromPixels: mipLevel must be an integer in [0, ${tex.texture.mipLevelCount}) (got ${mipLevel})`);
     }

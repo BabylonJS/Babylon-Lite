@@ -70,17 +70,17 @@ describe("engine GPU events", () => {
         expect(device.listenerCount()).toBe(1);
     });
 
-    it("reports the loss of the current device with its reason", async () => {
+    it.each(["unknown", "destroyed"] as const)("reports the loss of the current device with reason %s", async (reason) => {
         const device = makeDevice();
         const engine = makeEngine(device);
         const lost = vi.fn();
         onEngineDeviceLost(engine, lost);
-        const info = { reason: "unknown", message: "GPU process crashed" } as GPUDeviceLostInfo;
+        const info = { reason, message: "device lost" } as GPUDeviceLostInfo;
 
         device.loseDevice(info);
         await flush();
 
-        expect(lost).toHaveBeenCalledWith(info);
+        expect(lost).toHaveBeenCalledExactlyOnceWith(info);
     });
 
     it("follows the replacement device that device-lost recovery installs", async () => {
@@ -92,26 +92,41 @@ describe("engine GPU events", () => {
         const lost = vi.fn();
         onEngineGpuError(engine, errors);
         onEngineDeviceLost(engine, lost);
-        vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });
+        try {
+            vi.stubGlobal("navigator", { gpu: { requestAdapter: vi.fn(async () => ({ features: new Set<GPUFeatureName>(), requestDevice: vi.fn(async () => replacement) })) } });
 
-        await runDeviceLostRecovery(engine, engine._deviceLostRecovery!, []);
-        const error = { message: "after recovery" } as GPUError;
-        replacement.emitError(error);
-        lostDevice.emitError({ message: "stale device" } as GPUError);
-        replacement.loseDevice({ reason: "unknown", message: "second loss" } as GPUDeviceLostInfo);
-        await flush();
+            await runDeviceLostRecovery(engine, engine._deviceLostRecovery!, []);
+            recovery.disable();
+            const error = { message: "after recovery" } as GPUError;
+            replacement.emitError(error);
+            lostDevice.emitError({ message: "stale device" } as GPUError);
+            lostDevice.loseDevice({ reason: "unknown", message: "obsolete loss" } as GPUDeviceLostInfo);
+            await flush();
+            expect(lost).not.toHaveBeenCalled();
+            replacement.loseDevice({ reason: "unknown", message: "second loss" } as GPUDeviceLostInfo);
+            await flush();
 
-        expect(errors.mock.calls).toEqual([[error]]);
-        expect(lostDevice.listenerCount()).toBe(0);
-        expect(lost).toHaveBeenCalledWith(expect.objectContaining({ message: "second loss" }));
-        recovery.disable();
+            expect(errors.mock.calls).toEqual([[error]]);
+            expect(lostDevice.listenerCount()).toBe(0);
+            expect(lost).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: "second loss" }));
+        } finally {
+            recovery.disable();
+        }
     });
 
-    it("exposes limits and features as read-only information", () => {
+    it("queries the current device without enabling GPU event subscriptions", () => {
         const engine = makeEngine(makeDevice(["timestamp-query"]));
 
         expect(getEngineLimits(engine).maxTextureArrayLayers).toBe(256);
         expect(hasEngineFeature(engine, "timestamp-query")).toBe(true);
         expect(hasEngineFeature(engine, "shader-f16")).toBe(false);
+        const replacement = makeDevice(["shader-f16"]);
+        engine._device = replacement;
+        expect(getEngineLimits(engine)).toBe(replacement.limits);
+        expect(hasEngineFeature(engine, "timestamp-query")).toBe(false);
+        expect(hasEngineFeature(engine, "shader-f16")).toBe(true);
+        expect(engine._gpuEvents).toBeUndefined();
+        expect(engine._attachGpuEvents).toBeUndefined();
+        expect(replacement.listenerCount()).toBe(0);
     });
 });

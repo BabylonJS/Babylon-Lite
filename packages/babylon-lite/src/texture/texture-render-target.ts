@@ -16,8 +16,14 @@ export interface TextureRenderTargetOptions {
 
 function attach(target: RenderTarget, texture: Texture2D, layer: number, mipLevel: number): void {
     const gpu = texture.texture;
-    target._colorTexture = gpu;
-    target._colorView = gpu.createView({ dimension: "2d", baseArrayLayer: layer, arrayLayerCount: 1, baseMipLevel: mipLevel, mipLevelCount: 1 });
+    const view = gpu.createView({ dimension: "2d", baseArrayLayer: layer, arrayLayerCount: 1, baseMipLevel: mipLevel, mipLevelCount: 1 });
+    if (target._descriptor.dFormat) {
+        target._depthTexture = gpu;
+        target._depthView = view;
+    } else {
+        target._colorTexture = gpu;
+        target._colorView = view;
+    }
 }
 
 /**
@@ -47,7 +53,14 @@ export function createTextureRenderTarget(_engine: EngineContext, texture: Textu
     }
     const width = Math.max(1, gpu.width >> mipLevel);
     const height = Math.max(1, gpu.height >> mipLevel);
-    const target = createRenderTarget({ lbl: gpu.label, format: gpu.format, samples: gpu.sampleCount, size: { width, height } });
+    const depth = gpu.format.startsWith("depth") || gpu.format === "stencil8";
+    const target = createRenderTarget({
+        lbl: gpu.label,
+        format: depth ? undefined : gpu.format,
+        dFormat: depth ? gpu.format : undefined,
+        samples: gpu.sampleCount,
+        size: { width, height },
+    });
     attach(target, texture, layer, mipLevel);
     target._width = width;
     target._height = height;
@@ -57,11 +70,14 @@ export function createTextureRenderTarget(_engine: EngineContext, texture: Textu
         if (this._disposed) {
             throw new Error("Texture render target has been disposed.");
         }
-        if (this._colorTexture !== texture.texture) {
+        if ((this._colorTexture ?? this._depthTexture) !== texture.texture) {
             attach(this, texture, layer, mipLevel);
         }
     };
     target._disposeAttachments = function (this: RenderTarget): void {
+        if (this._disposed) {
+            return;
+        }
         this._disposed = true;
         releaseTexture(texture);
     };

@@ -1,4 +1,6 @@
 import type { EngineContext } from "../engine/engine.js";
+import { TU } from "../engine/gpu-flags.js";
+import { getTextureFormatBlockInfo } from "./compressed-formats.js";
 import type { Texture2D } from "./texture-2d.js";
 
 /**
@@ -16,9 +18,9 @@ export interface TextureRegion {
     height: number;
     /** Number of consecutive array layers written. Default 1. */
     layerCount?: number;
-    /** Source bytes between two rows (any multiple of the texel size; no 256-byte alignment is needed for queue writes). */
+    /** Source bytes between two block rows. Queue writes require no byte alignment. */
     bytesPerRow: number;
-    /** Source rows between two layers. Default `height`. */
+    /** Source block rows between two layers. Default `height / blockHeight`. */
     rowsPerImage?: number;
     /** Source byte offset inside `data`. Default 0. */
     dataOffset?: number;
@@ -49,28 +51,44 @@ function checkInteger(name: string, value: number, min: number, max: number): vo
  */
 export function updateTextureRegion(engine: EngineContext, texture: Texture2D, data: ArrayBufferView, region: TextureRegion): void {
     const gpu = texture.texture;
+    if (!(gpu.usage & TU.COPY_DST) || gpu.sampleCount !== 1) {
+        throw new Error("updateTextureRegion: the texture requires copy-destination usage and sampleCount 1.");
+    }
+    const block = getTextureFormatBlockInfo(gpu.format);
+    if (!block) {
+        throw new Error(`updateTextureRegion: ${gpu.format} does not support CPU writes with the default copy aspect.`);
+    }
     const x = region.x ?? 0;
     const y = region.y ?? 0;
     const layer = region.layer ?? 0;
     const mipLevel = region.mipLevel ?? 0;
     const layerCount = region.layerCount ?? 1;
-    const rowsPerImage = region.rowsPerImage ?? region.height;
     const dataOffset = region.dataOffset ?? 0;
     checkInteger("mipLevel", mipLevel, 0, gpu.mipLevelCount - 1);
-    const mipWidth = Math.max(1, gpu.width >> mipLevel);
-    const mipHeight = Math.max(1, gpu.height >> mipLevel);
+    const mipWidth = Math.ceil(Math.max(1, gpu.width >> mipLevel) / block.blockW) * block.blockW;
+    const mipHeight = Math.ceil(Math.max(1, gpu.height >> mipLevel) / block.blockH) * block.blockH;
+    const mipLayers = gpu.dimension === "3d" ? Math.max(1, gpu.depthOrArrayLayers >> mipLevel) : gpu.depthOrArrayLayers;
     checkInteger("width", region.width, 1, mipWidth);
     checkInteger("height", region.height, 1, mipHeight);
     checkInteger("x", x, 0, mipWidth - region.width);
     checkInteger("y", y, 0, mipHeight - region.height);
-    checkInteger("layerCount", layerCount, 1, gpu.depthOrArrayLayers);
-    checkInteger("layer", layer, 0, gpu.depthOrArrayLayers - layerCount);
-    checkInteger("rowsPerImage", rowsPerImage, region.height, Number.MAX_SAFE_INTEGER);
-    checkInteger("bytesPerRow", region.bytesPerRow, 1, Number.MAX_SAFE_INTEGER);
+    checkInteger("layerCount", layerCount, 1, mipLayers);
+    checkInteger("layer", layer, 0, mipLayers - layerCount);
+    if (x % block.blockW || y % block.blockH || region.width % block.blockW || region.height % block.blockH) {
+        throw new Error(`updateTextureRegion: origin and extent must be multiples of the ${block.blockW}x${block.blockH} texel block.`);
+    }
+    if ((gpu.format === "depth16unorm" || gpu.format === "stencil8") && (region.width !== mipWidth || region.height !== mipHeight)) {
+        throw new Error("updateTextureRegion: depth/stencil copies must cover the full physical mip width and height.");
+    }
+    const blockRows = region.height / block.blockH;
+    const lastRowBytes = (region.width / block.blockW) * block.blockBytes;
+    const rowsPerImage = region.rowsPerImage ?? blockRows;
+    checkInteger("rowsPerImage", rowsPerImage, blockRows, 0xffffffff);
+    checkInteger("bytesPerRow", region.bytesPerRow, lastRowBytes, 0xffffffff);
     checkInteger("dataOffset", dataOffset, 0, data.byteLength);
     // The last row only needs its texels, but every earlier row and layer spans the full stride.
-    const stridedBytes = region.bytesPerRow * (rowsPerImage * (layerCount - 1) + region.height - 1);
-    if (dataOffset + stridedBytes >= data.byteLength) {
+    const requiredBytes = region.bytesPerRow * (rowsPerImage * (layerCount - 1) + blockRows - 1) + lastRowBytes;
+    if (!Number.isSafeInteger(requiredBytes) || dataOffset + requiredBytes > data.byteLength) {
         throw new Error(
             `updateTextureRegion: ${data.byteLength} source bytes cannot hold ${region.width}×${region.height}×${layerCount} texels at ${region.bytesPerRow} bytes per row.`
         );

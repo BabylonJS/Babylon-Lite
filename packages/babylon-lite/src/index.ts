@@ -118,7 +118,7 @@ export type { GeometryRendererTask, GeometryRendererTaskConfig, GeometryRenderer
 export { GeometryTextureType } from "./frame-graph/geometry-types.js";
 export type { ShadowTask } from "./frame-graph/shadow-task.js";
 export type { RenderTarget, RenderTargetDescriptor, RenderTargetSurfaceSize } from "./engine/render-target.js";
-export { createRenderTarget } from "./engine/render-target.js";
+export { createRenderTarget, disposeRenderTarget } from "./engine/render-target.js";
 export { createMipMappedRenderTarget } from "./engine/render-target-mipmaps.js";
 export { createRenderTargetTexture, disposeRenderTargetTexture } from "./texture/rtt.js";
 export { createSurfaceRenderTargetTexture, onRenderTargetTextureResize } from "./texture/rtt-surface.js";

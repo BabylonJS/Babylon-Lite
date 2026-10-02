@@ -71,17 +71,40 @@ export function setRenderDrawTaskTarget(task: RenderDrawTask, target: RenderTarg
   `createRenderShader` installs render-visible bind-group layouts and the pipeline layout on it
   immediately (vertex + fragment visibility; writable storage buffers and writable storage textures are
   fragment-only, as WebGPU requires), so `_ensureComputeBindingGroups` never builds compute layouts for it.
-- Pipelines: `Map<signatureKey, GPURenderPipeline>` plus a `WeakMap<RenderTarget, GPURenderPipeline>` in
-  front of it, so the per-frame lookup allocates nothing (no key string) once a target has been seen.
+- Pipelines: `Map<signatureKey, GPURenderPipeline>` plus a per-target `WeakMap` holding the pipeline and
+  a snapshot of its color format, depth/stencil format, effective depth compare, and sample count.
+  Compare those scalar fields before reusing a target-identity hit. Unchanged targets allocate nothing
+  on the per-frame lookup; a changed signature resolves the matching shared pipeline and refreshes
+  the snapshot. Eager attachment rebuilds therefore cannot leave a stale pipeline behind.
+- Async preparation: a lazy `Map<signatureKey, Promise<GPURenderPipeline>>` shares one compilation
+  across concurrent calls, including different targets with the same signature. Settlement removes
+  only the matching in-flight promise. Success publishes only while the program remains live on its
+  owning device; failure leaves the signature retryable and propagates to every waiting caller.
 - `RenderDrawTask` uses the `execute()` fast path (no `Pass` objects). Its `GPURenderPassDescriptor` and
   attachments are built in `record()` (and when `setRenderDrawTaskTarget` changes the attachment set);
   per frame only `view`, `loadOp` and `clearValue` are patched.
+- Depth/stencil attachments include operations only for present aspects. `"stencil8"` omits all depth
+  operations; `"depth24plus-stencil8"` and `"depth32float-stencil8"` include both depth and stencil.
+  Clear/load changes apply to each present aspect, using the target's depth clear default and stencil
+  clear value zero. Cache the depth/stencil format used by `buildAttachments`; compare that snapshot
+  and the cached color attachment's presence against the synchronized target, not another live target
+  descriptor. Selecting the same target after an in-place format change rebuilds the descriptor to
+  add or remove aspect operations without another `record()`. An unchanged attachment signature
+  preserves descriptor identity.
 - Redundant `setPipeline` / `setBindGroup` calls are skipped as in `ComputeTask`.
 
 ## Pipeline Configuration
 
 Color format, depth format, depth compare default and sample count come from the target's
 `RenderTargetDescriptor`; blend, write mask, primitive state, depth write and compare come from the shader.
+A stencil-only pipeline omits depth write/compare state, which is inapplicable to that format. Its
+signature does not depend on depth compare.
+
+## Shader Logic
+
+WGSL is supplied by the caller without parsing or rewriting its declarations. The configured vertex
+and fragment entry points use the declared binding layouts and vertex buffers. This module supplies
+no material lighting or UV conversion.
 
 ## State Machine / Lifecycle
 
@@ -89,8 +112,19 @@ Color format, depth format, depth compare default and sample count come from the
   they throw "recreate the compute graph" (wording inherited from the shared core). Applications recreate
   them in their device-lost recovery path.
 - Targets are borrowed: the task never disposes them. A target that was never allocated is built once in
-  `record()` and stays caller-owned.
+  `record()` or when selected by `setRenderDrawTaskTarget`, and stays caller-owned. Every `record()`
+  synchronizes eager targets through `buildRenderTarget` before rebuilding the pass attachments.
+  Target switches synchronize the new target before changing task state, so an eager resize/recovery
+  hook or first allocation is reflected in the very next draw without another graph build.
+  Switching a disposed task is rejected before synchronizing or allocating a target.
 - When no draw is enabled and `clear` is false, the task opens no pass.
+- Disposal clears completed and in-flight pipeline caches. An outstanding compilation cannot
+  repopulate a disposed shader, and its waiting preparation rejects instead of reporting success.
+
+## Babylon.js Equivalence Map
+
+Custom render programs and frame-graph draw passes map to user-authored render effects and draw
+tasks. Lite shares compute's binding core while retaining a single frame encoder and plain-state draws.
 
 ## Dependencies
 
@@ -104,6 +138,15 @@ use it carry zero bytes of it.
 shader's fixed-function state, instanced draws with vertex buffers, no pass when idle, clear on request,
 indexed and indirect draws, dynamic offsets, vertex-usage validation, async preparation, device-change
 rejection, draw ownership.
+Regression cases also cover concurrent same-signature preparation, independent signatures, retry
+after rejection, disposal/device replacement during preparation, conditional depth/stencil operations,
+clear/load changes, target format switching, stencil-only pipeline state, eager synchronization on
+repeated records and target switches, single allocation for borrowed unbuilt targets, and rejection
+of target switches after task disposal. Same-format color-to-color and depth-to-depth switches reuse
+the pass descriptor while refreshing its attachment view. A mutable descriptor on the real mipmapped
+target owner exercises depth-format rebuilds by selecting the same target without another record,
+under both clear/load modes. Returning to depth-only removes stencil operations and reuses the
+original cached pipeline.
 
 ## File Manifest
 

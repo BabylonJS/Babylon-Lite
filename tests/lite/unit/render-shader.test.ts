@@ -3,11 +3,18 @@ import { describe, expect, it, vi } from "vitest";
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
+import { createMipMappedRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target-mipmaps";
 import { computeStorageBufferBinding } from "../../../packages/babylon-lite/src/compute/compute-storage-buffer-binding";
 import { computeUniformBufferBinding } from "../../../packages/babylon-lite/src/compute/compute-uniform-buffer-binding";
 import { createUniformBuffer } from "../../../packages/babylon-lite/src/compute/compute-uniform-buffer";
 import { createStorageBuffer } from "../../../packages/babylon-lite/src/resource/storage-buffer";
-import { createRenderBindingSet, createRenderShader, disposeRenderShader, prepareRenderShader } from "../../../packages/babylon-lite/src/render-shader/render-shader";
+import {
+    _getRenderPipeline,
+    createRenderBindingSet,
+    createRenderShader,
+    disposeRenderShader,
+    prepareRenderShader,
+} from "../../../packages/babylon-lite/src/render-shader/render-shader";
 import { createRenderDraw, setRenderDrawCount, setRenderDrawDynamicOffset } from "../../../packages/babylon-lite/src/render-shader/render-draw";
 import { setRenderDrawIndirect } from "../../../packages/babylon-lite/src/render-shader/render-draw-indirect";
 import { addRenderDraw, createRenderDrawTask, removeRenderDraw, setRenderDrawTaskTarget } from "../../../packages/babylon-lite/src/render-shader/render-draw-task";
@@ -30,7 +37,16 @@ function makeEngine() {
             minStorageBufferOffsetAlignment: 256,
             maxUniformBufferBindingSize: 65536,
             maxStorageBufferBindingSize: 128 * 1024 * 1024,
+            maxTextureDimension2D: 4096,
         },
+        createTexture: vi.fn(
+            (descriptor: GPUTextureDescriptor) =>
+                ({
+                    format: descriptor.format,
+                    createView: vi.fn(() => ({}) as GPUTextureView),
+                    destroy: vi.fn(),
+                }) as unknown as GPUTexture
+        ),
         createBuffer: vi.fn((descriptor: GPUBufferDescriptor) => {
             const mapped = new ArrayBuffer(Number(descriptor.size));
             return { descriptor, getMappedRange: () => mapped, unmap: vi.fn(), destroy: vi.fn() } as unknown as GPUBuffer;
@@ -84,6 +100,24 @@ function makeTarget(format: GPUTextureFormat, label: string): RenderTarget {
     target._colorView = { label } as unknown as GPUTextureView;
     target._eager = true;
     return target;
+}
+
+function makeDepthTarget(format: GPUTextureFormat): RenderTarget {
+    const target = createRenderTarget({ dFormat: format, samples: 1, size: { width: 8, height: 8 } });
+    target._depthTexture = { label: format } as GPUTexture;
+    target._depthView = { label: format } as GPUTextureView;
+    target._eager = true;
+    return target;
+}
+
+function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+    });
+    return { promise, resolve, reject };
 }
 
 const DAB_SOURCE = `
@@ -189,6 +223,127 @@ describe("render shaders", () => {
         expect(passes[0]!.calls).toEqual([]);
     });
 
+    it.each(["color", "depth"] as const)("synchronizes eager targets on each record and when switching to a %s target", (aspect) => {
+        const { engine, passes } = makeEngine();
+        const first = aspect === "color" ? makeTarget("r16float", "first") : makeDepthTarget("depth32float");
+        first._syncEager = vi.fn(() => {
+            const view = { label: "refreshed" } as GPUTextureView;
+            if (aspect === "color") {
+                first._colorView = view;
+            } else {
+                first._depthView = view;
+            }
+        });
+        const task = createRenderDrawTask(engine, { target: first, clear: true });
+        task.record();
+        task.execute!();
+        task.record();
+        task.execute!();
+        expect(first._syncEager).toHaveBeenCalledTimes(2);
+        expect(aspect === "color" ? passes[1]!.view : passes[1]!.descriptor.depthStencilAttachment?.view).not.toBe(
+            aspect === "color" ? passes[0]!.view : passes[0]!.descriptor.depthStencilAttachment?.view
+        );
+        const descriptor = passes[1]!.descriptor;
+
+        const next = aspect === "color" ? makeTarget("r16float", "next") : makeDepthTarget("depth32float");
+        const view = { label: "switched" } as GPUTextureView;
+        next._syncEager = vi.fn(() => {
+            if (aspect === "color") {
+                next._colorView = view;
+            } else {
+                next._depthView = view;
+            }
+        });
+        setRenderDrawTaskTarget(task, next);
+        task.execute!();
+        expect(next._syncEager).toHaveBeenCalledExactlyOnceWith(engine);
+        expect(passes[2]!.descriptor).toBe(descriptor);
+        expect(aspect === "color" ? passes[2]!.view : passes[2]!.descriptor.depthStencilAttachment?.view).toBe(view);
+    });
+
+    it.each([false, true])("refreshes same-target depth/stencil attachments and pipelines without recording again (clear: %s)", (clear) => {
+        const { engine, pipelines, passes } = makeEngine();
+        const { draw } = createDabProgram(engine);
+        const descriptor = { format: "rgba8unorm" as const, dFormat: "depth32float" as GPUTextureFormat, samples: 1, size: { width: 8, height: 8 } };
+        const target = createMipMappedRenderTarget(descriptor);
+        const task = createRenderDrawTask(engine, { target, clear });
+        addRenderDraw(task, draw);
+        setRenderDrawCount(draw, 4, 1);
+        task.record();
+        task.execute!();
+        const initialView = target._depthView;
+
+        descriptor.dFormat = "depth24plus-stencil8";
+        setRenderDrawTaskTarget(task, target);
+        task.execute!();
+
+        expect(target._depthView).not.toBe(initialView);
+        expect(passes[1]!.descriptor).not.toBe(passes[0]!.descriptor);
+        expect(passes[1]!.descriptor.depthStencilAttachment).toMatchObject({
+            view: target._depthView,
+            depthLoadOp: clear ? "clear" : "load",
+            depthStoreOp: "store",
+            stencilLoadOp: clear ? "clear" : "load",
+            stencilStoreOp: "store",
+        });
+        expect(pipelines.map((pipeline) => pipeline.depthStencil?.format)).toEqual(["depth32float", "depth24plus-stencil8"]);
+        expect(passes[1]!.calls[0]![1]).not.toBe(passes[0]!.calls[0]![1]);
+
+        descriptor.dFormat = "depth32float";
+        setRenderDrawTaskTarget(task, target);
+        task.execute!();
+        expect(passes[2]!.descriptor.depthStencilAttachment).toMatchObject({ view: target._depthView, depthLoadOp: clear ? "clear" : "load", depthStoreOp: "store" });
+        expect(passes[2]!.descriptor.depthStencilAttachment).not.toHaveProperty("stencilLoadOp");
+        expect(passes[2]!.descriptor.depthStencilAttachment).not.toHaveProperty("stencilStoreOp");
+        expect(passes[2]!.calls[0]![1]).toBe(passes[0]!.calls[0]![1]);
+        task.execute!();
+        expect(pipelines).toHaveLength(2);
+    });
+
+    it.each(["format", "dFormat", "depthCompare", "samples"] as const)("checks %s before reusing a target-identity pipeline hit", (field) => {
+        const { engine, pipelines } = makeEngine();
+        const { shader } = createDabProgram(engine);
+        const target = makeTarget("rgba8unorm", "mutable");
+        target._descriptor.dFormat = "depth32float";
+        const descriptor = { ...target._descriptor };
+        const first = _getRenderPipeline(shader, target);
+        if (field === "format") {
+            target._descriptor.format = "rgba16float";
+        } else if (field === "dFormat") {
+            target._descriptor.dFormat = "depth24plus-stencil8";
+        } else if (field === "depthCompare") {
+            target._descriptor.depthCompare = "less";
+        } else {
+            target._descriptor.samples = 4;
+        }
+        const changed = _getRenderPipeline(shader, target);
+        expect(changed).not.toBe(first);
+        expect(_getRenderPipeline(shader, target)).toBe(changed);
+        Object.assign(target._descriptor, descriptor, { depthCompare: descriptor.depthCompare });
+        expect(_getRenderPipeline(shader, target)).toBe(first);
+        expect(pipelines).toHaveLength(2);
+    });
+
+    it("allocates borrowed unbuilt targets only once and before their first draw", () => {
+        const { engine, device, passes } = makeEngine();
+        device.createTexture = vi.fn(() => ({ createView: () => ({}) as GPUTextureView, destroy: vi.fn() }) as GPUTexture);
+        const descriptor = { format: "r16float" as const, samples: 1, size: { width: 8, height: 8 } };
+        const first = createRenderTarget(descriptor);
+        const task = createRenderDrawTask(engine, { target: first, clear: true });
+        task.record();
+        task.record();
+        expect(device.createTexture).toHaveBeenCalledTimes(1);
+
+        const next = createRenderTarget(descriptor);
+        setRenderDrawTaskTarget(task, next);
+        task.execute!();
+        expect(device.createTexture).toHaveBeenCalledTimes(2);
+        expect(passes[0]!.view).toBe(next._colorView);
+        task.dispose();
+        expect(() => setRenderDrawTaskTarget(task, createRenderTarget(descriptor))).toThrow(/disposed/);
+        expect(device.createTexture).toHaveBeenCalledTimes(2);
+    });
+
     it("draws indexed and indirect draws, and switches back to direct counts", () => {
         const { engine, passes } = makeEngine();
         const shader = createRenderShader(engine, { renderSource: "@vertex fn vertexMain() -> @builtin(position) vec4f { return vec4f(0.0); }" });
@@ -258,6 +413,165 @@ describe("render shaders", () => {
 
         expect(device.createRenderPipelineAsync).toHaveBeenCalledTimes(1);
         expect(device.createRenderPipeline).not.toHaveBeenCalled();
+    });
+
+    it("shares concurrent preparation across targets with the same signature", async () => {
+        const { engine, device } = makeEngine();
+        const { shader, draw } = createDabProgram(engine);
+        const gate = deferred<GPURenderPipeline>();
+        vi.mocked(device.createRenderPipelineAsync).mockReturnValueOnce(gate.promise);
+        const first = prepareRenderShader(shader, makeTarget("r16float", "first"));
+        const target = makeTarget("r16float", "second");
+        const second = prepareRenderShader(shader, target);
+
+        expect(device.createRenderPipelineAsync).toHaveBeenCalledTimes(1);
+        const pipeline = { label: "shared" } as GPURenderPipeline;
+        gate.resolve(pipeline);
+        await Promise.all([first, second]);
+
+        const task = createRenderDrawTask(engine, { target });
+        addRenderDraw(task, draw);
+        setRenderDrawCount(draw, 4, 1);
+        task.record();
+        task.execute!();
+        expect(device.createRenderPipeline).not.toHaveBeenCalled();
+        expect(shader._pipelines?.size).toBe(1);
+    });
+
+    it("prepares distinct signatures independently", async () => {
+        const { engine, device } = makeEngine();
+        const { shader } = createDabProgram(engine);
+        const first = deferred<GPURenderPipeline>();
+        const second = deferred<GPURenderPipeline>();
+        vi.mocked(device.createRenderPipelineAsync).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+        const prepared = Promise.all([prepareRenderShader(shader, makeTarget("r16float", "first")), prepareRenderShader(shader, makeTarget("rgba16float", "second"))]);
+
+        expect(device.createRenderPipelineAsync).toHaveBeenCalledTimes(2);
+        first.resolve({ label: "first" } as GPURenderPipeline);
+        second.resolve({ label: "second" } as GPURenderPipeline);
+        await prepared;
+        expect(shader._pipelines?.size).toBe(2);
+    });
+
+    it("propagates a shared rejection and permits a later retry", async () => {
+        const { engine, device } = makeEngine();
+        const { shader } = createDabProgram(engine);
+        const target = makeTarget("r16float", "stroke");
+        const gate = deferred<GPURenderPipeline>();
+        const error = new Error("pipeline compilation failed");
+        vi.mocked(device.createRenderPipelineAsync).mockReturnValueOnce(gate.promise);
+        const first = expect(prepareRenderShader(shader, target)).rejects.toBe(error);
+        const second = expect(prepareRenderShader(shader, target)).rejects.toBe(error);
+        gate.reject(error);
+        await Promise.all([first, second]);
+
+        expect(device.createRenderPipelineAsync).toHaveBeenCalledTimes(1);
+        await prepareRenderShader(shader, target);
+        expect(device.createRenderPipelineAsync).toHaveBeenCalledTimes(2);
+        expect(shader._pipelines?.size).toBe(1);
+    });
+
+    it.each(["disposed", "replaced"] as const)("rejects pending preparation after the shader is %s without publishing a pipeline", async (change) => {
+        const { engine, device } = makeEngine();
+        const { shader } = createDabProgram(engine);
+        const gate = deferred<GPURenderPipeline>();
+        vi.mocked(device.createRenderPipelineAsync).mockReturnValueOnce(gate.promise);
+        const prepared = prepareRenderShader(shader, makeTarget("r16float", "stroke"));
+        const cache = shader._pipelines;
+        const rejected = expect(prepared).rejects.toThrow(change === "disposed" ? /disposed/ : /recreate the compute graph/);
+        if (change === "disposed") {
+            disposeRenderShader(shader);
+        } else {
+            engine._device = makeEngine().device;
+        }
+        gate.resolve({ label: "obsolete" } as GPURenderPipeline);
+        await rejected;
+
+        expect(cache?.size).toBe(0);
+        expect(shader._pending?.size ?? 0).toBe(0);
+        if (change === "disposed") {
+            expect(shader._pipelines).toBeNull();
+        }
+    });
+
+    it("does not replace a synchronous frame pipeline with a late async compilation", async () => {
+        const { engine, device, passes } = makeEngine();
+        const { shader, draw } = createDabProgram(engine);
+        const gate = deferred<GPURenderPipeline>();
+        vi.mocked(device.createRenderPipelineAsync).mockReturnValueOnce(gate.promise);
+        const target = makeTarget("r16float", "first");
+        const prepared = prepareRenderShader(shader, target);
+        const task = createRenderDrawTask(engine, { target });
+        addRenderDraw(task, draw);
+        setRenderDrawCount(draw, 4, 1);
+        task.record();
+        task.execute!();
+        const synchronous = passes[0]!.calls[0]![1];
+        gate.resolve({ label: "late" } as GPURenderPipeline);
+        await prepared;
+
+        setRenderDrawTaskTarget(task, makeTarget("r16float", "second"));
+        task.execute!();
+        expect(device.createRenderPipeline).toHaveBeenCalledTimes(1);
+        expect(passes[1]!.calls[0]![1]).toBe(synchronous);
+    });
+
+    it.each(["depth32float", "depth24plus-stencil8", "depth32float-stencil8", "stencil8"] as const)("uses only the present aspects of %s", (format) => {
+        const { engine, passes } = makeEngine();
+        const shader = createRenderShader(engine, { renderSource: "@vertex fn vertexMain() -> @builtin(position) vec4f { return vec4f(0.0); }" });
+        const draw = createRenderDraw(shader, createRenderBindingSet(shader, {}), { vertexCount: 3 });
+        const task = createRenderDrawTask(engine, { target: makeDepthTarget(format), clear: true });
+        addRenderDraw(task, draw);
+        task.record();
+        task.execute!();
+
+        const attachment = passes[0]!.descriptor.depthStencilAttachment!;
+        expect(passes[0]!.descriptor.colorAttachments).toEqual([]);
+        if (format === "stencil8") {
+            expect(attachment).not.toHaveProperty("depthLoadOp");
+            expect(attachment).not.toHaveProperty("depthStoreOp");
+            expect(attachment).not.toHaveProperty("depthClearValue");
+        } else {
+            expect(attachment).toMatchObject({ depthLoadOp: "clear", depthStoreOp: "store", depthClearValue: 0 });
+        }
+        if (format === "depth32float") {
+            expect(attachment).not.toHaveProperty("stencilLoadOp");
+        } else {
+            expect(attachment).toMatchObject({ stencilLoadOp: "clear", stencilStoreOp: "store", stencilClearValue: 0 });
+        }
+        task.clear = false;
+        task.execute!();
+        if (format !== "stencil8") {
+            expect(attachment.depthLoadOp).toBe("load");
+        }
+        if (format !== "depth32float") {
+            expect(attachment.stencilLoadOp).toBe("load");
+        }
+    });
+
+    it("rebuilds aspect operations when switching between depth-only, combined and stencil-only targets", () => {
+        const { engine, passes, pipelines } = makeEngine();
+        const shader = createRenderShader(engine, {
+            renderSource: "@vertex fn vertexMain() -> @builtin(position) vec4f { return vec4f(0.0); }",
+            depth: { depthWriteEnabled: true, depthCompare: "less" },
+        });
+        const draw = createRenderDraw(shader, createRenderBindingSet(shader, {}), { vertexCount: 3 });
+        const task = createRenderDrawTask(engine, { target: makeDepthTarget("depth32float"), clear: true });
+        addRenderDraw(task, draw);
+        task.record();
+        task.execute!();
+        expect(passes[0]!.descriptor.depthStencilAttachment).not.toHaveProperty("stencilLoadOp");
+
+        setRenderDrawTaskTarget(task, makeDepthTarget("depth24plus-stencil8"));
+        task.execute!();
+        expect(passes[1]!.descriptor.depthStencilAttachment).toMatchObject({ depthLoadOp: "clear", stencilLoadOp: "clear" });
+        expect(pipelines[1]!.depthStencil).toMatchObject({ format: "depth24plus-stencil8", depthWriteEnabled: true, depthCompare: "less" });
+
+        setRenderDrawTaskTarget(task, makeDepthTarget("stencil8"));
+        task.execute!();
+        expect(passes[2]!.descriptor.depthStencilAttachment).not.toHaveProperty("depthLoadOp");
+        expect(passes[2]!.descriptor.depthStencilAttachment).toMatchObject({ stencilLoadOp: "clear" });
+        expect(pipelines[2]!.depthStencil).toEqual({ format: "stencil8" });
     });
 
     it("requires the program to be recreated after the device is replaced or the shader disposed", () => {

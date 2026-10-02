@@ -38,6 +38,8 @@ export interface RenderDrawTask extends Task {
     _colorAttachment: GPURenderPassColorAttachment | null;
     /** @internal */
     _depthAttachment: GPURenderPassDepthStencilAttachment | null;
+    /** @internal Format used to build the cached depth/stencil attachment. */
+    _depthAttachmentFormat: GPUTextureFormat | undefined;
     /** @internal */
     _disposed: boolean;
 }
@@ -54,10 +56,26 @@ function offsetsEqual(a: readonly number[] | null, b: readonly number[]): boolea
     return true;
 }
 
+function prepareTarget(target: RenderTarget, engine: EngineContext): void {
+    if (target._eager || (!target._colorView && !target._depthView)) {
+        buildRenderTarget(target, engine);
+    }
+}
+
 function buildAttachments(task: RenderDrawTask): void {
     const target = task._target;
     task._colorAttachment = target._descriptor.format ? { view: target._colorView!, loadOp: "load", storeOp: "store" } : null;
-    task._depthAttachment = target._descriptor.dFormat ? { view: target._depthView!, depthLoadOp: "load", depthStoreOp: "store" } : null;
+    const format = target._descriptor.dFormat;
+    task._depthAttachmentFormat = format;
+    const hasDepth = format !== "stencil8";
+    const hasStencil = format === "stencil8" || format === "depth24plus-stencil8" || format === "depth32float-stencil8";
+    task._depthAttachment = format
+        ? {
+              view: target._depthView!,
+              ...(hasDepth ? { depthLoadOp: "load" as const, depthStoreOp: "store" as const } : {}),
+              ...(hasStencil ? { stencilLoadOp: "load" as const, stencilStoreOp: "store" as const } : {}),
+          }
+        : null;
     task._descriptor = {
         label: task.name,
         colorAttachments: task._colorAttachment ? [task._colorAttachment] : [],
@@ -86,11 +104,7 @@ export function createRenderDrawTask(engine: EngineContext, config: RenderDrawTa
                 throw new Error(`RenderDrawTask "${task.name}" has been disposed.`);
             }
             const target = task._target;
-            // Borrowed targets are normally allocated already (render-target textures, texture layers, the
-            // swapchain); a plain descriptor that was never built is allocated once, and stays caller-owned.
-            if (!target._colorView && !target._depthView) {
-                buildRenderTarget(target, engine);
-            }
+            prepareTarget(target, engine);
             buildAttachments(task);
         },
         execute(): number {
@@ -115,8 +129,14 @@ export function createRenderDrawTask(engine: EngineContext, config: RenderDrawTa
             const depth = task._depthAttachment;
             if (depth) {
                 depth.view = target._depthView!;
-                depth.depthLoadOp = task.clear ? "clear" : "load";
-                depth.depthClearValue = target._descriptor.depthClearValue ?? 0;
+                if (depth.depthLoadOp) {
+                    depth.depthLoadOp = task.clear ? "clear" : "load";
+                    depth.depthClearValue = target._descriptor.depthClearValue ?? 0;
+                }
+                if (depth.stencilLoadOp) {
+                    depth.stencilLoadOp = task.clear ? "clear" : "load";
+                    depth.stencilClearValue = 0;
+                }
             }
             const pass = engine._currentEncoder.beginRenderPass(task._descriptor);
             validated.clear();
@@ -212,12 +232,15 @@ export function removeRenderDraw(task: RenderDrawTask, draw: RenderDraw): void {
 
 /**
  * Point the task at another borrowed target, for example the next tile layer. Targets of the same format
- * reuse the same pipelines; nothing is allocated unless the attachment set (color, depth) changes.
+ * reuse the same pipelines. Synchronize eager targets or allocate an unbuilt target before the next draw.
  */
 export function setRenderDrawTaskTarget(task: RenderDrawTask, target: RenderTarget): void {
-    const previous = task._target;
+    if (task._disposed) {
+        throw new Error(`RenderDrawTask "${task.name}" has been disposed.`);
+    }
+    prepareTarget(target, task.engine);
     task._target = (task as { target: RenderTarget }).target = target;
-    if (!!previous._descriptor.format !== !!target._descriptor.format || !!previous._descriptor.dFormat !== !!target._descriptor.dFormat) {
+    if (!!task._colorAttachment !== !!target._descriptor.format || task._depthAttachmentFormat !== target._descriptor.dFormat) {
         buildAttachments(task);
     }
 }
