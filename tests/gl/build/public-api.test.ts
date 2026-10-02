@@ -90,6 +90,11 @@ describe("babylon-lite-gl build output", () => {
         expect(dtsResult.status).toBe(0);
         expect(readFileSync(resolve(DIST, "index.d.ts"), "utf-8")).toMatch(/export type \{[^}]*\bGLStencilOpState\b[^}]*\} from "\.\/depth-stencil\.js";/);
         expect(readFileSync(resolve(DIST, "index.d.ts"), "utf-8")).toMatch(/export type \{[^}]*\bGLTexture3D\b[^}]*\} from "\.\/texture-3d\.js";/);
+        expect(readFileSync(resolve(DIST, "index.d.ts"), "utf-8")).toMatch(/export type \{[^}]*\bGLEffectWaitOptions\b[^}]*\} from "\.\/effect-ready\.js";/);
+        expect(readFileSync(resolve(DIST, "effect.d.ts"), "utf-8")).toContain("getEffectCompilationError(engine: GLEngineContext, effect: GLEffect): string | null");
+        expect(readFileSync(resolve(DIST, "effect-ready.d.ts"), "utf-8")).toContain(
+            "waitForEffect(engine: GLEngineContext, effect: GLEffect, options?: GLEffectWaitOptions): Promise<GLEffect>"
+        );
 
         // ── The barrel exposes the full converged runtime surface ───────────
         const mod = (await import(pathToFileURL(resolve(DIST, "index.js")).href)) as Record<string, unknown>;
@@ -104,6 +109,8 @@ describe("babylon-lite-gl build output", () => {
             "stopRenderLoop",
             // effects
             "createEffect",
+            "getEffectCompilationError",
+            "waitForEffect",
             "createEffectWrapper",
             "applyEffectWrapper",
             "drawEffect",

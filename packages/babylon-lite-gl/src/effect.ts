@@ -110,9 +110,10 @@ export interface GLEffect {
     _restore: (engine: GLEngineContext) => void;
 }
 
-/** Compile + link a new effect. Does NOT block on link completion — `isReady`
- *  starts false; consumers poll `isEffectReady` (typically from their render
- *  callback) to drive finalization. */
+/** Submit compilation + linking without querying their results. `isReady`
+ *  starts false; poll `isEffectReady` or opt into `waitForEffect` to finalize.
+ *  Allocation failures throw synchronously. Shader syntax/link errors are
+ *  recorded during polling and exposed by `getEffectCompilationError`. */
 export function createEffect(engine: GLEngineContext, options: GLEffectOptions): GLEffect {
     const attribs = options.attributeNames ?? ["position"];
     const gl = engine.gl;
@@ -131,25 +132,11 @@ export function createEffect(engine: GLEngineContext, options: GLEffectOptions):
         return cached;
     }
 
-    const compileErr: (string | null)[] = [null];
-    const finalVS = applyDefines(options.vertexSource, options.defines);
-    const finalFS = applyDefines(options.fragmentSource, options.defines);
-
-    const vs = compileShader(gl, finalVS, gl.VERTEX_SHADER, compileErr);
-    if (vs === null) {
-        throw new Error(`lite-gl: ${options.name} vertex compile failed: ${compileErr[0] ?? "unknown"}`);
+    const compiled = compileEffectProgram(gl, options, attribs);
+    if (typeof compiled === "string") {
+        throw new Error(`lite-gl: ${options.name} ${compiled}`);
     }
-    const fs = compileShader(gl, finalFS, gl.FRAGMENT_SHADER, compileErr);
-    if (fs === null) {
-        gl.deleteShader(vs);
-        throw new Error(`lite-gl: ${options.name} fragment compile failed: ${compileErr[0] ?? "unknown"}`);
-    }
-    const program = linkProgram(gl, vs, fs, attribs);
-    if (program === null) {
-        gl.deleteShader(vs);
-        gl.deleteShader(fs);
-        throw new Error(`lite-gl: ${options.name} program allocation failed`);
-    }
+    const { vs, fs, program } = compiled;
 
     const effect: GLEffect = {
         name: options.name,
@@ -174,23 +161,14 @@ export function createEffect(engine: GLEngineContext, options: GLEffectOptions):
     };
 
     effect._restore = (target: GLEngineContext): void => {
-        const g = target.gl;
-        const newVS = compileShader(g, applyDefines(options.vertexSource, options.defines), g.VERTEX_SHADER, [null]);
-        const newFS = compileShader(g, applyDefines(options.fragmentSource, options.defines), g.FRAGMENT_SHADER, [null]);
-        if (newVS === null || newFS === null) {
-            effect._compileError = "context-restore: shader compile failed";
+        const restored = compileEffectProgram(target.gl, options, attribs);
+        if (typeof restored === "string") {
+            recordCompilationError(effect, `context-restore: ${restored}`);
             return;
         }
-        const newProg = linkProgram(g, newVS, newFS, attribs);
-        if (newProg === null) {
-            g.deleteShader(newVS);
-            g.deleteShader(newFS);
-            effect._compileError = "context-restore: program allocation failed";
-            return;
-        }
-        effect.program = newProg;
-        effect._vs = newVS;
-        effect._fs = newFS;
+        effect.program = restored.program;
+        effect._vs = restored.vs;
+        effect._fs = restored.fs;
         effect.isReady = false;
         effect._samplersAssigned = false;
         effect.uniformLocations = {};
@@ -201,6 +179,35 @@ export function createEffect(engine: GLEngineContext, options: GLEffectOptions):
     engine._effects.push(effect);
     engine._effectCache.set(cacheKey, effect);
     return effect;
+}
+
+/** Shader/program handles allocated as one unit on creation and restoration. */
+interface EffectProgram {
+    vs: WebGLShader;
+    fs: WebGLShader;
+    program: WebGLProgram;
+}
+
+/** Share allocation and partial-failure cleanup between initial creation and
+ *  context restoration. Returns a diagnostic on allocation failure; compile
+ *  and link results are deliberately left to readiness polling. */
+function compileEffectProgram(gl: WebGL2RenderingContext, options: GLEffectOptions, attribs: readonly string[]): EffectProgram | string {
+    const vs = compileShader(gl, applyDefines(options.vertexSource, options.defines), gl.VERTEX_SHADER);
+    if (vs === null) {
+        return "vertex shader allocation failed";
+    }
+    const fs = compileShader(gl, applyDefines(options.fragmentSource, options.defines), gl.FRAGMENT_SHADER);
+    if (fs === null) {
+        gl.deleteShader(vs);
+        return "fragment shader allocation failed";
+    }
+    const program = linkProgram(gl, vs, fs, attribs);
+    if (program === null) {
+        gl.deleteShader(vs);
+        gl.deleteShader(fs);
+        return "program allocation failed";
+    }
+    return { vs, fs, program };
 }
 
 /** Poll the link state and, on first success, run finalization (uniform-
@@ -219,14 +226,28 @@ export function isEffectReady(engine: GLEngineContext, effect: GLEffect): boolea
     if (!isLinkComplete(engine.gl, effect.program, engine.caps.parallelShaderCompile)) {
         return false;
     }
-    const linkErr = getLinkError(engine.gl, effect.program);
+    const linkErr = getLinkError(engine.gl, effect.program, effect._vs, effect._fs);
     if (linkErr !== null) {
-        effect._compileError = linkErr;
-        console.error(`lite-gl: ${effect.name} link failed:`, linkErr);
+        recordCompilationError(effect, linkErr);
         return false;
     }
     finalizeEffect(engine, effect);
     return true;
+}
+
+/** Poll readiness once and return the recorded compile/link/restore diagnostic.
+ *  Returns null while pending or when no failure has been recorded; this is
+ *  not a readiness guarantee. Does not schedule polling. A successful restore
+ *  allocation clears the previous diagnostic before the new link is checked. */
+export function getEffectCompilationError(engine: GLEngineContext, effect: GLEffect): string | null {
+    isEffectReady(engine, effect);
+    return effect._compileError;
+}
+
+function recordCompilationError(effect: GLEffect, error: string): void {
+    effect._compileError = error;
+    effect.isReady = false;
+    console.error(`lite-gl: ${effect.name} ${error}`);
 }
 
 /** Resolves uniform/attribute locations, binds the program (cached), and
@@ -268,7 +289,8 @@ function finalizeEffect(engine: GLEngineContext, effect: GLEffect): void {
 }
 
 /** Fires `cb` synchronously if the effect is already ready; otherwise queues
- *  it for the next finalization. */
+ *  it for the next finalization. Does not start polling: call `isEffectReady`
+ *  from the render loop or opt into `waitForEffect`. */
 export function executeWhenCompiled(engine: GLEngineContext, effect: GLEffect, cb: (e: GLEffect) => void): void {
     if (isEffectReady(engine, effect)) {
         cb(effect);
