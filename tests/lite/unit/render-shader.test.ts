@@ -326,7 +326,6 @@ describe("render shaders", () => {
 
     it("allocates borrowed unbuilt targets only once and before their first draw", () => {
         const { engine, device, passes } = makeEngine();
-        device.createTexture = vi.fn(() => ({ createView: () => ({}) as GPUTextureView, destroy: vi.fn() }) as GPUTexture);
         const descriptor = { format: "r16float" as const, samples: 1, size: { width: 8, height: 8 } };
         const first = createRenderTarget(descriptor);
         const task = createRenderDrawTask(engine, { target: first, clear: true });
