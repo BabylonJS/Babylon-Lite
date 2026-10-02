@@ -57,6 +57,47 @@ runRenderLoop(engine, () => {
 });
 ```
 
+## Effect readiness and errors
+
+`createEffect` / `createEffectWrapper` submit compilation and linking without
+querying their results. With `KHR_parallel_shader_compile`, readiness checks
+poll completion before inspecting link status. Shader status and info logs are
+queried only after link failure, avoiding premature compilation stalls.
+Without the extension, checking link status can block.
+
+Manual polling stays available: call `isEffectReady(engine, effect)` in your
+render loop and inspect `getEffectCompilationError(engine, effect)` when it
+returns false. The error accessor also polls once; `null` means no failure has
+been recorded, not necessarily that the effect is ready. Errors include the
+program log and failing shader stages' logs and are logged once. Neither this
+accessor nor `executeWhenCompiled` starts automatic polling.
+
+To wait before starting a render loop, opt into the tree-shakeable helper:
+
+```ts
+import { waitForEffect } from "@babylonjs/lite-gl";
+
+const controller = new AbortController();
+try {
+    await waitForEffect(engine, wrapper.effect, { signal: controller.signal });
+    // The effect is finalized; rendering can now start.
+} catch (error) {
+    console.error("Effect could not become ready:", error);
+}
+```
+
+The helper polls once per animation frame without registering a render loop.
+It rejects on compile/link/restore failure, context loss, disposal (on the next
+poll), or cancellation via `controller.abort()`, and cleans up its frame and
+listeners on every exit. Cancelling a wait does not dispose a shared effect.
+After context restoration, call it again to wait for the replacement program.
+Already ready effects resolve without scheduling a frame; consumers that only
+use manual polling ship none of the helper's scheduling code.
+
+**Migration:** shader syntax errors no longer throw synchronously from
+`createEffect`. Use the public error accessor or catch `waitForEffect` instead.
+Shader/program allocation failures still throw synchronously.
+
 ## Entry points
 
 The entire public API is available from the single `@babylonjs/lite-gl` entry:
@@ -74,7 +115,8 @@ use.
   `getRenderingCanvas`, and `on/offContextLost` + `on/offContextRestored`
   (context-loss is handled: effects and textures are rebuilt on restore).
 - **Render loop** — `runRenderLoop`, `stopRenderLoop`.
-- **Effects** — `createEffect`, `isEffectReady`, `executeWhenCompiled`,
+- **Effects** — `createEffect`, `isEffectReady`, `getEffectCompilationError`,
+  `executeWhenCompiled`, `waitForEffect` (optional cancellable readiness promise),
   `useEffect`, `disposeEffect`, and the cached uniform setters
   `setEffectFloat` / `…Float2` / `…Float3` / `…Float4` / `…Int` /
   `…Color3` / `…Color4` / `…Texture`.

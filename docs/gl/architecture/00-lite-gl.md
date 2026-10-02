@@ -315,7 +315,16 @@ export interface GLEffect {
 
 export function createEffect(engine: GLEngineContext, options: GLEffectOptions): GLEffect;
 export function isEffectReady(engine: GLEngineContext, effect: GLEffect): boolean;
+/** Polls readiness once and returns a recorded compile/link/restore error,
+ *  or null when none has been recorded. Does not schedule background work. */
+export function getEffectCompilationError(engine: GLEngineContext, effect: GLEffect): string | null;
 export function executeWhenCompiled(engine: GLEngineContext, effect: GLEffect, cb: (e: GLEffect) => void): void;
+/** Optional readiness scheduler; all scheduling code lives in effect-ready.ts. */
+export interface GLEffectWaitOptions {
+    /** Cancels this wait without disposing or cancelling the shared effect. */
+    signal?: AbortSignal;
+}
+export function waitForEffect(engine: GLEngineContext, effect: GLEffect, options?: GLEffectWaitOptions): Promise<GLEffect>;
 export function disposeEffect(engine: GLEngineContext, effect: GLEffect): void;
 
 /** Sets engine._state.currentProgram and calls gl.useProgram(...) iff changed.
@@ -1201,10 +1210,19 @@ and ensure the shared quad VAO is always correct.
 
 ### 4.6 Readiness finalization (parallel-compile-safe)
 
-`createEffect` compiles shaders, calls `attachShader` × 2,
+`createEffect` submits shader compilation without querying shader status, calls `attachShader` × 2,
 `bindAttribLocation(program, 0, attributeNames[0])`, then `linkProgram`.
-It does NOT block on link completion — `isReady` starts as `false`,
+It does not query compile or link results — `isReady` starts as `false`,
 `_samplersAssigned` as `false`, `uniformLocations` and `samplerUnits` empty.
+Shader/program allocation failures still throw synchronously. Shader syntax
+and link errors instead surface during readiness polling, including without
+the parallel extension. This replaces the former synchronous shader-error
+throws: callers must inspect `getEffectCompilationError` after polling, or
+catch a rejected `waitForEffect` promise.
+Initial creation and restoration use one `compileEffectProgram` allocator,
+which returns the shader/program handles or an allocation diagnostic and
+releases any partial allocation. Creation throws that diagnostic with the
+effect name; restoration records it with a `context-restore` prefix.
 
 `isEffectReady(engine, effect)` is the polling gate:
 
@@ -1214,11 +1232,14 @@ if (effect._compileError !== null) return false;
 
 linked = (caps.parallelShaderCompile !== null)
     ? gl.getProgramParameter(program, caps.parallelShaderCompile.COMPLETION_STATUS_KHR)
-    : true                                  // synchronous link without the extension
+    : true                                  // LINK_STATUS may block without the extension
 if (!linked) return false;
 
 if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    effect._compileError = gl.getProgramInfoLog(program) ?? "link failed";
+    // Only AFTER link failure, query both shaders' COMPILE_STATUS and include
+    // failing stages' info logs alongside the program log. Empty logs get
+    // non-empty fallback diagnostics. Record and log the failure once.
+    effect._compileError = getLinkError(gl, program, effect._vs, effect._fs);
     return false;
 }
 
@@ -1239,6 +1260,30 @@ the render loop. That same poll drives finalization — there is no separate
 
 `_onCompiled[]` is fired and cleared during finalization. Listeners added
 _after_ readiness fire synchronously from `executeWhenCompiled` itself.
+
+`getEffectCompilationError(engine, effect)` runs one `isEffectReady` poll and
+returns `_compileError`. `null` means no failure has been recorded, not that
+the effect is ready. Recorded errors survive disposal and context loss for
+diagnostics; a successful context-restoration allocation clears the error,
+then readiness checks diagnose the replacement program normally. Restore
+allocation errors identify the stage and clean up any partially allocated
+shaders. Neither the accessor nor `executeWhenCompiled` starts a scheduler.
+
+`waitForEffect(engine, effect, { signal? })` is an opt-in helper in the separate,
+side-effect-free `effect-ready.ts` module, re-exported from the root barrel.
+It polls immediately, resolves with the effect when finalization succeeds,
+and otherwise polls once per animation frame independently of the render
+loop. It rejects with a labelled error on compile/link/restore failure,
+context loss, or disposal (disposal is observed on the next poll), and with
+the signal's Error reason on cancellation (other reasons become the `cause`
+of an `AbortError`). Context loss and abort events
+reject immediately, even while animation frames are suspended. Every exit
+removes the loss/abort listeners and cancels any scheduled frame; an already
+ready/failed/disposed/aborted effect schedules no frame. Polling exceptions
+also reject and clean up. Multiple waiters are independent; cancelling one
+does not dispose the shared effect or stop another waiter. No callbacks are
+added to `_onCompiled`, and importing only the manual APIs retains no promise,
+abort-listener or animation-frame scheduling code from this helper.
 
 ### 4.7 Context lost / restored protocol
 

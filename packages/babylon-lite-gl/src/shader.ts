@@ -5,26 +5,21 @@
  * re-compile path.
  */
 
-/** Compile a single shader stage. Returns the shader handle; sets the
- *  `errorOut` array's element 0 to a non-null string on failure. */
-export function compileShader(gl: WebGL2RenderingContext, source: string, stage: GLenum, errorOut: (string | null)[]): WebGLShader | null {
+/** Submit a shader stage without querying compilation results. Returns null
+ *  only on allocation failure; shader diagnostics are collected after a
+ *  completed program link fails. */
+export function compileShader(gl: WebGL2RenderingContext, source: string, stage: GLenum): WebGLShader | null {
     const shader = gl.createShader(stage);
     if (shader === null) {
-        errorOut[0] = "gl.createShader returned null";
         return null;
     }
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
-    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-        errorOut[0] = gl.getShaderInfoLog(shader) ?? "shader compile failed";
-        gl.deleteShader(shader);
-        return null;
-    }
     return shader;
 }
 
 /** Attach + bind + link. Returns the program handle. Does NOT block on
- *  link completion — callers use `pollLinkStatus` to drive the parallel-
+ *  link completion — callers use `isLinkComplete` to drive the parallel-
  *  shader-compile state machine. */
 export function linkProgram(gl: WebGL2RenderingContext, vs: WebGLShader, fs: WebGLShader, attributeNames: readonly string[]): WebGLProgram | null {
     const program = gl.createProgram();
@@ -50,8 +45,8 @@ export function linkProgram(gl: WebGL2RenderingContext, vs: WebGLShader, fs: Web
 
 /** Returns `true` when the program has finished linking and can be queried.
  *  When the `KHR_parallel_shader_compile` extension is present, this is the
- *  cheap async-friendly poll; without it, link is synchronous so the answer
- *  is always `true`. */
+ *  cheap async-friendly poll; without it, the subsequent LINK_STATUS query
+ *  may block until linking completes. */
 export function isLinkComplete(gl: WebGL2RenderingContext, program: WebGLProgram, parallel: { COMPLETION_STATUS_KHR: number } | null): boolean {
     if (parallel === null) {
         return true;
@@ -59,10 +54,18 @@ export function isLinkComplete(gl: WebGL2RenderingContext, program: WebGLProgram
     return Boolean(gl.getProgramParameter(program, parallel.COMPLETION_STATUS_KHR));
 }
 
-/** Returns null on success, the info log on failure. */
-export function getLinkError(gl: WebGL2RenderingContext, program: WebGLProgram): string | null {
+/** Query a completed link. Only on failure, collect the program log and any
+ *  failed shader stages' logs; never query shader status on the success path. */
+export function getLinkError(gl: WebGL2RenderingContext, program: WebGLProgram, vs: WebGLShader, fs: WebGLShader): string | null {
     if (gl.getProgramParameter(program, gl.LINK_STATUS)) {
         return null;
     }
-    return gl.getProgramInfoLog(program) ?? "link failed";
+    let error = `link failed: ${gl.getProgramInfoLog(program) || "no program info log"}`;
+    if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+        error += `\nvertex compile failed: ${gl.getShaderInfoLog(vs) || "no shader info log"}`;
+    }
+    if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+        error += `\nfragment compile failed: ${gl.getShaderInfoLog(fs) || "no shader info log"}`;
+    }
+    return error;
 }
