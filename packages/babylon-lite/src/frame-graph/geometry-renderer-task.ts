@@ -197,8 +197,9 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
     /** One view per unique source material (Standard, PBR or Node). Kept across syncs together with the
      *  variants compiled on it, and replaced only when a sync publishes, pruned to the materials still drawn. */
     _views: Map<Material, GeometryView>;
-    /** @internal What the published views and entries were built against: device, `config.camera` and
-     *  `config.reverseCulling`. A sync that sees any of them changed carries nothing and reuses no view. */
+    /** @internal What the published views and entries were built against: device, the camera (`config.camera`,
+     *  else `scene.camera`) and `config.reverseCulling`. A sync that sees any of them changed carries nothing and
+     *  reuses no view. */
     _cfg: unknown[];
     /** @internal Device the task's own buffers live on; `record()` recreates them on a replacement device. */
     _device: GPUDevice;
@@ -570,10 +571,12 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
     // entries are the same objects in both lists and are never retired here.
     const oldBound = task._bound;
     // Views and entries capture the device, the camera and the culling direction. When any changed since the
-    // last publish (`config.camera` / `reverseCulling` replaced before `frameGraph.build()`, or a replacement
-    // device after device loss), nothing is carried and every view is created afresh. The stamp is published
-    // with the list, so a failed sync is retried the same way.
-    const cfg = [task._device, config.camera, config.reverseCulling];
+    // last publish (`config.camera`, or `scene.camera` for a task without one, or `reverseCulling` replaced
+    // before `frameGraph.build()`, or a replacement device after device loss), nothing is carried and every view
+    // is created afresh. The camera is stamped by identity: a floating-origin entry packs its world against the
+    // camera it was built for and only re-packs when that camera's version moves. The stamp is published with
+    // the list, so a failed sync is retried the same way.
+    const cfg = [task._device, config.camera ?? sc.camera, config.reverseCulling];
     const fresh = cfg.some((value, index) => value !== task._cfg[index]);
     // This sync's own copy of the view cache: the views it creates replace `_views` only when it publishes, so
     // a failed sync never leaves a view built against another stamp for a later sync to reuse.

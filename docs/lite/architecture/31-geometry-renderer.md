@@ -245,10 +245,12 @@ contexts therefore composes K variants, not one per material. Node entries and v
 rebuilt on every sync, because a Node geometry resource snapshots the material's uniforms
 once; a Node view is stamped with a per-sync token that holds no view, so a published Node view
 keeps no earlier Node material or view alive. Off-scene meshes of an explicit list have no forward renderable and are rebuilt on every
-sync too. A sync that sees a different device, `config.camera` or `config.reverseCulling` than
-the last publish carries nothing and reuses no view, so a camera or culling change, or a
-device-loss recovery (whose `record()` also recreates the task's own buffers), rebuilds the
-whole pass as before. If such a sync fails and the previous configuration is restored, the next
+sync too. A sync that sees a different device, camera (`config.camera`, else `scene.camera`,
+compared by identity) or `config.reverseCulling` than the last publish carries nothing and
+reuses no view, so a camera or culling change, or a device-loss recovery (whose `record()` also
+recreates the task's own buffers), rebuilds the whole pass as before. The camera identity
+matters under a floating origin: an entry packs its world against the camera it was built
+for and re-packs only when that camera's version moves. If such a sync fails and the previous configuration is restored, the next
 sync carries the published entries and views, none of the failed sync's views.
 
 The task's `_removeMesh` hook evicts every matching bound entry and queues its retirement

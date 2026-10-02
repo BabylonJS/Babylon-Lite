@@ -754,7 +754,13 @@ describe("GeometryRendererTask", () => {
     // (mutations are then simulated with `replaceForward` / `addMesh`), while "scene" adds the meshes
     // with `addToScene` and boots the real Standard group build, so later mutations go through the
     // scene's own producers.
-    async function setupGeoTask(meshCount: number, explicitMeshes = false, forward: "none" | "stub" | "scene" = "none", type = GeometryTextureType.WORLD_POSITION) {
+    async function setupGeoTask(
+        meshCount: number,
+        explicitMeshes = false,
+        forward: "none" | "stub" | "scene" = "none",
+        type = GeometryTextureType.WORLD_POSITION,
+        prepareEngine?: (engine: EngineContext) => void
+    ) {
         const { createStandardMaterial } = await import("../../../packages/babylon-lite/src/material/standard/create-standard-material");
         const makeWorld = (x: number): Float32Array => {
             const m = new Float32Array(16);
@@ -781,6 +787,7 @@ describe("GeometryRendererTask", () => {
             _currentEncoder: { beginRenderPass: () => passEncoder } as unknown as GPUCommandEncoder,
             _retirements: [] as Array<() => void>,
         });
+        prepareEngine?.(engine);
         const scene = createSceneContext(engine, { defaultRenderTask: false }) as SceneContext;
         (scene as { camera?: unknown }).camera = {
             worldMatrix: makeWorld(0),
@@ -1197,6 +1204,41 @@ describe("GeometryRendererTask", () => {
         const rebuilt = [...internal._bound];
         internal.record();
         internal._bound.forEach((entry, index) => expect(entry).toBe(rebuilt[index]));
+    });
+
+    it("re-packs a tracked floating-origin entry against a replaced scene camera when the task has no camera of its own", async () => {
+        const { makePackMeshWorld } = await import("../../../packages/babylon-lite/src/large-world/pack-mat4-with-offset");
+        const { wrapRenderableForFO, applyLightFoOffset } = await import("../../../packages/babylon-lite/src/large-world/floating-origin");
+        const { scene, internal, config, engine } = await setupGeoTask(1, false, "stub", GeometryTextureType.WORLD_POSITION, (eng) =>
+            Object.assign(eng, {
+                useFloatingOrigin: true,
+                _makePackMeshWorld: makePackMeshWorld,
+                _wrapRenderableForFO: wrapRenderableForFO,
+                _applyLightFoOffset: applyLightFoOffset,
+            })
+        );
+        expect(config.camera).toBeUndefined();
+        internal.execute();
+        const before = [...internal._bound];
+        const gpu = probeGpu(engine);
+        const worlds: Float32Array[] = [];
+        (engine._device.queue as unknown as { writeBuffer: (...a: unknown[]) => void }).writeBuffer = (...a: unknown[]) => {
+            const data = a[2] as ArrayBuffer | ArrayBufferView;
+            worlds.push(new Float32Array(ArrayBuffer.isView(data) ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) : data.slice(0)));
+        };
+
+        // A different scene camera, far from the old origin, whose world-matrix counter happens to equal the old one.
+        const old = scene.camera as unknown as { worldMatrix: Float32Array; worldMatrixVersion: number };
+        const moved = { ...old, worldMatrix: Float32Array.from(old.worldMatrix), _viewVer: -1, _projVer: -1, _vpVer: -1 };
+        moved.worldMatrix[12] = 9000;
+        expect(moved.worldMatrixVersion).toBe(old.worldMatrixVersion);
+        (scene as { camera?: unknown }).camera = moved;
+        internal.record();
+        internal.execute();
+
+        // The mesh (world X = 0) is packed relative to the new camera: 0 - 9000.
+        expect(worlds.some((f) => f.length >= 16 && f[12] === -9000)).toBe(true);
+        expectRebuiltPass(internal._bound, before, gpu.retirements);
     });
 
     it("rebuilds every entry, view and pipeline with the flipped culling once config.reverseCulling changes", async () => {
