@@ -1327,6 +1327,350 @@ describe("GeometryRendererTask", () => {
             buildGroup._rebuildSingle = originalRebuild;
         }
     });
+
+    // Every record and every renderable-version change builds NEW views, so a module cached per view would be
+    // compiled again for byte-identical WGSL. The Standard geometry family shares one module per device and code.
+    describe("geometry shader module sharing", () => {
+        type BoundEntry = { _binding: object; _view: { source: unknown } };
+
+        /** The vertex and fragment modules a bound geometry pipeline was created with (the mock device hands
+         *  descriptors back as GPU objects, so a module is its `{ code }` descriptor). */
+        function boundModules(entry: BoundEntry): [GPUShaderModuleDescriptor, GPUShaderModuleDescriptor] {
+            const pipeline = (entry._binding as { pipeline: GPURenderPipelineDescriptor }).pipeline;
+            return [pipeline.vertex.module as unknown as GPUShaderModuleDescriptor, pipeline.fragment!.module as unknown as GPUShaderModuleDescriptor];
+        }
+
+        it("reuses its geometry shader modules when the task re-records", async () => {
+            const { internal, engine } = await setupGeoTask(2);
+            const previous = internal._bound.slice();
+            const createShaderModule = vi.spyOn(engine._device, "createShaderModule");
+
+            internal.record();
+
+            // The views and bindings really were rebuilt...
+            expect(internal._bound).toHaveLength(2);
+            for (const entry of internal._bound) {
+                expect(previous.map((p) => p._binding)).not.toContain(entry._binding);
+                expect(previous.map((p) => p._view)).not.toContain(entry._view);
+            }
+            // ...yet no module was compiled again for the same WGSL.
+            expect(createShaderModule).not.toHaveBeenCalled();
+            const [vertex, fragment] = boundModules(previous[0]!);
+            for (const entry of internal._bound) {
+                expect(boundModules(entry)[0]).toBe(vertex);
+                expect(boundModules(entry)[1]).toBe(fragment);
+            }
+        });
+
+        it("does not recompile geometry shader modules on a renderable-version rebuild", async () => {
+            const { scene, internal, engine } = await setupGeoTask(2);
+            const previous = internal._bound.slice();
+            const createShaderModule = vi.spyOn(engine._device, "createShaderModule");
+
+            scene._renderableVersion++;
+            internal.execute();
+
+            expect(internal._bound).toHaveLength(2);
+            for (const entry of internal._bound) {
+                expect(previous.map((p) => p._binding)).not.toContain(entry._binding);
+                expect(previous.map((p) => p._view)).not.toContain(entry._view);
+            }
+            expect(createShaderModule).not.toHaveBeenCalled();
+            const [vertex, fragment] = boundModules(previous[0]!);
+            for (const entry of internal._bound) {
+                expect(boundModules(entry)[0]).toBe(vertex);
+                expect(boundModules(entry)[1]).toBe(fragment);
+            }
+        });
+
+        it("shares one module pair between Standard materials that compose identical WGSL", async () => {
+            const { internal } = await setupGeoTask(2);
+            const [first, second] = internal._bound;
+
+            expect(first!._view.source).not.toBe(second!._view.source);
+            expect(first!._binding).not.toBe(second!._binding);
+            const [vertexA, fragmentA] = boundModules(first!);
+            const [vertexB, fragmentB] = boundModules(second!);
+            expect(vertexB).toBe(vertexA);
+            expect(fragmentB).toBe(fragmentA);
+        });
+
+        it("a task writing a different attachment compiles only its new fragment stage and shares the identical vertex module", async () => {
+            const { scene, internal, engine } = await setupGeoTask(1);
+            const [positionVertex, positionFragment] = boundModules(internal._bound[0]!);
+            const createShaderModule = vi.spyOn(engine._device, "createShaderModule");
+
+            // Another task on the same device writing WORLD_NORMAL instead of WORLD_POSITION.
+            const normals = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.WORLD_NORMAL }] }, engine, scene) as unknown as typeof internal;
+            await normals._preload();
+            normals.record();
+            const [normalVertex, normalFragment] = boundModules(normals._bound[0]!);
+
+            // The attachment set only changes the fragment outputs: the vertex stage composes the same code and
+            // reuses the first task's module.
+            expect(normalVertex.code).toBe(positionVertex.code);
+            expect(normalVertex).toBe(positionVertex);
+            // The different fragment code gets its own module, and it is the only module compiled.
+            expect(normalFragment.code).not.toBe(positionFragment.code);
+            expect(normalFragment).not.toBe(positionFragment);
+            expect(createShaderModule).toHaveBeenCalledTimes(1);
+            expect(createShaderModule).toHaveBeenCalledWith({ code: normalFragment.code });
+        });
+
+        it("compiles fresh modules on a renewed device and never hands it the previous device's modules", async () => {
+            const { internal, engine } = await setupGeoTask(2);
+            const previous = internal._bound.map((entry) => boundModules(entry));
+            const createShaderModule = vi.fn((descriptor: GPUShaderModuleDescriptor) => descriptor as unknown as GPUShaderModule);
+            // What device-lost recovery does: the engine's device is replaced in place, then the task re-records.
+            engine._device = { ...(engine._device as unknown as Record<string, unknown>), createShaderModule } as unknown as GPUDevice;
+
+            internal.record();
+
+            // One shared pair for both materials, created by the new device.
+            expect(internal._bound).toHaveLength(2);
+            expect(createShaderModule).toHaveBeenCalledTimes(2);
+            const created = createShaderModule.mock.results.map((result) => result.value as unknown);
+            for (const entry of internal._bound) {
+                for (const module of boundModules(entry)) {
+                    expect(created).toContain(module);
+                    expect(previous.flat()).not.toContain(module);
+                }
+            }
+        });
+
+        /** Run the retirements a submitted frame would release: every generation retired so far. */
+        function drainRetirements(engine: EngineContext): void {
+            (engine as unknown as { _retirements: Array<() => void> })._retirements.splice(0).forEach((retire) => retire());
+        }
+
+        it("evicts the modules of a retired Standard variant while the live generation keeps its own", async () => {
+            const { scene, internal, meshes, engine, createStandardMaterial } = await setupGeoTask(1);
+            const mesh = meshes[0]! as unknown as { material: unknown };
+            const untextured = mesh.material;
+            const textured = Object.assign(createStandardMaterial(), {
+                diffuseTexture: { texture: { createView: () => ({}), destroy: () => undefined }, sampler: {} },
+            });
+            const [untexturedVertex, untexturedFragment] = boundModules(internal._bound[0]!);
+            /** Swap the material, rebuild the task, and retire the previous generation as the next frame would. */
+            const swapTo = (material: unknown): [GPUShaderModuleDescriptor, GPUShaderModuleDescriptor] => {
+                mesh.material = material;
+                scene._renderableVersion++;
+                internal.execute();
+                drainRetirements(engine);
+                return boundModules(internal._bound[0]!);
+            };
+
+            // The diffuse texture changes both stages (UV varyings), so the variants share no module.
+            const [texturedVertex, texturedFragment] = swapTo(textured);
+            expect(texturedVertex.code).not.toBe(untexturedVertex.code);
+            expect(texturedFragment.code).not.toBe(untexturedFragment.code);
+            const createShaderModule = vi.spyOn(engine._device, "createShaderModule");
+
+            // Re-recording keeps the live variant shared across generations...
+            internal.record();
+            drainRetirements(engine);
+            expect(boundModules(internal._bound[0]!)[0]).toBe(texturedVertex);
+            expect(boundModules(internal._bound[0]!)[1]).toBe(texturedFragment);
+            expect(createShaderModule).not.toHaveBeenCalled();
+
+            // ...while the retired variant left the cache: swapping back compiles both of its stages again.
+            const [vertex, fragment] = swapTo(untextured);
+            expect([vertex.code, fragment.code]).toEqual([untexturedVertex.code, untexturedFragment.code]);
+            expect(vertex).not.toBe(untexturedVertex);
+            expect(fragment).not.toBe(untexturedFragment);
+            expect(createShaderModule).toHaveBeenCalledTimes(2);
+        });
+
+        it("releases the modules of a disposed task once its last generation retires", async () => {
+            const { scene, internal, engine } = await setupGeoTask(2);
+            const [vertex, fragment] = boundModules(internal._bound[0]!);
+            const createShaderModule = vi.spyOn(engine._device, "createShaderModule");
+
+            (internal as unknown as { dispose(): void }).dispose();
+            drainRetirements(engine);
+            const next = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.WORLD_POSITION }] }, engine, scene) as unknown as typeof internal;
+            await next._preload();
+            next.record();
+
+            // Nothing held the pair after the disposal, so the new task compiles it again, once for both materials.
+            expect(createShaderModule).toHaveBeenCalledTimes(2);
+            for (const entry of next._bound) {
+                expect(boundModules(entry)[0]).not.toBe(vertex);
+                expect(boundModules(entry)[1]).not.toBe(fragment);
+                expect(boundModules(entry)[0]).toBe(boundModules(next._bound[0]!)[0]);
+                expect(boundModules(entry)[1]).toBe(boundModules(next._bound[0]!)[1]);
+            }
+        });
+
+        it("a disposed task releases only the modules no other task draws with", async () => {
+            const { scene, internal, engine } = await setupGeoTask(1);
+            const [positionVertex] = boundModules(internal._bound[0]!);
+            const createNormals = async (): Promise<typeof internal> => {
+                const task = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.WORLD_NORMAL }] }, engine, scene) as unknown as typeof internal;
+                await task._preload();
+                task.record();
+                return task;
+            };
+            const normals = await createNormals();
+            const [, normalFragment] = boundModules(normals._bound[0]!);
+
+            (normals as unknown as { dispose(): void }).dispose();
+            drainRetirements(engine);
+            const createShaderModule = vi.spyOn(engine._device, "createShaderModule");
+            const again = await createNormals();
+
+            // The vertex module stays with the live WORLD_POSITION task; the disposed task's fragment was released.
+            const [vertex, fragment] = boundModules(again._bound[0]!);
+            expect(vertex).toBe(positionVertex);
+            expect(fragment.code).toBe(normalFragment.code);
+            expect(fragment).not.toBe(normalFragment);
+            expect(createShaderModule).toHaveBeenCalledTimes(1);
+            expect(createShaderModule).toHaveBeenCalledWith({ code: normalFragment.code });
+        });
+
+        /** Give every buffer the device creates from now on a destroy spy, and return them in creation order. */
+        function trackBuffers(engine: EngineContext): { destroy: ReturnType<typeof vi.fn> }[] {
+            const device = engine._device as unknown as { createBuffer(descriptor: GPUBufferDescriptor): object };
+            const create = device.createBuffer;
+            const buffers: { destroy: ReturnType<typeof vi.fn> }[] = [];
+            device.createBuffer = (descriptor) => {
+                const buffer = { ...create(descriptor), destroy: vi.fn() };
+                buffers.push(buffer);
+                return buffer;
+            };
+            return buffers;
+        }
+
+        it("a candidate whose fragment module fails to compile releases its vertex acquisition and creates no fragment entry", async () => {
+            const { scene, internal, engine } = await setupGeoTask(1);
+            const [positionVertex] = boundModules(internal._bound[0]!);
+            const normals = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.WORLD_NORMAL }] }, engine, scene) as unknown as typeof internal;
+            await normals._preload();
+            const buffers = trackBuffers(engine);
+            // The vertex stage hits the live task's entry, so the only compile, the new fragment stage, throws once.
+            const createShaderModule = vi.spyOn(engine._device, "createShaderModule").mockImplementationOnce(() => {
+                throw new Error("fragment compile failed");
+            });
+
+            expect(() => normals.record()).toThrow("fragment compile failed");
+            expect(normals._bound).toHaveLength(0);
+            // The rollback destroyed the candidate's mesh UBO and compiled nothing for the stage it never acquired.
+            expect(buffers.length).toBeGreaterThan(0);
+            for (const buffer of buffers) {
+                expect(buffer.destroy).toHaveBeenCalledOnce();
+            }
+            expect(createShaderModule).toHaveBeenCalledTimes(1);
+
+            // The vertex entry still has the live task's hold: a re-record keeps sharing it...
+            internal.record();
+            drainRetirements(engine);
+            expect(boundModules(internal._bound[0]!)[0]).toBe(positionVertex);
+            expect(createShaderModule).toHaveBeenCalledTimes(1);
+            // ...and only that hold: once the live task is disposed, the retried candidate compiles both stages.
+            (internal as unknown as { dispose(): void }).dispose();
+            drainRetirements(engine);
+            normals.record();
+            const [vertex, fragment] = boundModules(normals._bound[0]!);
+            expect(vertex).not.toBe(positionVertex);
+            expect(createShaderModule.mock.calls.slice(1)).toEqual([[{ code: positionVertex.code }], [{ code: fragment.code }]]);
+
+            // Both stages are held normally from then on: the next generation shares them.
+            normals.record();
+            drainRetirements(engine);
+            expect(boundModules(normals._bound[0]!)[0]).toBe(vertex);
+            expect(boundModules(normals._bound[0]!)[1]).toBe(fragment);
+            expect(createShaderModule).toHaveBeenCalledTimes(3);
+        });
+
+        it("a candidate whose vertex module fails to compile acquires nothing and still destroys its mesh UBO", async () => {
+            const { scene, internal, meshes, engine, createStandardMaterial } = await setupGeoTask(1);
+            const previous = internal._bound;
+            // The diffuse texture changes both stages, so the candidate's first acquisition compiles a new vertex module.
+            (meshes[0] as unknown as { material: unknown }).material = Object.assign(createStandardMaterial(), {
+                diffuseTexture: { texture: { createView: () => ({}), destroy: () => undefined }, sampler: {} },
+            });
+            scene._renderableVersion++;
+            const buffers = trackBuffers(engine);
+            let failing = true;
+            const createShaderModule = vi.spyOn(engine._device, "createShaderModule").mockImplementation((descriptor) => {
+                if (failing) {
+                    throw new Error("vertex compile failed");
+                }
+                return descriptor as unknown as GPUShaderModule;
+            });
+            const reported = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+            try {
+                // Compiling keeps failing, so releasing a stage the candidate never acquired would throw again.
+                expect(() => internal.execute()).toThrow("vertex compile failed");
+                expect(internal._bound).toBe(previous);
+                expect(buffers.length).toBeGreaterThan(0);
+                for (const buffer of buffers) {
+                    expect(buffer.destroy).toHaveBeenCalledOnce();
+                }
+                expect(reported).not.toHaveBeenCalled();
+                expect(createShaderModule).toHaveBeenCalledTimes(1);
+            } finally {
+                reported.mockRestore();
+            }
+
+            // Nothing was cached: the retried candidate compiles both stages once, and the next generation shares them.
+            failing = false;
+            internal.execute();
+            drainRetirements(engine);
+            const [vertex, fragment] = boundModules(internal._bound[0]!);
+            expect(createShaderModule.mock.calls.slice(1)).toEqual([[{ code: vertex.code }], [{ code: fragment.code }]]);
+            internal.record();
+            drainRetirements(engine);
+            expect(boundModules(internal._bound[0]!)[0]).toBe(vertex);
+            expect(boundModules(internal._bound[0]!)[1]).toBe(fragment);
+            expect(createShaderModule).toHaveBeenCalledTimes(3);
+        });
+
+        it("a candidate whose vertex module fails to compile takes no count from the live generation's fragment module", async () => {
+            const { scene, internal, meshes, engine } = await setupGeoTask(1);
+            const live = internal._bound;
+            const [liveVertex, liveFragment] = boundModules(live[0]!);
+            // Thin instances only add per-instance attributes to the vertex stage: the candidate's first acquisition
+            // compiles a new vertex stage, and its fragment code is the one the live generation holds.
+            (meshes[0] as unknown as { thinInstances: unknown }).thinInstances = { count: 4 };
+            await internal._preload();
+            const buffers = trackBuffers(engine);
+            const createShaderModule = vi.spyOn(engine._device, "createShaderModule").mockImplementationOnce(() => {
+                throw new Error("vertex compile failed");
+            });
+
+            expect(() => internal.record()).toThrow("vertex compile failed");
+            expect(internal._bound).toBe(live);
+            expect(buffers.length).toBeGreaterThan(0);
+            for (const buffer of buffers) {
+                expect(buffer.destroy).toHaveBeenCalledOnce();
+            }
+            expect(createShaderModule).toHaveBeenCalledTimes(1);
+
+            // The live fragment entry kept its count, so the retried candidate shares it and compiles only its vertex stage...
+            internal.record();
+            const [vertex, fragment] = boundModules(internal._bound[0]!);
+            expect(vertex.code).not.toBe(liveVertex.code);
+            expect(fragment).toBe(liveFragment);
+            expect(createShaderModule.mock.calls.slice(1)).toEqual([[{ code: vertex.code }]]);
+            // ...the entry outlives the retired live generation while the retried one still holds it...
+            drainRetirements(engine);
+            internal.record();
+            drainRetirements(engine);
+            expect(boundModules(internal._bound[0]!)[0]).toBe(vertex);
+            expect(boundModules(internal._bound[0]!)[1]).toBe(liveFragment);
+            expect(createShaderModule).toHaveBeenCalledTimes(2);
+            // ...and leaves with its last holder: once the task is disposed, a new task compiles both stages again.
+            (internal as unknown as { dispose(): void }).dispose();
+            drainRetirements(engine);
+            const next = createGeometryRendererTask({ textureDescriptions: [{ type: GeometryTextureType.WORLD_POSITION }] }, engine, scene) as unknown as typeof internal;
+            await next._preload();
+            next.record();
+            expect(boundModules(next._bound[0]!)[1]).not.toBe(liveFragment);
+            expect(createShaderModule.mock.calls.slice(2)).toEqual([[{ code: vertex.code }], [{ code: liveFragment.code }]]);
+        });
+    });
 });
 
 describe("Mesh-blending geometry shader contracts", () => {

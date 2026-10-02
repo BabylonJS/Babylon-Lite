@@ -90,8 +90,6 @@ interface PbrGeometryViewResources {
     _meshBGL: GPUBindGroupLayout;
     _shadowBGL: GPUBindGroupLayout | null;
     _pipelineLayout: GPUPipelineLayout;
-    _vertModule: GPUShaderModule;
-    _fragModule: GPUShaderModule;
     _pipelines: Map<string, GPURenderPipeline>;
     _alphaBlend: boolean;
 }
@@ -203,12 +201,16 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
     const meshUBO = createUniformBuffer(engine, meshUboData);
     let materialUBO: GPUBuffer | null = null;
     let boundTextures: ReturnType<typeof collectPbrBoundTextures> = [];
+    // Codes of the shared modules this renderable holds. Only a successful acquisition is recorded, so a
+    // candidate rolled back after a failed compile releases exactly what it acquired.
+    const heldModules: string[] = [];
     let perMeshDisposed = false;
     const _disposePerMesh = (): void => {
         if (perMeshDisposed) {
             return;
         }
         perMeshDisposed = true;
+        _releaseShaderModules(device, heldModules);
         meshUBO.destroy();
         materialUBO?.destroy();
         for (const texture of boundTextures) {
@@ -217,6 +219,8 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
         boundTextures.length = 0;
     };
     resources._lifetimeDisposers.push(_disposePerMesh);
+    const vertModule = _acquireShaderModule(device, composed._vertexWGSL, heldModules);
+    const fragModule = _acquireShaderModule(device, composed._fragmentWGSL, heldModules);
 
     // ── Material UBO ───────────────────────────────────────────────────
     const materialSpec = composed._materialUboSpec!;
@@ -365,7 +369,7 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
         bind(eng: EngineContext, sig: RenderTargetSignature) {
             return {
                 renderable: r,
-                pipeline: _getOrCreateGeometryPipeline(eng as EngineContext, sig, view, res),
+                pipeline: _getOrCreateGeometryPipeline(eng as EngineContext, sig, view, res, vertModule, fragModule),
                 update,
                 draw,
             };
@@ -376,6 +380,47 @@ export function buildPbrGeometryRenderable(scene: SceneContext, mesh: Mesh, view
 }
 
 // ─── Shared per-view resources ─────────────────────────────────────────
+
+/** Shader modules of composed PBR geometry WGSL, per device and exact code. The geometry task builds new
+ *  views on every record and renderable-version change, and a forward PBR rebuild publishes a new context
+ *  for them to compose against, yet the composed code rarely changes and materials with equal features
+ *  compose equal code. A module is immutable and has no `destroy()`, so one module per code string can serve
+ *  every view, generation and material. Each entry counts the renderables drawing with it, and a renderable
+ *  releases its count with its per-mesh resources: a rebuild, built before the old generation retires, still
+ *  hits the entry, and the entry leaves the map with its last holder (a retired plugin variant, a disposed
+ *  task, a rolled-back candidate). Keyed weakly by device: a replaced device compiles its own modules. Lazy,
+ *  so the module keeps no top-level side effect. */
+let _shaderModules: WeakMap<GPUDevice, Map<string, [GPUShaderModule, number]>> | null = null;
+
+/** Acquire the shared module of `code`, compiling it on first use, and record the acquisition in `held`. A
+ *  compile that throws stores and records nothing. */
+function _acquireShaderModule(device: GPUDevice, code: string, held: string[]): GPUShaderModule {
+    _shaderModules ??= new WeakMap();
+    let modules = _shaderModules.get(device);
+    if (!modules) {
+        modules = new Map();
+        _shaderModules.set(device, modules);
+    }
+    let entry = modules.get(code);
+    if (!entry) {
+        entry = [device.createShaderModule({ code }), 0];
+        modules.set(code, entry);
+    }
+    entry[1]++;
+    held.push(code);
+    return entry[0];
+}
+
+/** Release the acquisitions recorded in `held`. Never compiles or creates an entry, so it cannot throw. */
+function _releaseShaderModules(device: GPUDevice, held: readonly string[]): void {
+    const modules = _shaderModules?.get(device);
+    for (const code of held) {
+        const entry = modules?.get(code);
+        if (entry && !--entry[1]) {
+            modules!.delete(code);
+        }
+    }
+}
 
 function _ensureViewResources(
     view: PbrGeometryMaterialView,
@@ -438,8 +483,6 @@ function _ensureViewResources(
     const sceneBGL = (engine as unknown as { _getSceneBGL: () => GPUBindGroupLayout })._getSceneBGL?.() ?? _getSceneBindGroupLayoutLocal(engine, composed);
     const bgls: GPUBindGroupLayout[] = shadowBGL ? [sceneBGL, meshBGL, shadowBGL] : [sceneBGL, meshBGL];
     const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: bgls });
-    const vertModule = device.createShaderModule({ code: composed._vertexWGSL });
-    const fragModule = device.createShaderModule({ code: composed._fragmentWGSL });
 
     // The view's features have PBR_HAS_ALPHA_BLEND already stripped. Detect
     // alpha-blend from the SOURCE so transparent meshes get the right blend
@@ -456,8 +499,6 @@ function _ensureViewResources(
         _meshBGL: meshBGL,
         _shadowBGL: shadowBGL,
         _pipelineLayout: pipelineLayout,
-        _vertModule: vertModule,
-        _fragModule: fragModule,
         _pipelines: new Map(),
         _alphaBlend: alphaBlend,
     };
@@ -485,7 +526,14 @@ function _getSceneBindGroupLayoutLocal(engine: EngineContext, _composed: Compose
     return getSceneBindGroupLayout(engine);
 }
 
-function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSignature, view: PbrGeometryMaterialView, res: PbrGeometryViewResources): GPURenderPipeline {
+function _getOrCreateGeometryPipeline(
+    engine: EngineContext,
+    sig: RenderTargetSignature,
+    view: PbrGeometryMaterialView,
+    res: PbrGeometryViewResources,
+    vertModule: GPUShaderModule,
+    fragModule: GPUShaderModule
+): GPURenderPipeline {
     const key = targetSignatureKey(sig);
     const cached = res._pipelines.get(key);
     if (cached) {
@@ -519,8 +567,8 @@ function _getOrCreateGeometryPipeline(engine: EngineContext, sig: RenderTargetSi
     };
     const pipeline = device.createRenderPipeline({
         layout: res._pipelineLayout,
-        vertex: { module: res._vertModule, entryPoint: "main", buffers: res._composed._vertexBufferLayouts },
-        fragment: { module: res._fragModule, entryPoint: "main", targets: colorTargets },
+        vertex: { module: vertModule, entryPoint: "main", buffers: res._composed._vertexBufferLayouts },
+        fragment: { module: fragModule, entryPoint: "main", targets: colorTargets },
         depthStencil: sig._depthStencilFormat
             ? {
                   format: sig._depthStencilFormat,
