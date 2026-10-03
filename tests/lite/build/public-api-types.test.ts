@@ -42,12 +42,15 @@ describe("build/index.d.ts", () => {
                 probePath,
                 `import {
     createClearTextureTask, createGenerateMipMapsTask, createMipMappedRenderTarget,
+    createTextureRenderTarget, disposeRenderTarget,
     type ClearTextureTask, type ClearTextureTaskConfig,
     type GenerateMipMapsTask, type GenerateMipMapsTaskConfig,
     type EngineContext, type RenderTarget, type Texture2D,
 } from "./index.js";
 declare const engine: EngineContext;
 declare const texture: Texture2D;
+const wrapper: RenderTarget = createTextureRenderTarget(engine, texture, { layer: 0, mipLevel: 0 });
+disposeRenderTarget(wrapper);
 const target = createMipMappedRenderTarget({ format: "rgba8unorm", samples: 1, size: engine });
 const config: ClearTextureTaskConfig = {
     targetTexture: [target], depthTexture: target,
