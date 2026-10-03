@@ -112,10 +112,15 @@ no material lighting or UV conversion.
   they throw "recreate the compute graph" (wording inherited from the shared core). Applications recreate
   them in their device-lost recovery path.
 - Targets are borrowed: the task never disposes them. A target that was never allocated is built once in
-  `record()` or when selected by `setRenderDrawTaskTarget`, and stays caller-owned. Every `record()`
-  synchronizes eager targets through `buildRenderTarget` before rebuilding the pass attachments.
-  Target switches synchronize the new target before changing task state, so an eager resize/recovery
-  hook or first allocation is reflected in the very next draw without another graph build.
+  `record()` or when selected by `setRenderDrawTaskTarget`, and stays caller-owned. Both entry points
+  synchronize eager targets through `buildRenderTarget`. For non-eager targets, resolve the current
+  dimensions through `target._resolveSize`, falling back to `_resolveRenderTargetSize`, and rebuild
+  if both attachment views are absent or either dimension differs from `_width`/`_height`.
+  Unchanged dimensions preserve the existing allocation and contents. Surface and scaled-surface
+  sizes therefore follow resize on re-record or target selection, including selecting the same target.
+  Target selection synchronizes before changing task state, so refreshed attachments are reflected
+  in the very next draw without another graph build. Size-only changes reuse the cached pipeline
+  and, on target selection, the pass descriptor; execution reads the new attachment views.
   Switching a disposed task is rejected before synchronizing or allocating a target.
 - When no draw is enabled and `clear` is false, the task opens no pass.
 - Disposal clears completed and in-flight pipeline caches. An outstanding compilation cannot
@@ -142,7 +147,10 @@ Regression cases also cover concurrent same-signature preparation, independent s
 after rejection, disposal/device replacement during preparation, conditional depth/stencil operations,
 clear/load changes, target format switching, stencil-only pipeline state, eager synchronization on
 repeated records and target switches, single allocation for borrowed unbuilt targets, and rejection
-of target switches after task disposal. Same-format color-to-color and depth-to-depth switches reuse
+of target switches after task disposal. Non-eager surface and scaled-surface targets cover width-only
+and height-only resize through graph rebuild and same-target selection, replacement color/depth views,
+single destruction of old attachments, allocation and pipeline reuse without resize, and borrowed
+ownership after task disposal. Same-format color-to-color and depth-to-depth switches reuse
 the pass descriptor while refreshing its attachment view. A mutable descriptor on the real mipmapped
 target owner exercises depth-format rebuilds by selecting the same target without another record,
 under both clear/load modes. Returning to depth-only removes stencil operations and reuses the

@@ -1,6 +1,6 @@
 import type { EngineContext } from "../engine/engine.js";
 import type { RenderTarget } from "../engine/render-target.js";
-import { buildRenderTarget } from "../engine/render-target.js";
+import { buildRenderTarget, _resolveRenderTargetSize } from "../engine/render-target.js";
 import type { Task } from "../frame-graph/task.js";
 import { _ensureComputeBindingGroups } from "../compute/compute-bindings.js";
 import type { ComputeBindingSet } from "../compute/compute-bindings.js";
@@ -57,7 +57,12 @@ function offsetsEqual(a: readonly number[] | null, b: readonly number[]): boolea
 }
 
 function prepareTarget(target: RenderTarget, engine: EngineContext): void {
-    if (target._eager || (!target._colorView && !target._depthView)) {
+    if (target._eager) {
+        buildRenderTarget(target, engine);
+        return;
+    }
+    const size = (target._resolveSize ?? _resolveRenderTargetSize)(target._descriptor);
+    if ((!target._colorView && !target._depthView) || size.width !== target._width || size.height !== target._height) {
         buildRenderTarget(target, engine);
     }
 }
@@ -232,7 +237,7 @@ export function removeRenderDraw(task: RenderDrawTask, draw: RenderDraw): void {
 
 /**
  * Point the task at another borrowed target, for example the next tile layer. Targets of the same format
- * reuse the same pipelines. Synchronize eager targets or allocate an unbuilt target before the next draw.
+ * reuse the same pipelines. Synchronize eager targets and build unbuilt or resized non-eager targets before the next draw.
  */
 export function setRenderDrawTaskTarget(task: RenderDrawTask, target: RenderTarget): void {
     if (task._disposed) {

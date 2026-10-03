@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
-import { createRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
+import { createRenderTarget, disposeRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import type { RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
 import { createMipMappedRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target-mipmaps";
+import { createFrameGraph } from "../../../packages/babylon-lite/src/frame-graph/frame-graph";
+import { addTask } from "../../../packages/babylon-lite/src/frame-graph/frame-graph-actions";
 import { computeStorageBufferBinding } from "../../../packages/babylon-lite/src/compute/compute-storage-buffer-binding";
 import { computeUniformBufferBinding } from "../../../packages/babylon-lite/src/compute/compute-uniform-buffer-binding";
 import { createUniformBuffer } from "../../../packages/babylon-lite/src/compute/compute-uniform-buffer";
@@ -90,7 +92,7 @@ function makeEngine() {
             } as unknown as GPURenderPassEncoder;
         },
     } as unknown as GPUCommandEncoder;
-    const engine = { _device: device, _currentEncoder: encoder } as unknown as EngineContext;
+    const engine = { _device: device, _currentEncoder: encoder, canvas: { width: 8, height: 6 } } as unknown as EngineContext;
     return { engine, device, passes, pipelines, layouts };
 }
 
@@ -341,6 +343,93 @@ describe("render shaders", () => {
         task.dispose();
         expect(() => setRenderDrawTaskTarget(task, createRenderTarget(descriptor))).toThrow(/disposed/);
         expect(device.createTexture).toHaveBeenCalledTimes(2);
+    });
+
+    it.each([
+        { mode: "record", scale: 1 },
+        { mode: "record", scale: 0.5 },
+        { mode: "select", scale: 1 },
+        { mode: "select", scale: 0.5 },
+    ])("resizes non-eager surface targets through $mode (scale: $scale)", ({ mode, scale }) => {
+        const { engine, device, passes, pipelines } = makeEngine();
+        const { draw } = createDabProgram(engine);
+        const target = createRenderTarget({
+            format: "rgba8unorm",
+            dFormat: "depth32float",
+            samples: 1,
+            size: scale === 1 ? engine : { surface: engine, scale },
+        });
+        const task = createRenderDrawTask(engine, { target });
+        addRenderDraw(task, draw);
+        setRenderDrawCount(draw, 4, 1);
+        const graph = createFrameGraph(engine);
+        addTask(graph, task);
+        graph.build();
+        expect([target._width, target._height]).toEqual([8 * scale, 6 * scale]);
+        expect(graph.execute()).toBe(1);
+        expect(device.createTexture).toHaveBeenCalledTimes(2);
+
+        const refresh = () => {
+            if (mode === "record") {
+                graph.build();
+            } else {
+                setRenderDrawTaskTarget(task, target);
+            }
+        };
+        refresh();
+        expect(device.createTexture).toHaveBeenCalledTimes(2);
+
+        let allocations = 2;
+        for (const [width, height] of [
+            [16, 6],
+            [16, 12],
+        ] as const) {
+            const previousColor = target._colorTexture!;
+            const previousDepth = target._depthTexture!;
+            const previousColorView = target._colorView;
+            const previousDepthView = target._depthView;
+            const descriptor = task._descriptor;
+            engine.canvas.width = width;
+            engine.canvas.height = height;
+            refresh();
+
+            allocations += 2;
+            expect(device.createTexture).toHaveBeenCalledTimes(allocations);
+            expect(device.createTexture).toHaveBeenLastCalledWith(expect.objectContaining({ size: { width: width * scale, height: height * scale } }));
+            expect([target._width, target._height]).toEqual([width * scale, height * scale]);
+            expect(target._colorTexture).not.toBe(previousColor);
+            expect(target._depthTexture).not.toBe(previousDepth);
+            expect(target._colorView).not.toBe(previousColorView);
+            expect(target._depthView).not.toBe(previousDepthView);
+            expect(previousColor.destroy).toHaveBeenCalledOnce();
+            expect(previousDepth.destroy).toHaveBeenCalledOnce();
+            if (mode === "select") {
+                expect(task._descriptor).toBe(descriptor);
+            }
+            expect(graph.execute()).toBe(1);
+            expect(passes.at(-1)!.view).toBe(target._colorView);
+            expect(passes.at(-1)!.descriptor.depthStencilAttachment!.view).toBe(target._depthView);
+            expect(passes.at(-1)!.loadOp).toBe("load");
+            expect(pipelines).toHaveLength(1);
+
+            const color = target._colorTexture!;
+            const depth = target._depthTexture!;
+            refresh();
+            expect(device.createTexture).toHaveBeenCalledTimes(allocations);
+            expect(target._colorTexture).toBe(color);
+            expect(target._depthTexture).toBe(depth);
+            expect(color.destroy).not.toHaveBeenCalled();
+            expect(depth.destroy).not.toHaveBeenCalled();
+        }
+
+        const color = target._colorTexture!;
+        const depth = target._depthTexture!;
+        graph.dispose();
+        expect(color.destroy).not.toHaveBeenCalled();
+        expect(depth.destroy).not.toHaveBeenCalled();
+        disposeRenderTarget(target);
+        expect(color.destroy).toHaveBeenCalledOnce();
+        expect(depth.destroy).toHaveBeenCalledOnce();
     });
 
     it("draws indexed and indirect draws, and switches back to direct counts", () => {
