@@ -407,6 +407,14 @@ reconciles them with the live casters (`_reconcileCsmCasters`):
   requeued. The drop forces a redraw, so the depth a held caster last rendered leaves
   the map with the next draw. It is dropped once, when it becomes held: a later
   reconcile that still holds it has nothing to drop.
+- **A caster without a material.** One with no packet waits like a held caster: one
+  whose hold lifted to no material, or one that joined, or was in the first build,
+  without a material (it gets no cap entry until it is queued; the first build starts
+  `_held` with them). One re-capped without a material waits too: its packets are dropped
+  then, since its cap changed. It is queued once a material is assigned, also one the
+  snapshot already knows, which would otherwise read as unchanged and leave it out for
+  good while the same caster array is re-supplied. A caster that has packets keeps them
+  when its material becomes `null` and its cap does not change (below).
 - **Not covered.** Forgetting a stale chain's views can leave two views of an unchanged
   link: another live caster drawing through it (the re-pointed material's new target, or
   a link of a joining caster's chain) keeps its packets on the old view while the stale

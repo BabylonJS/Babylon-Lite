@@ -917,6 +917,158 @@ describe("CSM caster reconcile of the same caster array around a hold", () => {
     });
 });
 
+describe("CSM caster reconcile of a caster without a material", () => {
+    beforeAll(async () => {
+        await preloadPcfShadowTaskState([caster("preload", shaderMaterial("preload"))]);
+    });
+
+    beforeEach(() => {
+        createdTasks.length = 0;
+    });
+
+    /** Whether `mesh` has a packet in cascade `c`, in its dynamic task or, with static caching, its static one. */
+    const castsInto = (state: Partial<CachedState> & CsmTaskState, mesh: Mesh): boolean[] =>
+        state._tasks.map((task, c) => [task, state._staticTasks?.[c]].some((t) => t?._renderables.some((renderable) => renderable.mesh === mesh)));
+
+    it.each(["default", "cache"] as const)(
+        "requeues in the %s cascades a held caster sharing a material once its material goes null and is restored, with the same caster array",
+        (hooks) => {
+            const matA = shaderMaterial("A");
+            const meshA = caster("a", matA);
+            const meshB = caster("b", matA);
+            // A material whose group is never built in this scene: its caster stays held.
+            const unbuilt = { name: "unbuilt", _buildGroup: { _materialFamily: "shader" }, _uboVersion: 0 } as unknown as Material;
+            const casters = [meshA, meshB];
+            const { scene, state, tasks, ensure } = start(hooks, casters);
+            expect(castsInto(state, meshB)).toEqual([true, true]);
+
+            meshB.material = unbuilt;
+            ensure(casters);
+            expect(state._held).toEqual(new Set([meshB]));
+            record(state, scene, tasks());
+            expect(castsInto(state, meshB)).toEqual([false, false]);
+            // A stays snapshotted: meshA still casts through it.
+            expect(castsInto(state, meshA)).toEqual([true, true]);
+
+            // The hold lifts to no material: the caster has no packet and keeps waiting.
+            meshB.material = null as unknown as Material;
+            ensure(casters);
+            expect(state._held).toEqual(new Set([meshB]));
+            record(state, scene, tasks());
+            expect(castsInto(state, meshB)).toEqual([false, false]);
+
+            // A, which the snapshot knows, is restored: the caster is requeued.
+            meshB.material = matA;
+            ensure(casters);
+            expect(state._held).toBeUndefined();
+            record(state, scene, tasks());
+            expect(castsInto(state, meshB)).toEqual([true, true]);
+            expect(castsInto(state, meshA)).toEqual([true, true]);
+        }
+    );
+
+    it.each([
+        ["default", "joins"],
+        ["cache", "joins"],
+        ["default", "is in the first build"],
+        ["cache", "is in the first build"],
+    ] as const)("queues into the %s cascades a caster that %s without a material once it gets one the snapshot knows", (hooks, kind) => {
+        const matA = shaderMaterial("A");
+        const meshA = caster("a", matA);
+        const meshN = caster("n", null as unknown as Material);
+        const joins = kind === "joins";
+        const casters = [meshA, meshN];
+        const { scene, state, tasks, ensure } = start(hooks, joins ? [meshA] : casters);
+        ensure(casters);
+        expect(state._held).toEqual(new Set([meshN]));
+        record(state, scene, tasks());
+        expect(castsInto(state, meshN)).toEqual([false, false]);
+        // Waiting without a material changes nothing while it lasts: the bundles are kept.
+        const bundles = stampBundles(tasks(), scene);
+        ensure(casters);
+        expectBundlesKept(tasks(), bundles, scene);
+
+        meshN.material = matA;
+        ensure(casters);
+        expect(state._held).toBeUndefined();
+        record(state, scene, tasks());
+        expect(castsInto(state, meshN)).toEqual([true, true]);
+    });
+
+    it.each(["default", "cache"] as const)("keeps the %s packets and bundles of a caster that cast when its material goes null", (hooks) => {
+        const meshA = caster("a", shaderMaterial("A"));
+        const meshB = caster("b", shaderMaterial("B"));
+        const casters = [meshA, meshB];
+        const { engine, scene, state, tasks, ensure } = start(hooks, casters);
+        const packets = tasks().map((task) => task._renderables.slice());
+        const bundles = stampBundles(tasks(), scene);
+
+        meshB.material = null as unknown as Material;
+        ensure(casters);
+
+        expect(state._held).toBeUndefined();
+        expectBundlesKept(tasks(), bundles, scene);
+        tasks().forEach((task, t) => expect(task._renderables).toEqual(packets[t]));
+        expect(engine._retirements ?? []).toHaveLength(0);
+    });
+
+    it.each(["default", "cache"] as const)(
+        "queues into the %s cascades a caster of the first build without a material that gets one the snapshot knows before the next ensure",
+        (hooks) => {
+            const matA = shaderMaterial("A");
+            const meshA = caster("a", matA);
+            const meshN = caster("n", null as unknown as Material);
+            const casters = [meshA, meshN];
+            const { scene, state, tasks, ensure } = start(hooks, casters);
+            expect(state._held).toEqual(new Set([meshN]));
+            expect(castsInto(state, meshN)).toEqual([false, false]);
+
+            meshN.material = matA;
+            ensure(casters);
+            expect(state._held).toBeUndefined();
+            record(state, scene, tasks());
+            expect(castsInto(state, meshN)).toEqual([true, true]);
+        }
+    );
+
+    it.each(["default", "cache"] as const)(
+        "drops the %s packets of a caster re-capped without a material and requeues it under the new cap once its material is restored",
+        (hooks) => {
+            const matA = shaderMaterial("A");
+            const meshA = caster("a", matA);
+            const meshB = caster("b", matA);
+            const { engine, scene, state, tasks, ensure } = start(hooks, [meshA, meshB]);
+            const oldB = tasks()
+                .map((task) => task._renderables.find((renderable) => renderable.mesh === meshB))
+                .filter((renderable) => renderable !== undefined);
+            expect(oldB.length).toBeGreaterThan(0);
+
+            meshB.material = null as unknown as Material;
+            meshB._shadowMaxCascade = 0;
+            const casters = [meshA, meshB];
+            ensure(casters);
+            expect(state._held).toEqual(new Set([meshB]));
+            record(state, scene, tasks());
+            expect(castsInto(state, meshB)).toEqual([false, false]);
+            runRetirements(engine);
+            oldB.forEach((renderable) => expect(disposer(renderable)).toHaveBeenCalledOnce());
+            // Waiting changes nothing while it lasts: the bundles are kept.
+            const bundles = stampBundles(tasks(), scene);
+            ensure(casters);
+            expectBundlesKept(tasks(), bundles, scene);
+
+            // A stays snapshotted, since meshA still casts through it. Restored with the same caster array, the caster is
+            // requeued under cap 0.
+            meshB.material = matA;
+            ensure(casters);
+            expect(state._held).toBeUndefined();
+            record(state, scene, tasks());
+            expect(castsInto(state, meshB)).toEqual([true, false]);
+            expect(castsInto(state, meshA)).toEqual([true, true]);
+        }
+    );
+});
+
 describe("CSM caster reconcile of a new caster array", () => {
     beforeAll(async () => {
         await preloadPcfShadowTaskState([caster("preload", shaderMaterial("preload"))]);

@@ -91,9 +91,10 @@ export interface CsmTaskState extends ShadowTaskInternalState {
     _casterMatGens: Map<Material, number | undefined>;
     /** @internal Per-caster cascade-cap snapshot used to update task membership incrementally. */
     _casterMaxCascades: Map<Mesh, number | undefined>;
-    /** @internal The changed casters the last reconcile kept out of every task while their view could not be built
-     *  (`_reconcileCsmCasters`). While the held casters are unchanged the reconcile adopts this set, so an ensure with the
-     *  same caster array and no stale material touches no task. */
+    /** @internal The casters the last reconcile (or the first build) kept out of every task (`_reconcileCsmCasters`):
+     *  changed ones whose view could not be built yet, and ones without a material and without a packet. While they are
+     *  unchanged the reconcile adopts this set, so an ensure with the same caster array and no stale material touches no
+     *  task. */
     _held?: Set<Mesh>;
     /** @internal Pre-allocated scratch storage for per-frame cascade computation, sized for `_numCascades`. */
     _cascadeScratch: CsmCascadeScratch;
@@ -221,10 +222,15 @@ export function ensureCsmShadowTaskState(
     const casterMatGens = new Map<Material, number | undefined>();
     const casterMaterials = new Map<Material, Material>();
     const casterMaxCascades = new Map<Mesh, number | undefined>();
+    // A caster without a material gets no packet, and so no cap entry: it waits in `_held`, and the reconcile queues it
+    // once it has one, also when it gets it before the next ensure.
+    let held: Set<Mesh> | undefined;
     for (const m of casterMeshes) {
-        casterMaxCascades.set(m, m._shadowMaxCascade);
         if (m.material) {
+            casterMaxCascades.set(m, m._shadowMaxCascade);
             snapshotShadowCasterMaterial(m.material, casterMaterials, casterMatGens);
+        } else {
+            (held ??= new Set()).add(m);
         }
     }
     return {
@@ -242,6 +248,7 @@ export function ensureCsmShadowTaskState(
         _casterMaterials: casterMaterials,
         _casterMatGens: casterMatGens,
         _casterMaxCascades: casterMaxCascades,
+        _held: held,
         _cascadeScratch: _createCascadeScratch(n),
     };
 }
@@ -260,12 +267,14 @@ export function ensureCsmShadowTaskState(
  *  caster: it leaves every task once, its packets retired behind the frame fence, since they may reference per-mesh
  *  resources retired with its previous material, possibly in a frame this reconcile did not see (the generator was
  *  parked). A registered one keeps its cap entry, and its material is not snapshotted, so it still reads as changed and
- *  is requeued through a fresh view once the hold lifts, or rejoins if its change is reverted. The hold is decided per
- *  material, so every caster of a held material waits: queueing a new one would snapshot the material, and a
- *  registered caster sharing it would then never be requeued. The held casters are kept as `_held`; while they are
- *  unchanged, the same caster array with no stale material returns at once, so an unresolved hold costs a scan and no
- *  task. A hold that lifts or changes runs the reconcile again, also when no scene version moves (a view factory
- *  import lands, a change is reverted).
+ *  is requeued through a fresh view once the hold lifts, or rejoins if its change is reverted. A caster without a
+ *  material and without a packet (one held before, one that never joined, or one re-capped without a material, whose
+ *  packets are dropped then) waits the same way until a material is assigned. The hold is decided per material, so
+ *  every caster of a held material waits: queueing a new one would snapshot the material, and a registered caster
+ *  sharing it would then never be requeued. The held casters are kept as `_held`; while they are unchanged, the same
+ *  caster array with no stale material returns at once, so an unresolved hold costs a scan and no task. A hold that
+ *  lifts or changes runs the reconcile again, also when no scene version moves (a view factory import lands, a change
+ *  is reverted).
  *
  *  Nothing is resolved here: when a caster was queued, the shadow scheduler records each cascade once (forced through
  *  `_recordedVersion`), so K requeued casters cost one transaction per cascade instead of one whole-task rebind per
@@ -279,11 +288,19 @@ export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, s
     const gens = state._casterMatGens;
     const caps = state._casterMaxCascades;
     const tasks = state._tasks;
+    const last = state._held;
     let stale: Set<Material> | undefined;
     let held: Set<Mesh> | undefined;
     for (const mesh of casterMeshes) {
         const material = mesh.material;
-        if (material && shadowCasterMaterialChanged(material, materials, gens)) {
+        if (!material) {
+            // No material and no packet: a caster the last reconcile held, or one that never joined, waits like a held
+            // one, so it is queued once a material is assigned, even one the snapshot already knows. A caster that has
+            // packets keeps them, unless its cap changes: they are dropped then, and it waits too.
+            if (last?.has(mesh) || !caps.has(mesh) || mesh._shadowMaxCascade !== caps.get(mesh)) {
+                (held ??= new Set()).add(mesh);
+            }
+        } else if (shadowCasterMaterialChanged(material, materials, gens)) {
             if (holdCsmCaster(scene, sg, material)) {
                 (held ??= new Set()).add(mesh);
             } else {
@@ -291,7 +308,6 @@ export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, s
             }
         }
     }
-    const last = state._held;
     if (last && held?.size === last.size && [...held].every((mesh) => last.has(mesh))) {
         held = last;
     }
@@ -311,9 +327,10 @@ export function _reconcileCsmCasters(scene: SceneContext, sg: ShadowGenerator, s
     for (const mesh of state._casterMeshes) {
         const material = mesh.material;
         // A caster leaves every task when it becomes held, but keeps its cap entry: it is still registered. One the last
-        // reconcile held has no packet left, and dropping it again would force a redraw and a refit for nothing.
+        // reconcile held, or one without a cap entry (it was never queued), has no packet, and dropping it would force a
+        // redraw and a refit for nothing.
         if (held?.has(mesh)) {
-            if (!last?.has(mesh)) {
+            if (!last?.has(mesh) && caps.has(mesh)) {
                 drop.add(mesh);
             }
         } else if (!next.has(mesh) || (material && stale?.has(material)) || mesh._shadowMaxCascade !== caps.get(mesh)) {
