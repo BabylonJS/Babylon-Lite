@@ -471,6 +471,32 @@ loadGltf(engine, url)
 - Samplers use repeat addressing, linear min/mag filtering, linear mip filtering when mips exist, and anisotropy 4 for mipmapped textures.
 - `decodeKtx2ImageBitmapFromBuffer()` decodes mip0 to `ImageBitmap` only when the extension must compose a split metallic-roughness + occlusion ORM texture.
 
+### Opt-in Worker Decoding
+
+```typescript
+export interface Ktx2WorkerDecodingOptions {
+    workerCount?: number; // default: hardwareConcurrency - 1, clamped to [1, 4]
+}
+export function enableKtx2WorkerDecoding(options?: Ktx2WorkerDecodingOptions): void;
+```
+
+By default the decoder script runs on the main thread, so each KTX2 transcode blocks the page for its full duration.
+`enableKtx2WorkerDecoding()` (`src/texture/ktx2-worker-decoder.ts`) installs, through the internal
+`_setKtx2DecoderSource` seam of `ktx2-loader.ts`, a decoder backed by a pool of dedicated workers:
+
+- Each worker is started from a blob URL holding `_ktx2WorkerMain`. It receives `{ t: 0, url, wasmUrls }`, calls
+  `importScripts(url)`, sets `MSCTranscoder.UseFromWorkerThread` and `WASMMemoryManager.LoadBinariesFromCurrentThread`,
+  applies the `setKtx2DecoderUrl` transcoder overrides and replies `{ t: 0 }` (or `{ t: 0, e }`). URLs are resolved
+  against `document.baseURI` first, because a blob worker has no usable base URL.
+- `decode(data, caps, options)` posts a **copy** of `data` (transferred) to the least-busy worker as
+  `{ t: 1, id, data, caps, options }`; the caller's bytes are never detached. The worker replies `{ t: 1, id, d }` and
+  transfers every mip buffer back; a mip that is a view into a larger or already-transferred buffer is copied first.
+- A worker that crashes after start-up rejects its in-flight jobs and leaves the pool. If `Worker` is unavailable, or
+  no worker can initialise the decoder, the mode uninstalls itself (one `console.warn`) and `loadKtx2Decoder` returns
+  the main-thread decoder.
+
+Uploads, output formats and every public loader are unchanged; only where `decode` runs differs.
+
 ### Tree-Shaking
 
 `ktx2-loader.ts` is imported only by `loader-gltf/gltf-ext-basisu.ts`, which itself is dynamic-imported only when the asset declares `KHR_texture_basisu`. This keeps KTX2 decoder code, CDN script setup, and ORM composition out of existing KTX1, Basis `.basis`, and plain image scenes.
@@ -488,6 +514,7 @@ loadGltf(engine, url)
 7. **Texture usage flags** — Must include TEXTURE_BINDING, COPY_DST, and RENDER_ATTACHMENT.
 8. **Return shape** — Must contain `texture`, `view`, `sampler`, `width`, `height`.
 9. **KTX2 glTF path** — Scene 112 loads FlightHelmetKTX via `KHR_texture_basisu`, stays below its bundle ceiling, and does not increase runtime-loaded JS for existing scenes.
+   9b. **KTX2 worker decoding** (`tests/lite/unit/ktx2-worker-decoder.test.ts`) — the real worker source runs in a VM realm behind a message bridge with transfer semantics: absolute decoder/transcoder URLs, caller bytes intact, shared/sub-view mips returned intact, least-busy dispatch, decode errors and post-start crashes rejected, fallback to the main-thread decoder when no worker initialises or `Worker` is missing.
 10. **Independent decoded images** — Two calls with one source create different GPU textures and each takes one ownership reference.
 11. **External-image sizing** — Recognize bitmap/data/canvas, image, video, and VideoFrame dimension shapes; reject unsupported or zero-sized sources before allocation.
 12. **Aspect-preserving downscale** — Clamp only when the larger dimension exceeds `maxDimension`, preserve orientation/aspect ratio, and never upscale.
@@ -508,6 +535,7 @@ loadGltf(engine, url)
 | `src/texture/external-image-texture.ts` | Fresh external-image upload, source sizing, optional aspect-preserving downscaling, and explicit caller ownership |
 | `src/texture/ktx-loader.ts`             | KTX1 parser, compressed texture upload, suffix selection, fallback to loadTexture2D                               |
 | `src/texture/ktx2-loader.ts`            | Internal KTX2/BasisU decoder bridge and Texture2D upload for glTF `KHR_texture_basisu`                            |
+| `src/texture/ktx2-worker-decoder.ts`    | Opt-in `enableKtx2WorkerDecoding`: KTX2 decoder in a pool of Web Workers, main-thread fallback                    |
 | `src/texture/compressed-formats.ts`     | GL `glInternalFormat` → `{ gpuFormat, feature, blockW, blockH, blockBytes }` lookup table (lazy-init)             |
 | `src/texture/solid-texture.ts`          | Procedural 1×1 solid color texture                                                                                |
 | `src/texture/generate-mipmaps.ts`       | GPU mipmap generation via render passes, including encoder-local recording                                        |

@@ -75,6 +75,18 @@ export function setKtx2DecoderUrl(url: string, wasmUrls?: Record<string, Record<
     _ktx2WasmUrls = wasmUrls ?? null;
 }
 let _ktx2DecoderPromise: Promise<Ktx2Decoder> | null = null;
+// Decoder source installed by an opt-in decoding mode (`enableKtx2WorkerDecoding`); null = the main-thread decoder.
+let _ktx2DecoderSource: (() => Promise<Ktx2Decoder>) | null = null;
+
+/** @internal Install (or clear, with null) the decoder source `loadKtx2Decoder` hands out instead of the main-thread decoder. */
+export function _setKtx2DecoderSource(source: (() => Promise<Ktx2Decoder>) | null): void {
+    _ktx2DecoderSource = source;
+}
+
+/** @internal The decoder script URL and transcoder module overrides set by `setKtx2DecoderUrl`. */
+export function _getKtx2DecoderUrls(): { url: string; wasmUrls: Record<string, Record<string, string>> | null } {
+    return { url: _ktx2DecoderUrl, wasmUrls: _ktx2WasmUrls };
+}
 
 const GL_RGBA8 = 0x8058;
 const GL_R8 = 0x8229;
@@ -101,8 +113,12 @@ function deviceKtx2Caps(engine: EngineContext): Ktx2DecoderCaps {
     };
 }
 
-/** @internal Load (once) and cache the shared KTX2/Basis decoder, honoring `setKtx2DecoderUrl`. */
+/** @internal Load (once) and cache the shared KTX2/Basis decoder, honoring `setKtx2DecoderUrl` — or hand out the
+ *  decoder of an enabled opt-in mode (`enableKtx2WorkerDecoding`). */
 export function loadKtx2Decoder(): Promise<Ktx2Decoder> {
+    if (_ktx2DecoderSource) {
+        return _ktx2DecoderSource();
+    }
     if (_ktx2DecoderPromise) {
         return _ktx2DecoderPromise;
     }
