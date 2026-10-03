@@ -28,7 +28,9 @@ export type Ktx2WorkerRequest =
 export type Ktx2WorkerReply = { t: 0; e?: string } | { t: 1; id: number; d?: Ktx2DecodedData; e?: string };
 
 /** @internal Body of each decoding worker. Self-contained: it runs in the worker realm, never in this module's,
- *  so it may only use worker globals (`importScripts`, `postMessage`, `KTX2DECODER`). */
+ *  so it may only use worker globals (`importScripts`, `postMessage`, `KTX2DECODER`). It holds no
+ *  `throw new Error("…")`: Lite's production error plugin would rewrite one into a call to an imported helper that
+ *  does not exist in the worker realm, so failures are posted back as messages instead. */
 export function _ktx2WorkerMain(): void {
     type DecoderModule = {
         KTX2Decoder: new () => { decode(data: Uint8Array, caps: unknown, options?: unknown): Promise<{ mipmaps: { data?: Uint8Array }[] }> };
@@ -42,6 +44,25 @@ export function _ktx2WorkerMain(): void {
         KTX2DECODER?: DecoderModule;
     };
     let decoder: InstanceType<DecoderModule["KTX2Decoder"]> | null = null;
+    const errorText = (error: unknown): string => String((error as Error)?.message ?? error);
+    // The buffers to transfer with a reply. A mip that is a view into a larger buffer (the transcoder's own memory,
+    // or a sibling mip's) is copied first, so nothing the worker still uses is detached; `copyAll` copies every mip,
+    // for a buffer that looked transferable but is not (a full view of non-detachable memory, e.g. a
+    // WebAssembly.Memory buffer).
+    const transferList = (mipmaps: { data?: Uint8Array }[], copyAll: boolean): ArrayBuffer[] => {
+        const transfer: ArrayBuffer[] = [];
+        for (const mip of mipmaps) {
+            let data = mip.data;
+            if (!data) {
+                continue;
+            }
+            if (copyAll || !(data.buffer instanceof ArrayBuffer) || data.byteOffset !== 0 || data.byteLength !== data.buffer.byteLength || transfer.includes(data.buffer)) {
+                data = mip.data = data.slice();
+            }
+            transfer.push(data.buffer as ArrayBuffer);
+        }
+        return transfer;
+    };
     scope.onmessage = (event: MessageEvent): void => {
         const message = event.data as Ktx2WorkerRequest;
         if (message.t === 0) {
@@ -49,7 +70,8 @@ export function _ktx2WorkerMain(): void {
                 scope.importScripts(message.url);
                 const mod = scope.KTX2DECODER;
                 if (!mod) {
-                    throw new Error("decoder global KTX2DECODER not found after importScripts");
+                    scope.postMessage({ t: 0, e: "decoder global KTX2DECODER not found after importScripts" });
+                    return;
                 }
                 mod.MSCTranscoder.UseFromWorkerThread = true;
                 mod.WASMMemoryManager.LoadBinariesFromCurrentThread = true;
@@ -66,7 +88,7 @@ export function _ktx2WorkerMain(): void {
                 decoder = new mod.KTX2Decoder();
                 scope.postMessage({ t: 0 });
             } catch (error) {
-                scope.postMessage({ t: 0, e: String((error as Error)?.message ?? error) });
+                scope.postMessage({ t: 0, e: errorText(error) });
             }
             return;
         }
@@ -75,25 +97,19 @@ export function _ktx2WorkerMain(): void {
             scope.postMessage({ t: 1, id, e: "decoder not initialised" });
             return;
         }
-        decoder.decode(message.data, message.caps, message.options).then(
-            (decoded) => {
-                // Hand every mip back by transfer. A mip that is a view into a larger buffer (the transcoder's
-                // own memory, or a sibling mip's) is copied first, so nothing the worker still uses is detached.
-                const transfer: ArrayBuffer[] = [];
-                for (const mip of decoded.mipmaps) {
-                    let data = mip.data;
-                    if (!data) {
-                        continue;
-                    }
-                    if (!(data.buffer instanceof ArrayBuffer) || data.byteOffset !== 0 || data.byteLength !== data.buffer.byteLength || transfer.includes(data.buffer)) {
-                        data = mip.data = data.slice();
-                    }
-                    transfer.push(data.buffer as ArrayBuffer);
+        // Every failure — the decode, preparing the reply or posting it — answers this job, so the caller never
+        // waits forever. A reply whose transfer is refused (DataCloneError, before anything is detached) is sent
+        // again with the worker's own copies.
+        decoder
+            .decode(message.data, message.caps, message.options)
+            .then((decoded) => {
+                try {
+                    scope.postMessage({ t: 1, id, d: decoded }, transferList(decoded.mipmaps, false));
+                } catch {
+                    scope.postMessage({ t: 1, id, d: decoded }, transferList(decoded.mipmaps, true));
                 }
-                scope.postMessage({ t: 1, id, d: decoded }, transfer);
-            },
-            (error: unknown) => scope.postMessage({ t: 1, id, e: String((error as Error)?.message ?? error) })
-        );
+            })
+            .catch((error: unknown) => scope.postMessage({ t: 1, id, e: errorText(error) }));
     };
 }
 
@@ -145,6 +161,9 @@ async function createPool(count: number): Promise<Ktx2Decoder> {
     }
     const init: Ktx2WorkerRequest = { t: 0, url: absoluteUrl(url), wasmUrls: absoluteWasmUrls };
     let workers: PoolWorker[] = [];
+    // Liveness is decided as each worker acknowledges or crashes, never by re-reading the start-up results: a
+    // worker that crashed while a sibling was still starting must not come back into the pool.
+    const crashed = new Set<Worker>();
     const waiting = new Map<number, { resolve(decoded: Ktx2DecodedData): void; reject(error: Error): void; owner: PoolWorker }>();
     const onReply = (reply: Ktx2WorkerReply): void => {
         if (reply.t !== 1) {
@@ -164,6 +183,7 @@ async function createPool(count: number): Promise<Ktx2Decoder> {
     };
     // A worker that dies after start-up fails its own in-flight jobs and leaves the pool; the others carry on.
     const onCrash = (worker: Worker, message: string): void => {
+        crashed.add(worker);
         worker.terminate();
         workers = workers.filter((entry) => entry.worker !== worker);
         for (const [id, job] of waiting) {
@@ -175,10 +195,19 @@ async function createPool(count: number): Promise<Ktx2Decoder> {
     };
     const blobUrl = URL.createObjectURL(new Blob([`(${_ktx2WorkerMain.toString()})();`], { type: "text/javascript" }));
     try {
-        const started = await Promise.allSettled(Array.from({ length: count }, () => startWorker(blobUrl, init, onReply, onCrash)));
-        workers = started.filter((r): r is PromiseFulfilledResult<Worker> => r.status === "fulfilled").map((r) => ({ worker: r.value, pending: 0 }));
+        const started = await Promise.allSettled(
+            Array.from({ length: count }, () =>
+                startWorker(blobUrl, init, onReply, onCrash).then((worker) => {
+                    if (!crashed.has(worker)) {
+                        workers.push({ worker, pending: 0 });
+                    }
+                    return worker;
+                })
+            )
+        );
         if (!workers.length) {
-            throw (started[0] as PromiseRejectedResult).reason;
+            const failed = started.find((r): r is PromiseRejectedResult => r.status === "rejected");
+            throw failed ? failed.reason : new Error("KTX2: every decoding worker crashed during start-up");
         }
     } finally {
         URL.revokeObjectURL(blobUrl);

@@ -1,25 +1,43 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runInNewContext } from "node:vm";
+import { runInContext, runInNewContext } from "node:vm";
 import { resolveObjectURL } from "node:buffer";
-
-type Ktx2LoaderModule = typeof import("../../../packages/babylon-lite/src/texture/ktx2-loader");
-type WorkerDecoderModule = typeof import("../../../packages/babylon-lite/src/texture/ktx2-worker-decoder");
+import { readFileSync } from "node:fs";
+import ts from "typescript";
+import type * as Ktx2LoaderModule from "../../../packages/babylon-lite/src/texture/ktx2-loader";
+import type * as WorkerDecoderModule from "../../../packages/babylon-lite/src/texture/ktx2-worker-decoder";
 
 const CAPS = { astc: false, bptc: true, s3tc: true, pvrtc: false, etc2: false, etc1: false };
+
+/** Allocators that build decoder output INSIDE the worker's VM realm, so the worker's own `instanceof ArrayBuffer`
+ *  sees it as the real decoder's output and the direct-transfer branch is exercised. */
+interface RealmTools {
+    /** A fresh full-span Uint8Array of the worker realm. */
+    u8(length: number): Uint8Array;
+    /** A full-span Uint8Array over a WebAssembly.Memory buffer of the worker realm (not detachable). */
+    wasmView(): Uint8Array;
+}
 
 interface FakeDecoderBehaviour {
     /** Throw from importScripts (decoder script unreachable). */
     failImport?: boolean;
+    /** importScripts succeeds but defines no KTX2DECODER global. */
+    noGlobal?: boolean;
     /** Make every decode reject with this message. */
     decodeError?: string;
     /** Called inside the worker with the bytes it received; returns the mips to report. */
-    mips?: (input: Uint8Array) => Uint8Array[];
+    mips?: (input: Uint8Array, realm: RealmTools) => Uint8Array[];
+    /** The worker's postMessage throws for any reply that carries decoded data. */
+    replyThrows?: boolean;
+    /** Delay delivering the init message to the worker with this index until the promise settles. */
+    holdInit?: (index: number) => Promise<void> | undefined;
 }
 
 interface WorkerRecord {
     importedUrls: string[];
     module: Record<string, Record<string, unknown>> | null;
     received: Uint8Array[];
+    /** The init acknowledgement reached the pool. */
+    acked: boolean;
     crash(message: string): void;
 }
 
@@ -32,13 +50,16 @@ function installFakeWorker(behaviour: FakeDecoderBehaviour): WorkerRecord[] {
         onerror: ((event: { message: string }) => void) | null = null;
         private ready: Promise<(message: unknown) => void>;
         private terminated = false;
+        private readonly index: number;
         constructor(url: string) {
             const record: WorkerRecord = {
                 importedUrls: [],
                 module: null,
                 received: [],
+                acked: false,
                 crash: (message) => this.onerror?.({ message }),
             };
+            this.index = records.length;
             records.push(record);
             const blob = resolveObjectURL(url);
             if (!blob) {
@@ -46,15 +67,33 @@ function installFakeWorker(behaviour: FakeDecoderBehaviour): WorkerRecord[] {
             }
             this.ready = blob.text().then((source) => {
                 const realm: Record<string, unknown> = {
-                    postMessage: (message: unknown, transfer: Transferable[] = []) => {
+                    postMessage: (message: { t?: number; d?: unknown }, transfer: Transferable[] = []) => {
+                        if (behaviour.replyThrows && message.d) {
+                            throw new Error("DataCloneError: reply refused");
+                        }
                         const data = structuredClone(message, { transfer: transfer as Transferable[] });
-                        queueMicrotask(() => !this.terminated && this.onmessage?.({ data }));
+                        queueMicrotask(() => {
+                            if (this.terminated) {
+                                return;
+                            }
+                            if (message.t === 0) {
+                                record.acked = true;
+                            }
+                            this.onmessage?.({ data });
+                        });
                     },
                     importScripts: (scriptUrl: string) => {
                         record.importedUrls.push(scriptUrl);
                         if (behaviour.failImport) {
                             throw new Error(`cannot load ${scriptUrl}`);
                         }
+                        if (behaviour.noGlobal) {
+                            return;
+                        }
+                        const tools: RealmTools = {
+                            u8: (length) => runInContext(`new Uint8Array(${length})`, realm) as Uint8Array,
+                            wasmView: () => runInContext("new Uint8Array(new WebAssembly.Memory({ initial: 1 }).buffer)", realm) as Uint8Array,
+                        };
                         const module = {
                             MSCTranscoder: { UseFromWorkerThread: false, JSModuleURL: "", WasmModuleURL: "" },
                             WASMMemoryManager: { LoadBinariesFromCurrentThread: false },
@@ -65,7 +104,7 @@ function installFakeWorker(behaviour: FakeDecoderBehaviour): WorkerRecord[] {
                                     if (behaviour.decodeError) {
                                         return Promise.reject(new Error(behaviour.decodeError));
                                     }
-                                    const mips = behaviour.mips?.(data) ?? [new Uint8Array(16).fill(7)];
+                                    const mips = behaviour.mips?.(data, tools) ?? [tools.u8(16).fill(7)];
                                     return Promise.resolve({
                                         width: 4,
                                         height: 4,
@@ -88,9 +127,10 @@ function installFakeWorker(behaviour: FakeDecoderBehaviour): WorkerRecord[] {
                 return (message: unknown) => (realm.onmessage as (event: { data: unknown }) => void)({ data: message });
             });
         }
-        postMessage(message: unknown, transfer: Transferable[] = []): void {
+        postMessage(message: { t?: number }, transfer: Transferable[] = []): void {
             const data = structuredClone(message, { transfer });
-            void this.ready.then((deliver) => !this.terminated && deliver(data));
+            const hold = message.t === 0 ? behaviour.holdInit?.(this.index) : undefined;
+            void Promise.all([this.ready, hold]).then(([deliver]) => !this.terminated && deliver(data));
         }
         terminate(): void {
             this.terminated = true;
@@ -100,11 +140,16 @@ function installFakeWorker(behaviour: FakeDecoderBehaviour): WorkerRecord[] {
     return records;
 }
 
-async function freshModules(): Promise<{ loader: Ktx2LoaderModule; workers: WorkerDecoderModule }> {
+async function freshModules(): Promise<{ loader: typeof Ktx2LoaderModule; workers: typeof WorkerDecoderModule }> {
     vi.resetModules();
     const loader = await import("../../../packages/babylon-lite/src/texture/ktx2-loader");
     const workers = await import("../../../packages/babylon-lite/src/texture/ktx2-worker-decoder");
     return { loader, workers };
+}
+
+/** Fail fast instead of hanging the suite when a job is never answered. */
+function settlesWithin<T>(promise: Promise<T>, ms = 1000): Promise<T> {
+    return Promise.race([promise, new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`job still waiting after ${ms} ms`)), ms))]);
 }
 
 describe("enableKtx2WorkerDecoding", () => {
@@ -145,19 +190,62 @@ describe("enableKtx2WorkerDecoding", () => {
         expect([...decoded.mipmaps[0]!.data]).toEqual(new Array(16).fill(7));
     });
 
-    it("returns every mip intact when mips share one buffer or are views into a larger one", async () => {
+    it("transfers a decoder-owned full-span mip without copying it", async () => {
+        const produced: Uint8Array[] = [];
         installFakeWorker({
-            mips: () => {
-                const arena = new Uint8Array(32);
+            mips: (_input, realm) => {
+                const mip = realm.u8(16).fill(5);
+                produced.push(mip);
+                return [mip];
+            },
+        });
+        const { loader, workers } = await freshModules();
+        workers.enableKtx2WorkerDecoding({ workerCount: 1 });
+        const decoded = await (await loader.loadKtx2Decoder()).decode(new Uint8Array([1]), CAPS);
+        expect([...decoded.mipmaps[0]!.data]).toEqual(new Array(16).fill(5));
+        expect(produced[0]!.byteLength, "the worker's own mip was transferred, so it is detached there").toBe(0);
+    });
+
+    it("copies mips that share one buffer or view a larger one, and leaves the worker's memory attached", async () => {
+        const arenas: Uint8Array[] = [];
+        installFakeWorker({
+            mips: (_input, realm) => {
+                const arena = realm.u8(32);
                 arena.set(new Array(16).fill(1), 0);
                 arena.set(new Array(4).fill(2), 16);
-                return [arena.subarray(0, 16), arena.subarray(16, 20), new Uint8Array([3])];
+                arenas.push(arena);
+                const own = realm.u8(1).fill(3);
+                return [arena.subarray(0, 16), arena.subarray(16, 20), own];
             },
         });
         const { loader, workers } = await freshModules();
         workers.enableKtx2WorkerDecoding({ workerCount: 1 });
         const decoded = await (await loader.loadKtx2Decoder()).decode(new Uint8Array([9]), CAPS);
         expect(decoded.mipmaps.map((m) => [...m.data])).toEqual([new Array(16).fill(1), new Array(4).fill(2), [3]]);
+        expect(arenas[0]!.byteLength, "views are copied, never detaching the decoder's arena").toBe(32);
+    });
+
+    it("answers the job with copies when a mip views non-detachable WebAssembly memory", async () => {
+        installFakeWorker({
+            mips: (_input, realm) => {
+                const view = realm.wasmView();
+                view.fill(4, 0, 8);
+                return [view];
+            },
+        });
+        const { loader, workers } = await freshModules();
+        workers.enableKtx2WorkerDecoding({ workerCount: 1 });
+        const decoded = await settlesWithin((await loader.loadKtx2Decoder()).decode(new Uint8Array([1]), CAPS));
+        expect(decoded.mipmaps[0]!.data.byteLength).toBe(65536);
+        expect([...decoded.mipmaps[0]!.data.subarray(0, 9)]).toEqual([4, 4, 4, 4, 4, 4, 4, 4, 0]);
+    });
+
+    it("rejects the job, never leaving it waiting, when the reply itself cannot be posted", async () => {
+        installFakeWorker({ replyThrows: true });
+        const { loader, workers } = await freshModules();
+        workers.enableKtx2WorkerDecoding({ workerCount: 1 });
+        const decoder = await loader.loadKtx2Decoder();
+        await expect(settlesWithin(decoder.decode(new Uint8Array([1]), CAPS))).rejects.toThrow("KTX2: DataCloneError: reply refused");
     });
 
     it("spreads concurrent decodes over the least busy workers", async () => {
@@ -179,7 +267,7 @@ describe("enableKtx2WorkerDecoding", () => {
 
     it("fails a crashed worker's in-flight job and keeps decoding on the others", async () => {
         let hold = true;
-        const records = installFakeWorker({ mips: () => [new Uint8Array([hold ? 1 : 2])] });
+        const records = installFakeWorker({ mips: (_input, realm) => [realm.u8(1).fill(hold ? 1 : 2)] });
         const { loader, workers } = await freshModules();
         workers.enableKtx2WorkerDecoding({ workerCount: 2 });
         const decoder = await loader.loadKtx2Decoder();
@@ -191,6 +279,22 @@ describe("enableKtx2WorkerDecoding", () => {
         const next = await decoder.decode(new Uint8Array([2]), CAPS);
         expect([...next.mipmaps[0]!.data]).toEqual([2]);
         expect(records[1]!.received).toHaveLength(1);
+    });
+
+    it("never sends a job to a worker that crashed while a sibling was still starting", async () => {
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => (release = resolve));
+        const records = installFakeWorker({ holdInit: (index) => (index === 1 ? gate : undefined) });
+        const { loader, workers } = await freshModules();
+        workers.enableKtx2WorkerDecoding({ workerCount: 2 });
+        const pool = loader.loadKtx2Decoder();
+        await vi.waitFor(() => expect(records[0]?.acked).toBe(true));
+        records[0]!.crash("lost during start-up");
+        release();
+        const decoder = await pool;
+        const decoded = await settlesWithin(decoder.decode(new Uint8Array([1]), CAPS));
+        expect([...decoded.mipmaps[0]!.data]).toEqual(new Array(16).fill(7));
+        expect(records.map((r) => r.received.length)).toEqual([0, 1]);
     });
 
     it("falls back to the main-thread decoder when no worker can load the decoder", async () => {
@@ -212,6 +316,23 @@ describe("enableKtx2WorkerDecoding", () => {
         expect(await loader.loadKtx2Decoder(), "later loads go straight to the main thread").toBe(mainThreadDecoder);
     });
 
+    it("reports a missing decoder global through the init reply and falls back", async () => {
+        installFakeWorker({ noGlobal: true });
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+        const mainThreadDecoder = { decode: vi.fn() };
+        vi.stubGlobal("KTX2DECODER", {
+            KTX2Decoder: function () {
+                return mainThreadDecoder;
+            },
+            MSCTranscoder: { UseFromWorkerThread: true },
+            WASMMemoryManager: { LoadBinariesFromCurrentThread: false },
+        });
+        const { loader, workers } = await freshModules();
+        workers.enableKtx2WorkerDecoding({ workerCount: 1 });
+        expect(await loader.loadKtx2Decoder()).toBe(mainThreadDecoder);
+        expect(String(warn.mock.calls[0]![1])).toContain("decoder global KTX2DECODER not found after importScripts");
+    });
+
     it("keeps the main-thread decoder when Worker does not exist", async () => {
         vi.stubGlobal("Worker", undefined);
         const mainThreadDecoder = { decode: vi.fn() };
@@ -225,5 +346,31 @@ describe("enableKtx2WorkerDecoding", () => {
         const { loader, workers } = await freshModules();
         workers.enableKtx2WorkerDecoding();
         expect(await loader.loadKtx2Decoder()).toBe(mainThreadDecoder);
+    });
+});
+
+describe("_ktx2WorkerMain under the production error plugin", () => {
+    it("holds no `throw new Error(…)` the plugin would turn into a helper the worker realm lacks", () => {
+        // scripts/lite-error-plugin.ts rewrites `throw new Error(<string | template>)` into an imported
+        // ThrowLiteError call; the worker body is stringified on its own, so such a rewrite would leave it calling an
+        // undefined helper. Any throw of `new Error(...)` inside the worker function is refused here.
+        const file = new URL("../../../packages/babylon-lite/src/texture/ktx2-worker-decoder.ts", import.meta.url);
+        const source = ts.createSourceFile("ktx2-worker-decoder.ts", readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true);
+        let body: ts.Node | undefined;
+        source.forEachChild((node) => {
+            if (ts.isFunctionDeclaration(node) && node.name?.text === "_ktx2WorkerMain") {
+                body = node.body;
+            }
+        });
+        expect(body, "the worker function is found").toBeDefined();
+        const throwsError: string[] = [];
+        const visit = (node: ts.Node): void => {
+            if (ts.isThrowStatement(node) && ts.isNewExpression(node.expression) && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === "Error") {
+                throwsError.push(node.getText(source));
+            }
+            ts.forEachChild(node, visit);
+        };
+        visit(body!);
+        expect(throwsError).toEqual([]);
     });
 });
