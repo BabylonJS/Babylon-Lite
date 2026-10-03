@@ -212,6 +212,7 @@ export function ensureCsmShadowCacheState(
         if (dropped) {
             for (let cascade = 0; cascade < existing._tasks.length; cascade++) {
                 const staticTask = existing._staticTasks[cascade]!;
+                // Held casters are dropped too: they leave the static layer as well.
                 _dropTaskMeshes(staticTask, dropped);
                 // The reconcile queues into the dynamic overlay. A caster the gate holds static (one re-capped or
                 // requeued for a material change) goes back into the static layer, so it keeps its class. A caster
@@ -327,10 +328,15 @@ export function ensureCsmShadowCacheState(
     const casterMatGens = new Map<Material, number | undefined>();
     const casterMaterials = new Map<Material, Material>();
     const casterMaxCascades = new Map<Mesh, number | undefined>();
+    // A caster without a material gets no packet, and so no cap entry: it waits in `_held`, and the reconcile queues it
+    // once it has one, also when it gets it before the next ensure.
+    let held: Set<Mesh> | undefined;
     for (const mesh of casterMeshes) {
-        casterMaxCascades.set(mesh, mesh._shadowMaxCascade);
         if (mesh.material) {
+            casterMaxCascades.set(mesh, mesh._shadowMaxCascade);
             snapshotShadowCasterMaterial(mesh.material, casterMaterials, casterMatGens);
+        } else {
+            (held ??= new Set()).add(mesh);
         }
     }
     const state: CsmCachedTaskState = {
@@ -348,6 +354,7 @@ export function ensureCsmShadowCacheState(
         _casterMaterials: casterMaterials,
         _casterMatGens: casterMatGens,
         _casterMaxCascades: casterMaxCascades,
+        _held: held,
         _cascadeScratch: _createCascadeScratch(cascadeCount),
         _staticTasks: staticTasks,
         _cacheTexture: cacheTexture,
