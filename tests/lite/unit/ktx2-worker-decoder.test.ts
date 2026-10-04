@@ -338,7 +338,10 @@ describe("enableKtx2WorkerDecoding", () => {
 
         expect(records[0]!.terminated, "the rejected pre-init worker must release its resources").toBe(true);
         expect(records[0]!.acked).toBe(false);
-        expect(records.map((record) => record.received.length), "the rejected worker must not enter the live pool").toEqual([0, 1]);
+        expect(
+            records.map((record) => record.received.length),
+            "the rejected worker must not enter the live pool"
+        ).toEqual([0, 1]);
         expect([...decoded.mipmaps[0]!.data]).toEqual(new Array(16).fill(7));
     });
 
