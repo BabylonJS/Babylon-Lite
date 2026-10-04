@@ -22,6 +22,7 @@ function attach(target: RenderTarget, texture: Texture2D, layer: number, mipLeve
         target._depthView = view;
     } else {
         target._colorTexture = gpu;
+        target._colorSubresource = { layer, mipLevel };
         target._colorView = view;
     }
 }

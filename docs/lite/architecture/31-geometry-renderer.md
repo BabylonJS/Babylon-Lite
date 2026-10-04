@@ -400,11 +400,14 @@ execution paths chosen in `record()`:
 
 - **Fast path** — `GPUCommandEncoder.copyTextureToTexture`. Eligible when
   there is no viewport, source and target are single-sampled and share a
-  format, the source mip dimensions match the target's mip-0 dimensions, the
+  format, the source mip dimensions match the target attachment's dimensions, the
   target is not the swapchain, and the source/target textures were created
   with `COPY_SRC`/`COPY_DST`. Frame-graph render targets carry both copy usages
   by default; external/eager textures without the required usage fall back to
-  the blit path.
+  the blit path. Texture-backed color wrappers retain `_colorSubresource` so
+  encoder-copy destinations use the attachment's selected `mipLevel` and layer
+  (`origin.z`) rather than the whole allocation's default mip/layer. Targets
+  without this metadata retain the ordinary mip-zero, layer-zero destination.
 
 - **Blit path** — full-screen triangle samples the source. MSAA sources
   resolve per-sample with `textureLoad`. Lod level is applied via

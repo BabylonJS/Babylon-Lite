@@ -87,6 +87,7 @@ describe("createTextureRenderTarget", () => {
         expect(target._descriptor.format).toBe("rgba16float");
         expect(target._descriptor.samples).toBe(1);
         expect([target._width, target._height]).toEqual([128, 64]);
+        expect(target._colorSubresource).toEqual({ layer: 5, mipLevel: 1 });
         expect((tiles.texture as unknown as { views: GPUTextureViewDescriptor[] }).views.at(-1)).toEqual({
             dimension: "2d",
             baseArrayLayer: 5,
@@ -125,6 +126,7 @@ describe("createTextureRenderTarget", () => {
         expect(target._depthTexture).toBe(tiles.texture);
         expect(target._colorTexture).toBeNull();
         expect(target._colorView).toBeNull();
+        expect(target._colorSubresource).toBeUndefined();
         expect(view).not.toBeNull();
         buildRenderTarget(target, engine);
         expect(target._depthView).toBe(view);
@@ -147,6 +149,7 @@ describe("createTextureRenderTarget", () => {
         buildRenderTarget(target, engine);
 
         expect(target._colorTexture).toBe(replacement);
+        expect(target._colorSubresource).toEqual({ layer: 1, mipLevel: 0 });
         expect(replacement.views.at(-1)).toMatchObject({ baseArrayLayer: 1, arrayLayerCount: 1 });
     });
 

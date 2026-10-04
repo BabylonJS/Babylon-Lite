@@ -9,10 +9,10 @@
  *   - Fast path: `GPUCommandEncoder.copyTextureToTexture`. Requires:
  *       * No viewport.
  *       * Source and target have the same format and are single-sampled.
- *       * Source mip(`lodLevel`) dimensions match the target's mip-0 dimensions.
+ *       * Source mip(`lodLevel`) dimensions match the target attachment's dimensions.
  *       * Target is not the engine scRT (its color texture is re-acquired
  *         per frame, so a copy-destination handle captured at build time would go stale).
- *       * Target owns a color GPU texture (offscreen / MSAA-color).
+ *       * Target exposes a color GPU texture and any selected destination subresource.
  *       * Source and target textures declare `COPY_SRC` and `COPY_DST` respectively.
  *
  *   - Blit path: a full-screen triangle samples the source texture and writes
@@ -392,9 +392,12 @@ function tryBuildFastPath(task: CopyToTextureTaskInternal, source: RenderTarget,
     if (srcMipW !== target._width || srcMipH !== target._height) {
         return false;
     }
+    const subresource = target._colorSubresource;
     task._fast = {
         _source: { texture: sourceTexture, mipLevel: lod },
-        _target: { texture: targetTexture },
+        _target: subresource
+            ? { texture: targetTexture, mipLevel: subresource.mipLevel, origin: { x: 0, y: 0, z: subresource.layer } }
+            : { texture: targetTexture },
         _size: { width: srcMipW, height: srcMipH },
     };
     return true;
