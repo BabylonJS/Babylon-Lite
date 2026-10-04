@@ -395,9 +395,7 @@ function tryBuildFastPath(task: CopyToTextureTaskInternal, source: RenderTarget,
     const subresource = target._colorSubresource;
     task._fast = {
         _source: { texture: sourceTexture, mipLevel: lod },
-        _target: subresource
-            ? { texture: targetTexture, mipLevel: subresource.mipLevel, origin: { x: 0, y: 0, z: subresource.layer } }
-            : { texture: targetTexture },
+        _target: subresource ? { texture: targetTexture, mipLevel: subresource.mipLevel, origin: { x: 0, y: 0, z: subresource.layer } } : { texture: targetTexture },
         _size: { width: srcMipW, height: srcMipH },
     };
     return true;
