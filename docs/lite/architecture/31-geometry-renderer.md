@@ -245,13 +245,26 @@ contexts therefore composes K variants, not one per material. Node entries and v
 rebuilt on every sync, because a Node geometry resource snapshots the material's uniforms
 once; a Node view is stamped with a per-sync token that holds no view, so a published Node view
 keeps no earlier Node material or view alive. Off-scene meshes of an explicit list have no forward renderable and are rebuilt on every
-sync too. A sync that sees a different device, camera (`config.camera`, else `scene.camera`,
-compared by identity) or `config.reverseCulling` than the last publish carries nothing and
-reuses no view, so a camera or culling change, or a device-loss recovery (whose `record()` also
-recreates the task's own buffers), rebuilds the whole pass as before. The camera identity
-matters under a floating origin: an entry packs its world against the camera it was built
-for and re-packs only when that camera's version moves. If such a sync fails and the previous configuration is restored, the next
-sync carries the published entries and views, none of the failed sync's views.
+sync too. A sync that sees a different device, camera or `config.reverseCulling` than the last
+publish carries nothing and reuses no view, so a camera or culling change, or a device-loss
+recovery (whose `record()` also recreates the task's own buffers), rebuilds the whole pass as
+before. The camera is stamped as two elements, both compared by identity: the override as a view
+captures it (`config.camera ?? null`, so an omitted and a null override are the same choice) and
+the camera the pass draws with (`config.camera`, else `scene.camera`). Both matter under a
+floating origin. The override decides what an entry packs its world against and whose version
+re-packs it: the override itself, or whatever `scene.camera` is at each pack (it also decides
+whether a PBR entry receives shadows). Without it, moving one camera between `scene.camera` and
+`config.camera` would keep the effective camera and carry entries that then follow the wrong
+origin once `scene.camera` changes. The effective camera catches `scene.camera` replaced for a
+task without an override: its entries re-pack only when the version they compare moves, and the
+new camera's version can equal the old one. A sync only sees the camera of that moment, so under
+a floating origin `execute()` clears the stamp once a frame draws with another camera than the
+stamped one: `scene.camera` can then pass through other cameras and return to the stamped one
+with the version an entry compared last, leaving it packed against another camera's origin, and
+the next sync carries nothing. Clearing instead of rebuilding keeps a camera switch between
+frames free of pass rebuilds. If a sync against a changed configuration fails and the previous
+configuration is restored, the next sync carries the published entries and views, none of the
+failed sync's views.
 
 The task's `_removeMesh` hook evicts every matching bound entry and queues its retirement
 immediately, including when rendering is stopped. Its weak exclusion set still rejects removed
@@ -521,6 +534,11 @@ matches BJS pixel-for-pixel (no lossy material-constants approximation).
   restored configuration rebuilds a refreshed entry on its own view; Node entries rebuild on
   every sync, and a Node material swapped over several syncs leaves no earlier material or view
   reachable from the published views.
+- Under a floating origin, a tracked mesh is packed against the camera the pass draws with: after
+  `scene.camera` is replaced (with an equal world-matrix version) for a task without an override,
+  after its camera becomes `config.camera` and `scene.camera` then moves on, after
+  `config.camera` is removed while it is the scene camera and `scene.camera` then moves on, and
+  on the record after frames drawn with other scene cameras end on the stamped one again.
 - A PBR geometry variant composed against a superseded forward PBR context is not reused.
 - A PBR view keeps one variant set per live forward context: after meshes on a scene context
   and on per-mesh runtime-build contexts are bound (one variant per context), per-mesh and

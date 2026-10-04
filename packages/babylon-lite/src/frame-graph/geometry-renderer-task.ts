@@ -197,9 +197,14 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
     /** One view per unique source material (Standard, PBR or Node). Kept across syncs together with the
      *  variants compiled on it, and replaced only when a sync publishes, pruned to the materials still drawn. */
     _views: Map<Material, GeometryView>;
-    /** @internal What the published views and entries were built against: device, the camera (`config.camera`,
-     *  else `scene.camera`) and `config.reverseCulling`. A sync that sees any of them changed carries nothing and
-     *  reuses no view. */
+    /** @internal What the published views and entries were built against, compared by identity: the device, the
+     *  camera override as a view captures it (`config.camera ?? null`), the camera the pass draws with
+     *  (`config.camera`, else `scene.camera`) and `config.reverseCulling`. Both camera elements are needed under a
+     *  floating origin: the override decides whether an entry packs its world against that camera or against the
+     *  live `scene.camera`, and the effective camera catches a replaced `scene.camera` whose version equals the
+     *  old one. A sync that sees any of them changed carries nothing and reuses no view. Under a floating origin
+     *  `execute()` empties it once a frame draws with another camera than the stamped one, so the next sync
+     *  carries nothing either. */
     _cfg: unknown[];
     /** @internal Device the task's own buffers live on; `record()` recreates them on a replacement device. */
     _device: GPUDevice;
@@ -557,13 +562,13 @@ function recordTask(task: GeometryRendererTaskInternal, config: GeometryRenderer
  *  everything it captures either forces a forward rebuild when it changes (material features
  *  and textures, mesh capabilities and vertex layout, the PBR context and light / shadow
  *  request), is constant for the task (attachments, signature), is stamped in `_cfg` (device,
- *  camera, culling direction), or is read live (world, light selection, material UBO version,
- *  vertex/index buffers, thin-instance counts). So an entry whose mesh still draws the same
- *  source material through the forward renderable it was built alongside is carried as is —
- *  same renderable, binding, update state and lifetime sink — and only new or changed entries
- *  are built. Node entries, and meshes without a forward renderable of their own (off-scene
- *  meshes of an explicit list), are rebuilt on every sync, and so is everything once the stamp
- *  changes. */
+ *  camera override and effective camera, culling direction), or is read live (world, light
+ *  selection, material UBO version, vertex/index buffers, thin-instance counts). So an entry
+ *  whose mesh still draws the same source material through the forward renderable it was built
+ *  alongside is carried as is — same renderable, binding, update state and lifetime sink — and
+ *  only new or changed entries are built. Node entries, and meshes without a forward renderable
+ *  of their own (off-scene meshes of an explicit list), are rebuilt on every sync, and so is
+ *  everything once the stamp changes or `execute()` has cleared it. */
 function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: GeometryRendererTaskConfig, eng: EngineContext, sc: SceneContext): void {
     // Make-before-break: build every new entry with its own resource batch, publish the
     // complete list atomically, then retire the superseded entries after the next submitted
@@ -571,12 +576,23 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
     // entries are the same objects in both lists and are never retired here.
     const oldBound = task._bound;
     // Views and entries capture the device, the camera and the culling direction. When any changed since the
-    // last publish (`config.camera`, or `scene.camera` for a task without one, or `reverseCulling` replaced
-    // before `frameGraph.build()`, or a replacement device after device loss), nothing is carried and every view
-    // is created afresh. The camera is stamped by identity: a floating-origin entry packs its world against the
-    // camera it was built for and only re-packs when that camera's version moves. The stamp is published with
-    // the list, so a failed sync is retried the same way.
-    const cfg = [task._device, config.camera ?? sc.camera, config.reverseCulling];
+    // last publish (`config.camera` set, replaced or removed, or `reverseCulling` changed, before
+    // `frameGraph.build()`; `scene.camera` replaced for a task without a camera of its own; a replacement device
+    // after device loss), nothing is carried and every view is created afresh. The camera takes two elements,
+    // both compared by identity:
+    // - the override as a view captures it (`config.camera ?? null`, so an omitted and a null override are the
+    //   same choice). Under a floating origin it decides what an entry packs its world against and which
+    //   camera's version re-packs it: the override itself, or whatever `scene.camera` is at each pack (and
+    //   whether a PBR entry receives shadows). Without it, moving one camera A between `scene.camera` and
+    //   `config.camera` keeps the effective camera and carries the entries: one built without an override then
+    //   follows a later `scene.camera` while the pass draws with A, and one built for the override A stays on A
+    //   while the pass follows `scene.camera`;
+    // - the camera the pass draws with (`config.camera ?? scene.camera`). Without it, replacing `scene.camera` for
+    //   a task without an override carries entries packed against the old camera, which re-pack only when the
+    //   version they compare moves, and the new camera's version can equal the old one. It only sees the camera
+    //   at a sync: frames drawn with other cameras in between are caught by `executeTask`, which clears the stamp.
+    // The stamp is published with the list, so a failed sync is retried the same way.
+    const cfg = [task._device, config.camera ?? null, config.camera ?? sc.camera, config.reverseCulling];
     const fresh = cfg.some((value, index) => value !== task._cfg[index]);
     // This sync's own copy of the view cache: the views it creates replace `_views` only when it publishes, so
     // a failed sync never leaves a view built against another stamp for a later sync to reuse.
@@ -848,6 +864,17 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
     // auto-resync in `prepareRenderTaskPass`.
     if (sc._renderableVersion !== task._boundVer) {
         rebuildBoundMeshes(task, config, eng, sc);
+    }
+    // Under a floating origin an entry built without `config.camera` re-packs its world only when the version of
+    // whatever `scene.camera` is at that frame differs from the one it compared last, so once a frame draws with
+    // another camera than the stamped one, the stamp no longer tells what the entry is packed against:
+    // `scene.camera` can go through other cameras and come back to the stamped one with a version equal to the last
+    // one compared (per-object counters start equal), which leaves the entry packed against the previous camera's
+    // origin. Such an entry must not be carried, so the stamp is cleared and the next sync (a `frameGraph.build()`
+    // or a scene mutation) rebuilds the whole pass. Clearing it rather than rebuilding here keeps switching
+    // `scene.camera` between frames free of pass rebuilds.
+    if (eng.useFloatingOrigin && camera !== task._cfg[2]) {
+        task._cfg.length = 0;
     }
     const viewport = camera.viewport;
     const aspect = (mrt._width / mrt._height) * (viewport ? viewport.width / viewport.height : 1);

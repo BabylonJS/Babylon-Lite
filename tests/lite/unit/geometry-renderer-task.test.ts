@@ -1192,6 +1192,13 @@ describe("GeometryRendererTask", () => {
         const { scene, internal, config, engine } = await setupGeoTask(2, false, "stub");
         const before = [...internal._bound];
         expect(before.map((entry) => viewOf(entry)._camera)).toEqual([null, null]);
+        // An omitted and a null override are the same choice: moving between them carries every entry.
+        config.camera = null;
+        internal.record();
+        internal._bound.forEach((entry, index) => expect(entry).toBe(before[index]));
+        delete config.camera;
+        internal.record();
+        internal._bound.forEach((entry, index) => expect(entry).toBe(before[index]));
         const gpu = probeGpu(engine);
         const camera = { ...(scene.camera as object) } as GeometryRendererTaskConfig["camera"];
 
@@ -1206,10 +1213,14 @@ describe("GeometryRendererTask", () => {
         internal._bound.forEach((entry, index) => expect(entry).toBe(rebuilt[index]));
     });
 
-    it("re-packs a tracked floating-origin entry against a replaced scene camera when the task has no camera of its own", async () => {
+    /** One tracked Standard mesh at world X = 0 on a floating-origin engine, recorded without `config.camera`.
+     *  `cameraAt` copies the scene camera to world X = `x` with the given world-matrix counter (and its own matrix
+     *  caches); `uploadedX` tells whether any buffer upload in `uploads` (since setup, or since a test emptied it)
+     *  carries a world translation X of `x`, so -9000 is the mesh packed against a camera at X = 9000. */
+    async function setupFloatingOriginTask() {
         const { makePackMeshWorld } = await import("../../../packages/babylon-lite/src/large-world/pack-mat4-with-offset");
         const { wrapRenderableForFO, applyLightFoOffset } = await import("../../../packages/babylon-lite/src/large-world/floating-origin");
-        const { scene, internal, config, engine } = await setupGeoTask(1, false, "stub", GeometryTextureType.WORLD_POSITION, (eng) =>
+        const setup = await setupGeoTask(1, false, "stub", GeometryTextureType.WORLD_POSITION, (eng) =>
             Object.assign(eng, {
                 useFloatingOrigin: true,
                 _makePackMeshWorld: makePackMeshWorld,
@@ -1217,27 +1228,142 @@ describe("GeometryRendererTask", () => {
                 _applyLightFoOffset: applyLightFoOffset,
             })
         );
+        const uploads: Float32Array[] = [];
+        (setup.engine._device.queue as unknown as { writeBuffer: (...a: unknown[]) => void }).writeBuffer = (...a: unknown[]) => {
+            const data = a[2] as ArrayBuffer | ArrayBufferView;
+            uploads.push(new Float32Array(ArrayBuffer.isView(data) ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) : data.slice(0)));
+        };
+        type TaskCamera = NonNullable<GeometryRendererTaskConfig["camera"]>;
+        const cameraAt = (x: number, worldMatrixVersion: number): TaskCamera => {
+            const camera = setup.scene.camera as unknown as { worldMatrix: Float32Array };
+            const copy = {
+                ...camera,
+                worldMatrix: Float32Array.from(camera.worldMatrix),
+                worldMatrixVersion,
+                _viewCache: new Float32Array(16),
+                _viewVer: -1,
+                _projCache: new Float32Array(16),
+                _projVer: -1,
+                _vpCache: new Float32Array(16),
+                _vpVer: -1,
+            };
+            copy.worldMatrix[12] = x;
+            return copy as unknown as TaskCamera;
+        };
+        const uploadedX = (x: number): boolean => uploads.some((f) => f.length >= 16 && f[12] === x);
+        return { ...setup, cameraAt, uploads, uploadedX };
+    }
+
+    it("re-packs a tracked floating-origin entry against a replaced scene camera when the task has no camera of its own", async () => {
+        const { scene, internal, config, engine, cameraAt, uploadedX } = await setupFloatingOriginTask();
         expect(config.camera).toBeUndefined();
         internal.execute();
         const before = [...internal._bound];
         const gpu = probeGpu(engine);
-        const worlds: Float32Array[] = [];
-        (engine._device.queue as unknown as { writeBuffer: (...a: unknown[]) => void }).writeBuffer = (...a: unknown[]) => {
-            const data = a[2] as ArrayBuffer | ArrayBufferView;
-            worlds.push(new Float32Array(ArrayBuffer.isView(data) ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) : data.slice(0)));
-        };
 
         // A different scene camera, far from the old origin, whose world-matrix counter happens to equal the old one.
-        const old = scene.camera as unknown as { worldMatrix: Float32Array; worldMatrixVersion: number };
-        const moved = { ...old, worldMatrix: Float32Array.from(old.worldMatrix), _viewVer: -1, _projVer: -1, _vpVer: -1 };
-        moved.worldMatrix[12] = 9000;
-        expect(moved.worldMatrixVersion).toBe(old.worldMatrixVersion);
-        (scene as { camera?: unknown }).camera = moved;
+        (scene as { camera?: unknown }).camera = cameraAt(9000, scene.camera!.worldMatrixVersion);
         internal.record();
         internal.execute();
 
         // The mesh (world X = 0) is packed relative to the new camera: 0 - 9000.
-        expect(worlds.some((f) => f.length >= 16 && f[12] === -9000)).toBe(true);
+        expect(uploadedX(-9000)).toBe(true);
+        expectRebuiltPass(internal._bound, before, gpu.retirements);
+    });
+
+    it("pins a tracked floating-origin entry to config.camera once it overrides the scene camera the entry was built for", async () => {
+        const { scene, internal, config, engine, meshes, cameraAt, uploadedX } = await setupFloatingOriginTask();
+        internal.execute();
+        const before = [...internal._bound];
+        const gpu = probeGpu(engine);
+        const first = scene.camera!;
+
+        // The pass keeps drawing with the same camera, now as an override: the entry built without one follows
+        // `scene.camera`, so the switch must rebuild it against the override.
+        config.camera = first;
+        internal.record();
+        const pinned = [...internal._bound];
+        // `scene.camera` moves on to a far camera with another world-matrix counter while the override stays.
+        (scene as { camera?: unknown }).camera = cameraAt(9000, first.worldMatrixVersion + 1);
+        internal.record();
+        internal.execute();
+
+        // The pass draws with the override (origin X = 0): the mesh at X = 0 is never packed as 0 - 9000.
+        expect(uploadedX(-9000)).toBe(false);
+        expectRebuiltPass(pinned, before, gpu.retirements);
+        expect(viewOf(pinned[0]!)._camera).toBe(first);
+        // Neither the override nor the effective camera changed with `scene.camera`: the pinned entry was carried.
+        expect(internal._bound).toHaveLength(1);
+        expect(internal._bound[0]).toBe(pinned[0]);
+        // A later move of the mesh is packed against the override as well: X = 5, not 5 - 9000.
+        const mesh = meshes[0] as unknown as { worldMatrix: Float32Array; worldMatrixVersion: number };
+        expect(uploadedX(5)).toBe(false);
+        mesh.worldMatrix[12] = 5;
+        mesh.worldMatrixVersion++;
+        internal.execute();
+        expect(uploadedX(5)).toBe(true);
+        expect(uploadedX(5 - 9000)).toBe(false);
+    });
+
+    it("lets a tracked floating-origin entry follow scene.camera once config.camera no longer overrides the camera it was built for", async () => {
+        const { scene, internal, config, engine, cameraAt, uploadedX } = await setupFloatingOriginTask();
+        const override = cameraAt(0, 1);
+        config.camera = override;
+        internal.record();
+        internal.execute();
+        const gpu = probeGpu(engine);
+        gpu.retirements.splice(0).forEach((retire) => retire());
+        const before = [...internal._bound];
+        expect(viewOf(before[0]!)._camera).toBe(override);
+
+        // The override becomes the scene camera and leaves the config: the pass keeps drawing with the same camera,
+        // but from now on with whatever `scene.camera` is, so the switch must rebuild the entry to follow it.
+        (scene as { camera?: unknown }).camera = override;
+        delete config.camera;
+        internal.record();
+        const following = [...internal._bound];
+        // The next frame after `scene.camera` moves on to a far camera with another world-matrix counter, before any
+        // rebuild.
+        (scene as { camera?: unknown }).camera = cameraAt(9000, override.worldMatrixVersion + 1);
+        internal.execute();
+
+        // The pass draws with the new scene camera: the mesh at X = 0 is packed against it, 0 - 9000.
+        expect(uploadedX(-9000)).toBe(true);
+        expectRebuiltPass(following, before, gpu.retirements);
+        expect(viewOf(following[0]!)._camera).toBeNull();
+    });
+
+    it("rebuilds a tracked floating-origin entry on the next record once frames drew with other scene cameras, even with the stamped camera back", async () => {
+        const { scene, internal, engine, cameraAt, uploads, uploadedX } = await setupFloatingOriginTask();
+        const home = cameraAt(100, 1);
+        (scene as { camera?: unknown }).camera = home;
+        internal.record();
+        internal.execute();
+        expect(uploadedX(-100)).toBe(true);
+        const gpu = probeGpu(engine);
+        gpu.retirements.splice(0).forEach((retire) => retire());
+        const before = [...internal._bound];
+
+        // Frames without a rebuild. The entry re-packs whenever the scene camera's world-matrix counter differs from
+        // the one it compared last, so it ends packed against the camera at X = -500 (0 + 500), whose counter equals
+        // `home`'s: per-object counters start equal.
+        (scene as { camera?: unknown }).camera = cameraAt(9000, 2);
+        internal.execute();
+        (scene as { camera?: unknown }).camera = cameraAt(-500, 1);
+        internal.execute();
+        expect(uploadedX(500)).toBe(true);
+        // `home` is drawn again, and nothing re-packs the entry against it.
+        (scene as { camera?: unknown }).camera = home;
+        uploads.length = 0;
+        internal.execute();
+        expect(uploadedX(-100)).toBe(false);
+
+        // A record (a resize or `frameGraph.build()`) sees the stamped camera again, but must not carry the entry.
+        internal.record();
+        internal.execute();
+
+        // The rebuilt entry is packed against `home`: 0 - 100.
+        expect(uploadedX(-100)).toBe(true);
         expectRebuiltPass(internal._bound, before, gpu.retirements);
     });
 
