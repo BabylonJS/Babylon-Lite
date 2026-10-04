@@ -30,6 +30,8 @@ interface FakeDecoderBehaviour {
     replyThrows?: boolean;
     /** Delay delivering the init message to the worker with this index until the promise settles. */
     holdInit?: (index: number) => Promise<void> | undefined;
+    /** Fail this worker through its real onerror handler before init is acknowledged. */
+    failBeforeInit?: (index: number) => string | undefined;
 }
 
 interface WorkerRecord {
@@ -38,6 +40,7 @@ interface WorkerRecord {
     received: Uint8Array[];
     /** The init acknowledgement reached the pool. */
     acked: boolean;
+    terminated: boolean;
     crash(message: string): void;
 }
 
@@ -57,6 +60,7 @@ function installFakeWorker(behaviour: FakeDecoderBehaviour): WorkerRecord[] {
                 module: null,
                 received: [],
                 acked: false,
+                terminated: false,
                 crash: (message) => this.onerror?.({ message }),
             };
             this.index = records.length;
@@ -129,11 +133,17 @@ function installFakeWorker(behaviour: FakeDecoderBehaviour): WorkerRecord[] {
         }
         postMessage(message: { t?: number }, transfer: Transferable[] = []): void {
             const data = structuredClone(message, { transfer });
+            const initError = message.t === 0 ? behaviour.failBeforeInit?.(this.index) : undefined;
+            if (initError) {
+                queueMicrotask(() => this.onerror?.({ message: initError }));
+                return;
+            }
             const hold = message.t === 0 ? behaviour.holdInit?.(this.index) : undefined;
             void Promise.all([this.ready, hold]).then(([deliver]) => !this.terminated && deliver(data));
         }
         terminate(): void {
             this.terminated = true;
+            records[this.index]!.terminated = true;
         }
     }
     vi.stubGlobal("Worker", FakeWorker);
@@ -188,6 +198,27 @@ describe("enableKtx2WorkerDecoding", () => {
         expect([...records.flatMap((r) => r.received)[0]!]).toEqual([1, 2, 3, 4, 5]);
         expect(decoded.transcodedFormat).toBe(0x8e8c);
         expect([...decoded.mipmaps[0]!.data]).toEqual(new Array(16).fill(7));
+    });
+
+    it("resolves decoder and transcoder URLs against an HTTPS worker caller when document is absent", async () => {
+        vi.stubGlobal("document", undefined);
+        vi.stubGlobal("location", { href: "https://game.example/workers/texture-worker.js" });
+        const records = installFakeWorker({});
+        const { loader, workers } = await freshModules();
+        loader.setKtx2DecoderUrl("../assets/ktx2/babylon.ktx2Decoder.js", {
+            MSCTranscoder: { JSModuleURL: "./msc.js", WasmModuleURL: "../wasm/msc.wasm" },
+            ZSTDDecoder: { WasmModuleURL: "https://cdn.example/ktx2/zstd.wasm" },
+        });
+        workers.enableKtx2WorkerDecoding({ workerCount: 1 });
+
+        await loader.loadKtx2Decoder();
+
+        expect(records[0]!.importedUrls).toEqual(["https://game.example/assets/ktx2/babylon.ktx2Decoder.js"]);
+        expect(records[0]!.module!.MSCTranscoder).toMatchObject({
+            JSModuleURL: "https://game.example/workers/msc.js",
+            WasmModuleURL: "https://game.example/wasm/msc.wasm",
+        });
+        expect(records[0]!.module!.ZSTDDecoder!.WasmModuleURL).toBe("https://cdn.example/ktx2/zstd.wasm");
     });
 
     it("transfers a decoder-owned full-span mip without copying it", async () => {
@@ -295,6 +326,20 @@ describe("enableKtx2WorkerDecoding", () => {
         const decoded = await settlesWithin(decoder.decode(new Uint8Array([1]), CAPS));
         expect([...decoded.mipmaps[0]!.data]).toEqual(new Array(16).fill(7));
         expect(records.map((r) => r.received.length)).toEqual([0, 1]);
+    });
+
+    it("terminates and excludes a worker that errors before acknowledging initialization", async () => {
+        const records = installFakeWorker({ failBeforeInit: (index) => (index === 0 ? "failed before init acknowledgment" : undefined) });
+        const { loader, workers } = await freshModules();
+        workers.enableKtx2WorkerDecoding({ workerCount: 2 });
+
+        const decoder = await loader.loadKtx2Decoder();
+        const decoded = await decoder.decode(new Uint8Array([1]), CAPS);
+
+        expect(records[0]!.terminated, "the rejected pre-init worker must release its resources").toBe(true);
+        expect(records[0]!.acked).toBe(false);
+        expect(records.map((record) => record.received.length), "the rejected worker must not enter the live pool").toEqual([0, 1]);
+        expect([...decoded.mipmaps[0]!.data]).toEqual(new Array(16).fill(7));
     });
 
     it("falls back to the main-thread decoder when no worker can load the decoder", async () => {

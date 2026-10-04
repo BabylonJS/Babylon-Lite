@@ -121,15 +121,19 @@ interface PoolWorker {
 let _enabled = false;
 let _pool: Promise<Ktx2Decoder> | null = null;
 
-/** Resolve a possibly relative URL against the page, since a blob-URL worker has no usable base URL. */
+/** Resolve a possibly relative URL against the caller, since a blob-URL worker has no usable base URL. */
 function absoluteUrl(url: string): string {
-    return typeof document === "undefined" ? url : new URL(url, document.baseURI).href;
+    const baseUrl = typeof document === "undefined" ? globalThis.location?.href : document.baseURI;
+    return baseUrl ? new URL(url, baseUrl).href : url;
 }
 
 function startWorker(source: string, init: Ktx2WorkerRequest, onReply: (reply: Ktx2WorkerReply) => void, onCrash: (worker: Worker, message: string) => void): Promise<Worker> {
     return new Promise<Worker>((resolve, reject) => {
         const worker = new Worker(source);
-        worker.onerror = (event: ErrorEvent): void => reject(new Error(event.message || "KTX2 worker failed to start"));
+        worker.onerror = (event: ErrorEvent): void => {
+            worker.terminate();
+            reject(new Error(event.message || "KTX2 worker failed to start"));
+        };
         worker.onmessage = (event: MessageEvent<Ktx2WorkerReply>): void => {
             const reply = event.data;
             if (reply.t !== 0) {

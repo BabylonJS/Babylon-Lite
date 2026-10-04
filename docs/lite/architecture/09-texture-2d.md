@@ -487,13 +487,15 @@ By default the decoder script runs on the main thread, so each KTX2 transcode bl
 - Each worker is started from a blob URL holding `_ktx2WorkerMain`. It receives `{ t: 0, url, wasmUrls }`, calls
   `importScripts(url)`, sets `MSCTranscoder.UseFromWorkerThread` and `WASMMemoryManager.LoadBinariesFromCurrentThread`,
   applies the `setKtx2DecoderUrl` transcoder overrides and replies `{ t: 0 }` (or `{ t: 0, e }`). URLs are resolved
-  against `document.baseURI` first, because a blob worker has no usable base URL.
+  against `document.baseURI` in a page or the calling worker's `globalThis.location.href`, because a nested blob worker
+  has no usable base URL.
 - `decode(data, caps, options)` posts a **copy** of `data` (transferred) to the least-busy worker as
   `{ t: 1, id, data, caps, options }`; the caller's bytes are never detached. The worker replies `{ t: 1, id, d }` and
   transfers every mip buffer back; a mip that is a view into a larger or already-transferred buffer is copied first.
-- A worker that crashes after start-up rejects its in-flight jobs and leaves the pool. If `Worker` is unavailable, or
-  no worker can initialise the decoder, the mode uninstalls itself (one `console.warn`) and `loadKtx2Decoder` returns
-  the main-thread decoder.
+- A worker that errors before acknowledging initialisation is terminated and excluded while surviving workers continue.
+  A worker that crashes after start-up rejects its in-flight jobs and leaves the pool. If `Worker` is unavailable, or
+  no worker can initialise the decoder, the mode uninstalls itself (one `console.warn`) and `loadKtx2Decoder` returns the
+  main-thread decoder.
 
 Uploads, output formats and every public loader are unchanged; only where `decode` runs differs.
 
@@ -514,7 +516,7 @@ Uploads, output formats and every public loader are unchanged; only where `decod
 7. **Texture usage flags** — Must include TEXTURE_BINDING, COPY_DST, and RENDER_ATTACHMENT.
 8. **Return shape** — Must contain `texture`, `view`, `sampler`, `width`, `height`.
 9. **KTX2 glTF path** — Scene 112 loads FlightHelmetKTX via `KHR_texture_basisu`, stays below its bundle ceiling, and does not increase runtime-loaded JS for existing scenes.
-   9b. **KTX2 worker decoding** (`tests/lite/unit/ktx2-worker-decoder.test.ts`) — the real worker source runs in a VM realm behind a message bridge with transfer semantics: absolute decoder/transcoder URLs, caller bytes intact, shared/sub-view mips returned intact, least-busy dispatch, decode errors and post-start crashes rejected, fallback to the main-thread decoder when no worker initialises or `Worker` is missing.
+   9b. **KTX2 worker decoding** (`tests/lite/unit/ktx2-worker-decoder.test.ts`) — the real worker source runs in a VM realm behind a message bridge with transfer semantics: decoder/transcoder URLs resolved from either a page or an HTTP(S) caller worker (while preserving absolute URLs), caller bytes intact, shared/sub-view mips returned intact, least-busy dispatch, pre-init errors terminate and exclude only the failed worker, decode errors and post-start crashes are rejected, and the main-thread decoder is used when no worker initialises or `Worker` is missing.
 10. **Independent decoded images** — Two calls with one source create different GPU textures and each takes one ownership reference.
 11. **External-image sizing** — Recognize bitmap/data/canvas, image, video, and VideoFrame dimension shapes; reject unsupported or zero-sized sources before allocation.
 12. **Aspect-preserving downscale** — Clamp only when the larger dimension exceeds `maxDimension`, preserve orientation/aspect ratio, and never upscale.
