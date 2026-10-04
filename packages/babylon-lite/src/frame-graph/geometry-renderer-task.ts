@@ -170,12 +170,23 @@ interface AttachmentInfo {
     readonly _clearValue: GeometryClearValue;
 }
 
+/** A task-owned geometry view of one source material (Standard, PBR or Node). */
+type GeometryView = (StandardGeometryMaterialView | PbrGeometryMaterialView | NodeGeometryMaterialView) & {
+    /** @internal What the view was created against: the source's `_renderFeatures` object for Standard /
+     *  PBR, the sync that created it for Node (see `ensureView`). */
+    _rf?: unknown;
+};
+
 /** One mesh + its bound DrawBinding. The Renderable owns its own per-mesh
  *  GPU state (UBOs, bind group); the binding owns the per-signature pipeline. */
 interface BoundMesh extends MeshRebuildResources {
     readonly _mesh: Mesh;
     readonly _binding: DrawBinding;
-    readonly _view: StandardGeometryMaterialView | PbrGeometryMaterialView | NodeGeometryMaterialView;
+    readonly _view: GeometryView;
+    /** @internal Forward renderable the scene tracked for the mesh when this entry was built (Standard / PBR
+     *  scene meshes). While the scene still tracks that same renderable the entry is carried across syncs;
+     *  without one the entry is rebuilt on every sync. */
+    readonly _fwd?: Renderable;
 }
 
 interface GeometryRendererTaskInternal extends GeometryRendererTask {
@@ -183,8 +194,20 @@ interface GeometryRendererTaskInternal extends GeometryRendererTask {
      *  and (when no external depth was supplied) the depth attachment. */
     _mrt: RenderTargetMrt;
     _attachments: AttachmentInfo[];
-    /** One view per unique source material (Standard, PBR or Node). */
-    _views: Map<Material, StandardGeometryMaterialView | PbrGeometryMaterialView | NodeGeometryMaterialView>;
+    /** One view per unique source material (Standard, PBR or Node). Kept across syncs together with the
+     *  variants compiled on it, and replaced only when a sync publishes, pruned to the materials still drawn. */
+    _views: Map<Material, GeometryView>;
+    /** @internal What the published views and entries were built against, compared by identity: the device, the
+     *  camera override as a view captures it (`config.camera ?? null`), the camera the pass draws with
+     *  (`config.camera`, else `scene.camera`) and `config.reverseCulling`. Both camera elements are needed under a
+     *  floating origin: the override decides whether an entry packs its world against that camera or against the
+     *  live `scene.camera`, and the effective camera catches a replaced `scene.camera` whose version equals the
+     *  old one. A sync that sees any of them changed carries nothing and reuses no view. Under a floating origin
+     *  `execute()` empties it once a frame draws with another camera than the stamped one, so the next sync
+     *  carries nothing either. */
+    _cfg: unknown[];
+    /** @internal Device the task's own buffers live on; `record()` recreates them on a replacement device. */
+    _device: GPUDevice;
     /** Render bindings — opaque first then alpha-blended (sorted in record()). */
     _bound: BoundMesh[];
     _wrapperTargets: (RenderTarget | null)[];
@@ -360,6 +383,8 @@ export function createGeometryRendererTask(config: GeometryRendererTaskConfig, e
         },
         _attachments: attachments,
         _views: new Map(),
+        _cfg: [],
+        _device: eng._device,
         _bound: [],
         _wrapperTargets: wrapperTargets,
         _ownedDepthWrapper: ownedDepthWrapper,
@@ -498,6 +523,14 @@ function recordTask(task: GeometryRendererTaskInternal, config: GeometryRenderer
         task._ownedDepthWrapper._height = mrt._height;
     }
 
+    if (task._device !== eng._device) {
+        // Device-loss recovery replaced the device: the task's own buffers went with the lost one. The views
+        // capture `_paramsUBO`, and the sync below rebuilds them all, as its stamp includes the device.
+        task._device = eng._device;
+        task._sceneUBO = createEmptyUniformBuffer(eng, SCENE_UBO_BYTES);
+        task._paramsUBO = task._needsParams ? createEmptyUniformBuffer(eng, 80) : null;
+        task._ownLightsUBO = null;
+    }
     const lightsUBO = _resolveTaskLightsUBO(task, eng, sc, config);
     task._sceneBG = eng._device.createBindGroup({
         layout: getSceneBindGroupLayout(eng),
@@ -506,33 +539,75 @@ function recordTask(task: GeometryRendererTaskInternal, config: GeometryRenderer
             { binding: 1, resource: { buffer: lightsUBO } },
         ],
     });
-    // Rebuild the per-mesh bindings/views (make-before-break, retiring the prior
-    // set's owned GPU resources) then sync the render-pass descriptor.
+    // Re-sync the per-mesh bindings/views (make-before-break, retiring only the
+    // superseded entries) then sync the render-pass descriptor. Entries never
+    // capture the MRT, the scene bind group or the lights UBO, so current ones
+    // are carried across a resize / frame-graph rebuild with the same camera,
+    // culling and device.
     rebuildBoundMeshes(task, config, eng, sc);
     rebuildRenderPassDescriptor(task, config);
 }
 
-/** (Re)build the task's per-mesh `_bound` list + `_views` from the current mesh set,
- *  retiring the prior set's owned GPU resources make-before-break, and record the
- *  scene mutation version it reflects. Called at `record()` and again from `execute()`
- *  whenever `sc._renderableVersion` advances (mesh removal or material swap) so the task
- *  never draws a removed mesh's destroyed UBOs/vertex buffers or a swapped material's
- *  stale view. The mesh source mirrors `record()`: the common auto path (`config.meshes`
- *  omitted) reads `sc.meshes`; caller-supplied off-scene meshes remain supported, while
- *  the task-local removal list excludes meshes explicitly removed through `removeFromScene`. */
+/** Re-sync the task's per-mesh `_bound` list + `_views` with the current mesh set, retiring
+ *  superseded entries' owned GPU resources make-before-break, and record the scene mutation
+ *  version it reflects. Called at `record()` and again from `execute()` whenever
+ *  `sc._renderableVersion` advances (mesh add/removal, material swap or rebuild) so the task
+ *  never draws a removed mesh's destroyed UBOs/vertex buffers or a swapped material's stale
+ *  view. The mesh source mirrors `record()`: the common auto path (`config.meshes` omitted)
+ *  reads `sc.meshes`; caller-supplied off-scene meshes remain supported, while the task-local
+ *  removal list excludes meshes explicitly removed through `removeFromScene`.
+ *
+ *  The sync is incremental, like the forward RenderTask's resync that only re-binds the
+ *  scene-owned renderables. A Standard or PBR entry is derived from its mesh's forward build:
+ *  everything it captures either forces a forward rebuild when it changes (material features
+ *  and textures, mesh capabilities and vertex layout, the PBR context and light / shadow
+ *  request), is constant for the task (attachments, signature), is stamped in `_cfg` (device,
+ *  camera override and effective camera, culling direction), or is read live (world, light
+ *  selection, material UBO version, vertex/index buffers, thin-instance counts). So an entry
+ *  whose mesh still draws the same source material through the forward renderable it was built
+ *  alongside is carried as is — same renderable, binding, update state and lifetime sink — and
+ *  only new or changed entries are built. Node entries, and meshes without a forward renderable
+ *  of their own (off-scene meshes of an explicit list), are rebuilt on every sync, and so is
+ *  everything once the stamp changes or `execute()` has cleared it. */
 function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: GeometryRendererTaskConfig, eng: EngineContext, sc: SceneContext): void {
-    // Make-before-break: build a complete candidate with its own resource batches,
-    // publish it atomically, then retire the old generation after the next submitted
-    // frame drains. Unpublished candidate batches can be released synchronously.
+    // Make-before-break: build every new entry with its own resource batch, publish the
+    // complete list atomically, then retire the superseded entries after the next submitted
+    // frame drains. Unpublished candidate batches can be released synchronously; carried
+    // entries are the same objects in both lists and are never retired here.
     const oldBound = task._bound;
+    // Views and entries capture the device, the camera and the culling direction. When any changed since the
+    // last publish (`config.camera` set, replaced or removed, or `reverseCulling` changed, before
+    // `frameGraph.build()`; `scene.camera` replaced for a task without a camera of its own; a replacement device
+    // after device loss), nothing is carried and every view is created afresh. The camera takes two elements,
+    // both compared by identity:
+    // - the override as a view captures it (`config.camera ?? null`, so an omitted and a null override are the
+    //   same choice). Under a floating origin it decides what an entry packs its world against and which
+    //   camera's version re-packs it: the override itself, or whatever `scene.camera` is at each pack (and
+    //   whether a PBR entry receives shadows). Without it, moving one camera A between `scene.camera` and
+    //   `config.camera` keeps the effective camera and carries the entries: one built without an override then
+    //   follows a later `scene.camera` while the pass draws with A, and one built for the override A stays on A
+    //   while the pass follows `scene.camera`;
+    // - the camera the pass draws with (`config.camera ?? scene.camera`). Without it, replacing `scene.camera` for
+    //   a task without an override carries entries packed against the old camera, which re-pack only when the
+    //   version they compare moves, and the new camera's version can equal the old one. It only sees the camera
+    //   at a sync: frames drawn with other cameras in between are caught by `executeTask`, which clears the stamp.
+    // The stamp is published with the list, so a failed sync is retried the same way.
+    const cfg = [task._device, config.camera ?? null, config.camera ?? sc.camera, config.reverseCulling];
+    const fresh = cfg.some((value, index) => value !== task._cfg[index]);
+    // This sync's own copy of the view cache: the views it creates replace `_views` only when it publishes, so
+    // a failed sync never leaves a view built against another stamp for a later sync to reuse.
+    const views = new Map(fresh ? [] : task._views);
+    const previous = new Map(fresh ? [] : oldBound.map((b) => [b._mesh, b]));
     const nextBound: BoundMesh[] = [];
-    const nextViews = new Map<Material, StandardGeometryMaterialView | PbrGeometryMaterialView | NodeGeometryMaterialView>();
     const created: MeshRebuildResources[] = [];
     const removed = task._removedMeshes;
     const meshes = config.meshes ?? sc.meshes;
     const attachmentTypes = task._attachments.map((a) => a._type);
     // Forward renderable each PBR group currently tracks per mesh (filled lazily below).
     const forwardBuilt = new Map<unknown, Map<Mesh | undefined, Renderable>>();
+    // Forward renderable the scene draws per Standard mesh. Standard's synchronous single-mesh
+    // rebuild replaces the scene entry, not the group's tracked output (filled lazily below).
+    let forward: Map<Mesh | undefined, Renderable> | undefined;
     try {
         for (const mesh of meshes) {
             if (removed?.has(mesh)) {
@@ -554,27 +629,43 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
             // the old output. Otherwise it stays out of the pass; the forward build bumps
             // `_renderableVersion` when it completes, which re-syncs this list. Off-scene meshes of an
             // explicit list are never forward-built and keep using the scene-level context.
+            // This gate runs before the carry check below, so it also decides whether a carried entry may stay.
+            let fwd: Renderable | undefined;
             if (resolved._family === "pbr" && (!config.meshes || sc.meshes.includes(mesh))) {
                 const group = sc._groups.get((resolved._mat as Material)._buildGroup);
                 let built = forwardBuilt.get(group);
                 if (!built) {
                     forwardBuilt.set(group, (built = new Map(group?.o?.map((renderable) => [renderable.mesh, renderable]))));
                 }
-                if (!task._isPbrForwardCurrent!(sc, built.get(mesh), mesh)) {
+                fwd = built.get(mesh);
+                if (!task._isPbrForwardCurrent!(sc, fwd, mesh)) {
                     continue;
                 }
+            } else if (resolved._family === "standard") {
+                fwd = (forward ??= new Map(sc._renderables.map((renderable) => [renderable.mesh, renderable]))).get(mesh);
+            }
+            const prev = previous.get(mesh);
+            if (fwd && prev?._fwd === fwd && prev._view.source === resolved._mat) {
+                // The forward pass still draws what this entry was built alongside: nothing to allocate.
+                // A mesh listed twice carries its first occurrence only.
+                previous.delete(mesh);
+                nextBound.push(prev);
+                continue;
             }
             const resources: MeshRebuildResources = { _lifetimeDisposers: [] };
             created.push(resources);
-            const view = ensureView(task, nextViews, resolved, attachmentTypes, config);
+            const view = ensureView(task, views, created, resolved, attachmentTypes, config);
             // Natural dispatch — view._buildGroup is the standard or PBR geometry
             // builder, its _rebuildSingle returns the per-mesh geometry-MRT Renderable.
             const renderable: Renderable = view._buildGroup._rebuildSingle!(sc, mesh, view, resources);
             renderable._lifetimeDisposers = resources._lifetimeDisposers;
             const binding = renderable.bind(eng, task._signature as unknown as RenderTargetSignature);
-            nextBound.push({ _mesh: mesh, _binding: binding, _view: view, _lifetimeDisposers: resources._lifetimeDisposers });
+            nextBound.push({ _mesh: mesh, _binding: binding, _view: view, _lifetimeDisposers: resources._lifetimeDisposers, _fwd: fwd });
         }
     } catch (error) {
+        // Only this sync's candidates are released; `_bound`, every carried entry and `_views` stay as they were.
+        // The views this sync created are dropped with its local cache (their variants' buffers went with the
+        // released sinks).
         releaseGeometryResources(created);
         throw error;
     }
@@ -584,11 +675,17 @@ function rebuildBoundMeshes(task: GeometryRendererTaskInternal, config: Geometry
     // would overwrite its contribution with src-alpha=1.0.
     nextBound.sort((a, b) => (isAlphaBlend(a._binding.renderable) ? 1 : 0) - (isAlphaBlend(b._binding.renderable) ? 1 : 0));
 
+    const kept = new Set(nextBound);
     task._bound = nextBound;
-    task._views = nextViews;
+    // Keep the views of the materials still drawn; a view whose stamp went stale is replaced on its next use.
+    task._views = new Map(nextBound.map((b) => [b._view.source, views.get(b._view.source) ?? b._view]));
+    task._cfg = cfg;
     task._boundVer = sc._renderableVersion;
 
-    retireGeometryBindings(eng, oldBound);
+    retireGeometryBindings(
+        eng,
+        oldBound.filter((b) => !kept.has(b))
+    );
 }
 
 function releaseGeometryResources(entries: readonly MeshRebuildResources[]): void {
@@ -609,15 +706,24 @@ interface ResolvedMaterial {
     _family: "standard" | "pbr" | "node";
 }
 
+/** The view of `resolved`'s source material in `views`, the current sync's own view cache, shared by every mesh
+ *  of that material. Standard / PBR views, with the variants compiled on them, persist across syncs for as long
+ *  as the source keeps its `_renderFeatures` object: `rebuildMaterial`, transmission, clustered lights and
+ *  plugins replace that object, which yields a fresh view. A Node view must not outlive the sync (`pass`) that
+ *  created it, as its geometry resources snapshot the material's live uniforms once (`ensureGeometryNodeUBO`).
+ *  `pass` must not reference the view cache: a stamp holding the cache would keep every earlier view alive. */
 function ensureView(
     task: GeometryRendererTaskInternal,
-    views: Map<Material, StandardGeometryMaterialView | PbrGeometryMaterialView | NodeGeometryMaterialView>,
+    views: Map<Material, GeometryView>,
+    pass: object,
     resolved: ResolvedMaterial,
     attachmentTypes: readonly GeometryTextureType[],
     config: GeometryRendererTaskConfig
-): StandardGeometryMaterialView | PbrGeometryMaterialView | NodeGeometryMaterialView {
-    const cached = views.get(resolved._mat as Material);
-    if (cached) {
+): GeometryView {
+    const mat = resolved._mat as Material;
+    const stamp = resolved._family === "node" ? pass : mat._renderFeatures;
+    const cached = views.get(mat);
+    if (cached && cached._rf === stamp) {
         return cached;
     }
     const viewConfig = {
@@ -630,7 +736,7 @@ function ensureView(
         // origin as the task's view/projection + positional lights.
         camera: config.camera ?? null,
     };
-    const view =
+    const view: GeometryView =
         resolved._family === "standard"
             ? task._createStandardGeometryView!(resolved._mat as StandardMaterialProps, {
                   ...viewConfig,
@@ -639,7 +745,8 @@ function ensureView(
             : resolved._family === "pbr"
               ? task._createPbrGeometryView!(resolved._mat as PbrMaterialProps, viewConfig)
               : task._createNodeGeometryView!(resolved._mat as NodeMaterial, viewConfig);
-    views.set(resolved._mat as Material, view);
+    view._rf = stamp;
+    views.set(mat, view);
     return view;
 }
 
@@ -751,11 +858,23 @@ function executeTask(task: GeometryRendererTaskInternal, eng: EngineContext, sc:
     // Re-sync `_bound` before drawing when the scene mutated since the last (re)build.
     // Mesh removal and material swap both bump `sc._renderableVersion`; without this a
     // stale `_bound` entry would bind a removed mesh's destroyed UBOs/vertex buffers or
-    // a swapped material's old view. `rebuildBoundMeshes` retires the prior set
-    // make-before-break, so the frame just submitted stays valid. Mirrors the forward
-    // RenderTask's `_lastVersion` auto-resync in `prepareRenderTaskPass`.
+    // a swapped material's old view. `rebuildBoundMeshes` rebuilds only the entries whose
+    // forward build changed and retires the superseded ones make-before-break, so the
+    // frame just submitted stays valid. Mirrors the forward RenderTask's `_lastVersion`
+    // auto-resync in `prepareRenderTaskPass`.
     if (sc._renderableVersion !== task._boundVer) {
         rebuildBoundMeshes(task, config, eng, sc);
+    }
+    // Under a floating origin an entry built without `config.camera` re-packs its world only when the version of
+    // whatever `scene.camera` is at that frame differs from the one it compared last, so once a frame draws with
+    // another camera than the stamped one, the stamp no longer tells what the entry is packed against:
+    // `scene.camera` can go through other cameras and come back to the stamped one with a version equal to the last
+    // one compared (per-object counters start equal), which leaves the entry packed against the previous camera's
+    // origin. Such an entry must not be carried, so the stamp is cleared and the next sync (a `frameGraph.build()`
+    // or a scene mutation) rebuilds the whole pass. Clearing it rather than rebuilding here keeps switching
+    // `scene.camera` between frames free of pass rebuilds.
+    if (eng.useFloatingOrigin && camera !== task._cfg[2]) {
+        task._cfg.length = 0;
     }
     const viewport = camera.viewport;
     const aspect = (mrt._width / mrt._height) * (viewport ? viewport.width / viewport.height : 1);
