@@ -11,7 +11,7 @@ straight in the browser.
 ## Requirements
 
 - A **WebGPU-capable browser** (Chrome/Edge 113+). Babylon Lite is WebGPU-only.
-- **Node 20.19+** and **pnpm 11+** (managed via corepack) to build/run locally.
+- **Node.js 22.13+ (22.x), 24.x, or 26+** and **pnpm 11+** (managed via corepack) to build/run locally.
 
 ## Getting started
 
