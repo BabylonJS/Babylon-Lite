@@ -237,6 +237,13 @@ shader/pipeline caches naturally select new-device entries.
 URL, solid, bitmap, dynamic, raw-pixel, and empty render-target textures carry
 pure recovery data only when Scene or Sprite recovery capture is enabled.
 Raw-pixel updates and runtime atlas appends update the retained CPU copy.
+After a successful `updateTextureRegion` queue write, the same optional `w`
+capture seam receives the source `ArrayBufferView`, destination x/y/extent,
+view-relative byte offset, and row stride. Only the enabled capture module
+interprets the view as bytes and copies each updated RGBA8 row into the packed
+`pixels` source; padding and bytes outside the supplied view are not retained.
+Later caller mutation cannot change the recovery snapshot. Other source kinds
+are unchanged, and disabled recovery adds no byte-view allocation or retention.
 Applications must enable recovery before creating/loading recoverable sprite
 textures. Disabling the last capture-using handle stops retaining sources for
 new resources; existing source records remain on their owning textures.
@@ -448,6 +455,11 @@ module-level side effects; mutable caches remain null until an explicit call.
 - Sprite unit tests replace a fake device and assert new index, instance,
   uniform, FX, pipeline/bind-group/bundle state, recovered atlas/custom/target
   textures, preserved CPU/layer state, and exact-kind enumeration.
+- Pixel recovery tests call `updateTextureRegion` with byte, word, and `DataView`
+  inputs, nonzero view/relative offsets, padded rows, and subsequent caller
+  mutation. Replacement-device uploads must reproduce the complete updated
+  image; rejected uploads must not alter the snapshot, and disabled recovery
+  must not capture a source.
 - Text unit tests replace a fake device and assert new layer buffers and Slug
   atlas textures, invalidated/rebuilt bindings and bundles, preserved
   `TextData`/layer state, and exact-kind enumeration.

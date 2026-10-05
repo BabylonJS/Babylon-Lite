@@ -140,16 +140,17 @@ function attachRecoveryCapture(engine: EngineContext): void {
         r(tex: Texture2D, width: number, height: number, format: GPUTextureFormat, samplerDesc: GPUSamplerDescriptor): void {
             stamp(tex, { kind: "render", width, height, format, samplerDesc });
         },
-        w(tex: Texture2D, data: Uint8Array, x: number, y: number, width: number, height: number, dataOffset = 0, bytesPerRow = width * 4): void {
+        w(tex: Texture2D, data: ArrayBufferView, x: number, y: number, width: number, height: number, dataOffset = 0, bytesPerRow = width * 4): void {
             const source = tex._recoverySource;
             if (source?.kind !== "pixels") {
                 return;
             }
+            const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
             const rowBytes = width * 4;
             for (let row = 0; row < height; row++) {
                 const srcStart = dataOffset + row * bytesPerRow;
                 const dstStart = ((y + row) * source.width + x) * 4;
-                source.data.set(data.subarray(srcStart, srcStart + rowBytes), dstStart);
+                source.data.set(bytes.subarray(srcStart, srcStart + rowBytes), dstStart);
             }
         },
         m(

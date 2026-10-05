@@ -45,18 +45,27 @@ The unused attachment pair remains null.
 
 Color wrappers also retain `_colorSubresource = { layer, mipLevel }` on the target.
 These validated scalar indices describe the attachment view independently of the whole
-`_colorTexture` allocation. `CopyToTextureTask` uses them for its raw-copy destination:
-`mipLevel` selects the destination mip and `origin = { x: 0, y: 0, z: layer }` selects
-the destination layer. The copy extent is the selected mip's dimensions, not the
-allocation's base dimensions. Ordinary targets without this metadata keep the default
-layer-zero, mip-zero destination. Blit and resolve destinations already use the selected
-attachment view and do not need a different path.
+`_colorTexture` allocation. `CopyToTextureTask` uses them for either raw-copy endpoint:
+`mipLevel` selects its mip and `origin = { x: 0, y: 0, z: layer }` selects its layer.
+The copy extent is the selected mip's dimensions, not the allocation's base dimensions.
+`lodLevel` is relative to the source sampling view. A wrapper exposes only one mip,
+so sampling clamps to view-relative LOD zero, regardless of `lodLevel`; the raw-copy
+path likewise uses the wrapper's selected physical mip and its unshifted `_width`/`_height`.
+It never adds `lodLevel` to that physical mip or applies it a second time to the dimensions.
+Ordinary sources without this metadata retain their existing `lodLevel` mip selection;
+ordinary destinations keep layer zero and mip zero. Blit and resolve paths already
+use the selected attachment view and do not need a different path.
 
 Mark the target eager. Its `_syncEager` hook rejects disposal, compares the live attachment
 allocation with `texture.texture`, and recreates only the view when the facade's compatible
 allocation was replaced. Ordinary `buildRenderTarget` calls therefore never allocate another
 attachment or overwrite the selected layer/mip. Color subresource metadata is refreshed with
 the same captured indices alongside the replacement view.
+The replacement also republishes `_width`, `_height`, and descriptor `size`
+from the new allocation at the selected mip, using the same one-pixel minimum.
+This applies to color and depth/stencil wrappers. A real surface-sized RTT may
+replace its facade allocation before the borrowing wrapper is synchronized;
+the wrapper then exposes the live dimensions to attachment compatibility checks.
 
 ## Pipeline Configuration
 
@@ -99,6 +108,12 @@ and `resource/texture-acquire.ts` / `texture-release.ts` own logical allocation 
 sample count, each attachment classification, eager-build identity, facade replacement, invalid
 usage/dimension/indices, and idempotent disposal. Disposing a wrapper twice must not destroy its
 still-owned source; releasing the remaining source owner must destroy the allocation exactly once.
+Replacement cases cover changed dimensions at mip zero and a nonzero selected
+mip, including depth/stencil attachments. A real
+`createSurfaceRenderTargetTexture` resize regression in
+`tests/lite/unit/frame-graph-texture-tasks.test.ts` rebuilds a clear task using
+the color wrapper with the original RTT's depth attachment. Both live dimensions
+and attachment views must be refreshed without a compatibility error.
 
 `tests/lite/unit/copy-to-texture-task.test.ts` integrates the array factory, wrapper, and copy
 task. A 128x64 `rgba16float` source copied into layer 5, mip 1 of a 256x128 array must issue an
@@ -106,6 +121,14 @@ encoder copy to exactly that layer/mip with extent 128x64 and no draw or pipelin
 Layer-only, mip-only, default selection, and a nonzero source LOD retain the same fast-path
 contract. Re-recording preserves the destination, and disposing the borrowing task leaves
 the wrapper and the array's references intact.
+Source-wrapper cases cover layer-only, mip-only, combined, and default selection.
+The native-copy fixture models a `COPY_SRC`-capable allocation; the ordinary array
+factory does not request this usage and retains the view-based blit fallback.
+Layer 5, mip 1 of that 256x128 array copied into a matching 128x64 target must select
+physical source mip 1 and `origin.z = 5`, including nonzero and out-of-chain
+`lodLevel` values that clamp to the wrapper's only exposed mip. Re-recording preserves
+the source view and ownership. A differently sized destination uses the blit path
+and binds that same selected source view rather than sampling the whole array.
 
 `tests/lite/unit/render-shader.test.ts` covers depth/stencil pass operations and stencil-only
 pipeline state when these targets are used by render-draw tasks.
@@ -116,6 +139,6 @@ creation and disposal together.
 
 - `texture/texture-render-target.ts`: subresource validation, view attachment, ownership hooks.
 - `engine/render-target.ts`: existing target owner and disposal entry point.
-- `frame-graph/copy-to-texture-task.ts`: raw-copy destination subresource selection.
+- `frame-graph/copy-to-texture-task.ts`: raw-copy endpoint subresources and view-relative source LOD.
 - `tests/lite/unit/texture-render-target.test.ts`: wrapper regression coverage.
-- `tests/lite/unit/copy-to-texture-task.test.ts`: copy destination integration coverage.
+- `tests/lite/unit/copy-to-texture-task.test.ts`: copy source/destination integration coverage.

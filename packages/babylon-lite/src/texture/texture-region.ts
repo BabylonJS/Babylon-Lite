@@ -109,4 +109,5 @@ export function updateTextureRegion(engine: EngineContext, texture: Texture2D, d
     size.height = region.height;
     size.depthOrArrayLayers = layerCount;
     engine._device.queue.writeTexture(destination, data.buffer as ArrayBuffer, layout, size);
+    engine._dlr?.w(texture, data, x, y, region.width, region.height, dataOffset, region.bytesPerRow);
 }

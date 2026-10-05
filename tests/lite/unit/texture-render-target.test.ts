@@ -132,25 +132,34 @@ describe("createTextureRenderTarget", () => {
         expect(target._depthView).toBe(view);
         expect(device.createTexture).toHaveBeenCalledTimes(1);
 
-        const replacement = makeGpuTexture({ size: { width: 8, height: 8, depthOrArrayLayers: 2 }, format, usage: tiles.texture.usage });
+        const replacement = makeGpuTexture({ size: { width: 16, height: 4, depthOrArrayLayers: 2 }, format, usage: tiles.texture.usage });
         tiles.texture = replacement;
         buildRenderTarget(target, engine);
         expect(target._depthTexture).toBe(replacement);
+        expect([target._width, target._height]).toEqual([16, 4]);
+        expect(target._descriptor.size).toEqual({ width: 16, height: 4 });
         expect(replacement.views.at(-1)).toMatchObject({ baseArrayLayer: 1, arrayLayerCount: 1 });
     });
 
-    it("follows a facade whose GPU texture was replaced in place", () => {
+    it.each([0, 1])("follows a resized facade at selected mip %s", (mipLevel) => {
         const { engine } = makeEngine();
-        const tiles = createTexture2DArray(engine, 64, 64, 2, { format: "rgba16float", mipMaps: false });
-        const target = createTextureRenderTarget(engine, tiles, { layer: 1 });
-        const replacement = makeGpuTexture({ size: { width: 64, height: 64, depthOrArrayLayers: 2 }, format: "rgba16float", usage: tiles.texture.usage });
+        const tiles = createTexture2DArray(engine, 64, 64, 2, { format: "rgba16float" });
+        const target = createTextureRenderTarget(engine, tiles, { layer: 1, mipLevel });
+        const replacement = makeGpuTexture({
+            size: { width: 128, height: 32, depthOrArrayLayers: 2 },
+            format: "rgba16float",
+            usage: tiles.texture.usage,
+            mipLevelCount: tiles.texture.mipLevelCount,
+        });
         tiles.texture = replacement;
 
         buildRenderTarget(target, engine);
 
         expect(target._colorTexture).toBe(replacement);
-        expect(target._colorSubresource).toEqual({ layer: 1, mipLevel: 0 });
-        expect(replacement.views.at(-1)).toMatchObject({ baseArrayLayer: 1, arrayLayerCount: 1 });
+        expect(target._colorSubresource).toEqual({ layer: 1, mipLevel });
+        expect([target._width, target._height]).toEqual([128 >> mipLevel, 32 >> mipLevel]);
+        expect(target._descriptor.size).toEqual({ width: 128 >> mipLevel, height: 32 >> mipLevel });
+        expect(replacement.views.at(-1)).toMatchObject({ baseArrayLayer: 1, arrayLayerCount: 1, baseMipLevel: mipLevel, mipLevelCount: 1 });
     });
 
     it("preserves the allocation's multisample count", () => {

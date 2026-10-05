@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { EngineContext } from "../../../packages/babylon-lite/src/engine/engine";
 import { buildRenderTarget, createRenderTarget, disposeRenderTarget, type RenderTarget } from "../../../packages/babylon-lite/src/engine/render-target";
+import { disposeGpuResourceRetirements } from "../../../packages/babylon-lite/src/engine/gpu-resource-retirement";
 import { createMipMappedRenderTarget } from "../../../packages/babylon-lite/src/engine/render-target-mipmaps";
 import { createClearTextureTask } from "../../../packages/babylon-lite/src/frame-graph/clear-texture-task";
 import { createCopyToTextureTask } from "../../../packages/babylon-lite/src/frame-graph/copy-to-texture-task";
@@ -15,6 +16,9 @@ import type { SceneContext } from "../../../packages/babylon-lite/src/scene/scen
 import { setSurfaceSize } from "../../../packages/babylon-lite/src/engine/surface";
 import { wgsl } from "../../../packages/babylon-lite/src/shader/wgsl";
 import type { Texture2D } from "../../../packages/babylon-lite/src/texture/texture-2d";
+import { createTextureRenderTarget } from "../../../packages/babylon-lite/src/texture/texture-render-target";
+import { createSurfaceRenderTargetTexture } from "../../../packages/babylon-lite/src/texture/rtt-surface";
+import { disposeRenderTargetTexture } from "../../../packages/babylon-lite/src/texture/rtt";
 
 function mockGpu(features: GPUFeatureName[] = []) {
     const textures: GPUTexture[] = [];
@@ -89,6 +93,37 @@ function graphFor(task: Task) {
 }
 
 describe("ClearTextureTask", () => {
+    it("keeps a color wrapper compatible with live depth after a real surface RTT resize", () => {
+        const { engine, encoder } = mockGpu();
+        const result = createSurfaceRenderTargetTexture(engine, { format: "rgba8unorm", dFormat: "depth32float", samples: 1, size: engine });
+        const facade = result.texture;
+        const wrapper = createTextureRenderTarget(engine, facade);
+        const originalView = wrapper._colorView;
+        const task = createClearTextureTask({ targetTexture: wrapper, depthTexture: result.rt, clearDepth: true }, engine);
+        try {
+            const graph = graphFor(task);
+            engine.canvas.width = 79;
+            engine.canvas.height = 41;
+            buildRenderTarget(result.rt, engine);
+
+            expect(() => graph.build()).not.toThrow();
+            expect(result.texture).toBe(facade);
+            expect(wrapper._colorTexture).toBe(facade.texture);
+            expect(wrapper._colorView).not.toBe(originalView);
+            expect([wrapper._width, wrapper._height]).toEqual([79, 41]);
+            expect(wrapper._descriptor.size).toEqual({ width: 79, height: 41 });
+            expect(graph.execute()).toBe(0);
+            const descriptor = encoder.beginRenderPass.mock.calls[0]![0];
+            expect(Array.from(descriptor.colorAttachments)[0]).toMatchObject({ view: wrapper._colorView });
+            expect(descriptor.depthStencilAttachment).toMatchObject({ view: result.rt._depthView, depthLoadOp: "clear" });
+        } finally {
+            task.dispose();
+            disposeRenderTarget(wrapper);
+            disposeRenderTargetTexture(result);
+            disposeGpuResourceRetirements(engine);
+        }
+    });
+
     it("matches Babylon.js defaults and aliases borrowed color/depth outputs", () => {
         const { engine, encoder, pass } = mockGpu();
         const color = target(engine, { dFormat: "depth24plus-stencil8" });

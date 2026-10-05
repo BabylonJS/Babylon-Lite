@@ -73,6 +73,11 @@ export function createTextureRenderTarget(_engine: EngineContext, texture: Textu
         }
         if ((this._colorTexture ?? this._depthTexture) !== texture.texture) {
             attach(this, texture, layer, mipLevel);
+            const width = Math.max(1, texture.texture.width >> mipLevel);
+            const height = Math.max(1, texture.texture.height >> mipLevel);
+            this._width = width;
+            this._height = height;
+            this._descriptor.size = { width, height };
         }
     };
     target._disposeAttachments = function (this: RenderTarget): void {

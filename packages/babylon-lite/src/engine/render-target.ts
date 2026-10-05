@@ -78,7 +78,7 @@ export interface RenderTarget {
     _resolveSize?(descriptor: Pick<RenderTargetDescriptor, "size">): ResolvedRenderTargetSize;
     /** @internal */
     _colorTexture: GPUTexture | null;
-    /** @internal Selected color attachment subresource for raw-copy destinations. Defaults to mip/layer zero when absent. */
+    /** @internal Selected color attachment subresource for raw-copy sources and destinations. */
     _colorSubresource?: { readonly layer: number; readonly mipLevel: number };
     /** @internal */
     _colorView: GPUTextureView | null;
