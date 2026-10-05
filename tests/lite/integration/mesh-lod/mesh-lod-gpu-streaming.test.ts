@@ -30,6 +30,7 @@ import {
     PAGE_FLAG_RESIDENT,
     PAGE_STATE_WORDS,
     applyMeshLoDGpuReadback,
+    meshLoDPageUseOffset,
     packClusters,
     packGroupPageRefs,
     packGroups,
@@ -189,15 +190,9 @@ describe("MeshLoD GPU streaming — demand readback + adaptive draw growth", () 
 
         harness.flush();
         expect(page.lastUsedFrame).toBe(usedAtUpload);
-        applyMeshLoDGpuReadback(
-            runtime,
-            state,
-            syntheticControl(state, finePageId, 0, { count: 1, visible: 1, triangles: 1, fallback: 0 }),
-            runtime.gpu.pages.length,
-            runtime.generation,
-            new Uint32Array([fineClusterId, 0]),
-            runtime.frameIndex
-        );
+        const usedControl = syntheticControl(state, finePageId, 0, { count: 1, visible: 1, triangles: 1, fallback: 0 });
+        usedControl[meshLoDPageUseOffset(runtime.gpu.pages.length) + (finePageId >>> 5)] = 1 << (finePageId & 31);
+        applyMeshLoDGpuReadback(runtime, state, usedControl, runtime.gpu.pages.length, runtime.generation, runtime.frameIndex);
         expect(page.lastUsedFrame).toBe(runtime.frameIndex);
         harness.submit();
 
@@ -218,10 +213,24 @@ describe("MeshLoD GPU streaming — demand readback + adaptive draw growth", () 
         expect(copy).toBeTruthy();
         expect(copy!.src).toBe(state.controlBuffer);
         expect(copy!.size).toBe(state.controlWords * 4);
-        expect(harness.encoder.copies.some((c) => c.src.label === "mesh-lod-selected" && c.dst === copy!.dst && c.dstOffset === copy!.size)).toBe(true);
+        expect(harness.encoder.copies.some((c) => c.src.label === "mesh-lod-selected" && c.dst === copy!.dst)).toBe(false);
         // The staging ring holds a MAP_READ | COPY_DST buffer sized to the control buffer.
         const staging = (harness.engine._device as unknown as { buffers: MockBuffer[] }).buffers.find((b) => b.label === "mesh-lod-readback")!;
-        expect(staging.size).toBe(state.controlWords * 4 + state.selectedCapacity * 8);
+        expect(staging.size).toBe(state.controlWords * 4);
+    });
+
+    it("bounds sparse-selection readback by pages, not a million allocated cluster-instance pairs", async () => {
+        harness = await setup({ instanceCount: 512, visibleCount: 1 });
+        harness.flush();
+        const state = harness.batchState();
+        expect(state.selectedCapacity).toBeGreaterThan(1_000_000);
+        const pages = harness.runtime.pageRecords.length;
+        const expectedBytes = (CONTROL_PAGE_DEMAND_OFFSET + pages + Math.ceil(pages / 32)) * 4;
+        const copies = harness.encoder.copies.filter((copy) => copy.dst.label === "mesh-lod-readback");
+        expect(copies).toHaveLength(1);
+        expect(copies[0]!.size).toBe(expectedBytes);
+        expect(copies[0]!.src.label).toBe("mesh-lod-control");
+        expect(expectedBytes).toBeLessThan(1024);
     });
 
     it("feeds decoded demand into the streaming engine and refines resident pages", async () => {

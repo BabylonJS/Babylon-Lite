@@ -13,6 +13,7 @@ export interface MockBuffer {
     readonly size: number;
     readonly usage: number;
     destroyed: boolean;
+    data: Uint8Array<ArrayBuffer>;
     destroy(): void;
 }
 
@@ -23,7 +24,7 @@ export interface BufferWrite {
 }
 
 export interface MockDevice {
-    readonly limits: { maxStorageBufferBindingSize: number; maxBufferSize: number };
+    readonly limits: { maxStorageBufferBindingSize: number; maxBufferSize: number; maxComputeWorkgroupsPerDimension: number };
     readonly buffers: MockBuffer[];
     readonly writes: BufferWrite[];
     createBuffer(desc: { label?: string; size: number; usage: number }): MockBuffer;
@@ -47,7 +48,7 @@ export function createMockDevice(limitBytes = 1024 * 1024 * 1024): MockDevice {
     const buffers: MockBuffer[] = [];
     const writes: BufferWrite[] = [];
     const device: MockDevice = {
-        limits: { maxStorageBufferBindingSize: limitBytes, maxBufferSize: limitBytes },
+        limits: { maxStorageBufferBindingSize: limitBytes, maxBufferSize: limitBytes, maxComputeWorkgroupsPerDimension: 65535 },
         buffers,
         writes,
         createBuffer(desc) {
@@ -56,6 +57,7 @@ export function createMockDevice(limitBytes = 1024 * 1024 * 1024): MockDevice {
                 size: desc.size,
                 usage: desc.usage,
                 destroyed: false,
+                data: new Uint8Array(0),
                 destroy() {
                     this.destroyed = true;
                 },
@@ -75,8 +77,8 @@ export function createMockDevice(limitBytes = 1024 * 1024 * 1024): MockDevice {
         createBindGroupLayout() {
             return {};
         },
-        createBindGroup() {
-            return {};
+        createBindGroup(desc) {
+            return desc as object;
         },
         createPipelineLayout() {
             return {};
@@ -90,6 +92,13 @@ export function createMockDevice(limitBytes = 1024 * 1024 * 1024): MockDevice {
         queue: {
             writeBuffer(buffer, offset, data, dataOffset = 0, size) {
                 const byteLength = size ?? (ArrayBuffer.isView(data) ? data.byteLength - dataOffset : (data as ArrayBuffer).byteLength - dataOffset);
+                if (buffer.data.length < offset + byteLength) {
+                    const next = new Uint8Array(offset + byteLength);
+                    next.set(buffer.data);
+                    buffer.data = next;
+                }
+                const bytes = ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset + dataOffset, byteLength) : new Uint8Array(data, dataOffset, byteLength);
+                buffer.data.set(bytes, offset);
                 writes.push({ buffer, offset, byteLength });
             },
             writeTexture() {},
@@ -125,6 +134,7 @@ export function createMockRenderPass(): MockRenderPass {
 export interface MockComputeDispatch {
     readonly kind: "direct" | "indirect";
     readonly workgroups?: number;
+    readonly dimensions?: readonly [number, number, number];
     readonly indirectBuffer?: MockBuffer;
     readonly indirectOffset?: number;
 }
@@ -135,7 +145,7 @@ export interface MockComputePass {
     readonly setBindGroups: { index: number }[];
     setPipeline(pipeline: unknown): void;
     setBindGroup(index: number, group: unknown): void;
-    dispatchWorkgroups(x: number): void;
+    dispatchWorkgroups(x: number, y?: number, z?: number): void;
     dispatchWorkgroupsIndirect(buffer: MockBuffer, offset: number): void;
     end(): void;
 }
@@ -174,6 +184,12 @@ export function createMockEncoder(): MockEncoder {
         computePasses,
         copyBufferToBuffer(src, srcOffset, dst, dstOffset, size) {
             copies.push({ src, srcOffset, dst, dstOffset, size });
+            if (dst.data.length < dstOffset + size) {
+                const next = new Uint8Array(dstOffset + size);
+                next.set(dst.data);
+                dst.data = next;
+            }
+            dst.data.set(src.data.subarray(srcOffset, srcOffset + size), dstOffset);
         },
         clearBuffer(buffer, offset = 0, size) {
             clears.push({ buffer, offset, size });
@@ -188,8 +204,8 @@ export function createMockEncoder(): MockEncoder {
                 setBindGroup(index) {
                     setBindGroups.push({ index });
                 },
-                dispatchWorkgroups(x) {
-                    dispatches.push({ kind: "direct", workgroups: x });
+                dispatchWorkgroups(x, y = 1, z = 1) {
+                    dispatches.push({ kind: "direct", workgroups: x, dimensions: [x, y, z] });
                 },
                 dispatchWorkgroupsIndirect(indirectBuffer, indirectOffset) {
                     dispatches.push({ kind: "indirect", indirectBuffer, indirectOffset });

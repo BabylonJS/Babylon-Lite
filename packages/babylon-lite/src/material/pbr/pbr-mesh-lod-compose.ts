@@ -12,6 +12,8 @@
 import { SCENE_UBO_WGSL } from "../../shader/scene-uniforms.js";
 import { MULTI_LIGHT_STRUCTS, COMPUTE_PBR_LIGHT } from "./fragments/multilight-wgsl.js";
 import { MAX_LIGHTS } from "../../light/types.js";
+import type { ToneMapping } from "./tone-mapping.js";
+import { PBR_DISPLAY_OUTPUT_WGSL, PBR_EXPOSURE_WGSL } from "./pbr-image-processing-output-wgsl.js";
 
 /** Detected features for the guaranteed opaque metallic-roughness subset. */
 export interface MeshLoDShaderFeatures {
@@ -23,8 +25,8 @@ export interface MeshLoDShaderFeatures {
 }
 
 /** Stable pipeline cache key for a feature set. */
-export function meshLoDShaderKey(f: MeshLoDShaderFeatures): string {
-    return `${f.hasNormalMap ? "n" : ""}${f.hasEmissiveTexture ? "e" : ""}${f.hasIbl ? "i" : ""}${f.doubleSided ? "d" : ""}${f.unlit ? "u" : ""}`;
+export function meshLoDShaderKey(f: MeshLoDShaderFeatures, toneMapping?: ToneMapping): string {
+    return `${f.hasNormalMap ? "n" : ""}${f.hasEmissiveTexture ? "e" : ""}${f.hasIbl ? "i" : ""}${f.doubleSided ? "d" : ""}${f.unlit ? "u" : ""}:${toneMapping?.id ?? "off"}`;
 }
 
 const IBL_DECLS = `@group(1) @binding(12) var brdfLUT: texture_2d<f32>;
@@ -143,7 +145,6 @@ return vec4<f32>(0.0, 0.0, 0.0, -1.0);
 }`;
 
 const PBR_HELPERS = `const PI: f32 = 3.14159265358979323846;
-fn saturate(x: f32) -> f32 { return clamp(x, 0.0, 1.0); }
 fn distributionGGX(NdotH: f32, alphaG: f32) -> f32 {
 let a2 = alphaG * alphaG;
 let d = NdotH * NdotH * (a2 - 1.0) + 1.0;
@@ -202,7 +203,7 @@ var N = normalize(TBN * scaledN);`;
 var N = Ngeom;`;
 }
 
-function litFragment(f: MeshLoDShaderFeatures): string {
+function litFragment(f: MeshLoDShaderFeatures, toneMapping?: ToneMapping): string {
     const entry = f.doubleSided
         ? `@fragment fn fs(input: VOut, @builtin(front_facing) frontFacing: bool) -> @location(0) vec4<f32> {`
         : `@fragment fn fs(input: VOut) -> @location(0) vec4<f32> {`;
@@ -266,8 +267,8 @@ var emissive = material.emissive.rgb;
 ${emissiveTex}
 ${ibl}
 var color = diffuseIbl + specIbl + directDiffuse + directSpecular * energyConservation + emissive;
-color = color * scene.vImageInfos.x;
-if (scene.vImageInfos.w >= 1.0) { color = vec3<f32>(1.0) - exp(-color); }
+${toneMapping?.callWGSL ?? PBR_EXPOSURE_WGSL}
+${PBR_DISPLAY_OUTPUT_WGSL}
 // Debug-view override AFTER all texture sampling (textureSample requires uniform
 // control flow, so the non-uniform per-fragment debug branch must come last).
 let dbg = mlodDebugColor(u32(material.misc.y + 0.5), input.clusterId, input.dbgAttr);
@@ -276,10 +277,12 @@ return vec4<f32>(color, 1.0);
 }`;
 }
 
-function unlitFragment(): string {
+function unlitFragment(toneMapping?: ToneMapping): string {
     return `@fragment fn fs(input: VOut) -> @location(0) vec4<f32> {
 let baseSample = textureSample(baseColorTexture, baseColorSampler, input.uv);
-let color = baseSample.rgb * material.baseColorFactor.rgb;
+var color = baseSample.rgb * material.baseColorFactor.rgb;
+${toneMapping?.callWGSL ?? PBR_EXPOSURE_WGSL}
+${PBR_DISPLAY_OUTPUT_WGSL}
 let dbg = mlodDebugColor(u32(material.misc.y + 0.5), input.clusterId, input.dbgAttr);
 if (dbg.a >= 0.0) { return vec4<f32>(dbg.rgb, 1.0); }
 return vec4<f32>(color, 1.0);
@@ -287,16 +290,16 @@ return vec4<f32>(color, 1.0);
 }
 
 /** Compose the full MeshLoD WGSL module (vertex `vs` + fragment `fs`) for a feature set. */
-export function composeMeshLoDWgsl(f: MeshLoDShaderFeatures): string {
-    const parts = [SCENE_UBO_WGSL, COMMON_DECLS, VERTEX_MAIN, DEBUG_HELPERS];
+export function composeMeshLoDWgsl(f: MeshLoDShaderFeatures, toneMapping?: ToneMapping): string {
+    const parts = [SCENE_UBO_WGSL, COMMON_DECLS, VERTEX_MAIN, DEBUG_HELPERS, toneMapping?.helpersWGSL ?? ""];
     if (f.unlit) {
-        parts.push(unlitFragment());
+        parts.push(unlitFragment(toneMapping));
     } else {
         parts.push(MULTI_LIGHT_STRUCTS(), `@group(0) @binding(1) var<uniform> lights: lightsUniforms;`, COMPUTE_PBR_LIGHT, PBR_HELPERS);
         if (f.hasIbl) {
             parts.push(IBL_DECLS);
         }
-        parts.push(litFragment(f));
+        parts.push(litFragment(f, toneMapping));
     }
     return parts.join("\n");
 }

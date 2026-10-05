@@ -245,6 +245,7 @@ export function removeMeshLoDInstanceFromScene(scene: SceneContext, instance: Me
     if (index !== -1) {
         batch.instances.splice(index, 1);
         batch.priorFineRequired.delete(instance._instanceId);
+        instance._selectionVersion = (instance._selectionVersion ?? 0) + 1;
     }
 }
 

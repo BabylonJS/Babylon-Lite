@@ -15,7 +15,6 @@ import type { EngineContext } from "../../engine/engine.js";
 import { retireGpuResources } from "../../engine/gpu-resource-retirement.js";
 import { invalidateRenderBundles } from "../../mesh/mesh-factories.js";
 import type { SceneContext } from "../../scene/scene-core.js";
-import type { Mat4 } from "../../math/types.js";
 import type { DrawBinding, DrawUpdateContext, Renderable } from "../../render/renderable.js";
 import type { RenderTargetSignature } from "../../engine/render-target.js";
 import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
@@ -35,15 +34,18 @@ import { createMeshLoDError } from "../../mesh-lod/mesh-lod-errors.js";
 import type { MeshLoDGpuBatchState, MeshLoDGpuFrameParams, MeshLoDGpuInstanceState, MeshLoDUpdateBatch } from "../../mesh-lod/mesh-lod-selection-gpu.js";
 import { meshLoDConeCullMargin } from "../../mesh-lod/mesh-lod-selection-math.js";
 import {
+    INSTANCE_WORDS,
     createMeshLoDGpuBatchState,
     createMeshLoDGpuInstanceState,
     disposeMeshLoDGpuBatchState,
     disposeMeshLoDGpuInstanceState,
     getMeshLoDUpdateBatch,
+    packInstanceRecord,
     queueMeshLoDGpuSelection,
 } from "../../mesh-lod/mesh-lod-selection-gpu.js";
 import type { MeshLoDShaderFeatures } from "./pbr-mesh-lod-compose.js";
 import { composeMeshLoDWgsl, meshLoDShaderKey } from "./pbr-mesh-lod-compose.js";
+import { StandardToneMapping } from "./tone-mapping.js";
 import { meshLoDClusterDebugAttr, meshLoDConeDebugAttr, meshLoDDebugModeCode, meshLoDPageRequestCode, meshLoDPageResidencyCode } from "./pbr-mesh-lod-debug.js";
 
 const DRAW_VERTEX_STRIDE = 16; // 4 × u32
@@ -140,7 +142,8 @@ function packMaterialUbo(material: PbrMaterialProps, features: MeshLoDShaderFeat
 interface MeshLoDBatchPacket {
     readonly features: MeshLoDShaderFeatures;
     readonly environment: EnvironmentTextures | null;
-    readonly shaderModule: GPUShaderModule;
+    shaderModule: GPUShaderModule;
+    shaderKey: string;
     readonly bindGroupLayout: GPUBindGroupLayout;
     /** CPU-path group-1 bind group. Rebuilt make-before-break when the draw-vertex
      *  buffer grows to hold streamed refinement. */
@@ -247,8 +250,14 @@ function meshLoDBindGroupLayout(engine: EngineContext, hasIbl: boolean): GPUBind
     });
 }
 
-function getPipeline(engine: EngineContext, packet: MeshLoDBatchPacket, sig: RenderTargetSignature): GPURenderPipeline {
-    const key = targetSignatureKey(sig);
+function getPipeline(engine: EngineContext, packet: MeshLoDBatchPacket, sig: RenderTargetSignature, scene: SceneContext): GPURenderPipeline {
+    const toneMapping = scene.imageProcessing?.toneMappingEnabled ? (scene.imageProcessing.toneMapping ?? StandardToneMapping) : undefined;
+    const shaderKey = meshLoDShaderKey(packet.features, toneMapping);
+    if (packet.shaderKey !== shaderKey) {
+        packet.shaderModule = engine._device.createShaderModule({ label: `mesh-lod-${shaderKey}`, code: composeMeshLoDWgsl(packet.features, toneMapping) });
+        packet.shaderKey = shaderKey;
+    }
+    const key = `${targetSignatureKey(sig)}:${shaderKey}`;
     const cached = packet.pipelines.get(key);
     if (cached) {
         return cached;
@@ -266,38 +275,6 @@ function getPipeline(engine: EngineContext, packet: MeshLoDBatchPacket, sig: Ren
     });
     packet.pipelines.set(key, pipeline);
     return pipeline;
-}
-
-function writeInstanceRecord(out: Float32Array, floatOffset: number, world: Mat4): void {
-    for (let i = 0; i < 16; i++) {
-        out[floatOffset + i] = world[i]!;
-    }
-    // Normal matrix ∝ cofactor matrix = (c1×c2, c2×c0, c0×c1) as columns — the
-    // inverse-transpose up to determinant, correct after the shader's normalize().
-    const c0x = world[0]!,
-        c0y = world[1]!,
-        c0z = world[2]!;
-    const c1x = world[4]!,
-        c1y = world[5]!,
-        c1z = world[6]!;
-    const c2x = world[8]!,
-        c2y = world[9]!,
-        c2z = world[10]!;
-    // n0 = c1 × c2
-    out[floatOffset + 16] = c1y * c2z - c1z * c2y;
-    out[floatOffset + 17] = c1z * c2x - c1x * c2z;
-    out[floatOffset + 18] = c1x * c2y - c1y * c2x;
-    out[floatOffset + 19] = 0;
-    // n1 = c2 × c0
-    out[floatOffset + 20] = c2y * c0z - c2z * c0y;
-    out[floatOffset + 21] = c2z * c0x - c2x * c0z;
-    out[floatOffset + 22] = c2x * c0y - c2y * c0x;
-    out[floatOffset + 23] = 0;
-    // n2 = c0 × c1
-    out[floatOffset + 24] = c0y * c1z - c0z * c1y;
-    out[floatOffset + 25] = c0z * c1x - c0x * c1z;
-    out[floatOffset + 26] = c0x * c1y - c0y * c1x;
-    out[floatOffset + 27] = 0;
 }
 
 /** Grow the CPU draw-vertex buffer + scratch (make-before-break) so the streamed
@@ -403,7 +380,15 @@ function updatePacketCpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet
 
     for (const selection of selections) {
         const localInstance = instanceIndex;
-        writeInstanceRecord(inst, localInstance * (INSTANCE_STRIDE / 4), selection.instance.worldMatrix);
+        packInstanceRecord(
+            inst,
+            new Uint32Array(inst.buffer),
+            localInstance * (INSTANCE_STRIDE / 4),
+            selection.instance.worldMatrix,
+            selection.instance.visible,
+            selection.instance._instanceId,
+            selection.instance.screenSpaceError
+        );
         instanceIndex++;
         for (const clusterId of selection.result.selectedClusterIds) {
             const cluster = runtime.clusters[clusterId]!;
@@ -485,6 +470,7 @@ function buildGpuFrame(batch: MeshLoDSceneBatch, camera: Camera, context: DrawUp
         screenSpaceError: runtime.settings.screenSpaceError,
         lodHysteresis: runtime.settings.lodHysteresis,
         levelCount: runtime.header.levelCount,
+        debugMode: meshLoDDebugModeCode(runtime.debugView),
     };
 }
 
@@ -582,12 +568,15 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
     const indirectBuffer = device.createBuffer({ label: "mesh-lod-indirect", size: 16, usage: BU.INDIRECT | BU.COPY_DST });
 
     const bindGroupLayout = meshLoDBindGroupLayout(engine, features.hasIbl);
-    const shaderModule = device.createShaderModule({ label: `mesh-lod-${meshLoDShaderKey(features)}`, code: composeMeshLoDWgsl(features) });
+    const toneMapping = _scene.imageProcessing?.toneMappingEnabled ? (_scene.imageProcessing.toneMapping ?? StandardToneMapping) : undefined;
+    const shaderKey = meshLoDShaderKey(features, toneMapping);
+    const shaderModule = device.createShaderModule({ label: `mesh-lod-${shaderKey}`, code: composeMeshLoDWgsl(features, toneMapping) });
 
     const packet: MeshLoDBatchPacket = {
         features,
         environment,
         shaderModule,
+        shaderKey,
         bindGroupLayout,
         bindGroup: buildBindGroup(engine, bindGroupLayout, batch.material, drawVertexBuffer, instanceBuffer, runtime.gpu.arena.buffer, materialUbo, environment),
         pipelines: new Map(),
@@ -626,26 +615,53 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
             if (packet.gpuBatchState) {
                 disposeMeshLoDGpuBatchState(packet.gpuBatchState);
             }
+            for (const bindingPacket of bindingPackets) {
+                bindingPacket.dispose();
+            }
         },
     };
+    const bindingPackets: MeshLoDBatchPacket[] = [];
+    const packetByTarget = new WeakMap<RenderTargetSignature, MeshLoDBatchPacket>();
+    let firstBinding = true;
     (batch as { _packet?: unknown })._packet = packet;
 
     const renderable: Renderable = {
         order: 100,
         isTransparent: false,
         bind(eng: EngineContext, sig: RenderTargetSignature): DrawBinding {
-            const pipeline = getPipeline(eng, packet, sig);
+            // A binding is a render pass/camera (including an XR eye). Never let a
+            // later recorded view overwrite an earlier view's uniforms or draw state.
+            let drawPacket = packetByTarget.get(sig);
+            if (!drawPacket) {
+                drawPacket = firstBinding ? packet : createBindingPacket(eng, batch, packet);
+                firstBinding = false;
+                packetByTarget.set(sig, drawPacket);
+                if (drawPacket !== packet) {
+                    bindingPackets.push(drawPacket);
+                }
+            }
+            const passPacket = drawPacket;
+            let pipeline = getPipeline(eng, passPacket, sig, _scene);
             const updateBatch = getMeshLoDUpdateBatch(sig);
             return {
                 renderable,
-                pipeline,
-                update: (context: DrawUpdateContext) => updatePacket(eng, batch, packet, context, updateBatch),
+                get pipeline() {
+                    return pipeline;
+                },
+                update: (context: DrawUpdateContext) => {
+                    const nextPipeline = getPipeline(eng, passPacket, sig, _scene);
+                    if (pipeline !== nextPipeline) {
+                        pipeline = nextPipeline;
+                        invalidateRenderBundles(eng);
+                    }
+                    updatePacket(eng, batch, passPacket, context, updateBatch);
+                },
                 draw: (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => {
-                    if (batch.asset._runtime.disposed || !packet.activeBindGroup || !packet.activeIndirectBuffer) {
+                    if (batch.asset._runtime.disposed || !passPacket.activeBindGroup || !passPacket.activeIndirectBuffer) {
                         return 0;
                     }
-                    pass.setBindGroup(1, packet.activeBindGroup);
-                    pass.drawIndirect(packet.activeIndirectBuffer, 0);
+                    pass.setBindGroup(1, passPacket.activeBindGroup);
+                    pass.drawIndirect(passPacket.activeIndirectBuffer, 0);
                     return 1;
                 },
                 _updateBatches: [updateBatch],
@@ -653,4 +669,41 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
         },
     };
     return renderable;
+}
+
+function createBindingPacket(engine: EngineContext, batch: MeshLoDSceneBatch, shared: MeshLoDBatchPacket): MeshLoDBatchPacket {
+    const device = engine._device;
+    const drawVertexBuffer = device.createBuffer({ label: "mesh-lod-draw-vertices", size: shared.maxDrawVertices * DRAW_VERTEX_STRIDE, usage: BU.STORAGE | BU.COPY_DST });
+    const instanceBuffer = device.createBuffer({ label: "mesh-lod-instances", size: shared.maxInstances * INSTANCE_STRIDE, usage: BU.STORAGE | BU.COPY_DST });
+    const indirectBuffer = device.createBuffer({ label: "mesh-lod-indirect", size: 16, usage: BU.INDIRECT | BU.COPY_DST });
+    const packet: MeshLoDBatchPacket = {
+        ...shared,
+        drawVertexBuffer,
+        instanceBuffer,
+        indirectBuffer,
+        bindGroup: buildBindGroup(engine, shared.bindGroupLayout, batch.material, drawVertexBuffer, instanceBuffer, shared.arena, shared.materialUbo, shared.environment),
+        drawScratch: new Uint32Array(shared.maxDrawVertices * 4),
+        instanceScratch: new Float32Array(shared.maxInstances * INSTANCE_WORDS),
+        indirectScratch: new Uint32Array(4),
+        gpuInstanceState: null,
+        gpuBatchState: null,
+        gpuBindGroup: null,
+        gpuBoundDrawVertices: null,
+        gpuBoundInstances: null,
+        activeBindGroup: null,
+        activeIndirectBuffer: null,
+        dispose: () => {
+            if (packet.gpuBatchState) {
+                batch.asset._runtime._frameSnapshots.delete(packet.gpuBatchState);
+                disposeMeshLoDGpuBatchState(packet.gpuBatchState);
+            }
+            if (packet.gpuInstanceState) {
+                disposeMeshLoDGpuInstanceState(packet.gpuInstanceState);
+            }
+            packet.drawVertexBuffer.destroy();
+            packet.instanceBuffer.destroy();
+            indirectBuffer.destroy();
+        },
+    };
+    return packet;
 }

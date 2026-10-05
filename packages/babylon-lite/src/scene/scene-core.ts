@@ -89,6 +89,11 @@ export interface RuntimeSceneBuildHooks {
     /** @internal */
     _d(): boolean;
     exclusive<T>(builder: MeshGroupBuilder, work: () => Promise<T>): Promise<T>;
+    /** @internal Completion of the full PBR group rebuild that has not been dispatched yet. PBR meshes moved into
+     *  their group before it is dispatched join it instead of starting an identical rebuild of their own. */
+    _n?: Promise<void>;
+    /** @internal The most recent full PBR group rebuild (never rejects); the next one is dispatched once it settles. */
+    _l?: Promise<void>;
 }
 
 /** @internal Scene-owned mesh group plus the rebuild closure captured by its completed build. */
@@ -214,9 +219,8 @@ export interface SceneContext extends RenderingContext {
     _renderableVersion: number;
     /** @internal Monotonic counter bumped ONLY when a material's renderables are rebuilt/swapped (material
      *  swap drain or `rebuildMaterial`) — NOT on a geometry resize (which bumps `_renderableVersion` alone).
-     *  Lets consumers that cache material-view-derived GPU state (e.g. the CSM shadow tasks' no-color material
-     *  views) cheaply re-record on a geometry-only edit and only fully rebuild when a caster's material UBOs
-     *  were actually destroyed/recreated (which would otherwise leave their cached views dangling). */
+     *  Currently write-only: the CSM shadow tasks, its former reader, follow each caster material's `_csmGen`
+     *  instead, so they requeue only the casters of a rebuilt material. */
     _materialEpoch: number;
     /** True once the initial deferred build (buildScene) has run. Meshes added after
      *  this point use either the per-frame rebuild drain or an isolated async build

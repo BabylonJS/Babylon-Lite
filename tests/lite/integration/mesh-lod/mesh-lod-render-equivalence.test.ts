@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadMeshLoD, createMeshLoDInstance, setMeshLoDSelectionMode } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import { loadMeshLoD, createMeshLoDInstance, setMeshLoDSelectionMode, setMeshLoDDebugView } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { addMeshLoDInstanceToScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
 import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
 import { selectMeshLoDCpu } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-testing.js";
@@ -19,12 +19,14 @@ import {
     INSTANCE_WORDS,
     PAGE_FLAG_RESIDENT,
     PAGE_STATE_WORDS,
+    buildPageStateData,
     packClusters,
     packGroupPageRefs,
     packGroups,
     packHierarchyNodes,
     packInstanceRecord,
     runMeshLoDGpuSelection,
+    runMeshLoDGpuExpansion,
 } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
 import type { MeshLoDAsset } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import type { MeshLoDAssetRuntime } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-runtime.js";
@@ -34,7 +36,11 @@ import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/mat
 import type { EngineContext } from "../../../../packages/babylon-lite/src/engine/engine.js";
 import type { RenderTargetSignature } from "../../../../packages/babylon-lite/src/engine/render-target.js";
 import type { DrawUpdateBatch } from "../../../../packages/babylon-lite/src/render/renderable.js";
+import { createXrCamera, updateXrCameraForView } from "../../../../packages/babylon-lite/src/xr/xr-camera.js";
+import { getProjectionMatrix } from "../../../../packages/babylon-lite/src/camera/camera.js";
+import { meshLoDDebugModeCode } from "../../../../packages/babylon-lite/src/material/pbr/pbr-mesh-lod-debug.js";
 import { createFillDecoder, createMockEngine, createMockRenderPass } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
+import { AcesToneMapping } from "../../../../packages/babylon-lite/src/material/pbr/pbr-aces-wgsl.js";
 
 const STATUE = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
 const statueSource = (): ArrayBuffer => new Uint8Array(readFileSync(STATUE)).slice().buffer as ArrayBuffer;
@@ -176,6 +182,192 @@ describe("MeshLoD render equivalence — GPU selection over the real statue hier
 });
 
 describe("MeshLoD render equivalence — one indirect draw per batch key", () => {
+    it("refreshes each binding's output pipeline when tone mapping is enabled, changed, or disabled", async () => {
+        const asset = await loadMeshLoD(engine, statueSource());
+        const scene = fakeScene(engine);
+        scene.imageProcessing = { exposure: 0.8, contrast: 1.2, toneMappingEnabled: false };
+        await build(asset, {} as PbrMaterialProps, 1, scene);
+        const binding = scene._renderables[0]!.bind(engine, SIG);
+        const disabled = binding.pipeline;
+        scene.imageProcessing.toneMappingEnabled = true;
+        binding.update!(CONTEXT);
+        const standard = binding.pipeline;
+        expect(standard).not.toBe(disabled);
+        scene.imageProcessing.toneMapping = AcesToneMapping;
+        binding.update!(CONTEXT);
+        expect(binding.pipeline).not.toBe(standard);
+        scene.imageProcessing.toneMappingEnabled = false;
+        binding.update!(CONTEXT);
+        expect(binding.pipeline).toBe(disabled);
+        scene.imageProcessing.exposure = 2;
+        scene.imageProcessing.contrast = 0.7;
+        binding.update!(CONTEXT);
+        expect(binding.pipeline).toBe(disabled);
+    });
+
+    it.each(["cpu", "gpu"] as const)("reuses each target's buffers when render tasks rebind (%s)", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        const scene = await build(asset, {} as PbrMaterialProps, 1);
+        scene._renderableVersion = 0;
+        engine._renderingContexts.push(scene);
+        const renderable = scene._renderables[0]!;
+        const targets = [{ ...SIG }, { ...SIG }];
+        const drawBuffers = targets.map((target) => {
+            const binding = renderable.bind(engine, target);
+            flush(binding);
+            const pass = createMockRenderPass();
+            expect(binding.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+            return pass.indirectDraws[0]!.buffer;
+        });
+        expect(drawBuffers[0]).not.toBe(drawBuffers[1]);
+        const persistentBufferCount = () => mock.device.buffers.filter((buffer) => buffer.label !== "mesh-lod-readback").length;
+        const bufferCount = persistentBufferCount();
+        const version = scene._renderableVersion;
+        for (let rebind = 0; rebind < 3; rebind++) {
+            targets.forEach((target, index) => {
+                const binding = renderable.bind(engine, target);
+                flush(binding);
+                const pass = createMockRenderPass();
+                expect(binding.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+                expect(pass.indirectDraws[0]!.buffer).toBe(drawBuffers[index]);
+            });
+        }
+        expect(persistentBufferCount()).toBe(bufferCount);
+        expect(scene._renderableVersion).toBe(version);
+    });
+
+    it.each([false, true])("isolates two disjoint camera cuts recorded before one submission (XR=%s)", async (xr) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource());
+        const scene = await build(asset, { doubleSided: true } as PbrMaterialProps, 2);
+        const instances = scene._meshLoDRegistry!.batches[0]!.instances;
+        instances[0]!.position.set(-1000, 0, 0);
+        instances[1]!.position.set(1000, 0, 0);
+        const cameras = [-1000, 1000].map((x, eye) => {
+            const camera = fakeCamera();
+            const world = new Float32Array(camera.worldMatrix);
+            world[12] = x;
+            Object.assign(camera, { worldMatrix: world });
+            if (!xr) {
+                return camera;
+            }
+            const xrCamera = createXrCamera(eye === 0 ? "left" : "right");
+            const pose = new Float32Array(world);
+            pose[14] = 10; // XR's right-handed eye pose.
+            const projection = new Float32Array(getProjectionMatrix(camera, 800 / 600));
+            // Undo LH/reverse-Z so updateXrCameraForView applies the real XR boundary.
+            for (let column = 0; column < 4; column++) {
+                const row2 = column * 4 + 2;
+                projection[row2] = projection[column * 4 + 3]! - projection[row2]!;
+            }
+            for (let row = 0; row < 4; row++) {
+                projection[8 + row] = -projection[8 + row]!;
+            }
+            updateXrCameraForView(xrCamera, { transform: { matrix: pose }, projectionMatrix: projection } as unknown as XRView, 800, 600, { x: 0, y: 0, width: 1, height: 1 });
+            return xrCamera;
+        });
+        const bindings = cameras.map(() => scene._renderables[0]!.bind(engine, { ...SIG }));
+        for (let eye = 0; eye < 2; eye++) {
+            const binding = bindings[eye]!;
+            binding._updateBatches![0]!.reset();
+            binding.update!({ targetWidth: 800, targetHeight: 600, _camera: cameras[eye]! });
+            binding._updateBatches![0]!.flush(engine);
+        }
+        const params = mock.device.buffers.filter((buffer) => buffer.label === "mesh-lod-params");
+        expect(params).toHaveLength(2);
+        const transforms = mock.device.buffers.filter((buffer) => buffer.label === "mesh-lod-instances" && buffer.data.length > 0);
+        const runtime = asset._runtime;
+        const selectedSlots = params.map((buffer, eye) => {
+            const f = new Float32Array(buffer.data.buffer);
+            const u = new Uint32Array(buffer.data.buffer);
+            expect(f[24]).toBe(eye === 0 ? -1000 : 1000);
+            const records = new Float32Array(transforms[eye]!.data.buffer);
+            const model = runMeshLoDGpuSelection({
+                nodes: packHierarchyNodes(runtime.hierarchyNodes),
+                groups: packGroups(runtime.groups),
+                clusters: packClusters(runtime.clusters),
+                groupPageRefs: packGroupPageRefs(runtime.groupPageRefs),
+                pageState: buildPageStateData(runtime.gpu.pages, runtime.pageRecords, runtime.generation),
+                pageStoredBytes: runtime.pageRecords.map((record) => record.storedBytes),
+                instances: records,
+                instancesU32: new Uint32Array(records.buffer),
+                priorState: new Uint32Array(u[40]! * 2),
+                instanceCount: 2,
+                nodeCount: runtime.hierarchyNodes.length,
+                groupCount: runtime.groups.length,
+                clusterCount: runtime.clusters.length,
+                pageCount: runtime.pageRecords.length,
+                wordsPerInstance: u[40]!,
+                params: {
+                    cameraPos: [f[24]!, f[25]!, f[26]!],
+                    verticalFov: cameras[eye]!.fov,
+                    near: f[27]!,
+                    targetWidth: f[28]!,
+                    targetHeight: f[29]!,
+                    screenSpaceError: f[32]!,
+                    lodHysteresis: runtime.settings.lodHysteresis,
+                    levelCount: runtime.header.levelCount,
+                    frustumPlanes: Array.from({ length: 6 }, (_, plane) => [f[plane * 4]!, f[plane * 4 + 1]!, f[plane * 4 + 2]!, f[plane * 4 + 3]!] as const),
+                    coneCull: false,
+                },
+            });
+            return [...new Set(model.selected.map((pair) => pair.instanceId))];
+        });
+        expect(selectedSlots).toEqual([[0], [1]]);
+        const draws = bindings.map((binding) => {
+            const pass = createMockRenderPass();
+            expect(binding.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+            return pass.indirectDraws[0]!.buffer;
+        });
+        expect(draws[0]).not.toBe(draws[1]);
+        scene._disposables.forEach((dispose) => dispose());
+        expect(params.every((buffer) => buffer.destroyed)).toBe(true);
+    });
+
+    it("populates public debug views without leaving default GPU selection", async () => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource());
+        const scene = await build(asset, { doubleSided: true } as PbrMaterialProps, 1);
+        const binding = scene._renderables[0]!.bind(engine, SIG);
+        const runtime = asset._runtime;
+        const clusterId = runtime.clusters.findIndex((cluster) => runtime.pageRecords[cluster.pageId]!.pinned);
+        const cluster = runtime.clusters[clusterId]!;
+        const group = runtime.groups[cluster.groupId]!;
+        // Minimal decoded geometry is enough to inspect the reserved diagnostic word.
+        const pageState = buildPageStateData(runtime.gpu.pages, runtime.pageRecords, runtime.generation);
+        pageState[cluster.pageId * PAGE_STATE_WORDS + 2] = 0;
+        pageState[cluster.pageId * PAGE_STATE_WORDS + 3] = 0;
+        const modes = ["none", "meshlet-id", "lod-depth", "selected-group", "page-residency", "requested-pages", "meshlet-cone"] as const;
+        for (const view of modes) {
+            setMeshLoDDebugView(asset, view);
+            flush(binding);
+            const params = mock.device.buffers.find((buffer) => buffer.label === "mesh-lod-params")!;
+            const mode = new Uint32Array(params.data.buffer)[52]!;
+            expect(mode).toBe(meshLoDDebugModeCode(view));
+            expect(asset.diagnostics.selectionMode).toBe("gpu");
+            const result = runMeshLoDGpuExpansion({
+                selected: [{ clusterId, instanceId: 0 }],
+                clusters: packClusters(runtime.clusters),
+                groups: packGroups(runtime.groups),
+                pageState,
+                arena: new Uint32Array(cluster.indexOffset + cluster.triangleCount * 3),
+                drawVertexCapacity: cluster.triangleCount * 3,
+                debugMode: mode,
+                coneCull: false,
+            });
+            const expected =
+                view === "lod-depth" ? group.depth : view === "selected-group" ? cluster.groupId : view === "page-residency" ? 2 : view === "meshlet-cone" ? 0x3f800000 : 0;
+            expect(result.drawVertices[3]).toBe(expected);
+        }
+        setMeshLoDDebugView(asset, "none");
+        flush(binding);
+        expect(asset.diagnostics.selectionMode).toBe("gpu");
+    });
+
     it.each(["gpu", "cpu"] as const)("re-records the cached draw when switching from %s and back", async (initialMode) => {
         const asset = await loadMeshLoD(engine, statueSource(), { selectionMode: initialMode });
         const scene = await build(asset, {} as PbrMaterialProps, 1);

@@ -31,7 +31,6 @@ import {
     loadMeshLoD,
     registerScene,
     setCameraLimits,
-    setMeshLoDSelectionMode,
     setRenderTaskGpuTimingEnabled,
     startEngine,
     type MeshLoDAsset,
@@ -242,12 +241,6 @@ async function main(): Promise<void> {
             networkSim,
             onDebugViewChange: (view: MeshLoDDebugView) => {
                 diagnostics?.setLegend(view);
-                // Debug views render through the CPU reference selection path (which
-                // packs the per-cluster attribute); production GPU selection when off.
-                const mode = view === "none" ? "gpu" : "cpu";
-                for (const asset of assets) {
-                    setMeshLoDSelectionMode(asset, mode);
-                }
             },
         });
     }

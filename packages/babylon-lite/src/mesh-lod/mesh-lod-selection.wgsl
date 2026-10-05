@@ -20,6 +20,7 @@ struct Params {
   layout0: vec4<u32>,          // wordsPerInstance, selectedCapacity, pageCount, levelCount
   offsets: vec4<u32>,          // nodeWordOffset, groupWordOffset, clusterWordOffset, pageRefWordOffset
   control: vec4<u32>,          // diagWordOffset, pageDemandWordOffset, drawCapacity, coneCull
+  execution: vec4<u32>,        // debug mode, max workgroups/dimension, page-use offset, reserved
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -120,7 +121,7 @@ fn coneCullMargin(iBase: u32, cBase: u32) -> f32 {
   let n0 = vec3<f32>(instances[iBase + 16u], instances[iBase + 17u], instances[iBase + 18u]);
   let n1 = vec3<f32>(instances[iBase + 20u], instances[iBase + 21u], instances[iBase + 22u]);
   let n2 = vec3<f32>(instances[iBase + 24u], instances[iBase + 25u], instances[iBase + 26u]);
-  let axis = normalize(n0 * localAxis.x + n1 * localAxis.y + n2 * localAxis.z);
+  let axis = normalize((n0 * localAxis.x + n1 * localAxis.y + n2 * localAxis.z) * instances[iBase + 23u]);
   let center = vec3<f32>(metaF32(cBase), metaF32(cBase + 1u), metaF32(cBase + 2u));
   let p = projectSphere(iBase, instances[iBase + 28u], center, metaF32(cBase + 3u), 0.0);
   let view = p.worldCenter - params.cameraPos.xyz;
@@ -129,15 +130,20 @@ fn coneCullMargin(iBase: u32, cBase: u32) -> f32 {
   return (threshold - dot(view, axis)) / max(distance, 1.0e-20);
 }
 
+fn invocationIndex(gid: vec3<u32>, dimensions: vec3<u32>) -> u32 {
+  return gid.x + (gid.y + gid.z * dimensions.y) * dimensions.x * 64u;
+}
+
 // ── 1. Hierarchy visibility: one invocation per (node, instance). Under conservative
 //    bounds a not-outside leaf's ancestors are all not-outside, so the per-leaf test
 //    equals the root-down traversal the CPU oracle performs. ──
 @compute @workgroup_size(64)
-fn traverse(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn traverse(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) dimensions: vec3<u32>) {
+  let invocation = invocationIndex(gid, dimensions);
   let total = params.counts.w * params.counts.x; // nodeCount * instanceCount
-  if (gid.x >= total) { return; }
-  let node = gid.x % params.counts.w;
-  let inst = gid.x / params.counts.w;
+  if (invocation >= total) { return; }
+  let node = invocation % params.counts.w;
+  let inst = invocation / params.counts.w;
   let iBase = inst * INSTANCE_WORDS;
   if (bitcast<u32>(instances[iBase + 29u]) == 0u) { return; } // invisible
   let nBase = params.offsets.x + node * NODE_WORDS;
@@ -154,11 +160,12 @@ fn traverse(@builtin(global_invocation_id) gid: vec3<u32>) {
 // ── 2. Group evaluation: one invocation per (group, instance). Residency, hysteretic
 //    fine-required decision (asymmetric equality), prior-state persist, diagnostics. ──
 @compute @workgroup_size(64)
-fn evaluateGroups(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn evaluateGroups(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) dimensions: vec3<u32>) {
+  let invocation = invocationIndex(gid, dimensions);
   let total = params.counts.y * params.counts.x; // groupCount * instanceCount
-  if (gid.x >= total) { return; }
-  let group = gid.x % params.counts.y;
-  let inst = gid.x / params.counts.y;
+  if (invocation >= total) { return; }
+  let group = invocation % params.counts.y;
+  let inst = invocation / params.counts.y;
   let iBase = inst * INSTANCE_WORDS;
   if (bitcast<u32>(instances[iBase + 29u]) == 0u) { return; }
   let sse = select(params.thresholds.x, instances[iBase + 19u], instances[iBase + 19u] > 0.0);
@@ -199,11 +206,12 @@ fn evaluateGroups(@builtin(global_invocation_id) gid: vec3<u32>) {
 //    (cluster, instance). A second cluster-sphere cull can disagree with the
 //    conservative group bounds and punch view-dependent holes. ──
 @compute @workgroup_size(64)
-fn selectClusters(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn selectClusters(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) dimensions: vec3<u32>) {
+  let invocation = invocationIndex(gid, dimensions);
   let total = params.counts.z * params.counts.x; // clusterCount * instanceCount
-  if (gid.x >= total) { return; }
-  let cluster = gid.x % params.counts.z;
-  let inst = gid.x / params.counts.z;
+  if (invocation >= total) { return; }
+  let cluster = invocation % params.counts.z;
+  let inst = invocation / params.counts.z;
   let iBase = inst * INSTANCE_WORDS;
   if (bitcast<u32>(instances[iBase + 29u]) == 0u) { return; }
   let cBase = params.offsets.z + cluster * CLUSTER_WORDS;
@@ -218,8 +226,10 @@ fn selectClusters(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (coneCullMargin(iBase, cBase) <= 0.0) { return; }
   let idx = atomicAdd(&control[0], 1u); // reserve; control[0] doubles as indirect X
   if (idx < params.layout0.y) {
-    selectedList[idx * 2u] = cluster;
-    selectedList[idx * 2u + 1u] = inst;
+    selectedList[1u + idx * 2u] = cluster;
+    selectedList[2u + idx * 2u] = inst;
+    let pageId = metaBuf[cBase + 7u];
+    atomicOr(&control[params.execution.z + (pageId >> 5u)], 1u << (pageId & 31u));
     let triangles = metaBuf[cBase + 11u];
     let previous = atomicAdd(&control[params.control.x + 1u], triangles);
     let triangleCap = params.control.z / 3u;
@@ -250,11 +260,12 @@ fn selectClusters(@builtin(global_invocation_id) gid: vec3<u32>) {
 // ── 4. Page demand: one invocation per (group, instance). Visible demanded groups
 //    accumulate per-page benefit/cost priority for streaming readback (§11.1). ──
 @compute @workgroup_size(64)
-fn computeDemand(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn computeDemand(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) dimensions: vec3<u32>) {
+  let invocation = invocationIndex(gid, dimensions);
   let total = params.counts.y * params.counts.x;
-  if (gid.x >= total) { return; }
-  let group = gid.x % params.counts.y;
-  let inst = gid.x / params.counts.y;
+  if (invocation >= total) { return; }
+  let group = invocation % params.counts.y;
+  let inst = invocation / params.counts.y;
   let iBase = inst * INSTANCE_WORDS;
   if (bitcast<u32>(instances[iBase + 29u]) == 0u) { return; }
   let gsIdx = groupStateIndex(inst, group);
@@ -303,6 +314,15 @@ fn clampSelectedCount() {
   if (atomicLoad(&control[params.control.x + 2u]) != 0u) {
     atomicStore(&control[0], 0u); // never expand a partial cut
   }
+  let count = atomicLoad(&control[0]);
+  selectedList[0] = count;
+  let x = min(count, params.execution.y);
+  let rows = (count + max(x, 1u) - 1u) / max(x, 1u);
+  let y = max(min(rows, params.execution.y), 1u);
+  let z = max((rows + y - 1u) / y, 1u);
+  atomicStore(&control[1], x);
+  atomicStore(&control[2], y);
+  atomicStore(&control[3], z);
 }
 
 // ── Task 5.3 expansion — its own bind-group layout {0,1,2,6,8,9,10} (no `control`,
@@ -326,17 +346,34 @@ fn readLocalIndex(byteOffset: u32) -> u32 {
 }
 
 @compute @workgroup_size(64)
-fn expandClusters(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
-  let clusterId = selectedList[wid.x * 2u];
-  let slot = selectedList[wid.x * 2u + 1u];
+fn expandClusters(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>, @builtin(num_workgroups) dimensions: vec3<u32>) {
+  let selected = wid.x + (wid.y + wid.z * dimensions.y) * dimensions.x;
+  let pair = min(selected, selectedList[0] - 1u);
+  let clusterId = selectedList[1u + pair * 2u];
+  let slot = selectedList[2u + pair * 2u];
   let cBase = params.offsets.z + clusterId * CLUSTER_WORDS;
   let pageId = metaBuf[cBase + 7u];
   let clusterIndexOffset = metaBuf[cBase + 9u]; // first local index (u16 elements)
-  let indexCount = metaBuf[cBase + 11u] * 3u;
+  let indexCount = select(0u, metaBuf[cBase + 11u] * 3u, selected < selectedList[0]);
   let psBase = pageId * PAGE_STATE_WORDS;
   let arenaVertexWord = pageState[psBase + 2u] >> 2u; // absolute vertex byte -> word
   let arenaIndexByte = pageState[psBase + 3u];
   let drawCapacity = params.control.z;
+  let groupId = metaBuf[cBase + 5u];
+  let gBase = params.offsets.y + groupId * GROUP_WORDS;
+  var debug = 0u;
+  switch params.execution.x {
+    case 2u: { debug = metaBuf[gBase + 5u]; }
+    case 3u: { debug = groupId; }
+    case 4u: {
+      let flags = pageState[psBase];
+      debug = select(select(0u, 1u, (flags & 1u) != 0u), 2u, (flags & 2u) != 0u);
+      debug = select(debug, 3u, (flags & 4u) != 0u);
+    }
+    case 5u: { debug = pageState[psBase + 7u]; }
+    case 6u: { debug = bitcast<u32>(coneCullMargin(slot * INSTANCE_WORDS, cBase)); }
+    default: {}
+  }
   if (lid.x == 0u) { wgBase = atomicAdd(&drawArgs[0], indexCount); }
   workgroupBarrier();
   let base = wgBase;
@@ -348,7 +385,7 @@ fn expandClusters(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocati
     drawVertices[o] = arenaVertexWord + localVertex * VERTEX_WORDS;
     drawVertices[o + 1u] = clusterId;
     drawVertices[o + 2u] = slot;
-    drawVertices[o + 3u] = 0u; // debug/group flags — never affect selection or residency
+    drawVertices[o + 3u] = debug; // observational; never affects selection or residency
   }
 }
 

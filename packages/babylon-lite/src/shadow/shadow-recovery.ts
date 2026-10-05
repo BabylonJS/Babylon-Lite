@@ -2,6 +2,9 @@ import type { EngineContext } from "../engine/engine.js";
 import type { SceneContext } from "../scene/scene-core.js";
 import type { DirectionalLight } from "../light/directional-light.js";
 import type { ShadowGenerator } from "./shadow-generator.js";
+import { acquireTexture } from "../resource/texture-acquire.js";
+import { createUniformBuffer } from "../resource/uniform-buffer.js";
+import { createShadowParamsUBO } from "./shadow-base.js";
 
 /**
  * @internal Rebuild scene shadow generators on the replacement device while preserving each
@@ -18,14 +21,39 @@ export async function rebuildSceneShadowGenerators(engine: EngineContext, scene:
         }
     }
     for (const generator of generators) {
-        if (generator._shadowType !== "esm") {
+        if (generator._shadowType !== "esm" && generator._shadowType !== "csm") {
             throw new Error(`Device-lost Scene recovery does not support shadow generator type "${generator._shadowType}"`);
         }
         generator._shadowTaskState?._task.dispose();
         generator._shadowTaskState = undefined;
         generator._preloadPending = undefined;
 
-        // Kept lazy so a CSM-only scene (which throws above) never pulls in the ESM generator.
+        if (generator._shadowType === "csm") {
+            // Match the CSM factory's eager resources without replacing its generator-bound hooks.
+            const device = engine._device;
+            const mapSize = generator._config._mapSize;
+            generator._depthTexture = device.createTexture({
+                size: { width: mapSize, height: mapSize, depthOrArrayLayers: generator._csmCascadeCount! },
+                format: "depth32float",
+                usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | (generator._csmCache ? GPUTextureUsage.COPY_DST : 0),
+            });
+            generator._depthSampler = device.createSampler({ compare: "less", magFilter: "linear", minFilter: "linear" });
+            generator._shadowParamsUBO = createShadowParamsUBO(engine, generator._config._bias, 1 / mapSize);
+            generator._shadowUBO = createUniformBuffer(engine, new Float32Array(80));
+            const receiverTexture = generator._csmReceiverTexture;
+            if (receiverTexture) {
+                receiverTexture.texture = generator._depthTexture;
+                receiverTexture.view = generator._depthTexture.createView({ dimension: "2d-array" });
+                receiverTexture.sampler = generator._depthSampler;
+                receiverTexture.width = mapSize;
+                receiverTexture.height = mapSize;
+                acquireTexture(receiverTexture);
+            }
+            generator._version++;
+            continue;
+        }
+
+        // Kept lazy so a CSM-only scene never pulls in the ESM generator.
         const esm = await import("./esm-directional-shadow-generator.js");
         const oldResources = esm.getEsmShadowTaskResources(generator);
         if (!oldResources) {

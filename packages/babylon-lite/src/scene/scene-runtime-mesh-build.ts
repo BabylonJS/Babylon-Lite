@@ -85,12 +85,11 @@ export function A(scene: SceneContext, material: Material | null, mesh: Mesh, pe
  *  Entry point for `processMaterialSwaps`, reached through a dynamic import so the runtime-build
  *  subtree stays out of scenes that never introduce a material family at runtime.
  *
- *  Builds are chained rather than coalesced per group. For the PBR family `B` rebuilds the whole
- *  group, so N meshes joining one brand-new group produce N redundant rebuilds — but `exclusive()`
- *  serializes them and each is make-before-break, so the end state is correct, and this is a rare
- *  runtime path. Coalescing them would have to exclude meshes that arrived through the
- *  `mesh.material` setter (which only enqueues): those are not in the target group yet, and only
- *  their own `moveRuntimeMeshToGroup` call puts them there. */
+ *  Builds are chained per mesh rather than coalesced per group up front: a mesh that arrived through
+ *  the `mesh.material` setter (which only enqueues) is not in the target group yet, and only its own
+ *  `moveRuntimeMeshToGroup` call puts it there. Non-PBR families then build each mesh on its own. For
+ *  the PBR family `B` rebuilds the whole group, so each member moves itself into the group first and
+ *  then joins the pending group rebuild: N meshes joining one brand-new group share a single rebuild. */
 export function C(scene: SceneContext, meshes: readonly (Mesh | [Mesh, Material])[], pending?: Promise<void>): Promise<void> {
     let chain = pending;
     for (const entry of meshes) {
@@ -105,22 +104,40 @@ export function C(scene: SceneContext, meshes: readonly (Mesh | [Mesh, Material]
     });
 }
 
-/** @internal Lazily install runtime-build state and materialize one post-build mesh. */
+/** @internal Lazily install runtime-build state and materialize one post-build mesh.
+ *
+ *  A PBR mesh moves itself into its group and only then joins the full PBR group rebuild that has not been
+ *  dispatched yet, so meshes rebuilt together (one `rebuildMaterial` call, one swap drain) share a single
+ *  rebuild. Joining only after the move is what makes this safe: a mesh is in the group the shared rebuild
+ *  reads before it waits on that rebuild. A mesh that so far only went through the `mesh.material` setter
+ *  (which enqueues without moving it) never joins. */
 export function B(scene: SceneContext, builder: MeshGroupBuilder, mesh: Mesh): Promise<void> {
     if (scene._z || !scene.meshes.includes(mesh)) {
         return scene._runtimeBuilds?.all().catch(() => undefined) ?? Promise.resolve();
     }
     moveRuntimeMeshToGroup(scene, builder, mesh);
-    if (builder._materialFamily === "pbr" && (scene._built || scene._groups.get(builder)?.r)) {
-        const hooks = scene._runtimeBuilds ?? installRuntimeBuilds(scene);
-        const rebuild = import("./scene-rebuild.js")
-            .then(({ rebuildScenePbrPipelines }) => (scene._z ? undefined : rebuildScenePbrPipelines(scene, true)))
-            .catch((error: unknown) => {
-                scene._runtimeBuilds?._x(error);
-            });
-        return hooks.track(rebuild);
-    }
     const hooks = scene._runtimeBuilds ?? installRuntimeBuilds(scene);
+    if (builder._materialFamily === "pbr" && (scene._built || scene._groups.get(builder)?.r)) {
+        // A full PBR rebuild reads group membership only once its exclusive work starts, strictly after it is
+        // dispatched below, so every mesh moved into its group before dispatch is covered: join it instead of
+        // queueing an identical one. Requests made after dispatch share ONE follow-up, dispatched once the
+        // previous rebuild settles. The slot is tracked once, so joiners add no per-mesh promise wiring.
+        if (!hooks._n) {
+            hooks._l = Promise.resolve(hooks._l)
+                .then(() => import("./scene-rebuild.js"))
+                .finally(() => {
+                    // Dispatch, or a failed chunk load: membership is not read yet, but meshes moved from now on
+                    // need the next rebuild. Clearing on failure too keeps the slot from sticking to a dead request.
+                    hooks._n = undefined;
+                })
+                .then(({ rebuildScenePbrPipelines }) => (scene._z ? undefined : rebuildScenePbrPipelines(scene, true)))
+                .catch((error: unknown) => {
+                    scene._runtimeBuilds?._x(error);
+                });
+            hooks._n = hooks.track(hooks._l);
+        }
+        return hooks._n;
+    }
     return hooks.queue(builder, mesh).catch(() => undefined);
 }
 

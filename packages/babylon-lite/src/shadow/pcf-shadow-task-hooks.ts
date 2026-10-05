@@ -193,10 +193,24 @@ export function snapshotShadowCasterMaterial(material: Material, terminals: Map<
     generations.set(material, terminal._csmGen);
 }
 
-/** @internal Whether an override changed, was cleared, or its terminal material was rebuilt. */
+/** @internal Whether an override changed, was cleared, or its terminal material was rebuilt. A material missing from the
+ *  snapshot counts as changed too: the snapshot cannot vouch for a view that was never built for it. */
 export function shadowCasterMaterialChanged(material: Material, terminals: Map<Material, Material>, generations: Map<Material, number | undefined>): boolean {
     const terminal = resolveShadowCasterMaterial(material);
-    return terminals.has(material) && (terminals.get(material) !== terminal || generations.get(material) !== terminal._csmGen);
+    return terminals.get(material) !== terminal || generations.get(material) !== terminal._csmGen;
+}
+
+/** @internal Whether `getNoColorView` can build the view of a terminal caster material now: the no-colour view factory of
+ *  its family has been imported. A family without a factory builds no view, so it needs none. */
+export function hasNoColorViewFactory(terminal: Material): boolean {
+    const family = terminal._buildGroup._materialFamily;
+    return !!(family === "standard"
+        ? createStandardNoColorMaterialView
+        : family === "pbr"
+          ? createPbrNoColorMaterialView
+          : family === "node"
+            ? createNodeNoColorMaterialView
+            : family !== "shader" || createShaderNoColorMaterialView);
 }
 
 export function renderPcfShadowMap(

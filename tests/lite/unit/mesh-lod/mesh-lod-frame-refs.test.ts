@@ -123,7 +123,7 @@ describe("MeshLoD frame references (§14.1)", () => {
             return words;
         };
         for (let i = 0; i < 2; i++) {
-            applyMeshLoDGpuReadback(runtime, states[i]!, control(fine[i]!), runtime.pageRecords.length, runtime.generation, new Uint32Array(0), 1);
+            applyMeshLoDGpuReadback(runtime, states[i]!, control(fine[i]!), runtime.pageRecords.length, runtime.generation, 1);
         }
         expect(runtime.frameIndex).toBe(1);
         expect([...runtime.scheduler!.requests.keys()]).toEqual(fine.slice(0, 2));
@@ -134,8 +134,8 @@ describe("MeshLoD frame references (§14.1)", () => {
         engine._finishOptionalFrame?.(true);
         expect(runtime.frameIndex).toBe(2);
         expect([...runtime.scheduler!.requests.keys()]).toEqual(fine.slice(0, 2));
-        applyMeshLoDGpuReadback(runtime, states[1]!, control(fine[2]!), runtime.pageRecords.length, runtime.generation, new Uint32Array(0), 2);
-        applyMeshLoDGpuReadback(runtime, states[1]!, control(fine[3]!), runtime.pageRecords.length, runtime.generation, new Uint32Array(0), 1);
+        applyMeshLoDGpuReadback(runtime, states[1]!, control(fine[2]!), runtime.pageRecords.length, runtime.generation, 2);
+        applyMeshLoDGpuReadback(runtime, states[1]!, control(fine[3]!), runtime.pageRecords.length, runtime.generation, 1);
         expect(runtime.frameIndex).toBe(2);
         expect(runtime.scheduler!.requests.has(fine[2]!)).toBe(true);
         expect(runtime.scheduler!.requests.has(fine[3]!)).toBe(false);
@@ -249,7 +249,7 @@ describe("MeshLoD frame references (§14.1)", () => {
         const control = new Uint32Array(state.controlWords);
         control[CONTROL_COUNT_WORD] = 10;
         control[CONTROL_TRIANGLE_WORD] = 46;
-        applyMeshLoDGpuReadback(runtime, state, control, runtime.gpu.pages.length, runtime.generation, new Uint32Array(0), runtime.frameIndex);
+        applyMeshLoDGpuReadback(runtime, state, control, runtime.gpu.pages.length, runtime.generation, runtime.frameIndex);
 
         expect(page0.frameRefCount).toBe(1);
         expect(page0.lastUsedFrame).toBe(0); // no selected cluster used it

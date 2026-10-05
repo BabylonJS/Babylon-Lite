@@ -136,6 +136,8 @@ export interface MeshLoDInstance extends SceneNode {
     /** @internal */ _asset: MeshLoDAsset;
     /** @internal */ _material: PbrMaterialProps;
     /** @internal */ _instanceId: number;
+    /** @internal Removal invalidates GPU hysteresis even before a slot is uploaded again. */
+    _selectionVersion?: number;
 }
 
 // ─── Defaults ────────────────────────────────────────────────────────

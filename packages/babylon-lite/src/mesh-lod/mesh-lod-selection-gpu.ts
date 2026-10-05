@@ -45,6 +45,7 @@ import type {
 import { holdMeshLoDPages, publishMeshLoDGpuReadback, queueMeshLoDFrame } from "./mesh-lod-runtime.js";
 import type { MeshLoDPageDemand } from "./mesh-lod-scheduler.js";
 import selectionWgsl from "./mesh-lod-selection.wgsl?raw";
+import { meshLoDClusterDebugAttr, meshLoDConeDebugAttr, meshLoDPageRequestCode, meshLoDPageResidencyCode } from "../material/pbr/pbr-mesh-lod-debug.js";
 
 // ─── Record word/byte layouts (architecture §12.1) ───────────────────
 
@@ -180,7 +181,7 @@ export function writePageStateRecord(out: Uint32Array, wordBase: number, page: M
     out[wordBase + 4] = record.vertexCount;
     out[wordBase + 5] = record.localIndexCount;
     out[wordBase + 6] = resident ? generation : 0;
-    out[wordBase + 7] = 0;
+    out[wordBase + 7] = meshLoDPageRequestCode(record.pinned, page.state);
 }
 
 /** Build the full page-state array from the current runtime residency. */
@@ -203,12 +204,15 @@ export interface MeshLoDGpuInstanceInput {
     readonly screenSpaceError?: number;
     /** @internal Stable per-asset instance ID (slot identity for version gating). */
     readonly _instanceId: number;
+    /** @internal Removal/reinsertion invalidates this identity's hysteresis row. */
+    readonly _selectionVersion?: number;
 }
 
 /** Write one 128-byte instance record: world matrix, cofactor normal matrix as three
  *  padded `vec4` rows, maximum world scale, visibility flag, and stable instance ID.
  *  The cofactor matrix `(c1×c2, c2×c0, c0×c1)` is the inverse-transpose up to
- *  determinant — correct after the shader's `normalize()`. */
+ *  determinant sign — correct after the shader's `normalize()`. Singular or
+ *  non-finite transforms reject instead of emitting undefined shading normals. */
 export function packInstanceRecord(
     f32: Float32Array,
     u32: Uint32Array,
@@ -230,17 +234,22 @@ export function packInstanceRecord(
     const c2x = world[8]!,
         c2y = world[9]!,
         c2z = world[10]!;
-    f32[wordBase + 16] = c1y * c2z - c1z * c2y;
-    f32[wordBase + 17] = c1z * c2x - c1x * c2z;
-    f32[wordBase + 18] = c1x * c2y - c1y * c2x;
+    const determinant = c0x * (c1y * c2z - c1z * c2y) + c0y * (c1z * c2x - c1x * c2z) + c0z * (c1x * c2y - c1y * c2x);
+    if (!Number.isFinite(determinant) || determinant === 0 || Array.from(world).some((value) => !Number.isFinite(value))) {
+        throw createMeshLoDError("MLOD_INVALID_OPTION", "MeshLoD world matrix must be finite and nonsingular", { actual: determinant });
+    }
+    const sign = determinant < 0 ? -1 : 1;
+    f32[wordBase + 16] = sign * (c1y * c2z - c1z * c2y);
+    f32[wordBase + 17] = sign * (c1z * c2x - c1x * c2z);
+    f32[wordBase + 18] = sign * (c1x * c2y - c1y * c2x);
     f32[wordBase + 19] = screenSpaceError ?? 0; // normal-matrix padding: 0 selects the asset default
-    f32[wordBase + 20] = c2y * c0z - c2z * c0y;
-    f32[wordBase + 21] = c2z * c0x - c2x * c0z;
-    f32[wordBase + 22] = c2x * c0y - c2y * c0x;
-    f32[wordBase + 23] = 0;
-    f32[wordBase + 24] = c0y * c1z - c0z * c1y;
-    f32[wordBase + 25] = c0z * c1x - c0x * c1z;
-    f32[wordBase + 26] = c0x * c1y - c0y * c1x;
+    f32[wordBase + 20] = sign * (c2y * c0z - c2z * c0y);
+    f32[wordBase + 21] = sign * (c2z * c0x - c2x * c0z);
+    f32[wordBase + 22] = sign * (c2x * c0y - c2y * c0x);
+    f32[wordBase + 23] = sign;
+    f32[wordBase + 24] = sign * (c0y * c1z - c0z * c1y);
+    f32[wordBase + 25] = sign * (c0z * c1x - c0x * c1z);
+    f32[wordBase + 26] = sign * (c0x * c1y - c0y * c1x);
     f32[wordBase + 27] = 0;
     f32[wordBase + 28] = maxColumnScale(world); // bytes 112–115: maximum world scale
     u32[wordBase + 29] = visible ? 1 : 0; // bytes 116–119: visibility flags
@@ -560,6 +569,11 @@ export interface MeshLoDGpuExpansionInput {
     /** Decoded geometry arena words (vertex + index blocks per page). */
     readonly arena: Uint32Array;
     readonly drawVertexCapacity: number;
+    readonly debugMode?: number;
+    readonly groups?: Uint32Array;
+    readonly instances?: Float32Array;
+    readonly cameraPos?: readonly [number, number, number];
+    readonly coneCull?: boolean;
 }
 
 export interface MeshLoDGpuExpansionResult {
@@ -592,6 +606,34 @@ export function runMeshLoDGpuExpansion(input: MeshLoDGpuExpansionInput): MeshLoD
         const psBase = pageId * PAGE_STATE_WORDS;
         const arenaVertexWord = input.pageState[psBase + 2]! >>> 2;
         const arenaIndexByte = input.pageState[psBase + 3]!;
+        const groupId = input.clusters[cBase + 5]!;
+        const pageFlags = input.pageState[psBase]!;
+        const mode = input.debugMode ?? 0;
+        let debug = meshLoDClusterDebugAttr(
+            mode,
+            groupId,
+            input.groups?.[groupId * GROUP_WORDS + 5] ?? 0,
+            meshLoDPageResidencyCode(
+                (pageFlags & PAGE_FLAG_PINNED) !== 0,
+                (pageFlags & PAGE_FLAG_FAILED) !== 0 ? "terminal-failed" : pageFlags & PAGE_FLAG_RESIDENT ? "gpu-resident" : "unrequested"
+            ),
+            input.pageState[psBase + 7] ?? 0
+        );
+        if (mode === 6) {
+            const packed = input.clusters[cBase + 13]!;
+            const snorm = (shift: number): number => ((packed << (24 - shift)) >> 24) / 127;
+            const margin =
+                input.instances && input.cameraPos && input.coneCull !== false
+                    ? meshLoDConeCullMargin(
+                          input.instances.subarray(instanceId * INSTANCE_WORDS, instanceId * INSTANCE_WORDS + 16),
+                          input.cameraPos,
+                          [u32ToF32(input.clusters[cBase]!), u32ToF32(input.clusters[cBase + 1]!), u32ToF32(input.clusters[cBase + 2]!)],
+                          u32ToF32(input.clusters[cBase + 3]!),
+                          input.clusters[cBase + 15] ? [snorm(0), snorm(8), snorm(16), u32ToF32(input.clusters[cBase + 14]!)] : undefined
+                      )
+                    : 1;
+            debug = meshLoDConeDebugAttr(Number.isFinite(margin) ? margin : 1);
+        }
         const base = vertexCount;
         for (let k = 0; k < indexCount; k++) {
             const dst = base + k;
@@ -604,7 +646,7 @@ export function runMeshLoDGpuExpansion(input: MeshLoDGpuExpansionInput): MeshLoD
             draw[o] = arenaVertexWord + localVertex * VERTEX_WORDS;
             draw[o + 1] = clusterId;
             draw[o + 2] = instanceId;
-            draw[o + 3] = 0;
+            draw[o + 3] = debug;
         }
         vertexCount += indexCount;
     }
@@ -635,6 +677,7 @@ function residencySignature(runtime: MeshLoDAssetRuntime): number {
         const resident = p.state === "gpu-resident" && p.arenaOffset >= 0;
         const failed = p.state === "terminal-failed" ? 0x40000000 : 0;
         sig = (sig ^ ((resident ? p.arenaOffset + 1 : 0) | failed)) >>> 0;
+        sig ^= meshLoDPageRequestCode(runtime.pageRecords[i]!.pinned, p.state) << 28;
         sig = Math.imul(sig ^ i, 2246822519) >>> 0;
     }
     return sig;
@@ -763,6 +806,7 @@ export interface MeshLoDGpuInstanceState {
     slotVersion: Int32Array;
     /** Last-uploaded stable instance ID per slot (`-1` = empty). */
     slotId: Int32Array;
+    slotSelectionVersion: Uint32Array;
     /** Last-uploaded visibility per slot. */
     slotVisible: Uint8Array;
     /** Last-uploaded per-instance SSE override (0 = asset default). */
@@ -783,6 +827,7 @@ export function createMeshLoDGpuInstanceState(groupCount: number): MeshLoDGpuIns
         scratchU32: new Uint32Array(0),
         slotVersion: new Int32Array(0),
         slotId: new Int32Array(0),
+        slotSelectionVersion: new Uint32Array(0),
         slotVisible: new Uint8Array(0),
         slotThreshold: new Float32Array(0),
     };
@@ -800,6 +845,9 @@ export function ensureMeshLoDInstanceCapacity(engine: EngineContext, state: Mesh
         state.instanceBuffer = null;
         state.priorStateBuffer = null;
         state.capacity = 0;
+        state.instanceCount = 0;
+        state.slotId = new Int32Array(0);
+        state.slotSelectionVersion = new Uint32Array(0);
         state.device = device;
     }
     if (count <= state.capacity && state.instanceBuffer && state.priorStateBuffer) {
@@ -814,6 +862,8 @@ export function ensureMeshLoDInstanceCapacity(engine: EngineContext, state: Mesh
     const oldInstance = state.instanceBuffer;
     const oldPrior = state.priorStateBuffer;
     const oldCapacity = state.capacity;
+    const oldIds = state.slotId;
+    const oldVersions = state.slotSelectionVersion;
 
     const newInstance = device.createBuffer({ label: "mesh-lod-instances", size: capacity * INSTANCE_BYTES, usage: BU.STORAGE | BU.COPY_DST });
     const priorBytes = capacity * state.wordsPerInstance * 4;
@@ -831,6 +881,9 @@ export function ensureMeshLoDInstanceCapacity(engine: EngineContext, state: Mesh
     state.scratchU32 = new Uint32Array(state.scratchF32.buffer);
     state.slotVersion = new Int32Array(capacity).fill(-1);
     state.slotId = new Int32Array(capacity).fill(-1);
+    state.slotId.set(oldIds);
+    state.slotSelectionVersion = new Uint32Array(capacity);
+    state.slotSelectionVersion.set(oldVersions);
     state.slotVisible = new Uint8Array(capacity);
     state.slotThreshold = new Float32Array(capacity);
 
@@ -848,6 +901,27 @@ export function ensureMeshLoDInstanceCapacity(engine: EngineContext, state: Mesh
  *  coalesced into one `writeBuffer`. Returns the active instance count. */
 export function uploadMeshLoDInstances(engine: EngineContext, state: MeshLoDGpuInstanceState, instances: readonly MeshLoDGpuInstanceInput[]): number {
     ensureMeshLoDInstanceCapacity(engine, state, Math.max(instances.length, 1));
+    const changedMembership =
+        state.instanceCount !== instances.length ||
+        instances.some((instance, slot) => state.slotId[slot] !== instance._instanceId || state.slotSelectionVersion[slot] !== (instance._selectionVersion ?? 0));
+    if (changedMembership && state.instanceCount > 0) {
+        const oldPrior = state.priorStateBuffer!;
+        const prior = checkedStorageBuffer(engine, state.capacity * state.wordsPerInstance * 4, "mesh-lod-prior-state", BU.COPY_SRC);
+        const oldSlots = new Map<number, number>();
+        for (let slot = 0; slot < state.instanceCount; slot++) {
+            oldSlots.set(state.slotId[slot]!, slot);
+        }
+        const rowBytes = state.wordsPerInstance * 4;
+        for (let slot = 0; slot < instances.length; slot++) {
+            const instance = instances[slot]!;
+            const oldSlot = oldSlots.get(instance._instanceId);
+            if (oldSlot !== undefined && state.slotSelectionVersion[oldSlot] === (instance._selectionVersion ?? 0)) {
+                engine._currentEncoder.copyBufferToBuffer(oldPrior, oldSlot * rowBytes, prior, slot * rowBytes, rowBytes);
+            }
+        }
+        state.priorStateBuffer = prior;
+        retireGpuResources(engine, () => oldPrior.destroy());
+    }
     const f32 = state.scratchF32;
     const u32 = state.scratchU32;
     let runStart = -1;
@@ -882,8 +956,10 @@ export function uploadMeshLoDInstances(engine: EngineContext, state: MeshLoDGpuI
         } else {
             flush(i);
         }
+        state.slotSelectionVersion[i] = inst._selectionVersion ?? 0;
     }
     flush(instances.length);
+    state.slotId.fill(-1, instances.length);
     state.instanceCount = instances.length;
     return instances.length;
 }
@@ -901,15 +977,18 @@ export function disposeMeshLoDGpuInstanceState(state: MeshLoDGpuInstanceState): 
 // ─── Compute orchestration: pipelines, params, transient buffers, batch ──
 
 /** Params UBO byte size (13 × vec4, architecture §12; allocated at 256 for margin). */
-const PARAMS_BYTES = 208;
+const PARAMS_BYTES = 224;
 const PARAMS_ALLOC = 256;
-/** control[0..2] = indirect (count, 1, 1); control[3] = draw-vertex count (Task 5.3). */
+/** control[0] = selected count; control[1..3] = indirect dispatch XYZ. */
 const CONTROL_DIAG_OFFSET = 4;
 /** diag words: visibleGroupCount, renderedTriangleCount, overflow, fallbackGroupCount,
  *  maximumSelectedErrorPixels and maximumUnmetErrorPixels (positive f32 bit patterns). */
 const CONTROL_DIAG_WORDS = 6;
 /** First control word of the per-page demand region (one benefit accumulator per page). */
 export const CONTROL_PAGE_DEMAND_OFFSET = CONTROL_DIAG_OFFSET + CONTROL_DIAG_WORDS;
+export function meshLoDPageUseOffset(pageCount: number): number {
+    return CONTROL_PAGE_DEMAND_OFFSET + Math.max(pageCount, 1);
+}
 const SELECTION_WORKGROUP = 64;
 
 /** Diagnostics word indices within the control buffer (relative to its base). */
@@ -1015,6 +1094,7 @@ export function getMeshLoDSelectionPipelines(engine: EngineContext): MeshLoDSele
             buf(0, "uniform"),
             buf(1, "read-only-storage"),
             buf(2, "read-only-storage"),
+            buf(3, "read-only-storage"),
             buf(6, "storage"),
             buf(8, "read-only-storage"),
             buf(9, "storage"),
@@ -1149,12 +1229,10 @@ function ensureMeshLoDBatchBuffers(
     state.clusterCount = assetBuffers.clusterCount;
     state.nodeCount = assetBuffers.nodeCount;
     state.pageCount = assetBuffers.pageCount;
-    const controlWords = CONTROL_PAGE_DEMAND_OFFSET + Math.max(assetBuffers.pageCount, 1);
+    const controlWords = meshLoDPageUseOffset(assetBuffers.pageCount) + Math.ceil(assetBuffers.pageCount / 32);
     if (!state.controlBuffer) {
         state.controlBuffer = device.createBuffer({ label: "mesh-lod-control", size: controlWords * 4, usage: BU.STORAGE | BU.INDIRECT | BU.COPY_DST | BU.COPY_SRC });
         state.controlWords = controlWords;
-        // Fixed indirect Y/Z = 1 (count in word 0 is filled by the atomic each frame).
-        device.queue.writeBuffer(state.controlBuffer, 4, Uint32Array.from([1, 1]).buffer);
         state.bindGroup = null;
     }
     if (!state.drawArgsBuffer) {
@@ -1182,7 +1260,7 @@ function ensureMeshLoDBatchBuffers(
     if (growInstances) {
         const selectedCapacity = Math.max(assetBuffers.clusterCount * capacity, 1);
         state.groupStateBuffer = device.createBuffer({ label: "mesh-lod-group-state", size: Math.max(capacity * assetBuffers.groupCount, 1) * 4, usage: BU.STORAGE | BU.COPY_DST });
-        state.selectedBuffer = device.createBuffer({ label: "mesh-lod-selected", size: selectedCapacity * 2 * 4, usage: BU.STORAGE | BU.COPY_DST | BU.COPY_SRC });
+        state.selectedBuffer = checkedStorageBuffer(engine, (selectedCapacity * 2 + 1) * 4, "mesh-lod-selected");
         state.instanceCapacity = capacity;
         state.selectedCapacity = selectedCapacity;
         state.bindGroup = null;
@@ -1248,6 +1326,7 @@ function ensureMeshLoDBindGroup(
             { binding: 0, resource: { buffer: state.paramsBuffer! } },
             { binding: 1, resource: { buffer: assetBuffers.metaBuffer } },
             { binding: 2, resource: { buffer: assetBuffers.pageStateBuffer } },
+            { binding: 3, resource: { buffer: instances } },
             { binding: 6, resource: { buffer: state.selectedBuffer! } },
             { binding: 8, resource: { buffer: arena } },
             { binding: 9, resource: { buffer: state.drawVertexBuffer! } },
@@ -1296,11 +1375,9 @@ interface MeshLoDReadbackSlot {
  *  the decode/apply closure run once the frame submits. */
 interface MeshLoDReadbackJob {
     readonly control: GPUBuffer;
-    readonly selected: GPUBuffer;
     readonly slot: MeshLoDReadbackSlot;
     readonly bytes: number;
-    readonly controlBytes: number;
-    readonly apply: (control: Uint32Array, selected: Uint32Array) => void;
+    readonly apply: (control: Uint32Array) => void;
 }
 
 /** Reserve a free MAP_READ staging slot from the batch's small ring (growing it up to
@@ -1334,9 +1411,11 @@ async function pumpMeshLoDReadback(job: MeshLoDReadbackJob): Promise<void> {
     try {
         await Promise.resolve();
         await slot.buffer.mapAsync(GPUMapMode.READ, 0, job.bytes);
-        const contents = new Uint32Array(slot.buffer.getMappedRange(0, job.bytes).slice(0));
-        slot.buffer.unmap();
-        job.apply(contents.subarray(0, job.controlBytes / 4), contents.subarray(job.controlBytes / 4));
+        try {
+            job.apply(new Uint32Array(slot.buffer.getMappedRange(0, job.bytes)));
+        } finally {
+            slot.buffer.unmap();
+        }
     } catch {
         // Device lost / disposed / destroyed staging — drop this frame's readback.
     } finally {
@@ -1356,7 +1435,6 @@ export function applyMeshLoDGpuReadback(
     control: Uint32Array,
     pageCount: number,
     generation: number,
-    selected: Uint32Array = new Uint32Array(0),
     sourceFrame = runtime.frameIndex,
     selectionEpoch = runtime._selectionEpoch
 ): void {
@@ -1382,9 +1460,9 @@ export function applyMeshLoDGpuReadback(
         return;
     }
     const used = new Set<number>();
-    for (let i = 0; i < Math.min(decoded.selectedClusterCount, selected.length / 2); i++) {
-        const pageId = runtime.clusters[selected[i * 2]!]?.pageId;
-        if (pageId !== undefined) {
+    const useOffset = meshLoDPageUseOffset(pageCount);
+    for (let pageId = 0; pageId < pageCount; pageId++) {
+        if (((control[useOffset + (pageId >>> 5)] ?? 0) & (1 << (pageId & 31))) !== 0) {
             used.add(pageId);
         }
     }
@@ -1419,6 +1497,7 @@ export interface MeshLoDGpuFrameParams {
     readonly screenSpaceError: number;
     readonly lodHysteresis: number;
     readonly levelCount: number;
+    readonly debugMode?: number;
 }
 
 function writeSelectionParams(
@@ -1466,13 +1545,27 @@ function writeSelectionParams(
     u[49] = CONTROL_PAGE_DEMAND_OFFSET;
     u[50] = state.drawVertexCapacity; // params.control.z — expansion draw-vertex capacity
     u[51] = frame.coneCull !== false ? 1 : 0;
+    u[52] = frame.debugMode ?? 0;
+    u[53] = state.device!.limits.maxComputeWorkgroupsPerDimension;
+    u[54] = meshLoDPageUseOffset(assetBuffers.pageCount);
+}
+
+/** Bounded XYZ dispatch without dropping invocations. Padded workgroups are guarded in WGSL. */
+export function meshLoDDispatchSize(count: number, limit: number): readonly [number, number, number] {
+    if (!Number.isSafeInteger(count) || count < 0 || !Number.isInteger(limit) || limit < 1 || count > limit ** 3) {
+        throw createMeshLoDError("MLOD_DEVICE_LIMIT", "MeshLoD compute dispatch exceeds device dimensions", { expected: limit ** 3, actual: count });
+    }
+    const x = Math.min(count, limit);
+    const rows = Math.ceil(count / Math.max(x, 1));
+    const y = Math.max(Math.min(rows, limit), 1);
+    return [x, y, Math.max(Math.ceil(rows / y), 1)];
 }
 
 /** One selection step to replay in the shared compute pass. */
 interface MeshLoDComputeStep {
     readonly pipeline: GPUComputePipeline;
     readonly bindGroup: GPUBindGroup;
-    readonly workgroups?: number;
+    readonly workgroups?: readonly [number, number, number];
     readonly indirectBuffer?: GPUBuffer;
     readonly indirectOffset?: number;
 }
@@ -1506,7 +1599,7 @@ function replaySteps(pass: GPUComputePassEncoder, steps: readonly MeshLoDCompute
         if (step.indirectBuffer) {
             pass.dispatchWorkgroupsIndirect(step.indirectBuffer, step.indirectOffset ?? 0);
         } else {
-            pass.dispatchWorkgroups(step.workgroups ?? 0);
+            pass.dispatchWorkgroups(...(step.workgroups ?? [0, 1, 1]));
         }
     }
 }
@@ -1563,8 +1656,7 @@ export function getMeshLoDUpdateBatch(signature: RenderTargetSignature): MeshLoD
             for (let i = 0; i < count; i++) {
                 const rb = jobs[i]!.readback;
                 if (rb) {
-                    encoder.copyBufferToBuffer(rb.control, 0, rb.slot.buffer, 0, rb.controlBytes);
-                    encoder.copyBufferToBuffer(rb.selected, 0, rb.slot.buffer, rb.controlBytes, rb.bytes - rb.controlBytes);
+                    encoder.copyBufferToBuffer(rb.control, 0, rb.slot.buffer, 0, rb.bytes);
                     void pumpMeshLoDReadback(rb);
                 }
             }
@@ -1612,6 +1704,7 @@ export function queueMeshLoDGpuSelection(
         throw batchState.pendingError;
     }
     if (instances.length === 0) {
+        uploadMeshLoDInstances(engine, instanceState, instances);
         return null;
     }
     const pipelines = getMeshLoDSelectionPipelines(engine);
@@ -1640,6 +1733,7 @@ export function queueMeshLoDGpuSelection(
     const maxVertices = Math.min(Math.floor(Math.min(limits.maxStorageBufferBindingSize, limits.maxBufferSize) / 48) * 3, 0x3fffffff);
     const drawVertexCapacity = Math.max(3, Math.min(batchState.residentDrawVertexBound * visibleCount, maxVertices));
     ensureMeshLoDBatchBuffers(engine, batchState, instanceState.capacity, drawVertexCapacity, assetBuffers);
+    meshLoDDispatchSize(batchState.selectedCapacity, limits.maxComputeWorkgroupsPerDimension);
     ensureMeshLoDBindGroup(engine, batchState, pipelines, assetBuffers, instanceState, runtime.gpu.arena.buffer);
     writeSelectionParams(batchState, assetBuffers, instanceCount, instanceState.wordsPerInstance, frame);
     engine._device.queue.writeBuffer(batchState.paramsBuffer!, 0, batchState.paramsBytes, 0, PARAMS_BYTES);
@@ -1653,7 +1747,7 @@ export function queueMeshLoDGpuSelection(
     // Reserve a staging slot and build the demand/diagnostics readback for this frame.
     // Skipped only when every ring slot still has a map in flight.
     const controlBytes = batchState.controlWords * 4;
-    const readbackBytes = controlBytes + batchState.selectedCapacity * 8;
+    const readbackBytes = controlBytes;
     const readbackSlot = acquireMeshLoDReadbackSlot(engine, batchState, readbackBytes);
     const generation = runtime.generation;
     const selectionEpoch = runtime._selectionEpoch;
@@ -1661,34 +1755,32 @@ export function queueMeshLoDGpuSelection(
     const readback: MeshLoDReadbackJob | undefined = readbackSlot
         ? {
               control: batchState.controlBuffer!,
-              selected: batchState.selectedBuffer!,
               slot: readbackSlot,
               bytes: readbackBytes,
-              controlBytes,
-              apply: (control, selected) => applyMeshLoDGpuReadback(runtime, batchState, control, pageCount, generation, selected, sourceFrame, selectionEpoch),
+              apply: (control) => applyMeshLoDGpuReadback(runtime, batchState, control, pageCount, generation, sourceFrame, selectionEpoch),
           }
         : undefined;
 
     const job: MeshLoDSelectionJob = {
         clears: [
             { buffer: batchState.controlBuffer!, offset: CONTROL_COUNT_WORD * 4, size: 4 },
-            { buffer: batchState.controlBuffer!, offset: CONTROL_DIAG_OFFSET * 4, size: (CONTROL_DIAG_WORDS + Math.max(batchState.pageCount, 1)) * 4 },
+            { buffer: batchState.controlBuffer!, offset: CONTROL_DIAG_OFFSET * 4, size: (batchState.controlWords - CONTROL_DIAG_OFFSET) * 4 },
             { buffer: batchState.groupStateBuffer!, offset: 0, size: Math.max(batchState.groupCount * instanceCount, 1) * 4 },
             { buffer: batchState.drawArgsBuffer!, offset: 0, size: 4 }, // vertexCount = 0
             { buffer: batchState.drawArgsBuffer!, offset: 16, size: 4 }, // expansion overflow = 0
         ],
         pass1Steps: [
-            { pipeline: pipelines.traverse, bindGroup, workgroups: nodeInvocations },
-            { pipeline: pipelines.evaluate, bindGroup, workgroups: groupInvocations },
-            { pipeline: pipelines.select, bindGroup, workgroups: clusterInvocations },
-            { pipeline: pipelines.demand, bindGroup, workgroups: groupInvocations },
+            { pipeline: pipelines.traverse, bindGroup, workgroups: meshLoDDispatchSize(nodeInvocations, limits.maxComputeWorkgroupsPerDimension) },
+            { pipeline: pipelines.evaluate, bindGroup, workgroups: meshLoDDispatchSize(groupInvocations, limits.maxComputeWorkgroupsPerDimension) },
+            { pipeline: pipelines.select, bindGroup, workgroups: meshLoDDispatchSize(clusterInvocations, limits.maxComputeWorkgroupsPerDimension) },
+            { pipeline: pipelines.demand, bindGroup, workgroups: meshLoDDispatchSize(groupInvocations, limits.maxComputeWorkgroupsPerDimension) },
             // Clamp the selected count so the expansion pass's indirect dispatch stays within capacity.
-            { pipeline: pipelines.clamp, bindGroup, workgroups: 1 },
+            { pipeline: pipelines.clamp, bindGroup, workgroups: [1, 1, 1] },
         ],
         pass2Steps: [
             // One workgroup per selected cluster via the clamped count in control[0..2].
-            { pipeline: pipelines.expand, bindGroup: expandBindGroup, indirectBuffer: batchState.controlBuffer!, indirectOffset: 0 },
-            { pipeline: pipelines.finalize, bindGroup: expandBindGroup, workgroups: 1 },
+            { pipeline: pipelines.expand, bindGroup: expandBindGroup, indirectBuffer: batchState.controlBuffer!, indirectOffset: 4 },
+            { pipeline: pipelines.finalize, bindGroup: expandBindGroup, workgroups: [1, 1, 1] },
         ],
         readback,
     };

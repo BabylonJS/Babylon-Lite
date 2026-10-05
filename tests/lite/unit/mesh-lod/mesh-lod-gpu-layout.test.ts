@@ -23,11 +23,18 @@ import {
     packGroups,
     packHierarchyNodes,
     packInstanceRecord,
+    meshLoDDispatchSize,
+    runMeshLoDGpuExpansion,
     syncMeshLoDPageState,
     uploadMeshLoDInstances,
     writePageStateRecord,
 } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-gpu.js";
 import { isMeshLoDError } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-errors.js";
+import { createMeshLoDInstance } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import type { MeshLoDAsset } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
+import { addMeshLoDInstanceToScene, removeMeshLoDInstanceFromScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
+import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
+import { createPbrMaterial } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
 import type {
     MeshLoDCluster,
     MeshLoDGroup,
@@ -109,6 +116,39 @@ function makePageRuntime(over: Partial<MeshLoDPageRuntime> = {}): MeshLoDPageRun
 }
 
 describe("MeshLoD GPU metadata layout", () => {
+    it.each([65535, 65536])("expands all %i pairs using bounded dispatch dimensions", (count) => {
+        const dimensions = meshLoDDispatchSize(count, 65535);
+        expect(dimensions.every((value) => value <= 65535)).toBe(true);
+        expect(dimensions.reduce((product, value) => product * value, 1)).toBeGreaterThanOrEqual(count);
+        const seen = new Uint8Array(count);
+        for (let z = 0; z < dimensions[2]; z++) {
+            for (let y = 0; y < dimensions[1]; y++) {
+                for (let x = 0; x < dimensions[0]; x++) {
+                    const pair = x + (y + z * dimensions[1]) * dimensions[0];
+                    if (pair < count) {
+                        seen[pair]!++;
+                    }
+                }
+            }
+        }
+        expect(seen.every((visits) => visits === 1)).toBe(true);
+        const result = runMeshLoDGpuExpansion({
+            selected: Array.from({ length: count }, () => ({ clusterId: 0, instanceId: 0 })),
+            clusters: packClusters([makeCluster({ pageId: 0, triangleCount: 1, indexOffset: 0 })]),
+            pageState: new Uint32Array(PAGE_STATE_WORDS),
+            arena: new Uint32Array(2),
+            drawVertexCapacity: count * 3,
+        });
+        expect(result.vertexCount).toBe(count * 3);
+        expect(result.overflow).toBe(false);
+    });
+
+    it("handles XYZ padding and zero without exceeding the reported device limit", () => {
+        expect(meshLoDDispatchSize(0, 2)).toEqual([0, 1, 1]);
+        expect(meshLoDDispatchSize(5, 2)).toEqual([2, 2, 2]);
+        expect(() => meshLoDDispatchSize(9, 2)).toThrow(expect.objectContaining({ code: "MLOD_DEVICE_LIMIT" }));
+    });
+
     it("packs hierarchy nodes into 8 words with float bits and i32 groupId", () => {
         const packed = packHierarchyNodes([makeNode({ groupId: -1 }), makeNode({ groupId: 5, center: [9, 8, 7] })]);
         expect(packed.length).toBe(2 * NODE_WORDS);
@@ -205,6 +245,43 @@ describe("MeshLoD GPU metadata layout", () => {
         expect(u32[29]).toBe(0);
         expect(f32[28]).toBe(1);
         expect(f32[19]).toBe(0); // asset-level default
+    });
+
+    it.each([
+        [-1, 1, 1],
+        [-2, 3, 4],
+        [2, -3, 4],
+        [2, 3, -4],
+    ])("matches inverse-transpose lighting and reflection for scale %j", (...scale) => {
+        const f32 = new Float32Array(INSTANCE_WORDS);
+        const world = [scale[0]!, 0, 0, 0, 0, scale[1]!, 0, 0, 0, 0, scale[2]!, 0, 0, 0, 0, 1];
+        packInstanceRecord(f32, new Uint32Array(f32.buffer), 0, world, true, 0);
+        const normalize = (v: number[]): number[] => v.map((value) => value / Math.hypot(...v));
+        const local = [1, 2, 3];
+        const ordinaryNormal = normalize(local.map((value, axis) => value / scale[axis]!));
+        const meshLoDNormal = normalize(local.map((value, axis) => value * f32[16 + axis * 5]!));
+        for (let axis = 0; axis < 3; axis++) {
+            expect(meshLoDNormal[axis]).toBeCloseTo(ordinaryNormal[axis]!, 6);
+        }
+        const light = normalize([-1, 1, 2]);
+        const lambert = (normal: number[]): number =>
+            Math.max(
+                0,
+                normal.reduce((dot, value, axis) => dot + value * light[axis]!, 0)
+            );
+        expect(lambert(meshLoDNormal)).toBeCloseTo(lambert(ordinaryNormal), 6);
+        const reflection = (normal: number[]): number[] => light.map((value, axis) => value - 2 * normal[axis]! * normal.reduce((dot, n, i) => dot + n * light[i]!, 0));
+        reflection(meshLoDNormal).forEach((value, axis) => expect(value).toBeCloseTo(reflection(ordinaryNormal)[axis]!, 6));
+        expect(f32[23]).toBe(-1);
+    });
+
+    it("rejects singular and non-finite transforms explicitly", () => {
+        for (const scale of [0, Number.NaN, Number.POSITIVE_INFINITY]) {
+            const f32 = new Float32Array(INSTANCE_WORDS);
+            expect(() => packInstanceRecord(f32, new Uint32Array(f32.buffer), 0, [scale, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], true, 0)).toThrow(
+                expect.objectContaining({ code: "MLOD_INVALID_OPTION" })
+            );
+        }
     });
 });
 
@@ -339,7 +416,7 @@ describe("MeshLoD GPU instance state", () => {
         expect(state.capacity).toBeGreaterThanOrEqual(3);
         expect(state.instanceBuffer as unknown as MockBuffer).not.toBe(firstInstance);
         // Retained prior-state bits copied old → new.
-        expect(encoder.copies.some((c) => c.src === firstPrior && c.dst === (state.priorStateBuffer as unknown as MockBuffer))).toBe(true);
+        expect(encoder.copies.some((c) => c.src === firstPrior)).toBe(true);
         // Old buffers retired (not destroyed synchronously) for frame safety.
         expect(firstInstance.destroyed).toBe(false);
         const retire = (engine as unknown as { _retirements: (() => void)[] | null })._retirements!;
@@ -347,6 +424,57 @@ describe("MeshLoD GPU instance state", () => {
         retire.forEach((r) => r());
         expect(firstInstance.destroyed).toBe(true);
         expect(firstPrior.destroyed).toBe(true);
+    });
+
+    it("remaps retained IDs and clears reused slots without growing either instance buffer", () => {
+        const { engine } = createMockEngine();
+        const state = createMeshLoDGpuInstanceState(40);
+        const a = inst(0, 1);
+        const b = inst(1, 1);
+        uploadMeshLoDInstances(engine, state, [a, b]);
+        const instanceBuffer = state.instanceBuffer;
+        const oldPrior = state.priorStateBuffer! as unknown as MockBuffer;
+        oldPrior.data = new Uint8Array(Uint32Array.from([1, 2, 4, 8]).buffer);
+        uploadMeshLoDInstances(engine, state, [b, inst(2, 1)]);
+        expect(state.instanceBuffer).toBe(instanceBuffer);
+        expect(state.capacity).toBe(2);
+        const remapped = state.priorStateBuffer! as unknown as MockBuffer;
+        expect(Array.from(new Uint32Array(remapped.data.buffer))).toEqual([4, 8]);
+        expect(remapped.size).toBe(16); // unpopulated new-ID row is GPU-zero-initialized
+        remapped.data = new Uint8Array(Uint32Array.from([4, 8, 16, 32]).buffer);
+        uploadMeshLoDInstances(engine, state, [inst(2, 1), b]);
+        expect(Array.from(new Uint32Array((state.priorStateBuffer! as unknown as MockBuffer).data.buffer))).toEqual([16, 32, 4, 8]);
+        uploadMeshLoDInstances(engine, state, [{ ...b, _selectionVersion: 1 }]);
+        expect((state.priorStateBuffer! as unknown as MockBuffer).data).toHaveLength(0); // same ID reinserted starts clean
+    });
+
+    it("clears a publicly removed and reinserted instance even without an intervening upload", () => {
+        const { engine } = createMockEngine();
+        const scene = { _deferredBuilders: [] } as unknown as SceneContext;
+        const asset = { _runtime: { nextInstanceId: 0 } } as unknown as MeshLoDAsset;
+        const material = createPbrMaterial();
+        const a = createMeshLoDInstance(asset, material);
+        const b = createMeshLoDInstance(asset, material);
+        addMeshLoDInstanceToScene(scene, a);
+        addMeshLoDInstanceToScene(scene, b);
+        const instances = scene._meshLoDRegistry!.batches[0]!.instances;
+        const state = createMeshLoDGpuInstanceState(40);
+        uploadMeshLoDInstances(engine, state, instances);
+        const instanceBuffer = state.instanceBuffer;
+        const prior = state.priorStateBuffer! as unknown as MockBuffer;
+        prior.data = new Uint8Array(Uint32Array.from([1, 2, 4, 8]).buffer);
+        removeMeshLoDInstanceFromScene(scene, b);
+        removeMeshLoDInstanceFromScene(scene, b);
+        expect(b._selectionVersion).toBe(1);
+        addMeshLoDInstanceToScene(scene, b);
+        expect(instances).toEqual([a, b]);
+        uploadMeshLoDInstances(engine, state, instances);
+        expect(state.instanceBuffer).toBe(instanceBuffer);
+        expect(state.capacity).toBe(2);
+        const remapped = state.priorStateBuffer! as unknown as MockBuffer;
+        const words = new Uint32Array(remapped.size / 4);
+        words.set(new Uint32Array(remapped.data.buffer));
+        expect(Array.from(words)).toEqual([1, 2, 0, 0]);
     });
 
     it("builds one page-state record per page", () => {

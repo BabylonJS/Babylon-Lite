@@ -13,6 +13,7 @@ import type { ShaderTemplate, UboField, VertexAttribute, Varying, BindingDecl } 
 import type { PbrTemplateExt } from "./pbr-template-ext.js";
 import { appendMeshLightUboFields, meshLightIndexWGSL } from "../../render/mesh-light-layout.js";
 import { wgsl } from "../../shader/wgsl.js";
+import { PBR_DISPLAY_OUTPUT_WGSL, PBR_EXPOSURE_WGSL } from "./pbr-image-processing-output-wgsl.js";
 
 type GammaBaseColorFn = (baseColorFactorRgb: string, baseColorFactorAlpha: string, vertexColorMod: string) => string;
 
@@ -419,7 +420,7 @@ var directSpecular=vec3<f32>(0.0);
     // StandardToneMapping upstream in pbr-renderable — so _toneMappingCall is always non-empty here when
     // _hasTonemap). When disabled, only exposure is applied. Helpers are emitted alongside the call.
     const toneMappingHelpersBlock = _hasTonemap ? _toneMappingHelpers : "";
-    const tonemapBlock = _hasTonemap ? _toneMappingCall : wgsl`color*=scene.vImageInfos.x;`;
+    const tonemapBlock = _hasTonemap ? _toneMappingCall : PBR_EXPOSURE_WGSL;
 
     // Fog (opt-in via scene.fog). The fog WGSL — `_fogHelper` (calcFogFactor) and `_fogBlock`
     // (the blend, emitted just before the tonemap block) — is supplied by pbr-renderable, which
@@ -517,12 +518,7 @@ var color=directDiffuse+directSpecular+emissive;
 /*NI*/
 ${fogBlock}
 ${tonemapBlock}
-color=pow(color,vec3<f32>(1.0/2.2));
-color=clamp(color,vec3<f32>(0.0),vec3<f32>(1.0));
-let highContrast=color*color*(3.0-2.0*color);
-if(scene.vImageInfos.y<1.0){color=mix(vec3<f32>(0.5),color,scene.vImageInfos.y);}
-else{color=mix(color,highContrast,scene.vImageInfos.y-1.0);}
-color=max(color,vec3<f32>(0.0));
+${PBR_DISPLAY_OUTPUT_WGSL}
 /*BC*/
 ${alphaBlock}`
 }

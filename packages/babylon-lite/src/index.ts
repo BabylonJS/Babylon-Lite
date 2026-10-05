@@ -419,6 +419,8 @@ export type { HtmlTexture2D, HtmlTexture2DOptions } from "./texture/html-texture
 export { loadKtxTexture2D } from "./texture/ktx-loader.js";
 export { loadBasisTexture2D } from "./texture/basis-loader.js";
 export { setKtx2DecoderUrl, loadKtx2Texture2D } from "./texture/ktx2-loader.js";
+export { enableKtx2WorkerDecoding } from "./texture/ktx2-worker-decoder.js";
+export type { Ktx2WorkerDecodingOptions } from "./texture/ktx2-worker-decoder.js";
 export { createTexture2DArrayFromKtx2 } from "./texture/ktx2-texture-array.js";
 export type { Ktx2TextureArrayOptions } from "./texture/ktx2-texture-array.js";
 
@@ -1014,6 +1016,8 @@ export { enableDetailedPicking } from "./picking/detailed-picking.js";
 export { getPickedNormal, getPickedUV } from "./picking/picking-helpers.js";
 export { pickWithRay, pickMeshesWithRay } from "./picking/ray-pick.js";
 export type { RayPickOptions } from "./picking/ray-pick.js";
+export { pickWithRayPrecise, pickMeshesWithRayPrecise } from "./picking/precise-ray-pick.js";
+export type { PreciseRayPickOptions, TrianglePickingPredicate } from "./picking/precise-ray-pick.js";
 export { createPickingRay } from "./picking/ray.js";
 export type { Ray } from "./picking/ray.js";
 export { computeDeformedPositionToRef } from "./picking/deformed-vertex.js";

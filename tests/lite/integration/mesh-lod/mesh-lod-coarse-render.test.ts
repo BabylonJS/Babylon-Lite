@@ -119,7 +119,7 @@ describe("MeshLoD coarse indirect rendering", () => {
         // Expanded triangles scale with instance count; the draw count does not.
         expect(asset.diagnostics.renderedTriangleCount).toBe(coarseTriangleCount(asset) * 3);
         const pass = createMockRenderPass();
-        expect(scene._renderables[0]!.bind(engine, SIG).draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        expect(binding.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
     });
 
     it("grows CPU instance storage and draw scratch before rendering instances added to an existing batch", async () => {

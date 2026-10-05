@@ -164,7 +164,7 @@ the asset clock. While readback is pending, the last successful snapshot is
 retained for batches that still render; an explicit empty result clears it.
 Frames without a contributing batch submit empty demand until outstanding
 requests have aged out; removed batches never renew a stale snapshot.
-Only frames *after* the last demanded frame may count toward obsolescence:
+Only frames _after_ the last demanded frame may count toward obsolescence:
 zero grace retains demand for the current frame and cancels it on the next
 undemanded frame. Positive grace retains its existing cutoff.
 Transient network/408/429/5xx failures receive up to two retries with
@@ -212,8 +212,13 @@ records, group-to-page references, eight-word page-state records, and
 the immutable packed geometry arena. A 128-byte instance record contains
 the world and normal transforms, scale, flags, and stable instance ID.
 These typed layouts are packed by `mesh-lod-selection-gpu.ts`.
+Both render paths use the same instance packer. Shading normals use the
+cofactor matrix multiplied by the determinant sign, then normalize in WGSL;
+cone culling retains geometric winding by undoing that sign. Non-finite
+or singular world matrices reject with `MLOD_INVALID_OPTION` rather than
+producing undefined lighting. The sign occupies normal-column padding word 23.
 
-### 12.2 Per-batch resources
+### 12.2 Per-binding resources
 
 Selection work queues, group bitsets, selected-cluster pairs, page-demand
 words, expanded draw vertices, and 16-byte indirect draw arguments are
@@ -227,6 +232,15 @@ cannot fit, the whole draw is suppressed rather than drawing a partial cut,
 and a device-limit error is surfaced after GPU readback. In GPU mode, the
 material packet keeps only a minimal placeholder for its unused CPU draw
 stream; GPU selection owns the actual draw buffer.
+Each render binding owns independent selection parameters, hysteresis, and
+draw buffers, including the two stereo-eye bindings recorded before a single
+submission. Immutable asset metadata and material resources remain shared.
+The render task's stable target-signature identity keys these resources;
+rebinding that target reuses them without allocating or invalidating bundles.
+Hysteresis rows follow stable instance identity when slots move: retained rows
+are copied into a zero-initialized replacement, never overlapping in place.
+A removal/re-registration version resets a reused identity, even when removal
+and insertion occur between two uploads without growing the buffers.
 
 ### 12.3 Compute order
 
@@ -236,10 +250,16 @@ evaluates group error/residency; selects clusters; prepares an indirect
 dispatch; then expands selected triangles into draw-vertex records and
 publishes `drawIndirect` arguments. Selection and expansion are ordered
 in two compute passes before the opaque render pass. Async readback of
-page demand, selected-cluster pairs, and counters drives subsequent
+page demand, a page-use bitset, and counters drives subsequent
 streaming, actual page-use aging, and diagnostics without blocking the
 current draw. Readback completion is an observation of its source
 selection, not an additional rendered frame.
+Readback copies only the control header, one demand word per page, and
+`ceil(pageCount / 32)` use words, independent of selected-list capacity.
+The selected list has a count header. Indirect expansion uses bounded XYZ
+dimensions based on `maxComputeWorkgroupsPerDimension`; the shader flattens
+workgroup IDs and skips padding beyond the count. Direct selection kernels
+use the same multidimensional flattening. No valid cut is truncated to fit X.
 
 ## 13. Material-owned drawing
 
@@ -253,6 +273,14 @@ prefiltered environment cubemap and BRDF LUT with the normal PBR material's
 roughness, horizon-occlusion, and energy-conservation math. Without a scene
 environment, only direct lighting contributes. Debug color does not affect
 selection or page residency.
+GPU expansion fills diagnostic attributes from group metadata, page state,
+and cone margins. `setMeshLoDDebugView` works in the default GPU mode without
+changing selection modes; the CPU path uses the same attribute meanings.
+Lit and unlit variants share ordinary PBR output processing: live exposure,
+the enabled scene tone-mapping algorithm, display gamma, then contrast.
+Bindings refresh their shader/pipeline keys before drawing when tone mapping
+is enabled, disabled, or its algorithm changes; exposure/contrast remain live
+scene UBO values and require no shader rebuild.
 
 ### 13.2 Bind groups
 
