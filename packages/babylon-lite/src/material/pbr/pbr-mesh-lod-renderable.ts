@@ -27,6 +27,7 @@ import type { EnvironmentTextures } from "../../loader-env/load-env.js";
 import type { Texture2D } from "../../texture/texture-2d.js";
 import { createSolidTexture2D } from "../../texture/solid-texture.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
+import { validateMeshLoDMaterial } from "./pbr-mesh-lod-material.js";
 import type { MeshLoDSceneBatch } from "../../mesh-lod/mesh-lod-scene.js";
 import { driveMeshLoDStreaming, getMeshLoDSelectionCamera, selectMeshLoDBatch } from "../../mesh-lod/mesh-lod-scene.js";
 import { queueMeshLoDFrame } from "../../mesh-lod/mesh-lod-runtime.js";
@@ -83,24 +84,7 @@ function detectFeatures(material: PbrMaterialProps, hasEnvironment: boolean): Me
     // The PBR module owns supported-material validation (architecture 13.2). Reject
     // anything outside the guaranteed opaque metallic-roughness subset even though
     // the scene registry validated it — this module is the authoritative gate.
-    const unsupported =
-        material.alphaBlend === true ||
-        material._alphaCutOff !== undefined ||
-        !!material._transmissive ||
-        !!material._clearCoat ||
-        !!material._sheen ||
-        !!material._iridescence ||
-        !!material._anisotropy ||
-        !!material._subsurface ||
-        !!material.specGlossTexture ||
-        !!material.plugins?.length ||
-        material.occlusionTexCoord === 1 ||
-        !!material._uv2Mask ||
-        !!material._shadowOnly ||
-        !!material._skyboxMode;
-    if (unsupported) {
-        throw createMeshLoDError("MLOD_UNSUPPORTED_MATERIAL", "MeshLoD material is outside the guaranteed opaque metallic-roughness subset");
-    }
+    validateMeshLoDMaterial(material);
     return {
         hasNormalMap: !!material.normalTexture,
         hasEmissiveTexture: !!material.emissiveTexture,
@@ -112,8 +96,7 @@ function detectFeatures(material: PbrMaterialProps, hasEnvironment: boolean): Me
 
 // ─── Material UBO packing ────────────────────────────────────────────
 
-function packMaterialUbo(material: PbrMaterialProps, features: MeshLoDShaderFeatures): Float32Array {
-    const data = new Float32Array(MATERIAL_UBO_BYTES / 4);
+function packMaterialUbo(material: PbrMaterialProps, features: MeshLoDShaderFeatures, data: Float32Array): void {
     const bcf = material.baseColorFactor ?? [1, 1, 1, 1];
     const unlitColor = features.unlit ? (material._unlitColor ?? [1, 1, 1]) : [1, 1, 1];
     data[0] = bcf[0]! * unlitColor[0]!;
@@ -134,10 +117,15 @@ function packMaterialUbo(material: PbrMaterialProps, features: MeshLoDShaderFeat
     data[14] = material.reflectance ?? 0.04;
     data[15] = material.alpha ?? 1;
     data[16] = material.usePhysicalLightFalloff === false ? 0 : 1;
-    return data;
 }
 
 // ─── Per-batch GPU packet ────────────────────────────────────────────
+
+interface MeshLoDMaterialState {
+    readonly scratch: Float32Array<ArrayBuffer>;
+    version: number;
+    debugMode: number;
+}
 
 interface MeshLoDBatchPacket {
     readonly features: MeshLoDShaderFeatures;
@@ -155,6 +143,7 @@ interface MeshLoDBatchPacket {
     instanceBuffer: GPUBuffer;
     readonly indirectBuffer: GPUBuffer;
     readonly materialUbo: GPUBuffer;
+    readonly materialState: MeshLoDMaterialState;
     readonly arena: GPUBuffer;
     drawScratch: Uint32Array;
     instanceScratch: Float32Array;
@@ -162,8 +151,7 @@ interface MeshLoDBatchPacket {
     maxDrawVertices: number;
     maxInstances: number;
     lastVertexCount: number;
-    /** Debug-view mode (0 = off) last written into the material UBO's misc.y. */
-    appliedDebugMode: number;
+    disposed: boolean;
     /** True once a disposed asset has re-recorded the cached bundle to drop its draw. */
     disposedHandled: boolean;
     // ── GPU selection/expansion path (created lazily on first GPU-mode frame) ──
@@ -343,14 +331,20 @@ function setActiveDraw(engine: EngineContext, packet: MeshLoDBatchPacket, bindGr
     }
 }
 
-/** Sync the debug-view mode into the material UBO's misc.y on change (a 4-byte
- *  write). Observational only — never affects selection/residency/demand. */
-function syncDebugMode(engine: EngineContext, packet: MeshLoDBatchPacket, mode: number): void {
-    if (packet.appliedDebugMode === mode) {
-        return;
+function syncMaterialUbo(engine: EngineContext, packet: MeshLoDBatchPacket, material: PbrMaterialProps, mode: number): void {
+    const state = packet.materialState;
+    if (state.version !== material._uboVersion) {
+        validateMeshLoDMaterial(material);
+        packMaterialUbo(material, packet.features, state.scratch);
+        state.scratch[17] = mode;
+        engine._device.queue.writeBuffer(packet.materialUbo, 0, state.scratch);
+        state.version = material._uboVersion;
+        state.debugMode = mode;
+    } else if (state.debugMode !== mode) {
+        state.scratch[17] = mode;
+        engine._device.queue.writeBuffer(packet.materialUbo, MATERIAL_MISC_Y_BYTE, state.scratch.buffer, MATERIAL_MISC_Y_BYTE, 4);
+        state.debugMode = mode;
     }
-    packet.appliedDebugMode = mode;
-    engine._device.queue.writeBuffer(packet.materialUbo, MATERIAL_MISC_Y_BYTE, new Float32Array([mode]));
 }
 
 /** Per-frame CPU selection + expansion (reference/diagnostic mode): run the oracle for
@@ -359,7 +353,6 @@ function syncDebugMode(engine: EngineContext, packet: MeshLoDBatchPacket, mode: 
 function updatePacketCpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet: MeshLoDBatchPacket, context: DrawUpdateContext): void {
     const runtime = batch.asset._runtime;
     const debugMode = meshLoDDebugModeCode(runtime.debugView);
-    syncDebugMode(engine, packet, debugMode);
     const selections = selectMeshLoDBatch(batch, context);
     // Feed this frame's fine-page demand + frame references to the streaming engine.
     driveMeshLoDStreaming(batch, selections);
@@ -492,7 +485,6 @@ function updatePacketGpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet
         return;
     }
     const runtime = batch.asset._runtime;
-    syncDebugMode(engine, packet, meshLoDDebugModeCode(runtime.debugView));
     packet.gpuInstanceState ??= createMeshLoDGpuInstanceState(runtime.groups.length);
     packet.gpuBatchState ??= createMeshLoDGpuBatchState();
     const handles = queueMeshLoDGpuSelection(engine, updateBatch, runtime, packet.gpuInstanceState, packet.gpuBatchState, batch.instances, buildGpuFrame(batch, camera, context));
@@ -530,6 +522,7 @@ function updatePacket(engine: EngineContext, batch: MeshLoDSceneBatch, packet: M
         }
         return;
     }
+    syncMaterialUbo(engine, packet, batch.material, meshLoDDebugModeCode(runtime.debugView));
     if (runtime.selectionMode === "gpu") {
         updatePacketGpu(engine, batch, packet, context, updateBatch);
     } else {
@@ -561,7 +554,9 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
 
     const device = engine._device;
     const materialUbo = createEmptyUniformBuffer(engine, MATERIAL_UBO_BYTES, "mesh-lod-material");
-    device.queue.writeBuffer(materialUbo, 0, packMaterialUbo(batch.material, features) as Float32Array<ArrayBuffer>);
+    const materialState: MeshLoDMaterialState = { scratch: new Float32Array(MATERIAL_UBO_BYTES / 4), version: batch.material._uboVersion, debugMode: 0 };
+    packMaterialUbo(batch.material, features, materialState.scratch);
+    device.queue.writeBuffer(materialUbo, 0, materialState.scratch);
 
     const drawVertexBuffer = device.createBuffer({ label: "mesh-lod-draw-vertices", size: maxDrawVertices * DRAW_VERTEX_STRIDE, usage: BU.STORAGE | BU.COPY_DST });
     const instanceBuffer = device.createBuffer({ label: "mesh-lod-instances", size: maxInstances * INSTANCE_STRIDE, usage: BU.STORAGE | BU.COPY_DST });
@@ -584,6 +579,7 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
         instanceBuffer,
         indirectBuffer,
         materialUbo,
+        materialState,
         arena: runtime.gpu.arena.buffer,
         drawScratch: new Uint32Array(maxDrawVertices * 4),
         instanceScratch: new Float32Array(maxInstances * (INSTANCE_STRIDE / 4)),
@@ -591,7 +587,7 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
         maxDrawVertices,
         maxInstances,
         lastVertexCount: 0,
-        appliedDebugMode: 0,
+        disposed: false,
         disposedHandled: false,
         gpuInstanceState: null,
         gpuBatchState: null,
@@ -601,27 +597,21 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
         activeBindGroup: null,
         activeIndirectBuffer: null,
         dispose: () => {
+            if (sceneDisposed) {
+                return;
+            }
+            sceneDisposed = true;
             runtime._frameSnapshots.delete(batch);
-            if (packet.gpuBatchState) {
-                runtime._frameSnapshots.delete(packet.gpuBatchState);
+            for (const release of bindingPackets.values()) {
+                release();
             }
+            disposeDrawPacket(batch, packet);
             materialUbo.destroy();
-            packet.drawVertexBuffer.destroy();
-            packet.instanceBuffer.destroy();
-            indirectBuffer.destroy();
-            if (packet.gpuInstanceState) {
-                disposeMeshLoDGpuInstanceState(packet.gpuInstanceState);
-            }
-            if (packet.gpuBatchState) {
-                disposeMeshLoDGpuBatchState(packet.gpuBatchState);
-            }
-            for (const bindingPacket of bindingPackets) {
-                bindingPacket.dispose();
-            }
         },
     };
-    const bindingPackets: MeshLoDBatchPacket[] = [];
-    const packetByTarget = new WeakMap<RenderTargetSignature, MeshLoDBatchPacket>();
+    const bindingPackets = new Map<MeshLoDBatchPacket, () => void>();
+    const packetByTarget = new WeakMap<RenderTargetSignature, { packet: MeshLoDBatchPacket; updateBatch: MeshLoDUpdateBatch }>();
+    let sceneDisposed = false;
     let firstBinding = true;
     (batch as { _packet?: unknown })._packet = packet;
 
@@ -629,26 +619,41 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
         order: 100,
         isTransparent: false,
         bind(eng: EngineContext, sig: RenderTargetSignature): DrawBinding {
+            if (sceneDisposed) {
+                throw createMeshLoDError("MLOD_DISPOSED", "MeshLoD renderable has been disposed");
+            }
             // A binding is a render pass/camera (including an XR eye). Never let a
             // later recorded view overwrite an earlier view's uniforms or draw state.
-            let drawPacket = packetByTarget.get(sig);
+            const updateBatch = getMeshLoDUpdateBatch(sig);
+            const cached = packetByTarget.get(sig);
+            let drawPacket = cached?.updateBatch === updateBatch ? cached.packet : undefined;
             if (!drawPacket) {
                 drawPacket = firstBinding ? packet : createBindingPacket(eng, batch, packet);
                 firstBinding = false;
-                packetByTarget.set(sig, drawPacket);
-                if (drawPacket !== packet) {
-                    bindingPackets.push(drawPacket);
-                }
+                const ownedPacket = drawPacket;
+                packetByTarget.set(sig, { packet: ownedPacket, updateBatch });
+                const release = (): void => {
+                    unregister();
+                    bindingPackets.delete(ownedPacket);
+                    if (packetByTarget.get(sig)?.packet === ownedPacket) {
+                        packetByTarget.delete(sig);
+                    }
+                    disposeDrawPacket(batch, ownedPacket);
+                };
+                const unregister = updateBatch.addDisposer(release);
+                bindingPackets.set(ownedPacket, release);
             }
             const passPacket = drawPacket;
             let pipeline = getPipeline(eng, passPacket, sig, _scene);
-            const updateBatch = getMeshLoDUpdateBatch(sig);
             return {
                 renderable,
                 get pipeline() {
                     return pipeline;
                 },
                 update: (context: DrawUpdateContext) => {
+                    if (passPacket.disposed || updateBatch._retired) {
+                        return;
+                    }
                     const nextPipeline = getPipeline(eng, passPacket, sig, _scene);
                     if (pipeline !== nextPipeline) {
                         pipeline = nextPipeline;
@@ -657,7 +662,7 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
                     updatePacket(eng, batch, passPacket, context, updateBatch);
                 },
                 draw: (pass: GPURenderPassEncoder | GPURenderBundleEncoder): number => {
-                    if (batch.asset._runtime.disposed || !passPacket.activeBindGroup || !passPacket.activeIndirectBuffer) {
+                    if (passPacket.disposed || batch.asset._runtime.disposed || !passPacket.activeBindGroup || !passPacket.activeIndirectBuffer) {
                         return 0;
                     }
                     pass.setBindGroup(1, passPacket.activeBindGroup);
@@ -685,6 +690,7 @@ function createBindingPacket(engine: EngineContext, batch: MeshLoDSceneBatch, sh
         drawScratch: new Uint32Array(shared.maxDrawVertices * 4),
         instanceScratch: new Float32Array(shared.maxInstances * INSTANCE_WORDS),
         indirectScratch: new Uint32Array(4),
+        disposed: false,
         gpuInstanceState: null,
         gpuBatchState: null,
         gpuBindGroup: null,
@@ -692,18 +698,30 @@ function createBindingPacket(engine: EngineContext, batch: MeshLoDSceneBatch, sh
         gpuBoundInstances: null,
         activeBindGroup: null,
         activeIndirectBuffer: null,
-        dispose: () => {
-            if (packet.gpuBatchState) {
-                batch.asset._runtime._frameSnapshots.delete(packet.gpuBatchState);
-                disposeMeshLoDGpuBatchState(packet.gpuBatchState);
-            }
-            if (packet.gpuInstanceState) {
-                disposeMeshLoDGpuInstanceState(packet.gpuInstanceState);
-            }
-            packet.drawVertexBuffer.destroy();
-            packet.instanceBuffer.destroy();
-            indirectBuffer.destroy();
-        },
+        dispose: () => disposeDrawPacket(batch, packet),
     };
     return packet;
+}
+
+function disposeDrawPacket(batch: MeshLoDSceneBatch, packet: MeshLoDBatchPacket): void {
+    if (packet.disposed) {
+        return;
+    }
+    packet.disposed = true;
+    if (packet.gpuBatchState) {
+        batch.asset._runtime._frameSnapshots.delete(packet.gpuBatchState);
+        disposeMeshLoDGpuBatchState(packet.gpuBatchState);
+        packet.gpuBatchState = null;
+    }
+    if (packet.gpuInstanceState) {
+        disposeMeshLoDGpuInstanceState(packet.gpuInstanceState);
+        packet.gpuInstanceState = null;
+    }
+    packet.drawVertexBuffer.destroy();
+    packet.instanceBuffer.destroy();
+    packet.indirectBuffer.destroy();
+    packet.drawScratch = new Uint32Array(0);
+    packet.instanceScratch = new Float32Array(0);
+    packet.activeBindGroup = null;
+    packet.activeIndirectBuffer = null;
 }

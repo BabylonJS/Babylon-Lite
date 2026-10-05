@@ -13,7 +13,7 @@
 
 import type { MeshLoDCluster, MeshLoDGroup, MeshLoDHierarchyNode, MeshLoDPageRecord } from "./mesh-lod-runtime.js";
 import type { MeshLoDFrustumPlane, ProjectedSphere } from "./mesh-lod-selection-math.js";
-import { fadd, fmul, fsub, maxColumnScale, meshLoDConeCullMargin, perspectivePixelScale, projectSphere, sphereOutsidePlanes } from "./mesh-lod-selection-math.js";
+import { conservativeWorldScale, fadd, fmul, fsub, meshLoDConeCullMargin, perspectivePixelScale, projectSphere, sphereOutsidePlanes } from "./mesh-lod-selection-math.js";
 
 export type { MeshLoDFrustumPlane } from "./mesh-lod-selection-math.js";
 
@@ -97,7 +97,7 @@ function groupResident(input: MeshLoDSelectionInput, group: MeshLoDGroup): boole
 /** Run the deterministic CPU selection oracle. */
 export function selectMeshLoDCpu(input: MeshLoDSelectionInput): MeshLoDSelectionResult {
     const groupCount = input.groups.length;
-    const worldScale = maxColumnScale(input.worldMatrix);
+    const worldScale = conservativeWorldScale(input.worldMatrix);
     const pixelScale = perspectivePixelScale(input.camera.targetHeight, input.camera.verticalFov);
     const refineBoundary = fmul(input.screenSpaceError, fadd(1, input.lodHysteresis));
     const coarsenBoundary = fmul(input.screenSpaceError, fsub(1, input.lodHysteresis));

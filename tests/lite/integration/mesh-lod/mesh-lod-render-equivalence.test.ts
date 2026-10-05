@@ -10,7 +10,7 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadMeshLoD, createMeshLoDInstance, setMeshLoDSelectionMode, setMeshLoDDebugView } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod.js";
 import { addMeshLoDInstanceToScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
 import { _setMeshLoDPageDecoder } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-page-decoder.js";
@@ -41,6 +41,13 @@ import { getProjectionMatrix } from "../../../../packages/babylon-lite/src/camer
 import { meshLoDDebugModeCode } from "../../../../packages/babylon-lite/src/material/pbr/pbr-mesh-lod-debug.js";
 import { createFillDecoder, createMockEngine, createMockRenderPass } from "../../unit/mesh-lod/fixtures/gpu-mock.js";
 import { AcesToneMapping } from "../../../../packages/babylon-lite/src/material/pbr/pbr-aces-wgsl.js";
+import { createPbrMaterial } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
+import { markMaterialUboDirty } from "../../../../packages/babylon-lite/src/material/material-dirty.js";
+import { createSolidTexture2D } from "../../../../packages/babylon-lite/src/texture/solid-texture.js";
+import { cloneTexture2D } from "../../../../packages/babylon-lite/src/texture/texture-2d.js";
+import { createRenderTarget } from "../../../../packages/babylon-lite/src/engine/render-target.js";
+import { _createAutomaticRenderTask } from "../../../../packages/babylon-lite/src/frame-graph/render-task-base.js";
+import { flushGpuResourceRetirements, waitForGpuResourceRetirements } from "../../../../packages/babylon-lite/src/engine/gpu-resource-retirement.js";
 
 const STATUE = fileURLToPath(new URL("../../../../lab/public/mesh-lod/harvard-yenching_institute_statue.mesh000.prim000.mlod", import.meta.url));
 const statueSource = (): ArrayBuffer => new Uint8Array(readFileSync(STATUE)).slice().buffer as ArrayBuffer;
@@ -182,6 +189,116 @@ describe("MeshLoD render equivalence — GPU selection over the real statue hier
 });
 
 describe("MeshLoD render equivalence — one indirect draw per batch key", () => {
+    it.each(["cpu", "gpu"] as const)("refreshes the shared dirty material UBO and preserves debug mode (%s)", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const writeBuffer = vi.spyOn(mock.device.queue, "writeBuffer");
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        const material = createPbrMaterial();
+        const scene = await build(asset, material, 1);
+        const bindings = [scene._renderables[0]!.bind(engine, { ...SIG }), scene._renderables[0]!.bind(engine, { ...SIG })];
+        setMeshLoDDebugView(asset, "lod-depth");
+        bindings.forEach(flush);
+        const ubo = mock.device.buffers.find((buffer) => buffer.label === "mesh-lod-material")!;
+        expect(mock.device.buffers.filter((buffer) => buffer.label === "mesh-lod-material")).toHaveLength(1);
+        const initialWrites = mock.device.writes.filter((write) => write.buffer === ubo && write.byteLength === 80).length;
+        material.baseColorFactor = [0.2, 0.3, 0.4, 1];
+        material.roughnessFactor = 0.15;
+        material.directIntensity = 0.7;
+        material._emissiveColor = [0.8, 0.6, 0.4];
+        markMaterialUboDirty(material);
+        bindings.forEach(flush);
+        const values = new Float32Array(ubo.data.buffer);
+        expect(values[0]).toBeCloseTo(0.2);
+        expect(values[4]).toBeCloseTo(0.8);
+        expect(values[9]).toBeCloseTo(0.15);
+        expect(values[13]).toBeCloseTo(0.7);
+        expect(values[17]).toBe(meshLoDDebugModeCode("lod-depth"));
+        expect(mock.device.writes.filter((write) => write.buffer === ubo && write.byteLength === 80)).toHaveLength(initialWrites + 1);
+        bindings.forEach(flush);
+        expect(mock.device.writes.filter((write) => write.buffer === ubo && write.byteLength === 80)).toHaveLength(initialWrites + 1);
+        setMeshLoDDebugView(asset, "none");
+        material.roughnessFactor = 0.9;
+        markMaterialUboDirty(material);
+        bindings.forEach(flush);
+        expect(new Float32Array(ubo.data.buffer)[9]).toBeCloseTo(0.9);
+        expect(new Float32Array(ubo.data.buffer)[17]).toBe(0);
+        const fullUploads = writeBuffer.mock.calls.filter(([buffer, offset]) => buffer === ubo && offset === 0);
+        expect(fullUploads).toHaveLength(3);
+        expect(fullUploads.every((call) => call[2] === fullUploads[0]![2])).toBe(true);
+    });
+
+    it.each(["baseColorTexture", "normalTexture"] as const)("rejects %s transforms introduced after scene registration", async (channel) => {
+        const asset = await loadMeshLoD(engine, statueSource());
+        const texture = createSolidTexture2D(engine, 1, 1, 1);
+        const material = createPbrMaterial({ [channel]: texture });
+        const scene = fakeScene(engine);
+        addMeshLoDInstanceToScene(scene, createMeshLoDInstance(asset, material));
+        material[channel] = cloneTexture2D(texture, { uOffset: 0.25 });
+        await expect(scene._deferredBuilders[0]!()).rejects.toMatchObject({ code: "MLOD_UNSUPPORTED_MATERIAL" });
+    });
+
+    it.each(["cpu", "gpu"] as const)("releases repeated offscreen and stereo target packets behind their task fence (%s)", async (selectionMode) => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource(), { selectionMode });
+        const scene = await build(asset, createPbrMaterial(), 1);
+        const renderable = scene._renderables[0]!;
+        const main = renderable.bind(engine, { ...SIG });
+        flush(main);
+        const liveBuffers = () => mock.device.buffers.filter((buffer) => !buffer.destroyed).length;
+        const baseline = liveBuffers();
+        for (let cycle = 0; cycle < 6; cycle++) {
+            const tasks = Array.from({ length: cycle % 2 === 0 ? 1 : 2 }, (_, eye) => {
+                const rt = createRenderTarget({ format: "rgba8unorm", dFormat: "depth24plus-stencil8", samples: 1, size: { width: 800, height: 600 } });
+                const task = _createAutomaticRenderTask({ name: `pass-${cycle}-${eye}`, rt }, engine, scene);
+                const binding = renderable.bind(engine, task._targetSignature);
+                task._batchState = task._targetSignature._collectBatches!(undefined, binding);
+                flush(binding);
+                expect(renderable.bind(engine, task._targetSignature)._updateBatches![0]).toBe(binding._updateBatches![0]);
+                return task;
+            });
+            const beforeRetirement = liveBuffers();
+            tasks.forEach((task) => task.dispose());
+            expect(liveBuffers()).toBe(beforeRetirement);
+            let finishFence!: () => void;
+            const fence = new Promise<void>((resolve) => (finishFence = resolve));
+            Object.assign(mock.device.queue, { onSubmittedWorkDone: () => fence });
+            flushGpuResourceRetirements(engine);
+            await Promise.resolve();
+            expect(liveBuffers()).toBe(beforeRetirement);
+            finishFence();
+            await waitForGpuResourceRetirements(engine);
+            expect(liveBuffers()).toBe(baseline);
+            const pass = createMockRenderPass();
+            expect(main.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        }
+        scene._disposables.forEach((dispose) => dispose());
+    });
+
+    it("keeps a replacement packet alive when the same target is rebound before an older fence drains", async () => {
+        const mock = createMockEngine();
+        engine = mock.engine;
+        const asset = await loadMeshLoD(engine, statueSource());
+        const scene = await build(asset, createPbrMaterial(), 1);
+        const renderable = scene._renderables[0]!;
+        const target = { ...SIG };
+        const first = renderable.bind(engine, target);
+        const firstState = target._collectBatches!(undefined, first)!;
+        flush(first);
+        firstState._release(engine);
+        const replacement = renderable.bind(engine, target);
+        flush(replacement);
+        expect(replacement._updateBatches![0]).not.toBe(first._updateBatches![0]);
+        Object.assign(mock.device.queue, { onSubmittedWorkDone: () => Promise.resolve() });
+        await waitForGpuResourceRetirements(engine);
+        expect(renderable.bind(engine, target)._updateBatches![0]).toBe(replacement._updateBatches![0]);
+        const pass = createMockRenderPass();
+        expect(replacement.draw(pass as unknown as GPURenderPassEncoder, engine)).toBe(1);
+        expect(pass.indirectDraws[0]!.buffer.destroyed).toBe(false);
+        scene._disposables.forEach((dispose) => dispose());
+    });
+
     it("refreshes each binding's output pipeline when tone mapping is enabled, changed, or disabled", async () => {
         const asset = await loadMeshLoD(engine, statueSource());
         const scene = fakeScene(engine);

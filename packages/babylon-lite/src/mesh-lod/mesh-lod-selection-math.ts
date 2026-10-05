@@ -26,12 +26,18 @@ export interface ProjectedSphere {
     readonly projectedRadiusPx: number;
 }
 
-/** Maximum column length of the upper-left 3×3 of a column-major world matrix. */
-export function maxColumnScale(m: ArrayLike<number>): number {
-    const c0 = fsqrt(fadd(fadd(fmul(m[0]!, m[0]!), fmul(m[1]!, m[1]!)), fmul(m[2]!, m[2]!)));
-    const c1 = fsqrt(fadd(fadd(fmul(m[4]!, m[4]!), fmul(m[5]!, m[5]!)), fmul(m[6]!, m[6]!)));
-    const c2 = fsqrt(fadd(fadd(fmul(m[8]!, m[8]!), fmul(m[9]!, m[9]!)), fmul(m[10]!, m[10]!)));
-    return Math.max(c0, c1, c2);
+/** Conservative operator-norm bound: sqrt(||A^T A||_infinity), including shear. */
+export function conservativeWorldScale(m: ArrayLike<number>): number {
+    const c0 = m[0]! * m[0]! + m[1]! * m[1]! + m[2]! * m[2]!;
+    const c1 = m[4]! * m[4]! + m[5]! * m[5]! + m[6]! * m[6]!;
+    const c2 = m[8]! * m[8]! + m[9]! * m[9]! + m[10]! * m[10]!;
+    const d01 = Math.abs(m[0]! * m[4]! + m[1]! * m[5]! + m[2]! * m[6]!);
+    const d02 = Math.abs(m[0]! * m[8]! + m[1]! * m[9]! + m[2]! * m[10]!);
+    const d12 = Math.abs(m[4]! * m[8]! + m[5]! * m[9]! + m[6]! * m[10]!);
+    const bound = Math.sqrt(Math.max(c0 + d01 + d02, c1 + d01 + d12, c2 + d02 + d12));
+    const scale = f32(bound);
+    // GPU packing must not round a conservative bound downward.
+    return scale < bound ? f32(scale + Math.max(scale * 2 ** -23, 2 ** -149)) : scale;
 }
 
 /** Whether the upper-left 3x3 is a non-degenerate similarity transform. Normal
@@ -66,7 +72,7 @@ export function meshLoDConeCullMargin(
     if (!normalCone || !isSimilarityTransform(m)) {
         return Number.POSITIVE_INFINITY;
     }
-    const worldScale = maxColumnScale(m);
+    const worldScale = conservativeWorldScale(m);
     const wx = fadd(fadd(fmul(m[0]!, center[0]), fmul(m[4]!, center[1])), fadd(fmul(m[8]!, center[2]), m[12]!));
     const wy = fadd(fadd(fmul(m[1]!, center[0]), fmul(m[5]!, center[1])), fadd(fmul(m[9]!, center[2]), m[13]!));
     const wz = fadd(fadd(fmul(m[2]!, center[0]), fmul(m[6]!, center[1])), fadd(fmul(m[10]!, center[2]), m[14]!));

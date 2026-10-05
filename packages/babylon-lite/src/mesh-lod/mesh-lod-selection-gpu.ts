@@ -17,7 +17,7 @@
 
 import { BU } from "../engine/gpu-flags.js";
 import type { EngineContext } from "../engine/engine.js";
-import { retireGpuResources } from "../engine/gpu-resource-retirement.js";
+import { retireGpuResources, runGpuResourceCallbacks } from "../engine/gpu-resource-retirement.js";
 import { enableDrawBatchCollection } from "../render/draw-update-batches.js";
 import type { DrawUpdateBatch } from "../render/renderable.js";
 import type { RenderTargetSignature } from "../engine/render-target.js";
@@ -27,7 +27,7 @@ import type { MeshLoDFrustumPlane } from "./mesh-lod-selection-math.js";
 import {
     extractFrustumPlanes,
     isSimilarityTransform,
-    maxColumnScale,
+    conservativeWorldScale,
     meshLoDConeCullMargin,
     perspectivePixelScale,
     projectSphere,
@@ -251,7 +251,7 @@ export function packInstanceRecord(
     f32[wordBase + 25] = sign * (c0z * c1x - c0x * c1z);
     f32[wordBase + 26] = sign * (c0x * c1y - c0y * c1x);
     f32[wordBase + 27] = 0;
-    f32[wordBase + 28] = maxColumnScale(world); // bytes 112–115: maximum world scale
+    f32[wordBase + 28] = conservativeWorldScale(world); // bytes 112–115: conservative world scale
     u32[wordBase + 29] = visible ? 1 : 0; // bytes 116–119: visibility flags
     u32[wordBase + 30] = instanceId >>> 0; // bytes 120–123: stable instance ID
     u32[wordBase + 31] = isSimilarityTransform(world) ? 1 : 0;
@@ -1610,6 +1610,7 @@ function replaySteps(pass: GPUComputePassEncoder, steps: readonly MeshLoDCompute
  *  signature. */
 export interface MeshLoDUpdateBatch extends DrawUpdateBatch {
     queue(job: MeshLoDSelectionJob): void;
+    addDisposer(dispose: () => void): () => void;
 }
 
 let _updateBatches: WeakMap<RenderTargetSignature, MeshLoDUpdateBatch> | null = null;
@@ -1619,12 +1620,14 @@ export function getMeshLoDUpdateBatch(signature: RenderTargetSignature): MeshLoD
     enableDrawBatchCollection(signature);
     _updateBatches ??= new WeakMap();
     const existing = _updateBatches.get(signature);
-    if (existing) {
+    if (existing && !existing._retired) {
         return existing;
     }
     const jobs: MeshLoDSelectionJob[] = [];
+    const disposers = new Set<() => void>();
     let count = 0;
     const batch: MeshLoDUpdateBatch = {
+        _retired: false,
         reset(): void {
             count = 0;
         },
@@ -1664,7 +1667,16 @@ export function getMeshLoDUpdateBatch(signature: RenderTargetSignature): MeshLoD
         destroy(): void {
             jobs.length = 0;
             count = 0;
-            _updateBatches?.delete(signature);
+            batch._retired = true;
+            if (_updateBatches?.get(signature) === batch) {
+                _updateBatches.delete(signature);
+            }
+            runGpuResourceCallbacks([...disposers]);
+            disposers.clear();
+        },
+        addDisposer(dispose): () => void {
+            disposers.add(dispose);
+            return () => disposers.delete(dispose);
         },
         queue(job): void {
             jobs[count++] = job;

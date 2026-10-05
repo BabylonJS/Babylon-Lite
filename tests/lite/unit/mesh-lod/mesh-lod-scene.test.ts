@@ -13,6 +13,10 @@ import type { MeshLoDAsset } from "../../../../packages/babylon-lite/src/mesh-lo
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
 import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
 import type { Camera } from "../../../../packages/babylon-lite/src/camera/camera.js";
+import { createPbrMaterial } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
+import { createSolidTexture2D } from "../../../../packages/babylon-lite/src/texture/solid-texture.js";
+import { cloneTexture2D } from "../../../../packages/babylon-lite/src/texture/texture-2d.js";
+import { createMockEngine } from "./fixtures/gpu-mock.js";
 
 function fakeScene(): SceneContext {
     return { _deferredBuilders: [] } as unknown as SceneContext;
@@ -158,12 +162,35 @@ describe("MeshLoD scene registry — one-way ownership", () => {
 });
 
 describe("MeshLoD scene registry — material gate", () => {
+    it("rejects material-side V-flips instead of sampling an inverted texture", () => {
+        const { engine } = createMockEngine();
+        const texture = createSolidTexture2D(engine, 1, 1, 1);
+        texture.invertY = true;
+        const material = createPbrMaterial({ baseColorTexture: texture });
+        expect(() => addMeshLoDInstanceToScene(fakeScene(), createMeshLoDInstance(fakeAsset(), material))).toThrowError(
+            expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL" })
+        );
+    });
+
+    it.each(["baseColorTexture", "normalTexture", "ormTexture", "emissiveTexture"] as const)("rejects transforms on %s without relying on the material flag", (channel) => {
+        const { engine } = createMockEngine();
+        const texture = createSolidTexture2D(engine, 1, 1, 1);
+        for (const transform of [{ uScale: 2 }, { uOffset: 0.25 }, { uAng: 0.5 }]) {
+            const material = createPbrMaterial({ [channel]: cloneTexture2D(texture, transform) });
+            const instance = createMeshLoDInstance(fakeAsset(), material);
+            expect(() => addMeshLoDInstanceToScene(fakeScene(), instance)).toThrowError(expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL" }));
+        }
+        const material = createPbrMaterial({ [channel]: texture });
+        expect(() => addMeshLoDInstanceToScene(fakeScene(), createMeshLoDInstance(fakeAsset(), material))).not.toThrow();
+    });
+
     it.each([
         ["clearcoat", { _clearCoat: { isEnabled: true } }],
         ["alpha blending", { alphaBlend: true }],
         ["alpha masking", { _alphaCutOff: 0.5 }],
         ["transmission", { _transmissive: true }],
         ["a second UV set", { occlusionTexCoord: 1 }],
+        ["UV-transform opt-in", { _hasUvTx: true }],
     ])("rejects %s with MLOD_UNSUPPORTED_MATERIAL", (_name, material) => {
         const scene = fakeScene();
         const asset = fakeAsset();

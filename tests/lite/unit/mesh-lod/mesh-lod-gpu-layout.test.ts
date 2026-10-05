@@ -35,6 +35,7 @@ import type { MeshLoDAsset } from "../../../../packages/babylon-lite/src/mesh-lo
 import { addMeshLoDInstanceToScene, removeMeshLoDInstanceFromScene } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-scene.js";
 import type { SceneContext } from "../../../../packages/babylon-lite/src/scene/scene-core.js";
 import { createPbrMaterial } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
+import { conservativeWorldScale } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-selection-math.js";
 import type {
     MeshLoDCluster,
     MeshLoDGroup,
@@ -116,6 +117,32 @@ function makePageRuntime(over: Partial<MeshLoDPageRuntime> = {}): MeshLoDPageRun
 }
 
 describe("MeshLoD GPU metadata layout", () => {
+    it("rounds a subnormal operator-norm bound upward rather than losing the rounding increment", () => {
+        const s = 2 ** -141;
+        const world = [s, 0, 0, 0, s, s, 0, 0, 0, 0, s, 0, 0, 0, 0, 1];
+        expect(conservativeWorldScale(world)).toBeGreaterThanOrEqual(Math.sqrt(3) * s);
+    });
+
+    it.each([
+        [1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+        [4 * Math.SQRT1_2, Math.SQRT1_2, 0, 0, -4 * Math.SQRT1_2, Math.SQRT1_2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1],
+    ])("packs a conservative shear bound covering transformed sphere geometry", (...world) => {
+        const data = new Float32Array(INSTANCE_WORDS);
+        packInstanceRecord(data, new Uint32Array(data.buffer), 0, world, true, 0);
+        const bound = data[28]!;
+        expect(bound).toBe(conservativeWorldScale(world));
+        for (let latitude = 0; latitude <= 16; latitude++) {
+            for (let longitude = 0; longitude < 32; longitude++) {
+                const theta = (latitude * Math.PI) / 16;
+                const phi = (longitude * 2 * Math.PI) / 32;
+                const v = [Math.sin(theta) * Math.cos(phi), Math.sin(theta) * Math.sin(phi), Math.cos(theta)];
+                const transformed = [0, 1, 2].map((row) => world[row]! * v[0]! + world[row + 4]! * v[1]! + world[row + 8]! * v[2]!);
+                expect(Math.hypot(...transformed)).toBeLessThanOrEqual(bound);
+            }
+        }
+        expect(data[31]).toBe(0); // cone culling remains disabled for non-similarity transforms
+    });
+
     it.each([65535, 65536])("expands all %i pairs using bounded dispatch dimensions", (count) => {
         const dimensions = meshLoDDispatchSize(count, 65535);
         expect(dimensions.every((value) => value <= 65535)).toBe(true);

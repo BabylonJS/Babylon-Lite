@@ -19,7 +19,8 @@ do not import the feature.
 The material-owned renderer supports opaque PBR metallic-roughness (including
 unlit and double-sided) with the base-color, normal, ORM/occlusion, and
 emissive properties used by the statue. Alpha blending/masking, transmission,
-clearcoat, sheen, UV2, material plugins, and other unsupported extensions
+clearcoat, sheen, UV2, per-texture UV transforms (including material-side V-flips),
+material plugins, and other unsupported extensions
 fail with `MLOD_UNSUPPORTED_MATERIAL` rather than silently dropping features.
 Materials and scene transforms are supplied by the application, not stored
 in `.mlod`.
@@ -132,6 +133,11 @@ non-additive `totalDurationMs` from `getRenderTaskGpuTimings`.
 pixel scale is `viewportHeight / (2 * tan(verticalFov / 2))`; geometric
 error is transformed by the instance scale and divided by the distance
 from the camera to the bounding sphere surface (clamped by the near plane).
+The shared scale bound is `sqrt(max row sum(abs(A^T A)))`, rounded upward
+to float32, where `A` is the world transform's linear part. It bounds the
+operator norm even for sheared transforms, and reduces to maximum axis
+scale for orthogonal bases. The GPU caches this bound in the instance record
+and refreshes it through version-gated instance uploads.
 Orthographic cameras use their visible height instead. Sphere/frustum and
 safe normal-cone culling reject invisible work. Hysteresis keeps the prior
 fine-required state near an error threshold.
@@ -237,6 +243,9 @@ draw buffers, including the two stereo-eye bindings recorded before a single
 submission. Immutable asset metadata and material resources remain shared.
 The render task's stable target-signature identity keys these resources;
 rebinding that target reuses them without allocating or invalidating bundles.
+Each packet registers cleanup with the target's MeshLoD update batch. Task
+retirement releases the packet behind the existing GPU fence and removes
+its strong reference, without destroying shared material or asset resources.
 Hysteresis rows follow stable instance identity when slots move: retained rows
 are copied into a zero-initialized replacement, never overlapping in place.
 A removal/re-registration version resets a reused identity, even when removal
@@ -289,6 +298,10 @@ optional texture/sampler pairs, and three storage buffers (arena, draw
 vertices, instances); missing textures use the material fallbacks. The lit
 environment variant also binds the scene BRDF LUT/sampler and prefiltered
 cubemap/sampler at bindings 12–15.
+The material UBO and its reusable packing scratch are shared across target
+packets. Updates observe `material._uboVersion`, so `markMaterialUboDirty`
+refreshes supported scalar/vector properties once per mutation while
+preserving the current debug selector.
 
 ### 13.3 Pipeline
 

@@ -16,6 +16,7 @@ import type { Renderable, DrawUpdateContext } from "../render/renderable.js";
 import type { Camera } from "../camera/camera.js";
 import { getCameraPosition } from "../camera/camera.js";
 import type { PbrMaterialProps } from "../material/pbr/pbr-material.js";
+import { validateMeshLoDMaterial } from "../material/pbr/pbr-mesh-lod-material.js";
 import type { MeshLoDAsset, MeshLoDInstance } from "./mesh-lod.js";
 import type { MeshLoDAssetRuntime, MeshLoDStreamSelectionStats } from "./mesh-lod-runtime.js";
 import type * as PbrMeshLoDModule from "../material/pbr/pbr-mesh-lod-renderable.js";
@@ -50,50 +51,6 @@ export interface MeshLoDSceneRegistry {
     readonly batches: MeshLoDSceneBatch[];
     /** True once the single deferred builder has been registered on the scene. */
     builderRegistered: boolean;
-}
-
-/** Sub-feature objects and flags outside the guaranteed opaque metallic-roughness
- *  subset (architecture §2, decision 5). Any of these rejects the instance. */
-function validateSupportedPbrSubset(material: PbrMaterialProps): void {
-    const reject = (feature: string): never => {
-        throw createMeshLoDError("MLOD_UNSUPPORTED_MATERIAL", `MeshLoD v1 does not support ${feature}`, { expected: "opaque metallic-roughness", actual: feature });
-    };
-    if (material.alphaBlend === true) {
-        reject("alpha blending");
-    }
-    if (material._alphaCutOff !== undefined) {
-        reject("alpha masking");
-    }
-    if (material._transmissive) {
-        reject("transmission");
-    }
-    if (material._clearCoat) {
-        reject("clearcoat");
-    }
-    if (material._sheen) {
-        reject("sheen");
-    }
-    if (material._iridescence) {
-        reject("iridescence");
-    }
-    if (material._anisotropy) {
-        reject("anisotropy");
-    }
-    if (material._subsurface) {
-        reject("subsurface");
-    }
-    if (material.specGlossTexture) {
-        reject("specular-glossiness");
-    }
-    if (material.plugins?.length) {
-        reject("material plugins");
-    }
-    if (material.occlusionTexCoord === 1 || material._uv2Mask) {
-        reject("a second UV set");
-    }
-    if (material._shadowOnly || material._skyboxMode) {
-        reject("shadow-only or skybox materials");
-    }
 }
 
 function getOrCreateRegistry(scene: SceneContext): MeshLoDSceneRegistry {
@@ -214,7 +171,7 @@ function registerDeferredBuilder(scene: SceneContext): void {
  *  same scene/instance; validates the guaranteed opaque PBR subset immediately and
  *  writes no scene reference into the instance. */
 export function addMeshLoDInstanceToScene(scene: SceneContext, instance: MeshLoDInstance): void {
-    validateSupportedPbrSubset(instance._material);
+    validateMeshLoDMaterial(instance._material);
     const existingBatch = scene._meshLoDRegistry?.byAsset.get(instance._asset)?.get(instance._material);
     if (scene._built && !existingBatch?.renderable) {
         throw createMeshLoDError(

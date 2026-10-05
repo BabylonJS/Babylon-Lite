@@ -128,6 +128,23 @@ describe("selectMeshLoDCpu — instance transforms", () => {
     const fixture = loadFixture("selection-lod.json");
     const closeCase = fixture.cases.find((c) => c.name.startsWith("close-resident"))!;
 
+    it("keeps sheared geometry that actually intersects the frustum", () => {
+        const n = Math.SQRT1_2;
+        const world = [1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, -1.5 * n, -1.5 * n, 0, 1];
+        // This point lies on the local unit sphere; its transformed position is inside.
+        const local = [1 / Math.sqrt(5), 2 / Math.sqrt(5), 0];
+        const worldPoint = [local[0]! + local[1]! + world[12]!, local[1]! + world[13]!, 0];
+        expect(n * worldPoint[0]! + n * worldPoint[1]!).toBeGreaterThan(0);
+        const input = buildInput(fixture.hierarchy, closeCase, world);
+        const result = selectMeshLoDCpu({
+            ...input,
+            nodes: input.nodes.map((node) => ({ ...node, radius: 1 })),
+            frustumPlanes: [[n, n, 0, 0]],
+        });
+        expect(result.visibleGroupCount).toBe(2);
+        expect(Array.from(result.selectedClusterIds)).toEqual([2, 3]);
+    });
+
     it("selects fine for a near instance and coarse for a distant instance of the same hierarchy", () => {
         const near = selectMeshLoDCpu(buildInput(fixture.hierarchy, closeCase, IDENTITY));
         // Translate the instance far down +Z (column-major translation in m[12..14]).

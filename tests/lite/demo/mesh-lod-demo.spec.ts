@@ -116,11 +116,12 @@ test.describe("MeshLoD demo workflow", () => {
             await expect(page.locator("#meshLodLegend .hud-section-title")).toHaveText(view === "meshlet-id" ? "Meshlet ID" : "LOD depth");
             expect(Buffer.compare(await canvasShot(page), none)).not.toBe(0); // recolored
             expect(await metricNumber(page, "rendered")).toBeGreaterThan(COARSE_MIN); // still complete
-            expect(await metric(page, "selection")).toBe("CPU"); // debug uses reference selection
+            expect(await metric(page, "selection")).toBe("GPU");
         }
         await page.selectOption("#mlod-debug", "none");
         await page.waitForTimeout(400);
         expect(((await page.textContent("#meshLodLegend")) ?? "").trim()).toBe("");
+        expect(await metric(page, "selection")).toBe("GPU");
     });
 
     test("short desktop viewport keeps the debug selector clear of the legend", async () => {
