@@ -333,7 +333,7 @@ const SE = {
 } as const;
 
 function rangeWithin(offset: number, length: number, total: number): boolean {
-    return offset >= 0 && length >= 0 && offset + length <= total;
+    return offset >= 0 && length >= 0 && offset <= total && length <= total - offset;
 }
 
 function rangesDisjoint(offsetA: number, lengthA: number, offsetB: number, lengthB: number): boolean {
@@ -349,8 +349,9 @@ function parseDirectory(reader: Reader, header: MeshLoDHeader): MeshLoDSectionEn
     if (directoryBytes !== sectionCount * SECTION_ENTRY_SIZE) {
         throw fail("MLOD_INVALID_LAYOUT", "directory size disagrees with the section count");
     }
-    if (!rangeWithin(directoryOffset, directoryBytes, size) || directoryOffset + directoryBytes > PAGE_ALIGNMENT) {
-        throw fail("MLOD_INVALID_LAYOUT", "directory is out of the first 64 KiB", { byteOffset: directoryOffset });
+    const bootstrapLimit = Math.min(reader.bytes.length, header.bootstrapBytes);
+    if (directoryOffset < HEADER_SIZE || !rangeWithin(directoryOffset, directoryBytes, Math.min(bootstrapLimit, PAGE_ALIGNMENT))) {
+        throw fail("MLOD_INVALID_LAYOUT", "directory is outside the available bootstrap or first 64 KiB", { byteOffset: directoryOffset });
     }
     if (reader.u32(H.directoryCrc) !== crc32c(reader.bytes, directoryOffset, directoryOffset + directoryBytes)) {
         throw fail("MLOD_DIRECTORY_INTEGRITY", "directory CRC mismatch");
@@ -387,7 +388,13 @@ function parseDirectory(reader: Reader, header: MeshLoDHeader): MeshLoDSectionEn
             throw fail("MLOD_INVALID_LAYOUT", "section is not aligned", { sectionType: type, byteOffset: offset });
         }
         const pageData = (flags & SECTION_FLAG_PAGE_DATA) !== 0;
+        if (pageData !== (type === SECTION_PAGE_DATA)) {
+            throw fail("MLOD_INVALID_LAYOUT", "section page-data flag disagrees with its type", { sectionType: type, byteOffset: base + SE.flags });
+        }
         if (!pageData) {
+            if (!rangeWithin(offset, storedBytes, bootstrapLimit)) {
+                throw fail("MLOD_INVALID_LAYOUT", "metadata section is outside the available bootstrap", { sectionType: type, byteOffset: offset });
+            }
             if (decodedBytes !== storedBytes) {
                 throw fail("MLOD_INVALID_LAYOUT", "metadata decoded size disagrees with stored size", { sectionType: type });
             }

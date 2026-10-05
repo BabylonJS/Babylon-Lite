@@ -15,12 +15,15 @@ import type { PbrMaterialProps } from "../../../../packages/babylon-lite/src/mat
 import type { Camera } from "../../../../packages/babylon-lite/src/camera/camera.js";
 import { createPbrMaterial } from "../../../../packages/babylon-lite/src/material/pbr/pbr-material.js";
 import { setPbrGammaAlbedo } from "../../../../packages/babylon-lite/src/material/pbr/set-gamma-albedo.js";
+import { setPbrLightmap } from "../../../../packages/babylon-lite/src/material/pbr/enable-pbr-lightmap.js";
+import { setPbrMetallicReflectance } from "../../../../packages/babylon-lite/src/material/pbr/set-metallic-reflectance.js";
+import type { MetallicReflectanceOptions } from "../../../../packages/babylon-lite/src/material/pbr/set-metallic-reflectance.js";
 import { createSolidTexture2D } from "../../../../packages/babylon-lite/src/texture/solid-texture.js";
 import { cloneTexture2D } from "../../../../packages/babylon-lite/src/texture/texture-2d.js";
 import { createMockEngine } from "./fixtures/gpu-mock.js";
 
 function fakeScene(): SceneContext {
-    return { _deferredBuilders: [] } as unknown as SceneContext;
+    return { _deferredBuilders: [], surface: { engine: createMockEngine().engine } } as unknown as SceneContext;
 }
 
 function fakeAsset(): MeshLoDAsset {
@@ -163,6 +166,45 @@ describe("MeshLoD scene registry — one-way ownership", () => {
 });
 
 describe("MeshLoD scene registry — material gate", () => {
+    it("rejects floating-origin engines before installing a scene batch", () => {
+        const scene = fakeScene();
+        scene.surface.engine.useFloatingOrigin = true;
+        const instance = createMeshLoDInstance(fakeAsset(), createPbrMaterial());
+        instance.position.set(1e7 + 2, 0, 0);
+        expect(() => addMeshLoDInstanceToScene(scene, instance)).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_OPTION", actual: "useFloatingOrigin: true" }));
+        expect(scene._meshLoDRegistry).toBeUndefined();
+        expect(scene._deferredBuilders).toHaveLength(0);
+    });
+
+    it("rejects a UV0 lightmap configured through the public setter", () => {
+        const material = createPbrMaterial();
+        const { engine } = createMockEngine();
+        setPbrLightmap(material, createSolidTexture2D(engine, 1, 1, 1), { coordIndex: 0 });
+        expect(() => addMeshLoDInstanceToScene(fakeScene(), createMeshLoDInstance(fakeAsset(), material))).toThrowError(
+            expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "lightmaps" })
+        );
+    });
+
+    it.each<MetallicReflectanceOptions>([{ f0Factor: 0 }, { specularWeight: 0 }, { color: [0.2, 0.4, 0.6] }, { useOnlyMetallicFromTexture: false }])(
+        "rejects explicit dielectric-reflectance state including zero/false (%j)",
+        (options) => {
+            const material = createPbrMaterial();
+            setPbrMetallicReflectance(material, options);
+            expect(() => addMeshLoDInstanceToScene(fakeScene(), createMeshLoDInstance(fakeAsset(), material))).toThrowError(
+                expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "dielectric-reflectance extensions" })
+            );
+        }
+    );
+
+    it.each(["texture", "reflectanceTexture"] as const)("rejects the dielectric-reflectance %s channel", (channel) => {
+        const material = createPbrMaterial();
+        const { engine } = createMockEngine();
+        setPbrMetallicReflectance(material, { [channel]: createSolidTexture2D(engine, 1, 1, 1) });
+        expect(() => addMeshLoDInstanceToScene(fakeScene(), createMeshLoDInstance(fakeAsset(), material))).toThrowError(
+            expect.objectContaining({ code: "MLOD_UNSUPPORTED_MATERIAL", actual: "dielectric-reflectance extensions" })
+        );
+    });
+
     it("rejects the public gamma-albedo opt-in with an explicit unsupported-material error", () => {
         const material = createPbrMaterial();
         setPbrGammaAlbedo(material);

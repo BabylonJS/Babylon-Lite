@@ -97,6 +97,12 @@ async function buildMeshLoDBatchRenderables(engine: EngineContext, scene: SceneC
         return renderables;
     }
     const pbr = await getPbrMeshLoDModule();
+    validateMeshLoDEngine(engine);
+    for (const batch of registry.batches) {
+        if (batch.instances.length && batch.asset.state !== "failed" && !batch.asset._runtime.disposed) {
+            validateMeshLoDMaterial(batch.material);
+        }
+    }
     for (const batch of registry.batches) {
         if (batch.asset.state === "failed" || batch.asset._runtime.disposed) {
             continue;
@@ -171,6 +177,7 @@ function registerDeferredBuilder(scene: SceneContext): void {
  *  same scene/instance; validates the guaranteed opaque PBR subset immediately and
  *  writes no scene reference into the instance. */
 export function addMeshLoDInstanceToScene(scene: SceneContext, instance: MeshLoDInstance): void {
+    validateMeshLoDEngine(scene.surface.engine);
     validateMeshLoDMaterial(instance._material);
     const existingBatch = scene._meshLoDRegistry?.byAsset.get(instance._asset)?.get(instance._material);
     if (scene._built && !existingBatch?.renderable) {
@@ -187,6 +194,16 @@ export function addMeshLoDInstanceToScene(scene: SceneContext, instance: MeshLoD
     if (!registry.builderRegistered) {
         registry.builderRegistered = true;
         registerDeferredBuilder(scene);
+    }
+}
+
+/** @internal Reject engine configurations outside the MeshLoD rendering contract. */
+export function validateMeshLoDEngine(engine: EngineContext): void {
+    if (engine.useFloatingOrigin) {
+        throw createMeshLoDError("MLOD_INVALID_OPTION", "MeshLoD v1 does not support floating-origin rendering", {
+            expected: "useFloatingOrigin: false",
+            actual: "useFloatingOrigin: true",
+        });
     }
 }
 

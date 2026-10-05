@@ -477,7 +477,7 @@ describe("MeshLoD GPU instance state", () => {
 
     it("clears a publicly removed and reinserted instance even without an intervening upload", () => {
         const { engine } = createMockEngine();
-        const scene = { _deferredBuilders: [] } as unknown as SceneContext;
+        const scene = { _deferredBuilders: [], surface: { engine } } as unknown as SceneContext;
         const asset = { _runtime: { nextInstanceId: 0 } } as unknown as MeshLoDAsset;
         const material = createPbrMaterial();
         const a = createMeshLoDInstance(asset, material);

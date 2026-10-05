@@ -19,11 +19,18 @@ do not import the feature.
 The material-owned renderer supports opaque PBR metallic-roughness (including
 unlit and double-sided) with the base-color, normal, ORM/occlusion, and
 emissive properties used by the statue. Alpha blending/masking, transmission,
-clearcoat, sheen, UV2, gamma-albedo decoding, per-texture UV transforms (including material-side V-flips),
+clearcoat, sheen, UV2, gamma-albedo decoding, lightmaps, dielectric-reflectance
+extensions, per-texture UV transforms (including material-side V-flips),
 material plugins, and other unsupported extensions
 fail with `MLOD_UNSUPPORTED_MATERIAL` rather than silently dropping features.
 Materials and scene transforms are supplied by the application, not stored
 in `.mlod`.
+
+MeshLoD v1 does not support engines created with `useFloatingOrigin: true`.
+Scene registration and material build reject that configuration with
+`MLOD_INVALID_OPTION` before installing a batch or allocating draw resources;
+binding and updates also enforce the gate. Both CPU and GPU selection require
+absolute world transforms and the ordinary, non-rebased camera matrices.
 
 ## 3. Public API
 
@@ -88,6 +95,11 @@ and validators are in `mesh-lod-format.ts`; the writer and conversion
 options are maintained in MegameshCLI. Hierarchy nodes begin with one root
 per level; the parser rejects cycles, shared children, unreachable nodes,
 and out-of-range group/page/cluster references before selection.
+
+Directory and metadata spans must fit both the supplied bytes and the declared
+coarse bootstrap before CRC scans or record reads. Only the page-data section
+may extend beyond the bootstrap into the unfetched remainder of the file.
+Metadata entries cannot masquerade as page data to bypass these bounds.
 
 One output file contains one primitive hierarchy. A multi-primitive
 conversion gives each output a deterministic `.meshNNN.primNNN.mlod`
@@ -316,6 +328,16 @@ The material UBO and its reusable packing scratch are shared across target
 packets. Updates observe `material._uboVersion`, so `markMaterialUboDirty`
 refreshes supported scalar/vector properties once per mutation while
 preserving the current debug selector.
+The four material texture bindings are captured when the shared batch is built.
+It acquires the application-supplied textures once, independently of ordinary
+PBR scenes using the same material. Target packets and buffer-growth bind-group
+rebuilds reuse those captured bindings without acquiring additional references.
+Fallback textures remain owned by the device-keyed fallback cache. Shared-batch
+teardown releases the captured texture references and material UBO behind the
+engine's GPU-retirement fence, exactly once.
+The deferred scene builder validates every active batch before allocating any
+packet, so unsupported material mutations in a later batch cannot strand texture
+references acquired for an earlier one.
 
 ### 13.3 Pipeline
 
@@ -375,3 +397,14 @@ only `.mlod` requests (initially 8 MiB/s and 100 ms), not the remote GLB.
 The normal camera is interactive; `?pathTime=` samples deterministic
 frozen poses for workflow verification. The source model is credited to
 Alexandre Tokovinine under CC BY 4.0.
+
+## 16. Automated regression coverage
+
+PR CI runs the Node-hosted `lite-integration` Vitest project alongside unit
+tests, so loader, streaming, shared-lifetime, recovery, and render-equivalence
+regressions gate changes without requiring local visual or performance tests.
+Bounded metadata mutations abort on any attempted checksum scan into an invalid
+span. Shared ordinary-PBR/MeshLoD texture tests cover both selection modes,
+target retirement, instance-buffer growth, and fenced, idempotent batch teardown.
+Registration/build gates cover public lightmap and dielectric-reflectance
+setters, plus translated-camera floating-origin configurations in both modes.

@@ -21,6 +21,8 @@ import { REVERSE_DEPTH_COMPARE } from "../../engine/render-target.js";
 import { targetSignatureKey } from "../../engine/render-target-signature.js";
 import { getSceneBindGroupLayout } from "../../render/scene-helpers.js";
 import { createEmptyUniformBuffer } from "../../resource/gpu-buffers.js";
+import { acquireTexture } from "../../resource/texture-acquire.js";
+import { releaseTexture } from "../../resource/texture-release.js";
 import type { Camera } from "../../camera/camera.js";
 import { getCameraPosition, getViewProjectionMatrix } from "../../camera/camera.js";
 import type { EnvironmentTextures } from "../../loader-env/load-env.js";
@@ -29,7 +31,7 @@ import { createSolidTexture2D } from "../../texture/solid-texture.js";
 import type { PbrMaterialProps } from "./pbr-material.js";
 import { validateMeshLoDMaterial } from "./pbr-mesh-lod-material.js";
 import type { MeshLoDSceneBatch } from "../../mesh-lod/mesh-lod-scene.js";
-import { driveMeshLoDStreaming, getMeshLoDSelectionCamera, selectMeshLoDBatch } from "../../mesh-lod/mesh-lod-scene.js";
+import { driveMeshLoDStreaming, getMeshLoDSelectionCamera, selectMeshLoDBatch, validateMeshLoDEngine } from "../../mesh-lod/mesh-lod-scene.js";
 import { queueMeshLoDFrame } from "../../mesh-lod/mesh-lod-runtime.js";
 import { createMeshLoDError } from "../../mesh-lod/mesh-lod-errors.js";
 import type { MeshLoDGpuBatchState, MeshLoDGpuFrameParams, MeshLoDGpuInstanceState, MeshLoDUpdateBatch } from "../../mesh-lod/mesh-lod-selection-gpu.js";
@@ -127,8 +129,16 @@ interface MeshLoDMaterialState {
     debugMode: number;
 }
 
+interface MeshLoDMaterialTextures {
+    readonly base: Texture2D;
+    readonly normal: Texture2D;
+    readonly orm: Texture2D;
+    readonly emissive: Texture2D;
+}
+
 interface MeshLoDBatchPacket {
     readonly features: MeshLoDShaderFeatures;
+    readonly textures: MeshLoDMaterialTextures;
     readonly environment: EnvironmentTextures | null;
     shaderModule: GPUShaderModule;
     shaderKey: string;
@@ -169,18 +179,14 @@ interface MeshLoDBatchPacket {
 function buildBindGroup(
     engine: EngineContext,
     layout: GPUBindGroupLayout,
-    material: PbrMaterialProps,
+    textures: MeshLoDMaterialTextures,
     drawVertexBuffer: GPUBuffer,
     instanceBuffer: GPUBuffer,
     arena: GPUBuffer,
     materialUbo: GPUBuffer,
     environment: EnvironmentTextures | null
 ): GPUBindGroup {
-    const fb = getFallbacks(engine);
-    const base = material.baseColorTexture ?? fb.white;
-    const normal = material.normalTexture ?? fb.normal;
-    const orm = material.ormTexture ?? fb.white;
-    const emissive = material.emissiveTexture ?? fb.black;
+    const { base, normal, orm, emissive } = textures;
     const entries: GPUBindGroupEntry[] = [
         { binding: 0, resource: { buffer: materialUbo } },
         { binding: 1, resource: base.view },
@@ -285,7 +291,7 @@ function ensureCpuDrawCapacity(engine: EngineContext, batch: MeshLoDSceneBatch, 
     packet.bindGroup = buildBindGroup(
         engine,
         packet.bindGroupLayout,
-        batch.material,
+        packet.textures,
         packet.drawVertexBuffer,
         packet.instanceBuffer,
         runtime.gpu.arena.buffer,
@@ -311,7 +317,7 @@ function ensureCpuInstanceCapacity(engine: EngineContext, batch: MeshLoDSceneBat
     packet.bindGroup = buildBindGroup(
         engine,
         packet.bindGroupLayout,
-        batch.material,
+        packet.textures,
         packet.drawVertexBuffer,
         packet.instanceBuffer,
         batch.asset._runtime.gpu.arena.buffer,
@@ -496,7 +502,7 @@ function updatePacketGpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet
         packet.gpuBindGroup = buildBindGroup(
             engine,
             packet.bindGroupLayout,
-            batch.material,
+            packet.textures,
             handles.drawVertexBuffer,
             handles.instanceBuffer,
             packet.arena,
@@ -513,6 +519,7 @@ function updatePacketGpu(engine: EngineContext, batch: MeshLoDSceneBatch, packet
  *  asset is non-drawable immediately; the cached render bundle must not replay retired
  *  arena/draw buffers (§14.2). */
 function updatePacket(engine: EngineContext, batch: MeshLoDSceneBatch, packet: MeshLoDBatchPacket, context: DrawUpdateContext, updateBatch: MeshLoDUpdateBatch): void {
+    validateMeshLoDEngine(engine);
     const runtime = batch.asset._runtime;
     if (runtime.disposed) {
         setActiveDraw(engine, packet, null, null);
@@ -533,12 +540,23 @@ function updatePacket(engine: EngineContext, batch: MeshLoDSceneBatch, packet: M
 /** Build the single indirect-draw `Renderable` for one MeshLoD batch, or `null`
  *  when the batch has no instances. */
 export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: SceneContext, batch: MeshLoDSceneBatch): Renderable | null {
+    validateMeshLoDEngine(engine);
     if (batch.instances.length === 0) {
         return null;
     }
     const runtime = batch.asset._runtime;
     const environment = batch.material._unlit === true ? null : (_scene._envTextures ?? null);
     const features = detectFeatures(batch.material, environment !== null);
+    const boundTextures = [batch.material.baseColorTexture, batch.material.normalTexture, batch.material.ormTexture, batch.material.emissiveTexture].filter(
+        (texture): texture is Texture2D => texture !== undefined
+    );
+    const fb = getFallbacks(engine);
+    const textures: MeshLoDMaterialTextures = {
+        base: batch.material.baseColorTexture ?? fb.white,
+        normal: batch.material.normalTexture ?? fb.normal,
+        orm: batch.material.ormTexture ?? fb.white,
+        emissive: batch.material.emissiveTexture ?? fb.black,
+    };
 
     const maxInstances = Math.max(batch.instances.length, 1);
     let maxDrawVertices = 3;
@@ -569,11 +587,12 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
 
     const packet: MeshLoDBatchPacket = {
         features,
+        textures,
         environment,
         shaderModule,
         shaderKey,
         bindGroupLayout,
-        bindGroup: buildBindGroup(engine, bindGroupLayout, batch.material, drawVertexBuffer, instanceBuffer, runtime.gpu.arena.buffer, materialUbo, environment),
+        bindGroup: buildBindGroup(engine, bindGroupLayout, textures, drawVertexBuffer, instanceBuffer, runtime.gpu.arena.buffer, materialUbo, environment),
         pipelines: new Map(),
         drawVertexBuffer,
         instanceBuffer,
@@ -606,13 +625,21 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
                 release();
             }
             disposeDrawPacket(batch, packet);
-            materialUbo.destroy();
+            retireGpuResources(engine, () => {
+                materialUbo.destroy();
+                for (const texture of boundTextures) {
+                    releaseTexture(texture);
+                }
+            });
         },
     };
     const bindingPackets = new Map<MeshLoDBatchPacket, () => void>();
     const packetByTarget = new WeakMap<RenderTargetSignature, { packet: MeshLoDBatchPacket; updateBatch: MeshLoDUpdateBatch }>();
     let sceneDisposed = false;
     let firstBinding = true;
+    for (const texture of boundTextures) {
+        acquireTexture(texture);
+    }
     (batch as { _packet?: unknown })._packet = packet;
 
     const renderable: Renderable = {
@@ -622,6 +649,7 @@ export function buildMeshLoDBatchRenderable(engine: EngineContext, _scene: Scene
             if (sceneDisposed) {
                 throw createMeshLoDError("MLOD_DISPOSED", "MeshLoD renderable has been disposed");
             }
+            validateMeshLoDEngine(eng);
             // A binding is a render pass/camera (including an XR eye). Never let a
             // later recorded view overwrite an earlier view's uniforms or draw state.
             const updateBatch = getMeshLoDUpdateBatch(sig);
@@ -686,7 +714,7 @@ function createBindingPacket(engine: EngineContext, batch: MeshLoDSceneBatch, sh
         drawVertexBuffer,
         instanceBuffer,
         indirectBuffer,
-        bindGroup: buildBindGroup(engine, shared.bindGroupLayout, batch.material, drawVertexBuffer, instanceBuffer, shared.arena, shared.materialUbo, shared.environment),
+        bindGroup: buildBindGroup(engine, shared.bindGroupLayout, shared.textures, drawVertexBuffer, instanceBuffer, shared.arena, shared.materialUbo, shared.environment),
         drawScratch: new Uint32Array(shared.maxDrawVertices * 4),
         instanceScratch: new Float32Array(shared.maxInstances * INSTANCE_WORDS),
         indirectScratch: new Uint32Array(4),

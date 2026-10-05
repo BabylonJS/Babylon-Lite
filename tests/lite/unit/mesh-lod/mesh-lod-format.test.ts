@@ -14,7 +14,9 @@ import { describe, expect, it } from "vitest";
 import {
     PAGE_MAX_BYTES,
     PAGE_TABLE_RECORD_SIZE,
+    HEADER_SIZE,
     SECTION_PAGE_TABLE,
+    crc32c,
     parseMeshLoDContainer,
     toMeshLoDMetadata,
 } from "../../../../packages/babylon-lite/src/mesh-lod/mesh-lod-format.js";
@@ -70,6 +72,68 @@ describe("parseMeshLoDContainer — minimal valid container", () => {
         expect(metadata.clusterCount).toBe(2);
         expect(metadata.toolVersion).toBe("1.0.0-test");
         expect(metadata.boundsMax).toEqual([1, 1, 1]);
+    });
+});
+
+describe("parseMeshLoDContainer — bootstrap metadata bounds", () => {
+    function sealHeaderAndDirectory(bytes: Uint8Array, layout: FixtureLayout): void {
+        const view = new DataView(bytes.buffer);
+        view.setUint32(layout.directoryCrc, crc32c(bytes, layout.directoryOffset, layout.directoryOffset + 7 * 64), true);
+        view.setUint32(layout.headerCrc, 0, true);
+        view.setUint32(layout.headerCrc, crc32c(bytes, 0, HEADER_SIZE), true);
+    }
+
+    function forbidScanAt(bytes: Uint8Array, boundary: number): Uint8Array {
+        return new Proxy(bytes, {
+            get(target, property): unknown {
+                if (typeof property === "string" && /^\d+$/.test(property) && Number(property) >= boundary) {
+                    throw new Error("parser scanned an invalid metadata span");
+                }
+                const value: unknown = Reflect.get(target, property, target);
+                return typeof value === "function" ? value.bind(target) : value;
+            },
+        });
+    }
+
+    it.each([false, true])("rejects an out-of-bootstrap directory before checksum scanning (full file: %s)", (fullFile) => {
+        const { bytes, layout } = buildMinimalContainer();
+        new DataView(bytes.buffer).setBigUint64(48, 512n, true);
+        sealHeaderAndDirectory(bytes, layout);
+        const source = fullFile ? bytes : bytes.subarray(0, 512);
+        expect(() => parseMeshLoDContainer(forbidScanAt(source, 512))).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_LAYOUT", byteOffset: layout.directoryOffset }));
+    });
+
+    it("rejects a gigabyte provenance declaration before scanning its span", () => {
+        const { bytes, layout } = buildMinimalContainer();
+        const view = new DataView(bytes.buffer);
+        const originalEnd = layout.provOffset + Number(view.getBigUint64(layout.firstEntry + 16, true));
+        const declaredBytes = 1024 * 1024 * 1024;
+        view.setBigUint64(56, BigInt(layout.provOffset + declaredBytes), true);
+        view.setBigUint64(layout.firstEntry + 16, BigInt(declaredBytes), true);
+        view.setBigUint64(layout.firstEntry + 24, BigInt(declaredBytes), true);
+        sealHeaderAndDirectory(bytes, layout);
+        expect(() => parseMeshLoDContainer(forbidScanAt(bytes, originalEnd))).toThrowError(
+            expect.objectContaining({ code: "MLOD_INVALID_LAYOUT", sectionType: 1, byteOffset: layout.provOffset })
+        );
+    });
+
+    it("rejects downloaded metadata extending beyond the declared bootstrap before its CRC", () => {
+        const { bytes, layout } = buildMinimalContainer();
+        const bootstrap = layout.provOffset + 64;
+        new DataView(bytes.buffer).setBigUint64(48, BigInt(bootstrap), true);
+        sealHeaderAndDirectory(bytes, layout);
+        expect(() => parseMeshLoDContainer(forbidScanAt(bytes, bootstrap))).toThrowError(
+            expect.objectContaining({ code: "MLOD_INVALID_LAYOUT", sectionType: 1, byteOffset: layout.provOffset })
+        );
+    });
+
+    it.each([0, 6])("rejects a page-data flag on metadata and a missing flag on page data (%i)", (sectionIndex) => {
+        const { bytes, layout } = buildMinimalContainer();
+        const view = new DataView(bytes.buffer);
+        const offset = layout.firstEntry + sectionIndex * 64 + 4;
+        view.setUint32(offset, view.getUint32(offset, true) ^ 0x8, true);
+        sealHeaderAndDirectory(bytes, layout);
+        expect(() => parseMeshLoDContainer(bytes)).toThrowError(expect.objectContaining({ code: "MLOD_INVALID_LAYOUT", sectionType: sectionIndex + 1, byteOffset: offset }));
     });
 });
 
